@@ -20,11 +20,13 @@ from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
 from api.v2.guia import DICAS, PASSOS, Guia
+from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
+from db import investido
 from db.lancamentos import ler_cursor
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
@@ -266,6 +268,23 @@ def test_fixture_de_contas_segue_o_modelo_e_fecha_a_conta(nome):
     assert c.total == c.carteira.saldo + sum((x.saldo for x in c.contas if x.no_total), Decimal(0))
     assert c.fora_do_total == sum(not x.no_total for x in c.contas)
     assert set(c.motivos) == set(c.carteira.motivos).union(*(x.motivos for x in c.contas))
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["investido"]))
+def test_fixture_de_investido_segue_o_modelo(nome):
+    """Dinheiro é texto com 2 casas (ou null); o rótulo é o de `investido.TIPOS` (§0.7:
+    a fixture repete o rótulo, este teste os compara); Σ partes == total (null = 0)."""
+    import re
+    from decimal import Decimal
+
+    f = FIXTURES["investido"][nome]
+    Investido.model_validate(f)
+    partes = [*f["por_tipo"], *f["por_banco"]]
+    assert all(v is None or re.fullmatch(r"-?\d+\.\d{2}", v) for v in [f["total"], *(p["valor"] for p in partes)])
+    assert all(p["rotulo"] == investido.TIPOS[p["tipo"]] for p in f["por_tipo"])
+    for lado in ("por_tipo", "por_banco"):
+        assert sum((Decimal(p["valor"] or 0) for p in f[lado]), Decimal(0)) == Decimal(f["total"] or 0)
+        assert all(set(p["motivos"]) <= set(f["motivos"]) for p in f[lado])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))

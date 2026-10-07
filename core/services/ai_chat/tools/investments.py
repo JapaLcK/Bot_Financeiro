@@ -2,8 +2,9 @@
 core/services/ai_chat/tools/investments.py — tools de investimentos.
 
 Read:
-  - list_investments: lista investimentos cadastrados com saldo, taxa, vencimento
-  - get_investment_summary: totais agregados (valor aplicado, número de ativos)
+  - get_investment_summary: total investido nos bancos conectados (Open Finance), por
+    tipo e por banco — a regra de `db/investido.py`. Cadastro manual não entra.
+  - get_investment_contributions: aportes num período
 
 Write (precisam de confirmação humana):
   - create_investment:     cadastra um investimento novo
@@ -23,7 +24,7 @@ from typing import Any
 
 import db
 from core.services import fonte_unica
-from utils_text import fmt_rate
+from db import investido
 
 from ._base import Tool
 
@@ -42,49 +43,17 @@ def _parse_iso_date(s: str | None) -> date | None:
 
 # ─── Read ───────────────────────────────────────────────────────────────────
 
-def _list_investments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    # accrue_all_investments aplica juros ate hoje E retorna a lista — usa
-    # ele em vez de db.list_investments pra evitar mostrar saldo defasado.
-    rows = db.accrue_all_investments(user_id)
-    return {
-        "investments": [
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "balance": float(
-                    r.get("projected_balance")
-                    if r.get("projected_days") and r.get("projected_balance")
-                    else r["balance"] or 0
-                ),
-                # rate_display ja formatado (ex: "116% CDI", "13,78% a.a.",
-                # "IPCA + 7,62% a.a."). Use ele direto na resposta — NAO
-                # interprete `rate` cru, ele varia de significado (multiplier
-                # CDI vs % anual) conforme `period`/`indexer`.
-                "rate_display": fmt_rate(r.get("rate"), r.get("period")),
-                "asset_type": r.get("asset_type"),
-                "indexer": r.get("indexer"),
-                "issuer": r.get("issuer"),
-                "purchase_date": r["purchase_date"].isoformat() if r.get("purchase_date") else None,
-                "maturity_date": r["maturity_date"].isoformat() if r.get("maturity_date") else None,
-            }
-            for r in rows
-        ]
-    }
-
-
 def _get_investment_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    # Mesma logica do _list_investments: aplica accrual antes de somar.
-    rows = db.accrue_all_investments(user_id)
-    total = 0.0
-    for r in rows:
-        if r.get("projected_days") and r.get("projected_balance"):
-            total += float(r["projected_balance"])
-        else:
-            total += float(r["balance"] or 0)
+    # Só leitura (sem accrual): a regra é a do painel e do "meus investimentos".
+    r = investido.ler(user_id)
+    texto = lambda v: None if v is None else str(v)  # Decimal → texto, nunca float
     return {
-        "total_invested": total,
-        "investment_count": len(rows),
-        "investments_with_balance": sum(1 for r in rows if float(r["balance"] or 0) > 0),
+        "total_investido": texto(r["total"]),
+        "por_tipo": [{**p, "valor": texto(p["valor"])} for p in r["por_tipo"]],
+        "por_banco": [{**p, "valor": texto(p["valor"])} for p in r["por_banco"]],
+        "motivos": r["motivos"],
+        "fonte": "posições dos bancos conectados (Open Finance); investimento cadastrado à mão "
+                 "não entra; não existe lista ativo por ativo",
     }
 
 
@@ -293,27 +262,14 @@ TOOLS: list[Tool] = [
         schema={
             "type": "function",
             "function": {
-                "name": "list_investments",
-                "description": "Lista os investimentos cadastrados do usuário com saldo, taxa, emissor, vencimento. Use pra 'quais meus investimentos?', 'minha carteira', 'quanto tenho aplicado'.",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        },
-        is_write=False,
-        execute=_list_investments,
-        has_side_effects=True,
-    ),
-    Tool(
-        schema={
-            "type": "function",
-            "function": {
                 "name": "get_investment_summary",
-                "description": "Retorna totais agregados da carteira: valor total aplicado, número de investimentos, quantos têm saldo > 0. Use pra 'quanto eu tenho investido no total?', 'quantos ativos eu tenho?'.",
+                "description": "Total investido nos bancos conectados, com divisão por tipo e por banco. Use para 'quanto tenho investido?', 'meus investimentos', 'minha carteira', 'e onde?', 'quanto em ações?', 'quanto tenho no Nubank?'. total null = ainda não dá para saber (sem banco conectado ou banco sem a 1ª atualização): diga isso e sugira conectar o banco. valor null numa parte = o banco não informou o saldo, não é zero. Tipo ou banco fora da lista = nada investido ali nos bancos conectados. Não há lista de ativos: não invente nome de ativo, posição, taxa, vencimento nem rendimento.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
         is_write=False,
         execute=_get_investment_summary,
-        has_side_effects=True,
+        has_side_effects=False,
     ),
     Tool(
         schema={

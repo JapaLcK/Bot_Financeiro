@@ -112,9 +112,19 @@ export const guiaQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),
   ...vivo,
 };
-// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx): decide o selo
-// do chat e o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
+// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx), menos o assunto
+// `investido` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
+// o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
 export const CHAT_REAL = false;
+// O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
+// A resposta monta duas vezes (a bolha e o role=status do PiggyChat): montar de novo só
+// relê depois de erro (a pergunta repetida tenta outra vez); o dado novo vem do SSE e do foco.
+export const investidoQuery = {
+  queryKey: ["investido"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/investido", signal),
+  ...vivo,
+  refetchOnMount: (q: { state: { status: string } }) => q.state.status === "error",
+};
 export const resumoMesQuery = (mes: string) => ({
   queryKey: ["resumo-do-mes", mes],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/resumo-do-mes", signal, { mes }),

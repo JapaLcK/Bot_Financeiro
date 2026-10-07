@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 import pytest
 
+from conftest import usuario_pagante
+from core.handlers import investido as h_investido
 from core.handlers import investments as h_investments
+from tests._patrimonio_helpers import conexao, investimento_manual, posicao
 
 
 def _carteira_com(saldo: float):
@@ -37,6 +40,7 @@ def test_list_investments_capitaliza_antes_de_responder():
     assert "R$ 821,91 (116% CDI)" in msg
     assert "R$ 11.287,35 (14%)" in msg
     assert "https://app.test/d/abc" in msg
+    assert "no total" not in msg  # o total é o do banco (`carteira`); o seletor não soma
 
 
 def test_create_investment_redireciona_para_dashboard():
@@ -229,3 +233,41 @@ def test_deposit_deixa_plan_limit_subir():
             h_investments.deposit(
                 123, "investi 870 no cdb", {"investment_name": "CDB", "amount": 870},
             )
+
+
+# ─── carteira: o "meus investimentos" lê só os bancos conectados ─────────────
+
+def _carteira(uid):
+    with patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
+        return h_investido.carteira(uid)
+
+
+def test_carteira_sem_banco_pede_para_conectar_e_esconde_o_manual():
+    uid = usuario_pagante()
+    investimento_manual(uid, "Tesouro Manual", "321")
+    msg = _carteira(uid)
+    assert msg.startswith("Ainda não sei quanto você tem investido: conecte seu banco no painel")
+    assert "Tesouro Manual" not in msg and "321" not in msg and "cadastrad" not in msg
+    assert "https://app.test/d/abc" in msg
+
+
+def test_carteira_banco_sem_primeira_atualizacao():
+    uid = usuario_pagante()
+    conexao(uid, f"item-{uid}", sync=None)
+    assert "seu banco ainda não terminou a primeira atualização" in _carteira(uid)
+
+
+def test_carteira_com_banco_total_por_tipo_por_banco_e_sem_saldo():
+    uid = usuario_pagante()
+    posicao(conexao(uid, f"item-a-{uid}", banco="Nubank"), "inv-1", "40000")
+    xp = conexao(uid, f"item-b-{uid}", banco="XP")
+    posicao(xp, "inv-2", "17123.45", tipo="EQUITY")
+    posicao(xp, "inv-3", None, tipo="MUTUAL_FUND")
+    investimento_manual(uid, "Tesouro Manual", "321")
+    msg = _carteira(uid)
+    assert msg.startswith("📈 **R$ 57.123,45** investidos nos bancos conectados")
+    assert "Por tipo:\n• Renda fixa — R$ 40.000,00\n• Ações — R$ 17.123,45\n" \
+           "• Fundos de investimento — saldo não informado pelo banco" in msg
+    assert "Por banco:\n• Nubank — R$ 40.000,00\n• XP — R$ 17.123,45" in msg
+    assert "desatualizado ou incompleto" in msg  # saldo_ausente
+    assert "Tesouro Manual" not in msg and "321" not in msg and "R$ 0,00" not in msg

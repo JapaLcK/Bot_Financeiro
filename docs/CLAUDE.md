@@ -368,6 +368,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
 
+- `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
+  `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
+  [{tipo, rotulo, valor, motivos}], por_banco: [{banco, valor, motivos}], motivos}`. Gate
+  `investments` (403 `pro_required`). Só posições do Open Finance, com o recorte da foto
+  (`POSICOES_BANCO_SQL` + `separar_posicoes` de `db/patrimonio.py`): investimento e caixinha
+  manuais não entram. A mesma regra serve a tool `get_investment_summary` da IA e o "meus
+  investimentos" do WhatsApp (`core/handlers/investido.py`). `total: null` = não dá para
+  saber (`sem_banco_conectado`, ou nenhuma conexão viva terminou a 1ª atualização), nunca
+  zero; parte só com posição sem saldo sai `valor: null`; parte que fecha em 0 some.
+  **Centavos:** cada posição entra quantizada em 2 casas e as partes somam essas parcelas, então
+  Σ por_tipo == total == Σ por_banco, exato; o custo é o total poder diferir do
+  `investimentos_banco` da foto em até 0,005 × nº de posições (só com saldo de 3+ casas).
+  `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
+  `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.

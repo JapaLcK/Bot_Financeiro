@@ -3,8 +3,7 @@ Cobre as tools de investimentos da IA conversacional
 (`core/services/ai_chat/tools/investments.py`):
 
 Read:
-  - list_investments
-  - get_investment_summary
+  - get_investment_summary (regra de `db/investido.py`: só os bancos conectados)
   - get_investment_contributions
 
 Write (retornam string final pronta, não passam por confirmação aqui):
@@ -29,64 +28,51 @@ from core.services.ai_chat.tools.investments import (
     _get_investment_summary,
     _investment_deposit_execute,
     _investment_withdraw_execute,
-    _list_investments,
 )
-
-
-# ─── list_investments ───────────────────────────────────────────────────────
-
-
-def test_list_investments_vazio_sem_ativos(user_id):
-    out = _list_investments(user_id, {})
-    assert out == {"investments": []}
-
-
-def test_list_investments_retorna_ativos_com_saldo_e_taxa(user_id):
-    db.create_investment(user_id, "CDB Nubank", 0.14, "yearly")
-    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
-    db.investment_deposit_from_account(user_id, "CDB Nubank", 500)
-
-    out = _list_investments(user_id, {})
-    assert len(out["investments"]) == 1
-    inv = out["investments"][0]
-    assert inv["name"] == "CDB Nubank"
-    assert inv["balance"] >= 500.0  # >= por causa do accrual
-    assert "rate_display" in inv
-    assert inv["rate_display"]  # não vazio
+from core.services.ai_chat.tools import SCHEMAS, get_tool
+from db import investido
+from tests._patrimonio_helpers import conexao, investimento_manual, posicao, q
 
 
 # ─── get_investment_summary ─────────────────────────────────────────────────
+# Leitor da regra única do total investido. `list_investments` saiu do registro (o
+# manual não aparece mais para a IA); quem tem só manual ouve "ainda não sei".
 
 
-def test_summary_zero_sem_ativos(user_id):
+def test_list_investments_saiu_do_registro():
+    assert get_tool("list_investments") is None
+    assert "list_investments" not in {s["function"]["name"] for s in SCHEMAS}
+    assert get_tool("get_investment_summary").has_side_effects is False
+
+
+def test_summary_so_manual_e_null(user_id):
+    investimento_manual(user_id, "CDB manual", "500")
     out = _get_investment_summary(user_id, {})
-    assert out == {
-        "total_invested": 0,
-        "investment_count": 0,
-        "investments_with_balance": 0,
-    }
+    assert out["total_investido"] is None and out["por_tipo"] == out["por_banco"] == []
+    assert out["motivos"] == ["sem_banco_conectado"]
 
 
-def test_summary_agrega_multiplos_ativos(user_id):
-    db.create_investment(user_id, "CDB A", 0.13, "yearly")
-    db.create_investment(user_id, "CDB B", 0.14, "yearly")
-    db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
-    db.investment_deposit_from_account(user_id, "CDB A", 300)
-    db.investment_deposit_from_account(user_id, "CDB B", 200)
-
+def test_summary_e_a_regra_do_banco_em_texto_sem_o_manual(user_id):
+    c = conexao(user_id, f"item-{user_id}", banco="Nubank")
+    posicao(c, "inv-1", "1234.5", subtipo="CDB")
+    posicao(c, "inv-2", "10", tipo="EQUITY")
+    investimento_manual(user_id, "SEGREDO-MANUAL", "777")
+    r = investido.ler(user_id)
     out = _get_investment_summary(user_id, {})
-    assert out["investment_count"] == 2
-    assert out["investments_with_balance"] == 2
-    assert out["total_invested"] >= 500.0
+    assert out["total_investido"] == str(r["total"]) == "1244.50"
+    assert out["por_tipo"] == [
+        {"tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": "1234.50", "motivos": []},
+        {"tipo": "acoes", "rotulo": "Ações", "valor": "10.00", "motivos": []}]
+    assert out["por_banco"] == [{"banco": "Nubank", "valor": "1244.50", "motivos": []}]
+    assert "SEGREDO" not in str(out) and "777" not in str(out)
 
 
-def test_summary_ignora_investimento_sem_saldo(user_id):
-    db.create_investment(user_id, "CDB Vazio", 0.10, "yearly")
-
-    out = _get_investment_summary(user_id, {})
-    assert out["investment_count"] == 1
-    assert out["investments_with_balance"] == 0
-    assert out["total_invested"] == 0.0
+def test_summary_nao_escreve_nem_capitaliza_o_manual(user_id):
+    investimento_manual(user_id, "CDB manual", "500")
+    q("update investments set last_date = current_date - 30 where user_id=%s", (user_id,))
+    antes = q("select balance, last_date from investments where user_id=%s", (user_id,), fetch=True)
+    _get_investment_summary(user_id, {})
+    assert q("select balance, last_date from investments where user_id=%s", (user_id,), fetch=True) == antes
 
 
 # ─── get_investment_contributions ───────────────────────────────────────────

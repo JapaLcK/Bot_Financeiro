@@ -6,7 +6,7 @@ import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
 import { ICON } from "../lib/brand";
-import { CHAT_REAL, DEMO, perfilQuery } from "../lib/v2";
+import { DEMO, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
 
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
@@ -16,7 +16,7 @@ type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string }
 function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
-      <p className="msg-by"><img src={ICON} alt="" width={24} height={24} />Piggy</p>
+      <p className="msg-by"><img src={ICON} alt="" width={24} height={24} />Piggy{!DEMO && !m.real && <Demonstracao />}</p>
       <p className="msg-text">{m.text}</p>
       {m.blocks?.length && m.s0 && m.page ? <LiveAnswer blocks={m.blocks} s0={m.s0} page={m.page} /> : null}
       {live && !!m.follow?.length && (
@@ -47,7 +47,7 @@ export function PiggyChat() {
 
   const head = (
     <header className="page-head">
-      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy{!DEMO && !CHAT_REAL && <Demonstracao />}</h1>
+      <h1 id="page-title" tabIndex={-1}>Converse com o Piggy</h1>
       <p className="page-lede">Pergunte sobre gastos, fatura, metas e investimentos. A resposta vem com os seus números.</p>
     </header>
   );
@@ -79,7 +79,8 @@ export function PiggyChat() {
       <p className="sr-only" role="status">{said}</p>
       <ol className="chat" aria-label="Conversa">
         {msgs.map((m, i) => (
-          <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}>
+          <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
+            data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>
             {m.role === "user" ? m.text : <PiggySays m={m} live={i === msgs.length - 1} />}
           </li>
         ))}
