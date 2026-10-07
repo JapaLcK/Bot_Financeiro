@@ -33,6 +33,7 @@
 
   /* Coluna: margem embaixo de cada filho, menos o último. */
   .w > :not(:last-child), .w-body > :not(:last-child) { margin-bottom: 12px; }
+  .prev-corpo > :not(:last-child) { margin-bottom: 12px; } /* display: contents (styles/panels.css) */
   .rail > :not(:last-child) { margin-bottom: 28px; }
   .stat > :not(:last-child) { margin-bottom: 8px; }
   .detail-facts.col > :not(:last-child) { margin-bottom: 14px; }

@@ -177,6 +177,10 @@
       "status": 409,
       "body": { "error": { "code": "passo_indisponivel", "message": "Conflict" } }
     },
+    "403_forecast_horizon_not_allowed": {
+      "status": 403,
+      "body": { "error": { "code": "forecast_horizon_not_allowed", "message": "Forbidden" } }
+    },
     "403_csrf": {
       "status": 403,
       "fora_do_envelope": true,
@@ -2914,6 +2918,1228 @@
           ]
         }
       ]
+    },
+    "pior_negativo": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "10.00",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "a_conferir",
+      "motivos": [
+        {
+          "codigo": "receita_nao_garantida",
+          "direcao_do_erro": "so_melhora"
+        }
+      ],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [
+          "receita_nao_garantida"
+        ],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "120.00"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "10.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "10.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "10.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "10.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "-5.32",
+          "compromissos": [
+            {
+              "chave": "000fd0bc50f1b94969667542dbe599a0142cb9e73ac58251dfa051cf649c4404",
+              "ciclo": "2026-10-10",
+              "data": "2026-10-10",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "15.32",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "-5.32",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "120.00",
+          "compromissos": [
+            {
+              "chave": "2f9c53268d2305b67be8986a4f3a38d82c951b25442bd4ccc7e35910ced30e61",
+              "ciclo": "2026-10-20",
+              "data": "2026-10-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "125.32",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "120.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "120.00",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-10",
+        "saldo": "-5.32",
+        "desde": "2026-10-06",
+        "causas": [
+          {
+            "chave": "000fd0bc50f1b94969667542dbe599a0142cb9e73ac58251dfa051cf649c4404",
+            "ciclo": "2026-10-10",
+            "data": "2026-10-10",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Aluguel",
+            "valor": "15.32",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "2d28d5f083f79f6bb62f4c5a7d2b1f8d1e7dd4ddfdd572e49f1454ee0c2640e4",
+          "fonte": "gasto_recorrente",
+          "nome": "Aluguel",
+          "primeira_data": "2026-10-10",
+          "ultima_data": "2026-10-10",
+          "ocorrencias": [
+            {
+              "chave": "000fd0bc50f1b94969667542dbe599a0142cb9e73ac58251dfa051cf649c4404",
+              "ciclo": "2026-10-10",
+              "data": "2026-10-10",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "15.32",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "chave": "3e0f97d2c89e6f71fdb1396d634a57a1657ae77f1656c8342e05fa6e5700401c",
+          "fonte": "receita_recorrente",
+          "nome": "Salário",
+          "primeira_data": "2026-10-20",
+          "ultima_data": "2026-10-20",
+          "ocorrencias": [
+            {
+              "chave": "2f9c53268d2305b67be8986a4f3a38d82c951b25442bd4ccc7e35910ced30e61",
+              "ciclo": "2026-10-20",
+              "data": "2026-10-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "125.32",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "zero": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "0",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "0.00"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "0.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "0.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "0.00",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-07",
+        "saldo": "0.00",
+        "desde": null,
+        "causas": []
+      },
+      "compromissos": []
+    },
+    "real_diario": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "1500.00",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "a_conferir",
+      "motivos": [
+        {
+          "codigo": "gastos_variaveis_nao_estimados",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "receita_nao_garantida",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "realizacao_boleto_a_conferir",
+          "direcao_do_erro": "so_piora"
+        },
+        {
+          "codigo": "incorporacao_cartao_nao_comprovada",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "realizacao_fatura_a_conferir",
+          "direcao_do_erro": "so_piora"
+        }
+      ],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [
+          "gastos_variaveis_nao_estimados",
+          "incorporacao_cartao_nao_comprovada",
+          "realizacao_boleto_a_conferir",
+          "realizacao_fatura_a_conferir",
+          "receita_nao_garantida"
+        ],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "2672.73"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "1410.10"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "1385.10",
+          "compromissos": [
+            {
+              "chave": "7671cab1156b52970cad918af61ce5fbd595f1c428cb22074c73d8a0982403d7",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "1385.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "1035.10",
+          "compromissos": [
+            {
+              "chave": "c21d5a7623b07523614461bb9e1e51d33d8c62729eb93832cfec87bc8e366caf",
+              "ciclo": "2026-10-15",
+              "data": "2026-10-15",
+              "fonte": "fatura",
+              "tipo": "fatura_cartao",
+              "nome": "Cartão Nubank",
+              "valor": "350.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "realizacao_fatura_a_conferir",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "1035.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "1010.10",
+          "compromissos": [
+            {
+              "chave": "5ab4399b37884c4d3476b542d362ffff2d16ba8430e4615570aa3e1c1a37a6a3",
+              "ciclo": "2026-10-17",
+              "data": "2026-10-17",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "1010.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "985.10",
+          "compromissos": [
+            {
+              "chave": "94e9776725fd719d25ab084695c1e7a7e604aa5f4289378582591e165ebb27ec",
+              "ciclo": "2026-10-27",
+              "data": "2026-10-27",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "985.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "985.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "985.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "985.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "572.73",
+          "compromissos": [
+            {
+              "chave": "ed50ae56bd27a02d48311e7a3680cd29b406da81ec33848fc4022ea5d81c4db9",
+              "ciclo": "2026-11-01",
+              "data": "2026-11-01",
+              "fonte": "fatura",
+              "tipo": "fatura_cartao",
+              "nome": "Cartão Nubank",
+              "valor": "412.37",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "realizacao_fatura_a_conferir",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "572.73",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "572.73",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "572.73",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "2672.73",
+          "compromissos": [
+            {
+              "chave": "b62ba224df7803136534c1c5456aea562d3db40eaaf69208fe1287b7813030d7",
+              "ciclo": "2026-11-05",
+              "data": "2026-11-05",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "2100.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-11-01",
+        "saldo": "572.73",
+        "desde": "2026-10-06",
+        "causas": [
+          {
+            "chave": "7671cab1156b52970cad918af61ce5fbd595f1c428cb22074c73d8a0982403d7",
+            "ciclo": "2026-10-07",
+            "data": "2026-10-07",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Ônibus",
+            "valor": "25.00",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          },
+          {
+            "chave": "c21d5a7623b07523614461bb9e1e51d33d8c62729eb93832cfec87bc8e366caf",
+            "ciclo": "2026-10-15",
+            "data": "2026-10-15",
+            "fonte": "fatura",
+            "tipo": "fatura_cartao",
+            "nome": "Cartão Nubank",
+            "valor": "350.00",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "a_conferir",
+            "incluida_no_calculo": true,
+            "motivos": [
+              {
+                "codigo": "realizacao_fatura_a_conferir",
+                "direcao_do_erro": "so_piora"
+              }
+            ]
+          },
+          {
+            "chave": "5ab4399b37884c4d3476b542d362ffff2d16ba8430e4615570aa3e1c1a37a6a3",
+            "ciclo": "2026-10-17",
+            "data": "2026-10-17",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Ônibus",
+            "valor": "25.00",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          },
+          {
+            "chave": "94e9776725fd719d25ab084695c1e7a7e604aa5f4289378582591e165ebb27ec",
+            "ciclo": "2026-10-27",
+            "data": "2026-10-27",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Ônibus",
+            "valor": "25.00",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          },
+          {
+            "chave": "ed50ae56bd27a02d48311e7a3680cd29b406da81ec33848fc4022ea5d81c4db9",
+            "ciclo": "2026-11-01",
+            "data": "2026-11-01",
+            "fonte": "fatura",
+            "tipo": "fatura_cartao",
+            "nome": "Cartão Nubank",
+            "valor": "412.37",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "a_conferir",
+            "incluida_no_calculo": true,
+            "motivos": [
+              {
+                "codigo": "realizacao_fatura_a_conferir",
+                "direcao_do_erro": "so_piora"
+              }
+            ]
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "e535d9b2ccea7ab69ed02fadbc49be371534d2f9ff28c7162163a410ac957c3a",
+          "fonte": "instancia",
+          "nome": "Conta de luz",
+          "primeira_data": "2026-10-04",
+          "ultima_data": "2026-10-04",
+          "ocorrencias": [
+            {
+              "chave": "f97a797d0604bfcb35c407b568e3eef9f6d94037f7aa053197b12828859f4210",
+              "ciclo": "2026-10",
+              "data": "2026-10-04",
+              "fonte": "instancia",
+              "tipo": "boleto",
+              "nome": "Conta de luz",
+              "valor": "89.90",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "realizacao_boleto_a_conferir",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "5405aa00bb45de6ef6471687ecb5ebefe88ea1fc7f317559f8c91f7ace67c694",
+          "fonte": "gasto_recorrente",
+          "nome": "Ônibus",
+          "primeira_data": "2026-10-07",
+          "ultima_data": "2026-10-27",
+          "ocorrencias": [
+            {
+              "chave": "7671cab1156b52970cad918af61ce5fbd595f1c428cb22074c73d8a0982403d7",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            },
+            {
+              "chave": "5ab4399b37884c4d3476b542d362ffff2d16ba8430e4615570aa3e1c1a37a6a3",
+              "ciclo": "2026-10-17",
+              "data": "2026-10-17",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            },
+            {
+              "chave": "94e9776725fd719d25ab084695c1e7a7e604aa5f4289378582591e165ebb27ec",
+              "ciclo": "2026-10-27",
+              "data": "2026-10-27",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Ônibus",
+              "valor": "25.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "chave": "e3c8bcd533ea55bdb4429c45791de5af5d7d4e0d494a470f97b65b37d594d83d",
+          "fonte": "gasto_recorrente",
+          "nome": "Spotify",
+          "primeira_data": "2026-10-12",
+          "ultima_data": "2026-10-12",
+          "ocorrencias": [
+            {
+              "chave": "508f739076e2cc689d854f65d6540a8c67291f643e07168e7b9f3b01a78be97e",
+              "ciclo": "2026-10-12",
+              "data": "2026-10-12",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Spotify",
+              "valor": "21.90",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": false,
+              "motivos": [
+                {
+                  "codigo": "incorporacao_cartao_nao_comprovada",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "0d2957f86b669347883d1ef21581ea6663849ce64768c04055a828d1860a3835",
+          "fonte": "fatura",
+          "nome": "Cartão Nubank",
+          "primeira_data": "2026-10-15",
+          "ultima_data": "2026-11-01",
+          "ocorrencias": [
+            {
+              "chave": "c21d5a7623b07523614461bb9e1e51d33d8c62729eb93832cfec87bc8e366caf",
+              "ciclo": "2026-10-15",
+              "data": "2026-10-15",
+              "fonte": "fatura",
+              "tipo": "fatura_cartao",
+              "nome": "Cartão Nubank",
+              "valor": "350.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "realizacao_fatura_a_conferir",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            },
+            {
+              "chave": "ed50ae56bd27a02d48311e7a3680cd29b406da81ec33848fc4022ea5d81c4db9",
+              "ciclo": "2026-11-01",
+              "data": "2026-11-01",
+              "fonte": "fatura",
+              "tipo": "fatura_cartao",
+              "nome": "Cartão Nubank",
+              "valor": "412.37",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "realizacao_fatura_a_conferir",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "3e0f97d2c89e6f71fdb1396d634a57a1657ae77f1656c8342e05fa6e5700401c",
+          "fonte": "receita_recorrente",
+          "nome": "Salário",
+          "primeira_data": "2026-11-05",
+          "ultima_data": "2026-11-05",
+          "ocorrencias": [
+            {
+              "chave": "b62ba224df7803136534c1c5456aea562d3db40eaaf69208fe1287b7813030d7",
+              "ciclo": "2026-11-05",
+              "data": "2026-11-05",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "2100.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "plus30_a_conferir": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30
+      ],
+      "capacidades": [
+        "marcos"
+      ],
+      "base": {
+        "saldo": "10.005",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "a_conferir",
+      "motivos": [
+        {
+          "codigo": "gastos_variaveis_nao_estimados",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "acao_financeira_pendente",
+          "direcao_do_erro": "ambos"
+        }
+      ],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [
+          "acao_financeira_pendente",
+          "gastos_variaveis_nao_estimados"
+        ],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "7.33"
+        }
+      ],
+      "periodo": null,
+      "ancora": null,
+      "trajetoria": null,
+      "pior_dia": null,
+      "compromissos": null
     }
   }
 }

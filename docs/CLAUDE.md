@@ -356,8 +356,17 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
   global de bytes comprovado/adicionado: esses limites dimensionais não limitam
   fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.
-  Contrato TS gerado e fixtures herméticas preparadas para PR3; consumidor, tela e
-  refetch temporal são PR3.
+  Consumidor (Etapa 3 PR3): `webapp/src/dashboard/widgets/Previsao.tsx` (página
+  `/previsao` e card "Saldo previsto" do Resumo) e `Compromissos.tsx`, com
+  `previsaoQuery` em `lib/v2.ts`: chave `["previsao", dias]`, `gcTime: 0` (dado sem
+  tela olhando sai do cache, inclusive no downgrade) e releitura em `valido_ate`,
+  medida no relógio do servidor, com piso de 60 s. Dinheiro na tela é `moneyText`
+  (`lib/format.js`), sem float; a tela não soma (grupo repetido é "3 × −R$ 25,00" ou
+  "valores diferentes"). Limite declarado: pendência financeira NOVA em
+  `pending_actions`/`ai_pending_actions` não avisa o SSE (as duas tabelas ficam fora
+  de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
+  foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
+  escritores compartilhados: PR próprio, faixa Completo.
 
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
