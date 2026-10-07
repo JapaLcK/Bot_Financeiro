@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "goals": [
+    {
+      "id": 1,
+      "name": "Espelhada",
+      "balance": 500.005,
+      "target_amount": null,
+      "target_date": null,
+      "emoji": null,
+      "color": null,
+      "status": "active",
+      "description": null,
+      "interest_enabled": false,
+      "interest_rate": 1.0,
+      "interest_period": "cdi",
+      "source": "open_finance",
+      "of_investment_id": 1,
+      "of_plan_active": true,
+      "is_goal": false,
+      "pct_complete": null,
+      "remaining": null,
+      "days_left": null,
+      "monthly_pace_needed": null,
+      "monthly_pace_current": null,
+      "projected_months": null,
+      "indicator": "no_target"
+    }
+  ]
+}

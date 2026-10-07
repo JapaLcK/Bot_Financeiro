@@ -7,6 +7,7 @@
  * mesmos, só o `_resetTela` de `inicio.ts` virou `_resetEntrar` de
  * `entrar.ts`.
  */
+import painelFixture from "./painel.fixture.json";
 import { deBase64Url } from "@/storage/secure";
 import { _resetRenovacao } from "@/api/client";
 import { _resetEntrar } from "@/features/auth/entrar";
@@ -104,6 +105,7 @@ export function credencialDe(email: string) {
 
 export function rotear(extra: Record<string, Rota> = {}) {
   const rotas: Record<string, Rota> = {
+    ...Object.fromEntries(Object.entries(painelFixture).map(([path, body]) => [path, () => resposta(200, body)])),
     "/auth/login": (o) =>
       resposta(200, credencialDe((JSON.parse(String(o.body)) as { email: string }).email)),
     "/auth/me": me,
@@ -113,7 +115,7 @@ export function rotear(extra: Record<string, Rota> = {}) {
   };
   fetchFalso.mockImplementation(async (url: string, o: RequestInit) => {
     const caminho = String(url).replace(/^https?:\/\/[^/]+/, "");
-    const rota = rotas[caminho];
+    const rota = rotas[caminho] ?? rotas[caminho.split("?")[0] ?? ""];
     if (!rota) throw new Error(`rota inesperada: ${caminho}`);
     return rota(o);
   });

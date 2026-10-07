@@ -1,3 +1,4 @@
+import { voltarAoInicio } from "@/features/openFinance/navegacao";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccessibilityInfo, View } from "react-native";
@@ -111,8 +112,8 @@ export default function OpenFinanceVolta() {
     if (estado.fase === "conectado" && estado.ui.state !== "updating") AccessibilityInfo.announceForAccessibility(estado.ui.label);
   }, [estado]);
 
-  const sair = <Button rotulo="Sair" onPress={() => router.dismissTo("/")} />;
-  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => router.dismissTo("/")} />;
+  const sair = <Button rotulo="Sair" onPress={() => voltarAoInicio()} />;
+  const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => voltarAoInicio()} />;
 
   return (
     <Screen rolar={false}>
@@ -183,7 +184,7 @@ export default function OpenFinanceVolta() {
         {estado.fase === "escolher-conexao" && (
           <>
             <Texto tom="inkMuted">Não conseguimos identificar o retorno desta tentativa. Confira os bancos conectados para acompanhar o estado de cada um.</Texto>
-            <Button rotulo="Ver bancos conectados" onPress={() => { router.dismissTo("/"); router.push("/conexoes"); }} />
+            <Button rotulo="Ver bancos conectados" onPress={() => { voltarAoInicio(); router.push("/conexoes"); }} />
             <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((n) => n + 1)} />
             {continuar}
           </>

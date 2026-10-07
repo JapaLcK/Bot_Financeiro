@@ -126,7 +126,7 @@ it("confirmação de Alert da montagem substituída não inicia DELETE", async (
   const antiga = confirmar;
   expect(antiga).toBeDefined();
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Voltar ao Início" })); await drenar(); });
-  await waitFor(() => expect(screen).toHavePathname("/"));
+  await waitFor(() => expect(screen).toHavePathname("/resumo"));
   await act(async () => { antiga?.(); await drenar(); });
   expect(deletes()).toHaveLength(0);
 });

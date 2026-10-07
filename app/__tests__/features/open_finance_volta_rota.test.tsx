@@ -6,7 +6,7 @@ import { origemDaTentativa } from "./open_finance_volta_apoio";
  * item em `updating` tem os casos dele em `open_finance_volta_rota_updating.test.tsx`.
  */
 import * as Linking from "expo-linking";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 
 import { definirWidgetAberto, INTERVALO_MS, JANELA_MS } from "@/features/openFinance/volta";
@@ -174,7 +174,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
 
     await act(async () => {
       await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, (await lerTentativaBancaria(1)) ?? undefined);
-      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false })!);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${B}`, initial: false }) as Href);
       await drenar();
     });
     await waitFor(() => expect(postsDe(B)).toHaveLength(1));
@@ -314,7 +314,7 @@ describe("open-finance-volta — trava ligada", () => {
     await waitFor(() => expect(prompts()).toBe(2));
 
     await act(async () => {
-      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false })!);
+      router.navigate(redirectSystemPath({ path: `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`, initial: false }) as Href);
       await drenar();
     });
     await waitFor(() => expect(screen).toHavePathname("/open-finance-volta"));

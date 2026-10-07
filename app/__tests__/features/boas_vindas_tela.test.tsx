@@ -188,8 +188,8 @@ describe("(auth)/boas-vindas — navegação", () => {
     rotasGoogle();
     await tocar("Começar");
     await tocar("Continuar com Google");
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
-    expect(screen).toHavePathname("/");
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   // Controle negativo (medido): sem o efeito de montagem da BV, a sessão

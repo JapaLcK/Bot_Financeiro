@@ -151,8 +151,8 @@ it("entrada reservada não permite salto para Bancos que abra segunda autorizaç
 const navegacoesIrmas = [
   ["/conectar-banco", "Conectar meu banco", "Ver meus bancos", "/conexoes"],
   ["/conectar-banco", "Conectar meu banco", "Configurações", "/configuracoes"],
-  ["/conectar-banco", "Conectar meu banco", "Continuar para o Início", "/"],
-  ["/conexoes", "Conectar outro banco", "Voltar ao Início", "/"],
+  ["/conectar-banco", "Conectar meu banco", "Continuar para o Início", "/resumo"],
+  ["/conexoes", "Conectar outro banco", "Voltar ao Início", "/resumo"],
   ["/conexoes", "Conectar outro banco", "Acompanhar sincronização", "/open-finance-volta"],
 ];
 it.each(navegacoesIrmas)("reserva em %s por %s bloqueia %s antes do render", async (url, autorizar, navegar) => {

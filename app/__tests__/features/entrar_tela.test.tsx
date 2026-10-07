@@ -188,7 +188,8 @@ describe("(auth)/entrar — tela real", () => {
       await respirar();
     });
 
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     expect(chamadas().filter((c) => c.caminho === "/auth/login")).toHaveLength(1);
     const verifies = chamadas().filter((c) => c.caminho === "/auth/mfa/verify-login");
     expect(verifies.map((c) => c.corpo.challenge)).toEqual(["ch-1", "ch-1"]);
@@ -238,7 +239,8 @@ describe("(auth)/entrar — tela real", () => {
     // autenticou (login sem MFA): sem busy pendurado, a sessão avança e o
     // app navega para a tela autenticada.
     expect(chamadas().filter((c) => c.caminho === "/auth/login" && c.corpo.email === "bia@x.com")).toHaveLength(1);
-    await waitFor(() => expect(screen.getByText(/Olá, Bia/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Bia/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("I-B — mesmo cenário, mas o verify antigo (Ana) chega 200 DEPOIS do Voltar: a pessoa autentica como Bia, nunca como Ana", async () => {
@@ -283,8 +285,9 @@ describe("(auth)/entrar — tela real", () => {
 
     // O cofre nunca termina com a Ana — mesmo com um 200 chegando depois.
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-bia", refresh: "rt_bia" });
-    expect(screen.queryByText(/Olá, Ana/)).toBeNull();
-    await waitFor(() => expect(screen.getByText(/Olá, Bia/)).toBeTruthy());
+    expect(screen.queryByText(/Bom dia, Ana/)).toBeNull();
+    await waitFor(() => expect(screen.getByText(/Bom dia, Bia/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("I-B (parado no formulário) — 200 atrasado do verify abandonado NÃO autentica sozinho", async () => {

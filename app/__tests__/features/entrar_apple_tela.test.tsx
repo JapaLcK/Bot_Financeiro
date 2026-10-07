@@ -152,7 +152,8 @@ describe("(auth)/entrar — Continuar com a Apple", () => {
   it("caminho feliz: troca o token e abre o app como Ana", async () => {
     await abrirEntrar();
     await tocar(APPLE);
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
 

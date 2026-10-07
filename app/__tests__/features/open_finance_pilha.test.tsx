@@ -53,25 +53,25 @@ it("primeira conexão volta à Home existente; back e repetição não reabrem a
   await autorizar("Conectar meu banco");
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
   await apertar("Continuar");
-  await waitFor(() => expect(screen).toHavePathname("/"));
+  await waitFor(() => expect(screen).toHavePathname("/resumo"));
   expect(router.canGoBack()).toBe(false);
-  expect(r.getRouterState()?.routes[0]?.state?.routes.find((route) => route.name === "(app)")?.state?.routes.map((route) => route.name)).toEqual(["index"]);
+  expect(r.getRouterState()?.routes[0]?.state?.routes.find((route) => route.name === "(app)")?.state?.routes.map((route) => route.name)).toEqual(["(painel)"]);
   await apertar("Bancos conectados");
   await autorizar("Reconectar Nubank");
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
   await apertar("Continuar");
   expect(router.canGoBack()).toBe(false);
   // Sem canGoBack, o navigator não oferece gesto Back na Home.
-  expect(screen).toHavePathname("/");
+  expect(screen).toHavePathname("/resumo");
   expect(tokens()).toHaveLength(2);
 });
 
-it.each(["conectar-banco", "conexoes"])("retorno explícito de %s não duplica Home nem deixa origem no histórico", async (destino) => {
+it.each(["conectar-banco", "conexoes"] as const)("retorno explícito de %s não duplica Home nem deixa origem no histórico", async (destino) => {
   servidor(); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeEnabled());
   await act(async () => { router.push(`/${destino}`); await drenar(); });
   await apertar(destino === "conexoes" ? "Voltar ao Início" : "Continuar para o Início");
-  expect(screen).toHavePathname("/");
+  expect(screen).toHavePathname("/resumo");
   expect(router.canGoBack()).toBe(false);
   expect(tokens()).toHaveLength(0);
 });
@@ -86,7 +86,7 @@ it("timeout com Conexões existente retorna à mesma pilha e back vai à Home", 
   expect(screen).toHavePathname("/conexoes");
   expect(router.canGoBack()).toBe(true);
   await act(async () => { router.back(); await drenar(); });
-  expect(screen).toHavePathname("/");
+  expect(screen).toHavePathname("/resumo");
   expect(router.canGoBack()).toBe(false);
   expect(tokens()).toHaveLength(1);
 });
@@ -136,7 +136,7 @@ it("retorno frio para bancos ausentes da pilha usa fallback sem ressuscitar Volt
   expect(router.canGoBack()).toBe(true);
   expect(await lerTentativaBancaria(1)).toEqual(tentativa);
   await act(async () => { router.back(); await drenar(); });
-  expect(screen).toHavePathname("/");
+  expect(screen).toHavePathname("/resumo");
   expect(router.canGoBack()).toBe(false);
   expect(tokens()).toHaveLength(0);
 });
