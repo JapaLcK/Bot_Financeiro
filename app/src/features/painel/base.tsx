@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Pressable, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { usePressao, useReduzirMovimento } from "@/ui/motion";
@@ -39,10 +39,13 @@ const MOTIVOS: Record<string, string> = {
  saldo_ausente: "O banco não informou um dos saldos.", moeda_presumida: "A moeda de uma conta ainda precisa ser confirmada.",
  conta_fora_do_ultimo_sync: "Uma conta não apareceu na última sincronização.", conexao_pausada: "Há uma conexão bancária pausada.",
 };
+/** Estado do banco: vai só no aviso único do topo (`TelaPainel`), nunca repetido nos cards. */
+export const MOTIVOS_BANCO = new Set(["banco_desatualizado", "conexao_pausada"]);
 export function Avisos({ motivos }: { motivos: string[] }) {
- if (!motivos.length) return null;
- const mensagens = [...new Set(motivos.map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
- return <Texto variante="legenda" tom="warning">{mensagens.join(" ")}</Texto>;
+ const [aberto, setAberto] = useState(false);
+ const mensagens = [...new Set(motivos.filter((m) => !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
+ if (!mensagens.length) return null;
+ return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }
 export function Vazio({ texto }: { texto: string }) { return <Texto variante="rotulo" tom="inkMuted">{texto}</Texto>; }
 export function Folha({ titulo, aberta, fechar, children }: { titulo: string; aberta: boolean; fechar: () => void; children: ReactNode }) {

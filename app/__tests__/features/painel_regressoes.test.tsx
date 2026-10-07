@@ -36,6 +36,10 @@ beforeEach(async () => {
 });
 afterEach(() => jest.restoreAllMocks());
 async function apertar(rotulo: string) { await act(async () => { fireEvent.press(screen.getByRole("button", { name: rotulo })); await drenar(); }); }
+async function abrirRessalvas(n: number) {
+ await waitFor(() => expect(screen.getAllByRole("button", { name: "Ver ressalvas" })).toHaveLength(n));
+ for (const b of screen.getAllByRole("button", { name: "Ver ressalvas" })) await act(async () => { fireEvent.press(b); await drenar(); });
+}
 async function enviar() {
  await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta exclusiva"); await drenar(); });
@@ -97,19 +101,19 @@ it("calendário distingue meses de compra e mantém a data civil no drilldown", 
  await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy()); expect(screen.getByText("03/09/2026")).toBeTruthy();
 });
 it("grupos arredondados apresentam aviso em Categorias e Calendário", async () => {
- detalhes = arredondamento; renderRouter("./app", { initialUrl: "/gastos" });
+ detalhes = arredondamento; renderRouter("./app", { initialUrl: "/gastos" }); await abrirRessalvas(3);
  await waitFor(() => expect(screen.getAllByText(aviso)).toHaveLength(3)); expect(screen.queryByText("arredondamento por grupo")).toBeNull();
 });
 it("patrimônio preserva total oficial e informa diferença de centavos entre grupos", async () => {
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/patrimonio" ? resposta(200, { ...fixture["/api/app/patrimonio"], total: "2.01", partes: { carteira: "1.01", bancos: "1.01", investimentos_banco: "0.00", caixinhas: "0.00", investimentos_manuais: "0.00" }, motivos: ["arredondamento_por_grupo"], historico: [] }) : impl(url, req));
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText(aviso)).toBeTruthy());
+ renderRouter("./app", { initialUrl: "/resumo" }); await abrirRessalvas(1); await waitFor(() => expect(screen.getByText(aviso)).toBeTruthy());
  expect(screen.getByLabelText("2 reais e 1 centavo")).toBeTruthy(); expect(screen.queryByLabelText("2 reais e 2 centavos")).toBeNull();
 });
 it("foto histórica mantém seu aviso mesmo quando patrimônio atual não diverge", async () => {
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/patrimonio" ? resposta(200, { ...fixture["/api/app/patrimonio"], motivos: [], historico: [{ ...fixture["/api/app/patrimonio"].historico[0], total: "2.01", motivos: ["arredondamento_por_grupo"] }] }) : impl(url, req));
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText(aviso)).toBeTruthy());
+ renderRouter("./app", { initialUrl: "/resumo" }); await abrirRessalvas(1); await waitFor(() => expect(screen.getByText(aviso)).toBeTruthy());
  expect(screen.getByLabelText("2 reais e 1 centavo")).toBeTruthy();
 });
 it("ação com ícone usa layout horizontal estático e alvo de pelo menos 44 pontos", async () => {

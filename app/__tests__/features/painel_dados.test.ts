@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { decimalParaCentavos, numeroLegadoParaCentavos, somarCentavos, percentualEmCentavos } from "@/features/painel/decimal";
-import { PERFIS, PADRAO, sanitizarLayout, chaveLayout } from "@/features/painel/catalogo";
+import { PERFIS, PADRAO, sanitizarLayout, chaveLayout, nomeLegivel, nomeCategoria } from "@/features/painel/catalogo";
 import * as S from "@/api/schemas/painel";
 import fixture from "./painel.fixture.json";
 it.each([["10.005", 1001], ["-10.005", -1001], ["0.004999", 0], ["0.005", 1], ["1.999", 200], ["12", 1200], ["0.01", 1]])("Decimal %s arredonda HALF_UP sem float", (valor, esperado) => expect(decimalParaCentavos(String(valor))).toBe(esperado));
@@ -19,3 +19,10 @@ it("organização aceita todos ocultos, remove IDs desconhecidos/repetidos e iso
 it("contratos reais transformam todos os valores monetários na fronteira", () => { expect(S.contasSchema.parse(fixture["/api/app/contas"]).total).toBe(940025); expect(S.detalhesMesSchema.parse(fixture["/api/app/mes-detalhes"]).guardado.liquido).toBe(120000); expect(S.previsaoSchema.parse(fixture["/api/app/previsao"]).base.saldo).toBe(940025); expect(S.patrimonioSchema.parse(fixture["/api/app/patrimonio"]).total).toBe(2600025); expect(S.rendimentoSchema.parse(fixture["/api/app/rendimento"]).itens[0]!.taxa).toBe("100"); });
 
 it("cortes 0/100 e centavo fracionário são exatos e reversíveis sem floats", () => { expect(percentualEmCentavos(1001, 0)).toBe(0); expect(percentualEmCentavos(1001, 100)).toBe(1001); expect(percentualEmCentavos(5, 10)).toBe(1); expect(percentualEmCentavos(Number.MAX_SAFE_INTEGER, 100)).toBe(Number.MAX_SAFE_INTEGER); });
+it.each([["ultraviolet-black", "Ultraviolet Black"], ["gold_card", "Gold Card"], ["Nubank", "Nubank"], ["nubank", "nubank"], ["Mastercard Black", "Mastercard Black"], ["Meu cartão", "Meu cartão"], ["cartão-x", "cartão-x"]])("nomeLegivel(%s) só reescreve slug", (nome, esperado) => expect(nomeLegivel(nome)).toBe(esperado));
+it("nomeCategoria usa a grafia do catálogo, cai na chave capitalizada e nomeia a ausência", () => {
+ const catalogo = [{ chave: "transferencias", nome: "transferências" }];
+ expect(nomeCategoria(null, catalogo)).toBe("Sem categoria"); expect(nomeCategoria("", catalogo)).toBe("Sem categoria");
+ expect(nomeCategoria("transferencias", catalogo)).toBe("Transferências"); expect(nomeCategoria("compras", catalogo)).toBe("Compras"); expect(nomeCategoria("compras")).toBe("Compras");
+ expect(nomeCategoria("lazer", [{ chave: "lazer", nome: "" }])).toBe("Lazer");
+});

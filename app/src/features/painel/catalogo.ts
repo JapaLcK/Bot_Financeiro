@@ -36,3 +36,14 @@ export function mesesDoHistorico(mes: string, inicio: string | null | undefined,
  const meses = (Number(mes.slice(0, 4)) - Number(inicio.slice(0, 4))) * 12 + Number(mes.slice(5, 7)) - Number(inicio.slice(5, 7)) + 1;
  return mesesAnteriores(mes, Math.max(0, meses));
 }
+
+/** Nome em slug do banco ("ultraviolet-black") vira "Ultraviolet Black"; o resto passa intacto. */
+export function nomeLegivel(nome: string) {
+ return /^[a-z0-9]+([-_][a-z0-9]+)+$/.test(nome) ? nome.split(/[-_]/).map((p) => p[0]!.toUpperCase() + p.slice(1)).join(" ") : nome;
+}
+/** Grafia oficial do catálogo do usuário (`/api/app/categorias`); sem par, a própria chave. */
+export function nomeCategoria(chave: string | null, catalogo?: { chave: string; nome: string }[]) {
+ if (!chave) return "Sem categoria";
+ const nome = catalogo?.find((c) => c.chave === chave)?.nome || chave;
+ return nome[0]!.toUpperCase() + nome.slice(1);
+}

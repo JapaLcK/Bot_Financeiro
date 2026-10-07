@@ -153,6 +153,31 @@ def test_nao_cdi_preserva_unidade_e_posicoes_inativas_nao_entram(uid):
     assert (r["itens"][0]["taxa"], r["itens"][0]["tipo_taxa"]) == ("12.5", "PRE_FIXED")
 
 
+def test_rendimento_lista_renda_fixa_com_nome_legivel_e_tira_acao_sem_taxa(uid):
+    cid = conexao(uid, f"item-{uid}")
+    for pid, tipo, subtipo, nome in (("rf", "FIXED_INCOME", None, "FIXED_INCOME"),
+                                     ("td", "FIXED_INCOME", "TREASURY", "FIXED_INCOME"),
+                                     ("acao", "EQUITY", "STOCK", "PETR4"),
+                                     ("acao-taxa", "EQUITY", None, "FII Taxado"),
+                                     ("rf-sem", "FIXED_INCOME", "CDB", "CDB Banco"),
+                                     ("sem-tipo", None, None, "Posição Sem Tipo")):
+        iid = posicao(cid, pid, "100")
+        q("update open_finance_investments set type=%s, subtype=%s, name=%s where id=%s",
+          (tipo, subtipo, nome, iid))
+    snapshot(cid, "rf", "12.5", "PRE_FIXED")
+    snapshot(cid, "td", "6", "IPCA")
+    snapshot(cid, "acao-taxa", "1", "CDI")
+    por_nome = {i["nome"]: i for i in leitura(uid, "rendimento")["itens"]}
+    assert "PETR4" not in por_nome, "ação sem taxa não é rendimento contratado"
+    assert "FIXED_INCOME" not in por_nome
+    assert por_nome["Renda fixa"]["taxa"] == "12.5"
+    assert por_nome["Tesouro Direto"]["taxa"] == "6"
+    assert por_nome["FII Taxado"]["taxa"] == "1"
+    assert por_nome["CDB Banco"]["taxa"] is None, "renda fixa sem taxa continua listada"
+    assert por_nome["Posição Sem Tipo"]["motivos"][0] == "taxa_contratada_ausente", \
+        "type nulo sem taxa continua listado"
+
+
 def test_mes_completo_manual_cartao_parcela_interno_e_conciliacao(uid):
     semeia_a(uid)
     r = leitura(uid, "mes-detalhes", mes=MES)

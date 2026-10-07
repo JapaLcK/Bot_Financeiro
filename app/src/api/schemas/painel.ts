@@ -5,6 +5,7 @@ const legado = z.number().finite().transform((v, ctx) => { try { return numeroLe
 const motivos = z.array(z.string());
 const texto = z.string().nullable();
 export const perfilPainelSchema = z.object({ perfil: z.enum(["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"]).nullable() });
+export const categoriasSchema = z.object({ categorias: z.array(z.object({ chave: z.string(), nome: z.string() })) });
 export const planoSchema = z.object({ plan_tier: z.enum(["free", "essencial", "plus", "pro"]) });
 export const contasSchema = z.object({ total: dinheiro, motivos, fora_do_total: z.number().int(), carteira: z.object({ saldo: dinheiro, motivos }), contas: z.array(z.object({ id: z.number().int(), instituicao: texto, nome: texto, saldo: dinheiro.nullable(), moeda: z.string(), no_total: z.boolean(), conexao: z.string(), sincronizado_em: texto, motivos })) });
 export const resumoSchema = z.object({ mes: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, anterior: z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro }).nullable(), motivos });
