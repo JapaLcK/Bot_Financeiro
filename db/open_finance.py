@@ -260,8 +260,8 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
-        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
-        janela_device_auth_min)
+        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_DEVICE_NA_JANELA, SQL_EXECUTION_STATUS,
+        aplica_teto_por_health, janela_device_auth_min)
 
     cur.execute(
         f"""
@@ -280,19 +280,22 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
         -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
         -- a ação certa depois que a janela fechou — o `raw` é congelado
         -- (`mark_sync_result` não o toca), então sem prazo a instrução
-        -- duraria para sempre.
+        -- duraria para sempre. O `device_na_janela` (D5) é o MESMO prazo
+        -- valendo também com `health`: fora dele, nenhum ramo mostra a
+        -- instrução de dispositivo.
         --
         -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
         -- reconectar ZERA a saúde até um sync real provar o contrário),
         -- e é por isso que a saída é o derivado e não a coluna.
         --
-        -- O `execution_status` é REMOVIDO do dict antes de a resposta
+        -- O `execution_status` (e o `device_na_janela`) é REMOVIDO do dict antes de a resposta
         -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
         -- `connection_ui_state` que o consome): o corpo HTTP fica
         -- idêntico em chaves ao de antes deste PR.
         select id, provider, provider_item_id, status, institution_name, institution_id,
                last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
                {SQL_EXECUTION_STATUS},
+               {SQL_DEVICE_NA_JANELA},
                {SQL_COLETA_VENCIDA},
                {SQL_COLETA_ESTOURADA}
         from open_finance_connections
@@ -300,7 +303,7 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
         order by updated_at desc, id desc
         {"for update" if lock else ""}
         """,
-        (janela_device_auth_min(), user_id),
+        (janela_device_auth_min(), janela_device_auth_min(), user_id),
     )
     connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
     # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
@@ -315,6 +318,7 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
         # é o que impede um campo derivado do `raw` de virar API pública
         # sem ninguém ter decidido isso.
         c.pop("execution_status", None)
+        c.pop("device_na_janela", None)
         c.pop("coleta_vencida", None)
         c.pop("coleta_estourada", None)
     return connections
@@ -559,8 +563,7 @@ def list_connections_needing_reconnect(user_id: int) -> list[dict]:
 
     Device/QR fica de fora enquanto a tela mostra "Autorize o acesso no app do
     banco" (mandar reconectar faz PERDER a janela, Codex #166); vencido o prazo
-    (o do `execution_status` do `raw`, ramo sem `health`), a tela diz
-    "Reautorize o banco" e o aviso sai.
+    (D5, `device_na_janela`), a tela diz "Reautorize o banco" e o aviso sai.
 
     Sem perna de `consent_expires_at`: para `provider='pluggy'` a coluna nunca é
     escrita (o upsert grava NULL) e o mock é excluído pelo `provider` abaixo.

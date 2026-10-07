@@ -35,7 +35,8 @@ Código de referência:
 - `core/services/of_retentativa.py` (quem a retentativa relê, §2.2) e
   `frontend/routes/of_retentativa.py` (`retentar_leituras`, a etapa do tique).
 - `frontend/settings.html`: `renderConnections` (pílula) e `refreshVerdict` (toast).
-- `db/open_finance.py`: `list_connections_needing_reconnect` (aviso proativo).
+- `db/open_finance.py`: `list_connections_needing_reconnect` (aviso proativo): a
+  leitura do snapshot filtrada por `avisa_reconectar` (`core/services/pluggy_health.py`).
 
 Nenhum número aqui é medição. Para contar conexões, testes ou linhas, rode o
 comando; não copie o resultado para cá (`CLAUDE.md` §2).
@@ -56,8 +57,13 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
 4. **Observação do item** (`health`: `item_status`, `execution_status`,
    `products`). O `item_status` decide o balde; o `execution_status` só refina o
    detalhe (device/QR, `PARTIAL_SUCCESS`). *Vigente.* A observação vale até a
-   próxima. *Proposto (D5, PR-D):* a instrução de device/QR ganha prazo também
-   quando há `health`.
+   próxima. *Vigente desde o PR-D (D5):* a instrução de device/QR ("Autorize o
+   acesso no app do banco") só aparece com a autorização atual dentro de
+   `JANELA_DEVICE_AUTH_MIN` (âncora `coalesce(reconnected_at, created_at)`, teto
+   de +5 min), nos DOIS ramos (com e sem `health`, inclusive o `status` local
+   `WAITING_USER_ACTION`): derivado SQL `device_na_janela`
+   (`SQL_DEVICE_NA_JANELA`, `db/open_finance_state.py`). Fora dela, "Reautorize o
+   banco". Linha lida sem o derivado = janela fechada.
 5. **Status vindo do webhook** é pista, não observação. *Vigente desde o PR-C2:*
    `item/error` com uma conexão NÃO grava veredito: agenda uma observação
    (`GET /items` e `observar_item`), que decide o par. Só se a releitura não
@@ -190,14 +196,19 @@ comando; não copie o resultado para cá (`CLAUDE.md` §2).
    - quem RELÊ sozinho depois do prazo ou da falha é a retentativa do tique
      (D3). **Vigente desde o PR-B2**; quem entra, célula por célula, na §2.2.
 9. **Aviso proativo = função do mesmo estado da tela** (`connection_ui_state`), não
-   um classificador paralelo por `status`. *Proposto (D4, PR-D).*
+   um classificador paralelo por `status`. *Vigente desde o PR-D (D4):*
+   `list_connections_needing_reconnect(user_id)` é a leitura do snapshot filtrada
+   por `avisa_reconectar(ui)`: `item_missing`, ou `needs_user_action` cujo detalhe
+   não é o de dispositivo. "Sem dados" não avisa (DP1 = A). A perna de
+   `consent_expires_at` saiu (morta para `provider='pluggy'`). Tabela na §2.3.
 10. **`health` e `status` local discordando** (`status=ERROR` do webhook com
     `health.item_status=UPDATED`): hoje `ERROR` vence. *Proposto:* não comparar
     relógios; a observação imediata do item 5 resolve. Até ela terminar, `ERROR`
     continua vencendo, que é o lado conservador, salvo quando um sync em voo
     grava a sua foto do item (o sucesso, ou a O do item 8 quando ele falha
     depois do `GET /items`): aí o `status` observado troca esse `ERROR`
-    (célula 13b da §2.1).
+    (célula 13b da §2.1). Desde o PR-D o aviso não lê `status`: tela e aviso
+    concordam nessa troca por construção.
 
 Ações para dado antigo, em ordem de custo: (a) reler a Pluggy (sync, só GET, sem
 cota de coleta); (b) pedir coleta nova (PATCH, gasta cota); (c) pedir ação do
@@ -246,7 +257,7 @@ verificação externa pendente.
 | Conexão perdida (`item_missing`) | o próprio sync vê o item vivo (`GET /items` 200) e falha depois (`/accounts` 5xx/429) | **Erro temporário · Tentaremos de novo automaticamente** (DECISÃO 2 = A) | para | ✓ **PR-B1** (célula 8) |
 | Sem dados (`no_accounts`) | falha final de um sync, sem evento no meio (no `GET /items` ou depois) | mantém "Sem dados"; em L a foto do run não é gravada (DECISÃO 1 = A) | não | ✓ **PR-B1** (células 18 e 19) |
 | Sem dados (`no_accounts`) | o sync vê o item em `LOGIN_ERROR` e falha depois | **Ação necessária · Reautorize o banco** (antes: Erro temporário, com a foto de ontem) | avisa | ✓ **PR-B1** (célula 22) |
-| qualquer sem motivo | E3 no meio de um sync que falha depois do `GET /items` | Erro temporário; a foto (mais velha que a pista do webhook) troca `status` `ERROR` por `ACTIVE`, e o aviso proativo, que ainda lê `status`, é afetado até o PR-D | não | ✓ tela **PR-B1** (célula 13b); aviso registrado em `decisoes.md` |
+| qualquer sem motivo | E3 no meio de um sync que falha depois do `GET /items` | Erro temporário; a foto (mais velha que a pista do webhook) troca `status` `ERROR` por `ACTIVE` | não | ✓ tela **PR-B1** (célula 13b); aviso ✓ **PR-D** (segue a tela) |
 | Atualizando, com o prazo vencido | E6 (Atualizar) com a Pluggy ainda coletando e sem conta | toast "{banco}: está demorando mais que o normal — atualize de novo. Toque em Atualizar de novo em instantes.", em tom de ERRO (o `reason` é `no_accounts`) | não | ✗ instrução repetida, "Toque em Atualizar" num app sem o botão e tom de erro: frontend (`refreshVerdict`), fica para o PR-E |
 | Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… até 30 min da autorização; depois **Atualizando… · Está demorando mais que o normal — atualize de novo** (âmbar); a partir de 2 h, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; recuperar sozinho: ✓ **PR-B2** (classe `coleta`); teto: ✓ **Fase 4, PR 2** |
 | Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") dentro do prazo, depois o detalhe do prazo; com `read_failed`, Erro temporário | não | ✓ **PR-B1**; o tique relê depois do prazo: ✓ **PR-B2** |
@@ -254,15 +265,16 @@ verificação externa pendente.
 | Atualizando, já sincronizada, item em coleta sem produto (`coletando_sem_info`) | E12 (horas), com E8 e syncs regravando a foto | até 2 h de `coletando_desde`, Atualizando…; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** (antes: Atualizando… por 12–18 h) | não | ✓ **Fase 4, PR 2**; o tique relê (classe `coleta`, E25) |
 | Atualizando, 1ª conexão sem sync | E11 (Ajustes aberto) | card parado em Atualizando… | n/a | ✗ F1 (PR-E) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET falhando | mantém; vencida a janela, "Reautorize" | calado, depois avisa | ✓ (#428) |
-| Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" para sempre | calado para sempre | ✗ R7 (D5, PR-D) |
+| Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" dentro da janela; vencida, **Ação necessária · Reautorize o banco** | calado, depois avisa | ✓ **PR-D** (R7, D5) |
 | Autorize no app | E9 | reinicia a janela | calado | ✓ |
+| Autorize no app | E6 (Atualizar manual) / E2 / E8 | **não** reinicia a janela (a âncora é `coalesce(reconnected_at, created_at)` e só o upsert do widget grava `reconnected_at`); conexão com mais de 60 min e pedido novo de device: **Reautorize o banco** | avisa | aceito pelo dono em 2026-10-07; renovar a âncora fica para PR próprio após V2 (Onda 8). Medido: `.time-dev/of-onda5-d/scratch/test_tester_pr_d.py::test_pedido_de_device_aberto_agora_em_conexao_antiga`, fora de `tests/`: referência de medição, não cobertura |
 | Autorize no app | E5 | nada muda | – | ? H5 (depende do catálogo de eventos da Pluggy) |
 | Ação necessária (reautorize) | E2 | continua "Ação necessária"; "Última sync" avança | avisa | tela ✓; "Última sync" ✓ **PR-B3 (D7)**: "· dados de dd/mm" |
 | Ação necessária (reautorize) | E9 e sync | Atualizado | para | ✓ |
 | Atualizado | E2 com sync ok | Atualizado | não | ✓ |
 | Atualizado com a Pluggy à frente (D2) | E6 com sync ok | Atualizado (o `last_sync_at` novo passa a data da Pluggy) | não | ✓ **PR-B3** |
 | Atualizado com a Pluggy à frente (D2) | E6 com `sync_in_progress` (lock ocupado: nada carimbou) | Parcial; toast "Atualizei o que deu no X: o banco já tem dados de dd/mm — atualize para trazer." | não | ✓ **PR-B3** |
-| Atualizado | E3 transitório (item ok na Pluggy) | segue Atualizado: a releitura do webhook confirma o item vivo (antes: "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8) | "reconecte" | ✓ **PR-C2** (R3: a observação relê o item; o `item/error` não grava mais veredito); ✗ R2 (PR-D) |
+| Atualizado | E3 transitório (item ok na Pluggy) | segue Atualizado: a releitura do webhook confirma o item vivo (antes: "Erro temporário · Tentaremos de novo automaticamente" até o próximo E8) | não | ✓ **PR-C2** (R3: a observação relê o item; o `item/error` não grava mais veredito); aviso ✓ **PR-D** (R2) |
 | Atualizado | E3 com item em `LOGIN_ERROR` | **Ação necessária · Reautorize o banco**, na hora (a releitura do webhook; antes: "Erro temporário" até o E8) | avisa | ✓ **PR-C2** |
 | Atualizado | E4 | Removido (sem detalhe) | não | ? C7 (fora da Onda 5 salvo pedido) |
 | Atualizado | E6 com `/investments` 429 e contas lidas | **Parcial · Investimentos não vieram nesta atualização**; toast "Atualizei o que deu no {banco}: investimentos não vieram nesta atualização." | não | ✓ **corrigido no PR-A (R4)** |
@@ -333,7 +345,7 @@ nome (`test_c9b_…`).
 | 11 | nenhum | job vê 404 | G, L | mantém `item_missing`. **Conexão perdida** | `c11_…` |
 | 12 | `read_failed` | nenhum | G, L | regrava. **Erro temporário** | `c12_c17_…[c12-…]` |
 | 13 | nenhum | webhook `item/error` | G | `read_failed`, `status` segue `ERROR`. **Erro temporário** | `c13_…[c13_G]` |
-| 13b | nenhum | webhook `item/error` | L | a foto troca `ERROR` por `ACTIVE`; tela igual. O aviso proativo, que lê `status`, deixa de sair até o PR-D | `c13_…[c13b_L]` |
+| 13b | nenhum | webhook `item/error` | L | a foto troca `ERROR` por `ACTIVE`; tela igual. O aviso segue a tela (PR-D): não sai nem antes nem depois | `c13_…[c13b_L]` |
 | 14 | qualquer | item readotado (linha nova) | G | a marca vai pelo `id` antigo: a linha nova fica intocada | `c14_…` |
 | 15 | qualquer | `PAUSED` ou `DELETED` | G | não grava (terminal) | `c15_…` |
 | 16 | nenhum | webhook `item/created` | G, L | `read_failed`. **Erro temporário** | `c16_…` |
@@ -608,6 +620,25 @@ comportamental em `tests/frontend/of_refresh_ui.test.mjs`.
 | C15 | observação do webhook × R | R não cria tarefa (`marcar_sujo=False`) nem lê com a observação em voo; a observação em voo termina e solta o slot | `_INFLIGHT` |
 | C16 | observação do webhook × sync em voo | o `item/error` marca `_DIRTY` e NÃO lê; a rodada suja roda um sync, que relê o item. Rajada de itens diferentes: no máximo 4 observações no trecho bloqueante (semáforo constante) | `_INFLIGHT`/`_DIRTY` + semáforo |
 
+### 2.3 Aviso = tela (PR-D), as células que mudaram
+
+O aviso "reconecte" sai para uma conexão se, e só se, `avisa_reconectar` aceita o
+`ui` que a tela mostra. Janela = `device_na_janela` (item 4 da §1). Testes:
+`tests/test_of_aviso_mesma_regra.py` (id do caso entre parênteses).
+
+| estado | evento | tela | aviso antes | aviso depois |
+|---|---|---|---|---|
+| Atualizado, Sem dados, Erro temporário ou Parcial com a pista `ERROR` | E3 com a releitura falhando (R2) | igual (Erro temporário / Sem dados) | sim | **não** (`a_pista`, `b_pista_*` cobrem Atualizado, Sem dados e Erro temporário; Parcial: por construção, sem teste) |
+| qualquer | sync ou job vê `item_status = ERROR` (R2b, E13) | Erro temporário · O banco teve um erro — atualize de novo mais tarde | sim | **não** (`c_item_error`) |
+| Caixa (`OUTDATED` + `USER_AUTHORIZATION_PENDING`) com `health`, fora da janela | E8 / E12 (R7) | antes "Autorize…" para sempre; agora **Reautorize o banco** | não | **sim** (`f_caixa_health_61`) |
+| `item_status = WAITING_USER_ACTION` com `health`, fora / dentro da janela | E8 / E12 | Reautorize / Autorize | não / não | **sim** / não (`h_wua_health_61`, `_55`) |
+| `status` local `WAITING_USER_ACTION`, sem `health`, fora / dentro da janela | E12 com o job sem medir | Reautorize / Autorize (antes: Autorize para sempre) | não / não | **sim** / não (`i_wua_sem_health_61`, `_55`) |
+| `status` local `INVALID_CREDENTIALS`, sem `health` | upsert | Ação necessária · Reautorize o banco | não | **sim** (`j_invalid_credentials`) |
+| diagonal `LOGIN_ERROR` + `execution_status` de device, fora da janela | E8 / E12 | Reautorize o banco (antes: Autorize para sempre) | não | **sim**, por construção (mecanismo provado por `f`/`h`/`i`) |
+| `LOGIN_ERROR` e outros `_NEEDS_USER` sem device; Conexão perdida | sync, job, upsert | Reautorize / Refaça a conexão | sim | sim (controles `d_login_error`, `e_item_missing`) |
+| Caixa com `health`, dentro da janela | E8 | Autorize o acesso no app do banco | não | não (controle `g_caixa_health_55`) |
+| Autorize no app, conexão com mais de 60 min | E6 (Atualizar manual) / E2 / E8 com pedido novo de device | **não** reinicia a janela: Reautorize o banco | – (não medido) | **sim**; aceito pelo dono em 2026-10-07; renovar a âncora fica para PR próprio após V2 (Onda 8). Medido: `.time-dev/of-onda5-d/scratch/test_tester_pr_d.py::test_pedido_de_device_aberto_agora_em_conexao_antiga`, fora de `tests/`: referência de medição, não cobertura |
+
 ---
 
 ## 3. Decisões do dono (2026-09-27) e quem as implementa
@@ -620,8 +651,8 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | D1: por quanto tempo "Atualizando…" é honesto sem sync | 30 min desde a autorização atual; depois pílula âmbar, mesma "Atualizando…", detalhe "Está demorando mais que o normal — atualize de novo" (texto trocado pelo dono em 2026-09-30: o app não tem botão Atualizar) | PR-B1 (**implementada**) |
 | D2: o que a tela diz com dado antigo | âmbar só com prova (Pluggy com dado mais novo que o nosso); sem limite de idade absoluta até medir o auto-update da Pluggy | PR-B3 (**implementada**; texto A1, regra única `data_da_pluggy`) |
 | D3: alguém tenta de novo sozinho quando nosso dado está atrás | sim: o tique de saúde agenda sync para conexões com dado atrás (motivo de leitura pendente, coleta vencida, Pluggy à frente), teto K por tique, só GET. "Tentaremos de novo automaticamente" passa a ser verdade | PR-B2 (**implementada**, §2.2) |
-| D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D |
-| D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D |
+| D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D (**implementada**; `avisa_reconectar`, §2.3) |
+| D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D (**implementada**; `device_na_janela`) |
 | D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
 | Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
 | D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |

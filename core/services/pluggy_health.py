@@ -118,12 +118,14 @@ _PRODUCT_PT = {
 ITEM_STATUS_AUTORIZA_DISPOSITIVO = "WAITING_USER_ACTION"
 EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 
-# Por quanto tempo o `executionStatus` do `raw` (o payload cru da Pluggy, gravado
-# pelo upsert) ainda descreve a autorização ATUAL. Mora aqui, ao lado dos dois
-# nomes acima e pelo mesmo motivo: quem o consome é SQL (`db/open_finance_state.py`,
-# e por ele o snapshot e o aviso proativo), e a regra de device/QR é deste módulo.
-# O `raw` é congelado — `mark_sync_result` não o toca —, então sem prazo a
-# supressão do aviso e a instrução de dispositivo durariam para sempre.
+# Por quanto tempo a instrução de dispositivo/QR ainda descreve a autorização
+# ATUAL — com ou sem `health` (Onda 5, D5). Mora aqui, ao lado dos dois nomes
+# acima e pelo mesmo motivo: quem o consome é SQL (`db/open_finance_state.py`:
+# `SQL_EXECUTION_STATUS` e `SQL_DEVICE_NA_JANELA`, lidos pelo snapshot e, por ele,
+# pelo aviso proativo), e a regra de device/QR é deste módulo. Nem o `raw` nem o
+# `health` trazem prazo (o `raw` é congelado; o job regrava o `health` com o mesmo
+# `execution_status`), então sem prazo a supressão do aviso e a instrução de
+# dispositivo durariam para sempre.
 #
 # 60 minutos. O PISO é ESTIMATIVA, e é preciso dizer de onde ela vem antes de
 # derivar qualquer coisa dela:
@@ -163,7 +165,8 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #     ARITMÉTICA sobre um número estimado, não medição — e `60 - L` também.
 #     O sentido oposto (app adiantado, carimbo no FUTURO) esta constante não
 #     cobre e não pode cobrir: ela é o piso do intervalo. Quem o cobre é o TETO
-#     do `SQL_RAW_AINDA_VALE` (`db/open_finance_state.py`), e é ele que impede o
+#     do `SQL_JANELA_DEVICE` (`db/open_finance_state.py`; vale para o
+#     `execution_status` e para o `device_na_janela`), e é ele que impede o
 #     carimbo no futuro de tornar a supressão permanente.
 #   • A TOLERÂNCIA A RELÓGIO É ASSIMÉTRICA, 6×: 5 min para o app adiantado (o
 #     teto) contra 30 min para o atrasado (os `60 - 30` de folga do piso). Não é
@@ -176,7 +179,7 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #     correta depois que a janela fechou. Errar curto custa uma instrução
 #     conservadora; errar longo manda a pessoa esperar um QR morto.
 #
-# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_RAW_AINDA_VALE`, o
+# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_JANELA_DEVICE`, o
 # intervalo aceito tem 65 min de largura para um carimbo 5 min adiantado (medido:
 # `now() - 60 min` FORA, `now() - 59 min` DENTRO, `now() + 5 min` DENTRO,
 # `now() + 5 min 1 s` FORA). Quem lê só esta constante infere 60.
@@ -335,6 +338,10 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
     `JANELA_DEVICE_AUTH_MIN`. Esta função continua PURA: recebe `execution_status`
     na linha, não consulta banco nem relógio. O `raw` inteiro NÃO viaja — só o
     escalar — porque ele carrega `clientUserId`.
+
+    O PRAZO dos DOIS campos (D5) não é daqui: `connection_ui_state` só a chama com
+    `device_na_janela` verdadeiro, nos dois ramos. Fora da janela o detalhe é o
+    fixo, "Reautorize o banco".
 
     Precedência: o `item_status` ganha. As duas diagonais fora do par medido,
     enumeradas porque enumerar só a inofensiva foi apontado:
@@ -956,6 +963,10 @@ def connection_ui_state(connection_row: dict) -> dict:
     Lê `status`, `status_reason`, `health` e `last_sync_at` da linha de
     `open_finance_connections`. `health` NULL significa "saúde ainda não medida"
     — NÃO "nunca sincronizou": linha legada tem last_sync_at e nenhum health.
+    Os derivados SQL (`execution_status`, `device_na_janela`, `coleta_*`) vêm do
+    select (`db/open_finance_state.py`); chave AUSENTE = janela do dispositivo
+    fechada: quem não seleciona `device_na_janela` nunca vê "Autorize o acesso no
+    app do banco", só "Reautorize o banco".
     """
     row = connection_row if isinstance(connection_row, dict) else {}
     status = str(row.get("status") or "").upper()
@@ -1087,7 +1098,8 @@ def connection_ui_state(connection_row: dict) -> dict:
         item_status = str(health.get("item_status") or "").upper()
         if item_status in _NEEDS_USER:
             return out("needs_user_action", _detalhe_de_acao(
-                item_status, str(health.get("execution_status") or "").upper()))
+                item_status, str(health.get("execution_status") or "").upper())
+                if row.get("device_na_janela") else None)
         # `and sem_sync`: coleta de banco real demora MUITO mais que o sync, então
         # o item fica em `UPDATING` depois de o espelho já estar escrito — e o card
         # dizia "Atualizando…" para sempre em cima de dado importado e de um
@@ -1160,8 +1172,11 @@ def connection_ui_state(connection_row: dict) -> dict:
         # no app do banco" aqui também, e não o oposto do ramo com health.
         # Ausente (linha de outra query, prazo vencido, `raw` sem o campo) → "",
         # que é o default do parâmetro: o detalhe cai em "Reautorize o banco".
+        # O `device_na_janela` (D5) põe o MESMO prazo no 1º campo: o `status`
+        # local `WAITING_USER_ACTION` também vence.
         return out("needs_user_action", _detalhe_de_acao(
-            status, str(row.get("execution_status") or "").upper()))
+            status, str(row.get("execution_status") or "").upper())
+            if row.get("device_na_janela") else None)
     if status == "ERROR":
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).
