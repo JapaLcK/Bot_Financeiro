@@ -22,7 +22,8 @@ def test_um_usuario_por_balde_e_a_saida_padrao_sem_user_id():
     investimento_manual(manual_e_banco, "CDB", "100")
     posicao(conexao(manual_e_banco, f"item-{manual_e_banco}"), "inv-1", "50")
     posicao(conexao(so_banco, f"item-{so_banco}"), "inv-1", "50")
-    conexao(igual, f"item-{igual}")  # banco sem posição: 0 -> 0.00
+    posicao(conexao(igual, f"item-{igual}"), "inv-1", "0")  # saldo 0 do banco: 0 -> 0.00
+    conexao(nada, f"item-{nada}")  # banco sem posição: 0 -> null (sem linha não há R$ 0)
     usuarios = [so_manual, manual_e_banco, so_banco, nada, igual]
 
     linhas = _rodar(usuarios)

@@ -24,7 +24,7 @@ from .patrimonio import (BANCO_VELHO, POSICOES_BANCO_SQL, desatualizada, finito,
 from .rv import pluggy_rv_kind
 
 MOTIVOS = ("sem_banco_conectado", "banco_desatualizado", "saldo_ausente", "moeda_presumida",
-           "conta_fora_do_ultimo_sync", "outra_moeda", "conexao_pausada")
+           "conta_fora_do_ultimo_sync", "outra_moeda", "conexao_pausada", "nenhum_investimento")
 MOTIVOS_PARTE = ("banco_desatualizado", "saldo_ausente", "moeda_presumida", "conta_fora_do_ultimo_sync")
 # A ÚNICA tabela de rótulos de tipo: a API manda o rótulo pronto, o TS não tem cópia.
 TIPOS = {
@@ -88,11 +88,22 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None) -> dict:
             soma, todas, ms = acc.get(k, (Decimal("0.00"), True, set()))
             acc[k] = (soma + q, todas and ausente, ms | motivos)
 
-    if not vivas or not any(c["last_sync_at"] for c in vivas):
-        # Sem banco vivo, ou nenhum terminou a 1ª atualização: não se sabe (≠ zero).
+    # Conexão sem nenhuma linha no espelho (`ultima`) não prova carteira vazia: o sync não
+    # grava "li e veio vazio", e a falha nem sempre vira `status_reason` (item em
+    # NEEDS_USER grava ""). Sem linha não há R$ 0.
+    if not any(c["last_sync_at"] and c["id"] in ultima for c in vivas):
+        # Sem banco vivo, ou nenhum sincronizado com posição no espelho: não se sabe (≠ zero).
         if not vivas:
             topo.add("sem_banco_conectado")
+        elif not any(velha.values()) and not fora["pausada"]:
+            # Só com TODA conexão viva saudável (o contrário do `banco_desatualizado`: tela
+            # "Atualizado", sync em 48 h, sem tentativa depois). Qualquer dúvida fica com ele.
+            # Posição de conexão pausada existe, só está fora: "não encontrei" seria falso.
+            # Moeda/resgatada não chegam aqui: a linha põe a conexão viva em `ultima`.
+            topo.add("nenhum_investimento")
         return {"total": None, "por_tipo": [], "por_banco": [], "motivos": _ordem(topo)}
+    if posicoes and total == 0 and all(sem_saldo(p) for p in posicoes):
+        total = None  # nenhum saldo veio do banco: o mesmo critério da parte `null`
     return {
         "total": total,
         "por_tipo": _partes(por_tipo, "tipo", lambda k: {"rotulo": TIPOS[k]}),

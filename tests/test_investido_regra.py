@@ -6,15 +6,17 @@ todo caso: Σ por_tipo == total == Σ por_banco (null conta 0) e motivos de part
 from __future__ import annotations
 
 import random
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from psycopg.types.json import Jsonb
 
 from conftest import usuario_pagante
 from db import investido
 from db.investido import tipo_da_posicao
-from tests._patrimonio_helpers import (caixinha, conexao, foto, horas_atras, investimento_manual,
-                                       posicao, q)
+from tests._patrimonio_helpers import (AGORA, caixinha, conexao, foto, horas_atras,
+                                       investimento_manual, posicao, q)
 
 D = Decimal
 
@@ -201,3 +203,135 @@ def test_isolamento_b_nunca_entra_em_a(uid):
     assert r["total"] == D("100.00")
     assert partes(r) == {"renda_fixa": D("100.00")} and partes(r, "por_banco") == {"Nubank": D("100.00")}
     assert ler(b)["total"] == D("10776.00")
+
+
+# ─── "não sei" ≠ zero: conexão sem linha no espelho, posições todas sem saldo (Codex P1/P2) ───
+
+def _leitura_falhou(cid, motivo="investments_read_failed"):
+    q("update open_finance_connections set status_reason=%s where id=%s", (motivo, cid))
+
+
+# Sincronizou (last_sync_at = AGORA) com cada status_reason real. Sem linha no espelho
+# não há R$ 0 (o sync não grava "li e veio vazio"; item em NEEDS_USER grava "" mesmo com
+# /investments falhando); com linha, o número. `nenhum_investimento` só com a conexão
+# saudável; em dúvida, o `banco_desatualizado` e o texto "ainda não consegui ler".
+_FALHA = ["banco_desatualizado"]
+
+
+@pytest.mark.parametrize("motivo, sem_posicao, com_posicao", [
+    ("", ["nenhum_investimento"], []),
+    (None, ["nenhum_investimento"], []),
+    ("item_missing", _FALHA, _FALHA),
+    ("no_accounts", _FALHA, _FALHA),
+    ("coleta_estourada", _FALHA, _FALHA),
+    ("investments_read_failed", _FALHA, _FALHA),
+    ("read_failed", _FALHA, _FALHA),
+])
+@pytest.mark.parametrize("posicoes", [False, True])
+def test_sem_linha_no_espelho_e_null_com_linha_e_numero(uid, motivo, sem_posicao, com_posicao, posicoes):
+    c = conexao(uid, f"item-{uid}", banco="Nubank")
+    if posicoes:
+        posicao(c, "inv-1", "100")
+    _leitura_falhou(c, motivo)
+    r = ler(uid)
+    if posicoes:
+        assert r["total"] == D("100.00") and r["motivos"] == com_posicao
+        assert partes(r, "por_banco") == {"Nubank": D("100.00")}
+    else:
+        assert r == {"total": None, "por_tipo": [], "por_banco": [], "motivos": sem_posicao}
+
+
+def test_leitura_atual_falhou_com_posicoes_de_antes_mantem_o_numero(uid):
+    c = conexao(uid, f"item-{uid}", banco="Nubank")
+    posicao(c, "inv-1", "100")
+    _leitura_falhou(c)
+    r = ler(uid)
+    assert r["total"] == D("100.00") and r["motivos"] == ["banco_desatualizado"]
+    assert r["por_banco"] == [{"banco": "Nubank", "valor": D("100.00"), "motivos": ["banco_desatualizado"]}]
+
+
+@pytest.mark.parametrize("motivo_b, esperado", [
+    ("investments_read_failed", ["banco_desatualizado"]),  # falhou: o aviso é o desatualizado
+    ("", []),  # saudável e sem linha: o número basta, sem aviso (nenhum_investimento só com total null)
+])
+def test_uma_com_posicoes_e_outra_sem_soma_a_que_tem(uid, motivo_b, esperado):
+    posicao(conexao(uid, f"item-a-{uid}", banco="Nubank"), "inv-1", "100")
+    _leitura_falhou(conexao(uid, f"item-b-{uid}", banco="XP"), motivo_b)
+    r = ler(uid)
+    assert r["total"] == D("100.00") and r["motivos"] == esperado
+    assert r["por_banco"] == [{"banco": "Nubank", "valor": D("100.00"), "motivos": []}]
+
+
+# Sem linha no espelho, por estado da conexão. `nenhum_investimento` só no sinal positivo
+# de saúde (`desatualizada` False: tela "Atualizado", sync em 48 h, sem tentativa depois).
+# O par (status, reason, health) é o que `resolve_connection_state` grava: o sync limpo é
+# ACTIVE/"" (pluggy_sync.py:575 → pluggy_health.py:904); NEEDS_USER/ERROR é ERROR/"" (:847).
+_DEPOIS = AGORA + timedelta(minutes=1)
+
+
+@pytest.mark.parametrize("status, item_status, sync, tentativa, esperado", [
+    ("ACTIVE", "UPDATED", AGORA, None, ["nenhum_investimento"]),   # sync limpo
+    ("ACTIVE", None, AGORA, None, ["nenhum_investimento"]),        # sync limpo, saúde não medida
+    ("ERROR", "LOGIN_ERROR", AGORA, None, _FALHA),                 # reconexão pendente
+    ("ERROR", "WAITING_USER_INPUT", AGORA, None, _FALHA),
+    ("ERROR", "OUTDATED", AGORA, None, _FALHA),
+    ("ERROR", "ERROR", AGORA, None, _FALHA),                       # item em erro na Pluggy
+    ("ERROR", None, AGORA, None, _FALHA),                          # status local ERROR
+    ("LOGIN_ERROR", None, AGORA, None, _FALHA),                    # status local pede o usuário
+    ("ACTIVE", "UPDATED", horas_atras(49), None, _FALHA),          # desatualizada
+    ("ACTIVE", "UPDATED", AGORA, _DEPOIS, _FALHA),                 # tentativa depois do sync
+])
+def test_sem_linha_reason_vazio_so_diz_nenhum_com_conexao_saudavel(uid, status, item_status, sync,
+                                                                    tentativa, esperado):
+    c = conexao(uid, f"item-{uid}", status=status, sync=sync, tentativa=tentativa)
+    q("update open_finance_connections set status_reason='', health=%s where id=%s",
+      (Jsonb({"item_status": item_status}) if item_status else None, c))
+    assert ler(uid) == {"total": None, "por_tipo": [], "por_banco": [], "motivos": esperado}
+
+
+def test_duas_sem_linha_uma_pede_reconexao_nao_diz_nenhum_investimento(uid):
+    conexao(uid, f"item-a-{uid}")
+    conexao(uid, f"item-b-{uid}", status="LOGIN_ERROR")
+    assert ler(uid) == {"total": None, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"]}
+
+
+def test_duas_sem_linha_uma_falhou_nao_diz_nenhum_investimento(uid):
+    conexao(uid, f"item-a-{uid}")
+    _leitura_falhou(conexao(uid, f"item-b-{uid}"))
+    assert ler(uid) == {"total": None, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"]}
+
+
+# Posição excluída do total (pausada, outra moeda, resgatada) + conexão viva saudável sem
+# linha. Só a pausada chega ao "sem linha": moeda/resgatada são linhas da própria conexão
+# viva, que entra em `ultima` e sai com número (0 + o motivo). O controle positivo (viva
+# saudável vazia, nada excluído → nenhum_investimento) é o caso ("", ...) acima.
+def test_pausada_com_posicao_e_viva_vazia_nao_diz_nenhum_investimento(uid):
+    posicao(conexao(uid, f"item-p-{uid}", status="PAUSED"), "inv-p", "999")
+    conexao(uid, f"item-{uid}")
+    assert ler(uid) == {"total": None, "por_tipo": [], "por_banco": [], "motivos": ["conexao_pausada"]}
+
+
+@pytest.mark.parametrize("moeda, status, motivos", [
+    ("USD", None, ["outra_moeda"]),            # existe, só fora do total em R$: o selo avisa
+    ("BRL", "TOTAL_WITHDRAWAL", []),           # resgatada: zero de fato
+])
+def test_so_posicao_excluida_na_viva_e_zero_com_motivo_nunca_nenhum(uid, moeda, status, motivos):
+    posicao(conexao(uid, f"item-{uid}"), "inv-x", "999", moeda=moeda, code=moeda, status=status)
+    assert ler(uid) == {"total": D("0.00"), "por_tipo": [], "por_banco": [], "motivos": motivos}
+
+
+def test_todas_sem_saldo_total_null_e_partes_null(uid):
+    c = conexao(uid, f"item-{uid}", banco="Nubank")
+    posicao(c, "inv-1", None)
+    posicao(c, "inv-2", None, tipo="EQUITY")
+    r = ler(uid)
+    assert r["total"] is None and r["motivos"] == ["saldo_ausente"]
+    assert partes(r) == {"renda_fixa": None, "acoes": None} and partes(r, "por_banco") == {"Nubank": None}
+
+
+def test_positivo_zero_informado_pelo_banco_e_zero(uid):
+    """Controle positivo: posições com saldo 0 vindo do banco somam R$ 0 de verdade."""
+    c = conexao(uid, f"item-{uid}")
+    posicao(c, "inv-1", "0")
+    posicao(c, "inv-2", "0", tipo="EQUITY")
+    assert ler(uid) == {"total": D("0.00"), "por_tipo": [], "por_banco": [], "motivos": []}

@@ -375,8 +375,16 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`POSICOES_BANCO_SQL` + `separar_posicoes` de `db/patrimonio.py`): investimento e caixinha
   manuais não entram. A mesma regra serve a tool `get_investment_summary` da IA e o "meus
   investimentos" do WhatsApp (`core/handlers/investido.py`). `total: null` = não dá para
-  saber (`sem_banco_conectado`, ou nenhuma conexão viva terminou a 1ª atualização), nunca
-  zero; parte só com posição sem saldo sai `valor: null`; parte que fecha em 0 some.
+  saber (`sem_banco_conectado`; nenhuma conexão viva sincronizada com linha no espelho
+  `open_finance_investments` — o sync não grava "li e veio vazio", então sem linha não há
+  R$ 0; ou toda posição sem saldo), nunca zero. R$ 0,00 só com posições que somam 0.
+  `nenhum_investimento` só com total null e **toda** conexão viva saudável (o contrário do
+  `banco_desatualizado`: `desatualizada` False, tela "Atualizado"); qualquer dúvida
+  (reconexão pendente, item em erro, `item_missing`, coleta travada, falha de leitura, sync
+  velho) fica só com `banco_desatualizado`. Nunca junto de um número. Com ele os
+  três consumidores dizem "Não encontrei investimentos nos seus bancos conectados", na ordem
+  `sem_banco_conectado` > `saldo_ausente` > `nenhum_investimento` > "ainda não consegui ler".
+  Parte só com posição sem saldo sai `valor: null`; parte que fecha em 0 some.
   **Centavos:** cada posição entra quantizada em 2 casas e as partes somam essas parcelas, então
   Σ por_tipo == total == Σ por_banco, exato; o custo é o total poder diferir do
   `investimentos_banco` da foto em até 0,005 × nº de posições (só com saldo de 3+ casas).

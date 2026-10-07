@@ -263,7 +263,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_investment_summary",
-                "description": "Total investido nos bancos conectados, com divisão por tipo e por banco. Use para 'quanto tenho investido?', 'meus investimentos', 'minha carteira', 'e onde?', 'quanto em ações?', 'quanto tenho no Nubank?'. total null = ainda não dá para saber (sem banco conectado ou banco sem a 1ª atualização): diga isso e sugira conectar o banco. valor null numa parte = o banco não informou o saldo, não é zero. Tipo ou banco fora da lista = nada investido ali nos bancos conectados. Não há lista de ativos: não invente nome de ativo, posição, taxa, vencimento nem rendimento.",
+                "description": "Total investido nos bancos conectados, com divisão por tipo e por banco. Use para 'quanto tenho investido?', 'meus investimentos', 'minha carteira', 'e onde?', 'quanto em ações?', 'quanto tenho no Nubank?'. total null = ainda não dá para saber; diga o porquê pelos motivos, nesta ordem: com sem_banco_conectado, sugira conectar o banco; senão, com saldo_ausente, o banco não informou o saldo dos investimentos; senão, com nenhum_investimento, não encontrei investimentos nos bancos conectados (não diga que é zero); senão, a carteira ainda não foi lida no banco. valor null numa parte = o banco não informou o saldo, não é zero. Tipo ou banco fora da lista = nada investido ali nos bancos conectados. Não há lista de ativos: não invente nome de ativo, posição, taxa, vencimento nem rendimento.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },

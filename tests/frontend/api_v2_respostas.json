@@ -216,7 +216,15 @@
       "motivos": ["saldo_ausente"]
     },
     "sem_banco": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["sem_banco_conectado"] },
-    "pausada": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["sem_banco_conectado", "conexao_pausada"] }
+    "pausada": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["sem_banco_conectado", "conexao_pausada"] },
+    "todas_sem_saldo": {
+      "total": null,
+      "por_tipo": [{ "tipo": "fundos", "rotulo": "Fundos de investimento", "valor": null, "motivos": ["saldo_ausente"] }],
+      "por_banco": [{ "banco": "Nubank", "valor": null, "motivos": ["saldo_ausente"] }],
+      "motivos": ["saldo_ausente"]
+    },
+    "nunca_lida": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"] },
+    "nenhum_investimento": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["nenhum_investimento"] }
   },
   "previsao": {
     "plus30": {

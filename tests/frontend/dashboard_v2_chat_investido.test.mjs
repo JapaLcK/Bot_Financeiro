@@ -123,6 +123,12 @@ test("sem banco, com motivos e com parte sem saldo", async () => {
   const [semSaldo] = await leia("parte_sem_saldo");
   assert.match(semSaldo, /Por tipo: Renda fixa R\$ 500,00 · Fundos de investimento: saldo não informado\./);
   assert.doesNotMatch(semSaldo, /R\$ 0,00/);
+  // total null: sem_banco_conectado > saldo_ausente > nenhum_investimento > o resto (a mesma ordem do WhatsApp e da IA)
+  assert.equal((await leia("todas_sem_saldo"))[0], "Ainda não sei: seu banco não informou o saldo dos seus investimentos.");
+  assert.equal((await leia("nunca_lida"))[0], "Ainda não sei: ainda não consegui ler seus investimentos no banco.");
+  const [nenhum, selosNenhum] = await leia("nenhum_investimento");
+  assert.equal(nenhum, "Não encontrei investimentos nos seus bancos conectados.");
+  assert.deepEqual(selosNenhum, []);
 });
 
 test("protótipo: o valor semeado, nenhuma requisição", async () => {

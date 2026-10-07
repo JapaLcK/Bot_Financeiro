@@ -17,7 +17,11 @@ export function InvestidoResposta() {
   if (d.total === null) {
     return <>{d.motivos.includes("sem_banco_conectado")
       ? "Ainda não sei: conecte seu banco para eu ver seus investimentos."
-      : "Ainda não sei: seu banco ainda não terminou a primeira atualização."}</>;
+      : d.motivos.includes("saldo_ausente")
+        ? "Ainda não sei: seu banco não informou o saldo dos seus investimentos."
+        : d.motivos.includes("nenhum_investimento")
+          ? "Não encontrei investimentos nos seus bancos conectados."
+          : "Ainda não sei: ainda não consegui ler seus investimentos no banco."}</>;
   }
   const total = moneyText(d.total);
   const linha = (partes: { nome: string; valor: string | null }[]) =>

@@ -18,9 +18,12 @@ def _linha(nome: str, valor) -> str:
 def carteira(user_id: int) -> str:
     r = investido.ler(user_id)
     if r["total"] is None:
-        porque = ("conecte seu banco no painel para eu ver" if "sem_banco_conectado" in r["motivos"]
-                  else "seu banco ainda não terminou a primeira atualização")
-        return f"Ainda não sei quanto você tem investido: {porque}.\n\n{_investment_dashboard_link(user_id)}"
+        m, nao_sei = r["motivos"], "Ainda não sei quanto você tem investido: "
+        texto = (nao_sei + "conecte seu banco no painel para eu ver" if "sem_banco_conectado" in m
+                 else nao_sei + "seu banco não informou o saldo dos seus investimentos" if "saldo_ausente" in m
+                 else "Não encontrei investimentos nos seus bancos conectados" if "nenhum_investimento" in m
+                 else nao_sei + "ainda não consegui ler seus investimentos no banco")
+        return f"{texto}.\n\n{_investment_dashboard_link(user_id)}"
     blocos = [f"📈 **{fmt_brl(r['total'])}** investidos nos bancos conectados"]
     if r["por_tipo"]:
         blocos.append("Por tipo:\n" + "\n".join(_linha(p["rotulo"], p["valor"]) for p in r["por_tipo"]))
