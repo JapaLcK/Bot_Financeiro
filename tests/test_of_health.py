@@ -1105,18 +1105,22 @@ def test_execution_status_de_erro_nao_e_status_de_item(item, esperado, rotulo):
 # casos abaixo vermelhos (o detalhe volta a ser "Reautorize o banco").
 # CONTROLE POSITIVO: `LOGIN_ERROR` prova que os OUTROS membros do balde seguem
 # com o detalhe compartilhado — senão a exceção teria virado regra.
+# `device_na_janela` (Onda 5, D5) é o derivado SQL do prazo: com ele falso
+# (janela vencida) os dois ramos voltam a "Reautorize o banco".
 
 @pytest.mark.parametrize("origem", ["health", "status_local"])
-@pytest.mark.parametrize("item_status, detalhe_esperado", [
-    ("WAITING_USER_ACTION", "Autorize o acesso no app do banco"),
-    ("LOGIN_ERROR", "Reautorize o banco"),
+@pytest.mark.parametrize("item_status, na_janela, detalhe_esperado", [
+    ("WAITING_USER_ACTION", True, "Autorize o acesso no app do banco"),
+    ("WAITING_USER_ACTION", False, "Reautorize o banco"),
+    ("LOGIN_ERROR", True, "Reautorize o banco"),
 ])
 def test_detalhe_da_acao_necessaria_e_especifico_quando_precisa(
-        origem, item_status, detalhe_esperado):
+        origem, item_status, na_janela, detalhe_esperado):
     """Os dois ramos: com `health` medido e caindo no `status` LOCAL — o upsert
     grava `item.get("status") or item.get("executionStatus")`, então o valor
     chega pelos dois caminhos."""
-    linha = {"status_reason": "", "last_sync_at": AGORA, "reconnected_at": None}
+    linha = {"status_reason": "", "last_sync_at": AGORA, "reconnected_at": None,
+             "device_na_janela": na_janela}
     if origem == "health":
         linha |= {"status": "ERROR",
                   "health": {"item_status": item_status, "products": {},
@@ -1152,7 +1156,7 @@ def test_detalhe_olha_o_execution_status_quando_o_item_e_outdated(
         execution_status, detalhe_esperado):
     ui = connection_ui_state({
         "status": "ERROR", "status_reason": "", "last_sync_at": AGORA,
-        "reconnected_at": None,
+        "reconnected_at": None, "device_na_janela": True,
         "health": {"item_status": "OUTDATED", "execution_status": execution_status,
                    "products": {}, "stale_products": []}})
 
@@ -1188,7 +1192,7 @@ def test_item_cru_da_caixa_chega_na_tela_com_a_instrucao_certa():
 
     ui = connection_ui_state({"status": "ERROR", "status_reason": "",
                               "health": health, "last_sync_at": AGORA,
-                              "reconnected_at": None})
+                              "reconnected_at": None, "device_na_janela": True})
 
     assert ui["state"] == "needs_user_action"
     assert ui["detail"] == "Autorize o acesso no app do banco", (
@@ -1265,7 +1269,8 @@ def _detalhe_por_estado() -> dict[str, set]:
             for sync in (AGORA, None):
                 for status_local in ("ACTIVE", "ERROR", "DELETED", "PAUSED", item_status):
                     base = {"status": status_local, "status_reason": reason,
-                            "last_sync_at": sync, "reconnected_at": None}
+                            "last_sync_at": sync, "reconnected_at": None,
+                            "device_na_janela": True}
                     anota(base | {"health": {"item_status": item_status, "products": {},
                                              "stale_products": []}})
                     anota(base | {"health": None})
@@ -1534,7 +1539,8 @@ def test_dados_parciais_separam_autorizacao_e_dado_sem_apagar_motivo(
     ({"last_sync_at": None}, "updating", "Atualizando…", "Ainda não sincronizou"),
     ({"status_reason": "read_failed"}, "error_recoverable", "Erro temporário",
      "Tentaremos de novo automaticamente"),
-    ({"status": "WAITING_USER_ACTION"}, "needs_user_action", "Ação necessária",
+    ({"status": "WAITING_USER_ACTION", "device_na_janela": True}, "needs_user_action",
+     "Ação necessária",
      "Autorize o acesso no app do banco"),
     ({"status_reason": "item_missing"}, "item_missing", "Conexão perdida",
      "Refaça a conexão com o banco"),

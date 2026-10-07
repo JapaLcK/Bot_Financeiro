@@ -1085,6 +1085,10 @@ def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
 # LIMITE HONESTO: o estado abaixo é montado com UPDATE cru e HOJE é inalcançável
 # em produção (nenhum escritor põe `consent_expires_at` numa linha 'pluggy').
 # Ele guarda a decisão, não um caminho vivo.
+#
+# Onda 5, PR-D: a perna do consentimento SAIU (o aviso virou a tela filtrada,
+# `avisa_reconectar`). O teste fica e passa a prender que uma data de
+# consentimento próxima não reabre o aviso de quem está na janela do dispositivo.
 
 def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentimento(
         user_id, relogio_fixo):
@@ -1126,7 +1130,9 @@ def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentiment
 # prende as duas superfícies com a MESMA condição e o MESMO prazo.
 #
 # CONTROLE NEGATIVO: tirar o `raw->>'executionStatus'` da query → o caso da Caixa
-# fica vermelho (volta a ser avisado).
+# fica vermelho (volta a ser avisado). Desde o PR-D da Onda 5 a "query" do aviso é
+# o select do snapshot: o ponto equivalente é o `SQL_EXECUTION_STATUS`
+# (`db/open_finance_state.py`), e não há mais predicado próprio do aviso.
 # CONTROLE POSITIVO: o `LOGIN_ERROR` com `health` NULL CONTINUA sendo avisado —
 # sem ele, um fallback que casasse demais teria calado o aviso inteiro e o teste
 # passaria mesmo assim.
@@ -1254,6 +1260,16 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #
 # O grupo tem METADES INDEPENDENTES, e cada uma tem o seu controle negativo —
 # uma injeção só não discrimina todas. As QUATRO foram MEDIDAS, não deduzidas.
+# Desde o PR-D da Onda 5 o piso e o teto moram em `SQL_JANELA_DEVICE`,
+# compartilhado pelo `execution_status` E pelo `device_na_janela` (o prazo da
+# instrução nos dois ramos), e o aviso é o select do snapshot. (B) e (B') foram
+# REMEDIDAS em 2026-10-07 sobre esse código, rodando este arquivo,
+# `test_of_aviso_mesma_regra.py` e `test_of_health.py`: neste arquivo os
+# vermelhos são os mesmos listados abaixo; (B) derruba também, no outro
+# arquivo, `test_tela_e_aviso_dizem_a_mesma_coisa[f_caixa_health_61]`,
+# `[h_wua_health_61]`, `[i_wua_sem_health_61]` e
+# `test_em_lote_o_aviso_e_exatamente_a_tela_filtrada`; (B') não derruba nada
+# fora deste arquivo. (A) e (C) não foram remedidas depois do PR-D.
 #
 # Os VERMELHOS vão por NODE ID, e não por apelido ("caso 7", "a perna de +1
 # min"): apelido deixa de bater no dia em que um `parametrize` é renomeado, e o
