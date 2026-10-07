@@ -130,7 +130,8 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #   • NÃO HÁ FONTE NA ÁRVORE PARA OS 30 MIN DA JANELA DO QR. O único registro
 #     anterior a este PR é prosa num comentário vizinho — "a janela do QR
 #     (~30 min)", `db/open_finance.py`, no `where` de
-#     `list_connections_needing_reconnect` —, com til e sem citar página de doc.
+#     `list_connections_needing_reconnect` (removido com o SQL no PR-D da Onda 5) —,
+#     com til e sem citar página de doc.
 #     O bloco do `_DETALHE_POR_STATUS`, abaixo, diz só "um `userAction.expiresAt`
 #     CURTO": sem número. Escrever aqui "a doc registrada anota 30 min" foi
 #     promover um `~` de um comentário irmão a fato documentado, que é a §0.7
@@ -294,9 +295,9 @@ _CONTEXTO_DADOS_PARCIAIS = (
 #     isso acrescentá-lo a `_NEEDS_USER` seria o `executionStatus` "por
 #     precaução" que o bloco lá em cima proíbe. Codex do @hiago no #166.
 #
-# Os dois nomes são exportados porque `list_connections_needing_reconnect`
-# (`db/open_finance.py`) precisa PULAR estas conexões: o aviso proativo manda
-# "reconecte seu banco", o único caminho que faz PERDER a janela.
+# O aviso proativo ("reconecte seu banco", o único caminho que faz PERDER a
+# janela) PULA estas conexões dentro do prazo pelo DETALHE, não por estes nomes:
+# `avisa_reconectar`, abaixo, compara com `_AUTORIZE_NO_APP`.
 # SÓ É LIDO no ramo `needs_user_action` (abaixo, nos dois caminhos), via
 # `_detalhe_de_acao`. As DUAS chaves são load-bearing, e por motivos diferentes:
 # a de `item_status` porque está em `_NEEDS_USER`; a de `execution_status`
@@ -361,6 +362,18 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
     """
     return (_DETALHE_POR_STATUS.get(item_status)
             or _DETALHE_POR_STATUS.get(execution_status))
+
+
+def avisa_reconectar(ui: dict) -> bool:
+    """A regra do aviso "reconecte" (Onda 5, D4): a TELA decide, aqui só se filtra.
+
+    Avisa `item_missing` e `needs_user_action` cujo detalhe NÃO é o de
+    dispositivo/QR (mandar reconectar faz perder a janela, Codex #166). Erro
+    transitório, "Sem dados" (DP1 = A) e o resto não avisam.
+    """
+    return ui.get("state") == "item_missing" or (
+        ui.get("state") == "needs_user_action" and ui.get("detail") != _AUTORIZE_NO_APP)
+
 
 _FIXED_DETAIL = {
     "error_recoverable": "Tentaremos de novo automaticamente",

@@ -1085,6 +1085,10 @@ def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
 # LIMITE HONESTO: o estado abaixo é montado com UPDATE cru e HOJE é inalcançável
 # em produção (nenhum escritor põe `consent_expires_at` numa linha 'pluggy').
 # Ele guarda a decisão, não um caminho vivo.
+#
+# Onda 5, PR-D: a perna do consentimento SAIU (o aviso virou a tela filtrada,
+# `avisa_reconectar`). O teste fica e passa a prender que uma data de
+# consentimento próxima não reabre o aviso de quem está na janela do dispositivo.
 
 def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentimento(
         user_id, relogio_fixo):
@@ -1126,7 +1130,9 @@ def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentiment
 # prende as duas superfícies com a MESMA condição e o MESMO prazo.
 #
 # CONTROLE NEGATIVO: tirar o `raw->>'executionStatus'` da query → o caso da Caixa
-# fica vermelho (volta a ser avisado).
+# fica vermelho (volta a ser avisado). Desde o PR-D da Onda 5 a "query" do aviso é
+# o select do snapshot: o ponto equivalente é o `SQL_EXECUTION_STATUS`
+# (`db/open_finance_state.py`), e não há mais predicado próprio do aviso.
 # CONTROLE POSITIVO: o `LOGIN_ERROR` com `health` NULL CONTINUA sendo avisado —
 # sem ele, um fallback que casasse demais teria calado o aviso inteiro e o teste
 # passaria mesmo assim.

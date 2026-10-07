@@ -54,11 +54,10 @@ logger = logging.getLogger(__name__)
 _TERMINAL = ("PAUSED", "DELETED")
 
 # ── O `executionStatus` derivado do `raw` ────────────────────────────────────
-# FONTE ÚNICA (§0.7) da regra "o `raw` ainda descreve a autorização ATUAL". Dois
-# consumidores, formatos diferentes, MESMA condição e MESMO parâmetro: o select
-# do snapshot / `get_connections_by_item_id` (abaixo, via `SQL_EXECUTION_STATUS`)
-# e o predicado do aviso proativo (`list_connections_needing_reconnect`, em
-# `db/open_finance.py`, que precisa da condição CRUA dentro do `coalesce` dele).
+# FONTE ÚNICA (§0.7) da regra "o `raw` ainda descreve a autorização ATUAL", lida
+# por todo select que alimenta `connection_ui_state` (snapshot,
+# `_COLUNAS_DA_CONEXAO`) via `SQL_EXECUTION_STATUS`. O aviso proativo não tem
+# predicado próprio: é a tela filtrada (`list_connections_needing_reconnect`).
 #
 # Por que em SQL e não em Python: `connection_ui_state` se declara "sem banco,
 # sem rede" (`core/services/pluggy_health.py`) e não tem relógio. E aqui o
@@ -105,9 +104,8 @@ SQL_RAW_AINDA_VALE = (
 # Só o ESCALAR viaja. O `raw` inteiro nunca sai do Postgres: ele carrega
 # `clientUserId` (e `statusDetail`), e o snapshot vai para o navegador.
 #
-# O `upper` É mudança de comportamento, a MESMA que o predicado irmão do aviso
-# documenta (`list_connections_needing_reconnect`, `db/open_finance.py`) — e
-# agora ela vale também para a TELA: um `executionStatus` em minúscula no `raw`
+# O `upper` É mudança de comportamento, e vale para a TELA (e, por ela, para o
+# aviso, que é a tela filtrada): um `executionStatus` em minúscula no `raw`
 # passa a virar a instrução de dispositivo, onde antes caía no detalhe fixo
 # "Reautorize o banco". Hoje é INALCANÇÁVEL pelo caminho de produção — a Pluggy
 # manda `USER_AUTHORIZATION_PENDING` em maiúscula, e `_DETALHE_POR_STATUS` só tem
