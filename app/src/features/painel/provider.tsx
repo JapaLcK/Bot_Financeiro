@@ -61,11 +61,13 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const acessoValidando = useRef(true);
   const dono = useRef<number | null>(null);
   const controladores = useRef(new Set<AbortController>());
+  const leituras = useRef(new Map<Recurso, AbortController>());
+  const ultimaCarga = useRef<{ uid: number; versao: number; mes: string; dias?: number; geracao: number } | null>(null);
   const emVoo = useRef(false);
   const layouts = useRef(new Map<S.PerfilPainel, Widget[]>());
   const filaStorage = useRef(Promise.resolve());
   const sessaoRef = useRef(sessao); sessaoRef.current = sessao;
-  const cancelar = useCallback(() => { geracao.current++; for (const c of controladores.current) c.abort(); controladores.current.clear(); }, []);
+  const cancelar = useCallback(() => { geracao.current++; for (const c of controladores.current) c.abort(); controladores.current.clear(); leituras.current.clear(); }, []);
   useEffect(() => cancelar, [cancelar]);
   const falhou = useCallback((e: unknown) => {
     if (e instanceof SessaoExpirada) sessaoRef.current.expirou(e.detalhe);
@@ -93,25 +95,45 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   }, [ativo, travado, cancelar, falhou]));
   useEffect(() => {
     if (gate !== "liberado" || acessoValidando.current || !usuario || !ativo || travado) return;
-    cancelar(); const g = geracao.current; const uid = usuario.user_id;
-    const c = new AbortController(); controladores.current.add(c);
-    const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid;
+    const uid = usuario.user_id, anterior = ultimaCarga.current;
+    const completa = !anterior || anterior.uid !== uid || anterior.versao !== versao || anterior.geracao !== geracao.current;
+    const recursos: Recurso[] = completa ? Object.keys(schemas) as Recurso[] : [
+      ...(anterior.mes !== mes ? ["resumo", "detalhes"] as const : []),
+      ...(anterior.dias !== dias ? ["previsao"] as const : []),
+    ];
+    if (completa) { cancelar(); setDados({}); }
+    const g = geracao.current;
+    ultimaCarga.current = { uid, versao, mes, dias, geracao: g };
+    if (!recursos.length) return;
     setAtualizando(true);
-    setDados({});
+    if (!completa) setDados((d) => ({ ...d, ...Object.fromEntries(recursos.map((k) => [k, { fase: "carregando" }])) }));
     const carregar = async <K extends Recurso>(k: K) => {
+      const anterior = leituras.current.get(k);
+      anterior?.abort(); if (anterior) controladores.current.delete(anterior);
+      const c = new AbortController(); leituras.current.set(k, c); controladores.current.add(c);
+      // Seletores superam somente a leitura deste recurso; refresh e acesso superam toda a geração.
+      const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid && leituras.current.get(k) === c;
       try {
         const dado = await lerRecurso(rota(k, uid, mes, dias), schemas[k] as unknown as z.ZodType<Dados[K]>, c);
         if (atual()) setDados((d) => ({ ...d, [k]: { fase: "pronto", dado } }));
       } catch (e) {
         if (!atual() || e instanceof RequisicaoSuperada) return;
         falhou(e);
+        if (!atual()) return;
         if (e instanceof ErroDeApi && e.status === 403 && typeof e.corpo === "object" && e.corpo && JSON.stringify(e.corpo).includes("open_finance_onboarding_required")) { cancelar(); setGate("negado"); setDados({}); return; }
         setDados((d) => ({ ...d, [k]: { fase: e instanceof ErroDeApi && e.status === 403 ? "negado" : "erro", mensagem: mensagemRecurso(e) } }));
+      } finally {
+        controladores.current.delete(c);
+        if (leituras.current.get(k) === c) leituras.current.delete(k);
+        if (g === geracao.current && dono.current === uid) setAtualizando(leituras.current.size > 0);
       }
     };
-    void Promise.all((Object.keys(schemas) as Recurso[]).map(carregar)).finally(() => { if (atual()) setAtualizando(false); });
-    if (!emVoo.current) void lerRecurso("/api/app/perfil", S.perfilPainelSchema, c).then((p) => { if (atual() && !emVoo.current) { setPerfil(p.perfil ?? "padrao"); setEscolhendo(p.perfil === null); } }).catch((e: unknown) => { if (atual() && !(e instanceof RequisicaoSuperada)) { falhou(e); setAviso("Não conseguimos carregar seu perfil. Tente atualizar."); } });
-    return () => { c.abort(); controladores.current.delete(c); };
+    void Promise.all(recursos.map(carregar));
+    if (completa && !emVoo.current) {
+      const c = new AbortController(); controladores.current.add(c);
+      const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid;
+      void lerRecurso("/api/app/perfil", S.perfilPainelSchema, c).then((p) => { if (atual() && !emVoo.current) { setPerfil(p.perfil ?? "padrao"); setEscolhendo(p.perfil === null); } }).catch((e: unknown) => { if (atual() && !(e instanceof RequisicaoSuperada)) { falhou(e); setAviso("Não conseguimos carregar seu perfil. Tente atualizar."); } }).finally(() => controladores.current.delete(c));
+    }
   }, [gate, usuario, mes, dias, versao, ativo, travado, cancelar, falhou]);
   useEffect(() => {
     if (!usuario) return;

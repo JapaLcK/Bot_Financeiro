@@ -2,8 +2,8 @@
 
 Conta paga sem senha e sem Google/Apple (`db.conta_sem_credencial`) não lê nem
 grava dado: 403 `password_required` (`shared.exigir_credencial`). Esta tabela é
-a única lista de quem bloqueia e quem libera; ela sai do `app.routes` (com o
-sub-app da /api/v2 e o /ws), não de memória.
+a única lista de quem bloqueia e quem libera; ela sai do `app.routes` (com os
+sub-apps /api/v2 e /api/app e o /ws), não de memória.
 
 - `bloqueia`: toda rota de dado, e as de vínculo (link-code, push, afiliado);
 - `libera`: autenticada, mas é por ela que a pessoa sai do bloqueio (ou exige
@@ -122,6 +122,25 @@ TABELA = {
     ("POST", "/api/v2/lancamentos/apagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/guia"): (B, "usuario_atual"), ("POST", "/api/v2/guia"): (B, "usuario_atual"),
     ("POST", "/api/v2/guia/dica"): (B, "usuario_atual"),
+    # ── /api/app: mesma guarda de credencial, antes do marco bancário ──
+    ("GET", "/api/app/me"): (B, "usuario_do_app"),
+    ("GET", "/api/app/assinaturas"): (B, "usuario_do_app"),
+    ("POST", "/api/app/assinaturas/marca"): (B, "usuario_do_app"),
+    ("GET", "/api/app/perfil"): (B, "usuario_do_app"), ("PUT", "/api/app/perfil"): (B, "usuario_do_app"),
+    ("GET", "/api/app/contas"): (B, "usuario_do_app"),
+    ("GET", "/api/app/previsao"): (B, "usuario_do_app"),
+    ("GET", "/api/app/resumo-do-mes"): (B, "usuario_do_app"),
+    ("GET", "/api/app/lancamentos"): (B, "usuario_do_app"),
+    ("GET", "/api/app/categorias"): (B, "usuario_do_app"),
+    ("POST", "/api/app/lancamentos/carteira"): (B, "usuario_do_app"),
+    ("POST", "/api/app/lancamentos/editar"): (B, "usuario_do_app"),
+    ("POST", "/api/app/lancamentos/apagar"): (B, "usuario_do_app"),
+    ("GET", "/api/app/guia"): (B, "usuario_do_app"),
+    ("POST", "/api/app/guia"): (B, "usuario_do_app"),
+    ("POST", "/api/app/guia/dica"): (B, "usuario_do_app"),
+    ("GET", "/api/app/patrimonio"): (B, "usuario_do_app"),
+    ("GET", "/api/app/rendimento"): (B, "usuario_do_app"),
+    ("GET", "/api/app/mes-detalhes"): (B, "usuario_do_app"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),
@@ -207,11 +226,11 @@ def _classe(metodo: str, path: str):
 
 
 def _rotas():
-    """(método, path, rota) de todo o app, com o /api/v2 e o /ws."""
+    """(método, path, rota) de todo o app, com os sub-apps e o /ws."""
     import frontend.finance_bot_websocket_custom as dashboard
     for path, rota in _andar_nas_rotas(dashboard.app.routes, com_rota=True):
         if not getattr(rota, "endpoint", None):
-            continue  # o Mount da /api/v2: as filhas vêm pela descida
+            continue  # as filhas dos Mounts vêm pela descida
         metodos = getattr(rota, "methods", None) or {"WS"}
         for m in sorted(metodos - {"HEAD"}):
             yield m, path, rota
@@ -226,6 +245,7 @@ def test_toda_rota_tem_linha_e_nenhuma_linha_e_orfa():
     assert not sem_linha, f"rota nova sem classificação na TABELA: {sem_linha}"
     assert not orfas, f"linha da TABELA sem rota: {orfas}"
     assert ("WS", "/ws/{user_id}") in vistas and ("GET", "/api/v2/me") in vistas, "a descida quebrou"
+    assert ("GET", "/api/app/me") in vistas, "a descida do namespace nativo quebrou"
 
 
 # ── 2: estrutural, por AST ──────────────────────────────────────────────────
@@ -256,22 +276,48 @@ def _dependentes(dep):
         yield from _dependentes(sub)
 
 
-def _funcoes_da_rota(rota):
+def _funcoes_da_rota(path, rota):
+    import frontend.finance_bot_websocket_custom as dashboard
+
     yield rota.endpoint
     dep = getattr(rota, "dependant", None)
+    provider = getattr(rota, "dependency_overrides_provider", None)
+    # FastAPI 0.141 include_router conserva a APIRoute original sem provider;
+    # os overrides reais pertencem ao sub-app montado, identificado pela árvore.
+    montados = [(p, r.app) for p, r in _andar_nas_rotas(dashboard.app.routes, com_rota=True)
+                if path.startswith(p + "/") and hasattr(getattr(r, "app", None), "dependency_overrides")]
+    if montados:
+        provider = max(montados, key=lambda par: len(par[0]))[1]
+    overrides = getattr(provider, "dependency_overrides", {})
     for d in (_dependentes(dep) if dep else ()):
-        if inspect.isroutine(d.call) and d.call is not rota.endpoint:
-            yield d.call  # instância (HTTPBearer) não tem fonte a ler
+        chamada = overrides.get(d.call, d.call)
+        if inspect.isroutine(chamada) and chamada is not rota.endpoint:
+            yield chamada  # instância (HTTPBearer) não tem fonte a ler
+
+
+def _cadeia_de_sessao(fn, vistos=None):
+    """Lê o helper realmente chamado; seu nome nunca é prova de uma guarda."""
+    vistos = set() if vistos is None else vistos
+    if fn in vistos:
+        return
+    vistos.add(fn)
+    yield fn
+    for nome, _ in _chamadas(fn):
+        if nome == "usuario_assinante":
+            helper = fn.__globals__.get(nome)
+            if inspect.isroutine(helper):
+                yield from _cadeia_de_sessao(helper, vistos)
 
 
 def _prova(path: str, rota) -> bool:
-    for fn in _funcoes_da_rota(rota):
-        for nome, kws in _chamadas(fn):
-            if nome in _DIRETAS:
-                return True
-            if (nome in _GATES and not path.startswith(_ISENTOS)
-                    and kws.get("exige_credencial") is not False and kws.get("exige_direito") is not False):
-                return True
+    for raiz in _funcoes_da_rota(path, rota):
+        for fn in _cadeia_de_sessao(raiz):
+            for nome, kws in _chamadas(fn):
+                if nome in _DIRETAS:
+                    return True
+                if (nome in _GATES and not path.startswith(_ISENTOS)
+                        and kws.get("exige_credencial") is not False and kws.get("exige_direito") is not False):
+                    return True
     return False
 
 
@@ -288,6 +334,27 @@ def test_o_gate_central_e_quem_o_repassa_carregam_a_perna():
     assert "exigir_credencial" in {n for n, _ in _chamadas(shared._enforce_subscription_gate)}
     repasse = [k for n, k in _chamadas(shared.authorize_dashboard_access) if n == "_enforce_subscription_gate"]
     assert repasse and all("exige_credencial" in k for k in repasse), repasse
+
+
+def test_cadeia_real_de_sessao_sem_gate_perde_a_prova(monkeypatch):
+    import api.nativo.app as nativo
+    import api.v2.sessao as sessao
+    from frontend.routes import shared
+
+    rotas = {p: r for m, p, r in _rotas() if m == "GET" and p in ("/api/v2/me", "/api/app/me")}
+    assert nativo.usuario_do_app in list(_funcoes_da_rota("/api/app/me", rotas["/api/app/me"]))
+    assert all(_prova(p, r) for p, r in rotas.items()), "a cadeia real deve provar a guarda"
+
+    def sem_gate(request):
+        uid = shared.resolve_dashboard_user_id(request)
+        shared.raise_if_account_scheduled_for_deletion(uid)
+        return uid
+
+    monkeypatch.setattr(sessao, "usuario_assinante", sem_gate)
+    monkeypatch.setattr(nativo, "usuario_assinante", sem_gate)
+    assert all(not _prova(p, r) for p, r in rotas.items()), "o nome do helper não concede prova"
+    with pytest.raises(AssertionError, match="/api/app/me"):
+        test_cada_rota_que_bloqueia_tem_a_perna_da_senha()
 
 
 def test_o_contact_pula_so_a_perna_da_senha():
@@ -335,6 +402,7 @@ def test_toda_leitura_e_exclusao_que_bloqueia_responde_password_required(monkeyp
                     if m in ("GET", "DELETE") and (_classe(m, p) or (None,))[0] == B
                     and p != "/conta" and _sem_corpo_obrigatorio(r)), key=lambda t: t[:2])
     assert len(alvos) > 40, alvos  # a varredura achou as rotas de dados
+    assert ("GET", "/api/app/me") in {(m, p) for m, p, _ in alvos}
     errados = []
     for m, p, rota in alvos:
         r = client.request(m, _url(p, uid), params=_query_obrigatoria(rota), headers={"x-csrf-token": CSRF})

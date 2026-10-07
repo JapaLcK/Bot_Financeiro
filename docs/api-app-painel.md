@@ -20,6 +20,12 @@ Os contratos compartilhados incluem `me`, `perfil` GET/PUT, `contas`,
 com os mesmos feature gates. SSE `eventos` permanece apenas no namespace web:
 revalida a coorte web durante o stream; o app revalida por foco e foreground.
 
+`GET /lancamentos` sem `q` respeita o mês solicitado. Com termos de busca,
+`q` consulta todo o histórico permitido pelo plano, mantendo os filtros de
+categoria, origem e tipo. O campo `mes` da resposta conserva o mês solicitado;
+ele não restringe os resultados da busca. A UI explicita esse escopo, conserva
+as datas civis e permite percorrer o cursor até o fim, inclusive com filtro local por dia.
+
 ## Complementos exclusivos do app
 
 `GET /patrimonio` retorna `{total,partes,motivos,historico,historico_desde}`.
