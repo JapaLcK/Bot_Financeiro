@@ -259,7 +259,7 @@ STATUS_REMOTOS_ACEITOS = frozenset(
 
 _LABELS = {
     "updated": "Atualizado",
-    "partial": "Parcial",
+    "partial": "Dados parciais",
     "updating": "Atualizando…",
     "error_recoverable": "Erro temporário",
     "needs_user_action": "Ação necessária",
@@ -268,6 +268,10 @@ _LABELS = {
     "removed": "Removido",
     "no_accounts": "Sem dados",
 }
+
+_CONTEXTO_DADOS_PARCIAIS = (
+    "Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização."
+)
 
 # Detalhe POR STATUS, quando o do estado manda a ação errada. `_NEEDS_USER` é um
 # balde só ("Ação necessária"), mas a ação não é a mesma para todo mundo:
@@ -1049,6 +1053,8 @@ def connection_ui_state(connection_row: dict) -> dict:
             state, detail = "error_recoverable", _DETALHE_COLETA_ESTOURADA
         elif state == "updating" and row.get("coleta_vencida"):
             detail = _DETALHE_COLETA_VENCIDA
+        if state == "partial":
+            detail = _CONTEXTO_DADOS_PARCIAIS + (f" {detail}" if detail else "")
         return {
             "state": state,
             "label": _LABELS[state],
