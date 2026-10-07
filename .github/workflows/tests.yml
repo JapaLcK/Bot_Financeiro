@@ -42,7 +42,7 @@ jobs:
     # tests/test_pool_async_entre_loops.py). Foi o que travou a suíte no #211.
     # RE-MEDIDO em 03/09/2026 sobre as 12 execuções verdes mais recentes do job
     # `pytest` (started_at/completed_at da API): 3m53s a 4m39s, mediana 4m09s.
-    # 15 min = 3,2x o pior caso, e o mesmo número do job `frontend` abaixo.
+    # 15 min = 3,2x o pior caso, e o mesmo número do job `frontend-shard` abaixo.
     timeout-minutes: 15
 
     services:
@@ -99,7 +99,15 @@ jobs:
   # não foi exercitado neste CI ainda. Se ele quebrar, o CI fica vermelho e a
   # gente descobre na hora — falha ruidosa vale mais que um job que sinaliza
   # sozinho e ninguém lê.
-  frontend:
+  #
+  # Em 3 shards (#852): sequencial, a suíte passou de 11 min e estourava o
+  # timeout. O check required `frontend` é o job agregador logo abaixo deste.
+  frontend-shard:
+    name: frontend shard ${{ matrix.shard }}/3
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-latest
     # Sem isto o default é 360 min: um download de Chromium travado queimaria
     # 6 horas de runner antes de desistir.
@@ -194,7 +202,7 @@ jobs:
       #    autorizar apagar ou renomear o worker — não autoriza, mas quem
       #    garante é outro check: `tests/frontend/sw_cache_privado.test.mjs` faz
       #    `readFileSync` de caminho fixo, então some o arquivo e o step
-      #    `Run frontend tests` (mesmo job, três steps adiante) fica vermelho.
+      #    `Run frontend tests` (no shard que pegar o arquivo) fica vermelho.
       #    Medido: 11 dos 28 testes daquele arquivo quebram com ENOENT, tanto
       #    apagando quanto renomeando. Se um dia aquele teste deixar de ler o
       #    arquivo, este ramo passa a ser um buraco de verdade.
@@ -209,7 +217,7 @@ jobs:
       # comparação final.
       # ────────────────────────────────────────────────────────────────────
       - name: Gate do CACHE_NAME do service worker
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && matrix.shard == 1
         env:
           # Dado de PR NUNCA entra no corpo do `run:` por `${{ }}`: vem por env e
           # é lido como variável. Serve só para VALIDAR a premissa do checkout —
@@ -437,6 +445,7 @@ jobs:
       # ou uma das regras zeradas voltando — não código que já existia. Aviso
       # (`warn`) não reprova: `eslint` só sai != 0 com erro.
       - name: Lint (ESLint)
+        if: matrix.shard == 1
         run: npm run lint
 
       # Gate do artefato das ilhas React: `frontend/precos-app.*`, `chat-app.*` e
@@ -481,8 +490,12 @@ jobs:
       # rebuilde fica vermelho.
       #
       # O que este gate NÃO garante: que o bundle RENDERIZA. Quem prova o render é
-      # o `npm run test:frontend` (step abaixo), e quem prova que a ROTA existe é
+      # a suíte de frontend (step `Run frontend tests`, abaixo), e quem prova que a ROTA existe é
       # o pytest (`tests/test_frontend_assets_e_rotas.py`).
+      #
+      # Roda em TODO shard, não só no 1: o build deixa `frontend/dashboard-app.js`
+      # mais novo que `webapp/src`, e sem isso `exigeArtefatoEmDia()`
+      # (tests/frontend/_painel.mjs) reprova pela mtime de checkout.
       - name: Gate do artefato das ilhas React (webapp -> frontend/precos-app.*, chat-app.*, dashboard-app.*)
         run: |
           npm --prefix webapp ci
@@ -498,8 +511,28 @@ jobs:
       - name: Install Playwright + Chromium
         run: npx playwright install --with-deps chromium
 
+      # O glob repete o do `test:frontend` do package.json de propósito: o
+      # `--test-shard` tem de vir ANTES dos arquivos — depois deles é ignorado em
+      # silêncio e o shard roda a suíte inteira (`npm run test:frontend -- ...`).
       - name: Run frontend tests
-        run: npm run test:frontend
+        run: node --test --test-shard=${{ matrix.shard }}/3 tests/frontend/*.test.mjs
+
+  # Agregador: o check required da main é `frontend`, e os shards aparecem como
+  # "frontend shard N/3" — sem este job o `frontend` ficaria pendente para sempre.
+  # `always()` é obrigatório: sem ele um shard falho deixa este job "skipped", e
+  # check required skipped conta como sucesso no GitHub.
+  frontend:
+    needs: frontend-shard
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Todos os shards passaram
+        env:
+          RESULTADO: ${{ needs.frontend-shard.result }}
+        run: |
+          echo "frontend-shard: $RESULTADO"
+          [ "$RESULTADO" = success ]
 
   # Varredura de CVE nas dependências. Não-bloqueante: sinaliza sem travar
   # o merge/deploy (uma CVE sem fix disponível não deve segurar a main).
