@@ -328,6 +328,37 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
   dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
 
+- `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
+  condicional do motor único, usuário da sessão e gates antes da leitura financeira.
+  Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
+  Pro recebe 30/60/90 conforme o horizonte solicitado. Fora do horizonte do plano é
+  403 `forecast_horizon_not_allowed`; recurso ausente é 403 `pro_required`; query
+  fora dos três valores é 422 no envelope. O recurso `cashflow` concede os detalhes,
+  independentemente da lista de horizontes. Uma snapshot repeatable read/read only,
+  bancos elegíveis da base v2 (`cashflow_snapshot.ler(..., True)`), sem sync, escrita,
+  reparo, expiração de pendência ou aviso SSE.
+  `base` é saldo observado; `ancora` é hoje ajustado pelas premissas do motor; série
+  começa amanhã e pior dia usa apenas os pontos futuros (primeiro empate, causas
+  desde o último pico). Plus tem apenas capacidade `marcos` e todos os campos de
+  detalhe Pro são `null`, inclusive sem nomes/ids/ciclos nos motivos públicos.
+  Pro sem saldo mantém detalhes conhecidos e pontos `null`, com pior dia `null`.
+  Motivos expõem somente código/direção. Compromissos usam chaves opacas estáveis
+  por usuário e identidade da fonte; homônimos não se fundem. Instâncias ficam em
+  grupo próprio, pois a snapshot não fornece o vínculo persistido de apresentação.
+  `incluida_no_calculo` exige valor e data utilizáveis, inclusão na snapshot e
+  ocorrência não realizada; desconhecidos e excluídos continuam na explicação.
+  Base e valor da ocorrência preservam o Decimal/escala original da snapshot;
+  saldos calculados mantêm a quantização do motor. Exemplo discriminante: base
+  `"10.005"`, saída `"2.675"`, saldo calculado `"7.33"`. Pontos e causas resolvem as
+  ocorrências originais, sem usar o valor arredondado do detalhe legado.
+  `calculado_em`/`valido_ate`, qualidade e cobertura vêm da mesma snapshot;
+  `cabe_nas_premissas` e estimativa variável seguem `false`. Horizonte até 90 pontos
+  futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
+  global de bytes comprovado/adicionado: esses limites dimensionais não limitam
+  fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.
+  Contrato TS gerado e fixtures herméticas preparadas para PR3; consumidor, tela e
+  refetch temporal são PR3.
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
