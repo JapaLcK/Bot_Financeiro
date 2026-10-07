@@ -29,3 +29,10 @@ export function indicadorMeta(indicador: string) {
   const rotulos: Record<string, string> = { no_target: "Sem objetivo definido", achieved: "Objetivo alcançado", on_track: "No ritmo para alcançar", ahead: "Adiantada em relação ao objetivo", behind: "Abaixo do ritmo necessário", tight: "Prazo apertado", active: "Meta em andamento", no_deadline: "Sem prazo definido" };
   return rotulos[indicador] ?? "Ritmo da meta a conferir";
 }
+
+/** Janela fornecida pelo servidor, incluindo o mês parcial do corte. Sem corte, expansão do usuário. */
+export function mesesDoHistorico(mes: string, inicio: string | null | undefined, quantidade = 12) {
+ if (inicio == null) return mesesAnteriores(mes, quantidade);
+ const meses = (Number(mes.slice(0, 4)) - Number(inicio.slice(0, 4))) * 12 + Number(mes.slice(5, 7)) - Number(inicio.slice(5, 7)) + 1;
+ return mesesAnteriores(mes, Math.max(0, meses));
+}

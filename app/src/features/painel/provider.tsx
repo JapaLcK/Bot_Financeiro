@@ -84,7 +84,10 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       if (cancelado || g !== geracaoAcesso.current) return;
       if (a.fase !== "inicio") { setDados({}); setUsuario(null); setGate("negado"); return; }
       if (dono.current !== a.perfil.user_id) {
-        dono.current = a.perfil.user_id; layouts.current.clear(); setDados({}); setOculto(false); setPerfil("padrao"); setDias(undefined);
+        dono.current = a.perfil.user_id; layouts.current.clear(); setDados({}); setOculto(false); setPerfil("padrao"); setDias(undefined); setMes(mesAtual());
+      } else {
+        const atual = mesAtual(), inicio = a.perfil.history_earliest_date?.slice(0, 7);
+        setMes((m) => m > atual ? atual : inicio && m < inicio ? inicio : m);
       }
       acessoValidando.current = false; setPendente(!!tentativa); setUsuario(a.perfil); setGate("liberado"); setVersao((v) => v + 1);
     }).catch((e: unknown) => {

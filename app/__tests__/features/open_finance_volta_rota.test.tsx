@@ -71,8 +71,8 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
       fireEvent.press(screen.getByRole("button", { name: "Continuar" }));
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
-    expect(screen.getByText("Olá, S")).toBeTruthy();
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
+    expect(screen.getByText("Bom dia, S")).toBeTruthy();
   });
 
   it("4 — link sem itemId e sem tentativa: texto neutro, nenhum pedido de OF", async () => {
@@ -111,7 +111,7 @@ describe("open-finance-volta — com sessão, trava desligada", () => {
       router.back();
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     await act(async () => {
       portao.soltar();
       await drenar();
@@ -197,7 +197,7 @@ describe("open-finance-volta — link com o app aberto e o widget da Pluggy em f
     const ouvir = jest.spyOn(Linking, "addEventListener");
     servidor();
     renderRouter("./app", { initialUrl: "/" });
-    await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
     const chamada = ouvir.mock.calls.find(([evento]) => evento === "url");
     ouvir.mockRestore();
     if (!chamada) throw new Error("o roteador não registrou ouvinte de url");
@@ -213,7 +213,7 @@ describe("open-finance-volta — link com o app aberto e o widget da Pluggy em f
     definirWidgetAberto(true);
     await abrir(LINK);
     await act(drenar);
-    expect(screen).toHavePathname("/");
+    expect(screen).toHavePathname("/resumo");
     expect(deOpenFinance()).toEqual([]);
   });
 
@@ -305,7 +305,7 @@ describe("open-finance-volta — trava ligada", () => {
     renderRouter("./app", { initialUrl: "/" });
     await waitFor(() => expect(prompts()).toBe(1));
     await liberar();
-    await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
 
     await appVai("inactive");
     await appVai("background");

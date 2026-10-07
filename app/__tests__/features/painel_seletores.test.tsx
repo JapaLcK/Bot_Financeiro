@@ -20,10 +20,15 @@ beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredencia
 afterEach(() => jest.restoreAllMocks());
 async function apertar(nome: string) { await act(async () => { fireEvent.press(screen.getByRole("button", { name: nome })); await drenar(); }); }
 async function escolherMes(mes: string, anterior = mesAtual()) { await apertar(nomeMes(anterior).slice(0, 3)); await apertar(nomeMes(mes)); }
+// O Router já usa timers falsos: avançar o debounce evita polling da árvore a cada 50ms.
+async function buscar(termo: string) {
+ await act(async () => { fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), termo); await drenar(); });
+ await act(async () => { jest.advanceTimersByTime(300); await drenar(); });
+}
 function caminhos(desde: number) { return fetchFalso.mock.calls.slice(desde).map(([url]) => new URL(String(url)).pathname).sort(); }
 it("busca global explicita o histórico permitido sem esconder registros fora do mês", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
- await act(async () => { fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Loja"); });
+ await buscar("Loja");
  await waitFor(() => expect(screen.getByText("Loja de setembro")).toBeTruthy());
  expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("01/09/2026 · banco")).toBeTruthy();
  expect(screen.getByText("Existem mais páginas desta busca no histórico permitido pelo seu plano.")).toBeTruthy();
@@ -31,7 +36,7 @@ it("busca global explicita o histórico permitido sem esconder registros fora do
  expect(screen.getByText("Todos os resultados deste filtro foram carregados.")).toBeTruthy();
  const paginas = fetchFalso.mock.calls.map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/lancamentos" && u.searchParams.has("q"));
  expect(paginas.map((u) => u.searchParams.get("cursor"))).toEqual([null, "pagina-2"]);
- await act(async () => { fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), ""); });
+ await buscar("");
  await waitFor(() => expect(screen.queryByText(escopo)).toBeNull());
 });
 it("seletores recarregam somente mês ou horizonte e preservam os recursos independentes", async () => {
@@ -123,7 +128,7 @@ it("refresh completo supera previsão em voo e revalida todos os recursos", asyn
 });
 it("busca com categoria vazia e dia civil mantém filtros e paginação global", async () => {
  renderRouter("./app", { initialUrl: "/extrato?categoria=&dia=2026-08-01" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
- await act(async () => { fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Loja"); }); await waitFor(() => expect(screen.getByText(escopo)).toBeTruthy()); await act(drenar);
+ await buscar("Loja"); await waitFor(() => expect(screen.getByText(escopo)).toBeTruthy()); await act(drenar);
  expect(screen.queryByText("Loja de setembro")).toBeNull(); expect(screen.getByText("Sem categoria")).toBeTruthy(); expect(screen.getByText("01/08/2026")).toBeTruthy();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de agosto")).toBeTruthy();
  const paginas = fetchFalso.mock.calls.map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/lancamentos" && u.searchParams.has("q"));
@@ -132,8 +137,19 @@ it("busca com categoria vazia e dia civil mantém filtros e paginação global",
 
 it("horizonte não repete leituras mensais, conversa ou insights", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy()); await act(drenar);
- const antes = fetchFalso.mock.calls.length, saldoMes = screen.getByLabelText("mais 7200 reais");
- await apertar("60 dias"); expect(caminhos(antes)).toEqual(["/api/app/previsao"]); expect(screen.getByLabelText("mais 7200 reais")).toBe(saldoMes);
+ const antes = fetchFalso.mock.calls.length, saldoMes = screen.getAllByLabelText("mais 7200 reais");
+ await apertar("60 dias"); expect(caminhos(antes)).toEqual(["/api/app/previsao"]);
+ const saldoDepois = screen.getAllByLabelText("mais 7200 reais"); expect(saldoDepois).toHaveLength(saldoMes.length);
+ saldoDepois.forEach((no, i) => expect(no).toBe(saldoMes[i]));
  await apertar("90 dias"); expect(caminhos(antes)).toEqual(["/api/app/previsao", "/api/app/previsao"]);
  expect(screen.getByRole("button", { name: "90 dias · selecionado" })).toBeTruthy();
+});
+
+it("debounce da busca não consulta antes de 300ms e aplica o termo uma vez", async () => {
+ renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
+ const buscas = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/api/app/lancamentos" && new URL(String(url)).searchParams.has("q"));
+ await act(async () => { fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Loja"); await drenar(); });
+ await act(async () => { jest.advanceTimersByTime(299); await drenar(); }); expect(buscas()).toHaveLength(0);
+ await act(async () => { jest.advanceTimersByTime(1); await drenar(); }); expect(buscas()).toHaveLength(1);
+ expect(new URL(String(buscas()[0]![0])).searchParams.get("q")).toBe("Loja"); expect(screen.getByText("Loja de setembro")).toBeTruthy();
 });

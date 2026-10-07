@@ -104,7 +104,7 @@ describe("open-finance-volta — item em updating", () => {
       router.back();
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     const antes = contarGets();
     for (let i = 0; i < 3; i++) await umIntervalo();
     expect(contarGets()).toBe(antes);
@@ -245,7 +245,7 @@ describe("open-finance-volta — tela de espera (Organizando seus dados)", () =>
       fireEvent.press(sair());
       await drenar();
     });
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
     const antes = contarGets();
     for (let i = 0; i < 3; i++) await umIntervalo();
     expect(contarGets()).toBe(antes);
