@@ -47,6 +47,24 @@ it("contas sem motivo de banco não ganham aviso no topo", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await pronto();
  expect(screen.queryByText(/precisam ser atualizados/)).toBeNull(); expect(screen.queryByText("Dados do banco desatualizados")).toBeNull();
 });
+// O sinal de banco não pode depender só de /contas: ele falha, ou a conexão desatualizada é só de investimentos.
+it("contas fora do ar não apagam o aviso: patrimônio com banco desatualizado gera o aviso genérico", async () => {
+ falhar = ["/api/app/contas"]; const pat = fixture["/api/app/patrimonio"];
+ extra["/api/app/patrimonio"] = { ...pat, motivos: banco };
+ renderRouter("./app", { initialUrl: "/resumo" });
+ await waitFor(() => expect(screen.getByText("Os dados de um banco conectado precisam ser atualizados. Alguns valores podem estar incompletos.")).toBeTruthy());
+ expect(screen.getByRole("button", { name: "Ver bancos conectados" })).toBeTruthy();
+});
+it("conexão só de investimento: item do rendimento desatualizado gera o aviso com a instituição", async () => {
+ const r = fixture["/api/app/rendimento"]; extra["/api/app/rendimento"] = { ...r, itens: [{ ...r.itens[0], instituicao: "XP Investimentos", motivos: banco }] };
+ renderRouter("./app", { initialUrl: "/metas" });
+ await waitFor(() => expect(screen.getByText(/Os dados de XP Investimentos precisam ser atualizados/)).toBeTruthy());
+});
+it("motivo de banco da previsão (objeto com código) também gera o aviso", async () => {
+ extra["/api/app/previsao"] = { ...fixture["/api/app/previsao"], motivos: [{ codigo: "conexao_pausada", direcao_do_erro: "ambos" }] };
+ renderRouter("./app", { initialUrl: "/resumo" });
+ await waitFor(() => expect(screen.getByText("Dados do banco desatualizados")).toBeTruthy());
+});
 const fatura = (ciclo: string, data: string, futura = false) => ({ chave: "fat", ciclo, data, fonte: "fatura", tipo: "fatura_cartao", nome: "ultraviolet-black", valor: futura ? "1240.50" : null, direcao: "saida", qualidade_valor: futura ? "conhecido" : "desconhecido", qualidade_data: "conhecida", realizacao: futura ? "prevista" : "a_conferir", incluida_no_calculo: true, motivos: [] });
 it("Próximos N dias mostra só hoje e o futuro; faturas antigas viram uma linha", async () => {
  extra["/api/app/previsao"] = { ...fixture["/api/app/previsao"], hoje: "2026-10-07", compromissos: [{ chave: "fat", fonte: "fatura", nome: "ultraviolet-black", primeira_data: "2025-11-08", ultima_data: "2026-10-15", ocorrencias: [fatura("2025-11", "2025-11-08"), fatura("2026-08", "2026-08-08"), fatura("2026-09", "2026-09-08"), fatura("2026-10", "2026-10-15", true), fatura("2026-10b", "2026-10-07", true)] }] };

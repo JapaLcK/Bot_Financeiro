@@ -41,6 +41,12 @@ const MOTIVOS: Record<string, string> = {
 };
 /** Estado do banco: vai só no aviso único do topo (`TelaPainel`), nunca repetido nos cards. */
 export const MOTIVOS_BANCO = new Set(["banco_desatualizado", "conexao_pausada"]);
+/** Algum `motivos` (string ou `{ codigo }` da previsão), em qualquer nível, traz estado de banco? */
+export function temMotivoBanco(v: unknown): boolean {
+ if (Array.isArray(v)) return v.some(temMotivoBanco);
+ if (!v || typeof v !== "object") return false;
+ return Object.entries(v).some(([k, x]) => (k === "motivos" && Array.isArray(x) && x.some((m) => MOTIVOS_BANCO.has(typeof m === "string" ? m : m?.codigo))) || temMotivoBanco(x));
+}
 export function Avisos({ motivos }: { motivos: string[] }) {
  const [aberto, setAberto] = useState(false);
  const mensagens = [...new Set(motivos.filter((m) => !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
