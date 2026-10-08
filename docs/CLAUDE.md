@@ -208,8 +208,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   hoje contra a segunda anterior até o mesmo dia da semana. `lancamentos` conta só despesa/receita
   não internas (o mensal ainda conta toda linha de `launches`: diferença conhecida). O template
   homologado (5 variáveis) não muda; o texto rico vai no pedido manual e no Discord.
-  Decisões do dono (PL-05): o envio é na segunda, no horário do resumo diário (dia e horário
-  próprios não foram feitos, por decisão); compra no cartão fica fora do semanal, com aviso no
+  Decisões do dono (PL-05): o envio é na segunda, no horário do resumo diário no WhatsApp (o
+  Discord roda fixo às 09:00 e não lê a preferência); dia e horário próprios não foram feitos, por decisão; compra no cartão fica fora do semanal, com aviso no
   texto; o template da Meta segue com 5 variáveis (o texto rico só no pedido manual e no Discord;
   levá-lo ao WhatsApp automático depende de template novo aprovado na Meta); a comparação com a
   semana anterior é só Plus+; não há saldo livre calculado (o texto separa "Resultado da semana"

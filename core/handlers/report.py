@@ -55,7 +55,7 @@ def enable_weekly(user_id: int) -> str:
         return "🐷 O resumo semanal automático está disponível nos planos Plus e Pro."
     db.set_weekly_report_enabled(user_id, True)
     return (
-        "✅ Resumo semanal ligado. Você recebe toda segunda-feira, no mesmo horário do resumo diário, referente à semana anterior.\n"
+        "✅ Resumo semanal ligado. Você recebe toda segunda-feira, referente à semana anterior.\n"
         "Para desligar: *desligar resumo semanal*"
     )
 
