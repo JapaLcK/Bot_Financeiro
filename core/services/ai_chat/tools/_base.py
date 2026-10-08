@@ -14,8 +14,11 @@ Toda tool exposta ao LLM é representada por um objeto `Tool` com:
   - execute: handler (user_id, args) → :
                * dict (read tool) → JSON, devolvido pro LLM
                * str  (write tool) → mensagem final pro user
-  - summary: SÓ pra writes que precisam de confirmação — recebe args e devolve
-             descrição em pt-BR usada no template 3.
+  - summary: SÓ pra writes que precisam (ou podem precisar) de confirmação —
+             recebe args e devolve descrição em pt-BR usada no template 3.
+  - confirmar_se: SÓ pra writes com requires_confirmation=False. Recebe
+             (user_id, args); True = desta vez vira pending action como as de
+             confirmação, com resposta fixa do runner. None = sempre executa.
 
 Cada arquivo em tools/ exporta uma lista `TOOLS: list[Tool]`. O `__init__.py`
 do pacote tools/ agrega todas e expõe utilitários (schemas, lookup por nome).
@@ -42,6 +45,8 @@ class Tool:
     Caso de uso principal: evitar pedir confirmação pra apagar/editar um
     ID que nem existe (LLM pode ter inventado). Sem validate, o user
     confirma achando que era real e só depois vê o 'não achei'."""
+
+    confirmar_se: Optional[Callable[[int, dict[str, Any]], bool]] = None
 
     has_side_effects: bool = False
     """Consulta que sincroniza ou aplica juros. Não é comando de escrita,

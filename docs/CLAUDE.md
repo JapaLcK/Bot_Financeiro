@@ -837,6 +837,19 @@ emergência e colapsa no binário legado). **A fonte de verdade é
 `core/services/plan_service.py`** — não duplique a tabela de tiers, limites ou nomes
 em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.py`.
 
+**IA primeiro no WhatsApp** (`core/services/wa_ia_primeiro.py`): com
+`WA_IA_PRIMEIRO` em `1`/`true`/`yes`/`on`, o texto do WhatsApp vai à IA antes do
+classificador; o roteador fica com a lista fechada de `fica_no_roteador`
+(saudação, ajuda, e-mails, relatórios, "sim"/"não", desfazer, cartão,
+recorrência/conta a pagar, vários lançamentos numa frase), com pendência viva e
+com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula):
+ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que
+não dê id válido (`,`, só espaços, `abc`) = ninguém, com warning no log. As duas são lidas a cada mensagem, mas
+trocar env no Railway reinicia o serviço (~1 min sem bot). Com a flag, o
+`add_launch` da IA pede "sim" quando valor, tipo ou categoria não batem com o texto.
+Desligar a flag NÃO desfaz o cancelamento da confirmação da IA não mostrada (seção
+"IA"): ele vale para todos os canais (decisão do dono, 2026-10-08).
+
 **Inadimplência de cartão** (`core/services/billing_dunning.py`): a coluna
 `auth_accounts.past_due_since` guarda a **primeira falha de cobrança do ciclo**,
 carimbada pelo webhook `invoice.payment_failed` (`db.dunning.claim_past_due_since`,
@@ -938,6 +951,18 @@ limite mensal de chat (`AI_CHAT_MONTHLY_LIMIT`), chat "Piggy" no dashboard
 atrás de `AGENTS_ENABLED` + listas de beta).
 A tool `simulate_purchase` (`core/services/ai_chat/tools/simulator.py`) usa o mesmo
 simulador e a mesma validação da rota `/simulator`, com gate soft de Pro.
+
+**Confirmação da IA armada e não mostrada é cancelada.** Em qualquer canal, com ou
+sem `WA_IA_PRIMEIRO`, a pendência da IA (`ai_pending_actions`) armada num turno é
+cancelada por CAS (`db.ai_consume_pending_action`) quando o turno termina com uma
+resposta que não é a pergunta dela: erro (`ERROR_MSG`), texto vazio do modelo, prazo
+estourado, `MAX_TOOL_LOOPS`, `_UM_POR_VEZ`, write direto ou recusa de validação na
+mesma rodada, ou exceção. Senão um "sim" posterior executaria algo que o usuário nunca
+viu (ex.: um `delete_all_launches` escondido atrás de um erro). Limites declarados:
+texto livre do modelo depois de armar não cancela; exceção entre gravar e reler a
+pendência não cancela; falha ao cancelar só loga. Código em
+`core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
+`tests/test_wa_ia_primeiro_runner.py`.
 
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria

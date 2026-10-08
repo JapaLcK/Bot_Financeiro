@@ -130,7 +130,8 @@ _PERGUNTA_ENCERRADA = (
 #             gravar nada, e a nova tentativa ("300 reais transporte") cairia
 #             no route() como despesa.
 #   ENCERRA — largou a `ai_pending` com um comando claro: sem captura (o
-#             comando vai ao route()), e o `finally` encerra.
+#             comando vai ao route() — ou, com WA_IA_PRIMEIRO, à IA do 5a se
+#             ele não for do roteador), e o `finally` encerra.
 MANTEM, ENCERRA = "mantem", "encerra"
 pergunta_no_turno: ContextVar[str | None] = ContextVar("pergunta_no_turno", default=None)
 

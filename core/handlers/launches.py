@@ -1065,6 +1065,11 @@ def _maybe_recurring_offer(
         return None
 
 
+# Regra determinística confiante o bastante para vencer a categoria do LLM
+# (aqui) e para o `core/services/wa_ia_primeiro.py` dar a categoria por certa.
+MOTIVOS_CONFIANTES = frozenset({"user_rule", "user_category", "ticker_match", "local_rule"})
+
+
 def add_from_entities(
     user_id: int,
     *,
@@ -1133,7 +1138,7 @@ def add_from_entities(
             # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
             categoria_ai = infer_category(user_id, "", categoria).category
             local = infer_category(user_id, nota_clean, None, allow_ai=False)
-            if local.reason in {"user_rule", "user_category", "ticker_match", "local_rule"} and local.category != categoria_ai:
+            if local.reason in MOTIVOS_CONFIANTES and local.category != categoria_ai:
                 logger.info(
                     "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
                     categoria_ai, local.category, local.reason, nota_clean,

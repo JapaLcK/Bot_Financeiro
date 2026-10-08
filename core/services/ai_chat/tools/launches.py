@@ -13,7 +13,9 @@ Read:
 
 Write (auto-executado, SEM confirmação):
   - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
-    (a mesma fn que o bot tradicional usa) e devolve a resposta padrão.
+    (a mesma fn que o bot tradicional usa) e devolve a resposta padrão. No
+    WhatsApp com WA_IA_PRIMEIRO, pede "sim" antes quando os args não batem
+    com o texto do usuário (`confirmar_se`, `core/services/wa_ia_primeiro.py`).
 
 Write (PEDE confirmação — destrutivo):
   - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
@@ -33,7 +35,9 @@ import db
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
 # porta e não pela outra.
 from core.observability import _log_falha
+from core.services.wa_ia_primeiro import ativo, precisa_confirmar_lancamento
 from utils_date import _tz
+from utils_text import fmt_brl
 
 from .._context import CURRENT_PLATFORM
 from ._base import Tool
@@ -359,18 +363,11 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     from core.handlers import forma_pagamento as fp
     from core.handlers.launches import add_from_entities
 
-    # Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
-    # do enum vira "desconhecida" — o modelo não inventa uma terceira forma.
-    forma = args.get("forma_pagamento")
-    forma = forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+    forma = forma_declarada(args)
     decisao = fp.decidir(user_id, forma)
     if decisao == fp.BANCO:
         return fp.msg_banco(user_id, tipo, valor)
-    if decisao != fp.CARTEIRA:
-        return _PERGUNTE_A_FORMA
-
-    return add_from_entities(
-        user_id,
+    ents = dict(
         tipo=tipo,
         valor=valor,
         alvo=(args.get("alvo") or "").strip() or None,
@@ -378,9 +375,43 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         categoria=(args.get("categoria") or "").strip() or None,
         category_reason="ai",
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
-        platform=CURRENT_PLATFORM.get(),
-        forma_pagamento=forma,
     )
+    platform = CURRENT_PLATFORM.get()
+    if decisao != fp.CARTEIRA:
+        if platform != "whatsapp" or not ativo(user_id):
+            return _PERGUNTE_A_FORMA
+        # WA_IA_PRIMEIRO: a pergunta vai ao usuário (Q40, como o recibo da
+        # imagem em `core/handlers/pending.py`); a resposta "dinheiro" grava
+        # pelo `forma_pagamento.resolver`, fluxo "entities".
+        ents["criado_em"] = ents["criado_em"].isoformat() if ents["criado_em"] else None
+        return fp.perguntar(
+            user_id, {"fluxo": "entities", "entities": ents, "platform": platform},
+            fp.pergunta_lancamento(tipo, valor))
+
+    return add_from_entities(user_id, **ents, platform=platform, forma_pagamento=forma)
+
+
+def forma_declarada(args: dict[str, Any]) -> str:
+    """Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
+    do enum vira "desconhecida" — o modelo não inventa uma terceira forma."""
+    from core.handlers import forma_pagamento as fp
+    forma = args.get("forma_pagamento")
+    return forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+
+
+def _add_launch_summary(args: dict[str, Any]) -> str:
+    try:
+        valor = fmt_brl(float(args.get("valor") or 0))
+    except (TypeError, ValueError):
+        valor = str(args.get("valor"))
+    partes = [f"{(args.get('tipo') or 'despesa').strip().lower()} de {valor}"]
+    alvo = (args.get("alvo") or args.get("nota") or "").strip()
+    if alvo:
+        partes.append(f"em {alvo}")
+    categoria = (args.get("categoria") or "").strip()
+    if categoria:
+        partes.append(f"({categoria})")
+    return " ".join(partes)
 
 
 # Instrução ao MODELO (volta como resultado da tool). Não arma pendência: a
@@ -960,6 +991,8 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_launch_execute,
+        summary=_add_launch_summary,
+        confirmar_se=precisa_confirmar_lancamento,
     ),
     Tool(
         schema={
