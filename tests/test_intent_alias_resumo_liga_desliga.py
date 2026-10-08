@@ -51,6 +51,8 @@ _TOGGLES = (
     # determinante possessivo e dia da semana como período
     ("não quero receber meu resumo semanal", "report.weekly_disable"),
     ("para de me mandar meu resumo mensal", "report.monthly_disable"),
+    ("não quero receber o meu resumo semanal", "report.weekly_disable"),
+    ("para de me mandar o meu resumo mensal", "report.monthly_disable"),
     ("não quero receber o resumo toda segunda-feira", "report.weekly_disable"),
     # cortesia antes do comando também não muda o pedido
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
@@ -82,6 +84,8 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     # correção no fim da frase: o comando inteiro não é o pedido
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
+    # negação colada na cadência não é cadência
+    "quero receber o resumo semanal todo domingo não",
     # pergunta sobre o recebimento
     "quando vou receber o resumo mensal?",
     # "para de" como preposição, não como comando de parar
