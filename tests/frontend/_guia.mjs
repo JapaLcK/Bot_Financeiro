@@ -97,10 +97,14 @@ export const tocarAba = async (page, timeout = 10000) => {
 // mesmo com o "Entendi"). 10 s: festa (1,6 s), o voo até a aba e o da tela nova.
 export const esperaTitulo = async (page, t) => {
   const alvo = page.locator("#guia-titulo", { hasText: t }), aba = page.locator("#guia-titulo", { hasText: ABA });
-  for (let i = 0; i < 100 && !(await alvo.count()); i++) {
+  for (const fim = Date.now() + 10000; Date.now() < fim && !(await alvo.count());) {
     // 500 ms: se o toque anterior já pegou, o guia navegou e o "Agora toca" não volta
-    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page, 500).catch(() => {});
-    else await page.waitForTimeout(100);
+    if (!String(t).startsWith(ABA) && (await aba.count())) {
+      // Depois do toque, espera o "Agora toca" sair: o React troca o título um tempo depois do
+      // clique, e voltar ao laço antes disso toca de novo, no mesmo ponto — que na tela nova é o
+      // véu, e o clique no véu tira o foco do título (o foco com o véu acabava em <body>).
+      if (await tocarAba(page, 500).then(() => true, () => false)) await aba.waitFor({ state: "detached", timeout: 2000 }).catch(() => {});
+    } else await page.waitForTimeout(100);
   }
   await alvo.waitFor({ timeout: 10000 });
 };

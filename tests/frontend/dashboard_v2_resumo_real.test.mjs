@@ -124,7 +124,15 @@ const aviso = async (page, sel) => [await page.locator(sel).textContent(), await
 for (const [nome, erro, esperado] of [["500", RESPOSTAS.erros["500"], GENERICO], ["403 password_required", RESPOSTAS.erros["403_password_required"], SENHA]]) {
   test(`PUT ${nome} no modal: desfaz (o modal volta) e avisa`, async () => {
     const { ctx, page, ir } = await abrir({ perfil: null });
-    await ctx.route("**/api/v2/perfil", (r) => (r.request().method() === "PUT" ? r.fulfill({ status: erro.status, json: erro.body }) : r.fallback()));
+    // O PUT só falha depois de a tela já ter trocado para a escolha (otimista): é essa troca que o
+    // "desfaz" desfaz. Se o erro chegasse antes de o React pintar a escolha, as duas escritas no
+    // cache provavelmente virariam uma só (o perfil nunca saiu de `null`), o modal ficaria fechado e o teste,
+    // 30 s esperando o aviso dentro dele. Em produção a rede custa mais que o quadro; no mock não.
+    await ctx.route("**/api/v2/perfil", async (r) => {
+      if (r.request().method() !== "PUT") return r.fallback();
+      await page.waitForFunction(() => document.querySelector("#board-profile")?.value === "investir", null, { timeout: 5000 });
+      return r.fulfill({ status: erro.status, json: erro.body });
+    });
     await ir();
     await page.getByRole("button", { name: /^Investir/ }).click();
     await page.locator(".picker[open] .picker-aviso").waitFor();
