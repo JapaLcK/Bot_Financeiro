@@ -339,7 +339,11 @@ def test_so_recorrencia_nos_dois_lados_tambem_recusa(user_id, semear):
 @pytest.mark.parametrize("rota", ["auto_link", "vincular"])
 def test_corrida_lancamento_no_destino_depois_da_checagem_vira_recusa(user_id, monkeypatch, rota):
     """Lançamento gravado no destino, por OUTRA conexão, entre a checagem e os
-    updates: sem o except, `uq_launches_user_seq` subia como UniqueViolation."""
+    updates: sem o except, `uq_launches_user_seq` subia como UniqueViolation.
+
+    O merge trava os dois usuários (`_lock_user`) antes da checagem, então um escritor
+    comum (`add_launch_and_update_balance`) já espera por ele. A rede de segurança é para o
+    que NÃO toma o mutex: o INSERT abaixo é direto, sem o `update accounts` do escritor."""
     import db.users as users
 
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -352,7 +356,10 @@ def test_corrida_lancamento_no_destino_depois_da_checagem_vira_recusa(user_id, m
     def checa_e_grava_no_destino(cur, uid):
         tem = real(cur, uid)
         if uid == user_id:
-            db.add_launch_and_update_balance(user_id, "receita", 80, None, "pix")
+            with db.get_conn() as conn, conn.cursor() as c2:
+                c2.execute("insert into launches(user_id, tipo, valor, alvo, nota) "
+                           "values (%s, 'receita', 80, null, 'pix')", (user_id,))
+                conn.commit()
         return tem
 
     monkeypatch.setattr(users, "_tem_dados_financeiros", checa_e_grava_no_destino)

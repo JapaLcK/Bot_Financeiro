@@ -375,8 +375,18 @@ fixo de toda mudança de layout.
   de um par precisam dele (#622). A ordem interna só importa contra quem não o toma
   (`accrue_all_*`, que segue pai → filho; o reset apaga pai antes de filho por isso).
   Seguir "launches → pai → lotes" sem o mutex reabre o ciclo com o reset. Exceções
-  conhecidas que o mutex não cobre: undo de lançamento comum, import em lote de OFX,
-  `delete_user_data`, `merge_users`; acompanhamento em issue separada. Escritor novo?
+  conhecidas, com acompanhamento em issue separada: (1) o undo de pagamento de fatura só
+  toma o mutex quando o pagamento é financiado/ligado ao banco (Open Finance); nesse caso
+  `pay_bill_amount` × undo trava sem deadlock detectável, e o par pagamento de fatura que
+  ganha ligação OF depois do preview × sync dá DeadlockDetected quando o undo chega
+  primeiro. Sem Open Finance a ordem é fatura → conta (`pay_bill_amount` segura a fatura
+  enquanto outra conexão pede `accounts`) e cruza com reset, merge e `delete_user_data`; o
+  próprio `pay_bill_amount` também pode travar sem deadlock detectável contra reset e merge; (2)
+  `delete_user_data` apaga Open Finance e crédito ANTES de `accounts` (mutex antes do laço,
+  não no topo: T17/T21/T23 modelam uma sessão que comita no meio da exclusão) e cruza com
+  reset, merge e sync/conciliação do Open Finance. Escritor novo? O guard
+  `tests/test_lock_ordem_guarda.py` acusa quem abre `get_conn` e toca 2+ famílias sem
+  `_lock_user`; é cego ao lock condicional e a f-string. Receita:
   `grep -rn "_lock_user" db/` e `grep -rniE "for update" db/`;
   `tests/test_lock_ordem_caixinha.py` mostra como forçar a intercalação.
 - **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
