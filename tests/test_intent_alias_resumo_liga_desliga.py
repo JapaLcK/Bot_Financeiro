@@ -61,6 +61,8 @@ _TOGGLES = (
     # complemento que descreve o relatório (lista fechada de substantivos)
     ("não quero receber o resumo semanal dos meus gastos", "report.weekly_disable"),
     ("quero receber o relatório mensal das minhas finanças", "report.monthly_enable"),
+    ("não quero receber o resumo semanal de gastos", "report.weekly_disable"),
+    ("não quero receber o relatório mensal de finanças", "report.monthly_disable"),
     # plural do dia da semana sozinho como período
     ("não quero receber o resumo todas as segundas-feiras", "report.weekly_disable"),
     # artigo indefinido ("um", "uma") nos dois sentidos
