@@ -116,7 +116,7 @@
         <span>Toque para ouvir</span>
       </button>
     </div>
-    <a id="lp-cta" class="lp-cta" href="/precos">Quero o PigBank</a>
+    <a id="lp-cta" class="lp-cta" href="https://quiz.pigbankai.com/">Quero o PigBank</a>
   </main>
   <footer class="lp-rodape">
     <a href="/termos">Termos de uso</a>
@@ -130,7 +130,7 @@
      vale: busca além do ponto mais longe já ouvido volta para ele. Erro no
      vídeo libera na hora, sem gravar a marca — tropeço de rede não é "assistiu".
      Exceção aqui dentro também libera: a falha é sempre aberta.
-     Portão de persuasão, não de segurança: a /precos segue aberta por URL. */
+     Portão de persuasão, não de segurança: o quiz segue aberto por URL. */
   try { (function () {
     var CHAVE = "pb_lp_vsl_visto";
     var raiz = document.documentElement;
@@ -147,12 +147,12 @@
       som.hidden = false;
     }
 
-    // utm_* e fbclid do anúncio seguem para a /precos.
+    // utm_* e fbclid do anúncio seguem para o quiz (o destino é o href do botão).
     var params = new URLSearchParams();
     new URLSearchParams(location.search).forEach(function (valor, nome) {
       if (/^utm_/i.test(nome) || nome === "fbclid") params.append(nome, valor);
     });
-    if (params.toString()) cta.href = "/precos?" + params.toString();
+    if (params.toString()) cta.href = cta.getAttribute("href") + "?" + params.toString();
 
     function liberar(gravar) {
       if (!raiz.classList.contains("lp-travado")) return;
