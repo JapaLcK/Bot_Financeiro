@@ -626,3 +626,194 @@ def test_link_stripe_em_modo_teste(monkeypatch):
     nomes = _links(monkeypatch, stripe="sk_test_x")
     assert nomes["Stripe, assinaturas"] == "https://dashboard.stripe.com/test/subscriptions"
     assert nomes["Stripe, pagamentos"] == "https://dashboard.stripe.com/test/payments"
+
+
+# ── Pessoa, não linha: `auth_accounts.user_id` não é único ─────────────────
+
+def _segunda_conta(uid, dias_atras, *, plan="free", pay="inactive", source="web",
+                   quiz=False, onboarding=False, trial_dias=None, past_due_dias=None):
+    """2ª linha de `auth_accounts` do MESMO user_id (só email/hashes são únicos)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into auth_accounts
+                    (user_id, email, password_hash, plan, last_payment_status, signup_source,
+                     signup_quiz, created_at, onboarding_completed_at, trial_started_at,
+                     past_due_since)
+                values (%s, %s, 'x', %s, %s, %s, %s, now() - make_interval(days => %s),
+                        case when %s then now() else null end,
+                        case when %s::int is null then null
+                             else now() - make_interval(days => %s::int) end,
+                        case when %s::int is null then null
+                             else now() - make_interval(days => %s::int) end)
+                """,
+                (uid, f"funil-2a-{uuid.uuid4().hex}@test.local", plan, pay, source,
+                 json.dumps({"versao": 1, "respostas": None}) if quiz else None,
+                 dias_atras, onboarding, trial_dias, trial_dias, past_due_dias, past_due_dias))
+        conn.commit()
+
+
+def _por(j, janela, chave, nome):
+    return {x[nome]: x["cadastros"] for x in j["janelas"][janela][chave]}
+
+
+def _dif(antes, depois, janela, chave, nome):
+    a, d = _por(antes, janela, chave, nome), _por(depois, janela, chave, nome)
+    return {k: d.get(k, 0) - a.get(k, 0) for k in set(a) | set(d) if d.get(k, 0) != a.get(k, 0)}
+
+
+def _soma_fecha(j):
+    for w in j["janelas"].values():
+        cad = w["etapas"][0]["n"]
+        assert sum(c["cadastros"] for c in w["canais"]) == cad
+        assert sum(o["cadastros"] for o in w["origens"]) == cad
+        assert sum(w["estado_atual"].values()) == cad
+
+
+def test_usuario_com_duas_contas_conta_uma_pessoa_na_conta_mais_antiga(contas):
+    antes = _funil()
+    # canônica (a mais antiga): free, web, sem quiz, sem onboarding
+    u = contas(3)
+    # a 2ª diverge em TUDO que agrupa o coorte e em onboarding
+    _segunda_conta(u, 1, plan="pro", pay="active", source="app", quiz=True, onboarding=True)
+    _evento(u, "completed", session="cs_duas")
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        assert _delta(antes, depois, janela) == {
+            "cadastros": 1, "viram_precos": 1, "abriram_checkout": 1, "concluiram": 1}
+        assert _dif(antes, depois, janela, "canais", "canal") == {"direto": 1}       # não "quiz"
+        assert _dif(antes, depois, janela, "origens", "origem") == {"web": 1}        # não "app"
+        assert depois["janelas"][janela]["estado_atual"]["free"] \
+            - antes["janelas"][janela]["estado_atual"]["free"] == 1                   # não "paying"
+        a, d = antes["janelas"][janela]["ativacao"], depois["janelas"][janela]["ativacao"]
+        assert {k: d[k] - a[k] for k in a} == {                                       # 1 pessoa, conta mais antiga
+            "concluiram": 1, "onboarding": 0, "whatsapp": 0, "lancamento": 0}
+    _soma_fecha(depois)
+
+
+def test_conta_nova_de_usuario_antigo_nao_e_cadastro_novo(contas):
+    antes = _funil()
+    u = contas(40)                       # 1º cadastro fora das duas janelas
+    _segunda_conta(u, 2, plan="pro", pay="active", source="app", quiz=True)
+    _evento(u, "completed", session="cs_antigo")
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        assert _delta(antes, depois, janela) == {
+            "cadastros": 0, "viram_precos": 0, "abriram_checkout": 0, "concluiram": 0}
+        assert _dif(antes, depois, janela, "canais", "canal") == {}
+        assert _dif(antes, depois, janela, "origens", "origem") == {}
+        assert depois["janelas"][janela]["estado_atual"] == antes["janelas"][janela]["estado_atual"]
+    _soma_fecha(depois)
+
+
+def test_duas_contas_somam_uma_pessoa_nas_duas_janelas(contas):
+    """Mistura: 1 pessoa com 2 contas na janela + 1 antigo com conta nova + 1 normal."""
+    antes = _funil()
+    dupla = contas(20)                   # canônica só na janela de 30d
+    _segunda_conta(dupla, 2, source="google")   # 2ª cairia nas DUAS janelas se contasse
+    antigo = contas(60)
+    _segunda_conta(antigo, 2)
+    contas(2, source="apple")
+    depois = _funil()
+    assert _delta(antes, depois, "7d")["cadastros"] == 1     # só a normal
+    assert _delta(antes, depois, "30d")["cadastros"] == 2    # normal + canônica da dupla
+    assert _dif(antes, depois, "7d", "origens", "origem") == {"apple": 1}
+    assert _dif(antes, depois, "30d", "origens", "origem") == {"apple": 1, "web": 1}
+    _soma_fecha(depois)
+
+
+def _trial(j, janela):
+    return j["janelas"][janela]["trial"]
+
+
+def test_trial_conta_pessoa_com_duas_contas_uma_vez(contas):
+    antes = _funil()
+    # 2 linhas do mesmo usuário, ambas com trial na janela e status diferentes
+    u = contas(3, plan="pro", pay="trialing", trial_dias=2)          # canônica: em trial
+    _segunda_conta(u, 1, plan="pro", pay="active", trial_dias=1)     # 2ª: pagando
+    contas(3, plan="pro", pay="active", trial_dias=1)                # positivo: 1 linha = 1 pessoa
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        a, d = _trial(antes, janela), _trial(depois, janela)
+        assert {k: d[k] - a[k] for k in a} == {
+            "iniciaram": 2, "em_trial": 1, "pagando": 1, "cancelaram": 0, "outros": 0}
+    # trial só na 2ª conta, canônica sem trial: fora (pessoa = conta mais antiga)
+    solo = contas(3)
+    _segunda_conta(solo, 1, plan="pro", pay="trialing", trial_dias=1)
+    assert _trial(_funil(), "7d")["iniciaram"] == _trial(depois, "7d")["iniciaram"]
+
+
+def test_atraso_conta_pessoa_com_duas_linhas_uma_vez(contas):
+    antes = _funil()["atraso"]
+    u = contas(3, plan="pro", pay="past_due", past_due_dias=40)     # além da carência
+    _segunda_conta(u, 1, plan="pro", pay="past_due", past_due_dias=60)
+    contas(3, plan="pro", pay="past_due", past_due_dias=1)          # positivo: 1 linha, dentro da carência
+    depois = _funil()["atraso"]
+    assert depois["total"] - antes["total"] == 2
+    assert depois["alem_carencia"] - antes["alem_carencia"] == 1
+
+
+def _duas_contas_ids(uid, quando_baixo, quando_alto):
+    """2 linhas do mesmo user_id com ids EXPLÍCITOS (baixo < alto), planos/origens
+    diferentes e a de id ALTO inserida primeiro (a ordem física não resolve o desempate).
+    Devolve nada: a de id baixo é free/web; a de id alto é pro/app/quiz."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from auth_accounts where user_id = %s", (uid,))
+            cur.execute("select nextval('auth_accounts_id_seq') as a, nextval('auth_accounts_id_seq') as b")
+            r = cur.fetchone()
+            baixo, alto = r["a"], r["b"]
+            assert baixo < alto
+            for id_, quando, plan, pay, source, quiz in (
+                    (alto, quando_alto, "pro", "active", "app", True),
+                    (baixo, quando_baixo, "free", "inactive", "web", False)):
+                cur.execute(
+                    "insert into auth_accounts (id, user_id, email, password_hash, plan, "
+                    "last_payment_status, signup_source, signup_quiz, created_at) "
+                    "values (%s, %s, %s, 'x', %s, %s, %s, %s, %s)",
+                    (id_, uid, f"funil-id-{id_}@test.local", plan, pay, source,
+                     json.dumps({"versao": 1, "respostas": None}) if quiz else None, quando))
+        conn.commit()
+
+
+def test_mesmo_created_at_desempata_pelo_menor_id(contas):
+    antes = _funil()
+    u = contas(3)
+    mesmo = NOW - timedelta(days=3)
+    _duas_contas_ids(u, mesmo, mesmo)
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        assert _delta(antes, depois, janela)["cadastros"] == 1
+        assert _dif(antes, depois, janela, "canais", "canal") == {"direto": 1}   # id baixo: free/web
+        assert _dif(antes, depois, janela, "origens", "origem") == {"web": 1}
+        assert depois["janelas"][janela]["estado_atual"]["free"] \
+            - antes["janelas"][janela]["estado_atual"]["free"] == 1
+    _soma_fecha(depois)
+
+
+def test_canonica_e_a_mais_antiga_nao_a_de_menor_id(contas):
+    antes = _funil()
+    u = contas(3)
+    # id baixo (free/web) é a conta NOVA; id alto (pro/app/quiz) é a antiga: vale a antiga
+    _duas_contas_ids(u, NOW - timedelta(days=1), NOW - timedelta(days=3))
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        assert _delta(antes, depois, janela)["cadastros"] == 1
+        assert _dif(antes, depois, janela, "canais", "canal") == {"quiz": 1}     # id alto: pro/app/quiz
+        assert _dif(antes, depois, janela, "origens", "origem") == {"app": 1}
+        assert depois["janelas"][janela]["estado_atual"]["paying"] \
+            - antes["janelas"][janela]["estado_atual"]["paying"] == 1
+    _soma_fecha(depois)
+
+
+def test_ativacao_nao_exige_o_primeiro_cadastro_na_janela(contas):
+    antes = _funil()
+    u = contas(40)                                   # canônica fora das duas janelas, sem onboarding
+    _segunda_conta(u, 2, onboarding=True)            # a nova tem onboarding, mas não é a canônica
+    _evento(u, "completed", dias_atras=1, session="cs_ativ_antigo")
+    depois = _funil()
+    for janela in ("7d", "30d"):
+        a, d = antes["janelas"][janela]["ativacao"], depois["janelas"][janela]["ativacao"]
+        assert {k: d[k] - a[k] for k in a} == {
+            "concluiram": 1, "onboarding": 0, "whatsapp": 0, "lancamento": 0}

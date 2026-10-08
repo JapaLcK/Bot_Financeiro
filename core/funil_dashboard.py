@@ -63,8 +63,20 @@ def _linha(cad: int, v: int, s: int, c: int) -> dict:
             "concluiram": c, "taxa_conclusao": _taxa(c, cad)}
 
 
-# Coorte = contas criadas na janela. v/s/c/e = o usuário teve esse kind DEPOIS do início
-# do coorte. Pix só grava `completed` (sem `started`), por isso as etapas são cumulativas.
+def _canonica(onde: str = "") -> str:
+    """Uma conta por PESSOA: `auth_accounts.user_id` não é único (só email/hashes são).
+
+    A canônica é a mais antiga (o 1º cadastro; `id` desempata). `onde` só poda o que entra
+    no DISTINCT ON, sempre por `user_id` inteiro (nunca corta linhas de uma mesma pessoa).
+    """
+    return (f"(SELECT DISTINCT ON (a.user_id) a.* FROM auth_accounts a {onde} "
+            "ORDER BY a.user_id, a.created_at, a.id)")
+
+
+# Coorte = pessoas cujo 1º cadastro (conta canônica) caiu na janela; a 2ª conta de um
+# usuário antigo NÃO é cadastro novo. Plano/origem/quiz/status vêm da canônica.
+# v/s/c/e = o usuário teve esse kind DEPOIS do início do coorte.
+# Pix só grava `completed` (sem `started`), por isso as etapas são cumulativas.
 _COORTE_SQL = f"""
 WITH flags AS (
     SELECT a.user_id,
@@ -80,7 +92,7 @@ WITH flags AS (
            coalesce(bool_or(e.kind = 'started'), false)        AS s,
            coalesce(bool_or(e.kind = 'completed'), false)      AS c,
            coalesce(bool_or(e.kind = 'expired'), false)        AS e
-    FROM auth_accounts a
+    FROM {_canonica("WHERE a.user_id IN (SELECT user_id FROM auth_accounts WHERE created_at >= %(ini)s)")} a
     LEFT JOIN checkout_funnel_events e
            ON e.user_id = a.user_id AND e.created_at >= %(ini)s
     WHERE a.created_at >= %(ini)s
@@ -128,10 +140,12 @@ async def _janela(cur, dias: int, agora: datetime, desde, ck: dict) -> dict:
         "WHERE created_at >= %(ini)s AND email_hash IS NOT NULL", p)
     emails = (await cur.fetchone())["n"]
 
-    # Bloco 3: ativação de quem CONCLUIU checkout na janela. Sem filtro de data nos
-    # lançamentos: "já lançou alguma vez".
+    # Bloco 3: ativação de quem CONCLUIU checkout na janela (1 conta canônica por pessoa).
+    # Sem filtro de data nos lançamentos: "já lançou alguma vez".
+    concluiu = ("WHERE a.user_id IN (SELECT user_id FROM checkout_funnel_events "
+                "WHERE kind = 'completed' AND created_at >= %(ini)s)")
     await cur.execute(
-        """
+        f"""
         SELECT count(*) AS n,
                count(*) FILTER (WHERE a.onboarding_completed_at IS NOT NULL) AS onboarding,
                count(*) FILTER (WHERE a.phone_status = 'confirmed' OR EXISTS (
@@ -140,16 +154,17 @@ async def _janela(cur, dias: int, agora: datetime, desde, ck: dict) -> dict:
                count(*) FILTER (WHERE EXISTS (
                    SELECT 1 FROM launches l
                    WHERE l.user_id = a.user_id AND l.is_internal_movement = false)) AS lancamento
-        FROM auth_accounts a
-        WHERE a.user_id IN (SELECT user_id FROM checkout_funnel_events
-                            WHERE kind = 'completed' AND created_at >= %(ini)s)
+        FROM {_canonica(concluiu)} a
         """, p)
     ativ = await cur.fetchone()
 
-    # Bloco 4: quem iniciou trial na janela e onde está hoje.
+    # Bloco 4: quem iniciou trial na janela e onde está hoje (pessoa = conta canônica;
+    # trial iniciado só na 2ª conta, com a canônica sem trial, não conta).
     await cur.execute(
-        f"SELECT {_ACCOUNT_STATUS_SQL} AS status, count(*) AS n FROM auth_accounts a "
-        "WHERE a.trial_started_at >= %(ini)s GROUP BY 1", p)
+        f"SELECT {_ACCOUNT_STATUS_SQL} AS status, count(*) AS n FROM "
+        + _canonica("WHERE a.user_id IN (SELECT user_id FROM auth_accounts "
+                    "WHERE trial_started_at >= %(ini)s)")
+        + " a WHERE a.trial_started_at >= %(ini)s GROUP BY 1", p)
     tr = {r["status"]: r["n"] for r in await cur.fetchall()}
     trial = {"iniciaram": sum(tr.values()), "em_trial": tr.get("trial", 0),
              "pagando": tr.get("paying", 0), "cancelaram": tr.get("canceled", 0)}
@@ -222,11 +237,11 @@ async def fetch_funil() -> dict[str, Any]:
             desde = (await cur.fetchone())["desde"]
             ck = await _fetch_checkout_funnel(cur)
             janelas = {f"{d}d": await _janela(cur, d, agora, desde, ck) for d in JANELAS}
-            # Bloco 7: cobrança em atraso AGORA (não depende de janela).
+            # Bloco 7: cobrança em atraso AGORA (não depende de janela); pessoa, não linha.
             await cur.execute(
                 """
-                SELECT count(*) AS total,
-                       count(*) FILTER (WHERE past_due_since < now() - make_interval(days => %s)) AS alem_carencia
+                SELECT count(DISTINCT user_id) AS total,
+                       count(DISTINCT user_id) FILTER (WHERE past_due_since < now() - make_interval(days => %s)) AS alem_carencia
                 FROM auth_accounts
                 WHERE past_due_since IS NOT NULL
                   AND lower(coalesce(last_payment_status, '')) = ANY(%s)

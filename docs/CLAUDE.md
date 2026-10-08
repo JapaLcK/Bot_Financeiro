@@ -1031,6 +1031,10 @@ social novo entra em `ORIGENS` e no teste de igualdade com
 `signup_source_from_request`. Sem cache/índice por decisão; se a consulta passar
 de ~5s, TTL de 60s antes de índice. Contas de cortesia/internas entram em
 "cadastros".
+Limites declarados do painel (pessoa = conta mais antiga do `user_id`; `auth_accounts.user_id` não é único):
+(a) `atraso` conta a pessoa se QUALQUER linha dela está em atraso, enquanto `estado_atual` usa a conta mais antiga, então a mesma pessoa pode ser "free" num bloco e "em atraso" no outro (atraso é sobre cobrança: qualquer linha vale);
+(b) quem converte só na 2ª conta (cadastro novo do mesmo `user_id`) não aparece como conversão do coorte;
+(c) custo da ativação: falta índice em `user_identities(user_id)` (EXISTS por linha); o Tester mediu 3,6s no pior caso com 100k cadastros nos últimos 30d e ~30s com 20k conclusões (só admin). Remédio: `create index on user_identities(user_id)` em issue separada, ou o TTL de 60s acima.
 
 ### Tarefas de fundo
 
