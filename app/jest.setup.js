@@ -203,4 +203,9 @@ jest.mock("@/features/bloqueio/tampa", () => ({
 
 // O slider é nativo (UISlider): no Jest, um View que repassa as props, para o teste
 // achar pelo rótulo e disparar `fireEvent(slider, "valueChange", n)`.
-jest.mock("@react-native-community/slider", () => ({ __esModule: true, default: require("react-native").View }));
+// O `require` fica dentro do componente: resolver "react-native" já na fábrica
+// carrega o css-interop antes do `mockAppState` existir (apontado pelo Codex).
+jest.mock("@react-native-community/slider", () => ({
+  __esModule: true,
+  default: (props) => require("react").createElement(require("react-native").View, props),
+}));
