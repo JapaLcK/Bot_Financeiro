@@ -913,6 +913,10 @@ def _extract_date_entity(norm: str) -> str | None:
 
 def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
+        # Pergunta sobre ligar/desligar não é pedido: _normalize tira o '?', então
+        # quem decide é o texto original.
+        if "?" in original and intent.startswith("report.") and intent.endswith(("_enable", "_disable")):
+            continue
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
 
