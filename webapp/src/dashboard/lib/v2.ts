@@ -118,12 +118,13 @@ export const guiaQuery = {
 export const CHAT_REAL = false;
 // O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
 // A resposta monta duas vezes (a bolha e o role=status do PiggyChat): montar de novo só
-// relê depois de erro (a pergunta repetida tenta outra vez); o dado novo vem do SSE e do foco.
+// relê depois de erro (a pergunta repetida tenta outra vez) ou de aviso do SSE com a conversa
+// fechada (inativa, a consulta só fica invalidada); o resto do dado novo vem do SSE e do foco.
 export const investidoQuery = {
   queryKey: ["investido"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/investido", signal),
   ...vivo,
-  refetchOnMount: (q: { state: { status: string } }) => q.state.status === "error",
+  refetchOnMount: (q: { state: { status: string; isInvalidated: boolean } }) => q.state.status === "error" || q.state.isInvalidated,
 };
 export const resumoMesQuery = (mes: string) => ({
   queryKey: ["resumo-do-mes", mes],

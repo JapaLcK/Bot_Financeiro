@@ -17,9 +17,11 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, investido = "com_banco", falha = false, demo = false } = {}) {
+async function abrir({ width = 1440, investido = "com_banco", falha = false, demo = false, sse = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, reducedMotion: "reduce" });
   await servir(ctx, demo ? RAIZ : undefined, { investido });
+  // Guarda o EventSource do painel para o teste disparar um aviso (o mesmo caminho do SSE).
+  if (sse) await ctx.addInitScript(() => { const Real = window.EventSource; window.EventSource = class extends Real { constructor(...args) { super(...args); window.sseDoPainel = this; } }; });
   if (falha) {
     const e = RESPOSTAS.erros["500"];
     await ctx.route("**/api/v2/investido", (r) => r.fulfill({ status: e.status, json: e.body }));
@@ -129,6 +131,30 @@ test("sem banco, com motivos e com parte sem saldo", async () => {
   const [nenhum, selosNenhum] = await leia("nenhum_investimento");
   assert.equal(nenhum, "Não encontrei investimentos nos seus bancos conectados.");
   assert.deepEqual(selosNenhum, []);
+});
+
+// Fora da /piggy a consulta fica inativa: o aviso do SSE só a marca como invalidada. Voltar
+// tem de reler (o snapshot velho não fica na tela), e a pergunta seguinte já vê o novo.
+test("aviso do SSE com a conversa fechada: voltar relê uma vez e a pergunta seguinte mostra o número novo", async () => {
+  const { ctx, page, gets } = await abrir({ sse: true });
+  await perguntar(page, "quanto tenho investido?");
+  const antes = await resposta(page);
+  await page.evaluate(() => { location.hash = "#/"; });
+  await page.locator(".chat").waitFor({ state: "detached" });
+  await ctx.route("**/api/v2/investido", (r) => r.fulfill({ json: RESPOSTAS.investido.com_motivos }));
+  await page.evaluate(() => window.sseDoPainel.dispatchEvent(new MessageEvent("message", { data: '{"recurso":"open_finance"}' })));
+  const inativa = gets.length;
+  await page.evaluate(() => { location.hash = "#/piggy"; });
+  await page.locator(".chat").waitFor();
+  await perguntar(page, "quanto tenho investido?");
+  await page.waitForFunction(() => document.querySelector(".chat > .msg-piggy:last-child .msg-text").textContent.includes("1.234,50"), null, { timeout: 5000 }).catch(() => {});
+  const depois = await resposta(page);
+  await page.waitForTimeout(300); // o role=status monta a mesma resposta 60 ms depois: não pode pedir de novo
+  await ctx.close();
+  assert.match(antes, /^Você tem R\$ 57\.123,45/);
+  assert.equal(inativa, 1); // inativa: o aviso não relê sozinho
+  assert.match(depois, /^Você tem R\$ 1\.234,50/);
+  assert.deepEqual(gets, ["GET", "GET"]);
 });
 
 test("protótipo: o valor semeado, nenhuma requisição", async () => {
