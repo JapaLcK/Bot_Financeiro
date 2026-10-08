@@ -55,10 +55,10 @@ def _ordem(motivos: set, lista=MOTIVOS) -> list[str]:
 
 
 def _partes(acc: dict, chave: str, rotulo) -> list[dict]:
-    # Parte só com posições sem saldo (e soma 0) → `null`; parte que fecha em 0 some.
+    # Soma 0 com alguma posição sem saldo → `null` (não se sabe); parte que fecha em 0 some.
     out = []
-    for k, (soma, todas_sem_saldo, motivos) in acc.items():
-        valor = None if todas_sem_saldo and soma == 0 else soma
+    for k, (soma, motivos) in acc.items():
+        valor = None if soma == 0 and "saldo_ausente" in motivos else soma
         if valor is None or valor != 0:
             out.append({chave: k, **rotulo(k), "valor": valor, "motivos": _ordem(motivos, MOTIVOS_PARTE)})
     return sorted(out, key=lambda p: (p["valor"] is None, -(p["valor"] or 0),
@@ -89,8 +89,8 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None) -> dict:
         total += q
         for acc, k in ((por_tipo, tipo_da_posicao(p["type"], p["subtype"])),
                        (por_banco, c["institution_name"] or SEM_NOME)):
-            soma, todas, ms = acc.get(k, (Decimal("0.00"), True, set()))
-            acc[k] = (soma + q, todas and ausente, ms | motivos)
+            soma, ms = acc.get(k, (Decimal("0.00"), set()))
+            acc[k] = (soma + q, ms | motivos)
 
     # Conexão sem nenhuma linha no espelho (`ultima`) não prova carteira vazia: o sync não
     # grava "li e veio vazio", e a falha nem sempre vira `status_reason` (item em
@@ -106,8 +106,8 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None) -> dict:
             # Moeda/resgatada não chegam aqui: a linha põe a conexão viva em `ultima`.
             topo.add("nenhum_investimento")
         return {"total": None, "por_tipo": [], "por_banco": [], "motivos": _ordem(topo)}
-    if posicoes and total == 0 and all(sem_saldo(p) for p in posicoes):
-        total = None  # nenhum saldo veio do banco: o mesmo critério da parte `null`
+    if total == 0 and "saldo_ausente" in topo:
+        total = None  # soma 0 com um saldo desconhecido não é R$ 0: o critério da parte `null`
     return {
         "total": total,
         "por_tipo": _partes(por_tipo, "tipo", lambda k: {"rotulo": TIPOS[k]}),

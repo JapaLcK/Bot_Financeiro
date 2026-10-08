@@ -336,3 +336,52 @@ def test_positivo_zero_informado_pelo_banco_e_zero(uid):
     posicao(c, "inv-1", "0")
     posicao(c, "inv-2", "0", tipo="EQUITY")
     assert ler(uid) == {"total": D("0.00"), "por_tipo": [], "por_banco": [], "motivos": []}
+
+
+# ─── Soma 0 com algum saldo desconhecido não é R$ 0 (Codex, head 9851ae74) ───
+# (a) zero + ausente → null; (b) positivo + ausente → número com aviso; (c) é o controle
+# positivo acima; (d)/(e) a mesma regra na parte, ao lado de uma parte positiva.
+
+def _sem_saldo(c, pid, como, tipo="FIXED_INCOME"):
+    if como == "nulo":
+        return posicao(c, pid, None, tipo=tipo)
+    i = posicao(c, pid, "0", tipo=tipo)  # o sync grava 0 quando a Pluggy estraga o saldo
+    q("""update open_finance_investments set raw = raw || '{"balance": "abc"}' where id=%s""", (i,))
+    return i
+
+
+@pytest.mark.parametrize("como", ["nulo", "invalido"])
+def test_a_zero_informado_e_ausente_e_null(uid, como):
+    c = conexao(uid, f"item-{uid}", banco="Nubank")
+    posicao(c, "inv-zero", "0")
+    _sem_saldo(c, "inv-sem", como)
+    r = ler(uid)
+    assert r["total"] is None and r["motivos"] == ["saldo_ausente"]
+    assert r["por_tipo"] == [{"tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": None,
+                              "motivos": ["saldo_ausente"]}]
+    assert r["por_banco"] == [{"banco": "Nubank", "valor": None, "motivos": ["saldo_ausente"]}]
+
+
+@pytest.mark.parametrize("como", ["nulo", "invalido"])
+def test_b_positivo_e_ausente_e_numero_com_aviso(uid, como):
+    c = conexao(uid, f"item-{uid}", banco="Nubank")
+    posicao(c, "inv-1", "100")
+    _sem_saldo(c, "inv-sem", como)
+    r = ler(uid)
+    assert r["total"] == D("100.00") and r["motivos"] == ["saldo_ausente"]
+    assert partes(r) == {"renda_fixa": D("100.00")} and partes(r, "por_banco") == {"Nubank": D("100.00")}
+
+
+@pytest.mark.parametrize("como", ["nulo", "invalido"])
+def test_d_e_parte_zero_e_ausente_e_null_ao_lado_da_positiva(uid, como):
+    a = conexao(uid, f"item-a-{uid}", banco="Nubank")
+    posicao(a, "inv-zero", "0")
+    _sem_saldo(a, "inv-sem", como)
+    posicao(conexao(uid, f"item-b-{uid}", banco="XP"), "inv-1", "100", tipo="EQUITY")
+    r = ler(uid)
+    assert r["total"] == D("100.00") and r["motivos"] == ["saldo_ausente"]
+    assert r["por_tipo"] == [
+        {"tipo": "acoes", "rotulo": "Ações", "valor": D("100.00"), "motivos": []},
+        {"tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": None, "motivos": ["saldo_ausente"]}]
+    assert r["por_banco"] == [{"banco": "XP", "valor": D("100.00"), "motivos": []},
+                              {"banco": "Nubank", "valor": None, "motivos": ["saldo_ausente"]}]
