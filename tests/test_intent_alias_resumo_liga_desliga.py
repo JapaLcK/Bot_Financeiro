@@ -48,6 +48,10 @@ _TOGGLES = (
     # pronome objeto entre "de" e o verbo
     ("para de me mandar o resumo semanal", "report.weekly_disable"),
     ("para de me enviar o resumo mensal", "report.monthly_disable"),
+    # determinante possessivo e dia da semana como período
+    ("não quero receber meu resumo semanal", "report.weekly_disable"),
+    ("para de me mandar meu resumo mensal", "report.monthly_disable"),
+    ("não quero receber o resumo toda segunda-feira", "report.weekly_disable"),
     # cortesia antes do comando também não muda o pedido
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
     ("por favor quero receber o resumo mensal", "report.monthly_enable"),
