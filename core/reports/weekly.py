@@ -76,8 +76,8 @@ def _totais_semana(user_id: int, inicio: date, fim: date) -> dict:
 
 def _bancos(user_id: int, agora: datetime) -> tuple[str, datetime | None, int]:
     """(estado, menor `sincronizado_em` das conexões vivas, quantas CONEXÕES nunca sincronizaram), a
-    partir do bloco de contas oficial. A contagem vem das conexões e não das contas: uma conexão com
-    3 contas é 1 banco."""
+    partir do bloco de contas oficial. A contagem (e a presença de banco sem sync) vem das conexões e
+    não das contas: uma conexão com 3 contas é 1 banco, e a nova sem conta ainda existe."""
     from db import contas_hoje
     from db.connection import get_conn
     from db.open_finance_state import _TERMINAL
@@ -90,12 +90,11 @@ def _bancos(user_id: int, agora: datetime) -> tuple[str, datetime | None, int]:
                     if c["last_sync_at"] is None and (c["status"] or "").upper() not in _TERMINAL)
         conn.rollback()
     vivas = [c for c in contas if "conexao_pausada" not in c["motivos"]]
-    if not vivas:
-        return "sem_banco", None, 0
     syncs = [c["sincronizado_em"] for c in vivas if c["sincronizado_em"]]
     if not syncs:
-        return "nunca_sincronizado", None, nunca
-    velho = any("banco_desatualizado" in c["motivos"] for c in vivas)
+        # Conexão nova ainda sem linhas em open_finance_accounts não aparece em `contas`: vale a conexão.
+        return ("nunca_sincronizado", None, nunca) if nunca else ("sem_banco", None, 0)
+    velho = nunca or any("banco_desatualizado" in c["motivos"] for c in vivas)  # pendente = desatualizado
     return ("desatualizado" if velho else "atualizado"), min(syncs), nunca
 
 

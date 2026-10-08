@@ -688,3 +688,28 @@ def test_job_semana_atual_que_falha_continua_derrubando_o_build(job):
     job.mp.setattr(wk, "get_summary_by_period", quebra)
     job.tick(uid)
     assert job.envios == [] and _prefs_semanal(uid) is None
+
+
+def test_conexao_nova_sem_contas_conta_como_banco_nao_sincronizado():
+    """Conexão nova (last_sync_at nulo) ainda sem linhas em open_finance_accounts não aparece em
+    `contas_hoje.listar`: a presença e o "nunca sincronizou" vêm das conexões."""
+    from tests import _patrimonio_helpers as h
+    agora = datetime.now(h.AGORA.tzinfo)
+
+    nova = usuario_pagante("plus")                                  # (a)
+    _banco(nova, f"x{nova}", sync=None, contas=0)
+    misto = usuario_pagante("plus")                                 # (b)
+    s_ok = _banco(misto, f"y1{misto}")
+    _banco(misto, f"y2{misto}", sync=None, contas=0)
+    pausada, apagada, nada = (usuario_pagante("plus") for _ in range(3))   # (c) controles
+    _banco(pausada, f"p{pausada}", status="PAUSED", sync=None, contas=0)
+    _banco(apagada, f"d{apagada}", status="DELETED", sync=None, contas=0)
+
+    assert wk._bancos(nova, agora) == ("nunca_sincronizado", None, 1)
+    assert wk._bancos(misto, agora) == ("desatualizado", s_ok, 1)
+    assert wk._bancos(pausada, agora) == wk._bancos(apagada, agora) == wk._bancos(nada, agora) == ("sem_banco", None, 0)
+
+    with patch.object(wk, "now_tz", return_value=SEGUNDA):
+        assert wk.build_weekly_report_summary(nova, closed=True)["atualizado_em"] == "Bancos conectados ainda não sincronizaram"
+        assert "e 1 banco(s) ainda não sincronizado(s)" in wk.build_weekly_report_text(misto, closed=True)
+        assert wk.build_weekly_report_summary(pausada, closed=True)["atualizado_em"] == ""
