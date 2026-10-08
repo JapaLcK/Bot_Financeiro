@@ -152,3 +152,30 @@ def test_pergunta_sem_alias_nao_liga_mesmo_se_a_ia_devolver_toggle(monkeypatch):
     monkeypatch.setattr(openai, "OpenAI", _FakeClient)
 
     assert classify("posso assinar os resumos semanais?").intent == "out_of_scope"
+
+
+def test_clarificacao_com_pergunta_nao_liga_resumo(monkeypatch):
+    # Com pendência de esclarecimento, a resposta "posso assinar…?" troca de assunto.
+    # A IA devolve o toggle; a guarda usa a resposta do usuário (não o texto montado).
+    from types import SimpleNamespace
+
+    import openai
+
+    from core.intent_classifier import classify_with_context
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            conteudo = '{"intent": "report.weekly_enable", "confidence": 0.95}'
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=conteudo))])
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.chat = SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setenv("OPENAI_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(openai, "OpenAI", _FakeClient)
+
+    resultado = classify_with_context(
+        "quero algo", "Qual resumo você quer?", "posso assinar os resumos semanais?"
+    )
+    assert resultado.intent == "out_of_scope"

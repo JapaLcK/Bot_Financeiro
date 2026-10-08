@@ -1207,7 +1207,11 @@ def classify_with_context(
         "incompreensível ou o usuário tenha mudado de assunto (aí classifique a nova mensagem "
         "normalmente). Se o usuário claramente desistiu/cancelou, use out_of_scope."
     )
-    return _classify_llm_call(content, user_id)
+    result = _classify_llm_call(content, user_id)
+    # A guarda usa a resposta do usuário: o texto montado tem a pergunta do bot, com '?'.
+    if _pergunta_sobre_o_toggle(answer) and result.intent in _RESUMO_TOGGLES:
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+    return result
 
 
 # ---------------------------------------------------------------------------
