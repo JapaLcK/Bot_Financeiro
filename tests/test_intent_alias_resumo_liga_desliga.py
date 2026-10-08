@@ -33,6 +33,8 @@ _TOGGLES = (
     ("não desejo receber o resumo mensal", "report.monthly_disable"),
     # cortesia antes e depois
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
+    ("por gentileza, desliga o resumo semanal", "report.weekly_disable"),
+    ("ei, para de mandar o resumo mensal", "report.monthly_disable"),
     ("não quero receber o resumo semanal por favor", "report.weekly_disable"),
     ("quero receber o resumo mensal todo mês", "report.monthly_enable"),
     # ligar/desligar genéricos continuam como antes
