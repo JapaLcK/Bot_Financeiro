@@ -1015,6 +1015,23 @@ apaga a linha de `plan_trials` do **telefone** da conta e zera
 `trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
 por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
 
+`/admin/funil` (`core/funil_routes.py` + `core/funil_dashboard.py` + `frontend/funil.html`)
+é o painel de funil: só leitura, agregados fechados (nenhum `user_id`/e-mail/quiz),
+7d e 30d na mesma resposta de `GET /admin/api/funil`, mesma sessão do `/admin` (reusa
+`get_current_admin`; sem auth nova). Links externos só aparecem com o ID configurado
+(`GA4_PROPERTY_ID`, `META_PIXEL_ID`, `CLARITY_PROJECT_ID`, `STRIPE_SECRET_KEY`).
+Regras de leitura: coorte = cadastros criados na janela, e as etapas são
+CUMULATIVAS ("alcançou pelo menos"; o Pix só grava `completed`). Taxa ligada a
+/precos vira "—" quando o coorte começa antes do "medido desde"
+(`min(created_at)` de `viewed_pricing`), então nos primeiros dias/semanas
+pós-deploy a janela de 30d mostra "—". Canal: afiliado > prospecção > quiz >
+direto (quiz só sim/não, nunca perfil). `expired` NÃO é abandono (abandono =
+abriram − concluíram). `origem` é restrita a `ORIGENS` (+ "outro"): provedor
+social novo entra em `ORIGENS` e no teste de igualdade com
+`signup_source_from_request`. Sem cache/índice por decisão; se a consulta passar
+de ~5s, TTL de 60s antes de índice. Contas de cortesia/internas entram em
+"cadastros".
+
 ### Tarefas de fundo
 
 Sobem no startup do app quando `RUN_BACKGROUND_TASKS != "0"`: rendimento de
