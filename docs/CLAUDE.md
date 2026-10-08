@@ -846,7 +846,11 @@ com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula
 ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que
 não dê id válido (`,`, só espaços, `abc`) = ninguém, com warning no log. As duas são lidas a cada mensagem, mas
 trocar env no Railway reinicia o serviço (~1 min sem bot). Com a flag, o
-`add_launch` da IA pede "sim" quando valor, tipo ou categoria não batem com o texto.
+`add_launch` da IA pede "sim" quando valor, data, tipo ou categoria não batem com o texto
+(`lancamento_com_certeza`): data do texto e `data` da IA no mesmo dia, no fuso do app
+(texto sem data → IA sem data ou hoje); hashtag só é certa se a regra local da nota não
+a contradiz. Limite: depois do "sim", o cross-check do `add_from_entities` ainda pode
+trocar a categoria da hashtag pela da regra local (comportamento de hoje).
 Desligar a flag NÃO desfaz o cancelamento da confirmação da IA não mostrada (seção
 "IA"): ele vale para todos os canais (decisão do dono, 2026-10-08).
 

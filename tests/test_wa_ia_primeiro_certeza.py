@@ -189,6 +189,9 @@ def test_tabela_lancamento_com_certeza(uid_pro, frase, args, certo):
     # "salário" não tem regra local: sem a do usuário, toda receita de salário
     # confirmaria pela categoria, e a tabela não mediria o tipo.
     db.add_category_rule(uid_pro, "salario", "salário")
+    if frase.startswith("ontem"):
+        # A IA coerente manda o dia de ontem (calculado aqui, não na coleta).
+        args = {**args, "data": _dia(-1)}
     assert lancamento_com_certeza(uid_pro, args, frase) is certo
 
 
@@ -257,3 +260,116 @@ def test_cota_no_fim_outro_texto_mantem_aviso_e_limpa(uid_pro, monkeypatch):
     assert "acabaram" in r, r
     assert db.ai_get_pending_action(uid_pro) is None
     assert lancamentos(uid_pro) == []
+
+
+# ── Data: a gravação usa `args["data"]`, não a data do texto ─────────────────
+
+def _dia(delta: int = 0) -> str:
+    from datetime import timedelta
+    from utils_date import today_tz
+    return (today_tz() + timedelta(days=delta)).isoformat()
+
+
+def _dias_gravados(uid):
+    from utils_date import _tz
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select criado_em from launches where user_id=%s order by id", (uid,))
+        rows = cur.fetchall()
+        conn.commit()
+    return [r["criado_em"].astimezone(_tz()).date().isoformat() for r in rows]
+
+
+@pytest.mark.parametrize("frase,data_ia", [
+    ("ontem gastei 50 no mercado", None),          # a IA esqueceu a data
+    ("ontem gastei 50 no mercado", "hoje"),
+    ("gastei 50 no mercado dia 03/10", "2026-10-04"),
+    ("gastei 50 no mercado dia 3", "2026-10-04"),  # "dia 3" sem mês: o 2º número já pega
+    ("gastei 50 no mercado", -2),                  # texto sem data, IA com outro dia
+    ("gastei 50 no mercado", "amanhã"),            # data que não se lê
+], ids=["ontem-sem-data", "ontem-ia-hoje", "03-10-ia-04", "dia-3-ia-4", "sem-data-ia-anteontem",
+        "data-ilegivel"])
+def test_data_divergente_confirma(uid_pro, monkeypatch, frase, data_ia):
+    liga_flag(monkeypatch)
+    extra = {}
+    if data_ia == "hoje":
+        extra["data"] = _dia(0)
+    elif isinstance(data_ia, int):
+        extra["data"] = _dia(data_ia)
+    elif data_ia:
+        extra["data"] = data_ia
+    openai_falso(monkeypatch, lancamento(50, **extra))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+@pytest.mark.parametrize("frase,delta", [
+    ("ontem gastei 50 no mercado", -1),
+    ("gastei 50 no mercado", 0),
+    ("gastei 50 no mercado", None),
+], ids=["ontem-ia-ontem", "sem-data-ia-hoje", "sem-data-ia-sem-data"])
+def test_data_coerente_grava_direto_no_dia_certo(uid_pro, monkeypatch, frase, delta):
+    liga_flag(monkeypatch)
+    extra = {} if delta is None else {"data": _dia(delta)}
+    openai_falso(monkeypatch, lancamento(50, **extra))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" not in r, r
+    assert _dias_gravados(uid_pro) == [_dia(delta or 0)]
+
+
+@pytest.mark.parametrize("agora,frase,data_ia,certo", [
+    # 22:30 em São Paulo = 01:30 UTC do dia seguinte: "hoje" é o dia 8, não o 9.
+    ((2026, 10, 8, 22, 30), "gastei 50 no mercado", "2026-10-08", True),
+    ((2026, 10, 8, 22, 30), "gastei 50 no mercado", "2026-10-09", False),
+    ((2026, 10, 8, 22, 30), "ontem gastei 50 no mercado", "2026-10-07", True),
+    ((2026, 10, 8, 22, 30), "ontem gastei 50 no mercado", "2026-10-08", False),
+    # 00:10 do dia 9: "ontem" é o dia 8.
+    ((2026, 10, 9, 0, 10), "ontem gastei 50 no mercado", "2026-10-08", True),
+    ((2026, 10, 9, 0, 10), "ontem gastei 50 no mercado", "2026-10-07", False),
+])
+def test_data_perto_da_meia_noite_no_fuso_do_app(uid_pro, monkeypatch, agora, frase, data_ia, certo):
+    from datetime import datetime
+    import utils_date
+    monkeypatch.setenv("REPORT_TIMEZONE", "America/Sao_Paulo")
+    congelado = datetime(*agora, tzinfo=utils_date._tz())
+    monkeypatch.setattr(utils_date, "now_tz", lambda: congelado)
+    args = {"tipo": "despesa", "valor": 50, "alvo": "mercado", "data": data_ia}
+    assert lancamento_com_certeza(uid_pro, args, frase) is certo
+
+
+@pytest.mark.parametrize("frase,delta", [
+    ("ontem gastei 50 no mercado", -1),
+    ("gastei 50 no mercado", 0),
+], ids=["ontem-com-espacos", "hoje-com-espacos"])
+def test_data_com_espacos_nunca_grava_noutro_dia(uid_pro, monkeypatch, frase, delta):
+    """A gravação lê `data` crua: " 2026-10-07 " não é ISO e vira "agora". A
+    certeza lê pelo mesmo parser, então não aprova — confirma, e o "sim" grava
+    onde a gravação gravaria (nunca hoje no lugar de ontem sem perguntar)."""
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, data=f" {_dia(delta)} "))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+# ── Hashtag: a regra local da nota não pode contradizê-la ───────────────────
+
+def test_hashtag_contrariada_por_regra_local_confirma(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    openai_falso(monkeypatch, lancamento(50, alvo="posto", categoria="lazer"))
+    r = diga(uid_pro, "gastei 50 no posto #lazer")
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_hashtag_sem_conflito_grava_direto_na_categoria_dela(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, alvo="zé", categoria="lazer"))
+    r = diga(uid_pro, "gastei 50 no zé #lazer")
+    assert "Só confirmando" not in r, r
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select categoria from launches where user_id=%s", (uid_pro,))
+        cats = [x["categoria"] for x in cur.fetchall()]
+        conn.commit()
+    assert cats == ["lazer"]

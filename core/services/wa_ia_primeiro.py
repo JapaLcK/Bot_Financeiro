@@ -61,17 +61,43 @@ def fica_no_roteador(user_id: int, text: str) -> bool:
 
 
 def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> bool:
-    """True só se valor, categoria e tipo que a IA mandou batem com o que o
-    texto do usuário diz por si só, sem LLM."""
+    """True só se valor, data, tipo e categoria que a IA mandou batem com o que
+    o texto do usuário diz por si só, sem LLM:
+
+    (a) valor: um número só no texto (fora a data), igual ao da IA;
+    (d) data: texto com data → `args["data"]` no mesmo dia; texto sem data →
+        `data` ausente ou hoje. Dia no fuso do app (`_tz`, o mesmo do
+        `extract_date_from_text` e do `_parse_iso_datetime_for_launch`);
+    (c) tipo: receita só com verbo de receita no começo; despesa só sem;
+    (b) categoria: com hashtag, a IA ecoa a da hashtag E a regra local da nota
+        não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
+        sem hashtag, regra local confiante na nota e no texto, iguais.
+    """
     from core.handlers.launches import MOTIVOS_CONFIANTES
+    from core.services.ai_chat.tools.launches import _parse_iso_datetime_for_launch
     from core.services.category_service import infer_category
     from parsers import RECEITA_START_VERBS, _extract_explicit_category, _extract_valor
-    from utils_date import extract_date_from_text
+    from utils_date import _tz, extract_date_from_text, today_tz
     from utils_text import normalize_text
 
     texto = (texto_do_usuario or "").strip()
-    _, sem_data = extract_date_from_text(texto)
+    data_txt, sem_data = extract_date_from_text(texto)
     sem_data = sem_data or texto
+
+    # (d) data: a gravação usa `args["data"]`; a do texto não chega lá. O dia
+    # sai do MESMO parser da gravação: o que se aprova é o que se grava.
+    data_ia = args.get("data")
+    dia_ia = None                       # vazia: a gravação usa agora (= hoje)
+    if data_ia:
+        gravado = _parse_iso_datetime_for_launch(data_ia)
+        if gravado is None:             # a gravação cairia em "agora": incerto
+            return False
+        dia_ia = gravado.astimezone(_tz()).date()
+    if data_txt is not None:
+        if dia_ia != data_txt.date():
+            return False
+    elif dia_ia not in (None, today_tz()):
+        return False
 
     # (a) valor: um número só no texto, igual ao da IA.
     try:
@@ -90,13 +116,16 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
 
     # (b) categoria: hashtag do usuário, ou regra determinística confiante.
     _, hashtag = _extract_explicit_category(texto)
-    if hashtag:
-        # A hashtag só garante algo se a IA mandou a mesma categoria.
-        cat_ia = (args.get("categoria") or "").strip()
-        return bool(cat_ia) and (infer_category(user_id, "", cat_ia).category
-                                 == infer_category(user_id, "", hashtag).category)
     nota = (args.get("nota") or "").strip() or (args.get("alvo") or "").strip()
     local = infer_category(user_id, nota, None, allow_ai=False)
+    if hashtag:
+        # A hashtag só garante algo se a IA mandou a mesma categoria e se a
+        # regra local da nota não a contradiz (o `add_from_entities` trocaria).
+        cat_ia = (args.get("categoria") or "").strip()
+        cat_hashtag = infer_category(user_id, "", hashtag).category
+        if not cat_ia or infer_category(user_id, "", cat_ia).category != cat_hashtag:
+            return False
+        return local.reason not in MOTIVOS_CONFIANTES or local.category == cat_hashtag
     if local.reason not in MOTIVOS_CONFIANTES:
         return False
     return infer_category(user_id, texto, None, allow_ai=False).category == local.category
