@@ -1015,7 +1015,7 @@ REGRAS ABSOLUTAS:
 5. Se faltar informação essencial para executar, ative needs_clarification.
 6. confidence deve refletir sua certeza real.
 7. NÃO confunda recorrente com lançamento avulso: "gastei 50 no mercado" = launches.add (uma vez); "gasto fixo de 100 todo dia 10" / "salário todo dia 5" = recurring.add (todo mês). Em recurring.add, se o usuário NÃO disser DO QUE é (nome/descrição), ative needs_clarification perguntando do que é o gasto/receita.
-8. Pedido sobre o RESUMO/RELATÓRIO (ligar, desligar, receber, parar de mandar o resumo semanal ou mensal) é SEMPRE report.weekly_enable/weekly_disable/monthly_enable/monthly_disable, mesmo com dia ou "todo mês" no pedido. Ex.: "quero receber o resumo mensal todo dia 1" = report.monthly_enable, NUNCA recurring.add (não é lançamento nem gasto fixo).
+8. Só o pedido de LIGAR/DESLIGAR o envio AUTOMÁTICO e recorrente do resumo (semanal ou mensal) é report.*_enable/_disable, mesmo com dia ou "todo mês": "quero receber o resumo mensal todo dia 1" = report.monthly_enable, NUNCA recurring.add. Pedido PONTUAL de um resumo com data ("resumo mensal de setembro de 2026", "quero o resumo de setembro") é CONSULTA: report.monthly ou report.weekly, nunca enable/disable.
 
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta

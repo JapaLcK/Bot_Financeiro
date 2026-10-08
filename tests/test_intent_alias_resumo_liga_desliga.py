@@ -96,3 +96,4 @@ def test_resumo_mensal_com_dia_chega_a_ia_e_nao_vira_recorrente(monkeypatch):
     assert chamadas[0]["messages"][1]["content"] == texto
     assert resultado.intent == "report.monthly_enable"
     assert "NUNCA recurring.add" in _SYSTEM_PROMPT
+    assert "PONTUAL" in _SYSTEM_PROMPT  # pedido com data é consulta, não toggle
