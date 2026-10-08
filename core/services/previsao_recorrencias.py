@@ -4,7 +4,8 @@ estimadas do motor. Chamado por `cashflow_snapshot.ler`, só com os bancos na ba
 
 O fixo e a receita manuais continuam contando. Quando um deles e uma cadeia do
 banco parecem a mesma coisa (casamento 1:1, nunca guloso), conta o manual e a do
-banco fica fora do cálculo, visível. Sem casamento, a saída do banco entra
+banco fica fora do cálculo, visível, do 1º ciclo do manual em diante (antes dele, a
+do banco segue como sem casamento). Sem casamento, a saída do banco entra
 (pessimista e rotulada) e a entrada fica fora (receita em dobro seria otimista).
 """
 from __future__ import annotations
@@ -52,13 +53,22 @@ def _candidato(m: dict, c: dict) -> bool:
                  or valor is not None and abs(valor - c['valor']) <= RECON_AMOUNT_TOL))
 
 
-def _casar(manuais: list[dict], cs: list[dict]) -> set[int]:
-    """Índices das cadeias casadas 1:1 com um manual; e marca o manual casado."""
+def _inicio(m: dict, entrada: bool) -> date | None:
+    """1ª data em que o manual gera ocorrência no motor (o mesmo cálculo do `_datas`)."""
+    start = _data(m.get('start_date'))
+    if start is None:
+        return None  # calendário desconhecido: o casamento cobre tudo, como antes
+    return _recurring_occurrence_dates(m['pay_day' if entrada else 'due_day'], 'monthly', None, start,
+                                       start - timedelta(days=1), start + timedelta(days=31))[0]
+
+
+def _casar(manuais: list[dict], cs: list[dict]) -> dict[int, date | None]:
+    """Cadeias casadas 1:1 com um manual → início do manual; e marca o manual casado."""
     pares = [(i, j) for i, m in enumerate(manuais) for j, c in enumerate(cs) if _candidato(m, c)]
-    casadas = set()
+    casadas = {}
     for i, j in pares:
         if sum(p[0] == i for p in pares) == 1 and sum(p[1] == j for p in pares) == 1:
-            casadas.add(j)
+            casadas[j] = _inicio(manuais[i], cs[j]['direcao'] == 'entrada')
             manuais[i]['_casado'] = True
     return casadas
 
@@ -99,10 +109,10 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
 
     fixos = [dict(r) for r in recs if r['is_active']]
     rendas = [dict(r) for r in receitas if r['is_active']]
-    casadas = set()
+    casadas = {}
     for direcao, manuais in (('saida', fixos), ('entrada', rendas)):
         idx = [j for j, c in enumerate(cs) if c['direcao'] == direcao]
-        casadas |= {idx[j] for j in _casar(manuais, [cs[j] for j in idx])}
+        casadas |= {idx[j]: ini for j, ini in _casar(manuais, [cs[j] for j in idx]).items()}
     sobra = {'saida': any(not m.get('_casado') for m in fixos) or any(
                  b['status'] == 'pending' and (_data(b['due_date']) is None or _data(b['due_date']) <= until)
                  for b in instancias),
@@ -134,7 +144,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
                 incluida = False
                 motivos.append(_motivo(s, 'recorrencia_banco_interrompida',
                                        'so_melhora' if saida else 'so_piora', c['id']))
-            if j in casadas:
+            # Antes do 1º ciclo do manual (meio ciclo antes do início dele), o banco conta sozinho.
+            if j in casadas and (casadas[j] is None or (casadas[j] - d).days < MEIO_CICLO):
                 incluida = False
                 motivos.append(_motivo(s, 'recorrencia_banco_igual_a_fixo_manual',
                                        'so_melhora' if saida else 'so_piora', c['id']))

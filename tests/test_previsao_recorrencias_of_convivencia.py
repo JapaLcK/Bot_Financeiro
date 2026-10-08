@@ -72,6 +72,28 @@ def test_18_receita_ambigua_nunca_soma_as_duas(user_id):
     assert saldo_90(s) == D("16000")
 
 
+# Manual casado que começa no futuro: o 1º ciclo dele é 08/12 (início 06/12, dia 8). O
+# banco (dia 5) conta sozinho em out e nov; em 05/12 já é o ciclo do manual, mesmo
+# antes do início e do dia dele — senão dezembro contaria duas vezes.
+@pytest.mark.parametrize("receita", [False, True], ids=["fixo", "receita"])
+def test_18b_manual_que_comeca_depois_nao_apaga_o_banco_de_antes(user_id, receita):
+    db.set_balance(user_id, D(1000))
+    if receita:
+        create_recurring_income(user_id, "Trabalho", 5000, "salario", 8, start_date=date(2026, 12, 6))
+        salario(user_id)
+    else:
+        create_recurring_expense(user_id, "Netflix", 39.90, "assinaturas", 8, "account",
+                                 start_date=date(2026, 12, 6))
+        netflix(user_id)
+    s = ler_em(user_id)
+    assert [(e.data, e.incluida) for e in do_banco(s)] == [
+        (date(2026, 10, 5), True), (date(2026, 11, 5), True), (date(2026, 12, 5), False)]
+    assert "recorrencia_banco_igual_a_fixo_manual" in codigos(do_banco(s)[2])
+    assert not any({"recorrencia_banco_igual_a_fixo_manual", "recorrencia_banco_pode_repetir_manual"}
+                   & codigos(e) for e in do_banco(s)[:2])
+    assert saldo_90(s) == D("16000" if receita else "880.30")  # 3 ciclos, nenhum em dobro
+
+
 # ── Antes × depois (Q18) ─────────────────────────────────────────────────────
 
 def _ultima():
