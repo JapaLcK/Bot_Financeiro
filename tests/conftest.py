@@ -242,6 +242,10 @@ def _init_schema():
     if not os.getenv("DATABASE_URL"):
         raise RuntimeError("Faltou DATABASE_URL no ambiente para rodar os testes.")
     init_db()
+    # Em produção os índices das FKs saem do `lifespan` (tarefa de fundo), não do
+    # `init_db`; o banco de teste precisa deles para a auditoria de tests/test_fk_indexes.py.
+    from db.schema_repairs import ensure_fk_indexes_once
+    assert ensure_fk_indexes_once() == []
 
 
 @pytest.fixture(autouse=True)

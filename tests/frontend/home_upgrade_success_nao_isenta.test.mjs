@@ -33,8 +33,9 @@
  * negativos — e barrar quem pagou é pior que o furo.
  *
  * O QUE ESTE ARQUIVO NÃO ALCANÇA: o timeout de rede real dentro do orçamento
- * de `_boundedAuthMe`/`_raceBudget`. A bateria de `comWebhookEm` roda com
- * relógio FALSO e cobre webhook depois do deadline de `_checkoutDeadline`
+ * de `_boundedAuthMe`/`_raceBudget`. Os casos negativos (`comWebhookEm` com
+ * um webhook que nunca chega) e a bateria `webhook em N ms` rodam com relógio
+ * FALSO e cobrem webhook depois do deadline de `_checkoutDeadline`
  * (22 s, 25 s) — mas com o relógio congelado durante toda request real, essa
  * corrida contra timeout nunca vence lá (limite declarado na doc da função).
  */
@@ -87,18 +88,15 @@ async function abrirHome(me, antes = null) {
 }
 
 /**
- * Espera o `location.replace` acontecer; devolve o pathname+search final.
- *
- * `timeout` curto no caso POSITIVO de propósito: lá o esperado é que NADA
- * aconteça, e esperar 12 s por um redirect que não vem custava 30 s de relógio
- * num arquivo de 3 casos. Os negativos redirecionam em menos de 1 s (medido),
- * então 4 s é margem de 4× — e se algum dia o redirect legítimo passar disso, o
- * caso positivo fica vermelho, que é o lado certo de errar.
+ * Espera até `timeout` ms por um `location.replace`; devolve o pathname+search
+ * final. Só o caso POSITIVO usa: lá o esperado é que NADA aconteça, então o
+ * `timeout` é a janela em que um redirect indevido seria pego. Os negativos
+ * passam por `comWebhookEm`, que avança o relógio da página até o redirect.
  */
-async function destino(page, timeout = 12000) {
+async function destino(page, timeout) {
   try {
     await page.waitForFunction(
-      () => location.pathname.replace(/\.html$/, "") !== "/home", { timeout });
+      () => location.pathname.replace(/\.html$/, "") !== "/home", undefined, { timeout });
   } catch { /* não redirecionou — o caller decide se isso é o esperado */ }
   return page.evaluate(() => location.pathname + location.search);
 }
@@ -118,46 +116,46 @@ const CORTADO = { user_id: 1, plan: "free", plan_expires_at: null,
                   app_access: false };
 
 test("cortado com ?upgrade=success vai pra /precos depois do polling", async () => {
-  const page = await abrirHome(CORTADO);
-  const url = await destino(page);
+  const url = await comWebhookEm(Infinity, { naoPago: CORTADO });
   assert.match(url, /^\/precos/,
     `o cortado ficou na Início com ?upgrade=success: ${url}`);
   assert.match(url, /ativar=1/, `marcador errado pro cortado: ${url}`);
-  await page.close();
 });
 
 test("cortado com ?upgrade=success não deixa snapshot repintável", async () => {
   // O gêmeo do `clearSessionSnapshots()` de `dashboard.js:407`. A assimetria
   // era medida: o dashboard limpava antes de redirecionar e a Início não, então
   // o saldo do próprio usuário voltava à tela a cada recarga durante os ~21 s.
-  const page = await abrirHome(CORTADO, (p) =>
+  let sobrou;
+  const url = await comWebhookEm(Infinity, {
+    naoPago: CORTADO,
     // Semeia UMA vez: `addInitScript` roda em toda navegação, inclusive no
     // redirect para /precos — sem a trava, o teste replantava as chaves que o
     // conserto tinha acabado de apagar e media a si mesmo.
-    p.addInitScript(() => {
+    semear: (p) => p.addInitScript(() => {
       if (sessionStorage.getItem("__semeado")) return;
       sessionStorage.setItem("__semeado", "1");
       sessionStorage.setItem("pb_home_1", JSON.stringify({ saldo: 4242.42 }));
       sessionStorage.setItem("pb_snap_1_2026_9", JSON.stringify({ x: 1 }));
-    }));
-  await destino(page);
-  const sobrou = await page.evaluate(() => Object.keys(sessionStorage)
-    .filter((k) => k.startsWith("pb_home_") || k.startsWith("pb_snap_")));
+    }),
+    inspecionar: async (page) => {
+      sobrou = await page.evaluate(() => Object.keys(sessionStorage)
+        .filter((k) => k.startsWith("pb_home_") || k.startsWith("pb_snap_")));
+    },
+  });
+  assert.match(url, /^\/precos/, `o cortado ficou na Início com ?upgrade=success: ${url}`);
   assert.deepEqual(sobrou, [],
     `snapshot sobreviveu ao veredito negativo e repinta no reload: ${sobrou}`);
-  await page.close();
 });
 
 test("cadastro sem plano com ?upgrade=success vai pra /precos depois do polling", async () => {
   // A outra perna. Sem este caso, um conserto que mexesse só no `app_access`
   // deixaria a da ESCOLHA aberta — "achei um caso" ≠ "resolvi a categoria" (§2).
-  const page = await abrirHome({ user_id: 1, plan: "free", plan_expires_at: null,
-                                 needs_plan_selection: true });
-  const url = await destino(page);
+  const url = await comWebhookEm(Infinity, { naoPago: {
+    user_id: 1, plan: "free", plan_expires_at: null, needs_plan_selection: true } });
   assert.match(url, /^\/precos/,
     `o cadastro sem plano ficou na Início com ?upgrade=success: ${url}`);
   assert.match(url, /escolha=1/, `marcador errado pro cadastro novo: ${url}`);
-  await page.close();
 });
 
 test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
@@ -172,7 +170,10 @@ test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
 
 /**
  * Roda o retorno de checkout com relógio FALSO, avançando em passos de 250 ms,
- * e vira o `/auth/me` para "pago" quando o relógio chega em `webhookMs`.
+ * e vira o `/auth/me` para "pago" quando o relógio chega em `webhookMs`
+ * (`Infinity` = o webhook nunca chega). Até lá o `/auth/me` responde `naoPago`.
+ * `semear(p)` registra init scripts antes do `goto`; `inspecionar(page)` roda
+ * depois do laço, antes do `close`.
  *
  * `page.clock.install()` deixa o relógio falso andar em tempo real fora de um
  * `runFor` — só existe `pauseAt`, não existe "pausado" por padrão. Sem
@@ -254,9 +255,13 @@ async function evaluateOuNavegou(page, fn) {
   }
 }
 
-async function comWebhookEm(webhookMs) {
+async function comWebhookEm(webhookMs, {
+  naoPago = { user_id: 1, plan: "free", plan_expires_at: null, app_access: false },
+  semear = null, inspecionar = null,
+} = {}) {
   let confirmado = false;
   const page = await abrirHome(null, async (p) => {
+    if (semear) await semear(p);
     await p.addInitScript(() => {
       window.__authEmVoo = 0;
       const nativo = window.fetch;
@@ -286,9 +291,7 @@ async function comWebhookEm(webhookMs) {
     // porque nenhum timer existe antes do `goto`.
     await p.clock.pauseAt(Date.now() + 60000);
     await p.route("**/auth/me", (route) => route.fulfill(json(
-      confirmado ? { ...PAGO, app_access: true }
-                 : { user_id: 1, plan: "free", plan_expires_at: null,
-                     app_access: false })));
+      confirmado ? { ...PAGO, app_access: true } : naoPago)));
   });
   const ociosa = async () => {
     // Teto de tempo REAL, não de simulação — guarda de deadlock (contador
@@ -316,6 +319,7 @@ async function comWebhookEm(webhookMs) {
     if (!localizacao(page).home) break;  // saiu de /home == navegou
   }
   const url = localizacao(page).url;
+  if (inspecionar) await inspecionar(page);
   await page.close();
   return url;
 }

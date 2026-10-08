@@ -55,10 +55,12 @@ const MOTIVO: Record<string, string> = {
 };
 export const rotulo = (codigo: string) => MOTIVO[codigo] ?? codigo;
 
-// Para que lado o número real pode ficar, por motivo da previsão.
+// Para que lado o número real pode ficar, por motivo da previsão. `so_melhora`: a falta ou o
+// erro do dado só deixa a projeção melhor do que a realidade, então o real pode ser PIOR
+// (docs/plano-piggy-assistente-contextual.md); `so_piora` é o contrário.
 export const DIRECAO: Record<MotivoPrevisao["direcao_do_erro"], string> = {
-  so_melhora: "o real pode ser melhor",
-  so_piora: "o real pode ser pior",
+  so_melhora: "o real pode ser pior",
+  so_piora: "o real pode ser melhor",
   ambos: "pode variar para os dois lados",
 };
 

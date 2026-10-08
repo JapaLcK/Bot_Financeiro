@@ -478,6 +478,16 @@ async def serve_lp():
     return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
 
 
+@router.get("/vsl")
+async def serve_vsl():
+    # A mesma VSL da /lp, depois do XQuiz (a /q sem plano manda pra cá): o botão vai à
+    # /precos. Trocado aqui, e não no JS, para valer também sem JavaScript.
+    resp = await serve_lp()
+    resp.body = resp.body.replace(b'href="https://quiz.pigbankai.com/"', b'href="/precos"')
+    resp.headers["content-length"] = str(len(resp.body))
+    return resp
+
+
 @router.get("/continuar-compra")
 async def serve_continuar_compra():
     """Retoma no checkout a escolha feita antes da autenticação.
