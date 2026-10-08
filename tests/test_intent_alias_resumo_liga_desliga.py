@@ -52,6 +52,9 @@ _TOGGLES = (
     ("não quero receber meu resumo semanal", "report.weekly_disable"),
     ("para de me mandar meu resumo mensal", "report.monthly_disable"),
     ("não quero receber o meu resumo semanal", "report.weekly_disable"),
+    # plural
+    ("não quero receber os relatórios semanais", "report.weekly_disable"),
+    ("para de me mandar os resumos mensais", "report.monthly_disable"),
     ("para de me mandar o meu resumo mensal", "report.monthly_disable"),
     ("não quero receber o resumo toda segunda-feira", "report.weekly_disable"),
     # cortesia antes do comando também não muda o pedido
