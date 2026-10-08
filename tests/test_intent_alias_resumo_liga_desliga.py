@@ -193,3 +193,29 @@ def test_clarificacao_com_pergunta_nao_liga_resumo(monkeypatch):
         "quero algo", "Qual resumo você quer?", "posso assinar os resumos semanais?"
     )
     assert resultado.intent == "out_of_scope"
+
+
+def test_ligar_com_dia_nao_segunda_avisa_que_sai_na_segunda(monkeypatch):
+    # Pedido com outro dia não pode ficar em silêncio: a confirmação diz que sai na segunda.
+    import core.services.plan_service as plan_service
+    from core.handlers import report as h_report
+    import db
+
+    monkeypatch.setattr(plan_service, "plan_gate_ok", lambda *a, **k: True)
+    monkeypatch.setattr(db, "set_weekly_report_enabled", lambda *a, **k: None)
+
+    resposta = h_report.enable_weekly(1, "quero receber o resumo semanal todo domingo")
+    assert "Você pediu domingo, mas o resumo semanal sai só na segunda-feira" in resposta
+    assert "toda segunda-feira" in resposta
+
+
+def test_ligar_sem_dia_ou_com_segunda_nao_avisa(monkeypatch):
+    import core.services.plan_service as plan_service
+    from core.handlers import report as h_report
+    import db
+
+    monkeypatch.setattr(plan_service, "plan_gate_ok", lambda *a, **k: True)
+    monkeypatch.setattr(db, "set_weekly_report_enabled", lambda *a, **k: None)
+
+    for texto in ("quero receber o resumo semanal", "quero receber o resumo semanal todas as segundas-feiras"):
+        assert "sai só na segunda-feira" not in h_report.enable_weekly(1, texto)

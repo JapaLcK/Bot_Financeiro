@@ -1394,7 +1394,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_report.monthly(user_id)
 
     if intent == "report.weekly_enable":
-        return h_report.enable_weekly(user_id)
+        return h_report.enable_weekly(user_id, text)
 
     if intent == "report.weekly_disable":
         return h_report.disable_weekly(user_id)
