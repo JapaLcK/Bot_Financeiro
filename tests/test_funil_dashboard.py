@@ -431,6 +431,7 @@ def test_expiraram_sem_concluir_ignora_quem_concluiu(contas):
 def test_sessao_expirada_reentregue_conta_uma_vez(contas):
     antes = _funil()
     u = contas(2)
+    _evento(u, "started", session="cs_reentrega")
     _evento(u, "expired", session="cs_reentrega")
     _evento(u, "expired", session="cs_reentrega")
     depois = _funil()
@@ -817,3 +818,22 @@ def test_ativacao_nao_exige_o_primeiro_cadastro_na_janela(contas):
         a, d = antes["janelas"][janela]["ativacao"], depois["janelas"][janela]["ativacao"]
         assert {k: d[k] - a[k] for k in a} == {
             "concluiram": 1, "onboarding": 0, "whatsapp": 0, "lancamento": 0}
+
+
+def test_sessao_expirada_so_conta_se_foi_aberta_na_janela(contas):
+    antes = _funil()
+    u = contas(2)
+
+    def _sessao(nome, aberta, expirada):
+        if aberta is not None:
+            _evento(u, "started", dias_atras=aberta, session=nome)
+        _evento(u, "expired", dias_atras=expirada, session=nome)
+
+    _sessao("cs_a", 8, 6)      # aberta fora de 7d, expirada dentro: só 30d
+    _sessao("cs_b", 6, 5)      # tudo dentro: 7d e 30d
+    _sessao("cs_c", 31, 29)    # aberta fora de 30d: nenhuma
+    _sessao("cs_d", None, 1)   # expired sem started: nenhuma
+    depois = _funil()
+    exp = {j: depois["janelas"][j]["checkout"]["sessoes_expiradas"]
+           - antes["janelas"][j]["checkout"]["sessoes_expiradas"] for j in ("7d", "30d")}
+    assert exp == {"7d": 1, "30d": 2}

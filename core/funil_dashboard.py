@@ -171,9 +171,12 @@ async def _janela(cur, dias: int, agora: datetime, desde, ck: dict) -> dict:
     trial["outros"] = trial["iniciaram"] - trial["em_trial"] - trial["pagando"] - trial["cancelaram"]
 
     # Bloco 2 (por sessão): pessoas / sessões abertas / concluídas vêm do helper do admin.
+    # Expirada só conta se a sessão foi ABERTA na janela (mesma base de `sessoes_abertas`).
     await cur.execute(
         "SELECT count(DISTINCT session_id) AS n FROM checkout_funnel_events "
-        "WHERE kind = 'expired' AND created_at >= %(ini)s", p)
+        "WHERE kind = 'expired' AND created_at >= %(ini)s AND session_id IN ("
+        "SELECT session_id FROM checkout_funnel_events "
+        "WHERE kind = 'started' AND created_at >= %(ini)s)", p)
     checkout = {"pessoas": ck[f"people_{dias}d"],
                 "sessoes_abertas": ck[f"sessions_started_{dias}d"],
                 "sessoes_concluidas": ck[f"sessions_completed_{dias}d"],
