@@ -920,13 +920,9 @@ _RESUMO_TOGGLES = frozenset({
 
 
 def _pergunta_sobre_o_toggle(original: str) -> bool:
-    """True se o '?' está na frase do toggle: no fim da mensagem ou depois do
-    substantivo do resumo. '?' de uma frase anterior ('tudo bem? desliga…') não conta."""
-    texto = original.strip().lower()
-    if texto.endswith("?"):
-        return True
-    m = re.search(r"resumo|relat[oó]rio|report", texto)
-    return bool(m) and "?" in texto[m.start():]
+    """True se a mensagem tem '?'. Pontuação não diz de qual cláusula é a pergunta,
+    então qualquer '?' impede o toggle: na dúvida, não liga nem desliga."""
+    return "?" in original
 
 
 def _try_alias(norm: str, original: str) -> IntentResult | None:

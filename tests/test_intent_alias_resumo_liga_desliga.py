@@ -34,8 +34,6 @@ _TOGGLES = (
     # cortesia antes e depois
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
     ("não quero receber o resumo semanal por favor", "report.weekly_disable"),
-    # "?" de frase anterior não é pergunta sobre o toggle
-    ("tudo bem? desliga o resumo semanal", "report.weekly_disable"),
     ("quero receber o resumo mensal todo mês", "report.monthly_enable"),
     # ligar/desligar genéricos continuam como antes
     ("liga o resumo semanal", "report.weekly_enable"),
@@ -57,6 +55,9 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "não quero receber o resumo mensal?",
     "para de mandar o resumo semanal?",
     "ligar resumo semanal?",
+    # qualquer "?" impede o toggle: pontuação não diz de qual cláusula é a pergunta
+    "tudo bem? desliga o resumo semanal",
+    "quero receber? o resumo semanal por favor",
     "desligar resumo mensal?",
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
