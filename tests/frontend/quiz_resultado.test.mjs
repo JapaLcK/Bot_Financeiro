@@ -1,6 +1,6 @@
 /**
  * /q (frontend/quiz-resultado.js): o fragmento do quiz vira o cookie `quiz_result`
- * e a página segue pro /cadastro levando a UTM e deixando p/r para trás.
+ * e a página segue pra /precos levando a UTM e deixando p/r para trás.
  * O servidor revalida o cookie; aqui se mede só o lado do navegador.
  */
 import { test, before, after } from "node:test";
@@ -25,12 +25,12 @@ async function abrir(url, prepara = async () => {}) {
   await prepara(ctx);
   const page = await ctx.newPage();
   await page.goto(url, { waitUntil: "commit" });
-  await page.waitForURL(/\/cadastro/, { waitUntil: "commit" });
+  await page.waitForURL(/\/precos/, { waitUntil: "commit" });
   const destino = new URL(page.url());
   const cookie = (await ctx.cookies()).find((c) => c.name === "quiz_result");
   await ctx.close();
   assert.deepEqual(externos, []);
-  assert.equal(destino.pathname, "/cadastro");
+  assert.equal(destino.pathname, "/precos");
   assert.equal(destino.hash, "");
   return { destino, cookie };
 }
@@ -61,7 +61,7 @@ test("p e r na query por engano saem da URL e não viram cookie", async () => {
 });
 
 for (const perfil of ["padrao", "admin"]) {
-  test(`perfil fora da lista (${perfil}) não grava cookie e segue pro cadastro`, async () => {
+  test(`perfil fora da lista (${perfil}) não grava cookie e segue pra /precos`, async () => {
     const { destino, cookie } = await abrir(q(`#p=${perfil}&r=acdbd`));
     assert.equal(cookie, undefined);
     assert.equal(destino.search, "");
@@ -187,7 +187,7 @@ test("429: pede para aguardar", async () => {
   await ctx.close();
 });
 
-test("e sem c segue pro /cadastro sem levar o e-mail", async () => {
+test("e sem c segue pra /precos sem levar o e-mail", async () => {
   const { destino, cookie } = await abrir(q("?utm_source=ig#p=dividas&e=a@b.com"));
   assert.equal(cookie.value, "v1.dividas");
   assert.equal(destino.search, "?utm_source=ig");

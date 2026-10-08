@@ -36,7 +36,8 @@
     [["n", nome], ["e", email], ["w", zap]].forEach(function (kv) { if (kv[1]) f.append(kv[0], kv[1]); });
     location.replace("/assinar" + (qs ? "?" + qs : "") + (f.toString() ? "#" + f : ""));
   } else if (email && code) confirmar(email, code, query);
-  else location.replace("/cadastro" + (qs ? "?" + qs : ""));
+  // Sem plano escolhido: a /precos, que leva o deslogado à /assinar; o cookie vale até a conta nascer lá.
+  else location.replace("/precos" + (qs ? "?" + qs : ""));
 
   function confirmar(email, code, query) {
     const $ = function (id) { return document.getElementById(id); };
