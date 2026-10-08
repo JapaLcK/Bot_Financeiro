@@ -325,6 +325,7 @@ def job(monkeypatch):
     monkeypatch.setattr(wa, "send_template", lambda to, name, **kw: envios.append((to, kw["named_body_params"])))
 
     monkeypatch.setattr(wa, "_WEEKLY_BUILD_FALHAS", {})
+    monkeypatch.setattr(wa, "_WEEKLY_RELEASE_PENDENTES", set())
 
     def tick(*uids):
         monkeypatch.setattr(wa, "list_users_with_weekly_report_enabled", lambda: list(uids))
@@ -713,3 +714,82 @@ def test_conexao_nova_sem_contas_conta_como_banco_nao_sincronizado():
         assert wk.build_weekly_report_summary(nova, closed=True)["atualizado_em"] == "Bancos conectados ainda não sincronizaram"
         assert "e 1 banco(s) ainda não sincronizado(s)" in wk.build_weekly_report_text(misto, closed=True)
         assert wk.build_weekly_report_summary(pausada, closed=True)["atualizado_em"] == ""
+
+
+def _build_que_falha_na_primeira(job):
+    real, chamadas = job.wa.build_weekly_report_summary, []
+
+    def build(uid, **kw):
+        chamadas.append(uid)
+        if len(chamadas) == 1:
+            raise RuntimeError("banco caiu")
+        return real(uid, **kw)
+    job.mp.setattr(job.wa, "build_weekly_report_summary", build)
+    return chamadas
+
+
+def test_job_release_que_falhou_e_refeito_no_proximo_tick_antes_do_claim(job):
+    uid = usuario_pagante("plus")
+    _semear(uid)
+    db.set_weekly_report_enabled(uid, True)
+    _build_que_falha_na_primeira(job)
+    real_release, falhas = job.wa.release_weekly_report_claim, []
+
+    def release(u, d):
+        if not falhas:
+            falhas.append(1)
+            raise RuntimeError("banco ainda fora")
+        return real_release(u, d)
+    job.mp.setattr(job.wa, "release_weekly_report_claim", release)
+
+    job.tick(uid)                                          # build e release caem na mesma queda
+    assert job.envios == [] and _prefs_semanal(uid) == date(2026, 10, 5)
+    assert job.wa._WEEKLY_RELEASE_PENDENTES == {(uid, date(2026, 10, 5))}
+
+    job.tick(uid)                                          # banco de volta: release, claim, build, envio
+    assert len(job.envios) == 1 and _prefs_semanal(uid) == date(2026, 10, 5)
+    assert job.wa._WEEKLY_RELEASE_PENDENTES == set()
+    assert job.wa._WEEKLY_BUILD_FALHAS == {(uid, date(2026, 10, 5)): 1}   # o release pendente não conta tentativa
+
+
+def test_job_release_pendente_que_continua_falhando_nao_envia_nem_derruba_os_outros(job):
+    a, b = usuario_pagante("plus"), usuario_pagante("plus")
+    for u in (a, b):
+        db.set_weekly_report_enabled(u, True)
+    _semear(b)
+    real_build, builds = job.wa.build_weekly_report_summary, []
+
+    def build(uid, **kw):
+        builds.append(uid)
+        if uid == a:
+            raise RuntimeError("boom")
+        return real_build(uid, **kw)
+    job.mp.setattr(job.wa, "build_weekly_report_summary", build)
+    real_release = job.wa.release_weekly_report_claim
+
+    def release_quebrado(u, d):
+        raise RuntimeError("banco fora")
+    job.mp.setattr(job.wa, "release_weekly_report_claim", release_quebrado)
+
+    for _ in range(3):
+        job.tick(a, b)                                     # nenhuma exceção escapa
+    assert builds.count(a) == 1                            # pendente: sem novo build para A
+    assert builds.count(b) == 1 and len(job.envios) == 1   # B recebe uma vez só
+    assert _prefs_semanal(b) == date(2026, 10, 5)
+
+    job.mp.setattr(job.wa, "release_weekly_report_claim", real_release)
+    job.mp.setattr(job.wa, "build_weekly_report_summary", real_build)
+    job.tick(a, b)                                         # banco volta: A é liberado e envia
+    assert len(job.envios) == 2 and job.wa._WEEKLY_RELEASE_PENDENTES == set()
+
+
+def test_job_rebaixado_com_release_pendente_nao_e_liberado_nem_recebe(job):
+    uid = usuario_pagante("essencial")
+    db.set_weekly_report_enabled(uid, True)
+    assert db.claim_weekly_report_send(uid, date(2026, 10, 5))
+    job.wa._WEEKLY_RELEASE_PENDENTES.add((uid, date(2026, 10, 5)))
+    chamadas = []
+    job.mp.setattr(job.wa, "release_weekly_report_claim", lambda u, d: chamadas.append(u))
+
+    job.tick(uid)
+    assert chamadas == [] and job.envios == [] and _prefs_semanal(uid) == date(2026, 10, 5)

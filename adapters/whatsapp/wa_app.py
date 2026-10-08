@@ -704,13 +704,29 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
 # o claim fica consumido e a semana se perdeu (não há recuperação automática).
 _WEEKLY_BUILD_MAX_TENTATIVAS = 10
 _WEEKLY_BUILD_FALHAS: dict[tuple[int, Any], int] = {}
+# Releases que falharam (o banco caiu junto com o build): o claim segue gravado e todo tick seguinte
+# falharia no claim. O próximo tick repete o release antes de qualquer claim; não conta como tentativa.
+_WEEKLY_RELEASE_PENDENTES: set[tuple[int, Any]] = set()
 
 
 def _contar_falha_do_build_semanal(uid, period_date) -> int:
     for chave in [k for k in _WEEKLY_BUILD_FALHAS if k[1] != period_date]:
         del _WEEKLY_BUILD_FALHAS[chave]  # semanas passadas não voltam
+    _WEEKLY_RELEASE_PENDENTES.difference_update([k for k in _WEEKLY_RELEASE_PENDENTES if k[1] != period_date])
     _WEEKLY_BUILD_FALHAS[(uid, period_date)] = n = _WEEKLY_BUILD_FALHAS.get((uid, period_date), 0) + 1
     return n
+
+
+def _liberar_claim_semanal(uid, period_date) -> bool:
+    """Devolve o claim; se falhar, não levanta (os outros usuários do tick precisam rodar) e fica pendente."""
+    try:
+        release_weekly_report_claim(uid, period_date)
+    except Exception:
+        logger.exception("WA weekly report release failed uid=%s", uid)
+        _WEEKLY_RELEASE_PENDENTES.add((uid, period_date))
+        return False
+    _WEEKLY_RELEASE_PENDENTES.discard((uid, period_date))
+    return True
 
 
 def _periodic_report_tick() -> None:
@@ -755,7 +771,10 @@ def _periodic_report_tick() -> None:
         # que cada resumo saia uma única vez (mesmo com reinício / múltiplas instâncias)
         from core.services.plan_service import plan_gate_ok
         # Ordem importa: o plano vem ANTES do claim (downgrade não consome a semana).
-        if uid in weekly_users and plan_gate_ok(uid, "weekly_report") and claim_weekly_report_send(uid, today):
+        weekly_ok = uid in weekly_users and plan_gate_ok(uid, "weekly_report")
+        if weekly_ok and (uid, today) in _WEEKLY_RELEASE_PENDENTES and not _liberar_claim_semanal(uid, today):
+            weekly_ok = False  # banco ainda fora: sem claim nem build nesta volta (o mensal abaixo segue)
+        if weekly_ok and claim_weekly_report_send(uid, today):
             try:
                 summary = build_weekly_report_summary(uid, closed=True)
             except Exception:
@@ -766,10 +785,7 @@ def _periodic_report_tick() -> None:
                 logger.exception("WA weekly report build failed uid=%s tentativa=%d/%d%s", uid, tentativas,
                                  _WEEKLY_BUILD_MAX_TENTATIVAS, " (desistindo: semana não será reenviada)" if ultima else "")
                 if not ultima:
-                    try:
-                        release_weekly_report_claim(uid, today)
-                    except Exception:  # não deixa escapar: os outros usuários do tick ainda precisam rodar
-                        logger.exception("WA weekly report release failed uid=%s", uid)
+                    _liberar_claim_semanal(uid, today)
             else:
                 _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
 

@@ -201,7 +201,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   payload tipado (Decimal/date); `build_weekly_report_summary` o adapta para texto e mantém as 6
   chaves do template da Meta. Bancos e comparação são extras: se falharem, o resumo sai sem eles
   (`bancos=None`, `comparacao_motivo="indisponivel"`). No job do WhatsApp, build que falha depois do
-  claim devolve a semana até 10 vezes (≈5 min, contador em memória); na 10ª a semana se perde.
+  claim devolve a semana até 10 vezes (≈5 min, contador em memória); na 10ª a semana se perde. Se o próprio release falha (banco fora), ele fica pendente e é
+  repetido no tick seguinte, antes do claim e sem contar como tentativa.
   Mantém a regra de `get_summary_by_period` e expõe `cartao_incluido=False`
   (o texto avisa que compra no cartão não entra). A "semana equivalente" é n dias contra n dias
   (`_semana_equivalente`): fechada = seg→dom contra seg→dom da retrasada; parcial = segunda até
