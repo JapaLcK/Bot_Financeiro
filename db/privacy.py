@@ -724,10 +724,9 @@ def reset_user_data(
                 # ele valeria para TODO write do produto, e espera correta viraria
                 # erro.
                 #
-                # O mutex NÃO cobre, e a regra acima não os alcança: o undo de lançamento
-                # comum, o import em lote de OFX, o `delete_user_data` e o `merge_users`
-                # (pegam locks em outra ordem): exceção conhecida, acompanhamento em
-                # issue separada.
+                # Exceções conhecidas do mutex (docstring de `_lock_user`; acompanhamento em issue
+                # separada): o undo de pagamento de fatura e `pay_bill_amount` (ordem fatura →
+                # conta) e `delete_user_data`, que apaga Open Finance antes de `accounts`.
                 #
                 # O custo do `delete from launches` depende de as FKs `on delete set
                 # null` para launches/credit_transactions terem índice (ver #253):
@@ -897,7 +896,8 @@ def delete_user_data(
         # Tabelas com coluna user_id e ON DELETE CASCADE (verificado em prod).
         # Dependiam só do cascade; incluídas no sweep explícito + na verificação
         # de sobra como cinto-e-suspensório, caso um DB antigo perca a FK.
-        # pocket_lots antes de pockets (child-first) por segurança de ordem.
+        # investments/pockets ANTES dos próprios lotes (pai → filho: a ordem de lock de
+        # `accrue_all_*` e de `_RESET_TABLES`; lote primeiro fecha ciclo com eles).
         "ai_messages",
         "ai_pending_actions",
         "recurring_charges",
@@ -910,11 +910,12 @@ def delete_user_data(
         "auth_refresh_tokens",
         "auth_sessions",
         "user_categories",
+        "pockets",
         "pocket_lots",
         "affiliates",
         "credit_cards",
-        "investment_lots",
         "investments",
+        "investment_lots",
         "category_budgets",
         "pending_actions",
         "user_category_rules",
@@ -932,7 +933,6 @@ def delete_user_data(
         "of_cash_coverage",
         "patrimonio_fotos",
         "launches",
-        "pockets",
         "user_identities",
         "auth_accounts",
     )
@@ -1133,6 +1133,18 @@ def delete_user_data(
                         (user_id,),
                     )
 
+                # Mutex do usuário (o do reset e dos escritores) ANTES do laço, que é onde estão os
+                # lotes, os pais, `launches` e `accounts`: `accounts`, não `users`, então a direção
+                # accounts → users do comentário da reconsulta segue valendo. Fica DEPOIS dos deletes
+                # de Open Finance e crédito de propósito: no topo da transação ele fecharia a janela
+                # que T17/T21/T23 (tests/test_account_deletion_adocao_corrida.py) medem — a sessão 2
+                # comita uma conexão nova entre o RETURNING e o laço, e com o mutex no topo ela
+                # esperaria a exclusão. Sobra a ordem OF → accounts da exclusão: cruza com reset, merge
+                # e sync/conciliação do Open Finance (accounts → OF), exceção conhecida.
+                # Conta sem linha em `accounts`: o `select for update` casa zero e não trava nada;
+                # os ciclos com `accrue_*` seguem fechados só pela ordem pai → lote.
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)
                 for table in user_owned_tables:
                     if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                         cur.execute(f"delete from {table} where user_id = %s", (user_id,))
