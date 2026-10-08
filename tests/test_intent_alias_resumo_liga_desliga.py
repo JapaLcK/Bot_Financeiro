@@ -125,3 +125,24 @@ def test_pergunta_com_numero_nao_liga_mesmo_se_a_ia_devolver_toggle(monkeypatch)
     monkeypatch.setattr(openai, "OpenAI", _FakeClient)
 
     assert classify("quero receber o resumo mensal todo dia 1?").intent == "out_of_scope"
+
+
+def test_pergunta_sem_alias_nao_liga_mesmo_se_a_ia_devolver_toggle(monkeypatch):
+    # Cai no Tier 3 final (sem número, sem alias): "posso assinar os resumos semanais?"
+    from types import SimpleNamespace
+
+    import openai
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            conteudo = '{"intent": "report.weekly_enable", "confidence": 0.95}'
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=conteudo))])
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.chat = SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setenv("OPENAI_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(openai, "OpenAI", _FakeClient)
+
+    assert classify("posso assinar os resumos semanais?").intent == "out_of_scope"

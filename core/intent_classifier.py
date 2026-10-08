@@ -1170,7 +1170,11 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
 
 
 def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
-    return _classify_llm_call(text, user_id)
+    result = _classify_llm_call(text, user_id)
+    # Pergunta nunca liga/desliga resumo, nem quando a IA devolve o toggle.
+    if "?" in text and result.intent in _RESUMO_TOGGLES:
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+    return result
 
 
 def classify_with_context(
@@ -1245,11 +1249,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
     if _has_recurrence_marker(norm) or _has_bill_marker(norm):
         if not allow_ai:
             return IntentResult(intent="out_of_scope", confidence=0.0)
-        result = _classify_with_ai(text, user_id=user_id)
-        # Pergunta nunca liga/desliga resumo, nem quando a IA devolve o toggle.
-        if "?" in text and result.intent in _RESUMO_TOGGLES:
-            return IntentResult(intent="out_of_scope", confidence=0.0)
-        return result
+        return _classify_with_ai(text, user_id=user_id)
 
     # Tier 1
     result = _try_exact(norm)
