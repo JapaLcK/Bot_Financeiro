@@ -48,7 +48,7 @@ def salvar_recorrencias(connection_id: int, itens: list) -> None:
 _SQL_OCORRENCIAS = """
 select rp.id rp_id, rp.description, rp.average_amount,
        t.transaction_date, t.amount, t.category, t.raw->'merchant' merchant,
-       t.raw->'creditCardMetadata' cc_meta, a.type account_type, a.name account_name,
+       t.raw->'creditCardMetadata' cc_meta, a.id account_id, a.type account_type, a.name account_name,
        a.raw->>'number' account_number
 from of_recurring_payments rp
 join open_finance_connections c on c.id = rp.connection_id

@@ -216,7 +216,7 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
 
     if bancos_permitidos:  # sem os bancos na base, despesa deles seria incoerente
         from core.services.previsao_recorrencias import anexar
-        anexar(cur, s, user_id, until, recs, receitas, instances)
+        anexar(cur, s, user_id, until, recs, receitas, instances, {c['id'] for c in banks})
 
     for b in ler_faturas(cur, user_id):
         total, paid, remaining, invalid_value = valores_fatura(b)

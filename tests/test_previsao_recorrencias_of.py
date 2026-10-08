@@ -203,3 +203,58 @@ def test_20_lista_nao_lida_ou_velha_vira_motivo(user_id, fetched, avisa):
     s = ler_em(user_id, hoje=datetime.now(timezone.utc).date())
     assert ("recorrencias_banco_nao_lidas" in {m.codigo for m in s.motivos}) is avisa
     assert any("se repetem todo mês" in p for p in s.premissas)
+
+
+# ── Apontamentos do Codex no #866 ────────────────────────────────────────────
+
+@pytest.mark.parametrize("horas,avisa,vence_com_a_lista", [(47, False, True), (49, True, False), (1, False, False)],
+                         ids=["quase_velha", "velha", "recente"])
+def test_21_cache_vence_quando_a_lista_vira_velha(user_id, horas, avisa, vence_com_a_lista):
+    """A conta sincronizada há pouco não segura a previsão depois de a lista virar velha."""
+    cid = netflix(user_id)
+    agora = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    buscada = agora - timedelta(hours=horas)
+    q("update open_finance_connections set recurring_fetched_at=%s where id=%s and user_id=%s", (buscada, cid, user_id))
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("set transaction isolation level repeatable read, read only")
+        s = ler(cur, user_id, HOJE, HOJE + timedelta(days=90), agora, True)
+        conn.rollback()
+    with db.get_conn() as conn, conn.cursor() as cur:  # o mesmo `ler` sem a conexão: o teto do resto
+        cur.execute("set transaction isolation level repeatable read, read only")
+        sem = ler(cur, user_id, HOJE, HOJE + timedelta(days=90), agora, False)
+        conn.rollback()
+    assert ("recorrencias_banco_nao_lidas" in {m.codigo for m in s.motivos}) is avisa
+    assert s.valido_ate == (buscada + timedelta(hours=48) if vence_com_a_lista else sem.valido_ate)
+    assert s.valido_ate > agora
+
+
+def test_22_recorrencia_de_conta_fora_da_base_fica_fora(user_id):
+    """Por conta: a conexão com uma conta na base e outra sem saldo só desconta a da que está na base."""
+    db.set_balance(user_id, D(1000))
+    nf = mensais("nf", ["-39.90"] * 3, desc="NETFLIX.COM")
+    ac = mensais("ac", ["-100"] * 3, ultima=date(2026, 9, 12), desc="ACADEMIA")
+    semeia(user_id, [conta("acc-ok", nf), conta("acc-sem", ac, saldo=None)],
+           [rp("NETFLIX.COM", -39.9, nf), rp("ACADEMIA", -100, ac)])
+    s = ler_em(user_id)
+    assert s.base["balance_source"] == "consolidated"
+    assert {e.nome for e in do_banco(s) if e.incluida} == {"NETFLIX.COM"}
+    fora = do_banco(s, "ACADEMIA")
+    assert len(fora) == 3 and all("recorrencia_banco_conta_fora_da_base" in codigos(e) for e in fora)
+    assert {m.direcao_do_erro for e in fora for m in e.motivos if m.codigo == "recorrencia_banco_conta_fora_da_base"} == {"so_melhora"}
+    assert not any("recorrencia_banco_conta_fora_da_base" in codigos(e) for e in do_banco(s, "NETFLIX.COM"))
+    assert _projection(HOJE, s.base, s.ocorrencias, HOJE + timedelta(days=90))["projetado"] == D("880.30")
+
+
+def test_23_todas_as_contas_fora_da_base_nao_descontam_a_base_manual(user_id):
+    db.set_balance(user_id, D(1000))
+    nf = mensais("nf", ["-39.90"] * 3, desc="NETFLIX.COM")
+    sal = mensais("sal", ["5000"] * 3, desc="SALARIO EMPRESA X")
+    semeia(user_id, [conta("acc-nf", nf, saldo=None), conta("acc-sal", sal, saldo=None)],
+           [rp("NETFLIX.COM", -39.9, nf), rp("SALARIO EMPRESA X", 5000, sal)])
+    s = ler_em(user_id)
+    es = do_banco(s)
+    assert s.base["balance_source"] == "manual" and len(es) == 6 and not any(e.incluida for e in es)
+    direcoes = {(e.direcao, m.direcao_do_erro) for e in es for m in e.motivos
+                if m.codigo == "recorrencia_banco_conta_fora_da_base"}
+    assert direcoes == {("saida", "so_melhora"), ("entrada", "so_piora")}
+    assert _projection(HOJE, s.base, s.ocorrencias, HOJE + timedelta(days=90))["projetado"] == D("1000")

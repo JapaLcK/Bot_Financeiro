@@ -384,7 +384,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
   comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
   não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
-  duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`.
+  duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`, e a
+  previsão em cache vence quando a lista vira velha. Recorrência de conta cujo saldo não está
+  na base (saldo ausente, moeda presumida, outra moeda) fica fora, com
+  `recorrencia_banco_conta_fora_da_base` (a conta é a da última cobrança da cadeia).
 
 - `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
   `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:

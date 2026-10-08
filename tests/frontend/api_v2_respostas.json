@@ -4197,16 +4197,15 @@
         "compromissos"
       ],
       "base": {
-        "saldo": "1000",
-        "origem": "manual",
+        "saldo": "3500",
+        "origem": "consolidated",
         "contas_bancarias": 2,
         "bancos_excluidos": false,
         "motivos": [
           "carteira_nao_confirmada",
           "especie_incompleta",
           "banco_desatualizado",
-          "saldo_ausente",
-          "moeda_presumida"
+          "saldo_ausente"
         ]
       },
       "estado": "a_conferir",
@@ -4228,10 +4227,6 @@
           "direcao_do_erro": "ambos"
         },
         {
-          "codigo": "moeda_presumida",
-          "direcao_do_erro": "ambos"
-        },
-        {
           "codigo": "cobertura_bancaria_nao_comprovada",
           "direcao_do_erro": "ambos"
         },
@@ -4246,6 +4241,10 @@
         {
           "codigo": "recorrencia_banco_atrasada",
           "direcao_do_erro": "so_piora"
+        },
+        {
+          "codigo": "recorrencia_banco_conta_fora_da_base",
+          "direcao_do_erro": "so_melhora"
         },
         {
           "codigo": "gastos_variaveis_nao_estimados",
@@ -4266,9 +4265,9 @@
           "cobertura_bancaria_nao_comprovada",
           "especie_incompleta",
           "gastos_variaveis_nao_estimados",
-          "moeda_presumida",
           "receita_nao_garantida",
           "recorrencia_banco_atrasada",
+          "recorrencia_banco_conta_fora_da_base",
           "recorrencia_banco_estimada",
           "saldo_ausente"
         ],
@@ -4280,7 +4279,7 @@
         {
           "dias": 30,
           "data": "2026-11-05",
-          "saldo": "5960.10"
+          "saldo": "8460.10"
         }
       ],
       "periodo": {
@@ -4289,20 +4288,20 @@
       },
       "ancora": {
         "data": "2026-10-06",
-        "saldo": "1000.00"
+        "saldo": "3500.00"
       },
       "trajetoria": [
         {
           "data": "2026-10-07",
-          "saldo": "1000.00",
+          "saldo": "3500.00",
           "compromissos": []
         },
         {
           "data": "2026-10-08",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": [
             {
-              "chave": "f3b9547c41070909c3880a81465fbead981ad214dfa08e4f96b6155c6d9dd713",
+              "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
               "ciclo": "2026-10-08",
               "data": "2026-10-08",
               "fonte": "recorrencia_banco",
@@ -4325,145 +4324,145 @@
         },
         {
           "data": "2026-10-09",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-10",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-11",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-12",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-13",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-14",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-15",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-16",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-17",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-18",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-19",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-20",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-21",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-22",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-23",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-24",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-25",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-26",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-27",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-28",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-29",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-30",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-10-31",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-11-01",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-11-02",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-11-03",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-11-04",
-          "saldo": "960.10",
+          "saldo": "3460.10",
           "compromissos": []
         },
         {
           "data": "2026-11-05",
-          "saldo": "5960.10",
+          "saldo": "8460.10",
           "compromissos": [
             {
-              "chave": "2a492c7f86eb32ba3ee64157c60b573f8c7ca08cf934fa46aa78e8b4208a65c7",
+              "chave": "94a68fff3eb1e90a3bc0abc6394c149938e3204a013d3b26439008304fcb4729",
               "ciclo": "2026-11-05",
               "data": "2026-11-05",
               "fonte": "recorrencia_banco",
@@ -4491,11 +4490,11 @@
       ],
       "pior_dia": {
         "data": "2026-10-08",
-        "saldo": "960.10",
+        "saldo": "3460.10",
         "desde": "2026-10-06",
         "causas": [
           {
-            "chave": "f3b9547c41070909c3880a81465fbead981ad214dfa08e4f96b6155c6d9dd713",
+            "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
             "ciclo": "2026-10-08",
             "data": "2026-10-08",
             "fonte": "recorrencia_banco",
@@ -4518,14 +4517,14 @@
       },
       "compromissos": [
         {
-          "chave": "8514ecd50a6b8751860d6eeff8aab733f238049d57896fb6ea7c7a910856d283",
+          "chave": "7cf697b94c85ff3720ca3c5d76f1ef6ab2d821ba5ecd4320f2b37048a9ba89eb",
           "fonte": "recorrencia_banco",
           "nome": "SALARIO EMPRESA X",
           "primeira_data": "2026-10-05",
           "ultima_data": "2026-11-05",
           "ocorrencias": [
             {
-              "chave": "77e7c2cbf940a63edf68f71231d62c51b94d946ab4612c53c7e28146ddc3e973",
+              "chave": "d98c2571715f44f8bfac1471c9e2e7cdb0536e9a7bbd44197865ce31e92e847c",
               "ciclo": "2026-10-05",
               "data": "2026-10-05",
               "fonte": "recorrencia_banco",
@@ -4553,7 +4552,7 @@
               ]
             },
             {
-              "chave": "2a492c7f86eb32ba3ee64157c60b573f8c7ca08cf934fa46aa78e8b4208a65c7",
+              "chave": "94a68fff3eb1e90a3bc0abc6394c149938e3204a013d3b26439008304fcb4729",
               "ciclo": "2026-11-05",
               "data": "2026-11-05",
               "fonte": "recorrencia_banco",
@@ -4579,14 +4578,14 @@
           ]
         },
         {
-          "chave": "41e4503cc580e21e2a293000231381e616f965461dda7987d41246abe58dd43f",
+          "chave": "824a4ed46d89399e5435db25bac34d2a0a98734479078f14395bed9a169355ea",
           "fonte": "recorrencia_banco",
           "nome": "NETFLIX.COM",
           "primeira_data": "2026-10-08",
           "ultima_data": "2026-10-08",
           "ocorrencias": [
             {
-              "chave": "f3b9547c41070909c3880a81465fbead981ad214dfa08e4f96b6155c6d9dd713",
+              "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
               "ciclo": "2026-10-08",
               "data": "2026-10-08",
               "fonte": "recorrencia_banco",
@@ -4602,6 +4601,39 @@
                 {
                   "codigo": "recorrencia_banco_estimada",
                   "direcao_do_erro": "ambos"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "fba9e6cc918c34406b8403b4215c0f25a514355fdc5aa5a750a2d2044e33aad4",
+          "fonte": "recorrencia_banco",
+          "nome": "ACADEMIA",
+          "primeira_data": "2026-10-12",
+          "ultima_data": "2026-10-12",
+          "ocorrencias": [
+            {
+              "chave": "70697faab763b224a6affc79584101aee221024c65736f3a5f9048c1d0671d0f",
+              "ciclo": "2026-10-12",
+              "data": "2026-10-12",
+              "fonte": "recorrencia_banco",
+              "tipo": "gasto_fixo",
+              "nome": "ACADEMIA",
+              "valor": "100",
+              "direcao": "saida",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": false,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                },
+                {
+                  "codigo": "recorrencia_banco_conta_fora_da_base",
+                  "direcao_do_erro": "so_melhora"
                 }
               ]
             }

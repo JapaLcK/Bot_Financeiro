@@ -63,7 +63,9 @@ def _casar(manuais: list[dict], cs: list[dict]) -> set[int]:
     return casadas
 
 
-def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instancias: list) -> None:
+def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instancias: list,
+           contas_na_base: set) -> None:
+    """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
     hoje = s.hoje
     conexoes = ler_frescor(cur, user_id)
     if not conexoes:
@@ -72,6 +74,9 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
     velho = s.calculado_em - BANCO_VELHO
     if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
         _motivo(s, 'recorrencias_banco_nao_lidas')
+    for c in conexoes:  # a previsão em cache vence quando a lista vira velha
+        if c['recurring_fetched_at'] is not None and c['recurring_fetched_at'] >= velho:
+            s.valido_ate = min(s.valido_ate, c['recurring_fetched_at'] + BANCO_VELHO)
 
     linhas = ler_ocorrencias(cur, user_id, receitas=True)
     # Positivo no cartão é pagamento de fatura ou estorno, não receita.
@@ -89,7 +94,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
                        'nome': _merchant(ult).get('name') or ult['description'],
                        'descricao': ult['description'], 'valor': abs(ult['amount']),
                        'dia': dia_da_cadeia(ls), 'ultima': ult['transaction_date'],
-                       'cartao': not entrada and ult['account_type'] == 'CREDIT'})
+                       'cartao': not entrada and ult['account_type'] == 'CREDIT',
+                       'conta': ult['account_id']})
 
     fixos = [dict(r) for r in recs if r['is_active']]
     rendas = [dict(r) for r in receitas if r['is_active']]
@@ -120,6 +126,10 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
             if atrasada and d < hoje:
                 incluida = incluida and saida
                 motivos.append(_motivo(s, 'recorrencia_banco_atrasada', 'so_piora', c['id']))
+            if not c['cartao'] and c['conta'] not in contas_na_base:
+                incluida = False  # o saldo dessa conta não está na base: seria conta pela metade
+                motivos.append(_motivo(s, 'recorrencia_banco_conta_fora_da_base',
+                                       'so_melhora' if saida else 'so_piora', c['id']))
             if interrompida:
                 incluida = False
                 motivos.append(_motivo(s, 'recorrencia_banco_interrompida',

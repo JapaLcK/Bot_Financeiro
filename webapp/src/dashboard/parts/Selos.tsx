@@ -46,6 +46,7 @@ const MOTIVO: Record<string, string> = {
   recorrencia_banco_interrompida: "parou de aparecer no banco",
   recorrencia_banco_igual_a_fixo_manual: "já contado no seu fixo",
   recorrencia_banco_pode_repetir_manual: "pode repetir um fixo seu",
+  recorrencia_banco_conta_fora_da_base: "conta fora do saldo de partida",
   recorrencias_banco_nao_lidas: "recorrências do banco desatualizadas",
   valor_boleto_desconhecido: "valor do boleto desconhecido",
   valor_boleto_estimado: "valor do boleto estimado",
