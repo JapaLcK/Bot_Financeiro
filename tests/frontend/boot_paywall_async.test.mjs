@@ -66,8 +66,11 @@ after(async () => { await browser?.close(); });
 // stubadas: validate responde na hora; /auth/me demora ME_DELAY_MS.
 // wsMode: "silent" = conecta e fica (default) | "reject" = handshake cai 30ms
 // depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
+// relogio: relógio falso na página (os timers do FakeWS e do backoff andam
+// com page.clock.runFor, não com o relógio de parede).
 async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
-                         seedSnap = false, meAfter = null, meGate = false }) {
+                         seedSnap = false, meAfter = null, meGate = false,
+                         relogio = false }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   let meCalls = 0;
@@ -148,6 +151,7 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
     // /auth/dashboard-profile, /history, /insights, etc.: pendura (nunca resolve)
     return new Promise(() => {});
   });
+  if (relogio) await page.clock.install();
   await page.goto("http://pb.test/app", { waitUntil: "domcontentloaded" });
   return { ctx, page, liberaMe };
 }
@@ -200,8 +204,9 @@ test("paywall APROVA: restore intacto (nenhum gate novo no caminho quente)", asy
 test("handshake rejeitado + /auth/me 500: retry com backoff, sockets ≤2 em 15s", async () => {
   // Codex-2 do PR #218: sem o backoff eram ~5 sockets em 15s (3s fixos),
   // martelando /ws para sempre numa outage de auth.
-  const { ctx, page } = await bootApp({ me: { detail: "boom" }, meStatus: 500, meDelayMs: 50, wsMode: "reject" });
-  await new Promise((r) => setTimeout(r, 15000));
+  const { ctx, page } = await bootApp({ me: { detail: "boom" }, meStatus: 500, meDelayMs: 50, wsMode: "reject", relogio: true });
+  await page.waitForFunction(() => window._wsCount === 1, undefined, { timeout: LIMITE_MS });
+  await page.clock.runFor(15000);
   const n = await page.evaluate(() => window._wsCount);
   assert.ok(n <= 2, `${n} sockets em 15s — retry sem backoff (esperado ≤2)`);
   await ctx.close();
@@ -213,24 +218,27 @@ test("plano revogado no meio da sessão: revalida, redireciona e PARA de reconec
   // o motivo). Antes: retry fixo de 3 s para sempre, /auth/me nunca refeito.
   const { ctx, page } = await bootApp({
     me: { app_access: true }, meAfter: { app_access: false },
-    meDelayMs: 30, wsMode: "open-then-reject",
+    meDelayMs: 30, wsMode: "open-then-reject", relogio: true,
   });
+  await page.waitForFunction(() => window._wsCount === 1, undefined, { timeout: LIMITE_MS });
+  await page.clock.runFor(15000);
+  // O /auth/me do Node demora em tempo real: a navegação se espera no relógio de parede.
   await page.waitForURL("**/precos?escolha=1", { timeout: 15000 });
   const antes = await page.evaluate(() => window._wsCount || 0);
-  await page.waitForTimeout(5000);
+  await page.clock.runFor(60000);
   const depois = await page.evaluate(() => window._wsCount || 0);
   assert.equal(depois, antes, `continuou reconectando após o veredito: ${antes} -> ${depois}`);
   await ctx.close();
 });
 
 test("queda transitória DEPOIS de aberto: reconexão legítima segue em ~3s", async () => {
-  const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 50, wsMode: "open" });
+  const { ctx, page } = await bootApp({ me: { app_access: true }, meDelayMs: 50, wsMode: "open", relogio: true });
   await page.waitForFunction(() => window._wsCount === 1, undefined, { timeout: LIMITE_MS });
-  await page.waitForTimeout(100); // deixa o onopen (30ms) rodar
+  await page.clock.runFor(100); // deixa o onopen (30ms) rodar
   await page.evaluate(() => { window._ws.onclose({ code: 1006 }); }); // queda
-  await page.waitForFunction(() => window._wsCount >= 2, undefined, { timeout: LIMITE_MS });
+  await page.clock.runFor(3000);
   const n = await page.evaluate(() => window._wsCount);
-  assert.ok(n >= 2, "socket que já abriu tem que reconectar em ~3s");
+  assert.ok(n >= 2, `socket que já abriu tem que reconectar em 3s (${n} sockets)`);
   await ctx.close();
 });
 
