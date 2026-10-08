@@ -103,3 +103,25 @@ def test_resumo_mensal_com_dia_chega_a_ia_e_nao_vira_recorrente(monkeypatch):
     assert "NUNCA recurring.add" in _SYSTEM_PROMPT
     assert "PONTUAL" in _SYSTEM_PROMPT  # pedido com data é consulta, não toggle
     assert "NÃO é pedido de ligar/desligar" in _SYSTEM_PROMPT  # pergunta não é toggle
+
+
+def test_pergunta_com_numero_nao_liga_mesmo_se_a_ia_devolver_toggle(monkeypatch):
+    # "todo dia 1" tem número: vai para a IA antes dos aliases. Se a IA devolver o
+    # toggle para uma pergunta, o classificador descarta (cliente falso, sem rede).
+    from types import SimpleNamespace
+
+    import openai
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            conteudo = '{"intent": "report.monthly_enable", "confidence": 0.95}'
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=conteudo))])
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.chat = SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setenv("OPENAI_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(openai, "OpenAI", _FakeClient)
+
+    assert classify("quero receber o resumo mensal todo dia 1?").intent == "out_of_scope"
