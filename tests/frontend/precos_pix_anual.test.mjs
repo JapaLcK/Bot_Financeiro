@@ -90,6 +90,14 @@ async function abrirPrecos({
 } = {}) {
   const page = await browser.newPage({ viewport });
   if (initScript) await page.addInitScript(initScript);
+  // Conta as publicações do Pix (a 2ª é a que traz a assinatura): a espera do
+  // fim da preparação olha para ela, e não para a ordem das linhas da página.
+  await page.addInitScript(() => {
+    let v;
+    window.__pixPublicacoes = 0;
+    Object.defineProperty(window, "pbPixState", { configurable: true, get: () => v,
+      set: (x) => { v = x; window.__pixPublicacoes += 1; } });
+  });
   // Relógio falso: o teto do CLIENTE é de 15 minutos, e a única forma de medir
   // que ele existe sem esperar 15 minutos é adiantar o relógio da página.
   // `clock.install()` sozinho NÃO congela o relógio — ele segue andando junto
@@ -174,17 +182,17 @@ async function abrirPrecos({
 
   await page.goto(`${ORIGIN}/precos.html`);
   await page.waitForSelector("#plans-v2 .plan");
-  // Fim do `loadPlansState`: `purchaseResumeScheduled` só vira true no
-  // `schedulePurchaseResume()`, colado (sem await no meio) à 2ª `publicarPix`
-  // da precos.html. Se ele for movido para antes de um await, esta espera
-  // passa cedo e os casos voltam a depender da velocidade da máquina.
+  // Fim do `loadPlansState`: a 2ª `publicarPix` (a da assinatura) já rodou E
+  // o `schedulePurchaseResume()` também — as duas condições, para nenhuma
+  // reordenação na precos.html fazer esta espera passar cedo.
   if (subPendurada) {
     await page.waitForFunction(() => !!window.pbPixState, null, { timeout: 10_000 })
       .catch(() => {});
   } else {
-    await page.waitForFunction(() => typeof purchaseResumeScheduled !== "undefined"
-      && purchaseResumeScheduled === true, null, { timeout: 10_000 })
-      .catch(() => assert.fail("o loadPlansState não chegou ao fim (purchaseResumeScheduled): o cenário não foi montado"));
+    await page.waitForFunction(() => window.__pixPublicacoes >= 2
+      && typeof purchaseResumeScheduled !== "undefined" && purchaseResumeScheduled === true,
+    null, { timeout: 10_000 })
+      .catch(() => assert.fail("o loadPlansState não chegou ao fim (2ª publicarPix e purchaseResumeScheduled): o cenário não foi montado"));
   }
   return { page, chamadas, corposPix };
 }
