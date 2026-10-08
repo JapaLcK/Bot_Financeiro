@@ -70,15 +70,18 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
 }, withFallback);
 
 // Em vez de sono fixo: fontes prontas, nenhuma requisição pendente (menos o SSE, que fica
-// aberto) e dois snapshots seguidos iguais, a dois quadros um do outro. Devolve o último.
+// aberto) e dois snapshots seguidos iguais com a rede ociosa, a dois quadros um do outro.
+// Devolve o último.
 async function estavel(page, pendentes) {
   await page.evaluate(() => document.fonts.ready);
   let antes;
   for (let i = 0; i < 50; i++) {
     await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    let ocioso = !pendentes.size;
     const s = await snapshot(page), js = JSON.stringify(s);
-    if (!pendentes.size && js === antes) return s;
-    antes = js;
+    ocioso &&= !pendentes.size;
+    if (ocioso && js === antes) return s;
+    antes = ocioso ? js : undefined;
   }
   throw new Error(`a página não assentou em 50 voltas (${pendentes.size} requisições pendentes: ${[...pendentes].map((r) => r.url()).join(" ")})`);
 }
