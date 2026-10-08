@@ -94,6 +94,9 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "não tenho certeza se quero receber o resumo mensal",
     # frase contrastiva: a negação não vale para a cláusula seguinte
     "não quero o resumo mensal, quero receber o resumo semanal",
+    # cadência só com dia/período reconhecido: "todo errado" é queixa, não cadência
+    "para de mandar o resumo semanal todo errado",
+    "para de mandar o resumo mensal todo quebrado",
     # correção no fim da frase: o comando inteiro não é o pedido
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
