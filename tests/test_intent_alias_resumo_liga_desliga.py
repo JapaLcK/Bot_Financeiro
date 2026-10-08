@@ -4,9 +4,10 @@ Os dois primeiros casos são os erros medidos por scripts/avaliar_intencao/avali
 "receber" não estava na lista de verbos de ativação e "para de" não estava na de
 desativação, então o alias caía em report.weekly / report.monthly.
 
-Liga/desliga por "receber" é ancorado no início da frase: só o pedido explícito
-liga ou desliga. Relato de problema de entrega, dúvida e frase contrastiva nunca
-ligam nem desligam — caem na consulta (read-only).
+Escopo reduzido de propósito (decisão de 2026-10-08): liga/desliga por "receber"
+e "para de mandar" só casa a frase exata listada aqui, com cortesia opcional.
+Variações (plural, complemento, dúvida, correção, pergunta, outro substantivo)
+não ligam nem desligam: caem na consulta ou na IA.
 """
 import pytest
 
@@ -19,107 +20,79 @@ _TOGGLES = (
 
 
 @pytest.mark.parametrize("texto, intent", [
+    # medidos pelo avaliar.py
     ("quero receber o resumo semanal todo domingo", "report.weekly_enable"),
     ("para de mandar o resumo mensal", "report.monthly_disable"),
+    # forma exata do ligar/desligar
     ("quero receber o resumo mensal", "report.monthly_enable"),
+    ("desejo receber o resumo semanal", "report.weekly_enable"),
     ("para de mandar o resumo semanal", "report.weekly_disable"),
+    ("não quero receber o resumo semanal", "report.weekly_disable"),
+    ("eu não quero receber o resumo mensal", "report.monthly_disable"),
+    ("não quero mais receber o resumo semanal", "report.weekly_disable"),
+    ("não desejo receber o resumo mensal", "report.monthly_disable"),
+    # cortesia antes e depois
+    ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
+    ("não quero receber o resumo semanal por favor", "report.weekly_disable"),
+    ("quero receber o resumo mensal todo mês", "report.monthly_enable"),
+    # ligar/desligar genéricos continuam como antes
     ("liga o resumo semanal", "report.weekly_enable"),
     ("desativa o resumo semanal", "report.weekly_disable"),
     ("resumo da semana", "report.weekly"),
     ("resumo mensal", "report.monthly"),
-    # pedido explícito de parar de receber
-    ("não quero receber o resumo semanal", "report.weekly_disable"),
-    ("não quero mais receber o resumo semanal", "report.weekly_disable"),
-    ("não desejo receber o resumo mensal", "report.monthly_disable"),
-    # sinônimos de substantivo aceitos pelas outras regras de relatório
-    ("não quero receber o relatório semanal", "report.weekly_disable"),
-    ("quero receber o relatório mensal", "report.monthly_enable"),
-    # a cadência repetida no desligar não impede o desligar
-    ("não quero mais receber o resumo semanal todo domingo", "report.weekly_disable"),
-    ("não quero receber o resumo mensal todo mês", "report.monthly_disable"),
-    # "eu" e cadência por dia da semana (normalizada de "segunda-feira")
-    ("eu não quero receber o resumo semanal", "report.weekly_disable"),
-    ("não quero receber o resumo semanal toda segunda-feira", "report.weekly_disable"),
-    ("quero receber o resumo semanal toda segunda-feira", "report.weekly_enable"),
-    # a cadência sozinha basta como período ("toda semana", "todo mês")
-    ("não quero receber o resumo toda semana", "report.weekly_disable"),
-    ("quero receber o resumo todo mês", "report.monthly_enable"),
-    ("não quero receber o resumo todo mês", "report.monthly_disable"),
-    # pronome objeto entre "de" e o verbo
-    ("para de me mandar o resumo semanal", "report.weekly_disable"),
-    ("para de me enviar o resumo mensal", "report.monthly_disable"),
-    # determinante possessivo e dia da semana como período
-    ("não quero receber meu resumo semanal", "report.weekly_disable"),
-    ("para de me mandar meu resumo mensal", "report.monthly_disable"),
-    ("não quero receber o meu resumo semanal", "report.weekly_disable"),
-    # plural
-    ("não quero receber os relatórios semanais", "report.weekly_disable"),
-    ("para de me mandar os resumos mensais", "report.monthly_disable"),
-    ("não quero receber o resumo semanal todos os domingos", "report.weekly_disable"),
-    # plural composto do dia da semana ("segundas-feiras" → "segundas feiras")
-    ("não quero receber o resumo semanal todas as segundas-feiras", "report.weekly_disable"),
-    # complemento que descreve o relatório (lista fechada de substantivos)
-    ("não quero receber o resumo semanal dos meus gastos", "report.weekly_disable"),
-    ("quero receber o relatório mensal das minhas finanças", "report.monthly_enable"),
-    ("não quero receber o resumo semanal de gastos", "report.weekly_disable"),
-    ("desejo receber o resumo semanal", "report.weekly_enable"),
-    ("eu desejo receber o relatório mensal", "report.monthly_enable"),
-    ("não quero receber o relatório mensal de finanças", "report.monthly_disable"),
-    # plural do dia da semana sozinho como período
-    ("não quero receber o resumo todas as segundas-feiras", "report.weekly_disable"),
-    # artigo indefinido ("um", "uma") nos dois sentidos
-    ("não quero receber um resumo semanal", "report.weekly_disable"),
-    ("quero receber um resumo mensal", "report.monthly_enable"),
-    # determinante negativo só no desligar: "nenhum" no ligar seria contradição
-    ("não quero receber nenhum resumo semanal", "report.weekly_disable"),
-    ("não quero receber nenhum relatório mensal", "report.monthly_disable"),
-    # cadência no plural sozinha como período
-    ("não quero receber o resumo todas as semanas", "report.weekly_disable"),
-    ("quero receber o resumo todos os meses", "report.monthly_enable"),
-    ("quero receber o resumo mensal todos os meses", "report.monthly_enable"),
-    ("para de me mandar mais o resumo semanal", "report.weekly_disable"),
-    ("para de receber mais o resumo mensal", "report.monthly_disable"),
-    ("para de me mandar o meu resumo mensal", "report.monthly_disable"),
-    ("não quero receber o resumo toda segunda-feira", "report.weekly_disable"),
-    # cortesia antes do comando também não muda o pedido
-    ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
-    ("por favor quero receber o resumo mensal", "report.monthly_enable"),
-    # cortesia no fim não muda o pedido
-    ("não quero receber o resumo semanal por favor", "report.weekly_disable"),
-    ("para de mandar o resumo mensal por favor", "report.monthly_disable"),
-    ("quero receber o resumo semanal por favor", "report.weekly_enable"),
-    # "mais" depois do verbo também é pedido de parar
-    ("não quero receber mais o resumo semanal", "report.weekly_disable"),
-    ("não desejo receber mais o relatório mensal", "report.monthly_disable"),
-    # formas de período por substantivo, como "resumo da semana" e "resumo do mes"
-    ("não quero receber o resumo da semana", "report.weekly_disable"),
-    ("quero receber o resumo do mês", "report.monthly_enable"),
 ])
 def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
 
 
 @pytest.mark.parametrize("texto", [
-    # problema de entrega: não é pedido de desligar
+    # fora da forma exata: não liga nem desliga (vai para consulta ou IA)
     "não consigo receber o resumo semanal",
-    "não estou conseguindo receber o resumo mensal",
-    # dúvida: não é pedido de ligar nem de desligar
     "não sei se quero receber o resumo semanal",
-    "não tenho certeza se quero receber o resumo mensal",
-    # frase contrastiva: a negação não vale para a cláusula seguinte
     "não quero o resumo mensal, quero receber o resumo semanal",
-    # cadência só com dia/período reconhecido: "todo errado" é queixa, não cadência
-    "para de mandar o resumo semanal todo errado",
-    "para de mandar o resumo mensal todo quebrado",
-    # correção no fim da frase: o comando inteiro não é o pedido
+    "quando vou receber o resumo mensal?",
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
-    # negação colada na cadência não é cadência
     "quero receber o resumo semanal todo domingo não",
-    # pergunta sobre o recebimento
-    "quando vou receber o resumo mensal?",
-    # "para de" como preposição, não como comando de parar
-    "como faço para de novo receber o resumo semanal?",
+    "para de mandar o resumo semanal todo errado",
+    "não quero receber os relatórios semanais",
+    "não quero receber nenhum resumo semanal",
+    "não quero receber o resumo semanal dos meus gastos",
+    "não quero receber o resumo toda semana",
 ])
-def test_frase_ambigua_nao_liga_nem_desliga(texto):
+def test_forma_fora_do_escopo_nao_liga_nem_desliga(texto):
     assert classify(texto, allow_ai=False).intent not in _TOGGLES
+
+
+def test_resumo_mensal_com_dia_chega_a_ia_e_nao_vira_recorrente(monkeypatch):
+    # "resumo mensal todo dia 1" tem número e "mensal": o predicado de recorrência
+    # manda para a IA antes dos aliases. O teste prova que a chamada à IA acontece
+    # (cliente falso, sem rede) e que o prompt separa resumo de recorrente.
+    from types import SimpleNamespace
+
+    import openai
+
+    from core.intent_classifier import _SYSTEM_PROMPT
+
+    chamadas = []
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            chamadas.append(kwargs)
+            conteudo = '{"intent": "report.monthly_enable", "confidence": 0.95}'
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=conteudo))])
+
+    class _FakeClient:
+        def __init__(self, api_key=None):
+            self.chat = SimpleNamespace(completions=_FakeCompletions())
+
+    monkeypatch.setenv("OPENAI_API_KEY", "chave-de-teste")
+    monkeypatch.setattr(openai, "OpenAI", _FakeClient)
+
+    texto = "quero receber o resumo mensal todo dia 1"
+    resultado = classify(texto)  # sem allow_ai=False: precisa cair na IA
+
+    assert len(chamadas) == 1
+    assert chamadas[0]["messages"][1]["content"] == texto
+    assert resultado.intent == "report.monthly_enable"
+    assert "NUNCA recurring.add" in _SYSTEM_PROMPT

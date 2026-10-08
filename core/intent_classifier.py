@@ -515,21 +515,22 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.weekly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
-    # "receber" só liga/desliga em frase inteira na forma pedida: "não consigo
-    # receber", "não sei se quero receber" e "quando vou receber…?" não são
-    # pedido — caem na consulta ou na IA. Ancorado no início de propósito.
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as|um|uma|nenhum|nenhuma) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|todas as semanas|toda segunda(?: feira)?|todas as segundas(?: feiras)?)(?: (?:dos|das|do|da|de)(?: (?:meus|minhas|seus|suas))? (?:gastos|financas|lancamentos))?(?: (?:todo|toda|todos os|todas as) (?:dia|mes(?:es)?|semana|domingo|segunda|terca|quarta|quinta|sexta|sabado)s?(?: feiras?)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    # "receber" e "para de mandar" só ligam/desligam na frase exata abaixo, com
+    # cortesia opcional. Qualquer outra forma (dúvida, correção, complemento,
+    # plural, pergunta) cai na consulta ou na IA: lista aberta de variações não
+    # fecha — ver a rodada de revisão de 2026-10-08 em tests/test_intent_alias_resumo_liga_desliga.py.
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber|para de mandar) o resumo semanal(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_disable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:quero|desejo) receber (?:(?:o|a|os|as|um|uma) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|todas as semanas|toda segunda(?: feira)?|todas as segundas(?: feiras)?)(?: (?:dos|das|do|da|de)(?: (?:meus|minhas|seus|suas))? (?:gastos|financas|lancamentos))?(?: (?:todo|toda|todos os|todas as) (?:dia|mes(?:es)?|semana|domingo|segunda|terca|quarta|quinta|sexta|sabado)s?(?: feiras?)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:quero|desejo) receber o resumo semanal(?: todo domingo)?(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_enable"),
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber|para de mandar) o resumo mensal(?: por favor| pfv| obrigad[oa])?$",
+     "report.monthly_disable"),
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:quero|desejo) receber o resumo mensal(?: todo mes)?(?: por favor| pfv| obrigad[oa])?$",
+     "report.monthly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
     (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
-     "report.monthly_enable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as|um|uma|nenhum|nenhuma) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes|todos os meses)(?: (?:dos|das|do|da|de)(?: (?:meus|minhas|seus|suas))? (?:gastos|financas|lancamentos))?(?: (?:todo|toda|todos os|todas as) (?:dia|mes(?:es)?|semana|domingo|segunda|terca|quarta|quinta|sexta|sabado)s?(?: feiras?)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
-     "report.monthly_disable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:quero|desejo) receber (?:(?:o|a|os|as|um|uma) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes|todos os meses)(?: (?:dos|das|do|da|de)(?: (?:meus|minhas|seus|suas))? (?:gastos|financas|lancamentos))?(?: (?:todo|toda|todos os|todas as) (?:dia|mes(?:es)?|semana|domingo|segunda|terca|quarta|quinta|sexta|sabado)s?(?: feiras?)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"
@@ -1014,6 +1015,7 @@ REGRAS ABSOLUTAS:
 5. Se faltar informação essencial para executar, ative needs_clarification.
 6. confidence deve refletir sua certeza real.
 7. NÃO confunda recorrente com lançamento avulso: "gastei 50 no mercado" = launches.add (uma vez); "gasto fixo de 100 todo dia 10" / "salário todo dia 5" = recurring.add (todo mês). Em recurring.add, se o usuário NÃO disser DO QUE é (nome/descrição), ative needs_clarification perguntando do que é o gasto/receita.
+8. Pedido sobre o RESUMO/RELATÓRIO (ligar, desligar, receber, parar de mandar o resumo semanal ou mensal) é SEMPRE report.weekly_enable/weekly_disable/monthly_enable/monthly_disable, mesmo com dia ou "todo mês" no pedido. Ex.: "quero receber o resumo mensal todo dia 1" = report.monthly_enable, NUNCA recurring.add (não é lançamento nem gasto fixo).
 
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta
