@@ -2499,6 +2499,8 @@ def import_ofx_launches_bulk(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user  # o INSERT toma o advisory do usuário: conta antes
+            _lock_user(cur, user_id)
             for r in launches_rows:
                 cur.execute(
                     """
