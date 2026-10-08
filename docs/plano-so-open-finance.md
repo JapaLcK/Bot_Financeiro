@@ -248,13 +248,20 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
 **2a. Novos casos na trava. Faixa Completo: dinheiro, WhatsApp, IA, /app.**
 - **Faz:** novos casos em `fonte_unica.MENSAGENS`:
   - `cartao_manual`: `create_card` e editar dias/limite de cartão manual; `pay_bill_amount`
-    do cartão manual. O do cartão OF só depois da 1b.
+    do cartão manual. O do cartão OF só depois da 1b. O parcelamento do cartão manual
+    (#6): antecipar, editar, apagar grupo e desfazer compra.
   - `recorrente`: `create_recurring_expense`/`_income` e `update_*`. O "sim" à sugestão de
     fixo (`pending.py:159`) e a oferta em `launches.py:1044` saem.
-  - `conta`: `create_boleto`/`update_boleto`.
-  - `caixinha`: `create_pocket` e depósito. Retirar e apagar caixinha **com saldo** depende
-    da P3.
+  - `conta`: `create_boleto`/`update_boleto` e marcar conta manual como paga
+    (`db/bills.py:176`, #13).
+  - `caixinha`: `create_pocket`, depositar, e retirar e apagar caixinha manual com saldo
+    (P3: congelada).
+  - `investimento`: resgatar e apagar investimento manual com saldo (P3: congelado). Isto
+    supera a liberação da Q36, que deixava os dois livres.
   - `renda_informada`: `set_income_override`.
+- Regra de alcance: **todo escritor do §2.1 que muda legado** entra na trava ou tem motivo
+  escrito para ficar livre. Esconder a tela (3a) não desliga o WhatsApp, a IA nem a rota
+  direta.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
 - O caso `recorrente` da receita (`create_recurring_income`) espera a P7.
 - Os textos da IA (`system_prompt.py`) e o `validate` das tools recusam antes de pedir
@@ -323,8 +330,11 @@ são dinheiro, então essa parte é Completo.
 - A P7 vem antes de travar a receita manual e a renda informada (2a) e antes de tirá-las da Previsão
   (3b).
 - A Fase 4 pode correr em paralelo à Fase 2 depois da P5 e da P6.
-- Atalho de baixo risco: aplicar 2a–2c **primeiro só à coorte do v2** (a chave atual). Ela é
-  nova e não tem legado. Depois ampliar pela P2.
+- A P2 manda aplicar 2a–2c **primeiro só à coorte do v2** (a chave atual), depois a todos.
+  A chave é uma lista de e-mail e id (`plan_service.dashboard_v2_enabled`) e **não prova
+  que a conta não tem legado** (`docs/etapa3-previsao-inventario.md`, "Coorte e
+  recuperação"). Antes de ligar, meça o legado dessa coorte (cartão manual, caixinha,
+  investimento, fixo e receita manuais) e trate quem tiver pela P3, como os demais.
 
 **O que cada fase toca:**
 
