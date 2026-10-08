@@ -911,11 +911,19 @@ def _extract_date_entity(norm: str) -> str | None:
     return None
 
 
+# Toggles de resumo (ligar/desligar semanal e mensal). Pergunta com '?' nunca liga
+# nem desliga: _normalize tira o '?', então o texto original é que decide.
+_RESUMO_TOGGLES = frozenset({
+    "report.weekly_enable", "report.weekly_disable",
+    "report.monthly_enable", "report.monthly_disable",
+})
+
+
 def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
         # Pergunta sobre ligar/desligar não é pedido: _normalize tira o '?', então
         # quem decide é o texto original.
-        if "?" in original and intent.startswith("report.") and intent.endswith(("_enable", "_disable")):
+        if "?" in original and intent in _RESUMO_TOGGLES:
             continue
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
@@ -1241,7 +1249,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
 
     # Tier 1
     result = _try_exact(norm)
-    if result:
+    if result and not ("?" in text and result.intent in _RESUMO_TOGGLES):
         return result
 
     # Tier 2

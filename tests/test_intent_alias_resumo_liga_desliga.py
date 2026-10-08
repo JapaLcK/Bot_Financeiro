@@ -54,6 +54,8 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "quero receber o resumo semanal?",
     "não quero receber o resumo mensal?",
     "para de mandar o resumo semanal?",
+    "ligar resumo semanal?",
+    "desligar resumo mensal?",
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
     "quero receber o resumo semanal todo domingo não",
