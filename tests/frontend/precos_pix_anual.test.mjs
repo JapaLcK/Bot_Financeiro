@@ -90,13 +90,25 @@ async function abrirPrecos({
 } = {}) {
   const page = await browser.newPage({ viewport });
   if (initScript) await page.addInitScript(initScript);
-  // Conta as publicações do Pix (a 2ª é a que traz a assinatura): a espera do
-  // fim da preparação olha para ela, e não para a ordem das linhas da página.
+  // Conta só as publicações do Pix feitas DEPOIS de a página receber o
+  // desfecho (resposta ou rejeição) do /billing/subscription. Roda antes do
+  // auth-refresh.js, que embrulha este fetch por fora: o desfecho é marcado
+  // antes de o `loadSubscription` ver o resultado. Contagem simples ou a
+  // ordem das linhas da precos.html não servem: duplicar uma publicação ou
+  // mover o `schedulePurchaseResume()` faria a espera passar cedo.
   await page.addInitScript(() => {
     let v;
-    window.__pixPublicacoes = 0;
+    window.__subDesfecho = false;
+    window.__pixAposSub = 0;
     Object.defineProperty(window, "pbPixState", { configurable: true, get: () => v,
-      set: (x) => { v = x; window.__pixPublicacoes += 1; } });
+      set: (x) => { v = x; if (window.__subDesfecho) window.__pixAposSub += 1; } });
+    const orig = window.fetch;
+    window.fetch = function (u) {
+      const p = orig.apply(this, arguments);
+      if (!String(u?.url ?? u).includes("/billing/subscription")) return p;
+      const marca = () => { window.__subDesfecho = true; };
+      return p.then((r) => { marca(); return r; }, (e) => { marca(); throw e; });
+    };
   });
   // Relógio falso: o teto do CLIENTE é de 15 minutos, e a única forma de medir
   // que ele existe sem esperar 15 minutos é adiantar o relógio da página.
@@ -182,17 +194,17 @@ async function abrirPrecos({
 
   await page.goto(`${ORIGIN}/precos.html`);
   await page.waitForSelector("#plans-v2 .plan");
-  // Fim do `loadPlansState`: a 2ª `publicarPix` (a da assinatura) já rodou E
-  // o `schedulePurchaseResume()` também — as duas condições, para nenhuma
-  // reordenação na precos.html fazer esta espera passar cedo.
+  // Fim do `loadPlansState`: uma `publicarPix` depois do desfecho da
+  // assinatura E o `schedulePurchaseResume()` — nenhuma das duas depende da
+  // ordem das linhas da precos.html.
   if (subPendurada) {
     await page.waitForFunction(() => !!window.pbPixState, null, { timeout: 10_000 })
       .catch(() => {});
   } else {
-    await page.waitForFunction(() => window.__pixPublicacoes >= 2
+    await page.waitForFunction(() => window.__pixAposSub >= 1
       && typeof purchaseResumeScheduled !== "undefined" && purchaseResumeScheduled === true,
     null, { timeout: 10_000 })
-      .catch(() => assert.fail("o loadPlansState não chegou ao fim (2ª publicarPix e purchaseResumeScheduled): o cenário não foi montado"));
+      .catch(() => assert.fail("o loadPlansState não chegou ao fim (publicarPix depois da assinatura e purchaseResumeScheduled): o cenário não foi montado"));
   }
   return { page, chamadas, corposPix };
 }
