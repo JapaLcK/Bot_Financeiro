@@ -959,10 +959,19 @@ resposta que não é a pergunta dela: erro (`ERROR_MSG`), texto vazio do modelo,
 estourado, `MAX_TOOL_LOOPS`, `_UM_POR_VEZ`, write direto ou recusa de validação na
 mesma rodada, ou exceção. Senão um "sim" posterior executaria algo que o usuário nunca
 viu (ex.: um `delete_all_launches` escondido atrás de um erro). Limites declarados:
-texto livre do modelo depois de armar não cancela; exceção entre gravar e reler a
-pendência não cancela; falha ao cancelar só loga. Código em
+texto livre do modelo depois de armar não cancela; falha depois do commit da
+pendência e antes de o runner receber a linha gravada não cancela; falha ao cancelar só
+loga. O token do CAS é a linha que o próprio `ai_set_pending_action` devolve
+(`returning`), sem reler: outra janela que re-arme no meio não é cancelada. Código em
 `core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
 `tests/test_wa_ia_primeiro_runner.py`.
+
+O "sim"/"não" de uma confirmação da IA já mostrada não gasta cota: quando o plano tem IA
+e só a cota acabou (`aviso_de_cota` devolve texto; inclusive se a própria mensagem que
+armou a pergunta gastou a última), o `handle_ai_chat_command` ainda o leva ao runner,
+que resolve a pendência antes da cota. Sem IA no plano (v1 sem Pro, downgrade), o gate
+de sempre: pendência descartada e mensagem de upgrade. Qualquer outro texto com a cota
+zerada também segue como antes: aviso de cota e pendência descartada.
 
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria

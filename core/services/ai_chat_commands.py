@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from datetime import timedelta
 
 import db
+from core.services.ai_chat.confirmations import is_cancel, is_confirm
 from core.services.ai_chat.runner import ERROR_MSG
 from core.services import billing_copy
 from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
@@ -284,7 +285,18 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         # Cai no gate Pro abaixo (mesmo se for só "piggy" puro).
 
     # 3. Sem acesso à IA → mensagem de upgrade (ou cota estourada, no v2).
+    # Exceto o "sim"/"não" de uma confirmação já mostrada quando o plano tem IA
+    # e só a COTA acabou (`aviso_de_cota` devolve texto): o runner o trata antes
+    # da cota, sem gastá-la — quem gastou a última cota na mensagem que armou a
+    # pergunta não perde a ação. Sem IA no plano (downgrade), o gate de sempre.
+    aviso = None
     if not user_is_pro:
+        try:
+            aviso = aviso_de_cota(user_id)
+        except Exception:
+            aviso = None
+    responde_pendencia = bool(aviso) and has_pending and (is_confirm(text) or is_cancel(text))
+    if not user_is_pro and not responde_pendencia:
         if has_pending:
             # Edge case: tinha pending e o user perdeu o acesso no meio. Limpa
             # pra não deixar o estado preso.
@@ -293,12 +305,8 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
                 db.ai_consume_pending_action(user_id, pending)
             except Exception:
                 pass
-        try:
-            aviso = aviso_de_cota(user_id)
-            if aviso:
-                return aviso
-        except Exception:
-            pass
+        if aviso:
+            return aviso
         return (
             "🐷 Conversar com a IA é um recurso do PigBank+.\n"
             "Dá uma olhada nos planos: https://pigbankai.com/precos"

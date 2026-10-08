@@ -195,3 +195,65 @@ def test_tabela_lancamento_com_certeza(uid_pro, frase, args, certo):
 def test_salario_sem_regra_do_usuario_confirma_pela_categoria(uid_pro):
     assert lancamento_com_certeza(uid_pro, _a(1000, "salário", "receita"),
                                   "recebi 1000 de salário") is False
+
+
+# ── A última cota do mês vai na mensagem que arma a confirmação ─────────────
+# O "sim"/"não" dessa pergunta não gasta cota (o runner o trata antes dela):
+# sem cota sobrando, ele ainda tem de chegar à pendência.
+
+def _na_ultima_cota(uid):
+    from core.services.plan_service import ai_monthly_limit_for
+    from db.ai_quota import _current_month_start
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update auth_accounts set ai_messages_this_month=%s, ai_month_reset_at=%s "
+                    "where user_id=%s",
+                    (ai_monthly_limit_for(uid) - 1, _current_month_start(), uid))
+        conn.commit()
+
+
+def _arma_com_a_ultima_cota(uid, monkeypatch):
+    from core.services.plan_service import ai_chat_allowed
+    liga_flag(monkeypatch)
+    _na_ultima_cota(uid)
+    openai_falso(monkeypatch, lancamento(500))
+    assert "Só confirmando" in diga(uid, "gastei 50 no mercado")
+    assert not ai_chat_allowed(uid), "a cota devia ter acabado nesta mensagem"
+
+
+@pytest.mark.parametrize("resposta,esperado", [
+    ("sim", [{"tipo": "despesa", "valor": 500.0}]),
+    ("não", []),
+])
+def test_cota_no_fim_sim_e_nao_ainda_resolvem_a_confirmacao(uid_pro, monkeypatch, resposta, esperado):
+    _arma_com_a_ultima_cota(uid_pro, monkeypatch)
+    diga(uid_pro, resposta)
+    assert lancamentos(uid_pro) == esperado
+    assert db.ai_get_pending_action(uid_pro) is None
+
+
+def test_downgrade_para_free_sim_nao_executa(uid_pro, monkeypatch):
+    """Sem IA no plano (não só sem cota), a confirmação antiga não executa: o
+    gate de sempre descarta a pendência."""
+    from core.services.plan_service import ai_chat_allowed
+    from tests.conftest import promote_to_pro
+    from core.services.ai_chat_commands import aviso_de_cota
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(500))
+    assert "Só confirmando" in diga(uid_pro, "gastei 50 no mercado")
+    # Sem IA no plano só existe no v1 (`ai_chat_allowed` = is_pro): no v2 todo
+    # tier tem IA e só a cota barra (`aviso_de_cota` com texto).
+    monkeypatch.setenv("PLANS_V2_ENABLED", "0")
+    promote_to_pro(uid_pro, plan="free")
+    assert not ai_chat_allowed(uid_pro) and not aviso_de_cota(uid_pro)
+    r = diga(uid_pro, "sim")
+    assert lancamentos(uid_pro) == []
+    assert db.ai_get_pending_action(uid_pro) is None
+    assert "PigBank+" in r, r
+
+
+def test_cota_no_fim_outro_texto_mantem_aviso_e_limpa(uid_pro, monkeypatch):
+    _arma_com_a_ultima_cota(uid_pro, monkeypatch)
+    r = diga(uid_pro, "hmm sei la")
+    assert "acabaram" in r, r
+    assert db.ai_get_pending_action(uid_pro) is None
+    assert lancamentos(uid_pro) == []

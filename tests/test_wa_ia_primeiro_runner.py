@@ -260,3 +260,28 @@ def test_p6_confirma_sobrescrita_na_mesma_rodada_cancela(com_lancamento_1, monke
     r = diga(uid, "piggy gastei 50 no mercado")
     assert "Só confirmando" in r, r
     _sim_nao_apaga(uid)
+
+
+def test_p7_corrida_entre_gravar_e_reler_nao_apaga_a_outra_janela(com_lancamento_1, monkeypatch):
+    """Logo depois de o turno gravar, outra janela re-arma (created_at novo).
+    O token do turno é o da linha que ELE gravou: o cancelamento perde o CAS
+    e a confirmação da outra janela fica."""
+    uid = com_lancamento_1
+    original = db.ai_set_pending_action
+
+    def corrida(user_id, name, args, summary):
+        meu = original(user_id, name, args, summary)
+        original(user_id, "delete_launch", {"launch_id": "1"}, "outra janela")
+        return meu
+
+    monkeypatch.setattr(db, "ai_set_pending_action", corrida)
+    openai_falso(monkeypatch, _apaga_o_1(), RuntimeError("modelo caiu"))
+    r = diga(uid, "piggy " + _TIRA)
+    assert runner.ERROR_MSG in r, r
+    assert db.ai_get_pending_action(uid)["summary"] == "outra janela"
+
+
+def test_set_pending_action_devolve_a_linha_como_get(user_id):
+    gravada = db.ai_set_pending_action(user_id, "delete_launch", {"launch_id": "1"}, "apagar #1")
+    assert gravada == db.ai_get_pending_action(user_id)
+    assert gravada["created_at"].tzinfo is not None and gravada["tool_args"] == {"launch_id": "1"}

@@ -52,8 +52,8 @@ logger = logging.getLogger(__name__)
 
 # Isolado por requisição/thread; marca antes de qualquer tentativa de escrita.
 _TURN_WRITE_ATTEMPTED = ContextVar("ai_chat_turn_write_attempted", default=False)
-# A última pendência da IA armada NESTE turno, como relida logo depois de
-# gravar (o `created_at` é o token do CAS); None = nenhuma.
+# A última pendência da IA armada NESTE turno, como o `ai_set_pending_action`
+# a devolveu (o `created_at` é o token do CAS); None = nenhuma.
 # Saída que não é a pergunta dela (erro, prazo, texto fixo de código) a cancela:
 # pendência viva e invisível vira um "sim" que executa o que o usuário não viu.
 _PENDENCIA_DO_TURNO: ContextVar[dict | None] = ContextVar("ai_chat_pendencia_do_turno", default=None)
@@ -604,8 +604,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         # Validação e resumo ainda não criaram uma ação. A marca é cumulativa
         # no turno e começa imediatamente antes da primeira tentativa de gravação.
         _TURN_WRITE_ATTEMPTED.set(True)
-        db.ai_set_pending_action(user_id, name, args, summary)
-        _PENDENCIA_DO_TURNO.set(db.ai_get_pending_action(user_id))
+        _PENDENCIA_DO_TURNO.set(db.ai_set_pending_action(user_id, name, args, summary))
         return (
             json.dumps(
                 {
@@ -623,8 +622,7 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
     if tool.is_write and confirmar_se is not None and confirmar_se(user_id, args):
         summary = tool.summary(args) if tool.summary else f"executar {name}"
         _TURN_WRITE_ATTEMPTED.set(True)
-        db.ai_set_pending_action(user_id, name, args, summary)
-        _PENDENCIA_DO_TURNO.set(db.ai_get_pending_action(user_id))
+        _PENDENCIA_DO_TURNO.set(db.ai_set_pending_action(user_id, name, args, summary))
         return (
             json.dumps({"status": "pending_user_confirmation", "summary": summary,
                         "args": args}, ensure_ascii=False),
