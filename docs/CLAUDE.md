@@ -849,7 +849,8 @@ trocar env no Railway reinicia o serviço (~1 min sem bot). O prazo do turno da 
 (`IA_PRIMEIRO_PRAZO_TURNO`, 15 s) também limita cada chamada à OpenAI (timeout por
 requisição = o menor entre 8 s e o que sobra), e resposta com tool calls que chega depois
 dele não roda nada: a mensagem volta ao roteador (ou, se já houve escrita no turno,
-`ERROR_MSG`). Com a flag, o
+`ERROR_MSG`). Quando a mensagem volta ao roteador, ele não chama LLM de novo no mesmo
+turno (`SEM_LLM_NO_TURNO`): classificador sem tier 3 e categoria sem GPT. Com a flag, o
 `add_launch` da IA pede "sim" quando QUALQUER parâmetro que a gravação usa não está
 apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schema): valor
 (um número só, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual

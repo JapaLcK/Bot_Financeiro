@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextvars import ContextVar
 
 logger = logging.getLogger(__name__)
 _LIGADA = {"1", "true", "yes", "on"}
@@ -32,6 +33,10 @@ _INTENTS_DO_ROTEADOR = frozenset({
 _PREFIXOS_DO_ROTEADOR = ("report.weekly", "report.monthly")
 
 _NUMERO_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+# Turno do WhatsApp em que a IA foi tentada e desistiu: o resto do turno (o
+# roteador) não chama LLM de novo. Ligada e zerada pelo `handle_incoming`.
+SEM_LLM_NO_TURNO: ContextVar[bool] = ContextVar("wa_ia_primeiro_sem_llm", default=False)
 
 
 def ativo(user_id: int) -> bool:

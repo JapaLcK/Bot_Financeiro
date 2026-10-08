@@ -126,6 +126,59 @@ def test_r9_positivo_giria_vai_a_ia(uid_pro, ia, monkeypatch):
     assert _primeiro(ia) == ["qto sobrou esse mes"]
 
 
+# ── Depois que a IA desistiu, o roteador não volta ao LLM no mesmo turno ────
+
+@pytest.fixture
+def llm_do_roteador(monkeypatch):
+    """Conta as idas do roteador ao LLM: tier 3 do classificador e categoria
+    por GPT. Nenhuma bate em rede."""
+    import ai_router
+    import core.intent_classifier as ic
+    from core.intent_classifier import IntentResult
+    idas = {"tier3": 0, "categoria": 0}
+
+    def tier3(text, user_id=None):
+        idas["tier3"] += 1
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+
+    def categoria(descricao, *, user_id=None, source="unknown"):
+        idas["categoria"] += 1
+        return "lazer"
+
+    monkeypatch.setattr(ic, "_classify_with_ai", tier3)
+    monkeypatch.setattr(ai_router, "classify_category_with_gpt", categoria)
+    return idas
+
+
+@pytest.mark.parametrize("flag", [True, False], ids=["ia-desistiu", "flag-desligada"])
+def test_tier3_do_classificador_so_sem_ia_tentada(uid_pro, ia, llm_do_roteador, monkeypatch, flag):
+    (liga_flag if flag else desliga_flag)(monkeypatch)
+    ia["resposta"] = None if flag else "🐷 resposta da IA"
+    r = diga(uid_pro, "qto sobrou esse mes")
+    assert llm_do_roteador["tier3"] == (0 if flag else 1)
+    assert r, r                                   # o roteador respondeu algo
+
+
+@pytest.mark.parametrize("flag", [True, False], ids=["ia-desistiu", "flag-desligada"])
+def test_categoria_por_gpt_so_sem_ia_tentada(uid_pro, ia, llm_do_roteador, monkeypatch, flag):
+    (liga_flag if flag else desliga_flag)(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-only")   # habilita o passo de GPT
+    ia["resposta"] = None
+    diga(uid_pro, "gastei 40 no zé")
+    assert llm_do_roteador["categoria"] == (0 if flag else 1)
+    assert len(lancamentos(uid_pro)) == 1
+
+
+def test_sem_llm_nao_vaza_para_o_turno_seguinte(uid_pro, ia, llm_do_roteador, monkeypatch):
+    liga_flag(monkeypatch)
+    ia["resposta"] = None
+    diga(uid_pro, "qto sobrou esse mes")
+    desliga_flag(monkeypatch)
+    ia["resposta"] = "🐷 resposta da IA"
+    diga(uid_pro, "qto sobrou esse mes")
+    assert llm_do_roteador["tier3"] == 1
+
+
 def test_r10_sim_com_pendencia_da_ia_segue_o_caminho_de_sempre(uid_pro, ia, monkeypatch):
     liga_flag(monkeypatch)
     db.ai_set_pending_action(uid_pro, "delete_launch", {"launch_id": "#1"}, "apagar o lançamento #1")

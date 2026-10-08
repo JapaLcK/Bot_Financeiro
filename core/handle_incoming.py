@@ -993,6 +993,8 @@ def handle_incoming(msg: IncomingMessage, *,
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
     marca = pergunta_no_turno.set(None)
+    from core.services.wa_ia_primeiro import SEM_LLM_NO_TURNO
+    sem_llm = SEM_LLM_NO_TURNO.set(False)
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -1177,8 +1179,12 @@ def handle_incoming(msg: IncomingMessage, *,
                 pergunta_no_turno.set(MANTEM)
                 return [OutgoingMessage(text=format_for_platform(ia_reply, platform))]
             ia_tentou = ia_reply is _IA_TENTOU
+        if ia_tentou:
+            # A fila do WhatsApp já esperou a IA: o roteador não volta ao LLM
+            # (tier 3 do classificador, categoria por GPT) neste turno.
+            SEM_LLM_NO_TURNO.set(True)
 
-        intent_result = classify(text, user_id=uid)
+        intent_result = classify(text, user_id=uid, allow_ai=not ia_tentou)
 
         # ------------------------------------------------------------------
         # 5b. Roteamento híbrido: se o classifier não reconheceu (out_of_scope
@@ -1317,3 +1323,4 @@ def handle_incoming(msg: IncomingMessage, *,
         if pergunta_ia is not None and pergunta_no_turno.get() != MANTEM:
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
         pergunta_no_turno.reset(marca)
+        SEM_LLM_NO_TURNO.reset(sem_llm)
