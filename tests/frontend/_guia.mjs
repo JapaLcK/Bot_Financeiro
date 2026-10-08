@@ -87,9 +87,9 @@ export const vaoDoVeu = () => {
   const [f0, f1, f2, f3] = [...document.querySelectorAll(".guia-veu")].map((e) => e.getBoundingClientRect());
   return { left: f2.right, top: f0.bottom, right: f3.left, bottom: f1.top };
 };
-export const tocarAba = async (page) => {
-  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout: 10000 });
-  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout: 10000 }); // pousou
+export const tocarAba = async (page, timeout = 10000) => {
+  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout });
+  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout }); // pousou
   const v = await page.evaluate(vaoDoVeu);
   await page.mouse.click((v.left + v.right) / 2, (v.top + v.bottom) / 2);
 };
@@ -98,7 +98,8 @@ export const tocarAba = async (page) => {
 export const esperaTitulo = async (page, t) => {
   const alvo = page.locator("#guia-titulo", { hasText: t }), aba = page.locator("#guia-titulo", { hasText: ABA });
   for (let i = 0; i < 100 && !(await alvo.count()); i++) {
-    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page).catch(() => {});
+    // 500 ms: se o toque anterior já pegou, o guia navegou e o "Agora toca" não volta
+    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page, 500).catch(() => {});
     else await page.waitForTimeout(100);
   }
   await alvo.waitFor({ timeout: 10000 });
