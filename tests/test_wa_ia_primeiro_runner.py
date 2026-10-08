@@ -198,11 +198,13 @@ def test_p2c_write_direto_depois_de_armar_cancela(com_lancamento_1, monkeypatch)
 def test_p3_prazo_depois_de_armar_cancela(com_lancamento_1, monkeypatch):
     uid = com_lancamento_1
 
-    def arma_e_estoura(messages):
+    def estoura_na_2a_resposta(messages):
+        # A rodada 1 armou o delete dentro do prazo; a 2ª resposta chega fora.
         monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: 1e12))
-        return _apaga_o_1()
+        return com_tools(chamada("get_period_summary", {}, "s"))
 
-    openai_falso(monkeypatch, arma_e_estoura, texto("🐷 não devia chegar aqui"))
+    openai_falso(monkeypatch, _apaga_o_1(), estoura_na_2a_resposta,
+                 texto("🐷 não devia chegar aqui"))
     r = diga(uid, _TIRA)
     assert runner.ERROR_MSG in r, r
     _sim_nao_apaga(uid)
@@ -448,3 +450,44 @@ def test_set_budget_sozinho_atualizando_pergunta_como_hoje(uid_pro, monkeypatch)
     assert db.ai_get_pending_action(uid_pro)["tool_name"] == "set_budget"
     diga(uid_pro, "sim")
     assert db.get_budget(uid_pro, "mercado")["budget"] == 800.0
+
+
+# ── Prazo do turno: a chamada não passa dele, nem a resposta atrasada roda ──
+
+def _relogio(monkeypatch, *instantes):
+    """`time` só do runner: devolve os instantes em ordem e repete o último."""
+    fila = list(instantes)
+    monkeypatch.setattr(runner, "time", SimpleNamespace(
+        monotonic=lambda: fila.pop(0) if len(fila) > 1 else fila[0]))
+
+
+def test_resposta_depois_do_prazo_nao_despacha_escrita(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    # prazo = 0 + 15; topo da volta em 1; timeout calculado em 1; resposta em 20.
+    _relogio(monkeypatch, 0.0, 1.0, 1.0, 20.0)
+    openai_falso(monkeypatch, lancamento(50))
+    r = runner.chat(uid_pro, "gastei 50 no mercado", monthly_limit=10,
+                    platform="whatsapp", ia_primeiro=True)
+    assert r is None
+    assert lancamentos(uid_pro) == []
+    h = db.ai_get_recent_messages(uid_pro, limit=50)
+    assert not any(m.get("tool_calls") for m in h), h
+    assert runner.trim_history_for_openai(h) == h
+
+
+def test_timeout_da_chamada_cabe_no_prazo_e_dentro_dele_roda(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    # prazo = 15; topo em 10; timeout = min(8, 15 - 10) = 5; resposta em 11.
+    _relogio(monkeypatch, 0.0, 10.0, 10.0, 11.0)
+    clientes = openai_falso(monkeypatch, lancamento(50))
+    r = runner.chat(uid_pro, "gastei 50 no mercado", monthly_limit=10,
+                    platform="whatsapp", ia_primeiro=True)
+    assert clientes.creates[0]["timeout"] == 5.0
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
+
+
+def test_fora_do_ia_primeiro_a_chamada_nao_ganha_timeout_proprio(uid_pro, monkeypatch):
+    clientes = openai_falso(monkeypatch, texto("🐷 oi"))
+    runner.chat(uid_pro, "oi", monthly_limit=10, platform="dashboard")
+    assert "timeout" not in clientes.creates[0]

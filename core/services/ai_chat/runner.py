@@ -435,6 +435,10 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
             logger.warning("ai_chat ia_primeiro: prazo do turno estourado pra user %s", user_id)
             _cancela_pendencia_do_turno(user_id)
             return None
+        # ia_primeiro: a chamada não passa do prazo do turno (timeout por
+        # requisição); fora dele, a chamada de sempre.
+        por_requisicao = ({"timeout": min(IA_PRIMEIRO_TIMEOUT, prazo - time.monotonic())}
+                          if ia_primeiro else {})
         try:
             resp = client.chat.completions.create(
                 model=MODEL,
@@ -442,6 +446,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 messages=messages,
                 tools=SCHEMAS,
                 max_tokens=MAX_TOKENS,
+                **por_requisicao,
             )
         except Exception as e:
             logger.error("erro na chamada OpenAI: %s", e)
@@ -450,6 +455,13 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
 
         msg = resp.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []
+
+        # A resposta chegou depois do prazo: nenhuma tool call dela roda (nem
+        # é persistida). Texto sem tool call segue — não escreve nada.
+        if tool_calls and ia_primeiro and time.monotonic() > prazo:
+            logger.warning("ai_chat ia_primeiro: resposta depois do prazo pra user %s", user_id)
+            _cancela_pendencia_do_turno(user_id)
+            return None
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
@@ -564,18 +576,22 @@ def _ainda_e_a_mesma(user_id: int, armada: dict[str, Any]) -> bool:
 def _alguma_arma_pendencia(user_id: int, chamadas: list[dict[str, Any]]) -> bool:
     """Alguma das chamadas pode armar uma pergunta pendente: write com
     `requires_confirmation` (sem rodar o `validate`), com
-    `arma_pendencia_no_execute`, ou com `confirmar_se` verdadeiro para os args."""
+    `arma_pendencia_no_execute` (bool, ou o predicado verdadeiro para os args),
+    ou com `confirmar_se` verdadeiro para os args."""
     for tc in chamadas:
         tool = get_tool(tc["function"]["name"])
-        if getattr(tool, "is_write", False) and (
-                getattr(tool, "requires_confirmation", False)
-                or getattr(tool, "arma_pendencia_no_execute", False)):
+        if not getattr(tool, "is_write", False):
+            continue
+        if getattr(tool, "requires_confirmation", False):
             return True
-        confirmar_se = getattr(tool, "confirmar_se", None)
         try:
             args = json.loads(tc["function"]["arguments"] or "{}")
         except Exception:
             args = {}
+        arma = getattr(tool, "arma_pendencia_no_execute", False)
+        if arma(user_id, args) if callable(arma) else arma:
+            return True
+        confirmar_se = getattr(tool, "confirmar_se", None)
         if confirmar_se is not None and confirmar_se(user_id, args):
             return True
     return False

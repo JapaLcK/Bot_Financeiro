@@ -26,7 +26,7 @@ do pacote tools/ agrega todas e expõe utilitários (schemas, lookup por nome).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 
 @dataclass(frozen=True)
@@ -47,11 +47,13 @@ class Tool:
     confirma achando que era real e só depois vê o 'não achei'."""
 
     confirmar_se: Optional[Callable[[int, dict[str, Any]], bool]] = None
-    arma_pendencia_no_execute: bool = False
+    arma_pendencia_no_execute: Union[bool, Callable[[int, dict[str, Any]], bool]] = False
     """Write SEM `requires_confirmation` cujo execute pode, por conta própria,
     armar uma pergunta pendente (ai_pending ou `pending_actions`) e devolvê-la
     como resposta. O runner não a vê armar; na pré-varredura da rodada ela
-    conta como escrita que arma pendência (não roda junto de outra escrita)."""
+    conta como escrita que arma pendência (não roda junto de outra escrita).
+    Bool = sempre/nunca; callable (user_id, args) = só quando aquela chamada
+    armaria."""
     ao_confirmar: Optional[Callable[[int, dict[str, Any]], dict[str, Any]]] = None
     """Só com `confirmar_se`: ajusta os args que vão para a pendência (e para
     o resumo) — o que o "sim" grava é o que a pergunta mostrou."""

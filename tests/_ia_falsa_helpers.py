@@ -30,15 +30,23 @@ def lancamento(valor, alvo="mercado", tipo="despesa", **extra):
     return com_tools(chamada("add_launch", {"tipo": tipo, "valor": valor, "alvo": alvo, **extra}))
 
 
+class _Registro(list):
+    def __init__(self):
+        super().__init__()
+        self.creates: list[dict] = []
+
+
 def openai_falso(monkeypatch, *rodadas):
     """Cada `create` consome uma rodada: mensagem pronta, Exception (levanta)
     ou callable(messages) -> mensagem. Sem rodada sobrando, levanta. Devolve
-    os kwargs com que o cliente foi criado (timeout, max_retries)."""
+    os kwargs com que o cliente foi criado (timeout, max_retries); os de cada
+    `create` (sem as mensagens) ficam em `.creates`."""
     import openai
     fila = list(rodadas)
-    clientes: list[dict] = []
+    clientes = _Registro()
 
     def create(**kw):
+        clientes.creates.append({k: v for k, v in kw.items() if k != "messages"})
         if not fila:
             raise AssertionError("IA falsa chamada além do roteiro")
         r = fila.pop(0)

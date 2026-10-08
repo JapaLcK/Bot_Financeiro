@@ -530,3 +530,50 @@ def test_confirma_nao_aparece_se_outra_janela_sobrescreveu(uid_pro, monkeypatch)
     monkeypatch.setattr(db, "ai_set_pending_action", original)
     diga(uid_pro, "sim")                   # é a que o usuário viu na outra janela
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 77.0}]
+
+
+# ── Q40 armada pelo add_launch certo, junto de outra escrita ────────────────
+
+_PAINEL = "gastei 50 no mercado e manda meu painel"
+
+
+def _lanca_e_painel():
+    from tests._ia_falsa_helpers import chamada, com_tools
+    return com_tools(
+        chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "mercado"}, "a"),
+        chamada("open_dashboard", {}, "d"),
+    )
+
+
+def test_q40_com_outra_escrita_nada_roda(uid_pro, monkeypatch):
+    from core.services.ai_chat import runner
+    _connect_fake_bank(uid_pro)
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, _lanca_e_painel())
+    r = diga(uid_pro, _PAINEL)
+    assert runner._UM_POR_VEZ in r, r
+    assert lancamentos(uid_pro) == []
+    assert _pend(uid_pro) is None
+
+
+def test_q40_sem_of_os_dois_rodam_como_hoje(uid_pro, monkeypatch):
+    from core.services.ai_chat import runner
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, _lanca_e_painel())
+    r = diga(uid_pro, _PAINEL)
+    assert runner._UM_POR_VEZ not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
+
+
+def test_q40_fora_do_whatsapp_com_flag_ou_flag_desligada_inalterado(uid_pro, monkeypatch):
+    from core.services.ai_chat import runner
+    _connect_fake_bank(uid_pro)
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, _lanca_e_painel())
+    r = diga(uid_pro, "piggy " + _PAINEL)
+    assert runner._UM_POR_VEZ not in r and _PERGUNTE_A_FORMA.split("`")[0] in r, r
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, _lanca_e_painel())
+    r = runner.chat(uid_pro, _PAINEL, monthly_limit=10, platform="dashboard")
+    assert r != runner._UM_POR_VEZ and "Nada foi gravado" in r, r
+    assert lancamentos(uid_pro) == []

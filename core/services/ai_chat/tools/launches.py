@@ -35,7 +35,7 @@ import db
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
 # porta e não pela outra.
 from core.observability import _log_falha
-from core.services.wa_ia_primeiro import ativo, precisa_confirmar_lancamento
+from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
 from utils_date import _tz
 from utils_text import fmt_brl
 
@@ -1029,6 +1029,8 @@ TOOLS: list[Tool] = [
         summary=_add_launch_summary,
         confirmar_se=precisa_confirmar_lancamento,
         ao_confirmar=_fixa_hashtag,
+        # Só a Q40 (WhatsApp com a flag); fora disso o add_launch não conta.
+        arma_pendencia_no_execute=armaria_q40,
     ),
     Tool(
         schema={

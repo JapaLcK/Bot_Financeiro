@@ -845,7 +845,11 @@ recorrência/conta a pagar, vários lançamentos numa frase), com pendência viv
 com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula):
 ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que
 não dê id válido (`,`, só espaços, `abc`) = ninguém, com warning no log. As duas são lidas a cada mensagem, mas
-trocar env no Railway reinicia o serviço (~1 min sem bot). Com a flag, o
+trocar env no Railway reinicia o serviço (~1 min sem bot). O prazo do turno da IA
+(`IA_PRIMEIRO_PRAZO_TURNO`, 15 s) também limita cada chamada à OpenAI (timeout por
+requisição = o menor entre 8 s e o que sobra), e resposta com tool calls que chega depois
+dele não roda nada: a mensagem volta ao roteador (ou, se já houve escrita no turno,
+`ERROR_MSG`). Com a flag, o
 `add_launch` da IA pede "sim" quando QUALQUER parâmetro que a gravação usa não está
 apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schema): valor
 (um número só, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
@@ -993,8 +997,9 @@ seguinte e não há essa releitura. Código em
 **Uma escrita com pendência por rodada.** Em qualquer canal, com ou sem
 `WA_IA_PRIMEIRO`, uma rodada do modelo com uma escrita que armaria pendência
 (`requires_confirmation=True`, sem rodar o `validate`; `arma_pendencia_no_execute=True`,
-a que arma a pergunta dentro do próprio execute — hoje `set_budget` e `mark_bill_paid`,
-contadas SEMPRE, mesmo quando aquela chamada não armaria; ou `confirmar_se` verdadeiro) e
+a que arma a pergunta dentro do próprio execute — `set_budget` e `mark_bill_paid` contadas
+SEMPRE, mesmo quando aquela chamada não armaria; o `add_launch` por predicado, só quando
+armaria a Q40, no WhatsApp com `WA_IA_PRIMEIRO`; ou `confirmar_se` verdadeiro) e
 QUALQUER outra escrita, em qualquer ordem, não roda nada (nem as leituras dela): a
 pendência do turno é cancelada e a resposta é o texto fixo `_UM_POR_VEZ` ("me manda um
 por mensagem"). Antes, no dashboard e com a flag desligada, "gasta 50 no ifood e apaga o

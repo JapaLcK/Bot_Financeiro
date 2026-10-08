@@ -151,22 +151,38 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     return infer_category(user_id, texto, None, allow_ai=False).category == local.category
 
 
+def _decisao_no_whatsapp(user_id: int, args: dict) -> str | None:
+    """O `fp.decidir` que o `_add_launch_execute` tomaria, só no WhatsApp com a
+    flag e com tipo/valor válidos; None fora disso (a execução nem decide)."""
+    from core.handlers import forma_pagamento as fp
+    from core.services.ai_chat._context import CURRENT_PLATFORM
+    from core.services.ai_chat.tools.launches import _TIPOS_VALIDOS, forma_declarada
+
+    if not ativo(user_id) or CURRENT_PLATFORM.get() != "whatsapp":
+        return None
+    if str(args.get("tipo") or "").strip().lower() not in _TIPOS_VALIDOS:
+        return None
+    try:
+        if float(args.get("valor") or 0) <= 0:
+            return None
+    except (TypeError, ValueError):
+        return None
+    return fp.decidir(user_id, forma_declarada(args))
+
+
 def precisa_confirmar_lancamento(user_id: int, args: dict) -> bool:
     """`confirmar_se` do `add_launch`: no WhatsApp com a flag, pede "sim"
     antes de uma gravação que aconteceria e não tem certeza."""
     from core.handlers import forma_pagamento as fp
-    from core.services.ai_chat._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
-    from core.services.ai_chat.tools.launches import _TIPOS_VALIDOS, forma_declarada
+    from core.services.ai_chat._context import CURRENT_USER_MESSAGE
 
-    if not ativo(user_id) or CURRENT_PLATFORM.get() != "whatsapp":
-        return False
-    if str(args.get("tipo") or "").strip().lower() not in _TIPOS_VALIDOS:
-        return False
-    try:
-        if float(args.get("valor") or 0) <= 0:
-            return False
-    except (TypeError, ValueError):
-        return False
-    if fp.decidir(user_id, forma_declarada(args)) not in (fp.CARTEIRA, fp.PERGUNTA):
+    if _decisao_no_whatsapp(user_id, args) not in (fp.CARTEIRA, fp.PERGUNTA):
         return False
     return not lancamento_com_certeza(user_id, args, CURRENT_USER_MESSAGE.get())
+
+
+def armaria_q40(user_id: int, args: dict) -> bool:
+    """`arma_pendencia_no_execute` do `add_launch`: a execução armaria a
+    pergunta da forma (Q40, `payment_method_choice`)."""
+    from core.handlers import forma_pagamento as fp
+    return _decisao_no_whatsapp(user_id, args) == fp.PERGUNTA
