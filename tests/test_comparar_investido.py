@@ -17,7 +17,7 @@ def _rodar(usuarios=None):
 
 
 def test_um_usuario_por_balde_e_a_saida_padrao_sem_user_id():
-    so_manual, manual_e_banco, so_banco, nada, igual = (usuario_pagante() for _ in range(5))
+    so_manual, manual_e_banco, so_banco, nada, igual, vazio = (usuario_pagante() for _ in range(6))
     investimento_manual(so_manual, "CDB", "100")
     investimento_manual(manual_e_banco, "CDB", "100")
     posicao(conexao(manual_e_banco, f"item-{manual_e_banco}"), "inv-1", "50")
@@ -33,5 +33,13 @@ def test_um_usuario_por_balde_e_a_saida_padrao_sem_user_id():
     assert linhas[-len(BALDES):] == [f"{b}: 1" for b in BALDES]
 
     padrao = _rodar()
+    # `vazio` não tem investimento nem conexão: a população vem de `users`, ele conta em "nada".
+    assert _rodar([vazio])[-len(BALDES):] == [f"{b}: {int(b == 'nada')}" for b in BALDES]
+    com_vazio = dict(l.split(": ") for l in padrao)
+    with get_conn() as conn:
+        conn.execute("delete from users where id = %s", (vazio,))
+        conn.commit()
+    sem_vazio = dict(l.split(": ") for l in _rodar())
+    assert int(com_vazio["nada"]) == int(sem_vazio["nada"]) + 1
     assert len(padrao) == len(BALDES) and all(l.split(": ")[0] in BALDES for l in padrao)
     assert not any(str(u) in "\n".join(padrao) for u in usuarios)

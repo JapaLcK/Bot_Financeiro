@@ -29,7 +29,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from db.investido import calcular  # noqa: E402
 
 BALDES = ("igual", "manual_sem_banco", "manual_com_banco", "so_banco", "nada")
-_TODOS_SQL = "select user_id from investments union select user_id from open_finance_connections"
+# Todos de `users`, como scripts/cleanup_poisoned_category_rules.py:48: conta apagada e a
+# fundida pelo merge_users já saíram da tabela; quem não tem nada também muda (0 -> null).
+_TODOS_SQL = "select id as user_id from users order by id"
 
 
 def balde(antigo, novo) -> str:
