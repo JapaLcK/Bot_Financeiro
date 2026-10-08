@@ -37,6 +37,15 @@ def test_receber_negado_desliga_o_resumo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
 
 
+@pytest.mark.parametrize("texto, intent", [
+    # a negação vale só para a cláusula dela: o "quero receber" depois é ativação
+    ("não quero o resumo mensal, quero receber o resumo semanal", "report.weekly_enable"),
+    ("não quero o resumo semanal mas quero receber o resumo mensal", "report.monthly_enable"),
+])
+def test_negacao_nao_vaza_para_a_clausula_seguinte(texto, intent):
+    assert classify(texto, allow_ai=False).intent == intent
+
+
 @pytest.mark.parametrize("texto", [
     # perguntas sobre o recebimento não ativam o resumo
     "quando vou receber o resumo mensal?",
