@@ -932,7 +932,7 @@ def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
         # Pergunta sobre ligar/desligar não é pedido: _normalize tira o '?', então
         # quem decide é o texto original.
-        if _pergunta_sobre_o_toggle(original) and intent in _RESUMO_TOGGLES:
+        if intent in _RESUMO_TOGGLES and _pergunta_sobre_o_toggle(original):
             continue
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
@@ -1266,7 +1266,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
 
     # Tier 1
     result = _try_exact(norm)
-    if result and not (_pergunta_sobre_o_toggle(text) and result.intent in _RESUMO_TOGGLES):
+    if result and not (result.intent in _RESUMO_TOGGLES and _pergunta_sobre_o_toggle(text)):
         return result
 
     # Tier 2
