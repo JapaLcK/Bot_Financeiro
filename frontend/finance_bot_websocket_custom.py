@@ -6696,6 +6696,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 except Exception as exc:
                     print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
 
+    elif event["type"] == "checkout.session.expired":
+        # Funil: sem usuário resolvido é no-op (200). Reentrega grava outra linha.
+        session = event["data"]["object"]
+        user_id = await _resolve_user(session)
+        if user_id:
+            from db import record_checkout_expired
+            await asyncio.to_thread(record_checkout_expired, user_id, _g(session, "id"))
+
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
         # — fonte primária; scheduler interno fica como fallback se o webhook

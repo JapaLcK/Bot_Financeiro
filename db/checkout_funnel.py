@@ -1,7 +1,8 @@
 """db/checkout_funnel.py — telemetria do funil de checkout (tabela dedicada
 checkout_funnel_events, fora do system_event_logs purgável).
 
-Duas pontas: record_checkout_started (no /billing/create-checkout) e
+Pontas: record_pricing_viewed (GET /precos logado), record_checkout_expired
+(webhook checkout.session.expired), record_checkout_started (no /billing/create-checkout) e
 record_checkout_completed (no webhook checkout.session.completed). O
 session_id (id da Checkout Session do Stripe) liga a abertura à conclusão
 da MESMA tentativa — é o que permite a conversão por sessão no painel.
@@ -18,10 +19,24 @@ from .connection import get_conn
 _log = logging.getLogger(__name__)
 
 
-def _record(user_id: int, session_id: str | None, kind: str) -> None:
+def _record(user_id: int, session_id: str | None, kind: str, *, dedupe_24h: bool = False) -> None:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
+                if dedupe_24h:
+                    # Janela móvel de 24h por (user, kind). ponytail: dois GETs
+                    # simultâneos podem gravar 2 linhas; o painel conta usuários
+                    # distintos, então não vale lock.
+                    cur.execute(
+                        "insert into checkout_funnel_events (user_id, session_id, kind) "
+                        "select %s, %s, %s where not exists ("
+                        "select 1 from checkout_funnel_events "
+                        "where user_id = %s and kind = %s "
+                        "and created_at > now() - interval '24 hours')",
+                        (int(user_id), session_id, kind, int(user_id), kind),
+                    )
+                    conn.commit()
+                    return
                 cur.execute(
                     # Quem impede a linha de CONCLUSÃO duplicada na reentrega
                     # do webhook é a unique parcial de db/schema.py (só
@@ -48,3 +63,12 @@ def record_checkout_started(user_id: int, session_id: str | None) -> None:
 
 def record_checkout_completed(user_id: int, session_id: str | None) -> None:
     _record(user_id, session_id, "completed")
+
+
+def record_pricing_viewed(user_id: int) -> None:
+    _record(user_id, None, "viewed_pricing", dedupe_24h=True)
+
+
+def record_checkout_expired(user_id: int, session_id: str | None) -> None:
+    # Também dispara quando o app troca/expira a sessão aberta (não só abandono).
+    _record(user_id, session_id, "expired")

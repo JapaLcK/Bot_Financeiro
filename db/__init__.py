@@ -315,6 +315,8 @@ from .agents import (
 from .checkout_funnel import (
     record_checkout_started,
     record_checkout_completed,
+    record_pricing_viewed,
+    record_checkout_expired,
 )
 from .reports import (
     set_daily_report_enabled,
@@ -566,6 +568,7 @@ __all__ = [
     "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
     "get_onboarding_state", "needs_onboarding", "set_onboarding_step", "mark_onboarding_completed",
     "record_checkout_started", "record_checkout_completed",
+    "record_pricing_viewed", "record_checkout_expired",
     "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
     "create_password_reset_token", "consume_password_reset_token",
     "update_last_activity", "get_users_for_engagement",

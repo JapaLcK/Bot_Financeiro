@@ -547,6 +547,20 @@ Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, 
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
+**Funil (`checkout_funnel_events`):** além de `started`/`completed`, grava `viewed_pricing`
+(GET `/precos` de usuário logado, 1 por janela móvel de 24h) e `expired` (webhook
+`checkout.session.expired`). Esse evento também dispara quando o app troca/expira a sessão
+aberta (`finance_bot_websocket_custom.py`, ao reaproveitar/expirar sessões em
+`/billing/create-checkout`), então `expired` NÃO é abandono: abandono confiável = abriram − concluíram.
+Quem consome a tabela (painel de funil): `started` e `expired` repetem por `session_id`
+(reuso de sessão, reentrega do webhook) → `COUNT(DISTINCT session_id)`; `viewed_pricing` repete a cada 24h
+por usuário e a dedupe é racy → `COUNT(DISTINCT user_id)` na janela. `viewed_pricing` é só de usuário
+LOGADO (quem vem do quiz anônimo não entra; entram também quem já paga e abre a /precos, e quem o
+`gate_plan_selection` redireciona): é "logado que viu a /precos", não "visitante". Sem backfill: antes do
+deploy `viewed_pricing` e `expired` são zero, então taxa vista→iniciou não vale numa janela que cruza o
+deploy (usar `min(created_at)` do kind como "medido desde"). Exclusão de conta zera `user_id`
+(`viewed_pricing` não tem `session_id`, então some de qualquer distinct por usuário).
+
 **`/billing/create-checkout` serve a `/precos` e a `/assinar`.** O corpo ganha
 `origem` (`"precos"` default | `"assinar"`; outro valor é 400) e `embutido` (default
 `false`). Hospedado responde `{checkout_url, interval, plan}`; embutido responde
