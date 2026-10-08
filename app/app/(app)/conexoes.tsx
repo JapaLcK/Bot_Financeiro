@@ -10,6 +10,7 @@ import { useForeground } from "@/features/openFinance/useForeground";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { conexoes, desconectarBanco, limiteBancario } from "@/services/openFinance";
 import { perfil } from "@/services/auth";
+import { dataCurta } from "@/features/painel/catalogo";
 import { Button } from "@/ui/componentes/Button";
 import { Banner } from "@/ui/componentes/Banner";
 import { Card } from "@/ui/componentes/Card";
@@ -94,14 +95,13 @@ export default function Conexoes() {
   };
   return <Screen sobCabecalho onAtualizar={() => setRodada((v) => v + 1)} atualizando={carregando}><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <Texto variante="secao">Sua grana, conectada</Texto>
-    <Texto tom="inkMuted">Confira a autorização e a última sincronização de cada banco.</Texto>
     {erro && <Banner tom="danger" mensagem={erro} />}
     {!dados && !erro && <Texto tom="inkMuted">Conferindo seus bancos…</Texto>}
-    {dados?.lista.length === 0 && <Texto>Nenhum banco conectado. Conecte seu banco para começar.</Texto>}
+    {dados?.lista.length === 0 && <Texto>Nenhum banco conectado.</Texto>}
     {dados?.lista.map((c) => <Card key={c.id}><View style={{ gap: espaco.md }}>
       <Texto variante="secao">{c.institution_name ?? "Seu banco"}</Texto>
       <ConnectionStatus estado={c.ui.state} label={c.ui.label} detalhe={c.ui.detail ?? undefined} />
-      <Texto variante="legenda" tom="inkMuted">{c.last_sync_at ? `Última sincronização: ${new Date(c.last_sync_at).toLocaleString("pt-BR")}` : "A primeira sincronização ainda não terminou."}</Texto>
+      <Texto variante="legenda" tom="inkMuted">{c.last_sync_at ? `Última sincronização: ${dataCurta(c.last_sync_at)}, ${new Date(c.last_sync_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : "A primeira sincronização ainda não terminou."}</Texto>
       {c.ui.state === "updating" && c.provider_item_id && <Button rotulo="Acompanhar sincronização" variante="secondary" desativado={entrando} onPress={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id!, modo: "acompanhar" } })} />}
       {c.provider_item_id && dados.permiteReconectar && !["removed", "item_missing", "paused"].includes(c.ui.state) && <Button rotulo={`Reconectar ${c.institution_name ?? "banco"}`} variante="secondary" desativado={entrando || removendo !== null} onPress={() => abrirAutorizacao(c.provider_item_id!)} />}
       <Button rotulo={`Desconectar ${c.institution_name ?? "banco"}`} variante="ghost" carregando={removendo === c.id} desativado={entrando || (removendo !== null && removendo !== c.id)} onPress={() => pedirRemocao(c)} />
