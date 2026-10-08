@@ -8,6 +8,8 @@ import { appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta
 
 // Só a fronteira WebView nativa é dublada; Router, autorização e HTTP são reais.
 jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: () => null }));
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 
 const B = "banco_b";
 function servidor(completo = true, pausa?: Promise<void>) {
