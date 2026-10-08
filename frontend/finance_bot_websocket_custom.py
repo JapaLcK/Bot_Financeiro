@@ -57,6 +57,7 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
+from core.funil_routes import register_funil_routes
 from core.audit import (
     AuditEvent,
     maybe_record_login_from_new_ip,
@@ -2787,6 +2788,7 @@ app.add_middleware(
 
 # ─── Admin dashboard routes (delegado para core/admin_dashboard.py) ───────────
 register_admin_routes(app, HERE, JWT_SECRET, limiter)
+register_funil_routes(app, HERE, JWT_SECRET)
 
 # ─── Auth helpers ────────────────────────────────────────────────────────────
 
