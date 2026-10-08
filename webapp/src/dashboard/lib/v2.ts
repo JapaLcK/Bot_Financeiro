@@ -117,9 +117,9 @@ export const guiaQuery = {
 // o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
 export const CHAT_REAL = false;
 // O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
-// A resposta monta duas vezes (a bolha e o role=status do PiggyChat): montar de novo só
-// relê depois de erro (a pergunta repetida tenta outra vez) ou de aviso do SSE com a conversa
-// fechada (inativa, a consulta só fica invalidada); o resto do dado novo vem do SSE e do foco.
+// Só a bolha consulta (a cópia do role=status não: parts/InvestidoResposta.tsx). Montar de
+// novo só relê depois de erro (a pergunta repetida tenta outra vez) ou de aviso do SSE com a
+// conversa fechada (inativa, a consulta só fica invalidada); o resto do dado novo vem do SSE e do foco.
 export const investidoQuery = {
   queryKey: ["investido"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/investido", signal),

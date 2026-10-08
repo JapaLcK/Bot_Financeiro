@@ -124,6 +124,44 @@ test("erros esperados: plano sem acesso, sem senha e sessão; 503 e rede ficam n
   assert.equal(await leia({ rede: true }), "Não consegui buscar agora. Pergunta de novo daqui a pouco.");
 });
 
+// A resposta aparece na bolha e, 60 ms depois, de novo no role=status do PiggyChat (é de lá
+// que o leitor de tela a lê). Só a bolha consulta: a cópia nunca pede a rota, nem quando o
+// 403 chega antes de ela montar.
+test("uma requisição por pergunta (sucesso e 403 rápido); o role=status anuncia o texto da bolha", async () => {
+  for (const opts of [{}, { plano: "free" }, { falha: "403_password_required" }]) {
+    const { ctx, page, gets } = await abrir(opts);
+    await perguntar(page, "quanto tenho investido?");
+    await resposta(page);
+    await page.waitForTimeout(300); // a cópia monta 60 ms depois
+    const bolha = await ultima(page).locator(".msg-text").textContent();
+    const anuncio = await page.locator('[role="status"]:has(+ .chat)').textContent();
+    await ctx.close();
+    assert.deepEqual(gets, ["GET"], JSON.stringify(opts));
+    assert.equal(anuncio, bolha, JSON.stringify(opts));
+    assert.notEqual(bolha, "Calculando…");
+  }
+});
+
+test("erro de rede: perguntar de novo pede a rota mais uma vez e mostra o número", async () => {
+  const { ctx, page, gets } = await abrir();
+  await ctx.route("**/api/v2/investido", (r) => r.abort());
+  await perguntar(page, "quanto tenho investido?");
+  await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Não consegui buscar agora" }).waitFor({ timeout: 15000 });
+  await page.waitForTimeout(300);
+  const falhou = gets.length; // as 3 tentativas do `retry` (rede e 5xx)
+  await ctx.route("**/api/v2/investido", (r) => r.fulfill({ json: RESPOSTAS.investido.com_banco }));
+  await perguntar(page, "quanto tenho investido?");
+  const depois = await resposta(page);
+  await page.waitForTimeout(300);
+  const total = gets.length;
+  const anuncio = await page.locator('[role="status"]:has(+ .chat)').textContent();
+  await ctx.close();
+  assert.equal(falhou, 3);
+  assert.equal(total, falhou + 1);
+  assert.match(depois, /^Você tem R\$ 57\.123,45/);
+  assert.match(anuncio, /^Você tem R\$ 57\.123,45/);
+});
+
 test("sem banco, com motivos e com parte sem saldo", async () => {
   const leia = async (investido) => {
     const { ctx, page } = await abrir({ investido });
@@ -165,6 +203,10 @@ test("aviso do SSE com a conversa fechada: voltar relê uma vez e a pergunta seg
   const inativa = gets.length;
   await page.evaluate(() => { location.hash = "#/piggy"; });
   await page.locator(".chat").waitFor();
+  // A bolha antiga relê ao voltar, sem pergunta nova: uma requisição e o número novo.
+  await page.waitForFunction(() => document.querySelector(".chat > .msg-piggy:last-child .msg-text").textContent.includes("1.234,50"), null, { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  const voltou = [gets.length, await ultima(page).locator(".msg-text").innerText()];
   await perguntar(page, "quanto tenho investido?");
   await page.waitForFunction(() => document.querySelector(".chat > .msg-piggy:last-child .msg-text").textContent.includes("1.234,50"), null, { timeout: 5000 }).catch(() => {});
   const depois = await resposta(page);
@@ -172,6 +214,8 @@ test("aviso do SSE com a conversa fechada: voltar relê uma vez e a pergunta seg
   await ctx.close();
   assert.match(antes, /^Você tem R\$ 57\.123,45/);
   assert.equal(inativa, 1); // inativa: o aviso não relê sozinho
+  assert.equal(voltou[0], 2);
+  assert.match(voltou[1], /^Você tem R\$ 1\.234,50/);
   assert.match(depois, /^Você tem R\$ 1\.234,50/);
   assert.deepEqual(gets, ["GET", "GET"]);
 });

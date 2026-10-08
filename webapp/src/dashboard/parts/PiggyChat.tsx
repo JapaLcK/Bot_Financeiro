@@ -8,6 +8,7 @@ import { LiveAnswer } from "./LiveAnswer";
 import { ICON } from "../lib/brand";
 import { DEMO, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
+import { Anuncio } from "./InvestidoResposta";
 
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
 
@@ -76,7 +77,7 @@ export function PiggyChat() {
     <>
       {head}
       {/* A resposta nova entra acima da barra, onde o foco fica: o leitor de tela a lê daqui. */}
-      <p className="sr-only" role="status">{said}</p>
+      <p className="sr-only" role="status"><Anuncio.Provider value>{said}</Anuncio.Provider></p>
       <ol className="chat" aria-label="Conversa">
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}

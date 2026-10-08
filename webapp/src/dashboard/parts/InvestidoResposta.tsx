@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { moneyText } from "../lib/format.js";
 import { ErroApi, investidoQuery } from "../lib/v2";
@@ -15,8 +16,12 @@ const erro = (e: Error) => !(e instanceof ErroApi) ? ERRO
     : e.code === "password_required" ? "Crie sua senha para ver seus investimentos. Depois de criar, volte para o painel novo."
       : e.status === 401 ? "Sua sessão terminou. Recarregue a página." : ERRO;
 
+// A cópia do role=status (PiggyChat) monta ~60 ms depois da bolha: só espelha a consulta,
+// nunca a dispara (um 403 rápido já seria erro quando ela monta e pediria de novo).
+export const Anuncio = createContext(false);
+
 export function InvestidoResposta() {
-  const q = useQuery(investidoQuery);
+  const q = useQuery({ ...investidoQuery, enabled: investidoQuery.enabled && !useContext(Anuncio) });
   if (q.isPending) return <>Calculando…</>;
   if (q.isError) return <>{erro(q.error)}</>;
   const d = q.data;
