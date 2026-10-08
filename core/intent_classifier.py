@@ -511,25 +511,25 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
 
     # liga/desliga do semanal — precisa vir ANTES do alias de report.weekly,
     # senão "desligar resumo semanal" cairia em report.weekly.
-    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|para\s+de|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
     # "receber" só liga/desliga em frase inteira na forma pedida: "não consigo
     # receber", "não sei se quero receber" e "quando vou receber…?" não são
     # pedido — caem na consulta ou na IA. Ancorado no início de propósito.
-    (r"^(?:nao (?:quero|desejo) (?:mais )?|para de )receber o resumo semanal\b",
+    (r"^(?:nao (?:quero|desejo) (?:mais )?receber|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) semanal\b",
      "report.weekly_disable"),
-    (r"^quero receber o resumo semanal\b",
+    (r"^quero receber (?:o |a )?(?:resumo|relatorio|report) semanal\b",
      "report.weekly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
-    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|para\s+de|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
-    (r"^(?:nao (?:quero|desejo) (?:mais )?|para de )receber o resumo mensal\b",
+    (r"^(?:nao (?:quero|desejo) (?:mais )?receber|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) mensal\b",
      "report.monthly_disable"),
-    (r"^quero receber o resumo mensal\b",
+    (r"^quero receber (?:o |a )?(?:resumo|relatorio|report) mensal\b",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"

@@ -31,6 +31,9 @@ _TOGGLES = (
     ("não quero receber o resumo semanal", "report.weekly_disable"),
     ("não quero mais receber o resumo semanal", "report.weekly_disable"),
     ("não desejo receber o resumo mensal", "report.monthly_disable"),
+    # sinônimos de substantivo aceitos pelas outras regras de relatório
+    ("não quero receber o relatório semanal", "report.weekly_disable"),
+    ("quero receber o relatório mensal", "report.monthly_enable"),
 ])
 def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
@@ -47,6 +50,8 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "não quero o resumo mensal, quero receber o resumo semanal",
     # pergunta sobre o recebimento
     "quando vou receber o resumo mensal?",
+    # "para de" como preposição, não como comando de parar
+    "como faço para de novo receber o resumo semanal?",
 ])
 def test_frase_ambigua_nao_liga_nem_desliga(texto):
     assert classify(texto, allow_ai=False).intent not in _TOGGLES
