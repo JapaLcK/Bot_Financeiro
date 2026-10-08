@@ -511,9 +511,9 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
 
     # liga/desliga do semanal — precisa vir ANTES do alias de report.weekly,
     # senão "desligar resumo semanal" cairia em report.weekly.
-    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_disable"),
-    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
     # "receber" e "para de mandar" só ligam/desligam na frase exata abaixo, com
     # cortesia opcional. Qualquer outra forma (dúvida, correção, complemento,
@@ -528,9 +528,9 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:quero|desejo) receber o resumo mensal(?: todo mes)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
-    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
-    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"
