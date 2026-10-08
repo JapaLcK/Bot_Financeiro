@@ -515,21 +515,21 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.weekly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
-    # "receber" negado é pedido para parar ("não quero mais receber o resumo
-    # semanal"); "receber" afirmativo só liga com "quero receber" — "vou receber"
-    # e "quando vou receber…?" são perguntas, não pedido.
-    (r"\bnao\b(?:\s+\w+){0,2}?\s+(?:receber|recebo|receba)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    # "receber" só liga/desliga em frase inteira na forma pedida: "não consigo
+    # receber", "não sei se quero receber" e "quando vou receber…?" não são
+    # pedido — caem na consulta ou na IA. Ancorado no início de propósito.
+    (r"^(?:nao (?:quero|desejo) (?:mais )?|para de )receber o resumo semanal\b",
      "report.weekly_disable"),
-    (r"(?<!nao )\bquero receber\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"^quero receber o resumo semanal\b",
      "report.weekly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
     (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|para\s+de|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
-    (r"\bnao\b(?:\s+\w+){0,2}?\s+(?:receber|recebo|receba)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"^(?:nao (?:quero|desejo) (?:mais )?|para de )receber o resumo mensal\b",
      "report.monthly_disable"),
-    (r"(?<!nao )\bquero receber\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"^quero receber o resumo mensal\b",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"

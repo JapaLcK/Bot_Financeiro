@@ -3,12 +3,19 @@
 Os dois primeiros casos são os erros medidos por scripts/avaliar_intencao/avaliar.py:
 "receber" não estava na lista de verbos de ativação e "para de" não estava na de
 desativação, então o alias caía em report.weekly / report.monthly.
-Os demais são controles: a frase de consulta e a de liga/desliga já simples
-continuam indo para o intent certo, e "receber" negado ou em pergunta nunca liga.
+
+Liga/desliga por "receber" é ancorado no início da frase: só o pedido explícito
+liga ou desliga. Relato de problema de entrega, dúvida e frase contrastiva nunca
+ligam nem desligam — caem na consulta (read-only).
 """
 import pytest
 
 from core.intent_classifier import classify
+
+_TOGGLES = (
+    "report.weekly_enable", "report.weekly_disable",
+    "report.monthly_enable", "report.monthly_disable",
+)
 
 
 @pytest.mark.parametrize("texto, intent", [
@@ -20,38 +27,26 @@ from core.intent_classifier import classify
     ("desativa o resumo semanal", "report.weekly_disable"),
     ("resumo da semana", "report.weekly"),
     ("resumo mensal", "report.monthly"),
+    # pedido explícito de parar de receber
+    ("não quero receber o resumo semanal", "report.weekly_disable"),
+    ("não quero mais receber o resumo semanal", "report.weekly_disable"),
+    ("não desejo receber o resumo mensal", "report.monthly_disable"),
 ])
 def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
 
 
-@pytest.mark.parametrize("texto, intent", [
-    # opt-out com "receber" negado é desligar, não consulta nem ligar
-    ("não quero receber o resumo semanal", "report.weekly_disable"),
-    ("nao vou receber o resumo mensal", "report.monthly_disable"),
-    ("nao recebo o resumo mensal", "report.monthly_disable"),
-    ("não quero mais receber o resumo semanal", "report.weekly_disable"),
-    ("não desejo receber o resumo mensal", "report.monthly_disable"),
-])
-def test_receber_negado_desliga_o_resumo(texto, intent):
-    assert classify(texto, allow_ai=False).intent == intent
-
-
-@pytest.mark.parametrize("texto, intent", [
-    # a negação vale só para a cláusula dela: o "quero receber" depois é ativação
-    ("não quero o resumo mensal, quero receber o resumo semanal", "report.weekly_enable"),
-    ("não quero o resumo semanal mas quero receber o resumo mensal", "report.monthly_enable"),
-])
-def test_negacao_nao_vaza_para_a_clausula_seguinte(texto, intent):
-    assert classify(texto, allow_ai=False).intent == intent
-
-
 @pytest.mark.parametrize("texto", [
-    # perguntas sobre o recebimento não ativam o resumo
+    # problema de entrega: não é pedido de desligar
+    "não consigo receber o resumo semanal",
+    "não estou conseguindo receber o resumo mensal",
+    # dúvida: não é pedido de ligar nem de desligar
+    "não sei se quero receber o resumo semanal",
+    "não tenho certeza se quero receber o resumo mensal",
+    # frase contrastiva: a negação não vale para a cláusula seguinte
+    "não quero o resumo mensal, quero receber o resumo semanal",
+    # pergunta sobre o recebimento
     "quando vou receber o resumo mensal?",
-    "vou receber o resumo mensal?",
-    "como faço para receber o resumo mensal?",
 ])
-def test_pergunta_sobre_recebimento_nao_liga_o_resumo(texto):
-    assert classify(texto, allow_ai=False).intent not in (
-        "report.weekly_enable", "report.monthly_enable")
+def test_frase_ambigua_nao_liga_nem_desliga(texto):
+    assert classify(texto, allow_ai=False).intent not in _TOGGLES
