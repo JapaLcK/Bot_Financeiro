@@ -143,6 +143,11 @@ def test_for_update_serializa_reversao_do_mesmo_lancamento(user_id: int):
     t = threading.Thread(target=apagar)
     with db.get_conn() as conn:
         with conn.cursor() as cur:
+            # Mesma ordem do código: o mutex do usuário antes da linha (o perdedor espera nele).
+            # (O `for update` da linha, sozinho, é medido com pagamento de fatura, que não toma o mutex:
+            # tests/test_lock_ordem_undo_comum.py.)
+            from db.bank_movements import _lock_user
+            _lock_user(cur, user_id)
             cur.execute(
                 "select id from launches where id=%s and user_id=%s for update",
                 (lid, user_id),
