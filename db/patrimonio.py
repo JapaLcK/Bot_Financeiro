@@ -37,7 +37,7 @@ POSICOES_BANCO_SQL = """
         upper(coalesce(i.raw->>'status', '')) as status,
         i.raw->>'currencyCode' as currency_code,
         i.raw->>'balance' as raw_balance, i.connection_id, i.updated_at,
-        upper(coalesce(c.status, '')) as connection_status
+        upper(coalesce(c.status, '')) as connection_status, i.type, i.subtype
     from open_finance_investments i
     join open_finance_connections c on c.id = i.connection_id
     where c.user_id=%s
@@ -135,6 +135,22 @@ def fora_do_sync(p, ultima: dict) -> bool:
     return m is not None and p["updated_at"] is not None and p["updated_at"] < m
 
 
+def separar_posicoes(rows) -> tuple[list, dict]:
+    """(posições que entram, fora={'moeda','resgatada','pausada'}) — a regra da foto e do total investido."""
+    fora = {"moeda": 0, "resgatada": 0, "pausada": 0}
+    posicoes = []
+    for p in rows:
+        if p["connection_status"] in _TERMINAL:
+            fora["pausada"] += 1
+        elif p["currency"] != "BRL":
+            fora["moeda"] += 1
+        elif p["status"] == "TOTAL_WITHDRAWAL":
+            fora["resgatada"] += 1
+        else:
+            posicoes.append(p)
+    return posicoes, fora
+
+
 def calcular(cur, user_id: int) -> dict:
     from .bank_movements import _declarations
     from .carteira_qualidade import nao_confirmada
@@ -145,17 +161,7 @@ def calcular(cur, user_id: int) -> dict:
     carteira = somar((row["balance"] if row else Decimal(0), merged_wallet_delta(cur, user_id)))
 
     cur.execute(POSICOES_BANCO_SQL, (user_id,))
-    fora = {"moeda": 0, "resgatada": 0, "pausada": 0}
-    posicoes = []
-    for p in cur.fetchall():
-        if p["connection_status"] in _TERMINAL:
-            fora["pausada"] += 1
-        elif p["currency"] != "BRL":
-            fora["moeda"] += 1
-        elif p["status"] == "TOTAL_WITHDRAWAL":
-            fora["resgatada"] += 1
-        else:
-            posicoes.append(p)
+    posicoes, fora = separar_posicoes(cur.fetchall())
     # Conta de conexão pausada fica fora sem contar, como no saldo consolidado.
     cur.execute(CONTAS_BANCO_SQL, (user_id,))
     contas = []
