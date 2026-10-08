@@ -400,18 +400,36 @@ def forma_declarada(args: dict[str, Any]) -> str:
 
 
 def _add_launch_summary(args: dict[str, Any]) -> str:
+    """Tudo o que a gravação vai usar e o usuário precisa ver para recusar:
+    tipo, valor, alvo, nota, categoria, o DIA efetivo (o do mesmo parser da
+    gravação; ausente/ilegível = hoje) e a forma, se veio."""
+    from core.handlers import forma_pagamento as fp
+    from core.handlers.launches import _fmt_date_label
+    from utils_date import today_tz
     try:
         valor = fmt_brl(float(args.get("valor") or 0))
     except (TypeError, ValueError):
         valor = str(args.get("valor"))
-    partes = [f"{(args.get('tipo') or 'despesa').strip().lower()} de {valor}"]
-    alvo = (args.get("alvo") or args.get("nota") or "").strip()
-    if alvo:
-        partes.append(f"em {alvo}")
-    categoria = (args.get("categoria") or "").strip()
+    # str(): o modelo pode mandar número ou lista; o resumo não pode levantar.
+    partes = [f"{str(args.get('tipo') or 'despesa').strip().lower()} de {valor}"]
+    alvo = str(args.get("alvo") or "").strip()
+    nota = str(args.get("nota") or "").strip()
+    if alvo or nota:
+        partes.append(f"em {alvo or nota}")
+    if alvo and nota and nota != alvo:
+        partes.append(f"({nota})")
+    categoria = str(args.get("categoria") or "").strip()
     if categoria:
-        partes.append(f"({categoria})")
-    return " ".join(partes)
+        partes.append(f"#{categoria}")
+    dia = _parse_iso_datetime_for_launch(args.get("data"))
+    resumo = [" ".join(partes),
+              _fmt_date_label(dia.astimezone(_tz()).date() if dia else today_tz())]
+    forma = forma_declarada(args)
+    if forma == fp.DINHEIRO:
+        resumo.append("em dinheiro")
+    elif forma == fp.BANCO:
+        resumo.append("pelo banco")
+    return ", ".join(resumo)
 
 
 # Instrução ao MODELO (volta como resultado da tool). Não arma pendência: a

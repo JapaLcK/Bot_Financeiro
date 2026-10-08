@@ -373,3 +373,87 @@ def test_hashtag_sem_conflito_grava_direto_na_categoria_dela(uid_pro, monkeypatc
         cats = [x["categoria"] for x in cur.fetchall()]
         conn.commit()
     assert cats == ["lazer"]
+
+
+# ── Forma de pagamento: a da IA só vale se o texto disse a mesma ────────────
+
+@pytest.mark.parametrize("frase", ["gastei 50 no mercado", "gastei 50 no mercado no pix"])
+def test_forma_dinheiro_da_ia_sem_apoio_no_texto_confirma(uid_pro, monkeypatch, frase):
+    """Com OF, "dinheiro" é a única forma que grava na Carteira: inventada pela
+    IA, o gasto entra em dobro quando o banco importar o mesmo."""
+    _connect_fake_bank(uid_pro)
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, forma_pagamento="dinheiro"))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r and "em dinheiro" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_forma_dinheiro_dita_no_texto_grava_direto(uid_pro, monkeypatch):
+    _connect_fake_bank(uid_pro)
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, forma_pagamento="dinheiro"))
+    r = diga(uid_pro, "gastei 50 no mercado em dinheiro")
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
+
+
+# ── Alvo e nota: palavras do texto ──────────────────────────────────────────
+
+@pytest.mark.parametrize("args", [
+    {"alvo": "taxi"},
+    {"alvo": "uber", "nota": "uber pro aeroporto"},   # categoria certa, nota inventada
+], ids=["alvo-trocado", "nota-inventada"])
+def test_alvo_ou_nota_fora_do_texto_confirma(uid_pro, monkeypatch, args):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, **args))
+    r = diga(uid_pro, "gastei 50 no uber")
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_alvo_do_texto_grava_direto(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, alvo="uber"))
+    r = diga(uid_pro, "gastei 50 no uber")
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
+
+
+# ── O resumo da confirmação mostra o dia que vai ser gravado ────────────────
+
+def test_resumo_mostra_hoje_quando_a_ia_nao_manda_data(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50))
+    r = diga(uid_pro, "ontem gastei 50 no mercado")
+    assert "Só confirmando" in r and "hoje" in r and "ontem" not in r.split("registrar", 1)[1], r
+
+
+def test_resumo_mostra_a_data_que_a_ia_mandou(uid_pro, monkeypatch):
+    from datetime import date
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, data="2026-03-04"))
+    r = diga(uid_pro, "gastei 50 no mercado dia 05/03/2026")
+    assert "Só confirmando" in r and date(2026, 3, 4).strftime("%d/%m/%Y") in r, r
+
+
+@pytest.mark.parametrize("args,trecho", [
+    ({"alvo": "mercado", "nota": 123}, "em mercado (123)"),
+    ({"alvo": 123}, "em 123"),
+    ({"alvo": "mercado", "nota": ["a", "b"]}, "em mercado (['a', 'b'])"),
+    ({"tipo": 7, "alvo": "mercado", "categoria": 9}, "#9"),
+], ids=["nota-int", "alvo-int", "nota-lista", "tipo-e-categoria-int"])
+def test_resumo_nao_levanta_com_tipos_estranhos(args, trecho):
+    from core.services.ai_chat.tools.launches import _add_launch_summary
+    resumo = _add_launch_summary({"tipo": "despesa", "valor": 50, **args})
+    assert trecho in resumo and "R$ 50,00" in resumo, resumo
+
+
+def test_nota_numerica_da_ia_confirma_em_vez_de_cair_no_roteador(uid_pro, monkeypatch):
+    """Exceção no resumo, no modo ia_primeiro, virava None: a mensagem caía no
+    roteador e o usuário via outra resposta, sem a pergunta."""
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, nota=123))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert "Só confirmando" in r and "(123)" in r, r
+    assert lancamentos(uid_pro) == []

@@ -71,8 +71,14 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     (c) tipo: receita só com verbo de receita no começo; despesa só sem;
     (b) categoria: com hashtag, a IA ecoa a da hashtag E a regra local da nota
         não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
-        sem hashtag, regra local confiante na nota e no texto, iguais.
+        sem hashtag, regra local confiante na nota e no texto, iguais;
+    (e) forma_pagamento: se a IA declarou, o texto declara a mesma
+        (`forma_pagamento.detectar`); ausente segue o `fp.decidir`;
+    (f) alvo e nota: cada um que veio aparece no texto como palavras inteiras
+        (normalizado, sem acento nem caixa).
+    Parâmetro fora do schema a gravação ignora.
     """
+    from core.handlers import forma_pagamento as fp
     from core.handlers.launches import MOTIVOS_CONFIANTES
     from core.services.ai_chat.tools.launches import _parse_iso_datetime_for_launch
     from core.services.category_service import infer_category
@@ -111,17 +117,31 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
 
     # (c) tipo: receita só com verbo de receita no começo; despesa só sem.
     receita = normalize_text(sem_data).startswith(RECEITA_START_VERBS)
-    if (args.get("tipo") or "").strip().lower() != ("receita" if receita else "despesa"):
+    if str(args.get("tipo") or "").strip().lower() != ("receita" if receita else "despesa"):
         return False
+
+    # (e) forma: declarada pela IA só vale se o texto declara a mesma.
+    forma_ia = args.get("forma_pagamento")
+    if forma_ia and fp.detectar(texto) != forma_ia:
+        return False
+
+    # (f) alvo e nota: palavras inteiras do texto ("uber" não aprova "taxi" nem
+    # casa dentro de "uberlandia").
+    texto_norm = f" {normalize_text(texto)} "
+    for campo in ("alvo", "nota"):
+        bruto = str(args.get(campo) or "").strip()
+        if bruto and (not normalize_text(bruto)
+                      or f" {normalize_text(bruto)} " not in texto_norm):
+            return False
 
     # (b) categoria: hashtag do usuário, ou regra determinística confiante.
     _, hashtag = _extract_explicit_category(texto)
-    nota = (args.get("nota") or "").strip() or (args.get("alvo") or "").strip()
+    nota = str(args.get("nota") or "").strip() or str(args.get("alvo") or "").strip()
     local = infer_category(user_id, nota, None, allow_ai=False)
     if hashtag:
         # A hashtag só garante algo se a IA mandou a mesma categoria e se a
         # regra local da nota não a contradiz (o `add_from_entities` trocaria).
-        cat_ia = (args.get("categoria") or "").strip()
+        cat_ia = str(args.get("categoria") or "").strip()
         cat_hashtag = infer_category(user_id, "", hashtag).category
         if not cat_ia or infer_category(user_id, "", cat_ia).category != cat_hashtag:
             return False
@@ -140,7 +160,7 @@ def precisa_confirmar_lancamento(user_id: int, args: dict) -> bool:
 
     if not ativo(user_id) or CURRENT_PLATFORM.get() != "whatsapp":
         return False
-    if (args.get("tipo") or "").strip().lower() not in _TIPOS_VALIDOS:
+    if str(args.get("tipo") or "").strip().lower() not in _TIPOS_VALIDOS:
         return False
     try:
         if float(args.get("valor") or 0) <= 0:

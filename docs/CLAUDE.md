@@ -846,11 +846,18 @@ com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula
 ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que
 não dê id válido (`,`, só espaços, `abc`) = ninguém, com warning no log. As duas são lidas a cada mensagem, mas
 trocar env no Railway reinicia o serviço (~1 min sem bot). Com a flag, o
-`add_launch` da IA pede "sim" quando valor, data, tipo ou categoria não batem com o texto
-(`lancamento_com_certeza`): data do texto e `data` da IA no mesmo dia, no fuso do app
-(texto sem data → IA sem data ou hoje); hashtag só é certa se a regra local da nota não
-a contradiz. Limite: depois do "sim", o cross-check do `add_from_entities` ainda pode
-trocar a categoria da hashtag pela da regra local (comportamento de hoje).
+`add_launch` da IA pede "sim" quando QUALQUER parâmetro que a gravação usa não está
+apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schema): valor
+(um número só, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
+ao do texto; texto sem data → IA sem data ou hoje); tipo (verbo de receita); categoria
+(regra local confiante; hashtag só se a regra local da nota não a contradiz);
+`forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
+nota (se vieram, palavras inteiras do texto, sem acento nem caixa). Limite: depois do
+"sim", o cross-check do `add_from_entities` ainda pode trocar a categoria da hashtag
+pela da regra local (comportamento de hoje). O resumo da confirmação
+(`_add_launch_summary`; só é usado por esta confirmação — WhatsApp com a flag —, porque o
+`add_launch` não pede confirmação em nenhum outro caminho) mostra tipo, valor, alvo,
+nota, categoria, o dia que vai ser gravado e a forma, se veio.
 Desligar a flag NÃO desfaz o cancelamento da confirmação da IA não mostrada (seção
 "IA"): ele vale para todos os canais (decisão do dono, 2026-10-08).
 
