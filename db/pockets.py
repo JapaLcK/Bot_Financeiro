@@ -333,6 +333,10 @@ def update_pocket_meta(
     with get_conn() as conn:
         with conn.cursor() as cur:
             if interest_enabled is not None or name is not None:
+                # Renome escreve em launches DEPOIS de travar a caixinha; o desfazer da
+                # criação faz o inverso. Ordem única: db.bank_movements._lock_user.
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)
                 cur.execute(
                     "select id, name from pockets where user_id=%s and id=%s for update",
                     (user_id, int(pocket_id)),
@@ -797,6 +801,8 @@ def delete_pocket(user_id: int, pocket_name: str):
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user  # ordem de lock: ver a docstring dele
+            _lock_user(cur, user_id)
             cur.execute(
                 "select id, name, balance from pockets "
                 "where user_id=%s and lower(name)=lower(%s) for update",

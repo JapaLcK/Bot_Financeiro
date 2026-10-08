@@ -1712,9 +1712,20 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 # Ligada ao banco também (fundida OU par pendente): o desfazer
                 # trava a transação OF, que todo escritor trava depois de `accounts`;
                 # e sem o lock um confirmar concorrente fundiria X no meio do apagar.
-                return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
-                                   or touches_investment(r["efeitos"]) or r["caixa"]
-                                   or r["ligado"]))
+                # Criar/apagar caixinha: o desfazer trava launches → pockets, e
+                # renome/delete_pocket fazem o inverso (#622). `efeitos` string (jsonb
+                # legado) é normalizado como mais abaixo, para os TRÊS predicados:
+                # lido cru, o undo rodaria sem o lock.
+                ef = r["efeitos"] if r else None
+                if isinstance(ef, str):
+                    try:
+                        ef = json.loads(ef)
+                    except ValueError:
+                        ef = None
+                return bool(r and (uses_bank_movement_lock(r["source"], ef)
+                                   or touches_investment(ef) or r["caixa"] or r["ligado"]
+                                   or (isinstance(ef, dict)
+                                       and any(ef.get(k) for k in ("create_pocket", "delete_pocket")))))
 
             cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa,{_LIGADO_SQL} as ligado "
                         "from launches where id=%s and user_id=%s", (launch_id, user_id))
