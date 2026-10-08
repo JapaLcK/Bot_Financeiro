@@ -45,6 +45,9 @@ _TOGGLES = (
     ("não quero receber o resumo toda semana", "report.weekly_disable"),
     ("quero receber o resumo todo mês", "report.monthly_enable"),
     ("não quero receber o resumo todo mês", "report.monthly_disable"),
+    # pronome objeto entre "de" e o verbo
+    ("para de me mandar o resumo semanal", "report.weekly_disable"),
+    ("para de me enviar o resumo mensal", "report.monthly_disable"),
     # cortesia antes do comando também não muda o pedido
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
     ("por favor quero receber o resumo mensal", "report.monthly_enable"),
