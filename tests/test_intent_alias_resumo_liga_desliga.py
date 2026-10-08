@@ -34,6 +34,9 @@ _TOGGLES = (
     # sinônimos de substantivo aceitos pelas outras regras de relatório
     ("não quero receber o relatório semanal", "report.weekly_disable"),
     ("quero receber o relatório mensal", "report.monthly_enable"),
+    # formas de período por substantivo, como "resumo da semana" e "resumo do mes"
+    ("não quero receber o resumo da semana", "report.weekly_disable"),
+    ("quero receber o resumo do mês", "report.monthly_enable"),
 ])
 def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
