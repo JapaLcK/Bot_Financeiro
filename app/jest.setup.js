@@ -200,3 +200,7 @@ jest.mock("@/features/bloqueio/tampa", () => ({
   descobrir: jest.fn(),
   pular: jest.fn(() => Promise.resolve()),
 }));
+
+// O slider é nativo (UISlider): no Jest, um View que repassa as props, para o teste
+// achar pelo rótulo e disparar `fireEvent(slider, "valueChange", n)`.
+jest.mock("@react-native-community/slider", () => ({ __esModule: true, default: require("react-native").View }));

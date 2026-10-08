@@ -73,7 +73,7 @@ export default function BoasVindas() {
               : { gap: espaco.xl, paddingTop: espaco.xxl }
           }
         >
-          {repouso ? <Button rotulo="Voltar" variante="ghost" desativado={ocupado} onPress={() => setIniciou(false)} /> : <Texto variante="titulo">{cadastro ? "Criar conta" : "Entrar"}</Texto>}
+          {repouso ? <Button rotulo="Voltar" variante="link" desativado={ocupado} onPress={() => setIniciou(false)} /> : <Texto variante="titulo">{cadastro ? "Criar conta" : "Entrar"}</Texto>}
           <FasesDaEntrada estado={estado} aplicar={setEstado} autenticar={sessao.autenticar}>
             <View style={{ gap: espaco.md }}>
               <Image source={SIMBOLO} accessible={false} resizeMode="contain" style={{ width: 34, height: 37 }} />

@@ -45,11 +45,11 @@ it("PUT lento durante foreground não deixa seletor travado e reconcilia o perfi
  await waitFor(() => expect(screen.getByRole("button", { name: /Padrão|Investir/ })).toBeEnabled());
 });
 it("privacidade remove montantes, gráfico e mensagem financeira da árvore acessível", async () => {
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("Saldo disponível agora")).toBeTruthy());
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("Disponível agora")).toBeTruthy());
  await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull();
  await act(async () => { router.navigate("/piggy"); await drenar(); }); await waitFor(() => expect(screen.getByText("Mensagem oculta enquanto os valores estão privados.")).toBeTruthy()); expect(screen.queryByText(/Oi! Posso ajudar/)).toBeNull();
 });
 it("contas A atrasadas após logout não são mostradas e não restauram sessão", async () => {
  const atraso = segurar(); servidor({ contasLentas: atraso }); renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
- await apertar("Abrir minha conta"); await apertar("Sair"); atraso.soltar(); await act(async () => { await drenar(); }); expect(screen.queryByText("Saldo disponível agora")).toBeNull(); expect(cofre.has("pb.credenciais")).toBe(false);
+ await apertar("Abrir minha conta"); await apertar("Sair"); atraso.soltar(); await act(async () => { await drenar(); }); expect(screen.queryByText("Disponível agora")).toBeNull(); expect(cofre.has("pb.credenciais")).toBe(false);
 });

@@ -1,4 +1,4 @@
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { metasSchema } from "@/api/schemas/painel";
@@ -96,8 +96,9 @@ it("indicador tight e prazo da meta têm cópia em português", async () => {
 });
 it("calendário distingue meses de compra e mantém a data civil no drilldown", async () => {
  detalhes = { ...fixture["/api/app/mes-detalhes"], dias: [{ dia: "2026-09-03", entrou: "0.00", saiu: "1.00" }, { dia: "2026-10-03", entrou: "0.00", saiu: "2.00" }] };
- renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByRole("button", { name: "03/09/2026" })).toBeTruthy());
- expect(screen.getByRole("button", { name: "03/10/2026" })).toBeTruthy(); await apertar("03/09/2026");
+ renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByTestId("calendario-dia-2026-09-03")).toBeTruthy());
+ expect(within(screen.getByTestId("calendario-dia-2026-09-03")).getByText("03/09")).toBeTruthy(); expect(within(screen.getByTestId("calendario-dia-2026-10-03")).getByText("03/10")).toBeTruthy();
+ await act(async () => { fireEvent.press(screen.getByTestId("calendario-dia-2026-09-03")); await drenar(); });
  await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy()); expect(screen.getByText("03/09/2026")).toBeTruthy();
 });
 it("grupos arredondados apresentam aviso em Categorias e Calendário", async () => {
