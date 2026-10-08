@@ -91,13 +91,41 @@ test("com /bump em voo o Express fica inert e o clique não abre a folha; ao vol
   await ctx.close();
 });
 
-test("confirm sem click, com /bump em voo: ignorado, sem cobrar", async () => {
-  const { ctx, page, posts } = await abrirPagina({ api: { [`POST ${BUMP}`]: null } });
+const RECUSA = "Pagamento não iniciado. Tente de novo.";
+
+test("confirm com /bump em voo (mundo sem click): recusado pelo voo, com aviso e paymentFailed, sem cobrar", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { semClick: true }, api: { [`POST ${BUMP}`]: null } });
   await pronta(page);
   await caixas(page).nth(0).click();
   await ate(() => posts(BUMP).length > 0);
   await page.evaluate(() => window.__exConfirma());
   await pausa(150);
+  assert.equal(posts(CONFIRM).length, 0);
+  assert.equal(await page.textContent("#pp-erro"), RECUSA);
+  assert.equal(await page.evaluate(() => window.__stripe.falhou || 0), 1);
+  await ctx.close();
+});
+
+// Apple Pay do Safari (staging, 2026-10-05): o Express nunca mandou o `click` e todo confirm era ignorado em silêncio.
+test("sem click nenhum (Apple Pay do Safari): o confirm da folha cobra com o evento da carteira", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { semClick: true }, api: { [`POST ${CONFIRM}`]: null } });
+  await pronta(page);
+  await clicaCarteira(page);
+  await ate(() => posts(CONFIRM).length > 0);
+  assert.deepEqual(posts(CONFIRM).map((r) => r.body), [{ ev: true }]);
+  assert.equal(await page.evaluate(() => window.__stripe.falhou || 0), 0);
+  await ctx.close();
+});
+
+test("confirm recusado (tardio, depois do click e do cancel): aviso e paymentFailed, não em silêncio", async () => {
+  const { ctx, page, posts } = await abrirPagina({ sdk: { folhaParada: true } });
+  await pronta(page);
+  await clicaCarteira(page);
+  await page.evaluate(() => window.__exCancela());
+  await page.evaluate(() => window.__exConfirma());
+  await page.locator("#pp-erro.show").waitFor();
+  assert.equal(await page.textContent("#pp-erro"), RECUSA);
+  assert.equal(await page.evaluate(() => window.__stripe.falhou || 0), 1);
   assert.equal(posts(CONFIRM).length, 0);
   await ctx.close();
 });

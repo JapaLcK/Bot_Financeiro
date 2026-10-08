@@ -36,6 +36,7 @@ async function tocar(nome: string) {
 async function abrirBV() {
   renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
+  await tocar("Começar");
   await waitFor(() => botao(GOOGLE));
 }
 
@@ -49,8 +50,8 @@ describe("(auth)/boas-vindas — Continuar com Google", () => {
     voltaDoGoogle("pigbank://auth?code=code-ana");
     await abrirBV();
     await tocar(GOOGLE);
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
-    expect(screen).toHavePathname("/");
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("folha fechada: a BV fica parada, sem aviso e sem requisição", async () => {
@@ -113,7 +114,8 @@ describe("(auth)/boas-vindas — Continuar com Google", () => {
       fireEvent.changeText(screen.getByLabelText("Código de 6 dígitos"), "123456");
       await respirar();
     });
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("pré-cadastro que sumiu (404): Banner de cadastro expirado na BV", async () => {
@@ -131,7 +133,8 @@ describe("(auth)/boas-vindas — Continuar com a Apple", () => {
     voltaDaApple();
     await abrirBV();
     await tocar(APPLE);
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
   });
 
   it("folha cancelada: BV parada, sem aviso; outro erro da folha: Banner", async () => {

@@ -110,8 +110,9 @@ describe("Segurança — rotas", () => {
     await guardarCredenciais(S);
     servidorMfa({ ligado: false });
     renderRouter("./app", { initialUrl: "/" });
-    await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
 
+    await tocar("Abrir minha conta");
     await tocar("Segurança");
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy());
@@ -129,7 +130,7 @@ describe("Segurança — rotas", () => {
       await drenar();
     });
 
-    await waitFor(() => expect(screen).toHavePathname("/"));
+    await waitFor(() => expect(screen).toHavePathname("/resumo"));
   });
 
   it("status com erro mostra Tentar de novo, que recarrega", async () => {
@@ -216,7 +217,8 @@ describe("Segurança — rotas", () => {
       botoes?.find((b) => b.text === "Desativar")?.onPress?.();
     });
     renderRouter("./app", { initialUrl: "/" });
-    await waitFor(() => expect(screen.getByText("Olá, S")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Bom dia, S")).toBeTruthy());
+    await tocar("Abrir minha conta");
     await tocar("Segurança");
     await waitFor(() => expect(screen.getByText("Ativa · 9 de 10 códigos de backup")).toBeTruthy());
 

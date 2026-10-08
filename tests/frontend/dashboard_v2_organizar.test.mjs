@@ -134,6 +134,9 @@ test("positivo: fora do Organizar a seta muda o horizonte e o campo aceita digit
   const h0 = await horizonte(page), n0 = await numero(page);
   await focar(page, `${HERO}[aria-checked=true]`);
   await page.keyboard.press("ArrowRight");
+  // o Seg refoca o marcado no próximo quadro: com a previsão real (Etapa 3 PR3) a troca pede a
+  // API e o quadro pode cair depois do foco no campo, que perderia as teclas para o rádio
+  await page.evaluate(() => new Promise(requestAnimationFrame));
   await focar(page, NUM);
   await page.keyboard.type("123");
   await page.waitForTimeout(100);

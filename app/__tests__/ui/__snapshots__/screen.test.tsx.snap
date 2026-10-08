@@ -12,31 +12,54 @@ exports[`Screen snapshot (dois temas): claro, rolando 1`] = `
     ]
   }
 >
-  <RCTScrollView
-    contentContainerStyle={
-      {
-        "flexGrow": 1,
-        "paddingBottom": 34,
-        "paddingLeft": 16,
-        "paddingRight": 16,
-        "paddingTop": 47,
-      }
-    }
-    keyboardShouldPersistTaps="handled"
+  <View
     style={
       {
         "backgroundColor": "#FFFFFF",
         "flex": 1,
       }
     }
-    testID="tela"
   >
-    <View>
-      <Text>
-        conteúdo
-      </Text>
-    </View>
-  </RCTScrollView>
+    <RCTScrollView
+      contentContainerStyle={
+        {
+          "flexGrow": 1,
+          "paddingBottom": 34,
+          "paddingLeft": 16,
+          "paddingRight": 16,
+          "paddingTop": 47,
+        }
+      }
+      keyboardShouldPersistTaps="handled"
+      style={
+        {
+          "backgroundColor": "#FFFFFF",
+          "flex": 1,
+        }
+      }
+      testID="tela"
+    >
+      <View>
+        <Text>
+          conteúdo
+        </Text>
+      </View>
+    </RCTScrollView>
+    <View
+      pointerEvents="none"
+      style={
+        {
+          "backgroundColor": "#FFFFFF",
+          "height": 47,
+          "left": 0,
+          "position": "absolute",
+          "right": 0,
+          "top": 0,
+        }
+      }
+      testID="tela-topo"
+    />
+  </View>
 </RNCSafeAreaProvider>
 `;
 

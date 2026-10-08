@@ -58,7 +58,7 @@ async function tocar(nome: string) {
 describe("(auth)/entrar — Continuar com a Apple", () => {
   it("iOS: botão do sistema CONTINUE, contorno branco no claro, raio e altura do Google; sem 'em breve'", async () => {
     await abrirEntrar();
-    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: 12, style: { height: 44 } });
+    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: 12, style: { height: 48 } });
     expect(screen.queryByText("Entrar com Apple chega em breve.")).toBeNull();
     expect(involucro()).toEqual({ pointerEvents: "auto", opacity: 1 });
   });
@@ -152,7 +152,8 @@ describe("(auth)/entrar — Continuar com a Apple", () => {
   it("caminho feliz: troca o token e abre o app como Ana", async () => {
     await abrirEntrar();
     await tocar(APPLE);
-    await waitFor(() => expect(screen.getByText(/Olá, Ana/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Bom dia, Ana/)).toBeTruthy());
+    expect(screen).toHavePathname("/resumo");
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
 

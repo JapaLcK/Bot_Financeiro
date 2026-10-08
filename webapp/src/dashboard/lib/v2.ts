@@ -1,6 +1,6 @@
 // Cliente da /api/v2. Os tipos saem do contrato (api-v2.gen.ts); o fetch é o global,
 // que o auth-refresh.js do /painel envolve (renova no 401 e repete).
-import { useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
 
@@ -112,9 +112,20 @@ export const guiaQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),
   ...vivo,
 };
-// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx): decide o selo
-// do chat e o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
+// A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx), menos o assunto
+// `investido` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
+// o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
 export const CHAT_REAL = false;
+// O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
+// Só a bolha consulta (a cópia do role=status não: parts/InvestidoResposta.tsx). Montar de
+// novo só relê depois de erro (a pergunta repetida tenta outra vez) ou de aviso do SSE com a
+// conversa fechada (inativa, a consulta só fica invalidada); o resto do dado novo vem do SSE e do foco.
+export const investidoQuery = {
+  queryKey: ["investido"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/investido", signal),
+  ...vivo,
+  refetchOnMount: (q: { state: { status: string; isInvalidated: boolean } }) => q.state.status === "error" || q.state.isInvalidated,
+};
 export const resumoMesQuery = (mes: string) => ({
   queryKey: ["resumo-do-mes", mes],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/resumo-do-mes", signal, { mes }),
@@ -123,3 +134,35 @@ export const resumoMesQuery = (mes: string) => ({
 
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;
+
+export const categoriasQuery = {
+  queryKey: ["categorias"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/categorias", signal),
+  ...vivo,
+};
+// A previsão por horizonte (null = o padrão do plano). `gcTime: 0`: dado privado sem tela
+// olhando sai do cache na hora (troca de horizonte, downgrade, portão caído), e a chave
+// abandonada tem o fetch abortado.
+// Reconsulta quando a resposta deixa de valer (`valido_ate`), medido no relógio do servidor.
+// ponytail: piso de 60 s contra laço; o teto é o do setTimeout (2³¹−1 ms).
+const instante = (s: string) => Date.parse(s.replace(/(\.\d{3})\d+/, "$1")); // 6 casas: NaN no Safari 14
+export const previsaoQuery = (dias: 30 | 60 | 90 | null) => queryOptions({
+  queryKey: ["previsao", dias],
+  queryFn: ({ signal }) => apiGet("/previsao", signal, dias ? { dias: String(dias) as "30" | "60" | "90" } : undefined),
+  ...vivo,
+  gcTime: 0,
+  refetchInterval: (q) => {
+    const d = q.state.data;
+    if (!d?.valido_ate) return false;
+    const ms = instante(d.valido_ate) - instante(d.calculado_em) - (Date.now() - q.state.dataUpdatedAt);
+    return Number.isFinite(ms) ? Math.min(Math.max(ms, 60_000), 2 ** 31 - 1) : false;
+  },
+});
+
+export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor">) => infiniteQueryOptions({
+  queryKey: ["lancamentos", filtros],
+  initialPageParam: null as string | null,
+  queryFn: ({ signal, pageParam }) => apiGet("/lancamentos", signal, { ...filtros, cursor: pageParam }),
+  getNextPageParam: (pagina) => pagina.proximo ?? undefined,
+  ...vivo,
+});

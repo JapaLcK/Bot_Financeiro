@@ -5,6 +5,8 @@ import { mesDe, simActive } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { Frame } from "./parts/Frame";
 import { Board } from "./parts/Board";
+import { DicaDaTela } from "./parts/Dica";
+import { Lancamentos } from "./parts/Lancamentos";
 import { Ledger } from "./parts/Ledger";
 import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
@@ -19,6 +21,7 @@ import { GoalsTimeline } from "./widgets/GoalsTimeline";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
+import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SubscriptionList } from "./widgets/Subscriptions";
 import { TrajectoryChart } from "./widgets/TrajectoryChart";
@@ -32,6 +35,7 @@ function Page({ path, lede, children }: { path: Path; lede: ReactNode; children:
         <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
         <p className="page-lede">{lede}</p>
       </header>
+      <DicaDaTela path={path} />
       <div className="page-grid">{children}</div>
     </>
   );
@@ -51,6 +55,7 @@ function Home({ s }: { s: DashState }) {
 }
 
 function Forecast({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/previsao" lede="Quanto deve sobrar até o horizonte escolhido, com os compromissos que o Piggy conhece."><PrevisaoPainel /></Page>;
   return (
     <Page path="/previsao" lede="O saldo dia a dia até o horizonte escolhido, com cada conta no dia em que cai.">
       <Panel span={12}><Hero s={s} /></Panel>
@@ -153,8 +158,8 @@ function Wealthy() {
 
 function Launches({ s }: { s: DashState }) {
   return (
-    <Page path="/lancamentos" lede={isCurrentMonth(s.month) ? "Tudo o que entrou e saiu no mês, com a mensagem que você mandou ao Piggy." : "O extrato do mês escolhido na barra de cima."}>
-      <div className="span-12"><Ledger s={s} /></div>
+    <Page path="/lancamentos" lede={!DEMO ? "O extrato do mês escolhido na barra de cima, com as informações de cada origem." : isCurrentMonth(s.month) ? "Tudo o que entrou e saiu no mês, com a mensagem que você mandou ao Piggy." : "O extrato do mês escolhido na barra de cima."}>
+      <div className="span-12">{DEMO ? <Ledger s={s} /> : <Lancamentos s={s} />}</div>
     </Page>
   );
 }

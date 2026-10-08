@@ -1,11 +1,14 @@
-import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { useSessao } from "@/features/auth/sessao";
-import { perfil } from "@/services/auth";
+import { carregarAcessoBancario, type AcessoBancario } from "@/features/openFinance/acesso";
+import { useForeground } from "@/features/openFinance/useForeground";
+import { useBloqueio } from "@/features/bloqueio/bloqueio";
+import { lerTentativaBancaria } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
@@ -15,9 +18,10 @@ import { espaco } from "@/ui/tokens";
 
 const MENSAGEM_ERRO_SAIR = "Não conseguimos sair. Tente de novo.";
 
-type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string } | { fase: "erro"; mensagem: string };
+type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string; acesso: AcessoBancario["fase"]; pendente: boolean } | { fase: "erro"; mensagem: string };
 
 /**
+ * Início provisório com gate de acesso e prova bancária no servidor.
  * Placeholder autenticado da Fase 3 — o ramo "pronto" da tela provisória da
  * Fase 1 (`src/ui/inicio.ts`, removida), refeito com os componentes da Fase 2.
  * A primeira tela de produto de verdade vem depois.
@@ -25,16 +29,31 @@ type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string } | { fase
 export default function Inicio() {
   const { cores } = useTema();
   const sessao = useSessao();
+  const ativo = useForeground();
+  const travado = useBloqueio().estado.fase === "travado";
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
   // Erro do Sair é um estado À PARTE de `estado`: uma falha ao sair não
   // invalida o perfil já carregado, então não troca a tela para "erro" (isso
   // perderia "Olá, nome" à toa) — só soma um aviso com "Tentar de novo" por
   // cima do que já está na tela.
+  const [aviso, setAviso] = useState<string | null>(null);
   const [erroSaida, setErroSaida] = useState<string | null>(null);
   // A saída espera a revogação no servidor (até o tempo limite de auth): o
   // botão fica em carregando nesse meio. No sucesso a tela desmonta e o
   // `setSaindo(false)` nem roda.
   const [saindo, setSaindo] = useState(false);
+  const entradaEmVoo = useRef(false);
+  const [entrando, setEntrando] = useState(false);
+  useFocusEffect(useCallback(() => {
+    entradaEmVoo.current = false;
+    setEntrando(false);
+  }, []));
+  const navegar = (destino: Href) => {
+    if (entradaEmVoo.current) return;
+    entradaEmVoo.current = true; setEntrando(true);
+    try { router.push(destino); }
+    catch { entradaEmVoo.current = false; setEntrando(false); setAviso("Não conseguimos abrir a tela. Tente de novo."); }
+  };
 
   const sair = useCallback(async () => {
     setErroSaida(null);
@@ -46,38 +65,44 @@ export default function Inicio() {
     }
   }, [sessao]);
 
-  const carregar = useCallback(async () => {
-    setEstado({ fase: "carregando" });
+  const carregar = useCallback(async (cancelado: () => boolean = () => false) => {
+    setAviso(null);
     try {
-      const p = await perfil();
+      const a = await carregarAcessoBancario();
+      const p = a.perfil;
+      const tentativa = a.fase === "inicio" || a.fase === "conectar" ? await lerTentativaBancaria(p.user_id) : null;
+      if (cancelado()) return;
       const nome = p.display_name?.trim() || p.email?.split("@")[0] || "por aí";
-      setEstado({ fase: "pronto", nome });
+      setEstado({ fase: "pronto", nome, acesso: a.fase, pendente: !!tentativa });
     } catch (e) {
       // Sessão encerrada (revogada, senha trocada): o provider decide a
       // navegação — não há erro para mostrar aqui.
       if (e instanceof SessaoExpirada) return sessao.expirou(e.detalhe);
+      if (cancelado()) return;
       // Outra conta assumiu o cofre enquanto esta tela buscava o perfil dela:
       // o resultado é de uma sessão que não é mais esta tela — ignora.
       if (e instanceof RequisicaoSuperada) return;
       // `RenovacaoIndisponivel` e qualquer outra falha: instabilidade do
       // servidor, não fim de sessão — a pessoa pode tentar de novo, ou sair.
-      setEstado({ fase: "erro", mensagem: textoDaFalha(e) });
+      const mensagem = textoDaFalha(e);
+      setEstado((anterior) => anterior.fase === "pronto" ? anterior : { fase: "erro", mensagem });
+      setAviso(mensagem);
     }
   }, [sessao]);
 
-  // Só no MONTE, de propósito: `carregar` muda de referência sempre que
-  // `estado` da sessão muda (o `useMemo` de `SessaoProvider` é chaveado nele),
-  // e `sessao.expirou()`/`sessao.autenticar()` mudam esse estado. Um efeito
-  // dependente de `carregar` reagiria a essa mudança e chamaria `/auth/me` de
-  // novo — que, com a sessão já expirada, chama `expirou()` de novo, um loop
-  // sem fim. "Tentar de novo" continua chamando a versão mais recente porque
-  // o botão lê `carregar` do closure do render atual, não deste efeito.
+  useFocusEffect(useCallback(() => {
+    if (!ativo || travado) return;
+    let cancelado = false;
+    void carregar(() => cancelado);
+    return () => { cancelado = true; };
+  }, [ativo, travado]));
+
   useEffect(() => {
-    void carregar();
-  }, []);
+    if (estado.fase === "pronto" && estado.acesso === "inicio" && ativo && !travado) router.replace("/resumo" as Href);
+  }, [estado, ativo, travado]);
 
   return (
-    <Screen rolar={false}>
+    <Screen>
       <View style={{ flex: 1, justifyContent: "center", gap: espaco.lg }}>
         {estado.fase === "carregando" && (
           <>
@@ -96,8 +121,27 @@ export default function Inicio() {
 
         {estado.fase === "pronto" && (
           <>
-            <Texto variante="titulo">Olá, {estado.nome}</Texto>
-            <Button rotulo="Segurança" variante="secondary" icone="Lock" onPress={() => router.push("/seguranca")} />
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: espaco.md }}>
+              <Texto variante="titulo" style={{ flex: 1 }}>Olá, {estado.nome}</Texto>
+              <Pressable accessibilityRole="button" accessibilityLabel="Configurações da conta" disabled={entrando} accessibilityState={{ disabled: entrando }} onPress={() => navegar("/configuracoes")}
+                style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}>
+                <Texto variante="rotulo">{estado.nome.slice(0, 2).toUpperCase()}</Texto>
+              </Pressable>
+            </View>
+            {aviso && <Banner tom="warning" mensagem={aviso} />}
+            {estado.acesso === "inicio" ? (
+              <Texto tom="inkMuted">Seu primeiro acesso foi concluído. Confira seus bancos e acompanhe as conexões.</Texto>
+            ) : <Texto tom="inkMuted">{estado.acesso === "cobranca-pendente"
+              ? "Há uma cobrança pendente. Novas conexões estão indisponíveis enquanto a cobrança é regularizada."
+              : estado.acesso === "sem-acesso" ? "Sua conta ainda não tem acesso ao app. A contratação pelo iPhone chegará em uma próxima atualização."
+              : estado.acesso === "sem-open-finance" ? "Seu acesso atual não permite conectar bancos."
+              : estado.acesso === "senha" ? "Crie sua senha pelo link enviado por e-mail para continuar."
+              : "Conecte seu banco e conclua a primeira sincronização para entrar."}</Texto>}
+            {estado.acesso === "conectar" && <Button rotulo="Conectar meu banco" desativado={entrando} onPress={() => navegar("/conectar-banco")} />}
+            {estado.pendente && <Button rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />}
+            {estado.acesso === "inicio" && <Button rotulo="Bancos conectados" variante="secondary" desativado={entrando} onPress={() => navegar("/conexoes")} />}
+            <Button rotulo="Conferir acesso novamente" variante="ghost" onPress={() => void carregar()} />
+            <Button rotulo="Segurança" variante="secondary" icone="Lock" desativado={entrando} onPress={() => navegar("/seguranca")} />
             {erroSaida ? (
               <Banner tom="danger" mensagem={erroSaida} acao={{ rotulo: "Tentar de novo", onPress: () => void sair() }} />
             ) : null}

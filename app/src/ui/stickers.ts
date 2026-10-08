@@ -40,3 +40,6 @@ export const STICKERS: Record<NomeSticker, ImageSourcePropType> = {
   success: require("../../assets/stickers/success.webp"),
   thinking: require("../../assets/stickers/thinking.webp"),
 };
+
+/** Símbolo oficial da marca; asset compartilhado com a identidade web. */
+export const SIMBOLO: ImageSourcePropType = require("../../assets/brand/simbolo.png");

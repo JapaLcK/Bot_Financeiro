@@ -1,0 +1,41 @@
+{
+  "mes": "2026-09",
+  "ate": "2026-09-30",
+  "entrou": "0.00",
+  "saiu": "2.01",
+  "categorias": [
+    {
+      "categoria": "a",
+      "valor": "1.01",
+      "quantidade": 1
+    },
+    {
+      "categoria": "b",
+      "valor": "1.01",
+      "quantidade": 1
+    }
+  ],
+  "dias": [
+    {
+      "dia": "2026-09-03",
+      "entrou": "0.00",
+      "saiu": "1.01"
+    },
+    {
+      "dia": "2026-09-04",
+      "entrou": "0.00",
+      "saiu": "1.01"
+    }
+  ],
+  "guardado": {
+    "aportes": "0.00",
+    "saques": "0.00",
+    "liquido": "0.00",
+    "cobertura": "movimentos_registrados"
+  },
+  "motivos": [
+    "arredondamento_por_grupo"
+  ],
+  "fora_do_total": 0,
+  "criterio_dias": "data_do_lancamento_ou_compra_na_fatura_do_mes"
+}

@@ -118,19 +118,22 @@ _PRODUCT_PT = {
 ITEM_STATUS_AUTORIZA_DISPOSITIVO = "WAITING_USER_ACTION"
 EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 
-# Por quanto tempo o `executionStatus` do `raw` (o payload cru da Pluggy, gravado
-# pelo upsert) ainda descreve a autorização ATUAL. Mora aqui, ao lado dos dois
-# nomes acima e pelo mesmo motivo: quem o consome é SQL (`db/open_finance_state.py`,
-# e por ele o snapshot e o aviso proativo), e a regra de device/QR é deste módulo.
-# O `raw` é congelado — `mark_sync_result` não o toca —, então sem prazo a
-# supressão do aviso e a instrução de dispositivo durariam para sempre.
+# Por quanto tempo a instrução de dispositivo/QR ainda descreve a autorização
+# ATUAL — com ou sem `health` (Onda 5, D5). Mora aqui, ao lado dos dois nomes
+# acima e pelo mesmo motivo: quem o consome é SQL (`db/open_finance_state.py`:
+# `SQL_EXECUTION_STATUS` e `SQL_DEVICE_NA_JANELA`, lidos pelo snapshot e, por ele,
+# pelo aviso proativo), e a regra de device/QR é deste módulo. Nem o `raw` nem o
+# `health` trazem prazo (o `raw` é congelado; o job regrava o `health` com o mesmo
+# `execution_status`), então sem prazo a supressão do aviso e a instrução de
+# dispositivo durariam para sempre.
 #
 # 60 minutos. O PISO é ESTIMATIVA, e é preciso dizer de onde ela vem antes de
 # derivar qualquer coisa dela:
 #   • NÃO HÁ FONTE NA ÁRVORE PARA OS 30 MIN DA JANELA DO QR. O único registro
 #     anterior a este PR é prosa num comentário vizinho — "a janela do QR
 #     (~30 min)", `db/open_finance.py`, no `where` de
-#     `list_connections_needing_reconnect` —, com til e sem citar página de doc.
+#     `list_connections_needing_reconnect` (removido com o SQL no PR-D da Onda 5) —,
+#     com til e sem citar página de doc.
 #     O bloco do `_DETALHE_POR_STATUS`, abaixo, diz só "um `userAction.expiresAt`
 #     CURTO": sem número. Escrever aqui "a doc registrada anota 30 min" foi
 #     promover um `~` de um comentário irmão a fato documentado, que é a §0.7
@@ -162,7 +165,8 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #     ARITMÉTICA sobre um número estimado, não medição — e `60 - L` também.
 #     O sentido oposto (app adiantado, carimbo no FUTURO) esta constante não
 #     cobre e não pode cobrir: ela é o piso do intervalo. Quem o cobre é o TETO
-#     do `SQL_RAW_AINDA_VALE` (`db/open_finance_state.py`), e é ele que impede o
+#     do `SQL_JANELA_DEVICE` (`db/open_finance_state.py`; vale para o
+#     `execution_status` e para o `device_na_janela`), e é ele que impede o
 #     carimbo no futuro de tornar a supressão permanente.
 #   • A TOLERÂNCIA A RELÓGIO É ASSIMÉTRICA, 6×: 5 min para o app adiantado (o
 #     teto) contra 30 min para o atrasado (os `60 - 30` de folga do piso). Não é
@@ -175,7 +179,7 @@ EXEC_STATUS_AUTORIZA_DISPOSITIVO = "USER_AUTHORIZATION_PENDING"
 #     correta depois que a janela fechou. Errar curto custa uma instrução
 #     conservadora; errar longo manda a pessoa esperar um QR morto.
 #
-# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_RAW_AINDA_VALE`, o
+# 60 NÃO é a janela máxima: somado ao teto de 5 min do `SQL_JANELA_DEVICE`, o
 # intervalo aceito tem 65 min de largura para um carimbo 5 min adiantado (medido:
 # `now() - 60 min` FORA, `now() - 59 min` DENTRO, `now() + 5 min` DENTRO,
 # `now() + 5 min 1 s` FORA). Quem lê só esta constante infere 60.
@@ -196,7 +200,7 @@ _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
 # `save_pluggy_open_finance_item` (`db/open_finance.py`), o ÚNICO ponto da árvore
 # que grava status REMOTO — os outros escritores da coluna gravam valor NOSSO:
 # `pause_open_finance_connection` (PAUSED), o mapa literal do webhook
-# (`update_pluggy_open_finance_item_status`: UPDATING/ERROR/DELETED), o
+# (`update_pluggy_open_finance_item_status`: só DELETED desde o PR-C2), o
 # `resolve_connection_state` via `mark_sync_result` (ACTIVE/ERROR) e o mock
 # (ACTIVE, provider `mock_pluggy`).
 #
@@ -211,7 +215,7 @@ _NEEDS_USER = {"LOGIN_ERROR", "WAITING_USER_INPUT", "INVALID_CREDENTIALS",
 # É lista de PERMISSÃO e não de bloqueio das duas sentinelas: `ACTIVE` e elas são
 # vocabulário NOSSO, e nenhum payload pode reivindicar nenhum dos três. O
 # conteúdo é a união dos conjuntos acima — os status que este módulo já trata por
-# nome —, mais `ERROR` (o que o webhook grava e o que `of_health_counters` conta)
+# nome —, mais `ERROR` (o que o resolvedor e a pista do webhook gravam, e o que `of_health_counters` conta)
 # e o `executionStatus` de dispositivo, que a fronteira também aceita pelo
 # `item['status'] or item['executionStatus']`. Não acrescente status "por
 # precaução": vale aqui o mesmo veto do bloco de `_NEEDS_USER`.
@@ -259,7 +263,7 @@ STATUS_REMOTOS_ACEITOS = frozenset(
 
 _LABELS = {
     "updated": "Atualizado",
-    "partial": "Parcial",
+    "partial": "Dados parciais",
     "updating": "Atualizando…",
     "error_recoverable": "Erro temporário",
     "needs_user_action": "Ação necessária",
@@ -268,6 +272,10 @@ _LABELS = {
     "removed": "Removido",
     "no_accounts": "Sem dados",
 }
+
+_CONTEXTO_DADOS_PARCIAIS = (
+    "Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização."
+)
 
 # Detalhe POR STATUS, quando o do estado manda a ação errada. `_NEEDS_USER` é um
 # balde só ("Ação necessária"), mas a ação não é a mesma para todo mundo:
@@ -290,9 +298,9 @@ _LABELS = {
 #     isso acrescentá-lo a `_NEEDS_USER` seria o `executionStatus` "por
 #     precaução" que o bloco lá em cima proíbe. Codex do @hiago no #166.
 #
-# Os dois nomes são exportados porque `list_connections_needing_reconnect`
-# (`db/open_finance.py`) precisa PULAR estas conexões: o aviso proativo manda
-# "reconecte seu banco", o único caminho que faz PERDER a janela.
+# O aviso proativo ("reconecte seu banco", o único caminho que faz PERDER a
+# janela) PULA estas conexões dentro do prazo pelo DETALHE, não por estes nomes:
+# `avisa_reconectar`, abaixo, compara com `_AUTORIZE_NO_APP`.
 # SÓ É LIDO no ramo `needs_user_action` (abaixo, nos dois caminhos), via
 # `_detalhe_de_acao`. As DUAS chaves são load-bearing, e por motivos diferentes:
 # a de `item_status` porque está em `_NEEDS_USER`; a de `execution_status`
@@ -331,6 +339,10 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
     na linha, não consulta banco nem relógio. O `raw` inteiro NÃO viaja — só o
     escalar — porque ele carrega `clientUserId`.
 
+    O PRAZO dos DOIS campos (D5) não é daqui: `connection_ui_state` só a chama com
+    `device_na_janela` verdadeiro, nos dois ramos. Fora da janela o detalhe é o
+    fixo, "Reautorize o banco".
+
     Precedência: o `item_status` ganha. As duas diagonais fora do par medido,
     enumeradas porque enumerar só a inofensiva foi apontado:
 
@@ -357,6 +369,18 @@ def _detalhe_de_acao(item_status: str, execution_status: str = "") -> str | None
     """
     return (_DETALHE_POR_STATUS.get(item_status)
             or _DETALHE_POR_STATUS.get(execution_status))
+
+
+def avisa_reconectar(ui: dict) -> bool:
+    """A regra do aviso "reconecte" (Onda 5, D4): a TELA decide, aqui só se filtra.
+
+    Avisa `item_missing` e `needs_user_action` cujo detalhe NÃO é o de
+    dispositivo/QR (mandar reconectar faz perder a janela, Codex #166). Erro
+    transitório, "Sem dados" (DP1 = A) e o resto não avisam.
+    """
+    return ui.get("state") == "item_missing" or (
+        ui.get("state") == "needs_user_action" and ui.get("detail") != _AUTORIZE_NO_APP)
+
 
 _FIXED_DETAIL = {
     "error_recoverable": "Tentaremos de novo automaticamente",
@@ -939,6 +963,10 @@ def connection_ui_state(connection_row: dict) -> dict:
     Lê `status`, `status_reason`, `health` e `last_sync_at` da linha de
     `open_finance_connections`. `health` NULL significa "saúde ainda não medida"
     — NÃO "nunca sincronizou": linha legada tem last_sync_at e nenhum health.
+    Os derivados SQL (`execution_status`, `device_na_janela`, `coleta_*`) vêm do
+    select (`db/open_finance_state.py`); chave AUSENTE = janela do dispositivo
+    fechada: quem não seleciona `device_na_janela` nunca vê "Autorize o acesso no
+    app do banco", só "Reautorize o banco".
     """
     row = connection_row if isinstance(connection_row, dict) else {}
     status = str(row.get("status") or "").upper()
@@ -1049,6 +1077,8 @@ def connection_ui_state(connection_row: dict) -> dict:
             state, detail = "error_recoverable", _DETALHE_COLETA_ESTOURADA
         elif state == "updating" and row.get("coleta_vencida"):
             detail = _DETALHE_COLETA_VENCIDA
+        if state == "partial":
+            detail = _CONTEXTO_DADOS_PARCIAIS + (f" {detail}" if detail else "")
         return {
             "state": state,
             "label": _LABELS[state],
@@ -1068,7 +1098,8 @@ def connection_ui_state(connection_row: dict) -> dict:
         item_status = str(health.get("item_status") or "").upper()
         if item_status in _NEEDS_USER:
             return out("needs_user_action", _detalhe_de_acao(
-                item_status, str(health.get("execution_status") or "").upper()))
+                item_status, str(health.get("execution_status") or "").upper())
+                if row.get("device_na_janela") else None)
         # `and sem_sync`: coleta de banco real demora MUITO mais que o sync, então
         # o item fica em `UPDATING` depois de o espelho já estar escrito — e o card
         # dizia "Atualizando…" para sempre em cima de dado importado e de um
@@ -1141,8 +1172,11 @@ def connection_ui_state(connection_row: dict) -> dict:
         # no app do banco" aqui também, e não o oposto do ramo com health.
         # Ausente (linha de outra query, prazo vencido, `raw` sem o campo) → "",
         # que é o default do parâmetro: o detalhe cai em "Reautorize o banco".
+        # O `device_na_janela` (D5) põe o MESMO prazo no 1º campo: o `status`
+        # local `WAITING_USER_ACTION` também vence.
         return out("needs_user_action", _detalhe_de_acao(
-            status, str(row.get("execution_status") or "").upper()))
+            status, str(row.get("execution_status") or "").upper())
+            if row.get("device_na_janela") else None)
     if status == "ERROR":
         # Mesma classe do ramo com health: o motivo explica melhor que "Erro
         # temporário" (linha legada gravada antes desta onda também cai aqui).

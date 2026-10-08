@@ -11,7 +11,6 @@ from psycopg.types.json import Jsonb
 from utils_date import _tz, add_months, billing_period_for_close_day
 from utils_text import is_internal_category
 
-from .accounts import delete_launch_and_rollback
 from .cards import (
     add_imported_credit_purchase,
     extract_installment_info,
@@ -20,6 +19,10 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .of_identity import (
+    LATEST_TRANSACTION_SQL, assert_unambiguous_links, bind_import,
+    external_id as of_external_id, existing_import,
+)
 from .open_finance_categories import categoria_pigbank, garantir_no_catalogo
 from .open_finance_cash import RESERVA_SQL, RESERVADO_SQL
 from .users import ensure_user, ensure_user_tx
@@ -38,28 +41,19 @@ from .users import ensure_user, ensure_user_tx
 logger = logging.getLogger(__name__)
 
 
-def _rollback_imported_of(rows: list[dict]) -> None:
-    """Reverte os artefatos importados de um conjunto de transações OF (launches + fatura).
+def _rollback_imported_of(rows: list[dict], *, disconnect=False) -> None:
+    """Limpa CREDIT antes de accounts; BANK é relido e limpo sob o lock no chamador.
 
-    Cada `row` traz: user_id, imported_launch_id, imported_credit_tx_id, launch_source.
-    - Cartão: `undo_credit_transaction` (ajusta o total da fatura).
-    - Launch: só apaga se for do OF (`source='open_finance'`); se foi auto-merge num lançamento
-      MANUAL, preserva o manual (só desvincula — a OF tx some depois de qualquer jeito).
-    Cada função gerencia própria conexão; falhas são engolidas pra não travar a limpeza.
+    O vínculo pode ter sido transferido a uma reconexão depois desta foto.
+    A remoção relê a referência sob o lock da compra antes de ajustar a fatura.
     """
     for r in rows:
-        uid = r.get("user_id")
-        ctx = r.get("imported_credit_tx_id")
+        uid, ctx = r.get("user_id"), r.get("imported_credit_tx_id")
         if ctx:
             try:
-                # remoção ÚNICA: apagar 1 parcela não pode cascatear o parcelamento inteiro.
-                remove_single_credit_transaction(uid, ctx)
-            except Exception:
-                pass
-        lid = r.get("imported_launch_id")
-        if lid and (r.get("launch_source") == "open_finance"):
-            try:
-                delete_launch_and_rollback(uid, lid)
+                remove_single_credit_transaction(
+                    uid, ctx, of_tx_ids=[t["id"] for t in rows if t["user_id"] == uid],
+                    disconnect=disconnect)
             except Exception:
                 pass
 
@@ -261,68 +255,80 @@ def create_mock_open_finance_connection(user_id: int, institution_key: str | Non
     }
 
 
-def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
-    ensure_user(user_id)
+def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> list[dict]:
+    """Mesma seleção do snapshot, dentro da transação do chamador."""
     # Import LOCAL: `open_finance_state` importa `_CursorComTeto` daqui no topo,
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
-        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_EXECUTION_STATUS, aplica_teto_por_health,
-        janela_device_auth_min)
+        SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_DEVICE_NA_JANELA, SQL_EXECUTION_STATUS,
+        aplica_teto_por_health, janela_device_auth_min)
 
+    cur.execute(
+        f"""
+        -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
+        -- `clientUserId` e `statusDetail`, e esta linha vai para o
+        -- navegador. O que entra é o DERIVADO — um escalar calculado no
+        -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
+        -- `db/open_finance_state.py`), que o `connection_ui_state` lê
+        -- para não mandar "Reautorize o banco" a quem devia estar lendo
+        -- o QR. Era a metade da TELA do achado do Codex #166; o aviso
+        -- proativo é esta mesma leitura filtrada
+        -- (`list_connections_needing_reconnect`).
+        --
+        -- Ele vale enquanto `health is null` E a autorização atual couber
+        -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
+        -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
+        -- a ação certa depois que a janela fechou — o `raw` é congelado
+        -- (`mark_sync_result` não o toca), então sem prazo a instrução
+        -- duraria para sempre. O `device_na_janela` (D5) é o MESMO prazo
+        -- valendo também com `health`: fora dele, nenhum ramo mostra a
+        -- instrução de dispositivo.
+        --
+        -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
+        -- reconectar ZERA a saúde até um sync real provar o contrário),
+        -- e é por isso que a saída é o derivado e não a coluna.
+        --
+        -- O `execution_status` (e o `device_na_janela`) é REMOVIDO do dict antes de a resposta
+        -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
+        -- `connection_ui_state` que o consome): o corpo HTTP fica
+        -- idêntico em chaves ao de antes deste PR.
+        select id, provider, provider_item_id, status, institution_name, institution_id,
+               last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
+               {SQL_EXECUTION_STATUS},
+               {SQL_DEVICE_NA_JANELA},
+               {SQL_COLETA_VENCIDA},
+               {SQL_COLETA_ESTOURADA}
+        from open_finance_connections
+        where user_id=%s
+        order by updated_at desc, id desc
+        {"for update" if lock else ""}
+        """,
+        (janela_device_auth_min(), janela_device_auth_min(), user_id),
+    )
+    connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
+    # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
+    # função que o decide. O front deixou de derivar rótulo do `status`:
+    # ele não sabe de produto atrasado nem de item que sumiu.
+    from core.services.pluggy_health import connection_ui_state
+    for c in connections:
+        c["ui"] = connection_ui_state(c)
+        # Campo de TRABALHO, não de contrato: entrou no select só para o
+        # `connection_ui_state` acima e sai antes da serialização, para o
+        # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
+        # é o que impede um campo derivado do `raw` de virar API pública
+        # sem ninguém ter decidido isso.
+        c.pop("execution_status", None)
+        c.pop("device_na_janela", None)
+        c.pop("coleta_vencida", None)
+        c.pop("coleta_estourada", None)
+    return connections
+
+
+def get_open_finance_snapshot(user_id: int, limit: int = 8) -> dict:
+    ensure_user(user_id)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                -- `raw` NÃO entra aqui, e continua não entrando: ele carrega
-                -- `clientUserId` e `statusDetail`, e esta linha vai para o
-                -- navegador. O que entra é o DERIVADO — um escalar calculado no
-                -- Postgres (`SQL_EXECUTION_STATUS`, fonte única em
-                -- `db/open_finance_state.py`), que o `connection_ui_state` lê
-                -- para não mandar "Reautorize o banco" a quem devia estar lendo
-                -- o QR. Era a metade da TELA do achado do Codex #166; a do aviso
-                -- proativo já estava fechada em `list_connections_needing_reconnect`.
-                --
-                -- Ele vale enquanto `health is null` E a autorização atual couber
-                -- em `JANELA_DEVICE_AUTH_MIN` (60 min). Vencido o prazo, o
-                -- derivado é NULL e o detalhe volta a "Reautorize o banco", que é
-                -- a ação certa depois que a janela fechou — o `raw` é congelado
-                -- (`mark_sync_result` não o toca), então sem prazo a instrução
-                -- duraria para sempre.
-                --
-                -- Gravar `health` no upsert continua VETADO (decisão da Onda 2:
-                -- reconectar ZERA a saúde até um sync real provar o contrário),
-                -- e é por isso que a saída é o derivado e não a coluna.
-                --
-                -- O `execution_status` é REMOVIDO do dict antes de a resposta
-                -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
-                -- `connection_ui_state` que o consome): o corpo HTTP fica
-                -- idêntico em chaves ao de antes deste PR.
-                select id, provider, provider_item_id, status, institution_name, institution_id,
-                       last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
-                       {SQL_EXECUTION_STATUS},
-                       {SQL_COLETA_VENCIDA},
-                       {SQL_COLETA_ESTOURADA}
-                from open_finance_connections
-                where user_id=%s
-                order by updated_at desc, id desc
-                """,
-                (janela_device_auth_min(), user_id),
-            )
-            connections = [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
-            # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
-            # função que o decide. O front deixou de derivar rótulo do `status`:
-            # ele não sabe de produto atrasado nem de item que sumiu.
-            from core.services.pluggy_health import connection_ui_state
-            for c in connections:
-                c["ui"] = connection_ui_state(c)
-                # Campo de TRABALHO, não de contrato: entrou no select só para o
-                # `connection_ui_state` acima e sai antes da serialização, para o
-                # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
-                # é o que impede um campo derivado do `raw` de virar API pública
-                # sem ninguém ter decidido isso.
-                c.pop("execution_status", None)
-                c.pop("coleta_vencida", None)
-                c.pop("coleta_estourada", None)
+            connections = _read_open_finance_connections(cur, user_id)
 
             cur.execute(
                 """
@@ -545,176 +551,29 @@ def pause_open_finance_connection(connection_id: int) -> int:
     return updated
 
 
-def list_connections_needing_reconnect(user_id: int | None = None, within_days: int = 7) -> list[dict]:
-    """Conexões em erro OU com consentimento vencendo em `within_days` dias.
+def list_connections_needing_reconnect(user_id: int) -> list[dict]:
+    """As conexões do usuário que pedem o aviso "reconecte" — a TELA filtrada.
 
-    Base pra um aviso proativo de 'reconectar/renovar' (P1 #5/#6). Sem isso, o dado
-    para de atualizar em silêncio — pior que não ter dado.
+    Uma regra só (Onda 5, D4): a MESMA leitura do snapshot
+    (`_read_open_finance_connections`, mesmos derivados) e o mesmo
+    `connection_ui_state`, filtrados por `avisa_reconectar` (`item_missing` e
+    `needs_user_action` sem a instrução de dispositivo). Não há classificador
+    paralelo por `status`: erro transitório (a pista do webhook, item em `ERROR`
+    na Pluggy) não avisa, porque a tela não manda reconectar.
 
-    Quem espera AUTORIZAÇÃO DE DISPOSITIVO / QR fica DE FORA, e é o único de erro
-    que fica. Essas conexões gravam `status='ERROR'` como o resto de
-    `_NEEDS_USER`, então cairiam aqui e receberiam o template de "reconecte seu
-    banco" — quando a ação certa é autorizar o dispositivo ou ler o QR no app do
-    banco, dentro de uma janela curta. Mandar reconectar é empurrar a pessoa
-    para o único caminho que faz PERDER a janela (Codex #166, P2).
+    Device/QR fica de fora enquanto a tela mostra "Autorize o acesso no app do
+    banco" (mandar reconectar faz PERDER a janela, Codex #166); vencido o prazo
+    (D5, `device_na_janela`), a tela diz "Reautorize o banco" e o aviso sai.
 
-    São DOIS campos porque os dois estados chegam por campos diferentes, e o
-    segundo é o que o Codex do @hiago achou: `USER_AUTHORIZATION_PENDING` é
-    `executionStatus`, e o Item vem com `"status": "OUTDATED"` ao lado — que
-    JÁ está na lista de erro abaixo. Filtrar só pelo `item_status` deixava a
-    Caixa passando batido. Os nomes vêm de `pluggy_health` para não divergirem
-    do detalhe que a tela mostra.
-
-    O filtro é pelo `health`, não pelo `status`: o status local não distingue,
-    todo `_NEEDS_USER` vira `ERROR` igual. Enquanto não existir template próprio
-    para device/QR, NÃO avisar é melhor que avisar errado — o estado continua
-    visível na tela do Open Finance, com a instrução certa.
-
-    E ele vale para o `where` INTEIRO, de propósito — inclusive para a perna do
-    consentimento vencendo. A tentação é restringi-lo à perna de erro,
-    argumentando que consentimento e QR são janelas diferentes (7 dias contra
-    ~30 min). Isso está ERRADO por dois fatos medidos, e a tentativa custou uma
-    rodada:
-
-      • o ÚNICO consumidor é `run_reconnect_notifications`
-        (`core/services/open_finance_proactive.py`), e ele manda UM template só
-        — `OF_RECONNECT_TEMPLATE_NAME`, parâmetro `banks` — para toda linha
-        devolvida, sem olhar qual perna casou. Não existe "aviso de renovação"
-        separado: deixar a conexão passar pela perna do consentimento entrega
-        exatamente o "reconecte seu banco" que este filtro existe para evitar;
-      • a perna do consentimento é MORTA para `provider = 'pluggy'`:
-        `save_pluggy_open_finance_item` grava `consent_expires_at = None` e o
-        ramo de conflito não toca a coluna. O único escritor não-nulo é
-        `create_mock_open_finance_connection`, que grava `provider =
-        'mock_pluggy'` — excluído pelo `where` daqui.
-
-    Ou seja: restringir à perna de erro não conserta caso nenhum hoje e abre o
-    defeito no dia em que a coluna passar a ser escrita. Se um dia o template
-    ganhar variante própria para renovação de consentimento, é ELE que precisa
-    distinguir — não este filtro.
+    Sem perna de `consent_expires_at`: para `provider='pluggy'` a coluna nunca é
+    escrita (o upsert grava NULL) e o mock é excluído pelo `provider` abaixo.
+    O item devolvido é a linha do snapshot (com `ui`); o consumidor
+    (`run_reconnect_notifications`) lê `institution_name`.
     """
-    # Local como o `connection_ui_state` da linha 259: db -> core.services.
-    from core.services.pluggy_health import (EXEC_STATUS_AUTORIZA_DISPOSITIVO,
-                                             ITEM_STATUS_AUTORIZA_DISPOSITIVO)
-    from .open_finance_state import SQL_RAW_AINDA_VALE, janela_device_auth_min
-    sql = f"""
-        select id, user_id, provider_item_id, institution_name, status,
-               consent_expires_at, last_sync_at
-        from open_finance_connections
-        where provider = 'pluggy'
-          -- SEM fallback de `raw` aqui, e por dois fatos, não por esquecimento:
-          -- (1) o único caminho que deixa `health` NULL é o upsert, e ele grava
-          -- a coluna `status` a partir do MESMO item — `WAITING_USER_ACTION`
-          -- vira `status='WAITING_USER_ACTION'`, que NÃO está na cláusula de
-          -- erro abaixo, então a linha nem chega ao filtro; (2) o outro escritor
-          -- de `raw` é o webhook (`update_pluggy_open_finance_item_status`), e
-          -- lá `raw` é o ENVELOPE do evento, não o item — `raw->>'status'` não
-          -- seria um `item_status`. O `executionStatus` abaixo não tem nenhum
-          -- dos dois problemas: o `OUTDATED` da Caixa casa com a cláusula de
-          -- erro, e o envelope não carrega `executionStatus`.
-          and coalesce(health->>'item_status', '') <> %s
-          -- `health` NULL cai no `raw`, que o upsert JÁ persiste (`Jsonb(item)`,
-          -- nos dois ramos). Sem isto havia uma janela: a reconexão zera o
-          -- `health` (`health = null`, acima) e quem escreve de volta é o sync
-          -- de fundo — no meio, a Caixa (`status=OUTDATED` +
-          -- `executionStatus=USER_AUTHORIZATION_PENDING`) casava com a cláusula
-          -- de erro pelo `OUTDATED` e um tique do aviso proativo mandava
-          -- "reconecte seu banco", a instrução que faz PERDER a janela do QR
-          -- (Codex #166, P2). Os nomes divergem de propósito: `execution_status`
-          -- é o do `derive_item_health` (snake_case, já em maiúscula);
-          -- `executionStatus` é como a Pluggy manda — daí o `upper`.
-          --
-          -- ASSIMETRIA com o predicado irmão de cima (`item_status`, SEM
-          -- `upper`), de propósito e não por descuido: aqui o `upper` envolve
-          -- TAMBÉM o ramo do `health`, e isso É mudança de comportamento — um
-          -- `health.execution_status` em minúscula passava pelo filtro antes e
-          -- agora cala o aviso. Hoje é INALCANÇÁVEL: o único escritor de
-          -- `health` é o `derive_item_health`, que já grava em maiúscula
-          -- (o `return` de `derive_item_health`,
-          -- `core/services/pluggy_health.py`, nas DUAS chaves). Fica
-          -- assim, e não em dois `coalesce` separados, porque a direção é a
-          -- barata: se um dia entrar minúscula, calar é errar para o lado de não
-          -- mandar "reconecte seu banco" na janela do QR. Sem teste próprio —
-          -- não há entrada que chegue lá.
-          --
-          -- ALCANCE, E ELE É DE UM EIXO SÓ. O que fecha é TELA × AVISO, e
-          -- DENTRO do ramo `health is null`: esta query é o AVISO PROATIVO; a
-          -- TELA é `get_open_finance_snapshot` (acima, na mesma tabela), que
-          -- passou a selecionar o MESMO derivado — o escalar do
-          -- `SQL_EXECUTION_STATUS`, nunca o `raw` inteiro. Uma regra, um prazo,
-          -- um parâmetro, e a condição literalmente compartilhada
-          -- (`SQL_RAW_AINDA_VALE`, §0.7): as duas superfícies não podem mais
-          -- divergir por alguém consertar uma só.
-          --
-          -- O EIXO QUE CONTINUA ABERTO é o OUTRO: health-nulo × health-PRESENTE.
-          -- O `SQL_RAW_AINDA_VALE` só governa `health is null`. Assim que o tique
-          -- de saúde grava `health` com o mesmo `execution_status`, a linha passa
-          -- para o ramo de CIMA — o `if health:` de `connection_ui_state` e o
-          -- primeiro braço do `coalesce` logo acima —, e esses DOIS não têm prazo
-          -- nenhum. A oscilação real em produção tem TRÊS fases:
-          --   1. 0–60 min: instrução certa. É o conserto deste PR.
-          --   2. 60 min → tique de saúde: "Reautorize o banco", aviso de volta.
-          --   3. depois do tique, PARA SEMPRE: "Autorize o acesso no app do
-          --      banco" com o QR morto há semanas, e o aviso calado.
-          -- A fase 3 é a que DURA (o tique é ≤6 h no caso comum). Medido pelo
-          -- caminho de produção — `save_pluggy_open_finance_item`, job de saúde
-          -- gravando `health` com o mesmo `execution_status`, 30 dias depois:
-          -- detalhe "Autorize o acesso no app do banco", aviso proativo `False`.
-          -- NÃO é regressão: o ramo com `health` já era assim na `main`, e este
-          -- PR não o toca. Está FORA DE ESCOPO por decisão do dono — fechá-la é
-          -- outra máquina de estados, outro inventário e outro PR. O que precisa
-          -- ser DECIDIDO antes de codar: por quanto tempo um `health` OBSERVADO
-          -- descreve a autorização atual (hoje: para sempre), e qual é a âncora
-          -- desse prazo — `health.observed_at` é o relógio do servidor no momento
-          -- da medição, não o da autorização, então não é o mesmo problema que o
-          -- `SQL_RAW_AINDA_VALE` resolve aqui. Isso vale para TODO `item_status`
-          -- de `_NEEDS_USER`, não só para device/QR, e é o que faz disto trabalho
-          -- próprio. Aqui fica só onde ela teria de ser fechada, sem proposta.
-          --
-          -- O SILÊNCIO FICA LIMITADO NO RAMO SEM `health`, e essa é a mudança —
-          -- a fase 3 acima é o que sobra. Antes ele durava
-          -- MUITO mais que a janela do QR (~30 min): quem escreve `health` de
-          -- volta é o `run_of_health_check` (`core/services/pluggy_sync.py`), num
-          -- tique de `OF_REFRESH_INTERVAL_SEC` — default 6 h
-          -- (`frontend/finance_bot_websocket_custom.py`) — que processa
-          -- `limit=200` linhas por passada, `order by id`
-          -- (`list_connections_for_health_check`), e PULA a linha sem gravar nada
-          -- quando o `GET /items` falha por algo que não seja 404. O piso era UM
-          -- tique (até 6 h) e esticava por `ceil(posição/200)` tiques. Com o
-          -- prazo, quem encerra a supressão é ELE (60 min), não uma corrida com o
-          -- tique: passados os 60 min o aviso volta sozinho, mesmo que nenhum
-          -- health tenha sido medido.
-          --
-          -- O `case` NÃO é enfeite, e as DUAS condições dele são load-bearing:
-          --   • `health is null` — com `coalesce(health->>…, raw->>…)` puro, um
-          --     `health` observado DEPOIS sem `execution_status` (o usuário
-          --     autorizou, virou LOGIN_ERROR) caía no `raw` VELHO da reconexão e
-          --     calava o aviso para sempre;
-          --   • o PRAZO — `mark_sync_result` não toca em `raw`, e
-          --     `mark_sync_attempt` empurra `updated_at`/`last_attempt_at` sem
-          --     que o `raw` mude (por isso a âncora é
-          --     `coalesce(reconnected_at, created_at)`). Sem prazo, uma linha que
-          --     nunca mais fosse medida ficaria calada para sempre.
-          and upper(coalesce(health->>'execution_status',
-                             case when {SQL_RAW_AINDA_VALE}
-                                  then raw->>'executionStatus' end, '')) <> %s
-          and (
-            upper(coalesce(status, '')) in ('ERROR', 'LOGIN_ERROR', 'OUTDATED', 'WAITING_USER_INPUT')
-            or (consent_expires_at is not null
-                and consent_expires_at <= now() + make_interval(days => %s))
-          )
-    """
-    # Ordem POSICIONAL, na ordem em que os `%s` aparecem no SQL acima: o do
-    # `SQL_RAW_AINDA_VALE` fica ENTRE os dois nomes de device/QR.
-    params: list = [ITEM_STATUS_AUTORIZA_DISPOSITIVO, janela_device_auth_min(),
-                    EXEC_STATUS_AUTORIZA_DISPOSITIVO, within_days]
-    if user_id is not None:
-        sql += " and user_id = %s"
-        params.append(user_id)
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall()
+    from core.services.pluggy_health import avisa_reconectar
+    with get_conn() as conn, conn.cursor() as cur:
+        conexoes = _read_open_finance_connections(cur, user_id)
+    return [c for c in conexoes if c["provider"] == "pluggy" and avisa_reconectar(c["ui"])]
 
 
 class _CursorComTeto:
@@ -951,27 +810,14 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
                 """
                 update open_finance_connections
                 set status=%s,
-                    -- O par (status, status_reason) é UM estado só. Este caminho
-                    -- (webhook) não passa pelo `resolve_connection_state` porque
-                    -- ele não observa o item — só repete o que a Pluggy disse —,
-                    -- mas grava o MESMO par que o resolvedor daria: linhas B/C da
-                    -- tabela (item em erro) são ERROR + motivo VAZIO, porque quem
-                    -- conta a história ali é o status/health, não o motivo de
-                    -- ontem. Sem isto, `item/error` sobre ACTIVE/no_accounts
-                    -- produzia ERROR/no_accounts — par incoerente (medido).
-                    -- EXCEÇÃO, `item_missing`: WEBHOOK NÃO É EVIDÊNCIA DE ITEM VIVO.
-                    -- Apagá-lo REBAIXA a mensagem — um `item/error` entregue com
-                    -- atraso (replay) sobre o par que o job de saúde acabou de
-                    -- gravar virava ERROR/None → "Erro temporário / Tentaremos de
-                    -- novo automaticamente" (medido), e o usuário parava de ser
-                    -- mandado refazer a conexão. Aceitar isso seria aceitar até
-                    -- ~12h (OF_HEALTH_MAX_AGE_SEC) mostrando estado saudável numa
-                    -- conexão que exige ação — a mentira que esta onda existe para
-                    -- matar. Quem PODE limpar `item_missing` é só quem OBSERVA o
-                    -- item: o job de saúde (GET /items) e o sync bem-sucedido, os
-                    -- dois pelo `resolve_connection_state`. E o par continua
-                    -- coerente: ERROR/item_missing é exatamente a linha A da tabela,
-                    -- o mesmo par que o job de saúde grava.
+                    -- PR-C2: o webhook só chama isto com `item/deleted` (terminal).
+                    -- `item/created`/`item/error` não passam mais por aqui: quem
+                    -- escreve o par de uma observação é `observar_item`, e a pista de
+                    -- erro vai por `mark_sync_result`, sem apagar o motivo.
+                    -- O `case` abaixo (ERROR vindo de fora apaga o motivo, MENOS
+                    -- `item_missing`) vale para os demais chamadores e para testes:
+                    -- evento atrasado não é evidência de item vivo, só quem OBSERVA
+                    -- o item (job de saúde, sync) limpa `item_missing`.
                     status_reason=case
                         when lower(coalesce(status_reason,'')) = 'item_missing' then status_reason
                         else null end,
@@ -1806,12 +1652,24 @@ def delete_open_finance_transactions(
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 where t.id = any(%s)
-                for update of t
                 """,
                 ([r["id"] for r in rows],),
             )
-            for row in cur.fetchall():
-                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .reconciliation import _locked_tx, _restore_original
+            removing = cur.fetchall()
+            for row in removing:
+                current = _locked_tx(cur, row["user_id"], row["id"])
+                cur.execute(
+                    """select 1 from open_finance_transactions t
+                         join open_finance_accounts a on a.id=t.account_id
+                         join open_finance_connections c on c.id=a.connection_id
+                        where c.user_id=%s and t.imported_launch_id=%s and not t.id=any(%s)
+                        limit 1""",
+                    (row["user_id"], current["imported_launch_id"], [r["id"] for r in removing]))
+                if cur.fetchone():
+                    continue  # outro espelho ainda sustenta o vínculo legado
+                _restore_original(cur, row["user_id"], current["imported_launch_id"])
+                delete_if_shadow(cur, row["user_id"], current["imported_launch_id"])
             from .open_finance_cash import estorna_links
             for owner in owners:
                 estorna_links(cur, owner, [r["id"] for r in rows if r["user_id"] == owner])
@@ -2133,6 +1991,9 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         que acontecia gravando `date` cru como meia-noite UTC).
     `time_known` sinaliza pro front mostrar HH:MM só quando é real.
     """
+    existing = existing_import(cur, user_id, r)
+    if existing:
+        return existing, False
     has_real_time = r["transacted_at"] is not None
     criado_em = (
         r["transacted_at"] if has_real_time
@@ -2156,7 +2017,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         (
             user_id, cls["tipo"], cls["valor"], (categoria_pigbank(r["category"]) or "outros"),
             r["description"], None, criado_em, Jsonb(efeitos),
-            "open_finance", r["provider_transaction_id"], r["transaction_date"], "BRL",
+            "open_finance", of_external_id(r), r["transaction_date"], "BRL",
             cls["is_internal_movement"],
         ),
     )
@@ -2165,7 +2026,7 @@ def _insert_of_shadow(cur, user_id: int, r, cls) -> tuple[int | None, bool]:
         return got["id"], True
     cur.execute(
         "select id from launches where user_id=%s and source='open_finance' and external_id=%s",
-        (user_id, r["provider_transaction_id"]),
+        (user_id, of_external_id(r)),
     )
     ex = cur.fetchone()
     return (ex["id"] if ex else None), False
@@ -2189,17 +2050,18 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=False)
             from .bank_movements import reconcile_bank_movements
             reconcile_bank_movements(cur, user_id)
             cur.execute(
-                """
+                f"""
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
                        t.amount, t.transaction_date, t.transacted_at, t.category,
-                       a.type as account_type
+                       a.type as account_type, a.provider_account_id, c.provider
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
-                where c.user_id = %s
+                where {LATEST_TRANSACTION_SQL.format(tx='t')} and c.user_id = %s
                   and t.imported_launch_id is null
                   and (%s::bigint is null or c.id = %s)
                 order by t.transaction_date, t.id
@@ -2218,6 +2080,11 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
                 if r["of_tx_id"] in caixa:  # saque/depósito em espécie: par da Carteira
                     cls["is_internal_movement"] = True
+
+                previous = existing_import(cur, user_id, r, include_fused=True)
+                if previous:
+                    bind_import(cur, user_id, r, previous)
+                    continue
 
                 # Reconciliação (Fase 2): gasto/receita não-interno tenta casar com manual.
                 verdict, match_id = "none", None
@@ -2265,6 +2132,8 @@ def import_open_finance_launches(user_id: int, connection_id: int | None = None)
                         "where id=%s",
                         (match_id, match_id, r["of_tx_id"]),
                     )
+                    from .reconciliation import _apply_bank_fields
+                    _apply_bank_fields(cur, user_id, match_id, r, cls)
                     auto_merged += 1
                     continue
 
@@ -2429,15 +2298,17 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=True)
             cur.execute(
-                """
+                f"""
                 select t.id as of_tx_id, t.provider_transaction_id, t.description,
                        t.amount, t.transaction_date, t.category, t.raw as tx_raw,
-                       a.id as of_account_id, a.name as account_name, a.raw as account_raw
+                       a.id as of_account_id, a.name as account_name, a.raw as account_raw,
+                       a.provider_account_id, c.provider
                 from open_finance_transactions t
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
-                where c.user_id = %s
+                where {LATEST_TRANSACTION_SQL.format(tx='t')} and c.user_id = %s
                   and t.imported_credit_tx_id is null
                   and upper(a.type) = 'CREDIT'
                   and (%s::bigint is null or c.id = %s)
@@ -2487,7 +2358,7 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
         cat = categoria_pigbank(r["category"])
         tx_id, created = add_imported_credit_purchase(
             user_id, card_cache[of_acc_id], r["amount"], cat,
-            r["transaction_date"], r["provider_transaction_id"],
+            r["transaction_date"], of_external_id(r), of_identity=r,
             installment_no=inst_no, installments_total=inst_total, group_id=group_id,
         )
         if created:
@@ -2495,16 +2366,22 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
             if cat:
                 novas.add(cat)
         if tx_id is not None:
-            links.append((r["of_tx_id"], tx_id))
+            links.append((r, tx_id))
 
     if links:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                for of_tx_id, credit_tx_id in links:
-                    cur.execute(
-                        "update open_finance_transactions set imported_credit_tx_id=%s where id=%s",
-                        (credit_tx_id, of_tx_id),
-                    )
+                # CREDIT antes de accounts, como o cleanup; serializa a transferência
+                # com a remoção da compra sem inverter a ordem do pagamento de fatura.
+                cur.execute("select id from credit_transactions where user_id=%s and id=any(%s) "
+                            "order by id for update", (user_id, sorted({tx for _, tx in links})))
+                present = {r["id"] for r in cur.fetchall()}
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)
+                for row, credit_tx_id in links:
+                    if credit_tx_id not in present:
+                        continue
+                    bind_import(cur, user_id, row, credit_tx_id, credit=True)
             conn.commit()
     garantir_no_catalogo(user_id, novas)
 
@@ -2542,10 +2419,12 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
     novas: set[str] = set()
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=True)
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
             cur.execute(
-                """
-                select o.amount, o.transaction_date, o.category,
+                f"""
+                select distinct on (ct.id) o.amount, o.transaction_date, o.category,
+                       o.provider_transaction_id, a.provider_account_id, c.provider,
                        ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
                        ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
                        ct.card_id, ct.categoria_editada as editada
@@ -2553,8 +2432,9 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join credit_transactions ct on ct.id = o.imported_credit_tx_id
-                where c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and upper(a.type)='CREDIT'
+                where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
+                  and ct.user_id=c.user_id and upper(a.type)='CREDIT'
+                order by ct.id, c.id desc, o.id desc
                 """,
                 (user_id, connection_id, connection_id),
             )
@@ -2621,7 +2501,7 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
 
     Sem isso, uma correção de valor/data/categoria atualizava só o espelho OF — o launch,
     a credit_transaction e o total da fatura ficavam com o valor velho. Mexe apenas em
-    registros DO OF (source=open_finance); nunca sobrescreve lançamento manual auto-mesclado.
+    registros OF e a representação bancária da fundida, preservando o original manual.
     Categoria e interno editados pelo cliente (`categoria_editada`) ficam como ele deixou
     (#712). O interno de linha editada = o da própria categoria, ou interno enquanto
     o par da Carteira vale (depois do par, volta ao que a categoria diz).
@@ -2635,13 +2515,15 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            assert_unambiguous_links(cur, user_id, credit=False)
             from .bank_movements import reconcile_bank_movements
             reconcile_bank_movements(cur, user_id)
             # 1) Launches próprios do OF (conta BANK)
             cur.execute(
-                """
-                select o.id as of_tx_id, o.amount, o.transaction_date, o.category, o.description,
-                       l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
+                f"""
+                select o.id as of_tx_id, o.amount, o.transaction_date, o.transacted_at, o.category, o.description,
+                       o.provider_transaction_id, a.provider_account_id, c.provider,
+                       l.source as launch_source, l.id as launch_id, l.valor as cur_valor, l.categoria as cur_cat,
                        l.tipo as cur_tipo, l.is_internal_movement as cur_internal,
                        l.categoria_editada as editada,
                        coalesce(l.posted_at, l.criado_em::date) as cur_date
@@ -2649,15 +2531,22 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                 join open_finance_accounts a on a.id = o.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 join launches l on l.id = o.imported_launch_id
-                where c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and upper(a.type)='BANK' and coalesce(l.source,'')='open_finance'
+                where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
+                  and l.user_id=%s and upper(a.type)='BANK'
+                  and (l.source='open_finance' or
+                       (o.reconciliation_status in ('auto_merged','confirmed')
+                        and (o.match_launch_id is null or o.match_launch_id=l.id)))
                 """,
-                (user_id, connection_id, connection_id),
+                (user_id, connection_id, connection_id, user_id),
             )
             from .open_finance_cash import cash_internal_tx_ids
             rows, caixa = cur.fetchall(), cash_internal_tx_ids(cur, user_id)
             for r in rows:
                 cls = classify_open_finance_launch(r["amount"], r["category"], r["description"])
+                if r["launch_source"] != "open_finance":
+                    from .reconciliation import _apply_bank_fields
+                    launches_updated += _apply_bank_fields(cur, user_id, r["launch_id"], r, cls)
+                    continue
                 forcado = r["of_tx_id"] in caixa  # saque/depósito em espécie: par da Carteira
                 if forcado:
                     cls["is_internal_movement"] = True
@@ -2695,7 +2584,9 @@ def sync_imported_open_finance_updates(user_id: int, connection_id: int | None =
                     gravada = (cur.fetchone() or {}).get("categoria")
                     if new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
-                    launches_updated += 1
+                from .reconciliation import _apply_bank_fields
+                fields_changed = _apply_bank_fields(cur, user_id, r["launch_id"], r, cls)
+                launches_updated += bool(changed or fields_changed)
 
 
         conn.commit()
@@ -3295,7 +3186,7 @@ def disconnect_open_finance_connection(
             card_ids = [r["card_id"] for r in cur.fetchall()]
 
     # 2. reverte launches/fatura importados.
-    _rollback_imported_of(rows)
+    _rollback_imported_of(rows, disconnect=True)
 
     # 3. CREDIT: apagar cartão pode cascatear faturas. Commit antes de accounts,
     # pois pagamento mantém a fatura enquanto outro helper adquire a conta.
@@ -3364,12 +3255,27 @@ def disconnect_open_finance_connection(
                 join open_finance_accounts a on a.id = t.account_id
                 join open_finance_connections c on c.id = a.connection_id
                 where c.user_id = %s and (%s::bigint is null or c.id = %s)
-                for update of t
                 """,
                 (user_id, connection_id, connection_id),
             )
-            for row in cur.fetchall():
-                delete_if_shadow(cur, row["user_id"], row["imported_launch_id"])
+            from .reconciliation import _locked_tx, _restore_original
+            removing = cur.fetchall()
+            for row in removing:
+                current = _locked_tx(cur, row["user_id"], row["id"])
+                from .of_identity import preserve_disconnect_alias
+                preserve_disconnect_alias(cur, user_id, [r["id"] for r in removing],
+                                          current["imported_launch_id"])
+                cur.execute(
+                    """select 1 from open_finance_transactions t
+                         join open_finance_accounts a on a.id=t.account_id
+                         join open_finance_connections c on c.id=a.connection_id
+                        where c.user_id=%s and t.imported_launch_id=%s and not t.id=any(%s)
+                        limit 1""",
+                    (row["user_id"], current["imported_launch_id"], [r["id"] for r in removing]))
+                if cur.fetchone():
+                    continue  # outro espelho ainda sustenta o vínculo legado
+                _restore_original(cur, row["user_id"], current["imported_launch_id"])
+                delete_if_shadow(cur, row["user_id"], current["imported_launch_id"])
             from .open_finance_cash import record_coverage
             record_coverage(cur, user_id, connection_id)
             if connection_id is None:

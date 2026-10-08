@@ -11,31 +11,33 @@ from __future__ import annotations
 import calendar
 import math
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.services import cashflow
+from core.services.cashflow_snapshot import carregar, Ocorrencia, centavos, legado
 from core.services.cashflow_forecast import _trajectory
 
 # strict: `true` e "180000" não passam por número; int continua valendo em float.
 _DINHEIRO = dict(ge=0, le=1_000_000_000, allow_inf_nan=False, strict=True)
 
 
+def _installments_decimal(principal: Decimal, monthly_rate: Decimal, n: int) -> list[Decimal]:
+    # Taxa pequena precisa de precisão suficiente para (1+r) não virar 1.
+    with localcontext() as ctx:
+        ctx.prec = max(60, -monthly_rate.adjusted() + 40) if monthly_rate else 60
+        total = (principal * monthly_rate / (1 - (1 + monthly_rate) ** -n) * n
+                 if monthly_rate else principal)
+        total = centavos(total)
+        parcela = centavos(total / n)
+        return [parcela] * (n - 1) + [total - parcela * (n - 1)]
+
+
 def installments(principal: float, monthly_rate: float, n: int) -> list[float]:
-    """Parcelas de `principal` em `n` meses. Taxa 0: principal/n. Com taxa: tabela
-    Price. Em centavos: todas iguais ao valor arredondado, e o resíduo do
-    arredondamento vai para a última, então a soma é o total exato."""
-    if monthly_rate:
-        # 1 − (1+r)^−n via expm1/log1p: com r minúsculo, `(1 + r) ** -n` vira 1.0
-        # em float e a fórmula direta divide por zero ou perde todos os dígitos.
-        total = principal * monthly_rate / -math.expm1(-n * math.log1p(monthly_rate)) * n
-    else:
-        total = principal
-    total_c = round(total * 100)
-    parcela_c = round(total_c / n)
-    return [parcela_c / 100] * (n - 1) + [(total_c - parcela_c * (n - 1)) / 100]
+    """Adaptador público legado; a aritmética e o resíduo ficam Decimal."""
+    return legado(_installments_decimal(Decimal(str(principal)), Decimal(str(monthly_rate)), n))
 
 
 def _add_months(d: date, k: int) -> date:
@@ -138,45 +140,50 @@ class Simulacao(_Corpo):
 
 
 def _duas_casas(v: float) -> float:
-    return round(v, 2) + 0.0  # `+ 0.0` troca −0,0 por 0,0 no JSON
+    return centavos(v)
 
 
 def _decision_events(cen: Cenario, today: date,
-                     until: date) -> tuple[list[tuple[date, str, str, float]], dict[str, Any]]:
+                     until: date) -> tuple[list[Ocorrencia], dict[str, Any]]:
     """Eventos do cenário até `until` (inclusive) e o resumo do contrato inteiro."""
     # `max`: a validação pode ter rodado ontem, num pedido que virou a meia-noite.
     # Sem isto a compra cairia no passado e o saldo de partida a absorveria.
     compra = max(cen.data_compra, today)
-    financiado = cen.financiado
-    valores = installments(financiado, cen.juros_mensal_pct / 100, cen.parcelas) if financiado > 0 else []
+    preco, entrada, custos, mensal = (Decimal(str(v)) for v in
+        (cen.preco, cen.entrada, cen.custos_unicos, cen.despesa_mensal_nova))
+    financiado = Decimal(0) if cen.a_vista else preco - entrada
+    valores = _installments_decimal(financiado, Decimal(str(cen.juros_mensal_pct)) / 100,
+                                    cen.parcelas) if financiado > 0 else []
     datas = [_add_months(compra, k) for k in range(1, len(valores) + 1)]
     # À vista: o preço cheio sai na data da compra. Parcelado: sai a entrada.
-    na_compra = cen.preco if cen.a_vista else cen.entrada
+    na_compra = preco if cen.a_vista else entrada
     # Tudo o que sai no dia da compra: o valor acima mais os custos únicos.
-    pago_na_compra = na_compra + cen.custos_unicos
+    pago_na_compra = na_compra + custos
 
-    events: list[tuple[date, str, str, float]] = []
+    events: list[Ocorrencia] = []
+    def event(d, label, value, ciclo):
+        return Ocorrencia('cenario', cen.nome, ciclo, d, 'simulacao', label, value, 'saida')
     if compra <= until:
         if na_compra > 0:
-            events.append((compra, "simulacao",
-                           f"{cen.nome}: {'à vista' if cen.a_vista else 'entrada'}", -na_compra))
-        if cen.custos_unicos > 0:
-            events.append((compra, "simulacao", f"{cen.nome}: custos únicos", -cen.custos_unicos))
-    events += [(d, "simulacao_parcela", f"{cen.nome}: parcela {k}/{len(valores)}", -v)
+            events.append(event(compra, f"{cen.nome}: {'à vista' if cen.a_vista else 'entrada'}", na_compra, 'compra'))
+        if custos > 0:
+            events.append(event(compra, f'{cen.nome}: custos únicos', custos, 'custos'))
+    events += [Ocorrencia('cenario', cen.nome, str(k), d, 'simulacao_parcela',
+                         f'{cen.nome}: parcela {k}/{len(valores)}', v, 'saida')
                for k, (d, v) in enumerate(zip(datas, valores), start=1) if d <= until]
-    if cen.despesa_mensal_nova > 0:
+    if mensal > 0:
         k = 1
         while (d := _add_months(compra, k)) <= until:
-            events.append((d, "simulacao", f"{cen.nome}: despesa mensal nova", -cen.despesa_mensal_nova))
+            events.append(event(d, f'{cen.nome}: despesa mensal nova', mensal, f'mensal:{k}'))
             k += 1
 
     fora = [v for d, v in zip(datas, valores) if d > until]
-    soma_parcelas = math.fsum(valores)
+    soma_parcelas = sum(valores, Decimal(0))
     contrato = {
         "data_compra": compra.isoformat(),
         "a_vista": cen.a_vista,
         # À vista não tem entrada, mesmo quando o pedido veio como `entrada = preco`.
-        "entrada": 0.0 if cen.a_vista else _duas_casas(cen.entrada),
+        "entrada": Decimal(0) if cen.a_vista else _duas_casas(cen.entrada),
         "pago_na_compra": _duas_casas(pago_na_compra),
         "valor_financiado": _duas_casas(financiado),
         "parcelas": cen.parcelas or 1,  # ecoa o pedido; à vista é 1 pagamento na data da compra
@@ -189,7 +196,7 @@ def _decision_events(cen: Cenario, today: date,
         "juros_totais": _duas_casas(soma_parcelas - financiado),
         "custos_unicos": _duas_casas(cen.custos_unicos),
         "despesa_mensal_nova": _duas_casas(cen.despesa_mensal_nova),
-        "parcelas_fora_do_horizonte": {"quantidade": len(fora), "valor": _duas_casas(math.fsum(fora))},
+        "parcelas_fora_do_horizonte": {"quantidade": len(fora), "valor": _duas_casas(sum(fora, Decimal(0)))},
     }
     return events, contrato
 
@@ -199,8 +206,8 @@ def _resumo(traj: dict[str, Any]) -> dict[str, Any]:
     abaixo = [it["date"] for it in dias if it["abaixo_do_limite"]]
     wd = traj["worst_day"]
     return {
-        "saldo_final_90": dias[-1]["saldo_projetado"] + 0.0,
-        "pior_dia": {"date": wd["date"], "saldo": wd["saldo_projetado"] + 0.0},
+        "saldo_final_90": dias[-1]["saldo_projetado"],
+        "pior_dia": {"date": wd["date"], "saldo": wd["saldo_projetado"]} if wd else None,
         "dias_abaixo_da_reserva": len(abaixo),
         "primeiro_dia_abaixo": abaixo[0] if abaixo else None,
     }
@@ -210,7 +217,7 @@ DIAS = 90  # janela do saldo diário; a chave `saldo_final_90` do resumo assume 
 
 PREMISSAS = (
     "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos "
-    "automáticos − boletos − faturas em aberto), mais a compra simulada. O pior dia e os dias "
+    "previstos − boletos − faturas observadas), mais a compra simulada. O pior dia e os dias "
     "abaixo da reserva incluem hoje após os compromissos e a compra, até o dia 90 inclusive "
     "(91 datas). pago_na_compra é tudo "
     "o que sai na data da compra: o preço cheio (à vista) ou a entrada (parcelado), mais os "
@@ -232,8 +239,8 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
     days = DIAS
     until = today + timedelta(days=days)
     reserva = simulacao.reserva_minima
-    sb = cashflow._starting_balance(user_id)
-    events = cashflow._cashflow_events(user_id, today, until)
+    snapshot = carregar(user_id, today, until)
+    sb, events = snapshot.base, snapshot.ocorrencias
 
     # O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE
     # como primeiro ponto, sem reler saldo nem mover o fim (hoje + 90 dias).
@@ -244,21 +251,24 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
     for cen in simulacao.cenarios:
         extra, contrato = _decision_events(cen, today, until)
         resumo = _resumo(_trajectory(anchor, sb, events + extra, days + 1, reserva))
-        resumo["delta_vs_atual"] = _duas_casas(resumo["saldo_final_90"] - atual["saldo_final_90"])
+        resumo["delta_vs_atual"] = (_duas_casas(resumo["saldo_final_90"] - atual["saldo_final_90"])
+                                  if resumo["saldo_final_90"] is not None and atual["saldo_final_90"] is not None else None)
         # Compra datada depois da janela: o saldo de 90 dias é igual ao atual, e sem
         # este marcador a resposta pareceria "não muda nada".
         resumo["compra_fora_da_janela"] = contrato["data_compra"] > until.isoformat()
         cenarios.append({"nome": cen.nome, "resumo": resumo, "contrato": contrato})
 
-    return {
+    return legado({
+        **snapshot.qualidade(),
+        "orientacao": "abster",
         "today": today.isoformat(),
         "balance_source": sb["balance_source"],
         "banks_excluded": sb["banks_excluded"],
         "reserva_minima": _duas_casas(reserva),
         "atual": atual,
         "cenarios": cenarios,
-        "premissas": PREMISSAS,
-    }
+        "premissas": [*snapshot.premissas, PREMISSAS],
+    })
 
 
 __all__ = ["DIAS", "Simulacao", "installments", "simulate"]

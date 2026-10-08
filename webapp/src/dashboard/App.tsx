@@ -6,7 +6,8 @@ import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
-import { Guia, abrirGuia, navGuia } from "./parts/Guia";
+import { Ajuda } from "./parts/Ajuda";
+import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
 import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
@@ -39,12 +40,13 @@ function Topbar({ s, path }: { s: DashState; path: Path }) {
   const mes = mesDe(s);
   const i = MESES.indexOf(mes);
   return (
-    <header className="topbar" data-stuck={stuck}>
+    <header className="topbar" data-stuck={stuck} data-historico={i < 0 && !NO_MONTH.includes(path)}>
       {!NO_MONTH.includes(path) && <div className="month-switch" role="group" aria-label="Mês exibido" data-guia="mes.seletor">
-        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i === 0} data-guia={i > 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
+        <button className="icon-btn" type="button" aria-label="Mês anterior" disabled={i <= 0} data-guia={i > 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i - 1])}><i className="ph ph-arrow-left" aria-hidden="true" /></button>
         <p className="month-title" aria-live="polite">{monthTitle(mes).replace(/ (\d{4})$/, "")}<span className="month-year"> {mes.slice(0, 4)}</span></p>
-        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i === MESES.length - 1} data-guia={i === 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
+        <button className="icon-btn" type="button" aria-label="Próximo mês" disabled={i < 0 || i === MESES.length - 1} data-guia={i === 0 ? "mes.trocar" : undefined} onClick={() => escolherMes(MESES[i + 1])}><i className="ph ph-arrow-right" aria-hidden="true" /></button>
       </div>}
+      {i < 0 && !NO_MONTH.includes(path) && <button className="btn btn-quiet" onClick={() => escolherMes(MESES[MESES.length - 1])}>Meses recentes</button>}
       <span className="topbar-spacer" />
       <button className="cmd-trigger" type="button" aria-label="Buscar ou ir para" aria-keyshortcuts="Meta+K Control+K /" onClick={() => window.dispatchEvent(new Event("dash:command"))}>
         <i className="ph ph-magnifying-glass" aria-hidden="true" />
@@ -88,7 +90,7 @@ export function App() {
                 </a>
               </li>
             ))}
-            {!DEMO && <li><button type="button" aria-label="Ajuda" title="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></button></li>}
+            {!DEMO && <li className="ajuda"><Ajuda path={path} title="Ajuda"><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></Ajuda></li>}
           </ul>
           <div className="rail-foot">
             <RailSync />
@@ -114,7 +116,7 @@ export function App() {
             </a>
           );
         })}
-        {!DEMO && <button type="button" aria-label="Ajuda" onClick={abrirGuia}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></button>}
+        {!DEMO && <div className="ajuda"><Ajuda path={path}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></Ajuda></div>}
       </nav>
       <AskBar path={path} />
       <Tip />

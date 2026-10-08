@@ -11,6 +11,7 @@ com a rota registrada via router.
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import math
@@ -20,6 +21,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from uuid import UUID
 
 import psycopg
 from psycopg_pool import PoolClosed, PoolTimeout
@@ -30,6 +32,7 @@ from pydantic import BaseModel, ValidationError
 
 from core.admin_dashboard import log_system_event
 from core.audit import AuditEvent, list_audit_events, record_audit_event
+from core.client_ip import client_ip
 from core.secure_compare import constant_time_eq
 from core.pg_text import detalhe_seguro, limpa_para_pg
 from core.services.pluggy import (
@@ -321,9 +324,16 @@ def _folga_ms(budget_ms: int | None, t0: float) -> int | None:
 class _ConflitoReconexao(HTTPException):
     """Transporta o diagnóstico para ser gravado após liberar o lock."""
 
-    def __init__(self, detail: str, level: str, event: str, message: str, **context):
+    def __init__(self, detail: str | dict, level: str, event: str, message: str, **context):
         super().__init__(status_code=409, detail=detail)
         self.diagnostico = ((level, event, message), context)
+
+
+def _item_removed_error() -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "OF_ITEM_REMOVED",
+        "message": "Esse banco foi desconectado. Inicie uma nova conexão.",
+    })
 
 
 def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
@@ -368,6 +378,15 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
     with pluggy_item_lock(item_id, budget_ms=budget_ms) as locked:
         if not locked:
             return None, False
+        # Callback atrasado nunca revoga a lápide; releitura dentro do lock
+        # cobre remoção durante GET remoto ou enquanto o callback esperava.
+        if adocao_registro_id is None and "removed" in item_registry_origins(
+                item_id, budget_ms=_folga_ms(budget_ms, t0)):
+            raise _ConflitoReconexao(
+                _item_removed_error().detail, "warning", "of_reconnect_aborted_state_gone",
+                "Callback recusado: banco desconectado antes da gravação",
+                source="open_finance", user_id=user_id, details={"item_id": item_id},
+            )
         # UMA leitura, incondicional, alimentando as DUAS revalidações de estado
         # abaixo (a de dono alheio e a de conexão própria que sumiu). Roda ANTES
         # do cálculo do `resto`: o tempo gasto aqui sai do orçamento da escrita
@@ -388,18 +407,8 @@ def _salva_item_sob_lock(user_id: int, remote: dict, item_id: str,
         #      por TENTATIVA, e é a conta que o `ponytail:` do `except` de
         #      `_grava_reconexao` (`:668`) usa para adiar a política de retry.
         #
-        # Leituras de pool DENTRO do lock, por caminho, MEDIDAS (0,93–1,49 ms
-        # cada; no caminho da rota o `resto` ficou em 9994 de 10000 ms) — fato
-        # medido e útil para a razão 2, não argumento de prazo:
-        #   • adoção: 1 → 2. Ela JÁ pagava uma antes disto — o
-        #     `item_registry_origins` da revalidação da adoção, mais abaixo
-        #     nesta mesma função, que abre `get_conn()`
-        #     (`db/open_finance_state.py`).
-        #   • rota com item NOVO (`tinha_conexao_propria=False`,
-        #     `adocao_registro_id=None` — o primeiro banco conectado, o fluxo
-        #     comum): 0 → 1. É o caminho que não pagava NENHUMA.
-        #   • rota reconectando: 1 → 1; a leitura só saiu de dentro do `if
-        #     tinha_conexao_propria`.
+        # A leitura das conexões e a do registry usam o que SOBROU do
+        # mesmo orçamento; a guarda de remoção acima é exclusiva do callback.
         linhas = get_connections_by_item_id(item_id, budget_ms=_folga_ms(budget_ms, t0))
         # DONO ALHEIO. Revalidação num caminho, 1ª CHECAGEM no outro — e os dois
         # chegam aqui:
@@ -707,21 +716,9 @@ async def _grava_reconexao(
             # no `of_reconnect_lock_retry`. Testado em
             # `test_causa_e_a_da_ultima_tentativa`.
             #
-            # ponytail: o teto é a política de retry sob infra — sob
-            # `TooManyConnections` este POST ainda tenta até 8 conexões num
-            # servidor que acabou de recusar uma. RECONTADO: 2 tentativas × 4
-            # aquisições por tentativa — a DEDICADA do `pluggy_item_lock`
-            # (`psycopg.connect`, `db/open_finance_state.py:701`), o pool da
-            # leitura das revalidações (`get_connections_by_item_id`), o pool da
-            # escrita (`get_conn` do `save_pluggy_open_finance_item`) e a
-            # conexão NOVA do log de diagnóstico (um por tentativa: o
-            # `of_reconnect_lock_retry` da 1ª e o `of_reconnect_lock_timeout`
-            # final). Eram 6 enquanto a leitura vivia dentro do `if
-            # tinha_conexao_propria`; ela é incondicional agora. Pela ADOÇÃO o
-            # teto é 11: +1 por tentativa (`item_registry_origins` sob o lock)
-            # = 10, mais o `unregister_item` do desfazimento no 503. Mudar isso
-            # é decidir não retentar quando `causa` é da família de conexão; o
-            # gancho já existe (é a própria `causa`), a decisão é de outro PR.
+            # ponytail: erro de infra ainda retenta aquisições de conexão e
+            # diagnóstico. Não retentar por família de conexão exige decisão
+            # separada; o gancho já existe na própria `causa`.
             connection, sob_lock = None, False
             # Texto cru com coluna NULL (#541): só `OperationalError` (infra) chega aqui, sem dado de linha.
             causa = f"{type(exc).__name__}: {exc}"
@@ -1753,14 +1750,19 @@ async def open_finance_caixinha_bind_route(request: Request, user_id: int, body:
 # cliente quiser. O site não manda o campo.
 _APP_SCHEMES = frozenset({"pigbank", "pigbank-staging", "pigbank-dev"})
 _APP_VOLTA_OF = "open-finance-volta"
-_CORPO_MAX = 4096  # corpo legítimo tem ~30 bytes; acima disso é ignorado, como se não houvesse corpo
-_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos; o que pinga devagar também é ignorado
+_CORPO_MAX = 4096
+_CORPO_SEGUNDOS = 5  # corpo legítimo chega junto dos cabeçalhos
 
 
-async def _corpo_json_limitado(request: Request) -> object | None:
-    """JSON do corpo, lido até _CORPO_MAX bytes e _CORPO_SEGUNDOS s (o código do app não
-    impõe teto de corpo; o do servidor não foi medido). Fora disso — e vazio/malformado — devolve None, "sem
-    o campo"; aninhamento fundo levanta RecursionError (não é ValueError)."""
+async def _corpo_json_limitado(request: Request, *, estrito: bool = False) -> object | None:
+    """Corpo limitado por bytes/tempo. Connect-token recusa JSON ambíguo/inválido
+    em vez de emitir token descartando a origem da tentativa; corpo vazio é legado."""
+    def campos_unicos(pares):
+        corpo = dict(pares)
+        if len(corpo) != len(pares):
+            raise ValueError("campo repetido")
+        return corpo
+
     try:
         pedacos, total = [], 0
         async with asyncio.timeout(_CORPO_SEGUNDOS):
@@ -1769,14 +1771,19 @@ async def _corpo_json_limitado(request: Request) -> object | None:
                 if total > _CORPO_MAX:
                     raise ValueError("corpo grande demais")
                 pedacos.append(p)
-        return json.loads(b"".join(pedacos))
-    except (ValueError, RecursionError, TimeoutError):
+        bruto = b"".join(pedacos)
+        if not bruto:
+            return None
+        return json.loads(bruto, object_pairs_hook=campos_unicos if estrito else dict)
+    except (ValueError, RecursionError, TimeoutError) as exc:
+        if estrito:
+            raise HTTPException(status_code=400, detail="Corpo JSON inválido ou fora dos limites.") from exc
         return None
 
 
 @router.post("/open-finance/{user_id}/connect-token")
 async def open_finance_connect_token_route(request: Request, user_id: int):
-    shared.authorize_dashboard_access(request, user_id)
+    session_uid = shared.authorize_dashboard_access(request, user_id)
     # Barra só o caso inequívoco (plano sem OF): não emite token pra quem não pode
     # conectar nada, fechando o abuso direto do endpoint e evitando item órfão na Pluggy.
     # O TETO POR CONTAGEM (planos pagos no limite) NÃO é cobrado aqui de propósito — o
@@ -1786,12 +1793,49 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
 
     # Corpo lido à mão e só depois dos portões, pela mesma razão do mock-connect:
     # parâmetro tipado decodificaria antes da sessão. Teto de bytes e de tempo no helper.
-    corpo = await _corpo_json_limitado(request)
+    corpo = await _corpo_json_limitado(request, estrito=True)
     scheme = corpo.get("app_scheme") if isinstance(corpo, dict) else None
     # isinstance antes do `in`: lista/dict não são hasháveis (TypeError → 500).
     if scheme is not None and (not isinstance(scheme, str) or scheme not in _APP_SCHEMES):
         raise HTTPException(status_code=400, detail="app_scheme inválido.")
     volta = f"{scheme}://{_APP_VOLTA_OF}" if scheme else None
+    if isinstance(corpo, dict) and "attempt_id" in corpo:
+        attempt = corpo["attempt_id"]
+        try:
+            if not scheme or not isinstance(attempt, str) or str(UUID(attempt)) != attempt:
+                raise ValueError("origem inválida")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="attempt_id inválido ou sem app_scheme.") from exc
+        volta = f"{volta}/{attempt}"
+
+    # Reconexão de um banco já conectado: sem o `itemId` a Pluggy recusa com
+    # "already exists" (`avoidDuplicates`). Dono pelo NOSSO banco antes de tocar a
+    # Pluggy; alheio, inexistente, PAUSED e removido respondem o mesmo 404.
+    item_id = corpo.get("item_id") if isinstance(corpo, dict) else None
+    if item_id is not None and (not isinstance(item_id, str) or not item_id):
+        raise HTTPException(status_code=400, detail="item_id inválido.")
+    nao_achou = HTTPException(status_code=404, detail={
+        "code": "OF_ITEM_NAO_ENCONTRADO", "message": "Não achamos esse banco nas suas conexões."})
+    if item_id:
+        if item_id not in await asyncio.to_thread(list_pluggy_item_ids, user_id):
+            raise nao_achou
+        try:
+            remote = await asyncio.to_thread(get_pluggy_item, item_id)
+        except PluggyConfigError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except PluggyApiError as exc:
+            if getattr(exc, "status_code", None) == 404:
+                raise nao_achou from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        # clientUserId tem de ser a sessão; session_uid == user_id aqui (authorize_dashboard_access dá 403 se não)
+        if str(remote.get("clientUserId") or "") != str(session_uid):
+            await log_system_event(
+                "error", "of_item_owner_conflict",
+                "Item Pluggy não pertence ao usuário da sessão",
+                source="open_finance", user_id=session_uid,
+                details={"item_id": item_id, "origin": "connect_token"},
+            )
+            raise nao_achou
 
     webhook_url = (os.getenv("PLUGGY_WEBHOOK_URL") or "").strip()
     if not webhook_url and shared.DASHBOARD_URL.startswith("https://"):
@@ -1811,10 +1855,14 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
             user_id,
             webhook_url or None,
             oauth_redirect_uri=volta,
+            item_id=item_id,
         )
     except PluggyConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PluggyApiError as exc:
+        # Item que sumiu entre o GET acima e o POST: o mesmo 404 dos demais "não é seu / não existe".
+        if item_id and getattr(exc, "status_code", None) == 404:
+            raise nao_achou from exc
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     # Registra que ESTE usuário pediu um token. O `GET /items` da Pluggy devolve
@@ -1898,6 +1946,9 @@ async def open_finance_pluggy_item_route(request: Request, user_id: int, payload
     new_item_id = str(item.get("id") or item.get("itemId") or "").strip()
     if not new_item_id:
         raise HTTPException(status_code=400, detail="Item Pluggy sem id.")
+
+    if "removed" in await asyncio.to_thread(item_registry_origins, new_item_id):
+        raise _item_removed_error()
 
     try:
         remote = await asyncio.to_thread(get_pluggy_item, new_item_id)
@@ -2167,9 +2218,12 @@ async def open_finance_refresh_route(request: Request, user_id: int, wait: int |
 def _ip_prefix(request: Request) -> str:
     """IP do chamador truncado (/24 em v4, /48 em v6) — o suficiente pra ver um
     padrão de abuso, insuficiente pra identificar alguém."""
-    ip = (request.client.host if request.client else "") or ""
+    ip = client_ip(request) or ""
     if ":" in ip:
-        return ":".join(ip.split(":")[:3]) + "::/48"
+        try:
+            return str(ipaddress.ip_network(f"{ip}/48", strict=False))
+        except ValueError:   # peer que não é IP (client_ip o devolve cru)
+            return "desconhecido"
     partes = ip.split(".")
     return ".".join(partes[:3]) + ".0/24" if len(partes) == 4 else "desconhecido"
 
@@ -2272,7 +2326,8 @@ async def open_finance_pluggy_webhook(request: Request):
         # A metade de STRING da mesma via — NUL (`\u0000`) e surrogate solitário,
         # no valor OU na chave — é o que o `limpa_para_pg` fecha (#317). Nenhum
         # dos dois existe em `text`/`jsonb`, então eles davam 500 no `Jsonb(raw)`
-        # de update_pluggy_open_finance_item_status, no param `text` do item_id,
+        # de update_pluggy_open_finance_item_status (desde o PR-C2 só `item/deleted`
+        # chega lá; `item/created`/`item/error` não gravam `raw`), no param `text` do item_id,
         # no get_connections_by_item_id e na lista de transactionIds do `any(%s)`
         # de delete_open_finance_transactions (psycopg a adapta como text[]) — e
         # ainda faziam o `Jsonb(details)` do log_system_event perder a linha de
@@ -2309,14 +2364,12 @@ async def open_finance_pluggy_webhook(request: Request):
     item = event.get("item")
     item_id = str(event.get("itemId") or event.get("item_id")
                   or (item.get("id") if isinstance(item, dict) else None) or "")
-    # `item/updated` NÃO escreve mais ACTIVE: quem afirma que sincronizou é o sync,
-    # depois de consultar o item e puxar as contas. O webhook só diz o que a Pluggy
-    # disse.
-    status_by_event = {
-        "item/created": "UPDATING",
-        "item/error": "ERROR",
-        "item/deleted": "DELETED",
-    }
+    # O webhook só grava o que é TERMINAL e certo: `item/deleted`. `item/created` e
+    # `item/error` NÃO gravam status, motivo nem `raw` (PR-C2): o sync (created/updated)
+    # e a observação (`of_observacao.py`, error) relêem o item e quem escreve é o
+    # `observar_item`. `item/updated` também não escreve ACTIVE: quem afirma que
+    # sincronizou é o sync.
+    status_by_event = {"item/deleted": "DELETED"}
     status = status_by_event.get(event_name)
     if item_id and status:
         await asyncio.to_thread(update_pluggy_open_finance_item_status, item_id, status, event)
@@ -2331,10 +2384,14 @@ async def open_finance_pluggy_webhook(request: Request):
         deleted_ids = event.get("transactionIds") or event.get("transactionsIds") or []
         if isinstance(deleted_ids, list) and deleted_ids:
             await asyncio.to_thread(delete_open_finance_transactions, item_id, deleted_ids)
-    elif item_id and event_name in PLUGGY_SYNC_EVENTS:
+    elif item_id and (event_name in PLUGGY_SYNC_EVENTS or event_name == "item/error"):
         if len(conexoes) == 1:
-            _schedule_pluggy_sync(item_id)
-        elif not conexoes:
+            if event_name == "item/error":
+                from frontend.routes.of_observacao import agenda_observacao  # circular: lazy
+                agenda_observacao(item_id, conexoes[0])
+            else:
+                _schedule_pluggy_sync(item_id)
+        elif not conexoes and event_name != "item/error":
             # Item que não conhecemos. Em `item/created` — e SÓ nele — pergunta à
             # Pluggy de quem ele é e adota. QUEM ele destrava está na docstring de
             # `_adota_item_orfao` ("Por que existe"), fonte única (CLAUDE.md §0.7);
@@ -2379,7 +2436,7 @@ async def open_finance_pluggy_webhook(request: Request):
                         source="open_finance",
                         details={"item_id": item_id, "error": str(exc)[:200]},
                     )
-        else:
+        elif conexoes:
             # Dois donos possíveis: sincronizar um deles é sincronizar a carteira
             # do usuário errado. Recusa.
             await log_system_event(
@@ -2521,7 +2578,7 @@ def delete_pluggy_items_best_effort(user_id: int, item_ids: list[str] | None = N
     return pluggy_item_ids
 
 
-def _disconnect_sob_lock(user_id: int) -> int:
+def _disconnect_sob_lock(user_id: int, connection_id: int | None = None) -> int:
     """Disconnect segurando os locks dos items, na MESMA ordem do reset
     (locks → remoto → local; trade-off da rede dentro do lock documentado em
     db/privacy.reset_user_data — operação rara, disparada pelo usuário).
@@ -2535,16 +2592,44 @@ def _disconnect_sob_lock(user_id: int) -> int:
     """
     from db.open_finance_state import pluggy_items_lock
 
-    with pluggy_items_lock(list_pluggy_item_ids(user_id)) as locked:
+    def target_items(*, for_lock=False):
+        if connection_id is None:
+            return list_pluggy_item_ids(user_id)
+        from db.connection import get_conn
+        from db.open_finance_state import pluggy_items_a_deletar
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "select provider, provider_item_id, status from open_finance_connections "
+                "where user_id=%s and id=%s", (user_id, connection_id),
+            )
+            rows = cur.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail={
+                "code": "OF_CONNECTION_NOT_FOUND",
+                "message": "Não achamos esse banco nas suas conexões.",
+            })
+        if for_lock:
+            # PAUSED pode ser reconectado após recuperar direito: também
+            # serializar esse item, embora ele não precise de DELETE remoto.
+            return [r["provider_item_id"] for r in rows if r["provider"] == "pluggy"]
+        return pluggy_items_a_deletar(rows)
+
+    items = target_items(for_lock=True)
+    with pluggy_items_lock(items) as locked:
         if not locked:
             raise HTTPException(
                 status_code=503,
                 detail="Não foi possível desconectar agora: uma sincronização "
                        "bancária está em andamento. Tente de novo em alguns segundos.",
             )
-        enumerados = delete_pluggy_items_best_effort(user_id)
+        if connection_id is None:
+            enumerados = delete_pluggy_items_best_effort(user_id)
+        else:
+            # Revalidar posse/id sob os locks, enumerando apenas o alvo.
+            enumerados = delete_pluggy_items_best_effort(user_id, target_items())
         varridos: list[str] = []
-        deleted = disconnect_open_finance_connection(user_id, swept_out=varridos)
+        deleted = disconnect_open_finance_connection(
+            user_id, connection_id, swept_out=varridos)
         # 2º passe (Codex PR #217, 12º — irmão do 11º no reset): item salvo
         # ENTRE a enumeração acima e o delete local ficou órfão na Pluggy
         # ("já possui conexão com este acesso"). `varridos` só existe se o
@@ -2583,6 +2668,16 @@ async def open_finance_disconnect_route(request: Request, user_id: int):
             request=request,
         )
 
+    return {"ok": True, "deleted": deleted}
+
+
+@router.delete("/open-finance/{user_id}/connections/{connection_id}")
+async def open_finance_disconnect_connection_route(request: Request, user_id: int, connection_id: int):
+    shared.authorize_dashboard_access(request, user_id)
+    deleted = await asyncio.to_thread(_disconnect_sob_lock, user_id, connection_id)
+    if deleted:
+        await asyncio.to_thread(record_audit_event, user_id,
+                               AuditEvent.OPEN_FINANCE_DISCONNECTED, request=request)
     return {"ok": True, "deleted": deleted}
 
 

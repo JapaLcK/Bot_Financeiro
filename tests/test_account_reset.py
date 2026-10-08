@@ -439,6 +439,56 @@ def test_reset_apaga_tudo_do_usuario_e_isola_o_vizinho(user_id):
     assert row["reminders_days_before"] == 3
 
 
+def test_reset_conta_os_lotes_apagados_pelo_cascade_do_pai(user_id):
+    """`_RESET_TABLES` apaga o pai antes do lote: o CASCADE leva os lotes e o delete
+    explícito contaria 0. O retorno (vai ao JSON da rota) tem de dizer quantos existiam.
+
+    NEGATIVO: sem a contagem prévia, `deleted` traz 0 e 0. A caixinha leva 2 lotes e o
+    investimento 1, para o número não ser 1 por coincidência; o vizinho (1 e 1) não entra."""
+    vizinho = user_id + 1
+    db.ensure_user(vizinho)
+    _semeia(user_id)
+    _semeia(vizinho)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into pocket_lots (user_id, pocket_id, principal_initial, principal_remaining, "
+                "balance, opened_at, last_date) select user_id, id, 7, 7, 7, current_date, current_date "
+                "from pockets where user_id = %s", (user_id,))
+        conn.commit()
+
+    def lotes(uid):
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select (select count(*) from investment_lots where user_id=%s) as i, "
+                            "(select count(*) from pocket_lots where user_id=%s) as p", (uid, uid))
+                r = cur.fetchone()
+            conn.commit()
+        return r["i"], r["p"]
+
+    assert lotes(user_id) == (1, 2) and lotes(vizinho) == (1, 1)
+
+    deleted = reset_user_data(user_id, SENHA)["deleted"]
+
+    assert (deleted["investment_lots"], deleted["pocket_lots"]) == (1, 2)
+    assert lotes(user_id) == (0, 0)
+    assert lotes(vizinho) == (1, 1), "o reset de A tocou os lotes de B"
+
+
+def test_reset_pula_a_contagem_de_lotes_sem_coluna_user_id(user_id, monkeypatch):
+    """Banco legado sem `user_id` na tabela de lotes: o `_delete` já pula em silêncio, e a
+    contagem prévia tem o mesmo guard (senão UndefinedColumn aborta o reset inteiro)."""
+    from db import privacy
+    original = privacy._column_exists
+    monkeypatch.setattr(privacy, "_column_exists", lambda cur, t, c: (
+        False if t in ("investment_lots", "pocket_lots") and c == "user_id" else original(cur, t, c)))
+    _semeia(user_id)
+
+    deleted = reset_user_data(user_id, SENHA)["deleted"]
+
+    assert "investment_lots" not in deleted and "pocket_lots" not in deleted
+
+
 # ── 2. preserva conta, segurança e vínculos ──────────────────────────────────
 
 def test_reset_preserva_conta_login_seguranca_e_vinculos(user_id):

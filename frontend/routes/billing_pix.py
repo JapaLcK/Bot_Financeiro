@@ -40,6 +40,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
+from core.client_ip import client_ip
 from core.observability import log_system_event_sync
 from core.secure_compare import constant_time_eq
 from core.services.asaas_customers import TitularRecusado
@@ -345,5 +346,5 @@ def _rastreio(request: Request) -> dict[str, str]:
 
 def _ip_prefix(request: Request) -> str:
     """Só os dois primeiros octetos — rastro sem identificar pessoa."""
-    ip = (request.client.host if request.client else "") or ""
+    ip = client_ip(request) or ""
     return ".".join(ip.split(".")[:2]) if "." in ip else ""

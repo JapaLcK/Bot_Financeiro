@@ -102,7 +102,17 @@ for (const [width, height] of [[1280, 800], [1024, 768], [900, 600], [700, 600],
     await bora(page);
     const medidas = [];
     const medir = async (p, fase, ancora) => {
-      await page.waitForTimeout(300);
+      // em vez de sono fixo: rolagem, Piggy, balão e anel iguais em duas leituras a dois quadros
+      const pose = () => page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const r = (sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b ? [b.left, b.top, b.width, b.height] : null; };
+        ok(JSON.stringify([scrollX, scrollY, document.querySelector(".guia-piggy") ? window.caixaDoPiggy() : null, r(".guia-balao"), r(".guia-anel")]));
+      }))));
+      for (let i = 0, antes; ; i++) {
+        const agora = await pose();
+        if (agora === antes) break;
+        if (i >= 50) throw new Error(`${p.id} ${fase}: o guia não parou em 50 voltas`);
+        antes = agora;
+      }
       medidas.push([p.id, fase, await page.evaluate(([sels, ancora]) => {
         const b = document.querySelector(".guia-balao"), bb = b.getBoundingClientRect();
         const pg = window.caixaDoPiggy();

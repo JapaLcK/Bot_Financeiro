@@ -5413,37 +5413,36 @@ async function simularPrazo() {
 function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
-  const ok = p.tranquilo;
-  const accent = _toneMoney(p.projetado);
+  const available = p.estado !== "indisponivel" && p.projetado != null && Number.isFinite(Number(p.projetado));
+  const uncertain = p.estado === "a_conferir" || (p.motivos || []).length > 0;
   const alvo = new Date(p.target + "T00:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "long" });
-  const header = ok
-    ? `<i class="ph ph-smiley" aria-hidden="true"></i> Tranquilo até ${alvo}, sobra ${_fmtBRL(p.projetado)}`
-    : `<i class="ph ph-warning" aria-hidden="true"></i> Aperta até ${alvo}, falta ${_fmtBRL(Math.abs(p.projetado))}`;
-  // Cor E sinal saem do `_toneMoney`/`_toneClass`, nunca da flag `positive`
-  // sozinha: "Boletos até lá" é a única linha incondicional, e quem não tem
-  // boleto nenhum recebe 0 — que saía "− R$ 0,00" em vermelho.
-  const line = (label, val, positive) => {
-    const signed = (positive ? 1 : -1) * Math.abs(val);
+  const header = available
+    ? `Saldo condicional até ${alvo}: ${_fmtBRL(p.projetado)}${uncertain ? " · a conferir" : ""}`
+    : `Saldo até ${alvo}: Indisponível`;
+  const line = (label, val, positive, optional = false) => {
+    const known = val != null && Number.isFinite(Number(val));
+    if (optional && known && val <= 0) return "";
+    const signed = known ? (positive ? 1 : -1) * Math.abs(val) : null;
     return `
     <div style="display:flex;justify-content:space-between;font-size:.82rem;padding:2px 0">
       <span style="color:var(--text-2)">${label}</span>
-      <span style="color:${_toneMoney(signed)}">${_toneClass(signed, "+ ", "− ")}${_fmtBRL(Math.abs(val))}</span>
+      <span style="color:${known ? _toneMoney(signed) : 'var(--text)'}">${known ? _toneClass(signed, "+ ", "− ") + _fmtBRL(Math.abs(val)) : "Indisponível"}</span>
     </div>`;
   };
   resEl.innerHTML = `
-    <div style="border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.35)' : 'rgba(255,45,45,.35)'}">
-      <div style="font-weight:700;color:${accent};margin-bottom:8px">${header}</div>
+    <div style="border-radius:10px;padding:12px;background:var(--bg-elev-2);border:1px solid var(--border)">
+      <div style="font-weight:700;color:var(--text);margin-bottom:8px">${header}</div>
       ${line("Saldo hoje", p.saldo_atual, p.saldo_atual >= 0)}
-      ${p.receitas_previstas > 0 ? line("Receitas previstas", p.receitas_previstas, true) : ""}
-      ${p.gastos_fixos_previstos > 0 ? line("Gastos fixos", p.gastos_fixos_previstos, false) : ""}
+      ${line("Receitas previstas", p.receitas_previstas, true, true)}
+      ${line("Gastos fixos", p.gastos_fixos_previstos, false, true)}
       ${line(`Boletos até lá (${p.n_boletos})`, p.boletos_ate, false)}
-      ${p.faturas_cartao > 0 ? line("Faturas de cartão até lá", p.faturas_cartao, false) : ""}
-      ${p.boleto_novo > 0 ? line("Boleto novo em análise", p.boleto_novo, false) : ""}
+      ${line("Faturas de cartão até lá", p.faturas_cartao, false, true)}
+      ${line("Boleto novo em análise", p.boleto_novo, false, true)}
       <div style="border-top:1px solid rgba(128,128,128,.25);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
-        <span>Projeção do caixa</span><span style="color:${accent}">${_fmtBRL(p.projetado)}</span>
+        <span>Projeção do caixa</span><span style="color:var(--text)">${available ? _fmtBRL(p.projetado) : "Indisponível"}</span>
       </div>
       ${_forecastBanksWarning(p)}
-      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Estimativa: saldo + receitas fixas − gastos fixos − boletos. Não inclui gastos avulsos futuros.</div>
+      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>
     </div>`;
 }
 
@@ -5486,16 +5485,20 @@ function _renderForecast(fc) {
   if (!resEl || !fc || !fc.horizons) return;
   const tile = (dias, p) => {
     if (!p) return "";
+    const available = p.projetado != null && Number.isFinite(Number(p.projetado));
+    const uncertain = fc.estado === 'a_conferir' || (fc.motivos || []).length > 0;
     const ok = p.tranquilo;
-    const accent = _toneMoney(p.projetado);
+    const accent = !available || uncertain ? 'var(--text)' : _toneMoney(p.projetado);
+    const background = uncertain || !available ? 'var(--bg-elev-2)' : ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)';
+    const border = uncertain || !available ? 'var(--border)' : ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)';
     // A LEGENDA segue o valor mostrado, não a flag `tranquilo`: projeção de
     // R$ 0,00 não está "no positivo" — está zerada. (A tinta de FUNDO da caixa
     // continua na flag: fora do escopo decidido para esta rodada.)
     return `
-      <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${ok ? 'rgba(34,197,94,.10)' : 'rgba(255,45,45,.10)'};border:1px solid ${ok ? 'rgba(34,197,94,.30)' : 'rgba(255,45,45,.30)'}">
+      <div style="flex:1;min-width:120px;border-radius:10px;padding:12px;background:${background};border:1px solid ${border}">
         <div style="font-size:.72rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">Em ${dias} dias</div>
-        <div style="font-weight:700;font-size:1.05rem;color:${accent};margin-top:2px">${_fmtBRL(p.projetado)}</div>
-        <div style="font-size:.72rem;color:var(--text-2);margin-top:2px">${_toneClass(p.projetado, "no positivo", "no vermelho") || "zerado"}</div>
+        <div style="font-weight:700;font-size:1.05rem;color:${accent};margin-top:2px">${available ? _fmtBRL(p.projetado) : "Indisponível"}</div>
+        <div style="font-size:.72rem;color:var(--text-2);margin-top:2px">${!available ? "Confira os dados" : uncertain ? "saldo condicional · a conferir" : (_toneClass(p.projetado, "no positivo", "no vermelho") || "zerado")}</div>
       </div>`;
   };
   const h = fc.horizons || {};
@@ -5504,7 +5507,7 @@ function _renderForecast(fc) {
       ${tile(30, h["30"])}${tile(60, h["60"])}${tile(90, h["90"])}
     </div>
     ${_forecastBanksWarning(fc)}
-    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Estimativa: saldo + receitas fixas − gastos fixos − boletos até a data. Não inclui gastos avulsos futuros.</div>`;
+    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>`;
 }
 
 // Aviso quando a previsão não parte do saldo consolidado: ou o usuário tem bancos
@@ -5513,10 +5516,12 @@ function _renderForecast(fc) {
 function _forecastBanksWarning(fc) {
   if (!fc) return "";
   const unavailable = fc.balance_source === "unavailable";
-  if (!fc.banks_excluded && !unavailable) return "";
+  const uncertain = (fc.motivos || []).length > 0;
+  if (!fc.banks_excluded && !unavailable && !uncertain) return "";
   const msg = unavailable
     ? "Não foi possível confirmar seu saldo consolidado agora — esta previsão pode não incluir o saldo dos seus bancos."
-    : "Seus bancos conectados não estão somados nesta previsão — ela usa só o saldo da sua Carteira.";
+    : fc.banks_excluded ? "Seus bancos conectados não estão somados nesta previsão — ela usa só o saldo da sua Carteira."
+    : "Há dados ou compromissos a conferir. Os valores são condicionais; saldo positivo no alvo não garante caixa positivo no percurso.";
   return `<div style="display:flex;gap:6px;align-items:flex-start;margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35);font-size:.72rem;color:var(--text-2)">
     <i class="ph ph-warning" aria-hidden="true" style="color:#F59E0B;margin-top:1px"></i>
     <span>${msg}</span>

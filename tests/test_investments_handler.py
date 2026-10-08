@@ -2,8 +2,12 @@ from datetime import date
 from unittest.mock import patch
 
 import pytest
+from psycopg.types.json import Jsonb
 
+from conftest import usuario_pagante
+from core.handlers import investido as h_investido
 from core.handlers import investments as h_investments
+from tests._patrimonio_helpers import conexao, investimento_manual, posicao, q
 
 
 def _carteira_com(saldo: float):
@@ -37,6 +41,7 @@ def test_list_investments_capitaliza_antes_de_responder():
     assert "R$ 821,91 (116% CDI)" in msg
     assert "R$ 11.287,35 (14%)" in msg
     assert "https://app.test/d/abc" in msg
+    assert "no total" not in msg  # o total é o do banco (`carteira`); o seletor não soma
 
 
 def test_create_investment_redireciona_para_dashboard():
@@ -229,3 +234,93 @@ def test_deposit_deixa_plan_limit_subir():
             h_investments.deposit(
                 123, "investi 870 no cdb", {"investment_name": "CDB", "amount": 870},
             )
+
+
+# ─── carteira: o "meus investimentos" lê só os bancos conectados ─────────────
+
+def _carteira(uid):
+    with patch("core.handlers.investments.build_dashboard_link", return_value="https://app.test/d/abc"):
+        return h_investido.carteira(uid)
+
+
+def test_carteira_sem_banco_pede_para_conectar_e_esconde_o_manual():
+    uid = usuario_pagante()
+    investimento_manual(uid, "Tesouro Manual", "321")
+    msg = _carteira(uid)
+    assert msg.startswith("Ainda não sei quanto você tem investido: conecte seu banco no painel")
+    assert "Tesouro Manual" not in msg and "321" not in msg and "cadastrad" not in msg
+    assert "https://app.test/d/abc" in msg
+
+
+# Total null: o porquê sai dos motivos, na ordem sem_banco_conectado > saldo_ausente >
+# nenhum_investimento > o resto, no WhatsApp e na tool da IA (o painel:
+# dashboard_v2_chat_investido.test.mjs).
+_NAO_SEI = "Ainda não sei quanto você tem investido: "
+_TOOL_SEM_BANCO = "com sem_banco_conectado, sugira conectar o banco"
+_TOOL_SEM_SALDO = "senão, com saldo_ausente, o banco não informou o saldo dos investimentos"
+_TOOL_NENHUM = "senão, com nenhum_investimento, não encontrei investimentos nos bancos conectados"
+_TOOL_RESTO = "senão, a carteira ainda não foi lida no banco"
+_LER = _NAO_SEI + "ainda não consegui ler seus investimentos no banco."
+_NENHUM = "Não encontrei investimentos nos seus bancos conectados."
+
+
+@pytest.mark.parametrize("caso, motivo, whatsapp, tool", [
+    ("sem_banco", "sem_banco_conectado", _NAO_SEI + "conecte seu banco no painel para eu ver.", _TOOL_SEM_BANCO),
+    ("todas_sem_saldo", "saldo_ausente", _NAO_SEI + "seu banco não informou o saldo dos seus investimentos.",
+     _TOOL_SEM_SALDO),
+    ("sem_saldo_e_outra_vazia", "saldo_ausente",
+     _NAO_SEI + "seu banco não informou o saldo dos seus investimentos.", _TOOL_SEM_SALDO),
+    ("vazia_lida", "nenhum_investimento", _NENHUM, _TOOL_NENHUM),
+    ("vazia_needs_user", None, _LER, _TOOL_RESTO),       # dúvida: nunca "Não encontrei"
+    ("vazia_item_missing", None, _LER, _TOOL_RESTO),
+    ("sem_sync", None, _LER, _TOOL_RESTO),
+    ("nunca_lida", None, _LER, _TOOL_RESTO),
+    ("vazia_lida_e_outra_falhou", None, _LER, _TOOL_RESTO),
+    ("vazia_lida_e_pausada_com_posicao", None, _LER, _TOOL_RESTO),  # a posição existe, só está fora
+])
+def test_total_desconhecido_diz_o_porque_no_whatsapp_e_na_tool(caso, motivo, whatsapp, tool):
+    from core.services.ai_chat.tools import get_tool
+    from core.services.ai_chat.tools.investments import _get_investment_summary
+    uid = usuario_pagante()
+    if caso != "sem_banco":
+        c = conexao(uid, f"item-{uid}", **({"sync": None} if caso == "sem_sync" else {}))
+        if caso in ("todas_sem_saldo", "sem_saldo_e_outra_vazia"):
+            posicao(c, "inv-1", None)
+        if caso in ("sem_saldo_e_outra_vazia", "vazia_lida_e_outra_falhou"):
+            conexao(uid, f"item-b-{uid}")
+        if caso in ("nunca_lida", "vazia_lida_e_outra_falhou"):
+            q("update open_finance_connections set status_reason='read_failed' where id=%s", (c,))
+        if caso == "vazia_needs_user":  # resolve_connection_state: NEEDS_USER grava ERROR/""
+            q("update open_finance_connections set status='ERROR', status_reason='', health=%s where id=%s",
+              (Jsonb({"item_status": "LOGIN_ERROR"}), c))
+        if caso == "vazia_lida_e_pausada_com_posicao":
+            posicao(conexao(uid, f"item-p-{uid}", status="PAUSED"), "inv-p", "999")
+        if caso == "vazia_item_missing":
+            q("update open_finance_connections set status='ERROR', status_reason='item_missing' where id=%s",
+              (c,))
+    msg = _carteira(uid)
+    assert msg.startswith(whatsapp) and "R$" not in msg, msg
+    out = _get_investment_summary(uid, {})
+    assert out["total_investido"] is None
+    assert next((m for m in ("sem_banco_conectado", "saldo_ausente", "nenhum_investimento")
+                 if m in out["motivos"]), None) == motivo
+    descricao = get_tool("get_investment_summary").schema["function"]["description"]
+    assert tool in descricao
+    assert (descricao.index(_TOOL_SEM_BANCO) < descricao.index(_TOOL_SEM_SALDO)
+            < descricao.index(_TOOL_NENHUM) < descricao.index(_TOOL_RESTO))
+
+
+def test_carteira_com_banco_total_por_tipo_por_banco_e_sem_saldo():
+    uid = usuario_pagante()
+    posicao(conexao(uid, f"item-a-{uid}", banco="Nubank"), "inv-1", "40000")
+    xp = conexao(uid, f"item-b-{uid}", banco="XP")
+    posicao(xp, "inv-2", "17123.45", tipo="EQUITY")
+    posicao(xp, "inv-3", None, tipo="MUTUAL_FUND")
+    investimento_manual(uid, "Tesouro Manual", "321")
+    msg = _carteira(uid)
+    assert msg.startswith("📈 **R$ 57.123,45** investidos nos bancos conectados")
+    assert "Por tipo:\n• Renda fixa — R$ 40.000,00\n• Ações — R$ 17.123,45\n" \
+           "• Fundos de investimento — saldo não informado pelo banco" in msg
+    assert "Por banco:\n• Nubank — R$ 40.000,00\n• XP — R$ 17.123,45" in msg
+    assert "desatualizado ou incompleto" in msg  # saldo_ausente
+    assert "Tesouro Manual" not in msg and "321" not in msg and "R$ 0,00" not in msg

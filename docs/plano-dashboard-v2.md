@@ -53,6 +53,16 @@ em lugar nenhum).
   com convite para conectar o banco. Na primeira vez no v2, o usuário confirma quanto da
   carteira é dinheiro vivo e revisa o que o sistema lançou sozinho no passado, para o
   antigo não contar duas vezes com o que vem do banco.
+  **Revisão do dono (2026-10-05), vigente para a coorte de lançamento:** quem terá acesso
+  ao dashboard v2 é novo, nunca usou/conectou o PigBank e não tem histórico para revisar.
+  Nessa coorte, Q37 não terá etapa, diálogo de confirmação nem gate antes da Previsão;
+  carteira nova parte de zero (padrão existente), com movimentos em dinheiro normalmente.
+  Isso substitui nesse escopo a decisão de 03/10 registrada no §8. Se houver problema,
+  a recuperação definida é Recomeçar do zero voluntário → reconectar banco → novo sync.
+  Não é reset automático, autorização para apagar usuários ou presunção de que dados
+  antigos fora dessa coorte devem ser zerados. A allowlist atual não comprova ausência de
+  histórico; o ajuste técnico do motivo hardcoded da carteira será tratado na regra
+  compartilhada da Etapa 3, preservando outras fontes de incerteza.
 - **Q38 — a caixinha manual continua**, com depositar e retirar: é dinheiro que o usuário
   separou. A caixinha do banco vem do Open Finance.
 - **Q39 — os defeitos de dinheiro do código atual achados na revisão deste plano são
@@ -125,6 +135,12 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   (Q37) e a transferência em espécie (Q41) funcionando com o ciclo de vida inteiro. Antes
   disso — inclusive para quem ainda não abriu o v2 — a foto é gravada, mas marcada como
   incerta; o histórico enche desde a etapa 0 sem afirmar nada que depois não se sustente.
+  **Revisão de 2026-10-05 para a coorte nova acima:** confirmação Q37 deixa de ser requisito
+  de exatidão por si só; carteira inicial zero e os movimentos registrados seguem a regra
+  normal. A flag `carteira_nao_confirmada=True` ainda existe no código e precisa ser
+  alinhada nesse escopo, com a mesma regra para contas/foto/previsão. Q41, frescor, moeda,
+  conciliação, pendências e completude continuam determinando a confiabilidade da foto;
+  não tornar usuários antigos ou outras fontes incertas exatos pela nova decisão.
 - **Rendimento × CDI** (Q35): por investimento, sem número da carteira somada. A fonte
   prevista era a rentabilidade que o banco informa pelo Open Finance, e **ela não chega
   hoje** (medição de 2026-09-29, abaixo, §7). O que já se grava a cada sincronização é a
@@ -305,7 +321,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 - Etapa 6: variação do período só dentro de um trecho sem quebra.
 - A tela da confirmação da carteira e da revisão dos lançamentos antigos (Q37): em que
   etapa entra e o que derruba a confirmação. O estado "não confirmado" existe desde a
-  etapa 0 (seção 4).
+  etapa 0 (seção 4). **Questão superada para a coorte nova pelo dono em 2026-10-05:**
+  não haverá essa tela/etapa nem gate para Previsão; permanece apenas o ajuste coerente da
+  flag da carteira no escopo previsto, sem apagar outros motivos ou dados antigos.
 
 **Convivência com o painel antigo (desde a etapa 0)**
 - Quem usa o v2 ainda alcança o painel antigo (links nos dois sentidos, e o app atual fica
@@ -503,6 +521,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   da compra; **P7** busca varre a janela inteira do plano; **P8** interno (saque em
   dinheiro, depósito em caixinha, pagamento de fatura) entra marcado, fora de todo total.
   (P4 não foi passado ao PR 1.)
+  **Revisão de P1 pelo dono (2026-10-05):** para a coorte nova do dashboard v2, sem
+  uso/conexão anterior no PigBank, Q37 deixa de ser etapa própria ou gate para a Etapa 3.
+  O registro de 03/10 acima é histórico, superado nesse escopo; P2 e demais decisões
+  continuam. Carteira inicial zero e movimentos manuais em dinheiro seguem normalmente.
+  Problema eventual usa Recomeçar do zero voluntário, reconexão do banco e novo sync;
+  não houve reset por esta decisão nem autorização para limpeza automática/usuários antigos.
   - PR 1: `GET /api/v2/lancamentos` (`db/lancamentos.py`) e `GET /api/v2/categorias`, só
     leitura (contrato em `docs/CLAUDE.md`, "API v2"). O mês sai das pernas de `TOTAIS_SQL`
     extraídas para `MES_LANCAMENTOS_SQL`/`MES_CARTAO_SQL` (o Resumo não mudou um número): a
@@ -577,5 +601,199 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     deadlock antigo apagar × sync em linha ainda não ligada (segue o xfail estrito) e a #793.
     Limite declarado: duas transações do banco fundidas no mesmo lançamento (só com dado
     corrompido; o confirmar recusa `ALREADY_LINKED`) voltam as duas.
+  - PR 3: identidade de importação por `(user_id, provedor, conta no provedor, transação)`;
+    `external_id` novo usa a tupla JSON, sem depender da conexão local. Legado inequívoco
+    conserva lançamento/compra, categoria, descrição e fatura; vínculo entre identidades
+    diferentes recusa com `OF_IDENTITY_AMBIGUOUS`, sem reparação automática nem DDL.
+    Vínculos manuais `bank_movement_confirmed` podem compartilhar lançamento; transferir
+    uma identidade não remove vínculos irmãos nem aplica campos de fusão ao movimento.
+    Reconectar a mesma identidade transfere o vínculo para a transação na conexão mais nova,
+    preservando pendência/fusão e snapshot; o sync antigo não o retoma. Só há transferência
+    quando a transação está no espelho novo: resposta parcial não descarta histórico antigo.
+    Cartão é reutilizado pela identidade da conta; a associação só avança para conexão mais
+    nova, mesmo ao importar histórico exclusivo da antiga. Havendo cartões duplicados do
+    legado, prioriza o dono da conta exata, depois quem já tem compras e o menor id;
+    revalida a ocupação antes de reassociar e relê o dono depois da tentativa, tanto
+    no vínculo existente quanto na adoção do cartão órfão, sem mover/consolidar compras ou
+    faturas existentes. O estado ativo de cada cartão considera a conexão mais nova
+    entre sua FK e os vínculos das compras/estornos; pausa/exclusão nova prevalece sobre
+    conexão antiga ainda ativa. Assim os cartões legados separados mantêm a proteção
+    contra compra manual após desconectar as conexões antigas. Sem FK nem vínculo,
+    o cartão continua manual. Limpar a conexão velha relê os vínculos e
+    não apaga a representação transferida, inclusive na janela concorrente do cleanup.
+    Desconectar a conexão dona preserva a representação no alias da mesma identidade
+    que sobreviver (ativo ou pausado, nunca DELETED), inclusive edição, fatura e snapshot.
+    Transferência e decisão de limpeza usam o lock da compra/usuário; se houver prova
+    bancária ainda ligada, suas referências acompanham a troca. O reconciliador de
+    movimentos mantém sua regra prévia de invalidar prova fora do recorte e exigir
+    reconfirmação na reconexão. `transactions/deleted` não transfere para alias sem
+    vínculo: exclusão pelo provedor não deve ressuscitar a transação. Cartão renomeado
+    sem FK é reutilizado pelos backlinks e reassociado quando a conta está livre.
+    Confirmar, fusão automática e sync aplicam valor/sinal/data/hora do banco à fundida.
+    `posted_at`, `criado_em` e presença de hora mudam juntos, então lista e Resumo trocam de
+    mês juntos; cartão segue o ciclo da fatura. `efeitos.of_original` guarda uma única vez
+    os campos anteriores; `delta_conta`, categoria e descrição editadas são preservados.
+    Desfazer restaura valor/data/tipo originais e cria a sombra atual do banco. Apagar a
+    fundida continua devolvendo só o delta original à Carteira. Decisão do dono (2026-10-04):
+    desconectar e `transactions/deleted` também restauram o original; pausa conserva vínculo
+    e snapshot, sem desfazer. Sem escrita/reparo de dados em produção, deploy ou tela PR 4.
+    Testes locais: `tests/test_of_identidade_e_campos_bancarios.py`, além das famílias de
+    reconciliação, Open Finance, dinheiro em espécie, cartão e lançamentos v2. Não provam
+    callback real da Pluggy, WhatsApp nem comportamento no aparelho após deploy.
+  - PR 4 (#836): a página de
+    Lançamentos do `/painel` consome `/api/v2/lancamentos`, categorias e contas reais,
+    com mês da barra, busca no histórico do plano, filtros do contrato e cursor opaco
+    por “Carregar mais”, sem somar páginas. Criação só na Carteira (espécie), detalhes,
+    edição e confirmação de apagar seguem `pode`; o POST leva somente campos tocados
+    desde a abertura e valores decimais em texto. Escritas não repetem automaticamente;
+    resposta perdida conserva contexto e rascunho nesta aba. A recuperação abre GET fresco
+    sem filtros no mês da data enviada ou no mês retornado pelo servidor quando a data
+    foi omitida; editar data permite conferir origem e destino, e cartão usa a fatura.
+    A guarda só libera após confirmação manual na lista, com paginação disponível.
+    Busca histórica efetiva exibe anos nos grupos e linhas. Sucesso reinicia na primeira
+    página; a conferência reinicia somente a consulta alvo. Erro de escrita relê as páginas
+    carregadas, preservando o rascunho e atualizando `pode`, sem confundir página descartada
+    com item removido. Sucesso e erro invalidam categorias, contas e todos os resumos em cache.
+    Modal reutiliza dialog/fallback Safari 14 e coordena Cmd-K. Os exemplos do chat e do
+    protótipo seguem demonstrativos; no painel real os CTAs abrem o extrato sem filtros
+    do exemplo, e Cmd-K omite lançamentos/categorias fictícios. Mantidos fora P8 (depósitos
+    e aportes ausentes na API), filtro de cartão individual sem catálogo, busca real em
+    Cmd-K, backend/schema e service worker. Validação local usa fixtures e
+    bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
+- Etapa 3 — execução autorizada em 05/10/2026; PR1 motor (#842) concluído localmente em
+  06/10, com commit/push/PR autorizados pelo dono. Merge somente após nova
+  autorização explícita do dono. Plano executável:
+  [plano-etapa3-pr1-motor.md](plano-etapa3-pr1-motor.md). Previsão, IA e simulador
+  compartilham uma snapshot read-only e cálculo Decimal; carteira física nova dispensa
+  Q37, enquanto dados contraditórios mantêm os motivos de incerteza. Recorrências e
+  faturas usam identidade/ciclo comum, sem descontar o cartão duas vezes. Consulta
+  não cria lançamentos nem resolve pendências. PR2 entrega a API v2 abaixo; PR3 permanece a tela real;
+  estimativa variável continua condicionada a decisão posterior.
+  - Manager final aprovou localmente, zero bloqueios abertos. Duas passadas Tester;
+    reparos finais conferidos pelo Manager, sem terceira passada. Área inicial:
+    **1559 passed/2 xfailed**, nomes/status anteriores preservados; frontend:
+    **56 passed**, prova visual **12/12** em desktop/mobile, claro/escuro.
+    Controle do reparo da base: 14 verdes → 7 falhas/7 verdes sem fix → 14 verdes
+    após restauração por cópia e identidade de bytes/SHA. Conferência independente
+    final: 279 testes pertinentes e 2 reproduções aprovados.
+  - Revisão do #842 em 06/10: cenário explícito de entrada/saída passa o valor à
+    tool existente; ambiguidade pede esclarecimento e preserva a pergunta pendente.
+    Corrigidos dois gates de CI: inventário aponta a unidade SQL real e o leitor de
+    boletos mantém o teto sem variável intermediária. Manager aprovou o delta;
+    **1629 passed/2 xfailed**, com nomes anteriores preservados. Controle do cenário:
+    53 falhas/6 consultas puras verdes sem fix; restaurado e aprovado no conjunto final.
+    Primeiro CI tinha também falhas de Pix e tooltip presentes na main; comparação
+    não equivale a CI verde. O head corrigido ainda requer CI e revisão remota.
+  - Segunda revisão do #842 em 06/10: prazo aceita “daqui a N dias” e usa a
+    mesma expressão para extração, remoção e contagem; múltiplos alvos são
+    explicitamente recusados sem consumir pendências. Próxima fatura exclui
+    ciclos closed antes da seleção, preservando a dívida e valores incoerentes.
+    Manager fresh aprovou os quatro arquivos congelados e os controles causais;
+    combinado local: **1789 passed/2 xfailed** em 46 arquivos, todas as
+    identidades anteriores preservadas. Comandos/XML em scratch; remedir antes
+    de reutilizar os números. Sem terceira passada Tester.
+    CI do head anterior: backend/audit aprovados; frontend falha no tooltip
+    também vermelho na main. Novo head requer nova revisão remota e CI.
+  - Terceira revisão do #842 em 06/10: o atalho de previsão aplica a política
+    existente de investimento antes de interpretar compra/cenário. Recusa
+    canônica e MANTEM preservados; OF/billing e roteamento geral inalterados.
+    Manager fresh aprovou três arquivos congelados e controle causal
+    23 falhas/5 positivos sem o reparo. Combinado local: **1878 passed/2 xfailed**
+    em 47 arquivos, identidades anteriores e baseline de política preservadas.
+    CI do head anterior: frontend/audit aprovados; backend falha somente no
+    teste Pix de cached plan também vermelho na main. Novo head requer CI
+    e Codex remotos. Sem terceira passada Tester.
+  - Quarta revisão do #842 em 06/10: reconhecimento textual compartilhado entre
+    core e WhatsApp, uma coleta de alvos e distinção de obrigações existentes
+    versus cenário novo explícito. Calendário/dinheiro/tools canônicos mantidos.
+    Reproduções no adapter confirmaram consumo/pagamento/categoria indevidos
+    antes do core; consultas agora cedem ao core preservando a linha no banco.
+    Manager fresh aprovou os três arquivos congelados e os controles finais:
+    59 falhas core/12 adapter, 71 integral; restaurado 101 testes aprovados.
+    Área local: **1979 passed/2 xfailed** em 48 arquivos, todos os 1880
+    nomes/status anteriores preservados. Comandos/XML e freeze finais
+    correspondem à versão de ordem revalidada; sem terceira passada Tester.
+    CI do head anterior 52e6120f aprovado em todos os jobs. Novo head ainda
+    requer CI e Codex remotos. Merge exige nova autorização explícita do dono.
+  - Quinta revisão do #842: horizonte finito próximo(s) N dia(s) adicionado à
+    mesma extração/remoção/contagem; predicado/datas/tools/gates preservados.
+    Harness passou a exportar a dependência do core simulado, sem importar
+    bordas reais ou relaxar guardas. Reproduções antes da fonte e controles
+    separados: 22 falhas de prazo e 11 falhas de import; restaurado164passed.
+    Manager fresh aprovou fonte2+teste1. Área: **2042 passed/2 xfailed**,
+    50 arquivos e 103 subtests; os1981 nomes/status anteriores preservados.
+    CIe3be teve11falhas próprias de import corrigidas localmente; frontend
+    falhou no tooltip com mesma asserção da main93 e fontes sem diff.
+    Novo head requer CI e Codex remotos; merge só autorização humana.
+  - Sexta revisão do #842: o renderizador legado da projeção até uma data
+    prioriza disponibilidade e qualidade. Valores finitos são condicionais,
+    título/card/total neutros; campos null/ausentes/não finitos mostram
+    Indisponível, preservando números conhecidos e formulário/gates.
+    Manager fresh aprovou JS e teste de perfil congelados. Baseline frontend
+    56 nomes/status preservados + 6 casos novos: 62 passaram. Controle causal
+    da função antiga: 6 falhas; restauração exata e 62 aprovados. Medição focal
+    de 12 renders desktop/mobile, claro/escuro, sem corte ou sobreposição.
+    Motor/DTO/rota intactos. CI anterior 47004b65: backend/audit aprovados,
+    frontend falhou no tooltip com mesma asserção da main e fontes sem diff.
+    Novo head requer CI e Codex remotos; merge só autorização humana.
+  - Sétima revisão do #842: ocorrências com realização comprovada continuam
+    na snapshot, mas saem das coleções de compromissos/causas e da contagem de
+    boletos. Apenas três guardas do motor; paid sem prova e valores incertos
+    continuam a conferir. Saldo e aritmética permanecem inalterados.
+    Reprodução real pela carteira antes da fonte: base 80 e saldo final 70 já
+    corretos; chave paga indevida e contagem 2. Controles separados retirando
+    cada guarda: três falhas discriminantes com positivos preservados.
+    Manager fresh aprovou fonte2+teste1 congelados. Área financeira:
+    **2046 passed/2 xfailed**, 103 subtests em 50 arquivos; todos os 2044
+    nomes/status anteriores preservados + 4 novos. JS/12 renders intactos.
+    Novo head exige CI/Codex remotos; merge só autorização humana.
+  - Oitava revisão do #842: consultas com boletos ou contas a pagar sem
+    artigo usam as obrigações existentes, sem valor extra. Ajuste limitado
+    ao contexto plural completo; qualificadores, exclusões e cenários
+    ambíguos continuam recusados. Reconhecimento e adapter inalterados.
+    Baseline pertinente 136 verdes; reprodução e negativo com cleanup
+    anterior geram 10 falhas discriminantes/140 positivos; restauração
+    por SHA e repetição 150 verdes. Área financeira: **2060 passed/2 xfailed**,
+    103 subtests em 50 arquivos, todas as 2048 identidades anteriores
+    preservadas + 14 novas. Manager independente conferiu o reparo.
+    CI do head 417b2791: backend/audit aprovados, frontend 1666/1 falha de tooltip também
+    presente na main 93db7c2a, sem diff nas fontes. Novo head exige CI/Codex
+    remotos; merge somente com nova autorização humana.
+  - CI completo e Codex remoto no head publicável seguem pendentes. Codex local
+    foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
+    Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
 - [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+
+### Etapa 3 — PR2: API v2 da previsão (implementação local, 06/10/2026)
+
+`GET /api/v2/previsao` adapta a snapshot/motor do PR1: sessão e plano antes da
+leitura, horizonte 30/60/90 pela política existente, base bancária canônica v2,
+uma transação repeatable read/read only. Plus recebe só marcos30; Pro recebe
+trajetória futura, âncora hoje, pior dia e compromissos conhecidos. Dinheiro fonte
+é Decimal/texto sem arredondar; somente saldos calculados seguem o motor.
+Sem escrita/sync/reparo/TTL/SSE, sem regra financeira ou orientação nova; qualidade
+e validade permanecem explícitas, estimativa variável e cabe_nas_premissas false.
+
+Tipos TS gerados e fixtures herméticas validáveis preparam PR3. Os limites são
+horizonte solicitado/autorizado (até 90 pontos, até 3 marcos) e capacidade do plano.
+Grupos/ocorrências completos, sem truncamento; **não há teto global de bytes
+comprovado ou introduzido**, e o requisito global de tamanho do esboço da Etapa3
+não é marcado como concluído. Esses limites não limitam quantidade de fontes, nomes
+ou motivos. Um teto futuro exige necessidade real de transporte/consumidor.
+
+PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
+aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
+calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.
+
+### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
+
+Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a
+`GET /api/v2/previsao` como chega: marco do horizonte, base, âncora (hoje), pior dia,
+gráfico a partir da âncora, compromissos agrupados (Q2 = a: sem total, "N × valor" ou
+"valores diferentes", ocorrências na expansão), estado, motivos com direção e
+premissas. Plus: marco de 30 dias e convite ao Pro, sem gráfico nem número atrás do
+convite. Sem faixa provável, estimativa variável nem "cabe". O protótipo não muda; o
+Cmd-K real perde os atalhos de horizonte e a `/previsao` real sai do seletor de mês.
+Pendência financeira nova sem aviso SSE fica como limite declarado (`docs/CLAUDE.md`,
+API v2); fechá-la é PR Completo à parte.

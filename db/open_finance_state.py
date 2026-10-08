@@ -54,11 +54,12 @@ logger = logging.getLogger(__name__)
 _TERMINAL = ("PAUSED", "DELETED")
 
 # ── O `executionStatus` derivado do `raw` ────────────────────────────────────
-# FONTE ÚNICA (§0.7) da regra "o `raw` ainda descreve a autorização ATUAL". Dois
-# consumidores, formatos diferentes, MESMA condição e MESMO parâmetro: o select
-# do snapshot / `get_connections_by_item_id` (abaixo, via `SQL_EXECUTION_STATUS`)
-# e o predicado do aviso proativo (`list_connections_needing_reconnect`, em
-# `db/open_finance.py`, que precisa da condição CRUA dentro do `coalesce` dele).
+# FONTE ÚNICA (§0.7) da regra "a autorização ATUAL ainda está na janela do
+# dispositivo/QR". Dois derivados, MESMA âncora e MESMO parâmetro, lidos por todo
+# select que alimenta `connection_ui_state` (snapshot, `_COLUNAS_DA_CONEXAO`):
+# `SQL_EXECUTION_STATUS` (o `raw` ainda vale, ramo sem `health`) e
+# `SQL_DEVICE_NA_JANELA` (o prazo nos dois ramos, D5). O aviso proativo não tem
+# predicado próprio: é a tela filtrada (`list_connections_needing_reconnect`).
 #
 # Por que em SQL e não em Python: `connection_ui_state` se declara "sem banco,
 # sem rede" (`core/services/pluggy_health.py`) e não tem relógio. E aqui o
@@ -96,18 +97,23 @@ _TERMINAL = ("PAUSED", "DELETED")
 # (`reconnected_at = excluded.updated_at`, `db/open_finance.py`), que é o do
 # widget reconectando. Ela custa 5 min a mais no pior caso legítimo (65 em vez de
 # 60) e continua descartando o relógio errado de verdade.
-SQL_RAW_AINDA_VALE = (
-    "health is null "
-    "and coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s) "
+SQL_JANELA_DEVICE = (
+    "coalesce(reconnected_at, created_at) > now() - make_interval(mins => %s) "
     "and coalesce(reconnected_at, created_at) <= now() + interval '5 minutes'"
 )
+SQL_RAW_AINDA_VALE = "health is null and " + SQL_JANELA_DEVICE
+
+# O PRAZO da instrução de dispositivo/QR com OU sem `health` (Onda 5, D5): mesma
+# âncora, mesmo teto e mesmo `%s` do `SQL_RAW_AINDA_VALE`, sem o `health is null`.
+# `connection_ui_state` só mostra "Autorize o acesso no app do banco" com ele
+# verdadeiro; ausente (linha de outra query) = janela fechada = "Reautorize o banco".
+SQL_DEVICE_NA_JANELA = f"coalesce(({SQL_JANELA_DEVICE}), false) as device_na_janela"
 
 # Só o ESCALAR viaja. O `raw` inteiro nunca sai do Postgres: ele carrega
 # `clientUserId` (e `statusDetail`), e o snapshot vai para o navegador.
 #
-# O `upper` É mudança de comportamento, a MESMA que o predicado irmão do aviso
-# documenta (`list_connections_needing_reconnect`, `db/open_finance.py`) — e
-# agora ela vale também para a TELA: um `executionStatus` em minúscula no `raw`
+# O `upper` É mudança de comportamento, e vale para a TELA (e, por ela, para o
+# aviso, que é a tela filtrada): um `executionStatus` em minúscula no `raw`
 # passa a virar a instrução de dispositivo, onde antes caía no detalhe fixo
 # "Reautorize o banco". Hoje é INALCANÇÁVEL pelo caminho de produção — a Pluggy
 # manda `USER_AUTHORIZATION_PENDING` em maiúscula, e `_DETALHE_POR_STATUS` só tem
@@ -203,11 +209,12 @@ def aplica_teto_por_health(row: dict, agora: datetime | None = None) -> dict:
 
 
 def janela_device_auth_min() -> int:
-    """O único `%s` de `SQL_RAW_AINDA_VALE` / `SQL_EXECUTION_STATUS`.
+    """O `%s` de `SQL_JANELA_DEVICE` (e de quem o embute: `SQL_RAW_AINDA_VALE`,
+    `SQL_EXECUTION_STATUS`, `SQL_DEVICE_NA_JANELA`), um por derivado no select.
 
     Import local porque `db` -> `core.services` é de mão única neste pacote (ver
     `connection_ui_state` em `db/open_finance.py`); e função em vez de constante
-    para que os três chamadores não repitam o import.
+    para que os chamadores não repitam o import.
 
     SEM VALIDAÇÃO de propósito: o valor é um literal do módulo, sem override por
     env, então nenhum valor hostil é alcançável e validar aqui seria código
@@ -237,7 +244,8 @@ class AmbiguousItemError(RuntimeError):
 
 # As colunas da conexão lidas por quem decide com `connection_ui_state`: o sync
 # (`get_connections_by_item_id`) e a retentativa (`list_connections_para_retentar`).
-# Uma lista só (§0.7): o `%s` de `SQL_EXECUTION_STATUS` é `janela_device_auth_min()`.
+# Uma lista só (§0.7): os dois `%s` (de `SQL_EXECUTION_STATUS` e de
+# `SQL_DEVICE_NA_JANELA`) são `janela_device_auth_min()`.
 # `SQL_EXECUTION_STATUS`: sem ele, o toast do /refresh manda "Reautorize o banco"
 # na janela do QR (`_refresh_items_report` lê esta linha). `mark_sync_result`
 # recebe `health` como OPCIONAL, então um sync que falhe antes do `GET /items` não
@@ -247,6 +255,7 @@ _COLUNAS_DA_CONEXAO = f"""id, user_id, provider, provider_item_id, status, insti
        last_sync_at, last_attempt_at, status_reason, health,
        next_refresh_at, last_refresh_origin, reconnected_at, updated_at,
        {SQL_EXECUTION_STATUS},
+       {SQL_DEVICE_NA_JANELA},
        {SQL_COLETA_VENCIDA},
        {SQL_COLETA_ESTOURADA}"""
 
@@ -309,7 +318,7 @@ def get_connections_by_item_id(item_id: str, provider: str = "pluggy", *,
                 where provider=%s and provider_item_id=%s
                 order by id
                 """,
-                (janela_device_auth_min(), provider, item),
+                (janela_device_auth_min(), janela_device_auth_min(), provider, item),
             )
             return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
@@ -655,7 +664,7 @@ def list_connections_para_retentar(*, id: int | None = None) -> list[dict]:
                    and (%s::bigint is null or id = %s)
                  order by last_attempt_at nulls first, id
                 """,
-                (janela_device_auth_min(), id, id),
+                (janela_device_auth_min(), janela_device_auth_min(), id, id),
             )
             return [aplica_teto_por_health(dict(r)) for r in (cur.fetchall() or [])]
 
@@ -706,9 +715,9 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         que era o buraco por onde a reentrega de `item/created` ressuscitava
         banco removido.
 
-    Quem precisa SEPARAR as três (nenhum leitor automático precisa; é o
-    operador) usa `db.open_finance_diagnostico.classifica_item`, onde a regra de
-    precedência está escrita. Os leitores daqui:
+    O diagnóstico por precedência usa `db.open_finance_diagnostico.classifica_item`.
+    O callback separa `removed` das demais origens: uma remoção deliberada com
+    dono veta o item antigo, mesmo com outros rastros. Os leitores daqui:
 
       • `_adota_item_orfao` — só adota item sem NENHUM dono no rastro (duplicata
         de `item/created`, entrega at-least-once, ressuscitava o removido), e a
@@ -716,7 +725,8 @@ def item_registry_origins(provider_item_id: str, *, provider: str = "pluggy",
         (`exceto_registro_id`, abaixo);
       • `POST /pluggy-item` — `'pluggy_item' in ...` = o NAVEGADOR já registrou
         este item, logo a conexão que existe não é a que o webhook acabou de
-        adotar (auditoria de reconexão).
+        adotar (auditoria de reconexão). `'removed' in ...` veta o callback antes
+        do GET remoto e novamente sob lock; novo consentimento requer item novo.
 
     `exceto_registro_id` IGNORA uma linha do rastro pelo `id` — a que o próprio
     chamador acabou de gravar. É o que permite ao `_salva_item_sob_lock` refazer

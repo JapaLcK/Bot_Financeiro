@@ -25,11 +25,14 @@ _SET = {
                 " case when feitos = '{}'::jsonb then clock_timestamp() end)"),
     "feito": ("feitos = case when feitos ? %(passo)s::text then feitos"
               " else feitos || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
+    # Na `dica`, `%(passo)s` leva o id da dica: o carimbo da 1ª vez, sem tocar o guia.
+    "dica": ("dicas = case when dicas ? %(passo)s::text then dicas"
+             " else dicas || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
 }
 
 _ERRO = {"error_recoverable", "needs_user_action", "item_missing"}
 
-_LER = "select oferecido_em, dispensado_em, concluido_em, feitos from guia_painel where user_id = %s"
+_LER = "select oferecido_em, dispensado_em, concluido_em, feitos, dicas from guia_painel where user_id = %s"
 
 
 def ler(user_id: int) -> dict | None:

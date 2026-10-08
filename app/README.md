@@ -7,11 +7,22 @@ convivem, e o app antigo continua atendendo quem não atualizou.
 O plano completo (discovery, arquitetura de informação, 35 telas, 12 fases)
 está fora do repositório, com o dono.
 
-## Estado: Fase 1 — fundação
+## Estado: Home nativa e cinco abas
 
-O que existe aqui hoje é a fundação técnica, não produto: cliente de API,
-sessão, erro, analytics e uma tela que prova a ponta a ponta. Nenhuma tela de
-produto entra antes da Fase 3.
+Resumo, Gastos, Piggy, Metas e Extrato usam dados reais do servidor, com
+Bearer, validação Zod, cancelamento, atualização por foco/foreground e
+privacidade dos valores. O acesso ao produto depende da sessão, da trava
+biométrica/MFA, da permissão explícita do app e do marco bancário persistido;
+entradas por link também passam pelo portão.
+
+Há dezesseis blocos e seis perfis. O perfil é salvo no servidor, e a ordem,
+a visibilidade e a restauração ficam no SecureStore por usuário e perfil.
+Falhas de um recurso são recuperáveis e não viram dinheiro fictício.
+Rendimento mostra taxas contratadas; o simulador calcula economia hipotética
+sobre gastos observados, sem alterar registros ou a previsão. Histórico e
+recursos respeitam a disponibilidade do servidor. Compras Apple e restauração
+fazem parte de uma entrega separada. Validação em simulador não comprova
+funcionamento em aparelho físico nem implantação em produção.
 
 ## Rodar
 

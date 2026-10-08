@@ -45,10 +45,15 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * pendente para sempre: stream aberto e mudo. O `/api/v2/perfil` guarda o que o PUT gravou
  * (começa em `perfil`; `null` = nunca escolheu, o modal abre); `/contas` e `/resumo-do-mes`
  * respondem as fixtures de nome `contas` e `resumo`; o GET `/guia`, a de nome `guia` (padrão
- * `concluido`: o convite do guia não aparece nos testes que não são dele). Registrar de novo vale para as
- * próximas requisições: no Playwright a rota registrada por último vence.
+ * `concluido`: o convite do guia não aparece nos testes que não são dele). O GET `/previsao` responde
+ * a fixture `previsao` quando dada; sem ela, como o servidor: Pro → `pro<dias, padrão 30>`, Plus →
+ * `plus30` (sem `dias` ou 30) e 403 `forecast_horizon_not_allowed` em 60/90, os outros → 403
+ * `pro_required`. O GET `/investido` responde a fixture de nome `investido` (padrão `com_banco`);
+ * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`.
+ * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
+ * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -61,6 +66,16 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
       if (r.request().method() === "PUT") atual = r.request().postDataJSON().perfil;
       return r.fulfill({ json: { perfil: atual } });
     }
+    if (url.pathname === "/api/v2/categorias") return r.fulfill({ json: RESPOSTAS.categorias[categorias] });
+    if (url.pathname === "/api/v2/lancamentos" && r.request().method() === "GET") {
+      const primeira = RESPOSTAS.lancamentos[lancamentos];
+      const pagina = url.searchParams.has("cursor") ? RESPOSTAS.lancamentos.segunda : primeira;
+      return r.fulfill({ json: { ...pagina, mes: url.searchParams.get("mes") ?? pagina.mes } });
+    }
+    if (url.pathname === "/api/v2/investido") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "free" ? r.fulfill({ status: e.status, json: e.body }) : r.fulfill({ json: RESPOSTAS.investido[investido] });
+    }
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });
     if (url.pathname === "/api/v2/guia" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.guia[guia] });
@@ -68,6 +83,14 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
       const pago = plano === "plus" || plano === "pro";
       const e = RESPOSTAS.erros["403_pro_required"];
       return pago ? r.fulfill({ json: RESPOSTAS.assinaturas.cheia }) : r.fulfill({ status: e.status, json: e.body });
+    }
+    if (url.pathname === "/api/v2/previsao") {
+      const dias = url.searchParams.get("dias") ?? "30";
+      if (previsao) return r.fulfill({ json: RESPOSTAS.previsao[previsao] });
+      if (plano === "pro") return r.fulfill({ json: RESPOSTAS.previsao[`pro${dias}`] });
+      if (plano === "plus" && dias === "30") return r.fulfill({ json: RESPOSTAS.previsao.plus30 });
+      const e = RESPOSTAS.erros[plano === "plus" ? "403_forecast_horizon_not_allowed" : "403_pro_required"];
+      return r.fulfill({ status: e.status, json: e.body });
     }
     const path = decodeURIComponent(url.pathname).replace(/\/$/, "/index.html");
     return r.fulfill({ path: join(raiz, path) }).catch(() => r.fulfill({ status: 404, body: "" }));

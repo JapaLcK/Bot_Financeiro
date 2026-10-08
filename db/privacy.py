@@ -523,11 +523,19 @@ class ResetLockUnavailableError(RuntimeError):
     entra."""
 
 
-# Tabelas apagadas pelo reset "Recomeçar do zero", na ordem (child-first).
-# As FKs reais são cascade/set null — a ordem é cinto-e-suspensório contra um
-# banco antigo sem elas. Fora desta lista ficam as três tabelas OF que exigem
-# join (deletadas à parte em reset_user_data) e a credit_bills (via card +
-# coluna user_id, padrão de delete_user_data).
+# Pai -> filho de lotes, apagado pai primeiro: o CASCADE leva os lotes e o delete
+# explícito deles contaria 0, então `reset_user_data` trava o pai (`for update`, a
+# ordem do accrue) e conta os lotes ANTES de apagá-lo; sem o lock, perde o lote que
+# um accrue concorrente ainda não commitou.
+_LOTES_DO_PAI = {"investments": "investment_lots", "pockets": "pocket_lots"}
+
+# Tabelas apagadas pelo reset "Recomeçar do zero", na ordem. Child-first, EXCETO
+# investments/pockets, que vão antes dos próprios lotes (pai antes de filho: a ordem
+# de lock de `accrue_all_*`, ver `_lock_user`). As FKs reais são cascade/set null —
+# o resto da ordem é cinto-e-suspensório contra um banco antigo sem elas. Fora
+# desta lista ficam as três tabelas OF que exigem join (deletadas à parte em
+# reset_user_data) e a credit_bills (via card + coluna user_id, padrão de
+# delete_user_data).
 _RESET_TABLES = (
     # Recorrentes
     "recurring_income_credits",
@@ -537,11 +545,12 @@ _RESET_TABLES = (
     "recurring_incomes",
     "recurring_suggestion_dismissed",
     "subscription_marks",
-    # Investimentos / caixinhas / orçamentos
-    "investment_lots",
+    # Investimentos / caixinhas / orçamentos. Pai ANTES do filho (o contrário do resto
+    # da lista): é a ordem de lock de accrue_all_*; filho primeiro fecha ciclo com ele.
     "investments",
-    "pocket_lots",
+    "investment_lots",
     "pockets",
+    "pocket_lots",
     "budget_alert_sent",
     "category_budgets",
     # Categorias (regra ≠ categoria: tabelas diferentes, as duas somem)
@@ -690,59 +699,38 @@ def reset_user_data(
                 # login e sem accounts); o `on conflict do nothing` é inócuo no
                 # caso normal.
                 #
-                # ponytail: o lock inverte a ordem accounts×pockets/investments
-                # de 4 fluxos (db/pockets.py:336→466, db/investments.py:1041→1096
-                # e :1554→1680, db/accounts.py:1647/1696→1718). Deadlock é REAL e
-                # é novo, e o reset NÃO é imune: ele fecha o ciclo (pede pockets
-                # no `_delete` do laço segurando accounts desde o update), e
-                # morre quem o Postgres detecta primeiro — ordem de chegada, não
-                # estrutura. Teto: nas 3 portas do OF o DeadlockDetected cai em
-                # `except Exception: pass` e some (db/accounts.py:1500-1512). No
-                # reset ele vira 503 (frontend/routes/settings.py:188) com o
-                # `remote_cleanup` já feito — gatilho novo para a janela residual.
-                #
-                # Quem chega DEPOIS do lock não deadlocka, só ESPERA — no
-                # `ensure_user` do writer, que pede accounts em transação
-                # PRÓPRIA antes de qualquer caixinha. Invariante frágil: vale
-                # enquanto todo escritor de accounts chamar `ensure_user` — hoje
-                # os 10 chamam, menos o `merge_users`, que é a exceção conhecida.
-                # A receita, e ela precisa ser case-INSENSITIVE: uma versão
-                # anterior deste comentário usava `grep -rn 'update accounts
-                # set'` e por isso dizia 9 — o `set_balance` (db/accounts.py:41)
-                # escreve em MAIÚSCULAS e ficava invisível.
-                #     grep -rniE 'update[[:space:]]+accounts[[:space:]]+set' \
-                #          --include='*.py' db/
-                # (medido 2026-09-04: 12 linhas = 10 escritores + este
-                # comentário + o `update` do próprio reset. REMEÇA antes de
-                # reusar.) E a
-                # espera não é só do dono da linha — a fila do WhatsApp tem
-                # consumidor único (`_worker_loop`, adapters/whatsapp/wa_app.py:324),
-                # então um writer preso trava as mensagens de TODOS na janela.
+                # ponytail: segurar o lock de accounts até o commit fecha ciclo com
+                # qualquer transação que pegue pockets/investments/lotes (ou uma
+                # linha-pai apagada por FK) ANTES de accounts. REGRA: `_lock_user`
+                # primeiro; dentro da família, pai antes de filho — está na
+                # docstring de `_lock_user` (db/bank_movements.py) e a ordem de
+                # `_RESET_TABLES` a segue. Lista nominal de fluxos envelhece; a
+                # receita não (case-INSENSITIVE: `set_balance` escreve em
+                # maiúsculas):
+                #     grep -rn "_lock_user" db/
+                #     grep -rniE "for update" db/
+                # Quem chega DEPOIS do lock não deadlocka, só ESPERA, e não é só
+                # escritor: quase todo caminho do usuário, inclusive leitura, passa
+                # por `ensure_user` (insert em accounts, que bloqueia sob este
+                # UPDATE). Cada requisição parada segura um slot do pool sync
+                # (`DB_POOL_MAX_SYNC`, global) e a fila do WhatsApp tem consumidor
+                # único por processo (`_worker_loop`). Teto: o DeadlockDetected que
+                # sobrar vira 503 no reset (frontend/routes/settings.py), com o
+                # `remote_cleanup` já feito.
                 #
                 # Sem `lock_timeout` de propósito: o do repo vive nas conexões
-                # DEDICADAS do `pluggy_item_lock` (os `set_config('lock_timeout',
-                # …)` de `pluggy_item_lock` e `pluggy_items_lock`, em
-                # db/open_finance_state.py — sem número: os três que estavam
-                # aqui apontavam para linha em branco muito antes desta leitura,
-                # CLAUDE.md §2), feitas para ter teto próprio. No pool ele valeria
-                # para TODO write do produto, e espera correta viraria erro. Se
-                # incomodar, a saída é ordem única de lock nos writers.
+                # DEDICADAS de `pluggy_item_lock`/`pluggy_items_lock`
+                # (db/open_finance_state.py), feitas para ter teto próprio. No pool
+                # ele valeria para TODO write do produto, e espera correta viraria
+                # erro.
                 #
-                # Janela MEDIDA 2026-09-03 (Postgres 15.15 local, 3 execuções,
-                # writer disparado no 1º `_table_exists` — gatilho de
-                # tests/test_account_reset.py::_reset_com_lancamento_concorrente).
-                # REMEÇA antes de reusar: conta vazia 0,05 s; MAIOR CONTA REAL de
-                # produção 0,08 s (1.858 linhas; 342 contas, p99 101, nenhuma acima de
-                # 10 mil). Sintético: 50 mil launches sozinhos 0,58 s; os mesmos com
-                # 20 mil open_finance_transactions, 16,9 s. Custo ≈ linhas apagadas ×
-                # tamanho GLOBAL de cada filha que as referencia (open_finance_
-                # transactions conta DUAS vezes p/ launches) — nenhuma das FKs
-                # `on delete set null` p/ launches/credit_transactions é indexada,
-                # então conta pequena também dói se a filha for grande; o conserto é
-                # o índice. Os 0,08 s são só o 1º fator (linhas-pai) e em banco
-                # LOCAL: o 2º — tamanho das filhas EM PRODUÇÃO — nunca foi medido,
-                # então eles NÃO sustentam "janela pequena em produção". Ele, as
-                # FKs e as queries: #253.
+                # Exceções conhecidas do mutex (docstring de `_lock_user`; acompanhamento em issue
+                # separada): o undo de pagamento de fatura e `pay_bill_amount` (ordem fatura →
+                # conta) e `delete_user_data`, que apaga Open Finance antes de `accounts`.
+                #
+                # O custo do `delete from launches` depende de as FKs `on delete set
+                # null` para launches/credit_transactions terem índice (ver #253):
+                # `ensure_fk_indexes_once` em db/schema_repairs.py.
                 ensure_user_tx(cur, user_id)
                 cur.execute("update accounts set balance = 0 where user_id = %s", (user_id,))
                 # sem `counts["accounts"]`: o retorno é {"deleted": ...} e a
@@ -819,8 +807,19 @@ def reset_user_data(
                         counts["credit_bills"] = counts.get("credit_bills", 0) + cur.rowcount
                 _delete(cur, "credit_cards")
 
+                lotes: dict[str, int] = {}
                 for table in _RESET_TABLES:
+                    lote = _LOTES_DO_PAI.get(table)
+                    if lote and _table_exists(cur, lote) and _column_exists(cur, lote, "user_id"):
+                        # Pai travado ANTES de contar (a ordem pai → lote do accrue): espera um
+                        # accrue que está materializando lote ainda não commitado. O `delete`
+                        # do pai logo abaixo trava as mesmas linhas de qualquer jeito: o lock
+                        # não amplia a janela.
+                        cur.execute(f"select id from {table} where user_id = %s for update", (user_id,))
+                        cur.execute(f"select count(*) as n from {lote} where user_id = %s", (user_id,))
+                        lotes[lote] = cur.fetchone()["n"]
                     _delete(cur, table)
+                counts.update(lotes)  # os que existiam, sem contar o CASCADE duas vezes
 
                 # Mesma transação: zera as preferências que apontavam para o que
                 # sumiu e reabre o onboarding (needs_onboarding volta a True).
@@ -839,6 +838,7 @@ def reset_user_data(
                     update auth_accounts
                     set onboarding_step = 0,
                         onboarding_completed_at = null,
+                        open_finance_onboarding_completed_at = null,
                         dashboard_profile = null,
                         signup_quiz = null
                     where user_id = %s
@@ -896,7 +896,8 @@ def delete_user_data(
         # Tabelas com coluna user_id e ON DELETE CASCADE (verificado em prod).
         # Dependiam só do cascade; incluídas no sweep explícito + na verificação
         # de sobra como cinto-e-suspensório, caso um DB antigo perca a FK.
-        # pocket_lots antes de pockets (child-first) por segurança de ordem.
+        # investments/pockets ANTES dos próprios lotes (pai → filho: a ordem de lock de
+        # `accrue_all_*` e de `_RESET_TABLES`; lote primeiro fecha ciclo com eles).
         "ai_messages",
         "ai_pending_actions",
         "recurring_charges",
@@ -909,11 +910,12 @@ def delete_user_data(
         "auth_refresh_tokens",
         "auth_sessions",
         "user_categories",
+        "pockets",
         "pocket_lots",
         "affiliates",
         "credit_cards",
-        "investment_lots",
         "investments",
+        "investment_lots",
         "category_budgets",
         "pending_actions",
         "user_category_rules",
@@ -931,7 +933,6 @@ def delete_user_data(
         "of_cash_coverage",
         "patrimonio_fotos",
         "launches",
-        "pockets",
         "user_identities",
         "auth_accounts",
     )
@@ -1132,6 +1133,18 @@ def delete_user_data(
                         (user_id,),
                     )
 
+                # Mutex do usuário (o do reset e dos escritores) ANTES do laço, que é onde estão os
+                # lotes, os pais, `launches` e `accounts`: `accounts`, não `users`, então a direção
+                # accounts → users do comentário da reconsulta segue valendo. Fica DEPOIS dos deletes
+                # de Open Finance e crédito de propósito: no topo da transação ele fecharia a janela
+                # que T17/T21/T23 (tests/test_account_deletion_adocao_corrida.py) medem — a sessão 2
+                # comita uma conexão nova entre o RETURNING e o laço, e com o mutex no topo ela
+                # esperaria a exclusão. Sobra a ordem OF → accounts da exclusão: cruza com reset, merge
+                # e sync/conciliação do Open Finance (accounts → OF), exceção conhecida.
+                # Conta sem linha em `accounts`: o `select for update` casa zero e não trava nada;
+                # os ciclos com `accrue_*` seguem fechados só pela ordem pai → lote.
+                from .bank_movements import _lock_user
+                _lock_user(cur, user_id)
                 for table in user_owned_tables:
                     if _table_exists(cur, table) and _column_exists(cur, table, "user_id"):
                         cur.execute(f"delete from {table} where user_id = %s", (user_id,))
@@ -1154,7 +1167,7 @@ def delete_user_data(
                 # `DeadlockDetected ... while locking tuple in relation "users"`.
                 # O ciclo tem DUAS metades, e nenhum escritor do repositório trava
                 # `users` explicitamente: (1) o escritor pega `accounts` em `FOR
-                # UPDATE` (`_lock_user`, `db/bank_movements.py:58`) e (2) só depois
+                # UPDATE` (`_lock_user`, em `db/bank_movements.py`) e (2) só depois
                 # o INSERT em `open_finance_connections` faz o POSTGRES pegar `FOR
                 # KEY SHARE` na linha-pai de `users`, por causa da FK `user_id
                 # references users(id)` (`db/schema.py:414`) — ou seja, `accounts`

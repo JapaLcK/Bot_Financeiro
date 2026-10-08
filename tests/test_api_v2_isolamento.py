@@ -93,3 +93,18 @@ def test_guia_de_a_b_nao_ve_nem_altera(a_e_b):
     assert list(linha(b)["feitos"]) == ["piggy.pergunta"]
     de_a = ler(a)
     assert (de_a["estado"], [p["feito"] for p in de_a["passos"]]) == ("dispensado", [False, True, False])
+
+
+def test_dica_de_a_b_nao_ve_nem_altera(a_e_b):
+    """A marca a dica de Assinaturas como vista; o POST de B (com `?user_id=A`) grava só na
+    linha de B. Controle positivo: A lê a dica vista."""
+    from test_api_v2_guia import ler, linha
+    from test_api_v2_guia_dica import ID, dica
+
+    a, b = a_e_b
+    assert dica(a).status_code == 200
+    antes = linha(a)
+    assert dica(b, user_id=a, uid=a).status_code == 200
+    assert linha(a) == antes
+    assert list(linha(b)["dicas"]) == [ID]
+    assert [(d["id"], d["vista"]) for d in ler(a)["dicas"]] == [(ID, True)]

@@ -18,7 +18,7 @@ próxima (GET anônimo, token de uso único no path, aberto uma vez por quem vem
 fora) — só o número: o teto DELA é `limit()` e, pelo parágrafo acima, é
 decorativo. Janela de MINUTO e não de hora porque o `rate_limit_exceeded_handler`
 devolve `Retry-After: 60` fixo: com teto por hora o 429 mentiria durante a hora
-inteira. E o limitador é por IP (`get_remote_address`), então CGNAT de operadora
+inteira. E o limitador é por IP (`rate_limit_key`, de core/client_ip.py), então CGNAT de operadora
 põe vários usuários na mesma chave — 30 cliques/min do mesmo IP fica muito acima
 do tráfego real e quem esbarrar volta em 60 s.
 

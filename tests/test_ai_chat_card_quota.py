@@ -75,6 +75,9 @@ def test_falha_apos_consulta_que_altera_fatura_mantem_cota(monkeypatch, user_id,
                     (user_id, card_id))
         bills = cur.fetchall()
     assert len(bills) == 1
-    assert bills[0]['status'] == 'open'
-    assert bills[0]['paid_at'] is None
-    assert get_usage_this_month(user_id) == 1, 'a fatura já foi alterada; não se pode devolver a reserva'
+    if tool_name == 'forecast_next_bill':
+        assert bills[0]['status'] == 'paid' and bills[0]['paid_at'] is not None
+        assert get_usage_this_month(user_id) == 0, 'consulta agora pura: falha devolve a reserva'
+    else:
+        assert bills[0]['status'] == 'open' and bills[0]['paid_at'] is None
+        assert get_usage_this_month(user_id) == 1, 'a fatura já foi alterada; não se pode devolver a reserva'

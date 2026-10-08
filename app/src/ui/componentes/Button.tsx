@@ -27,6 +27,7 @@ interface Props {
 
 /** Exportada para o botão do sistema da Apple (Entrar) ter a MESMA altura do botão do Google. */
 export const ALTURA: Record<Tamanho, number> = { M: 44, L: 52 };
+export const ALTURA_ACESSO: Record<Tamanho, number> = { M: 48, L: 54 };
 
 /**
  * Rosa só onde há decisão (identidade pigbank-frontend): só `primary` usa
@@ -52,7 +53,7 @@ export function Button({
   accessibilityHint,
   testID,
 }: Props) {
-  const { cores } = useTema();
+  const { cores, acesso } = useTema();
   const pressao = usePressao();
   const bloqueado = desativado || carregando;
   const v = VISUAL[variante];
@@ -71,7 +72,7 @@ export function Button({
       <Animated.View
         style={[
           {
-            minHeight: ALTURA[tamanho],
+            minHeight: acesso ? ALTURA_ACESSO[tamanho] : ALTURA[tamanho],
             borderRadius: raio.md,
             paddingHorizontal: espaco.xl,
             alignItems: "center",

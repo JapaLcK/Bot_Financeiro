@@ -298,15 +298,18 @@ def _check_cashflow(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         cap = max(forecast_horizons_for(user_id), default=0)
         if target > date.today() + timedelta(days=cap):
             return {"error": "pro_required", "message": f"Seu plano permite previsões de até {cap} dias. Escolha uma data nesse intervalo."}
-    extra = args.get("amount")
+    from core.services.cashflow import validar_extra
     try:
-        extra = float(extra) if extra is not None else 0.0
-    except (TypeError, ValueError):
-        extra = 0.0
-    p = project(user_id, target, extra)
-    p["note"] = ("projetado = saldo + receitas previstas − gastos fixos − boletos até a data"
-                 + (" − boleto novo em análise" if extra > 0 else "")
-                 + ". tranquilo=true significa que o caixa fica positivo até lá.")
+        extra = validar_extra(args.get('amount'))
+    except ValueError:
+        return {'error': 'invalid_args', 'message': 'Valor adicional inválido: informe um número finito.'}
+    p = project(user_id, target, extra, percurso=plan_gate_ok(user_id, 'cashflow'))
+    p['note'] = ('Saldo condicional no alvo. tranquilo informa somente o sinal desse saldo; '
+                 'não garante caixa positivo no percurso nem autoriza compra. '
+                 'Mostre estado/motivos/premissas antes dos números. Só afirme risco se '
+                 'orientacao=risco; cabe_nas_premissas=false exige abstenção de orientação positiva. '
+                 'Valor adicional negativo é ajuste assinado condicional, não um boleto novo.')
+
     return p
 
 
@@ -322,9 +325,10 @@ def _forecast_balance(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     from core.services.cashflow_forecast import forecast_horizons
     horizons = forecast_horizons_for(user_id)
     fc = forecast_horizons(user_id, horizons)
-    fc["note"] = ("cada horizonte disponível traz o saldo PROJETADO (saldo + receitas "
-                  "previstas − gastos fixos − boletos até a data) e 'tranquilo' (bool). "
-                  "Responda somente com os horizontes retornados, sem extrapolar outros prazos.")
+    fc['note'] = ('Responda somente com horizontes retornados; saldos são condicionais. '
+                  'Mostre estado/motivos/premissas; tranquilo só é sinal do saldo final, '
+                  'não segurança no percurso. Não recomende compra nem afirme que cabe.')
+
     return fc
 
 

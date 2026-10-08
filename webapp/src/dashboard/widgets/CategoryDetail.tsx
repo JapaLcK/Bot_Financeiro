@@ -3,10 +3,14 @@ import { LAUNCHES } from "../lib/data.js";
 import { money, money0, monthShort } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import type { DashState, Launch } from "../lib/types";
+import { useContext } from "react";
+import { DEMO } from "../lib/v2";
+import { FrameScope } from "../parts/Frame";
 import { Frame } from "../parts/Frame";
 
 // Detalhe da categoria escolhida em "Para onde vai" (ou da maior variável do mês).
 export function CategoryDetail({ s }: { s: DashState }) {
+  const exemplo = DEMO || !!useContext(FrameScope);
   const { setFilter, go } = useActions();
   const m = summary(s.month);
   const top = CATEGORIES.filter((c) => c.variable).sort((a, b) => m.byCategory[b.id] - m.byCategory[a.id])[0];
@@ -29,8 +33,8 @@ export function CategoryDetail({ s }: { s: DashState }) {
 
   return (
     <Frame id="cat-detalhe" title={<span className="detail-title"><i className={`ph ${c.icon}`} style={{ color: c.color }} aria-hidden="true" />{c.label}{!picked && <span className="faint detail-auto">maior gasto do dia a dia</span>}</span>}
-      aside={<button type="button" className="link" onClick={() => { setFilter({ category: c.id, day: null, query: "" }); go("/lancamentos"); }}>
-        Ver {mine.length} lançamentos<i className="ph ph-arrow-right" aria-hidden="true" /></button>}>
+      aside={<button type="button" className="link" onClick={() => { if (exemplo) setFilter({ category: c.id, day: null, query: "" }); go("/lancamentos"); }}>
+        {exemplo ? `Ver ${mine.length} lançamentos` : "Abrir lançamentos reais"}<i className="ph ph-arrow-right" aria-hidden="true" /></button>}>
       <dl className="detail-facts">
         <div><dt>No mês</dt><dd className="num">{money0(total)}</dd></div>
         <div><dt>Compras</dt><dd className="num">{mine.length}</dd></div>

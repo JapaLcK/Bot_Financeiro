@@ -23,6 +23,8 @@ def _aviso_saldo(result: dict[str, Any]) -> str:
     if result["banks_excluded"]:
         return ("Seus bancos conectados não estão somados nesta simulação: ela usa só o saldo "
                 "da sua Carteira.")
+    if result.get('motivos'):
+        return 'Há dados ou compromissos a conferir. Os saldos são condicionais e não autorizam uma compra.'
     return ""
 
 

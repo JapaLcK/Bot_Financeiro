@@ -27,8 +27,11 @@ const rolagem = async (page) => (await assentar(page), page.evaluate(() => docum
 // No Resumo a lista rola por dentro: nenhuma categoria some e o bloco não transborda. Para cada
 // <li>: está no DOM, visível, e rolado até ele aparece inteiro dentro da lista. Espera as
 // transições: com `reducedMotion` o base.css dá 1ms a todas, e a troca do @container (min-height)
-// no meio do layout pega a lista no meio do `flex` (altura 0 por um quadro).
-const assentar = (page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))));
+// no meio do layout pega a lista no meio do `flex` (altura 0 por um quadro). A entrada só de
+// opacidade dos cards (~1,1 s) fica de fora: não mexe em geometria nenhuma.
+const assentar = (page) => page.evaluate(() => Promise.all(document.getAnimations()
+  .filter((a) => !a.effect?.getKeyframes().every((k) => Object.keys(k).every((p) => ["offset", "computedOffset", "easing", "composite", "opacity"].includes(p))))
+  .map((a) => a.finished.catch(() => {}))));
 const categorias = async (page) => (await assentar(page), page.evaluate(() => {
   const art = document.querySelector("#w-categorias");
   const ul = art.querySelector(".cats");

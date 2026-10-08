@@ -220,10 +220,10 @@ test("projeção permitida continua renderizando; erro de horizonte atual perman
   await page.evaluate(async () => {
     USER_GATES = gates("plus");
     document.getElementById("boleto-sim-date").value = "2026-10-20";
-    window.fetch = async () => ({ ok: true, json: async () => ({ projection: { target: "2026-10-20", projetado: 123, tranquilo: true } }) });
+    window.fetch = async () => ({ ok: true, json: async () => ({ projection: { target: "2026-10-20", projetado: 123, tranquilo: true, saldo_atual: 123, receitas_previstas: 0, gastos_fixos_previstos: 0, boletos_ate: 0, n_boletos: 0, faturas_cartao: 0, boleto_novo: 0, estado: "a_conferir", motivos: [{ codigo: "gastos_variaveis_nao_estimados" }], cabe_nas_premissas: false } }) });
     await simularPrazo();
   });
-  assert.match(await page.locator("#boleto-sim-result").textContent(), /Tranquilo até/);
+  assert.match(await page.locator("#boleto-sim-result").textContent(), /Saldo condicional até 20 de outubro: R\$ 123,00 · a conferir/);
   await page.evaluate(async () => {
     window.fetch = async () => ({ ok: false, status: 403, json: async () => ({ detail: { message: "Limite de 30 dias" } }) });
     await simularPrazo();
@@ -231,3 +231,92 @@ test("projeção permitida continua renderizando; erro de horizonte atual perman
   assert.equal(await page.locator("#boleto-sim-result").textContent(), "Limite de 30 dias");
   await page.close();
 });
+
+
+const projectionBase = {
+  target: "2026-10-20", saldo_atual: 200, receitas_previstas: 100,
+  gastos_fixos_previstos: 40, boletos_ate: 77, n_boletos: 1,
+  faturas_cartao: 10, boleto_novo: 50, projetado: 123, tranquilo: true,
+  estado: "a_conferir", motivos: [{ codigo: "gastos_variaveis_nao_estimados" }],
+  cabe_nas_premissas: false, balance_source: "manual", banks_excluded: false,
+};
+const projectionCases = [
+  ["positivo a conferir", {}, "R$ 123,00"],
+  ["negativo a conferir", { saldo_atual: -46, projetado: -123, tranquilo: false }, "R$ -123,00"],
+  ["zero disponível", { saldo_atual: 77, projetado: 0 }, "R$ 0,00"],
+  ["base indisponível", { saldo_atual: null, projetado: null, receitas_previstas: null, gastos_fixos_previstos: null, estado: "indisponivel", tranquilo: false, balance_source: "unavailable" }, "Indisponível"],
+  ["condicional sem motivos", { estado: "condicional", motivos: [] }, "R$ 123,00"],
+  ["final positivo com percurso negativo", { minimo_percurso: -100 }, "R$ 123,00"],
+];
+
+for (const [name, changes, value] of projectionCases) {
+  test(`projeção condicional pelo loader: ${name}`, async () => {
+    const page = await viewPage("fixed");
+    const projection = { ...projectionBase, ...changes };
+    await page.evaluate(() => { document.getElementById("recurring-bills-pane").style.display = "block"; });
+    await page.locator("#boleto-sim-amount").focus();
+    const rendered = await page.evaluate(async projection => {
+      USER_GATES = gates("plus");
+      document.getElementById("boleto-sim-date").value = projection.target;
+      document.getElementById("boleto-sim-amount").value = "50";
+      window.fetch = async url => { calls.push(url); return { ok: true, json: async () => ({ projection }) }; };
+      await simularPrazo();
+      const box = document.getElementById("boleto-sim-result").firstElementChild;
+      return {
+        text: box.textContent, title: box.firstElementChild.textContent,
+        background: box.style.background, border: box.style.border,
+        titleColor: box.firstElementChild.style.color,
+        rows: [...box.children].filter(row => row.children.length === 2 && row.children[0].tagName === "SPAN")
+          .map(row => ({ label: row.children[0].textContent, value: row.children[1].textContent, color: row.children[1].style.color })),
+        focus: document.activeElement.id, calls: [...calls],
+      };
+    }, projection);
+    assert.match(rendered.title, /20 de outubro/);
+    assert.ok(rendered.title.includes(value), rendered.title);
+    assert.equal(rendered.background, "var(--bg-elev-2)");
+    assert.equal(rendered.border, "1px solid var(--border)");
+    assert.equal(rendered.titleColor, "var(--text)");
+    assert.doesNotMatch(rendered.text, /Tranquilo|sobra|Aperta|falta R\$|gastos_variaveis_nao_estimados|minimo_percurso/);
+    assert.match(rendered.text, /faturas.*Não inclui estimativa variável nem autoriza uma compra/s);
+    const rows = Object.fromEntries(rendered.rows.map(row => [row.label, row]));
+    assert.equal(rows["Projeção do caixa"].value, value);
+    assert.equal(rows["Projeção do caixa"].color, "var(--text)");
+    assert.equal(rows["Boletos até lá (1)"].value, "− R$ 77,00");
+    assert.equal(rows["Faturas de cartão até lá"].value, "− R$ 10,00");
+    assert.equal(rows["Boleto novo em análise"].value, "− R$ 50,00");
+    if (projection.estado === "indisponivel") {
+      for (const label of ["Saldo hoje", "Receitas previstas", "Gastos fixos"]) assert.equal(rows[label].value, "Indisponível");
+      assert.doesNotMatch(rendered.text, /R\$ 0,00|NaN|Infinity/);
+      // A ausência e valores não finitos também são desconhecidos, sem zerar somas conhecidas.
+      for (const unknown of [undefined, NaN, Infinity]) {
+        const result = await page.evaluate(async ({ projection, unknown }) => {
+          window.fetch = async () => ({ ok: true, json: async () => ({ projection: {
+            ...projection, estado: "a_conferir", projetado: unknown, saldo_atual: unknown,
+            receitas_previstas: unknown, gastos_fixos_previstos: unknown,
+          } }) });
+          await simularPrazo();
+          return document.getElementById("boleto-sim-result").textContent;
+        }, { projection, unknown });
+        assert.match(result, /Indisponível/);
+        assert.doesNotMatch(result, /R\$ 0,00|NaN|Infinity/);
+        assert.match(result, /− R\$ 77,00/);
+      }
+    } else {
+      assert.match(rendered.title, /Saldo condicional/);
+      assert.equal(rendered.title.includes("a conferir"), projection.estado === "a_conferir");
+      assert.equal(rows["Saldo hoje"].value, projection.saldo_atual < 0 ? "− R$ 46,00" : `+ R$ ${projection.saldo_atual},00`);
+      assert.equal(rows["Receitas previstas"].value, "+ R$ 100,00");
+      assert.equal(rows["Gastos fixos"].value, "− R$ 40,00");
+      if (projection.minimo_percurso < 0) {
+        assert.match(rendered.text, /saldo positivo no alvo não garante caixa positivo no percurso/);
+        assert.doesNotMatch(rendered.text, /100,00.*percurso|mínimo/i);
+      }
+    }
+    assert.equal(rendered.focus, "boleto-sim-amount");
+    assert.ok(rendered.calls.some(url => url.endsWith("projection?date=2026-10-20&amount=50")));
+    assert.equal(await page.locator("#boleto-sim-date").inputValue(), "2026-10-20");
+    assert.equal(await page.locator("#boleto-sim-amount").inputValue(), "50");
+    assert.deepEqual(page.__errs, []);
+    await page.close();
+  });
+}

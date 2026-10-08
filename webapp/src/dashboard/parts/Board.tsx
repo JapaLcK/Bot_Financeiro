@@ -26,6 +26,7 @@ import { Yield } from "../widgets/Yield";
 import { Installments } from "../widgets/Installments";
 import { Subscriptions } from "../widgets/Subscriptions";
 import { Contas } from "../widgets/Contas";
+import { PrevisaoCard } from "../widgets/Previsao";
 import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
@@ -57,7 +58,7 @@ const KNOWN = ALL.map((w) => w.id);
 const ITEM = new Map(ALL.map((w) => [w.id, w]));
 
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
-  contas: () => <Contas />, hero: Hero, resumo: MonthStats,
+  contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
   categorias: Categories, calendario: Calendar, simulador: Simulator,
   compromissos: Bills, piggy: Piggy, metas: Goals, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,

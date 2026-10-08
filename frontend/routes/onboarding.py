@@ -19,11 +19,13 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from core.services.pluggy import pluggy_products
 from db import (
     get_onboarding_state,
     mark_onboarding_completed,
     set_onboarding_step,
 )
+from db.open_finance_onboarding import get_open_finance_onboarding
 from frontend.routes import shared
 
 router = APIRouter()
@@ -50,7 +52,9 @@ class OnboardingStatePayload(BaseModel):
 async def onboarding_state_route(request: Request):
     user_id = shared.resolve_dashboard_user_id(request)
     state = await asyncio.to_thread(get_onboarding_state, user_id)
-    return {**state, "total_steps": TOTAL_STEPS}
+    # `of_produtos`: o que o connect token pede à Pluggy; o passo 2 lista isso
+    # como o que o PigBank lê do banco (texto de consentimento, não pode divergir).
+    return {**state, "total_steps": TOTAL_STEPS, "of_produtos": pluggy_products()}
 
 
 @router.post("/onboarding/state")
@@ -72,8 +76,12 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
     if payload.step is not None:
         await asyncio.to_thread(set_onboarding_step, user_id, int(payload.step))
 
+    # Só a chamada que CARIMBOU conta como conclusão no funil: duplo clique,
+    # retentativa ou revisita ao passo 5 regravam `completed` e não podem
+    # inflar o `onboarding_completed` (o UPDATE já é idempotente; o log não era).
+    stamped = False
     if payload.completed:
-        await asyncio.to_thread(mark_onboarding_completed, user_id)
+        stamped = await asyncio.to_thread(mark_onboarding_completed, user_id)
 
     # Telemetria por último e sem poder derrubar a escrita acima: perder um
     # evento de funil é barato, perder o progresso do usuário não é.
@@ -90,7 +98,7 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
                 user_id=user_id,
                 details={"step": int(payload.step)},
             )
-        if payload.completed:
+        if stamped:
             await log_system_event(
                 "info",
                 "onboarding_completed",
@@ -103,4 +111,13 @@ async def update_onboarding_state_route(request: Request, payload: OnboardingSta
         pass
 
     state = await asyncio.to_thread(get_onboarding_state, user_id)
-    return {**state, "total_steps": TOTAL_STEPS}
+    # `stamped`: o cliente dispara a conversão (Pixel/GA4) só com o True, uma
+    # vez por conta — revisita e retentativa recebem False.
+    return {**state, "total_steps": TOTAL_STEPS, "stamped": stamped}
+
+
+@router.get("/onboarding/open-finance")
+async def open_finance_onboarding_route(request: Request):
+    """Reconcilia prova do servidor; não concede conclusão alegada pelo app."""
+    user_id = shared.resolve_dashboard_user_id(request)
+    return await asyncio.to_thread(get_open_finance_onboarding, user_id)

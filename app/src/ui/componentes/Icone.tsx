@@ -23,7 +23,27 @@ export type NomeIcone =
   | "Envelope"
   | "Lock"
   | "ArrowLeft"
-  | "GoogleLogo";
+  | "GoogleLogo"
+  | "Eye"
+  | "EyeSlash"
+  | "UserCircle"
+  | "CaretDown"
+  | "ArrowUp"
+  | "ArrowDown"
+  | "Minus"
+  | "Plus"
+  | "ChartBar"
+  | "ChatCircle"
+  | "Target"
+  | "ListBullets"
+  | "House"
+  | "SlidersHorizontal"
+  | "X"
+  | "ArrowSquareOut"
+  | "PiggyBank"
+  | "Gear"
+  | "CalendarBlank"
+  | "ArrowsClockwise";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -52,6 +72,27 @@ function resolver(mod: unknown, nomeado: string): ComponenteIcone {
 }
 
 const ICONES: Record<NomeIcone, ComponenteIcone> = {
+  Eye: resolver(require("phosphor-react-native/src/icons/Eye"), "EyeIcon"),
+  EyeSlash: resolver(require("phosphor-react-native/src/icons/EyeSlash"), "EyeSlashIcon"),
+  UserCircle: resolver(require("phosphor-react-native/src/icons/UserCircle"), "UserCircleIcon"),
+  CaretDown: resolver(require("phosphor-react-native/src/icons/CaretDown"), "CaretDownIcon"),
+  ArrowUp: resolver(require("phosphor-react-native/src/icons/ArrowUp"), "ArrowUpIcon"),
+  ArrowDown: resolver(require("phosphor-react-native/src/icons/ArrowDown"), "ArrowDownIcon"),
+  Minus: resolver(require("phosphor-react-native/src/icons/Minus"), "MinusIcon"),
+  Plus: resolver(require("phosphor-react-native/src/icons/Plus"), "PlusIcon"),
+  ChartBar: resolver(require("phosphor-react-native/src/icons/ChartBar"), "ChartBarIcon"),
+  ChatCircle: resolver(require("phosphor-react-native/src/icons/ChatCircle"), "ChatCircleIcon"),
+  Target: resolver(require("phosphor-react-native/src/icons/Target"), "TargetIcon"),
+  ListBullets: resolver(require("phosphor-react-native/src/icons/ListBullets"), "ListBulletsIcon"),
+  House: resolver(require("phosphor-react-native/src/icons/House"), "HouseIcon"),
+  SlidersHorizontal: resolver(require("phosphor-react-native/src/icons/SlidersHorizontal"), "SlidersHorizontalIcon"),
+  X: resolver(require("phosphor-react-native/src/icons/X"), "XIcon"),
+  ArrowSquareOut: resolver(require("phosphor-react-native/src/icons/ArrowSquareOut"), "ArrowSquareOutIcon"),
+  PiggyBank: resolver(require("phosphor-react-native/src/icons/PiggyBank"), "PiggyBankIcon"),
+  Gear: resolver(require("phosphor-react-native/src/icons/Gear"), "GearIcon"),
+  CalendarBlank: resolver(require("phosphor-react-native/src/icons/CalendarBlank"), "CalendarBlankIcon"),
+  ArrowsClockwise: resolver(require("phosphor-react-native/src/icons/ArrowsClockwise"), "ArrowsClockwiseIcon"),
+
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
   Wallet: resolver(require("phosphor-react-native/src/icons/Wallet"), "WalletIcon"),
   Bell: resolver(require("phosphor-react-native/src/icons/Bell"), "BellIcon"),

@@ -27,6 +27,10 @@ export const perfilSchema = z.object({
   display_name: z.string().nullable().optional(),
   plan: z.string().nullable().optional(),
   app_access: z.boolean().optional(),
+  history_earliest_date: z.iso.date().nullable().optional(),
+  of_banks_max: z.number().int().nullable().optional(),
+  cobranca_em_atraso: z.boolean().optional(),
+  precisa_criar_senha: z.boolean().optional(),
 });
 
 /**

@@ -1,3 +1,4 @@
+from _cashflow_helpers import compactar
 """Trajetória diária de saldo projetado (feature Pro): série, compromissos no
 dia certo, vencidos e o limite de segurança.
 """
@@ -46,7 +47,7 @@ def test_daily_trajectory_compromisso_no_dia_certo(monkeypatch):
     due_date = today + timedelta(days=offset)
     expense = {
         "is_active": True, "payment_mode": "autopay", "frequency": "monthly",
-        "due_day": due_date.day, "due_month": None, "start_date": None,
+        "due_day": due_date.day, "due_month": None, "start_date": date.today(),
         "amount": 300.0, "name": "Aluguel",
     }
     cf = _mock_sources(monkeypatch, saldo=1000.0, expenses=[expense])
@@ -54,10 +55,10 @@ def test_daily_trajectory_compromisso_no_dia_certo(monkeypatch):
 
     hit = out["trajectory"][offset - 1]
     assert hit["date"] == due_date.isoformat()
-    assert hit["compromissos"] == [{"tipo": "gasto_fixo", "nome": "Aluguel", "valor": 300.0}]
+    assert compactar(hit["compromissos"]) == [{"tipo": "gasto_fixo", "nome": "Aluguel", "valor": 300.0}]
     for i, item in enumerate(out["trajectory"]):
         if i != offset - 1:
-            assert item["compromissos"] == []
+            assert compactar(item["compromissos"]) == []
 
 
 # 5) forecast_with_trajectory — boleto vencido não entra na série nem nas causas, pesa no
@@ -78,13 +79,13 @@ def test_daily_trajectory_boleto_vencido_pesa_no_saldo_e_vai_para_vencidos(monke
     # Ordem de data, mais antigo primeiro, com tipos misturados: a fatura atrasada
     # há 30 dias vem antes dos boletos (a fonte a entrega por último). Empate de
     # data mantém a ordem da fonte (Telefone antes de Gás).
-    assert out["vencidos"] == [
+    assert compactar(out["vencidos"], data=True) == [
         {"date": (today - timedelta(days=30)).isoformat(), "tipo": "fatura_cartao", "nome": "Nubank", "valor": 400.0},
         {"date": ontem.isoformat(), "tipo": "boleto", "nome": "Telefone", "valor": 30.0},
         {"date": ontem.isoformat(), "tipo": "boleto", "nome": "Gás", "valor": 20.0},
     ]
     # Vence hoje não é vencido (`due_date < hoje`, db/bills.py): lista própria, mesmo peso no saldo.
-    assert out["vencem_hoje"] == [{"date": today.isoformat(), "tipo": "boleto", "nome": "Água", "valor": 200.0}]
+    assert compactar(out["vencem_hoje"], data=True) == [{"date": today.isoformat(), "tipo": "boleto", "nome": "Água", "valor": 200.0}]
     nomes_na_serie = {c["nome"] for item in out["trajectory"] for c in item["compromissos"]}
     assert nomes_na_serie == {"Luz"}
     assert [c["nome"] for c in out["worst_day"]["causas"]] == ["Luz"]
@@ -98,7 +99,7 @@ def test_daily_trajectory_sem_aperto_quando_tudo_acima_do_limite(monkeypatch):
     expense = {
         "is_active": True, "payment_mode": "autopay", "frequency": "monthly",
         "due_day": (date.today() + timedelta(days=5)).day, "due_month": None,
-        "start_date": None, "amount": 50.0, "name": "Internet",
+        "start_date": date.today(), "amount": 50.0, "name": "Internet",
     }
     cf = _mock_sources(monkeypatch, saldo=10_000.0, expenses=[expense])
     out = forecast_with_trajectory(1, days=90, threshold=0.0)

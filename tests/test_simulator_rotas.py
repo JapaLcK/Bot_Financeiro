@@ -52,7 +52,7 @@ def test_gate_so_libera_o_tier_pro(cliente, plan, status):
         assert r.json()["detail"] == {"error": "pro_required", "feature": "simulator"}
     else:
         sim = r.json()["simulacao"]
-        assert set(sim) == {"today", "balance_source", "banks_excluded", "reserva_minima", "atual", "cenarios", "premissas"}
+        assert set(sim) == {"today", "balance_source", "banks_excluded", "reserva_minima", "atual", "cenarios", "premissas", "estado", "motivos", "cobertura", "calculado_em", "valido_ate", "cabe_nas_premissas", "orientacao"}
         assert "trajectory" not in json.dumps(sim)
         contrato = sim["cenarios"][0]["contrato"]
         # entrada 36.000 + 48 parcelas (202.606,84) + custos únicos 2.500
@@ -243,19 +243,20 @@ def test_tool_simula_o_user_da_conversa_e_nunca_um_id_vindo_dos_args(cliente, mo
     (None, True, True, "Não foi possível confirmar seu saldo consolidado"),
 ])
 def test_tool_avisa_quando_o_saldo_de_partida_nao_e_o_consolidado(cliente, monkeypatch, cb, gate, erro, esperado):
-    import db
-    import core.services.plan_service as plan_service
+    from datetime import date,datetime,timezone
+    from decimal import Decimal
+    from core.services.cashflow_snapshot import Snapshot,Motivo
+    import core.services.decision_simulator as ds
     from core.services.ai_chat import runner
-
-    def consolidado(uid):
-        if erro:
-            raise RuntimeError("OF fora do ar")
-        return dict(cb)
-    monkeypatch.setattr(db, "get_consolidated_balance", consolidado, raising=False)
-    monkeypatch.setattr(plan_service, "consolidated_balance_enabled", lambda uid, email=None: gate)
+    # O seam é agora Snapshot; nunca reintroduzir o getter consolidado removido.
+    base={'saldo':None if erro else Decimal(str(cb['consolidated'] if gate else cb['manual'])),
+          'balance_source':'unavailable' if erro else 'consolidated' if gate else 'manual',
+          'of_bank_count':0 if erro else cb['of_bank_count'],'banks_excluded':bool(cb and not gate)}
+    monkeypatch.setattr(ds,'carregar',lambda uid,today,until:Snapshot(today,datetime.now(timezone.utc),base,
+           motivos=[Motivo('gastos_variaveis_nao_estimados','so_melhora')]))
     out = json.loads(runner._dispatch_tool(1, "simulate_purchase", dict(VALIDO))[0])
     if esperado:
         assert esperado in out["aviso_saldo"], out["aviso_saldo"]
     else:
-        assert out["aviso_saldo"] == "" and out["balance_source"] == "consolidated"
+        assert "condicionais" in out["aviso_saldo"] and out["balance_source"] == "consolidated"
     assert "aviso_saldo" in out["note"]  # a note manda repetir o aviso

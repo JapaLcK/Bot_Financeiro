@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 
 # Dedupe por marcador em `system_event_logs` (mesmo par leitura/escrita do
 # `engagement_scheduler`), porque a tarefa roda a cada 6 h e sem isto o mesmo
-# aviso sairia 4x por dia enquanto a condição durar. 7 d é o mesmo horizonte de
-# `list_connections_needing_reconnect(within_days=7)`; 25 d dá um aviso por mês
+# aviso sairia 4x por dia enquanto a condição durar. 7 d: um "reconecte" por
+# semana enquanto a tela pedir ação (o antigo `within_days=7` saiu no PR-D da
+# Onda 5, junto com a perna do consentimento); 25 d dá um aviso por mês
 # de salário e pega o mês seguinte com 28-31 d (decisão do dono: uma vez por mês).
 OF_RECONNECT_EVENT = "of_reconnect_template_sent"
 OF_RECONNECT_DEDUPE_DAYS = 7.0
@@ -102,7 +103,7 @@ def run_salary_notifications() -> dict:
 
 
 def run_reconnect_notifications() -> dict:
-    """Avisa usuários cujos bancos estão em erro / com consentimento vencendo. Dormente sem template."""
+    """Avisa usuários cujos bancos a tela manda reconectar (`avisa_reconectar`). Dormente sem template."""
     cfg = _template_cfg("OF_RECONNECT_TEMPLATE_NAME")
     if not cfg:
         return {"ok": True, "dormant": True, "sent": 0}

@@ -14,7 +14,7 @@ import { prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 
 declare const global: typeof globalThis & { __dispararAppState: (v: string) => void; __definirAppState: (v: string) => void };
 
-const OLA = "Olá, S";
+const OLA = "Bom dia, S";
 const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };

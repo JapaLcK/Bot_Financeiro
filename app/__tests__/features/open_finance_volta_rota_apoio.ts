@@ -1,6 +1,6 @@
 /** Apoio dos dois arquivos da rota `open-finance-volta` (`renderRouter("./app")`). */
 import * as LA from "expo-local-authentication";
-import { act } from "expo-router/testing-library";
+import { act, screen } from "expo-router/testing-library";
 
 import { INTERVALO_MS } from "@/features/openFinance/volta";
 
@@ -8,10 +8,22 @@ import { chamadas, resposta, rotear, type Rota } from "./auth_apoio";
 
 export const A = "item_a";
 export const B = "item_b";
-const conexao = (id: string) => ({ provider_item_id: id, institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } });
+const conexao = (id: string) => ({ id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-05T12:00:00Z", reconnected_at: null, provider_item_id: id, institution_name: "Nubank", ui: { state: "updated", label: "Atualizado", detail: null } });
 export const lista = (...ids: string[]) => resposta(200, { ok: true, connections: ids.map(conexao) });
 export const atualizando = (id: string) =>
   resposta(200, { ok: true, connections: [{ ...conexao(id), ui: { state: "updating", label: "Atualizando…", detail: null } }] });
+
+const ESPERA = "Organizando seus dados";
+const FINAL = "Conectando seu banco";
+/**
+ * O título VISÍVEL (`getByText`; o rótulo da barra também diz "Organizando seus
+ * dados", mas é `accessibilityLabel`, não texto). `espera` = trava, conferindo,
+ * `updating` e `organizando`; os demais estados são "Conectando seu banco".
+ */
+export function titulo(espera: boolean, opcoes?: { includeHiddenElements: boolean }) {
+  expect(screen.getByText(espera ? ESPERA : FINAL, opcoes)).toBeTruthy();
+  expect(screen.queryByText(espera ? FINAL : ESPERA, opcoes)).toBeNull();
+}
 
 /** Sem `setTimeout(0)` dentro de `act` (ver `layout.test.tsx`): microtarefas à mão. */
 export const drenar = async () => {

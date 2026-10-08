@@ -25,11 +25,11 @@ def q(sql, a=(), fetch=False):
     return r
 
 
-def conexao(uid, item, status="UPDATED", sync=AGORA, tentativa=None) -> int:
+def conexao(uid, item, status="UPDATED", sync=AGORA, tentativa=None, banco="Banco") -> int:
     return q("""insert into open_finance_connections (user_id, provider, provider_item_id, status,
                     institution_id, institution_name, last_sync_at, last_attempt_at)
-                values (%s, 'pluggy', %s, %s, '1', 'Banco', %s, %s) returning id""",
-             (uid, item, status, sync, tentativa))["id"]
+                values (%s, 'pluggy', %s, %s, '1', %s, %s, %s) returning id""",
+             (uid, item, status, banco, sync, tentativa))["id"]
 
 
 def conta(cid, pid, saldo, moeda="BRL", code="BRL") -> int:
@@ -41,13 +41,14 @@ def conta(cid, pid, saldo, moeda="BRL", code="BRL") -> int:
              (cid, pid, moeda, saldo, Jsonb(raw), AGORA))["id"]
 
 
-def posicao(cid, pid, saldo, moeda="BRL", status=None, code="BRL") -> int:
+def posicao(cid, pid, saldo, moeda="BRL", status=None, code="BRL",
+            tipo="FIXED_INCOME", subtipo=None) -> int:
     raw = {k: v for k, v in (("currencyCode", code), ("status", status)) if v}
     raw["balance"] = None if saldo is None else float(saldo)  # a Pluggy manda número
     return q("""insert into open_finance_investments (connection_id, provider_investment_id, name,
-                    type, currency, balance, raw, updated_at)
-                values (%s, %s, 'CDB', 'FIXED_INCOME', %s, %s, %s, %s)
-                returning id""", (cid, pid, moeda, saldo, Jsonb(raw), AGORA))["id"]
+                    type, subtype, currency, balance, raw, updated_at)
+                values (%s, %s, 'CDB', %s, %s, %s, %s, %s, %s)
+                returning id""", (cid, pid, tipo, subtipo, moeda, saldo, Jsonb(raw), AGORA))["id"]
 
 
 def caixinha(uid, nome, saldo, of_investment_id=None):

@@ -2165,6 +2165,8 @@ def init_db():
         # configuração.
         """alter table auth_accounts add column if not exists onboarding_completed_at timestamptz default now()""",
         """alter table auth_accounts alter column onboarding_completed_at drop default""",
+        # Marco bancário: só prova de sync real promove; sem backfill do wizard.
+        """alter table auth_accounts add column if not exists open_finance_onboarding_completed_at timestamptz""",
         # Passo em que o usuário parou, pra retomar de onde fechou em vez de
         # recomeçar. Não precisa do truque acima: 0 serve pra todo mundo, porque
         # quem já está carimbado em onboarding_completed_at nunca lê esta coluna.
@@ -2235,6 +2237,8 @@ def init_db():
           id bigserial primary key,
           user_id bigint references users(id) on delete set null,
           session_id text,
+          -- só os 2 kinds originais: a lista VIVA (4 kinds) é a do drop+add de
+          -- `checkout_funnel_events_kind_check` mais abaixo.
           kind text not null check (kind in ('started', 'completed')),
           created_at timestamptz not null default now()
         )
@@ -2279,6 +2283,21 @@ def init_db():
         create unique index if not exists uniq_checkout_funnel_sessao_completed
           on checkout_funnel_events (session_id)
           where session_id is not null and kind = 'completed'
+        """,
+        # Telemetria do topo/fim do funil: `viewed_pricing` (GET /precos de
+        # usuário logado, 1 por 24h) e `expired` (webhook
+        # checkout.session.expired). O check inline do create table acima só
+        # conhece os 2 kinds originais: este drop+add é quem vale (a unique
+        # parcial de `completed` não muda). `not valid`: não varre linha legada.
+        """alter table checkout_funnel_events
+             drop constraint if exists checkout_funnel_events_kind_check""",
+        """alter table checkout_funnel_events
+             add constraint checkout_funnel_events_kind_check
+             check (kind in ('started', 'completed', 'viewed_pricing', 'expired'))
+             not valid""",
+        """
+        create index if not exists idx_checkout_funnel_user_kind_created
+          on checkout_funnel_events (user_id, kind, created_at desc)
         """,
 
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
@@ -2929,6 +2948,11 @@ def init_db():
           feitos jsonb not null default '{}'
         )
         """,
+        # `dicas` = {dica_id: carimbo da 1ª vez que a dica de tela apareceu} (`POST
+        # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
+        # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
+        # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

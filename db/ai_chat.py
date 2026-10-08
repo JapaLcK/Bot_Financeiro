@@ -176,7 +176,9 @@ def set_pending_action(
     Grava uma ação pendente. Apenas uma por user (upsert) — se já existe,
     sobrescreve.
     """
+    from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
+        anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
             """
             insert into ai_pending_actions (user_id, tool_name, tool_args, summary, created_at)
@@ -189,6 +191,8 @@ def set_pending_action(
             """,
             (int(user_id), tool_name, json.dumps(tool_args), summary),
         )
+        if cur.rowcount:
+            avisar_mudanca_financeira(cur, user_id, anterior, (tool_name, tool_args), ia=True)
         conn.commit()
 
 
@@ -222,6 +226,9 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
                 "delete from ai_pending_actions where user_id = %s",
                 (int(user_id),),
             )
+            if cur.rowcount:
+                from .pending import avisar_mudanca_financeira
+                avisar_mudanca_financeira(cur, user_id, (tool_name, tool_args), None, ia=True)
             conn.commit()
             return None
 
@@ -234,11 +241,15 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
 
 
 def clear_pending_action(user_id: int) -> None:
+    from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
+        anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
             "delete from ai_pending_actions where user_id = %s",
             (int(user_id),),
         )
+        if cur.rowcount:
+            avisar_mudanca_financeira(cur, user_id, anterior, None, ia=True)
         conn.commit()
 
 
@@ -263,12 +274,16 @@ def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
     - **abandono por mudança de assunto** — ignora o retorno: não há resposta
       a corrigir, a mensagem nova é atendida igual.
     """
+    from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
+        anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
             "delete from ai_pending_actions where user_id = %s and created_at = %s",
             (int(user_id), pending.get("created_at")),
         )
         apagou = cur.rowcount == 1
+        if apagou:
+            avisar_mudanca_financeira(cur, user_id, anterior, None, ia=True)
         conn.commit()
         return apagou
 

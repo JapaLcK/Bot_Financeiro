@@ -4,7 +4,7 @@ import { ActivityIndicator, Platform, View } from "react-native";
 import { continuarComApple } from "@/features/auth/apple";
 import { tocar, type EstadoEntrar } from "@/features/auth/entrar";
 import { continuarComGoogle } from "@/features/auth/google";
-import { ALTURA, Button } from "@/ui/componentes/Button";
+import { ALTURA, ALTURA_ACESSO, Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
 import { espaco, raio } from "@/ui/tokens";
@@ -19,7 +19,7 @@ interface Props {
 
 /** "Continuar com Google" e o botão da Apple, os mesmos no Entrar e na Boas-vindas. */
 export function BotoesSociais({ estado, aplicar, autenticar, bloqueado = false }: Props) {
-  const { cores, esquema } = useTema();
+  const { cores, esquema, acesso } = useTema();
   const google = estado.fase === "google";
   const apple = estado.fase === "apple";
   const ocupado = bloqueado || google || apple;
@@ -58,7 +58,7 @@ export function BotoesSociais({ estado, aplicar, autenticar, bloqueado = false }
                   : AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE
               }
               cornerRadius={raio.md}
-              style={{ height: ALTURA.M }}
+              style={{ height: acesso ? ALTURA_ACESSO.M : ALTURA.M }}
               onPress={() => {
                 // A antes de `tocar()`, pelo mesmo motivo do Entrar (B1).
                 aplicar({ fase: "apple" });

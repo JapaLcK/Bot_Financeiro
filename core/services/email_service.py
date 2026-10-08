@@ -1154,37 +1154,32 @@ def send_pro_welcome_email(to: str, plan: str, trial_end_at, dashboard_url: str 
 def send_ebook_email(to: str, url: str, dashboard_url: str = "", nome: str | None = "") -> bool:
     """Produto comprado na /assinar — o job `core/services/ebook_entrega.py`
     chama depois que a conta provou o e-mail, um e-mail por produto.
-    Transacional (sem unsub). Copy aprovada pelo dono (D1, 2026-10-02). `nome` é
-    o nome do produto no Stripe (escapado no HTML); vazio vira "seu e-book". A
-    `url` é a foto da compra: escapada no HTML (link do Drive tem `&`), crua no
-    texto, e nunca em log."""
+    Transacional (sem unsub), com cara de recibo: um botão, sem divulgação e
+    assunto sem emoji — a versão anterior caía na aba Promoções do Gmail (copy
+    aprovada pelo dono em 2026-10-04). `nome` é o nome do produto no Stripe
+    (escapado no HTML); vazio vira "Seu caderno chegou". A `url` é a foto da
+    compra: escapada no HTML (link do Drive tem `&`), crua no texto, e nunca em
+    log. `dashboard_url` ficou sem uso; mantido pela assinatura dos chamadores."""
     import html as _htmlmod
-    dash = (dashboard_url or _public_base_url()).rstrip("/")
     u = _htmlmod.escape(url, quote=True)
-    nome = (nome or "").strip() or "seu e-book"
-    n = _htmlmod.escape(nome)
+    nome = (nome or "").strip()
+    titulo = f"Seu caderno: {nome}" if nome else "Seu caderno chegou"
+    n = _htmlmod.escape(nome or "seu caderno")
     content = f"""
-      <p>🐷 Oi! Aqui é o Piggy. Sua compra tá liberada: <b>{n}</b>. É só tocar no botão pra baixar:</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar agora</a></p>
-      <p style="font-size:13px">Se o botão não abrir, copia e cola este link no navegador: <a href="{u}">{u}</a></p>
-      <p>Dica: salva o arquivo no celular e lê quando quiser, até sem internet.</p>
-      <p>Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no WhatsApp e acompanha tudo no painel.</p>
-      <p style="text-align:center;margin:24px 0"><a class="btn" href="{dash}/app">Abrir meu painel</a></p>
+      <p>Oi! Sua compra está liberada: <b>{n}</b>.</p>
+      <p style="text-align:center;margin:24px 0"><a class="btn" href="{u}">Baixar o PDF</a></p>
+      <p style="font-size:13px">Se o botão não abrir, copie e cole este link no navegador: <a href="{u}">{u}</a></p>
+      <p>Dica: salve o arquivo no celular para ler quando quiser, até sem internet.</p>
+      <p style="font-size:13px">Este e-mail é o comprovante da sua compra no PigBank.</p>
     """
-    html = _base_html(f"Chegou: {n}", content)
+    html = _base_html(_htmlmod.escape(titulo), content)
     text = (
-        f"🐷 Oi! Aqui é o Piggy. Sua compra tá liberada: {nome}. "
-        "É só abrir o link pra baixar:\n"
-        f"{url}\n\n"
-        "Dica: salva o arquivo no celular e lê quando quiser, até sem internet.\n\n"
-        "Enquanto isso, o PigBank segue cuidando do resto: manda seus gastos no "
-        "WhatsApp e acompanha tudo no painel.\n"
-        f"Abrir meu painel: {dash}/app"
+        f"Oi! Sua compra está liberada: {nome or 'seu caderno'}.\n\n"
+        f"Baixar o PDF: {url}\n\n"
+        "Dica: salve o arquivo no celular para ler quando quiser, até sem internet.\n\n"
+        "Este e-mail é o comprovante da sua compra no PigBank."
     )
-    return send_email(
-        to=to, subject=f"📘 Chegou: {nome}",
-        html_body=html, text_body=text,
-    )
+    return send_email(to=to, subject=titulo, html_body=html, text_body=text)
 
 
 def send_trial_ending_email(to: str, plan: str, trial_end_at, dashboard_url: str = "") -> bool:

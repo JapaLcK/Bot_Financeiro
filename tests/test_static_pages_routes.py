@@ -31,6 +31,8 @@ HTML_PAGES = [
     "/comandos-app",
     "/como-funciona",
     "/precos",
+    "/lp",
+    "/vsl",
     "/continuar-compra",
     "/suporte",
 ]
@@ -254,6 +256,27 @@ def test_robots_txt():
     assert "Disallow: /assinar\n" in resp.text
     assert "Disallow: /q\n" in resp.text
     assert "Sitemap:" in resp.text
+
+
+def test_lp_landing_de_anuncio():
+    resp = client.get("/lp")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert resp.headers["cache-control"] == "no-store"
+    assert '<meta name="robots" content="noindex"/>' in resp.text
+    # brand.css vem embutido: sem a viagem de rede bloqueante e sem o <link>.
+    assert 'data-pb-inline="brand.css"' in resp.text
+    assert 'href="/brand.css' not in resp.text
+
+
+def test_vsl_e_a_lp_com_o_botao_para_a_precos():
+    resp = client.get("/vsl")
+    assert len(resp.content) == int(resp.headers["content-length"])
+    lp, vsl = client.get("/lp").text, resp.text
+    assert 'id="lp-cta" class="lp-cta" href="https://quiz.pigbankai.com/"' in lp
+    assert 'id="lp-cta" class="lp-cta" href="/precos"' in vsl
+    assert "quiz.pigbankai.com" not in vsl
+    assert vsl.replace('href="/precos"', "") == lp.replace('href="https://quiz.pigbankai.com/"', "")
 
 
 def test_assinar_e_seus_assets():

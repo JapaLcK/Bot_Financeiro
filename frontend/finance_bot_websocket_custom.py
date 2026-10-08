@@ -42,9 +42,9 @@ from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import uvicorn
 from pydantic import BaseModel, Field, model_validator
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
+from core.client_ip import client_ip as ip_cliente, rate_limit_key
 from token_utils import decode_dashboard_token_full, make_dashboard_token, motivo_jwt_secret_fraco
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
@@ -119,6 +119,7 @@ from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_venen
 from core.secure_compare import constant_time_eq
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
+from api.nativo.app import app as api_nativo_app
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
@@ -1801,6 +1802,24 @@ async def _open_finance_refresh():
             print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
 
 
+async def _tarefa_fk_indexes():
+    # Índices das FKs (#253), CONCURRENTLY: espera as transações em voo, o que
+    # não cabe no wait_for (STARTUP_STEP_TIMEOUT) do init_db. Tarefa de fundo,
+    # uma vez por boot. Logger e não print: o `_DashboardHandler` do root grava
+    # WARNING em `system_event_logs`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.schema_repairs import ensure_fk_indexes_once  # noqa: PLC0415
+        falhou = await asyncio.to_thread(ensure_fk_indexes_once)
+        if falhou is None:
+            log.info("[fk_indexes] outro processo está construindo; nada a fazer aqui")
+        else:
+            log.info("[fk_indexes] terminou; índices não criados: %s", falhou or "nenhum")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[fk_indexes] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2224,6 +2243,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
             ]
         )
     else:
@@ -2604,7 +2624,7 @@ async def _check_auth_rate_limits(action: str, request: Request, email: str) -> 
         return
 
     max_attempts, window_seconds = limit
-    client_ip = get_remote_address(request)
+    client_ip = rate_limit_key(request)
     await _check_persistent_rate_limit(
         action,
         f"ip:{client_ip}",
@@ -2804,7 +2824,7 @@ def _issue_session_token(user_id: int, email: str, request: Request) -> tuple[st
     """
     from core.refresh_tokens import create_refresh_token
 
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     jti = create_session(user_id, ip=ip, user_agent=ua)
     access = _make_jwt(user_id, email, jti=jti)
@@ -3495,7 +3515,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         await log_auth_login_event(
             body.email,
             False,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="google_only_account",
         )
@@ -3506,7 +3526,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         await log_auth_login_event(
             body.email,
             False,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="invalid_credentials",
         )
@@ -3537,7 +3557,7 @@ async def _concluir_login(
             email,
             True,
             user_id=user_id,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
             failure_reason="mfa_pending",
         )
@@ -3560,7 +3580,7 @@ async def _concluir_login(
         email,
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -3741,7 +3761,7 @@ async def auth_refresh(request: Request, response: Response):
         return _no_store(resp)
 
     from core.refresh_tokens import consume_refresh_token
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     result = await asyncio.to_thread(
         consume_refresh_token, refresh_apresentado, ip=ip, user_agent=ua,
@@ -4223,7 +4243,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user["email"],
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -4262,7 +4282,7 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     user_id = _resolve_dashboard_user_id(request)
     _raise_if_account_scheduled_for_deletion(user_id)
 
-    client_ip = get_remote_address(request)
+    client_ip = ip_cliente(request)
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     # 1) Re-auth por senha
@@ -4363,7 +4383,7 @@ async def auth_account_export_download(request: Request, token: str):
             "data_export_token_invalid",
             "Tentativa de download com token inválido, expirado ou já usado.",
             source="auth_account_export_download",
-            details={"ip": get_remote_address(request)},
+            details={"ip": ip_cliente(request)},
         )
         raise HTTPException(
             status_code=410,
@@ -4372,7 +4392,7 @@ async def auth_account_export_download(request: Request, token: str):
 
     _raise_if_account_scheduled_for_deletion(user_id)
 
-    client_ip = get_remote_address(request)
+    client_ip = ip_cliente(request)
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
     content = await asyncio.to_thread(build_user_export_zip, user_id)
@@ -4723,7 +4743,7 @@ async def auth_google_callback(
                 await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
                 await log_auth_login_event(
                     email, True, user_id=user_id,
-                    ip_address=get_remote_address(request),
+                    ip_address=ip_cliente(request),
                     user_agent=request.headers.get("user-agent"),
                 )
             app_response = RedirectResponse(url=f"{scheme}://auth?code={code}", status_code=302)
@@ -4747,7 +4767,7 @@ async def auth_google_callback(
             email,
             True,
             user_id=user_id,
-            ip_address=get_remote_address(request),
+            ip_address=ip_cliente(request),
             user_agent=request.headers.get("user-agent"),
         )
 
@@ -4863,7 +4883,7 @@ async def _completar_cadastro_social(
         email,
         True,
         user_id=user_id,
-        ip_address=get_remote_address(request),
+        ip_address=ip_cliente(request),
         user_agent=request.headers.get("user-agent"),
     )
 
@@ -5093,8 +5113,10 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
     # Pix → Stripe NÃO tem fluxo (§9): quem já pagou o ano à vista assinando no
     # cartão pagaria o mesmo período duas vezes, e não há como "creditar" para
     # dentro do Stripe. A recusa é a resposta, e ela vem ANTES de qualquer
-    # criação de customer — o caminho de volta é esperar o anual acabar.
-    if await asyncio.to_thread(_grant_pix_vigente, user_id) is not None:
+    # criação de customer — o caminho de volta é esperar o anual acabar. A mesma
+    # pergunta das guardas do webhook (§0.7), com o Pix pago ainda sem grant.
+    from core.services.cartao_recusado_por_pix import pix_cobre_agora
+    if await asyncio.to_thread(pix_cobre_agora, user_id):
         raise HTTPException(
             status_code=409,
             detail={"error": "pix_active",
@@ -5384,7 +5406,9 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 async def billing_plans_config():
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
-    layout legado de plano único. Flag off = página atual intacta."""
+    layout legado de plano único. Flag off = página atual intacta.
+    `pagina_propria`: com ela, o deslogado (cartão) da /precos vai à /assinar."""
+    from core.services.extras_assinar import pagina_propria_ligada
     from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
     return {
@@ -5399,6 +5423,7 @@ async def billing_plans_config():
         # fora dos módulos do Pix. Ele está fazendo trabalho real — a flag mora
         # com quem a obedece.
         "pix_annual_available": pix_annual_available(),
+        "pagina_propria": pagina_propria_ligada(),
     }
 
 
@@ -6215,6 +6240,26 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
             print(f"[billing] email {fn.__name__} falhou user={uid}: {exc}")
             return False
 
+    async def _registrar_cadernos(uid: int, session) -> list:
+        """Pendência do e-book: a prova da compra, gravada ANTES dos outros
+        efeitos e sem try — falha → 5xx e a reentrega refaz tudo. O job
+        (`core/services/ebook_entrega.py`) entrega depois. Devolve os extras
+        da foto da sessão."""
+        from core.services.extras_assinar import da_metadata
+        _extras = da_metadata(_g(session, "metadata", {}))
+        if _extras:
+            from db.ebook_entregas import registrar as _registrar_ebook
+            await asyncio.to_thread(
+                _registrar_ebook, int(uid), _g(session, "id"), _extras)
+            for _preco, _url in _extras:
+                if not _url:
+                    await log_system_event(
+                        "error", "ebook_sem_url",
+                        "Compra de e-book sem a foto ebook_url; o job não entrega.",
+                        source="billing", user_id=int(uid),
+                        details={"session_id": _g(session, "id"), "ebook_price": _preco})
+        return _extras
+
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = await _resolve_user(session)
@@ -6228,6 +6273,40 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         # abaixo rodou — nem funil, nem e-mail, nem gate. A reentrega executa
         # tudo uma vez só, em vez de repetir a metade que já tinha passado.
         if user_id and sub_id:
+            # Sessão de cartão aberta antes de um Pix entrar e concluída depois:
+            # o Pix já cobre o período. Cancela a assinatura, entrega os
+            # cadernos (outro produto, já pagos) e para aqui — sem grant, funil,
+            # trial, e-mails nem rastreio. Plano cobrado hoje vira alerta de
+            # estorno manual (`core/services/cartao_recusado_por_pix.py`).
+            # ponytail: Pix FUTURO não barra — é a migração, cujo cartão
+            # precisa materializar até o fim do período. Um 2º cartão nesse
+            # intervalo passaria; o `create-checkout` o recusa (`already_subscribed`).
+            from core.services.cartao_recusado_por_pix import pix_cobre_agora
+            if await asyncio.to_thread(pix_cobre_agora, user_id):
+                _extras = await _registrar_cadernos(user_id, session)
+                # Plano × cadernos pela mesma conta do `invoice.paid`: a fatura
+                # da sessão, menos o líquido dos extras. Sem extras, o
+                # `amount_total` é só o plano. `None` = não deu para separar.
+                _plano_cents = _g(session, "amount_total") or 0
+                _cadernos_cents = 0
+                if _extras:
+                    from core.services.extras_assinar import linhas_da_fatura
+                    _inv = _g(session, "invoice")
+                    if isinstance(_inv, str):
+                        _inv = await asyncio.to_thread(stripe.Invoice.retrieve, _inv)
+                    if _inv:
+                        _cadernos_cents = _extras_liquido_cents(
+                            await asyncio.to_thread(linhas_da_fatura, _inv),
+                            {p for p, _ in _extras})
+                        _plano_cents = max(0, (_g(_inv, "amount_paid") or 0) - _cadernos_cents)
+                    else:
+                        _cadernos_cents = None
+                from core.services.cartao_recusado_por_pix import recusar_assinatura
+                await asyncio.to_thread(
+                    recusar_assinatura, stripe, int(user_id), sub_id,
+                    cobrado_cents=_plano_cents, session_id=_g(session, "id"),
+                    cadernos_cents=_cadernos_cents)
+                return {"received": True}
             # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
             # As TRÊS chamadas de `Subscription.retrieve` deste handler são a
             # mesma classe (I/O síncrono no event loop único) e foram
@@ -6267,23 +6346,8 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 await asyncio.to_thread(
                     clear_past_due_since, int(user_id),
                     nao_mais_novo_que=_event_version(event))
-            # Pendência do e-book: a prova da compra, gravada ANTES dos outros
-            # efeitos e sem try — falha → 5xx e a reentrega refaz tudo. Grava
-            # mesmo com `_decidiu_acesso` False: a compra aconteceu igual. O
-            # job (`core/services/ebook_entrega.py`) entrega depois.
-            from core.services.extras_assinar import da_metadata
-            _extras = da_metadata(_g(session, "metadata", {}))
-            if _extras:
-                from db.ebook_entregas import registrar as _registrar_ebook
-                await asyncio.to_thread(
-                    _registrar_ebook, int(user_id), _g(session, "id"), _extras)
-                for _preco, _url in _extras:
-                    if not _url:
-                        await log_system_event(
-                            "error", "ebook_sem_url",
-                            "Compra de e-book sem a foto ebook_url; o job não entrega.",
-                            source="billing", user_id=int(user_id),
-                            details={"session_id": _g(session, "id"), "ebook_price": _preco})
+            # Grava mesmo com `_decidiu_acesso` False: a compra aconteceu igual.
+            await _registrar_cadernos(user_id, session)
         # Funil: registra a CONCLUSÃO na tabela dedicada, com o session_id
         # (correlaciona com o record_checkout_started da mesma tentativa).
         # Vale pra trial e compra imediata — os dois disparam este evento.
@@ -6474,6 +6538,17 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
         user_id  = await _resolve_user(invoice)
         sub_id   = _invoice_subscription_id(invoice)
         if user_id and sub_id:
+            # A 1ª fatura de uma assinatura que o Pix vigente recusa (o par do
+            # ramo `checkout`, que pode chegar depois desta): cancela e para.
+            # O alerta de estorno é do checkout, que conhece a sessão.
+            # Renovações seguem como sempre.
+            from core.services.cartao_recusado_por_pix import (
+                pix_cobre_agora, recusar_assinatura)
+            if (_g(invoice, "billing_reason") == "subscription_create"
+                    and await asyncio.to_thread(pix_cobre_agora, user_id)):
+                await asyncio.to_thread(recusar_assinatura, stripe, int(user_id), sub_id,
+                                        cobrado_cents=0, session_id=None)
+                return {"received": True}
             # `to_thread`: ver a explicação no ramo `invoice.payment_failed`.
             sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
             expires_dt = _subscription_period_end(sub)
@@ -6647,6 +6722,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                         )
                 except Exception as exc:
                     print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
+
+    elif event["type"] == "checkout.session.expired":
+        # Funil: sem usuário resolvido é no-op (200). Reentrega grava outra linha.
+        session = event["data"]["object"]
+        user_id = await _resolve_user(session)
+        if user_id:
+            from db import record_checkout_expired
+            await asyncio.to_thread(record_checkout_expired, user_id, _g(session, "id"))
 
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
@@ -6847,7 +6930,7 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 STRIPE_CANCEL_REASON_INADIMPLENCIA,
             )
             encerramento_por_inadimplencia = (
-                (_g(obj, "cancellation_details") or {}).get("reason")
+                _g(_g(obj, "cancellation_details"), "reason")
                 == STRIPE_CANCEL_REASON_INADIMPLENCIA
             )
             if encerramento_por_inadimplencia:
@@ -6937,6 +7020,12 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 source="billing",
                 user_id=user_id,
             )
+            # Cancelamento NOSSO (cartão recusado por Pix vigente): a conta
+            # continua paga, então nada de "assinatura cancelada" ao cliente
+            # nem ao admin. Revogação e recompute acima já rodaram.
+            from core.services.cartao_recusado_por_pix import MARCA
+            if _g(_g(obj, "cancellation_details"), "comment") == MARCA:
+                return {"received": True}
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
             # evento (#351) — e não da conta, porque o `update_user_plan(...,
@@ -7231,7 +7320,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     response = RedirectResponse(url=redirect_url, status_code=302)
     # Magic-link tambem cria auth_session — aparece em "Dispositivos conectados"
     # e pode ser revogado individualmente como qualquer outra sessao.
-    ip = get_remote_address(request) or None
+    ip = ip_cliente(request) or None
     ua = request.headers.get("user-agent") or None
     jti = await asyncio.to_thread(create_session, int(user_id), ip=ip, user_agent=ua)
     _set_dashboard_cookie(response, int(user_id), jti=jti)
@@ -8763,13 +8852,12 @@ async def recurring_bill_pay_route(request: Request, user_id: int, bill_id: int,
 
 
 @app.get("/recurring-bills/{user_id}/projection")
-async def boleto_projection_route(request: Request, user_id: int, date: str, amount: float | None = None):
+async def boleto_projection_route(request: Request, user_id: int, date: str, amount: str | None = None):
     """Projeção de caixa até uma data ('tô tranquilo nesse prazo?'). `date`=alvo
     (YYYY-MM-DD), `amount`=boleto novo em consideração (opcional)."""
     _authorize_dashboard_access(request, user_id)
     _require_pro(user_id, "forecast")
     from datetime import date as _date
-    from math import isfinite
     try:
         target = _date.fromisoformat(str(date)[:10])
     except (ValueError, TypeError):
@@ -8782,12 +8870,15 @@ async def boleto_projection_route(request: Request, user_id: int, date: str, amo
                 "error": "pro_required", "feature": "forecast",
                 "message": f"Seu plano permite previsões de até {cap} dias.",
             })
-    # O parser de query aceita `nan`/`inf` num float, e o número não finito
-    # estoura na serialização JSON da resposta (500).
-    if amount is not None and not isfinite(amount):
-        raise HTTPException(status_code=400, detail="Valor inválido.")
-    from core.services.cashflow import project
-    result = await asyncio.to_thread(project, user_id, target, float(amount or 0))
+    from core.services.cashflow import project, validar_extra
+    from core.services.plan_service import plan_gate_ok
+    try:
+        extra = validar_extra(amount)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Valor inválido.") from None
+    percurso = await asyncio.to_thread(plan_gate_ok, user_id, 'cashflow')
+    result = await asyncio.to_thread(project, user_id, target, extra, percurso=percurso)
+
     return {"ok": True, "projection": result}
 
 
@@ -9345,6 +9436,7 @@ app.include_router(billing_bump_router)
 
 # ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
 app.mount("/api/v2", api_v2_app)
+app.mount("/api/app", api_nativo_app)
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────

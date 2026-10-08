@@ -142,7 +142,8 @@ def test_list_installments_only_pending_false_inclui_quitado(user_id):
 
 def test_forecast_next_bill_zero_sem_cartao(user_id):
     out = _forecast_next_bill(user_id, {})
-    assert out == {"total": 0, "cards": [], "count": 0}
+    assert out["total"] is None and out["cards"] == [] and out["count"] == 0
+    assert out["estado"] == "indisponivel" and out["motivos"] == ["fatura_observada_ausente"]
 
 
 def test_forecast_next_bill_pega_parcelamento_futuro(user_id):

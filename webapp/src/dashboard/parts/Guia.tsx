@@ -8,6 +8,7 @@ import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
 import { go, type Path } from "../router";
 import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
+import { avisarGuia } from "./Dica";
 import { MOTIVO, OF, destino } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
 import { TEMPO, partir, pular, quadro, tiltDe, type Voo } from "./guia-voo";
@@ -284,6 +285,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   });
 
   const aberto = modo === "convite" || (modo === "ativo" && !!exibido);
+  useEffect(() => avisarGuia(aberto));
   const leva = fora ? `Agora toca ${paraAba}.` : null;
   const mot = atual && !atual.disponivel && atual.motivo ? MOTIVO[atual.motivo] : null;
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };

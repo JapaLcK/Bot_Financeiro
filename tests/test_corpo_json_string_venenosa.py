@@ -87,7 +87,7 @@ def _veneno(v: str) -> str:
 # Chave, array e array aninhado são obrigatórios aqui: separam "saneei o valor"
 # de "saneei a CATEGORIA".
 #
-# `event: "item/error"` + `itemId` em TODOS os corpos não é decoração: é o que
+# `event: "item/deleted"` (PR-C2: o único que ainda grava) + `itemId` em TODOS os corpos não é decoração: é o que
 # leva o corpo inteiro ao `Jsonb(raw)` de
 # update_pluggy_open_finance_item_status. A primeira versão deste arquivo usava
 # `event: "ping"`, e aí veneno em campo não lido, em chave e em array não
@@ -102,13 +102,13 @@ ITEM_LIVRE = "item-inexistente-317"
 
 def _corpos(v: str) -> dict:
     p = _veneno(v)
-    base = {"event": "item/error", "itemId": ITEM_LIVRE}
+    base = {"event": "item/deleted", "itemId": ITEM_LIVRE}
     return {
         "campo_nao_lido": {**base, "extra": p},
         "chave_do_topo": {**base, p: 1},
         "item_id_camel": {**base, "itemId": p},
-        "item_id_snake": {"event": "item/error", "item_id": p},
-        "item_ponto_id": {"event": "item/error", "item": {"id": p}},
+        "item_id_snake": {"event": "item/deleted", "item_id": p},
+        "item_ponto_id": {"event": "item/deleted", "item": {"id": p}},
         "array_simples": {**base, "lista": [p]},
         "array_3_niveis": {**base, "fundo": [[[p]]]},
         "chave_aninhada": {**base, "obj": {"n": {p: 1}}},
@@ -186,7 +186,7 @@ def test_controle_positivo_corpo_limpo_grava_identico(user_id):
     item_id = f"item-317-limpo-{user_id}"
     _conexao(user_id, item_id)
     corpo = {
-        "event": "item/error",
+        "event": "item/deleted",
         "itemId": item_id,
         "extra": "pão à vista 😀",
         "n": [1, 2.5, None, True],
@@ -196,7 +196,7 @@ def test_controle_positivo_corpo_limpo_grava_identico(user_id):
 
     raw, status = _raw_e_status(item_id)
     assert raw == corpo, raw
-    assert status == "ERROR", status
+    assert status == "DELETED", status
 
 
 # Só as 5 posições cujo `itemId` fica LIMPO alcançam a linha do banco para ser
@@ -220,9 +220,9 @@ def test_corpo_venenoso_e_lido_de_volta_saneado(user_id, posicao, veneno):
     assert r.status_code == 200, r.text
 
     raw, status = _raw_e_status(item_id)
-    assert status == "ERROR", status
+    assert status == "DELETED", status
     # Um saneador que devolvesse `{}` também responderia 200.
-    assert raw["event"] == "item/error" and raw["itemId"] == item_id, raw
+    assert raw["event"] == "item/deleted" and raw["itemId"] == item_id, raw
     # No documento inteiro — valores E chaves, por isso a busca é no dumps:
     # sobrou UMA marca, e entre o AAA e o BBB só há U+FFFD. Vazio reprova
     # (dado destruído) e `AAABBB` também (apagar o veneno inventaria identidade).
@@ -246,7 +246,7 @@ def test_item_id_venenoso_nao_casa_com_id_real(user_id):
     """
     item_id = f"item-317-identidade-{user_id}"
     _conexao(user_id, item_id)
-    r = _pluggy_post({"event": "item/error", "itemId": item_id + NUL})
+    r = _pluggy_post({"event": "item/deleted", "itemId": item_id + NUL})
     assert r.status_code == 200, r.text
 
     raw, status = _raw_e_status(item_id)

@@ -29,7 +29,10 @@ function aplicar(g, c) {
   n.estado = c.acao === "dispensar" ? "dispensado" : n.passos.every((p) => p.feito) ? "concluido" : "em_andamento";
   return n;
 }
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes } = {}) {
+// `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista), "sem" (o plano não
+// dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
+// /guia/dica responde depois de N ms ou quando a promise dada resolve. `s.dicas`: os ids postados.
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -41,10 +44,22 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
   });
   // Safari 14 (sem <dialog>): o mesmo corte do dashboard_v2_cmdk.test.mjs.
   if (semDialog) await ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; });
-  await servir(ctx, undefined, { perfil });
+  await servir(ctx, undefined, { perfil, plano });
   // Perfil chegando depois do guia: a corrida em que o convite brigaria com o modal de perfil.
   if (perfilLento) await ctx.route("**/api/v2/perfil", async (r) => { await new Promise((ok) => setTimeout(ok, perfilLento)); return r.fallback(); });
-  const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [] };
+  const s = { g: structuredClone(RESPOSTAS.guia[guia]), posts: [], dicas: [] };
+  if (dica === "sem") s.g.dicas = [];
+  if (dica === "ausente") delete s.g.dicas;
+  if (dica === "nova") s.g.dicas.forEach((d) => { d.vista = false; });
+  await ctx.route("**/api/v2/guia/dica", async (r) => {
+    const { dica: id } = r.request().postDataJSON();
+    s.dicas.push(id);
+    s.g.dicas.forEach((d) => { if (d.id === id) d.vista = true; });
+    // A resposta é o guia de quando o POST chegou; a lentidão é a da volta.
+    const json = structuredClone(s.g);
+    if (dicaLenta) await (typeof dicaLenta === "number" ? new Promise((ok) => setTimeout(ok, dicaLenta)) : dicaLenta);
+    return r.fulfill({ json });
+  });
   await ctx.route("**/api/v2/guia", async (r) => {
     if (r.request().method() === "GET") return r.fulfill({ json: s.g });
     const c = r.request().postDataJSON();
@@ -72,9 +87,9 @@ export const vaoDoVeu = () => {
   const [f0, f1, f2, f3] = [...document.querySelectorAll(".guia-veu")].map((e) => e.getBoundingClientRect());
   return { left: f2.right, top: f0.bottom, right: f3.left, bottom: f1.top };
 };
-export const tocarAba = async (page) => {
-  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout: 10000 });
-  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout: 10000 }); // pousou
+export const tocarAba = async (page, timeout = 10000) => {
+  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout });
+  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout }); // pousou
   const v = await page.evaluate(vaoDoVeu);
   await page.mouse.click((v.left + v.right) / 2, (v.top + v.bottom) / 2);
 };
@@ -83,7 +98,8 @@ export const tocarAba = async (page) => {
 export const esperaTitulo = async (page, t) => {
   const alvo = page.locator("#guia-titulo", { hasText: t }), aba = page.locator("#guia-titulo", { hasText: ABA });
   for (let i = 0; i < 100 && !(await alvo.count()); i++) {
-    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page).catch(() => {});
+    // 500 ms: se o toque anterior já pegou, o guia navegou e o "Agora toca" não volta
+    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page, 500).catch(() => {});
     else await page.waitForTimeout(100);
   }
   await alvo.waitFor({ timeout: 10000 });

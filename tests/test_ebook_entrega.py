@@ -135,7 +135,7 @@ def mundo(monkeypatch):
                                     " extract(epoch from reivindicada_ate - now()) / 60 as janela"
                                     " from ebook_entregas where user_id = %s and session_id = %s",
                                     (uid, sid))[0]
-    m.para = lambda email: [e for e in m.enviados if e[0] == email and e[1].startswith("📘 Chegou")]
+    m.para = lambda email: [e for e in m.enviados if e[0] == email and e[1].startswith("Seu caderno")]
     m.invalida = db_support.invalidate_auth_user_cache
     return m
 
@@ -156,7 +156,7 @@ def test_e1_e2_sem_credencial_espera_com_senha_envia_uma_vez(mundo):
     _senha(uid)
     assert entregar_pendentes() >= 1
     ((_, assunto, html, texto),) = mundo.para(email)
-    assert assunto == f"📘 Chegou: {_nome(_PRECO)}"
+    assert assunto == f"Seu caderno: {_nome(_PRECO)}"
     assert _url(uid) in texto and _url(uid).replace("&", "&amp;") in html
     assert mundo.linha(uid, "cs_e1")["resultado"] == "enviado"
     entregar_pendentes()
@@ -332,5 +332,6 @@ def test_h_send_ebook_email(monkeypatch):
     assert es.send_ebook_email("a@b.com", url, "https://painel.test/") == "ret"
     html, texto = vistos[1]["html_body"], vistos[1]["text_body"]
     assert 'href="https://drive.test/uc?id=1&amp;export=download"' in html
-    assert url in texto and "https://painel.test/app" in texto
+    assert url in texto and "comprovante da sua compra" in texto
+    assert "Abrir meu painel" not in html and html.count('class="btn"') == 1
     assert vistos[0]["to"] == "a@b.com"

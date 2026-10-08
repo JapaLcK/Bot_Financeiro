@@ -105,7 +105,7 @@ def test_conta_em_outra_moeda_fica_fora_e_contada(uid, contas, bancos, moeda):
     f = foto(uid)
     assert (f["bancos"], f["total"]) == (D(bancos), f["carteira"] + D(bancos))
     assert f["base"]["fora"]["moeda"] == moeda
-    assert f["motivos"] == ["carteira_nao_confirmada"]
+    assert f["motivos"] == []  # Carteira inicial0 sem movimentos; banco tem qualidade independente.
 
 
 @pytest.mark.parametrize("moedas,soma,moeda", [
@@ -126,12 +126,12 @@ def _limpo(uid, **kw):
 
 def test_base_limpa_so_tem_a_carteira_nao_confirmada(uid):
     _limpo(uid, sync=horas_atras(47))
-    assert foto(uid)["motivos"] == ["carteira_nao_confirmada"]
+    assert foto(uid)["motivos"] == []  # Carteira inicial0 sem movimentos; banco tem qualidade independente.
 
 
 def test_sem_banco_nao_ha_motivo_de_banco_nem_de_especie(monkeypatch):
     monkeypatch.delenv("OF_CASH_ENABLED", raising=False)
-    assert foto(usuario_pagante())["motivos"] == ["carteira_nao_confirmada"]
+    assert foto(usuario_pagante())["motivos"] == []  # Carteira inicial0 sem movimentos; banco tem qualidade independente.
 
 
 def test_especie_incompleta_com_banco_e_o_saque_desligado(uid, monkeypatch):
@@ -158,7 +158,7 @@ def test_banco_desatualizado(uid, estado):
 def test_conexao_pausada_nao_desatualiza_nem_entra(uid):
     _limpo(uid, sync=horas_atras(1), tentativa=horas_atras(2))
     conexao(uid, f"item-p-{uid}", status="PAUSED", sync=None)
-    assert foto(uid)["motivos"] == ["carteira_nao_confirmada"]
+    assert foto(uid)["motivos"] == []  # Carteira inicial0 sem movimentos; banco tem qualidade independente.
 
 
 def test_movimento_pendente(uid):

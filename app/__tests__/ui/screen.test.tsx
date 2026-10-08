@@ -69,6 +69,27 @@ describe("Screen", () => {
     expect(c.UNSAFE_getByType(RefreshControl).props.progressViewOffset).toBe(0);
   });
 
+  // Conteúdo rolado não pode aparecer sob o relógio: faixa fixa do fundo do
+  // tema na altura da área segura, só onde o Screen é dono do topo.
+  it("faixa de fundo atrás da barra de status só no ramo que rola e é dono do topo", () => {
+    const { claro: c, escuro: e } = renderComAreaSegura(
+      <Screen>
+        <Text>x</Text>
+      </Screen>,
+    );
+    expect(StyleSheet.flatten(c.getByTestId("tela-topo").props.style)).toMatchObject({
+      position: "absolute",
+      top: 0,
+      height: METRICAS_DE_TESTE.insets.top,
+      backgroundColor: claro.bg,
+    });
+    expect(StyleSheet.flatten(e.getByTestId("tela-topo").props.style).backgroundColor).toBe(escuro.bg);
+    expect(c.getByTestId("tela-topo").props.pointerEvents).toBe("none");
+    const semFaixa = (el: React.ReactElement) => renderComAreaSegura(el).claro.queryByTestId("tela-topo");
+    expect(semFaixa(<Screen sobCabecalho><Text>x</Text></Screen>)).toBeNull();
+    expect(semFaixa(<Screen rolar={false}><Text>x</Text></Screen>)).toBeNull();
+  });
+
   it("fundo muda de cor entre os dois temas", () => {
     const { claro: c, escuro: e } = renderComAreaSegura(
       <Screen>

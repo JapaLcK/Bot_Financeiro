@@ -141,8 +141,8 @@ def _gasto_fixo(uid: int, freq: str, amount: float, start: date, nome: str = "Ga
 
 # Janelas: 30 → 16/10, 60 → 15/11, 90 → 15/12 (ocorrências em (16/09, alvo]).
 @pytest.mark.parametrize("freq, amount, start, esperado", [
-    ("weekly", 80, HOJE, (320, 640, 960)),                # 23/09…14/10 · …11/11 · …09/12
-    ("daily", 10, HOJE, (300, 600, 900)),                 # 17/09 em diante, um por dia
+    ("weekly", 80, HOJE, (400, 720, 1040)),                # 23/09…14/10 · …11/11 · …09/12
+    ("daily", 10, HOJE, (310, 610, 910)),                 # 17/09 em diante, um por dia
     ("once", 5000, date(2026, 10, 10), (5000, 5000, 5000)),
 ])
 def test_gasto_fixo_fora_de_mensal_anual_entra_na_previsao(pro_max_uid, freq, amount, start, esperado):
@@ -161,8 +161,8 @@ def test_gasto_fixo_mensal_e_semanal_somam_juntos(pro_max_uid):
                                        start_date=HOJE, frequency="weekly")
 
     assert semanal["frequency"] == "weekly"
-    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (820, 1640, 2460)
-    assert _previsao(pro_max_uid, "projetado") == (-820, -1640, -2460)
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (900, 1720, 2540)
+    assert _previsao(pro_max_uid, "projetado") == (-900, -1720, -2540)
 
 
 def test_gasto_fixo_semanal_com_inicio_futuro_so_conta_a_partir_do_inicio(pro_max_uid):
@@ -174,19 +174,20 @@ def test_gasto_fixo_semanal_com_inicio_futuro_so_conta_a_partir_do_inicio(pro_ma
 
 @pytest.mark.parametrize("start", [
     date(2026, 9, 10),   # passado: não vira "vencido" nem pesa no saldo de partida
-    HOJE,                # hoje: a previsão conta de amanhã em diante
+    HOJE,                # obrigação de hoje ainda sem prova de realização
     date(2027, 1, 10),   # além da janela de 90 dias
 ])
 def test_gasto_fixo_unico_fora_da_janela_nao_entra(pro_max_uid, start):
     _gasto_fixo(pro_max_uid, "once", 5000, start, nome="Único")
 
-    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == (0, 0, 0)
+    expected = (5000, 5000, 5000) if start == HOJE else (0, 0, 0)
+    assert _previsao(pro_max_uid, "gastos_fixos_previstos") == expected
     out = cff.forecast_with_trajectory(pro_max_uid, days=90)
     nomes = {c["nome"] for c in out["vencidos"] + out["vencem_hoje"]}
     nomes |= {c["nome"] for item in out["trajectory"] for c in item["compromissos"]}
-    assert "Único" not in nomes
-    assert out["trajectory"][0]["saldo_projetado"] == 0  # saldo de partida intacto
-    assert _previsao(pro_max_uid, "projetado") == (0, 0, 0)
+    assert ("Único" in nomes) == (start == HOJE)
+    assert out["trajectory"][0]["saldo_projetado"] == (-5000 if start == HOJE else 0)  # hoje ainda não comprovadamente realizado
+    assert _previsao(pro_max_uid, "projetado") == tuple(-v for v in expected)
 
 
 def test_cenario_combinado_so_a_mensal_soma(pro_max_uid):

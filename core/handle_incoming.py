@@ -16,6 +16,7 @@ Fluxo:
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 
 import db
@@ -58,6 +59,116 @@ _HELP_FALLBACK_MARKERS: tuple[str, ...] = (
 # `tests/test_pending_registry.py` reprova qualquer tipo que o código grave sem
 # estar nela.
 from db import sobrevive_a_audio, suprime_fallback_de_ia
+
+
+def _consulta_de_previsao(text: str) -> bool:
+    """Reconhecimento puro compartilhado com as interceptações do WhatsApp."""
+    from utils_text import normalize_text
+    from core.intent_classifier import _PRAZO_MARKERS
+    norm = normalize_text(text)
+    inicio = re.sub(r'^(?:piggy|pergunta|ia)[\s,:]+', '', norm)
+    if re.match(r'^(?:ja\s+)?(?:paguei|quitei|anota|anote|cria|cadastra|adiciona|lista|liste|listar)\b', inicio):
+        return False
+    return bool(
+        re.search(r'\bprevisao\b', norm) and re.search(r'\b(saldo|caixa|dias|dia)\b', norm)
+        or re.search(r'\b(saldo|caixa)\b.*\b(daqui|em)\b.*\bdias?\b', norm)
+        or re.search(r'\b(tranquilo|prazo)\b.*\b(ate|dia|daqui)\b', norm)
+        or re.search(r'\bcomo\s+(?:to|estou)\s+de\s+(?:boletos?|contas?\s+a\s+pagar)\b', norm)
+        or re.search(r'\bfolego\b.*\bdaqui\s+pra\s+frente\b', norm)
+        or any(m in norm for m in _PRAZO_MARKERS if m != 'da pra pegar')
+        or re.search(r'\b(?:da\s+pra|posso)\s+(?:pegar|aceitar)\b.*\bboletos?\b', norm)
+    )
+
+
+def _previsao_somente_leitura(uid: int, text: str) -> str | None:
+    """Consulta reconhecida sempre responde, antes de qualquer resolver de escrita."""
+    from utils_text import normalize_text, parse_money, limpa_pontuacao_final, valor_perigoso
+    if not _consulta_de_previsao(text):
+        return None
+    policy_refusal = investment_action_refusal(text)
+    if policy_refusal is not None:
+        return policy_refusal
+    from core.services.ai_chat.tools.bills import _forecast_balance, _check_cashflow, _resolve_date
+    recusa = (f'Não consegui interpretar o cenário informado: “{text}”. '
+              'Informe uma única data ou prazo e, para um cenário, uma única entrada ou saída com valor. '
+              'Sua pergunta pendente foi preservada.')
+    # Uma coleta não sobreposta governa contagem, argumentos e remoção do alvo.
+    alvo_re = re.compile(
+        r'(?<![\w/.-])(?:'
+        r'(?:daqui(?:\s+a)?|em|de|pr[oó]ximos?)\s+(?P<days>[+-]?\d[\d.,]*)\s+dias?\b'
+        r'|(?:(?:at[eé]|para|pra|no)\s+)?(?:dia\s+)?'
+        r'(?P<date>\d{4}-\d{2}-\d{2}|\d{1,2}[/\-]\d{1,2}(?:[/\-](?:\d{4}|\d{2}))?)(?![\w/\-]|[.,]\w)'
+        r'|(?:(?:at[eé]|para|pra|no)\s+)?dia\s+(?P<dom>[+-]?\d+)(?![\w/\-]|[.,]\w)'
+        r'|(?P<literal>hoje|ontem)\b)', re.I)
+    alvos = list(alvo_re.finditer(text))
+    if len(alvos) > 1:
+        return recusa
+    args = {}
+    restante = text
+    if alvos:
+        alvo = alvos[0]
+        if alvo.group('days') is not None:
+            if not re.fullmatch(r'\d+', alvo.group('days')):
+                return recusa
+            try:
+                args['days'] = int(alvo.group('days'))
+            except ValueError:
+                return recusa
+        elif alvo.group('literal'):
+            from utils_date import extract_date_from_text
+            dt, _ = extract_date_from_text(alvo.group('literal'))
+            args['date'] = dt.date().isoformat()
+        else:
+            args['date'] = alvo.group('date') or alvo.group('dom')
+        try:
+            if _resolve_date(args.get('date'), args.get('days')) is None:
+                return recusa
+        except (ValueError, OverflowError):
+            return recusa
+        restante = text[:alvo.start()] + ' ' + text[alvo.end():]
+    elif re.search(r'\b(ate|dia|dias|daqui|prazo|amanha|semana)\b',
+                   re.sub(r'\bdaqui\s+pra\s+frente\b', '', normalize_text(text))):
+        return recusa
+    # Obrigações existentes já pertencem à snapshot; só consome contexto explícito.
+    restante = re.sub(r'\b(?:(?:com\s+)?(?:(?:meus|os)\s+boletos|(?:minhas|as)\s+contas\s+a\s+pagar)\b'
+                       r'|com\s+(?:boletos|contas\s+a\s+pagar)\b(?=\s*(?:[.;:?!]*\s*$'
+                       r'|(?:considerando|com)\s+(?:uma?\s+)?(?:sa[ií]da|entrada|despesa|receita|gasto)\b)))',
+                       '', restante, flags=re.I)
+    restante = re.sub(r'\bcomo\s+(?:t[oô]|estou)\s+de\s+(?:boletos?|contas?\s+a\s+pagar)\b'
+                       r'|\b(?:aguento|consigo)\s+pagar\b', '', restante, flags=re.I)
+    sinal_cenario = r'\b(considerando|com|sem|se|cenario|hipotese|entrada|saida|despesa|receita|gasto|gastar|pagar|receber|boletos?|ignorar|ignorando|excluir|excluindo)\b'
+    cenario = re.search(r'\b(?:considerando|com)\s+(?:uma?\s+)?(sa[ií]da|entrada|despesa|receita|gasto)\b\s*(.*)',
+                        restante, re.I | re.S)
+    novo_boleto = re.search(
+        r'\b(?:(?:pegar|aceitar)\s+(?:um\s+)?(?:novo\s+)?boleto'
+        r'|(?:considerando|com)\s+(?:um\s+)?(?:novo\s+boleto|boleto\s+novo))\b\s*(.*)',
+        restante, re.I | re.S)
+    resumo_cenario = ''
+    if 'compr' in normalize_text(restante) or re.search(r'\b(financiar|financiamento|parcelas?|parcelado)\b', normalize_text(restante)):
+        return recusa
+    if re.search(sinal_cenario, normalize_text(restante)) or re.search(r'\d|r\$|\breais?\b', restante, re.I):
+        from core.handlers.bills import _VALOR_RE
+        escolhido = cenario or novo_boleto
+        bruto = limpa_pontuacao_final(escolhido.group(2 if cenario else 1).strip().rstrip(';:?')) if escolhido else ''
+        amount = parse_money(bruto) if _VALOR_RE.fullmatch(bruto) else None
+        antes = restante[:escolhido.start()] if escolhido else restante
+        if (not args or amount is None or valor_perigoso(bruto, amount)
+                or re.search(sinal_cenario, normalize_text(antes)) or re.search(r'\d|r\$', antes, re.I)):
+            return recusa
+        entrada = cenario is not None and normalize_text(cenario.group(1)) in ('entrada', 'receita')
+        args['amount'] = -amount if entrada else amount
+        resumo_cenario = f" Cenário: {'entrada' if entrada else 'saída'} de {fmt_brl(amount)}."
+    result = _check_cashflow(uid, args) if args else _forecast_balance(uid, {})
+    if result.get('error'):
+        return result.get('message') or result['error']
+    if result.get('estado') == 'indisponivel':
+        return 'A previsão está indisponível para essa data ou base. Consulte uma data atual/futura e confira os dados.'
+    if 'horizons' in result:
+        values = ' · '.join(f"{n} dias: {fmt_brl(p['projetado'])}" for n, p in result['horizons'].items()
+                            if p['projetado'] is not None)
+    else:
+        values = f"{result['target']}: {fmt_brl(result['projetado'])}"
+    return f'🐷 Saldo previsto condicional — {values}.{resumo_cenario} Há dados ou compromissos a conferir; isso não autoriza uma compra.'
 
 
 def _looks_like_help_fallback(response: str | None) -> bool:
@@ -988,6 +1099,11 @@ def handle_incoming(msg: IncomingMessage, *,
         if not text:
             pergunta_no_turno.set(MANTEM)
             return []
+
+        forecast_reply = _previsao_somente_leitura(uid, text)
+        if forecast_reply is not None:
+            pergunta_no_turno.set(MANTEM)
+            return [OutgoingMessage(text=format_for_platform(forecast_reply, platform))]
 
         if platform == "whatsapp":
             open_finance_reply = handle_open_finance_whatsapp_command(uid, text)

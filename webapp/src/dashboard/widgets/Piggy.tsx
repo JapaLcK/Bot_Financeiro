@@ -8,6 +8,7 @@ import type { DashState, Launch } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { go } from "../router";
 import { ICON } from "../lib/brand";
+import { DEMO } from "../lib/v2";
 
 // `head`, `ask` e `topic` são o que a faixa do topo do Resumo usa: a manchete, a pergunta
 // que vai para a conversa e o assunto da resposta (lib/topics.tsx).
@@ -48,7 +49,8 @@ export function insights(s: DashState): Insight[] {
         head: "Sem freelas, seu saldo desce",
         ask: "Como evito que meu saldo caia nos próximos 3 meses?", topic: "saldo",
         text: <>Sem freelas, seu saldo cai cerca de <b>{money0(-perMonth)} por mês</b>. Em 90 dias fica perto de {money0(end.value)}.</>,
-        action: { label: "Ver 90 dias", run: () => { set({ horizon: "90" }); go("/previsao"); } },
+        // Com backend a previsão real não segue o horizonte de exemplo (o Plus levaria 403).
+        action: DEMO ? { label: "Ver 90 dias", run: () => { set({ horizon: "90" }); go("/previsao"); } } : { label: "Ver a previsão", run: () => go("/previsao") },
       });
     }
     const next = scheduled(addDays(TODAY, 1), addDays(TODAY, 30)).find((b) => b.kind === "expense" && !b.transfer && b.source !== "cartao" && b.amount != null);

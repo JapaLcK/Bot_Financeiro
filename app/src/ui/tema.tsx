@@ -3,13 +3,14 @@ import * as SystemUI from "expo-system-ui";
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useColorScheme } from "react-native";
 
-import { claro, escuro, type Paleta } from "@/ui/tokens";
+import { claro, escuro, acessoClaro, acessoEscuro, type Paleta } from "@/ui/tokens";
 
 type Esquema = "light" | "dark";
 
 interface ContextoTema {
   esquema: Esquema;
   cores: Paleta;
+  acesso?: boolean;
 }
 
 const Contexto = createContext<ContextoTema | null>(null);
@@ -25,12 +26,18 @@ function pintarJanela(cor: string) {
  * `/_ds`, por exemplo); sem ele, segue `useColorScheme()` — o app não repete o
  * site, que força escuro por localStorage e ignora o aparelho.
  */
-export function TemaProvider(props: { esquema?: Esquema; children: ReactNode }) {
+export function TemaProvider(props: { esquema?: Esquema; acesso?: boolean; children: ReactNode }) {
   const doSistema = useColorScheme();
   const esquema: Esquema = props.esquema ?? (doSistema === "dark" ? "dark" : "light");
   const valor = useMemo<ContextoTema>(
-    () => ({ esquema, cores: esquema === "dark" ? escuro : claro }),
-    [esquema],
+    () => ({
+      esquema,
+      acesso: props.acesso,
+      cores: props.acesso
+        ? (esquema === "dark" ? acessoEscuro : acessoClaro)
+        : (esquema === "dark" ? escuro : claro),
+    }),
+    [esquema, props.acesso],
   );
 
   // A janela nativa por baixo das telas é branca por padrão e aparece onde

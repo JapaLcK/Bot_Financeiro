@@ -215,7 +215,8 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
     return { blocos, stats, etiqueta: document.body.innerText.includes("Dados de demonstração") };
   });
   await ctx.close();
-  assert.deepEqual(r.blocos, { contas: false, hero: true, resumo: false, categorias: true, calendario: true, simulador: true, compromissos: true, piggy: true, metas: true, patrimonio: true });
+  // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a)
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: true, calendario: true, simulador: true, compromissos: true, piggy: true, metas: true, patrimonio: true });
   assert.deepEqual(r.stats, [null, null, "demonstração", "demonstração"]);
   assert.equal(r.etiqueta, false);
 });
@@ -317,15 +318,22 @@ test("seletor: 6 meses reais; voltar pede o mês escolhido e os blocos de exempl
   await ctx.close();
   assert.deepEqual(setembro, ["Setembro 2026", "Resumo de setembro"]);
   assert.deepEqual([...new Set(meses)], ["2026-10", "2026-09", "2026-08", "2026-07", "2026-06", "2026-05"]);
-  assert.deepEqual(r, [true, 1, 1]);
+  assert.deepEqual(r, [true, 0, 1]); // o Saldo previsto é real (Q1 = a): sem selo; o calendário segue de exemplo
   assert.deepEqual(erros, []);
 });
 
 // --- Selo nas telas de exemplo -------------------------------------------------------
 
-const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo"] };
+// Na conversa o selo é por mensagem (a resposta de exemplo leva, a real não): o título não leva.
+const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo", ".chat > .msg-piggy .msg-by > .selo"] };
+// Texto livre sem assunto: o Piggy responde com os atalhos (resposta de exemplo).
+async function conversar(page) {
+  await page.locator("#askbar-input").fill("oi");
+  await page.locator("#askbar-input").press("Enter");
+  await page.locator(".chat > .msg-piggy").waitFor();
+}
 for (const demo of [false, true]) {
-  test(`selo "demonstração" na faixa do Piggy, no extrato e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
+  test(`selo "demonstração" na faixa do Piggy, no extrato demonstrativo e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
     const { ctx, page, ir } = await abrir({ demo, espera: "#page-title" });
     const r = {};
     for (const [rota, seletores] of Object.entries(SELO)) {
@@ -334,12 +342,14 @@ for (const demo of [false, true]) {
         await page.locator("#board-profile").waitFor();
         r.titulo = [await page.locator("#page-title").textContent(), await page.locator("#page-title .selo").count()];
       }
+      if (rota === "/piggy") await conversar(page);
       for (const s of seletores) r[s + " " + rota] = await page.locator(s).allTextContents();
+      if (rota === "/lancamentos" && !demo) assert.equal(await page.locator("#w-lancamentos").getAttribute("data-dado"), "real");
     }
     await ctx.close();
     const um = demo ? [] : ["demonstração"];
     const titulo = [demo ? "Resumo de setembro" : "Resumo de outubro", 0];
-    assert.deepEqual(r, { titulo, ...Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, um]))) });
+    assert.deepEqual(r, { titulo, ".piggy-band-by > .selo /": um, "#ledger-h > .selo /lancamentos": [], "#page-title > .selo /piggy": [], ".chat > .msg-piggy .msg-by > .selo /piggy": um });
   });
 }
 
@@ -351,11 +361,12 @@ for (const width of [1440, 1100, 390, 375]) {
     for (const rota of Object.keys(SELO)) {
       await ir(rota);
       if (rota === "/") await page.locator("#w-resumo .stat-value").first().waitFor();
+      if (rota === "/piggy") await conversar(page);
       r[rota] = await page.evaluate(() => {
         const cortado = (e) => e.scrollWidth > e.clientWidth;
         const fora = (s, h) => { const a = s.getBoundingClientRect(), b = h.getBoundingClientRect(); return a.right > b.right + 0.5 || a.right > innerWidth; };
         const ruins = [];
-        for (const s of document.querySelectorAll(".w-title > .selo, #page-title > .selo, #ledger-h > .selo, .piggy-band-by > .selo")) {
+        for (const s of document.querySelectorAll(".w-title > .selo, #page-title > .selo, #ledger-h > .selo, .piggy-band-by > .selo, .msg-by > .selo")) {
           const h = s.parentElement;
           const titulo = h.matches(".w-title") ? h.firstElementChild : h;
           if (cortado(titulo) || cortado(s) || fora(s, h)) ruins.push(h.id || h.className);

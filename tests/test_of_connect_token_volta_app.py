@@ -10,7 +10,7 @@ CONTROLES (CLAUDE.md §3):
   • tirar o `options["oauthRedirectUri"] = …` do serviço → `test_app_scheme_valido_vira_volta` vermelho
     (é também o controle positivo: a rota não recusa tudo);
   • gravar a chave sempre, mesmo com None → `test_site_manda_o_mesmo_de_antes` vermelho;
-  • `except ValueError` sem o RecursionError → caso do corpo aninhado vermelho (500);
+  • corpo malformado, repetido ou aninhado → contratos estritos no arquivo attempt;
   • `await request.json()` sem teto, ou teto maior → `test_corpo_acima_do_teto_...` 4097 vermelho;
   • tirar o `asyncio.timeout` do helper → `test_corpo_lento_vale_sem_o_campo` vermelho (pelo prazo
     externo, sem travar);
@@ -86,8 +86,7 @@ def _post(client, uid, headers, corpo):
 
 
 @pytest.mark.parametrize("corpo", [
-    b"{}", None, b'{"app_scheme": null}', b"{nao e json", b"[]", b"\x80\x81",
-    pytest.param(b"[" * 20000 + b"]" * 20000, id="aninhado"),  # RecursionError, não ValueError
+    b"{}", None, b'{"app_scheme": null}', b"[]",
 ])
 def test_site_manda_o_mesmo_de_antes(user_id, pluggy_dublada, corpo):
     promote_to_pro(user_id)
@@ -125,13 +124,16 @@ def _valido_com_tamanho(n: int) -> bytes:
 @pytest.mark.parametrize("n,aplica", [
     (4096, True), (4097, False), (1024 * 1024, False),
 ])
-def test_corpo_acima_do_teto_vale_sem_o_campo(user_id, pluggy_dublada, n, aplica):
-    """Teto de leitura (_CORPO_MAX): até 4096 bytes o corpo vale; acima, a rota para de
-    ler e segue como se não houvesse corpo — 200 com o payload de hoje, nunca 400/500."""
+def test_corpo_acima_do_teto_recusa_antes_do_token(user_id, pluggy_dublada, n, aplica):
+    """Acima de 4096 bytes, não emitir token descartando a origem OAuth."""
     promote_to_pro(user_id)
     client = TestClient(dashboard.app)
     r = _post(client, user_id, _auth(client, user_id), _valido_com_tamanho(n))
-    assert r.status_code == 200, r.text
+    assert r.status_code == (200 if aplica else 400), r.text
+    if not aplica:
+        assert pluggy_dublada.corpos == [] and pluggy_dublada.api_key == 0
+        assert pluggy_dublada.registros == []
+        return
     assert len(pluggy_dublada.corpos) == 1
     esperado = dict(_options_de_hoje(user_id))
     if aplica:

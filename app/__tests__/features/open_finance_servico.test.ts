@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import { conexoes, pedirConnectToken, registrarItem } from "@/services/openFinance";
 import { guardarCredenciais } from "@/storage/secure";
 
-import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
+import { chamadas, fetchFalso, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 
 /** O dublê de `expo-constants` (jest.setup.js) é um objeto: cada caso muda e o `afterEach` devolve. */
 const constantes = Constants as unknown as { executionEnvironment: string; expoConfig: { scheme?: unknown } };
@@ -63,4 +63,22 @@ describe("services/openFinance — conexões e item", () => {
     await expect(registrarItem(7, "item_1")).resolves.toEqual({ connections: [] });
     expect(chamadas()).toEqual([{ caminho: "/open-finance/7/pluggy-item", auth: "Bearer access-s", corpo: { item: { id: "item_1" } } }]);
   });
+});
+
+it("timeout por chamada não aborta pai nem a próxima leitura da janela de polling", async () => {
+  jest.useFakeTimers();
+  try {
+    const pai = new AbortController();
+    await conexoes(7, pai);
+    const primeiro = fetchFalso.mock.calls.at(-1)?.[1].signal as AbortSignal;
+    jest.advanceTimersByTime(16_000);
+    expect(primeiro.aborted).toBe(true);
+    expect(pai.signal.aborted).toBe(false);
+    await conexoes(7, pai);
+    const segundo = fetchFalso.mock.calls.at(-1)?.[1].signal as AbortSignal;
+    expect(segundo.aborted).toBe(false);
+    // A chamada já terminou: seu listener foi removido; nenhum pai fica retido.
+    pai.abort();
+    expect(pai.signal.aborted).toBe(true);
+  } finally { jest.useRealTimers(); }
 });

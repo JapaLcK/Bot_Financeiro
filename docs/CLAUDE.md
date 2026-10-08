@@ -318,6 +318,79 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
     from guia_painel g join users u on u.id = g.user_id;
   ```
 
+  **Dicas de tela.** O `Guia` também traz `dicas: [{id, tela, titulo, texto, vista}]`, do
+  catálogo `DICAS` em `api/v2/guia.py` (hoje só `assinaturas.marcas`), filtradas pelo plano
+  (`plan_gate_ok` do recurso da tela: `subscriptions` para Assinaturas; o Essencial recebe
+  `[]`). `POST /api/v2/guia/dica {dica}` carimba a 1ª vez em `guia_painel.dicas`
+  (`{dica_id: carimbo}`, coluna por `alter … if not exists`) e devolve o `Guia`; id fora do
+  catálogo = 422; não toca `oferecido_em` nem `feitos` (o guia segue em `oferecer`). Dica que
+  o plano não dá grava e é inofensiva: o GET não a devolve. O cliente (`parts/Dica.tsx`) mostra
+  a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
+  dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
+
+- `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
+  condicional do motor único, usuário da sessão e gates antes da leitura financeira.
+  Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
+  Pro recebe 30/60/90 conforme o horizonte solicitado. Fora do horizonte do plano é
+  403 `forecast_horizon_not_allowed`; recurso ausente é 403 `pro_required`; query
+  fora dos três valores é 422 no envelope. O recurso `cashflow` concede os detalhes,
+  independentemente da lista de horizontes. Uma snapshot repeatable read/read only,
+  bancos elegíveis da base v2 (`cashflow_snapshot.ler(..., True)`), sem sync, escrita,
+  reparo, expiração de pendência ou aviso SSE.
+  `base` é saldo observado; `ancora` é hoje ajustado pelas premissas do motor; série
+  começa amanhã e pior dia usa apenas os pontos futuros (primeiro empate, causas
+  desde o último pico). Plus tem apenas capacidade `marcos` e todos os campos de
+  detalhe Pro são `null`, inclusive sem nomes/ids/ciclos nos motivos públicos.
+  Pro sem saldo mantém detalhes conhecidos e pontos `null`, com pior dia `null`.
+  Motivos expõem somente código/direção. Compromissos usam chaves opacas estáveis
+  por usuário e identidade da fonte; homônimos não se fundem. Instâncias ficam em
+  grupo próprio, pois a snapshot não fornece o vínculo persistido de apresentação.
+  `incluida_no_calculo` exige valor e data utilizáveis, inclusão na snapshot e
+  ocorrência não realizada; desconhecidos e excluídos continuam na explicação.
+  Base e valor da ocorrência preservam o Decimal/escala original da snapshot;
+  saldos calculados mantêm a quantização do motor. Exemplo discriminante: base
+  `"10.005"`, saída `"2.675"`, saldo calculado `"7.33"`. Pontos e causas resolvem as
+  ocorrências originais, sem usar o valor arredondado do detalhe legado.
+  `calculado_em`/`valido_ate`, qualidade e cobertura vêm da mesma snapshot;
+  `cabe_nas_premissas` e estimativa variável seguem `false`. Horizonte até 90 pontos
+  futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
+  global de bytes comprovado/adicionado: esses limites dimensionais não limitam
+  fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.
+  Consumidor (Etapa 3 PR3): `webapp/src/dashboard/widgets/Previsao.tsx` (página
+  `/previsao` e card "Saldo previsto" do Resumo) e `Compromissos.tsx`, com
+  `previsaoQuery` em `lib/v2.ts`: chave `["previsao", dias]`, `gcTime: 0` (dado sem
+  tela olhando sai do cache, inclusive no downgrade) e releitura em `valido_ate`,
+  medida no relógio do servidor, com piso de 60 s. Dinheiro na tela é `moneyText`
+  (`lib/format.js`), sem float; a tela não soma (grupo repetido é "3 × −R$ 25,00" ou
+  "valores diferentes"). Limite declarado: pendência financeira NOVA em
+  `pending_actions`/`ai_pending_actions` não avisa o SSE (as duas tabelas ficam fora
+  de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
+  foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
+  escritores compartilhados: PR próprio, faixa Completo.
+
+- `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
+  `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
+  [{tipo, rotulo, valor, motivos}], por_banco: [{banco, valor, motivos}], motivos}`. Gate
+  `investments` (403 `pro_required`). Só posições do Open Finance, com o recorte da foto
+  (`POSICOES_BANCO_SQL` + `separar_posicoes` de `db/patrimonio.py`): investimento e caixinha
+  manuais não entram. A mesma regra serve a tool `get_investment_summary` da IA e o "meus
+  investimentos" do WhatsApp (`core/handlers/investido.py`). `total: null` = não dá para
+  saber (`sem_banco_conectado`; nenhuma conexão viva sincronizada com linha no espelho
+  `open_finance_investments` — o sync não grava "li e veio vazio", então sem linha não há
+  R$ 0; ou toda posição sem saldo), nunca zero. R$ 0,00 só com posições que somam 0.
+  `nenhum_investimento` só com total null e **toda** conexão viva saudável (o contrário do
+  `banco_desatualizado`: `desatualizada` False, tela "Atualizado"); qualquer dúvida
+  (reconexão pendente, item em erro, `item_missing`, coleta travada, falha de leitura, sync
+  velho) fica só com `banco_desatualizado`. Nunca junto de um número. Com ele os
+  três consumidores dizem "Não encontrei investimentos nos seus bancos conectados", na ordem
+  `sem_banco_conectado` > `saldo_ausente` > `nenhum_investimento` > "ainda não consegui ler".
+  Parte só com posição sem saldo sai `valor: null`; parte que fecha em 0 some.
+  **Centavos:** cada posição entra quantizada em 2 casas e as partes somam essas parcelas, então
+  Σ por_tipo == total == Σ por_banco, exato; o custo é o total poder diferir do
+  `investimentos_banco` da foto em até 0,005 × nº de posições (só com saldo de 3+ casas).
+  `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
+  `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -375,7 +448,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 
 Sessão por **JWT em cookie `HttpOnly`** + **refresh token** (tabela
 `auth_refresh_tokens`), com **CSRF por cookie `csrf_token`** (`SameSite=strict`) e
-rate limiting via `slowapi` nos endpoints sensíveis.
+rate limiting via `slowapi` nos endpoints sensíveis (chave `rate_limit_key`, ver abaixo).
 
 No cliente, `frontend/auth-refresh.js` faz *monkey-patch* de `window.fetch`: em 401
 que não seja o próprio `/auth/refresh`, dispara o refresh, deduplica chamadas
@@ -398,6 +471,19 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
+Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
+`CLOUDFLARE_ORIGIN_SECRET` (≥ 32 chars), o `CF-Connecting-IP` só vale quando a regra da
+Cloudflare manda o mesmo valor em `x-pigbank-cf-secret`; sem ela, o comportamento antigo
+(conexão da Cloudflare). Configuração em `.env.example`; a regra inteira e os riscos
+residuais, no docstring do módulo. A sonda `client_ip_sonda` (`system_event_logs`) mede.
+Todo IP gravado ou exibido (auditoria, `auth_login_events`, sessão, admin, export) usa
+`client_ip`; todo teto por IP (slowapi, `_check_auth_rate_limits`, quiz) usa `rate_limit_key`.
+Nunca ler o peer nem cabeçalho de IP direto: `tests/test_client_ip_fonte_unica.py` reprova.
+Limite conhecido: o detector de pico de falha de login (`core/services/security_alerts.py`)
+agrupa por `auth_login_events.ip_address`, o IP completo — IPv6 não vira /64 ali, então quem
+tem um bloco troca de endereço dentro do próprio /64 sem somar no balde. Só o limitador agrupa /64.
+
 **Conta pela `/assinar` (funil v3 do quiz): `POST /auth/quiz/conta`**
 (`frontend/routes/quiz_signup.py`, com CSRF). Recebe e-mail, nome, WhatsApp
 (obrigatório) e o aceite dos termos, e cria a conta **sem senha e sem código** na
@@ -408,7 +494,7 @@ pedido já é dessa conta), `tem_conta`, `cadastro_pendente` (há código de
 não é tocado) ou `ocupado` (409: outro pedido do mesmo e-mail está com a trava; a rota
 não espera, para uma rajada não segurar o pool de conexões). Só `criada` escreve e dá
 sessão. É o único lugar do site que diz se um e-mail tem conta (aceito pelo dono), com
-10/h por IP (balde `quiz`) e 3/h por e-mail (balde `quiz-conta`, separado do
+10/h por IP (balde `quiz`, chave `rate_limit_key`) e 3/h por e-mail (balde `quiz-conta`, separado do
 `register` para o anônimo não gastar o teto do cadastro da vítima). A prova do e-mail vem depois, no "Crie sua senha".
 A página é `frontend/assinar.html` + `assinar.js`: o script limpa o fragmento antes do
 Pixel e do GA4 (sem Clarity), percorre os estados formulário → já tem conta →
@@ -484,6 +570,20 @@ Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, 
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
+**Funil (`checkout_funnel_events`):** além de `started`/`completed`, grava `viewed_pricing`
+(GET `/precos` de usuário logado, 1 por janela móvel de 24h) e `expired` (webhook
+`checkout.session.expired`). Esse evento também dispara quando o app troca/expira a sessão
+aberta (`finance_bot_websocket_custom.py`, ao reaproveitar/expirar sessões em
+`/billing/create-checkout`), então `expired` NÃO é abandono: abandono confiável = abriram − concluíram.
+Quem consome a tabela (painel de funil): `started` e `expired` repetem por `session_id`
+(reuso de sessão, reentrega do webhook) → `COUNT(DISTINCT session_id)`; `viewed_pricing` repete a cada 24h
+por usuário e a dedupe é racy → `COUNT(DISTINCT user_id)` na janela. `viewed_pricing` é só de usuário
+LOGADO (quem vem do quiz anônimo não entra; entram também quem já paga e abre a /precos, e quem o
+`gate_plan_selection` redireciona): é "logado que viu a /precos", não "visitante". Sem backfill: antes do
+deploy `viewed_pricing` e `expired` são zero, então taxa vista→iniciou não vale numa janela que cruza o
+deploy (usar `min(created_at)` do kind como "medido desde"). Exclusão de conta zera `user_id`
+(`viewed_pricing` não tem `session_id`, então some de qualquer distinct por usuário).
+
 **`/billing/create-checkout` serve a `/precos` e a `/assinar`.** O corpo ganha
 `origem` (`"precos"` default | `"assinar"`; outro valor é 400) e `embutido` (default
 `false`). Hospedado responde `{checkout_url, interval, plan}`; embutido responde
@@ -551,7 +651,9 @@ BRL (`adaptive_pricing` off) nas **duas** origens: medido no Stripe de teste em
 2026-10-03, sem o campo a sessão `elements` da `/precos` nasce com ele LIGADO (o
 default da conta), e as caixas mostram R$. O hospedado da `/precos` segue sem o campo.
 
-No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
+O `GET /billing/plans-config` expõe a flag como `pagina_propria`; com ela, o deslogado
+que escolhe um plano no cartão na `/precos` vai direto à `/assinar?plano=…&ciclo=…` (sem
+`/cadastro`). No frontend, a `/assinar` manda `pagina: true` (e `origem` da query: só `precos`, senão
 `assinar`) e, se a resposta trouxer `pagina`, monta `frontend/pagamento-pagina.js`
 (Payment Element só cartão, resumo pelo `change` do Stripe, as caixas e o cupom
 "Tem cupom?" → `applyPromotionCode`); sem `pagina`, o embutido de antes. O Stripe.js é o
@@ -573,9 +675,14 @@ sincronização do Pagar; o Pagar faz 1 `/bump` de sincronização quando há ca
 `availablepaymentmethodschange` trazer botão, `inert` com `/bump`, cupom ou pagamento em voo (a folha nunca abre
 com o carrinho mudando; ela mostra o total da sessão, que é o que se cobra). O `click` do Express só chama o
 `resolve` (que abre a folha) com nada em voo, e então trava caixas, cupom e Pagar até o `cancel` ou o `confirm` —
-no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` sem folha aberta
-(tardio, depois de um `cancel`) é ignorado; com ela, `confirm` →
-`actions.confirm({expressCheckoutConfirmEvent})`. Pré-requisito: o domínio registrado em "Domínios de métodos de
+no Google Pay do desktop a folha é um popup e a página segue clicável por baixo. `confirm` com pedido em voo, ou
+sem folha aberta numa montagem que já viu um `click` (tardio, depois de um `cancel`), é recusado: `paymentFailed()`
+no evento e o aviso "Pagamento não iniciado. Tente de novo." (nunca em silêncio); senão, `confirm` →
+`actions.confirm({expressCheckoutConfirmEvent})`. O Apple Pay do Safari parece não mandar o `click` (staging,
+2026-10-05: a folha abria, girava e fechava sem nenhum PaymentIntent; causa provável, a confirmar no reteste — a
+alternativa é o `confirm` nem chegar à página); sem `click` a trava do carrinho
+fica por conta da folha ser modal (iPhone). Risco aceito: numa folha não modal sem `click`, um `/bump` que termina
+antes do `confirm` cobra o total novo, que a folha não mostrou. Pré-requisito: o domínio registrado em "Domínios de métodos de
 pagamento" do Stripe no modo TESTE (staging) e no LIVE (produção) — sem isso os botões não aparecem. O desenho das
 caixas mora em `frontend/bump-caixas.js` (PR C, abaixo); o do resumo e do botão, em `frontend/pagamento-caixas.js`. Testes: `tests/frontend/pagamento_express.test.mjs`.
 
@@ -649,6 +756,28 @@ no banco; contestação GANHA continua com `disputed` True, então também segur
 sempre. Limite conhecido: estorno por nota de crédito para o saldo do cliente (sem refund na
 charge) NÃO é detectado. Estorno "pending" real e contestação real chegando antes da
 entrega só se provam no Stripe; o modo teste sobe `amount_refunded` na hora.
+
+**Cartão nunca cobra período que um Pix pago cobre.** Checkout de cartão concluído (ou
+1ª fatura, `subscription_create`) com Pix cobrindo hoje (`pix_cobre_agora`: grant vigente
+ou cobrança paga com a janela em curso, ainda sem grant; grant Pix revogado não conta; o
+`create-checkout` recusa com `409 pix_active` pela mesma função) cancela a assinatura na hora
+(`core/services/cartao_recusado_por_pix.py`, `Subscription.cancel` com
+`cancellation_details.comment = "pigbank:pix_vigente"`), registra os cadernos e não
+materializa nada; plano cobrado vira alerta de estorno manual, e o `deleted` com a marca
+não manda e-mail de cancelamento. Na ordem inversa (cartão primeiro, Pix pago depois), o
+efeito `stripe_cancel` do dreno pergunta ao Stripe (`_stripe_vivo`) e agenda
+`cancel_at_period_end` quando a cobrança não tem `stripe_subscription_id` ou quando a
+gravada já está morta (`canceled`/`incomplete_expired`; o cliente a cancelou e assinou
+outra antes de pagar um QR antigo), gravando a assinatura achada (sempre a que foi
+agendada) e a janela adiada na linha antes de o efeito contar como feito; com a gravada
+morta, o começo que esperava o fim dela é desfeito antes de adiar até o fim da viva (que
+pode acabar antes, e o Pix não fica esperando a morta); gravada morta e
+nenhuma viva: não há `modify` e a janela que esperava o fim dela volta para agora. Com
+cadernos, o alerta manda estornar o plano só depois de `ebook_entregas` marcar `enviado`.
+Limites conhecidos: (1) assinatura que morre depois de o
+`stripe_cancel` registrar deixa a janela adiada; (2) cobrança paga com grant ainda por
+nascer: o `create-checkout` recusa, mas a tela de status mostra sem plano até o grant sair;
+(3) a reentrega do checkout repete o alerta de estorno.
 
 **Cadernos extras no Pix anual (PR A: receber e entregar; inerte até o checkout
 gravar a foto).** `pix_charges.extras` (`jsonb`, default `[]`, check de array) guarda a
@@ -804,6 +933,16 @@ não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhoo
 `/open-finance/pluggy/webhook`. O `connect-token` aceita `app_scheme` opcional no corpo
 (`pigbank`, `pigbank-staging` ou `pigbank-dev`; fora da lista, 400), que vira o
 `oauthRedirectUri` `<scheme>://open-finance-volta` da Pluggy; o site não manda o campo.
+Aceita também `item_id` opcional (reconectar banco já conectado; vai como `itemId` ao lado de
+`options`): só item não pausado do próprio usuário no nosso banco e com o `clientUserId` dele
+na Pluggy; não-string ou vazio é 400, todo o resto é o mesmo 404 `OF_ITEM_NAO_ENCONTRADO`.
+`item_id: null` conta como ausente (token de banco novo). O campo opcional `attempt_id`
+exige UUID canônico em minúsculas e `app_scheme` permitido; o servidor monta a URI
+`<scheme>://open-finance-volta/<attempt_id>`. Sem esse campo, pedidos legados válidos
+mantêm a URI anterior. Após os gates de sessão e acesso, JSON malformado, campos
+repetidos, corpo acima de 4096 bytes ou lento retornam 400 antes de qualquer chamada
+à Pluggy; corpo vazio continua permitido. Contrato completo em
+[`open-finance-ios-backend.md`](open-finance-ios-backend.md).
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
@@ -891,7 +1030,9 @@ chave), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
-consulta nada). Ficam desligadas só onde
+consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
+`db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
+retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -959,6 +1100,9 @@ para saber o que existe:
 ```bash
 grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | sort -u
 ```
+
+Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
+fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,

@@ -785,62 +785,55 @@ def _ui(item_id: str) -> dict:
     return connection_ui_state(_linha(item_id))
 
 
-# ── 13. RODADA 4: o webhook grava o PAR, não só o `status` ──────────────────
-# `update_pluggy_open_finance_item_status` escrevia o `status` sozinho: medido,
-# `item/error` sobre ACTIVE/no_accounts produzia ERROR/no_accounts — par
-# incoerente que a UI ainda mascarava de "Erro temporário". Ele não passa pelo
-# `resolve_connection_state` (não observa o item, só repete a Pluggy), mas grava
-# o MESMO par que as linhas B/C dariam: ERROR + motivo vazio.
-# CONTROLE NEGATIVO (medido): tirar o `status_reason=null` do UPDATE deixa este
-# teste vermelho no par.
+# ── 13. RODADA 4 (reescrito no PR-C2): o webhook não grava veredito ─────────
+# Antes, `update_pluggy_open_finance_item_status` escrevia o par (ERROR + motivo
+# vazio) a partir de `item/error`. No PR-C2 o webhook NÃO grava status nem motivo
+# em `item/error` (agenda a observação, `of_observacao.py`): o par que o job/sync
+# gravaram fica como está. A observação em si é medida em
+# `tests/test_of_webhook_observacao.py`; aqui a observação é neutralizada para
+# provar que o próprio handler não escreve.
+# CONTROLE NEGATIVO (medido): devolver `item/error` ao `status_by_event` deixa os
+# dois testes vermelhos.
 
-def test_webhook_item_error_nao_deixa_par_incoerente(user_id, monkeypatch):
+def _item_error_sem_observacao(item_id, monkeypatch):
     import json
 
     from fastapi.testclient import TestClient
 
     import frontend.finance_bot_websocket_custom as dashboard
 
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
+    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
+    monkeypatch.setattr("frontend.routes.of_observacao.agenda_observacao", lambda i, c: None)
+    return TestClient(dashboard.app).post(
+        "/open-finance/pluggy/webhook?token=test-webhook-secret",
+        content=json.dumps({"event": "item/error", "itemId": item_id}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+
+
+def test_webhook_item_error_nao_grava_veredito(user_id, monkeypatch):
     conexao = _conexao(user_id, "item-webhook-erro")
     db.mark_sync_result(conexao["id"], ok=False, status="ACTIVE",
                         status_reason="no_accounts", at=None)
-    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
 
-    resp = TestClient(dashboard.app).post(
-        "/open-finance/pluggy/webhook?token=test-webhook-secret",
-        content=json.dumps({"event": "item/error", "itemId": "item-webhook-erro"}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+    resp = _item_error_sem_observacao("item-webhook-erro", monkeypatch)
 
     assert resp.status_code == 200, resp.text
     linha = _linha("item-webhook-erro")
-    assert (linha["status"], linha["status_reason"]) == ("ERROR", None), linha
-    assert _ui("item-webhook-erro")["state"] == "error_recoverable"
+    assert (linha["status"], linha["status_reason"]) == ("ACTIVE", "no_accounts"), linha
+    assert _ui("item-webhook-erro")["state"] == "no_accounts"
 
 
 def test_webhook_item_error_atrasado_nao_apaga_item_missing(user_id, monkeypatch):
-    """A exceção do par: `item/error` entregue com atraso (replay) NÃO pode rebaixar
-    "Conexão perdida / Refaça a conexão" para "Erro temporário / Tentaremos de novo".
-    CONTROLE NEGATIVO (medido): com `status_reason=null` cru no UPDATE, o par vira
-    ('ERROR', None) e a UI vira `error_recoverable` — as duas asserções vermelhas."""
-    import json
-
-    from fastapi.testclient import TestClient
-
-    import frontend.finance_bot_websocket_custom as dashboard
-
+    """`item/error` entregue com atraso (replay) NÃO pode rebaixar "Conexão perdida /
+    Refaça a conexão" para "Erro temporário". No PR-C2 isso vale porque o handler não
+    escreve; a pista da observação também preserva o motivo (G2)."""
     conexao = _conexao(user_id, "item-webhook-sumido")
     db.mark_sync_result(conexao["id"], ok=False, status="ERROR",
                         status_reason="item_missing", at=None)
-    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "test-webhook-secret")
-    monkeypatch.setattr("frontend.routes.open_finance._schedule_pluggy_sync", lambda i: None)
 
-    resp = TestClient(dashboard.app).post(
-        "/open-finance/pluggy/webhook?token=test-webhook-secret",
-        content=json.dumps({"event": "item/error", "itemId": "item-webhook-sumido"}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
+    resp = _item_error_sem_observacao("item-webhook-sumido", monkeypatch)
 
     assert resp.status_code == 200, resp.text
     linha = _linha("item-webhook-sumido")
@@ -1092,6 +1085,10 @@ def test_aviso_de_reconexao_pula_quem_espera_autorizacao_no_app(
 # LIMITE HONESTO: o estado abaixo é montado com UPDATE cru e HOJE é inalcançável
 # em produção (nenhum escritor põe `consent_expires_at` numa linha 'pluggy').
 # Ele guarda a decisão, não um caminho vivo.
+#
+# Onda 5, PR-D: a perna do consentimento SAIU (o aviso virou a tela filtrada,
+# `avisa_reconectar`). O teste fica e passa a prender que uma data de
+# consentimento próxima não reabre o aviso de quem está na janela do dispositivo.
 
 def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentimento(
         user_id, relogio_fixo):
@@ -1133,7 +1130,9 @@ def test_espera_de_dispositivo_nao_recebe_o_aviso_nem_pela_perna_do_consentiment
 # prende as duas superfícies com a MESMA condição e o MESMO prazo.
 #
 # CONTROLE NEGATIVO: tirar o `raw->>'executionStatus'` da query → o caso da Caixa
-# fica vermelho (volta a ser avisado).
+# fica vermelho (volta a ser avisado). Desde o PR-D da Onda 5 a "query" do aviso é
+# o select do snapshot: o ponto equivalente é o `SQL_EXECUTION_STATUS`
+# (`db/open_finance_state.py`), e não há mais predicado próprio do aviso.
 # CONTROLE POSITIVO: o `LOGIN_ERROR` com `health` NULL CONTINUA sendo avisado —
 # sem ele, um fallback que casasse demais teria calado o aviso inteiro e o teste
 # passaria mesmo assim.
@@ -1261,6 +1260,16 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 #
 # O grupo tem METADES INDEPENDENTES, e cada uma tem o seu controle negativo —
 # uma injeção só não discrimina todas. As QUATRO foram MEDIDAS, não deduzidas.
+# Desde o PR-D da Onda 5 o piso e o teto moram em `SQL_JANELA_DEVICE`,
+# compartilhado pelo `execution_status` E pelo `device_na_janela` (o prazo da
+# instrução nos dois ramos), e o aviso é o select do snapshot. (B) e (B') foram
+# REMEDIDAS em 2026-10-07 sobre esse código, rodando este arquivo,
+# `test_of_aviso_mesma_regra.py` e `test_of_health.py`: neste arquivo os
+# vermelhos são os mesmos listados abaixo; (B) derruba também, no outro
+# arquivo, `test_tela_e_aviso_dizem_a_mesma_coisa[f_caixa_health_61]`,
+# `[h_wua_health_61]`, `[i_wua_sem_health_61]` e
+# `test_em_lote_o_aviso_e_exatamente_a_tela_filtrada`; (B') não derruba nada
+# fora deste arquivo. (A) e (C) não foram remedidas depois do PR-D.
 #
 # Os VERMELHOS vão por NODE ID, e não por apelido ("caso 7", "a perna de +1
 # min"): apelido deixa de bater no dia em que um `parametrize` é renomeado, e o

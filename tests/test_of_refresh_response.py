@@ -183,7 +183,10 @@ def test_label_acompanha_o_state_sobreposto(user_id, monkeypatch):
     out = ps._refresh_items_report(
         user_id, ["item-label"], {"item-label": "Nubank"},
         {"item-label": False}, {}, set(), rate_limited=set())
-    assert (out[0]["state"], out[0]["label"]) == ("partial", "Parcial"), out
+    assert (out[0]["state"], out[0]["label"], out[0]["detail"]) == (
+        "partial", "Dados parciais",
+        "Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização. "
+        "Parte dos dados ainda não veio"), out
 
     out = ps._refresh_items_report(
         user_id, ["item-label"], {"item-label": "Nubank"},
@@ -207,7 +210,8 @@ def test_detalhe_do_parcial_de_verdade_nao_e_sobrescrito(user_id, monkeypatch):
 
     out = ps._refresh_items_report(user_id, ["item-parcial-real"], {}, {}, {}, set())
     assert out[0]["state"] == "partial"
-    assert out[0]["detail"] == "Cartão desatualizado desde 12/08", out[0]
+    assert out[0]["detail"] == ("Banco conectado. Fechar o app ou bloquear a tela não cancela a autorização. "
+                                 "Cartão desatualizado desde 12/08"), out[0]
 
 
 def test_detalhe_da_acao_necessaria_chega_inteiro_na_resposta_do_refresh(user_id, monkeypatch):
