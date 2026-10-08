@@ -34,6 +34,9 @@ _TOGGLES = (
     # sinônimos de substantivo aceitos pelas outras regras de relatório
     ("não quero receber o relatório semanal", "report.weekly_disable"),
     ("quero receber o relatório mensal", "report.monthly_enable"),
+    # "mais" depois do verbo também é pedido de parar
+    ("não quero receber mais o resumo semanal", "report.weekly_disable"),
+    ("não desejo receber mais o relatório mensal", "report.monthly_disable"),
     # formas de período por substantivo, como "resumo da semana" e "resumo do mes"
     ("não quero receber o resumo da semana", "report.weekly_disable"),
     ("quero receber o resumo do mês", "report.monthly_enable"),
