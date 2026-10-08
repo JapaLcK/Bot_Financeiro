@@ -518,7 +518,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # "receber" só liga/desliga em frase inteira na forma pedida: "não consigo
     # receber", "não sei se quero receber" e "quando vou receber…?" não são
     # pedido — caem na consulta ou na IA. Ancorado no início de propósito.
-    (r"^(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) (?:semanal|da semana|semana)(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) (?:semanal|da semana|semana)(?: todo \w+(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_disable"),
     (r"^quero receber (?:o |a )?(?:resumo|relatorio|report) (?:semanal|da semana|semana)(?: todo \w+(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_enable"),
@@ -527,7 +527,7 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
      "report.monthly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
-    (r"^(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) (?:mensal|do mes|mes)(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:mandar|receber|enviar)) (?:o |a )?(?:resumo|relatorio|report) (?:mensal|do mes|mes)(?: todo \w+(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_disable"),
     (r"^quero receber (?:o |a )?(?:resumo|relatorio|report) (?:mensal|do mes|mes)(?: todo \w+(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_enable"),
