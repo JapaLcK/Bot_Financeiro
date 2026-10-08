@@ -8,6 +8,7 @@ import { MotivosPrevisao } from "../parts/Selos";
 
 const FONTE: Record<GrupoCompromissos["fonte"], string> = {
   receita_recorrente: "Receita fixa", gasto_recorrente: "Gasto fixo", instancia: "Boleto", fatura: "Fatura do cartão",
+  recorrencia_banco: "Detectado no banco",
 };
 export const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
