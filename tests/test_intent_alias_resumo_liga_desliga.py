@@ -37,6 +37,10 @@ _TOGGLES = (
     # a cadência repetida no desligar não impede o desligar
     ("não quero mais receber o resumo semanal todo domingo", "report.weekly_disable"),
     ("não quero receber o resumo mensal todo mês", "report.monthly_disable"),
+    # "eu" e cadência por dia da semana (normalizada de "segunda-feira")
+    ("eu não quero receber o resumo semanal", "report.weekly_disable"),
+    ("não quero receber o resumo semanal toda segunda-feira", "report.weekly_disable"),
+    ("quero receber o resumo semanal toda segunda-feira", "report.weekly_enable"),
     # cortesia antes do comando também não muda o pedido
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
     ("por favor quero receber o resumo mensal", "report.monthly_enable"),
