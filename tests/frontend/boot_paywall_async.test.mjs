@@ -68,9 +68,10 @@ after(async () => { await browser?.close(); });
 // depois (gate/outage) | "open" = onopen dispara (sessão que JÁ abriu).
 // relogio: relógio falso na página (os timers do FakeWS e do backoff andam
 // com page.clock.runFor, não com o relógio de parede).
+// inApp: window.PB_IN_APP (app iOS) — o veredito negativo não navega.
 async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
                          seedSnap = false, meAfter = null, meGate = false,
-                         relogio = false }) {
+                         relogio = false, inApp = false }) {
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   let meCalls = 0;
@@ -151,6 +152,7 @@ async function bootApp({ me, meDelayMs = 400, meStatus = 200, wsMode = "silent",
     // /auth/dashboard-profile, /history, /insights, etc.: pendura (nunca resolve)
     return new Promise(() => {});
   });
+  if (inApp) await page.addInitScript(() => { window.PB_IN_APP = true; });
   if (relogio) await page.clock.install();
   await page.goto("http://pb.test/app", { waitUntil: "domcontentloaded" });
   return { ctx, page, liberaMe };
@@ -224,9 +226,30 @@ test("plano revogado no meio da sessão: revalida, redireciona e PARA de reconec
   await page.clock.runFor(15000);
   // O /auth/me do Node demora em tempo real: a navegação se espera no relógio de parede.
   await page.waitForURL("**/precos?escolha=1", { timeout: 15000 });
+  // Daqui em diante o _wsCount lido é o do documento /precos (zerado pelo
+  // addInitScript): esta metade não mede a parada. Quem mede é o teste
+  // "plano revogado no app", logo abaixo, onde a página não navega.
   const antes = await page.evaluate(() => window._wsCount || 0);
   await page.clock.runFor(60000);
   const depois = await page.evaluate(() => window._wsCount || 0);
+  assert.equal(depois, antes, `continuou reconectando após o veredito: ${antes} -> ${depois}`);
+  await ctx.close();
+});
+
+test("plano revogado no app (sem navegação): tela de erro e PARA de reconectar", async () => {
+  // No app iOS o veredito negativo troca o body por _showAccessError e o
+  // documento continua o mesmo — aqui o _wsCount prova o stopWsRetries().
+  const { ctx, page } = await bootApp({
+    me: { app_access: true }, meAfter: { app_access: false },
+    meDelayMs: 30, wsMode: "open-then-reject", relogio: true, inApp: true,
+  });
+  await page.waitForFunction(() => window._wsCount === 1, undefined, { timeout: LIMITE_MS });
+  await page.clock.runFor(15000);
+  await page.waitForFunction(() => /sem plano ativo/i.test(document.body.textContent),
+                             undefined, { timeout: LIMITE_MS });
+  const antes = await page.evaluate(() => window._wsCount);
+  await page.clock.runFor(120000);
+  const depois = await page.evaluate(() => window._wsCount);
   assert.equal(depois, antes, `continuou reconectando após o veredito: ${antes} -> ${depois}`);
   await ctx.close();
 });
