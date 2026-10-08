@@ -54,6 +54,9 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "não tenho certeza se quero receber o resumo mensal",
     # frase contrastiva: a negação não vale para a cláusula seguinte
     "não quero o resumo mensal, quero receber o resumo semanal",
+    # correção no fim da frase: o comando inteiro não é o pedido
+    "quero receber o resumo semanal, mas não quero mais",
+    "não quero receber o resumo semanal, na verdade quero sim",
     # pergunta sobre o recebimento
     "quando vou receber o resumo mensal?",
     # "para de" como preposição, não como comando de parar
