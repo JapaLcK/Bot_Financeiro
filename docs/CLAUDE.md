@@ -979,7 +979,14 @@ viu (ex.: um `delete_all_launches` escondido atrás de um erro). Limites declara
 texto livre do modelo depois de armar não cancela; falha depois do commit da
 pendência e antes de o runner receber a linha gravada não cancela; falha ao cancelar só
 loga. O token do CAS é a linha que o próprio `ai_set_pending_action` devolve
-(`returning`), sem reler: outra janela que re-arme no meio não é cancelada. Código em
+(`returning`), sem reler: outra janela que re-arme no meio não é cancelada. No
+`_CONFIRMA` do `add_launch` (WhatsApp com a flag), o runner relê a linha logo depois de
+armar: se outra janela (o `/ai/chat` aberto junto) a sobrescreveu, responde
+`_OUTRO_PEDIDO` ("tem outro pedido seu esperando confirmação") em vez de mostrar um
+resumo cujo "sim" executaria a da outra. Limite: resta a janela entre essa releitura e
+a entrega da mensagem; fechar de vez exige pendência por canal ou sem sobrescrita, fora
+deste PR. No ramo `requires_confirmation` a pergunta é texto do modelo na rodada
+seguinte e não há essa releitura. Código em
 `core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
 `tests/test_wa_ia_primeiro_runner.py`.
 

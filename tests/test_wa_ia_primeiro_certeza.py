@@ -501,3 +501,32 @@ def test_hashtag_com_caixa_resumo_mostra_o_que_grava(uid_pro, monkeypatch):
     assert "Só confirmando" in r and "#lazer" in r and "#Lazer" not in r, r
     diga(uid_pro, "sim")
     assert _categorias(uid_pro) == ["lazer"]
+
+
+# ── Outra janela re-arma entre gravar e perguntar ───────────────────────────
+
+_DA_OUTRA = {"tipo": "despesa", "valor": 77, "alvo": "padaria"}
+
+
+def test_confirma_nao_aparece_se_outra_janela_sobrescreveu(uid_pro, monkeypatch):
+    """O /ai/chat aberto junto re-arma logo depois desta gravação. O WhatsApp
+    não pode mostrar "registrar R$ 500" sobre a linha da outra: o "sim" daqui
+    executaria a dela."""
+    from core.services.ai_chat import runner
+    liga_flag(monkeypatch)
+    original = db.ai_set_pending_action
+
+    def corrida(user_id, name, args, summary):
+        meu = original(user_id, name, args, summary)
+        original(user_id, "add_launch", _DA_OUTRA, "despesa de R$ 77,00 em padaria")
+        return meu
+
+    monkeypatch.setattr(db, "ai_set_pending_action", corrida)
+    openai_falso(monkeypatch, lancamento(500))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert runner._OUTRO_PEDIDO in r and "Só confirmando" not in r, r
+    pend = db.ai_get_pending_action(uid_pro)
+    assert (pend["tool_name"], pend["tool_args"]) == ("add_launch", _DA_OUTRA)
+    monkeypatch.setattr(db, "ai_set_pending_action", original)
+    diga(uid_pro, "sim")                   # é a que o usuário viu na outra janela
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 77.0}]

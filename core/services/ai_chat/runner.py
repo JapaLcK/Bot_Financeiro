@@ -86,6 +86,10 @@ _ATENDIDA_FORA = "Esta mensagem foi atendida fora desta conversa."
 # Resposta final de um write com `confirmar_se` verdadeiro (sem 2ª ida ao LLM).
 _CONFIRMA = "🐷 Só confirmando: registrar *{resumo}*? Responde *sim* ou *não*."
 
+# A pendência deste turno foi sobrescrita por outra janela antes da pergunta.
+_OUTRO_PEDIDO = ("🐷 Tem outro pedido seu esperando confirmação. Responde ele "
+                 "primeiro e depois me manda este de novo.")
+
 # Tool call da mesma rodada depois de um `_CONFIRMA`: não roda.
 _NAO_EXECUTADA = json.dumps(
     {"status": "not_executed", "message": "não executada: aguardando a confirmação do usuário"},
@@ -551,6 +555,12 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
     return ERROR_MSG
 
 
+def _ainda_e_a_mesma(user_id: int, armada: dict[str, Any]) -> bool:
+    atual = db.ai_get_pending_action(user_id)
+    return bool(atual) and all(atual[k] == armada[k]
+                               for k in ("created_at", "tool_name", "tool_args"))
+
+
 def _alguma_arma_pendencia(user_id: int, chamadas: list[dict[str, Any]]) -> bool:
     """Alguma das chamadas pode armar uma pergunta pendente: write com
     `requires_confirmation` (sem rodar o `validate`), com
@@ -657,7 +667,19 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             args = ao_confirmar(user_id, args)
         summary = tool.summary(args) if tool.summary else f"executar {name}"
         _TURN_WRITE_ATTEMPTED.set(True)
-        _PENDENCIA_DO_TURNO.set(db.ai_set_pending_action(user_id, name, args, summary))
+        armada = db.ai_set_pending_action(user_id, name, args, summary)
+        _PENDENCIA_DO_TURNO.set(armada)
+        # A linha é uma por usuário: outra janela (o /ai/chat aberto junto do
+        # WhatsApp) pode ter re-armado por cima. `_CONFIRMA` só se a linha
+        # ainda é a desta gravação; senão o "sim" executaria a da outra com o
+        # resumo desta. Não cancela a da outra (o CAS já não a apaga).
+        if armada is not None and not _ainda_e_a_mesma(user_id, armada):
+            _PENDENCIA_DO_TURNO.set(None)
+            return (
+                json.dumps({"status": "superseded", "message": _OUTRO_PEDIDO},
+                           ensure_ascii=False),
+                _OUTRO_PEDIDO,
+            )
         return (
             json.dumps({"status": "pending_user_confirmation", "summary": summary,
                         "args": args}, ensure_ascii=False),
