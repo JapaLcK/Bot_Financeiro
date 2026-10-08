@@ -15,7 +15,7 @@
 | 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
 | 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
 | 1b. Fatura OF paga pelo extrato | A fazer. Vem antes de travar o "pagar fatura" do cartão OF. |
-| 1c. Custo mensal do OF | A fazer, junto da Fase 4. |
+| 1c. Custo mensal do OF | A fazer. A parte de avisos vem antes da 3a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
 | 3. Esconder o legado | A fazer. |
 | 4. Metas sobre o OF | Espera a P5. |
@@ -286,8 +286,12 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   Negação. "Gastei 50 no cartão" sem cartão nenhum.
 
 **2c. O "apagar tudo" não apaga dado do OF. Faixa Completo: dinheiro.**
-- **Faz:** `delete_all_launches_and_rollback` passa a apagar só a Carteira (#20).
-- **Pronto:** sombras e fundidas intactas depois do "apagar tudo". Controle negativo.
+- **Faz:** `delete_all_launches_and_rollback` passa a apagar só a Carteira manual (#20). O
+  saque e o depósito em espécie que o OF cria na Carteira (`db/open_finance_cash.py::_credita`,
+  `origem='carteira'`, ligado em `of_cash_links`) também ficam: são dado do OF (Q41), e
+  desfeitos não voltam no sync.
+- **Pronto:** sombras, fundidas e lançamentos ligados em `of_cash_links` intactos depois do
+  "apagar tudo". Controle negativo.
 
 **2d. Textos. Faixa Direto.**
 - **Faz:** ajuda e comandos (`core/help_text.py`, `core/commands_catalog.py`,
@@ -310,6 +314,15 @@ são dinheiro, então essa parte é Completo.
   O WhatsApp e a IA param de listar o legado: "minhas caixinhas", "meus investimentos",
   "contas a pagar". O `/painel` tira `registro_antigo` de Lançamentos, e a listagem que o
   abastece (`db/lancamentos.py`, `GET /api/v2/lancamentos`) deixa de devolvê-lo (P3).
+- **Alcance:** todo consumidor de legado do §2.3, não só as telas acima. Isso inclui o app
+  nativo e o `/painel`, que leem rotas do `/app`: `app/src/features/painel/provider.tsx`
+  busca `/goals/{uid}/status`, `/cards/{uid}/summary` e `/installments/{uid}/list`, e essas
+  consultas não filtram o legado. A varredura se faz com `git grep` nas rotas de cada
+  tabela manual do §2.1, em `app/src`, `webapp/src` e `frontend/`.
+- **Antes da 3a:** o gerador de contas dos recorrentes manuais
+  (`core/services/recurring_charger.py`) e os avisos de autopay e de vencimento por
+  WhatsApp param, ou passam a ler a recorrência do OF (a parte de avisos da 1c). Senão o
+  legado escondido segue gerando conta e mensagem.
 - Service worker e `CACHE_NAME` pelo portão (`docs/armadilhas.md`).
 
 **3b. Totais sem o legado. Faixa Completo: dinheiro e foto diária.**
@@ -330,6 +343,8 @@ são dinheiro, então essa parte é Completo.
 
 **Dependências:**
 - 0 → 1a → (2a ∥ 2b ∥ 2c ∥ 2d) → 3a → 3b.
+- A parte de avisos da 1c (Carteiro, autopay, vencimento) e a parada do
+  `recurring_charger` vêm antes da 3a. O custo mensal da 1c pode esperar a Fase 4.
 - A 1b vem antes de travar o "pagar fatura" do cartão OF.
 - A P7 vem antes de travar a receita manual e a renda informada (2a) e antes de tirá-las da Previsão
   (3b).
