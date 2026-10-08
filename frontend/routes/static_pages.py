@@ -458,7 +458,17 @@ async def serve_como_funciona():
 
 
 @router.get("/precos")
-async def serve_precos():
+def serve_precos(request: Request):
+    """`def` (threadpool): o resolver consulta o banco. Logado grava
+    `viewed_pricing` (topo do funil); anônimo/cookie inválido só serve a página."""
+    from db import record_pricing_viewed
+
+    try:
+        uid = _resolve_page_user_id(request)
+        if uid is not None:
+            record_pricing_viewed(uid)
+    except Exception:  # telemetria nunca derruba a página de venda
+        logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
