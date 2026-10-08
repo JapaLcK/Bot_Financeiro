@@ -56,6 +56,9 @@ _TOGGLES = (
     ("não quero receber os relatórios semanais", "report.weekly_disable"),
     ("para de me mandar os resumos mensais", "report.monthly_disable"),
     ("não quero receber o resumo semanal todos os domingos", "report.weekly_disable"),
+    # cadência no plural sozinha como período
+    ("não quero receber o resumo todas as semanas", "report.weekly_disable"),
+    ("quero receber o resumo todos os meses", "report.monthly_enable"),
     ("quero receber o resumo mensal todos os meses", "report.monthly_enable"),
     ("para de me mandar mais o resumo semanal", "report.weekly_disable"),
     ("para de receber mais o resumo mensal", "report.monthly_disable"),
