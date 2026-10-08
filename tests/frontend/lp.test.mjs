@@ -1,5 +1,5 @@
 /**
- * /lp — landing de anúncio: o único botão ("Quero o PigBank" → /precos) só
+ * /lp — landing de anúncio: o único botão ("Quero o PigBank" → quiz.pigbankai.com) só
  * aparece depois de a VSL tocar até o fim COM SOM. O portão é o <script> do fim
  * de frontend/lp.html, e a trava nasce no <head>.
  *
@@ -164,7 +164,7 @@ test("erro no vídeo libera na hora, sem gravar a marca", async () => {
 test("sem JavaScript o botão aparece e o vídeo tem controles", async () => {
   const { page, ctx } = await abrir({ js: false });
   assert.equal(await ctaVisivel(page), true);
-  assert.equal(await page.getAttribute("#lp-cta", "href"), "/precos");
+  assert.equal(await page.getAttribute("#lp-cta", "href"), "https://quiz.pigbankai.com/");
   assert.ok(await page.$eval("#vsl", v => v.hasAttribute("controls")));
   await ctx.close();
 });
@@ -177,20 +177,20 @@ test("movimento reduzido: sem autoplay, com o botão para assistir", async () =>
   await ctx.close();
 });
 
-test("utm_* (sem diferenciar maiúsculas) e fbclid seguem para a /precos; o resto não", async () => {
+test("utm_* (sem diferenciar maiúsculas) e fbclid seguem para o quiz; o resto não", async () => {
   const { page, ctx } = await abrir({ visto: true, query: "?utm_source=meta&x=1&UTM_Campaign=lp%20a&fbclid=AbC" });
   assert.equal(await page.getAttribute("#lp-cta", "href"),
-               "/precos?utm_source=meta&UTM_Campaign=lp+a&fbclid=AbC");
+               "https://quiz.pigbankai.com/?utm_source=meta&UTM_Campaign=lp+a&fbclid=AbC");
   const sem = await abrir({ visto: true });
-  assert.equal(await sem.page.getAttribute("#lp-cta", "href"), "/precos");
+  assert.equal(await sem.page.getAttribute("#lp-cta", "href"), "https://quiz.pigbankai.com/");
   await sem.ctx.close();
   await ctx.close();
 });
 
-test("a página só tem links para /precos, /termos e /privacy", async () => {
+test("a página só tem links para o quiz, /termos e /privacy", async () => {
   const { page, ctx } = await abrir({ visto: true });
   const hrefs = await page.$$eval("a[href]", as => as.map(a => a.getAttribute("href")).sort());
-  assert.deepEqual(hrefs, ["/precos", "/privacy", "/termos"]);
+  assert.deepEqual(hrefs, ["/privacy", "/termos", "https://quiz.pigbankai.com/"]);
   await ctx.close();
 });
 

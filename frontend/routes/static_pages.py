@@ -464,7 +464,7 @@ async def serve_precos():
 
 @router.get("/lp")
 async def serve_lp():
-    # Landing de anúncio: VSL obrigatória e um único botão para a /precos.
+    # Landing de anúncio: VSL obrigatória e um único botão para o quiz (quiz.pigbankai.com).
     return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
 
 
