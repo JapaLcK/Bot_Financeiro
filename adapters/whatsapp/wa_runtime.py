@@ -832,7 +832,8 @@ def process_message(message: InboundMessage) -> None:
             # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
             # para o código de vínculo: seguindo, ele pararia no _paywall_gate
             # do usuário do WhatsApp (sem plano) com a copy de "assine". O opt-out
-            # desliga a conta paga: é ela que recebe os envios por `phone_e164`.
+            # desliga a conta paga: desde a #721 a atualização só vai a número ligado,
+            # mas o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
             if not _tratar_opt_out(auto_link_result["target_user_id"], reply_to,
                                    get_interactive_id(message.raw or {})):
                 _send_reply(reply_to, PRECISA_SENHA_WA)
