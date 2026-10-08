@@ -46,6 +46,7 @@ def partes(r, lado="por_tipo"):
     ("FIXED_INCOME", "", "renda_fixa"), ("FIXED_INCOME", "TREASURY", "tesouro"),
     ("FIXED_INCOME", "LCI", "renda_fixa"), ("EQUITY", "STOCK", "acoes"), ("EQUITY", None, "acoes"),
     ("EQUITY", "REAL_ESTATE_FUND", "fii"), ("EQUITY", "BDR", "acoes"),
+    ("EQUITY", "OPTION", "outros"), ("EQUITY", "DERIVATIVES", "outros"), ("EQUITY", "ETF", "acoes"),
     ("MUTUAL_FUND", "INVESTMENT_FUND", "fundos"), ("ETF", None, "etf"), ("COE", None, "outros"),
     ("SECURITY", "RETIREMENT", "outros"), (None, None, "outros"), ("fixed_income", "cdb", "renda_fixa"),
 ])

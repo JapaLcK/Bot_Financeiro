@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { moneyText } from "../lib/format.js";
-import { investidoQuery } from "../lib/v2";
+import { ErroApi, investidoQuery } from "../lib/v2";
 import { rotulo } from "./Selos";
 
 // O assunto `investido` do chat: o total dos bancos conectados, pronto do servidor
@@ -8,11 +8,17 @@ import { rotulo } from "./Selos";
 // lista ou botão): vai dentro do <p class="msg-text"> e de novo no role=status do
 // PiggyChat. Nunca float, nunca meio número.
 const ERRO = "Não consegui buscar agora. Pergunta de novo daqui a pouco.";
+// Os 4xx esperados da rota não são falha passageira: "pergunta de novo" não resolve. Rede,
+// 5xx e o resto seguem no ERRO.
+const erro = (e: Error) => !(e instanceof ErroApi) ? ERRO
+  : e.code === "pro_required" ? "Seus investimentos aparecem nos planos pagos."
+    : e.code === "password_required" ? "Crie sua senha para ver seus investimentos. Depois de criar, volte para o painel novo."
+      : e.status === 401 ? "Sua sessão terminou. Recarregue a página." : ERRO;
 
 export function InvestidoResposta() {
   const q = useQuery(investidoQuery);
   if (q.isPending) return <>Calculando…</>;
-  if (q.isError) return <>{ERRO}</>;
+  if (q.isError) return <>{erro(q.error)}</>;
   const d = q.data;
   if (d.total === null) {
     return <>{d.motivos.includes("sem_banco_conectado")

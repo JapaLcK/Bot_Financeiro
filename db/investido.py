@@ -42,6 +42,10 @@ def tipo_da_posicao(inv_type: str | None, subtype: str | None) -> str:
     if t == "FIXED_INCOME":
         return "tesouro" if st == "TREASURY" else "renda_fixa"
     if t == "EQUITY":
+        # Opção e derivativo não são ação; o `pluggy_rv_kind` (outros consumidores) não os
+        # separa. EQUITY/ETF segue em Ações (decisão do PR F).
+        if st in ("OPTION", "DERIVATIVES"):
+            return "outros"
         return "fii" if pluggy_rv_kind(t, st) == "fii" else "acoes"
     return {"MUTUAL_FUND": "fundos", "ETF": "etf"}.get(t, "outros")
 

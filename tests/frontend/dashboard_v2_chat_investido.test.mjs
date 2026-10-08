@@ -17,13 +17,13 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ width = 1440, investido = "com_banco", falha = false, demo = false, sse = false } = {}) {
+async function abrir({ width = 1440, investido = "com_banco", falha = false, demo = false, sse = false, plano = "pro" } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, reducedMotion: "reduce" });
-  await servir(ctx, demo ? RAIZ : undefined, { investido });
+  await servir(ctx, demo ? RAIZ : undefined, { investido, plano });
   // Guarda o EventSource do painel para o teste disparar um aviso (o mesmo caminho do SSE).
   if (sse) await ctx.addInitScript(() => { const Real = window.EventSource; window.EventSource = class extends Real { constructor(...args) { super(...args); window.sseDoPainel = this; } }; });
   if (falha) {
-    const e = RESPOSTAS.erros["500"];
+    const e = RESPOSTAS.erros[falha === true ? "500" : falha];
     await ctx.route("**/api/v2/investido", (r) => r.fulfill({ status: e.status, json: e.body }));
   }
   const page = await ctx.newPage();
@@ -103,6 +103,25 @@ test("erro 500: o texto de erro, nenhum número; perguntar de novo tenta outra v
   assert.equal(t, "Não consegui buscar agora. Pergunta de novo daqui a pouco.");
   assert.doesNotMatch(t, /R\$/);
   assert.match(depois, /^Você tem R\$ 57\.123,45/);
+});
+
+// Os 4xx esperados da rota (plano, senha, sessão) dizem o porquê; rede e 5xx seguem no "de novo".
+test("erros esperados: plano sem acesso, sem senha e sessão; 503 e rede ficam no texto de sempre", async () => {
+  const leia = async (opts) => {
+    const { ctx, page } = await abrir(opts);
+    if (opts.rede) await ctx.route("**/api/v2/investido", (r) => r.abort());
+    await perguntar(page, "quanto tenho investido?");
+    await page.waitForFunction(() => !/Calculando/.test([...document.querySelectorAll(".chat > .msg-piggy")].pop().textContent), null, { timeout: 15000 });
+    const t = await ultima(page).locator(".msg-text").innerText();
+    await ctx.close();
+    return t;
+  };
+  assert.equal(await leia({ plano: "free" }), "Seus investimentos aparecem nos planos pagos.");
+  assert.equal(await leia({ plano: "essencial" }).then((t) => t.slice(0, 8)), "Você tem");
+  assert.equal(await leia({ falha: "403_password_required" }), "Crie sua senha para ver seus investimentos. Depois de criar, volte para o painel novo.");
+  assert.equal(await leia({ falha: "401" }), "Sua sessão terminou. Recarregue a página.");
+  assert.equal(await leia({ falha: "503" }), "Não consegui buscar agora. Pergunta de novo daqui a pouco.");
+  assert.equal(await leia({ rede: true }), "Não consegui buscar agora. Pergunta de novo daqui a pouco.");
 });
 
 test("sem banco, com motivos e com parte sem saldo", async () => {
