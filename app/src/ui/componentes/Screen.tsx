@@ -59,35 +59,45 @@ export function Screen(props: Props) {
 
   const { children, onAtualizar, atualizando = false } = props;
   return (
-    <ScrollView
-      testID="tela"
-      style={{ flex: 1, backgroundColor: cores.bg }}
-      contentContainerStyle={preenchimento}
-      // Hipótese conhecida da RN, só o simulador/aparelho prova: sem isto, o
-      // primeiro toque num botão da tela com o teclado aberto só fecha o
-      // teclado (o toque é "engolido"), precisando de um segundo toque.
-      keyboardShouldPersistTaps="handled"
-      refreshControl={
-        onAtualizar ? (
-          // `progressViewOffset`: o padding da área segura está no
-          // `contentContainerStyle`, mas o `RefreshControl` se posiciona pelo
-          // ScrollView INTEIRO — sem o deslocamento, o indicador aparece sob a
-          // barra de status e a ilha. Só o aparelho confirma a aparência.
-          <RefreshControl
-            refreshing={atualizando}
-            onRefresh={onAtualizar}
-            // `tintColor` é iOS; no Android o RN descarta essa prop antes de
-            // repassar ao nativo (RefreshControl.js, ramo do
-            // AndroidSwipeRefreshLayout) e quem pinta é `colors`. Sem as duas,
-            // um dos sistemas cai no indicador padrão da plataforma.
-            tintColor={cores.brand}
-            colors={[cores.brand]}
-            progressViewOffset={topo}
-          />
-        ) : undefined
-      }
-    >
-      {children}
-    </ScrollView>
+    <View style={{ flex: 1, backgroundColor: cores.bg }}>
+      <ScrollView
+        testID="tela"
+        style={{ flex: 1, backgroundColor: cores.bg }}
+        contentContainerStyle={preenchimento}
+        // Hipótese conhecida da RN, só o simulador/aparelho prova: sem isto, o
+        // primeiro toque num botão da tela com o teclado aberto só fecha o
+        // teclado (o toque é "engolido"), precisando de um segundo toque.
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          onAtualizar ? (
+            // `progressViewOffset`: o padding da área segura está no
+            // `contentContainerStyle`, mas o `RefreshControl` se posiciona pelo
+            // ScrollView INTEIRO — sem o deslocamento, o indicador aparece sob a
+            // barra de status e a ilha. Só o aparelho confirma a aparência.
+            <RefreshControl
+              refreshing={atualizando}
+              onRefresh={onAtualizar}
+              // `tintColor` é iOS; no Android o RN descarta essa prop antes de
+              // repassar ao nativo (RefreshControl.js, ramo do
+              // AndroidSwipeRefreshLayout) e quem pinta é `colors`. Sem as duas,
+              // um dos sistemas cai no indicador padrão da plataforma.
+              tintColor={cores.brand}
+              colors={[cores.brand]}
+              progressViewOffset={topo}
+            />
+          ) : undefined
+        }
+      >
+        {children}
+      </ScrollView>
+      {/* Faixa fixa atrás da barra de status: sem ela o conteúdo rolado aparece sob o relógio. */}
+      {topo > 0 ? (
+        <View
+          testID="tela-topo"
+          pointerEvents="none"
+          style={{ position: "absolute", top: 0, left: 0, right: 0, height: topo, backgroundColor: cores.bg }}
+        />
+      ) : null}
+    </View>
   );
 }

@@ -560,5 +560,25 @@
         ]
       }
     ]
+  },
+  "/api/app/categorias": {
+    "categorias": [
+      {
+        "chave": "Alimentação",
+        "nome": "Alimentação"
+      },
+      {
+        "chave": "Moradia",
+        "nome": "Moradia"
+      },
+      {
+        "chave": "Transporte",
+        "nome": "Transporte"
+      },
+      {
+        "chave": "Lazer",
+        "nome": "Lazer"
+      }
+    ]
   }
 }

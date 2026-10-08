@@ -5,6 +5,9 @@ from .open_finance_state import _TERMINAL
 from .patrimonio import (BANCO_VELHO, POSICOES_BANCO_SQL, desatualizada, fora_do_sync,
                         ler_conexoes, ultima_geracao)
 
+_SUBTIPO = {"CDB": "CDB", "LCI": "LCI", "LCA": "LCA", "LC": "LC", "CRI": "CRI", "CRA": "CRA",
+            "TREASURY": "Tesouro Direto", "DEBENTURES": "Debêntures"}
+
 
 def ler(cur, user_id: int) -> dict:
     # Mesmo recorte latest por identidade/conexão do patrimônio; os ids são
@@ -18,7 +21,7 @@ def ler(cur, user_id: int) -> dict:
     limite = datetime.now(timezone.utc) - BANCO_VELHO
     itens = []
     for p in posicoes:
-        cur.execute("""select i.name, c.institution_name, s.contract_rate,
+        cur.execute("""select i.name, i.type, i.subtype, c.institution_name, s.contract_rate,
                               s.contract_rate_type, s.observed_at
                          from open_finance_investments i
                          join open_finance_connections c on c.id=i.connection_id
@@ -37,6 +40,14 @@ def ler(cur, user_id: int) -> dict:
         taxa = r["contract_rate"]
         tipo = r["contract_rate_type"]
         informada = taxa is not None and taxa.is_finite() and bool(tipo)
+        tipo_pos = (r["type"] or "").upper()
+        # Ação/FII/ETF sem taxa não tem "rendimento contratado"; tipo nulo/desconhecido fica.
+        if not informada and tipo_pos in ("EQUITY", "ETF"):
+            continue
+        nome = r["name"]
+        if not nome or nome.upper() == tipo_pos:
+            nome = _SUBTIPO.get((r["subtype"] or "").upper()) or (
+                "Renda fixa" if tipo_pos == "FIXED_INCOME" else nome)
         motivos = [] if informada else ["taxa_contratada_ausente"]
         c = por_id[p["connection_id"]]
         if desatualizada(c, estados[str(c["id"])], limite):
@@ -46,7 +57,7 @@ def ler(cur, user_id: int) -> dict:
         if (r["observed_at"] is not None and p["updated_at"] is not None
                 and r["observed_at"] < p["updated_at"]):
             motivos.append("taxa_de_coleta_anterior")
-        itens.append({"nome": r["name"], "instituicao": r["institution_name"],
+        itens.append({"nome": nome, "instituicao": r["institution_name"],
                       "taxa": taxa if informada else None,
                       "tipo_taxa": tipo if informada else None,
                       "observado_em": r["observed_at"], "motivos": motivos})

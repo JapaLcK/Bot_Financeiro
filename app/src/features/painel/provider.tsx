@@ -18,7 +18,7 @@ import { Texto } from "@/ui/componentes/Texto";
 import { chaveLayout, mesAtual, sanitizarLayout, type Widget } from "./catalogo";
 import Inicio from "../../../app/(app)/index";
 
-export const schemas = { contas: S.contasSchema, resumo: S.resumoSchema, detalhes: S.detalhesMesSchema, patrimonio: S.patrimonioSchema, rendimento: S.rendimentoSchema, previsao: S.previsaoSchema, assinaturas: S.assinaturasSchema, metas: S.metasSchema, cartoes: S.cartoesSchema, parcelas: S.parcelasSchema, renda: S.rendaSchema, insights: S.insightsSchema, conversa: S.conversaSchema, plano: S.planoSchema };
+export const schemas = { contas: S.contasSchema, resumo: S.resumoSchema, detalhes: S.detalhesMesSchema, patrimonio: S.patrimonioSchema, rendimento: S.rendimentoSchema, previsao: S.previsaoSchema, assinaturas: S.assinaturasSchema, metas: S.metasSchema, cartoes: S.cartoesSchema, parcelas: S.parcelasSchema, renda: S.rendaSchema, insights: S.insightsSchema, conversa: S.conversaSchema, plano: S.planoSchema, categorias: S.categoriasSchema };
 export type Recurso = keyof typeof schemas;
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };
@@ -35,7 +35,7 @@ export function mensagemRecurso(e: unknown) {
 }
 function rota(k: Recurso, uid: number, mes: string, dias?: number) {
   const base = `/api/app/`;
-  return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: `/goals/${uid}/status`, cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, conversa: "/ai/messages", plano: base + "me" })[k];
+  return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: `/goals/${uid}/status`, cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, conversa: "/ai/messages", plano: base + "me", categorias: base + "categorias" })[k];
 }
 export function PainelProvider({ children }: { children: ReactNode }) {
   const sessao = useSessao();

@@ -30,7 +30,7 @@ it("busca global explicita o histórico permitido sem esconder registros fora do
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  await buscar("Loja");
  await waitFor(() => expect(screen.getByText("Loja de setembro")).toBeTruthy());
- expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("01/09/2026 · banco")).toBeTruthy();
+ expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("01/09/2026 · Banco")).toBeTruthy();
  expect(screen.getByText("Existem mais páginas desta busca no histórico permitido pelo seu plano.")).toBeTruthy();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de setembro")).toBeTruthy(); expect(screen.getByText("Loja de agosto")).toBeTruthy();
  expect(screen.getByText("Todos os resultados deste filtro foram carregados.")).toBeTruthy();
@@ -122,7 +122,7 @@ it("refresh completo supera previsão em voo e revalida todos os recursos", asyn
  const antiga = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).searchParams.get("dias") === "60")!;
  const antes = fetchFalso.mock.calls.length;
  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
- expect(caminhos(antes)).toHaveLength(15); expect(caminhos(antes)).toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
+ expect(caminhos(antes)).toHaveLength(16); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
  expect(screen.getByRole("button", { name: "60 dias · selecionado" })).toBeTruthy(); atraso.soltar(); await act(drenar);
  expect(screen.getByRole("button", { name: "60 dias · selecionado" })).toBeTruthy(); expect(screen.queryByRole("button", { name: "30 dias · selecionado" })).toBeNull();
 });
