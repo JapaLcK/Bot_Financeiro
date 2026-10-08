@@ -34,6 +34,8 @@ _TOGGLES = (
     # cortesia antes e depois
     ("por favor, não quero receber o resumo semanal", "report.weekly_disable"),
     ("não quero receber o resumo semanal por favor", "report.weekly_disable"),
+    # "?" de frase anterior não é pergunta sobre o toggle
+    ("tudo bem? desliga o resumo semanal", "report.weekly_disable"),
     ("quero receber o resumo mensal todo mês", "report.monthly_enable"),
     # ligar/desligar genéricos continuam como antes
     ("liga o resumo semanal", "report.weekly_enable"),

@@ -919,11 +919,21 @@ _RESUMO_TOGGLES = frozenset({
 })
 
 
+def _pergunta_sobre_o_toggle(original: str) -> bool:
+    """True se o '?' está na frase do toggle: no fim da mensagem ou depois do
+    substantivo do resumo. '?' de uma frase anterior ('tudo bem? desliga…') não conta."""
+    texto = original.strip().lower()
+    if texto.endswith("?"):
+        return True
+    m = re.search(r"resumo|relat[oó]rio|report", texto)
+    return bool(m) and "?" in texto[m.start():]
+
+
 def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
         # Pergunta sobre ligar/desligar não é pedido: _normalize tira o '?', então
         # quem decide é o texto original.
-        if "?" in original and intent in _RESUMO_TOGGLES:
+        if _pergunta_sobre_o_toggle(original) and intent in _RESUMO_TOGGLES:
             continue
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
@@ -1172,7 +1182,7 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
 def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
     result = _classify_llm_call(text, user_id)
     # Pergunta nunca liga/desliga resumo, nem quando a IA devolve o toggle.
-    if "?" in text and result.intent in _RESUMO_TOGGLES:
+    if _pergunta_sobre_o_toggle(text) and result.intent in _RESUMO_TOGGLES:
         return IntentResult(intent="out_of_scope", confidence=0.0)
     return result
 
@@ -1253,7 +1263,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
 
     # Tier 1
     result = _try_exact(norm)
-    if result and not ("?" in text and result.intent in _RESUMO_TOGGLES):
+    if result and not (_pergunta_sobre_o_toggle(text) and result.intent in _RESUMO_TOGGLES):
         return result
 
     # Tier 2
