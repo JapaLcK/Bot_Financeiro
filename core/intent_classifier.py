@@ -511,14 +511,26 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
 
     # liga/desliga do semanal — precisa vir ANTES do alias de report.weekly,
     # senão "desligar resumo semanal" cairia em report.weekly.
-    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_disable"),
-    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
-    # liga/desliga do mensal — idem, antes de report.monthly.
-    (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    # "receber" e "para de mandar" só ligam/desligam na frase exata abaixo, com
+    # cortesia opcional. Qualquer outra forma (dúvida, correção, complemento,
+    # plural, pergunta) cai na consulta ou na IA: lista aberta de variações não
+    # fecha — ver a rodada de revisão de 2026-10-08 em tests/test_intent_alias_resumo_liga_desliga.py.
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber|para de mandar) o resumo semanal(?: por favor| pfv| obrigad[oa])?$",
+     "report.weekly_disable"),
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:quero|desejo) receber o resumo semanal(?: todo domingo)?(?: por favor| pfv| obrigad[oa])?$",
+     "report.weekly_enable"),
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber|para de mandar) o resumo mensal(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_disable"),
-    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:quero|desejo) receber o resumo mensal(?: todo mes)?(?: por favor| pfv| obrigad[oa])?$",
+     "report.monthly_enable"),
+    # liga/desliga do mensal — idem, antes de report.monthly.
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+     "report.monthly_disable"),
+    (r"^(?:(?:por favor|por gentileza|pfv|obrigad[oa]|favor|ei|oi|ok) )?(?:eu )?(?:(?:quero|desejo|preciso|pode) (?:que )?)?(?:me )?(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"
@@ -899,8 +911,29 @@ def _extract_date_entity(norm: str) -> str | None:
     return None
 
 
+# Toggles de resumo (ligar/desligar semanal e mensal). Pergunta com '?' nunca liga
+# nem desliga: _normalize tira o '?', então o texto original é que decide.
+_RESUMO_TOGGLES = frozenset({
+    "report.weekly_enable", "report.weekly_disable",
+    "report.monthly_enable", "report.monthly_disable",
+})
+
+
+def _pergunta_sobre_o_toggle(original: str) -> bool:
+    """True se a mensagem tem '?'. Pontuação não diz de qual cláusula é a pergunta,
+    então qualquer '?' impede o toggle: na dúvida, não liga nem desliga."""
+    return any(
+        "QUESTION" in unicodedata.name(c, "") or "INTERROBANG" in unicodedata.name(c, "")
+        for c in original
+    )
+
+
 def _try_alias(norm: str, original: str) -> IntentResult | None:
     for pattern, intent in _ALIAS_PATTERNS:
+        # Pergunta sobre ligar/desligar não é pedido: _normalize tira o '?', então
+        # quem decide é o texto original.
+        if intent in _RESUMO_TOGGLES and _pergunta_sobre_o_toggle(original):
+            continue
         if re.search(pattern, norm):
             entities: dict[str, Any] = {}
 
@@ -1003,6 +1036,7 @@ REGRAS ABSOLUTAS:
 5. Se faltar informação essencial para executar, ative needs_clarification.
 6. confidence deve refletir sua certeza real.
 7. NÃO confunda recorrente com lançamento avulso: "gastei 50 no mercado" = launches.add (uma vez); "gasto fixo de 100 todo dia 10" / "salário todo dia 5" = recurring.add (todo mês). Em recurring.add, se o usuário NÃO disser DO QUE é (nome/descrição), ative needs_clarification perguntando do que é o gasto/receita.
+8. Só o pedido de LIGAR/DESLIGAR o envio AUTOMÁTICO e recorrente do resumo (semanal ou mensal) é report.*_enable/_disable, mesmo com dia ou "todo mês": "quero receber o resumo mensal todo dia 1" = report.monthly_enable, NUNCA recurring.add. Pedido PONTUAL de um resumo com data ("resumo mensal de setembro de 2026", "quero o resumo de setembro") é CONSULTA: report.monthly ou report.weekly, nunca enable/disable. Pergunta sobre o recebimento ("quando vou receber o resumo mensal?", "como faço para receber o resumo semanal?") NÃO é pedido de ligar/desligar: é consulta (report.weekly / report.monthly) ou out_of_scope.
 
 CATÁLOGO DE INTENTS:
 - balance.check        → usuário quer saber o saldo da conta
@@ -1145,7 +1179,11 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
 
 
 def _classify_with_ai(text: str, user_id: int | None = None) -> IntentResult:
-    return _classify_llm_call(text, user_id)
+    result = _classify_llm_call(text, user_id)
+    # Pergunta nunca liga/desliga resumo, nem quando a IA devolve o toggle.
+    if _pergunta_sobre_o_toggle(text) and result.intent in _RESUMO_TOGGLES:
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+    return result
 
 
 def classify_with_context(
@@ -1172,7 +1210,11 @@ def classify_with_context(
         "incompreensível ou o usuário tenha mudado de assunto (aí classifique a nova mensagem "
         "normalmente). Se o usuário claramente desistiu/cancelou, use out_of_scope."
     )
-    return _classify_llm_call(content, user_id)
+    result = _classify_llm_call(content, user_id)
+    # A guarda usa a resposta do usuário: o texto montado tem a pergunta do bot, com '?'.
+    if _pergunta_sobre_o_toggle(answer) and result.intent in _RESUMO_TOGGLES:
+        return IntentResult(intent="out_of_scope", confidence=0.0)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1224,7 +1266,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
 
     # Tier 1
     result = _try_exact(norm)
-    if result:
+    if result and not (result.intent in _RESUMO_TOGGLES and _pergunta_sobre_o_toggle(text)):
         return result
 
     # Tier 2
