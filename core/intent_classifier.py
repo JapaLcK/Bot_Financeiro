@@ -922,7 +922,10 @@ _RESUMO_TOGGLES = frozenset({
 def _pergunta_sobre_o_toggle(original: str) -> bool:
     """True se a mensagem tem '?'. Pontuação não diz de qual cláusula é a pergunta,
     então qualquer '?' impede o toggle: na dúvida, não liga nem desliga."""
-    return any(c in original for c in "?？¿❓❔")
+    return any(
+        "QUESTION" in unicodedata.name(c, "") or "INTERROBANG" in unicodedata.name(c, "")
+        for c in original
+    )
 
 
 def _try_alias(norm: str, original: str) -> IntentResult | None:

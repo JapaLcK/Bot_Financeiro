@@ -61,6 +61,9 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     # pontuação de pergunta em Unicode também conta
     "ligar resumo semanal？",
     "quero receber o resumo semanal❓",
+    "ligar resumo semanal⁉️",
+    "quero receber o resumo semanal؟",
+    "ligar resumo mensal⁇",
     "desligar resumo mensal?",
     "quero receber o resumo semanal, mas não quero mais",
     "não quero receber o resumo semanal, na verdade quero sim",
