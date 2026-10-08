@@ -367,6 +367,24 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
+  **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
+  bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
+  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), despesa e
+  receita, sempre `estimado`/data `presumida`, valor = o último cobrado. Identidade
+  `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
+  frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
+  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
+  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
+  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
+  saída (a marca não tem direção); positivo no cartão e o movimento interno que
+  `classify_open_finance_launch` reconhece (pagamento de fatura, aplicação e resgate,
+  caixinha, poupança, transferência "same person" da Pluggy) não entram — transferência
+  entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
+  comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
+  não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
+  duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`.
 
 - `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
   `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
@@ -957,6 +975,7 @@ Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
+A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

@@ -253,8 +253,8 @@ test("qualidade: estado, motivos em português com a direção, código novo sai
 
 // §0.7: os códigos moram no Python e os rótulos no Selos.tsx. Servidos todos de uma vez,
 // nenhum pode sair cru na tela.
-test("paridade: todo `_motivo(s, '…')` do cashflow_snapshot.py tem rótulo em português", async () => {
-  const py = readFileSync(join(RAIZ, "core", "services", "cashflow_snapshot.py"), "utf8");
+test("paridade: todo `_motivo(s, '…')` do motor (cashflow_snapshot.py e previsao_recorrencias.py) tem rótulo em português", async () => {
+  const py = ["cashflow_snapshot.py", "previsao_recorrencias.py"].map((f) => readFileSync(join(RAIZ, "core", "services", f), "utf8")).join("\n");
   const codigos = [...new Set([...py.matchAll(/_motivo\(s, '([a-z_]+)'/g)].map((m) => m[1]))];
   assert.ok(codigos.length >= 20, `poucos códigos lidos: ${codigos}`);
   const corpo = { ...RESPOSTAS.previsao.pro30, estado: "a_conferir", motivos: codigos.map((codigo) => ({ codigo, direcao_do_erro: "ambos" })) };

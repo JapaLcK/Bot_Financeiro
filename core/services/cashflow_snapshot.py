@@ -150,7 +150,8 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
     rec_by_id = {r['id']: r for r in recs}
     instances = ler_instancias(cur, user_id)
     by_cycle = {(b['recurring_id'], _data(b['due_date'])): b for b in instances if b['recurring_id']}
-    for income, rows in ((True, ler_receitas(cur, user_id)), (False, recs)):
+    receitas = ler_receitas(cur, user_id)
+    for income, rows in ((True, receitas), (False, recs)):
         for r in rows:
             if not r['is_active']:
                 continue
@@ -212,6 +213,10 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
             'desconhecido' if amount is None else 'estimado' if b['variable_amount'] else 'conhecido',
             'conhecida' if d else 'desconhecida', 'realizada' if realized else 'a_conferir',
             tuple(reasons), not ambiguous))
+
+    if bancos_permitidos:  # sem os bancos na base, despesa deles seria incoerente
+        from core.services.previsao_recorrencias import anexar
+        anexar(cur, s, user_id, until, recs, receitas, instances)
 
     for b in ler_faturas(cur, user_id):
         total, paid, remaining, invalid_value = valores_fatura(b)

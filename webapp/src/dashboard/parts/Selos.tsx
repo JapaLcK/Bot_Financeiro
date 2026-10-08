@@ -4,7 +4,8 @@ export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] 
 
 // Por que um número da /api/v2 não é exato, em português. Código novo do servidor sai cru
 // (melhor que esconder a ressalva). Os da previsão saem de core/services/cashflow_snapshot.py
-// (`_motivo(s, '…')`); tests/frontend/dashboard_v2_previsao.test.mjs confere a paridade.
+// e core/services/previsao_recorrencias.py (`_motivo(s, '…')`); tests/frontend/dashboard_v2_previsao.test.mjs
+// confere a paridade.
 const MOTIVO: Record<string, string> = {
   carteira_nao_confirmada: "a confirmar",
   transacao_pendente: "transação pendente",
@@ -40,6 +41,12 @@ const MOTIVO: Record<string, string> = {
   realizacao_fatura_a_conferir: "pagamento da fatura a conferir",
   realizacao_passada_desconhecida: "pagamento anterior a conferir",
   receita_nao_garantida: "receita não garantida",
+  recorrencia_banco_estimada: "estimado pelo histórico do banco",
+  recorrencia_banco_atrasada: "cobrança do mês ainda não apareceu",
+  recorrencia_banco_interrompida: "parou de aparecer no banco",
+  recorrencia_banco_igual_a_fixo_manual: "já contado no seu fixo",
+  recorrencia_banco_pode_repetir_manual: "pode repetir um fixo seu",
+  recorrencias_banco_nao_lidas: "recorrências do banco desatualizadas",
   valor_boleto_desconhecido: "valor do boleto desconhecido",
   valor_boleto_estimado: "valor do boleto estimado",
   valor_fatura_a_conferir: "valor da fatura a conferir",
