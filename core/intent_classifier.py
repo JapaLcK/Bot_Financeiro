@@ -513,12 +513,18 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # senão "desligar resumo semanal" cairia em report.weekly.
     (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|para\s+de|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_disable"),
-    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar|(?<!nao )(?<!nao quero )(?<!nao vou )(?:receber|recebo|receba))\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
+     "report.weekly_enable"),
+    # "receber" só liga se a frase não tiver negação em lugar nenhum: "não quero
+    # mais receber o resumo semanal" não pode virar pedido de ligar.
+    (r"^(?!.*\bnao\b).*\b(receber|recebo|receba)\b.*\b(resumo|relatorio|report)\b.*\b(semanal|semana)\b",
      "report.weekly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
     (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|para\s+de|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
-    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar|(?<!nao )(?<!nao quero )(?<!nao vou )(?:receber|recebo|receba))\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+    (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
+     "report.monthly_enable"),
+    (r"^(?!.*\bnao\b).*\b(receber|recebo|receba)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"

@@ -29,6 +29,8 @@ def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     "não quero receber o resumo semanal",
     "nao vou receber o resumo mensal",
     "nao recebo o resumo mensal",
+    "não quero mais receber o resumo semanal",
+    "não desejo receber o resumo mensal",
 ])
 def test_negacao_de_receber_nao_liga_o_resumo(texto):
     # "receber" negado é pedido para parar, nunca para ligar.
