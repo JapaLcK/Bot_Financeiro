@@ -56,6 +56,9 @@ _TOGGLES = (
     ("não quero receber os relatórios semanais", "report.weekly_disable"),
     ("para de me mandar os resumos mensais", "report.monthly_disable"),
     ("não quero receber o resumo semanal todos os domingos", "report.weekly_disable"),
+    # determinante negativo só no desligar: "nenhum" no ligar seria contradição
+    ("não quero receber nenhum resumo semanal", "report.weekly_disable"),
+    ("não quero receber nenhum relatório mensal", "report.monthly_disable"),
     # cadência no plural sozinha como período
     ("não quero receber o resumo todas as semanas", "report.weekly_disable"),
     ("quero receber o resumo todos os meses", "report.monthly_enable"),
