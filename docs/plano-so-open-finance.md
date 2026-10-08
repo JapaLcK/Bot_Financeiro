@@ -254,16 +254,19 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
     fixo (`pending.py:159`) e a oferta em `launches.py:1044` saem.
   - `conta`: `create_boleto`/`update_boleto` e marcar conta manual como paga
     (`db/bills.py:176`, #13).
-  - `caixinha`: `create_pocket`, depositar, e retirar e apagar caixinha manual com saldo
-    (P3: congelada).
-  - `investimento`: resgatar e apagar investimento manual com saldo (P3: congelado). Isto
-    supera a liberação da Q36, que deixava os dois livres.
+  - `caixinha`: `create_pocket`, depositar, retirar e apagar caixinha manual (P3:
+    congelada). Apagar trava **com ou sem saldo**: `delete_pocket` só roda com saldo zero e
+    apaga o histórico junto.
+  - `investimento`: resgatar e apagar investimento manual (P3: congelado), apagar também
+    com saldo zero (`delete_investment`). Isto supera a liberação da Q36, que deixava os
+    dois livres.
   - `renda_informada`: `set_income_override`.
 - Regra de alcance: **todo escritor do §2.1 que muda legado** entra na trava ou tem motivo
   escrito para ficar livre. Esconder a tela (3a) não desliga o WhatsApp, a IA nem a rota
   direta.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
-- O caso `recorrente` da receita (`create_recurring_income`) espera a P7.
+- Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
+  Até lá o caso `recorrente` trava só a despesa.
 - Os textos da IA (`system_prompt.py`) e o `validate` das tools recusam antes de pedir
   confirmação, como já fazem em `tools/investments.py:130`.
 - **Não faz:** esconder, apagar, mexer em leitura.
@@ -305,7 +308,8 @@ são dinheiro, então essa parte é Completo.
   - importar.
 
   O WhatsApp e a IA param de listar o legado: "minhas caixinhas", "meus investimentos",
-  "contas a pagar". O `/painel` decide se `registro_antigo` some de Lançamentos.
+  "contas a pagar". O `/painel` tira `registro_antigo` de Lançamentos, e a listagem que o
+  abastece (`db/lancamentos.py`, `GET /api/v2/lancamentos`) deixa de devolvê-lo (P3).
 - Service worker e `CACHE_NAME` pelo portão (`docs/armadilhas.md`).
 
 **3b. Totais sem o legado. Faixa Completo: dinheiro e foto diária.**
