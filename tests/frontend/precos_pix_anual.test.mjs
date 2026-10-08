@@ -191,10 +191,14 @@ async function avancar(page, ms, parar = null) {
 // Pula UM intervalo do poll (3 s) depois que a pergunta `n` saiu. Um salto só,
 // e nunca durante a navegação; se o timer ainda não estava armado, o relógio
 // falso segue andando junto com o real e o poll sai no tempo de parede.
-async function proximoPoll(page, chamadas, n) {
+// `antes(ms)` roda colado ao salto: depois, a rota leria o deslocamento velho
+// no poll que o próprio salto dispara; antes da espera, um poll real veria o
+// relógio adiantado sem a página ter saltado.
+async function proximoPoll(page, chamadas, n, antes) {
   for (const fim = Date.now() + 10000; chamadas.poll < n && Date.now() < fim;)
     await new Promise((ok) => setTimeout(ok, 10));
   await page.waitForTimeout(60);
+  antes?.(3000);
   await page.clock.fastForward(3000);
 }
 
@@ -353,8 +357,9 @@ test("PT2c: liquidou dentro do último intervalo — pergunta antes de dizer que
       status: () => (Date.now() + avancado >= vence ? { status: "paid" } : { status: "pending" }),
       relogio: true,
     });
-    await proximoPoll(page, chamadas, 1); avancado += 3000;
-    await proximoPoll(page, chamadas, 2); avancado += 3000;
+    const somar = (ms) => { avancado += ms; };
+    await proximoPoll(page, chamadas, 1, somar);
+    await proximoPoll(page, chamadas, 2, somar);
     await page.waitForURL(/upgrade=success/, { timeout: 15000 });
     await page.close();
   });
