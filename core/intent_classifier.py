@@ -518,18 +518,18 @@ _ALIAS_PATTERNS: list[tuple[str, str]] = [
     # "receber" só liga/desliga em frase inteira na forma pedida: "não consigo
     # receber", "não sei se quero receber" e "quando vou receber…?" não são
     # pedido — caem na consulta ou na IA. Ancorado no início de propósito.
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|toda segunda(?: feira)?)(?: (?:todo|toda) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|toda segunda(?: feira)?)(?: (?:todo|toda|todos os|todas as) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_disable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?quero receber (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|toda segunda(?: feira)?)(?: (?:todo|toda) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?quero receber (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:semanal|semanais|da semana|semana|toda semana|toda segunda(?: feira)?)(?: (?:todo|toda|todos os|todas as) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.weekly_enable"),
     # liga/desliga do mensal — idem, antes de report.monthly.
     (r"\b(desligar|desliga|desligue|desativar|desativa|desative|parar|cancelar|cancela)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_disable"),
     (r"\b(ligar|liga|ligue|ativar|ativa|ative|habilitar|habilita|voltar)\b.*\b(resumo|relatorio|report)\b.*\b(mensal|mes)\b",
      "report.monthly_enable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes)(?: (?:todo|toda) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?(?:nao (?:quero|desejo)(?: mais)? receber(?: mais)?|para de (?:me |nos |lhe )?(?:mandar|receber|enviar)(?: mais)?) (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes)(?: (?:todo|toda|todos os|todas as) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_disable"),
-    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?quero receber (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes)(?: (?:todo|toda) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
+    (r"^(?:(?:por favor|pfv|obrigad[oa]) )?(?:eu )?quero receber (?:(?:o|a|os|as) )?(?:(?:meu|minha|seu|sua|meus|minhas|seus|suas) )?(?:resumos?|relatorios?|reports?) (?:mensal|mensais|do mes|mes|todo mes)(?: (?:todo|toda|todos os|todas as) (?!nao\b)\w+(?: feira)?(?: \d+)?)?(?: por favor| pfv| obrigad[oa])?$",
      "report.monthly_enable"),
 
     # resumo semanal: "resumo da semana", "relatorio semanal", "gastos da semana"
