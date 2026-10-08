@@ -30,6 +30,7 @@ from core.services.recurring_charger import bill_reminder_hour
 from db import (
     claim_daily_report_send,
     claim_weekly_report_send,
+    release_weekly_report_claim,
     claim_monthly_report_send,
     get_daily_report_prefs,
     list_identities_by_user,
@@ -697,6 +698,21 @@ def _send_periodic_template(uid, wa_targets, cfg, summary, kind, instance) -> No
             )
 
 
+# Falhas do build semanal por (usuário, segunda) neste processo. Sem teto, build que sempre falha
+# rodaria a cada tick de 30 s; 10 tentativas ≈ 5 min cobrem uma queda curta do banco.
+# ponytail: contador em memória. Restart zera a contagem só se vier ANTES da última falha; depois dela
+# o claim fica consumido e a semana se perdeu (não há recuperação automática).
+_WEEKLY_BUILD_MAX_TENTATIVAS = 10
+_WEEKLY_BUILD_FALHAS: dict[tuple[int, Any], int] = {}
+
+
+def _contar_falha_do_build_semanal(uid, period_date) -> int:
+    for chave in [k for k in _WEEKLY_BUILD_FALHAS if k[1] != period_date]:
+        del _WEEKLY_BUILD_FALHAS[chave]  # semanas passadas não voltam
+    _WEEKLY_BUILD_FALHAS[(uid, period_date)] = n = _WEEKLY_BUILD_FALHAS.get((uid, period_date), 0) + 1
+    return n
+
+
 def _periodic_report_tick() -> None:
     now = now_tz()
     today = now.date()
@@ -738,9 +754,24 @@ def _periodic_report_tick() -> None:
         # claim atômico por período: o loop faz polling a cada 30s, o claim garante
         # que cada resumo saia uma única vez (mesmo com reinício / múltiplas instâncias)
         from core.services.plan_service import plan_gate_ok
+        # Ordem importa: o plano vem ANTES do claim (downgrade não consome a semana).
         if uid in weekly_users and plan_gate_ok(uid, "weekly_report") and claim_weekly_report_send(uid, today):
-            summary = build_weekly_report_summary(uid, closed=True)
-            _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
+            try:
+                summary = build_weekly_report_summary(uid, closed=True)
+            except Exception:
+                # Build falhou depois do claim: devolve a semana para o próximo ciclo (30 s) tentar de
+                # novo, até _WEEKLY_BUILD_MAX_TENTATIVAS; na última a semana fica perdida de propósito.
+                tentativas = _contar_falha_do_build_semanal(uid, today)
+                ultima = tentativas >= _WEEKLY_BUILD_MAX_TENTATIVAS
+                logger.exception("WA weekly report build failed uid=%s tentativa=%d/%d%s", uid, tentativas,
+                                 _WEEKLY_BUILD_MAX_TENTATIVAS, " (desistindo: semana não será reenviada)" if ultima else "")
+                if not ultima:
+                    try:
+                        release_weekly_report_claim(uid, today)
+                    except Exception:  # não deixa escapar: os outros usuários do tick ainda precisam rodar
+                        logger.exception("WA weekly report release failed uid=%s", uid)
+            else:
+                _send_periodic_template(uid, wa_targets, weekly_cfg, summary, "weekly", instance)
 
         if uid in monthly_users and claim_monthly_report_send(uid, today):
             summary = build_monthly_report_summary(uid, closed=True)

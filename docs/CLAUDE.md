@@ -197,6 +197,26 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
   propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
   conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  **Semanal (PL-05):** `build_weekly_report_data` (`core/reports/weekly.py`, reexportada por `reports_daily`) é o
+  payload tipado (Decimal/date); `build_weekly_report_summary` o adapta para texto e mantém as 6
+  chaves do template da Meta. Bancos e comparação são extras: se falharem, o resumo sai sem eles
+  (`bancos=None`, `comparacao_motivo="indisponivel"`). No job do WhatsApp, build que falha depois do
+  claim devolve a semana até 10 vezes (≈5 min, contador em memória); na 10ª a semana se perde.
+  Mantém a regra de `get_summary_by_period` e expõe `cartao_incluido=False`
+  (o texto avisa que compra no cartão não entra). A "semana equivalente" é n dias contra n dias
+  (`_semana_equivalente`): fechada = seg→dom contra seg→dom da retrasada; parcial = segunda até
+  hoje contra a segunda anterior até o mesmo dia da semana. `lancamentos` conta só despesa/receita
+  não internas (o mensal ainda conta toda linha de `launches`: diferença conhecida). O template
+  homologado (5 variáveis) não muda; o texto rico vai no pedido manual e no Discord.
+  Decisões do dono (PL-05): o envio é na segunda, no horário do resumo diário (dia e horário
+  próprios não foram feitos, por decisão); compra no cartão fica fora do semanal, com aviso no
+  texto; o template da Meta segue com 5 variáveis (o texto rico só no pedido manual e no Discord;
+  levá-lo ao WhatsApp automático depende de template novo aprovado na Meta); a comparação com a
+  semana anterior é só Plus+; não há saldo livre calculado (o texto separa "Resultado da semana"
+  de "Saldo atual nas contas"). Limites conhecidos: um par pendente de conciliação (lançamento
+  manual + movimento do Open Finance ainda não fundido) conta em dobro e o semanal não avisa; falha
+  de `send_template` consome o claim da semana; o resumo mensal (WhatsApp e Discord) não tem a mesma
+  proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
