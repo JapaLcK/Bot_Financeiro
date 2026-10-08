@@ -349,6 +349,8 @@ fixo de toda mudança de layout.
 - **`db/` é um pacote** com ~30 módulos por domínio, não um `db.py` único. O DDL de
   todas as tabelas vive em `db/schema.py::init_db()` — é a fonte de verdade do schema
   (§0.7 do `CLAUDE.md`), e o `docs/CLAUDE.md` aponta para lá em vez de repetir a lista.
+  Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`, fora
+  do `init_db`, que segue a fonte do resto do DDL.
 - **O monólito ainda existe e ainda cresce.**
   `frontend/finance_bot_websocket_custom.py` é o maior arquivo do backend e ainda
   cresce; concentra auth, MFA, billing, WebSocket, dashboard e o `ConnectionManager`.
@@ -367,12 +369,33 @@ fixo de toda mudança de layout.
 - **Isolamento por usuário é regra dura.** A formulação da regra mora no §0 do
   `CLAUDE.md`, que é auto-carregado — instrução de segurança não pode depender de
   alguém abrir este arquivo. Aqui fica só o lembrete de que ela vale em todo `db/`.
+- **Ordem de lock por usuário.** O que protege é o mutex `_lock_user`
+  (`db/bank_movements.py`): transação que trava mais de uma família entre launches,
+  caixinhas, investimentos e lotes o chama ANTES de qualquer `for update`, e os dois lados
+  de um par precisam dele (#622). A ordem interna só importa contra quem não o toma
+  (`accrue_all_*`, que segue pai → filho; o reset apaga pai antes de filho por isso).
+  Seguir "launches → pai → lotes" sem o mutex reabre o ciclo com o reset. Exceções
+  conhecidas, com acompanhamento em issue separada: (1) o undo de pagamento de fatura só
+  toma o mutex quando o pagamento é financiado/ligado ao banco (Open Finance); nesse caso
+  `pay_bill_amount` × undo trava sem deadlock detectável, e o par pagamento de fatura que
+  ganha ligação OF depois do preview × sync dá DeadlockDetected quando o undo chega
+  primeiro. Sem Open Finance a ordem é fatura → conta (`pay_bill_amount` segura a fatura
+  enquanto outra conexão pede `accounts`) e cruza com reset, merge e `delete_user_data`; o
+  próprio `pay_bill_amount` também pode travar sem deadlock detectável contra reset e merge; (2)
+  `delete_user_data` apaga Open Finance e crédito ANTES de `accounts` (mutex antes do laço,
+  não no topo: T17/T21/T23 modelam uma sessão que comita no meio da exclusão) e cruza com
+  reset, merge e sync/conciliação do Open Finance. Escritor novo? O guard
+  `tests/test_lock_ordem_guarda.py` acusa quem abre `get_conn` e toca 2+ famílias sem
+  `_lock_user`; é cego ao lock condicional e a f-string. Receita:
+  `grep -rn "_lock_user" db/` e `grep -rniE "for update" db/`;
+  `tests/test_lock_ordem_caixinha.py` mostra como forçar a intercalação.
 - **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
   no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
   saiu dele no PR 5a do dashboard v2 e não roda mais.
 - **Tarefas de fundo sobem no startup do app** quando `RUN_BACKGROUND_TASKS != "0"`
   (agendadores de investimento, Open Finance, engajamento, cobrança recorrente, poda
-  das tabelas de token/challenge…). Dois arquivos põem o `0`, e por `setdefault`
+  das tabelas de token/challenge, índices das FKs…; esta última, `fk_indexes`, roda uma vez
+  por boot, usa 1 conexão do pool e não tem retry em processo). Dois arquivos põem o `0`, e por `setdefault`
   (o ambiente ganha deles): `dashboard_dev.py:69` e
   `scripts/whatsapp_qa_vault_harness.py:69`. **Em teste NÃO é desligado** — o
   `tests/conftest.py` não põe nada, então teste que sobe o `app` herda o default

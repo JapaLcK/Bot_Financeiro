@@ -195,10 +195,16 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
         with conn.cursor() as cur:
             ensure_user_tx(cur, to_user_id)
             ensure_user_tx(cur, from_user_id)
-            # ponytail: checagem sem lock — dado gravado por outra transação
-            # entre ela e os updates escapa dela: sem unique no caminho, junta;
-            # batendo numa unique (user_seq, nome de caixinha...), volta tudo e
-            # vira `MergeRefused` no `merge_users`. Lock por user_id se precisar.
+            # Mutex dos DOIS lados, em ordem de id (merge A→B × B→A) e ANTES da checagem:
+            # quem escreve por usuário toma o mesmo lock (ver `_lock_user`).
+            from .bank_movements import _lock_user
+            for u in sorted((from_user_id, to_user_id)):
+                _lock_user(cur, u)
+            # ponytail: escritor que NÃO toma `_lock_user` (o undo de pagamento de fatura do
+            # cartão, `delete_user_data`) ainda grava entre a checagem e os updates: sem unique no
+            # caminho, junta; batendo numa unique (user_seq, nome de caixinha...), volta tudo e vira
+            # `MergeRefused`. Contra esses dois o merge também pode dar deadlock (exceção conhecida,
+            # ver a docstring de `_lock_user`): `DeadlockDetected` não vira `MergeRefused`.
             if _origem_presa(cur, from_user_id) or _viraria_autoindicacao(cur, from_user_id, to_user_id) or (
                 _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id)
             ):

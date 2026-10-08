@@ -1050,7 +1050,9 @@ chave), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
-consulta nada). Ficam desligadas só onde
+consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
+`db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
+retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -1118,6 +1120,9 @@ para saber o que existe:
 ```bash
 grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | sort -u
 ```
+
+Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
+fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,
