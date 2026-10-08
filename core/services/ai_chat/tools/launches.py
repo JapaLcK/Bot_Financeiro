@@ -39,7 +39,7 @@ from core.services.wa_ia_primeiro import ativo, precisa_confirmar_lancamento
 from utils_date import _tz
 from utils_text import fmt_brl
 
-from .._context import CURRENT_PLATFORM
+from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -373,7 +373,9 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         alvo=(args.get("alvo") or "").strip() or None,
         nota=(args.get("nota") or "").strip() or None,
         categoria=(args.get("categoria") or "").strip() or None,
-        category_reason="ai",
+        # Hashtag fixada pelo código na confirmação: o cross-check com a
+        # regra local não a troca ("explicit", não "ai").
+        category_reason="explicit" if args.get("_categoria_explicita") else "ai",
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
     )
     platform = CURRENT_PLATFORM.get()
@@ -397,6 +399,21 @@ def forma_declarada(args: dict[str, Any]) -> str:
     from core.handlers import forma_pagamento as fp
     forma = args.get("forma_pagamento")
     return forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+
+
+def _fixa_hashtag(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """`ao_confirmar` do add_launch: com hashtag no texto do usuário, a
+    pendência guarda a categoria dela e a marca de proveniência (do código; o
+    runner descarta chave "_" vinda do modelo). Canonizada pela mesma chamada
+    que a gravação faz (`add_from_entities`, motivo não-"ai"), para o resumo
+    mostrar o que será gravado."""
+    from core.services.category_service import infer_category
+    from parsers import _extract_explicit_category
+    _, hashtag = _extract_explicit_category(CURRENT_USER_MESSAGE.get())
+    if not hashtag:
+        return args
+    return {**args, "categoria": infer_category(user_id, "", hashtag).category,
+            "_categoria_explicita": True}
 
 
 def _add_launch_summary(args: dict[str, Any]) -> str:
@@ -1011,6 +1028,7 @@ TOOLS: list[Tool] = [
         execute=_add_launch_execute,
         summary=_add_launch_summary,
         confirmar_se=precisa_confirmar_lancamento,
+        ao_confirmar=_fixa_hashtag,
     ),
     Tool(
         schema={

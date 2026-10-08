@@ -86,9 +86,14 @@ _ATENDIDA_FORA = "Esta mensagem foi atendida fora desta conversa."
 # Resposta final de um write com `confirmar_se` verdadeiro (sem 2ª ida ao LLM).
 _CONFIRMA = "🐷 Só confirmando: registrar *{resumo}*? Responde *sim* ou *não*."
 
-# Rodada com vários add_launch e ao menos um que pede confirmação: nada grava.
-_UM_POR_VEZ = ("🐷 Recebi mais de um lançamento de uma vez. Me manda um por "
-               "mensagem que eu registro certinho.")
+# Tool call da mesma rodada depois de um `_CONFIRMA`: não roda.
+_NAO_EXECUTADA = json.dumps(
+    {"status": "not_executed", "message": "não executada: aguardando a confirmação do usuário"},
+    ensure_ascii=False)
+
+# Rodada com mais de uma escrita e ao menos uma que pede confirmação: nada roda.
+_UM_POR_VEZ = ("🐷 Recebi mais de um pedido de uma vez. Me manda um por "
+               "mensagem que eu faço certinho.")
 
 
 LIMIT_MSG_TEMPLATE = (
@@ -461,16 +466,24 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         # assistant.tool_calls e a tool response que de fato roda.
         _maybe_override_trend(tool_calls_dicts, user_id)
 
-        # Vários add_launch na rodada: a pendência da IA é uma linha por
-        # usuário, e duas confirmações se sobrescreveriam (o "sim" gravaria o
-        # que a resposta não mostrou). Antes de persistir: sem tool_calls órfão.
+        # Vários add_launch na rodada no modo ia_primeiro: o roteador divide.
         lancamentos = [tc for tc in tool_calls_dicts if tc["function"]["name"] == "add_launch"]
-        if len(lancamentos) > 1:
-            if ia_primeiro and not _TURN_WRITE_ATTEMPTED.get():
-                return None
-            if _algum_pede_confirmacao(user_id, lancamentos):
-                _cancela_pendencia_do_turno(user_id)
-                return _UM_POR_VEZ
+        if len(lancamentos) > 1 and ia_primeiro and not _TURN_WRITE_ATTEMPTED.get():
+            return None
+        # Uma escrita que armaria pendência (`requires_confirmation`,
+        # `arma_pendencia_no_execute`, ou `confirmar_se` verdadeiro) junto com
+        # QUALQUER outra escrita, em qualquer ordem e em qualquer canal: a
+        # resposta só mostraria uma, e a pendência ficaria escondida (o "sim"
+        # executaria o que não foi mostrado) ou seria cancelada calada. Sai
+        # aqui, antes de persistir a rodada e de despachar qualquer chamada
+        # dela (nem as leituras rodam): sem tool_calls órfão, resposta
+        # `_UM_POR_VEZ`. Escrita que arma pendência sozinha (ou só com
+        # leituras) segue o caminho de sempre.
+        escritas = [tc for tc in tool_calls_dicts
+                    if getattr(get_tool(tc["function"]["name"]), "is_write", False)]
+        if len(escritas) > 1 and _alguma_arma_pendencia(user_id, escritas):
+            _cancela_pendencia_do_turno(user_id)
+            return _UM_POR_VEZ
 
         db.ai_append_message(
             user_id,
@@ -494,8 +507,14 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
             except Exception:
                 args = {}
 
-            antes = _PENDENCIA_DO_TURNO.get()
-            history_content, this_terminal = _dispatch_tool(user_id, name, args)
+            if pergunta is not None:
+                # A rodada já virou a pergunta de uma confirmação: nada mais
+                # dela roda antes do "sim" (o resultado sumiria atrás do
+                # `_CONFIRMA`). O resultado fixo fecha o tool_call no histórico.
+                history_content, this_terminal = _NAO_EXECUTADA, None
+            else:
+                antes = _PENDENCIA_DO_TURNO.get()
+                history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
             db.ai_append_message(
                 user_id,
@@ -532,9 +551,16 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
     return ERROR_MSG
 
 
-def _algum_pede_confirmacao(user_id: int, chamadas: list[dict[str, Any]]) -> bool:
+def _alguma_arma_pendencia(user_id: int, chamadas: list[dict[str, Any]]) -> bool:
+    """Alguma das chamadas pode armar uma pergunta pendente: write com
+    `requires_confirmation` (sem rodar o `validate`), com
+    `arma_pendencia_no_execute`, ou com `confirmar_se` verdadeiro para os args."""
     for tc in chamadas:
         tool = get_tool(tc["function"]["name"])
+        if getattr(tool, "is_write", False) and (
+                getattr(tool, "requires_confirmation", False)
+                or getattr(tool, "arma_pendencia_no_execute", False)):
+            return True
         confirmar_se = getattr(tool, "confirmar_se", None)
         try:
             args = json.loads(tc["function"]["arguments"] or "{}")
@@ -579,6 +605,12 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         do loop sem chamar OpenAI de novo. Usado por writes auto-executados
         (`is_write=True, requires_confirmation=False`).
     """
+    # Chave com "_" é do código (marca gravada na pendência: `_confirmed` do
+    # set_budget, `_categoria_explicita` do add_launch), nunca do modelo: vale
+    # para toda tool, senão o modelo forjaria qualquer uma delas.
+    if isinstance(args, dict):
+        args = {k: v for k, v in args.items() if not str(k).startswith("_")}
+
     tool = get_tool(name)
     if tool is None:
         return (
@@ -620,6 +652,9 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
 
     confirmar_se = getattr(tool, "confirmar_se", None)
     if tool.is_write and confirmar_se is not None and confirmar_se(user_id, args):
+        ao_confirmar = getattr(tool, "ao_confirmar", None)
+        if ao_confirmar is not None:
+            args = ao_confirmar(user_id, args)
         summary = tool.summary(args) if tool.summary else f"executar {name}"
         _TURN_WRITE_ATTEMPTED.set(True)
         _PENDENCIA_DO_TURNO.set(db.ai_set_pending_action(user_id, name, args, summary))

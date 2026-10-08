@@ -852,12 +852,18 @@ apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schem
 ao do texto; texto sem data → IA sem data ou hoje); tipo (verbo de receita); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
 `forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
-nota (se vieram, palavras inteiras do texto, sem acento nem caixa). Limite: depois do
-"sim", o cross-check do `add_from_entities` ainda pode trocar a categoria da hashtag
-pela da regra local (comportamento de hoje). O resumo da confirmação
-(`_add_launch_summary`; só é usado por esta confirmação — WhatsApp com a flag —, porque o
-`add_launch` não pede confirmação em nenhum outro caminho) mostra tipo, valor, alvo,
-nota, categoria, o dia que vai ser gravado e a forma, se veio.
+nota (se vieram, palavras inteiras do texto, sem acento nem caixa). O resumo da
+confirmação (`_add_launch_summary`; só é usado por esta confirmação — WhatsApp com a
+flag —, porque o `add_launch` não pede confirmação em nenhum outro caminho) mostra tipo,
+valor, alvo, nota, categoria, o dia que vai ser gravado e a forma, se veio, e o "sim"
+grava exatamente isso: com hashtag no texto, a pendência guarda a categoria dela e a
+marca `_categoria_explicita` (do código; o runner descarta toda chave `_` vinda do
+modelo), e a gravação a passa como `explicit`, que o cross-check com a regra local não
+troca (a categoria vai canonizada, como a gravação a deixa). Rodada do modelo com uma
+escrita que armaria pendência e QUALQUER outra escrita: nada roda (seção "IA"), também
+no modo ia_primeiro (o roteador não faz as duas juntas). Leituras não contam: a que vem
+antes do `_CONFIRMA` roda; a que vem depois recebe "não executada: aguardando a
+confirmação do usuário" (corte, rede de segurança).
 Desligar a flag NÃO desfaz o cancelamento da confirmação da IA não mostrada (seção
 "IA"): ele vale para todos os canais (decisão do dono, 2026-10-08).
 
@@ -976,6 +982,21 @@ loga. O token do CAS é a linha que o próprio `ai_set_pending_action` devolve
 (`returning`), sem reler: outra janela que re-arme no meio não é cancelada. Código em
 `core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
 `tests/test_wa_ia_primeiro_runner.py`.
+
+**Uma escrita com pendência por rodada.** Em qualquer canal, com ou sem
+`WA_IA_PRIMEIRO`, uma rodada do modelo com uma escrita que armaria pendência
+(`requires_confirmation=True`, sem rodar o `validate`; `arma_pendencia_no_execute=True`,
+a que arma a pergunta dentro do próprio execute — hoje `set_budget` e `mark_bill_paid`,
+contadas SEMPRE, mesmo quando aquela chamada não armaria; ou `confirmar_se` verdadeiro) e
+QUALQUER outra escrita, em qualquer ordem, não roda nada (nem as leituras dela): a
+pendência do turno é cancelada e a resposta é o texto fixo `_UM_POR_VEZ` ("me manda um
+por mensagem"). Antes, no dashboard e com a flag desligada, "gasta 50 no ifood e apaga o
+#3" gravava o gasto e deixava a pendência do apagar viva e escondida (e, com o
+cancelamento acima, ela sumia calada). Escrita com pendência sozinha na rodada, ou só
+com leituras, segue como sempre. Limites: a pendência que o execute arma por conta
+própria não é rastreada pelo turno (não é cancelada se uma exceção vier depois dela no
+mesmo execute); e as ofertas de conveniência (botões de recategorizar / apagar) e a
+oferta de gasto fixo que o `add_launch` arma pelo `add_from_entities` não entram na regra.
 
 O "sim"/"não" de uma confirmação da IA já mostrada não gasta cota: quando o plano tem IA
 e só a cota acabou (`aviso_de_cota` devolve texto; inclusive se a própria mensagem que

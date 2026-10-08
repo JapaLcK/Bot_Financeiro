@@ -47,6 +47,14 @@ class Tool:
     confirma achando que era real e só depois vê o 'não achei'."""
 
     confirmar_se: Optional[Callable[[int, dict[str, Any]], bool]] = None
+    arma_pendencia_no_execute: bool = False
+    """Write SEM `requires_confirmation` cujo execute pode, por conta própria,
+    armar uma pergunta pendente (ai_pending ou `pending_actions`) e devolvê-la
+    como resposta. O runner não a vê armar; na pré-varredura da rodada ela
+    conta como escrita que arma pendência (não roda junto de outra escrita)."""
+    ao_confirmar: Optional[Callable[[int, dict[str, Any]], dict[str, Any]]] = None
+    """Só com `confirmar_se`: ajusta os args que vão para a pendência (e para
+    o resumo) — o que o "sim" grava é o que a pergunta mostrou."""
 
     has_side_effects: bool = False
     """Consulta que sincroniza ou aplica juros. Não é comando de escrita,

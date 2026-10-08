@@ -249,16 +249,16 @@ def test_p5b_rearmada_por_outra_janela_nao_e_cancelada(com_lancamento_1, monkeyp
     assert db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"
 
 
-def test_p6_confirma_sobrescrita_na_mesma_rodada_cancela(com_lancamento_1, monkeypatch):
-    """`_CONFIRMA` do add_launch vence como resposta, mas o delete_launch da
-    mesma rodada sobrescreve a pendência: a resposta não é a pergunta dela."""
+def test_p6_confirmacao_e_delete_na_mesma_rodada_nada_roda(com_lancamento_1, monkeypatch):
+    """add_launch incerto + delete_launch na mesma rodada: nada roda nem fica
+    armado (pré-varredura), e o "sim" seguinte não apaga nem grava."""
     uid = com_lancamento_1
     openai_falso(monkeypatch, com_tools(
         chamada("add_launch", {"tipo": "despesa", "valor": 500, "alvo": "mercado"}, "a"),
         chamada("delete_launch", {"launch_id": "1"}, "d"),
     ))
     r = diga(uid, "piggy gastei 50 no mercado")
-    assert "Só confirmando" in r, r
+    assert runner._UM_POR_VEZ in r, r
     _sim_nao_apaga(uid)
 
 
@@ -285,3 +285,166 @@ def test_set_pending_action_devolve_a_linha_como_get(user_id):
     gravada = db.ai_set_pending_action(user_id, "delete_launch", {"launch_id": "1"}, "apagar #1")
     assert gravada == db.ai_get_pending_action(user_id)
     assert gravada["created_at"].tzinfo is not None and gravada["tool_args"] == {"launch_id": "1"}
+
+
+# ── Confirmação + outra escrita na mesma rodada: nada roda ────────────────
+
+def _boletos(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) n from bill_instances where user_id=%s", (uid,))
+        n = cur.fetchone()["n"]
+        conn.commit()
+    return n
+
+
+_BOLETO = chamada("add_boleto", {"name": "IPTU", "amount": 300, "days": 10}, "b")
+
+
+def _lanca(valor):
+    return chamada("add_launch", {"tipo": "despesa", "valor": valor, "alvo": "mercado"}, "a")
+
+
+@pytest.mark.parametrize("modo", list(_MODOS))
+@pytest.mark.parametrize("ordem", ["boleto-antes", "boleto-depois"])
+def test_confirmacao_e_outra_escrita_na_mesma_rodada_nada_roda(uid_pro, monkeypatch, ordem, modo):
+    liga_flag(monkeypatch)
+    rodada = [_BOLETO, _lanca(500)] if ordem == "boleto-antes" else [_lanca(500), _BOLETO]
+    openai_falso(monkeypatch, com_tools(*rodada))     # usuário disse 50: incerto
+    r = diga(uid_pro, _MODOS[modo] + "gastei 50 no mercado")
+    assert runner._UM_POR_VEZ in r, r
+    assert _boletos(uid_pro) == 0
+    assert lancamentos(uid_pro) == []
+    assert db.ai_get_pending_action(uid_pro) is None
+    h = db.ai_get_recent_messages(uid_pro, limit=50)
+    assert not any(m.get("tool_calls") for m in h), h
+    assert runner.trim_history_for_openai(h) == h
+
+
+def test_add_launch_certo_e_outra_escrita_rodam_como_hoje(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, com_tools(_lanca(50), _BOLETO))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
+    assert _boletos(uid_pro) == 1
+
+
+@pytest.mark.parametrize("leitura_antes", [True, False], ids=["leitura-antes", "leitura-depois"])
+def test_confirmacao_com_leitura_na_rodada(uid_pro, monkeypatch, leitura_antes):
+    """Leitura não conta como escrita: a rodada segue e a resposta é o
+    `_CONFIRMA`, com a pendência viva. A leitura que vem antes roda; a que vem
+    depois do `_CONFIRMA` não (corte, rede de segurança)."""
+    liga_flag(monkeypatch)
+    real = ai_tools.get_tool("get_period_summary")
+    rodou = []
+
+    def conta(user_id, args):
+        rodou.append(1)
+        return real.execute(user_id, args)
+
+    contada = dataclasses.replace(real, execute=conta)
+    monkeypatch.setattr(runner, "get_tool",
+                        lambda n: contada if n == "get_period_summary" else ai_tools.get_tool(n))
+    leitura = chamada("get_period_summary", {}, "s")
+    rodada = [leitura, _lanca(500)] if leitura_antes else [_lanca(500), leitura]
+    openai_falso(monkeypatch, com_tools(*rodada))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert "Só confirmando" in r, r
+    assert db.ai_get_pending_action(uid_pro)["tool_name"] == "add_launch"
+    assert rodou == ([1] if leitura_antes else [])
+    h = db.ai_get_recent_messages(uid_pro, limit=50)
+    assert runner.trim_history_for_openai(h) == h
+
+
+# ── requires_confirmation + outra escrita: vale em todos os canais ──────────
+
+@pytest.mark.parametrize("flag,platform", [
+    (True, "whatsapp"), (False, "whatsapp"), (False, "dashboard"), (True, "dashboard"),
+])
+def test_apagar_e_lancar_na_mesma_rodada_nada_roda(com_lancamento_1, monkeypatch, flag, platform):
+    from tests._ia_falsa_helpers import desliga_flag
+    uid = com_lancamento_1
+    if not flag:
+        desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, com_tools(
+        chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "ifood"}, "a"),
+        chamada("delete_launch", {"launch_id": "1"}, "b"),
+    ))
+    r = runner.chat(uid, "gasta 50 no ifood e apaga o lançamento #1",
+                    monthly_limit=10, platform=platform)
+    assert r == runner._UM_POR_VEZ, r
+    assert lancamentos(uid) == [{"tipo": "despesa", "valor": 25.0}]
+    assert db.ai_get_pending_action(uid) is None
+    h = db.ai_get_recent_messages(uid, limit=50)
+    assert not any(m.get("tool_calls") for m in h), h
+    assert runner.trim_history_for_openai(h) == h
+
+
+def test_apagar_sozinho_no_dashboard_pergunta_como_hoje(com_lancamento_1, monkeypatch):
+    uid = com_lancamento_1
+    openai_falso(monkeypatch, _apaga_o_1(), texto("🐷 Confirma apagar o #1?"))
+    r = runner.chat(uid, "apaga o lançamento #1", monthly_limit=10, platform="dashboard")
+    assert "Confirma apagar" in r, r
+    assert db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"
+
+
+def test_apagar_orcamento_e_lancar_na_mesma_rodada_nada_roda(com_lancamento_1, monkeypatch):
+    uid = com_lancamento_1
+    openai_falso(monkeypatch, com_tools(
+        chamada("delete_budget", {"categoria": "alimentação"}, "o"),
+        chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "mercado"}, "a"),
+    ))
+    r = diga(uid, "gastei 50 no mercado")
+    assert runner._UM_POR_VEZ in r, r
+    assert lancamentos(uid) == [{"tipo": "despesa", "valor": 25.0}]
+    assert db.ai_get_pending_action(uid) is None
+
+
+# ── set_budget arma a pergunta dentro do execute: conta sempre ──────────────
+
+def _orcamento(valor):
+    return chamada("set_budget", {"categoria": "mercado", "budget": valor}, "o")
+
+
+@pytest.mark.parametrize("ja_tem_orcamento", [True, False], ids=["atualiza", "cria"])
+def test_set_budget_e_lancamento_na_mesma_rodada_nada_roda(uid_pro, monkeypatch, ja_tem_orcamento):
+    """Atualizando, o set_budget arma "atualizar orçamento?" dentro do execute;
+    criando, não armaria — conta igual (lado conservador, sem ler o banco)."""
+    liga_flag(monkeypatch)
+    if ja_tem_orcamento:
+        db.upsert_budget(uid_pro, "mercado", 300)
+    openai_falso(monkeypatch, com_tools(_orcamento(800), _lanca(50)))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert runner._UM_POR_VEZ in r, r
+    assert lancamentos(uid_pro) == []
+    assert db.ai_get_pending_action(uid_pro) is None
+    orc = db.get_budget(uid_pro, "mercado")
+    assert (orc["budget"] if orc else None) == (300.0 if ja_tem_orcamento else None)
+
+
+def test_pagar_conta_e_lancamento_na_mesma_rodada_nada_roda(uid_pro, monkeypatch):
+    """mark_bill_paid pode armar "quanto veio?" (conta variável) dentro do
+    execute: conta sempre, mesmo numa conta de valor fixo."""
+    from datetime import timedelta
+    from db.bills import create_boleto, get_bill
+    from utils_date import today_tz
+    liga_flag(monkeypatch)
+    conta = create_boleto(uid_pro, "IPTU", 300, today_tz() + timedelta(days=5))
+    openai_falso(monkeypatch, com_tools(
+        chamada("mark_bill_paid", {"bill_id": int(conta["id"]), "forma_pagamento": "dinheiro"}, "p"),
+        _lanca(50)))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert runner._UM_POR_VEZ in r, r
+    assert lancamentos(uid_pro) == []
+    assert get_bill(uid_pro, int(conta["id"]))["status"] != "paid"
+
+
+def test_set_budget_sozinho_atualizando_pergunta_como_hoje(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    db.upsert_budget(uid_pro, "mercado", 300)
+    openai_falso(monkeypatch, com_tools(_orcamento(800)))
+    r = diga(uid_pro, "piggy muda o orçamento de mercado pra 800")
+    assert "Atualizar pra R$ 800.00?" in r, r
+    assert db.ai_get_pending_action(uid_pro)["tool_name"] == "set_budget"
+    diga(uid_pro, "sim")
+    assert db.get_budget(uid_pro, "mercado")["budget"] == 800.0

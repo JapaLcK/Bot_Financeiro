@@ -83,10 +83,12 @@ def test_recusa_posterior_nao_apaga_marca_de_pendencia_anterior(monkeypatch, use
     ], 'assistant')
     with pytest.raises(RuntimeError, match='salvar resultado'):
         runner.chat(user_id, 'Apague os registros.', monthly_limit=1)
-    # A resposta seria a recusa do delete_launch, não a pergunta do
-    # delete_all_launches: a pendência morre, a marca de escrita (cota) fica.
+    # Duas escritas com pendência na mesma rodada: nada da rodada roda (a
+    # resposta é o `_UM_POR_VEZ` do runner, cuja gravação falha aqui). Sem
+    # pendência armada nem escrita tentada, a vaga da cota volta.
     assert db.ai_get_pending_action(user_id) is None
-    assert get_usage_this_month(user_id) == 1
+    assert db.count_launches(user_id) == 1
+    assert get_usage_this_month(user_id) == 0
 
 
 @pytest.mark.parametrize('stage', ['validate', 'summary'])

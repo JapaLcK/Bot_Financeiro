@@ -457,3 +457,47 @@ def test_nota_numerica_da_ia_confirma_em_vez_de_cair_no_roteador(uid_pro, monkey
     r = diga(uid_pro, "gastei 50 no mercado")
     assert "Só confirmando" in r and "(123)" in r, r
     assert lancamentos(uid_pro) == []
+
+
+# ── A hashtag atravessa a confirmação: o "sim" grava o que a pergunta mostrou ─
+
+def _categorias(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select categoria from launches where user_id=%s order by id", (uid,))
+        rows = [x["categoria"] for x in cur.fetchall()]
+        conn.commit()
+    return rows
+
+
+@pytest.mark.parametrize("categoria_ia", ["lazer", None], ids=["ia-ecoa", "ia-omite"])
+def test_hashtag_confirmada_grava_a_categoria_da_hashtag(uid_pro, monkeypatch, categoria_ia):
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    extra = {"categoria": categoria_ia} if categoria_ia else {}
+    openai_falso(monkeypatch, lancamento(50, alvo="posto", **extra))
+    r = diga(uid_pro, "gastei 50 no posto #lazer")
+    assert "Só confirmando" in r and "#lazer" in r, r
+    diga(uid_pro, "sim")
+    assert _categorias(uid_pro) == ["lazer"]
+
+
+def test_marca_de_hashtag_forjada_pelo_modelo_e_ignorada(uid_pro, monkeypatch):
+    """Sem hashtag no texto, a marca vinda do modelo não pode tirar a categoria
+    do cross-check: a regra local (posto→transporte) vence como sempre."""
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    openai_falso(monkeypatch, lancamento(50, alvo="posto", categoria="lazer",
+                                         _categoria_explicita=True))
+    r = diga(uid_pro, "gastei 50 no posto")
+    assert "Só confirmando" not in r, r
+    assert _categorias(uid_pro) == ["transporte"]
+
+
+def test_hashtag_com_caixa_resumo_mostra_o_que_grava(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    openai_falso(monkeypatch, lancamento(50, alvo="posto"))
+    r = diga(uid_pro, "gastei 50 no posto #Lazer")
+    assert "Só confirmando" in r and "#lazer" in r and "#Lazer" not in r, r
+    diga(uid_pro, "sim")
+    assert _categorias(uid_pro) == ["lazer"]

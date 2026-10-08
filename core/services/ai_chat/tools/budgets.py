@@ -395,6 +395,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # gerenciado manualmente dentro do execute
         execute=_set_budget_execute,
+        arma_pendencia_no_execute=True,  # "atualizar orçamento de X?" (ai_pending)
     ),
     Tool(
         schema={
