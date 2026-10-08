@@ -23,3 +23,14 @@ from core.intent_classifier import classify
 ])
 def test_resumo_liga_desliga_roteia_intent_certo(texto, intent):
     assert classify(texto, allow_ai=False).intent == intent
+
+
+@pytest.mark.parametrize("texto", [
+    "não quero receber o resumo semanal",
+    "nao vou receber o resumo mensal",
+    "nao recebo o resumo mensal",
+])
+def test_negacao_de_receber_nao_liga_o_resumo(texto):
+    # "receber" negado é pedido para parar, nunca para ligar.
+    assert classify(texto, allow_ai=False).intent not in (
+        "report.weekly_enable", "report.monthly_enable")
