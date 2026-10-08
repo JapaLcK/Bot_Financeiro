@@ -7,7 +7,8 @@ continua 50 (nem 0, nem 100) e o consolidado continua 950. Sem o desfazer, o gas
 
 Controles por mutação (relato do PR): `_desfaz` desligado → vermelho nos quatro canais;
 sem o `not escopo_conta_corrente` → vermelho em `test_apagar_tudo_nao_recria_a_sombra`;
-sem o `ligado` no `_precisa_lock` → vermelho em `test_ligou_entre_o_preview_e_o_lock`.
+sem o `ligado` no `_precisa_lock` → vermelho em `test_ligou_entre_o_preview_e_o_lock`
+(até o undo comum passar a travar sempre: ver o docstring desse teste).
 """
 from __future__ import annotations
 
@@ -17,7 +18,6 @@ import db
 import db.bank_movements as bank_mod
 from conftest import usuario_pagante
 from core.services.ai_chat.tools.launches import _delete_launch_execute
-from db.accounts import LaunchUnsafeRollback
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
     conecta_banco, consolidado, ia_fora, manda, saldo_bruto, sincroniza, soma_delta_conta, tx,
     uid_pro, ultimo_launch,
@@ -155,8 +155,10 @@ def test_apagar_tudo_nao_recria_a_sombra(uid_pro, ia_fora):
 # ── concorrência sequencial e isolamento ─────────────────────────────────────
 
 def test_ligou_entre_o_preview_e_o_lock(uid_pro, ia_fora, monkeypatch):
-    """O import cria a pendência (`match` = X) depois do preview do apagar e antes do lock
-    da linha: o recheck pós-lock vê a ligação e recusa com `mudou_durante`."""
+    """O import começa no meio do apagar e quer ligar X (`match` = X). Todo apagar comum já
+    toma `_lock_user` antes da linha, então o import ESPERA o mutex: o apagar conclui sem
+    recusa (antes: o recheck pós-lock via a ligação e recusava com `mudou_durante`, porque o
+    apagar de carteira pura não tinha o mutex) e o import que sobra não acha X."""
     conexao = conecta_banco(uid_pro, "1000.00")
     manda(uid_pro, "gastei 50 no mercado em dinheiro")
     x = ultimo_launch(uid_pro)
@@ -165,19 +167,27 @@ def test_ligou_entre_o_preview_e_o_lock(uid_pro, ia_fora, monkeypatch):
     real = bank_mod.uses_bank_movement_lock
     rodou = []
 
+    import threading
+    from tests._espera_lock import _esperar_backend_travado
+    saida = {}
+
     def importa_no_meio(*a, **kw):
         if not rodou:
             rodou.append(1)
-            assert db.import_open_finance_launches(uid_pro, conexao)["pending"] == 1
+            fio = threading.Thread(
+                target=lambda: saida.__setitem__("import", db.import_open_finance_launches(uid_pro, conexao)))
+            fio.start()
+            saida["fio"] = fio
+            assert _esperar_backend_travado(), "o import não ficou esperando o mutex"
         return real(*a, **kw)
 
     monkeypatch.setattr(bank_mod, "uses_bank_movement_lock", importa_no_meio)
-    with pytest.raises(LaunchUnsafeRollback) as exc:
-        db.delete_launch_and_rollback(uid_pro, x)
-    assert exc.value.motivo == "mudou_durante"
-    assert rodou and _q("select 1 from launches where id=%s", (x,))
-    assert saldo_bruto(uid_pro) == antes
-    assert _estado(_of_tx(uid_pro))["match_launch_id"] == x
+    db.delete_launch_and_rollback(uid_pro, x)  # conclui sem recusa
+    saida["fio"].join(30)
+    assert not saida["fio"].is_alive() and rodou
+    assert not _q("select 1 from launches where id=%s", (x,))
+    assert _estado(_of_tx(uid_pro))["match_launch_id"] is None
+    assert saldo_bruto(uid_pro) == soma_delta_conta(uid_pro)
 
 
 def test_outro_usuario_nao_apaga_a_fundida(uid_pro, ia_fora):

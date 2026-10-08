@@ -1,6 +1,6 @@
-import type { Contas, Lancamento, MotivoPrevisao, ResumoDoMes } from "../lib/api-v2.gen";
+import type { Contas, Investido, Lancamento, MotivoPrevisao, ResumoDoMes } from "../lib/api-v2.gen";
 
-export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] | Lancamento["motivos"][number];
+export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] | Lancamento["motivos"][number] | Investido["motivos"][number];
 
 // Por que um número da /api/v2 não é exato, em português. Código novo do servidor sai cru
 // (melhor que esconder a ressalva). Os da previsão saem de core/services/cashflow_snapshot.py
@@ -18,6 +18,7 @@ const MOTIVO: Record<string, string> = {
   outra_moeda: "outra moeda",
   conexao_pausada: "conexão pausada",
   inicio_do_historico: "início do histórico",
+  sem_banco_conectado: "sem banco conectado",
   // previsão
   acao_financeira_pendente: "pedido pendente na conversa",
   bancos_excluidos: "bancos fora do cálculo",
@@ -47,10 +48,12 @@ const MOTIVO: Record<string, string> = {
 };
 export const rotulo = (codigo: string) => MOTIVO[codigo] ?? codigo;
 
-// Para que lado o número real pode ficar, por motivo da previsão.
+// Para que lado o número real pode ficar, por motivo da previsão. `so_melhora`: a falta ou o
+// erro do dado só deixa a projeção melhor do que a realidade, então o real pode ser PIOR
+// (docs/plano-piggy-assistente-contextual.md); `so_piora` é o contrário.
 export const DIRECAO: Record<MotivoPrevisao["direcao_do_erro"], string> = {
-  so_melhora: "o real pode ser melhor",
-  so_piora: "o real pode ser pior",
+  so_melhora: "o real pode ser pior",
+  so_piora: "o real pode ser melhor",
   ambos: "pode variar para os dois lados",
 };
 

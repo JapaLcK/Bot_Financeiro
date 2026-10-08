@@ -17,12 +17,14 @@ from core.limite_corpo import MAX_OFX_BYTES
 
 
 def reject_dangerous_xml(ofx_bytes: bytes) -> None:
-    """Bloqueia DOCTYPE/ENTITY antes do parse.
+    """Bloqueia DOCTYPE/ENTITY antes do parse, como defesa em profundidade.
 
-    O ofxparse usa parser XML sem proteção contra entidades externas (XXE) e
-    expansão de entidades (billion laughs). Nenhum banco emite OFX com
-    DOCTYPE/ENTITY — rejeitar de cara é seguro e barato (scan de bytes, sem
-    parse). Usada também pelo ofx_credit_import.
+    O ofxparse 0.21 lê o arquivo com `BeautifulSoup(fh, 'html.parser')`, que não
+    processa DTD: entidade declarada não se expande e entidade externa não é
+    buscada. O filtro existe para o dia em que o parser mudar (versão nova do
+    ofxparse, ou o fallback `BeautifulStoneSoup` se o bs4 sumir). Nenhum banco
+    emite OFX com DOCTYPE/ENTITY, então rejeitar é seguro e barato (scan de
+    bytes, sem parse). Usada também pelo ofx_credit_import.
     """
     upper = ofx_bytes.upper()
     if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:

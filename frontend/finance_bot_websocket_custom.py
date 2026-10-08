@@ -45,7 +45,7 @@ from pydantic import BaseModel, Field, model_validator
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from core.client_ip import client_ip as ip_cliente, rate_limit_key
-from token_utils import decode_dashboard_token_full, make_dashboard_token
+from token_utils import decode_dashboard_token_full, make_dashboard_token, motivo_jwt_secret_fraco
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
@@ -343,6 +343,14 @@ if not DATABASE_URL:
 if not JWT_SECRET:
     print("ERROR: JWT_SECRET not set. Refusing to start with insecure default.", file=sys.stderr)
     sys.exit(1)
+
+if _APP_ENV in ("prod", "production"):
+    _motivo = motivo_jwt_secret_fraco(JWT_SECRET)
+    if _motivo:
+        print(f"ERROR: JWT_SECRET {_motivo} (APP_ENV={_APP_ENV}). Refusing to start. "
+              "Gere um com: python -c \"import secrets; print(secrets.token_urlsafe(48))\"",
+              file=sys.stderr)
+        sys.exit(1)
 
 # jdump (serializer JSON) e db_connect (pool async) vêm de frontend/routes/shared.py
 
@@ -1794,6 +1802,24 @@ async def _open_finance_refresh():
             print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
 
 
+async def _tarefa_fk_indexes():
+    # Índices das FKs (#253), CONCURRENTLY: espera as transações em voo, o que
+    # não cabe no wait_for (STARTUP_STEP_TIMEOUT) do init_db. Tarefa de fundo,
+    # uma vez por boot. Logger e não print: o `_DashboardHandler` do root grava
+    # WARNING em `system_event_logs`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.schema_repairs import ensure_fk_indexes_once  # noqa: PLC0415
+        falhou = await asyncio.to_thread(ensure_fk_indexes_once)
+        if falhou is None:
+            log.info("[fk_indexes] outro processo está construindo; nada a fazer aqui")
+        else:
+            log.info("[fk_indexes] terminou; índices não criados: %s", falhou or "nenhum")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[fk_indexes] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2217,6 +2243,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
             ]
         )
     else:

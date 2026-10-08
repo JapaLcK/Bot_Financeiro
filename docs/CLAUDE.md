@@ -368,6 +368,29 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
 
+- `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
+  `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
+  [{tipo, rotulo, valor, motivos}], por_banco: [{banco, valor, motivos}], motivos}`. Gate
+  `investments` (403 `pro_required`). Só posições do Open Finance, com o recorte da foto
+  (`POSICOES_BANCO_SQL` + `separar_posicoes` de `db/patrimonio.py`): investimento e caixinha
+  manuais não entram. A mesma regra serve a tool `get_investment_summary` da IA e o "meus
+  investimentos" do WhatsApp (`core/handlers/investido.py`). `total: null` = não dá para
+  saber (`sem_banco_conectado`; nenhuma conexão viva sincronizada com linha no espelho
+  `open_finance_investments` — o sync não grava "li e veio vazio", então sem linha não há
+  R$ 0; ou toda posição sem saldo), nunca zero. R$ 0,00 só com posições que somam 0.
+  `nenhum_investimento` só com total null e **toda** conexão viva saudável (o contrário do
+  `banco_desatualizado`: `desatualizada` False, tela "Atualizado"); qualquer dúvida
+  (reconexão pendente, item em erro, `item_missing`, coleta travada, falha de leitura, sync
+  velho) fica só com `banco_desatualizado`. Nunca junto de um número. Com ele os
+  três consumidores dizem "Não encontrei investimentos nos seus bancos conectados", na ordem
+  `sem_banco_conectado` > `saldo_ausente` > `nenhum_investimento` > "ainda não consegui ler".
+  Parte só com posição sem saldo sai `valor: null`; parte que fecha em 0 some.
+  **Centavos:** cada posição entra quantizada em 2 casas e as partes somam essas parcelas, então
+  Σ por_tipo == total == Σ por_banco, exato; o custo é o total poder diferir do
+  `investimentos_banco` da foto em até 0,005 × nº de posições (só com saldo de 3+ casas).
+  `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
+  `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -1007,7 +1030,9 @@ chave), e a foto diária do
 patrimônio (`_patrimonio_foto` → `core/services/patrimonio_foto.py`, a cada hora, a partir
 das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos`; atrás de
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
-consulta nada). Ficam desligadas só onde
+consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
+`db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
+retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -1075,6 +1100,9 @@ para saber o que existe:
 ```bash
 grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | sort -u
 ```
+
+Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
+fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,

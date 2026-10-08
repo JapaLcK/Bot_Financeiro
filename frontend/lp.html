@@ -147,7 +147,7 @@
       som.hidden = false;
     }
 
-    // utm_* e fbclid do anúncio seguem para o quiz (o destino é o href do botão).
+    // utm_* e fbclid seguem para o destino do botão: o quiz na /lp, a /precos na /vsl.
     var params = new URLSearchParams();
     new URLSearchParams(location.search).forEach(function (valor, nome) {
       if (/^utm_/i.test(nome) || nome === "fbclid") params.append(nome, valor);
