@@ -470,9 +470,11 @@ corrija, resolva conflito com a `main`, responda a thread, peça `@codex review`
 quando as condições acima forem cumpridas. **CI verde não acorda a sessão** (o monitor só
 avisa de CI vermelho, conflito e comentário): se o Codex já liberou o head atual, sem thread
 aberta, e só faltam checks, espere o CI terminar na própria sessão, com um único
-`gh run watch <id> --exit-status` em segundo plano (o id sai de
-`gh run list --workflow tests.yml --branch <branch> --limit 1`; o término do comando acorda a
-sessão), e mergeie em seguida. Nada de laço de `sleep` nem de polling repetido. O
+`gh pr checks <PR> --watch --fail-fast` em segundo plano (ele acompanha todos os checks do
+PR, de todos os workflows — `Tests`, `App` e os que vierem —, e o término do comando acorda a
+sessão). Antes de mergear, confirme com `gh pr view <PR> --json headRefOid` que o head é o
+mesmo que o Codex liberou e que `ccd_pr get_status` mostra todos os checks verdes. Nada de
+laço de `sleep` nem de polling repetido. O
 auto-merge do GitHub está desligado no repositório (`ccd_pr set_auto_merge` é recusado):
 não tente ligá-lo, é configuração do dono. Push novo exige novo `@codex review`, e o merge
 só vale com o Codex liberado no head atual. Se o CI falhar, trate como CI vermelho.
