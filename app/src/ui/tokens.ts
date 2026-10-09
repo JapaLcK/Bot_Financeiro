@@ -71,8 +71,10 @@ export const escuro: Paleta = {
   brand: "#FF4FA0",
   brandSoft: "#351827",
   brandInk: "#FF4FA0",
-  acao: "#FF4FA0",
-  onAcao: "#0E0E10",
+  // Botão primário: #CE2572 sobre #0E0E10 dá ~3,8: `acao` é só fundo de botão e trilha do switch.
+  // TEXTO rosa usa só `brandInk`; `brand` fica para ícone/gráfico (não textual, mínimo 3:1).
+  acao: "#CE2572",
+  onAcao: "#FFFAFD",
   positive: "#47CD89",
   warning: "#FDB022",
   danger: "#F97066",
@@ -104,5 +106,5 @@ export const acessoClaro: Paleta = {
 };
 export const acessoEscuro: Paleta = {
   ...escuro, surface: "#24242F", surfaceRaised: "#24242F",
-  ink: "#F8F8FC", inkMuted: "#A0A0AF", acao: "#CE2572", onAcao: "#FFFAFD",
+  ink: "#F8F8FC", inkMuted: "#A0A0AF",
 };

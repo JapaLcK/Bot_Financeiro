@@ -21,6 +21,7 @@ exports[`Screen snapshot (dois temas): claro, rolando 1`] = `
     }
   >
     <RCTScrollView
+      automaticallyAdjustKeyboardInsets={true}
       contentContainerStyle={
         {
           "flexGrow": 1,
@@ -28,6 +29,11 @@ exports[`Screen snapshot (dois temas): claro, rolando 1`] = `
           "paddingLeft": 16,
           "paddingRight": 16,
           "paddingTop": 47,
+        }
+      }
+      innerViewRef={
+        {
+          "current": null,
         }
       }
       keyboardShouldPersistTaps="handled"
