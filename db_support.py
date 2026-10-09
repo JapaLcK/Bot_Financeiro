@@ -644,7 +644,9 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
     return row
 
 
-def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> str:
+def create_dashboard_session_impl(
+    get_conn, user_id: int, hours: float = 2, code_challenge: str | None = None
+) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     with get_conn() as conn:
@@ -653,8 +655,9 @@ def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> s
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "insert into dashboard_sessions (code, user_id, expires_at) values (%s, %s, %s)",
-                        (code, user_id, expires_at),
+                        "insert into dashboard_sessions (code, user_id, expires_at, code_challenge)"
+                        " values (%s, %s, %s, %s)",
+                        (code, user_id, expires_at, code_challenge),
                     )
                 conn.commit()
                 return code

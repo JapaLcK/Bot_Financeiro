@@ -1975,6 +1975,10 @@ def init_db():
         """alter table pending_google_signups add column if not exists email_hash text""",
         """alter table pending_google_signups add column if not exists email_enc text""",
         """alter table pending_google_signups add column if not exists name_hint_enc text""",
+        # PKCE (S256) do login Google do app nativo: nulo = fluxo sem PKCE
+        # (web, app antigo, Apple, código do bot). Ver core/services/pkce.py.
+        """alter table dashboard_sessions add column if not exists code_challenge text""",
+        """alter table pending_google_signups add column if not exists code_challenge text""",
 
         # auth_identities (Google OAuth): email snapshot — lookup é por provider_sub,
         # então não precisa de hash, só de cifragem.

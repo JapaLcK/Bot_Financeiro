@@ -119,6 +119,8 @@ from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
 from core.secure_compare import constant_time_eq
+from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
+from core.services.pkce import challenge_valido, s256 as pkce_s256
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
 from api.nativo.app import app as api_nativo_app
@@ -4509,6 +4511,8 @@ async def auth_dashboard_link(response: Response, request: Request, body: Dashbo
 
 GOOGLE_OAUTH_STATE_COOKIE = "google_oauth_state"
 GOOGLE_OAUTH_NEXT_COOKIE = "google_oauth_next"
+# PKCE do app nativo (#604): o challenge fica num cookie, NÃO no state que vai ao Google.
+GOOGLE_OAUTH_CHALLENGE_COOKIE = "google_oauth_challenge"
 GOOGLE_OAUTH_STATE_MAX_AGE = 600  # 10 minutos
 GOOGLE_OAUTH_PURCHASE_CONTINUE_URL = "/continuar-compra"
 
@@ -4518,10 +4522,12 @@ class GoogleSignupCompleteBody(_CorpoSemVeneno):
     name: str
     phone: str
     accepted_terms: bool = False
+    code_verifier: str | None = Field(default=None, pattern=_PKCE_VERIFIER_PATTERN)
 
 
 class GoogleExchangeBody(_CorpoSemVeneno):
     code: str
+    code_verifier: str | None = Field(default=None, pattern=_PKCE_VERIFIER_PATTERN)
 
 
 class AppleExchangeBody(_CorpoSemVeneno):
@@ -4540,6 +4546,7 @@ def _google_oauth_next_url(value: str | None) -> str | None:
 def _clear_google_oauth_cookies(response: Response) -> None:
     response.delete_cookie(GOOGLE_OAUTH_STATE_COOKIE, path="/auth/google")
     response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
+    response.delete_cookie(GOOGLE_OAUTH_CHALLENGE_COOKIE, path="/auth/google")
 
 
 def _google_redirect_to_landing(message: str) -> RedirectResponse:
@@ -4562,6 +4569,7 @@ async def auth_google_start(
     request: Request,
     app: int = 0,
     next_url: str | None = Query(default=None, alias="next"),
+    code_challenge: str | None = None,
 ):
     """Gera state, salva em cookie short-lived e redireciona pro Google.
 
@@ -4571,7 +4579,11 @@ async def auth_google_start(
     devolve intacto no callback — sem precisar de cookie extra. Assim o callback
     sabe devolver um código de uso único pelo scheme do app (`pigbankai://` ou
     `pigbank://`, ver `_google_app_scheme`) em vez de setar cookies num
-    navegador que não é o do app."""
+    navegador que não é o do app.
+
+    `app=2` aceita `code_challenge` (PKCE S256, #604): inválido → 400; ausente
+    → segue sem PKCE (app já instalado, transição). Vai num cookie próprio até
+    o callback, que o amarra ao código de uso único."""
     from core.services.google_oauth import (
         GoogleOAuthError,
         build_authorization_url,
@@ -4583,6 +4595,9 @@ async def auth_google_start(
             status_code=503,
             detail="Login com Google ainda não está configurado neste ambiente.",
         )
+
+    if code_challenge is not None and not challenge_valido(code_challenge):
+        raise HTTPException(status_code=400, detail="code_challenge inválido.")
 
     state = {1: "app-", 2: "nat-"}.get(app, "") + secrets.token_urlsafe(32)
     try:
@@ -4615,6 +4630,19 @@ async def auth_google_start(
     else:
         # Evita que uma tentativa abandonada contamine um login posterior.
         response.delete_cookie(GOOGLE_OAUTH_NEXT_COOKIE, path="/auth/google")
+    if code_challenge and app == 2:
+        response.set_cookie(
+            GOOGLE_OAUTH_CHALLENGE_COOKIE,
+            code_challenge,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            max_age=GOOGLE_OAUTH_STATE_MAX_AGE,
+            path="/auth/google",
+        )
+    else:
+        # Idem: challenge de tentativa abandonada não pode grudar num código novo.
+        response.delete_cookie(GOOGLE_OAUTH_CHALLENGE_COOKIE, path="/auth/google")
     return response
 
 
@@ -4654,6 +4682,8 @@ async def auth_google_callback(
     # forjado faria um erro qualquer voltar ao app como se fosse legítimo.
     state_ok = bool(state and cookie_state and constant_time_eq(state, cookie_state))
     scheme = _google_app_scheme(state) if state_ok else None
+    # PKCE (#604) só no app nativo; app antigo e web nunca têm challenge.
+    challenge = request.cookies.get(GOOGLE_OAUTH_CHALLENGE_COOKIE) if scheme == "pigbank" else None
 
     def _erro(codigo: str, message: str) -> RedirectResponse:
         # App nativo: o erro volta ao app com um código FIXO, nenhum texto
@@ -4702,7 +4732,9 @@ async def auth_google_callback(
 
         # 3) Conta totalmente nova → cria pendente e manda pra /completar-cadastro
         if not user_id:
-            token = await asyncio.to_thread(create_pending_google_signup, sub, email, name_hint)
+            token = await asyncio.to_thread(
+                create_pending_google_signup, sub, email, name_hint, code_challenge=challenge
+            )
             # App: devolve o token pelo scheme. O AppDelegate monta
             # "<site>/onboarding?token=T" em Swift COMPILADO, então esse caminho
             # NÃO pode mudar aqui — quem resolve é o 302 de /onboarding?token=
@@ -4728,7 +4760,9 @@ async def auth_google_callback(
         # código por Bearer em POST /auth/google/exchange.
         if scheme:
             from db import create_dashboard_session
-            code = await asyncio.to_thread(create_dashboard_session, int(user_id), 5 / 60)
+            code = await asyncio.to_thread(
+                create_dashboard_session, int(user_id), 5 / 60, challenge
+            )
             # No nativo o login só se completa na troca, que pede o MFA e
             # registra o evento lá; registrar aqui contaria login que não houve.
             if scheme == "pigbankai":
@@ -4787,7 +4821,13 @@ async def auth_google_exchange(request: Request, response: Response, body: Googl
     """
     from db import consume_dashboard_session, get_auth_user
 
-    user_id = await asyncio.to_thread(consume_dashboard_session, body.code.strip())
+    # PKCE (#604): com `code_verifier` consome o código que tem esse challenge
+    # (ou sem challenge, transição); sem ele, SÓ código sem challenge. Verifier
+    # errado ou ausente não casa no DELETE: recusa antes de qualquer sessão e o
+    # código não é queimado, o app legítimo ainda troca.
+    user_id = await asyncio.to_thread(
+        consume_dashboard_session, body.code.strip(), pkce_s256(body.code_verifier)
+    )
     user = await asyncio.to_thread(get_auth_user, user_id) if user_id else None
     if not user:
         # 400, nunca 401: 401 é "renove a sessão" no interceptor do app.
@@ -4859,6 +4899,7 @@ async def _completar_cadastro_social(
             body.token, body.name, body.phone,
             signup_source_from_request(request, provedor=provider),
             provider,
+            challenge=pkce_s256(body.code_verifier),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc))

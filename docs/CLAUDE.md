@@ -517,7 +517,17 @@ e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na
 para a `/assinar` (nome, e-mail e WhatsApp no fragmento `n/e/w`); `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
 e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
-quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
+quando o login começa em `google/start?app=2`); o `app=2` aceita **PKCE S256**
+(#604, `core/services/pkce.py`): o app manda `code_challenge` no start (cookie
+`google_oauth_challenge`, nunca no `state` do Google; inválido → 400) e o
+`code_verifier` no CORPO de `google/exchange` e `google/complete-signup`. O callback grava
+o challenge em `dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`
+(nulos = sem PKCE: web, app antigo, Apple, link do bot). Código com challenge só é
+consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
+código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
+pendente. Transição: código sem challenge continua trocável (com ou sem verifier). Teto:
+tornar o challenge obrigatório quando o app antigo sair de circulação. Resíduo conhecido:
+`GET google/pending/{token}` devolve e-mail e nome sem o verifier; **Apple**, só no app nativo iOS
 (`apple/exchange`, que verifica o identity token pelo JWKS da Apple e devolve sessão,
 desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora na
 mesma `pending_google_signups`, com `provider='apple'`);

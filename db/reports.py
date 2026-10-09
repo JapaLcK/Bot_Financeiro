@@ -114,11 +114,22 @@ def get_password_changed_at(user_id: int):
 # Dashboard short links
 # ──────────────────────────────────────────────────────────────────────────────
 
-def create_dashboard_session(user_id: int, hours: float = 5 / 60) -> str:
-    return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
+def create_dashboard_session(
+    user_id: int, hours: float = 5 / 60, code_challenge: str | None = None
+) -> str:
+    return _db_support.create_dashboard_session_impl(get_conn, user_id, hours, code_challenge)
 
 
-def consume_dashboard_session(code: str) -> int | None:
+def consume_dashboard_session(code: str, challenge: str | None = None) -> int | None:
+    # PKCE (#604): código criado COM challenge só é consumido por quem manda o
+    # mesmo challenge; `challenge=None` (`/d/{code}`, `/auth/dashboard-link`,
+    # troca sem verifier) só consome código SEM challenge, então um código
+    # roubado do `pigbank://` não vira sessão por essas rotas. Challenge errado
+    # não casa no DELETE e o código segue de pé para o dono. `= NULL` é
+    # desconhecido, então com `None` o `or` se reduz a `code_challenge is null`.
+    # Troca COM verifier de código SEM challenge passa de propósito: app novo ×
+    # código emitido antes do deploy. Teto: tornar o challenge obrigatório
+    # quando o app antigo sair de circulação.
     # `/d/{code}` é ANÔNIMA: com NUL no path o psycopg
     # estourava antes do DELETE e o 500 virava uma linha em `system_event_logs`
     # por requisição, de graça (#321). "Código com veneno" = "código que não
@@ -133,8 +144,9 @@ def consume_dashboard_session(code: str) -> int | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "delete from dashboard_sessions where code = %s and expires_at > now() returning user_id",
-                (code,),
+                "delete from dashboard_sessions where code = %s and expires_at > now()"
+                " and (code_challenge is null or code_challenge = %s) returning user_id",
+                (code, challenge),
             )
             row = cur.fetchone()
         conn.commit()
