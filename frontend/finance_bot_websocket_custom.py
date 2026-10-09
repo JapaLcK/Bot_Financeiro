@@ -3523,7 +3523,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         )
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    result = login_auth_user(body.email, body.password)
+    result = await asyncio.to_thread(login_auth_user, body.email, body.password)
     if not result:
         await log_auth_login_event(
             body.email,
@@ -3798,29 +3798,36 @@ async def auth_refresh(request: Request, response: Response):
     return {"ok": True, **credenciais}
 
 
+def _reset_de_senha_em_segundo_plano(email: str) -> None:
+    """Token, consulta e envio rodam fora da resposta (threadpool do Starlette), em
+    paralelo com o fim dela.
+
+    O ramo "e-mail existe" faz INSERT e envio; o "não existe" não. Dentro da
+    resposta, esse trabalho a mais é um oráculo de tempo de enumeração de contas.
+    Falha vai para o log SEM e-mail nem texto da exceção.
+    """
+    try:
+        from db import create_password_reset_token, email_has_password
+        from core.services.email_service import send_password_reset_email
+
+        token = create_password_reset_token(email)
+        if token:
+            reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
+            send_password_reset_email(email.strip().lower(), reset_url, email_has_password(email))
+    except Exception as exc:
+        logging.getLogger(__name__).error("forgot_password_background: %s", type(exc).__name__)
+
+
 @app.post("/auth/forgot-password")
 @limiter.limit("3/hour")
-async def auth_forgot_password(request: Request, body: EmailBody):
+async def auth_forgot_password(request: Request, body: EmailBody, background_tasks: BackgroundTasks):
     """
     Solicita recuperação de senha. Envia e-mail com link se o e-mail existir.
     Sempre retorna 200 para não revelar se o e-mail está cadastrado.
     """
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_password_reset_token, email_has_password
-    from core.services.email_service import send_password_reset_email
-
     await _check_auth_rate_limits("forgot-password", request, body.email)
 
-    token = await asyncio.to_thread(create_password_reset_token, body.email)
-    if token:
-        reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-        # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
-        # instrução por instrução igual, e a resposta abaixo nunca muda
-        has_password = await asyncio.to_thread(email_has_password, body.email)
-        await asyncio.to_thread(
-            send_password_reset_email, body.email.strip().lower(), reset_url, has_password
-        )
+    background_tasks.add_task(_reset_de_senha_em_segundo_plano, body.email)
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
     return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
@@ -3839,7 +3846,7 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
-    user_id = consume_password_reset_token(body.token, body.new_password)
+    user_id = await asyncio.to_thread(consume_password_reset_token, body.token, body.new_password)
     if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
 
