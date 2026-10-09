@@ -291,16 +291,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
   feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
   o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
-  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?}`
+  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?, ordem?}`
+  (`ordem` é validada em TODAS as ações: inválida = 422 também em `visto`/`feito`, onde é ignorada)
   e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
   `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
   (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
   (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
-  passo em `feitos`); `reabrir` zera `dispensado_em`. A oferta conta o convite **e** a Ajuda:
+  passo em `feitos`); `reabrir` zera `dispensado_em` (salvo gesto descartado pela ordem, abaixo). A oferta conta o convite **e** a Ajuda:
   quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
   e entra em `oferecidos` na medição abaixo (conclusão/oferecidos mistura as duas portas; quem
   abre pela Ajuda antes de ter dado põe a espera pela sincronização dentro de
   `mediana_oferta_ate_1o_valor`, então ela não mede só o guia).
+  **Ordem dos gestos.** `dispensar`/`reabrir` aceitam `ordem?: {aba, n}` (`aba` 1–32 caracteres, sorteada
+  por carregamento de página; `n` 1–2³¹−1, contador da aba que só cresce). O servidor guarda o último
+  `(aba, n)` aplicado em `guia_painel.ordem_aba`/`ordem_n` (anuláveis, `alter … if not exists`, fora do
+  `GET`); gesto da MESMA aba com `n` menor ou igual ao guardado não grava o efeito (200 com o estado atual;
+  o `reabrir` descartado ainda carimba `oferecido_em`, quando ele é null e `feitos` está vazio, como no reabrir de sempre). Outra aba, ou sem `ordem` (cliente antigo), aplica
+  e grava o novo `(aba, n)` (sem `ordem` → null). A comparação mora no `WHERE` do `UPDATE` (trava a
+  linha), nunca num `SELECT` antes. Limite aceito: a referência é UM par `(aba, n)` por usuário, o do último gesto aplicado; a garantia da mesma aba
+  só vale enquanto nenhum gesto de outra aba, de outro aparelho ou de cliente antigo (sem `ordem`) chegar entre os dois
+  POSTs. Ex.: A reabrir 9 → B reabrir 1 → A dispensar 5 (emitido antes do 9) aplica e desfaz o reabrir 9. Upgrade: guardar
+  o último `n` por aba, com teto de abas.
   `visto` e `reabrir` só carimbam enquanto `feitos` está vazio: **`oferecido_em`, quando existe, é anterior ou igual a todo carimbo de `feitos`**
   (as medianas abaixo nunca saem negativas). O servidor confia no cliente para o `feito`
   (não confere a ação; confere só a disponibilidade). Fora do aviso SSE e do merge; o "Recomeçar do
