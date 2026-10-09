@@ -799,6 +799,8 @@ READ_FAILED = "read_failed"
 # "Parcial" (`connection_ui_state`), nunca "Atualizado".
 INVESTMENTS_READ_FAILED = "investments_read_failed"
 _DETALHE_INVESTIMENTOS_FALTANDO = "Investimentos não vieram nesta atualização"
+# "Atualizando…" de conexão sem sync desta autorização (`sem_sync`).
+_DETALHE_SEM_SYNC = "Ainda não sincronizou"
 
 # "Atualizando…" passado o prazo da coleta (Onda 5, D1): mesma pílula, âmbar.
 # Quem decide o prazo é o derivado `coleta_vencida` (`SQL_COLETA_VENCIDA`, em
@@ -1022,7 +1024,7 @@ def connection_ui_state(connection_row: dict) -> dict:
         # Mas só se essa leitura é da autorização atual: com `sem_sync` o motivo
         # veio de um sync cujo carimbo a reconexão recusou, e ele não vale.
         if state == "updated" and reason == INVESTMENTS_READ_FAILED:
-            state, detail = (("updating", "Ainda não sincronizou") if sem_sync
+            state, detail = (("updating", _DETALHE_SEM_SYNC) if sem_sync
                              else ("partial", _DETALHE_INVESTIMENTOS_FALTANDO))
         elif state == "updated" and reason not in _REASONS_OK:
             state = reason if reason in _LABELS else "error_recoverable"
@@ -1039,7 +1041,7 @@ def connection_ui_state(connection_row: dict) -> dict:
         # a pílula do `read_failed` descia de vermelho para âmbar. Só o verde SEM
         # motivo é que vira "Ainda não sincronizou".
         elif state == "updated" and sem_sync:
-            state, detail = "updating", "Ainda não sincronizou"
+            state, detail = "updating", _DETALHE_SEM_SYNC
         # Mesma família da linha de cima, e no mesmo lugar de propósito: DEPOIS
         # do motivo pendente (`no_accounts`/`read_failed`/desconhecido continuam
         # falando primeiro) e só contra o verde. Sem `detail`: é o "Atualizando…"
@@ -1193,5 +1195,5 @@ def connection_ui_state(connection_row: dict) -> dict:
         # de o usuário reconectar e o sync falhar. Quem reconectou desce pelo
         # `out("updated")` abaixo, onde o motivo fala primeiro e o `sem_sync` só
         # decide o que restar de verde.
-        return out("updating", "Ainda não sincronizou")
+        return out("updating", _DETALHE_SEM_SYNC)
     return out("updated")
