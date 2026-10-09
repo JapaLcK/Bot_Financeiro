@@ -801,7 +801,8 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # `allow_ai=False`: só as regras determinísticas — medido em 19 µs,
             # sem DB e sem rede. As duas rotas de ajuda do intent_router
             # (help, help.tutorial) só renderizam texto, não tocam em dinheiro.
-            ajuda = classify(texto, user_id=uid, allow_ai=False).intent
+            classificado = classify(texto, user_id=uid, allow_ai=False)
+            ajuda = classificado.intent
             # O gate DEVOLVE a resposta, em vez de isentar a mensagem e deixá-la
             # seguir. "Seguir o fluxo" entregava a mensagem ao `route()`, que
             # resolve pendências ANTES do ramo de ajuda: com um
@@ -867,6 +868,17 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 # None = o billing cedeu a vez (há ai_pending). Cair no fluxo
                 # normal aqui reabriria o buraco pela porta do billing: segue
                 # para a mensagem do gate.
+            # #722: o código de vínculo é como o barrado ganha acesso (número
+            # novo, ou conta sem plano entrando na conta paga). Devolve a
+            # resposta, pelo mesmo motivo da ajuda: seguindo, uma pendência
+            # velha engoliria o código. O teto de tentativas mora no handler.
+            codigo = classificado.entities.get("code")
+            if classificado.intent in ("account.link", "account.vincular") and codigo:
+                from core.handlers import account as h_account
+                vincula = (h_account.link if classificado.intent == "account.link"
+                           else h_account.vincular)
+                resposta = vincula(platform, getattr(msg, "external_id", None) or "", codigo)
+                return [OutgoingMessage(text=format_for_platform(resposta, platform))]
     except Exception:
         logger.warning("gate do paywall falhou — seguindo fail-open", exc_info=True)
         if not barrado:

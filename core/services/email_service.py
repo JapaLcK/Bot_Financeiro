@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank <suporte@pigbankai.com>")
 EMAIL_FROM_PIGGY    = os.getenv("EMAIL_FROM_PIGGY",    "Piggy do PigBank <oi@pigbankai.com>")
 EMAIL_FROM_FOUNDER  = os.getenv("EMAIL_FROM_FOUNDER",  "Lucas do PigBank <lucas@pigbankai.com>")
-SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL",       "suporte@pigbankai.com")
+# Vazio cai no default, como em `send_subscription_canceled_email`: senão o texto vira "fale com ".
+SUPPORT_EMAIL       = os.getenv("SUPPORT_EMAIL", "").strip() or "suporte@pigbankai.com"
 
 
 def _public_base_url() -> str:

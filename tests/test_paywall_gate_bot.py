@@ -201,16 +201,17 @@ def test_o_veredito_vem_do_estado_e_nao_do_texto():
     corte dela tem teste próprio, o `test_so_whatsapp_e_barrado_*`.
 
     Como as duas metades de antes viraram o mesmo veredito, o par que ainda
-    DISCRIMINA é pagante × não-pagante. Consequência conhecida e aceita: um
-    número já vinculado a uma conta sem direito é barrado ao mandar `link
-    <código>` de outra conta; ele continua alcançando `assinar` e `ajuda`.
+    DISCRIMINA é pagante × não-pagante. O texto era `link 123456`, e trocou
+    porque o código de vínculo virou isenção do gate (#722, decisão D2(b) do
+    dono): a conta sem direito que manda o código de outra conta agora vincula
+    (`tests/test_vincular_codigo_numero_novo.py`).
     """
     pagante = _com_plano()
     sem_direito = _cadastro_novo()
 
-    assert not _barrado(_diga(pagante, "link 123456")), \
+    assert not _barrado(_diga(pagante, "gastei 50 no mercado")), \
         "barrou um pagante"
-    assert _barrado(_diga(sem_direito, "link 123456")), \
+    assert _barrado(_diga(sem_direito, "gastei 50 no mercado")), \
         "o mesmo texto passou para uma conta sem direito — o teste não mede estado"
 
 
