@@ -15,14 +15,13 @@
  *     Hoje os dois saem de `GET /billing/pix/<sid>`, que é autenticado e filtra
  *     por dono (404 para token de outro usuário).
  *
- * Os controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos) — as três
- * contagens abaixo são ANTERIORES ao WP18, remeça antes de reusar:
+ * Os controles do CLAUDE.md §3, MEDIDOS (rodados, não deduzidos) — a contagem
+ * da FONTE abaixo é ANTERIOR ao WP18, remeça antes de reusar:
  *   · negativo da CÓPIA — troque no `openWelcomePro` o ramo do Pix pelo `else`
- *     da Stripe (`} else if (false && modo === "pix") {`) e ficam vermelhos 20
- *     de 33 (remedido depois do WP15/WP16/WP17; era 13 de 24), por nome: WP1,
- *     WP2, os SETE casos do WP4, WP4b, WP8, WP10, WP13, WP14, os QUATRO do WP15
- *     e os dois do WP16. **WP5 e WP9 continuam VERDES** — eles só medem
- *     `searchParams.delete`, que a mutação não toca;
+ *     da Stripe (`} else if (false && modo === "pix") {`) e o grupo da cópia
+ *     fica vermelho (sem contagem, que envelhece: rode e leia a lista de nomes).
+ *     **WP5 e WP9 continuam VERDES** — eles só medem `searchParams.delete`, que
+ *     a mutação não toca;
  *   · negativo do STATUS — `const pago = !!cobranca;` (sem o
  *     `&& cobranca.status === "paid"`) e ficam vermelhos os QUATRO casos do
  *     WP15; o WP6 (a mesma `AGENDADA`, paga) e os demais seguem verdes;
