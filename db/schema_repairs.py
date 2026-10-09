@@ -224,6 +224,10 @@ _FK_INDEXES = (
     ("recurring_income_credits", "launch_id", True),
     ("pocket_lots", "pocket_id", False),
     ("investment_lots", "investment_id", False),
+    # FK para users: o `delete from users` também varria as duas. E o auto-vínculo do WhatsApp
+    # (`attempt_whatsapp_phone_link_impl`) as consulta por `user_id` em TODA mensagem (#722).
+    ("auth_accounts", "user_id", False),
+    ("user_identities", "user_id", False),
 )
 
 
