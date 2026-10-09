@@ -2221,6 +2221,22 @@ def init_db():
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
 
+        # ── Cache das fontes externas do painel de funil (`core/funil_fontes.py`) ──
+        # Guarda SÓ agregados já prontos (contagens, taxas, valores somados) de
+        # Stripe/GA4/Clarity/Meta, por fonte — nunca dado de pessoa, por isso NÃO tem
+        # user_id. `chamadas_dia`/`dia_utc` são o contador atômico da cota diária.
+        # Aditivo, sem backfill: linha ausente = nunca consultada.
+        """
+        create table if not exists funil_fontes_cache (
+          fonte text primary key,
+          payload jsonb,
+          buscado_em timestamptz,
+          falha_em timestamptz,
+          dia_utc date,
+          chamadas_dia int not null default 0
+        )
+        """,
+
         # ── Funil de checkout (telemetria durável, fora do log operacional) ──
         # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
         # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
