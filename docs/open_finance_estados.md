@@ -246,7 +246,7 @@ verificação externa pendente.
 
 | estado de partida | evento | tela | aviso (se ligado) | veredito |
 |---|---|---|---|---|
-| Atualizando, 1ª conexão sem sync | E2 com sync ok | Atualizado (os Ajustes só repintam se o usuário agir) | não | ✓ backend; ✗ front (F1, PR-E) |
+| Atualizando, 1ª conexão sem sync | E2 com sync ok | Atualizado (os Ajustes releem sozinhos, §2.4) | não | ✓ PR-E (`tests/frontend/of_acompanha_coleta.test.mjs`, T1) |
 | Atualizando, 1ª conexão sem sync | E2 com sync levantando (5xx/429/rede) | **Erro temporário · Tentaremos de novo automaticamente** (a falha final grava `read_failed`) | não | ✓ **PR-B1 (R1, R1b)**; a retentativa que a frase promete: ✓ **PR-B2** |
 | Atualizando, 1ª conexão sem sync, `health` do job com o item em `UPDATING` | E2 com sync levantando | **Erro temporário · Tentaremos de novo automaticamente** | não | ✓ **PR-B1** (rodada 2) |
 | Atualizando, 1ª conexão sem sync, `health` em `UPDATING` | sync lê e não vem conta (`no_accounts`, Pluggy ainda coletando) | Atualizando… (e o detalhe do prazo depois de 30 min) | não | ✓ **PR-B1** |
@@ -263,7 +263,7 @@ verificação externa pendente.
 | Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") dentro do prazo, depois o detalhe do prazo; com `read_failed`, Erro temporário | não | ✓ **PR-B1**; o tique relê depois do prazo: ✓ **PR-B2** |
 | Atualizando, 1ª conexão sem sync | E12 (horas) | de 30 min a 2 h: **Atualizando… · Está demorando mais que o normal — atualize de novo**; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; teto: ✓ **Fase 4, PR 2** |
 | Atualizando, já sincronizada, item em coleta sem produto (`coletando_sem_info`) | E12 (horas), com E8 e syncs regravando a foto | até 2 h de `coletando_desde`, Atualizando…; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** (antes: Atualizando… por 12–18 h) | não | ✓ **Fase 4, PR 2**; o tique relê (classe `coleta`, E25) |
-| Atualizando, 1ª conexão sem sync | E11 (Ajustes aberto) | card parado em Atualizando… | n/a | ✗ F1 (PR-E) |
+| Atualizando, 1ª conexão sem sync | E11 (Ajustes aberto) | o card relê sozinho na cadência da D6 até o estado final ou 30 min (§2.4) | n/a | ✓ PR-E (T1–T12c) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET falhando | mantém; vencida a janela, "Reautorize" | calado, depois avisa | ✓ (#428) |
 | Autorize no app (device, `health` null, dentro de `JANELA_DEVICE_AUTH_MIN`) | E8 com GET ok e mesmo estado | "Autorize no app" dentro da janela; vencida, **Ação necessária · Reautorize o banco** | calado, depois avisa | ✓ **PR-D** (R7, D5) |
 | Autorize no app | E9 | reinicia a janela | calado | ✓ |
@@ -639,6 +639,119 @@ O aviso "reconecte" sai para uma conexão se, e só se, `avisa_reconectar` aceit
 | Caixa com `health`, dentro da janela | E8 | Autorize o acesso no app do banco | não | não (controle `g_caixa_health_55`) |
 | Autorize no app, conexão com mais de 60 min | E6 (Atualizar manual) / E2 / E8 com pedido novo de device | **não** reinicia a janela: Reautorize o banco | – (não medido) | **sim**; aceito pelo dono em 2026-10-07; renovar a âncora fica para PR próprio após V2 (Onda 8). Medido: `.time-dev/of-onda5-d/scratch/test_tester_pr_d.py::test_pedido_de_device_aberto_agora_em_conexao_antiga`, fora de `tests/`: referência de medição, não cobertura |
 
+### 2.4 O acompanhamento dos Ajustes (PR-E)
+
+`frontend/of-status-poll.js` (`PBColetaOF`), ligado pelo `settings.html`: o
+`renderConnections` chama `observar(lista)` em toda pintura; `reler` é
+`loadData({ propagate: true, caixinhas: false })`: um GET só, o do snapshot, que
+repinta conexões, contas e transações. O card de caixinhas fica fora porque o
+`renderCaixinhas` refaz o card e tirava o foco do `<select>` de vincular meta a
+cada tique (U2); ele volta a ser lido na próxima carga completa. Uma carga
+completa superada no meio (por exemplo o GET do "Remover conexões" com um tique
+em voo) deixa a pendência `_caixPendente`, e quem vence a corrida (o tique, o
+botão Atualizar ou o `onConnected`) chama o caixinhas no lugar dela (U5; U5c sem
+ciclo é o controle). "Andamento" =
+alguma conexão com `ui.state = "updating"` **ou** algum item que o último
+Atualizar marcou com `still_updating` e cujo `last_sync_at` ainda não mudou (ver
+abaixo); os outros estados de `_LABELS` (`core/services/pluggy_health.py`) são
+finais para o timer. Intervalos contados do fim
+de uma leitura até o próximo pedido (`setTimeout` encadeado, nunca dois GETs
+sobrepostos). Testes: `tests/frontend/of_acompanha_coleta.test.mjs` (T*),
+`tests/frontend/of_acompanha_atualizar.test.mjs` (U*, O1, R3) e
+`tests/frontend/of_acompanha_foco_post.test.mjs` (B1, B1-P, F1, F2, R6-1, R6-9) e
+`tests/frontend/of_acompanha_geracao.test.mjs` (A, A', J, B, D, E, I, F), id entre parênteses.
+
+**Ciclo pelo `still_updating` (rodada 2).** O Atualizar pode voltar
+`sync.still_updating > 0` com o card em "Atualizado": a Pluggy ainda coleta, mas o
+item já tem todos os produtos (contrato de `tests/test_of_health.py`). A tela
+relê sozinha até a coleta terminar (Achado 1 = A, decisão do dono), então o ciclo
+liga mesmo assim. O `novoCiclo(resposta)` guarda, para cada `sync.items[]` com
+`still_updating`, o `last_sync_at` da conexão de mesmo `provider_item_id` na
+própria resposta do POST. O item sai da espera quando o snapshot traz outro
+`last_sync_at` (o sync que vem com o fim da coleta), quando a conexão some, ou
+quando o `ui.state` dela é de erro ou de ação necessária (`error_recoverable`,
+`needs_user_action`, `item_missing`, `paused`, `removed`, ou um estado que esta
+tela não conhece; U1c). `updated`, `updating`, `partial` e `no_accounts` seguem
+na espera: "Dados parciais" e "Sem dados" durante a coleta são a foto antiga de uma
+coleta que ainda roda (U1d, decisão do dono sobre o Tester r2, 2026-10-08). Se
+"Sem dados" for o desfecho final, a coleta não avança o `last_sync_at` e o ciclo
+lê até o teto (U1d-teto; A1, decisão do dono sobre o Manager r1, 2026-10-08); o
+ciclo para quando não sobra item nem conexão em "Atualizando…", no teto de 30 min,
+ou nas paradas de sempre (401/403/404, 402). Sem chave nova no corpo HTTP. Cada
+Atualizar substitui a lista do anterior; o teto a esquece (regra DP2 × DP3).
+Uma coleta que termina em falha não avança o `last_sync_at` (só sucesso
+avança); é a saída pelo estado final que a encerra (U1c, decisão do dono em
+2026-10-08), em vez de ler até o teto.
+
+**Só com a seção de Open Finance na tela.** A troca de seção é o
+`showSettingsSection` (troca `hidden` das `<section>` e reescreve `?view=` com
+`replaceState`, sem evento). Fora da seção de Open Finance o tique pausa como com
+a aba oculta (U3); mostrar a seção chama `PBColetaOF.retomar()`, que segue a
+mesma regra da volta ao foco. O GET do boot continua em qualquer seção (é o
+`loadData` do `initSettings`, de antes deste PR).
+
+Estados: **P** parado; **A** agendado; **V** lendo; **O** oculto com tique perdido;
+**E** esgotado (teto batido; a conexão fica marcada como "ciclo esgotado" enquanto
+continuar em "Atualizando…" a cada leitura vista).
+
+| estado | evento | efeito | GET? |
+|---|---|---|---|
+| P | pintura com andamento (boot, PTR, qualquer pintor) | → A (5 s) (T1) | não agora |
+| P | pintura sem andamento ou lista vazia | fica P (T4, positivo) | nunca |
+| P/A/V | conectar (`onConnected`) | `++_dataGen` invalida a leitura em voo; `novoCiclo` → A (5 s) (T6, T10) | não agora |
+| P/A/V/E | Atualizar (botão ou PTR) devolve | `novoCiclo`: teto e cadência recomeçam (T7, T12c); o ramo do botão faz `++_dataGen`, e a leitura do tique em voo não repinta (U4) | não agora |
+| P | Atualizar devolve `still_updating > 0` com tudo "Atualizado", "Dados parciais" ou "Sem dados" | → A (5 s) até o `last_sync_at` do item mudar (U1, U1d) ou ele cair em erro / ação necessária (U1c) | não agora |
+| A | tique, visível, livre, dentro do teto | → V (T2) | sim, 1 |
+| A | tique com POST /refresh em voo | reagenda o mesmo intervalo (T7) | não |
+| A | tique com 30 min desde o início do ciclo | → E (T2) | não |
+| A | tique com a aba oculta, ou outra seção dos Ajustes na tela | → O (T3, U3) | não |
+| V | ainda há andamento | → A (10, 20, 40, depois 60 s) (T2) | – |
+| V | tudo final ou lista vazia | → P (T1, T8, T9) | – |
+| V | rede, 5xx, 429 | tela preservada, sem toast → A (T5) | – |
+| V | 401/403/404 | → P (T5) | – |
+| V | 402 | "sem plano" e `parar()` → P (T5) | – |
+| O | volta ao foco (`visibilitychange` ou `pageshow` com `persisted`) ou à seção de Open Finance | tique na hora → V, e a cadência segue (T3, U3) | sim, 1 |
+| E | volta ao foco | UMA leitura (DP2 = A), mesmo com tudo "Atualizado"; a mesma coleta não reabre o ciclo, nem o mesmo `still_updating` (T12, U1b, O1) | sim, 1 |
+| E | volta ao foco traz "Atualizando…" numa conexão que antes estava final | abre ciclo → A (T12) | sim, 1 |
+| P com alguma conexão fora de "Atualizado" (ex.: "Autorize no app") | volta ao foco | UMA leitura (DP3 = B); se ela trouxer "Atualizando…" → A (T11) | sim, 1 |
+| P com tudo "Atualizado" | volta ao foco | nada (T4); limite: se o ciclo anterior bateu o teto e depois um `observar` o reabriu sem `novoCiclo` (ex.: `disconnectAll`) e ele terminou normal, a leitura do teto (DP2) segue devida e sai 1 GET (aceito, Manager; `ponytail:` no `tique` do `of-status-poll.js`) | não; 1 no limite |
+| O/S com POST /refresh em voo (ou P/E que leria na volta) | volta ao foco ou à seção | a leitura fica pendente e o fim do POST a cumpre (`fimDoAtualizar`). O POST OK a substitui quando a volta veio antes da resposta dele; no PTR, uma volta durante o GET que segue o POST OK ainda lê 1 vez no fim (aceito, Tester r5 F3). O POST que falha a cumpre na hora, e a cadência segue; o 402 já parou (B1, B1-P) | no fim do POST que falha, 1 |
+| P (fora de ciclo) | POST OK do PTR e o GET seguinte falha | o ciclo liga pela resposta do POST (`novoCiclo`) (R3) | não agora |
+| A/V | POST OK do PTR diz "Atualizado" (ou não traz a conexão) e o GET seguinte falha | o ciclo segue: a lista do POST só LIGA, nunca desliga; desligar é do `observar` da lista que a tela pintou (F1) | no próximo tique |
+
+Prazo do Atualizar (`OF_REFRESH_PRAZO_MS`, 60 s, `settings.html`). A trava, o prazo e
+a releitura pertencem ao Atualizar **mais recente** (`_ofRefreshGen`, Tester r7): um
+Atualizar velho preso (PTR solto pelo watchdog, GET pendurado) não segura nada, e o
+fim dele não solta a trava do mais recente (J). O prazo vale duas vezes:
+
+- **o POST /refresh é abortado nele**, para o `finally` rodar e o botão voltar (F2).
+  O prazo do POST sai quando o POST assenta (corpo lido, ou o 402), antes do GET que
+  o PTR e o ramo 402 fazem depois: ele nunca "aborta" um POST que já acabou (I). O
+  abort cai no toast de erro de sempre. O servidor segue, então 30 s depois
+  (`OF_RELEITURA_MS`) o acompanhamento relê o snapshot UMA vez pelo mesmo `reler`
+  (com a guarda `_dataGen` e o `observar` da pintura, que liga o ciclo se vier
+  "Atualizando…"). Só o abort do Atualizar mais recente agenda a releitura (E). Com o
+  ciclo já ligado, a releitura não faz nada (o tique lê; B); com a aba oculta ou fora
+  da seção, fica devida para a volta; outro Atualizar que começa antes a cancela
+  (R6-9), e o 402 do snapshot também, junto do `parar()` (D).
+- **a trava do acompanhamento**: `ocupado()` = o Atualizar mais recente está em voo e
+  dentro do prazo (`_ofRefreshVigente !== null`). Ela sai no fim dele (`finally`) ou
+  no prazo, o que vier antes, mesmo com o `finally` preso no GET do PTR / do ramo 402
+  (R6-1). Saindo, a cadência volta a ler (A), a volta ao foco pendente é cumprida
+  (`fimDoAtualizar`: A', R6-1 pendência) e o botão volta, também com o GET do 402
+  preso (F).
+
+Regra DP2 × DP3: o ciclo que bateu o teto não renasce na volta ao foco pela mesma
+coleta; só Atualizar ou conectar (`novoCiclo`) abrem ciclo novo para ela. Uma
+conexão que estava final e volta a "Atualizando…" é coleta nova e abre ciclo.
+Limite: uma volta final → "Atualizando…" que nenhuma leitura viu (aba oculta o tempo
+todo) conta como a mesma coleta.
+
+Só no aparelho (Onda 8): `visibilitychange` e timers suspensos no WKWebView (app
+iOS) e na PWA do Safari, volta pelo bfcache, desktop com QR lido no celular (a aba
+nunca fica oculta, DP3 não cobre), duração real da 1ª coleta e carga real do
+snapshot. Fora do escopo: §4, "Achados do PR-E".
+
 ---
 
 ## 3. Decisões do dono (2026-09-27) e quem as implementa
@@ -653,7 +766,7 @@ a D3, que torna verdade "Tentaremos de novo automaticamente" (menos em E13, §2.
 | D3: alguém tenta de novo sozinho quando nosso dado está atrás | sim: o tique de saúde agenda sync para conexões com dado atrás (motivo de leitura pendente, coleta vencida, Pluggy à frente), teto K por tique, só GET. "Tentaremos de novo automaticamente" passa a ser verdade | PR-B2 (**implementada**, §2.2) |
 | D4: quais estados geram o aviso "reconecte" | só `needs_user_action` sem instrução de dispositivo e `item_missing`; a mesma função da tela | PR-D (**implementada**; `avisa_reconectar`, §2.3) |
 | D5: prazo da instrução de device/QR com `health` medido | a mesma `JANELA_DEVICE_AUTH_MIN` (`core/services/pluggy_health.py`), ancorada na autorização atual, nos dois ramos | PR-D (**implementada**; `device_na_janela`) |
-| D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E |
+| D6: como os Ajustes acompanham a coleta | relê o snapshot em 5/10/20/40 s e depois a cada 60 s, para no estado final ou em 30 min, pausa com a aba oculta, relê no `visibilitychange` | PR-E (**implementada**; `frontend/of-status-poll.js`, §2.4; DP1 = A, DP2 = A, DP3 = B em 2026-10-08) |
 | Teto do "Atualizando…" (Fase 4 do app, 2026-10-01) | `TETO_ATUALIZANDO_MIN` = 120 min; depois, o estado `error_recoverable` existente (sem 10º estado) com o detalhe "O banco está demorando — atualize de novo mais tarde"; a retentativa continua relendo | Fase 4, PR 2 (**implementada**) |
 | D7: "Última sync" mostra a data de quê | mantém "Última sync" e acrescenta "· dados de dd/mm" quando a data do banco difere mais de 1 dia | PR-B3 (**implementada**; `ui.dados_de`, limiar de 24 h estrito) |
 
@@ -685,6 +798,13 @@ Texto novo do PR-A, visível ao usuário: o detalhe
 "Investimentos não vieram nesta atualização" (pílula "Parcial").
 
 ## 4. Achados registrados, fora do escopo da Onda 5
+
+- **Achados do PR-E.**
+  - O onboarding (`frontend/comecar.js`) acompanha a coleta por 2 min com
+    `setInterval` assíncrono, sem pausa com a aba oculta e sem impedir GET sobreposto
+    (a pintura é protegida pelo `ofSeq`). Não usa o `PBColetaOF`.
+  - O app nativo (`app/app/(app)/conexoes.tsx`) não se atualiza sozinho; há o botão
+    "Acompanhar sincronização", que leva à tela de volta.
 
 - **Limites do PR-C (C1 e C2).**
   - X7: um sync em OUTRA réplica que começou antes da observação do webhook grava a

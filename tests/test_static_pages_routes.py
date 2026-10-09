@@ -361,6 +361,9 @@ def test_assets_estaticos():
         ("/manifest.json", "application/manifest+json"),
         ("/dashboard.js", "application/javascript"),
         ("/dashboard-chat.js", "application/javascript"),
+        # JS novo sem rota dá 404 só no navegador, e o test_frontend_assets_e_rotas
+        # não pega mais (CLAUDE.md §5, "Assets").
+        ("/of-status-poll.js", "application/javascript"),
     ]:
         resp = client.get(path)
         assert resp.status_code == 200, path

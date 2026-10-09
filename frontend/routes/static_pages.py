@@ -913,6 +913,18 @@ async def serve_of_connect_js():
     )
 
 
+@router.get("/of-status-poll.js")
+async def serve_of_status_poll_js():
+    """Acompanhamento da coleta do Open Finance (Onda 5, D6), carregado pelo
+    settings.html. Sem esta rota o arquivo dá 404 e o sintoma só aparece no
+    navegador — não há StaticFiles mount neste projeto."""
+    return FileResponse(
+        FRONTEND_DIR / "of-status-poll.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/pix-checkout.js")
 async def serve_pix_checkout_js():
     """CTA, overlay e checkout do Pix anual da /precos. Sem esta rota o arquivo
