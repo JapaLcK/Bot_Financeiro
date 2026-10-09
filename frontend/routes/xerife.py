@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from core.services.xerife_config import XerifeConfig, RegraEsperado, config_publica
 from frontend.routes import shared
-
-router = APIRouter()
 
 
 async def _xerife_access(request: Request, user_id: int) -> None:
@@ -18,9 +16,11 @@ async def _xerife_access(request: Request, user_id: int) -> None:
         raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
 
 
+router = APIRouter(dependencies=[Depends(_xerife_access)])
+
+
 @router.patch("/agents/{user_id}/xerife/config")
 async def xerife_config_route(request: Request, user_id: int, body: XerifeConfig):
-    await _xerife_access(request, user_id)
     from db.anomalias import atualizar_config_xerife
     config = await asyncio.to_thread(atualizar_config_xerife, user_id, body.model_dump(exclude_unset=True))
     if config is None:
@@ -30,7 +30,6 @@ async def xerife_config_route(request: Request, user_id: int, body: XerifeConfig
 
 @router.get("/agents/{user_id}/xerife/esperados")
 async def xerife_esperados_route(request: Request, user_id: int, limit: int = 50, offset: int = 0):
-    await _xerife_access(request, user_id)
     from db.anomalias import listar_esperados_xerife
     result = await asyncio.to_thread(listar_esperados_xerife, user_id, max(1, min(limit, 50)), max(0, offset))
     if result is None:
@@ -40,7 +39,6 @@ async def xerife_esperados_route(request: Request, user_id: int, limit: int = 50
 
 @router.post("/agents/{user_id}/xerife/regras")
 async def xerife_regra_route(request: Request, user_id: int, body: RegraEsperado):
-    await _xerife_access(request, user_id)
     from db.anomalias import alterar_regra_xerife
     try:
         regra = await asyncio.to_thread(alterar_regra_xerife, user_id, body.model_dump(mode="json"))
@@ -53,7 +51,6 @@ async def xerife_regra_route(request: Request, user_id: int, body: RegraEsperado
 
 @router.delete("/agents/{user_id}/xerife/regras/{regra_id}")
 async def xerife_desfazer_regra_route(request: Request, user_id: int, regra_id: str):
-    await _xerife_access(request, user_id)
     from db.anomalias import alterar_regra_xerife
     regra = await asyncio.to_thread(alterar_regra_xerife, user_id, regra_id=regra_id)
     if regra is None:
