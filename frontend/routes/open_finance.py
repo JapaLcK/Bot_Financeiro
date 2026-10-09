@@ -1890,6 +1890,8 @@ async def open_finance_connect_token_route(request: Request, user_id: int):
         "accessToken": token_data["accessToken"],
         "includeSandbox": PLUGGY_INCLUDE_SANDBOX,
         "provider": "pluggy",
+        # A lista que foi neste token; o widget web a repassa como `products` (§0.7).
+        "products": token_data["options"].get("products"),
     }
 
 
