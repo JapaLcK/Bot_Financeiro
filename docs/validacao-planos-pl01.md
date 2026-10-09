@@ -282,6 +282,14 @@ gravada como ligada, e o job tem de recusar pelo plano. Ordem das seções,
 portanto: fazer S1–S4 até 27/09, voltar a S2 para E1, e só descer para S5
 antes de 05/10.
 
+PL-05 mudou o **conteúdo** do texto livre do semanal (pedido manual e Discord): agora traz
+Receitas, Despesas, "Resultado da semana" (receitas - despesas), maior categoria, comparação
+com a semana anterior (só Plus+), atualização dos bancos e "Saldo atual nas contas" em linhas
+separadas; os rótulos "Gastos da semana"/"Receitas da semana" viram "Despesas"/"Receitas". O
+**template do WhatsApp (envio automático) é o mesmo**: 5 variáveis, mesmo dia, hora e claim.
+Os valores de E1/E3 seguem os do roteiro; só o `lancamentos` pode cair se a semana teve
+transferência interna (antes contava toda linha).
+
 | caso | observado (horário de chegada, conteúdo resumido) | resultado | PR |
 |---|---|---|---|
 | E1 | | | |

@@ -1150,6 +1150,7 @@ def get_top_expense_categories(
     end_date: date,
     limit: int = 5,
     by_bill_month: bool = False,
+    include_card: bool = True,
 ):
     """Top N categorias de gasto no período.
 
@@ -1165,10 +1166,13 @@ def get_top_expense_categories(
         ao dashboard. Um gasto parcelado conta uma parcela por mês. Usado pela
         resposta "quanto gastei" do bot.
 
+    `include_card=False` desliga a perna do cartão: só `launches`, a regra de
+    `get_summary_by_period` (resumo semanal, que não soma cartão).
+
     NÃO inclui movimentações internas (aporte, resgate, transfer caixinha)
     nem reembolsos de cartão.
 
-    Retorna lista [{categoria, total}] ordenada desc por total.
+    Retorna lista [{categoria, total}] ordenada desc por total (desempate por nome, só para ser determinístico).
     """
     ensure_user(user_id)
 
@@ -1185,6 +1189,14 @@ def get_top_expense_categories(
         credit_date = "and ct.purchased_at >= %s::date and ct.purchased_at <= %s::date"
         credit_date_params = (start_date, end_date)
 
+    credit_union = f"""
+                    union all
+                    select ct.categoria, ct.valor
+                    {credit_from}
+                    where ct.user_id = %s
+                      and ct.is_refund = false
+                      {credit_date}""" if include_card else ""
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1197,21 +1209,15 @@ def get_top_expense_categories(
                     where user_id = %s
                       and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
-                      and criado_em >= %s and criado_em < %s
-                    union all
-                    select ct.categoria, ct.valor
-                    {credit_from}
-                    where ct.user_id = %s
-                      and ct.is_refund = false
-                      {credit_date}
+                      and criado_em >= %s and criado_em < %s{credit_union}
                 ) agg
                 group by coalesce(nullif(categoria, ''), 'outros')
-                order by total desc
+                order by total desc, categoria
                 limit %s
                 """,
                 (
                     user_id, start_dt, end_excl,
-                    user_id, *credit_date_params,
+                    *((user_id, *credit_date_params) if include_card else ()),
                     int(limit),
                 ),
             )
