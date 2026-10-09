@@ -412,9 +412,12 @@ async def installment_anticipate_route(request: Request, user_id: int, group_id:
     """Antecipa a próxima parcela pendente: paga à vista da conta corrente.
     Deleta a tx do parcelamento + reduz fatura aberta + cria launch de despesa."""
     shared.authorize_dashboard_access(request, user_id)
-    from db.cards import anticipate_installment
+    from db.cards import CompraDoBanco, anticipate_installment
 
-    result = await asyncio.to_thread(anticipate_installment, user_id, group_id)
+    try:
+        result = await asyncio.to_thread(anticipate_installment, user_id, group_id)
+    except CompraDoBanco as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result:
         raise HTTPException(
             status_code=404,
@@ -431,10 +434,12 @@ async def installment_delete_route(request: Request, user_id: int, group_id: str
     - tx em faturas pagas: viram órfãs (group_id=null, nota+sufixo).
       Fatura paga intacta — dinheiro não volta pra conta."""
     shared.authorize_dashboard_access(request, user_id)
-    from db.cards import undo_installment_group
+    from db.cards import CompraDoBanco, undo_installment_group
 
     try:
         result = await asyncio.to_thread(undo_installment_group, user_id, group_id)
+    except CompraDoBanco as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         # Caminho destrutivo: sem este `except` a exclusão de parcelamento
         # falhava com a frase de sistema do `admin_error_logging_middleware`

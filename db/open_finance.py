@@ -16,6 +16,7 @@ from .cards import (
     extract_installment_info,
     get_or_create_open_finance_card,
     remove_single_credit_transaction,
+    sinal_cartao_of,
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
@@ -1820,6 +1821,16 @@ def is_credit_card_payment(category: str | None = None, description: str | None 
     )
 
 
+def pagamento_no_cartao(amount, category, description) -> bool:
+    """Linha do CARTÃO que é pagamento da fatura: não é compra nem estorno, não entra.
+
+    Além da regra comum, o crédito (amount < 0) de transferência entre contas próprias:
+    no cartão, dinheiro próprio entrando é o pagamento ("Transfer - Internal", produção
+    2026-10-09). Só do lado CREDIT: o BANK usa is_credit_card_payment."""
+    return is_credit_card_payment(category, description) or (
+        Decimal(str(amount)) < 0 and categoria_pigbank(category) == "transferencia_interna")
+
+
 def investment_transfer_kind(category):
     """Categoria do provider que identifica aplicação/resgate, não toda transferência."""
     cat = (category or "").strip().lower()
@@ -2320,10 +2331,10 @@ def import_open_finance_credit(user_id: int, connection_id: int | None = None) -
 
     for r in rows:
         # Pagamento de fatura NÃO é compra: pular. Ele aparece na conta de crédito como
-        # entrada (amount positivo) e, se importado, viraria um "estorno" que (a) duplica o
+        # crédito (amount negativo) e, se importado, viraria um "estorno" que (a) duplica o
         # pagamento já visto na conta corrente e (b) reduz errado o total da fatura. O lado
         # BANK já o trata como movimento interno (classify_open_finance_launch).
-        if is_credit_card_payment(r["category"], r["description"]):
+        if pagamento_no_cartao(r["amount"], r["category"], r["description"]):
             continue
         of_acc_id = r["of_account_id"]
         if of_acc_id not in card_cache:
@@ -2413,6 +2424,45 @@ def _get_or_create_open_bill_cur(cur, user_id: int, card_id: int, ref_date) -> i
     return bill_id
 
 
+# Linhas de cartão já importadas e o espelho OF de onde derivam (também lido pelo script
+# `scripts/corrigir_sinal_cartao_of.py`). Parâmetros: (user_id, connection_id, connection_id).
+CREDIT_LINKS_SQL = f"""
+    select distinct on (ct.id) o.amount, o.transaction_date, o.category, o.description,
+           o.provider_transaction_id, a.provider_account_id, c.provider,
+           ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
+           ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
+           ct.card_id, ct.categoria_editada as editada
+    from open_finance_transactions o
+    join open_finance_accounts a on a.id = o.account_id
+    join open_finance_connections c on c.id = a.connection_id
+    join credit_transactions ct on ct.id = o.imported_credit_tx_id
+    where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
+      and ct.user_id=c.user_id and upper(a.type)='CREDIT'
+    order by ct.id, c.id desc, o.id desc
+"""
+
+
+def pagamentos_no_cartao_legados(cur, user_id: int) -> list[dict]:
+    """Linhas de cartão do usuário ligadas a QUALQUER espelho dele que são pagamento da fatura.
+
+    Sem `LATEST_TRANSACTION_SQL` nem recorte por conexão: o pagamento gravado como compra pela
+    regra velha, depois de uma reconexão, fica ligado só ao espelho da conexão VELHA (o import da
+    nova pula o pagamento e nunca o liga), e `CREDIT_LINKS_SQL` não o devolve. Também lido pelo
+    script. ponytail: uma linha cuja categoria deixou de ser pagamento entre as conexões sai
+    também; o import seguinte a recria pelo espelho novo."""
+    cur.execute(
+        """select distinct ct.id as ct_id, ct.bill_id, o.amount, o.category, o.description
+           from open_finance_transactions o
+           join open_finance_accounts a on a.id = o.account_id
+           join open_finance_connections c on c.id = a.connection_id
+           join credit_transactions ct on ct.id = o.imported_credit_tx_id
+          where c.user_id=%s and ct.user_id=c.user_id and upper(a.type)='CREDIT'""",
+        (user_id,),
+    )
+    return [r for r in cur.fetchall()
+            if pagamento_no_cartao(r["amount"], r["category"], r["description"])]
+
+
 def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> int:
     """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
@@ -2420,28 +2470,13 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
     with get_conn() as conn:
         with conn.cursor() as cur:
             assert_unambiguous_links(cur, user_id, credit=True)
+            pagamentos = {r["ct_id"] for r in pagamentos_no_cartao_legados(cur, user_id)}
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
-            cur.execute(
-                f"""
-                select distinct on (ct.id) o.amount, o.transaction_date, o.category,
-                       o.provider_transaction_id, a.provider_account_id, c.provider,
-                       ct.id as ct_id, ct.valor as cur_valor, ct.is_refund as cur_refund,
-                       ct.categoria as cur_cat, ct.purchased_at as cur_date, ct.bill_id,
-                       ct.card_id, ct.categoria_editada as editada
-                from open_finance_transactions o
-                join open_finance_accounts a on a.id = o.account_id
-                join open_finance_connections c on c.id = a.connection_id
-                join credit_transactions ct on ct.id = o.imported_credit_tx_id
-                where {LATEST_TRANSACTION_SQL.format(tx='o')} and c.user_id=%s and (%s::bigint is null or c.id=%s)
-                  and ct.user_id=c.user_id and upper(a.type)='CREDIT'
-                order by ct.id, c.id desc, o.id desc
-                """,
-                (user_id, connection_id, connection_id),
-            )
+            cur.execute(CREDIT_LINKS_SQL, (user_id, connection_id, connection_id))
             for r in cur.fetchall():
-                amt = Decimal(str(r["amount"]))
-                new_valor = -amt  # convenção canônica assinada (compra +, estorno -)
-                new_refund = amt > 0
+                if r["ct_id"] in pagamentos:
+                    continue  # não reescreve como estorno: sai da fatura abaixo
+                new_valor, new_refund, new_tipo = sinal_cartao_of(r["amount"])
                 new_cat = categoria_pigbank(r["category"])
                 changed = (
                     Decimal(str(r["cur_valor"])) != new_valor
@@ -2463,14 +2498,20 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                         if resolved is not None:
                             new_bill_id = resolved
                     # a marca decide NO UPDATE: edição commitada depois do select vale (#712)
+                    # `valor`/`bill_id` lidos no where: linha que mudou (ou sumiu) depois do select
+                    # (desfazer, antecipar parcela) não recebe a diferença nem mexe na fatura.
                     cur.execute(
-                        "update credit_transactions set valor=%s, is_refund=%s, "
+                        "update credit_transactions set valor=%s, is_refund=%s, tipo=%s, "
                         "categoria = case when categoria_editada then categoria else %s end, "
-                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s returning categoria",
-                        (new_valor, new_refund, new_cat, r["transaction_date"], new_bill_id,
-                         r["ct_id"], user_id),
+                        "purchased_at=%s, bill_id=%s where id=%s and user_id=%s "
+                        "and valor=%s and bill_id is not distinct from %s returning categoria",
+                        (new_valor, new_refund, new_tipo, new_cat, r["transaction_date"], new_bill_id,
+                         r["ct_id"], user_id, old_valor, old_bill_id),
                     )
-                    gravada = (cur.fetchone() or {}).get("categoria")
+                    escrita = cur.fetchone()
+                    if escrita is None:
+                        continue
+                    gravada = escrita.get("categoria")
                     if new_cat and new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
                     if new_bill_id == old_bill_id:
@@ -2492,7 +2533,11 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                     credit_updated += 1
 
         conn.commit()
-    garantir_no_catalogo(user_id, novas)
+    garantir_no_catalogo(user_id, novas)  # antes da remoção: falha nela não perde o catálogo
+    # Fora da transação: a remoção abre a própria (`for update`, `total -= valor`).
+    for ct_id in pagamentos:
+        if remove_single_credit_transaction(user_id, ct_id):
+            credit_updated += 1
     return credit_updated
 
 

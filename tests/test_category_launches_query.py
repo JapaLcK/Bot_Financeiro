@@ -802,7 +802,7 @@ def _compra_importada_sem_categoria(user_id, categoria=None, ext="a"):
         user_id, "Nubank", closing_day=10, due_day=17,
     )
     tx_id, _ = db.add_imported_credit_purchase(
-        user_id, card_id, -100, categoria, today_tz(), f"of-{ext}",
+        user_id, card_id, 100, categoria, today_tz(), f"of-{ext}",
     )
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(

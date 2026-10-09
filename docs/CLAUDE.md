@@ -984,6 +984,25 @@ silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
 `stale_at` (não aparece no feed nem vai por e-mail).
 
+**Cartão do Open Finance (medido na produção em 2026-10-09)**: no `amount` da conta `CREDIT`,
+**positivo é compra** (`type: DEBIT`) e **negativo é estorno ou pagamento** (`type: CREDIT`),
+como diz a doc do campo. `db.cards.sinal_cartao_of` é a única fonte do sinal: `valor = amount`
+(assinado, a fatura faz `total += valor`), `is_refund = amount < 0`, `tipo`. Sem ramo por conector
+nem por sandbox (o sandbox Pluggy Bank mostrou o oposto). O pagamento da fatura **não entra**:
+`db.open_finance.pagamento_no_cartao` = `is_credit_card_payment` ou crédito (`amount < 0`) da
+categoria `transferencia_interna` ("Transfer - Internal" é o pagamento visto do cartão), sem regra
+de texto; é só do lado CREDIT, o BANK segue em `is_credit_card_payment`. O sync de cada item
+deriva `valor`/`is_refund`/`tipo` do espelho (`_sync_imported_credit_updates`) e tira da fatura
+o pagamento já importado; `scripts/corrigir_sinal_cartao_of.py` faz o mesmo (dry-run por padrão,
+`--user`, `--apply`) para a conexão que não sincroniza; imprime banco e host antes de agir.
+O pagamento legado ligado só ao espelho de uma conexão substituída por reconexão (o `LATEST`
+devolve o espelho da nova, que nunca o ligou) é achado por `pagamentos_no_cartao_legados`:
+qualquer espelho do usuário, sem recorte por conexão; o sync e o script usam o mesmo.
+**Compra e parcela do banco não se apagam nem se antecipam** (`undo_credit_transaction`,
+`undo_installment_group`, `anticipate_installment` levantam `db.CompraDoBanco`; /app responde
+409, WhatsApp e IA a frase): o sync reimporta a linha e, na antecipação, a Carteira ficava
+debitada com a fatura de volta. Mesmo `pode` do v2 (`PODE_CARTAO_SQL`).
+
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o
 comportamento em produção pode não ser o do seu ambiente.

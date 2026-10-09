@@ -338,7 +338,7 @@ def test_p5_importada_edita_categoria_e_descricao(libera):
     a = usuario_pagante()
     sombra = _sombra(a)
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
-    of_ct = db.add_imported_credit_purchase(a, cartao, -40, "mercado", today_tz(), f"ct-{a}")[0]
+    of_ct = db.add_imported_credit_purchase(a, cartao, 40, "mercado", today_tz(), f"ct-{a}")[0]
     manual_ct = db.add_credit_purchase(a, cartao, 39, "mercado", "manual", today_tz())[0]
     libera(a)
     for ident in (f"l{sombra}", f"c{of_ct}"):
@@ -360,7 +360,7 @@ def test_p5_importada_edita_categoria_e_descricao(libera):
 def test_b_nao_edita_nem_apaga_o_de_a(libera):
     a, b = usuario_pagante(), usuario_pagante()
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
-    ct = db.add_imported_credit_purchase(a, cartao, -40, "mercado", today_tz(), f"ct-iso-{a}")[0]
+    ct = db.add_imported_credit_purchase(a, cartao, 40, "mercado", today_tz(), f"ct-iso-{a}")[0]
     libera(a, b)
     lid = cria(a)
     antes = (saldo(a), linha(lid)["categoria"], linha(lid)["alvo"])

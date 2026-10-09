@@ -44,7 +44,7 @@ def _ct(uid, ident):
              "where ct.user_id=%s and o.provider_transaction_id=%s", (uid, ident), True)[0]
 
 
-def _parcela(ident, n, mes, category="Shopping", valor=-50):
+def _parcela(ident, n, mes, category="Shopping", valor=50):
     t = _tx(ident, valor, category, desc="Loja Parcelada")
     t["transaction_date"] = dia(10, mes)
     t["raw"] = {"creditCardMetadata": {"installmentNumber": n, "totalInstallments": 3,
@@ -136,12 +136,12 @@ def test_a1_so_a_nota_nao_marca(user_id):
 # ─── B: cartão ───────────────────────────────────────────────────────────────
 
 def test_b1_compra_editada_sobrevive_e_valor_e_fatura_seguem_o_banco(user_id):
-    cid = _cartao(user_id, [_tx("c1", -50, "Shopping")])
+    cid = _cartao(user_id, [_tx("c1", 50, "Shopping")])
     ct = _ct(user_id, "c1")
     assert ct["total"] == Decimal("50")
     assert db.update_credit_transaction_fields(user_id, ct["id"], categoria="lazer")
 
-    _cartao(user_id, [_tx("c1", -80, "Groceries")], cid)
+    _cartao(user_id, [_tx("c1", 80, "Groceries")], cid)
 
     ct = _ct(user_id, "c1")
     assert (ct["categoria"], ct["valor"], ct["ed"], ct["total"]) == (
@@ -149,10 +149,10 @@ def test_b1_compra_editada_sobrevive_e_valor_e_fatura_seguem_o_banco(user_id):
 
 
 def test_b1_so_a_nota_nao_marca(user_id):
-    cid = _cartao(user_id, [_tx("c1", -50, "Shopping")])
+    cid = _cartao(user_id, [_tx("c1", 50, "Shopping")])
     assert db.update_credit_transaction_fields(user_id, _ct(user_id, "c1")["id"], nota="x")
 
-    _cartao(user_id, [_tx("c1", -50, "Groceries")], cid)
+    _cartao(user_id, [_tx("c1", 50, "Groceries")], cid)
 
     assert (_ct(user_id, "c1")["categoria"], _ct(user_id, "c1")["ed"]) == ("mercado", False)
 
@@ -163,7 +163,7 @@ def test_b2_parcelada_editada_sobrevive(user_id):
     assert gid and gid == _ct(user_id, "p2")["group_id"]
     assert db.update_installment_group_meta(user_id, str(gid), categoria="viagem")
 
-    _cartao(user_id, [_parcela("p1", 1, 3, "Groceries", -60), _parcela("p2", 2, 4, "Groceries", -60)],
+    _cartao(user_id, [_parcela("p1", 1, 3, "Groceries", 60), _parcela("p2", 2, 4, "Groceries", 60)],
             cid)  # valor junto: senão o UPDATE nem roda e o teste não mede o CASE
 
     assert [(_ct(user_id, i)["categoria"], _ct(user_id, i)["valor"]) for i in ("p1", "p2")] == [
@@ -171,9 +171,9 @@ def test_b2_parcelada_editada_sobrevive(user_id):
 
 
 def test_b3_compra_nao_editada_segue_o_banco(user_id):
-    cid = _cartao(user_id, [_tx("c1", -50, "Shopping")])
+    cid = _cartao(user_id, [_tx("c1", 50, "Shopping")])
 
-    _cartao(user_id, [_tx("c1", -50, "Groceries")], cid)
+    _cartao(user_id, [_tx("c1", 50, "Groceries")], cid)
 
     assert _ct(user_id, "c1")["categoria"] == "mercado"
 
@@ -183,7 +183,7 @@ def test_b3_compra_nao_editada_segue_o_banco(user_id):
 def test_d_a_marca_de_um_usuario_nao_vale_para_outro():
     ua, ub = usuario_pagante(), usuario_pagante()
     banco = {u: _banco(u, [_tx("x", -10, "Shopping")]) for u in (ua, ub)}
-    cartao = {u: _cartao(u, [_tx("cx", -50, "Shopping")]) for u in (ua, ub)}
+    cartao = {u: _cartao(u, [_tx("cx", 50, "Shopping")]) for u in (ua, ub)}
     la, cta = _launch(ua, "x")["id"], _ct(ua, "cx")["id"]
 
     # B tentando editar a linha de A: recusa, e a linha de A fica intacta
@@ -196,7 +196,7 @@ def test_d_a_marca_de_um_usuario_nao_vale_para_outro():
     assert db.update_credit_transaction_fields(ua, cta, categoria="lazer")
     for u in (ua, ub):
         sync(banco[u], u, [_tx("x", -10, "Groceries")])
-        _cartao(u, [_tx("cx", -50, "Groceries")], cartao[u])
+        _cartao(u, [_tx("cx", 50, "Groceries")], cartao[u])
 
     assert (_launch(ua, "x")["categoria"], _ct(ua, "cx")["categoria"]) == ("lazer", "lazer")
     assert (_launch(ub, "x")["categoria"], _ct(ub, "cx")["categoria"]) == ("mercado", "mercado")
@@ -247,11 +247,11 @@ def test_a7_edicao_no_meio_do_sync_nao_perde_o_interno(user_id, monkeypatch):
 
 
 def test_e_edicao_no_meio_do_sync_cartao(user_id, monkeypatch):
-    cid = _cartao(user_id, [_tx("c1", -50, "Shopping")])
+    cid = _cartao(user_id, [_tx("c1", 50, "Shopping")])
     ctid = _ct(user_id, "c1")["id"]
     db.save_open_finance_sync(cid, [{
         "provider_account_id": f"cred-{cid}", "name": "Cartão", "type": "CREDIT", "currency": "BRL",
-        "balance": Decimal("-100"), "raw": {}, "transactions": [_tx("c1", -50, "Groceries")]}])
+        "balance": Decimal("-100"), "raw": {}, "transactions": [_tx("c1", 50, "Groceries")]}])
     feito = _edita_no_meio(
         monkeypatch, lambda: db.update_credit_transaction_fields(user_id, ctid, categoria="lazer"))
 

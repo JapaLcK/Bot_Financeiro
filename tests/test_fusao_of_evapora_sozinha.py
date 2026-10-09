@@ -205,7 +205,7 @@ def test_7_transacao_de_cartao_nao_aciona_a_correcao(uid_pro, ia_fora):
         "provider_account_id": f"acc-card-{uid_pro}", "name": "Nubank Cartao",
         "type": "CREDIT", "subtype": "CREDIT_CARD", "currency": "BRL",
         "balance": Decimal("0"), "raw": {},
-        "transactions": [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")],
+        "transactions": [tx(uid_pro, "1.00", hoje, "PIX ENVIADO BARBARA")],
     }])
 
     manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")

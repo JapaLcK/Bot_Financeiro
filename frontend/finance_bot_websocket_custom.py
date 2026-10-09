@@ -106,6 +106,7 @@ from db import (
     LaunchDateLockedError,
     update_credit_transaction_fields,
     undo_credit_transaction,
+    CompraDoBanco,
     delete_launch_and_rollback,
     LaunchNoEffects,
     InvestmentLotHasWithdrawal,
@@ -8003,6 +8004,8 @@ async def delete_credit_transaction_route(
 
     try:
         result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
+    except CompraDoBanco as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
