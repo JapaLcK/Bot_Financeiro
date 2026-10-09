@@ -453,8 +453,11 @@ verificar; corrija o que procede, responda na thread, peça `@codex review` de n
 repita até o Codex liberar. **Pode mergear** quando, no head atual, o Codex liberou (👍
 ou "Didn't find any major issues") e todos os checks estão verdes, sem thread aberta.
 Se algo travar (Codex não responde, CI vermelho que não é seu, conflito que você não
-resolve), não force: avise o dono. Depois do merge, avise o dono e apague a branch pelas
-regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR de outra pessoa.
+resolve), não force: avise o dono. Depois do merge, **resuma o que foi feito**: um
+comentário no próprio PR mergeado (`gh pr comment`) com o que mudou, as provas medidas, o
+que ficou fora do escopo e os limites declarados, e o mesmo resumo ao dono. Em seguida
+apague a branch pelas regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR
+de outra pessoa.
 
 **Acompanhar é trabalho seu, não do dono.** Nunca termine uma resposta com "quando
 quiser, mande olhar o CI", "me avise quando..." ou equivalente: o dono não é quem
