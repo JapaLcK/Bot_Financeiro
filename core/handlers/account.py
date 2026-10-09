@@ -70,7 +70,7 @@ def link(platform: str, external_id: str, code: str | None) -> str:
         db.link_platform_identity(platform, external_id, target_user_id)
     except db.MergeRefused as exc:
         return _RECUSA_POR_MOTIVO.get(exc.motivo, _RECUSA_COLISAO)
-    return "✅ Contas vinculadas! Discord e WhatsApp agora usam os mesmos dados."
+    return "✅ Contas vinculadas! Este canal agora usa os dados da sua conta."
 
 
 def vincular(platform: str, external_id: str, code: str) -> str:

@@ -562,14 +562,24 @@ paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da crede
 `PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
 pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
 liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
-mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
-tem dados financeiros segue na própria conta, sem vínculo nem mescla
-(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+mensagem de número já ligado a conta sem credencial.
+**Auto-vínculo por telefone não mescla quem já é conta ou tem dados (#711/#630, D1(a)).**
+O telefone digitado no site não prova de quem é o número. Com outra conta dona do
+telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
+recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
+#607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
+vínculo nem mescla, e a junção é pelo `vincular CODIGO`. Exceção: o alvo já tem este número
+(com ou sem o nono dígito, conferido nos dois sentidos para um fixo não passar por celular) como
+identidade do WhatsApp, e aí junta como antes. O aviso é o `NAO_JUNTEI_WA`
+(`wa_runtime.py`): na saudação, uma vez, no primeiro status; em toda mensagem no segundo
+com alvo com credencial (sem plano, o turno cairia no "/precos"). Só o só-WhatsApp vazio
+ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
-preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número), e nada além da preferência é gravado.
+preferência da conta sem credencial), no `remetente_com_dados` e no
+`wa_linked_other_account` (a do remetente e a da conta que digitou o número), e nada
+além da preferência é gravado.
 Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
 (`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em

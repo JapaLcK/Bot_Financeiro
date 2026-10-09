@@ -64,6 +64,17 @@ def _com_dados(uid, nome_caixinha="Viagem", valor=1000):
     db.create_pocket(uid, nome_caixinha)
 
 
+def _junta(wa_phone, destino):
+    """`merge_users` pelo caminho do código (`vincular`/`link`): None quando junta,
+    o `motivo` quando recusa. Desde a #711 o auto-vínculo por telefone não mescla
+    remetente com dados ou com login, então ele deixou de ser o veículo daqui."""
+    try:
+        db.link_platform_identity("whatsapp", wa_phone, destino)
+    except db.MergeRefused as exc:
+        return exc.motivo
+    return None
+
+
 def _dono_do_numero(wa_phone):
     return _sql("select user_id from user_identities where provider='whatsapp' and external_id=%s",
                 (wa_phone,))[0]["user_id"]
@@ -77,9 +88,7 @@ def test_whatsapp_com_dados_nos_dois_lados_recusa_sem_mexer_em_nada(user_id, nom
     _com_dados(wa_uid)
     antes = (_foto(user_id), _foto(wa_uid))
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r == {"status": "merge_conflict", "wa_phone": wa_phone}
+    assert _junta(wa_phone, user_id) == "dados_dos_dois_lados"
     assert (_foto(user_id), _foto(wa_uid)) == antes
     assert _dono_do_numero(wa_phone) == wa_uid, "o número não pode ser religado na recusa"
     st = _sql("select phone_status from auth_accounts where user_id=%s", (user_id,))[0]
@@ -87,7 +96,10 @@ def test_whatsapp_com_dados_nos_dois_lados_recusa_sem_mexer_em_nada(user_id, nom
 
 
 def test_conversa_oi_e_saldo_nao_quebram_e_o_aviso_sai_uma_vez(user_id, monkeypatch):
-    """O auto-link REAL, pelo `process_message`, com estado real no banco."""
+    """O auto-link REAL, pelo `process_message`, com estado real no banco.
+
+    Desde a #711 a origem com login (o `promote_to_pro`) nem chega ao merge: o
+    aviso é o `NAO_JUNTEI_WA` do `wa_linked_other_account`, também uma vez só."""
     from tests._billing_grants_helpers import garantir_system_event_logs
     garantir_system_event_logs()  # o "uma vez" do aviso mora nela
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -108,7 +120,7 @@ def test_conversa_oi_e_saldo_nao_quebram_e_o_aviso_sai_uma_vez(user_id, monkeypa
         assert len(enviadas) > n, f"{texto!r} ficou sem resposta"
 
     assert not any(wr._PROCESSING_FAILURE_MESSAGE in m for m in enviadas), enviadas
-    avisos = [m for m in enviadas if "juntar" in m]
+    avisos = [m for m in enviadas if m == wr.NAO_JUNTEI_WA]
     assert len(avisos) == 1, enviadas
     assert any("R$ 250,00" in m for m in enviadas), "o saldo tem de ser o da conta do WhatsApp"
     assert _dono_do_numero(wa_phone) == wa_uid
@@ -135,9 +147,7 @@ def test_positivo_lotes_vao_junto_e_continuam_operaveis_no_destino(user_id):
     db.create_investment(wa_uid, "cdb", 0.01, "monthly")
     aporte, *_ = db.investment_deposit_from_account(wa_uid, "cdb", 200, "aporte")
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r["status"] == "linked"
+    assert _junta(wa_phone, user_id) is None
     orfaos = _sql("select (select count(*) from pocket_lots where user_id=%s)"
                   " + (select count(*) from investment_lots where user_id=%s) as n", (wa_uid, wa_uid))
     assert orfaos[0]["n"] == 0, "lote ficou com o user_id da origem"
@@ -232,9 +242,8 @@ def test_positivo_itens_sem_lancamento_vao_para_a_conta_do_site(user_id):
     _conta_site(user_id, wa_phone)
     _com_itens_sem_lancamento(wa_uid)
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r["status"] == "linked" and r["user_id"] == user_id
+    assert _junta(wa_phone, user_id) is None
+    assert _dono_do_numero(wa_phone) == user_id
     assert [x["name"] for x in list_recurring_expenses(user_id)] == ["Aluguel"]
     assert [x["name"] for x in list_recurring_incomes(user_id)] == ["Salário"]
     assert [x["name"] for x in list_bills(user_id)] == ["Faculdade"]
@@ -329,14 +338,15 @@ def test_so_recorrencia_nos_dois_lados_tambem_recusa(user_id, semear):
     semear(wa_uid)
     antes = (_foto(user_id), _foto(wa_uid))
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r == {"status": "merge_conflict", "wa_phone": wa_phone}
+    assert _junta(wa_phone, user_id) == "dados_dos_dois_lados"
     assert (_foto(user_id), _foto(wa_uid)) == antes
     assert _dono_do_numero(wa_phone) == wa_uid
 
 
-@pytest.mark.parametrize("rota", ["auto_link", "vincular"])
+# `link_platform_identity` direto e pelo handler do `vincular`. Era "auto_link":
+# desde a #711 o auto-vínculo não mescla origem com dados, e a corrida que ainda
+# o alcança (dado gravado na ORIGEM vazia) está em `test_auto_vinculo_telefone_digitado.py`.
+@pytest.mark.parametrize("rota", ["link_platform_identity", "vincular"])
 def test_corrida_lancamento_no_destino_depois_da_checagem_vira_recusa(user_id, monkeypatch, rota):
     """Lançamento gravado no destino, por OUTRA conexão, entre a checagem e os
     updates: sem o except, `uq_launches_user_seq` subia como UniqueViolation.
@@ -347,7 +357,7 @@ def test_corrida_lancamento_no_destino_depois_da_checagem_vira_recusa(user_id, m
     import db.users as users
 
     wa_phone, wa_uid = _wa_dono_do_numero()
-    if rota == "auto_link":
+    if rota == "link_platform_identity":
         _conta_site(user_id, wa_phone)
     db.add_launch_and_update_balance(wa_uid, "receita", 250, None, "salario")
     antes = _foto(wa_uid)
@@ -364,9 +374,8 @@ def test_corrida_lancamento_no_destino_depois_da_checagem_vira_recusa(user_id, m
 
     monkeypatch.setattr(users, "_tem_dados_financeiros", checa_e_grava_no_destino)
 
-    if rota == "auto_link":
-        r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-        assert r == {"status": "merge_conflict", "wa_phone": wa_phone}
+    if rota == "link_platform_identity":
+        assert _junta(wa_phone, user_id) == "colisao"  # a unique pega o que a checagem não viu
     else:
         from core.handlers.account import vincular
         resposta = vincular("whatsapp", wa_phone, db.create_link_code(user_id))
@@ -387,9 +396,9 @@ def _com_plano_pago(uid):
 
 
 @pytest.mark.parametrize("prender,esperado", [
-    (lambda uid: _com_conexao_of(uid, "UPDATED"), "merge_conflict"),
-    (_com_plano_pago, "merge_conflict"),
-    (lambda uid: _com_conexao_of(uid, "PAUSED"), "linked"),  # trial vencido: o item nem existe mais
+    (lambda uid: _com_conexao_of(uid, "UPDATED"), "open_finance"),
+    (_com_plano_pago, "origem_presa"),
+    (lambda uid: _com_conexao_of(uid, "PAUSED"), None),  # trial vencido: o item nem existe mais
 ], ids=["open_finance_vivo", "plano_pago", "open_finance_pausado"])
 def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, esperado):
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -402,10 +411,8 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
     prender(wa_uid)
     antes = (_foto(user_id), _foto(wa_uid))
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r["status"] == esperado, r
-    if esperado == "merge_conflict":
+    assert _junta(wa_phone, user_id) == esperado
+    if esperado:
         assert (_foto(user_id), _foto(wa_uid)) == antes
         assert _dono_do_numero(wa_phone) == wa_uid
     else:
@@ -414,11 +421,11 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
 
 @pytest.mark.parametrize("status,plano,com_cus,esperado", [
     # Codex P1: checkout aberto — o `checkout.session.completed` chegaria depois
-    ("inactive", "free", True, "merge_conflict"),
-    ("canceled", "pro", True, "merge_conflict"),  # estorno/disputa de cobrança antiga
-    ("active", "free", True, "merge_conflict"),
-    ("past_due", "pro", True, "merge_conflict"),
-    ("active", "free", False, "linked"),  # grant Pix vencido deixou `active`: sem cliente, junta
+    ("inactive", "free", True, "origem_presa"),
+    ("canceled", "pro", True, "origem_presa"),  # estorno/disputa de cobrança antiga
+    ("active", "free", True, "origem_presa"),
+    ("past_due", "pro", True, "origem_presa"),
+    ("active", "free", False, None),  # grant Pix vencido deixou `active`: sem cliente, junta
 ], ids=["checkout_aberto", "canceled", "active_plano_vencido", "past_due", "sem_customer"])
 def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esperado):
     """Dono (2026-09-27): qualquer `stripe_customer_id` na origem recusa. O plano
@@ -434,12 +441,10 @@ def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esp
                         (plano, cus, status, wa_uid))
         conn.commit()
 
-    r = attempt_whatsapp_phone_link(wa_phone, current_user_id=wa_uid)
-
-    assert r["status"] == esperado, r
+    assert _junta(wa_phone, user_id) == esperado
     origem = _sql("select a.stripe_customer_id from users u"
                   " left join auth_accounts a on a.user_id = u.id where u.id=%s", (wa_uid,))
-    if esperado == "merge_conflict":
+    if esperado:
         assert origem == [{"stripe_customer_id": cus}], "users e auth_accounts da origem intactos"
         assert _dono_do_numero(wa_phone) == wa_uid
     else:

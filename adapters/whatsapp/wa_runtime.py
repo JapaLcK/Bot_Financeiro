@@ -514,6 +514,16 @@ PRECISA_SENHA_WA = (
     "senha pelo link que enviamos para o seu e-mail."
 )
 
+# #711/#630 (D1(a), texto do dono): o número está digitado numa conta do site,
+# mas quem manda já tem conta ou dados próprios, e o auto-vínculo não juntou.
+# Serve aos dois status: `wa_linked_other_account` e `remetente_com_dados`.
+NAO_JUNTEI_WA = (
+    "Encontrei uma conta do site com este número, mas este WhatsApp já tem um histórico "
+    "próprio, então não juntei os dois. Se a conta do site é sua, gere um código no site "
+    "e me mande: *link 123456*. Se não é sua, alguém cadastrou seu número por engano e "
+    "nada seu foi para lá."
+)
+
 # Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
@@ -574,13 +584,18 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
     if status == "multiple_accounts":
         return "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente."
     if status == "wa_linked_other_account":
-        return "⚠️ Este WhatsApp já está vinculado a outra conta. Revise seu cadastro ou use outro número."
+        return NAO_JUNTEI_WA
     if status == "account_has_other_whatsapp":
         return (
             "⚠️ Sua conta já tem outro WhatsApp vinculado. "
             f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
         )
     if status == "merge_conflict":
+        motivo = auto_link_result.get("motivo")
+        if motivo != "dados_dos_dois_lados":
+            # Os mesmos textos da recusa do `vincular` (D6); o desconhecido cai na colisão.
+            from core.handlers.account import _RECUSA_COLISAO, _RECUSA_POR_MOTIVO
+            return _RECUSA_POR_MOTIVO.get(motivo, _RECUSA_COLISAO)
         return (
             "⚠️ Sua conta do site e este WhatsApp já têm dados cada um, então não dá pra juntar "
             "os dois automaticamente. Por enquanto, o que você mandar aqui fica na conta do WhatsApp.\n"
@@ -837,6 +852,17 @@ def process_message(message: InboundMessage) -> None:
                                    get_interactive_id(message.raw or {})):
                 _send_reply(reply_to, PRECISA_SENHA_WA)
             return
+        elif (auto_link_result["status"] == "remetente_com_dados"
+              and not conta_sem_credencial(auto_link_result["target_user_id"])):
+            # #711: só-WhatsApp com dados e o número digitado numa conta com login.
+            # Segue na conta dele, que não tem plano: sem esta resposta, o turno
+            # cairia no convite do "/precos". O código de vínculo segue para o
+            # `handle_incoming` (o gate o isenta), e o opt-out desliga as duas contas.
+            if not _is_link_code_attempt(message.text or ""):
+                if not _tratar_opt_out(uid, reply_to, get_interactive_id(message.raw or {}),
+                                       auto_link_result["target_user_id"]):
+                    _send_reply(reply_to, NAO_JUNTEI_WA)
+                return
         elif auto_link_result["status"] in {
             "multiple_accounts",
             "wa_linked_other_account",
@@ -1170,8 +1196,8 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", mask_phone(reply_to))
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            # `target_user_id` só existe no `remetente_com_dados`: a conta sem
-            # credencial que digitou este número também recebe envios nele.
+            # `target_user_id` (`remetente_com_dados`, `wa_linked_other_account`):
+            # a conta que digitou este número também recebe envios nele.
             elif _tratar_opt_out(uid, reply_to, interactive_id,
                                  auto_link_result.get("target_user_id")):
                 return
