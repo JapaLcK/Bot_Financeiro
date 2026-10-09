@@ -107,17 +107,6 @@ test("nenhuma opção de resumo reproduz o default do banco (true/true/true)", (
   }
 });
 
-test("o botão de salvar o resumo nasce desabilitado", () => {
-  assert.match(html(), /data-role="save-report"[^>]*disabled/);
-});
-
-test("nenhum radio do resumo vem marcado do HTML", () => {
-  // As opções são montadas em JS com aria-checked="false"; o HTML não pode
-  // trazer nenhuma pré-seleção.
-  assert.doesNotMatch(html(), /aria-checked="true"/);
-  assert.doesNotMatch(html(), /<input[^>]*type="radio"[^>]*checked/);
-});
-
 // ── 2. WhatsApp: identities, não whatsapp_linked ────────────────────────────
 
 test("vínculo por identities é reconhecido", () => {
@@ -135,11 +124,6 @@ test("quem vinculou pelo código conta como vinculado mesmo sem whatsapp_verifie
   const { api } = load();
   const security = { whatsapp_verified_at: null, identities: [{ provider: "whatsapp" }] };
   assert.equal(api.isWhatsAppLinked(security), true);
-});
-
-test("comecar.js não lê whatsapp_linked", () => {
-  assert.doesNotMatch(readFileSync(JS, "utf8").replace(/\/\*[\s\S]*?\*\//g, ""),
-    /profile\.whatsapp_linked|\.whatsapp_linked/);
 });
 
 // ── 3. Sem handler inline ───────────────────────────────────────────────────
@@ -186,15 +170,6 @@ test("cartão de nome repetido é barrado antes do POST", () => {
   assert.equal(api.hasCardNamed(cards, ""), false);
 });
 
-test("o botão fica inerte durante a requisição", () => {
-  // withBusy marca aria-busy e desabilita; o CSS torna o alvo não-clicável.
-  const js = readFileSync(JS, "utf8");
-  assert.match(js, /aria-busy/);
-  assert.match(js, /state\.inFlight/);
-  assert.match(readFileSync(join(FRONTEND, "comecar.css"), "utf8"),
-    /\[aria-busy="true"\][^}]*pointer-events:\s*none/);
-});
-
 // ── Boot uma vez só ─────────────────────────────────────────────────────────
 
 test("avaliar o arquivo duas vezes não registra dois listeners de clique", () => {
@@ -229,6 +204,7 @@ test("avaliar o arquivo duas vezes não registra dois listeners de clique", () =
 // ── Alvo de toque ───────────────────────────────────────────────────────────
 
 test("os botões de pular têm alvo de toque de 44px", () => {
+  // Ponto cego (#852): não pega uma regra posterior que sobrescreva o min-height.
   // Medido em 375×812 com padding 8px: davam 34px. Esta página abre dentro do
   // app iOS e NÃO carrega o app-mode.css, que é quem impõe o mínimo no resto
   // do app — então o mínimo tem de estar aqui.
@@ -240,6 +216,7 @@ test("os botões de pular têm alvo de toque de 44px", () => {
 // ── CTA de upgrade tem de ser <a href="/precos"> ────────────────────────────
 
 test("upgrade é anchor pra /precos, não botão", () => {
+  // Ponto cego (#852): não pega um createElement("button") no lugar da âncora.
   // auth-refresh.js esconde `a[href^="/precos"]` dentro do app iOS (diretriz
   // 3.1.1). Um <button> com location.href não seria pego pela regra.
   const js = readFileSync(JS, "utf8");

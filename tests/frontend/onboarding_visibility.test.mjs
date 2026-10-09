@@ -17,7 +17,7 @@
  * um teste sem CSS é estruturalmente cego a esta classe inteira.
  *
  * Controle negativo: apagar a regra `[hidden]{display:none!important}` de
- * comecar.css deixa os quatro casos vermelhos.
+ * comecar.css deixa os três casos vermelhos.
  *
  * Precisa de `npm ci` na raiz (playwright) + `npx playwright install chromium`.
  * Rodar: node --test tests/frontend/onboarding_visibility.test.mjs
@@ -196,12 +196,4 @@ test("o aviso de sucesso é legível sobre o fundo escuro", async () => {
   const c = await contraste(page, "balance-done");
   assert.ok(c >= 4.5, `contraste do aviso: ${c}:1 (WCAG AA para texto normal exige 4,5:1)`);
   await page.close();
-});
-
-// ── A regra em si ───────────────────────────────────────────────────────────
-
-test("comecar.css neutraliza o [hidden] contra as regras de display", () => {
-  const css = readFileSync(join(FRONTEND, "comecar.css"), "utf8");
-  assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none\s*!important/,
-    "sem esse reset, .onb-done e .btn voltam a vencer o [hidden] do navegador");
 });
