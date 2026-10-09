@@ -9,6 +9,7 @@ export const COMMON = [
   { key: "semana", topic: "lancamentos", head: "Quer ver pra onde foi seu dinheiro na última semana?", ask: "Pra onde foi meu dinheiro nos últimos 7 dias?" },
   { key: "meta", topic: "metas", head: "Quanto falta pra sua próxima meta?", ask: "Quanto falta pra minha próxima meta e quando eu chego lá?" },
   { key: "normal", topic: "categorias", head: "Seu mês tá acima ou abaixo do normal?", ask: "Meu gasto deste mês tá acima ou abaixo do normal?" },
+  { key: "investido", topic: "investido", head: "Quer saber quanto você tem investido?", ask: "Quanto eu tenho investido?" },
   { key: "assinaturas", topic: "categoria", cat: "assinaturas", head: "Tem alguma assinatura que você nem usa mais?", ask: "Quais assinaturas eu pago todo mês?" },
   { key: "fim-de-semana", topic: "saldo", head: "Dá pra curtir o fim de semana sem estourar?", ask: "Quanto posso gastar no fim de semana sem apertar o resto do mês?" },
   { key: "maior-gasto", topic: "lancamentos", head: "Qual foi seu maior gasto do mês?", ask: "Qual foi meu maior gasto este mês?" },

@@ -69,6 +69,23 @@ const simulate = (page, withFallback) => page.evaluate((withFallback) => {
   return sup.map((s) => s.conditionText.replace(/\s/g, ""));
 }, withFallback);
 
+// Em vez de sono fixo: fontes prontas, nenhuma requisição pendente (menos o SSE, que fica
+// aberto) e dois snapshots seguidos iguais com a rede ociosa, a dois quadros um do outro.
+// Devolve o último.
+async function estavel(page, pendentes) {
+  await page.evaluate(() => document.fonts.ready);
+  let antes;
+  for (let i = 0; i < 50; i++) {
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    let ocioso = !pendentes.size;
+    const s = await snapshot(page), js = JSON.stringify(s);
+    ocioso &&= !pendentes.size;
+    if (ocioso && js === antes) return s;
+    antes = ocioso ? js : undefined;
+  }
+  throw new Error(`a página não assentou em 50 voltas (${pendentes.size} requisições pendentes: ${[...pendentes].map((r) => r.url()).join(" ")})`);
+}
+
 async function measure(width, hash, withFallback, setup, semente = true) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 }, reducedMotion: "reduce" });
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
@@ -76,15 +93,17 @@ async function measure(width, hash, withFallback, setup, semente = true) {
   await servir(ctx, demo ? RAIZ : undefined, { perfil: semente ? "padrao" : null });
   if (demo && semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
+  const pendentes = new Set();
+  page.on("request", (r) => { if (!r.url().includes("/api/v2/eventos")) pendentes.add(r); });
+  page.on("requestfinished", (r) => pendentes.delete(r));
+  page.on("requestfailed", (r) => pendentes.delete(r));
   await page.goto(`${demo ? PROTOTIPO : PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor({ state: "attached" });
   if (setup) await setup(page);
-  await page.waitForTimeout(700);
-  const native = await snapshot(page);
+  const native = await estavel(page, pendentes);
   const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
   const conditions = await simulate(page, withFallback);
-  await page.waitForTimeout(300);
-  const sim = await snapshot(page);
+  const sim = await estavel(page, pendentes);
   await ctx.close();
   assert.equal(sim.length, native.length, `${width} ${hash}: o DOM mudou durante a medida`);
   const diffs = native.flatMap((a, i) => {

@@ -76,6 +76,10 @@ def claim_weekly_report_send(user_id: int, period_date) -> bool:
     return _db_support.claim_weekly_report_send_impl(get_conn, ensure_user, user_id, period_date)
 
 
+def release_weekly_report_claim(user_id: int, period_date) -> None:
+    return _db_support.release_weekly_report_claim_impl(get_conn, user_id, period_date)
+
+
 def claim_monthly_report_send(user_id: int, period_date) -> bool:
     return _db_support.claim_monthly_report_send_impl(get_conn, ensure_user, user_id, period_date)
 

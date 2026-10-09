@@ -340,6 +340,8 @@ def test_sem_truncamento_de_grupos_dentro_do_horizonte(uid):
 
 
 def test_snapshot_read_only_recusa_escrita_e_nao_oculta_falha(uid, monkeypatch):
+    from tests.test_previsao_recorrencias_of import netflix
+    netflix(uid)  # a leitura das recorrências do banco também roda na transação read only
     original = cashflow_snapshot.ler
     recusas = []
     def tentar_escrever(cur, *args):

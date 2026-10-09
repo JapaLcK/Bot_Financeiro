@@ -10,12 +10,16 @@
  * E a causa RAIZ, que o primeiro conserto deixou aberta: `det.message` num
  * `detail` que é STRING dá `undefined`, então toda frase que o servidor escreve
  * em `HTTPException(detail="…")` era descartada — os dois 400, o 429, o 503 e o
- * 403 do CSRF liam o genérico. A tabela `FRASES_DO_SERVIDOR` é esses cinco.
+ * 403 do CSRF liam o genérico. A tabela `FRASES_DO_SERVIDOR` cobre o 400 do
+ * plano, o 429 e o 403; o 400 do CPF e o 503 são o PT18a/PT18c de
+ * precos_pix_anual.test.mjs.
  *
  * Os dois controles do CLAUDE.md §3:
  *   · negativo — (a) apague as 3 linhas do `pago` no `pixEnviar` e o caso
  *     "conflito" fica VERMELHO; (b) devolva o `det` para `(d && d.detail) || {}`
- *     e os 5 casos de `FRASES_DO_SERVIDOR` ficam vermelhos. Os dois eram verdes;
+ *     e os 3 casos de `FRASES_DO_SERVIDOR` ficam vermelhos (medido 2026-10-08,
+ *     #852; no precos_pix_anual caem o PT18a, o PT18c e o PT18d nos 2
+ *     viewports). Os dois eram verdes;
  *   · positivo — o caso "500" prova que o genérico continua existindo. Sem ele,
  *     um código que desse mensagem específica para TODO erro passaria.
  *
@@ -222,11 +226,8 @@ test("conflito com covered_until malformado cai no genérico, sem 'undefined'", 
 // dirige — mas quem acrescentar um 400 NOVO àquela rota precisa saber disso.
 const FRASES_DO_SERVIDOR = [
   [400, "plan inválido (use 'essencial', 'plus' ou 'pro').", "billing_pix.py:88"],
-  [400, "Informe um CPF ou CNPJ válido.", "billing_pix.py:93"],
   [429, "Muitas tentativas. Aguarde alguns minutos e tente novamente.",
     "finance_bot_websocket_custom.py:2285 — o limitador é por IP (shared.py:98)"],
-  [503, "Não consegui emitir o Pix agora. Tenta de novo em instantes.",
-    "billing_pix.py:137"],
   [403, "Token CSRF inválido ou ausente.",
     "finance_bot_websocket_custom.py:2247 — o checkout não tem isenção de CSRF"],
 ];

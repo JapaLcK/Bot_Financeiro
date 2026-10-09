@@ -7,7 +7,8 @@
  *     não há mais `updating`, quando o usuário sai do passo e no teto.
  *  3. Passo 5: "Tudo pronto!" só com o 200; sem a conclusão gravada nada sai
  *     para o /home; a conversão sai uma vez, quando a conclusão grava.
- * Desktop (1280) e celular (390); relógio do Playwright (`page.clock`).
+ * Desktop (1280) e celular (390) só nos 3 casos de layout (ordem, duplo clique,
+ * opacidade dos CTAs); o resto roda só em 1280. Relógio do Playwright (`page.clock`).
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -91,6 +92,7 @@ const CONVERSAO = ["OnboardingComplete", "onboarding_complete"];
 
 const syncText = (page) => page.$eval('[data-role="of-sync"]', (e) => e.innerText);
 
+// Só o layout muda com a largura; o resto não lê a largura (comecar.js) e roda só no desktop.
 for (const vp of VIEWPORTS) {
   const tag = `[${vp.width}]`;
 
@@ -102,6 +104,61 @@ for (const vp of VIEWPORTS) {
     assert.ok(banco.y < saldo.y, `banco em y=${banco.y}, saldo em y=${saldo.y}`);
     await page.close();
   });
+
+  test(`${tag} duplo clique em "Pular tudo" e em "Tentar de novo" manda UM completed cada`, async () => {
+    // Pedido segurado 300 ms: o 2º clique cai com o 1º em voo. No "Tentar de
+    // novo" o botão some no 1º clique e o 2º cai no que o layout pôs sob o
+    // cursor; em 1280 isso ainda manda um 2º completed sem o withBusy do retry.
+    // Controle negativo: tirar o withBusy do skipAll (ou do retryComplete) dá 2.
+    const lento = (status) => new Promise((r) => setTimeout(() => r(status), 300));
+    const { page, calls } = await abrir(vp, { step: 2, saveStatus: () => lento(200) });
+    await Promise.all([page.waitForURL("**/home"), page.dblclick('[data-action="skip-all"]')]);
+    assert.equal(calls.posts.filter((b) => b.completed).length, 1, JSON.stringify(calls.posts));
+    await page.close();
+
+    let falha = true;
+    const { page: p2, calls: c2 } = await abrir(vp, { step: 4, saveStatus: (b) => lento(b.completed && falha ? 500 : 200) });
+    await p2.click('.onb-step[data-step="4"] [data-action="skip"]');
+    await p2.waitForSelector('[data-role="done-fail"]:not([hidden])');
+    falha = false;
+    const antes = c2.posts.filter((b) => b.completed).length;
+    await p2.dblclick('[data-action="retry-complete"]');
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
+    // Em 1280 o 2º clique cai no "Pular tudo" e vai ao app sem o Finish. Seja qual
+    // for a tela final, UMA conversão. Negativo: conversão só no finish() → 0.
+    assert.deepEqual(c2.conv, CONVERSAO, `tela final: ${p2.url()}`);
+    if (!/\/home$/.test(p2.url())) {
+      await Promise.all([p2.waitForURL("**/home"), p2.click('[data-action="finish"]')]);
+      assert.deepEqual(c2.conv, CONVERSAO, "o Finish repetiu a conversão");
+    }
+    await p2.close();
+  });
+
+  test(`${tag} com escrita em voo o wizard fica ocupado e os CTAs apagados; depois voltam`, async () => {
+    // Controle negativo: sem o aria-busy no .onb-card (busyBegin) o "Continuar"
+    // segue com opacidade 1 e clicável enquanto o clique seria engolido.
+    let solta;
+    const { page } = await abrir(vp, { step: 2,
+      saveStatus: (b) => (b.completed ? new Promise((r) => { solta = () => r(500); }) : 200) });
+    const cta = '.onb-step[data-step="2"] [data-action="next"]';
+    const estilo = () => page.$eval(cta, (e) => {
+      const s = getComputedStyle(e);
+      return { op: s.opacity, pe: s.pointerEvents, busy: document.querySelector(".onb-card").getAttribute("aria-busy") };
+    });
+    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null });
+    await page.click('[data-action="skip-all"]');
+    while (!solta) await new Promise((r) => setTimeout(r, 20)); // o POST chegou à rota e está segurado
+    assert.deepEqual(await estilo(), { op: "0.6", pe: "none", busy: "true" });
+    solta();
+    await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
+    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null }, "falha tem de desfazer o ocupado");
+    await page.close();
+  });
+}
+
+for (const vp of [VIEWPORTS[0]]) {
+  const tag = `[${vp.width}]`;
 
   // `of_produtos` é o que o connect token pede (pluggy_products); a tela lista
   // isso e nada além. Controle negativo: a lista fixa antiga mostrava 4 itens
@@ -286,36 +343,6 @@ for (const vp of VIEWPORTS) {
     await page.close();
   });
 
-  test(`${tag} duplo clique em "Pular tudo" e em "Tentar de novo" manda UM completed cada`, async () => {
-    // Pedido segurado 300 ms: o 2º clique cai com o 1º em voo. No "Tentar de
-    // novo" o botão some no 1º clique e o 2º cai no que o layout pôs sob o
-    // cursor; em 1280 isso ainda manda um 2º completed sem o withBusy do retry.
-    // Controle negativo: tirar o withBusy do skipAll (ou do retryComplete) dá 2.
-    const lento = (status) => new Promise((r) => setTimeout(() => r(status), 300));
-    const { page, calls } = await abrir(vp, { step: 2, saveStatus: () => lento(200) });
-    await Promise.all([page.waitForURL("**/home"), page.dblclick('[data-action="skip-all"]')]);
-    assert.equal(calls.posts.filter((b) => b.completed).length, 1, JSON.stringify(calls.posts));
-    await page.close();
-
-    let falha = true;
-    const { page: p2, calls: c2 } = await abrir(vp, { step: 4, saveStatus: (b) => lento(b.completed && falha ? 500 : 200) });
-    await p2.click('.onb-step[data-step="4"] [data-action="skip"]');
-    await p2.waitForSelector('[data-role="done-fail"]:not([hidden])');
-    falha = false;
-    const antes = c2.posts.filter((b) => b.completed).length;
-    await p2.dblclick('[data-action="retry-complete"]');
-    await new Promise((r) => setTimeout(r, 800));
-    assert.equal(c2.posts.filter((b) => b.completed).length - antes, 1, JSON.stringify(c2.posts));
-    // Em 1280 o 2º clique cai no "Pular tudo" e vai ao app sem o Finish. Seja qual
-    // for a tela final, UMA conversão. Negativo: conversão só no finish() → 0.
-    assert.deepEqual(c2.conv, CONVERSAO, `tela final: ${p2.url()}`);
-    if (!/\/home$/.test(p2.url())) {
-      await Promise.all([p2.waitForURL("**/home"), p2.click('[data-action="finish"]')]);
-      assert.deepEqual(c2.conv, CONVERSAO, "o Finish repetiu a conversão");
-    }
-    await p2.close();
-  });
-
   test(`${tag} "Pular tudo" durante o "Salvando…" do passo 5 espera a conclusão e vai ao /home com UM completed`, async () => {
     // Controle negativo: tirar o busyBegin/busyEnd do completeOnEnter deixa o
     // skipAll mandar o próprio completed por cima do auto-save → 2.
@@ -325,27 +352,6 @@ for (const vp of VIEWPORTS) {
     await page.waitForSelector('[data-role="done-saving"]:not([hidden])');
     await Promise.all([page.waitForURL("**/home"), page.click('[data-action="skip-all"]')]);
     assert.equal(calls.posts.filter((b) => b.completed).length, 1, JSON.stringify(calls.posts));
-    await page.close();
-  });
-
-  test(`${tag} com escrita em voo o wizard fica ocupado e os CTAs apagados; depois voltam`, async () => {
-    // Controle negativo: sem o aria-busy no .onb-card (busyBegin) o "Continuar"
-    // segue com opacidade 1 e clicável enquanto o clique seria engolido.
-    let solta;
-    const { page } = await abrir(vp, { step: 2,
-      saveStatus: (b) => (b.completed ? new Promise((r) => { solta = () => r(500); }) : 200) });
-    const cta = '.onb-step[data-step="2"] [data-action="next"]';
-    const estilo = () => page.$eval(cta, (e) => {
-      const s = getComputedStyle(e);
-      return { op: s.opacity, pe: s.pointerEvents, busy: document.querySelector(".onb-card").getAttribute("aria-busy") };
-    });
-    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null });
-    await page.click('[data-action="skip-all"]');
-    while (!solta) await new Promise((r) => setTimeout(r, 20)); // o POST chegou à rota e está segurado
-    assert.deepEqual(await estilo(), { op: "0.6", pe: "none", busy: "true" });
-    solta();
-    await page.waitForFunction(() => document.querySelector('[data-role="error"]').textContent.includes("Não consegui salvar"));
-    assert.deepEqual(await estilo(), { op: "1", pe: "auto", busy: null }, "falha tem de desfazer o ocupado");
     await page.close();
   });
 

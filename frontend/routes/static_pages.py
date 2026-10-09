@@ -458,7 +458,17 @@ async def serve_como_funciona():
 
 
 @router.get("/precos")
-async def serve_precos():
+def serve_precos(request: Request):
+    """`def` (threadpool): o resolver consulta o banco. Logado grava
+    `viewed_pricing` (topo do funil); anônimo/cookie inválido só serve a página."""
+    from db import record_pricing_viewed
+
+    try:
+        uid = _resolve_page_user_id(request)
+        if uid is not None:
+            record_pricing_viewed(uid)
+    except Exception:  # telemetria nunca derruba a página de venda
+        logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
@@ -466,6 +476,16 @@ async def serve_precos():
 async def serve_lp():
     # Landing de anúncio: VSL obrigatória e um único botão para o quiz (quiz.pigbankai.com).
     return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
+
+
+@router.get("/vsl")
+async def serve_vsl():
+    # A mesma VSL da /lp, depois do XQuiz (a /q sem plano manda pra cá): o botão vai à
+    # /precos. Trocado aqui, e não no JS, para valer também sem JavaScript.
+    resp = await serve_lp()
+    resp.body = resp.body.replace(b'href="https://quiz.pigbankai.com/"', b'href="/precos"')
+    resp.headers["content-length"] = str(len(resp.body))
+    return resp
 
 
 @router.get("/continuar-compra")

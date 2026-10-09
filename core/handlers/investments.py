@@ -269,7 +269,6 @@ def list_investments(user_id: int, intro: str | None = None, rows: list | None =
             f"{_investment_dashboard_link(user_id)}"
         )
 
-    total = 0.0
     lines: list[str] = []
     for r in rows:
         rate_txt = fmt_rate(r.get("rate"), r.get("period"))
@@ -279,14 +278,12 @@ def list_investments(user_id: int, intro: str | None = None, rows: list | None =
             value = float(projected_balance)
         else:
             value = float(r["balance"] or 0)
-        total += value
         name_pretty = _format_inv_name(r["name"])
         rate_part = f" ({rate_txt})" if rate_txt else ""
         lines.append(f"• **{name_pretty}** — {fmt_brl(value)}{rate_part}")
 
     return (
         f"{header}\n\n"
-        f"**{fmt_brl(total)}** no total\n\n"
         + "\n".join(lines)
         + "\n\n"
         + _investment_dashboard_link(user_id)

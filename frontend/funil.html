@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#07121d" />
+<meta name="robots" content="noindex, nofollow" />
+<title>PigBank — Funil</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #07121d; --panel: rgba(10,20,34,.88); --panel-2: rgba(255,255,255,.04);
+  --border: rgba(255,255,255,.08); --text: #edf6ff; --muted: rgba(237,246,255,.6);
+  --soft: rgba(237,246,255,.52); --green: #22c55e; --pink: #FF2D8E; --yellow: #facc15;
+  --red: #f87171;
+}
+body {
+  font-family: "Segoe UI", system-ui, sans-serif; color: var(--text); background: var(--bg);
+  min-height: 100vh; line-height: 1.45;
+}
+.shell { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+h1 { font-size: 24px; }
+.ctl { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button, .btn {
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 12px;
+  padding: 10px 14px; min-height: 40px; font-size: 13px; cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center;
+}
+button:hover, .btn:hover { background: rgba(255,255,255,.08); }
+button:focus-visible, .btn:focus-visible, a:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--pink); border-color: var(--pink); color: var(--bg); font-weight: 700; }
+#status { font-size: 12px; color: var(--muted); }
+#status.err { color: var(--red); }
+.grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+@media (min-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } .wide { grid-column: 1 / -1; } }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 18px; min-width: 0; }
+.card h2 { font-size: 16px; margin-bottom: 4px; }
+.what { font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+.what b { color: var(--text); font-weight: 600; }
+.note { font-size: 12px; color: var(--yellow); margin-top: 10px; }
+.stages { display: flex; flex-direction: column; gap: 10px; }
+.stage-top { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.stage-top b { font-variant-numeric: tabular-nums; }
+.track { height: 12px; border-radius: 6px; background: var(--panel-2); overflow: hidden; margin: 4px 0; }
+.fill { height: 100%; background: var(--pink); border-radius: 6px; min-width: 2px; }
+.rates { font-size: 12px; color: var(--muted); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 4px; }
+.fact { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.fact .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fact .l { font-size: 11px; color: var(--soft); text-transform: uppercase; letter-spacing: .06em; }
+.fact .s { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.sub { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--soft); margin: 16px 0 8px; }
+.tblwrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { overflow-wrap: anywhere; min-width: 0; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); }
+.chip b { font-variant-numeric: tabular-nums; }
+.links { list-style: none; display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 900px) { .links { grid-template-columns: repeat(2, 1fr); } }
+.links a { color: var(--pink); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; min-height: 40px; }
+.links a:hover { text-decoration: underline; }
+.links p { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.banner { font-size: 12.5px; color: var(--yellow); border: 1px solid var(--yellow); border-radius: 12px; padding: 8px 12px; margin-bottom: 12px; }
+.banner.err { color: var(--red); border-color: var(--red); }
+.foot { font-size: 11.5px; color: var(--muted); margin-top: 12px; }
+@media (prefers-reduced-motion: no-preference) { .fill { transition: width .25s ease; } }
+/* Área segura (mesmo padrão do admin-dashboard.html): o app abre esta rota no WebView. */
+@media (max-width: 820px),
+       (max-height: 520px) and (orientation: landscape) and (max-width: 950px) {
+  .shell {
+    padding: calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+             calc(60px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+  }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>PigBank — Funil</h1>
+    <div class="ctl">
+      <span id="status" role="status"></span>
+      <button type="button" id="b7" data-d="7d" aria-pressed="false">7 dias</button>
+      <button type="button" id="b30" data-d="30d" aria-pressed="true">30 dias</button>
+      <button type="button" id="refresh">↻ Atualizar</button>
+      <a class="btn" href="/admin">Monitoramento</a>
+    </div>
+  </header>
+  <main id="main" class="grid"></main>
+</div>
+
+<script>
+(function () {
+  const tokenKey = "finbot_admin_token";
+  let data = null, win = "30d";
+  const seq = {};  // nome -> nº do último pedido; resposta de pedido antigo é descartada
+  const fontes = {};  // nome -> envelope da fonte externa; o seletor 7d/30d reaproveita, sem refazer fetch
+
+  const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const n = (v) => (v == null ? "—" : Number(v).toLocaleString("pt-BR"));
+  const pct = (v) => (v == null ? "—" : (v * 100).toFixed(1).replace(".", ",") + "%");
+  const brl = (v) => (v == null ? "—" : Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }));
+  const hm = (iso) => (iso ? new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }) : "—");
+  const dm = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", timeZone: "America/Sao_Paulo" });
+  };
+  const fact = (l, v, s) => `<div class="fact"><div class="l">${esc(l)}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`;
+  const card = (title, what, body, cls) =>
+    `<section class="card ${cls || ""}"><h2>${esc(title)}</h2><p class="what">${what}</p>${body}</section>`;
+
+  const ETAPA = {
+    cadastros: "Cadastros", viram_precos: "Viram /precos",
+    abriram_checkout: "Abriram o checkout", concluiram: "Concluíram",
+  };
+  const STATUS = { free: "Free", trial: "Em trial", paying: "Pagando", past_due: "Em atraso", canceled: "Cancelado", granted: "Cortesia" };
+
+  function funnel(w) {
+    const cad = w.etapas[0].n;
+    const desde = dm(data.viewed_pricing_desde);
+    let body;
+    if (!cad) {
+      body = '<p class="empty">Nenhum cadastro nesta janela.</p>';
+    } else {
+      body = '<div class="stages">' + w.etapas.map((e) => {
+        const rates = e.id === "cadastros" ? "base do coorte"
+          : `${pct(e.taxa_etapa)} da etapa anterior · ${pct(e.taxa_acum)} dos cadastros`;
+        return `<div><div class="stage-top"><span>${ETAPA[e.id]}</span><b>${n(e.n)}</b></div>
+          <div class="track"><div class="fill" style="width:${Math.max(0, Math.min(100, (e.n / cad) * 100))}%"></div></div>
+          <div class="rates">${rates}</div></div>`;
+      }).join("") + "</div>";
+    }
+    body += '<div class="facts">' +
+      fact("Abandono", n(w.abandono), "abriram o checkout − concluíram") +
+      fact("Expiraram sem concluir", n(w.expiraram_sem_concluir), "não é abandono: o app também expira a sessão ao trocar de plano") +
+      fact("Medido desde", desde || "—", "/precos só é medida a partir desta data") +
+      fact("E-mails que pediram código", n(w.emails_verificacao), "etapa 0, janela de eventos (não é o coorte)") + "</div>";
+    body += '<p class="note">Contas de cortesia e internas entram em “Cadastros”.</p>';
+    if (!w.viram_precos_medido) {
+      body += `<p class="note">${desde ? `O coorte começa antes de ${desde}` : "Ainda não há medição de /precos"}: "Viram /precos" só enxerga quem abriu o checkout, por isso as taxas que passam por ele aparecem como —.</p>`;
+    }
+    body += '<div class="sub">Estado atual do coorte</div><div class="chips">' +
+      Object.keys(STATUS).map((k) => `<span class="chip">${STATUS[k]} <b>${n(w.estado_atual[k])}</b></span>`).join("") + "</div>";
+    return card("1. Cadastro até o plano",
+      "<b>O que é:</b> contas criadas na janela e até onde chegaram (etapas cumulativas: “alcançou pelo menos”). <b>O que não é:</b> visitante anônimo; /precos só conta quem estava logado.",
+      body, "wide");
+  }
+
+  function table(rows, key, label) {
+    return `<div class="tblwrap"><table><thead><tr><th>${label}</th><th>Cadastros</th><th>Viram /precos</th><th>Abriram checkout</th><th>Concluíram</th><th>Conclusão</th></tr></thead><tbody>` +
+      rows.map((r) => `<tr><td>${esc(r[key] === "prospeccao" ? "prospecção" : r[key])}</td><td>${n(r.cadastros)}</td><td>${n(r.viram_precos)}</td><td>${n(r.abriram_checkout)}</td><td>${n(r.concluiram)}</td><td>${pct(r.taxa_conclusao)}</td></tr>`).join("") +
+      "</tbody></table></div>";
+  }
+
+  function channels(w) {
+    return card("1b. Por canal de cadastro",
+      "<b>O que é:</b> o mesmo funil por canal (afiliado, prospecção, quiz, direto; nessa ordem de precedência) e por origem do app. <b>O que não é:</b> perfil ou respostas do quiz: só “veio do quiz”.",
+      table(w.canais, "canal", "Canal") + '<div class="sub">Origem do cadastro</div>' +
+        (w.origens.length ? table(w.origens, "origem", "Origem") : '<p class="empty">Sem cadastros.</p>'), "wide");
+  }
+
+  function simple(title, what, facts) {
+    return card(title, what, '<div class="facts">' + facts.join("") + "</div>");
+  }
+
+  // ── Fontes externas (Stripe e, nos PRs seguintes, GA4/Clarity/Meta) ─────────
+  // Tudo que vem do servidor aqui é dado de fonte externa: texto SEMPRE por esc(), número
+  // por n()/pct()/brl(), e `estado` só entra no HTML depois de passar pela whitelist.
+  const ESTADOS = { ok: 1, nao_configurado: 1, erro: 1, stale: 1 };
+  const FALHA = "Não foi possível consultar esta fonte.";
+  // Mesmo texto de `funil_fontes.MENSAGENS["ocupada"]` (um teste compara os dois): outra
+  // consulta já está em andamento, o que NÃO é falha da fonte.
+  const OCUPADA = "Já há uma consulta em andamento; tente em instantes.";
+
+  function stripeCorpo(x) {
+    const a = x.assinaturas, c = x.cobrancas[win];
+    return '<div class="facts">' +
+      fact("Ativas", n(a.ativas), "agora") + fact("Em trial", n(a.em_trial), "agora") +
+      fact("Em atraso", n(a.em_atraso), "agora") + fact("Canceladas", n(a.canceladas), "histórico total, não da janela") +
+      fact("Outras", n(a.outras), "agora") +
+      fact("MRR", brl(x.mrr), "assinaturas ativas, base mensal") + fact("Ticket médio", brl(x.ticket_medio), "assinaturas ativas") +
+      fact("MRR dos trials", brl(x.mrr_trial_potencial), "potencial, se todos converterem") + "</div>" +
+      `<div class="sub">Cobranças no cartão, últimos ${win === "7d" ? 7 : 30} dias</div><div class="facts">` +
+      fact("Aprovadas", n(c.aprovadas)) + fact("Recusadas", n(c.recusadas)) +
+      fact("Receita líquida", brl(c.receita_liquida), "aprovadas em R$ menos reembolsos") + "</div>" +
+      '<div class="sub">Motivos de recusa</div>' +
+      (c.motivos_recusa.length
+        ? '<div class="chips">' + c.motivos_recusa.map((m) => `<span class="chip">${esc(m.codigo)} <b>${n(m.n)}</b></span>`).join("") + "</div>"
+        : '<p class="empty">Nenhuma recusa na janela.</p>') +
+      '<p class="note">A receita é só do Stripe (cartão): o Pix anual não entra e disputas não são abatidas.</p>' +
+      (x.cobrancas.truncado ? '<p class="note">Mais de 1.000 cobranças em 30 dias: os números de cobrança estão parciais.</p>' : "");
+  }
+
+  const FONTES = {
+    stripe: {
+      rotulo: "Stripe", titulo: "8a. Stripe: assinaturas e cobranças", corpo: stripeCorpo,
+      what: "<b>O que é:</b> assinaturas por status agora e cobranças de cartão da janela, direto da API do Stripe. <b>O que não é:</b> Pix, nem lista de pessoas.",
+    },
+  };
+
+  function fonteCard(nome) {
+    const F = FONTES[nome], d = fontes[nome];
+    let estado = "carregando", corpo = '<p class="empty">Buscando…</p>';
+    if (d && typeof d === "object") {
+      try {  // tudo que depende do payload fica DENTRO do try: exceção vira cartão de erro, nunca "Buscando…"
+        estado = Object.prototype.hasOwnProperty.call(ESTADOS, d.estado) ? d.estado : "erro"; // sem Object.hasOwn: o Safari 14 não tem
+        const foot = () => `<p class="foot">Fonte: ${F.rotulo} · janela ${esc((d.janela || {}).rotulo)} · buscado às ${esc(hm(d.buscado_em))}</p>`;
+        if (estado === "nao_configurado") {
+          corpo = `<p class="empty">Fonte não configurada. Defina ${(Array.isArray(d.falta) ? d.falta : []).map(esc).join(", ")} no Railway.</p>`;
+        } else if (estado === "erro") {
+          corpo = d.mensagem === OCUPADA
+            ? `<div class="banner" role="status">${esc(OCUPADA)}</div>`
+            : `<div class="banner err" role="alert">${esc(d.mensagem || FALHA)}</div>`;
+        } else {
+          corpo = (estado === "stale"
+            ? `<div class="banner" role="alert">${d.mensagem === OCUPADA ? "Atualizando; dado" : "Dado"} de ${esc(hm(d.buscado_em))}${d.mensagem === OCUPADA ? "." : `, a fonte falhou: ${esc(d.mensagem || FALHA)}`}</div>` : "") +
+            F.corpo(d.dados) + foot();
+        }
+      } catch (e) {
+        estado = "erro";
+        corpo = `<div class="banner err" role="alert">${FALHA}</div>`;
+      }
+    }
+    return `<section class="card wide" id="f-${nome}" data-estado="${estado}"><h2>${esc(F.titulo)}</h2><p class="what">${F.what}</p>${corpo}</section>`;
+  }
+
+  function pintaFonte(nome) {
+    const el = document.getElementById("f-" + nome);
+    if (!el) return;
+    try {
+      el.outerHTML = fonteCard(nome);
+    } catch (e) {  // último recurso, só texto fixo: o cartão nunca fica preso em "Buscando…"
+      el.setAttribute("data-estado", "erro");
+      el.innerHTML = "<h2>" + FONTES[nome].titulo + '</h2><div class="banner err" role="alert">' + FALHA + "</div>";
+    }
+  }
+
+  // Cada fonte chega sozinha e troca só o cartão dela. O servidor decide se chama a fonte
+  // (TTL/cota); "Atualizar" nunca força chamada externa.
+  function carregaFontes() {
+    const t = localStorage.getItem(tokenKey);
+    return Promise.allSettled(Object.keys(FONTES).map(async (nome) => {
+      const meu = (seq[nome] = (seq[nome] || 0) + 1);
+      let d;
+      try {
+        const res = await fetch(`/admin/api/funil/fonte/${nome}`, { headers: t ? { Authorization: `Bearer ${t}` } : {}, cache: "no-store" });
+        if (res.status === 401) { window.location.href = "/admin/login"; return; }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        d = await res.json();
+        if (!d || typeof d !== "object") throw new Error("json");
+      } catch (e) {
+        d = { estado: "erro", mensagem: FALHA };
+      }
+      if (meu !== seq[nome]) return;  // chegou fora de ordem: já há um pedido mais novo
+      fontes[nome] = d;
+      pintaFonte(nome);
+    }));
+  }
+
+  function render() {
+    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, d = data.atraso;
+    const html = [
+      funnel(w),
+      channels(w),
+      simple("2. Checkout por sessão",
+        "<b>O que é:</b> tentativas de checkout (sessões), não pessoas. <b>O que não é:</b> “expiradas” não é abandono: também dispara quando o app troca a sessão.",
+        [fact("Pessoas que abriram", n(c.pessoas)), fact("Sessões abertas", n(c.sessoes_abertas)),
+         fact("Sessões concluídas", n(c.sessoes_concluidas), `conversão ${pct(c.conversao)}`),
+         fact("Sessões expiradas", n(c.sessoes_expiradas))]),
+      simple("3. Ativação de quem concluiu o checkout",
+        "<b>O que é:</b> de quem concluiu na janela, quantos já configuraram e usam. <b>Ressalva:</b> “Recomeçar do zero” zera o onboarding, então o número pode cair depois. Lançamento vale de qualquer data.",
+        [fact("Concluíram", n(a.concluiram)),
+         fact("Onboarding concluído", n(a.onboarding), pct(a.concluiram ? a.onboarding / a.concluiram : null)),
+         fact("WhatsApp vinculado", n(a.whatsapp), pct(a.concluiram ? a.whatsapp / a.concluiram : null)),
+         fact("Primeiro lançamento", n(a.lancamento), pct(a.concluiram ? a.lancamento / a.concluiram : null))]),
+      simple("4. Trial",
+        "<b>O que é:</b> quem iniciou trial na janela e onde está hoje. <b>O que não é:</b> conversão final: trial recente ainda está em andamento.",
+        [fact("Iniciaram", n(t.iniciaram)), fact("Hoje em trial", n(t.em_trial)),
+         fact("Hoje pagando", n(t.pagando)), fact("Cancelaram", n(t.cancelaram)),
+         fact("Outros", n(t.outros), "atraso, cortesia ou free")]),
+      simple("5. Pix anual",
+        "<b>O que é:</b> cobranças Pix com QR gerado na janela e o desfecho. <b>O que não é:</b> assinatura no cartão.",
+        [fact("Geradas", n(p.gerados)), fact("Pagas", n(p.pagos), pct(p.taxa_pago)),
+         fact("Expiradas", n(p.expirados)), fact("Canceladas", n(p.cancelados)), fact("Abertas agora", n(p.abertos))]),
+      simple("6. E-book",
+        "<b>O que é:</b> entregas do e-book da /assinar criadas na janela. “Pendente” = ainda sem fechamento.",
+        [fact("Entregas", n(e.entregas)), fact("Enviadas", n(e.enviados)), fact("Não comprou", n(e.nao_comprou)),
+         fact("Estornadas", n(e.estornados)), fact("Pendentes", n(e.pendentes))]),
+      simple("7. Cobrança em atraso agora",
+        "<b>O que é:</b> contas com cobrança falha em aberto neste momento (não depende da janela de 7/30 dias).",
+        [fact("Em atraso", n(d.total)), fact(`Além de ${n(d.carencia_dias)} dias`, n(d.alem_carencia), "fora da carência")]),
+      ...Object.keys(FONTES).map(fonteCard),
+      card("9. Onde olhar o resto",
+        "<b>O que é:</b> atalhos para os painéis externos. Só aparecem os que têm ID configurado aqui.",
+        '<ul class="links">' + data.links.map((l) => {
+          const ext = /^https:\/\//.test(l.url), ok = ext || /^\/[^\/]/.test(l.url);
+          return `<li>${ok ? `<a href="${esc(l.url)}"${ext ? ' target="_blank" rel="noopener noreferrer"' : ""}>${esc(l.painel)}</a>` : esc(l.painel)}<p>${esc(l.olhar)}</p></li>`;
+        }).join("") + "</ul>", "wide"),
+    ];
+    document.getElementById("main").innerHTML = html.join("");
+    const inicio = dm(w.inicio);
+    setStatus(`Coorte desde ${inicio}. Gerado ${new Date(data.gerado_em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`);
+  }
+
+  function setStatus(msg, err) {
+    const s = document.getElementById("status");
+    s.textContent = msg; s.classList.toggle("err", !!err);
+  }
+
+  async function load() {
+    setStatus("Buscando dados…");
+    try {
+      const t = localStorage.getItem(tokenKey);
+      const res = await fetch("/admin/api/funil", { headers: t ? { Authorization: `Bearer ${t}` } : {}, cache: "no-store" });
+      if (res.status === 401) { window.location.href = "/admin/login"; return; }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      data = await res.json();
+      render();
+      carregaFontes();
+    } catch (err) {
+      setStatus("Falha ao carregar o funil (" + err.message + "). Tente atualizar.", true);
+    }
+  }
+
+  document.querySelectorAll("[data-d]").forEach((b) => b.addEventListener("click", () => {
+    win = b.dataset.d;
+    document.querySelectorAll("[data-d]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    if (data) render();
+  }));
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+})();
+</script>
+</body>
+</html>

@@ -2221,6 +2221,22 @@ def init_db():
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
 
+        # ── Cache das fontes externas do painel de funil (`core/funil_fontes.py`) ──
+        # Guarda SÓ agregados já prontos (contagens, taxas, valores somados) de
+        # Stripe/GA4/Clarity/Meta, por fonte — nunca dado de pessoa, por isso NÃO tem
+        # user_id. `chamadas_dia`/`dia_utc` são o contador atômico da cota diária.
+        # Aditivo, sem backfill: linha ausente = nunca consultada.
+        """
+        create table if not exists funil_fontes_cache (
+          fonte text primary key,
+          payload jsonb,
+          buscado_em timestamptz,
+          falha_em timestamptz,
+          dia_utc date,
+          chamadas_dia int not null default 0
+        )
+        """,
+
         # ── Funil de checkout (telemetria durável, fora do log operacional) ──
         # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
         # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
@@ -2237,6 +2253,8 @@ def init_db():
           id bigserial primary key,
           user_id bigint references users(id) on delete set null,
           session_id text,
+          -- só os 2 kinds originais: a lista VIVA (4 kinds) é a do drop+add de
+          -- `checkout_funnel_events_kind_check` mais abaixo.
           kind text not null check (kind in ('started', 'completed')),
           created_at timestamptz not null default now()
         )
@@ -2281,6 +2299,21 @@ def init_db():
         create unique index if not exists uniq_checkout_funnel_sessao_completed
           on checkout_funnel_events (session_id)
           where session_id is not null and kind = 'completed'
+        """,
+        # Telemetria do topo/fim do funil: `viewed_pricing` (GET /precos de
+        # usuário logado, 1 por 24h) e `expired` (webhook
+        # checkout.session.expired). O check inline do create table acima só
+        # conhece os 2 kinds originais: este drop+add é quem vale (a unique
+        # parcial de `completed` não muda). `not valid`: não varre linha legada.
+        """alter table checkout_funnel_events
+             drop constraint if exists checkout_funnel_events_kind_check""",
+        """alter table checkout_funnel_events
+             add constraint checkout_funnel_events_kind_check
+             check (kind in ('started', 'completed', 'viewed_pricing', 'expired'))
+             not valid""",
+        """
+        create index if not exists idx_checkout_funnel_user_kind_created
+          on checkout_funnel_events (user_id, kind, created_at desc)
         """,
 
         # ── Agentes do Piggy (prateleira de jobs proativos) ──────────────────
@@ -2935,7 +2968,13 @@ def init_db():
         # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
         # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
         # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
-        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
+        # `ordem_aba`/`ordem_n` = o último `(aba, n)` de `dispensar`/`reabrir` aplicado: o POST
+        # mais velho da mesma aba, que chega depois, não desfaz o gesto mais novo, enquanto
+        # nenhum gesto de outra aba/aparelho/cliente antigo chegar no meio (limite em
+        # docs/CLAUDE.md, "Ordem dos gestos"; `db/guia.py`). Anuláveis, sem default: null = nenhum gesto com `ordem` ainda.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}',
+          add column if not exists ordem_aba text,
+          add column if not exists ordem_n int""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

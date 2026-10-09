@@ -37,6 +37,13 @@ describe("(auth)/entrar — tela real", () => {
     rotear();
   });
 
+  // Têm KeyboardAvoidingView próprio: o inset automático contaria o teclado duas vezes.
+  it.each(["/entrar", "/criar-conta"])("%s não ajusta o inset do teclado (já tem KeyboardAvoidingView)", async (rota) => {
+    renderRouter("./app", { initialUrl: rota });
+    await waitFor(() => expect(screen).toHavePathname(rota));
+    expect(screen.getByTestId("tela").props.automaticallyAdjustKeyboardInsets).toBe(false);
+  });
+
   it("B1 — enquanto o login não responde: e-mail, senha e 'Esqueci a senha' desativados; Entrar em carregando", async () => {
     const portao = segurar();
     rotear({ "/auth/login": async () => { await portao.promessa; return resposta(200, { user_id: 1, email: "a@x.com", access_token: "x", refresh_token: "y", dashboard_token: "d", expires_in: 900 }); } });

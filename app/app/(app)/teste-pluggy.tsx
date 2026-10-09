@@ -53,7 +53,6 @@ export default function TestePluggy() {
   }, [rodada]));
   return <Screen sobCabecalho><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <Texto variante="secao">Teste Open Finance</Texto>
-    <Texto tom="inkMuted">Diagnóstico da conexão real. Este acesso fica disponível enquanto validamos as novas telas no iPhone.</Texto>
     {erro && <Banner tom="danger" mensagem={erro} />}
     {linhas.map((l, i) => <Texto key={i} variante="legenda">{l}</Texto>)}
     <Button rotulo="Conferir no servidor" onPress={() => setRodada((v) => v + 1)} />

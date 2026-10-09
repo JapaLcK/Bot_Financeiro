@@ -37,7 +37,9 @@ test("celular: o Piggy é o botão do meio e leva à página dele", async () => 
   const r = [await page.locator("#page-title").innerText(), await page.locator('.tabbar a[data-tab="piggy"]').getAttribute("aria-current")];
   await ctx.close();
   assert.deepEqual(abas, ["Resumo", "Gastos", "Piggy", "Metas", "Extrato", "Ajuda"]);
-  assert.deepEqual(r, ["Converse com o Piggy demonstração", "page"]); // no /painel a conversa ainda é de exemplo: o título leva o selo
+  // O selo "demonstração" é por mensagem (a resposta de exemplo leva, a real não): o título não
+  // leva mais. A regra por mensagem é medida em dashboard_v2_chat_investido.test.mjs.
+  assert.deepEqual(r, ["Converse com o Piggy", "page"]);
 });
 
 test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre Ferramentas", async () => {

@@ -38,9 +38,12 @@ def mensais(prefixo, valores, *, ultima=date(2026, 9, 5), **kw) -> list[dict]:
     return out
 
 
-def conta(acc_id, txs, *, tipo="BANK", numero=None, nome="Conta"):
+def conta(acc_id, txs, *, tipo="BANK", numero=None, nome="Conta", saldo="0"):
+    """Saldo 0 em reais por padrão: a conta entra na base sem mudar o número dela
+    (só recorrência de conta na base entra na Previsão). `saldo=None` = saldo ausente."""
+    raw = {"currencyCode": "BRL"} | ({"balance": saldo} if saldo is not None else {})
     return {"provider_account_id": acc_id, "name": nome, "type": tipo,
-            "raw": {"number": numero} if numero else {}, "transactions": txs}
+            "raw": raw | ({"number": numero} if numero else {}), "transactions": txs}
 
 
 def rp(desc, media, txs) -> dict:

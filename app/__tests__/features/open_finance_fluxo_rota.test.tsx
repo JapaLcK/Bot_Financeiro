@@ -1,3 +1,5 @@
+import { StyleSheet } from "react-native";
+import { claro } from "@/ui/tokens";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
@@ -28,6 +30,9 @@ it("conclusão servidor mantém Início e avatar abre Configurações/Teste OF",
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Configurações" })); await drenar(); });
   await waitFor(() => expect(screen).toHavePathname("/configuracoes"));
   expect(screen.getByRole("button", { name: "Teste Open Finance" })).toBeTruthy();
+  // Lista agrupada: sem o subtítulo antigo, e "Sair" vermelho (danger) dentro do próprio grupo.
+  expect(screen.queryByText("Sua conta, do seu jeito")).toBeNull();
+  expect(StyleSheet.flatten(screen.getByText("Sair").props.style).color).toBe(claro.danger);
 });
 it("falha transitória na rechecagem protege dados e oferece recuperação", async () => {
   servidor(p, true); renderRouter("./app", { initialUrl: "/" });

@@ -1,7 +1,7 @@
-import { Keyboard, Platform, ScrollView, Text, TextInput } from "react-native";
+import { Keyboard, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { OPCOES_SHEET, SheetConteudo } from "@/ui/componentes/Sheet";
-import { espaco, raio } from "@/ui/tokens";
+import { espaco } from "@/ui/tokens";
 
 import { renderComAreaSegura } from "./_render";
 
@@ -11,13 +11,13 @@ describe("OPCOES_SHEET", () => {
   // `TS2561` — ver Sheet.tsx), então este teste só precisa afirmar os
   // VALORES de comportamento, não repetir o literal inteiro como se fosse
   // ele quem garantisse a forma do objeto.
-  it("presentation formSheet, detents [0.5, 1], raio do token, sem alça do sistema", () => {
+  it("presentation formSheet, detents [0.5, 1], alça e raio do sistema", () => {
     expect(OPCOES_SHEET).toMatchObject({
       presentation: "formSheet",
       sheetAllowedDetents: [0.5, 1],
-      sheetCornerRadius: raio.lg,
-      sheetGrabberVisible: false,
+      sheetGrabberVisible: true,
     });
+    expect(OPCOES_SHEET).not.toHaveProperty("sheetCornerRadius");
   });
 });
 
@@ -31,15 +31,17 @@ describe("SheetConteudo", () => {
     expect(c.getByText("conteúdo da sheet")).toBeTruthy();
   });
 
-  it("a alça é decorativa: escondida do leitor de tela", () => {
+  it("não desenha alça própria (a do sistema basta): nenhuma View de 36x4", () => {
     const { claro: c } = renderComAreaSegura(
       <SheetConteudo>
         <Text>x</Text>
       </SheetConteudo>,
     );
-    const alca = c.getByTestId("sheet-conteudo").props.children[0];
-    expect(alca.props.accessibilityElementsHidden).toBe(true);
-    expect(alca.props.importantForAccessibility).toBe("no-hide-descendants");
+    const alcas = c.UNSAFE_getAllByType(View).filter((v) => {
+      const e = StyleSheet.flatten(v.props.style);
+      return e?.width === 36 && e?.height === 4;
+    });
+    expect(alcas).toHaveLength(0);
   });
 
   // O Jest não mede layout nativo; isto trava só o contrato de estrutura. O
@@ -56,8 +58,7 @@ describe("SheetConteudo", () => {
     expect(raiz.props.keyboardShouldPersistTaps).toBe("handled");
     // Sem isto o teclado cobre o campo do código na sheet do MFA (iPhone real).
     expect(raiz.props.automaticallyAdjustKeyboardInsets).toBe(true);
-    expect(raiz.props.contentContainerStyle).toMatchObject({ paddingHorizontal: espaco.lg });
-    expect(raiz.props.children[0].props.accessibilityElementsHidden).toBe(true);
+    expect(raiz.props.contentContainerStyle).toMatchObject({ paddingHorizontal: espaco.lg, paddingTop: espaco.xl });
   });
 
   // O Jest não tem teclado nem layout: isto trava só o contrato. No

@@ -123,10 +123,12 @@ def test_apagar_pendente_enquanto_confirma_nao_deadlocka(uid_pro, ia_fora, monke
 
 def test_ligou_enquanto_o_apagar_espera_o_lock_da_linha(uid_pro, ia_fora):
     """Espera REAL no `for update` de X: outra transação liga X (`match_launch_id`; a FK
-    toma FOR KEY SHARE em X) e segura aberta. O apagar (carteira pura, sem lock de
-    `accounts`) bloqueia; só então a outra commita. O recheck em statement separado vê a
-    ligação → `mudou_durante`. Com as subqueries dentro do `for update`, o snapshot é o de
-    antes da espera: não vê a ligação e apaga X sem o lock de `accounts`."""
+    toma FOR KEY SHARE em X) e segura aberta. O apagar bloqueia; só então a outra commita.
+
+    Todo apagar comum toma `_lock_user` ANTES da linha (só o pagamento de fatura não), então
+    a corrida "ligou entre o preview e o lock" não existe mais: o apagar já tem o mutex e
+    conclui sob ele, sem `mudou_durante`. O recheck em statement separado segue valendo para
+    o que decide DEPOIS da espera (`ligado`/`fundido`); a pendência (`match`) cai com X pela FK."""
     conexao = conecta_banco(uid_pro, "1000.00")
     manda(uid_pro, "gastei 50 no mercado em dinheiro")
     x = ultimo_launch(uid_pro)
@@ -157,8 +159,7 @@ def test_ligou_enquanto_o_apagar_espera_o_lock_da_linha(uid_pro, ia_fora):
     fio.join(60)
     assert not fio.is_alive(), f"travou: {saida}"
 
-    assert isinstance(saida["delete"], LaunchUnsafeRollback), saida
-    assert saida["delete"].motivo == "mudou_durante"
-    assert _q("select 1 from launches where id=%s", (x,))
-    assert saldo_bruto(uid_pro) == antes
-    assert _estado(of_tx)["match_launch_id"] == x
+    assert saida["delete"] is None, saida
+    assert not _q("select 1 from launches where id=%s", (x,))
+    assert _estado(of_tx)["match_launch_id"] is None
+    assert saldo_bruto(uid_pro) == soma_delta_conta(uid_pro) == antes + 50

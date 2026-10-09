@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v2 import assinaturas, categorias, contas, erros, eventos, guia, lancamentos, me, perfil, previsao, resumo_mes
+from api.v2 import assinaturas, categorias, contas, erros, eventos, guia, investido, lancamentos, me, perfil, previsao, resumo_mes
 
 
 class _AppV2(FastAPI):
@@ -31,7 +31,7 @@ def criar_app(prefixo: str, *, com_eventos: bool = True) -> FastAPI:
     sub.add_exception_handler(RequestValidationError, erros.validacao_erro)
     sub.add_exception_handler(Exception, erros.erro_interno)
     for modulo in (me, eventos, perfil, contas, assinaturas, resumo_mes, lancamentos,
-                   categorias, guia, previsao):
+                   categorias, guia, previsao, investido):
         if modulo is not eventos or com_eventos:
             sub.include_router(modulo.router)
     return sub

@@ -80,9 +80,6 @@ export default function Seguranca() {
           </View>
         ) : (
           <View style={{ gap: espaco.md }}>
-            <Texto variante="corpo" tom="inkMuted">
-              Adicione uma camada extra de proteção com Google Authenticator, Authy ou similar.
-            </Texto>
             <Button rotulo="Ativar" onPress={() => router.push("/mfa-ativar")} />
           </View>
         ))}

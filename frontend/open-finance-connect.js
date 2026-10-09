@@ -577,10 +577,8 @@
       includeSandbox: Boolean(data.includeSandbox),
       connectorTypes: connectorTypes,
       selectedConnectorId: (selected && selected.id) || undefined,
-      // INVESTMENTS incluído: o sync lê /investments pra achar a Caixinha
-      // (FIXED_INCOME/CDB). Precisa casar com PLUGGY_PRODUCTS do connect-token,
-      // senão o produto não é coletado.
-      products: ["ACCOUNTS", "TRANSACTIONS", "CREDIT_CARDS", "INVESTMENTS"],
+      // A mesma lista que foi no connect token (pluggy_products(), CLAUDE.md §0.7).
+      products: data.products || undefined,
       language: "pt",
       theme: "dark",
       onSuccess: async function (itemData) {

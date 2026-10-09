@@ -69,7 +69,7 @@ cobrança; resolver o que for deles **antes** de começar.
 | `OF_CONSOLIDATED_BALANCE_ENABLED` | F9, G6 | registrar se está ausente/ligado (padrão) ou em `0`. Em `0`, vale a allowlist: env ausente usa uma lista **fixa no código**, e env definida substitui essa lista (`OF_CONSOLIDATED_BETA_EMAILS` / `_USER_IDS`); a comparação de e-mail é exata, então o alias `+pl01` não entra por semelhança. Registrar só se a conta de teste está ou não na lista | ver F9 e G6 | `plan_service.consolidated_balance_enabled` |
 | `STRIPE_SECRET_KEY` | I | definida (modo live) | 503 no checkout e no webhook | `finance_bot_websocket_custom.py` |
 | `STRIPE_PRICE_ID_PRO_MENSAL` (Plus mensal; ou o legado `STRIPE_PRICE_ID_PRO`) e `STRIPE_PRICE_ID_ESSENCIAL_MENSAL` | I1; I2, I3 | definidos | botão indisponível, 503; sem o preço do Essencial, o agendamento também não aparece | idem |
-| `STRIPE_WEBHOOK_SECRET` e endpoint `/billing/webhook` em live, assinando `checkout.session.completed`, `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.trial_will_end`, `customer.subscription.deleted` | I1, I4 | definidos e assinados | 400 e o plano não muda, sem aviso na tela | idem |
+| `STRIPE_WEBHOOK_SECRET` e endpoint `/billing/webhook` em live, assinando `checkout.session.completed`, `checkout.session.expired` (só telemetria do funil), `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.trial_will_end`, `customer.subscription.deleted` | I1, I4 | definidos e assinados | 400 e o plano não muda, sem aviso na tela | idem |
 | Customer Portal da Stripe (live) | I4 | configuração padrão salva, com cancelamento **no fim do período** | sem configuração, `/conta` dá 500; com cancelamento imediato, o acesso cai na hora | Stripe |
 | `PLANS_TRIAL_DAYS` | I1 | registrar o **valor** (padrão 15). No modo v2 é esta a variável; `PRO_TRIAL_DAYS` só vale no legado | trial de outra duração | `plan_service.trial_days_total()` |
 | `ADMIN_DASHBOARD_PASSWORD_HASH` | P6, I0 | definida (produção não aceita senha em texto) | painel admin responde 503 | `core/admin_dashboard.py` |
@@ -281,6 +281,14 @@ E3 é o caso que o #518 prometeu e só produção prova: a preferência continua
 gravada como ligada, e o job tem de recusar pelo plano. Ordem das seções,
 portanto: fazer S1–S4 até 27/09, voltar a S2 para E1, e só descer para S5
 antes de 05/10.
+
+PL-05 mudou o **conteúdo** do texto livre do semanal (pedido manual e Discord): agora traz
+Receitas, Despesas, "Resultado da semana" (receitas - despesas), maior categoria, comparação
+com a semana anterior (só Plus+), atualização dos bancos e "Saldo atual nas contas" em linhas
+separadas; os rótulos "Gastos da semana"/"Receitas da semana" viram "Despesas"/"Receitas". O
+**template do WhatsApp (envio automático) é o mesmo**: 5 variáveis, mesmo dia, hora e claim.
+Os valores de E1/E3 seguem os do roteiro; só o `lancamentos` pode cair se a semana teve
+transferência interna (antes contava toda linha).
 
 | caso | observado (horário de chegada, conteúdo resumido) | resultado | PR |
 |---|---|---|---|

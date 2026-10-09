@@ -453,8 +453,35 @@ verificar; corrija o que procede, responda na thread, peça `@codex review` de n
 repita até o Codex liberar. **Pode mergear** quando, no head atual, o Codex liberou (👍
 ou "Didn't find any major issues") e todos os checks estão verdes, sem thread aberta.
 Se algo travar (Codex não responde, CI vermelho que não é seu, conflito que você não
-resolve), não force: avise o dono. Depois do merge, avise o dono e apague a branch pelas
-regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR de outra pessoa.
+resolve), não force: avise o dono. Depois do merge, **resuma o que foi feito**: um
+comentário no próprio PR mergeado (`gh pr comment`) com o que mudou, as provas medidas, o
+que ficou fora do escopo e os limites declarados, e o mesmo resumo ao dono. Em seguida
+apague a branch pelas regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR
+de outra pessoa.
+
+**Acompanhar é trabalho seu, não do dono.** Nunca termine uma resposta com "quando
+quiser, mande olhar o CI", "me avise quando..." ou equivalente: o dono não é quem
+confere o CI. Logo depois de abrir o PR, ligue o monitor do app
+(`ccd_pr set_monitor` com `auto_fix` e a url do PR), que acorda a sessão em CI vermelho,
+conflito e comentário de revisão, e leia o estado com `ccd_pr get_status` (nada de
+polling por `gh`, `/loop` ou cron). Cada vez que a sessão acordar, ou o dono falar com
+você, leia o CI **e** o parecer do Codex **no head atual** antes de responder, e aja:
+corrija, resolva conflito com a `main`, responda a thread, peça `@codex review`, mergeie
+quando as condições acima forem cumpridas. **CI verde não acorda a sessão** (o monitor só
+avisa de CI vermelho, conflito e comentário): se o Codex já liberou o head atual, sem thread
+aberta, e só faltam checks, espere o CI terminar na própria sessão, com um único
+`gh pr checks <PR> --watch --fail-fast` em segundo plano (ele acompanha todos os checks do
+PR, de todos os workflows — `Tests`, `App` e os que vierem —, e o término do comando acorda a
+sessão). Antes de mergear, confirme com `gh pr view <PR> --json headRefOid` que o head é o
+mesmo que o Codex liberou e que `ccd_pr get_status` mostra todos os checks verdes. Nada de
+laço de `sleep` nem de polling repetido. O
+auto-merge do GitHub está desligado no repositório (`ccd_pr set_auto_merge` é recusado):
+não tente ligá-lo, é configuração do dono. Push novo exige novo `@codex review`, e o merge
+só vale com o Codex liberado no head atual. Se o CI falhar, trate como CI vermelho.
+Terminado o merge, faça o resumo e a limpeza da branch na mesma sessão. Só encerre o turno
+sem merge se estiver travado (os casos acima, ou o monitor não pôde ser ligado); aí diga o
+que trava e o que falta, em vez de entregar a espera ao dono. PR com conflito com a `main`
+não roda CI: um "sem checks" em PR `CONFLICTING` quer dizer conflito, não CI pendente.
 
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;

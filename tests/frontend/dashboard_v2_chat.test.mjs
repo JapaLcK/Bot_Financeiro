@@ -211,8 +211,8 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
     vistos[pergunta] = [await page.locator(".chat > .msg-piggy .msg-text").textContent(), erros.length];
     await ctx.close();
   }
-  // "fim-de-semana" não está entre as sugestões: pela faixa, com a sorte na faixa [12, 13) de 16.
-  const { ctx, page, erros } = await abrir({ sorte: 12.5 / 16 });
+  // "fim-de-semana" não está entre as sugestões: pela faixa, com a sorte na faixa [13, 14) de 17.
+  const { ctx, page, erros } = await abrir({ sorte: 13.5 / 17 });
   const chave = await page.locator(".piggy-band").getAttribute("data-band");
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
@@ -271,9 +271,9 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
   assert.match(await pela("dividas", "volta a caber"), /acaba em março de 2027/);
   assert.match(await pela("investir", "reserva de emergência"), /^Sua reserva cobre 3,3 meses .* já passou do mínimo/);
   assert.match(await pela("dividas", "economizar este mês"), /^O que mais subiu foi Delivery/);
-  // comuns fora das sugestões: pela faixa (3 insights × 2 + 10 comuns × 1 = 16)
-  assert.match(await faixa(11.5 / 16, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);
-  assert.match(await faixa(14.5 / 16, "resumo"), /^1\. Entraram .*2\. O que mais pesa .*3\. No ritmo atual/);
+  // comuns fora das sugestões: pela faixa (3 insights × 2 + 11 comuns × 1 = 17)
+  assert.match(await faixa(12.5 / 17, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);
+  assert.match(await faixa(15.5 / 17, "resumo"), /^1\. Entraram .*2\. O que mais pesa .*3\. No ritmo atual/);
 });
 
 // 3ª rodada do Codex no #584: o critério "o texto responde literalmente ao que foi
@@ -296,11 +296,11 @@ test("insights e as perguntas restantes respondem o que pediram (e com o mesmo n
     await ctx.close();
     return t;
   };
-  // padrão: 3 insights (peso 2) nas faixas [0,2), [2,4), [4,6); "normal" é a 5ª comum, [10,11)
-  const [k1, rise] = await pelaFaixa(1 / 16);
-  const [k2, trend] = await pelaFaixa(3 / 16);
-  const [k3, next] = await pelaFaixa(5 / 16);
-  const [k4, normal] = await pelaFaixa(10.5 / 16);
+  // padrão: 3 insights (peso 2) nas faixas [0,2), [2,4), [4,6); "normal" é a 5ª comum, [10,11) de 17
+  const [k1, rise] = await pelaFaixa(1 / 17);
+  const [k2, trend] = await pelaFaixa(3 / 17);
+  const [k3, next] = await pelaFaixa(5 / 17);
+  const [k4, normal] = await pelaFaixa(10.5 / 17);
   assert.deepEqual([k1, k2, k3, k4], ["insight-rise", "insight-trend", "insight-next", "normal"]);
   assert.match(rise, /^Subiu porque você pediu mais vezes: 7 contra 6 em agosto/);
   assert.match(trend, /cerca de R\$ 866 em 90 dias: R\$ 665 por mês a menos/); // o "Piggy notou" diz R$ 665
@@ -315,6 +315,9 @@ test("as próximas perguntas também respondem o que pedem (investir, maiores ga
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const texto = async () => page.locator(".chat > .msg-piggy").last().locator(".msg-text").textContent();
+  // Os atalhos do texto livre trocaram os investimentos de exemplo pelo total real
+  // ("Quanto eu tenho investido?"): o caminho até "Quanto sobra pra investir?" passa pelas metas.
+  await seguir(page, "Quanto falta pras minhas metas?");
   await seguir(page, "Como estão meus investimentos?");
   await seguir(page, "Quanto sobra pra investir?");
   const investir = await texto();

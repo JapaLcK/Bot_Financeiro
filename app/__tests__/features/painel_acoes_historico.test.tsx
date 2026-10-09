@@ -37,27 +37,47 @@ it("cancelar marca de assinatura por refresh libera botões e permite retry real
  expect(posts).toHaveLength(2); expect(JSON.parse(posts[1]![1].body)).toEqual({ chave: "netflix", status: "ignorar" });
  expect(screen.queryByText("Não conseguimos carregar agora. Tente novamente.")).toBeNull();
 });
-it("calendário apresenta entradas e saídas completas do dia, com privacidade e drilldown", async () => {
+it("Dia a dia: uma linha por dia, mais recente primeiro, 7 visíveis, com privacidade e drilldown", async () => {
  const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/mes-detalhes" ? resposta(200, { ...fixture["/api/app/mes-detalhes"], dias: [{ dia: "2026-10-01", entrou: "7200.00", saiu: "0.00" }, { dia: "2026-09-01", entrou: "10.00", saiu: "4.00" }] }) : impl(url, req));
- const r = renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByRole("button", { name: "01/10/2026" })).toBeTruthy());
- expect(screen.getByLabelText("mais 7200 reais")).toBeTruthy();
+ const dias = [{ dia: "2025-10-03", entrou: "0.00", saiu: "5.00" }, { dia: "2026-09-01", entrou: "10.00", saiu: "4.00" }, ...[2, 3, 4, 5, 6, 7, 8].map((n) => ({ dia: `2026-09-0${n}`, entrou: "0.00", saiu: "1.00" })), { dia: "2026-10-01", entrou: "7200.00", saiu: "0.00" }];
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/mes-detalhes" ? resposta(200, { ...fixture["/api/app/mes-detalhes"], dias }) : impl(url, req));
+ const r = renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByTestId("calendario-dia-2026-10-01")).toBeTruthy());
+ const ordem = () => screen.getAllByTestId(/^calendario-dia-/).map((n) => String(n.props.testID).slice("calendario-dia-".length));
+ expect(ordem()).toEqual(["2026-10-01", "2026-09-08", "2026-09-07", "2026-09-06", "2026-09-05", "2026-09-04", "2026-09-03"]);
  const salario = within(screen.getByTestId("calendario-dia-2026-10-01"));
- expect(salario.getByText("Entrou")).toBeTruthy(); expect(salario.getByText("Saiu")).toBeTruthy(); expect(salario.getByLabelText("mais 7200 reais")).toBeTruthy(); expect(salario.getByLabelText("zero reais")).toBeTruthy();
- const antigo = within(screen.getByTestId("calendario-dia-2026-09-01")); expect(antigo.getByLabelText("mais 10 reais")).toBeTruthy(); expect(antigo.getByLabelText("menos 4 reais")).toBeTruthy();
+ expect(salario.getByText("01/10")).toBeTruthy(); expect(salario.getByLabelText("mais 7200 reais")).toBeTruthy();
+ // Lado zerado não aparece ("R$ 0,00" era ruído); só saída fica só com o "menos".
+ expect(salario.queryByLabelText("zero reais")).toBeNull(); expect(salario.queryByLabelText(/^menos/)).toBeNull();
+ const soSaida = within(screen.getByTestId("calendario-dia-2026-09-08")); expect(soSaida.getByLabelText("menos 1 real")).toBeTruthy(); expect(soSaida.queryByLabelText(/^mais|zero reais/)).toBeNull();
+ expect(salario.queryByText("Entrou")).toBeNull(); expect(salario.queryByText("Saiu")).toBeNull();
+ await apertar("Mostrar todos os dias (10)"); expect(ordem().slice(7)).toEqual(["2026-09-02", "2026-09-01", "2025-10-03"]);
+ // Dia de outro ano leva o ano: a compra parcelada conserva o dia original e "03/10" seria ambíguo.
+ expect(within(screen.getByTestId("calendario-dia-2025-10-03")).getByText("03/10/25")).toBeTruthy();
+ const antigo = within(screen.getByTestId("calendario-dia-2026-09-01")); expect(antigo.getByText("01/09")).toBeTruthy(); expect(antigo.getByLabelText("mais 10 reais")).toBeTruthy(); expect(antigo.getByLabelText("menos 4 reais")).toBeTruthy();
  await apertar("Ocultar valores"); expect(salario.queryByLabelText("mais 7200 reais")).toBeNull(); expect(antigo.queryByLabelText("menos 4 reais")).toBeNull();
- await apertar("Mostrar valores"); await apertar("01/09/2026"); expect(screen).toHavePathname("/extrato"); expect(r.getSearchParams().dia).toBe("2026-09-01");
+ await apertar("Mostrar valores"); await apertar("Mostrar menos"); expect(ordem()).toHaveLength(7);
+ await apertar("Mostrar todos os dias (10)"); await act(async () => { fireEvent.press(screen.getByTestId("calendario-dia-2026-09-01")); await drenar(); });
+ expect(screen).toHavePathname("/extrato"); expect(r.getSearchParams().dia).toBe("2026-09-01");
+});
+it("Patrimônio: histórico mostra os 7 dias mais recentes e abre o resto pelo mesmo botão do Dia a dia", async () => {
+ const impl = fetchFalso.getMockImplementation()!, pat = fixture["/api/app/patrimonio"];
+ const historico = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => ({ ...pat.historico[0]!, dia: `2026-09-0${n}`, total: `${n}00.00` }));
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/patrimonio" ? resposta(200, { ...pat, historico }) : impl(url, req));
+ renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("09/09/2026")).toBeTruthy());
+ expect(screen.getByText("03/09/2026")).toBeTruthy(); expect(screen.queryByText("02/09/2026")).toBeNull(); expect(screen.queryByText("01/09/2026")).toBeNull();
+ await apertar("Mostrar todos os dias (9)"); expect(screen.getByText("01/09/2026")).toBeTruthy();
+ await apertar("Mostrar menos"); expect(screen.queryByText("01/09/2026")).toBeNull();
 });
 it.each([13, 25])("corte do servidor inclui o mês parcial mais antigo de %s meses e exclui o anterior", async (quantidade) => {
  const meses = mesesAnteriores(mesAtual(), quantidade + 1), antigo = meses[quantidade - 1]!; corte = `${antigo}-07`;
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: nomeMes(mesAtual()).slice(0, 3) })).toBeTruthy()); await apertar(nomeMes(mesAtual()).slice(0, 3));
  expect(screen.getByRole("button", { name: nomeMes(antigo) })).toBeTruthy(); expect(screen.queryByRole("button", { name: nomeMes(meses[quantidade]!) })).toBeNull();
- expect(screen.getByText(`Histórico permitido desde 07/${antigo.slice(5)}/${antigo.slice(0, 4)}.`)).toBeTruthy();
+ expect(screen.getByText(`Histórico desde 07/${antigo.slice(5)}/${antigo.slice(0, 4)}`)).toBeTruthy(); expect(screen.queryByTestId("painel-historico-expandir")).toBeNull();
  await apertar(nomeMes(antigo)); expect(fetchFalso.mock.calls.some(([url]) => new URL(String(url)).pathname === "/api/app/resumo-do-mes" && new URL(String(url)).searchParams.get("mes") === antigo)).toBe(true);
 });
-it.each([null, undefined])("histórico sem cutoff %s explica o contrato e permite ampliar além de 12 meses", async (valor) => {
+it.each([null, undefined])("histórico sem cutoff %s não mostra corte e permite ampliar além de 12 meses", async (valor) => {
  corte = valor; renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: nomeMes(mesAtual()).slice(0, 3) })).toBeTruthy()); await apertar(nomeMes(mesAtual()).slice(0, 3));
- expect(screen.getByText(valor === null ? "Histórico sem limite de plano." : "O início do histórico não foi informado. Seu acesso será conferido ao carregar cada mês.")).toBeTruthy();
+ expect(screen.queryByTestId("painel-historico-escopo")).toBeNull(); expect(screen.queryByRole("button", { name: nomeMes(mesesAnteriores(mesAtual(), 13)[12]!) })).toBeNull();
  await apertar("Mostrar meses anteriores"); await apertar("Mostrar meses anteriores"); const antigo = mesesAnteriores(mesAtual(), 25)[24]!;
  expect(screen.getByRole("button", { name: nomeMes(antigo) })).toBeTruthy(); expect(screen.getByRole("button", { name: "Mostrar meses anteriores" })).toBeEnabled(); await apertar(nomeMes(antigo));
  expect(fetchFalso.mock.calls.some(([url]) => new URL(String(url)).pathname === "/api/app/resumo-do-mes" && new URL(String(url)).searchParams.get("mes") === antigo)).toBe(true);
@@ -86,7 +106,7 @@ it("revalidação com corte mais curto ajusta o mês antes de qualquer leitura m
  await appVai("background"); await appVai("active"); await waitFor(() => expect(screen.getByRole("button", { name: nomeMes(novo).slice(0, 3) })).toBeTruthy()); await act(drenar);
  const mensais = fetchFalso.mock.calls.slice(antes).map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/resumo-do-mes" || u.pathname === "/api/app/mes-detalhes");
  expect(mensais).toHaveLength(2); expect(mensais.every((u) => u.searchParams.get("mes") === novo)).toBe(true);
- await apertar(nomeMes(novo).slice(0, 3)); expect(screen.getByRole("button", { name: nomeMes(novo) + " · selecionado" })).toBeTruthy(); expect(screen.queryByRole("button", { name: nomeMes(antigo) })).toBeNull();
+ await apertar(nomeMes(novo).slice(0, 3)); expect(screen.getByRole("button", { name: nomeMes(novo), selected: true })).toBeTruthy(); expect(screen.queryByRole("button", { name: nomeMes(antigo) })).toBeNull();
 });
 it("nova UID começa no mês atual e não herda seleção inacessível da conta anterior", async () => {
  const meses = mesesAnteriores(mesAtual(), 25), antigo = meses[24]!; corte = `${antigo}-07`; const impl = fetchFalso.getMockImplementation()!;

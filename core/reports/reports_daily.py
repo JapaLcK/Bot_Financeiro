@@ -10,6 +10,9 @@ from datetime import time, timedelta, date
 from discord.ext import tasks
 from core.observability import get_logger
 from .formatting import _fmt_brl, finish_report
+# O resumo semanal mora em weekly.py (teto de 350 linhas); reexportado: wa_app, o laço do
+# Discord e os testes o procuram aqui.
+from .weekly import build_weekly_report_data, build_weekly_report_summary, build_weekly_report_text  # noqa: F401
 
 logger = get_logger(__name__)
 
@@ -179,7 +182,8 @@ def _build_period_report_summary(user_id: int, start_date: date, end_date: date,
     saldo = _saldo_atual(user_id)
 
     launches = get_launches_by_period(user_id, start_date, end_date) or []
-    # Mensal: a regra única do mês (db/resumo_mes.py, Q18); o semanal fica na antiga, sem cartão.
+    # Mensal: a regra única do mês (db/resumo_mes.py, Q18). Quem não é mensal cai na regra antiga, sem cartão
+    # (o semanal não passa mais por aqui: tem o próprio builder em weekly.py).
     t = mensal and resumo_mes.totais_do_mes(user_id, start_date)
     summary = ({"despesa": t["saiu"], "receita": t["entrou"]} if t
                else get_summary_by_period(user_id, start_date, end_date))
@@ -194,23 +198,6 @@ def _build_period_report_summary(user_id: int, start_date: date, end_date: date,
     }
 
 
-def build_weekly_report_summary(user_id: int, closed: bool = False) -> dict[str, str]:
-    """Resumo semanal.
-
-    closed=False (sob demanda): semana atual, de segunda até hoje.
-    closed=True  (agendado na segunda): semana anterior completa (seg → dom).
-    """
-    today = now_tz().date()
-    this_monday = today - timedelta(days=today.weekday())
-    if closed:
-        start = this_monday - timedelta(days=7)   # segunda da semana passada
-        end   = this_monday - timedelta(days=1)   # domingo da semana passada
-    else:
-        start = this_monday
-        end   = today
-    return _build_period_report_summary(user_id, start, end)
-
-
 def build_monthly_report_summary(user_id: int, closed: bool = False) -> dict[str, str]:
     """Resumo mensal.
 
@@ -220,21 +207,6 @@ def build_monthly_report_summary(user_id: int, closed: bool = False) -> dict[str
     today = now_tz().date()
     start, fim = resumo_mes.mes_de(today.replace(day=1) - timedelta(days=1) if closed else today)
     return _build_period_report_summary(user_id, start, fim - timedelta(days=1), mensal=True)
-
-
-def build_weekly_report_text(user_id: int, closed: bool = False) -> str:
-    summary = build_weekly_report_summary(user_id, closed=closed)
-
-    lines = []
-    lines.append("📊 *Resumo semanal do Bot Financeiro*")
-    lines.append(f"📅 Período: {summary['start']} a {summary['end']}")
-    lines.append("")
-    lines.append(f"🏦 Saldo atual: {summary['saldo']}")
-    lines.append(f"📉 Gastos da semana: {summary['gastos']}")
-    lines.append(f"📈 Receitas da semana: {summary['receita']}")
-    lines.append(f"📊 Lançamentos da semana: {summary['lancamentos']}")
-
-    return finish_report(user_id, lines)
 
 
 def build_monthly_report_text(user_id: int, closed: bool = False) -> str:
@@ -321,7 +293,10 @@ async def _periodic_reports_discord(bot):
         messages = []
         from core.services.plan_service import plan_gate_ok
         if uid in weekly_users and plan_gate_ok(uid, "weekly_report"):
-            messages.append(build_weekly_report_text(uid, closed=True))
+            try:
+                messages.append(build_weekly_report_text(uid, closed=True))
+            except Exception:  # um usuário com build quebrado não derruba o laço dos outros
+                logger.exception("Falha ao montar o resumo semanal do Discord uid=%s", uid)
         if uid in monthly_users:
             messages.append(build_monthly_report_text(uid, closed=True))
 

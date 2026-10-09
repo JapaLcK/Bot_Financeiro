@@ -315,6 +315,8 @@ from .agents import (
 from .checkout_funnel import (
     record_checkout_started,
     record_checkout_completed,
+    record_pricing_viewed,
+    record_checkout_expired,
 )
 from .reports import (
     set_daily_report_enabled,
@@ -329,6 +331,7 @@ from .reports import (
     mark_daily_report_sent,
     claim_daily_report_send,
     claim_weekly_report_send,
+    release_weekly_report_claim,
     claim_monthly_report_send,
     was_daily_report_sent_today,
     get_last_ofx_import_end_date,
@@ -558,7 +561,7 @@ __all__ = [
     "list_users_with_daily_report_enabled", "list_identities_by_user",
     "list_users_with_weekly_report_enabled", "list_users_with_monthly_report_enabled",
     "mark_daily_report_sent", "claim_daily_report_send", "was_daily_report_sent_today",
-    "claim_weekly_report_send", "claim_monthly_report_send",
+    "claim_weekly_report_send", "release_weekly_report_claim", "claim_monthly_report_send",
     "get_last_ofx_import_end_date",
     "register_auth_user", "login_auth_user", "get_auth_user", "get_password_changed_at",
     "create_dashboard_session", "consume_dashboard_session",
@@ -566,6 +569,7 @@ __all__ = [
     "get_user_by_stripe_customer", "set_stripe_customer", "set_payment_status",
     "get_onboarding_state", "needs_onboarding", "set_onboarding_step", "mark_onboarding_completed",
     "record_checkout_started", "record_checkout_completed",
+    "record_pricing_viewed", "record_checkout_expired",
     "create_email_verification", "AccountAlreadyExistsError", "confirm_email_verification", "attempt_whatsapp_phone_link",
     "create_password_reset_token", "consume_password_reset_token",
     "update_last_activity", "get_users_for_engagement",

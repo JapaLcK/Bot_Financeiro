@@ -115,6 +115,7 @@ TABELA = {
     ("GET", "/api/v2/perfil"): (B, "usuario_atual"), ("PUT", "/api/v2/perfil"): (B, "usuario_atual"),
     ("GET", "/api/v2/contas"): (B, "usuario_atual"),
     ("GET", "/api/v2/previsao"): (B, "usuario_atual"),
+    ("GET", "/api/v2/investido"): (B, "usuario_atual"),
     ("GET", "/api/v2/resumo-do-mes"): (B, "usuario_atual"),
     ("GET", "/api/v2/lancamentos"): (B, "usuario_atual"), ("GET", "/api/v2/categorias"): (B, "usuario_atual"),
     ("POST", "/api/v2/lancamentos/carteira"): (B, "usuario_atual"),
@@ -129,6 +130,7 @@ TABELA = {
     ("GET", "/api/app/perfil"): (B, "usuario_do_app"), ("PUT", "/api/app/perfil"): (B, "usuario_do_app"),
     ("GET", "/api/app/contas"): (B, "usuario_do_app"),
     ("GET", "/api/app/previsao"): (B, "usuario_do_app"),
+    ("GET", "/api/app/investido"): (B, "usuario_do_app"),
     ("GET", "/api/app/resumo-do-mes"): (B, "usuario_do_app"),
     ("GET", "/api/app/lancamentos"): (B, "usuario_do_app"),
     ("GET", "/api/app/categorias"): (B, "usuario_do_app"),
@@ -152,7 +154,7 @@ TABELA = {
 _HTML_PUBLICO = (
     "/", "/login", "/cadastro", "/q", "/recuperar-senha", "/suporte/contato", "/privacy",
     "/termos", "/blog", "/whatsapp", "/funcionalidades", "/comandos", "/comandos-app",
-    "/agents", "/como-funciona", "/precos", "/lp", "/continuar-compra", "/assinar", "/suporte",
+    "/agents", "/como-funciona", "/precos", "/lp", "/vsl", "/continuar-compra", "/assinar", "/suporte",
     "/reset-password", "/redefinir-senha", "/completar-cadastro",
     "/.well-known/apple-app-site-association",
 )

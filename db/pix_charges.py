@@ -322,7 +322,8 @@ def buscar_por_asaas_payment_id(asaas_payment_id: str) -> dict | None:
 
 def _buscar_por(coluna: str, valor: str) -> dict | None:
     # `coluna` NUNCA vem de fora: só as duas funções acima chamam, com literal.
-    assert coluna in ("external_reference", "asaas_payment_id")
+    if coluna not in ("external_reference", "asaas_payment_id"):
+        raise ValueError(f"coluna fora da whitelist: {coluna!r}")
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

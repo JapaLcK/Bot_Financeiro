@@ -29,7 +29,7 @@ from utils_date import today_tz
 
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
     conecta_banco, consolidado, delta_conta, ia_fora, manda, of_tx_pendente,
-    saldo_bruto, sincroniza, tx, uid_pro, ultimo_launch,
+    saldo_bruto, sincroniza, soma_delta_conta, tx, uid_pro, ultimo_launch,
 )
 
 
@@ -124,120 +124,31 @@ def test_fusao_falsa_positiva_devolve_o_gasto_ao_desfazer(uid_pro, ia_fora):
 
 # ── achado 3: a ordem dos locks é uma só, em todo mundo ────────────────────
 
-@pytest.mark.xfail(strict=True, reason=(
-    "DEADLOCK PRE-EXISTENTE, medido em duas colunas em 2026-09-15: vermelho "
-    "tambem em origin/main (worktree limpo, mesma frase de erro - "
-    "DeadlockDetected ... while locking tuple in relation launches). Este PR "
-    "nao toca delete_launch_and_rollback nem import_open_finance_launches, e a "
-    "correcao esta fora do escopo da abordagem por leitura. REPRODUZ: duas "
-    "threads soltas por uma threading.Barrier com o delete parado ENTRE os "
-    "seus dois locks (o de launches ja tomado, o de accounts ainda nao) e o "
-    "sync fundindo a mesma transacao. CONSERTA: tomar accounts ANTES de "
-    "launches no delete - hoje ele trava launches primeiro e accounts so sob "
-    "bank_lock, invertendo a ordem do resto do modulo. Sem issue aberta: "
-    "pendencia no corpo do PR. strict=True para virar vermelho quando "
-    "consertarem."
-))
 def test_apagar_enquanto_o_sync_funde_nao_deadlocka(uid_pro, ia_fora, monkeypatch):
-    """Corrida REAL, caminho de produção: o dono apaga o lançamento no dashboard
-    enquanto o sync funde a transação do banco.
+    """Corrida REAL, caminho de produção: o dono apaga o lançamento no dashboard enquanto o sync
+    funde a transação do banco. Era `xfail(strict)` por um DEADLOCK pré-existente (delete:
+    launches → accounts; sync: accounts → launches); o conserto previsto no marcador era o
+    delete tomar `accounts` ANTES de launches, e o undo comum agora o faz (`_lock_user`).
 
-    DETERMINISMO SEM SLEEP. A versão anterior posicionava as threads com
-    `sleep(0.5)` + `sleep(0.1)`: em máquina carregada a corrida podia não
-    acontecer, o teste XPASSAva e o `strict=True` virava vermelho de CI por NÃO
-    reproduzir um bug — o oposto do que ele sinaliza.
-
-    A `threading.Barrier` (a mesma de `test_desconectar_durante_o_sync...`,
-    abaixo) tira o relógio do caminho — mas o encontro tem de ser nos DOIS
-    pontos de lock. MEDIDO em 2026-09-16: uma barrier num ponto só solta as
-    duas threads juntas, o delete ganha a corrida até `accounts` e o teste
-    XPASSA 3/3 (o mesmo vermelho falso que o sleep produzia, pelo outro lado).
-    Com o encontro duplo: xfailed 3/3, TODOS pelo motivo certo
-    (`DeadlockDetected ... relation "accounts"`, conferido com `--runxfail`), e
-    medido com a suíte inteira rodando em paralelo na mesma máquina.
-
-    Quando consertarem a ordem de lock, o sync fica preso em `_lock_user` sem
-    chegar à barrier, ela estoura em 30 s e o teste XPASSA — o `strict=True`
-    transforma isso no vermelho que avisa "tire o xfail".
+    A pausa é por statement (tests/_pausa_sql.py), sem sleep: o delete para com a linha e o
+    mutex tomados, o sync chega e ESPERA o mutex, e as DUAS concluem — o delete apaga o manual
+    e o sync, depois dele, traz a transação do banco como sombra, sem perder nem duplicar o gasto.
     """
-    import threading
-    import db.accounts as accounts_mod
+    from tests._pausa_sql import PausaSql, sem_deadlock
 
-    hoje = today_tz()
     conexao = conecta_banco(uid_pro, "114.88")
     manda(uid_pro, "Gastei 1 real com a barbara em dinheiro")
     manual_id = ultimo_launch(uid_pro)
     sincroniza(conexao, uid_pro, "113.88",
-               [tx(uid_pro, "-1.00", hoje, "PIX ENVIADO BARBARA")])
+               [tx(uid_pro, "-1.00", today_tz(), "PIX ENVIADO BARBARA")])
 
-    import db.bank_movements as bank_mod
-
-    # O encontro é nos DOIS pontos de lock, não num só: uma barrier que solta as
-    # duas ao mesmo tempo deixa o delete (já dentro da transação) ganhar a
-    # corrida até `accounts`, e o deadlock não acontece — medido, XPASS 3/3.
-    # Aqui cada thread ESPERA depois de tomar o SEU primeiro lock:
-    #   delete: travou `launches`, para em `_validar_efeitos`;
-    #   sync:   travou `accounts` em `_lock_user`, para ali.
-    # Soltas, cada uma pede o lock que a outra segura. Sem relógio nenhum.
-    real_validar = accounts_mod._validar_efeitos
-    real_lock = bank_mod._lock_user
-    porta = threading.Barrier(2, timeout=30)
-    chegou_delete = threading.Event()
-    chegou_sync = threading.Event()
-
-    def no_meio(*args, **kwargs):
-        if threading.current_thread().name == "delete" and not chegou_delete.is_set():
-            chegou_delete.set()
-            porta.wait()
-        return real_validar(*args, **kwargs)
-
-    def lock_e_espera(cur, user_id, *args, **kwargs):
-        r = real_lock(cur, user_id, *args, **kwargs)
-        if threading.current_thread().name == "sync" and not chegou_sync.is_set():
-            chegou_sync.set()
-            porta.wait()
-        return r
-
-    monkeypatch.setattr(accounts_mod, "_validar_efeitos", no_meio)
-    monkeypatch.setattr(bank_mod, "_lock_user", lock_e_espera)
-
-    erros: dict[str, str] = {}
-
-    def solta_se_a_outra_esperava(chegada):
-        """A thread morreu antes do ponto de encontro: não deixa a outra presa."""
-        if not chegada.is_set():
-            chegada.set()
-            try:
-                porta.wait(timeout=1)
-            except Exception:
-                pass
-
-    def apaga():
-        try:
-            db.delete_launch_and_rollback(uid_pro, manual_id)
-        except Exception as e:  # LookupError é legítimo (o outro chegou antes)
-            erros["delete"] = f"{type(e).__name__}: {e}"
-        finally:
-            solta_se_a_outra_esperava(chegou_delete)
-
-    def sincroniza_thread():
-        try:
-            db.import_open_finance_launches(uid_pro, conexao)
-        except Exception as e:
-            erros["sync"] = f"{type(e).__name__}: {e}"
-        finally:
-            solta_se_a_outra_esperava(chegou_sync)
-
-    fios = [threading.Thread(target=apaga, name="delete"),
-            threading.Thread(target=sincroniza_thread, name="sync")]
-    for f in fios:
-        f.start()
-    for f in fios:
-        f.join(timeout=60)
-    assert not any(f.is_alive() for f in fios), f"travou: {erros}"
-
-    deadlocks = [v for v in erros.values() if "Deadlock" in v]
-    assert not deadlocks, f"deadlock na corrida: {erros}"
+    pausa = PausaSql(monkeypatch, "a", lambda q: "from launches" in q and "for update" in q)
+    r_delete, r_sync = pausa.roda(lambda: db.delete_launch_and_rollback(uid_pro, manual_id),
+                                  lambda: db.import_open_finance_launches(uid_pro, conexao))
+    sem_deadlock(r_delete, r_sync)
+    assert pausa.casou and pausa.outro_travou, "o sync devia esperar o mutex do delete"
+    assert not isinstance(r_delete, Exception) and not isinstance(r_sync, Exception), (r_delete, r_sync)
+    assert saldo_bruto(uid_pro) == soma_delta_conta(uid_pro)
 
 
 # ── achado B: desconectar CONCORRENTE ao sync ──────────────────────────────

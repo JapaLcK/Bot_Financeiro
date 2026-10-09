@@ -1150,6 +1150,7 @@ def get_top_expense_categories(
     end_date: date,
     limit: int = 5,
     by_bill_month: bool = False,
+    include_card: bool = True,
 ):
     """Top N categorias de gasto no período.
 
@@ -1165,10 +1166,13 @@ def get_top_expense_categories(
         ao dashboard. Um gasto parcelado conta uma parcela por mês. Usado pela
         resposta "quanto gastei" do bot.
 
+    `include_card=False` desliga a perna do cartão: só `launches`, a regra de
+    `get_summary_by_period` (resumo semanal, que não soma cartão).
+
     NÃO inclui movimentações internas (aporte, resgate, transfer caixinha)
     nem reembolsos de cartão.
 
-    Retorna lista [{categoria, total}] ordenada desc por total.
+    Retorna lista [{categoria, total}] ordenada desc por total (desempate por nome, só para ser determinístico).
     """
     ensure_user(user_id)
 
@@ -1185,6 +1189,14 @@ def get_top_expense_categories(
         credit_date = "and ct.purchased_at >= %s::date and ct.purchased_at <= %s::date"
         credit_date_params = (start_date, end_date)
 
+    credit_union = f"""
+                    union all
+                    select ct.categoria, ct.valor
+                    {credit_from}
+                    where ct.user_id = %s
+                      and ct.is_refund = false
+                      {credit_date}""" if include_card else ""
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1197,21 +1209,15 @@ def get_top_expense_categories(
                     where user_id = %s
                       and {TIPO_DESPESA_SQL}
                       and is_internal_movement = false
-                      and criado_em >= %s and criado_em < %s
-                    union all
-                    select ct.categoria, ct.valor
-                    {credit_from}
-                    where ct.user_id = %s
-                      and ct.is_refund = false
-                      {credit_date}
+                      and criado_em >= %s and criado_em < %s{credit_union}
                 ) agg
                 group by coalesce(nullif(categoria, ''), 'outros')
-                order by total desc
+                order by total desc, categoria
                 limit %s
                 """,
                 (
                     user_id, start_dt, end_excl,
-                    user_id, *credit_date_params,
+                    *((user_id, *credit_date_params) if include_card else ()),
                     int(limit),
                 ),
             )
@@ -1704,6 +1710,15 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
             from .investment_undo import guard_last_investment_movement, touches_investment
             from .lancamentos import FUNDIDO_SQL
 
+            def _efeitos_de(r):  # `efeitos` string (jsonb legado) lido como o resto da função
+                ef = r["efeitos"] if r else None
+                if isinstance(ef, str):
+                    try:
+                        ef = json.loads(ef)
+                    except ValueError:
+                        ef = None
+                return ef
+
             def _precisa_lock(r):
                 # Investimento também: a guarda "é o último" tem de rodar sob o
                 # MESMO lock de aporte/resgate/apagar investimento, até o commit.
@@ -1712,17 +1727,30 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 # Ligada ao banco também (fundida OU par pendente): o desfazer
                 # trava a transação OF, que todo escritor trava depois de `accounts`;
                 # e sem o lock um confirmar concorrente fundiria X no meio do apagar.
-                return bool(r and (uses_bank_movement_lock(r["source"], r["efeitos"])
-                                   or touches_investment(r["efeitos"]) or r["caixa"]
-                                   or r["ligado"]))
+                # Criar/apagar caixinha: o desfazer trava launches → pockets, e
+                # renome/delete_pocket fazem o inverso (#622). `efeitos` string (jsonb
+                # legado) é normalizado como mais abaixo, para os TRÊS predicados:
+                # lido cru, o undo rodaria sem o lock.
+                ef = _efeitos_de(r)
+                return bool(r and (uses_bank_movement_lock(r["source"], ef)
+                                   or touches_investment(ef) or r["caixa"] or r["ligado"]
+                                   or (isinstance(ef, dict)
+                                       and any(ef.get(k) for k in ("create_pocket", "delete_pocket")))))
 
             cur.execute(f"select source,efeitos,{VINCULADO_SQL} as caixa,{_LIGADO_SQL} as ligado "
                         "from launches where id=%s and user_id=%s", (launch_id, user_id))
             preview = cur.fetchone()
-            bank_lock = exigir_pode or _precisa_lock(preview)
+            # Todo undo toma o mutex (o reset e o `accrue_all_*` fecham ciclo com quem não o toma),
+            # EXCETO o pagamento de fatura (`bill_id`) sem ligação com o banco: `pay_bill_amount`
+            # segura a fatura enquanto outra conexão pede `accounts`, então a ordem dele continua
+            # fatura → conta. Financiado/ligado ao banco (Open Finance), ele toma o mutex.
+            # Mudança de comportamento: apagar uma linha que ganha ligação OF pendente no meio da
+            # operação agora CONCLUI sob o mutex (a pendência cai pela FK e o saldo bate), em vez
+            # de recusar com `mudou_durante`; esse recheck só sobra para o pagamento de fatura.
+            ef_preview = _efeitos_de(preview)
+            de_cartao = isinstance(ef_preview, dict) and ef_preview.get("bill_id") is not None
+            bank_lock = exigir_pode or not de_cartao or _precisa_lock(preview)
             if bank_lock:
-                # Matcher: conta → transação OF → sombra. Cartões manuais
-                # mantêm sua ordem anterior de fatura → conta.
                 _lock_user(cur, user_id)
             # `for update`: serializa duas reversões do MESMO lançamento. Sem
             # ele as duas leem o mesmo `efeitos`, as duas revertem o saldo e o
@@ -1749,8 +1777,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                         "from launches where id=%s and user_id=%s", (launch_id, user_id))
             row.update(cur.fetchone())
 
-            # Com `exigir_pode` o lock já está tomado: sobrar lock não é corrida.
-            if not exigir_pode and _precisa_lock(row) != bank_lock:
+            # Sobrar lock não é corrida; faltar (precisa agora e não tomou) é.
+            if not exigir_pode and _precisa_lock(row) and not bank_lock:
                 raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                            "mudou_durante")
             if exigir_pode:
@@ -1758,12 +1786,7 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                 if "apagar" not in (pode_da_linha(cur, user_id, launch_id) or []):
                     raise NaoEditavel("Esta linha não pode ser apagada por aqui.")
 
-            efeitos = row.get("efeitos")
-            if isinstance(efeitos, str):
-                try:
-                    efeitos = json.loads(efeitos)
-                except ValueError:
-                    efeitos = None
+            efeitos = _efeitos_de(row)
             # jsonb aceita lista, escalar e string: `not isinstance(dict)` cobre
             # o `null` de hoje e os degenerados no mesmo ramo.
             if not isinstance(efeitos, dict):
@@ -2488,6 +2511,8 @@ def import_ofx_launches_bulk(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            from .bank_movements import _lock_user  # o INSERT toma o advisory do usuário: conta antes
+            _lock_user(cur, user_id)
             for r in launches_rows:
                 cur.execute(
                     """

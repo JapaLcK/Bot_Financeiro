@@ -13,6 +13,20 @@ def _require_jwt_secret() -> str:
     return secret
 
 
+# Pedaços que todo valor de dev/CI/doc do repo carrega: casar por marca evita
+# manter uma lista literal que envelhece a cada exemplo novo (§0.7). Não é
+# chamada pelo `_require_jwt_secret` (roda por requisição): só no boot de prod.
+_MARCAS_DE_PLACEHOLDER = ("secret", "test", "troque", "bytes", "changeme")
+
+
+def motivo_jwt_secret_fraco(secret: str) -> str | None:
+    if len(secret) < 32:
+        return "tem menos de 32 caracteres"
+    if any(m in secret.lower() for m in _MARCAS_DE_PLACEHOLDER):
+        return "parece valor de desenvolvimento/documentação"
+    return None
+
+
 def make_dashboard_token(user_id: int, hours: float = 2, *, jti: str | None = None) -> str:
     """
     Generate a short-lived signed token for dashboard access.

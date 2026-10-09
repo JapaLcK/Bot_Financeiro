@@ -264,7 +264,7 @@ CATÁLOGO DE INTENTS:
 - pockets.deposit      → quer depositar em caixinha (entities: pocket_name, amount)
 - pockets.withdraw     → quer sacar de caixinha (entities: pocket_name, amount)
 - pockets.delete       → quer apagar caixinha (entities: pocket_name)
-- investments.list     → quer listar investimentos
+- investments.list     → quer VER a carteira/lista ("meus investimentos"). Pergunta de valor ("quanto tenho investido?", "quanto em ações?", "quanto no Nubank?") NÃO é investments.list: devolva out_of_scope.
 - investments.create   → quer criar investimento (entities: name, rate, period)
 - investments.deposit  → quer aportar em investimento (entities: investment_name, amount)
 - investments.withdraw → quer resgatar investimento (entities: investment_name, amount)
