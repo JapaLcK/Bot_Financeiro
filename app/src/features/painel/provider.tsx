@@ -104,7 +104,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       ...(anterior.mes !== mes ? ["resumo", "detalhes"] as const : []),
       ...(anterior.dias !== dias ? ["previsao"] as const : []),
     ];
-    if (completa) { cancelar(); setDados({}); }
+    // Quem pede a recarga já cancelou (atualizar, cleanup do portão, o setVersao do finally de mudarPerfil: só roda com o controlador do PUT já abortado, e só o cancelar() aborta); as leituras do provider se superam por recurso.
+    if (completa) setDados({});
     const g = geracao.current;
     ultimaCarga.current = { uid, versao, mes, dias, geracao: g };
     if (!recursos.length) return;
@@ -170,7 +171,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const uid = usuario.user_id;
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
-  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => setVersao((v) => v + 1), atualizando, dias, mudarDias: setDias, versao, operacao, falhou }}>{children}</Contexto.Provider>;
+  // atualizar cancela no pedido, não no efeito: o efeito do pai roda depois do dos filhos e mataria a página recém-pedida (#849).
+  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); setVersao((v) => v + 1); }, atualizando, dias, mudarDias: setDias, versao, operacao, falhou }}>{children}</Contexto.Provider>;
 }
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {
