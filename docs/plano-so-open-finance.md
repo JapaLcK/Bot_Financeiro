@@ -280,15 +280,15 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   ficou de fora". O plano da 2a confere cada célula contra o código, e o teste-portão
   (`tests/test_fonte_unica_q36.py`) passa a reprovar escritor de legado que não esteja aqui.
 
-  | Entidade manual | Criar | Editar | Pausar / desativar | Apagar | Movimentar | Desfazer pelo lançamento | Job automático |
+  | Entidade manual | Criar | Editar | Pausar / desativar | Apagar | Movimentar | Desfazer pelo lançamento | Escrita automática (job ou leitura que escreve) |
   |---|---|---|---|---|---|---|---|
   | Cartão manual | trava | trava | — | trava | pagar fatura: trava | trava | — |
   | Compra e parcela do cartão manual | trava | trava | — | trava (grupo) | antecipar: trava | trava | — |
   | Fixo (despesa recorrente) | trava | trava | livre até o cobrador parar | trava | — | — | cobrador e avisos param **antes** da 2a |
   | Receita recorrente | espera P7 | espera P7 | espera P7 | espera P7 | — | — | — |
   | Conta e boleto manuais | trava | trava | — | trava | marcar paga: trava | trava | — |
-  | Caixinha manual | trava | trava (alvo e data são da Fase 4) | — | trava | depositar e retirar: trava | trava | rendimento (`accrue_all_pockets`, no `run_investment_accrual_loop`): para antes da 2a |
-  | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento (o mesmo loop): para antes da 2a |
+  | Caixinha manual | trava | alvo e data: livres até a Fase 4; o resto trava | — | trava | depositar e retirar: trava | trava | rendimento (`accrue_all_pockets`): para antes da 2a, no job **e** nas leituras que o chamam |
+  | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento (`accrue_all_investments`): para antes da 2a, no job **e** nas leituras que o chamam |
   | Renda informada | espera P7 | espera P7 | — | espera P7 | — | — | — |
   | Lançamento manual fora da Carteira | trava (2b) | categoria e descrição: livres | — | trava | — | trava | — |
 
@@ -302,11 +302,15 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   e os avisos de autopay e de vencimento param (ou passam a ler o OF, a parte de avisos da
   1c) **antes da 2a**. Até lá, pausar o fixo fica livre. O rendimento automático das
   caixinhas e dos investimentos manuais (`core/services/investment_scheduler.py::run_investment_accrual_loop`)
-  também para antes da 2a: congelado não rende.
-- **Varredura dos jobs:** o plano da 2a lista toda tarefa de fundo (`docs/CLAUDE.md`,
-  "Tarefas de fundo") que escreve numa tabela manual do §2.1, e cada uma entra na coluna "Job
-  automático" da matriz. O controle negativo da 2a inclui uma rodada desses jobs depois da
-  trava: o legado não pode mudar.
+  também para antes da 2a: congelado não rende. Vale também para as leituras que disparam o
+  rendimento: o estado do painel (`_get_dashboard_current_state`, no monólito) e a lista de
+  investimentos do WhatsApp (`core/handlers/investments.py`) chamam `accrue_all_pockets` e
+  `accrue_all_investments`. Elas passam a ler sem render.
+- **Varredura das escritas automáticas:** o plano da 2a parte das **funções que escrevem**
+  numa tabela manual do §2.1 (`git grep` de cada uma) e lista todo chamador que não é ação do
+  usuário: tarefa de fundo (`docs/CLAUDE.md`, "Tarefas de fundo") **e** leitura que escreve de
+  carona. Cada um entra na última coluna da matriz. O controle negativo da 2a roda esses
+  caminhos depois da trava: o legado não pode mudar.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
 - Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
   Até lá o caso `recorrente` trava só a despesa.
@@ -367,10 +371,12 @@ dos totais juntos, num PR só ou em PRs liberados no mesmo deploy.
   busca `/goals/{uid}/status`, `/cards/{uid}/summary` e `/installments/{uid}/list`, e essas
   consultas não filtram o legado. A varredura se faz com `git grep` nas rotas de cada
   tabela manual do §2.1, em `app/src`, `webapp/src` e `frontend/`.
-- **Regra da 3a: cada assunto só some quando o substituto existe.** Enquanto não existe, a
+- **Regra da 3a: cada assunto só some quando o substituto existe**, ou quando o dono decide
+  explicitamente seguir sem substituto (por exemplo, a P7 na opção "Previsão sem receita").
+  Enquanto nenhum dos dois acontece, a
   tela e os consumidores daquele assunto ficam como estão:
   - metas e caixinhas manuais esperam a Fase 4 (a meta sobre o OF);
-  - receita fixa e renda informada esperam a P7;
+  - receita fixa e renda informada esperam a decisão da P7, qualquer que seja;
   - recorrentes e contas a pagar esperam o item abaixo.
 - **Antes da 2a (e portanto da 3a):** o gerador de contas dos recorrentes manuais
   (`core/services/recurring_charger.py`) e os avisos de autopay e de vencimento por
