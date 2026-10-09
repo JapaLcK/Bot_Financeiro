@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from html import escape as _esc
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -814,9 +815,9 @@ def send_new_login_alert(
       <p>Detectamos um <strong>novo login</strong> na sua conta do <strong>PigBank</strong> a partir de um dispositivo ou local que ainda não tínhamos visto.</p>
       <div class="highlight">
         <p style="margin:0">
-          <strong>Local:</strong> {safe_city}<br/>
-          <strong>IP:</strong> {safe_ip}<br/>
-          <strong>Dispositivo:</strong> {safe_ua}
+          <strong>Local:</strong> {_esc(safe_city)}<br/>
+          <strong>IP:</strong> {_esc(safe_ip)}<br/>
+          <strong>Dispositivo:</strong> {_esc(safe_ua)}
         </p>
       </div>
       <p>Foi você? Pode ignorar este aviso — registramos para que você sempre saiba quando alguém entra na sua conta.</p>
@@ -916,8 +917,8 @@ def send_data_export_link_email(
       <p class="warn">⚠️ Este link expira em <strong>{expires_in_minutes} minutos</strong> e só pode ser usado <strong>uma única vez</strong>.</p>
       <div class="highlight">
         <p style="margin:0">Solicitação registrada a partir de:<br/>
-        <strong>IP:</strong> {safe_ip}<br/>
-        <strong>Dispositivo:</strong> {safe_ua}</p>
+        <strong>IP:</strong> {_esc(safe_ip)}<br/>
+        <strong>Dispositivo:</strong> {_esc(safe_ua)}</p>
       </div>
       <p class="warn"><strong>Não foi você?</strong> Ignore este e-mail e troque sua senha imediatamente em <a href="https://pigbankai.com">pigbankai.com</a>. Sem o link acima, ninguém consegue baixar seus dados — mesmo com sua sessão ativa.</p>
       <p style="font-size:12px;color:rgba(255,255,255,.25);word-break:break-all;text-align:center;margin-top:20px;">
@@ -955,8 +956,8 @@ def send_data_export_completed_email(
       <p>Confirmamos que a cópia completa dos seus dados no <strong>PigBank</strong> foi baixada com sucesso.</p>
       <div class="highlight">
         <p style="margin:0"><strong>Quando:</strong> {completed_at}<br/>
-        <strong>IP:</strong> {safe_ip}<br/>
-        <strong>Dispositivo:</strong> {safe_ua}</p>
+        <strong>IP:</strong> {_esc(safe_ip)}<br/>
+        <strong>Dispositivo:</strong> {_esc(safe_ua)}</p>
       </div>
       <p class="warn"><strong>Não foi você?</strong> Sua sessão ou senha podem estar comprometidas. Acesse <a href="https://pigbankai.com">pigbankai.com</a>, troque sua senha imediatamente e entre em contato com <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
