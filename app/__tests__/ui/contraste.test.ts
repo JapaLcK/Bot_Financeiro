@@ -52,4 +52,13 @@ describe("contraste", () => {
       expect(valor).toMatch(/^#[0-9A-F]{6}$/i);
     }
   });
+
+  // O painel e as telas de acesso usam o MESMO rosa de botão primário em cada tema.
+  it.each([
+    ["claro", claro, acessoClaro],
+    ["escuro", escuro, acessoEscuro],
+  ])("acesso %s não sobrescreve acao/onAcao", (_nome, base, acesso) => {
+    expect(acesso.acao).toBe(base.acao);
+    expect(acesso.onAcao).toBe(base.onAcao);
+  });
 });

@@ -1,3 +1,4 @@
+jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => "dark" }));
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { Dimensions, StyleSheet, View } from "react-native";
 import { CORES_CATEGORIA } from "@/features/painel/base";

@@ -99,7 +99,7 @@ export default function CriarConta() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <Screen sobCabecalho>
+      <Screen sobCabecalho ajustarTeclado={false}>
         <Stack.Screen options={{ gestureEnabled: !verificando }} />
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">Criar conta</Texto>

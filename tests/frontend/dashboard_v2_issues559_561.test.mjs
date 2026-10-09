@@ -21,12 +21,13 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir(hash, width = 1440, demo = false) {
+async function abrir(hash, width = 1440, demo = false, agora = null) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 }, reducedMotion: "reduce" });
   await servir(ctx, demo ? RAIZ : undefined);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
+  if (agora) await page.clock.install({ time: agora });
   await page.goto(`${demo ? PROTOTIPO : PAINEL}#${hash}`);
   await page.locator("#page-title").waitFor();
   return { ctx, page };
@@ -127,8 +128,10 @@ test("#559: mês pela paleta numa página sem seletor leva ao Resumo; com seleto
     await page.locator(".cmdk [role=option]").filter({ hasText: /^Agosto 2026$/ }).click();
   };
   const r = {};
+  // a paleta lista os 6 últimos meses pelo relógio real; sem fixá-lo o teste vence em fev/2027
+  const agora = new Date("2026-10-15T15:00:00Z");
   for (const p of ["/metas", "/gastos"]) {
-    const { ctx, page } = await abrir(p);
+    const { ctx, page } = await abrir(p, 1440, false, agora);
     await escolher(page);
     // hashchange é assíncrono: espera o seletor mostrar agosto (sem o conserto, em /metas ele nunca aparece)
     await page.waitForFunction(() => document.querySelector(".month-title")?.textContent === "Agosto 2026", null, { timeout: 2000 }).catch(() => {});

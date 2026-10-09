@@ -1,5 +1,5 @@
 import { render } from "@testing-library/react-native";
-import { RefreshControl, ScrollView, StyleSheet, Text } from "react-native";
+import { Keyboard, RefreshControl, ScrollView, StyleSheet, Text, TextInput } from "react-native";
 import { SafeAreaProvider, type Metrics } from "react-native-safe-area-context";
 
 import { Screen } from "@/ui/componentes/Screen";
@@ -170,5 +170,52 @@ describe("Screen", () => {
     );
     expect(c.toJSON()).toMatchSnapshot("claro, rolando");
     expect(e.toJSON()).toMatchSnapshot("escuro, sem rolar");
+  });
+
+  describe("teclado", () => {
+    const espiar = () => {
+      const ouvintes: (() => void)[] = [];
+      const escutar = jest.spyOn(Keyboard, "addListener").mockImplementation((evento, fn) => {
+        if (evento === "keyboardDidShow") ouvintes.push(fn as () => void);
+        return { remove: jest.fn() } as never;
+      });
+      return { ouvintes, escutar };
+    };
+
+    it("por padrão ajusta o inset do teclado; com ajustarTeclado={false} não", () => {
+      const { claro: a } = renderComAreaSegura(<Screen><Text>x</Text></Screen>);
+      expect(a.getByTestId("tela").props.automaticallyAdjustKeyboardInsets).toBe(true);
+      const { claro: b } = renderComAreaSegura(<Screen ajustarTeclado={false}><Text>x</Text></Screen>);
+      expect(b.getByTestId("tela").props.automaticallyAdjustKeyboardInsets).toBe(false);
+    });
+
+    it("ajustarTeclado={false} não escuta o keyboardDidShow; o padrão escuta", () => {
+      const { ouvintes, escutar } = espiar();
+      try {
+        renderComAreaSegura(<Screen ajustarTeclado={false}><Text>x</Text></Screen>);
+        expect(ouvintes).toHaveLength(0);
+        renderComAreaSegura(<Screen><Text>x</Text></Screen>);
+        expect(ouvintes.length).toBeGreaterThan(0);
+      } finally {
+        escutar.mockRestore();
+      }
+    });
+
+    it("no keyboardDidShow rola até o campo focado", () => {
+      const { ouvintes, escutar } = espiar();
+      const medir = jest.fn((_rel, ok: (x: number, y: number) => void) => ok(0, 300));
+      const foco = jest.spyOn(TextInput.State, "currentlyFocusedInput").mockReturnValue({ measureLayout: medir } as never);
+      try {
+        const { claro: c } = renderComAreaSegura(<Screen><Text>x</Text></Screen>);
+        const raiz = c.UNSAFE_getByType(ScrollView);
+        raiz.props.innerViewRef.current = {};
+        ouvintes.forEach((fn) => fn());
+        expect(medir).toHaveBeenCalledTimes(1);
+        expect(raiz.instance.scrollTo).toHaveBeenCalledWith({ y: 300 - espaco.xxxl });
+      } finally {
+        escutar.mockRestore();
+        foco.mockRestore();
+      }
+    });
   });
 });
