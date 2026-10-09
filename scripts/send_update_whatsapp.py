@@ -68,6 +68,8 @@ def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
                 pass
 
     for row in rows:
+        if row.get("opt_out"):  # só barra (acima); nunca é destinatário
+            continue
         user_id = int(row["user_id"])
         email = (row.get("email") or "").strip()
         raw_phone = (row.get("identity_phone") or "").strip()
@@ -120,8 +122,14 @@ def _sem_exclusao_pedida(rows: list[dict]) -> list[dict]:
 
 
 def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarget]:
-    """`numeros` restringe às identidades com esses números: é a reconferência
-    antes de cada envio, com a mesma regra (opt-out por número, exclusão pedida)."""
+    """`numeros` restringe os destinatários às identidades com esses números: é a
+    reconferência antes de cada envio. As linhas com opt-out vêm sempre, em qualquer
+    formato, para o `_dedupe_targets` normalizá-las e barrar as variantes como na
+    montagem completa.
+
+    ponytail: cada reconferência normaliza todas as linhas com opt-out, então o custo
+    por envio cresce com elas; `functools.lru_cache` em `_normalize_whatsapp_target`
+    corta a parte de CPU se pesar."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -135,7 +143,11 @@ def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarge
               on i.user_id = a.user_id
              and i.provider = 'whatsapp'
             where nullif(i.external_id, '') is not null
-              and (%(numeros)s::text[] is null or i.external_id = any(%(numeros)s::text[]))
+              and (
+                %(numeros)s::text[] is null
+                or i.external_id = any(%(numeros)s::text[])
+                or coalesce(a.whatsapp_updates_opt_out, false)
+              )
             order by a.user_id asc
             """,
             {"numeros": numeros},
@@ -145,10 +157,9 @@ def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarge
 
 
 def _ainda_recebe(target: UpdateTarget) -> bool:
-    """O disparo enviaria a este número agora? Mesma montagem, restrita às variantes
-    dele (opt-out por número, também em outra conta, e exclusão pedida). Limite:
-    número fixo de 12 dígitos (local 2-5) não gera a forma de 13, então o opt-out
-    gravado nela só é visto pela montagem completa."""
+    """O disparo enviaria a este número agora? Mesma montagem, com os destinatários
+    restritos às variantes dele (opt-out por número em qualquer conta e formato, e
+    exclusão pedida)."""
     return bool(get_all_update_targets(
         sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
     ))

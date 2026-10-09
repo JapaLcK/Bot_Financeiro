@@ -327,3 +327,56 @@ def test_test_email_dry_run_lista_so_quem_receberia(monkeypatch, capsys, opt_out
     out = capsys.readouterr().out
     assert (f"-> user_id={uid} " in out) is (opt_out == "nenhum"), out
     assert [t.user_id for t in get_test_targets(f"upd-{uid}@t.local")] == ([uid] if opt_out == "nenhum" else [])
+
+
+def _alias_em_outro_formato(formato: str) -> tuple[str, str]:
+    """(número do destinatário, o mesmo número gravado de outro jeito na outra conta)."""
+    if formato == "assimetrico":  # fixo de 12 dígitos × forma de 13 com o 9 na frente
+        local = f"{random.randint(2, 5)}{random.randint(0, 9_999_999):07d}"
+        return f"5511{local}", f"55119{local}"
+    n = _numero()
+    return n, {"mais": f"+{n}", "espacos": f"{n[:2]} {n[2:4]} {n[4:9]}-{n[9:]}"}[formato]
+
+
+# Opt-out gravado num alias de outra conta, em formato diferente do destinatário, vale
+# na reconferência como na montagem (a mesma normalização do `_dedupe_targets`).
+# Controle negativo: voltar o filtro exato (sem `or opt_out` na SQL) deixa os três
+# vermelhos, aqui e no `--test email --dry-run`.
+@pytest.mark.parametrize("formato", ["mais", "espacos", "assimetrico"])
+def test_opt_out_de_alias_em_outro_formato_durante_o_disparo(monkeypatch, capsys, formato):
+    n, alias = _alias_em_outro_formato(formato)
+    _conta(wa=_numero(), uid=random.randint(1, 999_999))  # recebe primeiro
+    _conta(wa=n, uid=random.randint(1_000_000, 1_999_999))
+    outra = _conta(wa=alias, uid=random.randint(5_000_000_000, 9_000_000_000))
+    enviados = _disparo(monkeypatch, lambda: db.set_whatsapp_updates_opt_out(outra, True))
+    assert n not in enviados, enviados
+    assert "PULADO" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("formato", ["mais", "espacos", "assimetrico"])
+def test_test_email_dry_run_ve_opt_out_de_alias_em_outro_formato(monkeypatch, capsys, formato):
+    n, alias = _alias_em_outro_formato(formato)
+    uid = _conta(wa=n)
+    _conta(wa=alias, opt_out=True)
+    assert get_test_targets(f"upd-{uid}@t.local") == []
+
+
+def test_opt_out_de_outro_numero_em_outro_formato_nao_barra():
+    n = _numero()
+    uid = _conta(wa=n)
+    _conta(wa=f"+{_numero()}", opt_out=True)
+    assert [t.to for t in get_test_targets(f"upd-{uid}@t.local")] == [n]
+
+
+# A reconferência carrega as linhas com opt-out de todo mundo: elas só barram, e
+# nada delas sai na saída (nem o aviso de ambíguo nem o de inválido, que mostra
+# user_id). Controle negativo: tirar o `if row.get("opt_out"): continue` do laço
+# principal do `_dedupe_targets` deixa este vermelho.
+def test_linha_com_opt_out_de_outra_conta_nao_aparece_na_saida(capsys):
+    n = _numero()
+    uid = _conta(wa=n)
+    _conta(wa=f"5198{random.randint(1_000_000, 9_999_999)}", opt_out=True)  # ambíguo
+    invalida = _conta(wa="abc", opt_out=True)
+    assert [t.to for t in get_test_targets(f"upd-{uid}@t.local")] == [n]
+    out = capsys.readouterr().out
+    assert "ambíguo" not in out and f"user_id={invalida}" not in out, out
