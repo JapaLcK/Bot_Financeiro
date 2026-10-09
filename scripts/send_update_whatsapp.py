@@ -240,8 +240,9 @@ def main() -> None:
             # Opt-out (Configurações ou botão de atualização anterior) ou exclusão pedidos
             # durante a execução valem para quem ainda não recebeu. Limite: número fixo de
             # 12 dígitos (local 2-5) não gera a forma de 13, então o opt-out feito nela
-            # durante a execução não é visto aqui (a montagem da lista vê).
-            if not test_value and not get_all_update_targets(
+            # durante a execução não é visto aqui (a montagem da lista vê). Vale também no
+            # `--test email` (#874); o `--test numero` é digitado pelo operador, sem conta.
+            if not direct_test_number and not get_all_update_targets(
                 sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
             ):
                 print(f"  PULADO (opt-out ou exclusão pedida) {label}")

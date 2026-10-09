@@ -286,3 +286,18 @@ def test_numero_ambiguo_de_10_ou_11_digitos_nao_recebe(monkeypatch, capsys, form
     assert "1 destinatário(s) com número ambíguo" in out
     assert raw not in out and to not in out
     assert get_test_targets(f"upd-{uid}@t.local") == []
+
+
+# #874: o `--test email` passa pela mesma reconferência, então quem fez opt-out não
+# recebe nem no teste do operador. Controle negativo: voltar a condição para
+# `not test_value` faz o caso com opt-out receber.
+@pytest.mark.parametrize("opt_out", [False, True])
+def test_test_email_respeita_opt_out(monkeypatch, capsys, opt_out):
+    n = _numero()
+    uid = _conta(wa=n, opt_out=opt_out)
+    enviados = []
+    monkeypatch.setattr(su, "send_template", lambda to, *a, **k: enviados.append(to) or {"messages": [{}]})
+    monkeypatch.setattr(sys, "argv", ["send_update_whatsapp.py", "--test", f"upd-{uid}@t.local"])
+    su.main()
+    assert (n in enviados) is not opt_out, enviados
+    assert ("PULADO" in capsys.readouterr().out) is opt_out
