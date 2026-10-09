@@ -37,7 +37,7 @@ import uuid
 import pytest
 from psycopg import errors
 
-from db.connection import get_conn
+from db.connection import close_pool, get_conn
 from db.pix_charges import criar_cobranca
 from db.privacy import build_user_export_zip, delete_user_data
 
@@ -241,7 +241,22 @@ def test_export_traz_a_cobranca_e_nao_traz_o_QR(user_id):
 
 # ── o DDL que alcança a tabela que JÁ EXISTE ─────────────────────────────────
 
-def test_init_db_poe_o_rastreio_em_tabela_que_JA_EXISTE():
+@pytest.fixture
+def pool_novo_depois_do_ddl():
+    """Descarta as conexões do pool quando o teste termina.
+
+    Drop+add de coluna muda a ORDEM de `select *`, e o psycopg prepara no
+    servidor a query que uma conexão repete (`prepare_threshold`, 5): a conexão
+    que já a tinha preparada estoura com `cached plan must not change result
+    type` na próxima vez — num teste de OUTRO arquivo (a flakiness da `main`,
+    `test_pix_reconciliacao` ao dividir o worker com este teste). O pool novo
+    nasce sem statement preparado.
+    """
+    yield
+    close_pool()
+
+
+def test_init_db_poe_o_rastreio_em_tabela_que_JA_EXISTE(pool_novo_depois_do_ddl):
     """As três colunas do 1b-B chegam a uma `pix_charges` pré-existente.
 
     É o teto que `create table if not exists` tem: no banco descartável do
