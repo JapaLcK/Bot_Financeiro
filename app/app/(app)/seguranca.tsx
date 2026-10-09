@@ -2,16 +2,18 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 
-import type { MfaStatus } from "@/api/schemas/auth";
+import type { MfaStatus, Perfil } from "@/api/schemas/auth";
+import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
+import { perfil } from "@/services/auth";
 import { statusMfa } from "@/services/mfa";
 import { Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
 
-type Estado = { fase: "carregando" } | { fase: "erro"; mensagem: string } | { fase: "pronto"; status: MfaStatus };
+type Estado = { fase: "carregando" } | { fase: "erro"; mensagem: string } | { fase: "pronto"; status: MfaStatus; conta: Perfil | null };
 
 /**
  * Segurança, aberta pelo Início até o Perfil (Fase 10) existir: o MFA e a
@@ -29,7 +31,10 @@ export default function Seguranca() {
 
   const carregar = async () => {
     try {
-      setEstado({ fase: "pronto", status: await statusMfa() });
+      // `conta` nula (falha do /auth/me) = lado permissivo: segue como se tivesse senha, e a
+      // autoridade é o 409 do /auth/mfa/setup (mesma decisão do settings.html).
+      const [status, conta] = await Promise.all([statusMfa(), perfil().catch(() => null)]);
+      setEstado({ fase: "pronto", status, conta });
     } catch (e) {
       const texto = falha(e);
       if (texto !== null) setEstado({ fase: "erro", mensagem: texto });
@@ -78,6 +83,14 @@ export default function Seguranca() {
             <Button rotulo="Gerar novos códigos" variante="secondary" onPress={() => router.push("/mfa-novos-codigos")} />
             <Button rotulo="Desativar" variante="ghost" onPress={() => router.push("/mfa-desativar")} />
           </View>
+        ) : estado.conta?.has_password === false ? (
+          // Conta do Google/Apple: sem senha o setup responde 409, então "Ativar" nem aparece.
+          // Só `false` conta; ausente ou `true` cai no ramo de baixo.
+          estado.conta.email ? (
+            <EsqueciSenha emailFixo={estado.conta.email} />
+          ) : (
+            <Texto variante="corpo">Sua conta ainda não tem senha. Defina uma senha pelo site para ativar a autenticação em 2 etapas.</Texto>
+          )
         ) : (
           <View style={{ gap: espaco.md }}>
             <Button rotulo="Ativar" onPress={() => router.push("/mfa-ativar")} />
