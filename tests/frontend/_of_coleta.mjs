@@ -97,6 +97,10 @@ export async function abrir(viewport, responder, { rotas, url } = {}) {
   await page.goto(`${ORIGIN}/settings.html?view=${url || "open-finance"}`);
   await page.waitForFunction(() => window.__gets.length === 1
     && document.querySelector("#connections-list .connection-row, #connections-list .empty-state, #connections-list a"));
+  // O `.empty-state` já vem no HTML estático: a condição acima vale com o GET do
+  // boot ainda em voo. Sem esperar a resposta pintar, o `observar` arma o 1º
+  // tique depois do 1º `runFor` e a cadência sai 1 s atrasada (CI, T5 [0, 6]).
+  await assentar(page);
   await page.evaluate(() => {
     const o = window.showToast;
     window.showToast = (m, t) => { window.__toasts.push([m, t]); return o(m, t); };
