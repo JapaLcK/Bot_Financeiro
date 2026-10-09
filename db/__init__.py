@@ -287,6 +287,7 @@ from .push import (
 )
 
 # ── Agentes do Piggy ──────────────────────────────────────────────────────────
+from .anomalias import listar_candidatos_xerife, marcar_lancamento_esperado
 from .agents import (
     AGENT_KINDS,
     list_agents,
@@ -622,6 +623,7 @@ __all__ = [
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
     "touch_agent_emailed", "set_agent_email_enabled",
+    "listar_candidatos_xerife", "marcar_lancamento_esperado",
 ]
 
 from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement

@@ -357,6 +357,11 @@ def init_db():
         alter table launches add column if not exists origem text
         """,
         """
+        -- PL-04: o usuário marcou ESTE lançamento como "era esperado" (o Xerife não alerta nem o
+        -- conta na média). Nulo = não esperado. Sem default, sem índice, sem expiração.
+        alter table launches add column if not exists esperado_em timestamptz
+        """,
+        """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
         update launches set is_internal_movement = true
         where (

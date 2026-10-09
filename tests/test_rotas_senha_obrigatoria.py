@@ -178,7 +178,8 @@ GET /analytics/{user_id}/categories|GET /analytics/{user_id}/weekday-pattern
 GET /analytics/{user_id}/top-merchants|GET /insights/{user_id}/current|GET /analytics/{user_id}/patterns
 GET /agents/{user_id}|POST /agents/{user_id}/{kind}/activate|POST /agents/{user_id}/{kind}/pause
 POST /agents/{user_id}/{kind}/email|GET /agents/{user_id}/feed|POST /agents/{user_id}/feed/seen
-POST /agents/{user_id}/{kind}/chat|GET /categories/{user_id}/launches|POST /simulator/{user_id}
+POST /agents/{user_id}/{kind}/chat|PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado
+GET /categories/{user_id}/launches|POST /simulator/{user_id}
 GET /debug/ai/{user_id}/payload|GET /history/{user_id}/list|GET /history/{user_id}/quick-stats
 POST /ofx/import/{user_id}|POST /export/{user_id}|GET /budgets/{user_id}|POST /budgets/{user_id}
 DELETE /budgets/{user_id}/{categoria}|GET /budgets/{user_id}/status|GET /household-budget/{user_id}/status

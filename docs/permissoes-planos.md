@@ -35,6 +35,12 @@ semana anterior no texto do resumo semanal segue o gate `financial_comparison` (
 Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a variação.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
 
+O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação
+"era esperado", PL-04) é do agente: Plus e Pro, pelo orçamento de energia. Essencial e Grátis não
+recebem evento de anomalia (o runner confere o plano antes de ler ou gravar) e o `PUT` de "esperado"
+responde 403 `pro_required`. O lembrete simples do Essencial é o alerta de orçamento por categoria
+(80/100/120%, `core/budget_alerts.py`), que não mudou.
+
 Orçamento Doméstico é o método específico de dividir a renda em potes, diferente
 do orçamento mensal por categoria. As regras existentes de correção/aprendizado
 continuam disponíveis; automações avançadas e quantidades comerciais indefinidas
