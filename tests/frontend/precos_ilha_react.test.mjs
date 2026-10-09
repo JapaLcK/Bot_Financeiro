@@ -773,7 +773,8 @@ test("PO2: em 1024px os cards têm alturas iguais, cores distintas e CTAs antes 
 
 // PI11: o cancelamento atravessa o mount sem duplicar POST; após falha pode repetir.
 // O POST confirmado limpa só o agendamento local; erros continuam permitindo retry.
-// Negativo: restaurar a releitura pós-POST torna os casos de sucesso vermelhos.
+// Negativo: restaurar a releitura pós-POST antes da asserção `consultas === 1` torna os casos
+// de sucesso vermelhos; releitura atrasada (setTimeout) passa batido: ponto cego conhecido.
 for (const [atrasoBundle, largura] of [[0, 1280], [1200, 1280], [1200, 390]]) {
   for (const falha of [false, true]) {
     test(`PI11: desfazer troca em ${largura}px com bundle ${atrasoBundle}ms e resposta ${falha ? 500 : 200}`, async () => {

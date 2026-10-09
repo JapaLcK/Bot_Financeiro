@@ -588,6 +588,9 @@ const fechadoresLD = {
   "Esc": page => page.keyboard.press("Escape"),
 };
 
+// Sucesso só com o botão Fechar: os 3 fechamentos chamam closeLaunchDetail() e a continuação do
+// undo usa a mesma guarda (_launchDetailCurrent === l) no sucesso e no erro. O 409 abaixo roda com os 3
+// jeitos porque o sequestro de alerta é o dano pior e cada fechamento segue exercitado ali.
 test(`Desfazer: fechar por botão Fechar com POST em voo + abrir outro lançamento -> detalhe NOVO continua aberto (P2 Codex)`, async () => {
   let release;
   const held = new Promise(r => { release = r; });
