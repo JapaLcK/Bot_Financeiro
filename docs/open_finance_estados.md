@@ -258,7 +258,7 @@ verificação externa pendente.
 | Sem dados (`no_accounts`) | falha final de um sync, sem evento no meio (no `GET /items` ou depois) | mantém "Sem dados"; em L a foto do run não é gravada (DECISÃO 1 = A) | não | ✓ **PR-B1** (células 18 e 19) |
 | Sem dados (`no_accounts`) | o sync vê o item em `LOGIN_ERROR` e falha depois | **Ação necessária · Reautorize o banco** (antes: Erro temporário, com a foto de ontem) | avisa | ✓ **PR-B1** (célula 22) |
 | qualquer sem motivo | E3 no meio de um sync que falha depois do `GET /items` | Erro temporário; a foto (mais velha que a pista do webhook) troca `status` `ERROR` por `ACTIVE` | não | ✓ tela **PR-B1** (célula 13b); aviso ✓ **PR-D** (segue a tela) |
-| Atualizando, com o prazo vencido | E6 (Atualizar) com a Pluggy ainda coletando e sem conta | toast "{banco}: está demorando mais que o normal — atualize de novo. Toque em Atualizar de novo em instantes.", em tom de ERRO (o `reason` é `no_accounts`) | não | ✗ instrução repetida, "Toque em Atualizar" num app sem o botão e tom de erro: frontend (`refreshVerdict`), fica para o PR-E |
+| Atualizando, com o prazo vencido | E6 (Atualizar) com a Pluggy ainda coletando e sem conta | toast "{banco}: está demorando mais que o normal — atualize de novo.", em tom neutro (DP1 = A do PR-E: com detalhe, só o detalhe; `no_accounts` durante a coleta é neutro) | não | ✓ PR-E (`tests/frontend/of_refresh_ui.test.mjs`, "toast do Atualizar com coleta em andamento") |
 | Atualizando, 1ª conexão sem sync | processo reinicia no meio do sync | Atualizando… até 30 min da autorização; depois **Atualizando… · Está demorando mais que o normal — atualize de novo** (âmbar); a partir de 2 h, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; recuperar sozinho: ✓ **PR-B2** (classe `coleta`); teto: ✓ **Fase 4, PR 2** |
 | Atualizando, 1ª conexão sem sync | E8 | Atualizando… ("Ainda não sincronizou") dentro do prazo, depois o detalhe do prazo; com `read_failed`, Erro temporário | não | ✓ **PR-B1**; o tique relê depois do prazo: ✓ **PR-B2** |
 | Atualizando, 1ª conexão sem sync | E12 (horas) | de 30 min a 2 h: **Atualizando… · Está demorando mais que o normal — atualize de novo**; depois, **Erro temporário · O banco está demorando — atualize de novo mais tarde** | não | ✓ **PR-B1 (D1)**; teto: ✓ **Fase 4, PR 2** |
@@ -664,8 +664,9 @@ sobrepostos). Testes: `tests/frontend/of_acompanha_coleta.test.mjs` (T*),
 **Ciclo pelo `still_updating` (rodada 2).** O Atualizar pode voltar
 `sync.still_updating > 0` com o card em "Atualizado": a Pluggy ainda coleta, mas o
 item já tem todos os produtos (contrato de `tests/test_of_health.py`). A tela
-relê sozinha até a coleta terminar (Achado 1 = A, decisão do dono), então o ciclo
-liga mesmo assim. O `novoCiclo(resposta)` guarda, para cada `sync.items[]` com
+relê sozinha até a coleta terminar (Achado 1 = A, decisão do dono), e é o que o
+toast promete ("Seus dados aparecem aqui sozinhos quando terminar", tabela abaixo),
+então o ciclo liga mesmo assim. O `novoCiclo(resposta)` guarda, para cada `sync.items[]` com
 `still_updating`, o `last_sync_at` da conexão de mesmo `provider_item_id` na
 própria resposta do POST. O item sai da espera quando o snapshot traz outro
 `last_sync_at` (o sync que vem com o fim da coleta), quando a conexão some, ou
@@ -746,6 +747,23 @@ coleta; só Atualizar ou conectar (`novoCiclo`) abrem ciclo novo para ela. Uma
 conexão que estava final e volta a "Atualizando…" é coleta nova e abre ciclo.
 Limite: uma volta final → "Atualizando…" que nenhuma leitura viu (aba oculta o tempo
 todo) conta como a mesma coleta.
+
+Textos do toast do Atualizar com o item em `updating` (`refreshVerdict`,
+`settings.html`; só web, no app o gesto descarta a frase):
+
+| tom | detalhe do backend | texto |
+|---|---|---|
+| neutro (sem motivo, `ok`, `no_accounts`) | nenhum | "O Nubank ainda está atualizando. Seus dados aparecem aqui sozinhos quando terminar." |
+| neutro | com detalhe (inclusive o da D1, "Está demorando mais que o normal — atualize de novo") | "Nubank: <detalhe>." |
+| erro (`refresh_failed`, `read_failed`, `investments_read_failed`, outro motivo) | nenhum | "Não consegui atualizar o Nubank agora. Tente de novo em alguns minutos." |
+| erro | com detalhe que não manda atualizar | "Nubank: <detalhe>. Tente de novo em alguns minutos." |
+| erro | com detalhe que já manda atualizar (contém "atualize", como o da D1: `OF_JA_MANDA_ATUALIZAR`) | "Nubank: <detalhe>." |
+| neutro, lote (`still_updating > 0` sem item em `updating`) | – | "O banco ainda está atualizando. Seus dados aparecem aqui sozinhos quando terminar." |
+
+"Aparecem aqui sozinhos" só no neutro: com motivo de falha nada garante que a
+coleta siga. Artigo por banco (`ofArtigo`): "a" para nome que começa com "Caixa"
+(Caixa, Caixa Econômica Federal), "o" para os outros, em todas as frases da tabela
+que nomeiam o banco ("a Caixa", "na Caixa", "com a Caixa").
 
 Só no aparelho (Onda 8): `visibilitychange` e timers suspensos no WKWebView (app
 iOS) e na PWA do Safari, volta pelo bfcache, desktop com QR lido no celular (a aba

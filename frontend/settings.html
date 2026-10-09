@@ -3542,7 +3542,10 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
 // SEM item: é o ramo `still_updating > 0`, que fala do lote, não de um banco.
 // Por isso ela é a única frase deste bloco sem `ofNome` — e por isso ela NÃO
 // serve de fallback do `updating`, que tem item na mão.
-const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
+// A tela relê sozinha durante a coleta (of-status-poll.js), então a frase não
+// manda tocar de novo (Onda 5, PR-E, DP1 = A).
+const OF_SOZINHOS = "Seus dados aparecem aqui sozinhos quando terminar.";
+const OF_UPDATING_LOTE = `O banco ainda está atualizando. ${OF_SOZINHOS}`;
 
 // "Banco ainda coletando" NÃO é erro, e os DOIS caminhos que dizem isso usam
 // este tom: o ramo do lote (`still_updating`) e a entrada `updating` da tabela
@@ -3558,6 +3561,16 @@ const OF_TOM_COLETANDO = "info";
 // devolve `updating` também para a 1ª conexão cujo sync FALHOU (o portão não olha
 // o motivo), então neutro só vale sem motivo de falha.
 const OF_REASONS_OK = ["", "ok"];
+// Exceção LOCAL à entrada `updating`, sem tocar no espelho acima (DP1 = A, PR-E):
+// `no_accounts` numa 1ª coleta em curso é a Pluggy ainda sem contas, e o
+// `connection_ui_state` mantém "Atualizando…" nesse caso — não é falha.
+const OF_REASONS_COLETANDO = [...OF_REASONS_OK, "no_accounts"];
+
+// Detalhe que já manda atualizar: o toast de erro não repete a ordem. Os
+// detalhes vêm de constantes do backend (`_DETALHE_COLETA_VENCIDA` e irmãs em
+// core/services/pluggy_health.py, todas com "atualize de novo") que o front não
+// importa; por isso a regra olha a instrução, não o texto inteiro (§0.7).
+const OF_JA_MANDA_ATUALIZAR = /\batualize\b/i;
 
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
@@ -3567,8 +3580,8 @@ const OF_VERDICT = [
   // backend sempre preenche o detalhe deste estado, e repetir a instrução aqui
   // é a duplicação que já mandou "reautorize" para quem precisava autorizar.
   ["needs_user_action", (i) => i.detail
-      ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
-      : `Ação necessária no ${ofNome(i)}.`],
+      ? `Ação necessária n${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Ação necessária n${ofArtigo(i)} ${ofNome(i)}.`],
   // O backend anexa o porquê ao detalhe. Sem ternário: para `no_accounts` o
   // `detail` nunca vem nulo (`_FIXED_DETAIL` tem a chave), e repetir a copy do
   // backend aqui é o que o comentário do `needs_user_action` proíbe.
@@ -3579,19 +3592,34 @@ const OF_VERDICT = [
   // lote (`OF_UPDATING_LOTE`), que fala de `still_updating` e não tem item.
   // Exceção por entrada é o buraco por onde esta classe reabriu três vezes.
   ["partial",           (i) => i.detail
-      ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
-      : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
+      ? `Atualizei o que deu n${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Atualizei o que deu n${ofArtigo(i)} ${ofNome(i)} — parte dos dados não veio.`],
   // Detalhe VARIÁVEL desde o PR-B2: o item em ERROR na Pluggy (E13) diz que o banco
   // errou e que só um novo Atualizar ajuda; o erro comum promete a retentativa.
   // Sem ternário: o `_FIXED_DETAIL` do backend sempre preenche o detalhe.
-  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
-  ["updating",          (i) => i.detail
-      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
-      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
+  ["error_recoverable", (i) => `Não consegui atualizar ${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
+  // Dois tons, duas frases (PR-E, achado 3 do Tester r1). Neutro (coleta sem
+  // falha): com detalhe, só o detalhe — o da D1 já diz "atualize de novo", e
+  // repetir a instrução era a duplicação da pendência de 2026-09-30; sem
+  // detalhe, a tela relê sozinha (of-status-poll.js). Erro (`neutro` falso,
+  // motivo de falha): diz o que falhou e manda tentar de novo, salvo quando o
+  // detalhe já manda (OF_JA_MANDA_ATUALIZAR); "aparecem aqui
+  // sozinhos" não vale, porque nada garante que a coleta siga.
+  ["updating",          (i, neutro) => neutro
+      ? (i.detail
+        ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+        : `${ofArtigo(i).toUpperCase()} ${ofNome(i)} ainda está atualizando. ${OF_SOZINHOS}`)
+      : (i.detail
+        ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.${OF_JA_MANDA_ATUALIZAR.test(i.detail) ? "" : " Tente de novo em alguns minutos."}`
+        : `Não consegui atualizar ${ofArtigo(i)} ${ofNome(i)} agora. Tente de novo em alguns minutos.`)],
 ];
 
-function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
+function ofBanco(i) { return i.institution ? `com ${ofArtigo(i)} ${i.institution}` : "com o banco"; }
 function ofNome(i)  { return i.institution || "banco"; }
+// "a Caixa", "o Nubank". ponytail: só a Caixa (e a Caixa Econômica Federal) é
+// feminina entre os bancos que conectamos hoje; banco novo com nome feminino
+// entra aqui.
+function ofArtigo(i) { return /^caixa\b/i.test(String(i.institution || "").trim()) ? "a" : "o"; }
 // O detalhe do backend começa em maiúscula ("Autorize o acesso…"); aqui ele
 // entra no meio da frase. `showToast` faz o `esc()`.
 // `String(d)` porque várias entradas do `OF_VERDICT` chamam isto, e um `detail`
@@ -3618,10 +3646,10 @@ function refreshVerdict(sync) {
   for (const [estado, msg] of OF_VERDICT) {
     for (const i of items) {
       if (i.state !== estado) continue;
-      if (estado === "updating" && OF_REASONS_OK.includes(String(i.reason ?? "").toLowerCase())) {
-        if (!coletando) coletando = { tone: OF_TOM_COLETANDO, msg: msg(i) };
+      if (estado === "updating" && OF_REASONS_COLETANDO.includes(String(i.reason ?? "").toLowerCase())) {
+        if (!coletando) coletando = { tone: OF_TOM_COLETANDO, msg: msg(i, true) };
       } else {
-        return { tone: "error", msg: msg(i) };
+        return { tone: "error", msg: msg(i, false) };
       }
     }
   }
@@ -3629,8 +3657,8 @@ function refreshVerdict(sync) {
   if (items.some((i) => !OF_VERDICT_OK.includes(i.state) && i.state !== "updating")) return erro;
   if (coletando) return coletando;
   // `still_updating` conta item que a Pluggy ainda reporta coletando quando o
-  // servidor olha (fim da espera, ou health regravado no cooldown). A FRASE é a
-  // mesma de antes (decisão do dono); só o tom é neutro.
+  // servidor olha (fim da espera, ou health regravado no cooldown). Tom neutro;
+  // a frase é a da DP1 do PR-E (a tela relê sozinha).
   if (Number(sync.still_updating) > 0)
     return { tone: OF_TOM_COLETANDO, msg: OF_UPDATING_LOTE };
   if (items.length === 0 && sync.ok === false) return erro;
