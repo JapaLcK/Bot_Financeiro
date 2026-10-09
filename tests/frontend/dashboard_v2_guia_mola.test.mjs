@@ -72,9 +72,13 @@ async function voo(width, height, motion) {
   return { A, zero, meio, quase, B };
 }
 
+// O voo() é determinístico (o performance.now fica congelado): cada (largura, motion) é medido uma vez.
+const memo = new Map();
+const vooDe = (w, h, m) => { const k = `${w}x${h}:${m}`; if (!memo.has(k)) memo.set(k, voo(w, h, m)); return memo.get(k); };
+
 for (const [width, height] of [[1280, 800], [375, 812]]) {
   test(`mola ${width}×${height}: o recorte aceso desliza do Saiu à seta e assenta em TEMPO.voo; com reduce, salta`, async () => {
-    const { A, meio, B } = await voo(width, height, "no-preference");
+    const { A, meio, B } = await vooDe(width, height, "no-preference");
     console.log(`# recorte ${width}:`, JSON.stringify({ A: A.aceso, meio: meio.aceso, B: B.aceso }));
     assert.ok(A.aceso && !perto(cx(A.aceso), cx(B.aceso), 24), "Saiu e seta longe");
     assert.ok(entre(cx(meio.aceso)[0], cx(A.aceso)[0], cx(B.aceso)[0]) || entre(cx(meio.aceso)[1], cx(A.aceso)[1], cx(B.aceso)[1]), "o meio entre A e B");
@@ -83,12 +87,12 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
     const andou = Math.hypot(...[0, 1].map((i) => cx(meio.aceso)[i] - cx(A.aceso)[i])) / Math.hypot(...[0, 1].map((i) => cx(B.aceso)[i] - cx(A.aceso)[i]));
     assert.ok(andou > 0.4 && andou < 0.7, `aos 200 ms andou ${andou}`);
     assert.ok(contem(B.alvo, B.aceso) && contem(B.aceso, B.alvo), "pousado: o aceso é a seta");
-    const r = await voo(width, height, "reduce");
+    const r = await vooDe(width, height, "reduce");
     assert.ok(contem(r.zero.alvo, r.zero.aceso) && contem(r.zero.aceso, r.zero.alvo), `reduce: já na seta ${JSON.stringify(r.zero.aceso)}`);
   });
 
   test(`mola ${width}×${height}: o balão desliza e surge (opacidade e escala), o Piggy em arco; com reduce, os dois saltam`, async () => {
-    const { A, meio, B } = await voo(width, height, "no-preference");
+    const { A, meio, B } = await vooDe(width, height, "no-preference");
     console.log(`# balão e Piggy ${width}:`, JSON.stringify({ b: [A.b, meio.b, B.b], op: meio.op, escala: meio.escala, pg: [A.pg, meio.pg, B.pg] }));
     // No celular o balão fica no pé nos dois (anda 10 px); no desktop ele troca de lado.
     assert.ok(width < 640 || !perto(A.b, B.b, 24), "o balão muda de lugar");
@@ -98,12 +102,12 @@ for (const [width, height] of [[1280, 800], [375, 812]]) {
     assert.ok(entre(meio.pg[0], A.pg[0], B.pg[0]), `x do Piggy fora de A–B: ${meio.pg[0]}`);
     const reta = A.pg[1] + (meio.pg[0] - A.pg[0]) * (B.pg[1] - A.pg[1]) / (B.pg[0] - A.pg[0]);
     assert.ok(meio.pg[1] <= reta - 20, `arco: o meio está ${Math.round(reta - meio.pg[1])} px acima da reta`);
-    const r = await voo(width, height, "reduce");
+    const r = await vooDe(width, height, "reduce");
     assert.ok(perto(r.zero.b, r.B.b) && perto(r.zero.pg, r.B.pg) && r.zero.op === 1, "reduce: já pousados");
   });
 
   test(`mola ${width}×${height}: o clique só passa no pedaço do alvo que está aceso, durante e depois`, async () => {
-    const { meio, quase, B } = await voo(width, height, "no-preference");
+    const { meio, quase, B } = await vooDe(width, height, "no-preference");
     console.log(`# toque ${width}:`, JSON.stringify({ meio: [meio.toque, meio.noToque, meio.naSobra, meio.foraDoAceso], quase: [quase.toque, quase.noToque, quase.naSobra] }));
     for (const f of [meio, quase, B]) {
       if (f.toque) assert.ok(contem(f.aceso, f.toque) && contem(f.alvo, f.toque), `toque fora do aceso ou do alvo: ${JSON.stringify(f)}`);
