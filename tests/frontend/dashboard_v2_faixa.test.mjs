@@ -85,14 +85,18 @@ test("insight do dia: o clique abre a conversa com a pergunta dele respondida", 
 });
 
 test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () => {
-  // Sorte 0: o Essencial nunca sorteia insight e o Plus sorteia (o corte é tudo ou nada, PiggyBand.tsx).
-  const sorteio = async (plano) => {
-    const { ctx, page, erros } = await abrir({ perfil: "investir", plano, sorte: 0 });
-    return { ctx, page, erros, vistas: [[await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]] };
+  // Sorte 0 (começo do pool) e 0.99 (fim): a ordem do pool não é invariante, então o Essencial
+  // é medido nas duas pontas; o Plus sorteia insight na sorte 0.
+  const sorteio = async (plano, sorte) => {
+    const { ctx, page, erros } = await abrir({ perfil: "investir", plano, sorte });
+    return { ctx, page, erros, vista: [await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)] };
   };
-  const { ctx: ctxPlus, vistas: plus } = await sorteio("plus");
+  const { ctx: ctxPlus, vista: vPlus } = await sorteio("plus", 0);
   await ctxPlus.close();
-  const { ctx, page, erros, vistas: essencial } = await sorteio("essencial");
+  const { ctx: ctxFim, vista: vFim } = await sorteio("essencial", 0.99);
+  await ctxFim.close();
+  const { ctx, page, erros, vista: vEssencial } = await sorteio("essencial", 0);
+  const plus = [vPlus], essencial = [vEssencial, vFim];
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const hash = await page.evaluate(() => location.hash);
