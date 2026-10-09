@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { usePressao, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
@@ -75,7 +75,7 @@ export function Avisos({ motivos }: { motivos: string[] }) {
 export function Vazio({ texto }: { texto: string }) { return <Texto variante="rotulo" tom="inkMuted">{texto}</Texto>; }
 export function Folha({ titulo, aberta, fechar, children }: { titulo: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
   const { cores } = useTema(); const reduzir = useReduzirMovimento();
-  return <Modal visible={aberta} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
+  return <Modal visible={aberta} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
 }
 export function Curva({ valores }: { valores: (number | null)[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();

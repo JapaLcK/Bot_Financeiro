@@ -1,5 +1,5 @@
 import { fireEvent } from "@testing-library/react-native";
-import { Modal, StyleSheet, Text } from "react-native";
+import { Modal, Platform, StyleSheet, Text } from "react-native";
 
 import { Folha } from "@/features/painel/base";
 
@@ -13,6 +13,14 @@ describe("Folha (pageSheet do painel)", () => {
     const { claro: c } = montar();
     const tela = c.getByTestId("tela");
     expect(StyleSheet.flatten([tela.props.style, tela.props.contentContainerStyle]).paddingTop).toBe(0);
+  });
+
+  it("no Android (sem pageSheet, Modal em tela cheia) mantém o inset do topo", () => {
+    jest.replaceProperty(Platform, "OS", "android");
+    const { claro: c } = montar();
+    const tela = c.getByTestId("tela");
+    expect(StyleSheet.flatten([tela.props.style, tela.props.contentContainerStyle]).paddingTop).toBe(METRICAS_DE_TESTE.insets.top);
+    jest.restoreAllMocks();
   });
 
   it("aceita arrastar para fechar e o arrasto chama fechar", () => {
