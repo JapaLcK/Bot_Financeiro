@@ -9,7 +9,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 
 import { guardarCredenciais } from "@/storage/secure";
 
-import { chamadas, prepararCaso, resposta, rotear, S, type Rota } from "./auth_apoio";
+import { chamadas, prepararCaso, resposta, rotear, S, segurar, type Rota } from "./auth_apoio";
 
 const MFA_DESLIGADO = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 const NEUTRA = "Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.";
@@ -19,12 +19,12 @@ const drenar = async () => {
 };
 
 /** `/auth/me` com `has_password` controlado; `undefined` = o campo nem vem. */
-function abrir(hasPassword: { valor: boolean | undefined }, extra: Record<string, Rota> = {}) {
+function abrir(hasPassword: { valor: boolean | undefined; email?: string }, extra: Record<string, Rota> = {}) {
   rotear({
     "/auth/mfa/status": () => resposta(200, MFA_DESLIGADO),
     "/auth/forgot-password": () => resposta(200, { message: "texto do servidor" }),
     "/auth/me": () =>
-      resposta(200, { user_id: 1, email: "s@x.com", display_name: "S", app_access: true, ...(hasPassword.valor === undefined ? {} : { has_password: hasPassword.valor }) }),
+      resposta(200, { user_id: 1, email: hasPassword.email ?? "s@x.com", display_name: "S", app_access: true, ...(hasPassword.valor === undefined ? {} : { has_password: hasPassword.valor }) }),
     ...extra,
   });
   return guardarCredenciais(S).then(() => renderRouter("./app", { initialUrl: "/seguranca" }));
@@ -38,7 +38,7 @@ const tocar = (rotulo: string) =>
 const forgot = () => chamadas().filter((c) => c.caminho === "/auth/forgot-password");
 
 const appState = globalThis as unknown as { __dispararAppState: (v: string) => void };
-const appVai = (v: "active" | "background") =>
+const appVai = (v: "active" | "inactive" | "background") =>
   act(async () => {
     appState.__dispararAppState(v);
     await drenar();
@@ -132,5 +132,94 @@ describe("Segurança — conta sem senha", () => {
     expect(screen.getByText(/Abra o link no navegador/)).toBeTruthy();
     expect(forgot()).toHaveLength(1);
     expect(chamadas().filter((c) => c.caminho === "/auth/me").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("A1 — resposta VELHA (has_password false) chegando depois da nova (true) não repinta o bloco", async () => {
+    const conta = { valor: false as boolean | undefined };
+    const lenta = segurar();
+    let cargas = 0; // 0 = carga do foco inicial, 1 = a lenta, 2 = a rápida
+    await abrir(conta, {
+      "/auth/me": async () => {
+        const vez = cargas;
+        if (vez === 1) await lenta.promessa;
+        return resposta(200, { user_id: 1, email: "s@x.com", display_name: "S", app_access: true, has_password: vez === 1 ? false : conta.valor });
+      },
+    });
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+
+    cargas = 1;
+    await appVai("background");
+    await appVai("active"); // carga 1: sai com a senha ainda indefinida e fica presa
+    cargas = 2;
+    conta.valor = true; // a senha foi definida no navegador
+    await appVai("background");
+    await appVai("active"); // carga 2: já vê a senha
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy());
+
+    lenta.soltar(); // a resposta velha chega por último
+    await act(drenar);
+
+    expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy();
+    expect(screen.queryByText("Definir senha")).toBeNull();
+  });
+
+  it("A2 — recarga que FALHA com dados na tela mantém 'Verifique seu e-mail' e não reabre o envio", async () => {
+    let fora = false;
+    await abrir({ valor: false }, { "/auth/mfa/status": () => (fora ? resposta(500, { detail: "x" }) : resposta(200, MFA_DESLIGADO)) });
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+    await tocar("Enviar link");
+    expect(screen.getByText("Verifique seu e-mail")).toBeTruthy();
+
+    fora = true; // a rede ainda está acordando
+    await appVai("background");
+    await appVai("active");
+
+    expect(chamadas().filter((c) => c.caminho === "/auth/mfa/status").length).toBeGreaterThanOrEqual(2); // a recarga rodou
+    expect(screen.getByText("Verifique seu e-mail")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Enviar link" })).toBeNull();
+    expect(forgot()).toHaveLength(1);
+  });
+
+  it("A2 — a carga INICIAL que falha ainda mostra o erro com Tentar de novo", async () => {
+    await abrir({ valor: false }, { "/auth/mfa/status": () => resposta(500, { detail: "x" }) });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy());
+  });
+
+  it("M3 — ir para background (e o inactive da volta) NÃO recarrega; só o active depois do background", async () => {
+    await abrir({ valor: false });
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+    const me = () => chamadas().filter((c) => c.caminho === "/auth/me").length;
+    const base = me();
+
+    await appVai("inactive"); // Central de Controle: não saiu do app
+    await appVai("active");
+    expect(me()).toBe(base);
+
+    await appVai("background");
+    expect(me()).toBe(base);
+    await appVai("inactive"); // a volta do iOS passa por aqui, com a rede ainda acordando
+    expect(me()).toBe(base);
+    await appVai("active");
+    expect(me()).toBe(base + 1);
+  });
+
+  it("M8 — has_password false com MFA já ativo: sem bloco Definir senha", async () => {
+    await abrir({ valor: false }, { "/auth/mfa/status": () => resposta(200, { enabled: true, has_pending_secret: false, backup_codes_remaining: 7 }) });
+    await waitFor(() => expect(screen.getByText("Ativa · 7 de 10 códigos de backup")).toBeTruthy());
+    expect(screen.queryByText("Definir senha")).toBeNull();
+  });
+
+  it("A4 — e-mail só com espaços cai no mesmo texto do e-mail vazio, sem botão nem Ativar", async () => {
+    await abrir({ valor: false, email: "   " });
+    await waitFor(() => expect(screen.getByText(/Defina uma senha pelo site/)).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Enviar link" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
+  });
+
+  it("A3 — antes do envio o texto está no futuro; 'Enviamos' só depois", async () => {
+    await abrir({ valor: false });
+    await waitFor(() => expect(screen.getByText(/Vamos enviar um link para s@x\.com/)).toBeTruthy());
+    expect(screen.queryByText(/Enviamos um link para/)).toBeNull();
   });
 });

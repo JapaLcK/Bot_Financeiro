@@ -1,10 +1,9 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { ActivityIndicator, AppState, ScrollView, View } from "react-native";
 
 import type { MfaStatus, Perfil } from "@/api/schemas/auth";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
-import { useForeground } from "@/features/openFinance/useForeground";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
 import { perfil } from "@/services/auth";
@@ -30,15 +29,23 @@ export default function Seguranca() {
   const falha = useFalha();
   const [estado, setEstado] = useState<Estado>({ fase: "carregando" });
 
+  // Só a ÚLTIMA carga aplica estado: foco, volta do navegador e "Tentar de novo" podem
+  // sobrepor, e uma resposta velha (ex.: `has_password: false`) não pode pintar por cima da nova.
+  const geracao = useRef(0);
+
   const carregar = async () => {
+    const minha = ++geracao.current;
     try {
       // `conta` nula (falha do /auth/me) = lado permissivo: segue como se tivesse senha, e a
       // autoridade é o 409 do /auth/mfa/setup (mesma decisão do settings.html).
       const [status, conta] = await Promise.all([statusMfa(), perfil().catch(() => null)]);
-      setEstado({ fase: "pronto", status, conta });
+      if (minha === geracao.current) setEstado({ fase: "pronto", status, conta });
     } catch (e) {
+      if (minha !== geracao.current) return;
       const texto = falha(e);
-      if (texto !== null) setEstado({ fase: "erro", mensagem: texto });
+      // Recarga que falha com dados na tela (foco, volta do navegador) mantém a tela: trocar por
+      // "erro" desmontaria o `EsqueciSenha` e reabriria o envio (teto de 3/h). Erro só sem dados.
+      if (texto !== null) setEstado((atual) => (atual.fase === "pronto" ? atual : { fase: "erro", mensagem: texto }));
     }
   };
 
@@ -52,16 +59,21 @@ export default function Seguranca() {
     }, []),
   );
 
-  // O link do e-mail abre o Safari: voltar ao app é AppState, não foco de navegação, e
-  // o foco acima não dispara. Recarrega só na VOLTA do background (não no 1º render, que
-  // o foco já cobre) e sem ir a "carregando": a tela segue como está até a resposta chegar. `[ativo]` de propósito,
-  // como o `[]` acima: `carregar`/`estado` mudam a cada render.
-  const ativo = useForeground();
-  const antes = useRef(ativo);
+  // O link do e-mail abre o Safari: voltar ao app é AppState, não foco de navegação, e o foco
+  // acima não dispara. Recarrega na volta REAL (`active` depois de `background`): no iOS a volta
+  // passa por `inactive` com a rede ainda acordando, e `inactive` sozinho (Central de Controle) não
+  // é saída do app. Sem "carregando": a tela segue como está até a resposta chegar. `[]` de propósito.
   useEffect(() => {
-    if (ativo && !antes.current && estado.fase !== "carregando") void carregar();
-    antes.current = ativo;
-  }, [ativo]);
+    let foiParaFundo = false;
+    const escuta = AppState.addEventListener("change", (v) => {
+      if (v === "background") foiParaFundo = true;
+      else if (v === "active" && foiParaFundo) {
+        foiParaFundo = false;
+        void carregar();
+      }
+    });
+    return () => escuta.remove();
+  }, []);
 
   return (
     <ScrollView
@@ -98,8 +110,8 @@ export default function Seguranca() {
         ) : estado.conta?.has_password === false ? (
           // Conta do Google/Apple: sem senha o setup responde 409, então "Ativar" nem aparece.
           // Só `false` conta; ausente ou `true` cai no ramo de baixo.
-          estado.conta.email ? (
-            <EsqueciSenha emailFixo={estado.conta.email} />
+          estado.conta.email?.trim() ? (
+            <EsqueciSenha emailFixo={estado.conta.email.trim()} />
           ) : (
             <Texto variante="corpo">Sua conta ainda não tem senha. Defina uma senha pelo site para ativar a autenticação em 2 etapas.</Texto>
           )

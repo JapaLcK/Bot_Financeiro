@@ -82,7 +82,7 @@ export function EsqueciSenha({ emailFixo }: { emailFixo?: string } = {}) {
       <Texto variante="corpo" tom="inkMuted">
         {emailFixo === undefined
           ? "Digite seu e-mail: se ele estiver cadastrado, enviamos um link para redefinir a senha."
-          : `Sua conta ainda não tem senha. Enviamos um link para ${emailFixo}: abra no navegador, crie a senha e volte ao app.`}
+          : `Sua conta ainda não tem senha. Vamos enviar um link para ${emailFixo}: abra no navegador, crie a senha e volte ao app.`}
       </Texto>
       {emailFixo === undefined && (
         <Input
