@@ -469,14 +469,17 @@ você, leia o CI **e** o parecer do Codex **no head atual** antes de responder, 
 corrija, resolva conflito com a `main`, responda a thread, peça `@codex review`, mergeie
 quando as condições acima forem cumpridas. **CI verde não acorda a sessão** (o monitor só
 avisa de CI vermelho, conflito e comentário): se o Codex já liberou o head atual, sem thread
-aberta, e só faltam checks, ligue o auto-merge do PR (`ccd_pr set_auto_merge`) em vez de
-dormir à espera do CI — o GitHub mergeia quando fechar. Isso só vale com o Codex liberado no
-head atual; push novo exige novo `@codex review`, e o auto-merge ligado antes de o Codex
-liberar não é permitido. O app não garante um aviso do merge: no próximo despertar ou
-quando o dono falar, confira o `MERGED` e faça o resumo e a limpeza da branch. Só encerre o
-turno sem merge se estiver travado (os casos acima, ou o monitor não pôde ser ligado); aí diga o que trava e o que falta,
-em vez de entregar a espera ao dono. PR com conflito com a `main` não roda CI: um
-"sem checks" em PR `CONFLICTING` quer dizer conflito, não CI pendente.
+aberta, e só faltam checks, espere o CI terminar na própria sessão, com um único
+`gh run watch <id> --exit-status` em segundo plano (o id sai de
+`gh run list --workflow tests.yml --branch <branch> --limit 1`; o término do comando acorda a
+sessão), e mergeie em seguida. Nada de laço de `sleep` nem de polling repetido. O
+auto-merge do GitHub está desligado no repositório (`ccd_pr set_auto_merge` é recusado):
+não tente ligá-lo, é configuração do dono. Push novo exige novo `@codex review`, e o merge
+só vale com o Codex liberado no head atual. Se o CI falhar, trate como CI vermelho.
+Terminado o merge, faça o resumo e a limpeza da branch na mesma sessão. Só encerre o turno
+sem merge se estiver travado (os casos acima, ou o monitor não pôde ser ligado); aí diga o
+que trava e o que falta, em vez de entregar a espera ao dono. PR com conflito com a `main`
+não roda CI: um "sem checks" em PR `CONFLICTING` quer dizer conflito, não CI pendente.
 
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
