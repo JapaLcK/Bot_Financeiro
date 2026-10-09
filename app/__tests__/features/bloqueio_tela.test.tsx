@@ -175,7 +175,7 @@ describe("trava — voltando do fundo", () => {
     expect(prompts()).toBe(1);
   });
 
-  it("trava DESLIGADA e app fora de foco: nenhum prompt; dados do painel aguardam foreground", async () => {
+  it("trava DESLIGADA: o inactive não desmonta o painel (é da tampa nativa); só o background (#897)", async () => {
     await guardarCredenciais(S);
     cofre.set(TRAVA, "1");
     renderRouter("./app", { initialUrl: "/" });
@@ -183,6 +183,10 @@ describe("trava — voltando do fundo", () => {
 
     await appVai("inactive");
     expect(travaNaTela()).toBe(false);
+    expect(screen.getByText(OLA)).toBeTruthy();
+    expect(prompts()).toBe(0);
+
+    await appVai("background");
     expect(screen.queryByText(OLA)).toBeNull();
     expect(screen.queryByTestId("painel-conta")).toBeNull();
     expect(prompts()).toBe(0);
