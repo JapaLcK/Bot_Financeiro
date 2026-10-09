@@ -46,6 +46,13 @@ const ACOES: Record<string, { feito: (antes: Retrato, agora: Retrato) => boolean
 type Modo = "fechado" | "convite" | "ativo";
 type Etapa = "bloco" | "alvo";
 const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
+// Os POST /guia em fila: a ordem é a do clique enquanto a fila anda em até ESPERA desde o clique
+// (um `visto` lento não volta por cima do `feito`); um POST pendurado não trava os seguintes além
+// disso. Não é o `scope` do TanStack: o `runNext` do query-core quebra no bundle safari14
+// (`.bind(this).get(`, ver frontend/dashboard-app.js) e a 2ª mutation fica parada para sempre.
+// O catch: a falha de um não trava os seguintes.
+const ESPERA = 5000;
+let fila: Promise<unknown> = Promise.resolve();
 
 export function Guia({ s, path }: { s: DashState; path: Path }) {
   const qc = useQueryClient();
@@ -77,9 +84,11 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
 
   const m = useMutation({
     mutationKey: ["guia"],
-    mutationFn: (c: AcaoGuia) => apiPost("/guia", c),
+    mutationFn: (c: AcaoGuia) => { const p = Promise.race([fila.catch(() => {}), new Promise((ok) => setTimeout(ok, ESPERA))]).then(() => apiPost("/guia", c)); fila = p; return p; },
     // A comemoração só depois do 200: o progresso está salvo.
-    onSuccess: (novo, c) => {
+    onSuccess: async (novo, c) => {
+      // O GET que saiu antes deste POST traz o retrato velho. O await importa: o revert do cancel é assíncrono.
+      await qc.cancelQueries({ queryKey: guiaQuery.queryKey });
       qc.setQueryData(guiaQuery.queryKey, novo);
       if (c.acao === "feito" && c.passo) { setVistos((v) => [...v, c.passo!]); setFesta(c.passo); }
     },
