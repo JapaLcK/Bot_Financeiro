@@ -2463,6 +2463,19 @@ def pagamentos_no_cartao_legados(cur, user_id: int) -> list[dict]:
             if pagamento_no_cartao(r["amount"], r["category"], r["description"])]
 
 
+def mudanca_linha_cartao(r: dict):
+    """Única regra de "esta linha de cartão muda?", do sync e do dry-run do script
+    `corrigir_sinal_cartao_of` (§0.7). `r` é uma linha de `CREDIT_LINKS_SQL`. Pura: sem escrita.
+    Devolve `(valor, is_refund, tipo, categoria, data_mudou)` ou None se nada muda."""
+    valor, refund, tipo = sinal_cartao_of(r["amount"])
+    cat = categoria_pigbank(r["category"])
+    data_mudou = r["cur_date"] != r["transaction_date"]
+    if (Decimal(str(r["cur_valor"])) != valor or bool(r["cur_refund"]) != refund
+            or (not r["editada"] and (r["cur_cat"] or None) != (cat or None)) or data_mudou):
+        return valor, refund, tipo, cat, data_mudou
+    return None
+
+
 def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> int:
     """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
@@ -2476,15 +2489,9 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
             for r in cur.fetchall():
                 if r["ct_id"] in pagamentos:
                     continue  # não reescreve como estorno: sai da fatura abaixo
-                new_valor, new_refund, new_tipo = sinal_cartao_of(r["amount"])
-                new_cat = categoria_pigbank(r["category"])
-                changed = (
-                    Decimal(str(r["cur_valor"])) != new_valor
-                    or bool(r["cur_refund"]) != new_refund
-                    or (not r["editada"] and (r["cur_cat"] or None) != (new_cat or None))
-                    or r["cur_date"] != r["transaction_date"]
-                )
-                if changed:
+                mudanca = mudanca_linha_cartao(r)
+                if mudanca:
+                    new_valor, new_refund, new_tipo, new_cat, _ = mudanca
                     old_valor = Decimal(str(r["cur_valor"]))
                     old_bill_id = r["bill_id"]
                     new_bill_id = old_bill_id

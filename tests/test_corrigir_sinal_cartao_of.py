@@ -4,7 +4,8 @@ Estado semeado como a produção tem hoje (regra velha): compra gravada como est
 como compra e o pagamento `Transfer - Internal` como compra. A foto é de `credit_transactions`
 e `credit_bills` inteiras (não só a contagem): é ela que um dry-run que escrevesse alteraria.
 
-CONTROLE NEGATIVO: o dry-run chamando `_sync_imported_credit_updates` muda a foto → vermelho.
+CONTROLES NEGATIVOS: o dry-run chamando `_sync_imported_credit_updates` muda a foto → vermelho;
+o dry-run contando só o sinal (sem o predicado do sync) → `test_dry_run_conta_o_que_o_apply_muda` vermelho.
 """
 from __future__ import annotations
 
@@ -67,6 +68,39 @@ def test_controle_negativo_dry_run_que_escreve_muda_a_foto(dois_usuarios, monkey
     monkeypatch.setattr(script, "conta_usuario", conta_escrevendo)
     script.main(["--user", str(u)])
     assert foto(u, v) != antes
+
+
+@pytest.mark.parametrize("campo,sql", [
+    ("categoria", "update credit_transactions set categoria='velha', categoria_editada=false where id=%s"),
+    ("data", "update credit_transactions set purchased_at = purchased_at - 60 where id=%s"),
+    ("data_e_fatura", "with nb as (insert into credit_bills (user_id, card_id, period_start, period_end, total, status) "
+                      "select user_id, card_id, period_start - 60, period_end - 60, 0, 'open' from credit_bills "
+                      "where id = (select bill_id from credit_transactions where id=%s) returning id) "
+                      "update credit_transactions set purchased_at = purchased_at - 60, "
+                      "bill_id = (select id from nb) where id=%s"),
+])
+def test_dry_run_conta_o_que_o_apply_muda(uid_pro, rodar, campo, sql):
+    """Conexão PAUSED com SINAL CERTO e categoria/data velha: o apply (o próprio sync) reescreve
+    a linha, então o dry-run tem de contá-la. dry-run -> apply -> dry-run = 0."""
+    rodar(uid_pro, [A])                                   # regra nova: sinal certo
+    q("update open_finance_connections set status='PAUSED' where user_id=%s", (uid_pro,))
+    ct = linhas(uid_pro)["a"]["id"]
+    q(sql, (ct,) * sql.count("%s"))
+    antes = foto(uid_pro)
+    bill_antes = q("select bill_id from credit_transactions where id=%s", (ct,), True)[0]["bill_id"]
+
+    (rel,) = script.main(["--user", str(uid_pro)])
+    assert (rel["a_corrigir"], rel["a_remover"], rel["faturas"]) == (1, 0, 1)
+    assert rel["fatura_destino_desconhecida"] == (0 if campo == "categoria" else 1)
+    assert foto(uid_pro) == antes                         # dry-run não escreve (nem cria fatura)
+
+    (ap,) = script.main(["--user", str(uid_pro), "--apply"])
+    assert ap["alteradas"] == rel["a_corrigir"] + rel["a_remover"]   # a foto bate com a previsão
+    depois = q("select categoria, bill_id from credit_transactions where id=%s", (ct,), True)[0]
+    assert depois["categoria"] != "velha"
+    assert (depois["bill_id"] != bill_antes) is (campo == "data_e_fatura")  # a data move de fatura
+    (rel,) = script.main(["--user", str(uid_pro)])
+    assert (rel["a_corrigir"], rel["a_remover"]) == (0, 0)
 
 
 def test_usuario_inexistente_aborta():
