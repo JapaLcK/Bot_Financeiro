@@ -156,10 +156,17 @@ test("asset sem extensão entra pelo destination declarado pelo navegador", () =
   assert.equal(cacheia("/analytics/42/kpis", ""), false);
 });
 
-test("o CDN saiu do PRECACHE — addAll rejeita inteiro se um item falhar", () => {
-  const fonte = readFileSync(SW, "utf-8");
-  const bloco = fonte.slice(fonte.indexOf("const PRECACHE"), fonte.indexOf("]", fonte.indexOf("const PRECACHE")));
-  assert.ok(!bloco.includes("cdnjs"), "o CDN voltou pro PRECACHE: a queda dele impede a instalação do worker");
+
+test("install: o PRECACHE só tem caminho da própria origem — addAll rejeita inteiro se um item falhar", async () => {
+  const { ctx, handlers } = carregaSW();
+  let lista;
+  ctx.caches.open = async () => ({ addAll: async (l) => { lista = l; } });
+  let espera;
+  handlers.install({ waitUntil: (p) => { espera = p; } });
+  await espera;
+  assert.ok(Array.isArray(lista) && lista.length > 0, "o install não chamou addAll");
+  const fora = [...lista].filter((u) => new URL(u, ORIGEM).origin !== ORIGEM);
+  assert.deepEqual(fora, [], "item de outra origem no PRECACHE: a queda dele impede a instalação do worker");
 });
 
 test("CACHE_NAME tem UMA declaração e é a versão que este arquivo assume", () => {
@@ -214,8 +221,9 @@ test("o activate apaga todo cache de nome diferente", async () => {
 //
 // E mora em DOIS arquivos: `auth-refresh.js` (dashboard, home, settings,
 // comecar) e `nav-auth.js` (as 12 páginas públicas, que NÃO carregam o
-// auth-refresh). Os dois são dirigidos aqui — é o teste que compara a
-// duplicação inevitável (§0.7).
+// auth-refresh). O auth-refresh é exercitado aqui; o nav-auth, clicando em
+// "Sair" no navegador, em `nav_auth_sair.test.mjs`. A lista `PRESERVA` dos dois
+// continua comparada aqui (§0.7).
 
 /** Roda um JS de página num contexto falso e devolve o que ele apagou. */
 function paginaComCache(arquivo, prepara) {
@@ -637,59 +645,6 @@ test("request comum que renova e da' certo NAO limpa", async () => {
   assert.deepEqual(apagados, [], "apagou o cache num refresh bem-sucedido");
 });
 
-test("nav-auth so' recarrega DEPOIS de apagar", async () => {
-  // Mesmo invariante do caso acima, no outro dono. Aqui o `doLogout` nao e'
-  // exposto pelo IIFE, entao a ordem e' prendida na FORMA: o `location.reload`
-  // tem que estar DENTRO da continuacao da limpeza, nao ao lado da chamada.
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
-  const nav = readFileSync(join(dir, "nav-auth.js"), "utf-8");
-  const i = nav.indexOf("function doLogout()");
-  const corpo = nav.slice(i, nav.indexOf("\n  }", i));
-
-  const chamada = corpo.indexOf("limpaCacheNoLogout()");
-  const reload = corpo.indexOf("location.reload()");
-  assert.ok(chamada > 0 && reload > 0, "doLogout perdeu a limpeza ou o reload");
-  assert.ok(/limpaCacheNoLogout\(\)\s*\.then\(/.test(corpo),
-            "o reload nao espera a limpeza: navegacao descarta o documento e o delete morre no meio");
-  assert.ok(chamada < reload, "a limpeza tem que vir antes do reload");
-});
-
-test("nav-auth tambem limpa — as 12 paginas publicas nao carregam o auth-refresh", () => {
-  // Comparação da duplicação (§0.7). O `doLogout` do nav-auth é interno ao
-  // IIFE e depende de DOM para ser alcançado pelo clique; o que este caso
-  // prende é que ele CHAMA a limpeza — se alguém tirar a chamada de um dos
-  // dois arquivos, aqui fica vermelho.
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
-  const nav = readFileSync(join(dir, "nav-auth.js"), "utf-8");
-  const refresh = readFileSync(join(dir, "static", "auth-refresh.js"), "utf-8");
-
-  for (const [nome, fonte] of [["nav-auth.js", nav], ["auth-refresh.js", refresh]]) {
-    assert.ok(/caches\s*\.\s*keys\s*\(/.test(fonte),
-              `${nome} parou de apagar o Cache Storage no logout`);
-    assert.ok(/caches\s*\.\s*delete\s*\(/.test(fonte), `${nome} nao apaga nada`);
-  }
-
-  // Dentro do CORPO do doLogout, não no arquivo inteiro. Um `test(/limpa.../)`
-  // sobre o arquivo casa a própria DEFINIÇÃO (`function limpaCacheNoLogout()`)
-  // e fica cego à chamada sumir — medido: tirando a chamada, aquela versão
-  // seguia verde. É o teste que lê o texto do arquivo e afirma que um nome
-  // existe, contra o qual o CLAUDE.md §3 avisa.
-  const i = nav.indexOf("function doLogout()");
-  assert.ok(i > 0, "doLogout sumiu do nav-auth.js");
-  const corpo = nav.slice(i, nav.indexOf("\n  }", i));
-  assert.ok(/limpaCacheNoLogout\s*\(\s*\)/.test(corpo),
-            "nav-auth.js define a limpeza mas o doLogout nao a chama — sair pela landing deixa o cache privado intacto");
-});
-
-test("o worker NAO tem listener de message — a limpeza e' da pagina", () => {
-  // Regressão do achado do Codex: um worker antigo nao escuta `message`, entao
-  // depender dele deixaria o cache privado intacto justamente no aparelho que
-  // ainda nao ativou a versao nova.
-  const fonte = readFileSync(SW, "utf-8");
-  assert.ok(!/addEventListener\(\s*["']message["']/.test(fonte),
-            "a limpeza voltou para o worker: nao alcanca aparelho com worker antigo");
-});
-
 // ── Logout SEM RESPOSTA: o fetch rejeita (offline, DNS, captive portal) ──
 //
 // O quarto caminho do interceptor, e o unico que nao produzia resposta: o
@@ -923,24 +878,6 @@ test("storage bloqueado no logout OFFLINE: limpa o cache E devolve o erro DA RED
 
   assert.deepEqual(apagados.sort(), ["pigbank-v8", "pigbank-v9"], "o cache ficou no aparelho");
   assert.equal(desregistrados.length, 1, "o service worker nao foi desregistrado");
-});
-
-test("nav-auth tem a mesma correcao — o Sair das publicas parava de recarregar", () => {
-  // §0.7 de novo: o `apagaStorage` do nav-auth e' a copia do outro e tinha o
-  // mesmo `try` no lugar errado. La o dano e' pior: o `.finally` do `doLogout`
-  // rejeitava e o `location.reload()` NUNCA rodava — o botao "Sair" das 12
-  // paginas publicas nao fazia nada visivel. O `doLogout` e' interno ao IIFE e
-  // so' e' alcancado por clique, entao o que se prende aqui e' a FORMA: nenhum
-  // dos dois pode avaliar o getter fora do try.
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
-  for (const [nome, caminho] of [["nav-auth.js", ["nav-auth.js"]],
-                                 ["auth-refresh.js", ["static", "auth-refresh.js"]]]) {
-    const fonte = readFileSync(join(dir, ...caminho), "utf-8");
-    assert.ok(!/apagaStorage\(\s*window\./i.test(fonte),
-              `${nome} volta a avaliar o getter de storage FORA do try: com dados do site bloqueados a limpeza inteira morre antes do Cache Storage`);
-    assert.ok(/pagaStorage\("localStorage"\)/.test(fonte) && /pagaStorage\("sessionStorage"\)/.test(fonte),
-              `${nome} parou de limpar um dos dois storages`);
-  }
 });
 
 test("URL com barra invertida tambem aponta para outro host", async () => {
