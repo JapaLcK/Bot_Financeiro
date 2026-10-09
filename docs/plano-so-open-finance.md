@@ -254,7 +254,8 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
 
 **2a. Novos casos na trava. Faixa Completo: dinheiro, WhatsApp, IA, /app.**
 - **Faz:** novos casos em `fonte_unica.MENSAGENS`:
-  - `cartao_manual`: `create_card` e editar dias/limite de cartão manual; `pay_bill_amount`
+  - `cartao_manual`: `create_card`, editar dias/limite e apagar cartão manual (`delete_card`,
+    que apaga em cascata faturas e compras); `pay_bill_amount`
     do cartão manual. O do cartão OF só depois da 1b. O parcelamento do cartão manual
     (#6): antecipar, editar, apagar grupo e desfazer compra.
   - `recorrente`: `create_recurring_expense`/`_income` e `update_*`. O "sim" à sugestão de
@@ -270,7 +271,9 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   - `renda_informada`: `set_income_override`.
 - Regra de alcance: **todo escritor do §2.1 que muda legado** entra na trava ou tem motivo
   escrito para ficar livre. Esconder a tela (3a) não desliga o WhatsApp, a IA nem a rota
-  direta.
+  direta. **Apagar conta como mudar**: toda exclusão de entidade manual (cartão, conta,
+  recorrente, receita, caixinha, investimento, parcelamento) trava, com ou sem saldo, porque
+  o legado fica até a Fase 5.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
 - Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
   Até lá o caso `recorrente` trava só a despesa.
@@ -309,6 +312,11 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
 
 Segue a P3: o legado sai da tela **e** dos totais. Os números que deixam de contar o legado
 são dinheiro, então essa parte é Completo.
+
+**3a e 3b saem no mesmo deploy, por assunto.** Esconder um assunto da tela sem tirá-lo dos
+totais deixa o usuário ver um número feito de registros que ele não consegue consultar.
+Cada assunto (caixinhas, investimentos, cartão manual, recorrentes, receitas) sai da tela e
+dos totais juntos, num PR só ou em PRs liberados no mesmo deploy.
 
 **3a. Telas. Faixa Leve.**
 - **Faz:** o `/app` some com as abas e os botões de:
@@ -356,7 +364,7 @@ são dinheiro, então essa parte é Completo.
   medir que nada mais lê.
 
 **Dependências:**
-- 0 → 1a → (2a ∥ 2b ∥ 2c ∥ 2d) → 3a → 3b.
+- 0 → 1a → (2a ∥ 2b ∥ 2c ∥ 2d) → (3a + 3b, juntas por assunto).
 - A parte de avisos da 1c (Carteiro, autopay, vencimento) e a parada do
   `recurring_charger` vêm antes da 3a. O custo mensal da 1c pode esperar a Fase 4.
 - A 1b vem antes de travar o "pagar fatura" do cartão OF.
