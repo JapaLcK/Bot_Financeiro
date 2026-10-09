@@ -456,6 +456,19 @@ Se algo travar (Codex não responde, CI vermelho que não é seu, conflito que v
 resolve), não force: avise o dono. Depois do merge, avise o dono e apague a branch pelas
 regras abaixo. Isto não autoriza pular a revisão (§4) nem mergear PR de outra pessoa.
 
+**Acompanhar é trabalho seu, não do dono.** Nunca termine uma resposta com "quando
+quiser, mande olhar o CI", "me avise quando..." ou equivalente: o dono não é quem
+confere o CI. Logo depois de abrir o PR, ligue o monitor do app
+(`ccd_pr set_monitor` com `auto_fix` e a url do PR), que acorda a sessão em CI vermelho,
+conflito e comentário de revisão, e leia o estado com `ccd_pr get_status` (nada de
+polling por `gh`, `/loop` ou cron). Cada vez que a sessão acordar, ou o dono falar com
+você, leia o CI **e** o parecer do Codex **no head atual** antes de responder, e aja:
+corrija, resolva conflito com a `main`, responda a thread, peça `@codex review`, mergeie
+quando as condições acima forem cumpridas. Só encerre o turno sem merge se estiver travado
+(os casos acima, ou o monitor não pôde ser ligado); aí diga o que trava e o que falta,
+em vez de entregar a espera ao dono. PR com conflito com a `main` não roda CI: um
+"sem checks" em PR `CONFLICTING` quer dizer conflito, não CI pendente.
+
 **Depois do merge, apague a branch — se estiver limpa e sem uso.** Antes de apagar,
 confira: o PR está `MERGED` (`gh pr view <n> --json state`); `git status --short` vazio;
 nenhum worktree nem sessão usa a branch (`git worktree list`); nenhum outro PR aberto a usa
