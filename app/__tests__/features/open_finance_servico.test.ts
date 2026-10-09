@@ -36,6 +36,27 @@ describe("services/openFinance — connect-token", () => {
     await expect(pedirConnectToken(7)).resolves.toHaveProperty("includeSandbox", false);
   });
 
+  it("repassa products do servidor (a mesma lista do token, para o widget)", async () => {
+    // fora do default de pluggy_products(): pega cópia/filtro local da lista no app
+    const products = ["ACCOUNTS", "IDENTITY"];
+    rotear({ "/open-finance/7/connect-token": () => resposta(200, { ok: true, accessToken: "tok", products }) });
+    await expect(pedirConnectToken(7)).resolves.toMatchObject({ accessToken: "tok", products });
+  });
+
+  // `null` e `[]` virariam "products=null"/"products=" na URL do widget; o campo ruim não pode barrar a conexão.
+  it.each([
+    ["null", { products: null }],
+    ["lista vazia", { products: [] }],
+    ["string", { products: "ACCOUNTS" }],
+    ["número na lista", { products: [1] }],
+    ["ausente", {}],
+  ])("products %s: conecta e o campo some", async (_nome, extra) => {
+    rotear({ "/open-finance/7/connect-token": () => resposta(200, { ok: true, accessToken: "tok", ...extra }) });
+    const token = await pedirConnectToken(7);
+    expect(token.accessToken).toBe("tok");
+    expect(token.products).toBeUndefined();
+  });
+
   it("no Expo Go não manda o campo", async () => {
     constantes.executionEnvironment = "storeClient";
     await pedirConnectToken(7);

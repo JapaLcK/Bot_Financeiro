@@ -12,8 +12,8 @@ import { texto } from "@/ui/tokens";
  */
 export const unstable_settings = { initialRouteName: "index" };
 
-/** Os códigos de backup não cabem em meia tela: sheet só inteira. */
-const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllowedDetents: [1] };
+/** Os códigos de backup não cabem em meia tela: sheet só inteira, e sem alça (não há o que arrastar). */
+const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllowedDetents: [1], sheetGrabberVisible: false };
 
 export default function LayoutApp() {
   const { cores } = useTema();
