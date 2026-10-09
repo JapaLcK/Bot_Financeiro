@@ -66,7 +66,7 @@ export function Conversa() {
     return <View style={{ gap: 16 }}>
       <Texto variante="rotulo" tom="inkMuted">Pergunte sobre seus gastos, metas e compromissos. Ações financeiras pedem sua confirmação na conversa.</Texto>
       {!mensagens.length && <Vazio texto="Comece uma conversa com o Piggy." />}
-      {mensagens.map((m, i) => <View key={i} style={{ gap: 6 }}><Texto variante="legenda" tom="brand">{m.role === "user" ? "Você" : "Piggy"}</Texto><Texto>{p.oculto ? "Mensagem oculta enquanto os valores estão privados." : m.content}</Texto></View>)}
+      {mensagens.map((m, i) => <View key={i} style={{ gap: 6 }}><Texto variante="legenda" tom="brandInk">{m.role === "user" ? "Você" : "Piggy"}</Texto><Texto>{p.oculto ? "Mensagem oculta enquanto os valores estão privados." : m.content}</Texto></View>)}
       {!p.oculto && <Texto variante="legenda" tom="inkMuted">{atual.used} de {atual.limit} mensagens utilizadas</Texto>}
       {erro && <Texto tom="warning">{erro}</Texto>}
       <Input rotulo="Mensagem para o Piggy" value={p.oculto ? "" : texto} onChangeText={setTexto} multiline maxLength={2000} desativado={enviando || p.oculto} />

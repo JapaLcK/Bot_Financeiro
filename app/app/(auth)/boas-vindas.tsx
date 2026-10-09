@@ -63,7 +63,7 @@ export default function BoasVindas() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <Screen>
+      <Screen ajustarTeclado={false}>
         {!iniciou && repouso ? (
           <Apresentacao comecar={() => setIniciou(true)} entrar={() => ir("/entrar")} />
         ) : <View

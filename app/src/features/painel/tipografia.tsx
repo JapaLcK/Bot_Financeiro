@@ -3,6 +3,7 @@ import { useWindowDimensions } from "react-native";
 import { Texto } from "@/ui/componentes/Texto";
 import { Button } from "@/ui/componentes/Button";
 import { Chip } from "@/ui/componentes/Chip";
+import { ListRow } from "@/ui/componentes/ListRow";
 
 type Tipografia = { fontScale: number; ampliado: boolean };
 const Contexto = createContext<Tipografia>({ fontScale: 1, ampliado: false });
@@ -28,4 +29,8 @@ export function ButtonPainel(props: ComponentProps<typeof Button>) {
 export function ChipPainel(props: ComponentProps<typeof Chip>) {
   const { fontScale } = useTipografiaPainel();
   return <Chip key={fontScale} {...props} />;
+}
+export function ListRowPainel(props: ComponentProps<typeof ListRow>) {
+  const { fontScale } = useTipografiaPainel();
+  return <ListRow key={fontScale} {...props} />;
 }
