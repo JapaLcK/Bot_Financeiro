@@ -156,7 +156,6 @@ test("asset sem extensão entra pelo destination declarado pelo navegador", () =
   assert.equal(cacheia("/analytics/42/kpis", ""), false);
 });
 
-
 test("install: o PRECACHE só tem caminho da própria origem — addAll rejeita inteiro se um item falhar", async () => {
   const { ctx, handlers } = carregaSW();
   let lista;

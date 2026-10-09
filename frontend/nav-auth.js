@@ -44,7 +44,7 @@
    * públicas carregam ESTE arquivo e NÃO carregam o auth-refresh, então o
    * logout do menu de conta delas não passa pelo interceptor de fetch de lá —
    * sem esta cópia, sair pela landing deixava o cache privado intacto (Codex,
-   * #170). `tests/frontend/nav_auth_sair.test.mjs` clica em "Sair" e confere (§0.7).
+   * #170). `tests/frontend/nav_auth_sair.test.mjs` clica em "Sair" e confere.
    *
    * Da PÁGINA, não por `postMessage` ao worker: o aparelho que ainda tem cache
    * privado é o controlado por um worker antigo, que não escuta `message`.
