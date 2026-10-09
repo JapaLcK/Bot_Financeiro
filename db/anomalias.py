@@ -2,6 +2,7 @@
 `core/services/anomalia.py`; aqui só o SQL. Toda query filtra por `user_id`."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -62,9 +63,15 @@ def marcar_lancamento_esperado(user_id: int, launch_id: int, esperado: bool) -> 
     Ao marcar, o alerta que já existia sai do feed e da fila de e-mail, e uma lápide ocupa a
     chave `anomalia:{id}` para o detector não recriá-lo se leu o lançamento antes da marcação.
     Desmarcar não ressuscita alerta velho. Se o lançamento não existe mais, o alerta órfão do
-    próprio usuário sai do feed e a resposta continua sendo "não achou"."""
-    from .agents import get_agent, mark_agent_event_stale, record_agent_event
+    próprio usuário sai do feed e a resposta continua sendo "não achou".
 
+    A coluna e o evento mudam na MESMA transação: ou o lançamento fica marcado e sem alerta
+    vivo, ou nada muda. O SQL do evento é local (espelha `record_agent_event(silencioso=True)`
+    e `mark_agent_event_stale`: só `stale_at`, sem tocar em `emailed_at`/`seen_at`/`fired_at`)."""
+    from .agents import get_agent
+
+    agent = get_agent(user_id, "xerife")              # leitura, conexão própria, antes da transação
+    chave = f"anomalia:{launch_id}"
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -78,15 +85,25 @@ def marcar_lancamento_esperado(user_id: int, launch_id: int, esperado: bool) -> 
                 (esperado, launch_id, user_id),
             )
             achou = cur.fetchone() is not None
+            if agent and achou and esperado:
+                cur.execute(
+                    """
+                    insert into agent_events
+                      (agent_id, user_id, kind, dedupe_key, payload, channel, stale_at)
+                    values (%s, %s, 'xerife', %s, %s::jsonb, 'dashboard', now())
+                    on conflict (agent_id, dedupe_key)
+                    do update set stale_at = coalesce(agent_events.stale_at, now())
+                    """,
+                    (agent["id"], user_id, chave,
+                     json.dumps({"tipo": "anomalia", "launch_id": launch_id, "esperado": True})),
+                )
+            elif agent and not achou:
+                # Lançamento apagado: limpa o alerta órfão do PRÓPRIO usuário (a chave é por launch_id
+                # e o agente é o do dono, então id de outro usuário é no-op). Sem lápide.
+                cur.execute(
+                    "update agent_events set stale_at = coalesce(stale_at, now())"
+                    " where agent_id = %s and dedupe_key = %s",
+                    (agent["id"], chave),
+                )
         conn.commit()
-    agent = get_agent(user_id, "xerife") if (esperado or not achou) else None
-    if agent:
-        chave = f"anomalia:{launch_id}"
-        if achou:
-            record_agent_event(agent["id"], user_id, "xerife", chave,
-                               {"tipo": "anomalia", "launch_id": launch_id, "esperado": True},
-                               silencioso=True)
-        # Não achou (ex.: o lançamento foi apagado): limpa o alerta órfão do PRÓPRIO usuário. A chave
-        # é por launch_id e o agente é o do dono, então id de outro usuário é no-op.
-        mark_agent_event_stale(agent["id"], chave)
     return achou

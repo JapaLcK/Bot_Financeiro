@@ -1060,10 +1060,10 @@ tela para listar/desfazer, regra de esperado recorrente ou por período, `_detec
 mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
 parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
 (`anomalia.limiar`); lixo não numérico ("abc") só derruba a anomalia daquele usuário (logada pelo nome
-da classe), não o bloco `limites`. Limite conhecido do "esperado": o `update` da coluna, a lápide e o
-`stale` são três escritas em conexões separadas (`record_agent_event` e `mark_agent_event_stale` são
-compartilhados e não foram tocados), então numa janela de milissegundos um detector que já leu o
-lançamento ainda pode gravar o alerta e o e-mail sair.
+da classe), não o bloco `limites`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
+transação (SQL local em `db/anomalias.py`; `record_agent_event` e `mark_agent_event_stale`, compartilhados,
+não foram tocados), e o detector que já leu o lançamento esbarra na chave ocupada. Continua verdadeiro: e-mail
+já enviado antes do PUT não é desfeito.
 
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria

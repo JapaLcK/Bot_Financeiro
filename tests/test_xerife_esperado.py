@@ -93,6 +93,47 @@ def test_marcar_depois_some_do_feed_da_fila_de_email_e_do_contador(uid):
     assert _eventos(uid) == []
 
 
+def test_falha_no_passo_do_evento_desfaz_a_marcacao(uid, monkeypatch):
+    """Atomicidade: o `update` de launches e a lápide/stale são UMA transação. Se o passo do
+    evento levanta depois do update, nada fica pela metade (nem marcado com alerta vivo)."""
+    from types import SimpleNamespace
+    import db.anomalias as anom
+    for i in range(5):
+        _lanca(uid, 100, dias=10 + i)
+    alvo = _lanca(uid, 480, dias=0, horas=1)
+    _roda(uid)
+    agent = db.get_agent(uid, "xerife")
+
+    def boom(*a, **k):
+        raise RuntimeError("falha no evento")
+    monkeypatch.setattr(anom, "json", SimpleNamespace(dumps=boom))
+    with pytest.raises(RuntimeError):
+        marcar_lancamento_esperado(uid, alvo, True)
+    monkeypatch.undo()
+
+    assert _coluna(alvo) is None
+    assert len(_eventos(uid)) == 1 and len(db.list_unemailed_events(agent["id"])) == 1
+
+
+def test_marcar_preserva_emailed_at_e_seen_at_do_evento(uid):
+    """O stale tira o evento do feed/fila sem apagar o histórico de entrega."""
+    for i in range(5):
+        _lanca(uid, 100, dias=10 + i)
+    alvo = _lanca(uid, 480, dias=0, horas=1)
+    _roda(uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("update agent_events set emailed_at = now() - interval '1 hour', "
+                        "seen_at = now() - interval '30 minutes' where user_id = %s", (uid,))
+        conn.commit()
+    marcar_lancamento_esperado(uid, alvo, True)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select emailed_at, seen_at, stale_at from agent_events where user_id = %s", (uid,))
+            row = cur.fetchone()
+    assert row["emailed_at"] is not None and row["seen_at"] is not None and row["stale_at"] is not None
+
+
 def test_lapide_impede_o_detector_que_leu_antes_da_marcacao(uid):
     """O detector leu o lançamento ANTES da marcação e grava DEPOIS dela: a chave já está
     ocupada pela lápide, então o insert dele é no-op."""
