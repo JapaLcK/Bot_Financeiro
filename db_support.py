@@ -850,8 +850,8 @@ def trava_email(cur, email_hash: str | None, *, esperar: bool = True) -> bool:
 
 
 def telefone_livre(cur, telefone: str | None, exceto_user_id: int | None = None) -> str | None:
-    """O telefone, ou None se outra conta já o tem: descarte silencioso, sem dizer
-    "em uso" (enumeraria números de WhatsApp). O cadastro segue sem WhatsApp.
+    """O telefone, ou None se outra conta já o tem. Os cadastros descartam em silêncio,
+    sem dizer "em uso" (enumeraria números de WhatsApp), e seguem sem WhatsApp.
     `exceto_user_id`: a troca de telefone de uma conta existente (Configurações)
     não colide com o número que já é dela, nem com a variante do nono dígito."""
     if not telefone:
