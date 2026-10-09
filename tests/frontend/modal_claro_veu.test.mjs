@@ -176,7 +176,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.kill(); });
 
-// Mesma carga, mesma leitura (relógio e transições desligados em medir()): mede uma vez por opts.
+// Mesma carga, mesma leitura (transições e animações desligadas em medir()): mede uma vez por opts.
 const memo = new Map();
 const medir = (opts) => { const k = JSON.stringify(opts); if (!memo.has(k)) memo.set(k, medirPagina(browser, ORIGIN, opts)); return memo.get(k); };
 

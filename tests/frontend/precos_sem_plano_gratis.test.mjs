@@ -424,8 +424,8 @@ test("copy do subtítulo: app iOS, logado com gate, sem marcador", async () => {
 // vez, e o trial é UM por telefone na vida, então o ex-assinante que já o
 // queimou não ganha outro.
 //
-// Decidido pelo /auth/me e NUNCA pela URL, igual às células acima: as duas
-// colunas de marcador têm de dar a mesma linha.
+// Decidido pelo /auth/me e NUNCA pela URL, igual às células acima: o marcador
+// não decide a linha (a diagonal desktop/mobile cobre os dois lados).
 //
 // Os dois VIEWPORTS existem porque a mudança é de texto num subtítulo, e
 // subtítulo mais longo é exatamente o que estoura a caixa no celular: além da
@@ -522,9 +522,10 @@ test("cortado que TAMBÉM não escolheu plano lê a copy da escolha, não a do c
 
 test("pagante continua lendo a copy padrão (app_access true)", async () => {
   // POSITIVO da perna nova: sem ele, um `me.app_access === false` escrito como
-  // `=== true` ou `!== undefined` passaria verde e trocaria a copy de quem tem
-  // acesso. (O `!me.app_access` quem pega são as células "logado sem gate", cujo
-  // `me` vem sem `app_access`.)
+  // `!== undefined` (ou `!= null`) passaria verde e trocaria a copy de quem tem
+  // acesso. (O `=== true` já deixa as células do cortado vermelhas; o
+  // `!me.app_access` quem pega são as células "logado sem gate", cujo `me` vem
+  // sem `app_access`.)
   const { page } = await abrirPrecos({
     me: { user_id: 42, needs_plan_selection: false, app_access: true },
   });
