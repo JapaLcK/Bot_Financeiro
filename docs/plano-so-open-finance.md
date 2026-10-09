@@ -15,7 +15,7 @@
 | 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
 | 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
 | 1b. Fatura OF paga pelo extrato | A fazer. Vem antes de travar o "pagar fatura" do cartão OF. |
-| 1c. Custo mensal do OF | A fazer. A parte de avisos vem antes da 3a; o custo, junto da Fase 4. |
+| 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
 | 3. Esconder o legado | A fazer. |
 | 4. Metas sobre o OF | Espera a P5. |
@@ -274,6 +274,31 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   direta. **Apagar conta como mudar**: toda exclusão de entidade manual (cartão, conta,
   recorrente, receita, caixinha, investimento, parcelamento) trava, com ou sem saldo, porque
   o legado fica até a Fase 5.
+- **Matriz de travas (entidade × operação).** Fecha a classe "um caminho que muda legado
+  ficou de fora". O plano da 2a confere cada célula contra o código, e o teste-portão
+  (`tests/test_fonte_unica_q36.py`) passa a reprovar escritor de legado que não esteja aqui.
+
+  | Entidade manual | Criar | Editar | Pausar / desativar | Apagar | Movimentar | Desfazer pelo lançamento | Job automático |
+  |---|---|---|---|---|---|---|---|
+  | Cartão manual | trava | trava | — | trava | pagar fatura: trava | trava | — |
+  | Compra e parcela do cartão manual | trava | trava | — | trava (grupo) | antecipar: trava | trava | — |
+  | Fixo (despesa recorrente) | trava | trava | livre até o cobrador parar | trava | — | — | cobrador e avisos param **antes** da 2a |
+  | Receita recorrente | espera P7 | espera P7 | espera P7 | espera P7 | — | — | — |
+  | Conta e boleto manuais | trava | trava | — | trava | marcar paga: trava | trava | — |
+  | Caixinha manual | trava | trava (alvo e data são da Fase 4) | — | trava | depositar e retirar: trava | trava | — |
+  | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento: decidir no plano da 2a |
+  | Renda informada | trava | trava | — | livre (volta à computada) | — | — | — |
+  | Lançamento manual fora da Carteira | trava (2b) | categoria e descrição: livres | — | trava | — | trava | — |
+
+  "Desfazer pelo lançamento" é o `delete_launch_and_rollback` (`db/accounts.py`), que aplica
+  `delta_pocket` e `delta_invest` e reverte movimento de caixinha, investimento, fatura e
+  conta. Hoje o teste-portão o lista como liberado de propósito (desfazer o apagar
+  investimento). A 2a muda isso: o desfazer de legado trava, e a decisão anterior do dono
+  vale só enquanto o investimento manual não está congelado.
+- **Ordem com os jobs:** nenhuma trava liga antes de parar o job que mexe na mesma entidade.
+  O cobrador dos recorrentes manuais (`core/services/recurring_charger.py::sync_manual_bills_once`)
+  e os avisos de autopay e de vencimento param (ou passam a ler o OF, a parte de avisos da
+  1c) **antes da 2a**. Até lá, pausar o fixo fica livre.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
 - Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
   Até lá o caso `recorrente` trava só a despesa.
@@ -339,7 +364,7 @@ dos totais juntos, num PR só ou em PRs liberados no mesmo deploy.
   - metas e caixinhas manuais esperam a Fase 4 (a meta sobre o OF);
   - receita fixa e renda informada esperam a P7;
   - recorrentes e contas a pagar esperam o item abaixo.
-- **Antes da 3a:** o gerador de contas dos recorrentes manuais
+- **Antes da 2a (e portanto da 3a):** o gerador de contas dos recorrentes manuais
   (`core/services/recurring_charger.py`) e os avisos de autopay e de vencimento por
   WhatsApp param, ou passam a ler a recorrência do OF (a parte de avisos da 1c). Senão o
   legado escondido segue gerando conta e mensagem.
@@ -366,7 +391,7 @@ dos totais juntos, num PR só ou em PRs liberados no mesmo deploy.
 **Dependências:**
 - 0 → 1a → (2a ∥ 2b ∥ 2c ∥ 2d) → (3a + 3b, juntas por assunto).
 - A parte de avisos da 1c (Carteiro, autopay, vencimento) e a parada do
-  `recurring_charger` vêm antes da 3a. O custo mensal da 1c pode esperar a Fase 4.
+  `recurring_charger` vêm antes da 2a. O custo mensal da 1c pode esperar a Fase 4.
 - A 1b vem antes de travar o "pagar fatura" do cartão OF.
 - A P7 vem antes de travar a receita manual e a renda informada (2a) e antes de tirá-las da Previsão
   (3b).
