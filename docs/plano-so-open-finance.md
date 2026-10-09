@@ -114,6 +114,13 @@ inventário.
 | **Plano/limites** | contagem de lançamentos do mês, de caixinhas e de cartões | `core/services/plan_service.py:702`, `:752`, `:766` |
 | **Qualidade da Carteira** | todas as tabelas manuais | `db/carteira_qualidade.py` |
 | **Privacidade** | exportação, reset, exclusão | `db/privacy.py` (**continua igual**: o dado fica) |
+| **Orçamento doméstico** | a renda informada do mês (#19) vence a computada | `db/household_budget.py` (`get_monthly_income`, `get_household_budget_status`) |
+| **Agentes especialistas** (Barão, Faria Limer) | investimentos manuais no snapshot da conversa | `core/services/agent_chat_data.py::_snapshot` |
+
+**Esta tabela não é exaustiva.** Ela é a varredura da base `42a8cfc9`, e o código muda. O
+plano de cada fase que esconde ou trava legado refaz a varredura por `git grep` em cada
+tabela manual do §2.1 (`db/`, `core/`, `frontend/`, `api/`, `app/src`, `webapp/src`) antes
+de escrever a lista de arquivos.
 
 ## 3. Pontos que pediram atenção
 
@@ -319,6 +326,11 @@ são dinheiro, então essa parte é Completo.
   busca `/goals/{uid}/status`, `/cards/{uid}/summary` e `/installments/{uid}/list`, e essas
   consultas não filtram o legado. A varredura se faz com `git grep` nas rotas de cada
   tabela manual do §2.1, em `app/src`, `webapp/src` e `frontend/`.
+- **Regra da 3a: cada assunto só some quando o substituto existe.** Enquanto não existe, a
+  tela e os consumidores daquele assunto ficam como estão:
+  - metas e caixinhas manuais esperam a Fase 4 (a meta sobre o OF);
+  - receita fixa e renda informada esperam a P7;
+  - recorrentes e contas a pagar esperam o item abaixo.
 - **Antes da 3a:** o gerador de contas dos recorrentes manuais
   (`core/services/recurring_charger.py`) e os avisos de autopay e de vencimento por
   WhatsApp param, ou passam a ler a recorrência do OF (a parte de avisos da 1c). Senão o
@@ -328,7 +340,9 @@ são dinheiro, então essa parte é Completo.
 **3b. Totais sem o legado. Faixa Completo: dinheiro e foto diária.**
 - **Faz:** Patrimônio, foto e contas sem caixinha nem investimento manual. Resumo do mês sem o
   lançamento manual não-Carteira e sem o cartão manual. Previsão sem os fixos, as contas e as
-  faturas manuais.
+  faturas manuais. Orçamento doméstico sem a renda informada antiga, e os snapshots dos
+  agentes especialistas sem investimento manual. Cada parte segue a regra da 3a: só sai
+  quando o substituto existe (receita e renda esperam a P7).
 - A foto diária **quebra a linha** quando a composição muda (regra do §4 do plano do v2), em
   vez de registrar perda.
 - **Não faz:** apagar linha. A exportação LGPD continua levando o legado.
@@ -348,7 +362,9 @@ são dinheiro, então essa parte é Completo.
 - A 1b vem antes de travar o "pagar fatura" do cartão OF.
 - A P7 vem antes de travar a receita manual e a renda informada (2a) e antes de tirá-las da Previsão
   (3b).
-- A Fase 4 pode correr em paralelo à Fase 2 depois da P5 e da P6.
+- A Fase 4 pode correr em paralelo à Fase 2 depois da P5 e da P6. Ela vem **antes** da parte
+  da 3a que esconde metas e caixinhas.
+- A P7 vem antes da parte da 3a que esconde a receita fixa e a renda informada.
 - A P2 manda aplicar 2a–2c **primeiro só à coorte do v2** (a chave atual), depois a todos.
   A chave é uma lista de e-mail e id (`plan_service.dashboard_v2_enabled`) e **não prova
   que a conta não tem legado** (`docs/etapa3-previsao-inventario.md`, "Coorte e
