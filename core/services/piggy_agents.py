@@ -35,7 +35,6 @@ AGENTS_INTERVAL_SEC = int(os.getenv("AGENTS_INTERVAL_SEC", str(60 * 60)))
 # Xerife: defaults dos thresholds (config do agente pode sobrescrever).
 XERIFE_MULTIPLIER = 2.5     # gasto único > N× a média da categoria
 XERIFE_MIN_VALOR = 50.0     # ignora anomalia abaixo disso (ruído)
-XERIFE_MIN_SAMPLES = 5      # mínimo de lançamentos no histórico da categoria
 
 MESES_PT = [
     "", "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -50,50 +49,31 @@ def _fmt_brl(v: float) -> str:
 
 # ── Xerife: anomalia de gasto + limite de categoria ──────────────────────────
 
-def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> int:
-    """Detecta pro usuário do agente; retorna quantos eventos novos gravou."""
-    from db import record_agent_event
+def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> tuple[int, int]:
+    """Detecta pro usuário do agente; retorna (eventos novos gravados, candidatos que o piso
+    de amostra suprimiu). A regra e o texto da anomalia moram em core/services/anomalia.py."""
+    from core.services.anomalia import avaliar_candidatos, limiar
+    from db import listar_candidatos_xerife, record_agent_event
 
     cfg = agent.get("config") or {}
-    mult = float(cfg.get("multiplicador") or XERIFE_MULTIPLIER)
-    minimo = float(cfg.get("minimo") or XERIFE_MIN_VALOR)
     user_id = agent["user_id"]
     fired = 0
+    payloads: list[dict[str, Any]] = []
+    suprimidos = 0
+
+    # Falha na anomalia (ex.: `config` crua do cliente) não derruba o bloco de limites.
+    try:
+        agora = datetime.now(timezone.utc)
+        payloads, suprimidos = avaliar_candidatos(
+            listar_candidatos_xerife(user_id, agora), agora,
+            multiplicador=limiar(cfg.get("multiplicador"), XERIFE_MULTIPLIER),
+            minimo=limiar(cfg.get("minimo"), XERIFE_MIN_VALOR),
+        )
+    except Exception as exc:
+        print(f"[agents] xerife anomalia user={user_id}: {type(exc).__name__}", file=sys.stderr)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            # Anomalia: lançamento das últimas 24h muito acima da média (90d)
-            # da própria categoria. Histórico exclui as últimas 24h pra o
-            # próprio gasto anômalo não puxar a média.
-            cur.execute(
-                """
-                with hist as (
-                  select lower(categoria) as cat, avg(valor) as media, count(*) as n
-                  from launches
-                  where user_id = %s
-                    and tipo in ('despesa', 'saida')
-                    and is_internal_movement = false
-                    and categoria is not null
-                    and criado_em >= now() - interval '90 days'
-                    and criado_em <  now() - interval '24 hours'
-                  group by 1
-                )
-                select l.id, l.valor, l.categoria, coalesce(l.alvo, l.nota, '') as descricao,
-                       h.media
-                from launches l
-                join hist h on lower(l.categoria) = h.cat
-                where l.user_id = %s
-                  and l.tipo in ('despesa', 'saida')
-                  and l.is_internal_movement = false
-                  and l.criado_em >= now() - interval '24 hours'
-                  and h.n >= %s
-                  and l.valor >= %s
-                  and l.valor > %s * h.media
-                """,
-                (user_id, user_id, XERIFE_MIN_SAMPLES, minimo, mult),
-            )
-            anomalias = cur.fetchall() or []
-
             # Limite mensal por categoria (config: {"limites": {"delivery": 200}}).
             limites: dict[str, Any] = cfg.get("limites") or {}
             estouros: list[dict[str, Any]] = []
@@ -121,27 +101,10 @@ def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> int:
                     if limite_f > 0 and total > limite_f:
                         estouros.append({"cat": cat.lower(), "total": total, "limite": limite_f})
 
-    for a in anomalias:
-        media = float(a["media"])
-        valor = float(a["valor"])
+    for payload in payloads:
         ok = record_agent_event(
             agent["agent_id"], user_id, "xerife",
-            dedupe_key=f"anomalia:{a['id']}",
-            payload={
-                "tipo": "anomalia",
-                "launch_id": a["id"],
-                "categoria": a["categoria"],
-                "descricao": (a["descricao"] or "")[:120],
-                "valor": valor,
-                "media": round(media, 2),
-                "titulo": f"Gasto fora do padrão em {a['categoria']}",
-                "mensagem": (
-                    f"{_fmt_brl(valor)} em {a['categoria']}"
-                    f"{' (' + a['descricao'] + ')' if a['descricao'] else ''} — bem acima do "
-                    f"seu normal ({_fmt_brl(media)}). Gasto grande fora do padrão é o que mais "
-                    f"pesa no fim do mês; fica de olho pra não deixar virar rotina."
-                ),
-            },
+            dedupe_key=f"anomalia:{payload['launch_id']}", payload=payload,
         )
         fired += 1 if ok else 0
 
@@ -164,7 +127,7 @@ def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> int:
             valor_impacto=None,
         )
         fired += 1 if ok else 0
-    return fired
+    return fired, suprimidos
 
 
 def run_xerife_once(today: date | None = None, user_id: int | None = None) -> dict:
@@ -180,13 +143,15 @@ def run_xerife_once(today: date | None = None, user_id: int | None = None) -> di
     from core.services.plan_service import agent_kind_allowed, agents_ui_enabled
     agents = [a for a in agents
               if agents_ui_enabled(a["user_id"]) and agent_kind_allowed(a["user_id"], "xerife")]
-    fired = 0
+    fired = suprimidos = 0
     for agent in agents:
         try:
-            fired += _xerife_detect_for_user(agent, today)
+            f, s = _xerife_detect_for_user(agent, today)
+            fired += f
+            suprimidos += s
         except Exception as exc:
             print(f"[agents] xerife user={agent['user_id']}: {exc}", file=sys.stderr)
-    return {"ok": True, "agents": len(agents), "fired": fired}
+    return {"ok": True, "agents": len(agents), "fired": fired, "suprimidos_amostra": suprimidos}
 
 
 # ── Repórter: a manchete do mês ──────────────────────────────────────────────

@@ -12134,6 +12134,7 @@ function _renderAgentes(data) {
               <div class="ag-event-body">
                 <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
                 <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · <i class='ph ph-envelope' aria-hidden='true'></i> no seu e-mail" : ""}</p>
+                ${ev.kind === "xerife" && p.tipo === "anomalia" && Number.isInteger(p.launch_id) ? `<button type="button" class="ag-event-esperado" data-esperado-lancamento="${p.launch_id}" aria-label="Marcar como esperado${p.categoria ? ": " + esc(String(p.categoria).slice(0, 40)) : ""}">Era esperado</button>` : ""}
               </div>
             </div>
           `;

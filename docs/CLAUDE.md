@@ -1030,6 +1030,41 @@ atrás de `AGENTS_ENABLED` + listas de beta).
 A tool `simulate_purchase` (`core/services/ai_chat/tools/simulator.py`) usa o mesmo
 simulador e a mesma validação da rota `/simulator`, com gate soft de Pro.
 
+**Xerife, alerta de anomalia explicado (PL-04 PR A).** A regra, a amostra e o texto moram em
+`core/services/anomalia.py` (puro, Decimal; `AMOSTRA_MINIMA` é a única constante da regra de amostra:
+hoje 5 lançamentos, `dias=0`) e o SQL em `db/anomalias.py` (`listar_candidatos_xerife`). Compara UM
+lançamento das últimas 24h com a média POR LANÇAMENTO da mesma categoria (`lower`) nos 90 dias que
+terminam 24h antes; limiar 2,5x, mínimo R$ 50 e janela não mudaram. Três mudanças de gatilho: (1) média
+de referência <= 0 não alerta (antes disparava por `valor > 2,5 * 0`); (2) o empate EXATO no limiar (2,5x
+ou o limiar da `config`) não alerta: o SQL antigo comparava em float8 e alertava por ruído de float
+(ex.: histórico 89,44/182,40/137,42/70,26/41,56 e gasto de 260,54 = 2,5 × 104,216), e agora a conta é
+em Decimal e estrita; (3) `config` com `multiplicador`/`minimo` `nan`, `inf`, `<= 0` ou `0` cai no
+padrão (na main, nan/inf nunca alertavam e -2 alertava sempre) e "abc", que na main derrubava o Xerife
+inteiro do usuário (inclusive o evento de limite), agora derruba só a anomalia. Só `launches` entra:
+compra no cartão (`credit_transactions`) fica fora do Xerife. O evento mantém os campos legados
+(`tipo`, `launch_id`, `categoria`, `descricao`, `valor`, `media`, `titulo`, `mensagem`) e ganha
+`explicacao` (versao 1: `detector`, `calculado_em`, `fonte`, `referencia`, `atual`, `diferenca`,
+`amostra` com `historico_incompleto` e `esperados_fora`); evento antigo não tem o bloco. Histórico
+incompleto (menos de 90 dias desde a primeira despesa do usuário) é flag e frase na mensagem, não
+bloqueio. Candidato que o piso de amostra suprimiu volta em `suprimidos_amostra` no retorno de
+`run_xerife_once` (sem lápide: o sync do Open Finance pode completar o histórico depois). Se a
+explicação falha ao montar, o alerta sai com o texto simples. `launches.esperado_em` (timestamptz,
+nulo = não esperado) marca UM lançamento como "era esperado": fora do candidato e da média, sem
+expiração. `PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado` (`{"esperado": bool}`,
+mesmas portas das rotas de agentes; 404 igual para inexistente e de outro usuário) grava a coluna,
+tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anomalia:{id}`; desmarcar
+não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
+Fora do PR A (PR B): os contadores do topo da aba ("Disparos") e a tela de "esperados"; sensibilidade editável (a `config` do agente ainda chega crua), canais,
+tela para listar/desfazer, regra de esperado recorrente ou por período, `_detect_category_spike`
+(`db/insights.py`, compara mês parcial com meses cheios), cartão no Xerife. Limites conhecidos: o
+mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
+parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
+(`anomalia.limiar`); lixo não numérico ("abc") só derruba a anomalia daquele usuário (logada pelo nome
+da classe), não o bloco `limites`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
+transação (SQL local em `db/anomalias.py`; `record_agent_event` e `mark_agent_event_stale`, compartilhados,
+não foram tocados), e o detector que já leu o lançamento esbarra na chave ocupada. Continua verdadeiro: e-mail
+já enviado antes do PUT não é desfeito.
+
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria
 na inferência.
