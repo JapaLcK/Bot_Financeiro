@@ -25,7 +25,7 @@
  *     `searchParams.delete`, que a mutação não toca;
  *   · negativo do STATUS — `const pago = !!cobranca;` (sem o
  *     `&& cobranca.status === "paid"`) e ficam vermelhos os QUATRO casos do
- *     WP15; `WP15 paid` e os outros 28 seguem verdes;
+ *     WP15; o WP6 (a mesma `AGENDADA`, paga) e os demais seguem verdes;
  *   · negativo da FONTE — volte a ler `vl` e `inicio` da URL no `home.html`
  *     (`cents` do `params.get("vl")`, `inicioPix` do `wpInicioValido(inicio)`)
  *     e ficam vermelhos 5: WP1, WP4b, WP6, WP8 e WP13 — número MEDIDO antes de
@@ -435,8 +435,9 @@ test("WP14: busca pendurada — o modal sobe assim mesmo, sem valor inventado", 
  *
  * Controle negativo MEDIDO: tire o `&& cobranca.status === "paid"` do `pago`
  * (`const pago = !!cobranca;`) e os quatro casos não-pagos ficam VERMELHOS.
- * Controle positivo: `WP15 paid`, no mesmo grupo — sem ele, um `pago = false`
- * fixo passaria nos quatro (e mandaria toda venda de verdade sem receita).
+ * Controle positivo: WP6 — a mesma `AGENDADA` com `status:"paid"`, value 499 —
+ * sem ele, um `pago = false` fixo passaria nos quatro (e mandaria toda venda de
+ * verdade sem receita).
  */
 for (const status of ["pending", "expired", "canceled", "refunded"]) {
   test(`WP15: status=${status} manda só currency, sem value`, async () => {
@@ -453,14 +454,6 @@ for (const status of ["pending", "expired", "canceled", "refunded"]) {
     await page.close();
   });
 }
-
-test("WP15 paid: a mesma cobrança, paga, manda os 49900 centavos", async () => {
-  const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix`,
-    { ...AGENDADA, status: "paid" });
-  const [, , dados] = await purchase(page);
-  assert.equal(dados.value, 499, `value: ${JSON.stringify(dados)}`);
-  await page.close();
-});
 
 /* ── WP16: `agendada` fora do booleano não vira promessa de data ─────────────
  * Par do WP8b, que já blinda `amount_cents` contra lixo: `agendada: 1` e
@@ -489,8 +482,8 @@ for (const agendada of [1, "false"]) {
  * Purchase da NOSSA conta. A coluna é nossa, mas o plano mais caro custa
  * R$ 499 — acima do teto é dado corrompido, não venda.
  *
- * Controle negativo: tire o `&& cents < 1e8` e este caso fica vermelho (WP6 e
- * `WP15 paid`, com 49900, seguem verdes).
+ * Controle negativo: tire o `&& cents < 1e8` e este caso fica vermelho (WP6, com
+ * 49900, segue verde).
  */
 test("WP17: amount_cents=999999999999 cai no caso sem valor", async () => {
   const { page } = await abrirHome(`${BASE}&pl=pro&gw=pix`,

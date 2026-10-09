@@ -24,9 +24,10 @@
  *   · app iOS — mais 2 células com a UA PigBankApp: o gate vale lá também, e
  *     o mandato tem de aparecer. A isenção que routes/shared.py tinha era por
  *     substring de User-Agent, escolhida pelo cliente, e saiu;
- *   · controle POSITIVO — "Assinar Plus" ainda dispara EXATAMENTE 1
- *     POST /billing/create-checkout. Sem ele o grupo passaria numa página com
- *     todos os botões quebrados, que é pior que o bug.
+ *   · controle POSITIVO — o clique em "Assinar Plus" com EXATAMENTE 1 POST
+ *     /billing/create-checkout `{monthly, pagina, plus}` é o "controle
+ *     positivo: checkout_url → hospedado…" de precos_pagina_propria.test.mjs;
+ *     aqui fica o estado habilitado dos 6 CTAs pagos.
  *
  * Rodar:  npm run test:frontend
  */
@@ -57,8 +58,7 @@ async function abrirPrecos({ me = null, query = "", app = false,
                            } = {}) {
   const page = await browser.newPage({ viewport,
                                        ...(app ? { userAgent: APP_UA } : {}) });
-  const chamadas = { selectFree: 0, checkout: 0 };
-  const corposCheckout = [];
+  const chamadas = { selectFree: 0 };
 
   await page.route("**/auth/me", (route) => (me
     ? route.fulfill({ contentType: "application/json", body: JSON.stringify(me) })
@@ -84,18 +84,6 @@ async function abrirPrecos({ me = null, query = "", app = false,
     });
   });
 
-  await page.route("**/billing/create-checkout", (route) => {
-    chamadas.checkout += 1;
-    corposCheckout.push(JSON.parse(route.request().postData() || "{}"));
-    // checkout_url pra uma página do próprio servidor: o startCheckout navega
-    // no sucesso, e mandá-lo pra lugar nenhum deixaria o teste cego pro ramo
-    // "Resposta inesperada do servidor".
-    return route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ checkout_url: `${ORIGIN}/precos.html?stripe=1` }),
-    });
-  });
-
   await page.goto(`${ORIGIN}/precos.html${query}`);
   await page.waitForSelector("#plans-v2 .plan");
   // O IIFE loadPlansState é assíncrono (plans-config + subscription) e o
@@ -103,7 +91,7 @@ async function abrirPrecos({ me = null, query = "", app = false,
   // Grátis. Sem esperar, "não existe CTA" passaria antes de o JS rodar — e o
   // teste ficaria verde por corrida, não pelo conserto.
   await page.waitForTimeout(600);
-  return { page, chamadas, corposCheckout };
+  return { page, chamadas };
 }
 
 test("o ciclo usa um switch único, animado e reversível", async () => {
@@ -516,23 +504,11 @@ test("pagante continua lendo a copy padrão (app_access true)", async () => {
 
 // ── controle POSITIVO: o caminho legítimo continua funcionando ───────────────
 
-test("controle positivo: 'Assinar Plus' dispara exatamente 1 POST /billing/create-checkout", async () => {
-  const { page, chamadas, corposCheckout } = await abrirPrecos({
-    me: { user_id: 42, needs_plan_selection: true }, query: "?escolha=1",
-  });
-  await Promise.all([
-    page.waitForURL(/stripe=1/, { timeout: 5000 }),
-    page.click('#plans-v2 [data-plan-btn="plus"]'),
-  ]);
-  assert.equal(chamadas.checkout, 1, `foram ${chamadas.checkout} POSTs de checkout`);
-  assert.deepEqual(corposCheckout[0], { interval: "monthly", pagina: true, plan: "plus" });
-  await page.close();
-});
-
 test("controle positivo: os 6 CTAs pagos continuam habilitados (card e tabela)", async () => {
   // Clicar nos seis não dá: o primeiro clique bem-sucedido NAVEGA pro Stripe.
   // Então a prova de "não quebrei os outros" é o estado do DOM — o clique de
-  // verdade é o teste acima. Cada plano pago tem DOIS botões (card + linha de
+  // verdade é o "controle positivo: checkout_url → hospedado…" de
+  // precos_pagina_propria.test.mjs. Cada plano pago tem DOIS botões (card + linha de
   // CTA da ilha #cmp-v2).
   const { page } = await abrirPrecos({ me: { user_id: 42, needs_plan_selection: true } });
   const estado = await page.$$eval("[data-plan-btn]", (els) => els.map((e) => ({

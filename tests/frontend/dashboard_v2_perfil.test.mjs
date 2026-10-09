@@ -190,6 +190,7 @@ test("plano plus: Investir sem o simulador; no catálogo ele tem cadeado e não 
   assert.deepEqual(depois, antes);
 });
 
+// O positivo (o Pro mostra os três) é o "o plano vem da API" de painel_v2_plano_api.test.mjs.
 test("plano essencial: previsão, Piggy e simulador fora do painel em todos os perfis", async () => {
   const { ctx, page } = await abrir({ plano: "essencial", perfil: "padrao" });
   const vistos = {};
@@ -220,13 +221,6 @@ test("esvaziar no essencial salva [] e o upgrade não põe o travado de volta: e
   assert.equal(vazio, "[]");
   assert.deepEqual(depois, []);
   assert.ok(livres.includes("Simulador") && livres.includes("Piggy notou"), JSON.stringify(livres));
-});
-
-test("positivo: plano pro mostra previsão, Piggy e simulador", async () => {
-  const { ctx, page } = await abrir({ plano: "pro", perfil: "padrao" });
-  const r = (await painel(page)).filter((id) => ["hero", "piggy", "simulador"].includes(id));
-  await ctx.close();
-  assert.deepEqual(ordenado(r), ["hero", "piggy", "simulador"]);
 });
 
 test("storage que lança: monta, o modal abre e a escolha vale em memória", async () => {
