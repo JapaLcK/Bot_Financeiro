@@ -101,13 +101,28 @@ test("falha de rede mantém o item, avisa e reabilita o botão", async () => {
   await page.close();
 });
 
-test("404 do servidor não remove o item", async () => {
+test("404 do lançamento (apagado) tira o item do feed e do cache, com o toast novo", async () => {
   const page = await montar({ fetchImpl: () => { window.fetch = () => Promise.resolve(new Response('{"detail":"Lançamento não encontrado."}', { status: 404 })); } });
   await page.locator('[data-esperado-lancamento="102"]').click();
-  await page.waitForFunction(() => /Não deu pra marcar/.test(document.getElementById("toast").textContent));
-  assert.equal(await page.locator(".ag-event").count(), 5);
+  await page.waitForFunction(() => /não existe mais; tirei o alerta/.test(document.getElementById("toast").textContent));
+  assert.equal(await page.locator(".ag-event").count(), 4);
+  assert.equal(await page.locator('[data-esperado-lancamento="102"]').count(), 0);
+  assert.equal(await page.evaluate(() => _agentesCache.events.some((e) => e.payload.launch_id === 102)), false);
   await page.close();
 });
+
+for (const [nome, resp] of [
+  ["404 de feature indisponível", () => { window.fetch = () => Promise.resolve(new Response('{"detail":"Feature indisponível."}', { status: 404 })); }],
+  ["500", () => { window.fetch = () => Promise.resolve(new Response('{"detail":"boom"}', { status: 500 })); }],
+]) {
+  test(`${nome} mantém o item e avisa`, async () => {
+    const page = await montar({ fetchImpl: resp });
+    await page.locator('[data-esperado-lancamento="102"]').click();
+    await page.waitForFunction(() => /Não deu pra marcar/.test(document.getElementById("toast").textContent));
+    assert.equal(await page.locator(".ag-event").count(), 5);
+    await page.close();
+  });
+}
 
 test("403 pro_required abre o upgrade e mantém o item", async () => {
   const page = await montar({ fetchImpl: () => { window.fetch = () => Promise.resolve(new Response('{"detail":{"error":"pro_required"}}', { status: 403 })); } });

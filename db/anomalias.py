@@ -61,7 +61,8 @@ def marcar_lancamento_esperado(user_id: int, launch_id: int, esperado: bool) -> 
 
     Ao marcar, o alerta que já existia sai do feed e da fila de e-mail, e uma lápide ocupa a
     chave `anomalia:{id}` para o detector não recriá-lo se leu o lançamento antes da marcação.
-    Desmarcar não ressuscita alerta velho."""
+    Desmarcar não ressuscita alerta velho. Se o lançamento não existe mais, o alerta órfão do
+    próprio usuário sai do feed e a resposta continua sendo "não achou"."""
     from .agents import get_agent, mark_agent_event_stale, record_agent_event
 
     with get_conn() as conn:
@@ -78,12 +79,14 @@ def marcar_lancamento_esperado(user_id: int, launch_id: int, esperado: bool) -> 
             )
             achou = cur.fetchone() is not None
         conn.commit()
-    if achou and esperado:
-        agent = get_agent(user_id, "xerife")
-        if agent:
-            chave = f"anomalia:{launch_id}"
+    agent = get_agent(user_id, "xerife") if (esperado or not achou) else None
+    if agent:
+        chave = f"anomalia:{launch_id}"
+        if achou:
             record_agent_event(agent["id"], user_id, "xerife", chave,
                                {"tipo": "anomalia", "launch_id": launch_id, "esperado": True},
                                silencioso=True)
-            mark_agent_event_stale(agent["id"], chave)
+        # Não achou (ex.: o lançamento foi apagado): limpa o alerta órfão do PRÓPRIO usuário. A chave
+        # é por launch_id e o agente é o do dono, então id de outro usuário é no-op.
+        mark_agent_event_stale(agent["id"], chave)
     return achou

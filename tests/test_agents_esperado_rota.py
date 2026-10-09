@@ -14,7 +14,9 @@ from fastapi.testclient import TestClient
 import frontend.finance_bot_websocket_custom as dashboard
 from _apoio_auth_app import csrf, sessao_de
 from conftest import promote_to_pro, usuario_pagante
-from test_xerife_deteccao import _lanca
+import db
+from db import get_conn
+from test_xerife_deteccao import _eventos, _lanca, _roda
 from test_xerife_esperado import _coluna
 from tests.test_api_v2_perfil import cliente
 from frontend.routes.shared import FRONTEND_DIR
@@ -99,3 +101,35 @@ def test_script_novo_e_servido_e_carregado_pelo_painel():
     assert r.status_code == 200 and "javascript" in r.headers["content-type"]
     assert "data-esperado-lancamento" in (FRONTEND_DIR / "dashboard.js").read_text(encoding="utf-8")
     assert "/dashboard-agent-esperado.js" in (FRONTEND_DIR / "dashboard.html").read_text(encoding="utf-8")
+
+
+def _alerta(uid):
+    """Alerta de anomalia gerado pelo detector real; devolve (launch_id, agent_id)."""
+    for i in range(5):
+        _lanca(uid, 100, dias=10 + i)
+    lid = _lanca(uid, 480, dias=0, horas=1)
+    _roda(uid)
+    assert len(_eventos(uid)) == 1
+    return lid, db.get_agent(uid, "xerife")["id"]
+
+
+def test_lancamento_apagado_da_404_e_limpa_o_alerta_orfao(uid):
+    lid, agent_id = _alerta(uid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("delete from launches where id = %s", (lid,))
+        conn.commit()
+    assert len(db.list_unemailed_events(agent_id)) == 1         # a exclusão não limpa o alerta
+    r = _put(uid, uid, lid)
+    assert r.status_code == 404 and r.json()["detail"] == "Lançamento não encontrado."
+    assert _eventos(uid) == [] and db.list_unemailed_events(agent_id) == []
+
+
+def test_404_de_outro_usuario_nao_limpa_o_alerta_do_dono(uid):
+    lid, agent_id = _alerta(uid)
+    outro = usuario_pagante()
+    db.activate_agent(outro, "xerife", {})                      # B também tem o agente
+    r = _put(outro, outro, lid)
+    assert r.status_code == 404
+    assert len(_eventos(uid)) == 1 and len(db.list_unemailed_events(agent_id)) == 1
+    assert _coluna(lid) is None

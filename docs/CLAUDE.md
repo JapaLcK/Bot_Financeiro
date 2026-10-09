@@ -1053,7 +1053,7 @@ nulo = não esperado) marca UM lançamento como "era esperado": fora do candidat
 expiração. `PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado` (`{"esperado": bool}`,
 mesmas portas das rotas de agentes; 404 igual para inexistente e de outro usuário) grava a coluna,
 tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anomalia:{id}`; desmarcar
-não ressuscita alerta velho. Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
+não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
 Fora do PR A (PR B): os contadores do topo da aba ("Disparos") e a tela de "esperados"; sensibilidade editável (a `config` do agente ainda chega crua), canais,
 tela para listar/desfazer, regra de esperado recorrente ou por período, `_detect_category_spike`
 (`db/insights.py`, compara mês parcial com meses cheios), cartão no Xerife. Limites conhecidos: o
