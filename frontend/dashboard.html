@@ -755,6 +755,50 @@
     <div id="agentes-feed" class="ag-feed"></div>
   </div>
 
+  <dialog id="xerife-dialog" aria-labelledby="xerife-title">
+    <div class="xerife-heading"><h2 id="xerife-title">Alertas do Xerife</h2><button type="button" class="btn-cancel" data-xerife-close aria-label="Fechar configurações do Xerife">Fechar</button></div>
+    <p id="xerife-status" role="status" aria-live="polite"></p>
+    <div id="xerife-content" hidden>
+      <form id="xerife-config-form">
+        <h3>Sensibilidade</h3>
+        <p>Compare cada gasto com a média da categoria. Um multiplicador menor avisa sobre variações menores. A comparação usa lançamentos dos últimos 90 dias e pelo menos 5 gastos de referência.</p>
+        <div class="xerife-fields">
+          <label>Multiplicador da média<input class="modal-inp" name="multiplicador" type="number" min="1" max="10" step="any" required aria-describedby="xerife-threshold-help"></label>
+          <label>Gasto mínimo (R$)<input class="modal-inp" name="minimo" type="number" min="0.01" max="1000000" step="0.01" required></label>
+        </div>
+        <p id="xerife-threshold-help">O gasto precisa superar o multiplicador e atingir o valor mínimo. Padrão: 2,5× e R$ 50. Compras no cartão ainda não entram nesta comparação.</p>
+        <h3>Canais</h3>
+        <p>No painel, os alertas ficam sempre disponíveis enquanto o agente estiver ativo.</p>
+        <label class="xerife-check"><input type="checkbox" name="email_enabled"> Receber também por e-mail</label>
+        <button class="btn-save" type="submit">Salvar configurações</button>
+      </form>
+      <section aria-labelledby="xerife-esperados-title">
+        <h3 id="xerife-esperados-title">Gastos esperados</h3>
+        <p>Gastos marcados individualmente ficam fora dos alertas de anomalia e da média. Desfazer devolve o gasto à comparação, exceto se uma regra ainda o considerar esperado. Alertas antigos não são reenviados.</p>
+        <div id="xerife-esperados-list"></div>
+        <div class="xerife-actions"><button type="button" class="btn-cancel" data-xerife-page="prev">Anteriores</button><button type="button" class="btn-cancel" data-xerife-page="next">Próximos</button></div>
+      </section>
+      <section aria-labelledby="xerife-regras-title">
+        <h3 id="xerife-regras-title">Regras recorrentes</h3>
+        <p>A regra vale para gastos com a mesma descrição e categoria, até o teto escolhido, inclusive no histórico. Valores maiores continuam sendo avaliados. Ela não cria pagamentos nem altera seu saldo.</p>
+        <div id="xerife-regras-list"></div>
+        <details id="xerife-new-rule"><summary>Criar regra recorrente</summary>
+          <form id="xerife-rule-form">
+            <label>Descrição ou favorecido exato<input class="modal-inp" name="descricao" maxlength="200" required></label>
+            <label>Categoria exata<input class="modal-inp" name="categoria" maxlength="200" required></label>
+            <div class="xerife-fields">
+              <label>Valor máximo (R$)<input class="modal-inp" name="teto" type="number" min="0.01" max="1000000" step="0.01" required></label>
+              <label>Até a data do gasto (opcional)<input class="modal-inp" name="data_fim" type="date"></label>
+            </div>
+            <p>Maiúsculas e espaços repetidos são ignorados; o restante da descrição precisa coincidir. Sem data, vale até você desfazer.</p>
+            <button class="btn-save" type="submit">Salvar regra recorrente</button>
+          </form>
+        </details>
+      </section>
+    </div>
+    <button type="button" class="btn-cancel" id="xerife-retry" hidden>Tentar novamente</button>
+  </dialog>
+
   <div id="categories-view" class="dash-view">
     <div class="mock-header">
       <p class="section-title" style="margin:0">Categorias</p>
@@ -1687,6 +1731,7 @@
 <script defer src="/dashboard-chat.js?v=1"></script>
 <script defer src="/dashboard-agent-chat.js?v=2"></script>
 <script defer src="/dashboard-agent-esperado.js?v=1"></script>
+<script defer src="/dashboard-xerife.js?v=1"></script>
 
 </body>
 </html>

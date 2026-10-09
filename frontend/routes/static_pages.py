@@ -775,6 +775,15 @@ async def serve_dashboard_agent_esperado_js():
     )
 
 
+@router.get("/dashboard-xerife.js")
+async def serve_dashboard_xerife_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-xerife.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/launch-type-labels.js")
 async def serve_launch_type_labels_js():
     """Fonte única dos rótulos de `tipo` de lançamento — dashboard.html e
