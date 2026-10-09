@@ -34,6 +34,7 @@ from db import (
     set_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
 )
+from db.connection import get_conn
 from frontend.routes import shared
 from utils_phone import normalize_phone_e164
 
@@ -275,6 +276,18 @@ async def security_settings_route(request: Request, user_id: int):
     return await _get_security_settings(user_id)
 
 
+CONTATO_EM_USO = "Este e-mail ou telefone já está em uso."
+
+
+def _telefone_livre(telefone: str, user_id: int) -> bool:
+    """O `telefone_livre` dos cadastros (§0.7): a variante com/sem o nono dígito do
+    número de outra conta também está em uso. O índice único só vê o número exato,
+    e continua de rede para a corrida entre esta leitura e o UPDATE (#630)."""
+    from db_support import telefone_livre
+    with get_conn() as conn, conn.cursor() as cur:
+        return telefone_livre(cur, telefone, exceto_user_id=user_id) is not None
+
+
 @router.patch("/settings/{user_id}/security/contact")
 async def update_security_contact_route(
     request: Request,
@@ -327,6 +340,14 @@ async def update_security_contact_route(
 
     old_email = (auth_user.get("email") or "").strip().lower() or None
     email_actually_changed = bool(email) and email != old_email
+    phone_actually_changed = bool(normalized_phone) and normalized_phone != auth_user.get("phone_e164")
+    if email_actually_changed or phone_actually_changed:
+        # #610: o 409 abaixo diz que o contato é de outra conta. Teto por conta
+        # (D5): 5 trocas/hora, contando também as que dão 409 — é a enumeração.
+        from frontend.finance_bot_websocket_custom import _check_persistent_rate_limit
+        await _check_persistent_rate_limit("settings-contact", f"user:{user_id}", 5, 60 * 60)
+    if phone_actually_changed and not await asyncio.to_thread(_telefone_livre, normalized_phone, user_id):
+        raise HTTPException(status_code=409, detail=CONTATO_EM_USO)
 
     try:
         async with await shared.db_connect() as conn:
@@ -401,7 +422,7 @@ async def update_security_contact_route(
         from db_support import invalidate_auth_user_cache
         invalidate_auth_user_cache(user_id)
     except psycopg.errors.UniqueViolation as exc:
-        raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
+        raise HTTPException(status_code=409, detail=CONTATO_EM_USO) from exc
 
     if email_actually_changed:
         await asyncio.to_thread(
