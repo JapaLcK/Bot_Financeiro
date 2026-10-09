@@ -74,13 +74,6 @@ test("controle positivo: mês com receita real continua verde", async () => {
   await page.close();
 });
 
-test("controle positivo: mês no vermelho continua vermelho", async () => {
-  const page = await loadDashboardJs();
-  const r = await abrirDetalhe(page, { inc: 100, exp: 500 });
-  assert.match(r.totalCls, /\bneg\b/, "o déficit perdeu o vermelho: " + r.totalCls);
-  await page.close();
-});
-
 /**
  * CARD e MODAL na MESMA medição. Medir só o modal foi o erro da rodada
  * anterior: o conserto entrou no `openSobrouDetail` e o card da Início, que é

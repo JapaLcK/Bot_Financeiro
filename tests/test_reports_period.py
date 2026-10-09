@@ -20,15 +20,17 @@ def _cb(value):
 
 def test_build_weekly_report_text():
     with patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(1000)), \
-         patch("core.reports.reports_daily.get_launches_by_period", return_value=[{"id": 1}, {"id": 2}, {"id": 3}]), \
-         patch("core.reports.reports_daily.get_summary_by_period", return_value={"despesa": 150.0, "receita": 20.0}):
+         patch("core.reports.weekly.get_launches_by_period", return_value=[
+             {"tipo": "despesa", "is_internal_movement": False}, {"tipo": "receita", "is_internal_movement": False},
+             {"tipo": "despesa", "is_internal_movement": False}, {"tipo": "despesa", "is_internal_movement": True}]), \
+         patch("core.reports.weekly.get_summary_by_period", return_value={"despesa": 150.0, "receita": 20.0}):
         msg = build_weekly_report_text(123)
 
     assert "📊 *Resumo semanal do Bot Financeiro*" in msg
-    assert "🏦 Saldo atual: R$ 1.000,00" in msg
-    assert "📉 Gastos da semana: R$ 150,00" in msg
-    assert "📈 Receitas da semana: R$ 20,00" in msg
-    assert "📊 Lançamentos da semana: 3" in msg
+    assert "🏦 Saldo atual nas contas: R$ 1.000,00" in msg
+    assert "📉 Despesas: R$ 150,00" in msg
+    assert "📈 Receitas: R$ 20,00" in msg
+    assert "🧾 Lançamentos: 3" in msg  # a interna não conta
 
 
 def test_build_monthly_report_text():
@@ -48,20 +50,22 @@ def test_build_monthly_report_text():
 def test_weekly_closed_usa_semana_anterior():
     # segunda-feira 2026-08-03 → semana fechada = 27/07 a 02/08
     fake_now = datetime(2026, 8, 3, 9, 0, tzinfo=_TZ)
-    captured = {}
+    chamadas = []
 
     def _fake_summary(user_id, start, end):
-        captured["start"], captured["end"] = start, end
+        chamadas.append((start, end))
         return {"despesa": 0.0, "receita": 0.0}
 
-    with patch("core.reports.reports_daily.now_tz", return_value=fake_now), \
+    with patch("core.reports.weekly.now_tz", return_value=fake_now), \
          patch("core.reports.reports_daily.get_consolidated_balance", return_value=_cb(0)), \
-         patch("core.reports.reports_daily.get_launches_by_period", return_value=[]), \
-         patch("core.reports.reports_daily.get_summary_by_period", side_effect=_fake_summary):
+         patch("core.reports.weekly.get_launches_by_period", return_value=[]), \
+         patch("core.services.plan_service.plan_gate_ok", return_value=True), \
+         patch("core.services.plan_service.history_earliest_date", return_value=None), \
+         patch("core.reports.weekly.get_summary_by_period", side_effect=_fake_summary):
         s = build_weekly_report_summary(123, closed=True)
 
-    assert captured["start"] == date(2026, 7, 27)
-    assert captured["end"] == date(2026, 8, 2)
+    # o período e, para quem compara (Plus+), a semana anterior de 7 dias contra 7 dias
+    assert chamadas == [(date(2026, 7, 27), date(2026, 8, 2)), (date(2026, 7, 20), date(2026, 7, 26))]
     assert s["start"] == "27/07/2026" and s["end"] == "02/08/2026"
 
 

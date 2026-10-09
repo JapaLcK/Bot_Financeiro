@@ -55,10 +55,10 @@ describe("ProgressBar", () => {
     expect(c.UNSAFE_getAllByType(View)[0]!.props.accessibilityValue).toEqual({ min: 0, max: 100, now: 1 });
   });
 
-  it("trilha é `surface` (nunca `border` — brand sobre border reprova 3:1)", () => {
+  it("trilha é `border`, não `surface`: dentro do Card (`surface`) a trilha sumia", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<ProgressBar valor={0.5} />);
-    expect(c.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(claro.surface);
-    expect(e.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(escuro.surface);
+    expect(c.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(claro.border);
+    expect(e.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(escuro.border);
   });
 
   it("tom customizado (positive/warning/danger) pinta o preenchimento", () => {

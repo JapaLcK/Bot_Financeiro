@@ -2221,6 +2221,22 @@ def init_db():
         """alter table plan_trials add column if not exists model_version smallint not null default 1""",
         """alter table plan_trials alter column model_version set default 2""",
 
+        # ── Cache das fontes externas do painel de funil (`core/funil_fontes.py`) ──
+        # Guarda SÓ agregados já prontos (contagens, taxas, valores somados) de
+        # Stripe/GA4/Clarity/Meta, por fonte — nunca dado de pessoa, por isso NÃO tem
+        # user_id. `chamadas_dia`/`dia_utc` são o contador atômico da cota diária.
+        # Aditivo, sem backfill: linha ausente = nunca consultada.
+        """
+        create table if not exists funil_fontes_cache (
+          fonte text primary key,
+          payload jsonb,
+          buscado_em timestamptz,
+          falha_em timestamptz,
+          dia_utc date,
+          chamadas_dia int not null default 0
+        )
+        """,
+
         # ── Funil de checkout (telemetria durável, fora do log operacional) ──
         # Vive em tabela própria, NÃO em system_event_logs, por dois motivos:
         # (1) system_event_logs é purgável (o "Limpar" do painel, admin.py
@@ -2952,7 +2968,13 @@ def init_db():
         # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
         # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
         # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
-        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
+        # `ordem_aba`/`ordem_n` = o último `(aba, n)` de `dispensar`/`reabrir` aplicado: o POST
+        # mais velho da mesma aba, que chega depois, não desfaz o gesto mais novo, enquanto
+        # nenhum gesto de outra aba/aparelho/cliente antigo chegar no meio (limite em
+        # docs/CLAUDE.md, "Ordem dos gestos"; `db/guia.py`). Anuláveis, sem default: null = nenhum gesto com `ordem` ainda.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}',
+          add column if not exists ordem_aba text,
+          add column if not exists ordem_n int""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

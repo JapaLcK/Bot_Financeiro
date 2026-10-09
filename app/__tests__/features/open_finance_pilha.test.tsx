@@ -107,7 +107,7 @@ it("retorno frio revalida entitlement sem conceder Início nem deixar Volta no b
   await waitFor(() => expect(screen.getByRole("button", { name: "Continuar" })).toBeTruthy());
   e.acesso = false;
   await apertar("Continuar");
-  await waitFor(() => expect(screen.getByText("Sua conta ainda não tem acesso ao app. A contratação pelo iPhone chegará em uma próxima atualização.")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText(/^Sua conta ainda não tem acesso ao app\./)).toBeTruthy());
   expect(screen).toHavePathname("/");
   expect(router.canGoBack()).toBe(false);
   expect(screen.queryByRole("button", { name: "Bancos conectados" })).toBeNull();

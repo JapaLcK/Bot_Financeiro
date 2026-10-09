@@ -48,12 +48,11 @@ export default function ConectarBanco() {
   }, [rodada]));
   const podeConectar = acesso?.fase === "conectar" || acesso?.fase === "inicio";
   const mensagem = acesso?.fase === "senha" ? SEM_SENHA : acesso?.fase === "cobranca-pendente"
-    ? "Há uma cobrança pendente. Seu acesso atual permanece, mas novas conexões bancárias não estão disponíveis enquanto a cobrança é regularizada."
-    : acesso?.fase === "sem-acesso" ? "Sua conta ainda não tem um plano com acesso ao app. A contratação pelo iPhone estará disponível em uma próxima atualização."
+    ? "Há uma cobrança pendente. Novas conexões ficam indisponíveis até regularizar."
+    : acesso?.fase === "sem-acesso" ? "Sua conta ainda não tem acesso ao app. A assinatura pelo iPhone chega numa próxima atualização."
     : acesso?.fase === "sem-open-finance" ? "Seu acesso atual não permite conectar bancos. Confira as condições da sua conta."
-    : "Conecte seu banco e deixe o Piggy organizar sua grana. Para começar, precisamos receber a primeira sincronização.";
+    : "Para começar, precisamos receber a primeira sincronização.";
   return <TemaProvider acesso><Screen><View style={{ gap: espaco.lg, paddingVertical: espaco.xl, flexGrow: 1 }}>
-    <Texto variante="legenda" tom="inkMuted">SEU DINHEIRO, MAIS CLARO</Texto>
     {/* eslint-disable-next-line @typescript-eslint/no-require-imports */}
     <Image source={require("../../assets/brand/piggy-3d.png")} accessible={false} resizeMode="contain" style={{ width: "100%", height: 220 }} />
     <Texto variante="display" accessibilityRole="header">Vamos conhecer sua grana?</Texto>

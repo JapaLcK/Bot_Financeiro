@@ -33,9 +33,8 @@
  *     jogasse TODO `detail` fora (e mostrasse sempre o genérico) passaria —
  *     e isso é pior que o bug, porque apaga "E-mail já cadastrado."
  *
- * Desktop (1440×900) e mobile (390×844) no mesmo grupo: a caixa de erro é
- * `.auth-error`/`.contact-msg`, que muda de largura entre os dois, e o teste
- * confere que o texto está VISÍVEL (não só no DOM) nas duas larguras.
+ * Só desktop (1440×900): as caixas de erro não têm `@media` e os JS das páginas
+ * não leem a largura. O teste confere que o texto está VISÍVEL (não só no DOM).
  *
  * O que este arquivo NÃO alcança: `home.html` (o 6º site — precisa do bootstrap
  * autenticado do dashboard, fora do alcance de um servidor de arquivos), o
@@ -65,7 +64,6 @@ const CORPO_422 = JSON.stringify({
 const VAZAMENTOS = ["[object Object]", "Field required", "missing", "password"];
 
 const DESKTOP = { width: 1440, height: 900 };
-const MOBILE = { width: 390, height: 844 };
 
 /**
  * Cada página: como abrir, o que mockar, como disparar o envio, e onde a
@@ -174,7 +172,7 @@ async function tela(p, { status, body, viewport }) {
 }
 
 for (const p of PAGINAS) {
-  for (const [rotulo, viewport] of [["desktop", DESKTOP], ["mobile", MOBILE]]) {
+  for (const [rotulo, viewport] of [["desktop", DESKTOP]]) {
     test(`${p.nome} (${rotulo}): 422 não vira [object Object] nem vaza o corpo`, async () => {
       const t = await tela(p, { status: 422, body: CORPO_422, viewport });
       assert.deepEqual(t.erros, [], "a página estourou JS");

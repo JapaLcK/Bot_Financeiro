@@ -45,6 +45,9 @@ def _tipo(s: dict) -> str:
     if t == "string" and (chaves - {"pattern", "minLength", "maxLength"} == {"type"}
                           or (chaves == {"type", "format"} and s["format"] == "date-time")):
         return "string"
+    # Inteiro com teto/piso (`ge`/`le`): o TS só vê `number`.
+    if t == "integer" and chaves - {"minimum", "maximum"} == {"type"}:
+        return "number"
     if chaves == {"type", "items"} and t == "array":
         return f"Array<{_tipo(s['items'])}>"
     if t == "object" and chaves in ({"type", "properties"}, {"type", "properties", "required"}):

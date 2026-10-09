@@ -197,6 +197,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
   propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
   conciliação pendente conta em dobro (sai com motivo), estorno não abate.
+  **Semanal (PL-05):** `build_weekly_report_data` (`core/reports/weekly.py`, reexportada por `reports_daily`) é o
+  payload tipado (Decimal/date); `build_weekly_report_summary` o adapta para texto e mantém as 6
+  chaves do template da Meta. Bancos e comparação são extras: se falharem, o resumo sai sem eles
+  (`bancos=None`, `comparacao_motivo="indisponivel"`). No job do WhatsApp, build que falha depois do
+  claim devolve a semana até 10 vezes (≈5 min, contador em memória); na 10ª a semana se perde. Se o próprio release falha (banco fora), ele fica pendente e é
+  repetido no tick seguinte, antes do claim e sem contar como tentativa.
+  Mantém a regra de `get_summary_by_period` e expõe `cartao_incluido=False`
+  (o texto avisa que compra no cartão não entra). A "semana equivalente" é n dias contra n dias
+  (`_semana_equivalente`): fechada = seg→dom contra seg→dom da retrasada; parcial = segunda até
+  hoje contra a segunda anterior até o mesmo dia da semana. `lancamentos` conta só despesa/receita
+  não internas (o mensal ainda conta toda linha de `launches`: diferença conhecida). O template
+  homologado (5 variáveis) não muda; o texto rico vai no pedido manual e no Discord.
+  Decisões do dono (PL-05): o envio é na segunda, no horário do resumo diário no WhatsApp (o
+  Discord roda fixo às 09:00 e não lê a preferência); dia e horário próprios não foram feitos, por decisão; compra no cartão fica fora do semanal, com aviso no
+  texto; o template da Meta segue com 5 variáveis (o texto rico só no pedido manual e no Discord;
+  levá-lo ao WhatsApp automático depende de template novo aprovado na Meta); a comparação com a
+  semana anterior é só Plus+; não há saldo livre calculado (o texto separa "Resultado da semana"
+  de "Saldo atual nas contas"). Limites conhecidos: um par pendente de conciliação (lançamento
+  manual + movimento do Open Finance ainda não fundido) conta em dobro e o semanal não avisa; falha
+  de `send_template` consome o claim da semana; o resumo mensal (WhatsApp e Discord) não tem a mesma
+  proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
@@ -291,16 +312,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   começado: o cliente não mostra o convite sozinho, só retoma pela Ajuda) > `oferecer` (nada
   feito, nunca oferecido, passo 1 disponível) > `indisponivel`. Quem fez 2 e 3 sem dados segue `em_andamento` quando os dados chegam, com
   o passo 1 agora disponível e não feito. O `motivo` do topo é o do passo 1 quando ele está
-  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?}`
+  indisponível (só em `em_andamento` e `indisponivel`); senão `null`. O POST recebe `{acao: "visto"|"feito"|"dispensar"|"reabrir", passo?, ordem?}`
+  (`ordem` é validada em TODAS as ações: inválida = 422 também em `visto`/`feito`, onde é ignorada)
   e devolve o mesmo `Guia`; `feito` sem `passo` ou `passo` fora do roteiro = 422 no envelope;
   `feito` de passo com `disponivel: false` = 409 `passo_indisponivel` no envelope, sem gravar
   (sem dados o cliente mostra a orientação e segue para 2 e 3); nas outras ações `passo` é ignorado. Exige o CSRF do pai. Carimbos só gravam uma vez
   (`oferecido_em` no `visto` e no `reabrir`, `dispensado_em`, `concluido_em`, e o 1º de cada
-  passo em `feitos`); `reabrir` zera `dispensado_em`. A oferta conta o convite **e** a Ajuda:
+  passo em `feitos`); `reabrir` zera `dispensado_em` (salvo gesto descartado pela ordem, abaixo). A oferta conta o convite **e** a Ajuda:
   quem abre pela Ajuda sem nunca ter visto o convite fica `em_andamento` e não o recebe depois,
   e entra em `oferecidos` na medição abaixo (conclusão/oferecidos mistura as duas portas; quem
   abre pela Ajuda antes de ter dado põe a espera pela sincronização dentro de
   `mediana_oferta_ate_1o_valor`, então ela não mede só o guia).
+  **Ordem dos gestos.** `dispensar`/`reabrir` aceitam `ordem?: {aba, n}` (`aba` 1–32 caracteres, sorteada
+  por carregamento de página; `n` 1–2³¹−1, contador da aba que só cresce). O servidor guarda o último
+  `(aba, n)` aplicado em `guia_painel.ordem_aba`/`ordem_n` (anuláveis, `alter … if not exists`, fora do
+  `GET`); gesto da MESMA aba com `n` menor ou igual ao guardado não grava o efeito (200 com o estado atual;
+  o `reabrir` descartado ainda carimba `oferecido_em`, quando ele é null e `feitos` está vazio, como no reabrir de sempre). Outra aba, ou sem `ordem` (cliente antigo), aplica
+  e grava o novo `(aba, n)` (sem `ordem` → null). A comparação mora no `WHERE` do `UPDATE` (trava a
+  linha), nunca num `SELECT` antes. Limite aceito: a referência é UM par `(aba, n)` por usuário, o do último gesto aplicado; a garantia da mesma aba
+  só vale enquanto nenhum gesto de outra aba, de outro aparelho ou de cliente antigo (sem `ordem`) chegar entre os dois
+  POSTs. Ex.: A reabrir 9 → B reabrir 1 → A dispensar 5 (emitido antes do 9) aplica e desfaz o reabrir 9. Upgrade: guardar
+  o último `n` por aba, com teto de abas.
   `visto` e `reabrir` só carimbam enquanto `feitos` está vazio: **`oferecido_em`, quando existe, é anterior ou igual a todo carimbo de `feitos`**
   (as medianas abaixo nunca saem negativas). O servidor confia no cliente para o `feito`
   (não confere a ação; confere só a disponibilidade). Fora do aviso SSE e do merge; o "Recomeçar do
@@ -367,6 +399,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
+  **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
+  bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
+  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), despesa e
+  receita, sempre `estimado`/data `presumida`, valor = o último cobrado. Identidade
+  `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
+  frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
+  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
+  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
+  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
+  saída (a marca não tem direção); positivo no cartão e o movimento interno que
+  `classify_open_finance_launch` reconhece (pagamento de fatura, aplicação e resgate,
+  caixinha, poupança, transferência "same person" da Pluggy) não entram — transferência
+  entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
+  comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
+  não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
+  duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`, e a
+  previsão em cache vence quando a lista vira velha. Recorrência de conta cujo saldo não está
+  na base (saldo ausente, moeda presumida, outra moeda) fica fora, com
+  `recorrencia_banco_conta_fora_da_base` (a conta é a da última cobrança da cadeia).
 
 - `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
   `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
@@ -957,6 +1010,7 @@ Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
+A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
@@ -1014,6 +1068,103 @@ A segunda escrita do drill-down libera novo trial
 apaga a linha de `plan_trials` do **telefone** da conta e zera
 `trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
 por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
+
+`/admin/funil` (`core/funil_routes.py` + `core/funil_dashboard.py` + `frontend/funil.html`)
+é o painel de funil: só leitura, agregados fechados (nenhum `user_id`/e-mail/quiz),
+7d e 30d na mesma resposta de `GET /admin/api/funil`, mesma sessão do `/admin` (reusa
+`get_current_admin`; sem auth nova). Links externos só aparecem com o ID configurado
+(`GA4_PROPERTY_ID`, `META_PIXEL_ID`, `CLARITY_PROJECT_ID`, `STRIPE_SECRET_KEY`).
+Regras de leitura: coorte = cadastros criados na janela, e as etapas são
+CUMULATIVAS ("alcançou pelo menos"; o Pix só grava `completed`). Taxa ligada a
+/precos vira "—" quando o coorte começa antes do "medido desde"
+(`min(created_at)` de `viewed_pricing`), então nos primeiros dias/semanas
+pós-deploy a janela de 30d mostra "—". Canal: afiliado > prospecção > quiz >
+direto (quiz só sim/não, nunca perfil). `expired` NÃO é abandono (abandono =
+abriram − concluíram). `origem` é restrita a `ORIGENS` (+ "outro"): provedor
+social novo entra em `ORIGENS` e no teste de igualdade com
+`signup_source_from_request`. Sem cache/índice por decisão **para o banco** (o
+`/admin/api/funil` em si); se a consulta passar de ~5s, TTL de 60s antes de índice. As
+**fontes externas** (abaixo) são outra coisa e TÊM cache. Contas de cortesia/internas
+entram em "cadastros".
+**Fontes externas** (`core/funil_fontes.py` + `core/funil_fonte_<nome>.py`): rota
+`GET /admin/api/funil/fonte/{nome}` (mesma auth do painel, `no-store`, só GET), uma
+chamada por fonte, e `/admin/api/funil` NÃO muda. `nome` só vale se estiver em
+`funil_fontes.MODULOS` (fonte nova = uma linha lá + um módulo que exporta `FONTE`); fora
+disso, 404. Hoje só `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
+é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total). Envelope
+comum e fechado: `fonte`, `estado` (`ok|nao_configurado|erro|stale`), `mensagem` (SEMPRE
+da tabela fixa `MENSAGENS`, nunca texto da fonte), `falta` (só NOMES de env, quando
+`nao_configurado`), `buscado_em`, `janela {rotulo, fuso}`, `dados`. Cache em TABELA
+(`funil_fontes_cache`, só agregados, sem `user_id`): TTL por fonte, `falha_em` + backoff
+(não martela uma fonte caída), `stale` quando falha mas há payload, e cota diária por
+reserva atômica (`reservar`: um `INSERT ... ON CONFLICT DO UPDATE ... WHERE`, vale com
+várias instâncias). Banco do cache fora do ar: fonte sem cota segue ao vivo, fonte com
+cota recusa. O front pede cada fonte separado depois do funil, e "Atualizar" nunca força
+chamada externa (quem manda é o TTL do servidor). Regras de segredo: chave/token só no
+servidor e lidos na hora da chamada; os módulos de fonte logam SÓ `type(exc).__name__` e
+um código fechado (nunca `exc_info`, `str(exc)` nem corpo de resposta: a mensagem de erro
+do SDK pode trazer a chave e o `_DashboardHandler` grava log em `system_event_logs`);
+host fixo; chamada bloqueante só no executor dedicado (`submit` + `wrap_future`), nunca no loop. O Stripe reaproveita
+`admin_dashboard.fetch_billing_summary` (cache próprio de 5 min) e faz UMA listagem
+nova de `charges` (cliente com timeout de 8s, sem retry, teto de 1.000 itens e prazo
+total de 10s na paginação; ao estourar, devolve o que tem com `truncado: true`).
+Execução: as fontes rodam num executor dedicado de 4 threads (`funil_fontes.EXECUTOR`),
+nunca no padrão do loop, com uma marca de voo por fonte e por processo; para fonte
+SÍNCRONA isso é no máximo UMA thread em voo (para `async def buscar`, como o Stripe, só a
+marca: o `to_thread` interno do resumo segue no executor padrão). Quem chega com a fonte
+ocupada recebe cache/`stale`/`erro` com a mensagem `ocupada`, sem thread nova nem cota
+gasta. Thread que sobrevive ao timeout (não dá para matar) segura a marca até terminar ou
+até `TIMEOUT_S + backoff_s`. Depois de pegar a marca o cache é RELIDO (TTL/backoff de novo),
+senão uma leitura antiga chamaria a fonte dentro do backoff. `dados` só passa se for JSON
+puro: objeto na raiz, chaves e textos sem NUL nem surrogate solitário, no máximo 20 níveis,
+20.000 nós e 256 KB; senão `erro` com `resposta_invalida` e `falha_em` (backoff). Se gravar
+o cache falhar por qualquer causa, devolve `ok` com o dado vivo e grava `falha_em` para não
+rechamar a fonte a cada GET. O DIA da cota vem do relógio do BANCO (`_HOJE_TESTE`/`hoje` são override só
+de teste) e o contador só reinicia em dia MAIS NOVO. Já `buscado_em`/`falha_em` são gravados
+com o relógio da INSTÂNCIA que gravou; quem lê trata timestamp no FUTURO como vencido (a
+fonte é rechamada, respeitando cota e voo único), senão um relógio adiantado congelaria a
+fonte. O cache vive em `core/funil_fontes_cache.py`; a regra de TTL/backoff em `funil_fontes.py`. `limite_dia` é `None` ou >= 1 (senão `ValueError` na importação).
+Cancelar a requisição propaga o cancelamento: a reserva já feita fica gasta e `falha_em`
+não é gravado (limite declarado).
+Limites declarados do cartão Stripe (sem correção): cobrança `succeeded` com
+`captured is False` (só autorização) não conta; disputas e captura parcial
+(`amount_captured`) NÃO são abatidas da receita; `buscado_em` pode subestimar a idade das
+assinaturas em até ~5 min (cache em memória do `fetch_billing_summary`);
+`STRIPE_LOG=debug` faz o SDK imprimir o corpo de `charges.list` no stderr (não habilitar em
+produção); o 401 de `/admin/api/*` não leva `no-store` (já era assim em `/admin/api/funil`);
+o resumo de assinaturas (`fetch_billing_summary`) segue com o timeout padrão do SDK (80s,
+`max_network_retries=2`, até ~240s) e roda no executor padrão; o backoff de 60s limita isso
+a ~4-5 threads vivas. O `timeout=8` da listagem é por OPERAÇÃO de rede: servidor que goteja
+bytes segura a thread além do prazo de 10s. O SDK loga sozinho no logger `stripe` (INFO
+com `error_message`, DEBUG com o corpo): o módulo do Stripe fixa esse logger em WARNING. O `reason` dele agora é
+só o NOME do tipo da exceção (antes era `str(exc)`, que podia levar a chave).
+Limites declarados da infra de fontes (sem correção): a marca `_EM_VOO` é por processo e a
+corrida entre loops só existe com vários workers (o limite real é a cota no banco); o
+executor tem 4 threads, então 4 fontes travadas ao mesmo tempo fazem a 5ª virar `timeout` e
+queimar cota (toda fonte nova precisa de timeout próprio); `buscar` que levanta
+`CancelledError` vira 500 sem backoff (não acontece nas fontes planejadas);
+`SystemExit`/`KeyboardInterrupt` propagam (correto); texto de 600 caracteres sem espaço
+estouraria o layout (inalcançável: as mensagens vêm da tabela fixa); o WARNING persistido
+pelo `_DashboardHandler` faz um INSERT síncrono no loop (uma falha por backoff); `async def
+buscar` com corpo bloqueante trava o loop.
+**Avisos para o PR C (Clarity) e os demais**: `reservar` reserva 1 por `buscar`, não por
+chamada HTTP (o `buscar` do Clarity deve fazer EXATAMENTE 1 chamada externa); falha, timeout
+ou `ocupada` depois da reserva queimam cota sem devolução, e com `backoff_s=60` a cota diária
+pode acabar em ~8 min (o Clarity precisa de backoff de horas); TTL de 3 h × 8/dia é
+exatamente a cota, sem folga; resposta de 1.000 linhas só cabe nos limites do `_validar` (20
+níveis, 20.000 nós, 256 KB) se for agregada dentro do módulo; fonte com várias métricas não
+tem sucesso parcial (ou tudo, ou erro); nos PRs B/D o token pode ir na query e a exceção do
+`requests` traz a URL: a regra "logar só o tipo" cobre, manter.
+Outros fatos registrados: `billing.reason` em `/admin/api/users` mudou de formato (agora
+`type(exc).__name__`; nenhum leitor no repo); com o banco do cache fora do ar a fonte sem cota
+(Stripe) é chamada ao vivo a cada GET, só com voo único; `cache.gravar_ok` falhando devolve `ok`
+ao vivo e grava `falha_em`, então o 1º GET dá `ok` e o 2º `erro` por até o backoff (60 s no
+Stripe: "flapping"); o logger `stripe` fixado em WARNING só vale depois da 1ª consulta da fonte
+(import preguiçoso) e silencia o INFO do SDK no app inteiro (decisão a confirmar com o dono).
+Limites declarados do painel (pessoa = conta mais antiga do `user_id`; `auth_accounts.user_id` não é único):
+(a) `atraso` conta a pessoa se QUALQUER linha dela está em atraso, enquanto `estado_atual` usa a conta mais antiga, então a mesma pessoa pode ser "free" num bloco e "em atraso" no outro (atraso é sobre cobrança: qualquer linha vale);
+(b) quem converte só na 2ª conta (cadastro novo do mesmo `user_id`) não aparece como conversão do coorte;
+(c) custo da ativação: falta índice em `user_identities(user_id)` (EXISTS por linha); o Tester mediu 3,6s no pior caso com 100k cadastros nos últimos 30d e ~30s com 20k conclusões (só admin). Remédio: `create index on user_identities(user_id)` em issue separada, ou o TTL de 60s acima.
 
 ### Tarefas de fundo
 

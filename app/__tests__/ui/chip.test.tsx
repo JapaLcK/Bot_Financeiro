@@ -3,7 +3,7 @@ import { Animated, StyleSheet } from "react-native";
 import * as Haptics from "expo-haptics";
 
 import { Chip } from "@/ui/componentes/Chip";
-import { claro, escuro } from "@/ui/tokens";
+import { claro, escuro, raio } from "@/ui/tokens";
 
 import { renderInterativo, renderNosDoisTemas } from "./_render";
 
@@ -44,12 +44,28 @@ describe("Chip", () => {
     expect(estiloVisual(naoSel).backgroundColor).toBe(escuro.surface);
   });
 
-  it("altura de toque de 44pt vem do tamanho real, não de hitSlop (que o pai recorta)", () => {
+  it("é pílula com contorno: brandInk no selecionado, inkMuted no não selecionado (o fundo surface some dentro do Card)", () => {
+    const { claro: sel } = renderNosDoisTemas(<Chip rotulo="x" selecionado onPress={jest.fn()} />);
+    const { claro: naoSel } = renderNosDoisTemas(<Chip rotulo="x" selecionado={false} onPress={jest.fn()} />);
+    expect(estiloVisual(sel)).toMatchObject({ borderRadius: raio.pilula, borderWidth: 1, borderColor: claro.brandInk });
+    expect(estiloVisual(naoSel)).toMatchObject({ borderRadius: raio.pilula, borderWidth: 1, borderColor: claro.inkMuted });
+  });
+
+  it("desativado não chama onPress e anuncia disabled", () => {
+    const onPress = jest.fn();
+    const { getByRole } = renderInterativo(<Chip rotulo="x" selecionado={false} desativado onPress={onPress} />);
+    fireEvent.press(getByRole("button"));
+    expect(onPress).not.toHaveBeenCalled();
+    expect(getByRole("button").props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
+  it("altura de toque de 44pt vem do tamanho real do Pressable, não de hitSlop (que o pai recorta); a pílula visível tem 34", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(
       <Chip rotulo="x" selecionado={false} onPress={jest.fn()} />,
     );
-    expect(estiloVisual(c).minHeight).toBeGreaterThanOrEqual(44);
-    expect(estiloVisual(e).minHeight).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(c.getByRole("button").props.style).minHeight).toBeGreaterThanOrEqual(44);
+    expect(StyleSheet.flatten(e.getByRole("button").props.style).minHeight).toBeGreaterThanOrEqual(44);
+    expect(estiloVisual(c).minHeight).toBe(34);
     expect(c.getByRole("button").props.hitSlop).toBeUndefined();
   });
 

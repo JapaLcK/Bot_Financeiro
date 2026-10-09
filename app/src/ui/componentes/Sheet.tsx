@@ -1,11 +1,11 @@
 import type { NativeStackNavigationOptions } from "expo-router";
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
-// eslint-disable-next-line no-restricted-imports -- só o `TextInput.State` (quem tem o foco); nada de texto é renderizado aqui.
-import { Keyboard, Platform, ScrollView, TextInput, View } from "react-native";
+import { useRef, type ReactNode, type RefObject } from "react";
+import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { useRolarAteCampoFocado } from "@/ui/componentes/Screen";
 import { useTema } from "@/ui/tema";
-import { espaco, raio } from "@/ui/tokens";
+import { espaco } from "@/ui/tokens";
 
 /**
  * Decisão 1 do dono: Sheet NATIVO do expo-router (via `react-native-screens`
@@ -18,15 +18,14 @@ import { espaco, raio } from "@/ui/tokens";
  * `<Stack.Screen name="minha-rota" options={OPCOES_SHEET} />`. A rota em si
  * usa `SheetConteudo` (abaixo) como casca.
  *
- * `sheetGrabberVisible: false`: a alça é do CONTEÚDO, não do sistema — nos
- * dois SOs o visual fica igual, em vez de um traço nativo só no iOS
- * (`sheetGrabberVisible` é `@platform ios`) e nenhum no Android.
+ * Alça e raio são do SISTEMA (`sheetGrabberVisible`, `@platform ios`): a alça
+ * desenhada à mão nunca bateu com a nativa e ficava dupla. Sheet inteira
+ * (`SHEET_INTEIRA`) a desliga.
  */
 export const OPCOES_SHEET: NativeStackNavigationOptions = {
   presentation: "formSheet",
   sheetAllowedDetents: [0.5, 1],
-  sheetCornerRadius: raio.lg,
-  sheetGrabberVisible: false,
+  sheetGrabberVisible: true,
 };
 
 interface Props {
@@ -59,9 +58,8 @@ interface Props {
 }
 
 /**
- * Casca de CONTEÚDO da sheet: alça própria (decorativa — `cores.border`,
- * nunca contorno de controle, escondida do leitor de tela), área segura
- * inferior e respiro lateral. Usada DENTRO da rota aberta com `OPCOES_SHEET`.
+ * Casca de CONTEÚDO da sheet: respiro de topo (a alça é do sistema), área
+ * segura inferior e respiro lateral. Usada DENTRO da rota aberta com `OPCOES_SHEET`.
  */
 export function SheetConteudo({ children, rolar = false }: Props) {
   const { cores, acesso } = useTema();
@@ -69,37 +67,13 @@ export function SheetConteudo({ children, rolar = false }: Props) {
   const rolagem = useRef<ScrollView>(null);
   const conteudo = useRef<View>(null);
 
-  useEffect(() => {
-    if (!rolar || Platform.OS !== "ios") return;
-    const sub = Keyboard.addListener("keyboardDidShow", () => {
-      const campo = TextInput.State.currentlyFocusedInput();
-      if (!conteudo.current || !campo) return;
-      // `xxxl` acima do TextInput: o rótulo do `Input` fica ali.
-      campo.measureLayout(conteudo.current, (_x, y) => rolagem.current?.scrollTo({ y: y - espaco.xxxl }), () => undefined);
-    });
-    return () => sub.remove();
-  }, [rolar]);
+  useRolarAteCampoFocado(rolar, rolagem, conteudo);
 
   const preenchimento = {
     paddingHorizontal: acesso ? espaco.xl : espaco.lg,
+    paddingTop: espaco.xl,
     paddingBottom: insets.bottom + espaco.lg,
   };
-  const alca = (
-    <View
-      importantForAccessibility="no-hide-descendants"
-      accessibilityElementsHidden
-      style={{
-        alignSelf: "center",
-        width: 36,
-        height: 4,
-        borderRadius: raio.sm,
-        backgroundColor: cores.border,
-        marginTop: espaco.sm,
-        marginBottom: espaco.lg,
-      }}
-    />
-  );
-
   if (rolar) {
     return (
       <ScrollView
@@ -112,7 +86,6 @@ export function SheetConteudo({ children, rolar = false }: Props) {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-        {alca}
         {children}
       </ScrollView>
     );
@@ -120,7 +93,6 @@ export function SheetConteudo({ children, rolar = false }: Props) {
 
   return (
     <View testID="sheet-conteudo" style={{ flex: 1, backgroundColor: cores.bg, ...preenchimento }}>
-      {alca}
       {children}
     </View>
   );

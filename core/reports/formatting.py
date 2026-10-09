@@ -5,6 +5,17 @@ def _fmt_brl(v: float) -> str:
     return f"R$ {s}"
 
 
+def _fmt_sinal(v) -> str:
+    """Resultado com sinal: `+R$ 369,60`, `-R$ 12,00`; zero sai sem sinal (e `-0.00` vira zero)."""
+    return _fmt_brl(v + 0) if v == 0 else ("+" if v > 0 else "-") + _fmt_brl(abs(v))
+
+
+def _fmt_pct(v, sinal: bool = True) -> str:
+    """Percentual JÁ arredondado a inteiro por quem calculou (`weekly._pct`), com sinal
+    (`+12%`, `-12%`, `+0%`); `sinal=False` para parte de um todo. Não arredonda de novo."""
+    return f"{int(v):{'+' if sinal else ''}d}%"
+
+
 def finish_report(user_id: int, lines: list[str]) -> str:
     from db.bank_movements import bank_movement_summary
     if bank_movement_summary(user_id)["pending_count"]:

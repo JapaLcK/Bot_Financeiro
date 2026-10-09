@@ -117,6 +117,10 @@ export function Board({ s }: { s: DashState }) {
   }
   const [said, setSaid] = useState("");
   const [aviso, setAviso] = useState<ReactNode>("");
+  // Conta as falhas do PUT (o texto do aviso pode se repetir): se o erro chega antes de o React
+  // pintar a escolha otimista, `null → escolha → null` é agrupado e o seletor, já fechado pelo
+  // `pick`, nunca desmonta. O contador o faz reabrir.
+  const [falhas, setFalhas] = useState(0);
   const columns = useColumns();
   const custom = ids.join() !== shownPreset(shown, plan).join();
 
@@ -137,6 +141,7 @@ export function Board({ s }: { s: DashState }) {
       // Outra escolha já escreveu por cima: a dela vale, e a recarga confirma.
       if (qc.getQueryData<Perfil>(perfilQuery.queryKey)?.perfil === p) qc.setQueryData(perfilQuery.queryKey, antes);
       setAviso(e instanceof ErroApi && e.code === "password_required" ? SEM_SENHA : "Não foi possível salvar agora");
+      setFalhas((n) => n + 1);
     },
     // Sem devolver a promessa: a trava do seletor é só o PUT, não a recarga. O `onSettled`
     // roda também se o `onMutate` falhar, então a trava nunca fica presa.
@@ -215,7 +220,7 @@ export function Board({ s }: { s: DashState }) {
           return View ? <FrameLink.Provider value={PAGE[item.id] ?? null}><View s={s} /></FrameLink.Provider> : null;
         }}
       />
-      {profile === null && <ProfilePicker onPick={choose} aviso={aviso} />}
+      {profile === null && <ProfilePicker onPick={choose} aviso={aviso} falhas={falhas} />}
     </section>
   );
 }

@@ -11,7 +11,7 @@ from core.services.plan_service import forecast_horizons_for, plan_gate_ok
 from core.services.previsao_v2 import ler_previsao
 
 router = APIRouter()
-FontePrevisao = Literal["receita_recorrente", "gasto_recorrente", "instancia", "fatura"]
+FontePrevisao = Literal["receita_recorrente", "gasto_recorrente", "instancia", "fatura", "recorrencia_banco"]
 
 
 class MotivoPrevisao(BaseModel):

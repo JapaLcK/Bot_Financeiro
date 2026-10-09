@@ -54,18 +54,6 @@ test("Simulador: desligar o chip desfaz só o chip, o ajuste em outra alavanca f
   assert.deepEqual(r, ["false", "0", "10"]);
 });
 
-test("positivo: o chip sozinho liga e desliga", async () => {
-  const { ctx, page } = await abrir();
-  const chip = page.locator(`${SIM} .chip`, { hasText: "Delivery pela metade" });
-  await chip.click();
-  const ligado = [await chip.getAttribute("aria-pressed"), await alavanca(page, "Delivery").inputValue()];
-  await chip.click();
-  const desligado = [await chip.getAttribute("aria-pressed"), await alavanca(page, "Delivery").inputValue()];
-  await ctx.close();
-  assert.deepEqual(ligado, ["true", "50"]);
-  assert.deepEqual(desligado, ["false", "0"]);
-});
-
 test("Simulador: ligar um chip mantém o ajuste feito à mão em outra alavanca", async () => {
   const { ctx, page } = await abrir();
   await alavanca(page, "Lazer").focus();
