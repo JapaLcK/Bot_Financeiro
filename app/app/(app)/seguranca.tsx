@@ -1,9 +1,10 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 
 import type { MfaStatus, Perfil } from "@/api/schemas/auth";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
+import { useForeground } from "@/features/openFinance/useForeground";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
 import { perfil } from "@/services/auth";
@@ -50,6 +51,17 @@ export default function Seguranca() {
       void carregar();
     }, []),
   );
+
+  // O link do e-mail abre o Safari: voltar ao app é AppState, não foco de navegação, e
+  // o foco acima não dispara. Recarrega só na VOLTA do background (não no 1º render, que
+  // o foco já cobre) e sem ir a "carregando": a tela segue como está até a resposta chegar. `[ativo]` de propósito,
+  // como o `[]` acima: `carregar`/`estado` mudam a cada render.
+  const ativo = useForeground();
+  const antes = useRef(ativo);
+  useEffect(() => {
+    if (ativo && !antes.current && estado.fase !== "carregando") void carregar();
+    antes.current = ativo;
+  }, [ativo]);
 
   return (
     <ScrollView

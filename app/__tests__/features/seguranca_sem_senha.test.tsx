@@ -37,7 +37,17 @@ const tocar = (rotulo: string) =>
   });
 const forgot = () => chamadas().filter((c) => c.caminho === "/auth/forgot-password");
 
-beforeEach(prepararCaso);
+const appState = globalThis as unknown as { __dispararAppState: (v: string) => void };
+const appVai = (v: "active" | "background") =>
+  act(async () => {
+    appState.__dispararAppState(v);
+    await drenar();
+  });
+
+beforeEach(() => {
+  prepararCaso();
+  appState.__dispararAppState("active");
+});
 
 describe("Segurança — conta sem senha", () => {
   it("has_password false: mostra Definir senha, esconde Ativar e manda o link para o e-mail DA CONTA", async () => {
@@ -94,5 +104,33 @@ describe("Segurança — conta sem senha", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy());
     expect(screen.queryByText("Definir senha")).toBeNull();
+  });
+
+  it("volta do Safari (background -> active) com a senha já definida: troca o bloco por Ativar, sem spinner", async () => {
+    const conta = { valor: false as boolean | undefined };
+    await abrir(conta);
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+    await tocar("Enviar link");
+
+    await appVai("background");
+    conta.valor = true; // a pessoa definiu a senha no navegador
+    await appVai("active");
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy());
+    expect(screen.queryByText("Definir senha")).toBeNull();
+    expect(screen.queryByLabelText("Carregando")).toBeNull();
+  });
+
+  it("voltar ao app com a senha ainda sem definir: o bloco continua, sem novo POST do forgot-password", async () => {
+    await abrir({ valor: false });
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+    await tocar("Enviar link");
+
+    await appVai("background");
+    await appVai("active");
+
+    expect(screen.getByText(/Abra o link no navegador/)).toBeTruthy();
+    expect(forgot()).toHaveLength(1);
+    expect(chamadas().filter((c) => c.caminho === "/auth/me").length).toBeGreaterThanOrEqual(2);
   });
 });
