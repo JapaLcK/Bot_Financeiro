@@ -3523,7 +3523,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         )
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    result = login_auth_user(body.email, body.password)
+    result = await asyncio.to_thread(login_auth_user, body.email, body.password)
     if not result:
         await log_auth_login_event(
             body.email,
@@ -3839,7 +3839,7 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
-    user_id = consume_password_reset_token(body.token, body.new_password)
+    user_id = await asyncio.to_thread(consume_password_reset_token, body.token, body.new_password)
     if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
 
