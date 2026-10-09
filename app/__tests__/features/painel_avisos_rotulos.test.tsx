@@ -110,8 +110,6 @@ it("lançamento de registro antigo tem rótulo legível, e o filtro de origem n�
  const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[0], origem: "registro_antigo" }] };
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: /^Banco/ })).toBeTruthy());
  expect(screen.queryByRole("button", { name: /^Registro antigo/ })).toBeNull();
- // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
- await act(async () => { fireEvent.press(screen.getByRole("button", { name: /^Banco/ })); await drenar(); });
  await waitFor(() => expect(screen.getByText(/· Registro antigo/)).toBeTruthy()); expect(screen.queryByText(/registro_antigo/)).toBeNull();
 });
 it("compromisso realizado diz recebido na entrada e pago na saída", async () => {
@@ -123,8 +121,6 @@ it("compromisso realizado diz recebido na entrada e pago na saída", async () =>
 it("fatura sai como mês curto no Extrato, nunca o ISO cru", async () => {
  const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[1], origem: "cartao", fatura: "2026-10" }] };
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Cartão" })).toBeTruthy());
- // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
- await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Cartão" })); await drenar(); });
  await waitFor(() => expect(screen.getByText(/· fatura out\/2026/)).toBeTruthy()); expect(screen.queryByText(/fatura 2026-10/)).toBeNull();
 });
 it("a atualização da conta sai curta, sem quebrar a linha com o ano", async () => {
