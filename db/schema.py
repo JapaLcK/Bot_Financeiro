@@ -2968,7 +2968,13 @@ def init_db():
         # /api/v2/guia/dica`). Fora de `feitos` de propósito: a dica não oferece o guia
         # (ele segue em `oferecer`) nem conta para a conclusão. Fora do `create table`
         # pelo mesmo motivo das colunas de `pix_charges`: a tabela já existe.
-        """alter table guia_painel add column if not exists dicas jsonb not null default '{}'""",
+        # `ordem_aba`/`ordem_n` = o último `(aba, n)` de `dispensar`/`reabrir` aplicado: o POST
+        # mais velho da mesma aba, que chega depois, não desfaz o gesto mais novo, enquanto
+        # nenhum gesto de outra aba/aparelho/cliente antigo chegar no meio (limite em
+        # docs/CLAUDE.md, "Ordem dos gestos"; `db/guia.py`). Anuláveis, sem default: null = nenhum gesto com `ordem` ainda.
+        """alter table guia_painel add column if not exists dicas jsonb not null default '{}',
+          add column if not exists ordem_aba text,
+          add column if not exists ordem_n int""",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
