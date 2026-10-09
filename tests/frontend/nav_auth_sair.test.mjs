@@ -1,4 +1,4 @@
-/** PROTÓTIPO (#852): o "Sair" das páginas públicas (nav-auth.js) dirigido no navegador. */
+/** "Sair" das páginas públicas (nav-auth.js): limpa o aparelho antes de recarregar, dirigido no navegador (#852). */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";

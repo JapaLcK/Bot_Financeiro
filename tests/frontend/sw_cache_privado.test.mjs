@@ -217,7 +217,10 @@ test("o activate apaga todo cache de nome diferente", async () => {
 //
 // Ela mora na PÁGINA, não no worker: o aparelho que tem cache privado é o
 // controlado por um worker ANTIGO, que não escuta `message` — o postMessage
-// cairia no vazio exatamente quando importa (Codex, #170).
+// cairia no vazio exatamente quando importa (Codex, #170). O que os testes
+// vigiam é a limpeza feita pela página (mover para o worker deixa o
+// `nav_auth_sair` vermelho); "o worker não escuta `message`" NÃO é mais
+// vigiado por teste.
 //
 // E mora em DOIS arquivos: `auth-refresh.js` (dashboard, home, settings,
 // comecar) e `nav-auth.js` (as 12 páginas públicas, que NÃO carregam o

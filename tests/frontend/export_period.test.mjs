@@ -1,4 +1,4 @@
-/** PROTÓTIPO (#852): o modal de exportar dirigido no navegador, no dashboard.html real. */
+/** Modal de exportar extrato: período obrigatório, validação e POST, dirigido no dashboard.html real (#852). */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";
