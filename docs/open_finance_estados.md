@@ -659,7 +659,8 @@ de uma leitura até o próximo pedido (`setTimeout` encadeado, nunca dois GETs
 sobrepostos). Testes: `tests/frontend/of_acompanha_coleta.test.mjs` (T*),
 `tests/frontend/of_acompanha_atualizar.test.mjs` (U*, O1, R3) e
 `tests/frontend/of_acompanha_foco_post.test.mjs` (B1, B1-P, F1, F2, R6-1, R6-9) e
-`tests/frontend/of_acompanha_geracao.test.mjs` (A, A', J, B, D, E, I, F), id entre parênteses.
+`tests/frontend/of_acompanha_geracao.test.mjs` (A, A', J, B, D, E, I, F) e
+`tests/frontend/of_acompanha_prazo.test.mjs` (K, K-tarde, K-ok, L, L-PTR), id entre parênteses.
 
 **Ciclo pelo `still_updating` (rodada 2).** O Atualizar pode voltar
 `sync.still_updating > 0` com o card em "Atualizado": a Pluggy ainda coleta, mas o
@@ -711,6 +712,7 @@ continuar em "Atualizando…" a cada leitura vista).
 | V | rede, 5xx, 429 | tela preservada, sem toast → A (T5) | – |
 | V | 401/403/404 | → P (T5) | – |
 | V | 402 | "sem plano" e `parar()` → P (T5) | – |
+| V | leitura sem resposta em 15 s (`LEITURA_PRAZO_MS`: GET do snapshot ou o caixinhas pendente) | o GET é abortado e a leitura conta como falha de rede: tela preservada → A. Quando o que pendura é o snapshot, a resposta que chegaria depois não pinta nem mexe no ciclo; quando é o caixinhas pendente, o snapshot já pintou e o caixinhas ainda pinta quando chegar. Sem o prazo, `emVoo` ficava preso e nem a volta ao foco nem o Atualizar OK religavam a leitura até recarregar a página (K, K-tarde; K-ok é o positivo). Limite aceito (dono, 2026-10-09): o snapshot é só banco (`get_open_finance_snapshot`, sem Pluggy); se ele passar de 15 s, o acompanhamento nunca pinta, e o botão Atualizar (pinta pelo corpo do POST, prazo de 60 s) e recarregar a página continuam pintando. Variante, mesma condição de servidor degradado e também aceita: um `loadData` completo e lento (boot, `onConnected`) superado por um tique que depois é abortado não pinta | – |
 | O | volta ao foco (`visibilitychange` ou `pageshow` com `persisted`) ou à seção de Open Finance | tique na hora → V, e a cadência segue (T3, U3) | sim, 1 |
 | E | volta ao foco | UMA leitura (DP2 = A), mesmo com tudo "Atualizado"; a mesma coleta não reabre o ciclo, nem o mesmo `still_updating` (T12, U1b, O1) | sim, 1 |
 | E | volta ao foco traz "Atualizando…" numa conexão que antes estava final | abre ciclo → A (T12) | sim, 1 |
@@ -741,6 +743,10 @@ fim dele não solta a trava do mais recente (J). O prazo vale duas vezes:
   (R6-1). Saindo, a cadência volta a ler (A), a volta ao foco pendente é cumprida
   (`fimDoAtualizar`: A', R6-1 pendência) e o botão volta, também com o GET do 402
   preso (F).
+- **o botão**: só o fim do Atualizar mais recente o devolve. O fim de um velho (GET
+  do 402 que solta depois do prazo) não o reabilita com outro Atualizar em voo (L);
+  o fim do mais recente sempre o devolve, mesmo sendo um PTR por cima de um clique,
+  então ele nunca fica preso (L-PTR).
 
 Regra DP2 × DP3: o ciclo que bateu o teto não renasce na volta ao foco pela mesma
 coleta; só Atualizar ou conectar (`novoCiclo`) abrem ciclo novo para ela. Uma

@@ -39,7 +39,8 @@
    PTR faz depois do POST OK ainda lê 1 vez no fim. O teto deixa UMA leitura
    para a volta ao foco, mesmo com tudo "Atualizado" (DP2). O Atualizar mais
    recente abortado pelo prazo deixa UMA releitura (`releitura`), porque o
-   servidor pode ter terminado depois do abort. */
+   servidor pode ter terminado depois do abort. Cada leitura tem prazo
+   (`LEITURA_PRAZO_MS`): um GET pendurado não prende `emVoo`. */
 (function () {
   "use strict";
 
@@ -93,14 +94,29 @@
     aguardando.clear();
   }
 
+  // Prazo da leitura: o GET do snapshot é só banco
+  // (`get_open_finance_snapshot`, db/open_finance.py, sem Pluggy), então 15 s
+  // já é servidor degradado. Vencido, o fetch é abortado (a resposta tardia não
+  // pinta) e a corrida solta `emVoo` mesmo se o que pendurar for o caixinhas
+  // pendente, que não leva o signal. Limite aceito (dono, 2026-10-09): snapshot
+  // acima de 15 s nunca pinta pelo acompanhamento; o botão Atualizar (pinta
+  // pelo corpo do POST, prazo de 60 s) e recarregar a página continuam pintando.
+  // `AbortController` + `setTimeout`, não `AbortSignal.timeout` (iOS 14, pb-nav.js).
+  const LEITURA_PRAZO_MS = 15000;
+
   async function ler() {
     emVoo = true;
+    const corte = new AbortController();
+    let prazo = null;
     try {
-      await reler();
+      await Promise.race([reler(corte.signal), new Promise((_, falhou) => {
+        prazo = setTimeout(() => { corte.abort(); falhou(new Error("prazo da leitura")); }, LEITURA_PRAZO_MS);
+      })]);
     } catch (err) {
-      // Rede, 5xx, 429: a tela já foi preservada pelo propagate; segue.
+      // Rede, 5xx, 429, prazo: a tela já foi preservada pelo propagate; segue.
       if (err && PARA.includes(err.status)) parar();
     } finally {
+      clearTimeout(prazo);
       emVoo = false;
     }
     if (ativo && !timer) agendar(proximo());

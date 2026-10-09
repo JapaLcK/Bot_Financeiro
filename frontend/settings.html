@@ -2943,7 +2943,7 @@ let OF_COBRANCA_EM_ATRASO = false; // carência (vem do /auth/me): o CTA vai pro
 // de vincular meta a cada tique; só relê o de uma carga completa que o tique
 // superou (`_caixPendente`). Só lê com a seção de Open Finance na tela.
 PBColetaOF.configurar({
-  reler: () => loadData({ propagate: true, caixinhas: false }),
+  reler: (signal) => loadData({ propagate: true, caixinhas: false, signal }),   // signal: o prazo da leitura
   ocupado: () => _ofRefreshVigente !== null,   // o Atualizar mais recente em voo e dentro do prazo
   visivel: () => !document.getElementById("section-open-finance").hidden,
 });
@@ -3183,7 +3183,7 @@ function caixinhasPendentes(opts) {
   _caixPendente = false;
   return loadCaixinhas(opts);
 }
-async function loadData({ propagate = false, caixinhas = true } = {}) {
+async function loadData({ propagate = false, caixinhas = true, signal } = {}) {
   if (PRECISA_SENHA) return;   // rotas de Open Finance barradas (#758)
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
@@ -3195,7 +3195,7 @@ async function loadData({ propagate = false, caixinhas = true } = {}) {
   if (caixinhas) _caixPendente = true;
   let ownErr = null;
   try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
+    const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders(), signal }));
     // 402 = sem plano ativo (#380). Este GET dispara no boot em QUALQUER aba, então
     // sem este ramo o cortado leva um toast de erro só por abrir a saída de
     // emergência. Estado, não erro — e nem com propagate ele tinge o PTR de âmbar.
@@ -3427,18 +3427,22 @@ async function refreshOpenFinance(opts) {
     return;
   }
   const btn = propagate ? null : document.getElementById("of-refresh-btn");
-  const orig = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
   if (!propagate) showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
   _ofRefreshEmVoo++;
   const gen = ++_ofRefreshGen;
-  // Fim deste Atualizar: no `finally` ou no prazo. A trava e a pendência só se
-  // este ainda for o mais recente. O botão é deste Atualizar.
-  // ponytail: um Atualizar velho do botão que termina depois de um novo do
-  // botão reabilita o botão antes da hora (só depois de > 60 s preso).
+  // Fim deste Atualizar: no `finally` ou no prazo. Só o do mais recente mexe:
+  // um velho que termina depois (GET do 402 preso) não reabilita o botão com
+  // outro em voo. O do mais recente sempre devolve o botão, mesmo sendo um
+  // PTR por cima de um clique, para ele nunca ficar preso. Esse par é só
+  // sintético: em produção o PTR é só do app (app-mode.js) e o app esconde o
+  // botão (app-mode.css, html.pb-app). Nele, um 3º clique pode gerar POST
+  // concorrente; aceito (dono, 2026-10-09), o backend serializa por
+  // `claim_manual_refresh`.
   const fim = () => {
-    if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
     if (gen !== _ofRefreshGen) return;
+    const b = document.getElementById("of-refresh-btn");
+    if (b) { b.disabled = false; b.textContent = "↻ Atualizar"; }
     clearTimeout(_ofRefreshVigente);
     _ofRefreshVigente = null;
     PBColetaOF.fimDoAtualizar();   // volta ao foco barrada pelo POST: lê agora (qualquer desfecho)
