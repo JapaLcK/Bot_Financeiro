@@ -80,6 +80,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
+from db.rate_limits import RATE_LIMIT_UPSERT_SQL
 from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (
     accrue_all_pockets,
@@ -2583,25 +2584,7 @@ async def _check_persistent_rate_limit(bucket: str, identifier: str, max_attempt
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
-                INSERT INTO auth_rate_limits (bucket, identifier, window_started_at, attempts, updated_at)
-                VALUES (%s, %s, NOW(), 1, NOW())
-                ON CONFLICT (bucket, identifier) DO UPDATE SET
-                    window_started_at = CASE
-                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
-                        THEN NOW()
-                        ELSE auth_rate_limits.window_started_at
-                    END,
-                    attempts = CASE
-                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
-                        THEN 1
-                        ELSE auth_rate_limits.attempts + 1
-                    END,
-                    updated_at = NOW()
-                RETURNING
-                    attempts,
-                    EXTRACT(EPOCH FROM (NOW() - window_started_at)) AS elapsed_seconds
-                """,
+                RATE_LIMIT_UPSERT_SQL,
                 (bucket, identifier, window_seconds, window_seconds),
             )
             row = await cur.fetchone()

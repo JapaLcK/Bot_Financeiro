@@ -69,7 +69,15 @@ def user_exists(user_id: int) -> bool:
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
     presa (Open Finance vivo, plano pago ou cliente Stripe), autoindicação de
-    afiliado ou colisão de unique/FK na junção."""
+    afiliado ou colisão de unique/FK na junção.
+
+    `motivo` diz qual, para a resposta ao usuário ser verdadeira (D6):
+    "dados_dos_dois_lados", "open_finance", "origem_presa" (plano pago ou
+    cliente Stripe), "autoindicacao" ou "colisao"."""
+
+    def __init__(self, *args, motivo: str | None = None):
+        super().__init__(*args)
+        self.motivo = motivo
 
 
 # Onde mora "dado financeiro" para a recusa do `merge_users`. Com linha nestas
@@ -122,8 +130,12 @@ def _tem_dados_financeiros(cur, user_id: int) -> bool:
     return bool(cur.fetchone()["tem"])
 
 
-def _origem_presa(cur, user_id: int) -> bool:
-    """A conta que some tem Open Finance vivo, plano pago vigente ou cliente Stripe?
+def _origem_presa(cur, user_id: int) -> str | None:
+    """Por que a conta que some está presa: "open_finance" (Open Finance vivo),
+    "origem_presa" (plano pago vigente ou cliente Stripe) ou None (não está).
+
+    Com os dois, vale o Open Finance (dono, D6): é o que a pessoa consegue
+    desfazer sozinha, desconectando o banco.
 
     "Vivo" é o que o código de OF considera vivo (`_TERMINAL`): PAUSED é trial
     vencido (o item nem existe mais na Pluggy) e DELETED é removido. Plano pago
@@ -143,11 +155,13 @@ def _origem_presa(cur, user_id: int) -> bool:
         (user_id,),
     )
     if cur.fetchone()["tem"]:
-        return True
+        return "open_finance"
     cur.execute("select plan, plan_expires_at, stripe_customer_id"
                 " from auth_accounts where user_id = %s", (user_id,))
-    return any(_tem_plano_pago_vigente(r) or (r["stripe_customer_id"] or "").strip()
-               for r in cur.fetchall())
+    if any(_tem_plano_pago_vigente(r) or (r["stripe_customer_id"] or "").strip()
+           for r in cur.fetchall()):
+        return "origem_presa"
+    return None
 
 
 def _viraria_autoindicacao(cur, from_user_id: int, to_user_id: int) -> bool:
@@ -184,7 +198,7 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
             from_user_id, to_user_id, exc.diag.constraint_name,
             extra={"user_id": to_user_id},
         )
-        raise MergeRefused(f"{from_user_id} -> {to_user_id}") from exc
+        raise MergeRefused(f"{from_user_id} -> {to_user_id}", motivo="colisao") from exc
 
 
 def _merge_users(from_user_id: int, to_user_id: int) -> None:
@@ -205,10 +219,15 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
             # caminho, junta; batendo numa unique (user_seq, nome de caixinha...), volta tudo e vira
             # `MergeRefused`. Contra esses dois o merge também pode dar deadlock (exceção conhecida,
             # ver a docstring de `_lock_user`): `DeadlockDetected` não vira `MergeRefused`.
-            if _origem_presa(cur, from_user_id) or _viraria_autoindicacao(cur, from_user_id, to_user_id) or (
-                _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id)
-            ):
-                raise MergeRefused(f"{from_user_id} -> {to_user_id}")
+            # Mesma ordem do `or` que vivia aqui: a 1ª recusa que vale é o motivo.
+            recusa = f"{from_user_id} -> {to_user_id}"
+            presa = _origem_presa(cur, from_user_id)
+            if presa:
+                raise MergeRefused(recusa, motivo=presa)
+            if _viraria_autoindicacao(cur, from_user_id, to_user_id):
+                raise MergeRefused(recusa, motivo="autoindicacao")
+            if _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id):
+                raise MergeRefused(recusa, motivo="dados_dos_dois_lados")
 
             # 1) dedupe de launches
             cur.execute(

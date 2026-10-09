@@ -1111,7 +1111,25 @@ def attempt_whatsapp_phone_link_impl(
             )
             existing_current_wa = cur.fetchone()
 
+            # Sem telefone que case, o número ainda pode já estar numa conta: o
+            # `vincular CODIGO` liga sem olhar o telefone digitado no site. O que
+            # separa isso do só-WhatsApp (que `get_or_create_canonical_user` cria
+            # com a identidade do número) é conta web ou outro canal ligado.
+            ja_em_conta = False
+            if not matches:
+                cur.execute(
+                    """
+                    select exists (select 1 from auth_accounts where user_id = %s)
+                        or exists (select 1 from user_identities
+                                   where user_id = %s and provider <> 'whatsapp') as ligado
+                    """,
+                    (current_user_id, current_user_id),
+                )
+                ja_em_conta = bool(cur.fetchone()["ligado"])
+
     if not matches:
+        if ja_em_conta:
+            return {"status": "already_linked", "user_id": int(current_user_id), "wa_phone": wa_phone}
         return {"status": "no_match", "wa_phone": wa_phone}
 
     if len(matches) > 1:
