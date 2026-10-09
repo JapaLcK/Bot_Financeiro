@@ -4,7 +4,8 @@
 //   · GET × POST: o GET do foco da janela saiu antes do `feito` e volta depois dele.
 // Nos dois, sem o conserto, a tela final "Fechou! O painel é seu." vira "Por agora é isso".
 // E a fila dos POSTs não prende o guia: um POST pendurado segura os seguintes só por ESPERA
-// (5 s, parts/Guia.tsx), e a resposta dele, quando enfim volta, é velha demais para gravar.
+// (5 s, parts/Guia.tsx), e a resposta dele, quando enfim volta, é velha demais para gravar: só relê o guia.
+// O caso 3 mede que o GET sai, não a convergência com o servidor em ordem inversa (o mock aplica na chegada).
 // Setup: `oferecer` com os passos 2 e 3 já feitos — o 1º (Resumo) é o último a fazer.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -89,9 +90,9 @@ test("GET × POST: o GET do foco que saiu antes do `feito` e volta depois não d
 });
 
 test("fila: um `visto` pendurado segura o `feito` por ~5 s; quando volta, o retrato velho não desfaz a conclusão", async () => {
-  let solta, v;
+  let solta, v, gets = 0;
   const { ctx, page, s, erros } = await abrir({
-    antes: (ctx, s) => { doisFeitos(s); v = voltas(ctx); },
+    antes: (ctx, s) => { doisFeitos(s); v = voltas(ctx); ctx.on("request", (q) => { if (q.method() === "GET" && q.url().endsWith("/api/v2/guia")) gets++; }); },
     // O retrato do `visto` é o da chegada (antes do `feito`): o velho que não pode vencer.
     postLento: (c) => (c.acao === "visto" ? new Promise((ok) => { solta = ok; }) : undefined),
   });
@@ -101,12 +102,14 @@ test("fila: um `visto` pendurado segura o `feito` por ~5 s; quando volta, o retr
   await page.locator("#guia-titulo", { hasText: "Fechou!" }).waitFor({ timeout: 9000 });
   const espera = Date.now() - t0;
   const salvando = await page.getByText("Salvando…").count();
+  const antes = gets;
   solta();
   await ate(() => v.includes("visto")); // a resposta velha voltou ao navegador
   await page.waitForTimeout(300); // e o onSuccess dela rodou
   const depois = await titulo(page);
   await ctx.close();
   assert.equal(depois, "Fechou! O painel é seu.");
+  assert.equal(gets, antes + 1, "a resposta descartada relê o guia (o servidor pode ter aplicado em outra ordem)");
   assert.ok(espera >= 3500, `o feito não esperou a fila (${espera} ms)`);
   assert.equal(salvando, 0);
   assert.deepEqual(acoes(s), ["visto", `feito:${PASSOS[0].id}`]);

@@ -49,7 +49,9 @@ const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "
 // Os POST /guia em fila: a ordem é a do clique enquanto a fila anda em até ESPERA desde o clique
 // (um `visto` lento não volta por cima do `feito`); um POST pendurado não trava os seguintes além
 // disso. E a resposta mais velha (emitida antes de uma que já gravou) não grava por cima da mais
-// nova: `emitido` numera o clique, `aplicado` é o do último retrato gravado. Não é o `scope` do
+// nova (`emitido` numera o clique, `aplicado` é o do último retrato gravado); em vez disso relê o
+// guia, porque após uma espera longa o servidor pode ter aplicado em outra ordem. Não cobre a
+// resposta velha que chega ANTES e grava (o cache fica velho até o próximo GET ou POST). Não é o `scope` do
 // TanStack: o `runNext` do query-core quebra no bundle safari14 (`.bind(this).get(`, ver
 // frontend/dashboard-app.js) e a 2ª mutation fica parada para sempre. O catch: a falha de um não
 // trava os seguintes.
@@ -101,7 +103,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
         // O GET que saiu antes deste POST traz o retrato velho. O await importa: o revert do cancel é assíncrono.
         await qc.cancelQueries({ queryKey: guiaQuery.queryKey });
         qc.setQueryData(guiaQuery.queryKey, novo);
-      }
+      } else qc.invalidateQueries({ queryKey: guiaQuery.queryKey }); // o servidor pode ter aplicado em outra ordem: a verdade é o GET
       if (c.acao === "feito" && c.passo) { setVistos((v) => [...v, c.passo!]); setFesta(c.passo); }
     },
     // 409: o passo deixou de valer (o banco sumiu do mês). Não é "tentar de novo": relê e
