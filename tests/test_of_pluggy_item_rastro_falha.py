@@ -238,7 +238,7 @@ def test_falha_no_rastro_do_connect_token_tambem_nasce_com_dono(
     regressão para o dia em que alguém puser o retorno da Pluggy nos `details`.
     """
     monkeypatch.setattr(of_routes, "create_pluggy_connect_token",
-                        lambda uid, webhook_url=None, oauth_redirect_uri=None, item_id=None: {"accessToken": "tok-de-teste"})
+                        lambda uid, webhook_url=None, oauth_redirect_uri=None, item_id=None: {"accessToken": "tok-de-teste", "options": {}})
     monkeypatch.setattr(of_routes, "register_item", lambda *a, **k: (_ for _ in ()).throw(
         psycopg.OperationalError("registry fora do ar")))
     client = TestClient(dashboard.app)

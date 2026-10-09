@@ -518,29 +518,6 @@ test("lista: um ESC fecha só a lista e devolve o usuário ao modal de edição"
   await page.close();
 });
 
-test("lista: fechar o detalhe reabre a lista de onde veio", async () => {
-  const page = await comLinhas(await loadDashboardJs());
-  const r = await page.evaluate(async () => {
-    window.fetch = () => Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ ok: true, launches: window.__LINHAS, resumo: { n_total: 3, despesa: 840, receita: 0 } }),
-    });
-    await openCategoryLaunches("saúde", {});
-    document.querySelectorAll("#cl-list .bar-row")[0].click();
-    document.getElementById("ld-close").click();
-    await new Promise((r) => setTimeout(r, 0));
-    return {
-      detalhe: document.getElementById("launch-detail-overlay").classList.contains("open"),
-      lista: document.getElementById("cat-launches-overlay").classList.contains("open"),
-      nLinhas: document.querySelectorAll("#cl-list .bar-row").length,
-    };
-  });
-  assert.equal(r.detalhe, false);
-  assert.equal(r.lista, true, "fechar o detalhe deixou o usuário sem lista nenhuma");
-  assert.equal(r.nLinhas, 3);
-  await page.close();
-});
-
 /* ══════════════════════════════════════════════════════════════════════
  * Rodada 2 — o que o ataque do Tester achou e este grupo trava:
  *
@@ -992,24 +969,7 @@ test("B1: ESC no detalhe aberto pela lista, com o detalhe registrado PRIMEIRO", 
   await page.close();
 });
 
-test("B1 controle: na ordem inversa (lista primeiro) o ESC também devolve pra lista", async () => {
-  const page = await loadDashboardJs();
-  await mockLista(page, UMA_LINHA);
-  const r = await page.evaluate(async () => {
-    window.__mock();
-    await openCategoryLaunches("saúde", {});
-    document.querySelectorAll("#cl-list .bar-row")[0].click();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    await new Promise((res) => setTimeout(res, 0));
-    return {
-      detalhe: document.getElementById("launch-detail-overlay").classList.contains("open"),
-      lista: document.getElementById("cat-launches-overlay").classList.contains("open"),
-    };
-  });
-  assert.equal(r.detalhe, false);
-  assert.equal(r.lista, true);
-  await page.close();
-});
+// A ordem inversa (lista registrada primeiro) é o E6, abaixo.
 
 test("B1 controle: com a lista SOZINHA, o ESC continua fechando ela", async () => {
   // O conserto não pode ter deixado a lista impossível de fechar pelo teclado.

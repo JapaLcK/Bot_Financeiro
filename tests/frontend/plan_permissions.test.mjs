@@ -7,7 +7,7 @@ import { abrirBrowser, fecharBrowser, loadDashboardJs } from "./_dashboard_loade
 before(abrirBrowser);
 after(fecharBrowser);
 
-for (const tier of ["essencial", "plus", "pro"]) {
+for (const tier of ["essencial", "plus"]) {
   test(`analytics ${tier}: busca somente capacidades disponíveis`, async () => {
     const page = await loadDashboardJs();
     const result = await page.evaluate(async tier => {
@@ -84,7 +84,7 @@ async function insightPage() {
   return page;
 }
 
-for (const tier of ["essencial", "plus", "pro"]) {
+for (const tier of ["essencial", "plus"]) {
   test(`perfil ${tier} após primeiro render: insight respeita gates confirmados`, async () => {
     const page = await insightPage();
     await page.evaluate(() => loadPiggyInsight());

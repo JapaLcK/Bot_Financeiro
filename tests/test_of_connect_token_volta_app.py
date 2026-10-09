@@ -14,7 +14,10 @@ CONTROLES (CLAUDE.md §3):
   • `await request.json()` sem teto, ou teto maior → `test_corpo_acima_do_teto_...` 4097 vermelho;
   • tirar o `asyncio.timeout` do helper → `test_corpo_lento_vale_sem_o_campo` vermelho (pelo prazo
     externo, sem travar);
-  • ler/validar o corpo antes dos portões → `..._nao_passa_na_frente_dos_portoes` vermelho.
+  • ler/validar o corpo antes dos portões → `..._nao_passa_na_frente_dos_portoes` vermelho;
+  • devolver `products` fixo em vez do `options.products` do token →
+    `test_resposta_devolve_os_produtos_do_token[ACCOUNTS,TRANSACTIONS-esperado1]` vermelho
+    (o caso do default é o positivo: segue verde).
 """
 from __future__ import annotations
 
@@ -33,9 +36,10 @@ import frontend.finance_bot_websocket_custom as dashboard
 import frontend.routes.open_finance as of_routes
 from conftest import promote_to_pro
 from test_of_item_ownership import _auth
+from test_onboarding_of_produtos import CONFIGS, _set_env
 
 WEBHOOK = "https://exemplo.test/open-finance/pluggy/webhook"
-CHAVES_RESPOSTA = {"ok", "accessToken", "includeSandbox", "provider"}
+CHAVES_RESPOSTA = {"ok", "accessToken", "includeSandbox", "provider", "products"}
 
 
 @pytest.fixture()
@@ -96,6 +100,18 @@ def test_site_manda_o_mesmo_de_antes(user_id, pluggy_dublada, corpo):
     assert set(r.json()) == CHAVES_RESPOSTA
     assert len(pluggy_dublada.corpos) == 1
     assert _options(pluggy_dublada.corpos[0]) == _options_de_hoje(user_id)
+
+
+@pytest.mark.parametrize("env,esperado", CONFIGS)
+def test_resposta_devolve_os_produtos_do_token(user_id, pluggy_dublada, monkeypatch, env, esperado):
+    """O widget web repassa `products` da resposta: tem de ser o que foi à Pluggy."""
+    _set_env(monkeypatch, env)  # depois da fixture, que faz delenv
+    promote_to_pro(user_id)
+    client = TestClient(dashboard.app)
+    r = _post(client, user_id, _auth(client, user_id), b"{}")
+    assert r.status_code == 200, r.text
+    assert r.json()["products"] == esperado
+    assert r.json()["products"] == json.loads(pluggy_dublada.corpos[0])["options"]["products"]
 
 
 @pytest.mark.parametrize("scheme", ["pigbank", "pigbank-staging", "pigbank-dev"])

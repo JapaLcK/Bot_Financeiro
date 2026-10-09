@@ -36,7 +36,7 @@
  * de `_boundedAuthMe`/`_raceBudget`. Os casos negativos (`comWebhookEm` com
  * um webhook que nunca chega) e a bateria `webhook em N ms` rodam com relógio
  * FALSO e cobrem webhook depois do deadline de `_checkoutDeadline`
- * (22 s, 25 s) — mas com o relógio congelado durante toda request real, essa
+ * (22 s) — mas com o relógio congelado durante toda request real, essa
  * corrida contra timeout nunca vence lá (limite declarado na doc da função).
  */
 import { test, before, after } from "node:test";
@@ -183,7 +183,7 @@ test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
  * sob 5 processos Playwright em paralelo mais 14 laços de CPU saturando as
  * CPUs (14 laços sozinhos não reproduzem: 2/2 verde): com a lista ESTENDIDA
  * de 8 instantes, os casos 19000/19750/20000/20250 ficaram vermelhos em 5 de
- * 5 rodadas; com a lista REAL do arquivo (4 instantes), só `webhook em 20000`
+ * 5 rodadas; com a lista REAL do arquivo (4 instantes, na época), só `webhook em 20000`
  * ficou vermelho, também em 5 de 5 — não porque o conserto falhasse, mas
  * porque o relógio de fundo empurrava a fase. `pauseAt(Date.now() + 60000)`
  * congela de vez: dali em diante o relógio só anda quando o teste manda com
@@ -197,7 +197,7 @@ test("quem PAGOU e teve o webhook confirmado continua na Início", async () => {
  * a mesma carga de 5 processos mais 14 laços de CPU: com a lista ESTENDIDA
  * de 8 instantes, sem `ociosa`, 6 de 40 casos ficaram vermelhos (20000,
  * 20250 três vezes, 21000, 22000); com a lista REAL do arquivo (4
- * instantes), sem `ociosa`, 1 vermelho em 72 slots contra 0 em 60 com ela. O
+ * instantes, na época), sem `ociosa`, 1 vermelho em 72 slots contra 0 em 60 com ela. O
  * efeito real de um `/auth/me` em voo quando o `runFor` avança não é travar
  * a página: é deslocar a fase da cadeia de polls em um passo. O gancho em
  * `window.fetch` (via `addInitScript`) conta requests de
@@ -346,15 +346,14 @@ async function comWebhookEm(webhookMs, {
 // | 1 s  | /home   | /home   |
 // | 20 s | /precos | **/home**  ← é ESTE caso que mede o conserto |
 // | 22 s | /precos | /precos |
-// | 25 s | /precos | /precos |
 // Medido 2026-09-17 com `node --test --test-name-pattern="webhook em"
 // tests/frontend/home_upgrade_success_nao_isenta.test.mjs` (coluna "sem o
 // conserto" com o bloco de releitura apagado de `awaitCheckoutConfirmation`,
 // revertido com `git checkout -- frontend/home.html` em seguida).
 //
 // 1 s é o positivo (quem pagou e confirmou rápido não pode ser expulso); 22 s
-// e 25 s prendem o RESÍDUO — o conserto estende a janela, não a elimina, e um
-// "conserto" que mandasse todo mundo para /home passaria sem eles. 20 s é o
+// prende o RESÍDUO — o conserto estende a janela, não a elimina, e um
+// "conserto" que mandasse todo mundo para /home passaria sem ele. 20 s é o
 // único que muda de coluna porque cai exatamente entre o último poll regular
 // (19.5 s) e a releitura (21 s): sem a releitura, o veredito fica preso no
 // poll de 19.5 s, que ainda não viu o webhook.
@@ -366,12 +365,14 @@ async function comWebhookEm(webhookMs, {
 // dentro do laço de teste (flip de `confirmado` → `runFor` → `ociosa`), não
 // do conserto em si.
 //
+// 25 s saiu (#852): o redirect sai na releitura de 21 s, antes de o laço virar
+// o webhook — rodava a mesma sequência do "cortado … depois do polling".
+//
 // CONTROLE: apague o bloco `if (!_checkoutSettled(me)) { ... }` do fim de
-// `awaitCheckoutConfirmation`. VERMELHO: `webhook em 20000 ms`. Os outros três
+// `awaitCheckoutConfirmation`. VERMELHO: `webhook em 20000 ms`. Os outros dois
 // ficam verdes — confirmado por medição.
 for (const [ms, destinoEsperado] of [
   [1000, /^\/home/], [20000, /^\/home/], [22000, /^\/precos/],
-  [25000, /^\/precos/],
 ]) {
   test(`webhook em ${ms} ms`, async () => {
     assert.match(await comWebhookEm(ms), destinoEsperado);
