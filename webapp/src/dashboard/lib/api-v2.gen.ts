@@ -1,5 +1,5 @@
 // GERADO — não edite; rode python scripts/gerar_tipos_api_v2.py; tests/test_api_v2_contrato.py compara.
-export type AcaoGuia = { acao: "visto" | "feito" | "dispensar" | "reabrir"; passo?: "resumo.saiu" | "gastos.categoria" | "piggy.pergunta" | null };
+export type AcaoGuia = { acao: "visto" | "feito" | "dispensar" | "reabrir"; passo?: "resumo.saiu" | "gastos.categoria" | "piggy.pergunta" | null; ordem?: Ordem | null };
 export type AncoraPrevisao = { data: string; saldo: string | null };
 export type Assinatura = { chave: string; nome: string; categoria: string | null; valor: string; valor_anterior: string | null; reajuste_em: string | null; dia: number; proxima: string; ultima: string; desde: string; meses: number; meio: Meio; status: "ativa" | "possivelmente_cancelada"; marcada: boolean };
 export type Assinaturas = { servicos: Array<Assinatura>; outras: Array<Assinatura>; ignoradas: Array<Assinatura>; total_mensal: string; total_anual: string };
@@ -18,7 +18,7 @@ export type DicaIn = { dica: "assinaturas.marcas" };
 export type Edicao = { id: string; categoria?: string | null; descricao?: string | null; data?: string | null; valor?: string | null };
 export type ErroV2 = { error: CorpoErro };
 export type Fala = { titulo: string; apresenta: string; texto: string };
-export type GrupoCompromissos = { chave: string; fonte: "receita_recorrente" | "gasto_recorrente" | "instancia" | "fatura"; nome: string; primeira_data: string | null; ultima_data: string | null; ocorrencias: Array<OcorrenciaPrevisao> };
+export type GrupoCompromissos = { chave: string; fonte: "receita_recorrente" | "gasto_recorrente" | "instancia" | "fatura" | "recorrencia_banco"; nome: string; primeira_data: string | null; ultima_data: string | null; ocorrencias: Array<OcorrenciaPrevisao> };
 export type Guia = { estado: "oferecer" | "em_andamento" | "concluido" | "dispensado" | "indisponivel"; motivo: "sem_dados" | "sincronizando" | "conexao_com_erro" | null; passos: Array<Passo>; dicas: Array<Dica> };
 export type IdLancamento = { id: string };
 export type Investido = { total: string | null; por_tipo: Array<ParteTipo>; por_banco: Array<ParteBanco>; motivos: Array<"sem_banco_conectado" | "banco_desatualizado" | "saldo_ausente" | "moeda_presumida" | "conta_fora_do_ultimo_sync" | "outra_moeda" | "conexao_pausada" | "nenhum_investimento"> };
@@ -33,7 +33,8 @@ export type MesAnterior = { mes: string; entrou: string; saiu: string };
 export type MotivoPrevisao = { codigo: string; direcao_do_erro: "so_melhora" | "so_piora" | "ambos" };
 export type NovoLancamento = { tipo: "entrada" | "saida"; valor: string; descricao: string; categoria?: string | null; data?: string | null };
 export type NovoPerfil = { perfil: "economizar" | "investir" | "controlar" | "dividas" | "autonomo" | "padrao" };
-export type OcorrenciaPrevisao = { chave: string; ciclo: string; data: string | null; fonte: "receita_recorrente" | "gasto_recorrente" | "instancia" | "fatura"; tipo: "receita" | "gasto_fixo" | "boleto" | "fatura_cartao"; nome: string; valor: string | null; direcao: "entrada" | "saida"; qualidade_valor: "conhecido" | "estimado" | "desconhecido"; qualidade_data: "conhecida" | "presumida" | "desconhecida"; realizacao: "prevista" | "realizada" | "a_conferir"; incluida_no_calculo: boolean; motivos: Array<MotivoPrevisao> };
+export type OcorrenciaPrevisao = { chave: string; ciclo: string; data: string | null; fonte: "receita_recorrente" | "gasto_recorrente" | "instancia" | "fatura" | "recorrencia_banco"; tipo: "receita" | "gasto_fixo" | "boleto" | "fatura_cartao"; nome: string; valor: string | null; direcao: "entrada" | "saida"; qualidade_valor: "conhecido" | "estimado" | "desconhecido"; qualidade_data: "conhecida" | "presumida" | "desconhecida"; realizacao: "prevista" | "realizada" | "a_conferir"; incluida_no_calculo: boolean; motivos: Array<MotivoPrevisao> };
+export type Ordem = { aba: string; n: number };
 export type Parcela = { n: number; total: number };
 export type ParteBanco = { banco: string; valor: string | null; motivos: Array<"banco_desatualizado" | "saldo_ausente" | "moeda_presumida" | "conta_fora_do_ultimo_sync"> };
 export type ParteTipo = { tipo: "renda_fixa" | "tesouro" | "acoes" | "fii" | "fundos" | "etf" | "outros"; rotulo: string; valor: string | null; motivos: Array<"banco_desatualizado" | "saldo_ausente" | "moeda_presumida" | "conta_fora_do_ultimo_sync"> };

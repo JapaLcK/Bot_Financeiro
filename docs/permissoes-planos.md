@@ -29,6 +29,10 @@ Insights são barrados antes de cache ou geração, inclusive no pré-processame
 O dashboard Essencial mantém as análises básicas e não solicita os endpoints
 avançados. O resumo semanal é conferido na ativação e em cada envio automático;
 preferência antiga ligada não contorna um downgrade. Desligar continua permitido.
+No job do WhatsApp o plano é checado ANTES do claim da semana, então o downgrade não
+consome o envio (`tests/test_resumo_semanal.py`, banco real). A linha de comparação com a
+semana anterior no texto do resumo semanal segue o gate `financial_comparison` (Plus+); o
+Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a variação.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
 
 Orçamento Doméstico é o método específico de dividir a renda em potes, diferente

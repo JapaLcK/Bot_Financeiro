@@ -14,11 +14,13 @@ interface Props {
 }
 
 /**
- * Trilha em `surface`, nunca `border`: `brand` sobre `border` mede 2,80 no
- * claro (reprova até o teto de 3:1 de não-texto). Sobre `surface`, todo
- * preenchimento usado aqui já está coberto em `PARES`: `brand` (≥3, os dois
- * temas) e `positive`/`warning`/`danger` (≥4,5, já cobertos como TEXTO×FUNDOS
- * — `tom` aceita os quatro). Preenchimento por `transform: scaleX` (não
+ * Trilha em `border`: a barra mora dentro de `Card` (`surface`), e a trilha
+ * `surface` sumia no fundo do card — não se via onde ficava o 100%. O
+ * preenchimento continua medido contra o que o cerca por cima e por baixo, o
+ * `surface` do card: `brand` (≥3, os dois temas) e `positive`/`warning`/
+ * `danger` (≥4,5, TEXTO×FUNDOS em `PARES`). A trilha é referência visual, não
+ * o único sinal: `brand`×`border` mede 2,80 no claro, abaixo de 3, e por isso
+ * não entra em `PARES` (remeça se a paleta mudar). Preenchimento por `transform: scaleX` (não
  * `width`) por performance: o RN 0.86 tem `transformOrigin` para escalar a
  * partir da esquerda sem cálculo manual de translação.
  */
@@ -37,7 +39,7 @@ export function ProgressBar({ valor, tom = "brand" }: Props) {
     <View
       accessibilityRole="progressbar"
       accessibilityValue={{ min: 0, max: 100, now: agora }}
-      style={{ height: 8, borderRadius: raio.sm, backgroundColor: cores.surface, overflow: "hidden" }}
+      style={{ height: 8, borderRadius: raio.sm, backgroundColor: cores.border, overflow: "hidden" }}
     >
       <View
         style={{

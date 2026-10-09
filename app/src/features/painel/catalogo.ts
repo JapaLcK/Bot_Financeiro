@@ -1,5 +1,5 @@
 import type { PerfilPainel } from "@/api/schemas/painel";
-export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas e caixinhas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Rendimento contratado", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
+export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas e caixinhas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
 export type Widget = keyof typeof TITULOS;
 export const PADRAO: Widget[] = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
 export const PERFIS: { id: PerfilPainel; label: string; preset: Widget[] }[] = [
@@ -18,7 +18,17 @@ export function sanitizarLayout(raw: unknown, p: PerfilPainel): Widget[] {
 export const chaveLayout = (uid: number, p: PerfilPainel) => `pigbank.painel.v1.u${uid}.${p}`;
 export function mesAtual() { return new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit" }).format(new Date()); }
 export function mesesAnteriores(mes: string, quantidade = 12) { const ano = Number(mes.slice(0, 4)), numero = Number(mes.slice(5, 7)); return Array.from({ length: quantidade }, (_, i) => { const d = new Date(Date.UTC(ano, numero - 1 - i, 1)); return d.toISOString().slice(0, 7); }); }
-export const nomeMes = (mes: string) => new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${mes}-01T12:00:00Z`));
+const MES_ISO = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** "2026-10" vira "outubro de 2026"; fora do formato ou mês fora de 01–12, passa intacto (o Intl lança RangeError com data inválida). */
+export const nomeMes = (mes: string) => MES_ISO.test(mes) ? new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${mes}-01T12:00:00Z`)) : mes;
+/** Mês ISO de fatura ("2026-10") vira "out/2026"; fora do formato ou mês fora de 01–12, passa intacto. */
+export const mesCurto = (mes: string) => MES_ISO.test(mes) ? `${nomeMes(mes).slice(0, 3)}/${mes.slice(0, 4)}` : mes;
+/** Instante ISO em "06/10", no fuso do aparelho; o ano só aparece quando não é o corrente. */
+export function dataCurta(instante: string, agora = new Date()) {
+  const d = new Date(instante);
+  if (Number.isNaN(d.getTime())) return instante;
+  return d.toLocaleDateString("pt-BR", d.getFullYear() === agora.getFullYear() ? { day: "2-digit", month: "2-digit" } : { day: "2-digit", month: "2-digit", year: "numeric" });
+}
 
 /** Datas civis do banco não passam pelo fuso do dispositivo. */
 export function dataPtBr(dia: string | null) {

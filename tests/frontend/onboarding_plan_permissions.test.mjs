@@ -57,6 +57,7 @@ for (const [tier, available, choice] of [
   test(`${tier}, semanal=${available}: conclui resumo com os três booleanos`, async () => {
     const { page, state } = await wizard({ tier, available });
     assert.equal(await page.locator('[data-choice="semanal"]').isDisabled(), !available);
+    assert.deepEqual([await page.locator('[data-role="report-choices"] [aria-checked="true"]').count(), await page.locator('[data-role="save-report"]').isDisabled()], [0, true], "depois do render, nada marcado e o Salvar desabilitado");
     await save(page, choice);
     assert.equal(await page.locator('.onb-step[data-step="5"]').isVisible(), true);
     assert.equal(state.patches.length, 1);

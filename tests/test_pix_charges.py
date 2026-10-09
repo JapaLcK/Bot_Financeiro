@@ -38,6 +38,7 @@ import pytest
 from db.connection import get_conn
 from db.pix_charges import (
     ESTADOS_ATIVOS,
+    _buscar_por,
     buscar_por_asaas_payment_id,
     buscar_por_external_reference,
     buscar_por_public_token,
@@ -299,3 +300,12 @@ def test_criar_cobranca_gera_a_referencia_no_formato_do_dreno(user_id):
     linha = _nova(user_id)
     assert linha["external_reference"] == f"pix:{linha['id']}"
     assert re.fullmatch(r"pix:[0-9]+", linha["external_reference"])
+
+
+def test_buscar_por_recusa_coluna_fora_da_whitelist():
+    """N8: a whitelist do f-string SQL é `if/raise`, não `assert` — com
+    `python -O` o assert some e a coluna iria direto para o SQL. Sem banco: a
+    recusa vem antes do `get_conn()`. O positivo (as duas colunas válidas) são
+    `test_attach_e_idempotente` e os que leem por `external_reference`."""
+    with pytest.raises(ValueError):
+        _buscar_por("coluna_invalida", "x")

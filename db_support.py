@@ -377,6 +377,22 @@ def claim_weekly_report_send_impl(get_conn, ensure_user, user_id: int, period_da
     return row is not None
 
 
+def release_weekly_report_claim_impl(get_conn, user_id: int, period_date) -> None:
+    """Devolve o claim de `period_date` quando o build do resumo falhou depois dele.
+
+    Só zera se a data gravada ainda é a do claim (não pisa num claim mais novo).
+    Só o dono do claim chama: o próximo ciclo do tick tenta de novo.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update daily_report_prefs set last_weekly_sent_date = null"
+                " where user_id = %s and last_weekly_sent_date = %s",
+                (user_id, period_date),
+            )
+        conn.commit()
+
+
 def claim_monthly_report_send_impl(get_conn, ensure_user, user_id: int, period_date) -> bool:
     """Reserva atomicamente o envio do resumo mensal para `period_date` (o dia 1 do mês).
 

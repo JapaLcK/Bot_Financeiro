@@ -4,7 +4,7 @@ import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
-const escopo = "Busca no histórico permitido pelo seu plano. O mês selecionado não limita os resultados.";
+const escopo = "Buscando em todo o histórico do seu plano";
 function servidor() {
  fetchFalso.mockImplementation(async (url: string) => {
   const u = new URL(url), path = u.pathname;
@@ -31,13 +31,22 @@ it("busca global explicita o histórico permitido sem esconder registros fora do
  await buscar("Loja");
  await waitFor(() => expect(screen.getByText("Loja de setembro")).toBeTruthy());
  expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("01/09/2026 · Banco")).toBeTruthy();
- expect(screen.getByText("Existem mais páginas desta busca no histórico permitido pelo seu plano.")).toBeTruthy();
+ expect(screen.getByRole("button", { name: "Carregar mais lançamentos" })).toBeTruthy(); expect(screen.queryByText(/Existem mais páginas/)).toBeNull();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de setembro")).toBeTruthy(); expect(screen.getByText("Loja de agosto")).toBeTruthy();
- expect(screen.getByText("Todos os resultados deste filtro foram carregados.")).toBeTruthy();
+ expect(screen.queryByText("Todos os resultados deste filtro foram carregados.")).toBeNull(); expect(screen.queryByRole("button", { name: "Carregar mais lançamentos" })).toBeNull();
  const paginas = fetchFalso.mock.calls.map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/lancamentos" && u.searchParams.has("q"));
  expect(paginas.map((u) => u.searchParams.get("cursor"))).toEqual([null, "pagina-2"]);
  await buscar("");
  await waitFor(() => expect(screen.queryByText(escopo)).toBeNull());
+});
+it("Previsão diz 'A partir de hoje, dd/mm' uma vez só, em qualquer mês selecionado", async () => {
+ const impl = fetchFalso.getMockImplementation()!;
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/api/app/previsao" ? resposta(200, { ...fixture["/api/app/previsao"], hoje: `${mesAtual()}-15` }) : impl(url, req));
+ const frase = `A partir de hoje, 15/${mesAtual().slice(5)}`;
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getAllByText(frase)).toHaveLength(1)); await act(drenar);
+ await escolherMes(mesesAnteriores(mesAtual())[1]!);
+ expect(screen.getAllByText(frase)).toHaveLength(1);
+ expect(screen.queryByText("Previsão a partir de hoje")).toBeNull();
 });
 it("seletores recarregam somente mês ou horizonte e preservam os recursos independentes", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy()); await act(drenar);
@@ -47,7 +56,9 @@ it("seletores recarregam somente mês ou horizonte e preservam os recursos indep
  const antesDias = fetchFalso.mock.calls.length;
  await apertar("60 dias");
  expect(caminhos(antesDias)).toEqual(["/api/app/previsao"]);
- expect(screen.getByRole("button", { name: "60 dias · selecionado" })).toBeTruthy();
+ expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy();
+ // O título do card de compromissos acompanha o horizonte da previsão.
+ expect(screen.getByText("Próximos 60 dias")).toBeTruthy(); expect(screen.getByRole("button", { name: "Abrir Próximos 60 dias" })).toBeTruthy(); expect(screen.queryByText("Próximos 30 dias")).toBeNull();
 });
 
 it("mês não consome nova cota de insights nem substitui o saldo independente", async () => {
@@ -68,7 +79,7 @@ it("leitura independente em voo continua válida após seleção de mês", async
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy());
  const chamada = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/api/app/contas")!;
  await escolherMes(mesesAnteriores(mesAtual())[1]!); expect(chamada[1].signal.aborted).toBe(false);
- atraso.soltar(); await act(drenar); expect(screen.getByText("Saldo disponível agora")).toBeTruthy();
+ atraso.soltar(); await act(drenar); expect(screen.getByText("Disponível agora")).toBeTruthy();
  expect(fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/api/app/contas")).toHaveLength(1);
 });
 it("resumo e detalhes tardios do mês anterior não substituem o mês mais recente", async () => {
@@ -109,7 +120,7 @@ it("PUT de perfil atravessa mês e horizonte sem cancelamento, rollback ou GET a
  expect(screen.getByRole("button", { name: "Autônomo" })).toBeDisabled();
  atraso.soltar(); await act(drenar); expect(screen.getByRole("button", { name: "Autônomo" })).toBeEnabled();
  expect(fetchFalso.mock.calls.filter(([url, req]) => new URL(String(url)).pathname === "/api/app/perfil" && req.method !== "PUT")).toHaveLength(1);
- await apertar("Autônomo"); expect(screen.getByRole("button", { name: "Autônomo · selecionado" })).toBeEnabled();
+ await apertar("Autônomo"); expect(screen.getByRole("button", { name: "Autônomo", selected: true })).toBeEnabled();
 });
 it("refresh completo supera previsão em voo e revalida todos os recursos", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!; let chamadas60 = 0;
@@ -123,8 +134,8 @@ it("refresh completo supera previsão em voo e revalida todos os recursos", asyn
  const antes = fetchFalso.mock.calls.length;
  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
  expect(caminhos(antes)).toHaveLength(16); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
- expect(screen.getByRole("button", { name: "60 dias · selecionado" })).toBeTruthy(); atraso.soltar(); await act(drenar);
- expect(screen.getByRole("button", { name: "60 dias · selecionado" })).toBeTruthy(); expect(screen.queryByRole("button", { name: "30 dias · selecionado" })).toBeNull();
+ expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); atraso.soltar(); await act(drenar);
+ expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); expect(screen.queryByRole("button", { name: "30 dias", selected: true })).toBeNull();
 });
 it("busca com categoria vazia e dia civil mantém filtros e paginação global", async () => {
  renderRouter("./app", { initialUrl: "/extrato?categoria=&dia=2026-08-01" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
@@ -142,7 +153,7 @@ it("horizonte não repete leituras mensais, conversa ou insights", async () => {
  const saldoDepois = screen.getAllByLabelText("mais 7200 reais"); expect(saldoDepois).toHaveLength(saldoMes.length);
  saldoDepois.forEach((no, i) => expect(no).toBe(saldoMes[i]));
  await apertar("90 dias"); expect(caminhos(antes)).toEqual(["/api/app/previsao", "/api/app/previsao"]);
- expect(screen.getByRole("button", { name: "90 dias · selecionado" })).toBeTruthy();
+ expect(screen.getByRole("button", { name: "90 dias", selected: true })).toBeTruthy();
 });
 
 it("debounce da busca não consulta antes de 300ms e aplica o termo uma vez", async () => {

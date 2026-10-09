@@ -3,7 +3,9 @@
 O roteiro mora em `api/v2/guia.py` (`PASSOS`); aqui só o estado gravado e o motivo de o
 passo 1 (o Saiu real) não estar disponível. Os carimbos só gravam uma vez: o 1º
 `feito` de cada passo, `oferecido_em`, `dispensado_em` e `concluido_em` nunca são
-reescritos ("reabrir" zera `dispensado_em` e, sem feitos, carimba a oferta).
+reescritos ("reabrir" zera `dispensado_em`, salvo gesto descartado pela ordem, e, sem feitos, carimba a oferta).
+`dispensar`/`reabrir` podem levar `ordem = (aba, n)`: o gesto da MESMA aba que o último gesto
+aplicado do usuário (um par por usuário), com `n` menor ou igual ao dele, não grava o efeito.
 """
 from __future__ import annotations
 
@@ -20,8 +22,7 @@ from .connection import get_conn
 # relógio sai depois do commit do outro e a guarda `feitos = '{}'` vê o `feito` já gravado.
 _SET = {
     "visto": "oferecido_em = coalesce(oferecido_em, case when feitos = '{}'::jsonb then clock_timestamp() end)",
-    "dispensar": "dispensado_em = coalesce(dispensado_em, clock_timestamp())",
-    "reabrir": ("dispensado_em = null, oferecido_em = coalesce(oferecido_em,"
+    "reabrir": ("oferecido_em = coalesce(oferecido_em,"
                 " case when feitos = '{}'::jsonb then clock_timestamp() end)"),
     "feito": ("feitos = case when feitos ? %(passo)s::text then feitos"
               " else feitos || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
@@ -29,6 +30,16 @@ _SET = {
     "dica": ("dicas = case when dicas ? %(passo)s::text then dicas"
              " else dicas || jsonb_build_object(%(passo)s::text, clock_timestamp()) end"),
 }
+
+# `dispensar`/`reabrir`: o efeito no `dispensado_em` só grava se o gesto é novo (`_NOVO`), e a
+# comparação mora no WHERE do UPDATE: ele trava a linha, e quem esperou a trava reavalia o
+# WHERE sobre a linha nova (READ COMMITTED). Ler `ordem_n` por SELECT antes e decidir em Python
+# reabriria a corrida. Sem `ordem` (cliente antigo) sempre aplica e zera `ordem_aba/ordem_n`.
+# ponytail: uma referência por usuário; um gesto de outra aba no meio a troca e o gesto velho da
+# aba anterior aplica. Upgrade que preserva a garantia dentro da aba: guardar o último n por aba, com teto de abas.
+_GESTO = {"dispensar": "dispensado_em = coalesce(dispensado_em, clock_timestamp())",
+          "reabrir": "dispensado_em = null"}
+_NOVO = "%(aba)s::text is null or ordem_aba is distinct from %(aba)s::text or ordem_n < %(n)s::int"
 
 _ERRO = {"error_recoverable", "needs_user_action", "item_missing"}
 
@@ -42,13 +53,19 @@ def ler(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def registrar(user_id: int, acao: str, passo: str | None, ids: list[str]) -> dict:
+def registrar(user_id: int, acao: str, passo: str | None, ids: list[str],
+              ordem: tuple[str, int] | None = None) -> dict:
     """Aplica `acao` e conclui quando todos os `ids` estão feitos, numa transação.
     O UPDATE trava a linha: dois `feito` simultâneos não perdem carimbo."""
-    p = {"uid": user_id, "passo": passo, "ids": ids}
+    aba, n = ordem or (None, None)
+    p = {"uid": user_id, "passo": passo, "ids": ids, "aba": aba, "n": n}
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("insert into guia_painel (user_id) values (%(uid)s) on conflict do nothing", p)
-        cur.execute(f"update guia_painel set {_SET[acao]} where user_id = %(uid)s", p)
+        if acao in _SET:
+            cur.execute(f"update guia_painel set {_SET[acao]} where user_id = %(uid)s", p)
+        if acao in _GESTO:
+            cur.execute(f"update guia_painel set {_GESTO[acao]}, ordem_aba = %(aba)s, ordem_n = %(n)s"
+                        f" where user_id = %(uid)s and ({_NOVO})", p)
         cur.execute("update guia_painel set concluido_em = clock_timestamp() where user_id = %(uid)s"
                     " and concluido_em is null and feitos ?& %(ids)s::text[]", p)
         cur.execute(_LER, (user_id,))

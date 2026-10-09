@@ -1,5 +1,6 @@
 # core/handlers/report.py
 from __future__ import annotations
+import re
 import db
 from core.reports.reports_daily import (
     build_daily_report_text,
@@ -49,14 +50,24 @@ def disable(user_id: int) -> str:
 
 # --- resumo semanal ---
 
-def enable_weekly(user_id: int) -> str:
+# Dia pedido que NÃO é segunda: o resumo semanal só sai na segunda-feira, e o usuário
+# tem que saber disso na hora (não pode ficar em silêncio).
+_DIA_NAO_SEGUNDA = re.compile(r"\b(domingo|s[áa]bado|ter[çc]a|quarta|quinta|sexta)s?\b", re.IGNORECASE)
+
+
+def enable_weekly(user_id: int, texto: str = "") -> str:
     from core.services.plan_service import plan_gate_ok
     if not plan_gate_ok(user_id, "weekly_report"):
         return "🐷 O resumo semanal automático está disponível nos planos Plus e Pro."
     db.set_weekly_report_enabled(user_id, True)
+    aviso = ""
+    dia = _DIA_NAO_SEGUNDA.search(texto or "")
+    if dia:
+        aviso = (f"⚠️ Você pediu {dia.group(1)}, mas o resumo semanal sai só na segunda-feira.\n")
     return (
-        "✅ Resumo semanal ligado. Você recebe toda segunda-feira, referente à semana anterior.\n"
-        "Para desligar: *desligar resumo semanal*"
+        aviso
+        + "✅ Resumo semanal ligado. Você recebe toda segunda-feira, referente à semana anterior.\n"
+        + "Para desligar: *desligar resumo semanal*"
     )
 
 

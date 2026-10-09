@@ -6,6 +6,10 @@ export const connectTokenSchema = z.object({
   accessToken: z.string().min(1),
   // Só dev/staging (`PLUGGY_INCLUDE_SANDBOX`): liga o conector Sandbox no widget, como o site.
   includeSandbox: z.boolean().optional(),
+  // A lista que foi neste token (`pluggy_products()`, §0.7); o widget a recebe como `products`.
+  // Inválido, `null` ou `[]` viram `undefined`: a lib poria "products=null" ou "products=" na URL,
+  // e um campo estranho não pode impedir a conexão (sem ele o widget fica como antes).
+  products: z.array(z.string().min(1)).min(1).optional().catch(undefined),
 });
 
 /**

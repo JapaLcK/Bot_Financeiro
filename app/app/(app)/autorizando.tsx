@@ -94,7 +94,7 @@ export default function Autorizando() {
       <Button rotulo="Retomar conexão" onPress={() => escolher(false, true)} />
       <Button rotulo="Iniciar nova tentativa" variante="secondary" onPress={() => escolher(true)} />
       <Button rotulo="Cancelar" variante="ghost" onPress={() => escolher(false)} />
-    </> : token ? <View style={{ flex: 1 }}><PluggyConnect connectToken={token.accessToken} includeSandbox={token.includeSandbox}
+    </> : token ? <View style={{ flex: 1 }}><PluggyConnect connectToken={token.accessToken} includeSandbox={token.includeSandbox} products={token.products}
       language="pt" connectorTypes={["PERSONAL_BANK"]} updateItem={itemId} forceOauthInBrowser
       onSuccess={(d) => { void fechar(d.item?.id); }} onError={(d) => { void fechar(d?.data?.item?.id); }} onClose={() => { void fechar(); }} />
     </View> : !erro && <Texto tom="inkMuted">Preparando uma conexão segura…</Texto>}

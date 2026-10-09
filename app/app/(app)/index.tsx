@@ -129,11 +129,9 @@ export default function Inicio() {
               </Pressable>
             </View>
             {aviso && <Banner tom="warning" mensagem={aviso} />}
-            {estado.acesso === "inicio" ? (
-              <Texto tom="inkMuted">Seu primeiro acesso foi concluído. Confira seus bancos e acompanhe as conexões.</Texto>
-            ) : <Texto tom="inkMuted">{estado.acesso === "cobranca-pendente"
-              ? "Há uma cobrança pendente. Novas conexões estão indisponíveis enquanto a cobrança é regularizada."
-              : estado.acesso === "sem-acesso" ? "Sua conta ainda não tem acesso ao app. A contratação pelo iPhone chegará em uma próxima atualização."
+            {estado.acesso !== "inicio" && <Texto tom="inkMuted">{estado.acesso === "cobranca-pendente"
+              ? "Há uma cobrança pendente. Novas conexões ficam indisponíveis até regularizar."
+              : estado.acesso === "sem-acesso" ? "Sua conta ainda não tem acesso ao app. A assinatura pelo iPhone chega numa próxima atualização."
               : estado.acesso === "sem-open-finance" ? "Seu acesso atual não permite conectar bancos."
               : estado.acesso === "senha" ? "Crie sua senha pelo link enviado por e-mail para continuar."
               : "Conecte seu banco e conclua a primeira sincronização para entrar."}</Texto>}
