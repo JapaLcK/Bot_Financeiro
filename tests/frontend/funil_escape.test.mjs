@@ -50,6 +50,9 @@ test("texto hostil da API vira texto, não HTML", async () => {
   const page = await browser.newPage();
   await page.route("**/admin/api/funil", (r) => r.fulfill({
     contentType: "application/json", body: JSON.stringify(RESPOSTA) }));
+  // as fontes externas têm teste próprio (funil_fontes.test.mjs); aqui só não vão ao servidor
+  await page.route("**/admin/api/funil/fonte/*", (r) => r.fulfill({
+    contentType: "application/json", body: JSON.stringify({ estado: XSS, mensagem: XSS }) }));
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".card");
   const v = await page.evaluate(() => ({

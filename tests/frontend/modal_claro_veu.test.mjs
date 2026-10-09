@@ -176,7 +176,9 @@ before(async () => {
 });
 after(async () => { await browser?.close(); server?.kill(); });
 
-const medir = (opts) => medirPagina(browser, ORIGIN, opts);
+// Mesma carga, mesma leitura (transições e animações desligadas em medir()): mede uma vez por opts.
+const memo = new Map();
+const medir = (opts) => { const k = JSON.stringify(opts); if (!memo.has(k)) memo.set(k, medirPagina(browser, ORIGIN, opts)); return memo.get(k); };
 
 
 /** Tinta (a) IGUAL nos dois temas — logo ninguém a revisou por tema — e (b) a

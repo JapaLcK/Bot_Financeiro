@@ -85,19 +85,23 @@ test("insight do dia: o clique abre a conversa com a pergunta dele respondida", 
 });
 
 test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () => {
-  const SORTES = [0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.99];
-  const sorteio = async (plano) => {
-    const vistas = [];
-    for (const sorte of SORTES) {
-      const { ctx, page } = await abrir({ perfil: "investir", plano, sorte });
-      vistas.push([await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]);
-      await ctx.close();
-    }
-    return vistas;
+  // O Essencial é medido com as 8 sortes porque a posição dos insights no pool não é
+  // invariante (começo, meio ou fim); o Plus sorteia insight na sorte 0.
+  const sorteio = async (plano, sorte) => {
+    const { ctx, page, erros } = await abrir({ perfil: "investir", plano, sorte });
+    return { ctx, page, erros, vista: [await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)] };
   };
-  const essencial = await sorteio("essencial");
-  const plus = await sorteio("plus");
-  const { ctx, page, erros } = await abrir({ perfil: "investir", plano: "essencial", sorte: 0 });
+  const { ctx: ctxPlus, vista: vPlus } = await sorteio("plus", 0);
+  await ctxPlus.close();
+  const essencial = [];
+  for (const sorte of [0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.99]) {
+    const { ctx: c, vista } = await sorteio("essencial", sorte);
+    essencial.push(vista);
+    await c.close();
+  }
+  const { ctx, page, erros, vista: v0 } = await sorteio("essencial", 0);
+  essencial.unshift(v0);
+  const plus = [vPlus];
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const hash = await page.evaluate(() => location.hash);
