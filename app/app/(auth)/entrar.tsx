@@ -91,7 +91,7 @@ export default function Entrar() {
                   <View style={{ alignSelf: "flex-end" }}>
                     <Button
                       rotulo="Esqueci a senha"
-                      variante="ghost"
+                      variante="link"
                       desativado={ocupado}
                       onPress={() => router.push("/esqueci-senha")}
                     />

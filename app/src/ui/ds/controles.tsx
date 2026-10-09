@@ -8,7 +8,7 @@ import { SegmentedControl } from "@/ui/componentes/SegmentedControl";
 import { Texto } from "@/ui/componentes/Texto";
 import { espaco } from "@/ui/tokens";
 
-const VARIANTES_BOTAO = ["primary", "secondary", "ghost", "danger"] as const;
+const VARIANTES_BOTAO = ["primary", "secondary", "ghost", "link", "danger"] as const;
 const CATEGORIAS = ["Mercado", "Transporte", "Lazer"];
 
 /**

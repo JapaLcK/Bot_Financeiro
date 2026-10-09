@@ -367,6 +367,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
+  **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
+  bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
+  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), despesa e
+  receita, sempre `estimado`/data `presumida`, valor = o último cobrado. Identidade
+  `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
+  frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
+  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
+  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
+  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
+  saída (a marca não tem direção); positivo no cartão e o movimento interno que
+  `classify_open_finance_launch` reconhece (pagamento de fatura, aplicação e resgate,
+  caixinha, poupança, transferência "same person" da Pluggy) não entram — transferência
+  entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
+  comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
+  não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
+  duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`, e a
+  previsão em cache vence quando a lista vira velha. Recorrência de conta cujo saldo não está
+  na base (saldo ausente, moeda presumida, outra moeda) fica fora, com
+  `recorrencia_banco_conta_fora_da_base` (a conta é a da última cobrança da cadeia).
 
 - `GET /api/v2/investido` (`api/v2/investido.py`, regra em `db/investido.py`; também
   `/api/app/investido`): o total investido **nos bancos conectados** — `{total, por_tipo:
@@ -957,6 +978,7 @@ Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
+A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
@@ -1014,6 +1036,27 @@ A segunda escrita do drill-down libera novo trial
 apaga a linha de `plan_trials` do **telefone** da conta e zera
 `trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
 por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
+
+`/admin/funil` (`core/funil_routes.py` + `core/funil_dashboard.py` + `frontend/funil.html`)
+é o painel de funil: só leitura, agregados fechados (nenhum `user_id`/e-mail/quiz),
+7d e 30d na mesma resposta de `GET /admin/api/funil`, mesma sessão do `/admin` (reusa
+`get_current_admin`; sem auth nova). Links externos só aparecem com o ID configurado
+(`GA4_PROPERTY_ID`, `META_PIXEL_ID`, `CLARITY_PROJECT_ID`, `STRIPE_SECRET_KEY`).
+Regras de leitura: coorte = cadastros criados na janela, e as etapas são
+CUMULATIVAS ("alcançou pelo menos"; o Pix só grava `completed`). Taxa ligada a
+/precos vira "—" quando o coorte começa antes do "medido desde"
+(`min(created_at)` de `viewed_pricing`), então nos primeiros dias/semanas
+pós-deploy a janela de 30d mostra "—". Canal: afiliado > prospecção > quiz >
+direto (quiz só sim/não, nunca perfil). `expired` NÃO é abandono (abandono =
+abriram − concluíram). `origem` é restrita a `ORIGENS` (+ "outro"): provedor
+social novo entra em `ORIGENS` e no teste de igualdade com
+`signup_source_from_request`. Sem cache/índice por decisão; se a consulta passar
+de ~5s, TTL de 60s antes de índice. Contas de cortesia/internas entram em
+"cadastros".
+Limites declarados do painel (pessoa = conta mais antiga do `user_id`; `auth_accounts.user_id` não é único):
+(a) `atraso` conta a pessoa se QUALQUER linha dela está em atraso, enquanto `estado_atual` usa a conta mais antiga, então a mesma pessoa pode ser "free" num bloco e "em atraso" no outro (atraso é sobre cobrança: qualquer linha vale);
+(b) quem converte só na 2ª conta (cadastro novo do mesmo `user_id`) não aparece como conversão do coorte;
+(c) custo da ativação: falta índice em `user_identities(user_id)` (EXISTS por linha); o Tester mediu 3,6s no pior caso com 100k cadastros nos últimos 30d e ~30s com 20k conclusões (só admin). Remédio: `create index on user_identities(user_id)` em issue separada, ou o TTL de 60s acima.
 
 ### Tarefas de fundo
 

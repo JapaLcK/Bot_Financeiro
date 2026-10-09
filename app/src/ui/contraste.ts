@@ -85,4 +85,6 @@ export const PARES: ParDeContraste[] = [
     minimo: 3 as const,
   })),
   ...FUNDOS.map((segundo) => ({ primeiro: "inkFaint" as Chave, segundo, minimo: 3 as const })),
+  // Selo do indicador da meta (`patrimonio.tsx`): texto `ink` sobre fundo `border`.
+  { primeiro: "ink", segundo: "border", minimo: 4.5 },
 ];

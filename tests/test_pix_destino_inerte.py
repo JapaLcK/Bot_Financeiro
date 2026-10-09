@@ -136,6 +136,9 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # A junção de contas (#635) passa a cobrança da origem ao destino num
     # `update ... set user_id`; a origem é apagada logo depois.
     "db/users.py": ("pix_charges",),
+    # O painel de funil (/admin/funil) só LÊ: um `select` agregado por status em
+    # `pix_charges` para o bloco "Pix anual". Sem host, sem env do Asaas, sem escrita.
+    "core/funil_dashboard.py": ("pix_charges",),
 }
 
 

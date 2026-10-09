@@ -2,7 +2,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { decimalParaCentavos, numeroLegadoParaCentavos, somarCentavos, percentualEmCentavos } from "@/features/painel/decimal";
-import { PERFIS, PADRAO, sanitizarLayout, chaveLayout, nomeLegivel, nomeCategoria } from "@/features/painel/catalogo";
+import { PERFIS, PADRAO, sanitizarLayout, chaveLayout, nomeLegivel, nomeCategoria, mesCurto, nomeMes, dataCurta } from "@/features/painel/catalogo";
+it.each([["2026-10", "out/2026"], ["2027-03", "mar/2027"], ["2026-1", "2026-1"], ["", ""], ["2026-13", "2026-13"], ["2026-00", "2026-00"]])("mês da fatura %s vira %s", (mes, esperado) => expect(mesCurto(mes)).toBe(esperado));
+it.each([["2026-10", "outubro de 2026"], ["2026-13", "2026-13"], ["", ""], ["2026-00", "2026-00"]])("nome do mês %s vira %s, sem RangeError", (mes, esperado) => expect(nomeMes(mes)).toBe(esperado));
+it("data de atualização curta: sem ano no ano corrente, com ano fora dele", () => {
+ expect(dataCurta("2026-10-06T12:00:00Z", new Date("2026-12-31T12:00:00Z"))).toBe("06/10");
+ expect(dataCurta("2026-10-06T12:00:00Z", new Date("2027-01-02T12:00:00Z"))).toBe("06/10/2026");
+ expect(dataCurta("2026-13-40T12:00:00Z")).toBe("2026-13-40T12:00:00Z"); expect(dataCurta("")).toBe("");
+});
 import * as S from "@/api/schemas/painel";
 import fixture from "./painel.fixture.json";
 it.each([["10.005", 1001], ["-10.005", -1001], ["0.004999", 0], ["0.005", 1], ["1.999", 200], ["12", 1200], ["0.01", 1]])("Decimal %s arredonda HALF_UP sem float", (valor, esperado) => expect(decimalParaCentavos(String(valor))).toBe(esperado));

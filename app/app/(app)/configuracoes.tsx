@@ -15,12 +15,10 @@ export default function Configuracoes() {
   const [saindo, setSaindo] = useState(false);
   return <Screen sobCabecalho><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <Texto variante="secao">Sua conta, do seu jeito</Texto>
-    <Texto tom="inkMuted">Cuide das suas conexões e da segurança do PigBank.</Texto>
     <Button rotulo="Bancos conectados" variante="secondary" onPress={() => router.push("/conexoes")} />
     <Button rotulo="Segurança" variante="secondary" icone="Lock" onPress={() => router.push("/seguranca")} />
     <Button rotulo="Teste Open Finance" variante="ghost" onPress={() => router.push("/teste-pluggy")} />
     <Button rotulo="Falar com o suporte" variante="ghost" onPress={() => { void Linking.openURL(`${baseUrl()}/suporte`).catch(() => setErro("Não conseguimos abrir o suporte. Tente de novo.")); }} />
-    <Texto variante="legenda" tom="inkMuted">A assinatura pela Apple será disponibilizada em uma próxima atualização.</Texto>
     {erro && <Banner tom="danger" mensagem={erro} />}
     <Button rotulo="Sair" variante="secondary" carregando={saindo} onPress={() => {
       setSaindo(true); setErro(null);

@@ -1,11 +1,14 @@
 """Recurring Payments da Pluggy (`of_recurring_payments`) e a marcação do usuário
-(`subscription_marks`). Quem monta a lista é `core/services/assinaturas.py`.
+(`subscription_marks`). Quem monta a lista é `core/services/assinaturas.py`; a
+Previsão (`core/services/previsao_recorrencias.py`) lê pelos leitores por cursor
+(`ler_*`), dentro da snapshot read only dela.
 
 `of_recurring_payments` não tem user_id: o dono é a conexão, e toda leitura passa
 por `open_finance_connections c ... where c.user_id = %s`.
 """
 from .connection import get_conn
 from .of_snapshots import _numero
+from .open_finance_state import _TERMINAL
 
 
 def salvar_recorrencias(connection_id: int, itens: list) -> None:
@@ -43,9 +46,9 @@ def salvar_recorrencias(connection_id: int, itens: list) -> None:
 # Uma linha por ocorrência casada. O join da transação fica preso às contas do
 # MESMO item da recorrência: o id de transação da Pluggy não é único entre usuários.
 _SQL_OCORRENCIAS = """
-select rp.id rp_id, rp.description,
+select rp.id rp_id, rp.description, rp.average_amount,
        t.transaction_date, t.amount, t.category, t.raw->'merchant' merchant,
-       t.raw->'creditCardMetadata' cc_meta, a.type account_type, a.name account_name,
+       t.raw->'creditCardMetadata' cc_meta, a.id account_id, a.type account_type, a.name account_name,
        a.raw->>'number' account_number
 from of_recurring_payments rp
 join open_finance_connections c on c.id = rp.connection_id
@@ -53,24 +56,39 @@ join open_finance_accounts a on a.connection_id = rp.connection_id
 join open_finance_transactions t on t.account_id = a.id
      and t.provider_transaction_id = any(rp.occurrences)
 where c.user_id = %s and upper(coalesce(c.status,'')) not in ('PAUSED','DELETED')
-  and rp.average_amount < 0
+  and (%s or rp.average_amount < 0)   -- receita só para quem pede (a Previsão)
   and upper(a.currency) = 'BRL'   -- conta em dólar somaria US$ como R$
 order by t.transaction_date, t.provider_transaction_id
 """
 
 
+def ler_ocorrencias(cur, user_id: int, *, receitas: bool = False) -> list[dict]:
+    cur.execute(_SQL_OCORRENCIAS, (user_id, receitas))
+    return cur.fetchall()
+
+
+def ler_marcas(cur, user_id: int) -> dict[str, tuple[str, bool]]:
+    """`{chave: (status, assinatura_antes)}`."""
+    cur.execute("select merchant_key, status, assinatura_antes from subscription_marks"
+                " where user_id = %s", (user_id,))
+    return {r["merchant_key"]: (r["status"], r["assinatura_antes"]) for r in cur.fetchall()}
+
+
+def ler_frescor(cur, user_id: int) -> list[dict]:
+    """`id` e `recurring_fetched_at` das conexões vivas do usuário."""
+    cur.execute("select id, recurring_fetched_at from open_finance_connections where user_id = %s"
+                f" and upper(coalesce(status,'')) not in {_TERMINAL}", (user_id,))
+    return cur.fetchall()
+
+
 def ocorrencias_do_usuario(user_id: int) -> list[dict]:
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(_SQL_OCORRENCIAS, (user_id,))
-        return cur.fetchall()
+        return ler_ocorrencias(cur, user_id)
 
 
 def marcas(user_id: int) -> dict[str, tuple[str, bool]]:
-    """`{chave: (status, assinatura_antes)}`."""
     with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select merchant_key, status, assinatura_antes from subscription_marks"
-                    " where user_id = %s", (user_id,))
-        return {r["merchant_key"]: (r["status"], r["assinatura_antes"]) for r in cur.fetchall()}
+        return ler_marcas(cur, user_id)
 
 
 def marcar(user_id: int, chave: str, status: str) -> None:

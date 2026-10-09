@@ -52,11 +52,11 @@ export function Desbloqueio() {
           trackColor={{ true: cores.acao }}
         />
       </View>
-      <Texto variante="corpo" tom="inkMuted">
-        {tipo === null
-          ? "Configure um código no aparelho para usar."
-          : "Pede ao abrir o PigBank e quando você volta depois de 1 minuto fora."}
-      </Texto>
+      {tipo === null && (
+        <Texto variante="corpo" tom="inkMuted">
+          Configure um código no aparelho para usar.
+        </Texto>
+      )}
       {erro ? (
         <Texto variante="corpo" tom="danger">
           {erro}

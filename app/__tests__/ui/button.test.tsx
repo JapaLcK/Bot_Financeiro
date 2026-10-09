@@ -51,7 +51,7 @@ describe("Button", () => {
     expect(estiloVisual(cL).minHeight).toBe(52);
   });
 
-  it("primary usa acao/onAcao, secondary usa contorno inkMuted, ghost usa brandInk, danger usa danger/onDanger", () => {
+  it("primary usa acao/onAcao, secondary usa contorno inkMuted, ghost usa brandInk com contorno, link só brandInk, danger usa danger/onDanger", () => {
     const { claro: c } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="primary" />);
     expect(estiloVisual(c).backgroundColor).toBe(claro.acao);
 
@@ -60,6 +60,10 @@ describe("Button", () => {
 
     const { claro: cGhost } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="ghost" />);
     expect(estiloVisual(cGhost).backgroundColor).toBe("transparent");
+    // ghost tem cara de botão (contorno 1px inkMuted, par do `Acao` do painel); link continua só texto.
+    expect(estiloVisual(cGhost)).toMatchObject({ borderWidth: 1, borderColor: claro.inkMuted });
+    const { claro: cLink } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="link" />);
+    expect(estiloVisual(cLink)).toMatchObject({ backgroundColor: "transparent", borderWidth: 0 });
 
     const { escuro: eDanger } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="danger" />);
     expect(estiloVisual(eDanger).backgroundColor).toBe(escuro.danger);

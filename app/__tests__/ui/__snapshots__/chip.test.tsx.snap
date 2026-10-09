@@ -32,6 +32,12 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
   onResponderTerminate={[Function]}
   onResponderTerminationRequest={[Function]}
   onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "justifyContent": "center",
+      "minHeight": 44,
+    }
+  }
 >
   <View
     collapsable={false}
@@ -39,11 +45,13 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
       {
         "alignItems": "center",
         "backgroundColor": "#FFE6F1",
-        "borderRadius": 12,
+        "borderColor": "#C7186B",
+        "borderRadius": 999,
+        "borderWidth": 1,
         "justifyContent": "center",
-        "minHeight": 44,
+        "minHeight": 34,
         "minWidth": 44,
-        "paddingHorizontal": 16,
+        "paddingHorizontal": 14,
         "transform": [
           {
             "scale": 1,
@@ -64,7 +72,10 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
           {
             "color": "#C7186B",
           },
-          {},
+          {
+            "fontSize": 15,
+            "lineHeight": 20,
+          },
           null,
         ]
       }
@@ -107,6 +118,12 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
   onResponderTerminate={[Function]}
   onResponderTerminationRequest={[Function]}
   onStartShouldSetResponder={[Function]}
+  style={
+    {
+      "justifyContent": "center",
+      "minHeight": 44,
+    }
+  }
 >
   <View
     collapsable={false}
@@ -114,11 +131,13 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
       {
         "alignItems": "center",
         "backgroundColor": "#351827",
-        "borderRadius": 12,
+        "borderColor": "#FF4FA0",
+        "borderRadius": 999,
+        "borderWidth": 1,
         "justifyContent": "center",
-        "minHeight": 44,
+        "minHeight": 34,
         "minWidth": 44,
-        "paddingHorizontal": 16,
+        "paddingHorizontal": 14,
         "transform": [
           {
             "scale": 1,
@@ -139,7 +158,10 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
           {
             "color": "#FF4FA0",
           },
-          {},
+          {
+            "fontSize": 15,
+            "lineHeight": 20,
+          },
           null,
         ]
       }

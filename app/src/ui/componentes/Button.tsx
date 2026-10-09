@@ -7,7 +7,7 @@ import { espaco, raio, type Paleta } from "@/ui/tokens";
 import { Icone, type NomeIcone } from "./Icone";
 import { Texto } from "./Texto";
 
-type Variante = "primary" | "secondary" | "ghost" | "danger";
+type Variante = "primary" | "secondary" | "ghost" | "link" | "danger";
 type Tamanho = "M" | "L";
 
 interface Props {
@@ -31,14 +31,17 @@ export const ALTURA_ACESSO: Record<Tamanho, number> = { M: 48, L: 54 };
 
 /**
  * Rosa só onde há decisão (identidade pigbank-frontend): só `primary` usa
- * `acao`; `ghost` usa `brandInk` no TEXTO, nunca em fundo. `secondary` tem
- * contorno `inkMuted` (3:1 sobre `surface`/`bg`, já medido em `PARES`), nunca
- * `border` (decorativo, não é contorno de controle — CLAUDE.md/tokens.ts).
+ * `acao`; `ghost` e `link` usam `brandInk` no TEXTO, nunca em fundo. `secondary`
+ * e `ghost` têm contorno `inkMuted` (3:1 sobre `surface`/`bg`, já medido em
+ * `PARES`), nunca `border` (decorativo, não é contorno de controle —
+ * CLAUDE.md/tokens.ts). `ghost` é o par do `Acao` do painel (contorno, raio
+ * `md`); `link` é só texto, para onde contorno não cabe ("Esqueci a senha").
  */
 const VISUAL: Record<Variante, { bg: keyof Paleta | "transparent"; tom: keyof Paleta; borda?: keyof Paleta }> = {
   primary: { bg: "acao", tom: "onAcao" },
   secondary: { bg: "surface", tom: "ink", borda: "inkMuted" },
-  ghost: { bg: "transparent", tom: "brandInk" },
+  ghost: { bg: "transparent", tom: "brandInk", borda: "inkMuted" },
+  link: { bg: "transparent", tom: "brandInk" },
   danger: { bg: "danger", tom: "onDanger" },
 };
 

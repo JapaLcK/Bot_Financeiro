@@ -65,7 +65,11 @@ const CNPJ = "11222333000181";
  *
  * `pix.expiresAt` aceita função: aí o deadline é contado a partir da RESPOSTA do
  * checkout, e não de antes de o navegador abrir. Sem isso, os 1–2 s de `goto` +
- * `waitForTimeout` comiam parte da janela que o teste quer medir.
+ * a espera do `loadPlansState` comiam parte da janela que o teste quer medir.
+ *
+ * `subPendurada`: o `/billing/subscription` está preso de propósito (`subPresa`)
+ * e o `loadPlansState` nunca chega ao fim; aí só se espera a 1ª publicação do
+ * Pix, e quem decide é o assert do caso.
  */
 async function abrirPrecos({
   sub = { active: false },
@@ -82,9 +86,30 @@ async function abrirPrecos({
   relogio = false,
   atrasos = {},
   initScript = null,
+  subPendurada = false,
 } = {}) {
   const page = await browser.newPage({ viewport });
   if (initScript) await page.addInitScript(initScript);
+  // Conta só as publicações do Pix feitas DEPOIS de a página receber o
+  // desfecho (resposta ou rejeição) do /billing/subscription. Roda antes do
+  // auth-refresh.js, que embrulha este fetch por fora: o desfecho é marcado
+  // antes de o `loadSubscription` ver o resultado. Contagem simples ou a
+  // ordem das linhas da precos.html não servem: duplicar uma publicação ou
+  // mover o `schedulePurchaseResume()` faria a espera passar cedo.
+  await page.addInitScript(() => {
+    let v;
+    window.__subDesfecho = false;
+    window.__pixAposSub = 0;
+    Object.defineProperty(window, "pbPixState", { configurable: true, get: () => v,
+      set: (x) => { v = x; if (window.__subDesfecho) window.__pixAposSub += 1; } });
+    const orig = window.fetch;
+    window.fetch = function (u) {
+      const p = orig.apply(this, arguments);
+      if (!String(u?.url ?? u).includes("/billing/subscription")) return p;
+      const marca = () => { window.__subDesfecho = true; };
+      return p.then((r) => { marca(); return r; }, (e) => { marca(); throw e; });
+    };
+  });
   // Relógio falso: o teto do CLIENTE é de 15 minutos, e a única forma de medir
   // que ele existe sem esperar 15 minutos é adiantar o relógio da página.
   // `clock.install()` sozinho NÃO congela o relógio — ele segue andando junto
@@ -169,7 +194,18 @@ async function abrirPrecos({
 
   await page.goto(`${ORIGIN}/precos.html`);
   await page.waitForSelector("#plans-v2 .plan");
-  await page.waitForTimeout(600);     // loadPlansState = 2 awaits de rede
+  // Fim do `loadPlansState`: uma `publicarPix` depois do desfecho da
+  // assinatura E o `schedulePurchaseResume()` — nenhuma das duas depende da
+  // ordem das linhas da precos.html.
+  if (subPendurada) {
+    await page.waitForFunction(() => !!window.pbPixState, null, { timeout: 10_000 })
+      .catch(() => {});
+  } else {
+    await page.waitForFunction(() => window.__pixAposSub >= 1
+      && typeof purchaseResumeScheduled !== "undefined" && purchaseResumeScheduled === true,
+    null, { timeout: 10_000 })
+      .catch(() => assert.fail("o loadPlansState não chegou ao fim (publicarPix depois da assinatura e purchaseResumeScheduled): o cenário não foi montado"));
+  }
   return { page, chamadas, corposPix };
 }
 
@@ -238,12 +274,12 @@ async function enviarDoc(page, valor = CPF) {
 
 /** Abre o modal do QR: CTA do Plus no anual, documento, submit. */
 async function abrirQr(ctx = {}) {
-  const r = await abrirPrecos(ctx);
-  await r.page.click("#cycle-annual");
-  await r.page.click('[data-pix-cta="plus"]');
-  await r.page.waitForSelector(".pix-doc");
+  const r = await abrirForm(ctx);
   await enviarDoc(r.page, ctx.doc);
-  await r.page.waitForTimeout(300);
+  for (const fim = Date.now() + 10_000; r.chamadas.poll < 1;) {
+    if (Date.now() > fim) assert.fail("a 1ª pergunta do poll não saiu: o QR não foi montado");
+    await new Promise((ok) => setTimeout(ok, 10));
+  }
   return r;
 }
 
@@ -1193,7 +1229,7 @@ test("PT13: resposta do poll da cobrança velha não decide sobre o modal novo",
  */
 test("PT14: vitalício não fica com CTA de Pix nenhum", async () => {
   const { soltar, subRoute } = subPresa({ active: true, lifetime: true });
-  const { page } = await abrirPrecos({ subRoute });
+  const { page } = await abrirPrecos({ subRoute, subPendurada: true });
   await page.click("#cycle-annual");
   await esperarCtas(page);
   assert.equal(await contarCtas(page), 3,
@@ -1231,7 +1267,7 @@ test("PT14: vitalício não fica com CTA de Pix nenhum", async () => {
 test("PT15: com /billing/subscription lento, os CTAs de Pix já estão na tela", async () => {
   const { soltar, subRoute } = subPresa(
     { active: true, gateway: "stripe", plan: "plus", interval: "monthly" });
-  const { page } = await abrirPrecos({ subRoute });
+  const { page } = await abrirPrecos({ subRoute, subPendurada: true });
   await page.click("#cycle-annual");
   await esperarCtas(page);
   assert.equal(await contarCtas(page), 3,
@@ -1705,7 +1741,7 @@ test("PT19c: a etiqueta é anunciável, e o vínculo com o Anual entra e sai com
  */
 test("PT19d: com /billing/subscription pendurado, o vitalício não vê a etiqueta", async () => {
   const { soltar, subRoute } = subPresa({ active: true, lifetime: true });
-  const { page } = await abrirPrecos({ subRoute });
+  const { page } = await abrirPrecos({ subRoute, subPendurada: true });
   assert.equal(await etiquetaVisivel(page), false,
     "a etiqueta anunciou Pix antes de saber se este usuário pode comprar");
   // Com a rota PRESA (nunca vai responder sozinha) este sono não mede uma
@@ -1862,7 +1898,7 @@ test("PT19: fetch pendurado não mata o poll — o teto de 10 s desiste anuncian
  */
 test("PT20: fechar o modal com a pergunta em voo aborta o corpo por ler",
   async () => {
-    const { page } = await abrirQr({
+    const { page } = await abrirForm({
       initScript: () => {
         window.__pollAbort = null;   // ms do início do fetch até o abort
         const orig = window.fetch;
@@ -1882,6 +1918,10 @@ test("PT20: fechar o modal com a pergunta em voo aborta o corpo por ler",
         };
       },
     });
+    // O stub acima responde sem passar pela rota: `chamadas.poll` fica em 0 e
+    // o `abrirQr` não serve. O sinal é o modal fechado pelo Esc do stub.
+    await enviarDoc(page);
+    await page.waitForSelector(".pix-ov", { state: "detached", timeout: 10_000 }).catch(() => {});
 
     assert.equal(await page.$$eval(".pix-ov", (e) => e.length), 0,
       "âncora: o Esc durante a pergunta devia ter fechado o modal");
