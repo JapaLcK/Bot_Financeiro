@@ -219,3 +219,41 @@ def test_depois_do_409_o_numero_de_b_segue_ligando_na_conta_de_b(user_id, enviad
     assert _dono_do_numero(tel_b) == uid_b, enviadas
     assert _gastos(uid_b) == 1, enviadas
     assert resp.status_code == 409, resp.text
+
+
+# ── Cache velho (Codex, #911): o "mudou?" não pode vir do cache de 10 s ────────
+
+def _outro_processo_troca(uid: int, coluna: str, valor: str) -> None:
+    """Grava direto no banco SEM invalidar o cache deste processo: é o que fica
+    aqui quando outra réplica atendeu a troca."""
+    from core.crypto import encrypt_pii_optional, hash_pii_optional
+    kind = "phone" if coluna == "phone_e164" else "email"
+    hash_col, enc_col = ("phone_hash", "phone_enc") if kind == "phone" else ("email_hash", "email_enc")
+    with get_conn() as conn:
+        conn.execute(f"update auth_accounts set {coluna} = %s, {hash_col} = %s, {enc_col} = %s"
+                     " where user_id = %s",
+                     (valor, hash_pii_optional(valor, kind=kind), encrypt_pii_optional(valor), uid))
+        conn.commit()
+
+
+def test_cache_velho_nao_pula_o_teto_nem_o_telefone_livre(user_id):
+    from db import get_auth_user
+    tel_x = _com_nove()
+    patch, _, _ = _conta(user_id, phone=tel_x)
+    assert get_auth_user(user_id)["phone_e164"] == tel_x  # cache deste processo: X
+    _outro_processo_troca(user_id, "phone_e164", _telefone())  # banco: Y
+    _outra_conta(phone=_sem_nove(tel_x))  # B pega a variante de X
+
+    resp = patch(phone=tel_x)  # A volta para X, que o cache acha que é o atual
+    assert _tentativas(user_id) == 1
+    assert resp.status_code == 409, resp.text
+
+
+def test_cache_velho_de_email_conta_no_teto(user_id):
+    from db import get_auth_user
+    patch, email_x, _ = _conta(user_id)
+    assert get_auth_user(user_id)["email"] == email_x
+    _outro_processo_troca(user_id, "email", _email())
+
+    assert patch(email=email_x).status_code == 200
+    assert _tentativas(user_id) == 1

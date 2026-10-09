@@ -306,6 +306,11 @@ async def update_security_contact_route(
     # corrigir o e-mail é a saída de quem pagou sem senha (PR 4 do funil v3).
     # Dono, exclusão agendada, DIREITO e CSRF continuam valendo.
     shared.authorize_dashboard_access(request, user_id, exige_credencial=False)
+    # Leitura fresca, sem o cache de 10 s: com mais de um processo, o valor em
+    # cache pode ser velho e fazer a troca parecer "sem mudança", pulando o teto
+    # e o `telefone_livre` abaixo.
+    from db_support import invalidate_auth_user_cache
+    invalidate_auth_user_cache(user_id)
     auth_user = await asyncio.to_thread(get_auth_user, user_id)
     if not auth_user:
         raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
@@ -419,7 +424,6 @@ async def update_security_contact_route(
                         (display_name, encrypt_pii_optional(display_name), user_id),
                     )
             await conn.commit()
-        from db_support import invalidate_auth_user_cache
         invalidate_auth_user_cache(user_id)
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(status_code=409, detail=CONTATO_EM_USO) from exc
