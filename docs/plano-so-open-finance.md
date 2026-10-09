@@ -268,7 +268,9 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   - `investimento`: resgatar e apagar investimento manual (P3: congelado), apagar também
     com saldo zero (`delete_investment`). Isto supera a liberação da Q36, que deixava os
     dois livres.
-  - `renda_informada`: `set_income_override`.
+  - `renda_informada`: `set_income_override` e `clear_income_override` (apagar a linha
+    também é apagar legado). Espera a P7, como a receita recorrente: até lá o usuário
+    corrige a renda que ainda pesa no orçamento doméstico.
 - Regra de alcance: **todo escritor do §2.1 que muda legado** entra na trava ou tem motivo
   escrito para ficar livre. Esconder a tela (3a) não desliga o WhatsApp, a IA nem a rota
   direta. **Apagar conta como mudar**: toda exclusão de entidade manual (cartão, conta,
@@ -287,7 +289,7 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   | Conta e boleto manuais | trava | trava | — | trava | marcar paga: trava | trava | — |
   | Caixinha manual | trava | trava (alvo e data são da Fase 4) | — | trava | depositar e retirar: trava | trava | — |
   | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento: decidir no plano da 2a |
-  | Renda informada | trava | trava | — | livre (volta à computada) | — | — | — |
+  | Renda informada | espera P7 | espera P7 | — | espera P7 | — | — | — |
   | Lançamento manual fora da Carteira | trava (2b) | categoria e descrição: livres | — | trava | — | trava | — |
 
   "Desfazer pelo lançamento" é o `delete_launch_and_rollback` (`db/accounts.py`), que aplica
