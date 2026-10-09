@@ -209,8 +209,8 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     const F = FONTES[nome], d = fontes[nome];
     let estado = "carregando", corpo = '<p class="empty">Buscando…</p>';
     if (d && typeof d === "object") {
-      estado = Object.hasOwn(ESTADOS, d.estado) ? d.estado : "erro";
-      try {
+      try {  // tudo que depende do payload fica DENTRO do try: exceção vira cartão de erro, nunca "Buscando…"
+        estado = Object.prototype.hasOwnProperty.call(ESTADOS, d.estado) ? d.estado : "erro"; // sem Object.hasOwn: o Safari 14 não tem
         const foot = () => `<p class="foot">Fonte: ${F.rotulo} · janela ${esc((d.janela || {}).rotulo)} · buscado às ${esc(hm(d.buscado_em))}</p>`;
         if (estado === "nao_configurado") {
           corpo = `<p class="empty">Fonte não configurada. Defina ${(Array.isArray(d.falta) ? d.falta : []).map(esc).join(", ")} no Railway.</p>`;
@@ -233,7 +233,13 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
 
   function pintaFonte(nome) {
     const el = document.getElementById("f-" + nome);
-    if (el) el.outerHTML = fonteCard(nome);
+    if (!el) return;
+    try {
+      el.outerHTML = fonteCard(nome);
+    } catch (e) {  // último recurso, só texto fixo: o cartão nunca fica preso em "Buscando…"
+      el.setAttribute("data-estado", "erro");
+      el.innerHTML = "<h2>" + FONTES[nome].titulo + '</h2><div class="banner err" role="alert">' + FALHA + "</div>";
+    }
   }
 
   // Cada fonte chega sozinha e troca só o cartão dela. O servidor decide se chama a fonte
