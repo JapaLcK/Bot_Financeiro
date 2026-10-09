@@ -6,11 +6,12 @@ bloqueante mockada dorme 1 s; um batimento de 0,05 s no mesmo loop cobre o pedid
 inteiro e mede o maior intervalo entre batidas. ASGI cru e não TestClient: o
 TestClient roda o app em outra thread e não mede o loop do teste.
 
-Controles (medidos no PR, maior intervalo ~1,0 s em cada um, 0,05 s com o
-conserto): chamada direta do `send_verification_email` no register → T1[novo]
-vermelho, T1[existente] segue verde (esse caminho já usava `to_thread`); chamada
-direta do `send_password_reset_email`, do `create_password_reset_token` ou do
-`email_has_password` no forgot-password → T3 vermelho.
+Controles: chamada direta do `send_verification_email` no register →
+test_register_envia_o_codigo_fora_do_event_loop[novo] vermelho, [existente] segue
+verde (esse caminho já usava `to_thread`). No forgot-password, o token, a consulta e o
+envio rodam numa tarefa de fundo em thread; este arquivo garante só que essa tarefa não
+trava o loop (test_forgot_password_envia_fora_do_event_loop). Que nada disso atrasa a
+resposta é de test_forgot_password_nao_enumera.py.
 Positivo: o código enviado no T1[novo] confirma a conta no verify-email.
 
 #681: o bcrypt do /auth/reset-password, do /auth/login e do /admin/auth/login
@@ -39,7 +40,7 @@ SENHA = "senha-forte-123"
 CSRF = "csrf-email-fora-do-loop"
 
 
-async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
+async def _post(caminho, dados, ao_enviar=None):  # ASGI cru: o conftest bloqueia o httpx async
     corpo_b = json.dumps(dados).encode()
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
@@ -57,6 +58,8 @@ async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
 
     async def send(msg):
         msgs.append(msg)
+        if ao_enviar:
+            ao_enviar(msg)
 
     await dashboard.app(scope, receive, send)
     return msgs[0]["status"], json.loads(b"".join(m.get("body", b"") for m in msgs[1:]))
@@ -142,6 +145,10 @@ def test_register_falha_no_envio_continua_500(monkeypatch):
 
 
 def test_forgot_password_envia_fora_do_event_loop(monkeypatch):
+    """O envio (e o token) rodam na tarefa de fundo, em thread: o loop segue livre.
+
+    Que nada disso roda ANTES da resposta é outro teste: test_forgot_password_nao_enumera.
+    """
     enviados = []
     monkeypatch.setattr(db, "create_password_reset_token", _lento([], "tok-x"))
     monkeypatch.setattr(db, "email_has_password", _lento([], False))
