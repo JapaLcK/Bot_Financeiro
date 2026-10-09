@@ -21,7 +21,7 @@
  *     gate} × {com ?escolha=1, sem marcador}: quem decide é o
  *     needs_plan_selection do /auth/me, não a URL (o marcador se perde num
  *     clique no "Planos" do próprio nav);
- *   · app iOS — mais 2 células com a UA PigBankApp: o gate vale lá também, e
+ *   · app iOS — mais 1 célula com a UA PigBankApp: o gate vale lá também, e
  *     o mandato tem de aparecer. A isenção que routes/shared.py tinha era por
  *     substring de User-Agent, escolhida pelo cliente, e saiu;
  *   · controle POSITIVO — o clique em "Assinar Plus" com EXATAMENTE 1 POST
@@ -401,23 +401,21 @@ for (const [estado, me] of [
 // /precos de dentro do app (pelo "Ver planos" .pb-keep-in-app do paywall,
 // `#upg-cta` em frontend/dashboard.html) está travado como qualquer um, e
 // esconder o mandato deixaria a tela sem explicar por que o dashboard não abre.
-// 2 células, não 6: as 4 de {deslogado, logado sem gate} × marcador saem da
+// 1 célula, não 6: as 4 de {deslogado, logado sem gate} × marcador saem da
 // função pelo mesmo `!me.needs_plan_selection`, com e sem app. A coluna do
-// marcador fica porque é o mesmo invariante das células web: a URL não decide.
-for (const query of ["?escolha=1", ""]) {
-  const rotulo = query ? "com marcador" : "sem marcador";
-  test(`copy do subtítulo: app iOS, logado com gate, ${rotulo}`, async () => {
-    const { page } = await abrirPrecos({
-      me: { user_id: 42, needs_plan_selection: true }, query, app: true,
-    });
-    assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true,
-      "a UA do app não ligou window.PB_IN_APP — a célula não mediria o app");
-    const sub = await page.textContent("#precos-sub");
-    assert.match(sub, COPY_GATE,
-      `app iOS ${rotulo} devia ler o mandato e leu: "${sub}"`);
-    await page.close();
+// marcador já é coberta nas células web (a URL não decide; `precos.html` não
+// lê `escolha`, e o PB_IN_APP só entra no `payload.pagina` do checkout).
+test("copy do subtítulo: app iOS, logado com gate, sem marcador", async () => {
+  const { page } = await abrirPrecos({
+    me: { user_id: 42, needs_plan_selection: true }, query: "", app: true,
   });
-}
+  assert.equal(await page.evaluate(() => window.PB_IN_APP === true), true,
+    "a UA do app não ligou window.PB_IN_APP — a célula não mediria o app");
+  const sub = await page.textContent("#precos-sub");
+  assert.match(sub, COPY_GATE,
+    `app iOS sem marcador devia ler o mandato e leu: "${sub}"`);
+  await page.close();
+});
 
 // ── o CORTE DO GRÁTIS: um terceiro estado de gate, e a copy dele ────────────
 // Quem foi cortado tem `needs_plan_selection` FALSE (escolheu um plano um dia)
@@ -431,13 +429,17 @@ for (const query of ["?escolha=1", ""]) {
 //
 // Os dois VIEWPORTS existem porque a mudança é de texto num subtítulo, e
 // subtítulo mais longo é exatamente o que estoura a caixa no celular: além da
-// copy, cada célula mede a largura do #precos-sub contra a do container.
+// copy, cada célula mede a largura do #precos-sub e da #plans-note-v2 contra a
+// do container. 2 células na diagonal (desktop + marcador, mobile + sem
+// marcador), não 4: o marcador não decide nada e a largura só importa na caixa.
 const COPY_CORTE = /Sua conta está sem plano ativo/;
-const TELAS = [["desktop", { width: 1280, height: 900 }],
-               ["mobile", { width: 390, height: 844 }]];
+const NOTA = "#plans-note-v2";
 
-for (const [tela, viewport] of TELAS) {
-  for (const query of ["?escolha=1", ""]) {
+for (const [tela, viewport, query] of [
+  ["desktop", { width: 1280, height: 900 }, "?escolha=1"],
+  ["mobile", { width: 390, height: 844 }, ""],
+]) {
+  {
     const rotulo = query ? "com marcador" : "sem marcador";
     test(`copy do subtítulo: cortado no fim do Grátis, ${tela}, ${rotulo}`, async () => {
       const { page } = await abrirPrecos({
@@ -472,6 +474,34 @@ for (const [tela, viewport] of TELAS) {
       });
       assert.ok(medida.sub <= medida.caixa + 1,
         `${tela}: o subtítulo tem ${medida.sub}px numa caixa de ${medida.caixa}px`);
+
+      // A NOTA DOS PLANOS (#plans-note-v2), o SEGUNDO texto que prometia o trial
+      // (ver "CONTROLE DECLARADO" mais abaixo).
+      const nota = await page.textContent(NOTA);
+      assert.ok(!nota.includes("15 dias grátis"),
+        `a nota prometeu o trial a um ex-assinante: "${nota}"`);
+      assert.ok(!/\btrial\b/i.test(nota),
+        `a nota ainda pressupõe um trial que pode não existir: "${nota}"`);
+      // As duas frases que continuam verdadeiras para todo mundo têm de ficar —
+      // sem elas o conserto tiraria informação de pagamento em vez de corrigir
+      // uma promessa.
+      assert.ok(nota.includes("Stripe"), `a nota perdeu a frase da Stripe: "${nota}"`);
+      assert.ok(nota.includes("nunca vê os dados do seu cartão"),
+        `a nota perdeu a garantia sobre o cartão: "${nota}"`);
+      assert.ok(nota.includes("checkout"),
+        `a nota perdeu a deferência ao checkout: "${nota}"`);
+
+      // O ícone sobrevive à troca do texto: `textContent =` apaga os filhos, e
+      // sem o `prepend` a nota ficaria sem o glifo — some calado (§5).
+      const icone = await page.getAttribute(`${NOTA} i`, "class");
+      assert.equal(icone, "ph ph-info", `a nota ficou sem ícone: ${icone}`);
+
+      // Não vaza da caixa na largura da célula.
+      const medidaNota = await page.$eval(NOTA, (el) => ({
+        largura: el.scrollWidth, caixa: el.parentElement.clientWidth,
+      }));
+      assert.ok(medidaNota.largura <= medidaNota.caixa + 1,
+        `${tela}: a nota tem ${medidaNota.largura}px numa caixa de ${medidaNota.caixa}px`);
       await page.close();
     });
   }
@@ -492,8 +522,9 @@ test("cortado que TAMBÉM não escolheu plano lê a copy da escolha, não a do c
 
 test("pagante continua lendo a copy padrão (app_access true)", async () => {
   // POSITIVO da perna nova: sem ele, um `me.app_access === false` escrito como
-  // `!me.app_access` passaria verde e trocaria a copy de todo mundo que o
-  // /auth/me responde sem o campo.
+  // `=== true` ou `!== undefined` passaria verde e trocaria a copy de quem tem
+  // acesso. (O `!me.app_access` quem pega são as células "logado sem gate", cujo
+  // `me` vem sem `app_access`.)
   const { page } = await abrirPrecos({
     me: { user_id: 42, needs_plan_selection: false, app_access: true },
   });
@@ -564,49 +595,12 @@ test("plus_available:false marca EXATAMENTE os 2 botões do Plus como indisponí
 // CONTROLE DECLARADO (`docs/controles_declarados.md`) — em `precos.html`, na
 // perna `me.app_access === false`, troque o `if (nota)` por `if (false)` (o
 // bloco continua lá e deixa de agir; nada é apagado). VERMELHOS:
-//   `a nota dos planos não promete trial ao cortado — desktop`
-//   `a nota dos planos não promete trial ao cortado — mobile`
+//   `copy do subtítulo: cortado no fim do Grátis, desktop, com marcador`
+//   `copy do subtítulo: cortado no fim do Grátis, mobile, sem marcador`
 // Direção: promessa falsa de trial a quem já o usou.
 //
 // Positivo do PAR, VERDE sob a injeção (é o que o torna positivo):
 //   `a nota dos planos continua prometendo o trial a quem não foi cortado`
-const NOTA = "#plans-note-v2";
-
-for (const [tela, viewport] of TELAS) {
-  test(`a nota dos planos não promete trial ao cortado — ${tela}`, async () => {
-    const { page } = await abrirPrecos({
-      me: { user_id: 42, needs_plan_selection: false, app_access: false },
-      viewport,
-    });
-    const nota = await page.textContent(NOTA);
-
-    assert.ok(!nota.includes("15 dias grátis"),
-      `a nota prometeu o trial a um ex-assinante: "${nota}"`);
-    assert.ok(!/\btrial\b/i.test(nota),
-      `a nota ainda pressupõe um trial que pode não existir: "${nota}"`);
-    // As duas frases que continuam verdadeiras para todo mundo têm de ficar —
-    // sem elas o conserto tiraria informação de pagamento em vez de corrigir
-    // uma promessa.
-    assert.ok(nota.includes("Stripe"), `a nota perdeu a frase da Stripe: "${nota}"`);
-    assert.ok(nota.includes("nunca vê os dados do seu cartão"),
-      `a nota perdeu a garantia sobre o cartão: "${nota}"`);
-    assert.ok(nota.includes("checkout"),
-      `a nota perdeu a deferência ao checkout: "${nota}"`);
-
-    // O ícone sobrevive à troca do texto: `textContent =` apaga os filhos, e
-    // sem o `prepend` a nota ficaria sem o glifo — some calado (§5).
-    const icone = await page.getAttribute(`${NOTA} i`, "class");
-    assert.equal(icone, "ph ph-info", `a nota ficou sem ícone: ${icone}`);
-
-    // Não vaza da caixa em nenhuma das duas larguras.
-    const medida = await page.$eval(NOTA, (el) => ({
-      largura: el.scrollWidth, caixa: el.parentElement.clientWidth,
-    }));
-    assert.ok(medida.largura <= medida.caixa + 1,
-      `${tela}: a nota tem ${medida.largura}px numa caixa de ${medida.caixa}px`);
-    await page.close();
-  });
-}
 
 test("a nota dos planos continua prometendo o trial a quem não foi cortado", async () => {
   // POSITIVO: sem ele, apagar a promessa do HTML estático passaria verde e

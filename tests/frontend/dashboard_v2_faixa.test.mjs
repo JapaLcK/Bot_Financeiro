@@ -85,19 +85,14 @@ test("insight do dia: o clique abre a conversa com a pergunta dele respondida", 
 });
 
 test("Essencial: a faixa abre a conversa e nunca sorteia um insight", async () => {
-  const SORTES = [0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.8, 0.99];
+  // Sorte 0: o Essencial nunca sorteia insight e o Plus sorteia (o corte é tudo ou nada, PiggyBand.tsx).
   const sorteio = async (plano) => {
-    const vistas = [];
-    for (const sorte of SORTES) {
-      const { ctx, page } = await abrir({ perfil: "investir", plano, sorte });
-      vistas.push([await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]);
-      await ctx.close();
-    }
-    return vistas;
+    const { ctx, page, erros } = await abrir({ perfil: "investir", plano, sorte: 0 });
+    return { ctx, page, erros, vistas: [[await faixa(page), await page.locator(".piggy-band").evaluate((b) => b.tagName)]] };
   };
-  const essencial = await sorteio("essencial");
-  const plus = await sorteio("plus");
-  const { ctx, page, erros } = await abrir({ perfil: "investir", plano: "essencial", sorte: 0 });
+  const { ctx: ctxPlus, vistas: plus } = await sorteio("plus");
+  await ctxPlus.close();
+  const { ctx, page, erros, vistas: essencial } = await sorteio("essencial");
   await page.locator(".piggy-band").click();
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const hash = await page.evaluate(() => location.hash);

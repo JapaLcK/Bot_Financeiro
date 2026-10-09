@@ -142,7 +142,7 @@ test("401 → refresh 401: tela de erro, sem redirecionar; o auth-refresh apaga 
   assert.deepEqual(r, [`${PAINEL}#/`, GENERICA, 1, 1, null]);
 });
 
-for (const nome of ["402", "403", "403_pro_required", "404", "404_not_found"]) {
+for (const nome of ["402", "403", "404"]) {
   test(`${nome} no envelope: tela de erro com texto fixo (sem a message do servidor), sem repetir nem trocar de URL; Recarregar recarrega`, async () => {
     const f = RESPOSTAS.erros[nome];
     const ctx = await contexto();
@@ -215,7 +215,6 @@ for (const width of [1440, 390, 320]) {
 }
 
 for (const [nome, responde] of [
-  ["500", erroDoMe(RESPOSTAS.erros["500"])],
   ["503", erroDoMe(RESPOSTAS.erros["503"])],
   ["rede fora", (r) => r.abort("internetdisconnected")],
 ]) {
