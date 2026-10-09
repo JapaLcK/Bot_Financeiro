@@ -144,6 +144,16 @@ def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarge
     return _dedupe_targets(_sem_exclusao_pedida(rows))
 
 
+def _ainda_recebe(target: UpdateTarget) -> bool:
+    """O disparo enviaria a este número agora? Mesma montagem, restrita às variantes
+    dele (opt-out por número, também em outra conta, e exclusão pedida). Limite:
+    número fixo de 12 dígitos (local 2-5) não gera a forma de 13, então o opt-out
+    gravado nela só é visto pela montagem completa."""
+    return bool(get_all_update_targets(
+        sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
+    ))
+
+
 def get_test_targets(value: str) -> list[UpdateTarget]:
     value = (value or "").strip()
     if not value:
@@ -171,7 +181,8 @@ def get_test_targets(value: str) -> list[UpdateTarget]:
             (value,),
         )
         rows = cur.fetchall() or []
-    return _dedupe_targets(_sem_exclusao_pedida(rows))
+    # Consentimento igual ao do disparo: o `--dry-run` lista o que seria enviado.
+    return [t for t in _dedupe_targets(_sem_exclusao_pedida(rows)) if _ainda_recebe(t)]
 
 
 def build_quick_reply_buttons(enabled: bool) -> list[dict] | None:
@@ -217,7 +228,10 @@ def main() -> None:
     elif test_value:
         print(f"{prefix}Destinatários encontrados para o e-mail de teste: {len(targets)}")
         if not targets:
-            print(f"{prefix}Aviso: nenhuma conta ativa com este e-mail tem WhatsApp ligado; nada será enviado.")
+            print(
+                f"{prefix}Aviso: nenhum destinatário para este e-mail (sem WhatsApp ligado, "
+                "opt-out, exclusão pedida ou número ambíguo); nada será enviado."
+            )
     else:
         print(f"{prefix}Destinatários encontrados na base: {len(targets)}")
     print()
@@ -238,13 +252,9 @@ def main() -> None:
 
         try:
             # Opt-out (Configurações ou botão de atualização anterior) ou exclusão pedidos
-            # durante a execução valem para quem ainda não recebeu. Limite: número fixo de
-            # 12 dígitos (local 2-5) não gera a forma de 13, então o opt-out feito nela
-            # durante a execução não é visto aqui (a montagem da lista vê). Vale também no
+            # durante a execução valem para quem ainda não recebeu, também no
             # `--test email` (#874); o `--test numero` é digitado pelo operador, sem conta.
-            if not direct_test_number and not get_all_update_targets(
-                sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
-            ):
+            if not direct_test_number and not _ainda_recebe(target):
                 print(f"  PULADO (opt-out ou exclusão pedida) {label}")
                 pulados += 1
                 continue

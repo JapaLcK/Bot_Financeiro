@@ -288,16 +288,42 @@ def test_numero_ambiguo_de_10_ou_11_digitos_nao_recebe(monkeypatch, capsys, form
     assert get_test_targets(f"upd-{uid}@t.local") == []
 
 
-# #874: o `--test email` passa pela mesma reconferência, então quem fez opt-out não
-# recebe nem no teste do operador. Controle negativo: voltar a condição para
-# `not test_value` faz o caso com opt-out receber.
+# #874: o `--test email` passa pela reconferência antes do envio, então o opt-out
+# feito entre a listagem e o envio vale também no teste do operador (o feito antes
+# já tira da lista, ver o teste do `--dry-run`). Controle negativo: voltar a
+# condição para `not test_value` faz o caso com opt-out receber.
 @pytest.mark.parametrize("opt_out", [False, True])
 def test_test_email_respeita_opt_out(monkeypatch, capsys, opt_out):
     n = _numero()
-    uid = _conta(wa=n, opt_out=opt_out)
-    enviados = []
+    uid = _conta(wa=n)
+    enviados, lista = [], su.get_test_targets
+
+    def _lista_e_desliga(valor):
+        alvos = lista(valor)
+        if opt_out:
+            db.set_whatsapp_updates_opt_out(uid, True)
+        return alvos
+
+    monkeypatch.setattr(su, "get_test_targets", _lista_e_desliga)
     monkeypatch.setattr(su, "send_template", lambda to, *a, **k: enviados.append(to) or {"messages": [{}]})
     monkeypatch.setattr(sys, "argv", ["send_update_whatsapp.py", "--test", f"upd-{uid}@t.local"])
     su.main()
     assert (n in enviados) is not opt_out, enviados
     assert ("PULADO" in capsys.readouterr().out) is opt_out
+
+
+# `--test email --dry-run` lista exatamente quem o `--test email` enviaria: opt-out
+# da própria conta ou de uma variante do número em outra conta tira o destinatário
+# da lista. Controle negativo: o `get_test_targets` sem o filtro `_ainda_recebe`
+# deixa `propria` e `alias` vermelhos.
+@pytest.mark.parametrize("opt_out", ["nenhum", "propria", "alias"])
+def test_test_email_dry_run_lista_so_quem_receberia(monkeypatch, capsys, opt_out):
+    n = _numero()
+    uid = _conta(wa=n, opt_out=opt_out == "propria")
+    if opt_out == "alias":
+        _conta(wa=n[:4] + n[5:], opt_out=True)
+    monkeypatch.setattr(sys, "argv", ["send_update_whatsapp.py", "--dry-run", "--test", f"upd-{uid}@t.local"])
+    su.main()
+    out = capsys.readouterr().out
+    assert (f"-> user_id={uid} " in out) is (opt_out == "nenhum"), out
+    assert [t.user_id for t in get_test_targets(f"upd-{uid}@t.local")] == ([uid] if opt_out == "nenhum" else [])
