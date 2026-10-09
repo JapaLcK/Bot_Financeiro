@@ -287,8 +287,8 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   | Fixo (despesa recorrente) | trava | trava | livre até o cobrador parar | trava | — | — | cobrador e avisos param **antes** da 2a |
   | Receita recorrente | espera P7 | espera P7 | espera P7 | espera P7 | — | — | — |
   | Conta e boleto manuais | trava | trava | — | trava | marcar paga: trava | trava | — |
-  | Caixinha manual | trava | trava (alvo e data são da Fase 4) | — | trava | depositar e retirar: trava | trava | — |
-  | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento: decidir no plano da 2a |
+  | Caixinha manual | trava | trava (alvo e data são da Fase 4) | — | trava | depositar e retirar: trava | trava | rendimento (`accrue_all_pockets`, no `run_investment_accrual_loop`): para antes da 2a |
+  | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento (o mesmo loop): para antes da 2a |
   | Renda informada | espera P7 | espera P7 | — | espera P7 | — | — | — |
   | Lançamento manual fora da Carteira | trava (2b) | categoria e descrição: livres | — | trava | — | trava | — |
 
@@ -300,7 +300,13 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
 - **Ordem com os jobs:** nenhuma trava liga antes de parar o job que mexe na mesma entidade.
   O cobrador dos recorrentes manuais (`core/services/recurring_charger.py::sync_manual_bills_once`)
   e os avisos de autopay e de vencimento param (ou passam a ler o OF, a parte de avisos da
-  1c) **antes da 2a**. Até lá, pausar o fixo fica livre.
+  1c) **antes da 2a**. Até lá, pausar o fixo fica livre. O rendimento automático das
+  caixinhas e dos investimentos manuais (`core/services/investment_scheduler.py::run_investment_accrual_loop`)
+  também para antes da 2a: congelado não rende.
+- **Varredura dos jobs:** o plano da 2a lista toda tarefa de fundo (`docs/CLAUDE.md`,
+  "Tarefas de fundo") que escreve numa tabela manual do §2.1, e cada uma entra na coluna "Job
+  automático" da matriz. O controle negativo da 2a inclui uma rodada desses jobs depois da
+  trava: o legado não pode mudar.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
 - Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
   Até lá o caso `recorrente` trava só a despesa.
