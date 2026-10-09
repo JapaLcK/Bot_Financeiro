@@ -588,29 +588,29 @@ const fechadoresLD = {
   "Esc": page => page.keyboard.press("Escape"),
 };
 
-for (const [nome, fechar] of Object.entries(fechadoresLD)) {
-  test(`Desfazer: fechar por ${nome} com POST em voo + abrir outro lançamento -> detalhe NOVO continua aberto (P2 Codex)`, async () => {
-    let release;
-    const held = new Promise(r => { release = r; });
-    const { page, posts } = await pageFor(800, [], {
-      actionHandler: (_id, a) => a === "undo" ? held.then(() => ({ body: { ok: true, changed: true }, status: 200 })) : null,
-    });
-    try {
-      await abreEDisparaUndoLD(page, 0);
-      await fechar(page);
-      await page.waitForFunction(() => !document.getElementById("launch-detail-overlay").classList.contains("open"));
-      await page.evaluate(() => openHistoryDetail(1));
-      await page.getByText("Padaria", { exact: false }).first().waitFor();
-      release();
-      await page.waitForTimeout(300);
-      assert.equal(
-        await page.locator("#launch-detail-overlay").evaluate(el => el.classList.contains("open")), true,
-        "o detalhe NOVO (Padaria) foi fechado pela continuação do undo do lançamento antigo");
-      assert.equal(await page.locator("#ld-desc").innerText(), "Padaria");
-      assert.equal(posts.length, 1);
-    } finally { await page.close(); }
+test(`Desfazer: fechar por botão Fechar com POST em voo + abrir outro lançamento -> detalhe NOVO continua aberto (P2 Codex)`, async () => {
+  let release;
+  const held = new Promise(r => { release = r; });
+  const { page, posts } = await pageFor(800, [], {
+    actionHandler: (_id, a) => a === "undo" ? held.then(() => ({ body: { ok: true, changed: true }, status: 200 })) : null,
   });
+  try {
+    await abreEDisparaUndoLD(page, 0);
+    await fechadoresLD["botão Fechar"](page);
+    await page.waitForFunction(() => !document.getElementById("launch-detail-overlay").classList.contains("open"));
+    await page.evaluate(() => openHistoryDetail(1));
+    await page.getByText("Padaria", { exact: false }).first().waitFor();
+    release();
+    await page.waitForTimeout(300);
+    assert.equal(
+      await page.locator("#launch-detail-overlay").evaluate(el => el.classList.contains("open")), true,
+      "o detalhe NOVO (Padaria) foi fechado pela continuação do undo do lançamento antigo");
+    assert.equal(await page.locator("#ld-desc").innerText(), "Padaria");
+    assert.equal(posts.length, 1);
+  } finally { await page.close(); }
+});
 
+for (const [nome, fechar] of Object.entries(fechadoresLD)) {
   test(`Desfazer: fechar por ${nome} com erro (409) + abrir outro lançamento -> sem alerta sobre o detalhe novo (P2 Codex)`, async () => {
     let release;
     const held = new Promise(r => { release = r; });
