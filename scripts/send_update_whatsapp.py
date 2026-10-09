@@ -29,7 +29,7 @@ load_dotenv(os.path.join(ROOT, ".env"))
 
 import db
 from adapters.whatsapp.wa_client import send_template
-from utils_phone import mask_phone, phone_lookup_candidates
+from utils_phone import mask_phone, normalize_phone_e164, phone_lookup_candidates
 
 DEFAULT_TEMPLATE_NAME = "atualizacao_pigbank"
 DEFAULT_TEMPLATE_LANGUAGE = "pt_BR"
@@ -42,6 +42,7 @@ class UpdateTarget:
     to: str
     email: str = ""
     source: str = "phone"
+    raw: str = ""  # `external_id` como está gravado, para a reconferência achar a própria linha
 
 
 def _env_flag(name: str) -> bool:
@@ -56,6 +57,7 @@ def _normalize_whatsapp_target(raw: str) -> tuple[str, set[str]]:
 def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
     targets: list[UpdateTarget] = []
     seen: set[str] = set()
+    ambiguos = 0
 
     # Opt-out vale para o número: barra todas as variantes dele, em qualquer conta.
     for row in rows:
@@ -78,6 +80,15 @@ def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
             print(f"  ! telefone invalido ignorado user_id={user_id}: {mask_phone(raw_phone)}")
             continue
 
+        # #901: o `wa_id` da Meta traz o código do país. Com 10/11 dígitos (o que não
+        # normaliza sem o 55 padrão) é ambíguo: brasileiro antigo sem 55 ou estrangeiro
+        # que viraria um número brasileiro de outra pessoa. Falha fechado.
+        try:
+            normalize_phone_e164(raw_phone, default_country_code="")
+        except ValueError:
+            ambiguos += 1
+            continue
+
         if seen.intersection(candidates):
             continue
 
@@ -88,9 +99,12 @@ def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
                 to=normalized,
                 email=email,
                 source="whatsapp",
+                raw=row["identity_phone"],
             )
         )
 
+    if ambiguos:
+        print(f"  ! {ambiguos} destinatário(s) com número ambíguo (10/11 dígitos) ignorado(s), ver #901")
     return targets
 
 
@@ -105,7 +119,9 @@ def _sem_exclusao_pedida(rows: list[dict]) -> list[dict]:
     ]
 
 
-def get_all_update_targets() -> list[UpdateTarget]:
+def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarget]:
+    """`numeros` restringe às identidades com esses números: é a reconferência
+    antes de cada envio, com a mesma regra (opt-out por número, exclusão pedida)."""
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -119,8 +135,10 @@ def get_all_update_targets() -> list[UpdateTarget]:
               on i.user_id = a.user_id
              and i.provider = 'whatsapp'
             where nullif(i.external_id, '') is not null
+              and (%(numeros)s::text[] is null or i.external_id = any(%(numeros)s::text[]))
             order by a.user_id asc
-            """
+            """,
+            {"numeros": numeros},
         )
         rows = cur.fetchall() or []
     return _dedupe_targets(_sem_exclusao_pedida(rows))
@@ -206,6 +224,7 @@ def main() -> None:
 
     ok = 0
     fail = 0
+    pulados = 0
     buttons = build_quick_reply_buttons(args.stop_button)
 
     for target in targets:
@@ -218,6 +237,17 @@ def main() -> None:
             continue
 
         try:
+            # Opt-out (Configurações ou botão de atualização anterior) ou exclusão pedidos
+            # durante a execução valem para quem ainda não recebeu. Limite: número fixo de
+            # 12 dígitos (local 2-5) não gera a forma de 13, então o opt-out feito nela
+            # durante a execução não é visto aqui (a montagem da lista vê).
+            if not test_value and not get_all_update_targets(
+                sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
+            ):
+                print(f"  PULADO (opt-out ou exclusão pedida) {label}")
+                pulados += 1
+                continue
+
             # `None` é o 401 da Meta (token inválido), que `send_template` não levanta.
             if send_template(
                 target.to,
@@ -233,7 +263,7 @@ def main() -> None:
             fail += 1
 
     if not args.dry_run:
-        print(f"\nEnviados: {ok} | Falhas: {fail}")
+        print(f"\nEnviados: {ok} | Falhas: {fail} | Pulados: {pulados}")
 
 
 if __name__ == "__main__":

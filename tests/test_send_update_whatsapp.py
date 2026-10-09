@@ -192,3 +192,97 @@ def test_exclusao_com_opt_out_ainda_barra_a_variante():
     _conta(wa=n, opt_out=True, exclusao=True)
     _conta(wa=n[:4] + n[5:])
     assert _ninguem_manda_para(n), _alvos()
+
+
+# Opt-out feito DURANTE a execução (Configurações ou botão de uma atualização
+# anterior) vale para quem ainda não recebeu: `main` reconfere antes de cada envio.
+# Controle negativo: tirar a reconferência faz o número de B receber.
+def test_opt_out_durante_o_disparo_vale_para_quem_ainda_nao_recebeu(monkeypatch, capsys):
+    na, nb, nc = _numero(), _numero(), _numero()
+    _conta(wa=na, uid=random.randint(1, 999_999))
+    b = _conta(wa=nb, uid=random.randint(1_000_000, 1_999_999))
+    _conta(wa=nc, uid=random.randint(5_000_000_000, 9_000_000_000))
+    enviados = []
+
+    def _envia(to, *a, **k):
+        if not enviados:
+            db.set_whatsapp_updates_opt_out(b, True)  # B desliga enquanto o 1º sai
+        enviados.append(to)
+        return {"messages": [{"id": "x"}]}
+
+    monkeypatch.setattr(su, "send_template", _envia)
+    monkeypatch.setattr(sys, "argv", ["send_update_whatsapp.py"])
+    su.main()
+    assert na in enviados and nc in enviados
+    assert nb not in enviados, enviados
+    assert "PULADO (opt-out ou exclusão pedida)" in capsys.readouterr().out
+
+
+def _disparo(monkeypatch, ao_enviar=None):
+    enviados = []
+
+    def _envia(to, *a, **k):
+        if ao_enviar and not enviados:
+            ao_enviar()
+        enviados.append(to)
+        return {"messages": [{"id": "x"}]}
+
+    monkeypatch.setattr(su, "send_template", _envia)
+    monkeypatch.setattr(sys, "argv", ["send_update_whatsapp.py"])
+    su.main()
+    return enviados
+
+
+# `external_id` fora do formato canônico: a reconferência acha a própria linha pelo
+# valor gravado, então o formato não decide nada; só o opt-out decide. Controle
+# negativo: tirar o `| {target.raw}` da reconferência deixa os 2 "recebe" vermelhos.
+@pytest.mark.parametrize("formato", ["mais", "espacos"])
+@pytest.mark.parametrize("opt_out_no_meio", [False, True])
+def test_reconferencia_independe_do_formato_gravado(monkeypatch, capsys, formato, opt_out_no_meio):
+    n = _numero()
+    raw = {"mais": f"+{n}", "espacos": f"{n[:2]} {n[2:4]} {n[4:9]}-{n[9:]}"}[formato]
+    _conta(wa=_numero(), uid=random.randint(1, 999_999))  # recebe primeiro
+    uid = _conta(wa=raw)
+    to = su._normalize_whatsapp_target(raw)[0]
+    desliga = (lambda: db.set_whatsapp_updates_opt_out(uid, True)) if opt_out_no_meio else None
+    enviados = _disparo(monkeypatch, desliga)
+    assert (to in enviados) is not opt_out_no_meio, enviados
+    assert ("PULADO" in capsys.readouterr().out) is opt_out_no_meio
+
+
+# Falha na reconferência conta como falha daquele destinatário e o disparo segue.
+# Controle negativo: reconferência fora do `try` derruba o `main` no 2º.
+def test_falha_na_reconferencia_nao_derruba_o_disparo(monkeypatch, capsys):
+    numeros = [_numero() for _ in range(3)]
+    for i, n in enumerate(numeros):
+        _conta(wa=n, uid=random.randint(1, 999_999) + i * 1_000_000)
+    original, chamadas = su.get_all_update_targets, []
+
+    def _reconfere(numeros=None):
+        if numeros is not None:
+            chamadas.append(numeros)
+            if len(chamadas) == 2:
+                raise RuntimeError("banco caiu")
+        return original(numeros)
+
+    monkeypatch.setattr(su, "get_all_update_targets", _reconfere)
+    enviados = _disparo(monkeypatch)
+    assert enviados == [numeros[0], numeros[2]]
+    assert "Enviados: 2 | Falhas: 1 | Pulados: 0" in capsys.readouterr().out
+
+
+# #901: 10/11 dígitos é ambíguo (brasileiro sem 55 ou estrangeiro com o código do
+# país: `51987654321` do Peru viraria `5551987654321`, um celular de Porto Alegre).
+# Não recebe, nem no `--test email`, e a saída não mostra o número. Controle
+# negativo: tirar o pulo do `_dedupe_targets` deixa os dois vermelhos.
+@pytest.mark.parametrize("formato", ["sem_55", "estrangeiro"])
+def test_numero_ambiguo_de_10_ou_11_digitos_nao_recebe(monkeypatch, capsys, formato):
+    raw = {"sem_55": _numero()[2:], "estrangeiro": f"51987{random.randint(100_000, 999_999)}"}[formato]
+    uid = _conta(wa=raw)
+    to = su._normalize_whatsapp_target(raw)[0]
+    enviados = _disparo(monkeypatch)
+    out = capsys.readouterr().out
+    assert to not in enviados, enviados
+    assert "1 destinatário(s) com número ambíguo" in out
+    assert raw not in out and to not in out
+    assert get_test_targets(f"upd-{uid}@t.local") == []
