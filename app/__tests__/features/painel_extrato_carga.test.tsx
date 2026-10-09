@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { act, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
@@ -34,10 +34,30 @@ it("refresh no Extrato mantém a lista e não aborta a última leitura", async (
  expect(screen.getByText("Salário")).toBeTruthy(); expect(screen.queryByText(VAZIO)).toBeNull();
  expect(chamadasLanc().at(-1)![1].signal.aborted).toBe(false);
 });
-it("voltar do primeiro plano (inactive -> active) com o Extrato aberto traz a lista de volta", async () => {
- renderRouter("./app", { initialUrl: "/extrato" }); await lista();
- await appVai("inactive"); await appVai("active"); await lista(); await act(drenar);
- expect(screen.queryByText(VAZIO)).toBeNull();
+const authMe = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/auth/me").length;
+const marcar = (nome: string) => { fireEvent.press(screen.getByRole("button", { name: nome })); };
+async function extratoComFiltros() {
+ renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await act(drenar);
+ fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Sal"); act(() => { jest.advanceTimersByTime(400); }); await lista(); await act(drenar);
+ marcar("Banco"); marcar("Entradas"); await lista(); await act(drenar);
+ fireEvent.press(screen.getByText("Salário")); await act(drenar);
+}
+const detalhe = () => screen.queryByText(/Nubank · 12:00/);
+it("#897: inactive→active mantém busca, origem, tipo e lançamento aberto, sem revalidar", async () => {
+ await extratoComFiltros(); const [me, lanc] = [authMe(), chamadasLanc().length];
+ expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal"); expect(detalhe()).toBeTruthy();
+ await appVai("inactive"); await appVai("active"); await act(drenar);
+ expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal");
+ expect(screen.getByRole("button", { name: "Banco" }).props.accessibilityState.selected).toBe(true);
+ expect(screen.getByRole("button", { name: "Entradas" }).props.accessibilityState.selected).toBe(true);
+ expect(detalhe()).toBeTruthy(); expect(authMe()).toBe(me); expect(chamadasLanc().length).toBe(lanc);
+});
+// Controle positivo do conserto do #897: o background (rede derrubada) continua fechando o portão e revalidando.
+it("#897: background→active fecha o portão e revalida", async () => {
+ await extratoComFiltros(); const me = authMe(); expect(detalhe()).toBeTruthy();
+ await appVai("background"); expect(screen.queryByText("Salário")).toBeNull(); expect(detalhe()).toBeNull();
+ await appVai("active"); await lista(); await act(drenar);
+ expect(authMe()).toBe(me + 1); expect(screen.queryByText(VAZIO)).toBeNull();
 });
 it("Extrato, Resumo com refresh, Extrato: a lista está lá", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await lista();
