@@ -40,10 +40,11 @@ from core import funil_fontes_cache as cache
 log = logging.getLogger(__name__)
 
 # nome (validado na rota) -> módulo que exporta `FONTE`. Import lazy: o módulo da fonte
-# só carrega (e só importa a lib dela) na primeira consulta. GA4, Clarity e Meta entram
-# aqui nos PRs seguintes, uma linha cada; até lá a rota responde 404 para eles.
+# só carrega (e só importa a lib dela) na primeira consulta. Clarity e Meta entram aqui
+# nos PRs seguintes, uma linha cada; até lá a rota responde 404 para eles.
 MODULOS = {
     "stripe": "core.funil_fonte_stripe",
+    "ga4": "core.funil_fonte_ga4",
 }
 
 TIMEOUT_S = 12  # teto por consulta; as fontes têm timeout próprio menor
@@ -53,6 +54,8 @@ _EM_VOO: dict[str, dict] = {}  # nome -> marca da busca em andamento
 MENSAGENS = {
     "auth": "A fonte recusou as credenciais configuradas.",
     "permissao": "A credencial não tem permissão para ler estes dados.",
+    "permissao_ga4": "O GA4 negou o acesso: habilite a Google Analytics Data API no projeto, dê papel de Leitor à conta de serviço na propriedade e confira se GA4_PROPERTY_ID é só o número da propriedade.",
+    "credencial_invalida": "A credencial configurada está ilegível ou inválida; confira o JSON da conta de serviço.",
     "cota": "Limite diário de consultas à fonte atingido; volta amanhã.",
     "limite": "A fonte pediu para reduzir o ritmo das consultas.",
     "timeout": "A fonte demorou demais para responder.",
@@ -212,9 +215,19 @@ async def _registrar_falha(nome: str, agora: datetime) -> None:
 
 async def obter(nome: str) -> dict:
     """Devolve o envelope da fonte. Falha da fonte, do cache ou do payload vira `erro`/`stale`.
-    Ainda podem levantar: `CancelledError` (propaga), módulo da fonte que não importa,
-    `faltam()` quebrado e erro de programação na montagem do envelope; os testes de `MODULOS`
-    pegam os dois primeiros antes de produção."""
+    Módulo que não importa, `faltam()` quebrado e erro de programação na montagem do envelope
+    viram `erro` genérico (só o NOME do tipo vai ao log: o `str(exc)` pode trazer a chave, e o
+    middleware do admin o imprimiria). Só `Exception` é capturada: `CancelledError`, `SystemExit` e
+    `KeyboardInterrupt` propagam."""
+    try:
+        return await _obter(nome)
+    except Exception as exc:
+        log.warning("[funil_fontes] %s: erro na montagem (%s)", nome, type(exc).__name__)
+        return {"fonte": nome, "estado": "erro", "mensagem": MENSAGENS["indisponivel"], "falta": None,
+                "buscado_em": None, "janela": {"rotulo": "", "fuso": ""}, "dados": None}
+
+
+async def _obter(nome: str) -> dict:
     f = fonte(nome)
     falta = f.faltam()
     if falta:  # sem credencial: nem encosta no banco
