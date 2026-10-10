@@ -1,6 +1,7 @@
-"""core/services/demo/dados.py — a persona FICTÍCIA do "Testar o Piggy".
+"""core/services/demo/dados.py — os dados FICTÍCIOS do "Testar o Piggy" (o usuário de exemplo).
 
-Não é dado de ninguém: quem testa pergunta sobre a "Ana", que não existe. Valores
+Não é dado de ninguém, e não tem nome (o Piggy fala com quem testa em 2ª pessoa, como se
+fossem os dados dela). Valores
 em string decimal (o modelo lê o JSON; o teste soma com Decimal). Meses com rótulo
 relativo, sem data real, para o exemplo não envelhecer. Sem marca de banco.
 """
@@ -12,7 +13,6 @@ ALFABETO = "23456789ABCDEFGHJKMNPQRSTVWXYZ"
 CODIGO_PADRAO = f"[{ALFABETO}]{{6}}"
 
 PERSONA = {
-    "nome": "Ana",
     "hoje": "dia 20",  # referencial: todo vencimento abaixo é depois dele
     "renda_mensal": "5200.00",
     "saldo_conta_corrente": "1840.50",

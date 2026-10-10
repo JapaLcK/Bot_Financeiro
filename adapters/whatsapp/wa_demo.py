@@ -40,10 +40,10 @@ _LISTA = [
     ("Dá pra pagar as contas?", "Cartão e contas contra o saldo",
      "Dá pra pagar todas as contas que vencem até o fim do mês sem apertar?",
      "💳 Dá pra pagar todas as contas do mês?"),
-    ("Gasto que nem percebo?", "O que pesa sem ninguém notar",
+    ("Gasto que nem percebo?", "O que pesa sem você notar",
      "Tem algum gasto que eu nem percebo?",
      "🕵️ Tem algum gasto que eu nem percebo?"),
-    ("Notebook de 4 mil em 10x", "Quanto a parcela pesa no mês da Ana",
+    ("Notebook de 4 mil em 10x", "Quanto a parcela pesa no seu mês",
      "Se eu comprar um notebook de R$ 4.000 em 10x, como ficam meus próximos meses?",
      "🛒 E se eu comprar um notebook de R$ 4.000 em 10x?"),
     ("Fecho o mês no azul?", "Projeção do mês no ritmo de agora",
@@ -64,8 +64,9 @@ _JA_TEM_CONTA = "Já tem conta? Manda *link 123456* com o código do site."
 _CONVITE = "Ou escreva a sua 👇"
 BOAS_VINDAS = (
     "🐷 Oi! Eu sou o Piggy, o assistente de dinheiro do PigBank no WhatsApp. "
-    "Estou com os dados de exemplo da Ana, uma pessoa fictícia. O que você escrever "
-    "aqui não é salvo no PigBank, só vai para a IA que responde. "
+    "Vou usar dados de exemplo (fictícios) pra te mostrar como funciona: é como se "
+    "fossem os seus. O que você escrever aqui não é salvo no PigBank, só vai para a "
+    "IA que responde. "
     f"Você tem {LIMITE_MSGS} perguntas. Por onde começar?\n\n"
     + "\n".join(c for *_, c in _LISTA if c) + "\n\n" + _CONVITE
 )
