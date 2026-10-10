@@ -3,8 +3,8 @@
 Módulo próprio porque `core/services/pluggy.py` está no teto de linhas (ver
 tests/test_max_lines_python.py). Só LÊ:
 quem grava é `db/of_card_bills.py`. Como a gravação nunca apaga, uma leitura que
-termina antes da hora só deixa de atualizar — por isso metadata incoerente e
-estouro do teto LEVANTAM (`PluggyApiError`) em vez de devolver lista parcial.
+termina antes da hora só deixa de atualizar — por isso metadata incoerente, `total` que
+não bate com o lido e estouro do teto LEVANTAM (`PluggyApiError`) em vez de devolver lista parcial.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def list_pluggy_bills(account_id: str, api_key: str, *, max_pages: int = 20,
     `on_page` é o heartbeat do sync, chamado antes de CADA página (como em
     `list_pluggy_transactions`); falha dele nunca interrompe a leitura."""
     out: list[dict] = []
-    total = None
+    total = contagem = None
     for pagina in range(1, max_pages + 1):
         if on_page is not None:
             try:
@@ -36,7 +36,14 @@ def list_pluggy_bills(account_id: str, api_key: str, *, max_pages: int = 20,
                 or (pagina > paginas and data["results"])):
             raise PluggyApiError("Leitura de /bills incompleta: metadata de paginação incoerente.")
         total = paginas
+        if "total" in data:                 # fixado pela 1ª página; as outras têm de repetir
+            n = _inv_int(data["total"])
+            if n is None or n < 0 or (pagina > 1 and n != contagem):
+                raise PluggyApiError("Leitura de /bills incompleta: total incoerente.")
+            contagem = n
         out += data["results"]
         if pagina >= total:
+            if contagem is not None and len(out) != contagem:
+                raise PluggyApiError("Leitura de /bills incompleta: total não bate.")
             return out
     raise PluggyApiError(f"Leitura de /bills passou do teto de {max_pages} páginas.")

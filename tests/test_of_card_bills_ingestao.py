@@ -212,8 +212,20 @@ def test_heartbeat_que_levanta_nao_interrompe_a_leitura(monkeypatch):
     (lambda p: {"totalPages": -1, "results": []}, 20),                               # total negativo
     (lambda p: {"results": []}, 20),                                                 # sem totalPages
     (lambda p: {"page": 7, "totalPages": 2, "results": []}, 20),                     # eco de outra página
+    (lambda p: {"total": 2, "totalPages": 1, "results": [{"id": p}]}, 20),           # lista parcial como completa
+    (lambda p: {"total": 2 if p == 1 else 3, "totalPages": 2, "results": [{"id": p}]}, 20),  # total muda no meio
+    (lambda p: {"total": "x", "totalPages": 1, "results": []}, 20),                  # total inválido
+    (lambda p: {"total": -1, "totalPages": 1, "results": []}, 20),                   # total negativo
+    (lambda p: {"total": 1, "totalPages": 1, "results": [{"id": 1}, {"id": 2}]}, 20),  # a mais que o total
 ])
 def test_paginador_levanta_se_incoerente(monkeypatch, resposta, max_pages):
     _paginas(monkeypatch, resposta)
     with pytest.raises(PluggyApiError):
         pb.list_pluggy_bills("x", "k", max_pages=max_pages)
+
+
+def test_paginador_com_total_que_bate_e_sem_total_passa(monkeypatch):
+    _paginas(monkeypatch, lambda p: {"total": 2, "totalPages": 2, "results": [{"id": p}]})
+    assert pb.list_pluggy_bills("x", "k") == [{"id": 1}, {"id": 2}]
+    _paginas(monkeypatch, lambda p: {"totalPages": 2, "results": [{"id": p}]})      # sem total: como antes
+    assert pb.list_pluggy_bills("x", "k") == [{"id": 1}, {"id": 2}]
