@@ -222,4 +222,42 @@ describe("Segurança — conta sem senha", () => {
     await waitFor(() => expect(screen.getByText(/Vamos enviar um link para s@x\.com/)).toBeTruthy());
     expect(screen.queryByText(/Enviamos um link para/)).toBeNull();
   });
+
+  it("X3 — background, active, active: UMA recarga só (a marca de 'foi para o fundo' zera depois de usada)", async () => {
+    await abrir({ valor: false });
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+    const me = () => chamadas().filter((c) => c.caminho === "/auth/me").length;
+    const base = me();
+
+    await appVai("background");
+    await appVai("active");
+    await appVai("active");
+    await appVai("inactive");
+    await appVai("active");
+
+    expect(me()).toBe(base + 1);
+  });
+
+  it("X1 — sessão expirada numa recarga SILENCIOSA (tela em pronto) ainda leva a /entrar com o aviso", async () => {
+    let morta = false;
+    await abrir(
+      { valor: false },
+      {
+        "/auth/mfa/status": () => (morta ? resposta(401, { detail: "expirado" }) : resposta(200, MFA_DESLIGADO)),
+        "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }),
+      },
+    );
+    await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+
+    morta = true; // revogada em outro aparelho enquanto o app estava no fundo
+    await appVai("background");
+    await appVai("active");
+
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+  });
+
+  // Comportamento registrado, NÃO é defeito a corrigir: a regra "recarga que falha mantém a tela"
+  // vale também para o foco de navegação. Se o MFA mudou e a recarga falha por rede, a tela fica com
+  // o status velho e sem aviso; a autoridade é o servidor (/auth/mfa/setup responde 409).
 });
