@@ -1062,6 +1062,9 @@ sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marca
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
+`of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,
+só contas `CREDIT`), por upsert em (conta, `provider_bill_id`); fail-soft (leitura ou gravação que
+falha vira log, o sync carimba igual) e **nenhuma tela a lê ainda** (só o export LGPD). Sem user_id: o dono é conta -> conexão.
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

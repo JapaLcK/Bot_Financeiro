@@ -41,6 +41,7 @@ from core.services.pluggy_health import (
     derive_item_health,
     resolve_connection_state,
 )
+from core.services.pluggy_bills import list_pluggy_bills
 from core.services.pluggy_investments import list_pluggy_investments
 from db import (
     AmbiguousItemError,
@@ -63,6 +64,7 @@ from db import (
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
 from db.open_finance_state import _SEM_CHECAGEM, _TERMINAL as CONEXAO_TERMINAL
+from db.of_card_bills import salvar_faturas_do_banco
 from db.of_recurring import salvar_recorrencias
 
 
@@ -420,6 +422,19 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             print(f"[pluggy_sync] segunda foto do item falhou item={provider_item_id} "
                   f"erro={type(exc).__name__}", flush=True)
 
+    # Faturas que o banco fechou (`/bills`), só das contas de cartão. Fail-soft POR
+    # CONTA: a que não leu fica fora do dict e a gravação não toca nela.
+    faturas: dict[str, list] = {}
+    for conta in accounts:
+        if conta["type"].upper() != "CREDIT":
+            continue
+        try:
+            faturas[conta["provider_account_id"]] = list_pluggy_bills(
+                conta["provider_account_id"], api_key, on_page=heartbeat)
+        except Exception as exc:
+            print(f"[pluggy_sync] faturas indisponíveis item={provider_item_id} "
+                  f"erro={type(exc).__name__}: {exc}", flush=True)
+
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
     with pluggy_item_lock(provider_item_id) as locked:
         if not locked:
@@ -527,6 +542,11 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             except Exception as exc:
                 print(f"[pluggy_sync] recorrências não gravadas item={provider_item_id} "
                       f"erro={type(exc).__name__}", flush=True)
+        try:
+            salvar_faturas_do_banco(connection["id"], faturas)
+        except Exception as exc:
+            print(f"[pluggy_sync] faturas não gravadas item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
