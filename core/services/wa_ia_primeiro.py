@@ -59,6 +59,14 @@ def _forma_curta(sem_data: str, args: dict) -> bool:
     return len(sobra) == 1 and alvo == sobra
 
 
+def forma_apoiada(args: dict, texto: str) -> bool:
+    """A forma que a IA declarou é a que o texto do usuário declara (ausente:
+    nada a corroborar). Vale em qualquer decisão do `fp.decidir`."""
+    from core.handlers import forma_pagamento as fp
+    forma_ia = args.get("forma_pagamento")
+    return not forma_ia or fp.detectar(texto or "") == forma_ia
+
+
 def ativo(user_id: int) -> bool:
     if (os.getenv("WA_IA_PRIMEIRO") or "").strip().lower() not in _LIGADA:
         return False
@@ -102,7 +110,9 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
         sem hashtag, regra local confiante na nota e no texto, iguais;
     (e) forma_pagamento: se a IA declarou, o texto declara a mesma
-        (`forma_pagamento.detectar`); ausente segue o `fp.decidir`;
+        (`forma_apoiada`, `forma_pagamento.detectar`), também quando o
+        `fp.decidir` dá BANCO (`precisa_confirmar_lancamento`); ausente segue o
+        `fp.decidir`;
     (f) alvo e nota: cada um que veio aparece no texto como palavras inteiras
         (normalizado, sem acento nem caixa).
     (g) texto com negação ("nao", "nem", "nunca", "sem", "jamais", palavra
@@ -168,8 +178,7 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         return False
 
     # (e) forma: declarada pela IA só vale se o texto declara a mesma.
-    forma_ia = args.get("forma_pagamento")
-    if forma_ia and fp.detectar(texto) != forma_ia:
+    if not forma_apoiada(args, texto):
         return False
 
     # (f) alvo e nota: palavras inteiras do texto ("uber" não aprova "taxi" nem
@@ -223,9 +232,15 @@ def precisa_confirmar_lancamento(user_id: int, args: dict) -> bool:
     from core.handlers import forma_pagamento as fp
     from core.services.ai_chat._context import CURRENT_USER_MESSAGE
 
-    if _decisao_no_whatsapp(user_id, args) not in (fp.CARTEIRA, fp.PERGUNTA):
+    decisao = _decisao_no_whatsapp(user_id, args)
+    texto = CURRENT_USER_MESSAGE.get()
+    if decisao == fp.BANCO:
+        # A execução não grava (`msg_banco`): com a forma apoiada no texto fica
+        # assim; inventada pela IA, o gasto em dinheiro sumiria — confirma.
+        return not forma_apoiada(args, texto)
+    if decisao not in (fp.CARTEIRA, fp.PERGUNTA):
         return False
-    return not lancamento_com_certeza(user_id, args, CURRENT_USER_MESSAGE.get())
+    return not lancamento_com_certeza(user_id, args, texto)
 
 
 def armaria_q40(user_id: int, args: dict) -> bool:

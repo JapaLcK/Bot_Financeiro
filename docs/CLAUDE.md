@@ -950,7 +950,9 @@ com verbo de receita no começo; despesa só com verbo de saída no começo, ou 
 "o mercado me devolveu 50 reais", "reembolso mercado 50", "uber aeroporto 23" e
 "R$ 1.234,56 no aluguel" são incertos); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
-`forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
+`forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma — também
+quando a decisão é BANCO, que não grava: forma "banco" inventada para um gasto em
+dinheiro pede confirmação, apoiada no texto ("no pix") segue direto com o `msg_banco`); alvo e
 nota (se vieram, palavras inteiras do texto, sem acento nem caixa); texto com negação
 ("não", "nem", "nunca", "sem", "jamais", palavra inteira) ou pergunta ("?") nunca é
 certo ("não gastei 50…" não vira lançamento). O resumo da

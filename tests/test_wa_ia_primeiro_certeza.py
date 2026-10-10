@@ -670,3 +670,29 @@ def test_sim_depois_da_meia_noite_grava_o_dia_mostrado(uid_pro, monkeypatch, dat
     relogio["agora"] = datetime(2026, 10, 9, 0, 3, tzinfo=tz)
     diga(uid_pro, "sim")
     assert _dias_gravados(uid_pro) == ["2026-10-08"]
+
+
+# ── Forma "banco" inventada pela IA não faz o gasto em dinheiro sumir ───────
+
+@pytest.mark.parametrize("frase", ["gastei 50 no mercado em dinheiro", "gastei 50 no mercado"],
+                         ids=["dinheiro-no-texto", "sem-forma-no-texto"])
+def test_forma_banco_da_ia_sem_apoio_confirma(uid_pro, monkeypatch, frase):
+    _connect_fake_bank(uid_pro)
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, forma_pagamento="banco"))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r and "pelo banco" in r, r
+    assert "Não registrei" not in r
+    assert lancamentos(uid_pro) == []
+    diga(uid_pro, "não")
+    assert lancamentos(uid_pro) == []
+    assert db.ai_get_pending_action(uid_pro) is None
+
+
+def test_forma_banco_apoiada_no_texto_segue_direto_com_msg_banco(uid_pro, monkeypatch):
+    _connect_fake_bank(uid_pro)
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, forma_pagamento="banco"))
+    r = diga(uid_pro, "paguei 50 no mercado no pix")
+    assert "Só confirmando" not in r and "Não registrei" in r, r
+    assert lancamentos(uid_pro) == []
