@@ -174,9 +174,12 @@ def set_pending_action(
 ) -> Optional[dict[str, Any]]:
     """
     Grava uma ação pendente. Apenas uma por user (upsert) — se já existe,
-    sobrescreve. Devolve a linha gravada no formato do `get_pending_action`:
-    o `created_at` dela é o token do CAS de quem armou, sem reler (outra
-    janela pode sobrescrever entre uma gravação e uma releitura).
+    só substitui se a existente já venceu o TTL. Pendência VIVA de outro pedido
+    não é sobrescrita: devolve None (nada gravado), senão o "sim" do usuário
+    executaria um pedido diferente do que a resposta mostrou. Quem arma de novo
+    a própria pendência consome a anterior antes (`consume_pending_action`).
+    Devolve a linha gravada no formato do `get_pending_action`: o `created_at`
+    dela é o token do CAS de quem armou, sem reler.
     """
     from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
@@ -190,9 +193,11 @@ def set_pending_action(
                 tool_args = excluded.tool_args,
                 summary = excluded.summary,
                 created_at = excluded.created_at
+            where ai_pending_actions.created_at < now() - make_interval(mins => %s)
             returning tool_name, tool_args, summary, created_at
             """,
-            (int(user_id), tool_name, json.dumps(tool_args), summary),
+            (int(user_id), tool_name, json.dumps(tool_args), summary,
+             PENDING_TTL_MINUTES),
         )
         row = cur.fetchone()
         if cur.rowcount:

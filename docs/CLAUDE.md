@@ -966,7 +966,11 @@ congelamento) vira `data` da pendência, então um "sim" depois da meia-noite gr
 mostrado; com hashtag no texto, a pendência guarda a categoria dela e a
 marca `_categoria_explicita` (do código; o runner descarta toda chave `_` vinda do
 modelo), e a gravação a passa como `explicit`, que o cross-check com a regra local não
-troca (a categoria vai canonizada, como a gravação a deixa). Rodada do modelo com uma
+troca (a categoria vai canonizada, como a gravação a deixa). Sem hashtag, quando a IA
+mandou categoria, o resumo e a pendência levam a categoria EFETIVA: a que a execução usaria
+depois do cross-check com a regra local (`resolver_categoria_da_ia`, a mesma função do
+`add_from_entities`), com o motivo dela em `_category_reason` (chave do código). Sem
+categoria da IA, a execução infere e o resumo não mostra categoria. Rodada do modelo com uma
 escrita que armaria pendência e QUALQUER outra escrita: nada roda (seção "IA"), também
 no modo ia_primeiro (o roteador não faz as duas juntas). Leituras não contam: a que vem
 antes do `_CONFIRMA` roda; a que vem depois recebe "não executada: aguardando a
@@ -1118,14 +1122,22 @@ viu (ex.: um `delete_all_launches` escondido atrás de um erro). Limites declara
 texto livre do modelo depois de armar não cancela; falha depois do commit da
 pendência e antes de o runner receber a linha gravada não cancela; falha ao cancelar só
 loga. O token do CAS é a linha que o próprio `ai_set_pending_action` devolve
-(`returning`), sem reler: outra janela que re-arme no meio não é cancelada. No
-`_CONFIRMA` do `add_launch` (WhatsApp com a flag), o runner relê a linha logo depois de
-armar: se outra janela (o `/ai/chat` aberto junto) a sobrescreveu, responde
-`_OUTRO_PEDIDO` ("tem outro pedido seu esperando confirmação") em vez de mostrar um
-resumo cujo "sim" executaria a da outra. Limite: resta a janela entre essa releitura e
-a entrega da mensagem; fechar de vez exige pendência por canal ou sem sobrescrita, fora
-deste PR. No ramo `requires_confirmation` a pergunta é texto do modelo na rodada
-seguinte e não há essa releitura. Código em
+(`returning`), sem reler: outra janela que re-arme no meio não é cancelada.
+
+**Pendência viva não é sobrescrita** (todos os canais; contrato da confirmação).
+`db.ai_chat.set_pending_action` só substitui a linha existente se ela já venceu o TTL
+(`PENDING_TTL_MINUTES`); com pendência viva de outro pedido devolve None e não grava. O
+runner responde `_OUTRO_PEDIDO` ("tem outro pedido seu esperando confirmação") no
+`_CONFIRMA` do `add_launch` e também no ramo `requires_confirmation`, onde a resposta é
+fixa e não o texto do modelo (que ofereceria um "confirma?" cujo "sim" executaria o outro);
+o `set_budget` faz o mesmo. A janela de corrida entre gravar e entregar deixou de existir;
+a releitura `_ainda_e_a_mesma` no `_CONFIRMA` ficou como redundância barata para o caso de
+a outra janela consumir ("não") e armar a dela no meio. O "mudou de assunto" já consome a
+pendência anterior no começo do turno, então nenhuma conversa fica bloqueada pela própria
+pendência. Se a rodada seguinte do MESMO turno tentar armar outra depois de armar a
+primeira, a viva é deste turno: o modelo recebe "já existe uma confirmação pendente deste
+turno" (resultado de tool, sem resposta final) e a primeira não é cancelada;
+`_OUTRO_PEDIDO` fica só para pendência viva de outra janela. Código em
 `core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
 `tests/test_wa_ia_primeiro_runner.py`.
 

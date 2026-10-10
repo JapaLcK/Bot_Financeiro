@@ -46,6 +46,7 @@ from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
 from .system_prompt import SYSTEM_PROMPT
 from .tools import SCHEMAS, get_tool
+from .tools._base import OUTRO_PEDIDO
 
 
 logger = logging.getLogger(__name__)
@@ -86,9 +87,16 @@ _ATENDIDA_FORA = "Esta mensagem foi atendida fora desta conversa."
 # Resposta final de um write com `confirmar_se` verdadeiro (sem 2ª ida ao LLM).
 _CONFIRMA = "🐷 Só confirmando: registrar *{resumo}*? Responde *sim* ou *não*."
 
-# A pendência deste turno foi sobrescrita por outra janela antes da pergunta.
-_OUTRO_PEDIDO = ("🐷 Tem outro pedido seu esperando confirmação. Responde ele "
-                 "primeiro e depois me manda este de novo.")
+# Resultado de tool (sem resposta final): o turno já tem uma confirmação pendente.
+_JA_PENDENTE_NO_TURNO = (
+    json.dumps({"status": "not_armed", "message":
+                "já existe uma confirmação pendente deste turno; peça ao usuário "
+                "para confirmar ou cancelar essa primeiro"}, ensure_ascii=False),
+    None,
+)
+
+# Há pendência viva de outro pedido (outra janela): este não foi armado.
+_OUTRO_PEDIDO = OUTRO_PEDIDO
 
 # Tool call da mesma rodada depois de um `_CONFIRMA`: não roda.
 _NAO_EXECUTADA = json.dumps(
@@ -567,6 +575,13 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
     return ERROR_MSG
 
 
+def _viva_e_deste_turno(user_id: int) -> bool:
+    """A pendência viva é a que ESTE turno armou numa rodada anterior (e não a
+    de outra janela): armar outra não é "outro pedido seu esperando"."""
+    armada = _PENDENCIA_DO_TURNO.get()
+    return armada is not None and _ainda_e_a_mesma(user_id, armada)
+
+
 def _ainda_e_a_mesma(user_id: int, armada: dict[str, Any]) -> bool:
     atual = db.ai_get_pending_action(user_id)
     return bool(atual) and all(atual[k] == armada[k]
@@ -662,7 +677,19 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         # Validação e resumo ainda não criaram uma ação. A marca é cumulativa
         # no turno e começa imediatamente antes da primeira tentativa de gravação.
         _TURN_WRITE_ATTEMPTED.set(True)
-        _PENDENCIA_DO_TURNO.set(db.ai_set_pending_action(user_id, name, args, summary))
+        armada = db.ai_set_pending_action(user_id, name, args, summary)
+        if armada is None and _viva_e_deste_turno(user_id):
+            return _JA_PENDENTE_NO_TURNO
+        if armada is None:
+            # Pendência viva de outro pedido: nada armado. A resposta final é
+            # fixa, não o texto do modelo, que ofereceria um "confirma?" cujo
+            # "sim" executaria o outro pedido.
+            return (
+                json.dumps({"status": "not_armed", "message": _OUTRO_PEDIDO},
+                           ensure_ascii=False),
+                _OUTRO_PEDIDO,
+            )
+        _PENDENCIA_DO_TURNO.set(armada)
         return (
             json.dumps(
                 {
@@ -684,12 +711,14 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         summary = tool.summary(args) if tool.summary else f"executar {name}"
         _TURN_WRITE_ATTEMPTED.set(True)
         armada = db.ai_set_pending_action(user_id, name, args, summary)
+        if armada is None and _viva_e_deste_turno(user_id):
+            return _JA_PENDENTE_NO_TURNO
         _PENDENCIA_DO_TURNO.set(armada)
-        # A linha é uma por usuário: outra janela (o /ai/chat aberto junto do
-        # WhatsApp) pode ter re-armado por cima. `_CONFIRMA` só se a linha
-        # ainda é a desta gravação; senão o "sim" executaria a da outra com o
-        # resumo desta. Não cancela a da outra (o CAS já não a apaga).
-        if armada is not None and not _ainda_e_a_mesma(user_id, armada):
+        # A linha é uma por usuário e pendência viva não é sobrescrita
+        # (`set_pending_action` devolve None): `_CONFIRMA` só se este turno
+        # armou. A releitura cobre o resto: a outra janela consumiu a nossa
+        # ("não") e armou a dela no meio. Não cancela a da outra.
+        if armada is None or not _ainda_e_a_mesma(user_id, armada):
             _PENDENCIA_DO_TURNO.set(None)
             return (
                 json.dumps({"status": "superseded", "message": _OUTRO_PEDIDO},

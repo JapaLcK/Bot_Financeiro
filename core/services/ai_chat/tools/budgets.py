@@ -25,7 +25,7 @@ from typing import Any
 
 import db
 
-from ._base import Tool
+from ._base import OUTRO_PEDIDO, Tool
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────────
@@ -201,7 +201,10 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
             "budget": budget,
             "_confirmed": True,
         }
-        db.ai_set_pending_action(user_id, "set_budget", pending_args, summary)
+        if db.ai_set_pending_action(user_id, "set_budget", pending_args, summary) is None:
+            # Pendência viva de outro pedido: não armou, e perguntar "Confirma?"
+            # faria o "sim" executar o outro.
+            return OUTRO_PEDIDO
 
         # Se o user digitou diferente da canônica (typo aceito via fuzzy,
         # variação de acento/case ignorada pela normalização), avisa

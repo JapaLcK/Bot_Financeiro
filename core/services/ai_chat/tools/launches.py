@@ -375,7 +375,8 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         categoria=(args.get("categoria") or "").strip() or None,
         # Hashtag fixada pelo código na confirmação: o cross-check com a
         # regra local não a troca ("explicit", não "ai").
-        category_reason="explicit" if args.get("_categoria_explicita") else "ai",
+        category_reason=(args.get("_category_reason")
+                         or ("explicit" if args.get("_categoria_explicita") else "ai")),
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
     )
     platform = CURRENT_PLATFORM.get()
@@ -420,10 +421,19 @@ def _congela_pendencia(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     from parsers import _extract_explicit_category
     args = {**args, "data": _dia_efetivo(args).isoformat()}
     _, hashtag = _extract_explicit_category(CURRENT_USER_MESSAGE.get())
-    if not hashtag:
-        return args
-    return {**args, "categoria": infer_category(user_id, "", hashtag).category,
-            "_categoria_explicita": True}
+    if hashtag:
+        return {**args, "categoria": infer_category(user_id, "", hashtag).category,
+                "_categoria_explicita": True}
+    # Sem hashtag: a categoria que a execução VAI usar (o cross-check do
+    # `add_from_entities`, mesma função) e o motivo dela, para o "sim" gravar
+    # o que o resumo mostra e aprender como hoje.
+    categoria = str(args.get("categoria") or "").strip()
+    if not categoria:
+        return args          # a execução infere (com IA); o resumo não mostra categoria
+    from core.handlers.launches import resolver_categoria_da_ia
+    nota = str(args.get("nota") or "").strip() or str(args.get("alvo") or "").strip()
+    categoria, motivo = resolver_categoria_da_ia(user_id, categoria, nota)
+    return {**args, "categoria": categoria, "_category_reason": motivo}
 
 
 def _add_launch_summary(args: dict[str, Any]) -> str:

@@ -29,6 +29,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 
+# Pendência viva de outro pedido: a nova NÃO foi armada (ver
+# `db.ai_chat.set_pending_action`). Texto único do runner e do `set_budget`.
+OUTRO_PEDIDO = ("🐷 Tem outro pedido seu esperando confirmação. Responde ele "
+                "primeiro e depois me manda este de novo.")
+
+
 @dataclass(frozen=True)
 class Tool:
     schema: dict[str, Any]

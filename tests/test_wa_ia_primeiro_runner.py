@@ -236,21 +236,6 @@ def test_p5_pendencia_que_nao_e_deste_turno_fica(com_lancamento_1, monkeypatch):
     assert db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"
 
 
-def test_p5b_rearmada_por_outra_janela_nao_e_cancelada(com_lancamento_1, monkeypatch):
-    """O turno armou, outra janela re-armou por cima (created_at novo) e o
-    turno caiu: o CAS não apaga a pendência da outra janela."""
-    uid = com_lancamento_1
-
-    def outra_janela_rearma_e_cai(messages):
-        db.ai_set_pending_action(uid, "delete_launch", {"launch_id": "1"}, "apagar o lançamento #1")
-        raise RuntimeError("modelo caiu")
-
-    openai_falso(monkeypatch, _apaga_o_1(), outra_janela_rearma_e_cai)
-    r = diga(uid, "piggy " + _TIRA)
-    assert runner.ERROR_MSG in r, r
-    assert db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"
-
-
 def test_p6_confirmacao_e_delete_na_mesma_rodada_nada_roda(com_lancamento_1, monkeypatch):
     """add_launch incerto + delete_launch na mesma rodada: nada roda nem fica
     armado (pré-varredura), e o "sim" seguinte não apaga nem grava."""
@@ -264,23 +249,24 @@ def test_p6_confirmacao_e_delete_na_mesma_rodada_nada_roda(com_lancamento_1, mon
     _sim_nao_apaga(uid)
 
 
-def test_p7_corrida_entre_gravar_e_reler_nao_apaga_a_outra_janela(com_lancamento_1, monkeypatch):
-    """Logo depois de o turno gravar, outra janela re-arma (created_at novo).
-    O token do turno é o da linha que ELE gravou: o cancelamento perde o CAS
-    e a confirmação da outra janela fica."""
+def test_p7_depois_de_armar_outra_janela_nao_consegue_sobrescrever(com_lancamento_1, monkeypatch):
+    """Pendência viva não é sobrescrita: a outra janela tenta armar logo depois
+    da gravação do turno e recebe None; o turno cai e cancela só a dele."""
     uid = com_lancamento_1
     original = db.ai_set_pending_action
+    tentativa = []
 
     def corrida(user_id, name, args, summary):
         meu = original(user_id, name, args, summary)
-        original(user_id, "delete_launch", {"launch_id": "1"}, "outra janela")
+        tentativa.append(original(user_id, "delete_launch", {"launch_id": "1"}, "outra janela"))
         return meu
 
     monkeypatch.setattr(db, "ai_set_pending_action", corrida)
     openai_falso(monkeypatch, _apaga_o_1(), RuntimeError("modelo caiu"))
     r = diga(uid, "piggy " + _TIRA)
     assert runner.ERROR_MSG in r, r
-    assert db.ai_get_pending_action(uid)["summary"] == "outra janela"
+    assert tentativa == [None]
+    assert db.ai_get_pending_action(uid) is None          # a do turno, cancelada
 
 
 def test_set_pending_action_devolve_a_linha_como_get(user_id):
@@ -491,3 +477,75 @@ def test_fora_do_ia_primeiro_a_chamada_nao_ganha_timeout_proprio(uid_pro, monkey
     clientes = openai_falso(monkeypatch, texto("🐷 oi"))
     runner.chat(uid_pro, "oi", monthly_limit=10, platform="dashboard")
     assert "timeout" not in clientes.creates[0]
+
+
+# ── Pendência viva de outro pedido não é sobrescrita (todos os canais) ───────
+
+def test_set_pending_action_viva_nao_e_sobrescrita_e_vencida_e(user_id):
+    a = db.ai_set_pending_action(user_id, "delete_launch", {"launch_id": "1"}, "primeira")
+    assert a is not None
+    assert db.ai_set_pending_action(user_id, "delete_launch", {"launch_id": "2"}, "segunda") is None
+    assert db.ai_get_pending_action(user_id)["summary"] == "primeira"
+    with db.get_conn() as conn, conn.cursor() as cur:       # vence o TTL
+        cur.execute("update ai_pending_actions set created_at = now() - interval '11 minutes' "
+                    "where user_id = %s", (user_id,))
+        conn.commit()
+    c = db.ai_set_pending_action(user_id, "delete_launch", {"launch_id": "3"}, "terceira")
+    assert c is not None and db.ai_get_pending_action(user_id)["summary"] == "terceira"
+
+
+def _outra_janela_arma(uid, depois):
+    """Rodada que, antes de devolver `depois`, faz a outra janela armar."""
+    def rodada(messages):
+        db.ai_set_pending_action(uid, "delete_launch", {"launch_id": "1"}, "apagar o #1 (outra janela)")
+        return depois
+    return rodada
+
+
+@pytest.mark.parametrize("canal", ["whatsapp", "dashboard"])
+def test_apagar_com_pendencia_viva_de_outra_janela_responde_outro_pedido(com_lancamento_1, monkeypatch, canal):
+    uid = com_lancamento_1
+    openai_falso(monkeypatch, _outra_janela_arma(uid, com_tools(
+        chamada("delete_all_launches", {}, "t"))))
+    r = runner.chat(uid, "apaga tudo", monthly_limit=10, platform=canal)
+    assert r == runner._OUTRO_PEDIDO, r
+    assert db.ai_get_pending_action(uid)["summary"] == "apagar o #1 (outra janela)"
+    diga(uid, "sim")                                         # executa a que o usuário viu
+    assert lancamentos(uid) == []
+
+
+def test_set_budget_com_pendencia_viva_de_outra_janela_nao_pergunta(uid_pro, monkeypatch):
+    db.upsert_budget(uid_pro, "mercado", 300)
+    openai_falso(monkeypatch, _outra_janela_arma(uid_pro, com_tools(_orcamento(800))))
+    r = runner.chat(uid_pro, "muda o orçamento de mercado pra 800", monthly_limit=10,
+                    platform="dashboard")
+    assert r == runner._OUTRO_PEDIDO and "Confirma" not in r, r
+    assert db.ai_get_pending_action(uid_pro)["tool_name"] == "delete_launch"
+    assert db.get_budget(uid_pro, "mercado")["budget"] == 300.0
+
+
+def test_pendencia_vencida_e_substituida_normalmente(com_lancamento_1, monkeypatch):
+    uid = com_lancamento_1
+    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": "1"}, "velha")
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update ai_pending_actions set created_at = now() - interval '11 minutes' "
+                    "where user_id = %s", (uid,))
+        conn.commit()
+    openai_falso(monkeypatch, _apaga_o_1(), texto("🐷 Confirma apagar o #1?"))
+    r = runner.chat(uid, "apaga o #1", monthly_limit=10, platform="dashboard")
+    assert "Confirma apagar" in r, r
+    assert db.ai_get_pending_action(uid)["summary"] != "velha"
+
+
+def test_segunda_confirmacao_no_mesmo_turno_nao_vira_outro_pedido(com_lancamento_1, monkeypatch):
+    """Rodada 1 arma o delete; a rodada 2 tenta armar outro: a viva é DESTE
+    turno, então não é "outro pedido seu esperando" e a 1ª não é cancelada."""
+    uid = com_lancamento_1
+    openai_falso(monkeypatch, _apaga_o_1(),
+                 com_tools(chamada("delete_launch", {"launch_id": "1"}, "d2")),
+                 texto("🐷 Confirma apagar o #1?"))
+    r = runner.chat(uid, "apaga o 1", monthly_limit=10, platform="dashboard")
+    assert r != runner._OUTRO_PEDIDO and "Confirma apagar" in r, r
+    assert db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"
+    diga(uid, "sim")
+    assert lancamentos(uid) == []

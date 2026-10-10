@@ -523,33 +523,80 @@ def test_hashtag_com_caixa_resumo_mostra_o_que_grava(uid_pro, monkeypatch):
     assert _categorias(uid_pro) == ["lazer"]
 
 
+# ── O resumo mostra a categoria que o "sim" vai gravar (sem hashtag) ────────
+
+def test_resumo_mostra_a_categoria_efetiva_e_o_sim_grava_a_mesma(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    openai_falso(monkeypatch, lancamento(500, alvo="posto", categoria="lazer"))
+    r = diga(uid_pro, "gastei 50 no posto")           # valor divergente: confirma
+    assert "Só confirmando" in r and "#transporte" in r and "#lazer" not in r, r
+    diga(uid_pro, "sim")
+    assert _categorias(uid_pro) == ["transporte"]
+
+
+def test_sim_grava_com_o_motivo_da_categoria_resolvida(uid_pro, monkeypatch):
+    """O motivo do cross-check (`user_rule`) viaja na pendência: o aprendizado
+    roda com ele depois do "sim", como no caminho direto (e então não aprende)."""
+    import core.handlers.launches as hl
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "posto", "transporte")
+    motivos = []
+    real = hl.learn_from_inference
+    monkeypatch.setattr(hl, "learn_from_inference",
+                        lambda *a, **kw: (motivos.append(kw.get("reason")), real(*a, **kw))[1])
+    openai_falso(monkeypatch, lancamento(500, alvo="posto", categoria="lazer"))
+    diga(uid_pro, "gastei 50 no posto")
+    diga(uid_pro, "sim")
+    assert motivos == ["user_rule"], motivos
+    assert _categorias(uid_pro) == ["transporte"]
+
+
 # ── Outra janela re-arma entre gravar e perguntar ───────────────────────────
 
 _DA_OUTRA = {"tipo": "despesa", "valor": 77, "alvo": "padaria"}
 
 
-def test_confirma_nao_aparece_se_outra_janela_sobrescreveu(uid_pro, monkeypatch):
-    """O /ai/chat aberto junto re-arma logo depois desta gravação. O WhatsApp
-    não pode mostrar "registrar R$ 500" sobre a linha da outra: o "sim" daqui
-    executaria a dela."""
+def test_confirma_nao_aparece_se_outra_janela_armou_no_meio(uid_pro, monkeypatch):
+    """O /ai/chat aberto junto arma enquanto o modelo responde. Pendência viva
+    não é sobrescrita: o WhatsApp não mostra "registrar R$ 500" e o "sim"
+    executa a da outra janela, que é a que o usuário viu lá."""
     from core.services.ai_chat import runner
     liga_flag(monkeypatch)
-    original = db.ai_set_pending_action
 
-    def corrida(user_id, name, args, summary):
-        meu = original(user_id, name, args, summary)
-        original(user_id, "add_launch", _DA_OUTRA, "despesa de R$ 77,00 em padaria")
-        return meu
+    def outra_janela(messages):
+        db.ai_set_pending_action(uid_pro, "add_launch", _DA_OUTRA, "despesa de R$ 77,00 em padaria")
+        return lancamento(500)
 
-    monkeypatch.setattr(db, "ai_set_pending_action", corrida)
-    openai_falso(monkeypatch, lancamento(500))
+    openai_falso(monkeypatch, outra_janela)
     r = diga(uid_pro, "gastei 50 no mercado")
     assert runner._OUTRO_PEDIDO in r and "Só confirmando" not in r, r
     pend = db.ai_get_pending_action(uid_pro)
     assert (pend["tool_name"], pend["tool_args"]) == ("add_launch", _DA_OUTRA)
-    monkeypatch.setattr(db, "ai_set_pending_action", original)
-    diga(uid_pro, "sim")                   # é a que o usuário viu na outra janela
+    diga(uid_pro, "sim")
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 77.0}]
+
+
+def test_depois_da_releitura_a_outra_janela_nao_sobrescreve(uid_pro, monkeypatch):
+    """A corrida que sobrava: a outra janela arma DEPOIS da releitura e antes
+    da entrega. Agora o set dela devolve None e o "sim" executa a nossa."""
+    from core.services.ai_chat import runner
+    liga_flag(monkeypatch)
+    real = runner._ainda_e_a_mesma
+    tentativas = []
+
+    def releitura_e_corrida(user_id, armada):
+        ok = real(user_id, armada)
+        tentativas.append(db.ai_set_pending_action(user_id, "add_launch", _DA_OUTRA, "outra"))
+        return ok
+
+    monkeypatch.setattr(runner, "_ainda_e_a_mesma", releitura_e_corrida)
+    openai_falso(monkeypatch, lancamento(500))
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert "Só confirmando" in r and "R$ 500,00" in r, r
+    assert tentativas == [None]
+    diga(uid_pro, "sim")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 500.0}]
 
 
 # ── Q40 armada pelo add_launch certo, junto de outra escrita ────────────────
