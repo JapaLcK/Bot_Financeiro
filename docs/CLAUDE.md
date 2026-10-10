@@ -569,7 +569,27 @@ A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (rela
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
 preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número), e nada além da preferência é gravado.
+conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+atualizações" também apaga pendências do remetente (abaixo). O texto digitado
+que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
+`parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
+decisão do dono; "pare" e "para" ficam fora, são palavras de cancelar do fluxo de valor
+pendente) vale como o botão de "parar atualizações" nesses mesmos pontos e no fluxo comum,
+antes das pendências e do paywall. "parar report diario" não casa e segue para `report.disable`.
+O "parar atualizações" (botão ou digitado; NÃO os botões de relatório) também apaga as
+pendências de confirmação do bot (`pending_actions`) e da IA (`ai_pending_actions`), para um
+"sim" depois não executar o que a pessoa mandou parar, e encerra a pergunta aberta da IA
+(`finally` do `process_message`: todos os ramos menos `conta_sem_credencial`, onde a âncora
+nem é lida). A limpeza vale só para o remetente (quem conversa: `uid` do fluxo comum e do
+`remetente_com_dados`, a própria conta no `conta_sem_credencial`, o usuário do WhatsApp no
+`precisa_senha`), nunca para a conta sem senha que digitou o número: o opt-out vale para as
+duas, as pendências são de cada um. Se a gravação ou a limpeza falha, responde
+`OPT_OUT_FALHOU_WA` (nunca silêncio; falha só da limpeza deixa o opt-out gravado e um 2º PARAR
+conserta). Nada no bot religa o opt-out (só a tela de
+Configurações). Nos dois ramos sem senha, quem nunca comprou
+(`db.remarketing.ja_comprou` falso) recebe `CONVITE_LEAD_WA` no lugar de `PRECISA_SENHA_WA` e
+`PARAR_LEAD_WA` ao digitar PARAR; quem comprou, os textos de antes. `ja_comprou` que levanta vale
+como "comprou" (log, e a mensagem segue).
 Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
 (`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
