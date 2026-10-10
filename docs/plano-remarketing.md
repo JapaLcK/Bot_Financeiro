@@ -2,7 +2,7 @@
 
 Faixa **Completo**: dinheiro, envio irreversível a pessoas reais, consentimento e uma
 credencial que deixa comprar sem login. Versão 2 do plano do Arquiteto (2026-10-09),
-depois das respostas P1–P5 do dono. O PR 1 (seção 4) está implementado; os demais não.
+depois das respostas P1–P5 do dono. O PR 1 e o PR 2 (seção 4) estão implementados; os demais não.
 
 ## Decisões do dono (2026-10-09)
 
@@ -166,13 +166,24 @@ Cada PR fica inerte sozinho; só o PR 6 com a env envia algo.
 
 ### PR 2 — Bot: "PARAR" desliga o WhatsApp; lead sem compra recebe texto próprio
 
-Hoje `_tratar_opt_out` (`wa_runtime.py:654`) só reage a id interativo; "PARAR" digitado
-não casa. Texto normalizado igual a `parar` vale como `parar atualizacoes` nos ramos
-`conta_sem_credencial`, `precisa_senha`, `remetente_com_dados` e no fluxo comum (antes
-das pendências e do paywall). Lead sem `ja_comprou` recebe texto novo (copy do dono) no
-lugar de `PRECISA_SENHA_WA`. Testes pela conversa (`process_message`, Postgres real),
-com controles negativo e positivo; "parar report diario" continua em `report.disable`.
-Só no aparelho: PARAR de um celular real.
+Implementado. `_tratar_opt_out` só reagia a id interativo; agora a mensagem INTEIRA,
+normalizada (`intent_classifier._normalize`), igual a um dos 6 textos de
+`WA_PARAR_TEXTOS` vale como o botão "parar atualizações" (mesmo setter): `parar`, `stop`,
+`sair`, `parar mensagens`, `parar de receber`, `nao quero mais receber`. "pare" e "para"
+ficam fora (cancelar do fluxo de valor pendente) e "parar report diario" segue para
+`report.disable`. Vale nos ramos `conta_sem_credencial`, `precisa_senha`,
+`remetente_com_dados` e no fluxo comum (antes das pendências e do paywall).
+- Textos do dono: lead sem `ja_comprou` recebe `CONVITE_LEAD_WA` (com
+  pigbankai.com/precos) no lugar de `PRECISA_SENHA_WA` nos dois ramos sem senha, e
+  `PARAR_LEAD_WA` ao digitar PARAR; quem comprou segue com `PRECISA_SENHA_WA` e, ao
+  digitar PARAR, com a resposta de atualizações. `ja_comprou` que levanta = comprou (log).
+- `OPT_OUT_FALHOU_WA` quando a gravação (ou a limpeza) falha: nunca silêncio.
+- PARAR (e o botão de atualizações) apaga as confirmações pendentes do REMETENTE, do bot
+  (`pending_actions`) e da IA (`ai_pending_actions`, uma linha por usuário: some também a
+  confirmação aberta no chat do `/painel` e do `/app`); nunca as da outra conta que recebe o envio. Nada no bot religa o opt-out.
+- Testes pela conversa (`process_message`, Postgres real) em `tests/test_wa_parar.py`, com
+  controles negativo e positivo.
+- Só no aparelho: PARAR de um celular real.
 
 ### PR 3 — Abrir espaço no `assinar.js` (sem mudar comportamento)
 
@@ -242,6 +253,17 @@ move código. `pix-checkout.js` (350) não é tocado.
   do botão.
 - Só em produção: entrega do template de marketing e o primeiro lote. Staging:
   `rodar_uma_vez()` pelo shell.
+- Itens que o PR 2 deixou para este PR (registrados):
+  (a) **telefone em 2 ou mais contas** (a decidir/registrado): quando o número casa com
+  mais de uma conta o auto-vínculo cai em `multiple_accounts` e o PARAR desliga só o
+  usuário do WhatsApp, nenhuma das contas. O PR 6 PULA o WhatsApp quando o número casa com
+  mais de uma conta.
+  (b) **contas sem `auth_accounts`** (registrado): `get_whatsapp_updates_opt_out` devolve
+  True (bloqueado) para elas, então nunca recebem WhatsApp; o job não deve tratar isso como
+  erro.
+  (c) **PARAR no WhatsApp corta só o WhatsApp** (dono, 2026-10-10): grava só
+  `whatsapp_updates_opt_out`, e os e-mails da régua seguem até o descadastro próprio
+  (`engagement_opt_out`, List-Unsubscribe). Por isso o `PARAR_LEAD_WA` diz "por aqui".
 
 ### PR 7 — Painel (só leitura)
 
@@ -270,7 +292,12 @@ falhas, presos em `enviando`, cliques, recuperados (`completed` depois de
 - Sem Purchase do pixel no cliente na volta sem sessão; o servidor cobre.
 - `clicado_em` inflado por prévias de link.
 - No máximo um envio por etapa.
-- "parar" passa a desligar as atualizações para todos os usuários.
+- "parar" e os outros 5 textos de `WA_PARAR_TEXTOS` passam a desligar as atualizações para
+  todos os usuários, e "sair"/"stop" no meio de um fluxo também (decisão do dono). O PARAR
+  e o botão de atualizações apagam as confirmações pendentes do remetente (bot e IA); uma
+  pergunta de valor aberta se perde e basta refazer o pedido.
+- PARAR duplicado (reentrega do mesmo wamid) gera 2 respostas; falha só da limpeza responde
+  "Não consegui registrar" com o opt-out já gravado (um 2º PARAR conserta).
 - Página de descadastro fala em "dicas e insights" (copy antiga).
 - Cupom depois: pelo cupom da página ou por `rm_etapa` no servidor; se for `discounts`
   na sessão, tirar `allow_promotion_codes=True`.

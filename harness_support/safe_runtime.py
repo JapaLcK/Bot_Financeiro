@@ -131,11 +131,13 @@ def install_runtime_boundaries(
 
     modules.install(
         "db",
+        ai_clear_pending_action=lambda *_a, **_k: None,
         attempt_whatsapp_phone_link=lambda _wa_id, current_user_id=None: {
             "status": "already_linked",
             "user_id": current_user_id,
         },
         claim_pending_action=lambda *_a, **_k: False,
+        clear_pending_action=lambda *_a, **_k: None,
         consume_pending_action=lambda *_a, **_k: False,
         conta_sem_credencial=lambda _uid: False,
         get_conn=lambda: deny_boundary("database:get_conn"),
