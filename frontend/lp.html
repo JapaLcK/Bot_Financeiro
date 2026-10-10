@@ -83,6 +83,14 @@
     .lp-travado .lp-cta { transform: none; }
   }
 
+  /* Botão secundário do teste: contorno, sem competir com o CTA rosa. Seletor duplo
+     porque o @media (min-width:720px) redefine .lp-cta{margin-top}. */
+  .lp-cta.lp-cta-sec {
+    margin-top: 12px; padding: 14px 24px; background: transparent; box-shadow: none;
+    border: 1.5px solid rgba(255, 255, 255, .35); font-size: 1rem; font-weight: 600;
+  }
+  @media (hover: hover) and (pointer: fine) { .lp-cta.lp-cta-sec:hover { background: rgba(255, 255, 255, .08); } }
+
   .lp-rodape {
     display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px;
     padding: 18px 20px;
@@ -98,12 +106,15 @@
     .lp h1 { margin: 36px 0 32px; }
     /* Vídeo e botão cabem juntos na primeira dobra (1280×800 incluso). */
     .lp-player { max-width: max(480px, min(880px, calc((100vh - 380px) * 16 / 9))); }
+    /* Com o segundo botão (teste) a dobra pede mais 40px. A classe sai do HTML junto
+       com o botão (html_file sem_teste): demo desligado = a /lp de antes. */
+    .lp-com-teste .lp-player { max-width: max(480px, min(880px, calc((100vh - 420px) * 16 / 9))); }
     .lp-cta { margin-top: 32px; }
   }
 </style>
 </head>
 <body>
-  <main class="lp">
+  <main class="lp lp-com-teste">
     <img class="lp-logo" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42">
     <h1>Você sabe pra onde foi seu dinheiro esse mês?</h1>
     <div class="lp-player">
@@ -117,7 +128,9 @@
       </button>
     </div>
     <a id="lp-cta" class="lp-cta" href="https://quiz.pigbankai.com/">Quero o PigBank</a>
+    <a class="lp-cta lp-cta-sec" data-teste href="/teste">Testar o Piggy agora</a>
   </main>
+  <script src="/teste-piggy.js?v=1" defer></script>
   <footer class="lp-rodape">
     <a href="/termos">Termos de uso</a>
     <a href="/privacy">Privacidade</a>

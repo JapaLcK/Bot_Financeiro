@@ -27,9 +27,11 @@ body.lp { margin:0;background:var(--lp-paper);color:var(--lp-black);font:400 16p
 .lp-btn:hover { transform:translateY(-3px);box-shadow:0 8px 24px #1112}
 .lp-btn-dark { background:var(--lp-black);color:var(--lp-paper)}
 .lp-btn-dark:hover { background:#292526}
+.lp-btn-line { background:transparent;border:1.5px solid currentColor}
+.lp-btn-line:hover { background:#1111}
 .lp-btn-pink { background:var(--lp-pink);color:var(--lp-black)}
 .lp-btn-pink:hover { background:#ff65ac}
-.lp-actions { display:flex;align-items:center;gap:28px}
+.lp-actions { display:flex;flex-wrap:wrap;align-items:center;gap:28px}
 .lp-text-link { font-size:14px;font-weight:650;text-decoration:underline;text-underline-offset:6px;text-decoration-thickness:1px;display:inline-flex;align-items:center;gap:12px;transition:opacity .2s}
 .lp-text-link:hover { opacity:.68}
 .lp-pink-link { color:var(--lp-pink)}
