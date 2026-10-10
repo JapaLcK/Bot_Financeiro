@@ -22,7 +22,7 @@ after(async () => { await browser?.close(); server?.kill(); });
 const XSS = '<img src=x onerror="window.__xss=1">';
 const OCUP = "Já há uma consulta em andamento; tente em instantes.";
 const IDS = ["page_view", "view_item_list", "begin_checkout", "sign_up", "start_trial",
-  "onboarding_complete", "vsl_play", "vsl_progress", "purchase"];
+  "onboarding_complete", "vsl_play", "vsl_progress", "teste_click", "purchase"];
 const FUNIL = {
   gerado_em: "2026-10-08T12:00:00+00:00", viewed_pricing_desde: "2026-09-01T00:00:00+00:00",
   janelas: Object.fromEntries([7, 30].map((d) => [`${d}d`, {

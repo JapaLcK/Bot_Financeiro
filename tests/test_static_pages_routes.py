@@ -809,3 +809,91 @@ def test_par_pix_sai_versionado_por_hash_do_conteudo():
     # E o literal do arquivo não vaza: `?v=1` seria a MESMA chave de cache de antes.
     assert "/pix-poll.js?v=1\"" not in html
     assert "/pix-checkout.js?v=1\"" not in html
+
+
+PAGINAS_DO_TESTE = ("/lp", "/", "/precos")   # a /vsl é a continuação do quiz: nunca leva o botão
+
+
+def _liga_demo(monkeypatch):
+    monkeypatch.setenv("DEMO_DAILY_MAX", "30")
+    monkeypatch.setenv("WHATSAPP_NUMBER", "5511999999999")
+
+
+def test_demo_ligado_as_paginas_levam_ao_teste_e_a_vsl_nao(monkeypatch):
+    """/lp, / e /precos levam ao /teste e carregam o js que repassa utm e mede o clique."""
+    _liga_demo(monkeypatch)
+    for path in PAGINAS_DO_TESTE:
+        html = client.get(path).text
+        assert re.search(r'<a [^>]*\bdata-teste\b[^>]*href="/teste"', html), path
+        assert "Testar o Piggy agora" in html, path
+        tag = re.search(r'<script[^>]*src="/teste-piggy\.js\?v=\w+"[^>]*>', html)
+        assert tag and "defer" in tag.group(0), path
+    assert 'id="testar-piggy"' in client.get("/precos").text
+    assert '<main class="lp lp-com-teste">' in client.get("/lp").text   # a dobra reserva o 2º botão
+    vsl = client.get("/vsl").text   # com o demo ligado a /vsl segue sem botão, script nem dobra extra
+    assert "data-teste" not in vsl and "teste-piggy.js" not in vsl, "a /vsl desvia da compra"
+    assert '<main class="lp">' in vsl and 'class="lp lp-com-teste"' not in vsl
+    assert 'href="/precos"' in vsl and "quiz.pigbankai.com" not in vsl   # o CTA trocado segue
+
+
+def _abre_fecha(html):
+    return len(re.findall(r"<a[\s>]", html)), html.count("</a>")
+
+
+def test_demo_desligado_nenhuma_pagina_promete_o_teste(monkeypatch):
+    """Padrão de produção (DEMO_DAILY_MAX ausente) ou sem WHATSAPP_NUMBER: o /teste só
+    devolve o visitante aos preços, então nenhum botão pode existir — e o resto fica."""
+    _liga_demo(monkeypatch)
+    ligado = {p: client.get(p).text for p in PAGINAS_DO_TESTE}
+    for env in ({"DEMO_DAILY_MAX": None, "WHATSAPP_NUMBER": "5511999999999"},
+                {"DEMO_DAILY_MAX": "0", "WHATSAPP_NUMBER": "5511999999999"},
+                {"DEMO_DAILY_MAX": "30", "WHATSAPP_NUMBER": ""}):
+        for k, v in env.items():
+            monkeypatch.delenv(k, raising=False) if v is None else monkeypatch.setenv(k, v)
+        for path in (*PAGINAS_DO_TESTE, "/vsl", "/continuar-compra"):
+            html = client.get(path).text
+            assert "data-teste" not in html and 'id="testar-piggy"' not in html, (path, env)
+            assert "teste-piggy.js" not in html, (path, env)   # sem botão, sem script
+            if path in ("/lp", "/vsl"):   # sem o botão a /lp é a de antes: dobra de 380, não de 420
+                assert '<main class="lp">' in html and 'class="lp lp-com-teste"' not in html, (path, env)
+        for path, on in ligado.items():   # cada <a removido leva o seu </a>: nada órfão
+            (a_on, f_on), (a_off, f_off) = _abre_fecha(on), _abre_fecha(client.get(path).text)
+            assert a_on - a_off == f_on - f_off >= 1, (path, env)
+    # vizinhos intactos: CTA do quiz na /lp, CTAs de cadastro na /, "Ver planos" na /.
+    assert 'id="lp-cta"' in client.get("/lp").text
+    home = client.get("/").text
+    assert home.count('href="/cadastro"') >= 4 and 'href="/precos">Ver planos</a>' in home
+
+
+def test_precos_logado_e_continuar_compra_sem_o_link_do_teste(monkeypatch):
+    """Logado já tem conta: sem o #testar-piggy no HTML (não some depois do /auth/me,
+    sem salto de layout). /continuar-compra reusa a precos.html e nunca o mostra. Quem
+    TERMINOU o demo chega por /t/{code} ou /teste desligado em /precos?origem=teste: o
+    clique reabriria o WhatsApp (laço FIM + link), então também não leva o convite."""
+    import frontend.routes.static_pages as sp
+    import db
+
+    _liga_demo(monkeypatch)
+    assert 'id="testar-piggy"' in client.get("/precos").text            # anônimo: controle positivo
+    fim = client.get("/precos?origem=teste").text                        # terminou o demo
+    assert "data-teste" not in fim and 'id="testar-piggy"' not in fim and 'id="precos-sub"' in fim
+    assert 'id="testar-piggy"' in client.get("/precos?origem=anuncio").text   # outra origem não esconde
+    monkeypatch.setattr(sp, "_resolve_page_user_id", lambda request: 42)
+    monkeypatch.setattr(db, "record_pricing_viewed", lambda uid: None)
+    logado = client.get("/precos").text
+    assert 'id="testar-piggy"' not in logado and "data-teste" not in logado
+    assert 'id="precos-sub"' in logado                                   # o resto do bloco ficou
+    cont = client.get("/continuar-compra").text
+    assert "data-teste" not in cont and 'id="testar-piggy"' not in cont
+
+
+def test_teste_piggy_js_cache_e_conteudo(monkeypatch):
+    _liga_demo(monkeypatch)   # desligado, a página nem carrega o script
+    resp = client.get("/teste-piggy.js")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/javascript")
+    assert "trackCustom" in resp.text
+    assert resp.headers["cache-control"] == "no-cache"                   # sem ?v
+    v = re.search(r'/teste-piggy\.js\?v=(\w+)', client.get("/lp").text).group(1)   # o hash que o HTML carimba
+    versionado = client.get(f"/teste-piggy.js?v={v}")
+    assert "immutable" in versionado.headers["cache-control"]

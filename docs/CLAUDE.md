@@ -1353,7 +1353,7 @@ ou do JSON); o token fica em memória, com chave = SHA-256 do JSON (trocar a env
 `_LOCK`; 401 da Data API zera o token. Devolve (lista fechada) `eventos {7d|30d: {<evento>:
 {eventos, usuarios}}}`, só para a lista `EVENTOS` (única fonte: `page_view` do `gtag('config')`,
 `view_item_list`, `begin_checkout`, `sign_up`, `start_trial`, `onboarding_complete` (via
-`pbTrack` em `comecar.js`), `vsl_play`, `vsl_progress` e `purchase` do servidor; um teste compara a
+`pbTrack` em `comecar.js`), `vsl_play`, `vsl_progress`, `teste_click` (botão "Testar o Piggy", `teste-piggy.js`) e `purchase` do servidor; um teste compara a
 lista com o que o código dispara, e o front tem a mesma lista em `GA4_EVENTOS`, comparada em
 `tests/frontend/funil_ga4.test.mjs`) e `origens {7d|30d: [{canal, sessoes, usuarios}]}` (top 8
 por janela; `canal` é texto do GA, sanitizado e truncado em 40, e o front o passa por `esc()`).
