@@ -42,12 +42,12 @@ from core import funil_fontes_cache as cache
 log = logging.getLogger(__name__)
 
 # nome (validado na rota) -> módulo que exporta `FONTE`. Import lazy: o módulo da fonte
-# só carrega (e só importa a lib dela) na primeira consulta. A Meta entra aqui no PR
-# seguinte, uma linha; até lá a rota responde 404 para ela.
+# só carrega (e só importa a lib dela) na primeira consulta.
 MODULOS = {
     "stripe": "core.funil_fonte_stripe",
     "ga4": "core.funil_fonte_ga4",
     "clarity": "core.funil_fonte_clarity",
+    "meta": "core.funil_fonte_meta",
 }
 
 TIMEOUT_S = 12  # teto por consulta; as fontes têm timeout próprio menor
@@ -58,6 +58,7 @@ MENSAGENS = {
     "auth": "A fonte recusou as credenciais configuradas.",
     "permissao": "A credencial não tem permissão para ler estes dados.",
     "permissao_ga4": "O GA4 negou o acesso: habilite a Google Analytics Data API no projeto, dê papel de Leitor à conta de serviço na propriedade e confira se GA4_PROPERTY_ID é só o número da propriedade.",
+    "permissao_meta": "A Meta negou o acesso: no Business Manager, o usuário do sistema precisa ter o pixel atribuído e o token provavelmente precisa da permissão de leitura de anúncios (a permissão exata não foi confirmada).",
     "credencial_invalida": "A credencial configurada está ilegível ou inválida; confira o JSON da conta de serviço.",
     "cota": "Limite diário de consultas à fonte atingido; volta amanhã.",
     "limite": "A fonte pediu para reduzir o ritmo das consultas.",

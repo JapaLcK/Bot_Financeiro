@@ -57,6 +57,7 @@ async function abre(responde, viewport = { width: 1280, height: 900 }) {
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
   await page.route("**/admin/api/funil/fonte/stripe", (r) => r.fulfill(json(NC("stripe", "STRIPE_SECRET_KEY"))));
   await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(NC("ga4", "GA4_SERVICE_ACCOUNT_JSON"))));
+  await page.route("**/admin/api/funil/fonte/meta", (r) => r.fulfill(json(NC("meta", "META_INSIGHTS_ACCESS_TOKEN"))));
   await page.route("**/admin/api/funil/fonte/clarity", (r) => { pedidos.clarity++; return responde(r); });
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#f-clarity:not([data-estado=carregando])");
@@ -89,10 +90,10 @@ test("ok: sessões, usuários, rolagem, cliques mortos e de raiva em pt-BR, avis
   await page.close();
 });
 
-test("a ordem dos cartões é 8a, 8b, 8c e o de links continua sendo o 9", async () => {
+test("a ordem dos cartões é 8a, 8b, 8c, 8d e o de links continua sendo o 9", async () => {
   const { page } = await abre((r) => r.fulfill(json(env())));
   const titulos = await page.evaluate(() => [...document.querySelectorAll("#main h2")].map((h) => h.textContent.split(".")[0]));
-  assert.deepEqual(titulos.slice(-4), ["8a", "8b", "8c", "9"]);
+  assert.deepEqual(titulos.slice(-5), ["8a", "8b", "8c", "8d", "9"]);
   assert.ok((await page.evaluate(() => document.querySelector("#main .card:last-child h2").textContent)).startsWith("9. Onde olhar"));
   await page.close();
 });
