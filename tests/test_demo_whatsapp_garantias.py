@@ -283,6 +283,43 @@ def test_falha_de_envio_devolve_a_mensagem_e_nao_carimba(mundo, monkeypatch):
     assert s["first_answer_at"] is None, "sem envio não há 'primeira resposta'"
 
 
+def _historico_visto(mundo):
+    """O que a ÚLTIMA chamada ao modelo recebeu entre o system e a pergunta atual."""
+    return [m["content"] for m in mundo.chamadas[-1][1:-1]]
+
+
+def test_resposta_nao_entregue_nao_entra_no_historico(mundo, monkeypatch):
+    """Envio falhou (Meta 5xx): a pessoa não leu a resposta, então a retentativa
+    não pode chegar ao modelo com ela no histórico (nem o par pergunta/resposta)."""
+    n = _numero()
+    _abre(n)
+
+    def quebra(*a, **k):
+        raise RuntimeError("meta 500")
+
+    real = wa_client.send_text
+    monkeypatch.setattr(wa_client, "send_text", quebra)
+    _manda(n, "primeira que nao chegou")  # o process_message engole o erro de envio
+    assert _sessao(n)["msgs_used"] == 0
+    assert conversa._ler(funil.wa_hash(n)) == [], "nada foi entregue: histórico vazio"
+    monkeypatch.setattr(wa_client, "send_text", real)
+    _manda(n, "de novo")
+    assert _historico_visto(mundo) == [], _historico_visto(mundo)
+    assert _sessao(n)["msgs_used"] == 1
+
+
+def test_resposta_entregue_entra_no_historico_sem_o_aviso_anexado(mundo):
+    """Caminho legítimo: entregue ⇒ a pergunta seguinte a recebe. E o que fica é a
+    resposta do modelo, sem o ULTIMA que o envio cola no fim."""
+    n = _numero()
+    _abre(n)
+    _q("update demo_sessions set msgs_used = 6 where code = %s", (_sessao(n)["code"],))
+    _manda(n, "setima")  # n=7 ⇒ o envio anexa ULTIMA
+    assert wa_demo.ULTIMA in mundo.textos()[-1]
+    _manda(n, "oitava")
+    assert _historico_visto(mundo) == ["setima", "resposta 1"], _historico_visto(mundo)
+
+
 def test_conversa_de_A_nao_toca_a_linha_de_B(mundo):
     """Toda escrita do funil é `where code = <o próprio>`: três vizinhas (uma com
     carimbos nulos e msgs_used baixo, uma com carimbos cheios e msgs_used=3, uma só
@@ -364,10 +401,8 @@ def test_prompt_do_demo_tem_as_regras_e_a_persona():
 
 def test_historico_e_por_numero_e_nao_vaza_entre_dois(mundo):
     ha, hb = funil.wa_hash(_numero()), funil.wa_hash(_numero())
-    conversa.responder(ha, "pergunta-A1")
-    conversa.responder(hb, "pergunta-B1")
-    conversa.responder(ha, "pergunta-A2")
-    conversa.responder(hb, "pergunta-B2")
+    for h, q in ((ha, "pergunta-A1"), (hb, "pergunta-B1"), (ha, "pergunta-A2"), (hb, "pergunta-B2")):
+        conversa.registrar(h, q, conversa.responder(h, q))
     textos = [" | ".join(m["content"] for m in msgs[1:]) for msgs in mundo.chamadas]  # sem o system
     assert "pergunta-A1" in textos[2] and "pergunta-B1" not in textos[2], textos[2]
     assert "pergunta-B1" in textos[3] and "pergunta-A1" not in textos[3], textos[3]

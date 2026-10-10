@@ -85,16 +85,26 @@ def _chamar_modelo(messages: list[dict]) -> str:
     return (resp.choices[0].message.content or "").strip()
 
 
+def _limpa(texto: str) -> str:
+    return (texto or "").strip()[:MAX_CHARS]
+
+
 def responder(h: str, texto: str) -> str:
     """Responde uma pergunta do demo. `h` = wa_hash (chave do histórico).
-    Levanta se o modelo falhar ou vier vazio: o chamador devolve a mensagem
-    reservada e manda o ERROR_MSG."""
-    pergunta = (texto or "").strip()[:MAX_CHARS]
-    hist = _ler(h)[-_HIST_MSGS:]
+    NÃO grava o histórico: quem entregou a resposta chama `registrar`. Levanta se
+    o modelo falhar ou vier vazio: o chamador devolve a mensagem reservada e manda
+    o ERROR_MSG."""
     resposta = (_chamar_modelo(
-        [{"role": "system", "content": PROMPT}, *hist, {"role": "user", "content": pergunta}]
+        [{"role": "system", "content": PROMPT}, *_ler(h)[-_HIST_MSGS:],
+         {"role": "user", "content": _limpa(texto)}]
     ) or "").strip()
     if not resposta:
         raise RuntimeError("resposta vazia do modelo")
-    _guardar(h, [*hist, {"role": "user", "content": pergunta}, {"role": "assistant", "content": resposta}])
     return resposta
+
+
+def registrar(h: str, texto: str, resposta: str) -> None:
+    """Põe o par no histórico. Só depois de a resposta chegar à pessoa: se o envio
+    falha ela não leu, e a retentativa não pode ver a resposta no prompt."""
+    _guardar(h, [*_ler(h), {"role": "user", "content": _limpa(texto)},
+                 {"role": "assistant", "content": resposta}])

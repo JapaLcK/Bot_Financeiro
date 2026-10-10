@@ -187,6 +187,7 @@ def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
         funil.devolver_mensagem(plano.code)
         _texto(to, ERROR_MSG)
         return
+    modelo = resposta  # o histórico guarda a do modelo, sem o ULTIMA/FIM
     if n >= LIMITE_MSGS:
         resposta += "\n\n" + FIM.format(link=_link(plano.code))
     elif n == LIMITE_MSGS - 1:
@@ -196,6 +197,7 @@ def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
     except Exception:
         funil.devolver_mensagem(plano.code)  # não chegou: não gasta pergunta
         raise
+    conversa.registrar(plano.h, pergunta, modelo)  # entregue: só agora a conversa a conhece
     funil.marcar_resposta(plano.code, n)
 
 
