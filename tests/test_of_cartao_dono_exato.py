@@ -25,7 +25,7 @@ def test_import_prioriza_dono_exato_sem_mover_legado(user_id, history):
     before = snapshot(user_id)
     target = first if history else new
     owner = old_card if history else exact
-    tx = transacao(-25)
+    tx = transacao(25)
     tx['provider_transaction_id'] = 'compra-exclusiva'
     ciclo(user_id, target, [conta('estavel', 'CREDIT', tx)])
     after = snapshot(user_id)
@@ -73,7 +73,7 @@ def test_orfao_rele_dono_criado_antes_da_reassociacao(user_id, monkeypatch, occu
     assert result == expected
     assert snapshot(user_id) == before
     assert cards.get_card_by_id(user_id, expected)['open_finance_account_id'] == aid
-    tx = transacao(-25)
+    tx = transacao(25)
     tx['provider_transaction_id'] = 'compra-apos-reassociacao'
     ciclo(user_id, first, [conta('estavel', 'CREDIT', tx)])
     after = snapshot(user_id)

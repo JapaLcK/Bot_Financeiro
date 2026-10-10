@@ -95,8 +95,8 @@ def test_t2_launch_em_portugues_e_espelho_cru(user_id):
 
 
 def test_t3_cartao_em_portugues(user_id):
-    _cartao(user_id, [_tx("c1", -50, "Shopping"), _tx("c2", -60, "Coisa nova"),
-                      _tx("c3", 200, "Credit card payment")])
+    _cartao(user_id, [_tx("c1", 50, "Shopping"), _tx("c2", 60, "Coisa nova"),
+                      _tx("c3", -200, "Credit card payment")])
     assert _compra(user_id, "c1")["categoria"] == "compras"
     assert _compra(user_id, "c2")["categoria"] is None
     assert _compra(user_id, "c3") is None  # pagamento de fatura não vira compra
@@ -105,7 +105,7 @@ def test_t3_cartao_em_portugues(user_id):
 def test_t5_ingles_antigo_vira_portugues_no_sync(user_id):
     txs = [_tx("a", -10, "Shopping"), _tx("f", -20, "Fixed income")]
     cid = _banco(user_id, txs)
-    ctxs = [_tx("c1", -50, "Shopping"), _tx("c2", -60, "Fixed income")]
+    ctxs = [_tx("c1", 50, "Shopping"), _tx("c2", 60, "Fixed income")]
     ccid = _cartao(user_id, ctxs)
     # forma de antes do #149: rótulo cru gravado na linha
     q("update launches set categoria='Shopping' where id=%s", (_launch(user_id, "a")["id"],))
@@ -176,7 +176,7 @@ def test_t10_aplicacao_do_of_fica_fora_dos_aportes(pro_user_id):
     assert _launch(user_id, "x1")["categoria"] == "investimento_aporte" and not _launch(user_id, "x1")["interno"]
     assert _spent_by_bucket(user_id, 2026, 3) == {"conforto": 500.0}
     # o mesmo no cartão (a fatura de uma compra de 10/03 fecha em abril)
-    _cartao(user_id, [_tx("c1", -50, "Investments")])
+    _cartao(user_id, [_tx("c1", 50, "Investments")])
     assert _compra(user_id, "c1")["categoria"] == "investimento_aporte"
     assert _spent_by_bucket(user_id, 2026, 4) == {"conforto": 50.0}
     # controle positivo: o aporte manual continua contando nos três

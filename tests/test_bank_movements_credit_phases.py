@@ -27,7 +27,7 @@ def _write(sql, params):
 def _credit(uid, cid):
     db.save_open_finance_sync(cid, [{"provider_account_id": f"credit-{uid}", "name": "Cartão",
         "type": "CREDIT", "currency": "BRL", "balance": -100,
-        "transactions": [_tx(-100, "credit-tx", "Restaurants")]}])
+        "transactions": [_tx(100, "credit-tx", "Restaurants")]}])
     db.import_open_finance_credit(uid, cid)
     return _row("""select t.id,t.imported_credit_tx_id,ct.card_id,ct.bill_id from open_finance_transactions t
                     join credit_transactions ct on ct.id=t.imported_credit_tx_id where ct.user_id=%s""", (uid,))
@@ -42,7 +42,7 @@ def test_pagamento_e_fase_credit_progridem_sem_ciclo(user_id, monkeypatch, opera
     db.add_launch_and_update_balance(user_id, "receita", 1000, "saldo", None)
     linked = _credit(user_id, cid)
     if operation == "sync":
-        _write("update open_finance_transactions set amount=-200 where id=%s", (linked["id"],))
+        _write("update open_finance_transactions set amount=200 where id=%s", (linked["id"],))
     else:
         # Cartão vazio com fatura real: DELETE card chega ao cascade de bill.
         _write("delete from credit_transactions where id=%s", (linked["imported_credit_tx_id"],))
@@ -97,7 +97,7 @@ def test_pagamento_e_fase_credit_progridem_sem_ciclo(user_id, monkeypatch, opera
         assert movements.bank_movement_summary(user_id)["pending_count"] == 1
 
 
-@pytest.mark.parametrize("amount,days", [(-200, 0), (25, 0), (-200, 40)])
+@pytest.mark.parametrize("amount,days", [(200, 0), (-25, 0), (200, 40)])
 def test_credit_commit_e_retry_apos_falha_bank(user_id, monkeypatch, amount, days):
     cid, source = _bank(user_id)
     _deposit(user_id, source)
@@ -110,7 +110,7 @@ def test_credit_commit_e_retry_apos_falha_bank(user_id, monkeypatch, amount, day
     with pytest.raises(RuntimeError, match="fase BANK"):
         db.sync_imported_open_finance_updates(user_id, cid)
     before = _row("select valor,bill_id from credit_transactions where id=%s", (linked["imported_credit_tx_id"],))
-    assert before["valor"] == -amount
+    assert before["valor"] == amount
     if days:
         assert before["bill_id"] != linked["bill_id"]
         assert _row("select total from credit_bills where id=%s", (linked["bill_id"],))["total"] == 0
@@ -118,7 +118,7 @@ def test_credit_commit_e_retry_apos_falha_bank(user_id, monkeypatch, amount, day
     monkeypatch.setattr(movements, "reconcile_bank_movements", original)
     assert db.sync_imported_open_finance_updates(user_id, cid)["credit_updated"] == 0
     assert _row("select valor,bill_id from credit_transactions where id=%s", (linked["imported_credit_tx_id"],)) == before
-    assert _row("select total from credit_bills where id=%s", (before["bill_id"],))["total"] == -amount
+    assert _row("select total from credit_bills where id=%s", (before["bill_id"],))["total"] == amount
     assert float(db.list_pockets(user_id)[0]["balance"]) == 500
 
 

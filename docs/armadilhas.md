@@ -389,6 +389,12 @@ fixo de toda mudança de layout.
   `_lock_user`; é cego ao lock condicional e a f-string. Receita:
   `grep -rn "_lock_user" db/` e `grep -rniE "for update" db/`;
   `tests/test_lock_ordem_caixinha.py` mostra como forçar a intercalação.
+- **Sandbox da Pluggy não é produção, e a convenção do cartão saiu invertida.** O sinal da
+  compra de cartão foi escrito em cima do Pluggy Bank (compra `CREDIT` negativa) e na produção
+  a compra vem `DEBIT` positiva: compras gravadas como estorno e créditos como compra
+  (contagens da produção em 2026-10-09, só contagens: remedir antes de citar). Medir o formato num conector real antes de fixar convenção de sinal. E
+  `Transfer - Internal` no cartão é o **pagamento da fatura** (a saída igual está na conta
+  corrente), não transferência: `pagamento_no_cartao` (`db/open_finance.py`).
 - **`launch.py` vira o uvicorn** (`os.execv`, que atende o `$PORT` do Railway): um `web`
   no Procfile, um processo, e o SIGTERM chega direto ao uvicorn. O `bot.py` do Discord
   saiu dele no PR 5a do dashboard v2 e não roda mais.

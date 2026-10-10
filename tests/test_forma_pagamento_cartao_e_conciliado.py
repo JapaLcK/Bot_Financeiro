@@ -171,9 +171,9 @@ def _compra_na_conexao(uid, item):
         "id": item, "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"})
     db.save_open_finance_sync(c["id"], [{
         "provider_account_id": f"acc-{uid}", "name": "Nubank", "type": "CREDIT",
-        "currency": "BRL", "balance": Decimal("-50"), "raw": {},
+        "currency": "BRL", "balance": Decimal("50"), "raw": {},
         "transactions": [{"provider_transaction_id": f"cc-{uid}", "description": "MERCADO LIVRE",
-                          "amount": Decimal("-50"), "transaction_date": today_tz(),
+                          "amount": Decimal("50"), "transaction_date": today_tz(),
                           "transacted_at": None, "category": "Shopping", "raw": {}}]}])
     db.import_open_finance_credit(uid, c["id"])
 

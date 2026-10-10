@@ -226,7 +226,7 @@ def test_duas_importacoes_do_mesmo_external_id_somam_a_fatura_uma_vez(user_id):
         try:
             barreira.wait()
             saidas.append(db.add_imported_credit_purchase(
-                user_id, card_id, "-100.00", "mercado", compra, "ext-dup",
+                user_id, card_id, "100.00", "mercado", compra, "ext-dup",
             ))
         except BaseException as exc:  # noqa: BLE001
             erros.append(exc)
