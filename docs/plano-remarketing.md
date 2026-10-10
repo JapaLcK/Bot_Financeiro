@@ -2,7 +2,7 @@
 
 Faixa **Completo**: dinheiro, envio irreversível a pessoas reais, consentimento e uma
 credencial que deixa comprar sem login. Versão 2 do plano do Arquiteto (2026-10-09),
-depois das respostas P1–P5 do dono. O PR 1 e o PR 2 (seção 4) estão implementados; os demais não.
+depois das respostas P1–P5 do dono. O PR 1, o PR 2 e o PR 3 (seção 4) estão implementados; os demais não.
 
 ## Decisões do dono (2026-10-09)
 
