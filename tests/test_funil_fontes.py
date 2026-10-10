@@ -247,7 +247,7 @@ def test_rota_sem_auth_401_usuario_comum_401_e_so_get():
 
 def test_rota_nome_fora_do_dicionario_404_inclusive_os_dos_proximos_prs():
     c = _admin_client()
-    for nome in ("inexistente", "ga4", "clarity", "meta", "STRIPE", "stripe%2F..", "x" * 300):
+    for nome in ("inexistente", "clarity", "meta", "STRIPE", "stripe%2F..", "x" * 300):
         r = c.get(f"/admin/api/funil/fonte/{nome}")
         assert r.status_code == 404, nome
         if nome.isalnum():  # os com "/" ou ".." nem chegam à rota (404 do roteador)

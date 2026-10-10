@@ -1156,8 +1156,8 @@ entram em "cadastros".
 `GET /admin/api/funil/fonte/{nome}` (mesma auth do painel, `no-store`, só GET), uma
 chamada por fonte, e `/admin/api/funil` NÃO muda. `nome` só vale se estiver em
 `funil_fontes.MODULOS` (fonte nova = uma linha lá + um módulo que exporta `FONTE`); fora
-disso, 404. Hoje só `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
-é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total). Envelope
+disso, 404. Hoje `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
+é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total) e `ga4` (abaixo). Envelope
 comum e fechado: `fonte`, `estado` (`ok|nao_configurado|erro|stale`), `mensagem` (SEMPRE
 da tabela fixa `MENSAGENS`, nunca texto da fonte), `falta` (só NOMES de env, quando
 `nao_configurado`), `buscado_em`, `janela {rotulo, fuso}`, `dados`. Cache em TABELA
@@ -1204,6 +1204,59 @@ a ~4-5 threads vivas. O `timeout=8` da listagem é por OPERAÇÃO de rede: servi
 bytes segura a thread além do prazo de 10s. O SDK loga sozinho no logger `stripe` (INFO
 com `error_message`, DEBUG com o corpo): o módulo do Stripe fixa esse logger em WARNING. O `reason` dele agora é
 só o NOME do tipo da exceção (antes era `str(exc)`, que podia levar a chave).
+**Fonte GA4** (`core/funil_fonte_ga4.py`, cartão "8b. GA4"): Google Analytics Data API
+(`runReport`), TTL 30 min, backoff 300 s, SEM cota diária; cada refresh faz no máximo 3 chamadas
+(token da conta de serviço, só quando o de ~1 h venceu, mais 2 relatórios), ou seja, bem abaixo
+da cota da API. Envs: `GA4_PROPERTY_ID` (só dígitos, validado ANTES de montar a URL; ID ruim
+vira `nao_encontrado` sem nenhuma chamada) e `GA4_SERVICE_ACCOUNT_JSON` (o JSON inteiro da chave;
+`faltam()` lista só os nomes). Hosts FIXOS (`oauth2.googleapis.com/token` e
+`analyticsdata.googleapis.com`): o `token_uri` de dentro do JSON nunca é lido. A troca do JWT é
+PyJWT + `requests` (e não `google-auth`, cujas exceções podem carregar trecho do corpo do Google
+ou do JSON); o token fica em memória, com chave = SHA-256 do JSON (trocar a env invalida) e
+`_LOCK`; 401 da Data API zera o token. Devolve (lista fechada) `eventos {7d|30d: {<evento>:
+{eventos, usuarios}}}`, só para a lista `EVENTOS` (única fonte: `page_view` do `gtag('config')`,
+`view_item_list`, `begin_checkout`, `sign_up`, `start_trial`, `onboarding_complete` (via
+`pbTrack` em `comecar.js`), `vsl_play`, `vsl_progress` e `purchase` do servidor; um teste compara a
+lista com o que o código dispara, e o front tem a mesma lista em `GA4_EVENTOS`, comparada em
+`tests/frontend/funil_ga4.test.mjs`) e `origens {7d|30d: [{canal, sessoes, usuarios}]}` (top 8
+por janela; `canal` é texto do GA, sanitizado e truncado em 40, e o front o passa por `esc()`).
+Evento fora da lista é descartado; sem linha = zeros; número que vem como texto vira `int`.
+Códigos de erro (mensagens fixas em `MENSAGENS`): 400 `resposta_invalida`, 401 `auth`, 403
+`permissao_ga4` (API não habilitada no projeto OU conta de serviço sem papel Leitor), 404
+`nao_encontrado` (ID da propriedade errado), 429 `limite`, timeout `timeout`, JSON de credencial
+ilegível/sem campo/PEM ruim `credencial_invalida` (nada do JSON é ecoado). SEGREDO: a
+`private_key` e o token OAuth não saem do módulo (log só com `type(exc).__name__`, status e
+código; `from None`); o `urllib3` em DEBUG só imprime host, caminho e status, então nenhum
+logger é rebaixado. Limites declarados: 7d/30d são `7daysAgo..today` e `30daysAgo..today`
+(incluem HOJE, parcial) no fuso da propriedade; os números do GA4 não batem com os do banco
+(bloqueador de anúncio, consentimento); `purchase` inclui os enviados pelo servidor
+(Measurement Protocol); usuários não somam entre linhas; `timeout=5` é por operação de rede (o
+backoff limita threads presas); o formato de `runReport` foi seguido pela documentação e testado
+contra um servidor local, NÃO contra o Google real (parser tolerante). O `limit` da API vale para
+as linhas dos dois ranges juntas: pede-se 100 e corta-se em 8 por janela no parser. Fica de fora
+de propósito: demografia, dimensões customizadas (ex.: `method` do `sign_up`) e o relatório de
+funil nativo (v1alpha).
+Limites do GA4 declarados, sem correção: o corpo da resposta não tem teto de tamanho (um par
+hostil no TLS poderia mandar 100 MB: ~20 s de parse e ~900 MB de RSS) e o `timeout` do requests é
+por operação, não total (resposta que goteja segura a thread; até ~21 min por ciclo, limitado
+pelo backoff). Sem `orderBys`: com mais de 100 linhas somadas (7d+30d; só com muitos canais
+personalizados) o top 8 pode ficar errado sem aviso (com ~18 grupos padrão são ~36 linhas);
+`rowCount` é ignorado. Um 403 de COTA esgotada aparece como a mensagem de permissão (a cota
+normal esgotada é 429, `limite`); `invalid_grant` por relógio adiantado da instância aparece
+como "recusou as credenciais". `HTTP_PROXY` não-https mandaria o assertion ao proxy em claro (em
+produção a URL é https: o proxy só vê o CONNECT). O `_TOKEN` guarda o access_token em claro, por
+desenho (é o que se reaproveita); redirecionamentos NÃO são seguidos (3xx vira `indisponivel`).
+O `access_token` só passa se casar `[A-Za-z0-9._~+/=-]{1,4096}`. Dois canais iguais após a
+sanitização aparecem como duas linhas. `obter` (infra) devolve `erro` genérico se o módulo da
+fonte não importa, `faltam()` quebra ou a montagem do envelope falha (só o NOME do tipo vai ao
+log); só o cancelamento propaga.
+Outros limites aceitos do GA4: o `overflow-wrap: anywhere` do `.wrapcol` (tabelas do cartão) é
+ignorado no Safari 14 (cosmético: o canal tem no máximo 40 caracteres e a tabela rola dentro
+do `.tblwrap`); 400 da Data API e resposta que não é JSON mostram a mesma mensagem ("não deu
+para ler"), e quem distingue é o log do Railway (`[funil_ga4] dados: HTTP 400`); ID de
+propriedade errado tende a aparecer como 403 (por isso a mensagem de `permissao_ga4` manda
+conferir `GA4_PROPERTY_ID`). Dois logs só de etapa ajudam a primeira carga: `[funil_ga4] token:
+formato recusado` e `[funil_ga4] credencial: JSON inválido` (nunca o valor, o tamanho ou o tipo).
 Limites declarados da infra de fontes (sem correção): a marca `_EM_VOO` é por processo e a
 corrida entre loops só existe com vários workers (o limite real é a cota no banco); o
 executor tem 4 threads, então 4 fontes travadas ao mesmo tempo fazem a 5ª virar `timeout` e

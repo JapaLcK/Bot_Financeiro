@@ -56,6 +56,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.wrapcol td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.cod { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); margin-left: 6px; }
+@media (max-width: 520px) { .cod { display: block; margin: 2px 0 0; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { overflow-wrap: anywhere; min-width: 0; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); }
 .chip b { font-variant-numeric: tabular-nums; }
@@ -170,7 +173,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     return card(title, what, '<div class="facts">' + facts.join("") + "</div>");
   }
 
-  // ── Fontes externas (Stripe e, nos PRs seguintes, GA4/Clarity/Meta) ─────────
+  // ── Fontes externas (Stripe, GA4 e, nos PRs seguintes, Clarity/Meta) ─────────
   // Tudo que vem do servidor aqui é dado de fonte externa: texto SEMPRE por esc(), número
   // por n()/pct()/brl(), e `estado` só entra no HTML depois de passar pela whitelist.
   const ESTADOS = { ok: 1, nao_configurado: 1, erro: 1, stale: 1 };
@@ -198,10 +201,39 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
       (x.cobrancas.truncado ? '<p class="note">Mais de 1.000 cobranças em 30 dias: os números de cobrança estão parciais.</p>' : "");
   }
 
+  // Mesma lista (e ordem) de `EVENTOS` em core/funil_fonte_ga4.py; um teste compara as duas. A ordem
+  // vem DAQUI: o cache em tabela (jsonb) reordena as chaves do `dados`.
+  const GA4_EVENTOS = [
+    ["page_view", "Página vista"], ["view_item_list", "Viu os planos (/precos)"],
+    ["begin_checkout", "Começou o checkout"], ["sign_up", "Cadastro"], ["start_trial", "Iniciou o trial"],
+    ["onboarding_complete", "Concluiu o onboarding"], ["vsl_play", "Deu play no vídeo"],
+    ["vsl_progress", "Progresso do vídeo"], ["purchase", "Compra (inclui as do servidor)"],
+  ];
+
+  function ga4Corpo(x) {
+    const ev = x.eventos[win], og = x.origens[win], dias = win === "7d" ? 7 : 30;
+    return `<div class="sub">Eventos do funil, últimos ${dias} dias e hoje</div>` +
+      '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Evento</th><th>Usuários</th><th>Eventos</th></tr></thead><tbody>' +
+      GA4_EVENTOS.map((e) => {
+        const v = ev[e[0]] || {};
+        return `<tr><td>${esc(e[1])}<span class="cod">${esc(e[0])}</span></td><td>${n(v.usuarios || 0)}</td><td>${n(v.eventos || 0)}</td></tr>`;
+      }).join("") + "</tbody></table></div>" +
+      '<div class="sub">De onde vieram as sessões (grupo de canais do GA4)</div>' +
+      (og.length
+        ? '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Canal</th><th>Sessões</th><th>Usuários</th></tr></thead><tbody>' +
+          og.map((o) => `<tr><td>${esc(o.canal)}</td><td>${n(o.sessoes)}</td><td>${n(o.usuarios)}</td></tr>`).join("") + "</tbody></table></div>"
+        : '<p class="empty">Nenhuma sessão na janela.</p>') +
+      '<p class="note">Os números do GA4 não batem com os do nosso banco (bloqueador de anúncio, consentimento). O dia de hoje é parcial e o fuso é o da propriedade GA4. “Compra” inclui os eventos enviados pelo servidor. Usuários não se somam entre linhas.</p>';
+  }
+
   const FONTES = {
     stripe: {
       rotulo: "Stripe", titulo: "8a. Stripe: assinaturas e cobranças", corpo: stripeCorpo,
       what: "<b>O que é:</b> assinaturas por status agora e cobranças de cartão da janela, direto da API do Stripe. <b>O que não é:</b> Pix, nem lista de pessoas.",
+    },
+    ga4: {
+      rotulo: "GA4", titulo: "8b. GA4: eventos do funil e origem das sessões", corpo: ga4Corpo,
+      what: "<b>O que é:</b> contagem dos eventos do funil medidos no navegador (e a compra, enviada pelo servidor) e de onde vieram as sessões, direto da API do Google Analytics. <b>O que não é:</b> o nosso banco, nem lista de pessoas.",
     },
   };
 
