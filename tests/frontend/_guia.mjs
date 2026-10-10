@@ -32,7 +32,8 @@ function aplicar(g, c) {
 // `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista), "sem" (o plano não
 // dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
 // /guia/dica responde depois de N ms ou quando a promise dada resolve. `s.dicas`: os ids postados.
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
+// `postLento(c, n)`: o mesmo para o POST /guia de número `n` (ms, promise ou nada).
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, postLento, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -66,8 +67,17 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
     s.posts.push(c);
     const outro = await post?.(c, s.posts.length, s);
     if (outro) return r.fulfill({ status: outro.status, json: outro.json });
-    s.g = aplicar(s.g, c);
-    return r.fulfill({ json: s.g });
+    // db/guia.py (`_GESTO`/`_NOVO`): dispensar/reabrir da MESMA aba com n <= o do último gesto
+    // aplicado não grava o efeito (responde o estado atual); sem `ordem` sempre aplica e zera a guarda.
+    const gesto = c.acao === "dispensar" || c.acao === "reabrir";
+    if (!(gesto && c.ordem && s.ordem?.aba === c.ordem.aba && c.ordem.n <= s.ordem.n)) {
+      s.g = aplicar(s.g, c);
+      if (gesto) s.ordem = c.ordem ?? null;
+    }
+    // Como o da dica: aplicado na chegada, a lentidão é a da volta.
+    const json = structuredClone(s.g), lento = postLento?.(c, s.posts.length);
+    if (lento) await (typeof lento === "number" ? new Promise((ok) => setTimeout(ok, lento)) : lento);
+    return r.fulfill({ json });
   });
   await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: "http://127.0.0.1:1" }]);
   await antes?.(ctx, s); // rotas a mais antes de a página abrir (o SSE da coreografia)
