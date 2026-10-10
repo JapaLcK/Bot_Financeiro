@@ -80,3 +80,15 @@ def test_b8_cookie_sem_csrf_403_e_pendencia_sobrevive():
     r = c.request("DELETE", "/ai/pending", json={})  # cookie de sessão, sem header de CSRF
     assert r.status_code == 403, r.text
     assert _pendencia_existe(uid)
+
+
+def test_b9_cota_esgotada_a_pendencia_viva_cancela_mesmo_assim():
+    from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+    uid, c = _conta()
+    _arma(uid, "apagar tudo")
+    for _ in range(ai_monthly_limit_for(uid)):
+        db.ai_increment_usage(uid)
+    assert ai_chat_allowed(uid) is False  # o gate de plano/cota fecharia aqui
+    r = c.delete("/ai/pending", headers=H)
+    assert r.status_code == 200 and r.json() == {"cancelada": "apagar tudo"}, r.text
+    assert not _pendencia_existe(uid)
