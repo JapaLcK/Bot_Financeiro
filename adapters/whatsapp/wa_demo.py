@@ -30,35 +30,44 @@ from utils_phone import mask_phone
 
 logger = logging.getLogger(__name__)
 
-PREFIXO = "demo_q:"
-BOTAO = "Ver perguntas"        # <= 20
+PREFIXO = "demo_p:"  # trocado de "demo_q:" quando a lista passou de 5 para 7: a linha antiga não casa
+BOTAO = "Ver todas"           # <= 20
 SECAO = "Pergunte ao Piggy"    # <= 24
-# id -> (título <= 24, descrição <= 72, pergunta completa que vai ao modelo).
-# A resposta da lista chega com o TÍTULO como texto; o que vale é o id.
-PERGUNTAS = {
-    f"{PREFIXO}1": ("Fecho o mês no azul?", "Projeção do mês com os dados da Ana",
-                    "No ritmo de agora, fecho o mês no azul?"),
-    f"{PREFIXO}2": ("Notebook de 4 mil em 10x", "Quanto pesa a parcela nos próximos meses",
-                    "Se eu comprar um notebook de R$ 4.000 em 10x, como ficam meus próximos meses?"),
-    f"{PREFIXO}3": ("Onde mais gasto?", "Os gastos da Ana por categoria",
-                    "Pra onde foi meu dinheiro este mês?"),
-    f"{PREFIXO}4": ("Qual assinatura cortar?", "As assinaturas da Ana e quanto custam",
-                    "Que assinatura eu poderia cortar?"),
-    f"{PREFIXO}5": ("Gastei 80 no iFood", "Veja como o Piggy anotaria um gasto",
-                    "gastei 80 no ifood"),
-}
+# (título <= 24, descrição <= 72, pergunta completa que vai ao modelo, linha escrita no
+# corpo da abertura — "" se não aparece lá). Uma fonte só: o corpo (BOAS_VINDAS), a lista
+# e o texto de reserva saem daqui. O id é a posição (ids únicos por construção).
+_LISTA = [
+    ("Dá pra pagar as contas?", "Cartão e contas contra o saldo",
+     "Dá pra pagar todas as contas que vencem até o fim do mês sem apertar?",
+     "💳 Dá pra pagar todas as contas do mês?"),
+    ("Gasto que nem percebo?", "O que pesa sem ninguém notar",
+     "Tem algum gasto que eu nem percebo?",
+     "🕵️ Tem algum gasto que eu nem percebo?"),
+    ("Notebook de 4 mil em 10x", "Quanto a parcela pesa no mês da Ana",
+     "Se eu comprar um notebook de R$ 4.000 em 10x, como ficam meus próximos meses?",
+     "🛒 E se eu comprar um notebook de R$ 4.000 em 10x?"),
+    ("Fecho o mês no azul?", "Projeção do mês no ritmo de agora",
+     "No ritmo de agora, fecho o mês no azul?", ""),
+    ("Mais que no mês passado?", "Comparação justa, no mesmo período",
+     "Estou gastando mais que no mês passado? Onde mudou?", ""),
+    ("Quando junto os 10 mil?", "Quando a reserva fica pronta",
+     "Se eu guardar R$ 500 por mês, quando completo minha reserva de R$ 10 mil?", ""),
+    ("Cobranças que se repetem", "Assinaturas e contas fixas do mês",
+     "Quais cobranças se repetem todo mês e quanto isso dá no ano?", ""),
+]
+PERGUNTAS = {f"{PREFIXO}{i}": q for i, q in enumerate(_LISTA, 1)}
 
 # Textos do Piggy (masculino). Nunca "não guardamos nada" nem "nada fica salvo":
 # o texto vai à IA que responde. O que vale é "não é salvo no PigBank, só vai
 # para a IA que responde".
 _JA_TEM_CONTA = "Já tem conta? Manda *link 123456* com o código do site."
+_CONVITE = "Ou escreva a sua 👇"
 BOAS_VINDAS = (
-    "🐷 Oi! Eu sou o Piggy. Aqui você testa como é ter um assistente de dinheiro "
-    "no WhatsApp.\n\n"
-    "Uso os dados de exemplo da Ana, uma pessoa fictícia. O que você escrever "
+    "🐷 Oi! Eu sou o Piggy, o assistente de dinheiro do PigBank no WhatsApp. "
+    "Estou com os dados de exemplo da Ana, uma pessoa fictícia. O que você escrever "
     "aqui não é salvo no PigBank, só vai para a IA que responde. "
-    f"Você tem {LIMITE_MSGS} perguntas. "
-    "Toca em *Ver perguntas* ou escreve a sua 👇"
+    f"Você tem {LIMITE_MSGS} perguntas. Por onde começar?\n\n"
+    + "\n".join(c for *_, c in _LISTA if c) + "\n\n" + _CONVITE
 )
 # ULTIMA e FIM vão coladas à resposta do modelo (que já abre com 🐷): sem emoji
 # aqui; quem manda o FIM sozinho põe o 🐷 na frente.
@@ -142,7 +151,7 @@ def _texto(to: str, body: str) -> None:
 
 
 def _enviar_lista(to: str) -> None:
-    rows = [{"id": i, "title": t, "description": d} for i, (t, d, _) in PERGUNTAS.items()]
+    rows = [{"id": i, "title": t, "description": d} for i, (t, d, *_) in PERGUNTAS.items()]
     try:
         ok = wa_client.send_interactive_list(
             to=to, body=BOAS_VINDAS, button_label=BOTAO,
@@ -152,8 +161,9 @@ def _enviar_lista(to: str) -> None:
             return
     except Exception as exc:
         logger.warning("WA demo lista falhou, usando texto: %s", exc)
-    perguntas = "\n".join(f"• {p}" for _, _, p in PERGUNTAS.values())
-    _texto(to, f"{BOAS_VINDAS}\n\n{perguntas}")
+    # As do corpo já estão escritas lá; o texto traz só as outras.
+    outras = "\n".join(f"• {p}" for _, _, p, c in PERGUNTAS.values() if not c)
+    _texto(to, BOAS_VINDAS.removesuffix(_CONVITE) + f"Outras:\n{outras}\n\n{_CONVITE}")
 
 
 def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
@@ -180,7 +190,7 @@ def _responder(plano: Plano, message: InboundMessage, msg_id: str) -> None:
             wa_client.send_typing_indicator(msg_id)
         except Exception as exc:
             logger.warning("WA demo typing indicator failed message_id=%s error=%s", msg_id, exc)
-        resposta = conversa.responder(plano.h, pergunta)
+        resposta = conversa.responder(plano.h, pergunta, ultima=n >= LIMITE_MSGS)
     except Exception as exc:
         # Sem resposta, sem desconto: a mensagem volta e a pessoa tenta de novo.
         logger.warning("WA demo modelo falhou to=%s error=%s", mask_phone(to), type(exc).__name__)

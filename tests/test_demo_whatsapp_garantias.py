@@ -285,7 +285,8 @@ def test_falha_de_envio_devolve_a_mensagem_e_nao_carimba(mundo, monkeypatch):
 
 def _historico_visto(mundo):
     """O que a ÚLTIMA chamada ao modelo recebeu entre o system e a pergunta atual."""
-    return [m["content"] for m in mundo.chamadas[-1][1:-1]]
+    msgs = [m for m in mundo.chamadas[-1][1:] if m["content"] != conversa.ULTIMA_RESPOSTA]
+    return [m["content"] for m in msgs[:-1]]
 
 
 def test_resposta_nao_entregue_nao_entra_no_historico(mundo, monkeypatch):

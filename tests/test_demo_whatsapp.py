@@ -20,6 +20,10 @@ Controles negativos (medidos no PR; marcados [N]):
 Positivos: número só-WhatsApp (sem conta) usa o demo; a conta real segue o fluxo
 normal; `vincular 123456` em sessão segue o fluxo normal.
 """
+import importlib
+import json
+import math
+import re
 import threading
 import uuid
 from decimal import Decimal
@@ -40,6 +44,7 @@ from core.services.ai_chat import system_prompt as sp
 from core.services.ai_chat.runner import ERROR_MSG
 from core.services.demo import conversa, dados
 from db import demo_funnel as funil
+from utils_text import fmt_brl
 
 
 def test_interruptor_desligado_cai_no_aviso_de_cadastro(mundo, monkeypatch):
@@ -76,6 +81,9 @@ def test_limite_de_oito_mensagens(mundo):
     assert wa_demo.ULTIMA not in textos[5] and wa_demo.ULTIMA not in textos[7]
     assert f"/t/{code}" in textos[7], "a 8ª devia trazer o link final"
     assert f"/t/{code}" not in textos[6]
+    # só a 8ª chamada leva a linha "última resposta" (sem gancho); as 7 primeiras, nunca
+    tem_ultima = [any(m["content"] == conversa.ULTIMA_RESPOSTA for m in c) for c in mundo.chamadas]
+    assert tem_ultima == [False] * 7 + [True]
     s = _sessao(n)
     assert s["msgs_used"] == 8 and s["first_answer_at"] is not None and s["limit_at"] is not None
 
@@ -223,10 +231,23 @@ def test_texto_longo_chega_cortado_em_300(mundo):
 def test_item_da_lista_manda_a_pergunta_completa(mundo):
     n = _numero()
     _abre(n)
-    titulo, _, completa = wa_demo.PERGUNTAS["demo_q:2"]
-    raw = {"interactive": {"type": "list_reply", "list_reply": {"id": "demo_q:2", "title": titulo}}}
+    id_, (titulo, _, completa, _) = f"{wa_demo.PREFIXO}2", wa_demo.PERGUNTAS[f"{wa_demo.PREFIXO}2"]
+    raw = {"interactive": {"type": "list_reply", "list_reply": {"id": id_, "title": titulo}}}
     _manda(n, titulo, raw_extra=raw, tipo="interactive")
     assert mundo.chamadas[-1][-1]["content"] == completa != titulo
+
+
+def test_linha_antiga_da_lista_vira_texto_normal_e_nao_a_pergunta_nova(mundo):
+    """Quem abriu a sessão antes da lista de 7 tem linhas "demo_q:N" na conversa. O id
+    antigo não casa com PERGUNTAS (prefixo novo): vale o título, como texto comum."""
+    n = _numero()
+    _abre(n)
+    assert "demo_q:3" not in wa_demo.PERGUNTAS
+    antigo = "Onde mais gasto?"  # título que demo_q:3 tinha
+    raw = {"interactive": {"type": "list_reply", "list_reply": {"id": "demo_q:3", "title": antigo}}}
+    _manda(n, antigo, raw_extra=raw, tipo="interactive")
+    assert mundo.chamadas[-1][-1]["content"] == antigo
+    assert _sessao(n)["msgs_used"] == 1
 
 
 def test_modelo_que_falha_devolve_a_mensagem(mundo):
@@ -332,7 +353,12 @@ def test_lista_falhando_cai_num_texto_com_as_perguntas(mundo, monkeypatch):
     n = _numero()
     _manda(n, GATILHO)
     corpo = mundo.textos()[-1]
-    assert all(p in corpo for _, _, p in wa_demo.PERGUNTAS.values())
+    assert corpo.startswith(wa_demo.BOAS_VINDAS.removesuffix(wa_demo._CONVITE))
+    fora = [p for _, _, p, c in wa_demo.PERGUNTAS.values() if not c]
+    no_corpo = [p for _, _, p, c in wa_demo.PERGUNTAS.values() if c]
+    assert len(fora) == len(wa_demo.PERGUNTAS) - 3 and all(f"• {p}" in corpo for p in fora)
+    assert not any(f"• {p}" in corpo for p in no_corpo)  # as do corpo não se repetem na lista de texto
+    assert corpo.endswith(wa_demo._CONVITE) and len(corpo) <= 4096
 
 
 # ── 8. lista, prompt e persona ───────────────────────────────────────────────
@@ -340,10 +366,13 @@ def test_lista_falhando_cai_num_texto_com_as_perguntas(mundo, monkeypatch):
 def test_lista_cabe_na_api_da_meta(mundo):
     assert len(wa_demo.BOTAO) <= 20 and len(wa_demo.SECAO) <= 24
     assert len(wa_demo.BOAS_VINDAS) <= 1024
+    assert f"{wa_demo.LIMITE_MSGS} perguntas" in wa_demo.BOAS_VINDAS
     assert 1 <= len(wa_demo.PERGUNTAS) <= 10
-    titulos = [t for t, _, _ in wa_demo.PERGUNTAS.values()]
+    assert len(wa_demo.PERGUNTAS) == 7  # id duplicado sobrescreveria uma pergunta em silêncio
+    assert list(wa_demo.PERGUNTAS) == [f"demo_p:{i}" for i in range(1, 8)]
+    titulos = [q[0] for q in wa_demo.PERGUNTAS.values()]
     assert len(set(titulos)) == len(titulos)
-    for i, (t, d, p) in wa_demo.PERGUNTAS.items():
+    for i, (t, d, p, _) in wa_demo.PERGUNTAS.items():
         assert i.startswith(wa_demo.PREFIXO) and len(t) <= 24 and len(d) <= 72 and p, i
 
     _manda(_numero(), GATILHO)
@@ -351,6 +380,22 @@ def test_lista_cabe_na_api_da_meta(mundo):
     assert enviado["button_label"] == wa_demo.BOTAO
     linhas = [r for s in enviado["sections"] for r in s["rows"]]
     assert len(linhas) <= 10 and len({r["id"] for r in linhas}) == len(linhas)
+
+
+def _tokens(texto):
+    return {t for t in re.findall(r"[\w.]+", texto.lower()) if len(t) >= 3}
+
+
+def test_corpo_da_abertura_e_as_3_perguntas_da_lista_sao_as_mesmas():
+    """O corpo escreve 3 perguntas que a pessoa pode digitar; cada uma tem de ser a de uma
+    entrada de PERGUNTAS (mesmo assunto e mesmos valores em R$), na ordem da lista."""
+    visiveis = wa_demo.BOAS_VINDAS.split("\n\n")[1].splitlines()
+    entradas = [q for q in wa_demo.PERGUNTAS.values() if q[3]]
+    assert len(visiveis) == len(entradas) == 3
+    assert visiveis == [q[3] for q in entradas] == [q[3] for q in list(wa_demo.PERGUNTAS.values())[:3]]
+    for linha, (_, _, completa, _) in zip(visiveis, entradas):
+        assert re.findall(r"R\$ [\d.]+", linha) == re.findall(r"R\$ [\d.]+", completa), linha
+        assert len(_tokens(linha) & _tokens(completa)) >= 3, f"{linha!r} não é {completa!r}"
 
 
 def test_constantes_do_prompt_estao_no_system_prompt_e_no_do_demo():
@@ -403,3 +448,115 @@ def test_message_id_mantem_a_regra_antiga():
     assert wr._message_id(sem_id) == "99"
     sem_nada = InboundMessage(wa_id="1", text="", timestamp=None, attachments=[], raw={})
     assert wr._message_id(sem_nada) == hashlib.sha256(repr({}).encode("utf-8")).hexdigest()
+
+
+def test_persona_pre_calculada_bate_com_as_contas():
+    """O modelo erra a conta; por isso a persona traz os números prontos. Aqui eles são refeitos."""
+    p = dados.PERSONA
+    atual, passado = p["meses"][0], p["meses"][1]
+    c = p["contas_a_vencer_este_mes"]
+    valores = [Decimal(i["valor"]) for i in c["itens"]]
+    assert valores[0] == Decimal(p["cartao"]["fatura_aberta"])
+    assert valores[1:] == [Decimal(x["valor"]) for x in p["contas_a_pagar"]]
+    # Uma fonte: o vencimento do item é o do cartão / da conta, e todos vencem DEPOIS de `hoje`.
+    assert c["itens"][0]["vencimento"] == p["cartao"]["vencimento"]
+    assert [i["vencimento"] for i in c["itens"][1:]] == [x["vencimento"] for x in p["contas_a_pagar"]]
+    hoje = int(p["hoje"].split()[1])
+    assert all(int(i["vencimento"].split()[1]) > hoje for i in c["itens"]), "vencimento no passado"
+    assert sum(valores) == Decimal(c["total"])
+    assert Decimal(p["saldo_conta_corrente"]) - Decimal(c["total"]) == Decimal(c["saldo_apos_pagar_tudo"])
+    assert Decimal(p["assinaturas_por_ano"]) == Decimal(atual["por_categoria"]["assinaturas"]) * 12
+    d = p["delivery_este_mes"]
+    assert Decimal(d["valor"]) == Decimal(atual["por_categoria"]["delivery"])
+    assert (Decimal(d["valor"]) / d["pedidos"]).quantize(Decimal("0.01")) == Decimal(d["ticket_medio"])
+    assert (Decimal(d["valor"]) / Decimal(atual["total_gastos"]) * 100).quantize(Decimal("0.1")) == Decimal(d["percentual_dos_gastos"])
+    m = p["mes_passado_ate_o_dia_20"]
+    assert sum(Decimal(v) for v in m["por_categoria"].values()) == Decimal(m["total_gastos"])
+    v = m["variacao_mesmo_periodo"]
+    assert Decimal(atual["total_gastos"]) - Decimal(m["total_gastos"]) == Decimal(v["valor"])
+    assert (Decimal(v["valor"]) / Decimal(m["total_gastos"]) * 100).quantize(Decimal("0.1")) == Decimal(v["percentual"])
+    altas = {k: Decimal(atual["por_categoria"][k]) - Decimal(x) for k, x in m["por_categoria"].items()}
+    assert {k: Decimal(x) for k, x in v["maiores_altas"].items()} == {k: altas[k] for k in v["maiores_altas"]}
+    assert sorted(altas.values())[-2:] == sorted(Decimal(x) for x in v["maiores_altas"].values())
+    assert Decimal(atual["total_gastos"]) * 30 / 20 > Decimal(passado["total_gastos"]), "o mês está mais caro"
+    r = p["caixinha"]
+    faltam = Decimal(r["meta"]) - Decimal(r["guardado"])
+    assert faltam == Decimal(r["faltam"]) and math.ceil(faltam / 500) == r["meses_guardando_500"]
+
+
+def test_prompt_manda_usar_os_campos_pre_calculados():
+    for campo in ("contas_a_vencer_este_mes", "saldo_apos_pagar_tudo", "mes_passado_ate_o_dia_20",
+                  "variacao_mesmo_periodo", "assinaturas_por_ano", "delivery_este_mes", "meses_guardando_500",
+                  "cobrancas_recorrentes", "total_mensal", "total_anual"):
+        assert campo in json.dumps(dados.PERSONA), campo
+        assert campo in conversa.REGRAS_DEMO, campo
+    assert "pergunta-gancho" in conversa.REGRAS_DEMO
+    assert dados.PERSONA["veredito_do_mes"] in conversa.REGRAS_DEMO  # o prompt cita o veredito da persona
+    assert conversa.REGRAS_DEMO.count("Termine com UMA pergunta-gancho") == 1
+    assert "No máximo 6 linhas" not in conversa.REGRAS_DEMO  # DICAS_GERAIS já fixa 8; uma regra só
+
+
+def test_veredito_do_mes_segue_o_sinal_da_sobra_projetada():
+    p = dados.PERSONA
+    assert p["veredito_do_mes"].startswith("fecha no azul") == (Decimal(p["sobra_projetada_fim_do_mes"]) > 0)
+
+
+def test_prompt_acompanha_a_persona(monkeypatch):
+    """Valores das regras saem da PERSONA (§0.7): mudar a persona muda o que o prompt manda citar."""
+    antes = conversa.REGRAS_DEMO
+    p = dados.PERSONA
+    assert f"{fmt_brl(float(p['cartao']['fatura_aberta']))}, vence {p['cartao']['vencimento']}" in antes
+    for v in (fmt_brl(float(p["contas_a_vencer_este_mes"]["saldo_apos_pagar_tudo"])),
+              fmt_brl(float(p["sobra_projetada_fim_do_mes"])), p["hoje"]):
+        assert v in antes
+    monkeypatch.setitem(p["cartao"], "fatura_aberta", "1300.00")
+    monkeypatch.setitem(p["contas_a_vencer_este_mes"], "proxima_receita", "dia 7 do mês que vem (x)")
+    try:
+        importlib.reload(conversa)
+        assert "R$ 1.300,00, vence" in conversa.REGRAS_DEMO and "R$ 1.260,00" not in conversa.REGRAS_DEMO
+        assert "(dia 7 do mês que vem)" in conversa.REGRAS_DEMO and "dia 5 do mês" not in conversa.REGRAS_DEMO
+    finally:
+        monkeypatch.undo()
+        importlib.reload(conversa)
+    assert conversa.REGRAS_DEMO == antes
+
+
+def test_brl_formata_pt_br():
+    """O prompt usa o `fmt_brl` do repo (§0.1): os valores que ele escreve saem em pt-BR."""
+    assert fmt_brl(float("1260.00")) == "R$ 1.260,00" and fmt_brl(float("300.60")) == "R$ 300,60"
+    assert "R$ 1.260,00, vence" in conversa.REGRAS_DEMO and "R$ 300,60" in conversa.REGRAS_DEMO
+
+
+def test_cobrancas_recorrentes_somam_assinaturas_mais_contas_fixas():
+    p = dados.PERSONA
+    c = p["cobrancas_recorrentes"]
+    mensal = sum(Decimal(i["valor_mensal"]) for i in c["itens"])
+    assert mensal == Decimal(c["total_mensal"]) == Decimal("471.50")
+    assert Decimal(c["total_mensal"]) * 12 == Decimal(c["total_anual"]) == Decimal("5658.00")
+    # as 4 assinaturas (191,60) + as contas_a_pagar (Internet, Energia): mesma fonte, mesmos valores
+    esperado = [Decimal(a["valor_mensal"]) for a in p["assinaturas"]] + [Decimal(a["valor"]) for a in p["contas_a_pagar"]]
+    assert sorted(Decimal(i["valor_mensal"]) for i in c["itens"]) == sorted(esperado)
+    assert "Energia (valor médio)" in [i["nome"] for i in c["itens"]]
+
+
+def test_textos_fixos_dos_dados_da_ana_nao_falam_com_voce_nem_citam_ifood():
+    """Gancho, descrição da lista e corpo falam dos dados da Ana: nunca "você/seu/sua". E
+    o PigBank é só Open Finance: nada de oferecer registrar gasto ("gastei 80 no iFood")."""
+    ganchos = re.findall(r"→ (Quer [^\n]*\?)", conversa.REGRAS_DEMO)
+    assert len(ganchos) == 7 and len(set(ganchos)) == 7  # ciclo de 7, sem repetir
+    textos = ganchos + [d for _, d, *_ in wa_demo.PERGUNTAS.values()] + [c for *_, c in wa_demo.PERGUNTAS.values() if c]
+    for t in textos:
+        assert not re.search(r"\b(você|voce|seus?|suas?)\b", t, re.I), t
+    tudo = " ".join(textos + [q for q, *_ in wa_demo.PERGUNTAS.values()] + [q[2] for q in wa_demo.PERGUNTAS.values()])
+    assert "ifood" not in tudo.lower() and "Veja como o Piggy anotaria" not in tudo
+    assert "ifood" not in " ".join(ganchos).lower() and "anota um gasto" not in conversa.REGRAS_DEMO
+
+
+def test_ultima_resposta_vai_ao_modelo_depois_do_historico(monkeypatch):
+    vistas = []
+    monkeypatch.setattr(conversa, "_chamar_modelo", lambda m: vistas.append(m) or "ok")
+    conversa.responder("h-ultima", "oi", ultima=True)
+    conversa.responder("h-ultima", "oi")
+    com, sem = vistas
+    assert com[-1] == {"role": "system", "content": conversa.ULTIMA_RESPOSTA} and com[-2]["role"] == "user"
+    assert sem == com[:-1], "sem `ultima` o pedido é o mesmo, só sem a linha"
