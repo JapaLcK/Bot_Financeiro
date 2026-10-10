@@ -3,6 +3,8 @@
 //   · POST × POST: o `visto` do convite, lento, volta depois do `feito` do último passo;
 //   · GET × POST: o GET do foco da janela saiu antes do `feito` e volta depois dele.
 // Nos dois, sem o conserto, a tela final "Fechou! O painel é seu." vira "Por agora é isso".
+// O dispensar atrasado de uma aba não desfaz o reabrir que veio depois dele: a `ordem` {aba, n}
+// do POST faz o servidor (db/guia.py; o mock em _guia.mjs aplica a mesma regra) ignorá-lo.
 // E a fila dos POSTs não prende o guia: um POST pendurado segura os seguintes só por ESPERA
 // (5 s, parts/Guia.tsx), e a resposta dele, quando enfim volta, é velha demais para gravar: só relê o guia.
 // O caso 3 mede que o GET sai, não a convergência com o servidor em ordem inversa (o mock aplica na chegada).
@@ -113,5 +115,29 @@ test("fila: um `visto` pendurado segura o `feito` por ~5 s; quando volta, o retr
   assert.ok(espera >= 3500, `o feito não esperou a fila (${espera} ms)`);
   assert.equal(salvando, 0);
   assert.deepEqual(acoes(s), ["visto", `feito:${PASSOS[0].id}`]);
+  assert.deepEqual(erros, []);
+});
+
+test("ordem: o `dispensar` retido que o servidor só aplica depois do `reabrir` não desfaz a reabertura", async () => {
+  let libera, v, gets = 0;
+  const segura = new Promise((ok) => { libera = ok; });
+  const { ctx, page, s, erros } = await abrir({
+    antes: (ctx) => { v = voltas(ctx); ctx.on("request", (q) => { if (q.method() === "GET" && q.url().endsWith("/api/v2/guia")) gets++; }); },
+    post: (c) => (c.acao === "dispensar" ? segura.then(() => undefined) : undefined), // retido ANTES de o servidor aplicar
+  });
+  await page.getByRole("button", { name: "Agora não", exact: true }).click(); // dispensar n=2 (o visto foi o 1)
+  await ate(() => s.posts.some((c) => c.acao === "dispensar"));
+  await page.evaluate(() => window.dispatchEvent(new Event("dash:guia"))); // a Ajuda: reabrir n=3, espera a fila (ESPERA)
+  await ate(() => v.includes("reabrir"), 9000);
+  const antes = gets;
+  libera();
+  await ate(() => v.includes("dispensar") && gets > antes); // a volta do velho e o GET que ela dispara
+  await page.waitForTimeout(300);
+  const balao = await page.locator(".guia-balao").count();
+  const [d, r] = ["dispensar", "reabrir"].map((a) => s.posts.find((c) => c.acao === a).ordem);
+  await ctx.close();
+  assert.equal(s.g.estado, "em_andamento");
+  assert.ok(d?.aba && d.aba === r?.aba && d.n < r.n, JSON.stringify([d, r]));
+  assert.equal(balao, 1);
   assert.deepEqual(erros, []);
 });

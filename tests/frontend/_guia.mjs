@@ -67,7 +67,13 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
     s.posts.push(c);
     const outro = await post?.(c, s.posts.length, s);
     if (outro) return r.fulfill({ status: outro.status, json: outro.json });
-    s.g = aplicar(s.g, c);
+    // db/guia.py (`_GESTO`/`_NOVO`): dispensar/reabrir da MESMA aba com n <= o do último gesto
+    // aplicado não grava o efeito (responde o estado atual); sem `ordem` sempre aplica e zera a guarda.
+    const gesto = c.acao === "dispensar" || c.acao === "reabrir";
+    if (!(gesto && c.ordem && s.ordem?.aba === c.ordem.aba && c.ordem.n <= s.ordem.n)) {
+      s.g = aplicar(s.g, c);
+      if (gesto) s.ordem = c.ordem ?? null;
+    }
     // Como o da dica: aplicado na chegada, a lentidão é a da volta.
     const json = structuredClone(s.g), lento = postLento?.(c, s.posts.length);
     if (lento) await (typeof lento === "number" ? new Promise((ok) => setTimeout(ok, lento)) : lento);
