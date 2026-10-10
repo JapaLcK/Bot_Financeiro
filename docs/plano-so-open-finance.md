@@ -282,7 +282,7 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
 
   | Entidade manual | Criar | Editar | Pausar / desativar | Apagar | Movimentar | Desfazer pelo lançamento | Escrita automática (job ou leitura que escreve) |
   |---|---|---|---|---|---|---|---|
-  | Cartão manual | trava | trava | — | trava | pagar fatura: trava | trava | — |
+  | Cartão manual | trava | dias e limite: trava; nome, cor, bandeira, final e ordem (`reorder_cards`): livres | — | trava | pagar fatura: trava | trava | — |
   | Compra e parcela do cartão manual | trava | trava | — | trava (grupo) | antecipar: trava | trava | — |
   | Fixo (despesa recorrente) | trava | trava | livre até o cobrador parar | trava | — | — | cobrador e avisos param **antes** da 2a |
   | Receita recorrente | espera P7 | espera P7 | espera P7 | espera P7 | — | — | — |
@@ -312,7 +312,8 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   carona. Cada um entra na última coluna da matriz. O controle negativo da 2a roda esses
   caminhos depois da trava: o legado não pode mudar.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
-- Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7.
+- Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7. Na
+  opção c da P7 (receita manual como exceção), ela não trava.
   Até lá o caso `recorrente` trava só a despesa.
 - Os textos da IA (`system_prompt.py`) e o `validate` das tools recusam antes de pedir
   confirmação, como já fazem em `tools/investments.py:130`.
@@ -376,7 +377,9 @@ dos totais juntos, num PR só ou em PRs liberados no mesmo deploy.
   Enquanto nenhum dos dois acontece, a
   tela e os consumidores daquele assunto ficam como estão:
   - metas e caixinhas manuais esperam a Fase 4 (a meta sobre o OF);
-  - receita fixa e renda informada esperam a decisão da P7, qualquer que seja;
+  - receita fixa e renda informada esperam a decisão da P7. Se a P7 mantiver a receita manual
+    como exceção (opção c), ela sai das Fases 2 e 3: continua aceita, editável, na tela e nos
+    totais;
   - recorrentes e contas a pagar esperam o item abaixo.
 - **Antes da 2a (e portanto da 3a):** o gerador de contas dos recorrentes manuais
   (`core/services/recurring_charger.py`) e os avisos de autopay e de vencimento por
