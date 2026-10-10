@@ -880,6 +880,22 @@ def init_db():
         create index if not exists idx_of_recurring_payments_conn
           on of_recurring_payments(connection_id)
         """,
+        # Faturas do cartão que o BANCO fechou (`/bills` da Pluggy), por conta CREDIT.
+        # SEM user_id, como as duas de cima: o dono é conta -> conexão. Nada na tela lê.
+        """
+        create table if not exists of_card_bills (
+          id bigserial primary key,
+          account_id bigint not null references open_finance_accounts(id) on delete cascade,
+          provider_bill_id text not null,
+          due_date date not null,
+          closing_date date,
+          total_amount numeric not null,
+          currency text,
+          raw jsonb not null,
+          updated_at timestamptz not null default now(),
+          unique (account_id, provider_bill_id)
+        )
+        """,
         """
         alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
         """,

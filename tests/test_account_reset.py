@@ -142,6 +142,11 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'NETFLIX.COM', -39.9, array['tx-1'])",
                 (con,),
             )
+            cur.execute(
+                "insert into of_card_bills (account_id, provider_bill_id, due_date, total_amount, raw) "
+                "values (%s, 'bill-1', %s, 100, '{}')",
+                (acc, hoje),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -318,6 +323,11 @@ _OF_JOINS = {
     "of_recurring_payments": (
         "select count(*) as n from of_recurring_payments rp "
         "join open_finance_connections c on c.id = rp.connection_id where c.user_id = %s"
+    ),
+    "of_card_bills": (
+        "select count(*) as n from of_card_bills b "
+        "join open_finance_accounts a on a.id = b.account_id "
+        "join open_finance_connections c on c.id = a.connection_id where c.user_id = %s"
     ),
 }
 _TABELAS_SIMPLES = (
