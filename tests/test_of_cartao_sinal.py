@@ -11,7 +11,12 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
   • regra: `pagamento_no_cartao` reduzida a `is_credit_card_payment` → 0, 1, 4, 6 e 7 vermelhos;
   • só o insert corrigido, a propagação do sync velha → 4 vermelho (o sync reinverte);
   • remoção do pagamento tirada do loop (só o `continue`) → 4 vermelho;
-  • guarda `valor=%s and bill_id` do update tirada → 5 vermelho.
+  • guarda `valor=%s and bill_id` do update tirada → 5 vermelho;
+  • `of_tx_ids` tirado da remoção do sync → 8 (`..._proximo_sync_...`) vermelho;
+  • `or pagamento_no_cartao(...)` tirado do `continue` da reescrita → 8 (`..._pagamento_fora_do_dict_...`) vermelho;
+  • "qualquer espelho é pagamento" no lugar de "o mais novo é pagamento" → 8 (`..._proximo_sync_...`
+    e `..._mais_novo_nao_pagamento_...`) vermelhos;
+  • `of_tx_ids` só com os espelhos-pagamento → 8 (`..._mais_novo_pagamento_remove`) vermelho: a linha fica presa.
 """
 from __future__ import annotations
 
@@ -277,3 +282,90 @@ def test_reconexao_com_legado_remove_o_pagamento(uid_pro, rodar, regra_velha):
     assert faturas(uid_pro) == [(120, "open")] and sem_vinculo(uid_pro, "d")
     rodar(uid_pro, [A, D], item=f"velha-{uid_pro}")  # e a conexão velha sincronizando não o traz de volta
     assert faturas(uid_pro) == [(120, "open")] and sem_vinculo(uid_pro, "d")
+
+
+# ── 8. a mesma transação em duas conexões: decide o espelho MAIS NOVO ───────
+# Mesma identidade (conta + id da Pluggy) nas duas conexões: é o único vínculo duplo que o sync
+# aceita (`assert_unambiguous_links`). Estado: ct de D (+400) e de A (-120, sinal velho), fatura 280.
+
+def _semeia_dois_espelhos(uid, rodar, regra_velha):
+    """(ct de D, espelho velho de D, espelho novo de D); a reconexão moveu o vínculo ao novo."""
+    with regra_velha():
+        rodar(uid, [A, D], item=f"velha-{uid}")
+        rodar(uid, [A, D], item=f"nova-{uid}")
+    velho, novo = [r["id"] for r in q(
+        "select o.id from open_finance_transactions o join open_finance_accounts a on a.id=o.account_id "
+        "join open_finance_connections c on c.id=a.connection_id "
+        "where c.user_id=%s and o.provider_transaction_id='d' order by o.id", (uid,), True)]
+    assert faturas(uid) == [(280, "open")]
+    return linhas(uid)["d"]["id"], velho, novo
+
+
+def _espelho_d(oid, ct, pagamento):
+    """Aponta o espelho `oid` para a linha `ct` (ou None) e o faz pagamento ou compra de 77."""
+    dados = (-400, "Transfer - Internal", "Pagamento em 05/10") if pagamento else (77, "Shopping", "Loja E")
+    q("update open_finance_transactions set imported_credit_tx_id=%s, amount=%s, category=%s, "
+      "description=%s where id=%s", (ct, *dados, oid))
+
+
+def _valor(ct):
+    return q("select valor, is_refund from credit_transactions where id=%s", (ct,), True)
+
+
+def test_religada_no_meio_o_proximo_sync_decide_pelo_mais_novo(uid_pro, rodar, regra_velha, monkeypatch):
+    """Sync 1: a reconexão liga o espelho NOVO (compra) depois do select → a linha de D fica.
+    Sync 2: o mais novo é a compra → D é reescrita como compra (77) e não fica presa."""
+    ct_d, velho, novo = _semeia_dois_espelhos(uid_pro, rodar, regra_velha)
+    _espelho_d(novo, None, pagamento=False)          # a reconexão ainda não ligou
+    _espelho_d(velho, ct_d, pagamento=True)
+    real = of.garantir_no_catalogo
+
+    def liga_no_meio(*a, **kw):
+        _espelho_d(novo, ct_d, pagamento=False)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(of, "garantir_no_catalogo", liga_no_meio)
+    of._sync_imported_credit_updates(uid_pro, None)
+    monkeypatch.setattr(of, "garantir_no_catalogo", real)
+    assert _valor(ct_d) == [{"valor": 400, "is_refund": False}]    # ficou neste sync
+    assert faturas(uid_pro) == [(520, "open")]
+    of._sync_imported_credit_updates(uid_pro, None)
+    assert _valor(ct_d) == [{"valor": 77, "is_refund": False}]     # o seguinte decide pelo novo
+    assert faturas(uid_pro) == [(197, "open")]                     # 520 - 400 + 77
+
+
+def test_ligacao_mista_mais_novo_pagamento_remove(uid_pro, rodar, regra_velha):
+    """Velho = compra, novo = pagamento, os dois ligados: sai. Com `of_tx_ids` só dos pagamentos
+    a remoção recusava (o velho não está no conjunto) e a linha ficava presa para sempre."""
+    ct_d, velho, novo = _semeia_dois_espelhos(uid_pro, rodar, regra_velha)
+    _espelho_d(velho, ct_d, pagamento=False)
+    of._sync_imported_credit_updates(uid_pro, None)
+    assert not _valor(ct_d)
+    assert faturas(uid_pro) == [(120, "open")]       # 280 + 240 (A) - 400 (D)
+
+
+def test_ligacao_mista_mais_novo_nao_pagamento_vira_compra(uid_pro, rodar, regra_velha):
+    """Velho = pagamento, novo = compra, os dois ligados: reescrita pelo mais novo, não removida."""
+    ct_d, velho, novo = _semeia_dois_espelhos(uid_pro, rodar, regra_velha)
+    _espelho_d(velho, ct_d, pagamento=True)
+    _espelho_d(novo, ct_d, pagamento=False)
+    of._sync_imported_credit_updates(uid_pro, None)
+    assert _valor(ct_d) == [{"valor": 77, "is_refund": False}]
+    assert faturas(uid_pro) == [(197, "open")]       # 280 + 240 (A) - 400 + 77 (D)
+
+
+def test_pagamento_fora_do_dict_nao_e_reescrito_como_estorno(uid_pro, rodar, regra_velha, monkeypatch):
+    """Corrida entre os dois selects: o espelho mais novo virou pagamento depois de
+    `pagamentos_no_cartao_legados` (aqui: devolveu []). A reescrita não o grava como estorno
+    (-400); ele fica como estava para o sync seguinte, que o põe em `pagamentos` e o remove."""
+    ct_d, velho, novo = _semeia_dois_espelhos(uid_pro, rodar, regra_velha)
+    _espelho_d(velho, None, pagamento=True)
+    _espelho_d(novo, ct_d, pagamento=True)
+    with monkeypatch.context() as m:
+        m.setattr(of, "pagamentos_no_cartao_legados", lambda cur, uid: [])
+        of._sync_imported_credit_updates(uid_pro, None)
+    assert _valor(ct_d) == [{"valor": 400, "is_refund": False}]
+    assert faturas(uid_pro) == [(520, "open")]       # só A (+240); D intacta
+    of._sync_imported_credit_updates(uid_pro, None)  # o seguinte a remove
+    assert not _valor(ct_d) and faturas(uid_pro) == [(120, "open")]
+

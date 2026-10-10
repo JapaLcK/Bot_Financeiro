@@ -997,7 +997,10 @@ o pagamento já importado; `scripts/corrigir_sinal_cartao_of.py` faz o mesmo (dr
 `--user`, `--apply`) para a conexão que não sincroniza; imprime banco e host antes de agir.
 O pagamento legado ligado só ao espelho de uma conexão substituída por reconexão (o `LATEST`
 devolve o espelho da nova, que nunca o ligou) é achado por `pagamentos_no_cartao_legados`:
-qualquer espelho do usuário, sem recorte por conexão; o sync e o script usam o mesmo.
+sem recorte por conexão, e quem decide se a linha é pagamento é o espelho MAIS NOVO ligado a ela
+(maior conexão, depois maior id); o sync e o script usam o mesmo. A remoção recusa se aparecer
+vínculo novo depois do select (`of_tx_ids` = todas as referências vistas); o sync seguinte decide
+de novo.
 **Compra e parcela do banco não se apagam nem se antecipam** (`undo_credit_transaction`,
 `undo_installment_group`, `anticipate_installment` levantam `db.CompraDoBanco`; /app responde
 409, WhatsApp e IA a frase): o sync reimporta a linha e, na antecipação, a Carteira ficava

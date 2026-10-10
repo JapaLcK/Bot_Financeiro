@@ -2443,23 +2443,31 @@ CREDIT_LINKS_SQL = f"""
 
 
 def pagamentos_no_cartao_legados(cur, user_id: int) -> list[dict]:
-    """Linhas de cartão do usuário ligadas a QUALQUER espelho dele que são pagamento da fatura.
+    """Linhas de cartão do usuário cujo espelho MAIS NOVO é pagamento da fatura.
 
-    Sem `LATEST_TRANSACTION_SQL` nem recorte por conexão: o pagamento gravado como compra pela
+    Mais novo = maior `c.id`, depois maior `o.id` (a ordem do `CREDIT_LINKS_SQL`). Sem
+    `LATEST_TRANSACTION_SQL` nem recorte por conexão: o pagamento gravado como compra pela
     regra velha, depois de uma reconexão, fica ligado só ao espelho da conexão VELHA (o import da
     nova pula o pagamento e nunca o liga), e `CREDIT_LINKS_SQL` não o devolve. Também lido pelo
-    script. ponytail: uma linha cuja categoria deixou de ser pagamento entre as conexões sai
-    também; o import seguinte a recria pelo espelho novo."""
+    script. `of_ids` = TODAS as referências da linha vistas aqui (o sync as passa como
+    `of_tx_ids`: só uma referência nova depois do select faz a remoção recusar). Linha cujo mais
+    novo não é pagamento fica de fora e cai na reescrita normal."""
     cur.execute(
-        """select distinct ct.id as ct_id, ct.bill_id, o.amount, o.category, o.description
+        """select ct.id as ct_id, o.id as of_id, ct.bill_id, o.amount, o.category, o.description
            from open_finance_transactions o
            join open_finance_accounts a on a.id = o.account_id
            join open_finance_connections c on c.id = a.connection_id
            join credit_transactions ct on ct.id = o.imported_credit_tx_id
-          where c.user_id=%s and ct.user_id=c.user_id and upper(a.type)='CREDIT'""",
+          where c.user_id=%s and ct.user_id=c.user_id and upper(a.type)='CREDIT'
+          order by ct.id, c.id desc, o.id desc""",
         (user_id,),
     )
-    return [r for r in cur.fetchall()
+    por_linha: dict[int, dict] = {}
+    for r in cur.fetchall():
+        if r["ct_id"] not in por_linha:  # 1ª de cada ct_id = o espelho mais novo
+            por_linha[r["ct_id"]] = {**r, "of_ids": set()}
+        por_linha[r["ct_id"]]["of_ids"].add(r["of_id"])
+    return [r for r in por_linha.values()
             if pagamento_no_cartao(r["amount"], r["category"], r["description"])]
 
 
@@ -2483,12 +2491,12 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
     with get_conn() as conn:
         with conn.cursor() as cur:
             assert_unambiguous_links(cur, user_id, credit=True)
-            pagamentos = {r["ct_id"] for r in pagamentos_no_cartao_legados(cur, user_id)}
+            pagamentos = {r["ct_id"]: r["of_ids"] for r in pagamentos_no_cartao_legados(cur, user_id)}
             # 2) Transações de cartão (ajusta o total da fatura pela diferença)
             cur.execute(CREDIT_LINKS_SQL, (user_id, connection_id, connection_id))
             for r in cur.fetchall():
-                if r["ct_id"] in pagamentos:
-                    continue  # não reescreve como estorno: sai da fatura abaixo
+                if r["ct_id"] in pagamentos or pagamento_no_cartao(r["amount"], r["category"], r["description"]):
+                    continue  # nunca reescreve pagamento como estorno; sai da fatura (neste sync ou no seguinte)
                 mudanca = mudanca_linha_cartao(r)
                 if mudanca:
                     new_valor, new_refund, new_tipo, new_cat, _ = mudanca
@@ -2542,8 +2550,9 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
         conn.commit()
     garantir_no_catalogo(user_id, novas)  # antes da remoção: falha nela não perde o catálogo
     # Fora da transação: a remoção abre a própria (`for update`, `total -= valor`).
-    for ct_id in pagamentos:
-        if remove_single_credit_transaction(user_id, ct_id):
+    # of_tx_ids: referência nova depois do select (reconexão) → fica; o próximo sync decide de novo
+    for ct_id, of_ids in pagamentos.items():
+        if remove_single_credit_transaction(user_id, ct_id, of_tx_ids=of_ids):
             credit_updated += 1
     return credit_updated
 
