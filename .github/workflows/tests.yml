@@ -517,8 +517,9 @@ jobs:
       # O mesmo vale para `--test-timeout`: teste que pendura vira falha com nome, em vez
       # de cancelar o shard aos 15 min sem dizer qual. 300 s ≈ 3,6× o pior teste (83,2 s,
       # run do PR #900, 2026-10-10) — remeça antes de reusar.
+      # `--test-force-exit` é o que faz o processo sair quando um hook pendura com o browser aberto.
       - name: Run frontend tests
-        run: node --test --test-timeout=300000 --test-shard=${{ matrix.shard }}/3 tests/frontend/*.test.mjs
+        run: node --test --test-timeout=300000 --test-force-exit --test-shard=${{ matrix.shard }}/3 tests/frontend/*.test.mjs
 
   # Agregador: o check required da main é `frontend`, e os shards aparecem como
   # "frontend shard N/3" — sem este job o `frontend` ficaria pendente para sempre.
