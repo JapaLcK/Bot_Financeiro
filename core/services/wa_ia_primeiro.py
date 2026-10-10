@@ -59,6 +59,19 @@ def _forma_curta(sem_data: str, args: dict) -> bool:
     return len(sobra) == 1 and alvo == sobra
 
 
+def _categoria_serve(tipo: str, curta: bool, categoria: str) -> bool:
+    """A categoria combina com o tipo: despesa nunca em categoria só de receita
+    ("gastei 50 em dividendo" → rendimentos); na forma curta (sem verbo dando a
+    direção), a despesa exige categoria de despesa PADRÃO — receita ("dividendo
+    50") e categoria personalizada do usuário ficam incertas."""
+    from utils_text import (CATEGORIAS_DE_DESPESA_PADRAO, CATEGORIAS_SO_DE_RECEITA,
+                            normalize_text)
+    cat = normalize_text(categoria or "")
+    if tipo == "despesa" and cat in CATEGORIAS_SO_DE_RECEITA:
+        return False
+    return not (curta and cat not in CATEGORIAS_DE_DESPESA_PADRAO)
+
+
 def forma_apoiada(args: dict, texto: str) -> bool:
     """A forma que a IA declarou é a que o texto do usuário declara (ausente:
     nada a corroborar). Vale em qualquer decisão do `fp.decidir`."""
@@ -108,7 +121,10 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         é o alvo inteiro); sem verbo e sem forma curta, incerto;
     (b) categoria: com hashtag, a IA ecoa a da hashtag E a regra local da nota
         não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
-        sem hashtag, regra local confiante na nota e no texto, iguais;
+        sem hashtag, regra local confiante na nota e no texto, iguais; a
+        categoria tem de servir ao tipo (`_categoria_serve`): despesa não vai a
+        categoria só de receita, e a forma curta (sem verbo) exige categoria de
+        despesa padrão (`utils_text.CATEGORIAS_DE_DESPESA_PADRAO`);
     (e) forma_pagamento: se a IA declarou, o texto declara a mesma
         (`forma_apoiada`, `forma_pagamento.detectar`), também quando o
         `fp.decidir` dá BANCO (`precisa_confirmar_lancamento`); ausente segue o
@@ -166,12 +182,13 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     # (c) tipo por lista positiva: receita só com verbo de receita no começo;
     # despesa só com verbo de saída no começo, ou na forma curta ("mercado 80").
     norm_sem_data = normalize_text(sem_data)
+    curta = False
     if norm_sem_data.startswith(RECEITA_START_VERBS):
         tipo_do_texto = "receita"
     elif norm_sem_data.split()[:1] and norm_sem_data.split()[0] in VERBOS_DE_SAIDA:
         tipo_do_texto = "despesa"
     elif _forma_curta(sem_data, args):
-        tipo_do_texto = "despesa"
+        tipo_do_texto, curta = "despesa", True
     else:
         return False
     if str(args.get("tipo") or "").strip().lower() != tipo_do_texto:
@@ -201,10 +218,12 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         cat_hashtag = infer_category(user_id, "", hashtag).category
         if not cat_ia or infer_category(user_id, "", cat_ia).category != cat_hashtag:
             return False
-        return local.reason not in MOTIVOS_CONFIANTES or local.category == cat_hashtag
+        return ((local.reason not in MOTIVOS_CONFIANTES or local.category == cat_hashtag)
+                and _categoria_serve(tipo_do_texto, curta, cat_hashtag))
     if local.reason not in MOTIVOS_CONFIANTES:
         return False
-    return infer_category(user_id, texto, None, allow_ai=False).category == local.category
+    return (infer_category(user_id, texto, None, allow_ai=False).category == local.category
+            and _categoria_serve(tipo_do_texto, curta, local.category))
 
 
 def _decisao_no_whatsapp(user_id: int, args: dict) -> str | None:

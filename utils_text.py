@@ -543,6 +543,17 @@ CATEGORY_LABELS = {
     "criptomoedas": "criptomoedas",
 }
 
+# Categoria que só faz sentido como RECEITA: uma despesa nela é incoerente.
+CATEGORIAS_SO_DE_RECEITA = frozenset({"rendimentos"})
+# As categorias de DESPESA padrão do app (chaves normalizadas de CATEGORY_LABELS,
+# sem movimentação interna, rendimento/investimento/cripto nem "outros"). O
+# `wa_ia_primeiro` só dá por certa uma despesa SEM verbo ("mercado 80") se a
+# categoria local está aqui; custom do usuário e receita ficam de fora.
+CATEGORIAS_DE_DESPESA_PADRAO = (
+    frozenset(CATEGORY_LABELS) - INTERNAL_MOVEMENT_CATEGORIES
+    - CATEGORIAS_SO_DE_RECEITA - {"investimentos", "criptomoedas", "outros"}
+)
+
 # Categorias onde "mesmo valor repetido" é ruído, não recorrência: compras
 # pontuais (mercado/lazer/compras online), alimentação (valor variável) e
 # movimentações internas/investimento. Nessas NÃO sugerimos gasto fixo

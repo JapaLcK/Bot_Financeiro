@@ -645,6 +645,34 @@ def test_verbo_ou_forma_curta_grava_direto(uid_pro, monkeypatch, frase, valor, a
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": float(valor)}]
 
 
+# ── Forma curta: a categoria tem de ser de despesa padrão ───────────────────
+
+@pytest.mark.parametrize("frase,alvo", [
+    ("dividendo 50", "dividendo"),                # LOCAL_RULES: rendimentos
+    ("gastei 50 em dividendo", "dividendo"),      # com verbo, mas despesa em categoria de receita
+    ("salario 50", "salario"),
+], ids=["dividendo-curta", "dividendo-com-verbo", "salario-curta"])
+def test_despesa_em_categoria_de_receita_confirma(uid_pro, monkeypatch, frase, alvo):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50, alvo=alvo))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_categoria_personalizada_na_forma_curta_confirma_mas_com_verbo_grava(uid_pro, monkeypatch):
+    liga_flag(monkeypatch)
+    db.add_category_rule(uid_pro, "padoca", "minha padaria")
+    openai_falso(monkeypatch, lancamento(30, alvo="padoca"), lancamento(30, alvo="padoca"))
+    r = diga(uid_pro, "padoca 30")
+    assert "Só confirmando" in r, r
+    diga(uid_pro, "não")
+    assert lancamentos(uid_pro) == []
+    r = diga(uid_pro, "gastei 30 na padoca")
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.0}]
+
+
 def test_nao_dentro_de_outra_palavra_nao_e_negacao(uid_pro):
     """"nao" só conta como palavra inteira: "nanao" / "banao" não disparam."""
     assert lancamento_com_certeza(uid_pro, _a(50, "mercado"), "gastei 50 no mercado banao") is True

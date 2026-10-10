@@ -948,7 +948,9 @@ ao do texto; texto sem data → IA sem data ou hoje); tipo (lista positiva: rece
 com verbo de receita no começo; despesa só com verbo de saída no começo, ou forma curta
 "mercado 80": além do número e de "R$/reais" sobra UMA palavra e ela é o alvo inteiro —
 "o mercado me devolveu 50 reais", "reembolso mercado 50", "uber aeroporto 23" e
-"R$ 1.234,56 no aluguel" são incertos); categoria
+"R$ 1.234,56 no aluguel" são incertos; na forma curta a categoria local também tem de ser
+de despesa padrão — "dividendo 50" (rendimentos) e categoria personalizada são incertos;
+despesa em categoria só de receita é incerta mesmo com verbo); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
 `forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma — também
 quando a decisão é BANCO, que não grava: forma "banco" inventada para um gasto em
