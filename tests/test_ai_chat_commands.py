@@ -127,10 +127,28 @@ def test_free_com_prefix_so_piggy_puro_tambem_recebe_gate(patches):
 def test_free_com_pending_recebe_gate_e_limpa_pending(patches):
     patches["is_pro"] = False
     patches["pending"] = {"some": "pending"}
-    out = mod.handle_ai_chat_command(1, "sim", platform="whatsapp")
+    out = mod.handle_ai_chat_command(1, "hmm sei la", platform="whatsapp")
     assert out is not None
     assert patches["clear_pending_called"] is True
     assert patches["ai_called_with"] is None
+
+
+@pytest.mark.parametrize("texto", ["sim", "não"])
+@pytest.mark.parametrize("so_a_cota_acabou", [True, False], ids=["cota", "sem-ia-no-plano"])
+def test_sem_ia_com_pending_sim_e_nao(patches, monkeypatch, texto, so_a_cota_acabou):
+    # Só a cota acabou (`aviso_de_cota` com texto): o sim/não vai ao runner,
+    # que resolve a confirmação antes da cota. Sem IA no plano: o gate de sempre.
+    patches["is_pro"] = False
+    patches["pending"] = {"some": "pending"}
+    monkeypatch.setattr(mod, "aviso_de_cota", lambda uid: "acabou" if so_a_cota_acabou else None)
+    out = mod.handle_ai_chat_command(1, texto, platform="whatsapp")
+    if so_a_cota_acabou:
+        assert patches["clear_pending_called"] is False
+        assert patches["ai_called_with"] is not None
+    else:
+        assert patches["clear_pending_called"] is True
+        assert patches["ai_called_with"] is None
+        assert "PigBank+" in out
 
 
 # ─── Pro sem prefix → None (comando determinístico tem precedência) ──────────
