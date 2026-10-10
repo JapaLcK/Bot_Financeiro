@@ -85,6 +85,7 @@ TABELA = {
     ("GET", "/billing/pix-extras"): (L, "compra"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
+    ("DELETE", "/ai/pending"): (B, "require_pro_feature"),
     # ── links e utilidades públicas ──
     ("GET", "/d/{code}"): (P, "magic link"), ("GET", "/r/{code}"): (P, "link de afiliado"),
     ("GET", "/i/{code}"): (P, "link de prospect"), ("GET", "/wa"): (P, "abre o WhatsApp"),

@@ -258,17 +258,23 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
     return _como_pendencia(row)
 
 
-def clear_pending_action(user_id: int) -> None:
+def clear_pending_action(user_id: int) -> Optional[str]:
+    """Apaga a pendência. Devolve o summary se ela ainda estava viva (TTL), senão None."""
     from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
         anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
-            "delete from ai_pending_actions where user_id = %s",
+            "delete from ai_pending_actions where user_id = %s returning summary, created_at",
             (int(user_id),),
         )
-        if cur.rowcount:
+        row = cur.fetchone()
+        if row:
             avisar_mudanca_financeira(cur, user_id, anterior, None, ia=True)
         conn.commit()
+    if not row:
+        return None
+    criada = row["created_at"].replace(tzinfo=row["created_at"].tzinfo or timezone.utc)
+    return row["summary"] if criada >= datetime.now(timezone.utc) - timedelta(minutes=PENDING_TTL_MINUTES) else None
 
 
 def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:
