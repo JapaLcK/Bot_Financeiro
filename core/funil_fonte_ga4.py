@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 # código): `page_view` vem do `gtag('config')`, o resto de `gtag('event')`/`pbTrack` nas
 # páginas e de `core/services/ga4_mp.py` (purchase, no servidor).
 EVENTOS = ("page_view", "view_item_list", "begin_checkout", "sign_up", "start_trial",
-           "onboarding_complete", "vsl_play", "vsl_progress", "purchase")
+           "onboarding_complete", "vsl_play", "vsl_progress", "teste_click", "purchase")
 
 _URL_TOKEN = "https://oauth2.googleapis.com/token"
 _URL_DADOS = "https://analyticsdata.googleapis.com/v1beta/properties/{}:runReport"

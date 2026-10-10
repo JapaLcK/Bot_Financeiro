@@ -61,7 +61,7 @@ const env = (extra) => ({ fonte: "stripe", estado: "ok", mensagem: null, falta: 
   janela: { rotulo: "Assinaturas agora; cobranças dos últimos 7 e 30 dias", fuso: "UTC" }, dados: DADOS, ...extra });
 // Cartão GA4 (8b): mesmo estado do caso do Stripe, com o corpo e a env que faltam da fonte dele.
 const eventos = (k) => Object.fromEntries(["page_view", "view_item_list", "begin_checkout", "sign_up", "start_trial",
-  "onboarding_complete", "vsl_play", "vsl_progress", "purchase"].map((e, i) => [e, { eventos: 100 * k + i, usuarios: 10 * k + i }]));
+  "onboarding_complete", "vsl_play", "vsl_progress", "teste_click", "purchase"].map((e, i) => [e, { eventos: 100 * k + i, usuarios: 10 * k + i }]));
 const DADOS_GA4 = { eventos: { "7d": eventos(1), "30d": eventos(2) },
   origens: { "7d": [{ canal: "Direct", sessoes: 5, usuarios: 4 }], "30d": [{ canal: "Organic Search", sessoes: 50, usuarios: 40 }] } };
 const ga4 = (e) => ({ ...e, fonte: "ga4", janela: { rotulo: "GA4", fuso: "o da propriedade GA4" },
