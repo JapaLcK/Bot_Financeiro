@@ -217,6 +217,9 @@ def test_heartbeat_que_levanta_nao_interrompe_a_leitura(monkeypatch):
     (lambda p: {"total": "x", "totalPages": 1, "results": []}, 20),                  # total inválido
     (lambda p: {"total": -1, "totalPages": 1, "results": []}, 20),                   # total negativo
     (lambda p: {"total": 1, "totalPages": 1, "results": [{"id": 1}, {"id": 2}]}, 20),  # a mais que o total
+    (lambda p: {"total": 2, "totalPages": 2, "results": [{"id": "A"}]}, 20),         # mesma fatura nas 2 páginas
+    (lambda p: {"totalPages": 1, "results": [{"id": "A"}, {"id": " A "}]}, 20),      # repetido na MESMA página
+    (lambda p: {"totalPages": 2, "results": [{"id": "A"}] if p == 1 else []}, 20),   # página 2 vazia sem prova
 ])
 def test_paginador_levanta_se_incoerente(monkeypatch, resposta, max_pages):
     _paginas(monkeypatch, resposta)
@@ -229,3 +232,13 @@ def test_paginador_com_total_que_bate_e_sem_total_passa(monkeypatch):
     assert pb.list_pluggy_bills("x", "k") == [{"id": 1}, {"id": 2}]
     _paginas(monkeypatch, lambda p: {"totalPages": 2, "results": [{"id": p}]})      # sem total: como antes
     assert pb.list_pluggy_bills("x", "k") == [{"id": 1}, {"id": 2}]
+
+
+def test_paginador_conta_vazia_e_itens_sem_id_nao_levantam(monkeypatch):
+    _paginas(monkeypatch, lambda p: {"total": 0, "totalPages": 1, "results": []})   # total 0 é prova
+    assert pb.list_pluggy_bills("x", "k") == []
+    sem_id = [{}, {}, {"id": ""}, {"id": 7}, "x"]          # a gravação os pula; o leitor não levanta
+    _paginas(monkeypatch, lambda p: {"total": 5, "totalPages": 1, "results": sem_id})
+    assert pb.list_pluggy_bills("x", "k") == sem_id
+    _paginas(monkeypatch, lambda p: {"total": 2, "totalPages": 2, "results": [{"id": "AB"[p - 1]}]})
+    assert pb.list_pluggy_bills("x", "k") == [{"id": "A"}, {"id": "B"}]

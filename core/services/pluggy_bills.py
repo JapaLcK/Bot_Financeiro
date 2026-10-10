@@ -4,7 +4,10 @@ Módulo próprio porque `core/services/pluggy.py` está no teto de linhas (ver
 tests/test_max_lines_python.py). Só LÊ:
 quem grava é `db/of_card_bills.py`. Como a gravação nunca apaga, uma leitura que
 termina antes da hora só deixa de atualizar — por isso metadata incoerente, `total` que
-não bate com o lido e estouro do teto LEVANTAM (`PluggyApiError`) em vez de devolver lista parcial.
+não bate com o lido, id repetido entre páginas, página vazia sem prova e estouro do teto LEVANTAM
+(`PluggyApiError`) em vez de devolver lista parcial. Limite: paginação por deslocamento sem snapshot pode
+pular uma fatura que muda de página entre requisições, sem sinal; aqui nada é apagado, então o efeito é a
+fatura não atualizar naquele sync (e a V1 contar a menos), não perda de dado.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ def list_pluggy_bills(account_id: str, api_key: str, *, max_pages: int = 20,
     `list_pluggy_transactions`); falha dele nunca interrompe a leitura."""
     out: list[dict] = []
     total = contagem = None
+    vistos: set[str] = set()
     for pagina in range(1, max_pages + 1):
         if on_page is not None:
             try:
@@ -41,6 +45,14 @@ def list_pluggy_bills(account_id: str, api_key: str, *, max_pages: int = 20,
             if n is None or n < 0 or (pagina > 1 and n != contagem):
                 raise PluggyApiError("Leitura de /bills incompleta: total incoerente.")
             contagem = n
+        if not data["results"] and paginas != 0 and contagem != 0:   # `contagem` já é a desta página
+            raise PluggyApiError("Leitura de /bills incompleta: página vazia sem prova.")
+        for item in data["results"]:        # item sem id usável: a gravação o pula (db/of_card_bills.py)
+            bid = item.get("id") if isinstance(item, dict) else None
+            if isinstance(bid, str) and bid.strip():
+                if bid.strip() in vistos:   # janela deslizante: o que ficou no fim nunca foi lido
+                    raise PluggyApiError("Leitura de /bills incompleta: id repetido.")
+                vistos.add(bid.strip())
         out += data["results"]
         if pagina >= total:
             if contagem is not None and len(out) != contagem:
