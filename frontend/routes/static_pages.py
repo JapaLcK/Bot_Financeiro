@@ -471,6 +471,13 @@ def serve_precos(request: Request):
             record_pricing_viewed(uid)
     except Exception:  # telemetria nunca derruba a página de venda
         logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
+    if uid is not None:  # T0 da régua de remarketing; try próprio, não derruba a página
+        try:
+            from db.remarketing import registrar_t0
+
+            registrar_t0(uid, "precos")
+        except Exception as exc:
+            logging.getLogger(__name__).warning("remarketing_t0 falhou: %s", type(exc).__name__)
     # Sem convite para quem já tem conta (o JS tira o link de quem só tem refresh válido;
     # aqui evitamos o salto de layout dos demais) e para quem acabou o demo: o /t/{code}
     # e o /teste desligado chegam aqui com ?origem=teste, e o clique reabriria o WhatsApp.
