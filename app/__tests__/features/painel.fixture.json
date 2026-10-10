@@ -450,6 +450,9 @@
       "limit": 100
     }
   },
+  "/ai/pending": {
+    "cancelada": null
+  },
   "/ai/chat": {
     "reply": "Vamos conferir os gastos por categoria deste mês antes de decidir uma mudança.",
     "usage": {

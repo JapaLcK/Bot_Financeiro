@@ -44,7 +44,7 @@ it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia
  expect(cor).toBe(paleta.brandInk);
  expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
 });
-it.each([["light", claro], ["dark", escuro]] as const)("rótulo \"Você\" do chat (%s) é brandInk e passa 4,5:1", async (esquema, paleta) => {
+it.each([["light", claro], ["dark", escuro]] as const)("rótulo \"Piggy\" da fala do chat (%s) é inkMuted e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/ai/chat" ? resposta(200, { reply: "Oi", usage: { used: 1, limit: 100 } }) : impl(url, req));
@@ -53,8 +53,8 @@ it.each([["light", claro], ["dark", escuro]] as const)("rótulo \"Você\" do cha
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Olá"); });
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Enviar mensagem" })); });
  await waitFor(() => expect(screen.getByText("Oi")).toBeTruthy());
- const cor = corDe(screen.getByText("Você"));
- expect(cor).toBe(paleta.brandInk);
+ const cor = corDe(screen.getByTestId("fala-piggy-nome"));
+ expect(cor).toBe(paleta.inkMuted);
  expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
 });
 it.each([["light", claro], ["dark", escuro]] as const)("ícone da aba ativa no sistema %s é brandInk, igual ao rótulo", async (esquema, paleta) => {

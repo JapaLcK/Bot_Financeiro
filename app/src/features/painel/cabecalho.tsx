@@ -1,5 +1,4 @@
-import { router, useFocusEffect, usePathname, type Href } from "expo-router";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Image, Pressable, View } from "react-native";
 import { useSessao } from "@/features/auth/sessao";
 import { Screen } from "@/ui/componentes/Screen";
@@ -11,24 +10,20 @@ import { Banner } from "@/ui/componentes/Banner";
 import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
 import { usePainel } from "./provider";
-import { ContextoNavegacaoPainel } from "./navegacao";
+import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
 import { Acao, Folha, MOTIVOS_BANCO, RecursoDados, temMotivoBanco } from "./base";
 import { PERFIS, TITULOS, nomeMes, mesesDoHistorico, dataPtBr, mesAtual, type Widget } from "./catalogo";
+export function BotaoPrivacidade() {
+ const p = usePainel();
+ return <Pressable testID="painel-privacidade" accessibilityRole="button" accessibilityLabel={p.oculto ? "Mostrar valores" : "Ocultar valores"} onPress={p.alternarPrivacidade} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome={p.oculto ? "EyeSlash" : "Eye"} /></Pressable>;
+}
 export function TelaPainel({ titulo, children }: { titulo: string; children: ReactNode }) {
- const { ampliado } = useTipografiaPainel(); const caminho = usePathname();
+ const { ampliado } = useTipografiaPainel();
  const p = usePainel(); const sessao = useSessao(); const { cores } = useTema();
  const [folha, setFolha] = useState<"perfil" | "mes" | "organizar" | "conta" | null>(null);
  const [erroSaida, setErroSaida] = useState<string | null>(null); const [saindo, setSaindo] = useState(false);
  const [quantidadeMeses, setQuantidadeMeses] = useState(12);
- const entradaEmVoo = useRef(false); const [entrando, setEntrando] = useState(false); const [avisoNavegacao, setAvisoNavegacao] = useState<string | null>(null);
- useFocusEffect(useCallback(() => { entradaEmVoo.current = false; setEntrando(false); }, []));
- const navegar = (destino: Href, metodo: "push" | "navigate" = "push") => {
-  if (metodo === "navigate" && destino === caminho) return;
-  if (entradaEmVoo.current) return;
-  entradaEmVoo.current = true; setEntrando(true); setAvisoNavegacao(null); setFolha(null);
-  try { router[metodo](destino); }
-  catch { entradaEmVoo.current = false; setEntrando(false); setAvisoNavegacao("Não conseguimos abrir a tela. Tente de novo."); }
- };
+ const { navegar, entrando, aviso: avisoNavegacao, emVoo: entradaEmVoo } = useNavegarPainel(() => setFolha(null));
  const nome = p.usuario.display_name?.trim() || p.usuario.email?.split("@")[0] || "Você";
  const label = PERFIS.find((x) => x.id === p.perfil)!.label;
  // O sinal vem de QUALQUER recurso carregado (contas pode ter falhado ou não ter a conexão); os nomes, de quem os traz.
@@ -38,7 +33,7 @@ export function TelaPainel({ titulo, children }: { titulo: string; children: Rea
  const mover = (id: Widget, dir: number) => { const ids = [...p.layout], i = ids.indexOf(id), j = i + dir; if (j < 0 || j >= ids.length) return; const atual = ids[i]!, outro = ids[j]!; ids[i] = outro; ids[j] = atual; p.organizar(ids); };
  const sair = async () => { setSaindo(true); setErroSaida(null); if (!(await sessao.sair())) { setSaindo(false); setErroSaida("Não conseguimos sair. Tente de novo."); } };
  return <ContextoNavegacaoPainel.Provider value={{ navegar, entrando }}><><Screen onAtualizar={p.atualizar} atualizando={p.atualizando}><View style={{ gap: 12, paddingTop: 12, paddingBottom: 24 }}>
- <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel="PigBank, abrir Resumo" onPress={() => navegar("/resumo", "navigate")} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center" }}><View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}><Image source={SIMBOLO} style={{ width: 28, height: 28 }} accessibilityIgnoresInvertColors /><Texto variante="secao" style={{ letterSpacing: -1, fontSize: 26, flexShrink: 1 }}>PigBank</Texto></View></Pressable><Pressable testID="painel-privacidade" accessibilityRole="button" accessibilityLabel={p.oculto ? "Mostrar valores" : "Ocultar valores"} onPress={p.alternarPrivacidade} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome={p.oculto ? "EyeSlash" : "Eye"} /></Pressable><Pressable testID="painel-conta" accessibilityRole="button" accessibilityLabel="Abrir minha conta" onPress={() => { if (!entradaEmVoo.current) setFolha("conta"); }} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 22, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}><Texto variante="rotulo">{nome.slice(0, 1).toUpperCase()}</Texto></Pressable></View>
+ <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel="PigBank, abrir Resumo" onPress={() => navegar("/resumo", "navigate")} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center" }}><View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}><Image source={SIMBOLO} style={{ width: 28, height: 28 }} accessibilityIgnoresInvertColors /><Texto variante="secao" style={{ letterSpacing: -1, fontSize: 26, flexShrink: 1 }}>PigBank</Texto></View></Pressable><BotaoPrivacidade /><Pressable testID="painel-conta" accessibilityRole="button" accessibilityLabel="Abrir minha conta" onPress={() => { if (!entradaEmVoo.current) setFolha("conta"); }} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 22, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}><Texto variante="rotulo">{nome.slice(0, 1).toUpperCase()}</Texto></Pressable></View>
  <View style={{ gap: 8 }}>{titulo === "Resumo" && <Texto variante="rotulo" tom="inkMuted">Bom dia, {nome}</Texto>}<View style={{ flexDirection: ampliado ? "column" : "row", alignItems: ampliado ? "flex-start" : "center", gap: 12 }}><Texto variante="titulo" accessibilityRole="header" style={{ flex: ampliado ? undefined : 1, flexShrink: 1, minWidth: 0 }}>{titulo === "Resumo" ? `Resumo de ${nomeMes(p.mes).split(" de ")[0]}` : titulo}</Texto><Acao rotulo={nomeMes(p.mes).slice(0, 3)} iconeFim="CaretDown" onPress={() => setFolha("mes")} /></View></View>
  {titulo === "Resumo" && <View style={{ flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}><Acao rotulo={label} iconeFim="CaretDown" onPress={() => setFolha("perfil")} desativado={p.salvandoPerfil} /><Acao rotulo="Organizar" icone="SlidersHorizontal" onPress={() => setFolha("organizar")} /></View>}
  {p.pendente && <Button rotulo="Retomar conexão" variante="secondary" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />}{p.aviso && <Banner tom="warning" mensagem={p.aviso} />}{bancoVelho && <Banner tom="warning" titulo="Dados do banco desatualizados" mensagem={`Os dados de ${bancos.length ? bancos.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`} acao={{ rotulo: "Ver bancos conectados", onPress: () => navegar("/conexoes") }} />}{avisoNavegacao && <Banner tom="warning" mensagem={avisoNavegacao} />}

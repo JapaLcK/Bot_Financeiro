@@ -211,6 +211,8 @@ it("navigate Piggy repetido não trava o destino nem duplica a pilha", async () 
  servidor(); const r = renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "Conversar com o Piggy" })).toBeTruthy());
  const antes = pilha(r); const b = screen.getByRole("button", { name: "Conversar com o Piggy" }); await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy");
  await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy"); expect(pilha(r)).toEqual(antes);
+ // A aba Piggy é só o chat (sem Minha conta nem Retomar): a trava de entrada do Resumo não pode ter ficado presa.
+ await act(async () => { router.navigate("/resumo"); await drenar(); });
  await apertar("Abrir minha conta"); expect(screen.getByText("Minha conta")).toBeTruthy(); await apertar("Fechar"); await apertar("Retomar conexão"); expect(pilha(r)?.filter((p) => p.nome === "open-finance-volta")).toHaveLength(1);
 });
 
