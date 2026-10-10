@@ -48,16 +48,15 @@ _SO_VALOR = frozenset({"r", "rs", "real", "reais"})
 
 
 def _forma_curta(sem_data: str, args: dict) -> bool:
-    """"mercado 80", "uber 23", "77,90 mercado": tirando o número e "R$/reais",
-    TODAS as palavras que sobram são do alvo (ou da nota) — só então é despesa.
-    Qualquer palavra a mais ("o mercado me devolveu 50 reais") é incerto."""
+    """"mercado 80", "uber 23", "77,90 mercado": tirando o número e "R$/reais"
+    sobra EXATAMENTE UMA palavra, e ela é o alvo inteiro (normalizado). Com 2+
+    palavras ("reembolso mercado 50", "uber aeroporto 23") é incerto: lista
+    positiva, sem depender de a IA copiar o texto inteiro para o alvo."""
     from utils_text import normalize_text
     sobra = normalize_text(_NUMERO_RE.sub(" ", sem_data)).split()
     sobra = [p for p in sobra if p not in _SO_VALOR]
-    do_alvo = set()
-    for campo in ("alvo", "nota"):
-        do_alvo |= set(normalize_text(str(args.get(campo) or "")).split())
-    return bool(sobra) and all(p in do_alvo for p in sobra)
+    alvo = normalize_text(str(args.get("alvo") or args.get("nota") or "")).split()
+    return len(sobra) == 1 and alvo == sobra
 
 
 def ativo(user_id: int) -> bool:
@@ -97,8 +96,8 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         `extract_date_from_text` e do `_parse_iso_datetime_for_launch`);
     (c) tipo, por lista positiva: receita só com verbo de receita no começo;
         despesa só com verbo de saída no começo (`VERBOS_DE_SAIDA`) ou na forma
-        curta ("mercado 80": sem o número e "R$/reais", toda palavra que sobra é
-        do alvo); sem verbo e sem forma curta, incerto;
+        curta ("mercado 80": sem o número e "R$/reais" sobra UMA palavra, e ela
+        é o alvo inteiro); sem verbo e sem forma curta, incerto;
     (b) categoria: com hashtag, a IA ecoa a da hashtag E a regra local da nota
         não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
         sem hashtag, regra local confiante na nota e no texto, iguais;

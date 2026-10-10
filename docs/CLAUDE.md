@@ -946,8 +946,9 @@ apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schem
 (exatamente um número em dígitos e nenhum por extenso, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
 ao do texto; texto sem data → IA sem data ou hoje); tipo (lista positiva: receita só
 com verbo de receita no começo; despesa só com verbo de saída no começo, ou forma curta
-"mercado 80" em que toda palavra além do número e de "R$/reais" é do alvo — "o mercado
-me devolveu 50 reais" e "R$ 1.234,56 no aluguel" são incertos); categoria
+"mercado 80": além do número e de "R$/reais" sobra UMA palavra e ela é o alvo inteiro —
+"o mercado me devolveu 50 reais", "reembolso mercado 50", "uber aeroporto 23" e
+"R$ 1.234,56 no aluguel" são incertos); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
 `forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
 nota (se vieram, palavras inteiras do texto, sem acento nem caixa); texto com negação

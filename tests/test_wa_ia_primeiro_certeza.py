@@ -177,6 +177,12 @@ def _a(valor, alvo, tipo="despesa"):
     ("cinquenta reais no mercado", _a(50, "mercado"), False),
     ("mercado 80", _a(80, "mercado"), True),
     ("uber 23", _a(23, "uber"), True),
+    # Eram certos com a regra "toda sobra é do alvo" (a IA copia o texto no alvo); agora
+    # incertos: a forma curta exige UMA palavra, que é o alvo inteiro.
+    ("uber aeroporto 23", _a(23, "uber aeroporto"), False),
+    ("reembolso mercado 50", _a(50, "reembolso mercado"), False),
+    ("padaria do zé 20", _a(20, "padaria do zé"), False),
+    ("uber 23", _a(23, "uber aeroporto"), False),             # alvo com mais palavras que o texto
     ("paguei 32,90 no ifood", _a(32.9, "ifood"), True),
     ("comprei um mercado de 280", _a(280, "mercado"), True),   # "um" é artigo, não número
     ("caiu 200 no mercado", _a(200, "mercado", "receita"), True),
@@ -614,7 +620,10 @@ def test_negacao_ou_pergunta_confirma(uid_pro, monkeypatch, frase):
     ("gastei 50 no mercado com dois amigos", lancamento(50)),   # 1 dígito + 1 extenso
     ("o mercado me devolveu 50 reais", lancamento(50)),
     ("o mercado me devolveu 50 reais", lancamento(50, tipo="receita")),
-], ids=["extenso-soma-52", "digito-e-extenso", "devolveu-despesa", "devolveu-receita"])
+    ("reembolso mercado 50", lancamento(50, alvo="reembolso mercado")),
+    ("uber aeroporto 23", lancamento(23, alvo="uber aeroporto")),
+], ids=["extenso-soma-52", "digito-e-extenso", "devolveu-despesa", "devolveu-receita",
+         "reembolso", "uber-aeroporto"])
 def test_valor_ou_tipo_sem_apoio_confirma(uid_pro, monkeypatch, frase, args):
     liga_flag(monkeypatch)
     openai_falso(monkeypatch, args)
