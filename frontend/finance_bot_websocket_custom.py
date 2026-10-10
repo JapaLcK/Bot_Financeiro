@@ -3524,6 +3524,41 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
     )
 
 
+async def _mfa_ligado(user_id: int) -> bool:
+    from db import get_mfa_status
+
+    return bool((await asyncio.to_thread(get_mfa_status, user_id)).get("enabled"))
+
+
+async def _desafio_mfa(request: Request, user_id: int, email: str) -> str | None:
+    """Desafio de MFA do login, ou None se a conta não tem MFA ligado.
+
+    Todo caminho que ia emitir sessão depois de provar a identidade (senha,
+    Google, Apple, magic link do bot) passa por aqui ANTES de emitir (#605)."""
+    from db import mfa_create_login_challenge
+
+    if not await _mfa_ligado(user_id):
+        return None
+    challenge = await asyncio.to_thread(mfa_create_login_challenge, user_id)
+    await log_auth_login_event(
+        email,
+        True,
+        user_id=user_id,
+        ip_address=ip_cliente(request),
+        user_agent=request.headers.get("user-agent"),
+        failure_reason="mfa_pending",
+    )
+    return challenge
+
+
+def _redirect_mfa(challenge: str, destino: str | None = None) -> RedirectResponse:
+    """302 para o formulário de código do /login, sem cookie de sessão. O desafio
+    vai no FRAGMENTO: não chega ao servidor nem ao Referer. `destino` já vem
+    validado por quem chama e só sobrevive se o login.html o aceitar."""
+    qs = f"?next={urllib.parse.quote(destino, safe='')}" if destino else ""
+    return _no_store(RedirectResponse(url=f"/login{qs}#mfa={challenge}", status_code=302))
+
+
 async def _concluir_login(
     request: Request, response: Response, *, user_id: int, email: str, plan: str
 ) -> dict:
@@ -3536,18 +3571,8 @@ async def _concluir_login(
     # Se o usuario tem MFA ativado, emite challenge token e retorna 200 com
     # mfa_required=true (sem cookies de sessao). O cliente deve chamar
     # /auth/mfa/verify-login para completar o login.
-    from db import get_mfa_status, mfa_create_login_challenge
-    mfa_status = await asyncio.to_thread(get_mfa_status, user_id)
-    if mfa_status.get("enabled"):
-        challenge = await asyncio.to_thread(mfa_create_login_challenge, user_id)
-        await log_auth_login_event(
-            email,
-            True,
-            user_id=user_id,
-            ip_address=ip_cliente(request),
-            user_agent=request.headers.get("user-agent"),
-            failure_reason="mfa_pending",
-        )
+    challenge = await _desafio_mfa(request, user_id, email)
+    if challenge:
         return {
             "mfa_required": True,
             "mfa_challenge": challenge,
@@ -4765,7 +4790,9 @@ async def auth_google_callback(
             )
             # No nativo o login só se completa na troca, que pede o MFA e
             # registra o evento lá; registrar aqui contaria login que não houve.
-            if scheme == "pigbankai":
+            # Idem no app antigo COM MFA: o `/d/` pede o código e o verify-login
+            # registra. Sem MFA o `/d/` não pede nada, então fica como sempre.
+            if scheme == "pigbankai" and not await _mfa_ligado(user_id):
                 await asyncio.to_thread(maybe_record_login_from_new_ip, user_id, request=request)
                 await log_auth_login_event(
                     email, True, user_id=user_id,
@@ -4775,6 +4802,15 @@ async def auth_google_callback(
             app_response = RedirectResponse(url=f"{scheme}://auth?code={code}", status_code=302)
             _clear_google_oauth_cookies(app_response)
             return app_response
+
+        # Conta com MFA (#605): o Google provou a identidade, não o segundo
+        # fator. Nenhum cookie de sessão; o código é pedido no /login e o
+        # verify-login registra o login. Vale também para o auto-vínculo acima.
+        desafio = await _desafio_mfa(request, user_id, email)
+        if desafio:
+            mfa_response = _redirect_mfa(desafio, next_url)
+            _clear_google_oauth_cookies(mfa_response)
+            return mfa_response
 
         # Login bem-sucedido (web) → cookies + redirect pra home
         jwt_token, jti, refresh = _issue_session_token(user_id, email, request)
@@ -7350,6 +7386,14 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         redirect_url = "/settings?view=open-finance" if target_view == "open-finance" else (
             f"/app?view={urllib.parse.quote(target_view)}" if target_view else "/app"
         )
+    from db import get_auth_user
+
+    u = await asyncio.to_thread(get_auth_user, int(user_id))
+    # Conta com MFA (#605): o link do bot prova a posse do WhatsApp, não o
+    # segundo fator. Sem sessão e sem cookie; o código é pedido no /login.
+    desafio = await _desafio_mfa(request, int(user_id), (u or {}).get("email") or "")
+    if desafio:
+        return _redirect_mfa(desafio, redirect_url)
     response = RedirectResponse(url=redirect_url, status_code=302)
     # Magic-link tambem cria auth_session — aparece em "Dispositivos conectados"
     # e pode ser revogado individualmente como qualquer outra sessao.
@@ -7361,9 +7405,7 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
     # rotas que exigem auth completa (/api/me, etc) sem precisar logar de novo.
     # Magic link também emite refresh_token (sessão de 14d com idle 7d).
     try:
-        from db import get_auth_user
         from core.refresh_tokens import create_refresh_token
-        u = await asyncio.to_thread(get_auth_user, int(user_id))
         email = (u or {}).get("email") or ""
         if email:
             auth_jwt = _make_jwt(int(user_id), email, jti=jti)

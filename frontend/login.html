@@ -103,8 +103,8 @@
 <!-- MFA -->
 <form id="form-mfa" onsubmit="doMfa(event)" style="display:none">
 <h1>Verificação em 2 etapas</h1>
-<p class="auth-sub">Digite o código do seu app autenticador para <b id="mfa-email">
-</b>.</p>
+<p class="auth-sub">Digite o código do seu app autenticador<span id="mfa-para"> para <b id="mfa-email">
+</b></span>.</p>
 <div class="auth-error" id="mfa-error" role="alert">
 </div>
 <div class="field">
@@ -184,7 +184,7 @@
   }
 
   var _ch=null;
-  function showMfa(ch,email){_ch=ch;document.getElementById('form-login').style.display='none';document.getElementById('form-mfa').style.display='';document.getElementById('mfa-email').textContent=email||'';document.getElementById('mfa-code').focus()}
+  function showMfa(ch,email){_ch=ch;document.getElementById('form-login').style.display='none';document.getElementById('form-mfa').style.display='';document.getElementById('mfa-email').textContent=email||'';document.getElementById('mfa-para').hidden=!email;document.getElementById('mfa-code').focus()}
   function cancelMfa(){_ch=null;document.getElementById('form-mfa').style.display='none';document.getElementById('form-login').style.display=''}
   async function doMfa(ev){ev.preventDefault();clrErr();
     var code=document.getElementById('mfa-code').value.trim(),bk=document.getElementById('mfa-backup').checked;
@@ -198,6 +198,12 @@
     }catch(e){err('mfa-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent=window.PBPurchaseIntent&&window.PBPurchaseIntent.pending()?'Verificar e continuar':'Verificar código'}
   }
+
+  // Google e magic link do bot com MFA (#605): o servidor manda o desafio no
+  // FRAGMENTO (não vai ao servidor nem ao Referer). Some da URL ao ler; hash
+  // fora do formato é ignorado e o formulário normal segue.
+  var mfaHash=/^#mfa=([\w-]+)$/.exec(location.hash);
+  if(mfaHash){history.replaceState(null,'',location.pathname+location.search);showMfa(mfaHash[1],'')}
 
 </script>
 <script src="/auth-presentation.js?v=1" defer>

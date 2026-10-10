@@ -526,7 +526,14 @@ o challenge em `dashboard_sessions.code_challenge` e `pending_google_signups.cod
 consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
 código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
 pendente. Transição: código sem challenge continua trocável (com ou sem verifier). Teto:
-tornar o challenge obrigatório quando o app antigo sair de circulação. Resíduo conhecido:
+tornar o challenge obrigatório quando o app antigo sair de circulação. **MFA (#605)**: conta
+com MFA ligado NUNCA ganha sessão só pelo Google ou pelo link do bot. O callback web e
+`GET /d/{code}` (todo código: bot ou app antigo) respondem 302 para
+`/login?next=<destino>#mfa=<desafio>` sem cookie nem `auth_sessions`; o desafio vai no
+fragmento (não chega ao servidor nem ao Referer) e o `login.html` abre o formulário de código;
+a sessão nasce em `mfa/verify-login`, que também registra o login (o callback `app-` não
+registra mais quando há MFA). O desafio vem de `_desafio_mfa`, o mesmo de `_concluir_login`.
+O `next` de `/d/` só chega ao destino se estiver na allowlist do `login.html`. Resíduo conhecido:
 `GET google/pending/{token}` devolve e-mail e nome sem o verifier; **Apple**, só no app nativo iOS
 (`apple/exchange`, que verifica o identity token pelo JWKS da Apple e devolve sessão,
 desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora na
