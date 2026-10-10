@@ -69,7 +69,9 @@ def test_validacao_aprovada_mantem_cota_apos_criar_pendencia(monkeypatch, user_i
     prepare_chat(monkeypatch, user_id, [('delete_all_launches', {})], failure_role)
     with pytest.raises(RuntimeError, match='salvar resultado'):
         runner.chat(user_id, 'Apague todos os lançamentos.', monthly_limit=1)
-    assert db.ai_get_pending_action(user_id)['tool_name'] == 'delete_all_launches'
+    # O usuário vê o erro, não a pergunta: a pendência armada no turno morre
+    # (senão um "sim" depois apagaria tudo). A cota fica: houve escrita.
+    assert db.ai_get_pending_action(user_id) is None
     assert db.count_launches(user_id) == 1
     assert get_usage_this_month(user_id) == 1
 
@@ -81,8 +83,12 @@ def test_recusa_posterior_nao_apaga_marca_de_pendencia_anterior(monkeypatch, use
     ], 'assistant')
     with pytest.raises(RuntimeError, match='salvar resultado'):
         runner.chat(user_id, 'Apague os registros.', monthly_limit=1)
-    assert db.ai_get_pending_action(user_id)['tool_name'] == 'delete_all_launches'
-    assert get_usage_this_month(user_id) == 1
+    # Duas escritas com pendência na mesma rodada: nada da rodada roda (a
+    # resposta é o `_UM_POR_VEZ` do runner, cuja gravação falha aqui). Sem
+    # pendência armada nem escrita tentada, a vaga da cota volta.
+    assert db.ai_get_pending_action(user_id) is None
+    assert db.count_launches(user_id) == 1
+    assert get_usage_this_month(user_id) == 0
 
 
 @pytest.mark.parametrize('stage', ['validate', 'summary'])

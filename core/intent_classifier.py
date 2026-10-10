@@ -297,6 +297,9 @@ _VERBOS_ENTRADA = ("recebi", "ganhei", "entrou", "caiu", "pingou", "pinguei",
                    "embolsei")
 _VERBOS_SAIDA = _VERBOS_CARTAO + _VERBOS_ENVIO
 _VERBOS_SAIDA_SOLTA = _VERBOS_SAIDA + ("gastando",)
+# Público: os verbos de saída de lançamento (o `wa_ia_primeiro` os lê para dar a
+# despesa por certa só com verbo reconhecido).
+VERBOS_DE_SAIDA = _VERBOS_SAIDA_SOLTA
 
 # A UNIÃO — o que o veto do crédito lê. Verbo novo em QUALQUER uma das tuplas
 # entra no veto sem ninguém precisar lembrar de mexer no outro arquivo.
@@ -681,6 +684,13 @@ def _has_bill_marker(norm: str) -> bool:
     if re.match(r"^(ja\s+)?(paguei|quitei)\b", norm):
         return False
     return any(mk in norm for mk in _BILL_CREATE_MARKERS)
+
+
+def vai_ao_tier3_por_marcador(text: str) -> bool:
+    """A mesma condição que, no `classify`, manda o texto direto ao tier 3
+    (recorrência ou criação de conta a pagar)."""
+    norm = _normalize(text)
+    return _has_recurrence_marker(norm) or _has_bill_marker(norm)
 
 
 # Marcadores de BOLETO / AGENDA / PRAZO — tudo isso vive na IA conversacional
@@ -1259,7 +1269,7 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
     # vai DIRETO pra IA (Tier 3), que classifica recurring.add. Precede os atalhos
     # de Tier 1/2 e o domain-hint, que senão mandariam pra launches.add ou
     # out_of_scope (→ IA conversacional criava orçamento por engano).
-    if _has_recurrence_marker(norm) or _has_bill_marker(norm):
+    if vai_ao_tier3_por_marcador(text):
         if not allow_ai:
             return IntentResult(intent="out_of_scope", confidence=0.0)
         return _classify_with_ai(text, user_id=user_id)

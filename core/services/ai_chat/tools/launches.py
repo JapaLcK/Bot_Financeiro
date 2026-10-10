@@ -13,7 +13,9 @@ Read:
 
 Write (auto-executado, SEM confirmação):
   - add_launch: IA extrai os args, delega pra `core.handlers.launches.add_from_entities`
-    (a mesma fn que o bot tradicional usa) e devolve a resposta padrão.
+    (a mesma fn que o bot tradicional usa) e devolve a resposta padrão. No
+    WhatsApp com WA_IA_PRIMEIRO, pede "sim" antes quando os args não batem
+    com o texto do usuário (`confirmar_se`, `core/services/wa_ia_primeiro.py`).
 
 Write (PEDE confirmação — destrutivo):
   - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
@@ -33,9 +35,11 @@ import db
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
 # porta e não pela outra.
 from core.observability import _log_falha
+from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
 from utils_date import _tz
+from utils_text import fmt_brl
 
-from .._context import CURRENT_PLATFORM
+from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -359,28 +363,107 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     from core.handlers import forma_pagamento as fp
     from core.handlers.launches import add_from_entities
 
-    # Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
-    # do enum vira "desconhecida" — o modelo não inventa uma terceira forma.
-    forma = args.get("forma_pagamento")
-    forma = forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+    forma = forma_declarada(args)
     decisao = fp.decidir(user_id, forma)
     if decisao == fp.BANCO:
         return fp.msg_banco(user_id, tipo, valor)
-    if decisao != fp.CARTEIRA:
-        return _PERGUNTE_A_FORMA
-
-    return add_from_entities(
-        user_id,
+    ents = dict(
         tipo=tipo,
         valor=valor,
         alvo=(args.get("alvo") or "").strip() or None,
         nota=(args.get("nota") or "").strip() or None,
         categoria=(args.get("categoria") or "").strip() or None,
-        category_reason="ai",
+        # Hashtag fixada pelo código na confirmação: o cross-check com a
+        # regra local não a troca ("explicit", não "ai").
+        category_reason=(args.get("_category_reason")
+                         or ("explicit" if args.get("_categoria_explicita") else "ai")),
         criado_em=_parse_iso_datetime_for_launch(args.get("data")),
-        platform=CURRENT_PLATFORM.get(),
-        forma_pagamento=forma,
     )
+    platform = CURRENT_PLATFORM.get()
+    if decisao != fp.CARTEIRA:
+        if platform != "whatsapp" or not ativo(user_id):
+            return _PERGUNTE_A_FORMA
+        # WA_IA_PRIMEIRO: a pergunta vai ao usuário (Q40, como o recibo da
+        # imagem em `core/handlers/pending.py`); a resposta "dinheiro" grava
+        # pelo `forma_pagamento.resolver`, fluxo "entities".
+        ents["criado_em"] = ents["criado_em"].isoformat() if ents["criado_em"] else None
+        return fp.perguntar(
+            user_id, {"fluxo": "entities", "entities": ents, "platform": platform},
+            fp.pergunta_lancamento(tipo, valor))
+
+    return add_from_entities(user_id, **ents, platform=platform, forma_pagamento=forma)
+
+
+def forma_declarada(args: dict[str, Any]) -> str:
+    """Q40: a tool só DECLARA a forma; quem decide se grava é o servidor. Fora
+    do enum vira "desconhecida" — o modelo não inventa uma terceira forma."""
+    from core.handlers import forma_pagamento as fp
+    forma = args.get("forma_pagamento")
+    return forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
+
+
+def _dia_efetivo(args: dict[str, Any]):
+    """O dia que a gravação usa: o de `_parse_iso_datetime_for_launch(data)` no
+    `_tz()`, ou hoje quando `data` falta/não se lê. Fonte única do resumo e do
+    congelamento da pendência."""
+    from utils_date import today_tz
+    dia = _parse_iso_datetime_for_launch(args.get("data"))
+    return dia.astimezone(_tz()).date() if dia else today_tz()
+
+
+def _congela_pendencia(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """`ao_confirmar` do add_launch: o "sim" grava o que a pergunta mostrou.
+    (1) O dia efetivo vira `data` — um "sim" depois da meia-noite não grava no
+    dia novo. (2) Com hashtag no texto do usuário, a pendência guarda a
+    categoria dela, canonizada pela mesma chamada que a gravação faz, e a marca
+    de proveniência (do código; o runner descarta chave "_" vinda do modelo)."""
+    from core.services.category_service import infer_category
+    from parsers import _extract_explicit_category
+    args = {**args, "data": _dia_efetivo(args).isoformat()}
+    _, hashtag = _extract_explicit_category(CURRENT_USER_MESSAGE.get())
+    if hashtag:
+        return {**args, "categoria": infer_category(user_id, "", hashtag).category,
+                "_categoria_explicita": True}
+    # Sem hashtag: a categoria que a execução VAI usar (o cross-check do
+    # `add_from_entities`, mesma função) e o motivo dela, para o "sim" gravar
+    # o que o resumo mostra e aprender como hoje.
+    categoria = str(args.get("categoria") or "").strip()
+    if not categoria:
+        return args          # a execução infere (com IA); o resumo não mostra categoria
+    from core.handlers.launches import resolver_categoria_da_ia
+    nota = str(args.get("nota") or "").strip() or str(args.get("alvo") or "").strip()
+    categoria, motivo = resolver_categoria_da_ia(user_id, categoria, nota)
+    return {**args, "categoria": categoria, "_category_reason": motivo}
+
+
+def _add_launch_summary(args: dict[str, Any]) -> str:
+    """Tudo o que a gravação vai usar e o usuário precisa ver para recusar:
+    tipo, valor, alvo, nota, categoria, o DIA efetivo (o do mesmo parser da
+    gravação; ausente/ilegível = hoje) e a forma, se veio."""
+    from core.handlers import forma_pagamento as fp
+    from core.handlers.launches import _fmt_date_label
+    try:
+        valor = fmt_brl(float(args.get("valor") or 0))
+    except (TypeError, ValueError):
+        valor = str(args.get("valor"))
+    # str(): o modelo pode mandar número ou lista; o resumo não pode levantar.
+    partes = [f"{str(args.get('tipo') or 'despesa').strip().lower()} de {valor}"]
+    alvo = str(args.get("alvo") or "").strip()
+    nota = str(args.get("nota") or "").strip()
+    if alvo or nota:
+        partes.append(f"em {alvo or nota}")
+    if alvo and nota and nota != alvo:
+        partes.append(f"({nota})")
+    categoria = str(args.get("categoria") or "").strip()
+    if categoria:
+        partes.append(f"#{categoria}")
+    resumo = [" ".join(partes), _fmt_date_label(_dia_efetivo(args))]
+    forma = forma_declarada(args)
+    if forma == fp.DINHEIRO:
+        resumo.append("em dinheiro")
+    elif forma == fp.BANCO:
+        resumo.append("pelo banco")
+    return ", ".join(resumo)
 
 
 # Instrução ao MODELO (volta como resultado da tool). Não arma pendência: a
@@ -964,6 +1047,11 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_launch_execute,
+        summary=_add_launch_summary,
+        confirmar_se=precisa_confirmar_lancamento,
+        ao_confirmar=_congela_pendencia,
+        # Só a Q40 (WhatsApp com a flag); fora disso o add_launch não conta.
+        arma_pendencia_no_execute=armaria_q40,
     ),
     Tool(
         schema={

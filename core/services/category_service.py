@@ -353,8 +353,10 @@ def infer_category(user_id: int, text_base: str, explicit_category: str | None =
     if local_cat:
         return InferResult(category=local_cat, reason="local_rule")
 
-    # D) fallback IA (chave configurada e permissão de categorização)
-    if allow_ai and os.getenv("OPENAI_API_KEY"):
+    # D) fallback IA (chave configurada e permissão de categorização). Não no
+    # turno em que o WhatsApp já esperou a IA (`SEM_LLM_NO_TURNO`).
+    from core.services.wa_ia_primeiro import SEM_LLM_NO_TURNO
+    if allow_ai and os.getenv("OPENAI_API_KEY") and not SEM_LLM_NO_TURNO.get():
         try:
             from core.services.plan_service import plan_gate_ok
             allow_ai = plan_gate_ok(int(user_id), "ai_categorization")

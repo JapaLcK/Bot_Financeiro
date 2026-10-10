@@ -171,10 +171,15 @@ def set_pending_action(
     tool_name: str,
     tool_args: dict[str, Any],
     summary: str,
-) -> None:
+) -> Optional[dict[str, Any]]:
     """
     Grava uma ação pendente. Apenas uma por user (upsert) — se já existe,
-    sobrescreve.
+    só substitui se a existente já venceu o TTL. Pendência VIVA de outro pedido
+    não é sobrescrita: devolve None (nada gravado), senão o "sim" do usuário
+    executaria um pedido diferente do que a resposta mostrou. Quem arma de novo
+    a própria pendência consome a anterior antes (`consume_pending_action`).
+    Devolve a linha gravada no formato do `get_pending_action`: o `created_at`
+    dela é o token do CAS de quem armou, sem reler.
     """
     from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
@@ -188,12 +193,30 @@ def set_pending_action(
                 tool_args = excluded.tool_args,
                 summary = excluded.summary,
                 created_at = excluded.created_at
+            where ai_pending_actions.created_at < now() - make_interval(mins => %s)
+            returning tool_name, tool_args, summary, created_at
             """,
-            (int(user_id), tool_name, json.dumps(tool_args), summary),
+            (int(user_id), tool_name, json.dumps(tool_args), summary,
+             PENDING_TTL_MINUTES),
         )
+        row = cur.fetchone()
         if cur.rowcount:
             avisar_mudanca_financeira(cur, user_id, anterior, (tool_name, tool_args), ia=True)
         conn.commit()
+    return _como_pendencia(row) if row else None
+
+
+def _como_pendencia(row) -> dict[str, Any]:
+    created_at = row["created_at"]
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    tool_args = row["tool_args"]
+    return {
+        "tool_name": row["tool_name"],
+        "tool_args": tool_args if isinstance(tool_args, dict) else json.loads(tool_args),
+        "summary": row["summary"],
+        "created_at": created_at,
+    }
 
 
 def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
@@ -232,12 +255,7 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
             conn.commit()
             return None
 
-    return {
-        "tool_name": tool_name,
-        "tool_args": tool_args if isinstance(tool_args, dict) else json.loads(tool_args),
-        "summary": summary,
-        "created_at": created_at,
-    }
+    return _como_pendencia(row)
 
 
 def clear_pending_action(user_id: int) -> None:

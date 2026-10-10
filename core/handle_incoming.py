@@ -393,6 +393,41 @@ def _resposta_da_ia(uid: int, text: str, platform: str, rotulo: str,
     return None
 
 
+_IA_TENTOU = object()
+
+
+def _ia_primeiro(uid: int, text: str):
+    """5a do `handle_incoming` (`core/services/wa_ia_primeiro.py`). A resposta
+    da IA (str); `_IA_TENTOU` se ela foi chamada e devolveu None ou levantou;
+    None se a mensagem não é dela (flag, pendência viva, roteador, plano)."""
+    from core.services import wa_ia_primeiro
+    if not wa_ia_primeiro.ativo(uid):
+        return None
+    try:
+        pend = db.get_pending_action(uid)
+    except Exception:
+        logger.warning("ia_primeiro: leitura da pendência falhou pra user %s", uid, exc_info=True)
+        return None
+    if pend is not None and not db.eh_oferta_de_conveniencia(pend.get("action_type")):
+        return None
+    from core.services.plan_service import ai_chat_allowed, ai_monthly_limit_for
+    if wa_ia_primeiro.fica_no_roteador(uid, text) or not ai_chat_allowed(uid):
+        return None
+    from core.services import ai_chat
+    try:
+        reply = ai_chat.chat(uid, text, monthly_limit=ai_monthly_limit_for(uid),
+                             platform="whatsapp", ia_primeiro=True)
+        motivo = "a IA desistiu sem escrever"
+    except Exception as exc:
+        logger.warning("ia_primeiro: a IA levantou pra user %s: %s", uid, exc)
+        reply, motivo = None, f"a IA levantou {type(exc).__name__}"
+    if reply is not None:
+        return reply
+    log_system_event_sync("info", "wa_ia_primeiro_fallback", motivo,
+                          source="handle_incoming/whatsapp", user_id=uid)
+    return _IA_TENTOU
+
+
 def _handle_audio(msg: IncomingMessage, platform: str,
                   pergunta_ia: int | None = None) -> list[OutgoingMessage] | None:
     """
@@ -970,6 +1005,8 @@ def handle_incoming(msg: IncomingMessage, *,
         encerra_pergunta_da_ia, pergunta_aberta_da_ia,
     )
     marca = pergunta_no_turno.set(None)
+    from core.services.wa_ia_primeiro import SEM_LLM_NO_TURNO
+    sem_llm = SEM_LLM_NO_TURNO.set(False)
     pergunta_uid = pergunta_ia = None
     try:
         pergunta_uid = _normalize_user_id(msg)
@@ -1145,7 +1182,21 @@ def handle_incoming(msg: IncomingMessage, *,
         if ai_reply is not None:
             return [OutgoingMessage(text=format_for_platform(ai_reply, platform))]
 
-        intent_result = classify(text, user_id=uid)
+        # 5a. WA_IA_PRIMEIRO: a IA atende antes do classificador. Desistiu sem
+        # escrever (None) ou levantou → segue ao roteador, sem 2ª ida à IA.
+        ia_tentou = False
+        if platform == "whatsapp" and not de_botao and pergunta_ia is None:
+            ia_reply = _ia_primeiro(uid, text)
+            if isinstance(ia_reply, str):
+                pergunta_no_turno.set(MANTEM)
+                return [OutgoingMessage(text=format_for_platform(ia_reply, platform))]
+            ia_tentou = ia_reply is _IA_TENTOU
+        if ia_tentou:
+            # A fila do WhatsApp já esperou a IA: o roteador não volta ao LLM
+            # (tier 3 do classificador, categoria por GPT) neste turno.
+            SEM_LLM_NO_TURNO.set(True)
+
+        intent_result = classify(text, user_id=uid, allow_ai=not ia_tentou)
 
         # ------------------------------------------------------------------
         # 5b. Roteamento híbrido: se o classifier não reconheceu (out_of_scope
@@ -1182,6 +1233,7 @@ def handle_incoming(msg: IncomingMessage, *,
 
         should_try_ai_fallback = (
             not has_resumable_pending
+            and not ia_tentou
             and (
                 intent_result.intent == "out_of_scope"
                 or intent_result.confidence < 0.55
@@ -1220,7 +1272,7 @@ def handle_incoming(msg: IncomingMessage, *,
             intent_result.intent == "greeting"
             and infer_help_from_text(text, platform) is None
         )
-        if not resposta_de_saudacao and _looks_like_help_fallback(raw_response):
+        if not ia_tentou and not resposta_de_saudacao and _looks_like_help_fallback(raw_response):
             ai_reply = _resposta_da_ia(uid, text, platform, "help→AI fallback")
             if ai_reply is not None:
                 return [OutgoingMessage(text=ai_reply)]
@@ -1283,3 +1335,4 @@ def handle_incoming(msg: IncomingMessage, *,
         if pergunta_ia is not None and pergunta_no_turno.get() != MANTEM:
             encerra_pergunta_da_ia(pergunta_uid, pergunta_ia)
         pergunta_no_turno.reset(marca)
+        SEM_LLM_NO_TURNO.reset(sem_llm)

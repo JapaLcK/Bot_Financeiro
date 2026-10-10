@@ -9,11 +9,20 @@ Fluxo:
      chama OpenAI com tools.
   4. Loop function calling:
        - Read tool → executa, devolve resultado pra IA continuar.
-       - Write tool → NÃO executa. Vira pending action. IA é informada e
-         responde com template 3 ("vou X, confirma?").
+       - Write tool com confirmação → NÃO executa. Vira pending action. IA é
+         informada e responde com template 3 ("vou X, confirma?").
+       - Write tool sem confirmação (ex.: add_launch) → executa direto; a
+         mensagem da tool é a resposta final. Com `confirmar_se` verdadeiro,
+         vira pending action e a resposta é a pergunta fixa `_CONFIRMA`.
   5. Resposta final é salva como assistant message e retornada.
 
-Regra de ouro: writes SEMPRE pedem confirmação humana antes de executar.
+Writes destrutivos pedem confirmação humana antes de executar. Pendência armada
+no turno que termina sem a pergunta dela (erro, prazo, texto fixo de código) é
+cancelada: `_cancela_pendencia_do_turno`.
+
+`ia_primeiro=True` (WhatsApp, `core/services/wa_ia_primeiro.py`): a IA atende
+antes do roteador, e `chat` devolve None quando desiste sem ter tentado
+escrever — o roteador atende a mensagem.
 
 Tools, system prompt, detecção de confirma/cancela e saneamento de histórico
 estão em módulos próprios. Este arquivo só orquestra.
@@ -23,6 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import unicodedata
 from contextvars import ContextVar
 from datetime import date
@@ -36,12 +46,18 @@ from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
 from .system_prompt import SYSTEM_PROMPT
 from .tools import SCHEMAS, get_tool
+from .tools._base import OUTRO_PEDIDO
 
 
 logger = logging.getLogger(__name__)
 
 # Isolado por requisição/thread; marca antes de qualquer tentativa de escrita.
 _TURN_WRITE_ATTEMPTED = ContextVar("ai_chat_turn_write_attempted", default=False)
+# A última pendência da IA armada NESTE turno, como o `ai_set_pending_action`
+# a devolveu (o `created_at` é o token do CAS); None = nenhuma.
+# Saída que não é a pergunta dela (erro, prazo, texto fixo de código) a cancela:
+# pendência viva e invisível vira um "sim" que executa o que o usuário não viu.
+_PENDENCIA_DO_TURNO: ContextVar[dict | None] = ContextVar("ai_chat_pendencia_do_turno", default=None)
 
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -56,6 +72,40 @@ MAX_TOKENS = int(os.getenv("AI_CHAT_MAX_TOKENS", "1024"))
 # OpenAI vira spinner infinito no widget. Caps p/ cair em ERROR_MSG em segundos.
 OPENAI_TIMEOUT = float(os.getenv("OPENAI_CHAT_TIMEOUT", "30"))
 OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_CHAT_MAX_RETRIES", "1"))
+
+
+# ponytail: prazos fixos do modo ia_primeiro (o roteador espera atrás da IA,
+# numa fila única por número). Env nova só se precisar calibrar em produção.
+IA_PRIMEIRO_TIMEOUT = 8.0
+IA_PRIMEIRO_PRAZO_TURNO = 15.0
+
+# Linha `system` quando o modo ia_primeiro desiste: a mensagem do usuário já
+# está no histórico, e sem resposta a IA a atenderia de novo no turno seguinte
+# (gravaria em dobro o que o roteador já gravou).
+_ATENDIDA_FORA = "Esta mensagem foi atendida fora desta conversa."
+
+# Resposta final de um write com `confirmar_se` verdadeiro (sem 2ª ida ao LLM).
+_CONFIRMA = "🐷 Só confirmando: registrar *{resumo}*? Responde *sim* ou *não*."
+
+# Resultado de tool (sem resposta final): o turno já tem uma confirmação pendente.
+_JA_PENDENTE_NO_TURNO = (
+    json.dumps({"status": "not_armed", "message":
+                "já existe uma confirmação pendente deste turno; peça ao usuário "
+                "para confirmar ou cancelar essa primeiro"}, ensure_ascii=False),
+    None,
+)
+
+# Há pendência viva de outro pedido (outra janela): este não foi armado.
+_OUTRO_PEDIDO = OUTRO_PEDIDO
+
+# Tool call da mesma rodada depois de um `_CONFIRMA`: não roda.
+_NAO_EXECUTADA = json.dumps(
+    {"status": "not_executed", "message": "não executada: aguardando a confirmação do usuário"},
+    ensure_ascii=False)
+
+# Rodada com mais de uma escrita e ao menos uma que pede confirmação: nada roda.
+_UM_POR_VEZ = ("🐷 Recebi mais de um pedido de uma vez. Me manda um por "
+               "mensagem que eu faço certinho.")
 
 
 LIMIT_MSG_TEMPLATE = (
@@ -106,7 +156,8 @@ def chat(
     *,
     monthly_limit: int = 1000,
     platform: str = "dashboard",
-) -> str:
+    ia_primeiro: bool = False,
+) -> str | None:
     """
     Processa uma mensagem do user e retorna a resposta da IA.
 
@@ -116,11 +167,16 @@ def chat(
 
     NÃO checa plano Pro — quem chama (endpoint / bot) que decide se gateia.
     Reserva a cota mensal antes das ferramentas; falhas sem tentativa de escrita devolvem a vaga.
+
+    `ia_primeiro=True`: None em vez de LIMIT_MSG/ERROR_MSG (ou exceção) quando
+    nenhuma escrita foi tentada no turno — quem chama devolve a mensagem ao
+    roteador. Com escrita tentada, nunca None. False = comportamento de sempre.
     """
     token_pf = CURRENT_PLATFORM.set(platform)
     token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
     try:
-        return _chat_inner(user_id, user_text, monthly_limit=monthly_limit)
+        return _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
+                           ia_primeiro=ia_primeiro)
     finally:
         CURRENT_USER_MESSAGE.reset(token_msg)
         CURRENT_PLATFORM.reset(token_pf)
@@ -138,7 +194,8 @@ _CAS_PERDIDO = (
 )
 
 
-def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
+def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
+                ia_primeiro: bool = False) -> str | None:
     user_id = int(user_id)
     user_text = (user_text or "").strip()
     if not user_text:
@@ -189,7 +246,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     # 2. Rate limit mensal
     used = db.ai_get_usage_this_month(user_id)
     if used >= monthly_limit:
-        return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
+        return None if ia_primeiro else LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
 
     # 2b. Fast-path: comandos óbvios pulam o LLM (ver _FAST_PATH_DASHBOARD).
     fast = _try_fast_path(user_id, user_text)
@@ -202,22 +259,26 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
     api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         logger.warning("OPENAI_API_KEY ausente — chat IA indisponível")
-        return ERROR_MSG
+        return None if ia_primeiro else ERROR_MSG
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
+        if ia_primeiro:
+            client = OpenAI(api_key=api_key, timeout=IA_PRIMEIRO_TIMEOUT, max_retries=0)
+        else:
+            client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
     except Exception as e:
         logger.error("falha ao inicializar OpenAI: %s", e)
-        return ERROR_MSG
+        return None if ia_primeiro else ERROR_MSG
 
     # A reserva vem ANTES do histórico e de qualquer ferramenta: o perdedor
     # não pode gravar lançamentos nem criar pendências e só depois ser rejeitado.
     from db.ai_chat import reserve_usage, refund_usage
     reservation = reserve_usage(user_id, monthly_limit)
     if reservation is None:
-        return LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
+        return None if ia_primeiro else LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
     write_token = _TURN_WRITE_ATTEMPTED.set(False)
+    pendencia_token = _PENDENCIA_DO_TURNO.set(None)
     final_text = ERROR_MSG
     completed = False
     try:
@@ -235,16 +296,53 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int) -> str:
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
-        final_text = _run_tool_loop(client, user_id, messages)
+        # Sem o kwarg fora do modo: a chamada de sempre (testes trocam o loop).
+        final_text = (_run_tool_loop(client, user_id, messages, ia_primeiro=True) if ia_primeiro
+                      else _run_tool_loop(client, user_id, messages))
+        if ia_primeiro and final_text in (None, ERROR_MSG) and not _TURN_WRITE_ATTEMPTED.get():
+            return _desiste(user_id)
+        final_text = final_text or ERROR_MSG
         db.ai_append_message(user_id, "assistant", final_text)
         completed = True
         return final_text
+    except Exception:
+        _cancela_pendencia_do_turno(user_id)
+        if not ia_primeiro:
+            raise
+        # Aqui, e não no chamador: o `finally` zera a marca de escrita.
+        logger.exception("ai_chat ia_primeiro falhou pra user %s", user_id)
+        if _TURN_WRITE_ATTEMPTED.get():
+            return ERROR_MSG
+        return _desiste(user_id)
     finally:
         attempted_write = _TURN_WRITE_ATTEMPTED.get()
         _TURN_WRITE_ATTEMPTED.reset(write_token)
+        _PENDENCIA_DO_TURNO.reset(pendencia_token)
         # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
         if (not completed or final_text == ERROR_MSG) and not attempted_write:
             refund_usage(user_id, reservation)
+
+
+def _cancela_pendencia_do_turno(user_id: int) -> None:
+    """Cancela a pendência armada neste turno, se ainda for ela (CAS do
+    `ai_consume_pending_action`). A de turno anterior não é tocada."""
+    armada = _PENDENCIA_DO_TURNO.get()
+    if armada is None:
+        return
+    _PENDENCIA_DO_TURNO.set(None)
+    try:
+        db.ai_consume_pending_action(user_id, armada)
+    except Exception:
+        logger.error("falha ao cancelar a pendência do turno pra user %s", user_id, exc_info=True)
+
+
+def _desiste(user_id: int) -> None:
+    """Modo ia_primeiro sem escrita: fecha o turno no histórico e devolve None."""
+    try:
+        db.ai_append_message(user_id, "system", _ATENDIDA_FORA)
+    except Exception:
+        logger.warning("falha ao fechar o turno da IA pra user %s", user_id, exc_info=True)
+    return None
 
 
 def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:
@@ -327,7 +425,10 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
         logger.debug("guarda de afirmações falhou — ignorado", exc_info=True)
 
 
-def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
+def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
+                   ia_primeiro: bool = False) -> str | None:
+    # None só no modo ia_primeiro: prazo do turno estourado, ou mais de um
+    # add_launch na rodada (o roteador sabe dividir; a IA confirmaria um só).
     # Fronteira do turno. `messages` CHEGA aqui já com o histórico persistido,
     # que inclui as `role="tool"` de turnos anteriores. Passar a lista inteira
     # pra guarda fazia ela dar como sustentado justamente o valor OBSOLETO que
@@ -336,7 +437,16 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
     # não gerava evento nenhum. O harness sempre fatiou por turno; era o wiring
     # de produção que divergia do que foi validado.
     inicio_do_turno = len(messages)
+    prazo = time.monotonic() + IA_PRIMEIRO_PRAZO_TURNO
     for _ in range(MAX_TOOL_LOOPS):
+        if ia_primeiro and time.monotonic() > prazo:
+            logger.warning("ai_chat ia_primeiro: prazo do turno estourado pra user %s", user_id)
+            _cancela_pendencia_do_turno(user_id)
+            return None
+        # ia_primeiro: a chamada não passa do prazo do turno (timeout por
+        # requisição); fora dele, a chamada de sempre.
+        por_requisicao = ({"timeout": min(IA_PRIMEIRO_TIMEOUT, prazo - time.monotonic())}
+                          if ia_primeiro else {})
         try:
             resp = client.chat.completions.create(
                 model=MODEL,
@@ -344,17 +454,28 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
                 messages=messages,
                 tools=SCHEMAS,
                 max_tokens=MAX_TOKENS,
+                **por_requisicao,
             )
         except Exception as e:
             logger.error("erro na chamada OpenAI: %s", e)
+            _cancela_pendencia_do_turno(user_id)
             return ERROR_MSG
 
         msg = resp.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []
 
+        # A resposta chegou depois do prazo: nenhuma tool call dela roda (nem
+        # é persistida). Texto sem tool call segue — não escreve nada.
+        if tool_calls and ia_primeiro and time.monotonic() > prazo:
+            logger.warning("ai_chat ia_primeiro: resposta depois do prazo pra user %s", user_id)
+            _cancela_pendencia_do_turno(user_id)
+            return None
+
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
             _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
+            if not final:
+                _cancela_pendencia_do_turno(user_id)
             return final or ERROR_MSG
 
         # Persistir assistant message com tool_calls — limpa `###`
@@ -369,6 +490,25 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
         # assistant.tool_calls e a tool response que de fato roda.
         _maybe_override_trend(tool_calls_dicts, user_id)
 
+        # Vários add_launch na rodada no modo ia_primeiro: o roteador divide.
+        lancamentos = [tc for tc in tool_calls_dicts if tc["function"]["name"] == "add_launch"]
+        if len(lancamentos) > 1 and ia_primeiro and not _TURN_WRITE_ATTEMPTED.get():
+            return None
+        # Uma escrita que armaria pendência (`requires_confirmation`,
+        # `arma_pendencia_no_execute`, ou `confirmar_se` verdadeiro) junto com
+        # QUALQUER outra escrita, em qualquer ordem e em qualquer canal: a
+        # resposta só mostraria uma, e a pendência ficaria escondida (o "sim"
+        # executaria o que não foi mostrado) ou seria cancelada calada. Sai
+        # aqui, antes de persistir a rodada e de despachar qualquer chamada
+        # dela (nem as leituras rodam): sem tool_calls órfão, resposta
+        # `_UM_POR_VEZ`. Escrita que arma pendência sozinha (ou só com
+        # leituras) segue o caminho de sempre.
+        escritas = [tc for tc in tool_calls_dicts
+                    if getattr(get_tool(tc["function"]["name"]), "is_write", False)]
+        if len(escritas) > 1 and _alguma_arma_pendencia(user_id, escritas):
+            _cancela_pendencia_do_turno(user_id)
+            return _UM_POR_VEZ
+
         db.ai_append_message(
             user_id,
             "assistant",
@@ -382,6 +522,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
         })
 
         terminal_msg: str | None = None
+        pergunta = None  # pendência que a resposta final (`_CONFIRMA`) mostra
         for tc_dict in tool_calls_dicts:
             tc_id = tc_dict["id"]
             name = tc_dict["function"]["name"]
@@ -390,7 +531,14 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
             except Exception:
                 args = {}
 
-            history_content, this_terminal = _dispatch_tool(user_id, name, args)
+            if pergunta is not None:
+                # A rodada já virou a pergunta de uma confirmação: nada mais
+                # dela roda antes do "sim" (o resultado sumiria atrás do
+                # `_CONFIRMA`). O resultado fixo fecha o tool_call no histórico.
+                history_content, this_terminal = _NAO_EXECUTADA, None
+            else:
+                antes = _PENDENCIA_DO_TURNO.get()
+                history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
             db.ai_append_message(
                 user_id,
@@ -408,14 +556,60 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]]) -> str:
 
             if this_terminal is not None and terminal_msg is None:
                 terminal_msg = this_terminal
+                # Armou e respondeu de uma vez = `_CONFIRMA` desta pendência.
+                if _PENDENCIA_DO_TURNO.get() is not antes:
+                    pergunta = _PENDENCIA_DO_TURNO.get()
 
         # Write auto-executado entrega a resposta final sem 2º round-trip.
         # Se múltiplas tools rodaram no mesmo turno, vence a primeira terminal.
         if terminal_msg is not None:
+            # Só a pergunta da pendência que ficou armada a mantém: resultado
+            # de write direto, erro de validação ou `_CONFIRMA` de uma pendência
+            # que outra tool da rodada sobrescreveu não a mostram.
+            if pergunta is None or pergunta is not _PENDENCIA_DO_TURNO.get():
+                _cancela_pendencia_do_turno(user_id)
             return terminal_msg
 
     logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id)
+    _cancela_pendencia_do_turno(user_id)
     return ERROR_MSG
+
+
+def _viva_e_deste_turno(user_id: int) -> bool:
+    """A pendência viva é a que ESTE turno armou numa rodada anterior (e não a
+    de outra janela): armar outra não é "outro pedido seu esperando"."""
+    armada = _PENDENCIA_DO_TURNO.get()
+    return armada is not None and _ainda_e_a_mesma(user_id, armada)
+
+
+def _ainda_e_a_mesma(user_id: int, armada: dict[str, Any]) -> bool:
+    atual = db.ai_get_pending_action(user_id)
+    return bool(atual) and all(atual[k] == armada[k]
+                               for k in ("created_at", "tool_name", "tool_args"))
+
+
+def _alguma_arma_pendencia(user_id: int, chamadas: list[dict[str, Any]]) -> bool:
+    """Alguma das chamadas pode armar uma pergunta pendente: write com
+    `requires_confirmation` (sem rodar o `validate`), com
+    `arma_pendencia_no_execute` (bool, ou o predicado verdadeiro para os args),
+    ou com `confirmar_se` verdadeiro para os args."""
+    for tc in chamadas:
+        tool = get_tool(tc["function"]["name"])
+        if not getattr(tool, "is_write", False):
+            continue
+        if getattr(tool, "requires_confirmation", False):
+            return True
+        try:
+            args = json.loads(tc["function"]["arguments"] or "{}")
+        except Exception:
+            args = {}
+        arma = getattr(tool, "arma_pendencia_no_execute", False)
+        if arma(user_id, args) if callable(arma) else arma:
+            return True
+        confirmar_se = getattr(tool, "confirmar_se", None)
+        if confirmar_se is not None and confirmar_se(user_id, args):
+            return True
+    return False
 
 
 def _maybe_override_trend(tool_calls_dicts: list[dict[str, Any]], user_id: int) -> None:
@@ -452,6 +646,12 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         do loop sem chamar OpenAI de novo. Usado por writes auto-executados
         (`is_write=True, requires_confirmation=False`).
     """
+    # Chave com "_" é do código (marca gravada na pendência: `_confirmed` do
+    # set_budget, `_categoria_explicita` do add_launch), nunca do modelo: vale
+    # para toda tool, senão o modelo forjaria qualquer uma delas.
+    if isinstance(args, dict):
+        args = {k: v for k, v in args.items() if not str(k).startswith("_")}
+
     tool = get_tool(name)
     if tool is None:
         return (
@@ -477,7 +677,19 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         # Validação e resumo ainda não criaram uma ação. A marca é cumulativa
         # no turno e começa imediatamente antes da primeira tentativa de gravação.
         _TURN_WRITE_ATTEMPTED.set(True)
-        db.ai_set_pending_action(user_id, name, args, summary)
+        armada = db.ai_set_pending_action(user_id, name, args, summary)
+        if armada is None and _viva_e_deste_turno(user_id):
+            return _JA_PENDENTE_NO_TURNO
+        if armada is None:
+            # Pendência viva de outro pedido: nada armado. A resposta final é
+            # fixa, não o texto do modelo, que ofereceria um "confirma?" cujo
+            # "sim" executaria o outro pedido.
+            return (
+                json.dumps({"status": "not_armed", "message": _OUTRO_PEDIDO},
+                           ensure_ascii=False),
+                _OUTRO_PEDIDO,
+            )
+        _PENDENCIA_DO_TURNO.set(armada)
         return (
             json.dumps(
                 {
@@ -489,6 +701,34 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                 ensure_ascii=False,
             ),
             None,
+        )
+
+    confirmar_se = getattr(tool, "confirmar_se", None)
+    if tool.is_write and confirmar_se is not None and confirmar_se(user_id, args):
+        ao_confirmar = getattr(tool, "ao_confirmar", None)
+        if ao_confirmar is not None:
+            args = ao_confirmar(user_id, args)
+        summary = tool.summary(args) if tool.summary else f"executar {name}"
+        _TURN_WRITE_ATTEMPTED.set(True)
+        armada = db.ai_set_pending_action(user_id, name, args, summary)
+        if armada is None and _viva_e_deste_turno(user_id):
+            return _JA_PENDENTE_NO_TURNO
+        _PENDENCIA_DO_TURNO.set(armada)
+        # A linha é uma por usuário e pendência viva não é sobrescrita
+        # (`set_pending_action` devolve None): `_CONFIRMA` só se este turno
+        # armou. A releitura cobre o resto: a outra janela consumiu a nossa
+        # ("não") e armou a dela no meio. Não cancela a da outra.
+        if armada is None or not _ainda_e_a_mesma(user_id, armada):
+            _PENDENCIA_DO_TURNO.set(None)
+            return (
+                json.dumps({"status": "superseded", "message": _OUTRO_PEDIDO},
+                           ensure_ascii=False),
+                _OUTRO_PEDIDO,
+            )
+        return (
+            json.dumps({"status": "pending_user_confirmation", "summary": summary,
+                        "args": args}, ensure_ascii=False),
+            _CONFIRMA.format(resumo=summary),
         )
 
     if tool.is_write:
