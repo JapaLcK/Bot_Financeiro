@@ -930,7 +930,7 @@ em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.
 **IA primeiro no WhatsApp** (`core/services/wa_ia_primeiro.py`): com
 `WA_IA_PRIMEIRO` em `1`/`true`/`yes`/`on`, o texto do WhatsApp vai à IA antes do
 classificador; o roteador fica com a lista fechada de `fica_no_roteador`
-(saudação, ajuda, e-mails, relatórios, "sim"/"não", desfazer, cartão,
+(saudação, ajuda, e-mails, relatórios, desfazer, cartão,
 recorrência/conta a pagar, vários lançamentos numa frase), com pendência viva e
 com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula):
 ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que

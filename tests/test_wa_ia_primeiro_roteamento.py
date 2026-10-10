@@ -216,3 +216,34 @@ def test_ativo_lista_de_ids_falha_fechada(monkeypatch, ids, uid, esperado):
     else:
         monkeypatch.setenv("WA_IA_PRIMEIRO_USER_IDS", ids)
     assert ativo(uid) is esperado
+
+
+_OFERTA = "Você gastou bastante com delivery. Se quiser, posso ajudar a analisar ou a ver onde dá pra cortar!"
+
+
+@pytest.mark.parametrize("texto", ["Sim", "sim", "pode", "Pode sim", "não"])
+def test_r12_sim_a_oferta_sem_pergunta_vai_a_ia(uid_pro, ia, monkeypatch, texto):
+    liga_flag(monkeypatch)
+    db.ai_append_message(uid_pro, "user", "Onde foi que eu gastei tanto?")
+    db.ai_append_message(uid_pro, "assistant", _OFERTA)
+    r = diga(uid_pro, texto)
+    assert _primeiro(ia) == [texto]
+    assert "resposta da IA" in r
+
+
+@pytest.mark.parametrize("texto", ["sim", "não"])
+def test_r13_sim_com_oferta_de_conveniencia_armada_vai_a_ia(uid_pro, ia, monkeypatch, texto):
+    liga_flag(monkeypatch)
+    db.set_pending_action(uid_pro, "undo_audio", {})  # oferta é consumida no mesmo turno por _send_reply_with_optional_buttons; aqui ela sobrou de pé
+    db.ai_append_message(uid_pro, "user", "Onde foi que eu gastei tanto?")
+    db.ai_append_message(uid_pro, "assistant", _OFERTA)
+    r = diga(uid_pro, texto)
+    assert _primeiro(ia) == [texto]
+    assert "resposta da IA" in r
+
+
+def test_r14_sim_com_pendencia_que_nao_e_oferta_nao_chama_a_ia(uid_pro, ia, monkeypatch):
+    liga_flag(monkeypatch)
+    db.set_pending_action(uid_pro, "credit_card_set_primary", {"card_id": 1})
+    diga(uid_pro, "sim")
+    assert _primeiro(ia) == []

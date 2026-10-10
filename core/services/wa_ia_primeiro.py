@@ -30,8 +30,11 @@ _INTENTS_DO_ROTEADOR = frozenset({
     "greeting", "help.tutorial", "account.link", "account.vincular",
     "emails.unsubscribe", "emails.resubscribe", "categories.create",
     "categories.delete", "cdi.check", "funds.add_ask", "funds.withdraw",
-    "launches.undo", "credit.handle", "confirm.yes", "confirm.no",
+    "launches.undo", "credit.handle",
 })
+# confirm.yes/no ficam de fora: sem pendência "sim/não" não significa nada no roteador, e as
+# ofertas de conveniência só se aceitam por botão (wa_runtime._send_reply_with_optional_buttons).
+# Quem tem o histórico para entender o "sim" é a IA.
 _PREFIXOS_DO_ROTEADOR = ("report.weekly", "report.monthly")
 
 _NUMERO_RE = re.compile(r"\d+(?:[.,]\d+)*")
