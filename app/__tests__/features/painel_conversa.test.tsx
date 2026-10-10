@@ -10,10 +10,12 @@ import { BY_PROFILE, COMMON, widgetDoTopico } from "@/features/painel/perguntas"
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 
 type Segurar = ReturnType<typeof segurar>;
 const ASK_ECONOMIZAR = "Onde eu consigo economizar este mês?", ASK_META = "Quanto falta pra minha próxima meta e quando eu chego lá?";
-let perfilDoServidor = "padrao", uso: number, limite: number, historico: unknown[], statusPendencia: number, cancelada: string | null, segurarDelete: Segurar | null, chat: (n: number) => Promise<Response> | Response, nChat: number;
+let perfilDoServidor = "padrao", uso: number, limite: number, historico: unknown[], statusPendencia: number, cancelada: string | null, segurarDelete: Segurar | null, segurarGet: Segurar | null, statusGet: number, chat: (n: number) => Promise<Response> | Response, nChat: number;
 const caminho = (u: unknown) => new URL(String(u)).pathname;
 const delecoes = () => fetchFalso.mock.calls.filter(([u, r]) => caminho(u) === "/ai/pending" && r.method === "DELETE");
 const posts = () => fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/ai/chat");
@@ -31,13 +33,13 @@ function servidor() {
    return statusPendencia === 200 ? resposta(200, { cancelada }) : resposta(statusPendencia, { detail: "indisponível" });
   }
   if (p === "/ai/chat") return chat(++nChat);
-  if (p === "/ai/messages") return resposta(200, { messages: historico, usage: { used: uso, limit: limite } });
+  if (p === "/ai/messages") { const lido = { used: uso, limit: limite }; if (segurarGet) await segurarGet.promessa; if (statusGet !== 200) return resposta(statusGet, { detail: "x" }); return resposta(200, { messages: historico, usage: lido }); }
   return resposta(200, (fixture as Record<string, unknown>)[p] ?? {});
  });
 }
 const ok = (reply: string) => () => { uso++; return resposta(200, { reply, usage: { used: uso, limit: limite } }); };
 beforeEach(async () => {
- prepararCaso(); desligarTrava(); perfilDoServidor = "padrao"; uso = 2; limite = 100; historico = []; statusPendencia = 200; cancelada = null; segurarDelete = null; nChat = 0; chat = ok("Resposta do Piggy");
+ prepararCaso(); desligarTrava(); perfilDoServidor = "padrao"; uso = 2; limite = 100; historico = []; statusPendencia = 200; cancelada = null; segurarDelete = null; segurarGet = null; statusGet = 200; nChat = 0; chat = ok("Resposta do Piggy");
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
@@ -172,6 +174,26 @@ it("voltar antes da resposta: a resposta aparece com a tela aberta e a conclusã
  await abrir(); await enviar("pergunta"); const post = posts()[0]!; await noResumo(); await voltar();
  const antes = delecoes().length; g.soltar(); await act(drenar); await act(drenar);
  expect(screen.getByText("Resposta enfim")).toBeTruthy(); expect(delecoes()).toHaveLength(antes); expect(post[1].signal.aborted).toBe(false);
+});
+it("reabrir com POST em voo: nenhum DELETE sai até o POST acabar; com a tela aberta, a saída seguinte cancela", async () => {
+ const g = segurar(); chat = async () => { await g.promessa; return ok("Posso apagar?")(); };
+ await abrir(); await enviar("apaga meu último gasto"); await noResumo(); await voltar(); await act(drenar);
+ expect(delecoes()).toHaveLength(1); // só o da primeira abertura; a reabertura só leu a cota
+ g.soltar(); await act(drenar); await act(drenar); expect(screen.getByText("Posso apagar?")).toBeTruthy(); expect(delecoes()).toHaveLength(1);
+ await noResumo(); await act(drenar); expect(delecoes()).toHaveLength(2);
+});
+it("reabrir com POST em voo e a cota falhando: Tentar novamente também não manda DELETE", async () => {
+ const g = segurar(); chat = async () => { await g.promessa; return ok("Resposta")(); };
+ await abrir(); await enviar("pergunta"); await noResumo(); statusGet = 500; await ir("/piggy"); await act(drenar);
+ statusGet = 200; await apertar("Tentar novamente"); await act(drenar);
+ expect(delecoes()).toHaveLength(1); g.soltar(); await act(drenar);
+});
+it("reabrir com POST em voo: o GET da cota que resolve depois do POST não sobrescreve o uso", async () => {
+ limite = 100; uso = 98; const g = segurar(); chat = async () => { await g.promessa; return ok("Resposta")(); };
+ await abrir(); await enviar("pergunta"); await noResumo(); segurarGet = segurar(); await ir("/piggy"); await act(drenar); // GET lê 98 e fica preso
+ g.soltar(); await act(drenar); await act(drenar); expect(screen.getByText("Resposta")).toBeTruthy(); // POST grava 99
+ const sg = segurarGet; segurarGet = null; sg.soltar(); await act(drenar); await act(drenar);
+ expect(screen.getByText("99 de 100 mensagens utilizadas")).toBeTruthy();
 });
 it("voo que termina com a tela aberta de novo: a saída seguinte manda o DELETE", async () => {
  const g = segurar(); chat = async () => { await g.promessa; return ok("Resposta enfim")(); };

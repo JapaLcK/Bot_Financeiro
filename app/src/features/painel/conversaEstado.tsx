@@ -14,7 +14,7 @@ export function useConversa() { const c = useContext(Contexto); if (!c) throw ne
  * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela no segundo plano e o turno em voo tem de sobreviver.
  * O POST tem AbortController PRÓPRIO (fora de p.operacao()): o cancelar() do painel (segundo plano, trava, atualizar) não o toca;
  * só a troca de conta, o logout, o limite de 60 s do POST e a desmontagem do provider o abortam.
- * Pendência (ai_pending_actions): DELETE bloqueante na abertura e antes do envio seguinte a um erro (erro que chega com um DELETE em voo mantém `sujo`); na saída, só se enviou.
+ * Pendência (ai_pending_actions): DELETE bloqueante na abertura sem turno em voo (com voo, só lê a cota: a pendência do POST em voo é do turno que a tela vai mostrar, e um DELETE em paralelo a apagaria) e antes do envio seguinte a um erro (erro que chega com um DELETE em voo mantém `sujo`); na saída, só se enviou.
  */
 export function ConversaProvider({ children }: { children: ReactNode }) {
   const p = useEstadoPainel(); const falhou = p.falhou;
@@ -26,19 +26,20 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const [bloqueio, setBloqueio] = useState<Bloqueio>("abrindo");
   const [enviando, setEnviando] = useState(false);
   const [rascunho, setRascunho] = useState("");
-  const aberta = useRef(false), enviou = useRef(false), sujo = useRef(false), erros = useRef(0), proximo = useRef(0), abertura = useRef(0);
+  const aberta = useRef(false), enviou = useRef(false), sujo = useRef(false), erros = useRef(0), proximo = useRef(0), abertura = useRef(0), versaoUso = useRef(0); // versaoUso: o POST que grava o uso invalida a cota que um GET mais antigo ainda traz
   const voo = useRef<AbortController | null>(null), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
-  const preparar = useCallback(async () => {
+  const preparar = useCallback(async (semDelete = false) => {
     const alvo = dono.current; if (alvo === null) return false;
     for (const c of prep.current) c.abort();
     const cd = novo(), cg = novo(); prep.current = [cd, cg]; setBloqueio("abrindo");
-    const vivo = () => prep.current[0] === cd && dono.current === alvo, e0 = erros.current; // erro de POST durante o DELETE: ele pode ter saído antes do turno acabar no servidor
+    const vivo = () => prep.current[0] === cd && dono.current === alvo, e0 = erros.current, v0 = versaoUso.current; // erro de POST durante o DELETE: ele pode ter saído antes do turno acabar no servidor
     try {
-      const [, cota] = await Promise.all([cancelarPendencia(cd), lerRecurso("/ai/messages?limit=1", conversaSchema, cg)]);
+      const [, cota] = await Promise.all([semDelete ? undefined : cancelarPendencia(cd), lerRecurso("/ai/messages?limit=1", conversaSchema, cg)]);
       if (!vivo()) return false;
-      if (erros.current === e0) sujo.current = false;
-      setUso(cota.usage); setBloqueio("livre"); return true;
+      if (erros.current === e0 && !semDelete) sujo.current = false;
+      if (versaoUso.current === v0) { setUso(cota.usage); }
+      setBloqueio("livre"); return true;
     } catch (e) { if (vivo()) { falhou(e); setBloqueio("falhou"); } return false; }
     finally { ativos.current.delete(cd); ativos.current.delete(cg); }
   }, [falhou]);
@@ -52,7 +53,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     } catch (e) { if (dono.current === alvo) falhou(e); }
     finally { ativos.current.delete(c); }
   }, [falhou]);
-  const abrir = useCallback(() => { aberta.current = true; abertura.current++; enviou.current = false; void preparar(); }, [preparar]);
+  const abrir = useCallback(() => { aberta.current = true; abertura.current++; enviou.current = false; void preparar(!!voo.current); }, [preparar]);
   const fechar = useCallback(() => {
     if (!aberta.current) return;
     aberta.current = false; for (const c of prep.current) c.abort(); prep.current = [];
@@ -72,7 +73,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     const marcar = (campos: Partial<Turno>) => setTurnos((ts) => ts.map((t) => t.id === id ? { ...t, ...campos } : t));
     try {
       const r = await enviarMensagem(message, ctrl);
-      if (dono.current === alvo) { marcar({ resposta: r.reply }); setUso(r.usage); }
+      if (dono.current === alvo) { marcar({ resposta: r.reply }); versaoUso.current++; setUso(r.usage); }
     } catch (e) {
       if (dono.current === alvo) { sujo.current = true; erros.current++; falhou(e); marcar({ erro: mensagemRecurso(e) }); if (aberta.current && abertura.current === minha) setRascunho((r) => r || message); }
     } finally {
@@ -95,5 +96,5 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (aberta.current && uid !== null) void preparar();
   }, [uid, preparar]);
   useEffect(() => () => { for (const c of ativos.current) c.abort(); }, []);
-  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(), enviar }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(!!voo.current), enviar }}>{children}</Contexto.Provider>;
 }

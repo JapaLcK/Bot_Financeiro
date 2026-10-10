@@ -5,6 +5,8 @@ import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 const escopo = "Buscando em todo o histórico do seu plano";
 function servidor() {
  fetchFalso.mockImplementation(async (url: string) => {
