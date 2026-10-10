@@ -399,6 +399,15 @@ def test_prompt_do_demo_tem_as_regras_e_a_persona():
     assert json.loads(conversa.PROMPT.split(marca, 1)[1]) == dados.PERSONA
 
 
+def test_prompt_do_demo_tem_as_regras_de_conta_formato_e_gravacao():
+    p = conversa.PROMPT
+    assert "gasto_projetado_fim_do_mes" in p and "sobra_projetada_fim_do_mes" in p
+    assert "NUNCA use a renda como se fosse gasto" in p
+    assert 'PISO "sem juros"' in p and "NÃO invente taxa" in p
+    assert "ERRADO: **Academia:**" in p
+    assert 'NUNCA escreva "nada fica salvo"' in p
+
+
 def test_historico_e_por_numero_e_nao_vaza_entre_dois(mundo):
     ha, hb = funil.wa_hash(_numero()), funil.wa_hash(_numero())
     for h, q in ((ha, "pergunta-A1"), (hb, "pergunta-B1"), (ha, "pergunta-A2"), (hb, "pergunta-B2")):

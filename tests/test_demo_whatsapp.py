@@ -377,6 +377,13 @@ def test_totais_da_persona_somam():
     assert Decimal(dados.PERSONA["meses"][0]["por_categoria"]["assinaturas"]) == assinaturas
 
 
+def test_projecao_da_persona_bate_com_a_conta():
+    atual = dados.PERSONA["meses"][0]
+    projetado = Decimal(atual["total_gastos"]) * 30 / 20  # até o dia 20 → mês de 30
+    assert Decimal(dados.PERSONA["gasto_projetado_fim_do_mes"]) == projetado
+    assert Decimal(dados.PERSONA["sobra_projetada_fim_do_mes"]) == Decimal(dados.PERSONA["renda_mensal"]) - projetado
+
+
 # ── extratos que não podem mudar comportamento ───────────────────────────────
 
 @pytest.mark.parametrize("dashboard_url,esperado", [

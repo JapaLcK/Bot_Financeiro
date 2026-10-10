@@ -15,6 +15,9 @@ PERSONA = {
     "nome": "Ana",
     "renda_mensal": "5200.00",
     "saldo_conta_corrente": "1840.50",
+    # Pré-calculados (o modelo não faz a conta): este mês até o dia 20 × 30/20; renda − projetado.
+    "gasto_projetado_fim_do_mes": "5072.40",
+    "sobra_projetada_fim_do_mes": "127.60",
     "cartao": {"nome": "Cartão principal", "fatura_aberta": "1260.00", "vencimento": "dia 10"},
     "caixinha": {"nome": "Reserva de emergência", "guardado": "3200.00", "meta": "10000.00"},
     "assinaturas": [
