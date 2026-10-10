@@ -14,6 +14,7 @@ Cada grupo tem controle negativo medido numa cópia da árvore (ver o relato do 
 - `numero_tem_conta`: trocar `o.provider <> 'whatsapp'` ou o `exists(auth_accounts`
   por false (um caso isolado para cada).
 """
+import asyncio
 import json
 import logging
 
@@ -27,6 +28,7 @@ from _demo_whatsapp_helpers import (  # noqa: F401  (mundo e _demo_limpo são fi
 from _paywall_gate_helpers import cadastro_novo
 from adapters.whatsapp import wa_client, wa_demo
 from adapters.whatsapp.wa_parse import InboundAttachmentRef
+from core.admin_dashboard import ensure_admin_tables
 from core.crypto import hash_pii
 from db.connection import get_conn
 from core.services.ai_chat.runner import ERROR_MSG
@@ -161,6 +163,20 @@ def test_escritas_enxerga_executemany_e_alvo_disfarcado(sql):
         cur.execute("select 1 from demo_sessions")
         conn.rollback()
     assert len(_escritas(sql)) == 3, _escritas(sql)
+
+
+def test_impressao_ignora_a_sequencia_do_log_mas_acusa_a_de_outra_tabela():
+    """Independe da ordem: a tabela do log existe (outro teste do worker a cria) e o demo
+    a escreve, sem acusar; nextval em sequência de qualquer outra tabela, acusa."""
+    asyncio.run(ensure_admin_tables())  # DDL oficial de system_event_logs
+    antes = _impressao()
+    assert not any(r["sequencename"].startswith(("system_event_logs_", "demo_sessions_"))
+                   for r in antes["__sequencias__"])
+    _q("select nextval('system_event_logs_id_seq')")
+    assert _impressao() == antes
+    outra = antes["__sequencias__"][0]["sequencename"]  # a 1ª que sobrou é de outra tabela
+    _q("select nextval(%s)", (outra,))
+    assert _impressao() != antes, outra
 
 
 # ── 2. retenção de 30 dias ───────────────────────────────────────────────────

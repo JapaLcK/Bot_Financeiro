@@ -23,6 +23,10 @@ from db.connection import get_conn
 
 GATILHO = "Oi Piggy! Quero testar o PigBank 🐷"
 
+# Únicas tabelas em que o demo pode escrever (a sessão e o log de sistema): fonte
+# única do gravador de SQL (`_escritas`) e da impressão (`_impressao`).
+PERMITIDAS = ("demo_sessions", "system_event_logs")
+
 
 def _q(sql, args=()):
     with get_conn() as conn, conn.cursor() as cur:
@@ -47,8 +51,9 @@ def _sessao(n: str):
 
 
 def _impressao() -> dict:
-    """Impressão de TODA tabela (menos demo_sessions e system_event_logs) + o
-    last_value de toda sequência. Pega insert, delete e UPDATE (count(*) não via
+    """Impressão de TODA tabela (menos as PERMITIDAS) + o last_value de toda
+    sequência (menos as delas: system_event_logs só existe no banco do worker se
+    outro teste a criou antes, e o log do demo avança a sequência dela). Pega insert, delete e UPDATE (count(*) não via
     update) e insert+delete com id gerado (a sequência anda). Teto: insert+delete
     com id explícito, sem sequência, volta à mesma impressão."""
     tabelas = [r["table_name"] for r in _q(
@@ -56,9 +61,11 @@ def _impressao() -> dict:
         " where table_schema = current_schema() and table_type = 'BASE TABLE'")]
     imp = {t: _um("select md5(coalesce(string_agg(x::text, ',' order by x::text), '')) as h"
                   f' from "{t}" x')["h"]
-           for t in sorted(tabelas) if t not in ("demo_sessions", "system_event_logs")}
-    imp["__sequencias__"] = _q("select sequencename, last_value from pg_sequences"
-                               " where schemaname = current_schema() order by 1")
+           for t in sorted(tabelas) if t not in PERMITIDAS}
+    # sequência serial se chama <tabela>_<coluna>_seq
+    imp["__sequencias__"] = [r for r in _q("select sequencename, last_value from pg_sequences"
+                                           " where schemaname = current_schema() order by 1")
+                             if not r["sequencename"].startswith(tuple(f"{t}_" for t in PERMITIDAS))]
     return imp
 
 
@@ -194,7 +201,7 @@ def _escritas(vistos) -> list[str]:
         if not _ESCRITA.match(q):
             continue
         m = _ALVO.match(q)
-        if not m or m.group(1).lower() not in ("demo_sessions", "system_event_logs"):
+        if not m or m.group(1).lower() not in PERMITIDAS:
             out.append(q)
     return out
 

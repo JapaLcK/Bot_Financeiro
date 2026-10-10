@@ -76,7 +76,9 @@ SO_TEXTO = (
     "nas suas perguntas."
 )
 
-_GATILHO_RE = re.compile(r"\bquero testar o pigbank\b")
+# Âncora no INÍCIO (texto já normalizado: sem acento/pontuação/emoji): só "oi"/"ola" e
+# "piggy" podem vir antes, para "não quero testar o PigBank" não abrir sessão.
+_GATILHO_RE = re.compile(r"^(?:(?:oi|ola) )?(?:piggy )?quero testar o pigbank\b")
 _CODIGO_RE = re.compile(rf"\bteste ({CODIGO_PADRAO})\b", re.I)  # `norm` vem em minúsculas
 
 

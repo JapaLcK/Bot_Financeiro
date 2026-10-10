@@ -245,6 +245,19 @@ def test_gatilho_sem_codigo_vira_sessao_organica(mundo):
     assert s["clicked_at"] is None and s["opened_at"] is not None
 
 
+@pytest.mark.parametrize("texto,abre", [
+    (GATILHO, True), (GATILHO + " (teste ABC123)", True), ("quero testar o pigbank", True),
+    ("Oi, quero testar o PigBank", True), ("oi piggy quero testar o pigbank", True),
+    ("Olá Piggy! Quero  testar o PIGBANK 🐷", True), ("  QUERO TESTAR O PIGBANK!", True),
+    ("não quero testar o PigBank", False), ("nao quero testar o pigbank", False),
+    ("eu não quero testar o PigBank", False), ("nunca quero testar o PigBank", False),
+    ("ele disse: quero testar o pigbank", False), ("quem quer testar o pigbank?", False),
+])
+def test_gatilho_so_no_inicio_e_nao_casa_negacao(mundo, texto, abre):
+    plano = wa_demo.decidir(_msg(_numero(), texto))
+    assert (plano is not None and plano.acao == "abrir") is abre, texto
+
+
 def test_codigo_clicado_liga_ao_numero_que_abre(mundo):
     code = funil.criar_clique("ig", "campanha")
     n = _numero()
