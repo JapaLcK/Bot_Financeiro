@@ -4694,6 +4694,11 @@ async def auth_google_callback(
         _clear_google_oauth_cookies(erro_response)
         return erro_response
 
+    # Cookie do challenge que existe mas não é um S256 (vazio, não-ASCII): só o
+    # start o grava, então é adulteração. Falha fechado, nunca grava valor ruim.
+    if challenge is not None and not challenge_valido(challenge):
+        return _erro("falha", "Sessão de login expirou. Tente novamente.")
+
     if error:
         return _erro("cancelado" if error == "access_denied" else "falha",
                      f"Login com Google cancelado: {error}")

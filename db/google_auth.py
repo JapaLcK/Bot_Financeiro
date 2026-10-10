@@ -230,7 +230,7 @@ def consume_pending_google_signup(
     if not pending:
         raise ValueError(_CADASTRO_EXPIRADO[provider])
     guardado = pending["code_challenge"]
-    if guardado and not (challenge and hmac.compare_digest(challenge, guardado)):
+    if guardado is not None and not (challenge and hmac.compare_digest(challenge, guardado)):
         raise ValueError(_CADASTRO_EXPIRADO[provider])
 
     # O e-mail ganhou conta depois do pendente (outra aba, outro provedor): o
