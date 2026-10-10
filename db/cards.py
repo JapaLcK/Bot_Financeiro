@@ -750,6 +750,19 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
+def reabrir_faturas_com_saldo(cur, user_id: int, bill_ids) -> None:
+    """Fatura paga/fechada cujo total passou a superar o pago volta a 'open' (mesmo padrão de
+    `add_credit_installments`). Para quem mexe no total fora do insert: sync do OF e remoção."""
+    ids = [b for b in bill_ids if b is not None]
+    if ids:
+        cur.execute(
+            "update credit_bills set status='open', paid_at=null "
+            "where user_id=%s and id=any(%s) and status in ('paid','closed') "
+            "and total > coalesce(paid_amount, 0)",
+            (user_id, ids),
+        )
+
+
 def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None, disconnect=False):
     """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
 
@@ -788,6 +801,7 @@ def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None
                 "update credit_bills set total = total - %s where id=%s and user_id = %s",
                 (v, tx["bill_id"], user_id),
             )
+            reabrir_faturas_com_saldo(cur, user_id, [tx["bill_id"]])  # tirar estorno/pagamento sobe o total
         conn.commit()
     return {"removed_total": float(v), "ct_id": ct_id}
 

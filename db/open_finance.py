@@ -15,6 +15,7 @@ from .cards import (
     add_imported_credit_purchase,
     extract_installment_info,
     get_or_create_open_finance_card,
+    reabrir_faturas_com_saldo,
     remove_single_credit_transaction,
     sinal_cartao_of,
 )
@@ -2488,6 +2489,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
     """Cartão e totais de faturas são uma transação, sem trava da Carteira."""
     credit_updated = 0
     novas: set[str] = set()
+    tocadas: set[int] = set()  # faturas cujo total o sync mexeu
     with get_conn() as conn:
         with conn.cursor() as cur:
             assert_unambiguous_links(cur, user_id, credit=True)
@@ -2526,6 +2528,7 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                     escrita = cur.fetchone()
                     if escrita is None:
                         continue
+                    tocadas.update((old_bill_id, new_bill_id))
                     gravada = escrita.get("categoria")
                     if new_cat and new_cat != r["cur_cat"] and gravada == new_cat:
                         novas.add(new_cat)
@@ -2546,6 +2549,8 @@ def _sync_imported_credit_updates(user_id: int, connection_id: int | None) -> in
                             (new_valor, new_bill_id, user_id),
                         )
                     credit_updated += 1
+            # a correção do sinal pode trocar total negativo (paga) por positivo (dívida)
+            reabrir_faturas_com_saldo(cur, user_id, tocadas)
 
         conn.commit()
     garantir_no_catalogo(user_id, novas)  # antes da remoção: falha nela não perde o catálogo
