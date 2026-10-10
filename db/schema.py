@@ -2943,6 +2943,34 @@ def init_db():
         create index if not exists idx_ebook_entregas_abertas
           on ebook_entregas (criada_em) where fechada_em is null
         """,
+        # Régua de remarketing (docs/plano-remarketing.md, PR 1: só o schema e o T0;
+        # nada envia). `remarketing_regua`: T0 = primeira entrada na /precos (logado) ou
+        # a criação da conta na /assinar, gravado uma vez (`db/remarketing.registrar_t0`).
+        # `remarketing_envios`: a reivindicação atômica de cada etapa (unique user+etapa);
+        # o PR 1 não lê nem escreve nela, ela nasce junto para o schema não vir em dois
+        # deploys. Sai com a conta (cascade); fora do merge e do export LGPD.
+        """
+        create table if not exists remarketing_regua (
+          user_id bigint primary key references users(id) on delete cascade,
+          t0 timestamptz not null default now(),
+          origem text not null check (origem in ('precos', 'assinar'))
+        )
+        """,
+        """
+        create table if not exists remarketing_envios (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          etapa smallint not null check (etapa between 1 and 3),
+          status text not null check (status in ('enviando', 'enviado', 'sem_canal')),
+          email_ok boolean,
+          whatsapp_ok boolean,
+          motivo text,
+          criado_em timestamptz not null default now(),
+          fechado_em timestamptz,
+          clicado_em timestamptz,
+          unique (user_id, etapa)
+        )
+        """,
         # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
         # /settings/{uid}/security/contact grava na MESMA transação da troca, o
         # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
