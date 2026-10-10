@@ -577,3 +577,44 @@ def test_q40_fora_do_whatsapp_com_flag_ou_flag_desligada_inalterado(uid_pro, mon
     r = runner.chat(uid_pro, _PAINEL, monthly_limit=10, platform="dashboard")
     assert r != runner._UM_POR_VEZ and "Nada foi gravado" in r, r
     assert lancamentos(uid_pro) == []
+
+
+# ── Negação e pergunta não são registro ─────────────────────────────────────
+
+@pytest.mark.parametrize("frase", [
+    "não gastei 50 no mercado", "nunca gastei 50 no mercado", "jamais gastei 50 no mercado",
+    "gastei 50 no mercado?", "NÃO gastei 50 no mercado",
+], ids=["nao", "nunca", "jamais", "pergunta", "caixa"])
+def test_negacao_ou_pergunta_confirma(uid_pro, monkeypatch, frase):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_nao_dentro_de_outra_palavra_nao_e_negacao(uid_pro):
+    """"nao" só conta como palavra inteira: "nanao" / "banao" não disparam."""
+    assert lancamento_com_certeza(uid_pro, _a(50, "mercado"), "gastei 50 no mercado banao") is True
+    assert lancamento_com_certeza(uid_pro, _a(50, "mercado"), "gastei 50 no mercado nao") is False
+
+
+# ── O dia mostrado é o dia gravado, mesmo com o "sim" depois da meia-noite ──
+
+@pytest.mark.parametrize("data_ia", [None, "amanhã"], ids=["sem-data", "data-ilegivel"])
+def test_sim_depois_da_meia_noite_grava_o_dia_mostrado(uid_pro, monkeypatch, data_ia):
+    from datetime import datetime
+    import utils_date
+    monkeypatch.setenv("REPORT_TIMEZONE", "America/Sao_Paulo")
+    tz = utils_date._tz()
+    relogio = {"agora": datetime(2026, 10, 8, 23, 58, tzinfo=tz)}
+    monkeypatch.setattr(utils_date, "now_tz", lambda: relogio["agora"])
+    liga_flag(monkeypatch)
+    extra = {"data": data_ia} if data_ia else {}
+    openai_falso(monkeypatch, lancamento(500, **extra))     # usuário disse 50: confirma
+    r = diga(uid_pro, "gastei 50 no mercado")
+    assert "Só confirmando" in r and "hoje" in r, r
+    assert db.ai_get_pending_action(uid_pro)["tool_args"]["data"] == "2026-10-08"
+    relogio["agora"] = datetime(2026, 10, 9, 0, 3, tzinfo=tz)
+    diga(uid_pro, "sim")
+    assert _dias_gravados(uid_pro) == ["2026-10-08"]

@@ -947,11 +947,15 @@ apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schem
 ao do texto; texto sem data → IA sem data ou hoje); tipo (verbo de receita); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
 `forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
-nota (se vieram, palavras inteiras do texto, sem acento nem caixa). O resumo da
+nota (se vieram, palavras inteiras do texto, sem acento nem caixa); texto com negação
+("não", "nem", "nunca", "sem", "jamais", palavra inteira) ou pergunta ("?") nunca é
+certo ("não gastei 50…" não vira lançamento). O resumo da
 confirmação (`_add_launch_summary`; só é usado por esta confirmação — WhatsApp com a
 flag —, porque o `add_launch` não pede confirmação em nenhum outro caminho) mostra tipo,
 valor, alvo, nota, categoria, o dia que vai ser gravado e a forma, se veio, e o "sim"
-grava exatamente isso: com hashtag no texto, a pendência guarda a categoria dela e a
+grava exatamente isso: o dia efetivo do resumo (`_dia_efetivo`, a mesma função do
+congelamento) vira `data` da pendência, então um "sim" depois da meia-noite grava o dia
+mostrado; com hashtag no texto, a pendência guarda a categoria dela e a
 marca `_categoria_explicita` (do código; o runner descarta toda chave `_` vinda do
 modelo), e a gravação a passa como `explicit`, que o cross-check com a regra local não
 troca (a categoria vai canonizada, como a gravação a deixa). Rodada do modelo com uma

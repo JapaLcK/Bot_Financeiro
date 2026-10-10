@@ -401,14 +401,24 @@ def forma_declarada(args: dict[str, Any]) -> str:
     return forma if forma in (fp.DINHEIRO, fp.BANCO) else fp.DESCONHECIDA
 
 
-def _fixa_hashtag(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """`ao_confirmar` do add_launch: com hashtag no texto do usuário, a
-    pendência guarda a categoria dela e a marca de proveniência (do código; o
-    runner descarta chave "_" vinda do modelo). Canonizada pela mesma chamada
-    que a gravação faz (`add_from_entities`, motivo não-"ai"), para o resumo
-    mostrar o que será gravado."""
+def _dia_efetivo(args: dict[str, Any]):
+    """O dia que a gravação usa: o de `_parse_iso_datetime_for_launch(data)` no
+    `_tz()`, ou hoje quando `data` falta/não se lê. Fonte única do resumo e do
+    congelamento da pendência."""
+    from utils_date import today_tz
+    dia = _parse_iso_datetime_for_launch(args.get("data"))
+    return dia.astimezone(_tz()).date() if dia else today_tz()
+
+
+def _congela_pendencia(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """`ao_confirmar` do add_launch: o "sim" grava o que a pergunta mostrou.
+    (1) O dia efetivo vira `data` — um "sim" depois da meia-noite não grava no
+    dia novo. (2) Com hashtag no texto do usuário, a pendência guarda a
+    categoria dela, canonizada pela mesma chamada que a gravação faz, e a marca
+    de proveniência (do código; o runner descarta chave "_" vinda do modelo)."""
     from core.services.category_service import infer_category
     from parsers import _extract_explicit_category
+    args = {**args, "data": _dia_efetivo(args).isoformat()}
     _, hashtag = _extract_explicit_category(CURRENT_USER_MESSAGE.get())
     if not hashtag:
         return args
@@ -422,7 +432,6 @@ def _add_launch_summary(args: dict[str, Any]) -> str:
     gravação; ausente/ilegível = hoje) e a forma, se veio."""
     from core.handlers import forma_pagamento as fp
     from core.handlers.launches import _fmt_date_label
-    from utils_date import today_tz
     try:
         valor = fmt_brl(float(args.get("valor") or 0))
     except (TypeError, ValueError):
@@ -438,9 +447,7 @@ def _add_launch_summary(args: dict[str, Any]) -> str:
     categoria = str(args.get("categoria") or "").strip()
     if categoria:
         partes.append(f"#{categoria}")
-    dia = _parse_iso_datetime_for_launch(args.get("data"))
-    resumo = [" ".join(partes),
-              _fmt_date_label(dia.astimezone(_tz()).date() if dia else today_tz())]
+    resumo = [" ".join(partes), _fmt_date_label(_dia_efetivo(args))]
     forma = forma_declarada(args)
     if forma == fp.DINHEIRO:
         resumo.append("em dinheiro")
@@ -1032,7 +1039,7 @@ TOOLS: list[Tool] = [
         execute=_add_launch_execute,
         summary=_add_launch_summary,
         confirmar_se=precisa_confirmar_lancamento,
-        ao_confirmar=_fixa_hashtag,
+        ao_confirmar=_congela_pendencia,
         # Só a Q40 (WhatsApp com a flag); fora disso o add_launch não conta.
         arma_pendencia_no_execute=armaria_q40,
     ),

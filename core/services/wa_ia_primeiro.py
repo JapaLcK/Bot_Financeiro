@@ -81,6 +81,8 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
         (`forma_pagamento.detectar`); ausente segue o `fp.decidir`;
     (f) alvo e nota: cada um que veio aparece no texto como palavras inteiras
         (normalizado, sem acento nem caixa).
+    (g) texto com negação ("nao", "nem", "nunca", "sem", "jamais", palavra
+        inteira; `forma_pagamento.NEGACAO_RE`) ou pergunta ("?"): incerto.
     Parâmetro fora do schema a gravação ignora.
     """
     from core.handlers import forma_pagamento as fp
@@ -92,6 +94,10 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     from utils_text import normalize_text
 
     texto = (texto_do_usuario or "").strip()
+    # Negação ou pergunta ("não gastei 50…", "gastei 50…?"): não é um registro.
+    norma = normalize_text(texto)
+    if fp.NEGACAO_RE.search(norma) or "jamais" in norma.split() or "?" in texto:
+        return False
     data_txt, sem_data = extract_date_from_text(texto)
     sem_data = sem_data or texto
 
