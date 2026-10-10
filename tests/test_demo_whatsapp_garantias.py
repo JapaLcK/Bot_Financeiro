@@ -396,7 +396,7 @@ def test_whatsapp_ligado_a_usuario_sem_conta_mas_com_outro_canal(mundo):
 def test_prompt_do_demo_tem_as_regras_e_a_persona():
     assert "NUNCA diga que cabe ou que não cabe" in conversa.PROMPT
     assert "NUNCA afirme que registrou, salvou ou lançou" in conversa.PROMPT
-    marca = "DADOS DE EXEMPLO (a Ana, fictícia):\n"
+    marca = "DADOS DE EXEMPLO (os dados da pessoa neste teste, fictícios):\n"
     assert json.loads(conversa.PROMPT.split(marca, 1)[1]) == dados.PERSONA
 
 

@@ -1229,8 +1229,8 @@ na inferência.
 **"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
 grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";
 `adapters/whatsapp/wa_demo.py` desvia a mensagem no começo de `process_message`, ANTES de
-`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre uma persona
-fictícia (`core/services/demo/`), sem ferramentas. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
+`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre dados
+fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
 entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo

@@ -539,14 +539,27 @@ def test_cobrancas_recorrentes_somam_assinaturas_mais_contas_fixas():
     assert "Energia (valor médio)" in [i["nome"] for i in c["itens"]]
 
 
-def test_textos_fixos_dos_dados_da_ana_nao_falam_com_voce_nem_citam_ifood():
-    """Gancho, descrição da lista e corpo falam dos dados da Ana: nunca "você/seu/sua". E
-    o PigBank é só Open Finance: nada de oferecer registrar gasto ("gastei 80 no iFood")."""
+def test_textos_fixos_falam_com_a_pessoa_sem_citar_persona_nem_ifood():
+    """O Piggy conversa em 2ª pessoa ("seu mês"): nenhum texto fixo, regra ou dado cita um
+    nome de persona ("Ana") nem fala em 3ª pessoa. E o PigBank é só Open Finance: nada de
+    oferecer registrar gasto ("gastei 80 no iFood")."""
     ganchos = re.findall(r"→ (Quer [^\n]*\?)", conversa.REGRAS_DEMO)
     assert len(ganchos) == 7 and len(set(ganchos)) == 7  # ciclo de 7, sem repetir
-    textos = ganchos + [d for _, d, *_ in wa_demo.PERGUNTAS.values()] + [c for *_, c in wa_demo.PERGUNTAS.values() if c]
-    for t in textos:
-        assert not re.search(r"\b(você|voce|seus?|suas?)\b", t, re.I), t
+    corpo = [c for *_, c in wa_demo.PERGUNTAS.values() if c]
+    textos = ganchos + [d for _, d, *_ in wa_demo.PERGUNTAS.values()] + corpo
+    fixos = textos + [wa_demo.BOAS_VINDAS, wa_demo.ULTIMA, wa_demo.FIM, wa_demo.LOTOU, wa_demo.SO_TEXTO,
+                      conversa.REGRAS_DEMO, conversa.ULTIMA_RESPOSTA, conversa.PROMPT]
+    for t in fixos:
+        assert not re.search(r"\bAna\b", t), t
+        if t not in (conversa.REGRAS_DEMO, conversa.PROMPT):  # as regras citam "dela" para PROIBIR
+            assert not re.search(r"\b(dela|dele|da pessoa)\b", t), t
+    assert "nome" not in dados.PERSONA
+    assert "mês da Ana" not in conversa.PROMPT and "sempre \"a Ana\"" not in conversa.PROMPT
+    r = conversa.REGRAS_DEMO
+    assert 'Fale COM a pessoa, em 2ª pessoa' in r and '"seu saldo"' in r
+    assert 'NUNCA fale dela em 3ª pessoa' in r and "NUNCA invente saldo real" in r
+    assert "NÃO use a frase de gravação e NÃO cite saldo nenhum" in r and "SÓ se perguntarem se o PigBank guarda" in r
+    assert "O que você escrever aqui não é salvo no PigBank, só vai para a IA que responde." in wa_demo.BOAS_VINDAS
     tudo = " ".join(textos + [q for q, *_ in wa_demo.PERGUNTAS.values()] + [q[2] for q in wa_demo.PERGUNTAS.values()])
     assert "ifood" not in tudo.lower() and "Veja como o Piggy anotaria" not in tudo
     assert "ifood" not in " ".join(ganchos).lower() and "anota um gasto" not in conversa.REGRAS_DEMO
