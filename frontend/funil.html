@@ -173,7 +173,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     return card(title, what, '<div class="facts">' + facts.join("") + "</div>");
   }
 
-  // ── Fontes externas (Stripe, GA4 e, nos PRs seguintes, Clarity/Meta) ─────────
+  // ── Fontes externas (Stripe, GA4, Clarity e, no PR seguinte, Meta) ─────────
   // Tudo que vem do servidor aqui é dado de fonte externa: texto SEMPRE por esc(), número
   // por n()/pct()/brl(), e `estado` só entra no HTML depois de passar pela whitelist.
   const ESTADOS = { ok: 1, nao_configurado: 1, erro: 1, stale: 1 };
@@ -227,6 +227,24 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
       '<p class="note">Os números do GA4 não batem com os do nosso banco (bloqueador de anúncio, consentimento). O dia de hoje é parcial e o fuso é o da propriedade GA4. “Compra” inclui os eventos enviados pelo servidor. Usuários não se somam entre linhas.</p>';
   }
 
+  // Clarity: janela FIXA de 3 dias (UTC) e só a página /precos, então ignora o seletor 7d/30d.
+  // `null` = o Clarity não trouxe (ou o formato não foi reconhecido): aparece como "n/d", nunca 0.
+  const nd = (v, f) => (v == null ? "n/d" : f(v));
+  const pc = (v) => Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  function clarityCorpo(x) {
+    const t = x.trafego, m = x.cliques_mortos, r = x.cliques_raiva;
+    return (x.reconhecido === true ? "" : '<div class="banner" role="status">Formato da resposta do Clarity não reconhecido; o log do servidor tem os nomes dos campos.</div>') +
+      '<div class="sub">Página /precos, últimos 3 dias (UTC)</div><div class="facts">' +
+      fact("Sessões", nd(t.sessoes, n), "sem bots, quando o Clarity informa") + fact("Usuários", nd(t.usuarios, n)) +
+      fact("Rolagem média", nd(x.rolagem_media_pct, pc), "média das variantes da URL; ponderada pelas sessões só quando o Clarity informa a contagem") +
+      fact("Cliques mortos", nd(m.pct_sessoes, pc), "das sessões") +
+      fact("Cliques de raiva", nd(r.pct_sessoes, pc), "das sessões") + "</div>" +
+      (x.reconhecido === true && !x.truncado && t.sessoes === 0 ? '<p class="note">Sem visitas em /precos nos últimos 3 dias.</p>' : "") +
+      (x.truncado ? '<p class="note">Números parciais: o Clarity devolveu 1.000 linhas (o limite) e pode ter cortado URLs.</p>' : "") +
+      '<p class="note">Confira com o painel do Clarity: se a rolagem ou os percentuais parecerem pequenos demais (ex.: 0,1%), a escala pode ser 0 a 1.</p>' +
+      '<p class="note">Só a página /precos; janela máxima de 3 dias; sessões sem bots quando o Clarity informa; o Clarity pode truncar em 1.000 linhas (“números parciais”); a cota do Clarity é de 10 consultas por dia, por isso o cartão atualiza no máximo a cada 3 h. Usuários de variantes da mesma URL podem se repetir.</p>';
+  }
+
   const FONTES = {
     stripe: {
       rotulo: "Stripe", titulo: "8a. Stripe: assinaturas e cobranças", corpo: stripeCorpo,
@@ -235,6 +253,10 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     ga4: {
       rotulo: "GA4", titulo: "8b. GA4: eventos do funil e origem das sessões", corpo: ga4Corpo,
       what: "<b>O que é:</b> contagem dos eventos do funil medidos no navegador (e a compra, enviada pelo servidor) e de onde vieram as sessões, direto da API do Google Analytics. <b>O que não é:</b> o nosso banco, nem lista de pessoas.",
+    },
+    clarity: {
+      rotulo: "Clarity", titulo: "8c. Clarity: a página /precos nos últimos 3 dias", corpo: clarityCorpo,
+      what: "<b>O que é:</b> visitas, rolagem e % de sessões com cliques mortos e de raiva (frustração) da página /precos, direto da API do Microsoft Clarity. <b>O que não é:</b> o nosso banco, outras páginas, nem gravações de sessão.",
     },
   };
 

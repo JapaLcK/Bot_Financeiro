@@ -19,6 +19,8 @@ Regras que valem para toda fonte (testes em `tests/test_funil_fontes.py`):
 - CUIDADO com `async def buscar`: roda NO LOOP (corpo bloqueante trava o servidor) e um
   `asyncio.to_thread` interno usa o executor PADRÃO, fora deste controle (caso do Stripe).
 - `dados` só passa se for JSON puro e pequeno (`_validar`); senão `resposta_invalida`.
+- `FonteErro("cota")` (a fonte avisou que o dia acabou, ex. 429 do Clarity) ESGOTA a cota do dia
+  no banco (`cache.esgotar`): nada mais chama a fonte até virar o dia UTC.
 - cancelar a requisição propaga o `CancelledError`; a reserva já feita fica gasta e nenhum
   `falha_em` é gravado (limite declarado).
 """
@@ -40,11 +42,12 @@ from core import funil_fontes_cache as cache
 log = logging.getLogger(__name__)
 
 # nome (validado na rota) -> módulo que exporta `FONTE`. Import lazy: o módulo da fonte
-# só carrega (e só importa a lib dela) na primeira consulta. Clarity e Meta entram aqui
-# nos PRs seguintes, uma linha cada; até lá a rota responde 404 para eles.
+# só carrega (e só importa a lib dela) na primeira consulta. A Meta entra aqui no PR
+# seguinte, uma linha; até lá a rota responde 404 para ela.
 MODULOS = {
     "stripe": "core.funil_fonte_stripe",
     "ga4": "core.funil_fonte_ga4",
+    "clarity": "core.funil_fonte_clarity",
 }
 
 TIMEOUT_S = 12  # teto por consulta; as fontes têm timeout próprio menor
@@ -206,11 +209,16 @@ def _pronta(f: Fonte, linha: dict | None, agora: datetime) -> dict | None:
     return None
 
 
-async def _registrar_falha(nome: str, agora: datetime) -> None:
+async def _registrar_falha(nome: str, agora: datetime, esgotar: int | None = None) -> None:
     try:
         await cache.gravar_falha(nome, agora)
     except Exception as exc:
         log.warning("[funil_fontes] %s: gravar falha falhou (%s)", nome, type(exc).__name__)
+    if esgotar:  # a fonte disse que a cota do dia acabou (`FonteErro("cota")`): para até virar o dia
+        try:  # independente da gravação da falha: uma não impede a outra
+            await cache.esgotar(nome, esgotar)
+        except Exception as exc:
+            log.warning("[funil_fontes] %s: esgotar cota falhou (%s)", nome, type(exc).__name__)
 
 
 async def obter(nome: str) -> dict:
@@ -303,5 +311,5 @@ async def _consultar(f: Fonte, linha: dict | None, banco_ok: bool, agora: dateti
 
     log.warning("[funil_fontes] %s: falha (%s)", nome, codigo)
     if banco_ok:
-        await _registrar_falha(nome, agora)
+        await _registrar_falha(nome, agora, f.limite_dia if codigo == "cota" else None)
     return _sem_dado(f, codigo, linha)

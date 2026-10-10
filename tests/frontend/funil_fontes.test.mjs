@@ -53,6 +53,8 @@ const env = (extra) => ({ fonte: "stripe", estado: "ok", mensagem: null, falta: 
                           buscado_em: "2026-10-08T15:30:00+00:00", janela: JANELA, dados: DADOS, ...extra });
 
 // O cartão do GA4 tem teste próprio (funil_ga4.test.mjs): aqui ele só precisa responder.
+const CLARITY_NC = { fonte: "clarity", estado: "nao_configurado", mensagem: null, falta: ["CLARITY_API_TOKEN"],
+                     buscado_em: null, janela: { rotulo: "x", fuso: "UTC" }, dados: null };
 const GA4_NC = { fonte: "ga4", estado: "nao_configurado", mensagem: null, falta: ["GA4_SERVICE_ACCOUNT_JSON"],
                  buscado_em: null, janela: { rotulo: "x", fuso: "y" }, dados: null };
 const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -66,6 +68,7 @@ async function abre(responde, viewport = { width: 1280, height: 900 }) {
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
   await page.route("**/admin/api/funil/fonte/stripe", (r) => { pedidos.fonte++; return responde(r); });
   await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(GA4_NC)));
+  await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json(CLARITY_NC)));
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#f-stripe:not([data-estado=carregando])");
   return { page, pedidos, erros };
@@ -157,6 +160,7 @@ test("401 na fonte leva ao login", async () => {
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
   await page.route("**/admin/api/funil/fonte/stripe", (r) => r.fulfill(json({ detail: "x" }, 401)));
   await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(GA4_NC)));  // um 401 só: dois redirecionamentos se abortam
+  await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json(CLARITY_NC)));
   await page.route("**/admin/login", (r) => r.fulfill({ status: 200, contentType: "text/html", body: "login" }));
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForURL("**/admin/login");
@@ -198,6 +202,7 @@ test("cliques rápidos em Atualizar: a resposta antiga não sobrescreve a nova",
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
   await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(GA4_NC)));
+  await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json(CLARITY_NC)));
   await page.route("**/admin/api/funil/fonte/stripe", async (r) => {
     if (++n === 1) { await new Promise((ok) => setTimeout(ok, 900)); return r.fulfill(json(mrr(111))); }
     return r.fulfill(json(mrr(222)));

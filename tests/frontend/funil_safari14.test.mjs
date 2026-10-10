@@ -66,6 +66,11 @@ const DADOS_GA4 = { eventos: { "7d": eventos(1), "30d": eventos(2) },
   origens: { "7d": [{ canal: "Direct", sessoes: 5, usuarios: 4 }], "30d": [{ canal: "Organic Search", sessoes: 50, usuarios: 40 }] } };
 const ga4 = (e) => ({ ...e, fonte: "ga4", janela: { rotulo: "GA4", fuso: "o da propriedade GA4" },
   dados: e.dados ? DADOS_GA4 : null, falta: e.falta ? ["GA4_SERVICE_ACCOUNT_JSON"] : null });
+// Cartão Clarity (8c): idem, com `null` ("n/d") e `truncado` para passar pelos formatadores.
+const DADOS_CLARITY = { pagina: "/precos", janela_dias: 3, trafego: { sessoes: 165, usuarios: 140 }, rolagem_media_pct: 54.55,
+  cliques_mortos: { pct_sessoes: 7.3 }, cliques_raiva: { pct_sessoes: null }, truncado: true, reconhecido: true };
+const clarity = (e) => ({ ...e, fonte: "clarity", janela: { rotulo: "últimos 3 dias (UTC)", fuso: "UTC" },
+  dados: e.dados ? DADOS_CLARITY : null, falta: e.falta ? ["CLARITY_API_TOKEN"] : null });
 const json = (b) => ({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
 
 const CASOS = [
@@ -100,12 +105,15 @@ for (const [nome, corpo, esperado] of CASOS) {
     await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
     await page.route("**/admin/api/funil/fonte/stripe", (r) => r.fulfill(json(corpo)));
     await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(ga4(corpo))));
+    await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json(clarity(corpo))));
     await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#f-stripe:not([data-estado=carregando])");
     await page.waitForSelector("#f-ga4:not([data-estado=carregando])");
+    await page.waitForSelector("#f-clarity:not([data-estado=carregando])");
     const r = await page.evaluate(() => [typeof Object.hasOwn, typeof structuredClone, typeof [].at,
       document.getElementById("f-stripe").dataset.estado, document.getElementById("main").textContent,
-      document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent]);
+      document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent,
+      document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent]);
     await ctx.close();
     assert.deepEqual(r.slice(0, 3), ["undefined", "undefined", "undefined"]);
     assert.equal(r[3], esperado);
@@ -115,6 +123,11 @@ for (const [nome, corpo, esperado] of CASOS) {
       assert.ok(r[6].includes("8b. GA4") && r[6].includes("Organic Search") && r[6].includes("purchase"), r[6].slice(0, 120));
     }
     if (esperado === "nao_configurado") assert.ok(r[6].includes("Defina GA4_SERVICE_ACCOUNT_JSON no Railway"));
+    assert.equal(r[7], esperado);  // o cartão Clarity também acompanha o estado
+    if (esperado === "ok" || esperado === "stale") {
+      assert.ok(r[8].includes("8c. Clarity") && r[8].includes("165") && r[8].includes("54,6%") && r[8].includes("n/d") && r[8].includes("números parciais"), r[8].slice(0, 160));
+    }
+    if (esperado === "nao_configurado") assert.ok(r[8].includes("Defina CLARITY_API_TOKEN no Railway"));
     assert.deepEqual(erros, []);
   });
 }
@@ -130,18 +143,20 @@ async function comFalha(preparaFalha) {
     String.prototype.replace = function (...a) { if (window.__quebra) throw new Error("esc quebrado"); return replace.apply(this, a); };
   });
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
-  for (const nome of ["stripe", "ga4"]) {
+  for (const nome of ["stripe", "ga4", "clarity"]) {
     await page.route(`**/admin/api/funil/fonte/${nome}`, async (r) => {
       await page.waitForSelector("#f-stripe");  // o painel já montou; agora provoca a falha
       await preparaFalha(page);
-      return r.fulfill(json(nome === "ga4" ? ga4(env()) : env()));
+      return r.fulfill(json(nome === "ga4" ? ga4(env()) : nome === "clarity" ? clarity(env()) : env()));
     });
   }
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#f-stripe:not([data-estado=carregando])", { timeout: 5000 });
   await page.waitForSelector("#f-ga4:not([data-estado=carregando])", { timeout: 5000 });
+  await page.waitForSelector("#f-clarity:not([data-estado=carregando])", { timeout: 5000 });
   const r = await page.evaluate(() => [document.getElementById("f-stripe").dataset.estado, document.getElementById("f-stripe").textContent,
-    document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent]);
+    document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent,
+    document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent]);
   await page.close();
   return { r, erros };
 }
@@ -152,6 +167,8 @@ test("exceção na checagem do estado (hasOwnProperty quebrado) vira cartão err
   assert.ok(r[1].includes("Não foi possível consultar esta fonte") && !r[1].includes("Buscando"));
   assert.equal(r[2], "erro");  // o cartão GA4 também: exceção na renderização nunca deixa "Buscando…"
   assert.ok(r[3].includes("Não foi possível consultar esta fonte") && !r[3].includes("Buscando"));
+  assert.equal(r[4], "erro");  // e o cartão Clarity
+  assert.ok(r[5].includes("Não foi possível consultar esta fonte") && !r[5].includes("Buscando"));
 });
 
 test("exceção até na moldura do cartão (esc quebrado) cai no último recurso: erro com texto fixo", async () => {
@@ -160,4 +177,6 @@ test("exceção até na moldura do cartão (esc quebrado) cai no último recurso
   assert.ok(r[1].includes("8a. Stripe") && r[1].includes("Não foi possível consultar esta fonte") && !r[1].includes("Buscando"));
   assert.equal(r[2], "erro");
   assert.ok(r[3].includes("8b. GA4") && r[3].includes("Não foi possível consultar esta fonte") && !r[3].includes("Buscando"));
+  assert.equal(r[4], "erro");
+  assert.ok(r[5].includes("8c. Clarity") && r[5].includes("Não foi possível consultar esta fonte") && !r[5].includes("Buscando"));
 });
