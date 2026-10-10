@@ -65,3 +65,18 @@ async def reservar(nome: str, limite: int, hoje: date | None = None) -> bool:
                 "RETURNING chamadas_dia",
                 {"f": nome, "d": hoje, "l": limite})
             return await cur.fetchone() is not None
+
+
+async def esgotar(nome: str, limite: int, hoje: date | None = None) -> None:
+    """Gasta o RESTO da cota de hoje (a fonte avisou que o dia acabou): chamadas_dia vira o
+    `limite`, no mesmo dia UTC de `reservar`, e a fonte só volta quando o dia virar."""
+    hoje = hoje if hoje is not None else _HOJE_TESTE
+    async with await db_connect() as conn:
+        await conn.execute(
+            "INSERT INTO funil_fontes_cache AS c (fonte, dia_utc, chamadas_dia) "
+            "SELECT %(f)s::text, COALESCE(%(d)s::date, (now() AT TIME ZONE 'utc')::date), %(l)s "
+            "ON CONFLICT (fonte) DO UPDATE SET dia_utc = EXCLUDED.dia_utc, "
+            "chamadas_dia = CASE WHEN c.dia_utc IS NULL OR c.dia_utc < EXCLUDED.dia_utc "
+            "THEN EXCLUDED.chamadas_dia ELSE GREATEST(c.chamadas_dia, EXCLUDED.chamadas_dia) END "
+            "WHERE c.dia_utc IS NULL OR c.dia_utc <= EXCLUDED.dia_utc",
+            {"f": nome, "d": hoje, "l": limite})

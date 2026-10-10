@@ -60,6 +60,7 @@ async function abre(responde, viewport = { width: 1280, height: 900 }) {
   page.on("console", (m) => { if (m.type() === "error") erros.push(m.text()); });
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
   await page.route("**/admin/api/funil/fonte/stripe", (r) => r.fulfill(json(STRIPE_NC)));
+  await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json({ ...STRIPE_NC, fonte: "clarity", falta: ["CLARITY_API_TOKEN"] })));
   await page.route("**/admin/api/funil/fonte/ga4", (r) => { pedidos.ga4++; return responde(r); });
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#f-ga4:not([data-estado=carregando])");

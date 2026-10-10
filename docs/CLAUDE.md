@@ -1294,7 +1294,7 @@ entram em "cadastros".
 chamada por fonte, e `/admin/api/funil` NÃO muda. `nome` só vale se estiver em
 `funil_fontes.MODULOS` (fonte nova = uma linha lá + um módulo que exporta `FONTE`); fora
 disso, 404. Hoje `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
-é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total) e `ga4` (abaixo). Envelope
+é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total), `ga4` e `clarity` (abaixo). Envelope
 comum e fechado: `fonte`, `estado` (`ok|nao_configurado|erro|stale`), `mensagem` (SEMPRE
 da tabela fixa `MENSAGENS`, nunca texto da fonte), `falta` (só NOMES de env, quando
 `nao_configurado`), `buscado_em`, `janela {rotulo, fuso}`, `dados`. Cache em TABELA
@@ -1403,8 +1403,109 @@ queimar cota (toda fonte nova precisa de timeout próprio); `buscar` que levanta
 estouraria o layout (inalcançável: as mensagens vêm da tabela fixa); o WARNING persistido
 pelo `_DashboardHandler` faz um INSERT síncrono no loop (uma falha por backoff); `async def
 buscar` com corpo bloqueante trava o loop.
-**Avisos para o PR C (Clarity) e os demais**: `reservar` reserva 1 por `buscar`, não por
-chamada HTTP (o `buscar` do Clarity deve fazer EXATAMENTE 1 chamada externa); falha, timeout
+**Fonte Clarity** (`core/funil_fonte_clarity.py`, cartão "8c. Clarity"): Microsoft Clarity Data Export
+API (`GET https://www.clarity.ms/export-data/api/v1/project-live-insights`, `numOfDays=3`,
+`dimension1=URL`, `Authorization: Bearer`). Env: só `CLARITY_API_TOKEN` (JWT do projeto: Clarity >
+Settings > Data Export > Generate new API token, aparece uma vez; o `CLARITY_PROJECT_ID` NÃO é
+necessário, só alimenta o link do card "9"). Devolve (lista fechada) `{pagina: "/precos", janela_dias: 3,
+trafego {sessoes, usuarios}, rolagem_media_pct, cliques_mortos {pct_sessoes}, cliques_raiva
+{pct_sessoes}, truncado, reconhecido}`; `null` = "n/d" (nunca 0). Só a página /precos
+(`path.rstrip("/") == "/precos"`, host/query/fragmento ignorados, soma de todas as variantes, caixa
+EXATA: `/PRECOS` e `/precos-app.js` não contam); janela FIXA "últimos 3 dias (UTC)" (o cartão ignora o
+seletor 7d/30d). Sessões = `totalSessionCount − totalBotSessionCount` (sem o campo de bots vale o
+total); rolagem e % de cliques são médias ponderadas pelas sessões da própria linha SÓ quando a linha
+traz a chave `session`+`count` (a doc pública do Clarity só mostra a contagem no Traffic; na rolagem é incerto);
+sem ela em nenhuma linha a média é SIMPLES das variantes da URL, e o cartão só diz "média das variantes da URL;
+ponderada pelas sessões só quando o Clarity informa a contagem". Risco: com tráfego de anúncio cada `fbclid`
+vira uma variante da URL e a média simples pode divergir muito do valor real (1 sessão a 10% e 99 a 60% dão 35,0%
+em vez de 59,5%): conferir na 1ª carga. Melhoria futura (NÃO implementada): ponderar pelo `totalSessionCount` da
+linha de Traffic da MESMA URL.
+Cliques mortos e de raiva mostram SÓ o % das sessões (chave `session`+`percentage`, sem
+`without`/`bot`, 0..100): a CONTAGEM de sessões deles NÃO é exposta porque `sessionsCount` nessas
+métricas provavelmente é o total de sessões da URL e não as com o evento (memória não confirmada: é
+ambíguo até haver resposta real). Quando houver resposta real, o parser fixa e a contagem volta. Fica de fora de
+propósito: dimensões device/país/campanha, engagement time, quickback, erros de script, páginas
+populares. COTA (a mais apertada de todas as fontes): o Clarity aceita 10 requisições por projeto por
+dia, então `limite_dia=8` (reserva real no banco; 2 de folga), `ttl_s=10800` (3 h × 8/dia = a cota,
+sem folga para falha), `backoff_s=10800` e EXATAMENTE 1 chamada HTTP por `buscar` (a reserva é por
+`buscar`). Falha, timeout e token ilegível depois da reserva QUEIMAM cota sem devolução (o backoff de
+3 h limita isso a 1 por ciclo); `ocupada` não queima. Um 429 vira `cota` e a infra ESGOTA o dia no
+banco (`funil_fontes_cache.esgotar`: `chamadas_dia = limite`, no dia UTC do relógio do banco, nunca
+baixa o contador nem afeta dia mais novo): a fonte só volta quando o dia UTC virar, servindo `stale`.
+Erros por STATUS (corpo nunca lido): 401 `auth`, 403 `permissao`, 429 `cota`, 400 `resposta_invalida`,
+demais `indisponivel`, timeout `timeout` (8 s), conexão `indisponivel`; resposta que não é lista JSON
+`resposta_invalida`. Redirecionamento não é seguido. Token fora de `[A-Za-z0-9._~+/=-]{1,4096}` vira
+`resposta_invalida` SEM chamada (e sem log do valor; a reserva já foi gasta). Resposta de 1.000 linhas
+(limite da API, sem paginação) marca `truncado: true` ("números parciais"; com `fbclid` nas URLs de
+anúncio a dimensão URL pode truncar) e só cabe no `_validar` porque o módulo agrega antes.
+VALIDAÇÃO DA 1ª CARGA (a fazer pelo dono): abrir o painel do Clarity para /precos na janela de 72 h e comparar
+sessões, rolagem, % de cliques mortos e de raiva com o cartão; se a rolagem ou os percentuais parecerem pequenos
+demais (ex.: 0,1%), a escala pode ser 0 a 1 (o cartão traz o aviso); se o cartão ficar amarelo ("formato não
+reconhecido"), copiar do log do Railway a linha `[funil_clarity] formato:`.
+Mais limites declarados: o campo de usuários (`distantUserCount`) provavelmente inclui bots (o cartão só avisa dos
+bots nas sessões); o prazo total de 10 s só é conferido depois que chega um pedaço do corpo (conexão e cabeçalhos
+usam `timeout=8` por operação: até ~18 s de thread presa contra os 12 s da infra, sem cota extra); `numOfDays=3` é
+janela móvel das últimas 72 h; o limite de 1.000 linhas pode ser por métrica ou total (a doc não diz) e `truncado`
+só detecta se ALGUMA métrica chegar a 1.000.
+FORMATO NÃO CONFIRMADO: a doc não dá os nomes exatos de `metricName` nem dos campos de Scroll Depth,
+Dead Click Count e Rage Click Count, nem a chave da dimensão URL; o parser é tolerante (nomes
+normalizados, heurística descrita no docstring do módulo) e honesto (`null`, `reconhecido: false`,
+aviso amarelo no cartão). PROCEDIMENTO se o cartão disser "formato não reconhecido": copiar do log do
+Railway a linha `[funil_clarity] formato: metricas=[...] campos={...}` (só NOMES de métrica e de campo
+da 1ª linha, até 20 métricas e 30 campos por busca; cada nome passa por ALLOWLIST
+`[A-Za-z][A-Za-z0-9_ ]{0,39}` com no máximo 2 dígitos, senão vira a constante `(nome fora do padrão)`,
+sem nenhum caractere do original: o Clarity pode mandar DADO como nome de campo; nunca valores, URLs ou números;
+nomes fora do padrão colapsam numa só chave de `campos`; `sessionsWithoutMetricPercentage` passa) e fixar o
+parser com a forma real. Usuários somam as variantes da URL
+e podem repetir pessoa. Regras do parser (1ª passada do Tester): a métrica é a de nome normalizado EXATO (`traffic`,
+`scrolldepth`, `deadclickcount`/`deadclicks`, `rageclickcount`/`rageclicks`); sem exata vale a ÚNICA que
+contém o fragmento; duas ou mais candidatas (ou o mesmo nome repetido) = não reconhecida (nunca soma
+métricas diferentes: `TrafficSources` não dobra `Traffic`). NUNCA soma parcial: se qualquer linha de /precos
+não tem o número legível, o campo agregado vira `null`; se QUALQUER linha da métrica não tem URL legível (chave
+ausente ou valor que não é texto), a métrica inteira fica DESCONHECIDA (`null` em todos os campos dela, "n/d" no
+cartão, nunca "Sem visitas"), porque a linha descartada pode ser de /precos; `reconhecido` segue `true` (o formato é
+reconhecido, só os dados são incertos; o contrato fechado do `dados` não ganha chave) e sai UMA linha de log de
+texto fixo `[funil_clarity] linha sem URL legível: os campos da métrica ficam n/d` (sem nome, valor ou número, no
+máximo uma por métrica). Uma URL legível de OUTRA página, inclusive a string "(not set)", é "outra página" e não torna
+o agregado desconhecido. Risco: se o Clarity mandar uma linha sem URL em cada resposta (ex.: sessões sem URL), o
+cartão fica "n/d" sem aviso amarelo: o dono vê o log do Railway (peso presente em só algumas linhas: média `null`;
+em nenhuma: média simples). Sem linha de /precos: sessões e usuários 0 e as MÉDIAS `null`; com `truncado` e
+sem linha de /precos, sessões e usuários `null` (a linha pode estar no corte) e o cartão só diz "Números
+parciais", nunca "Sem visitas". A resposta é lida em stream por `r.raw.read1(65536, decode_content=True)` (urllib3 2.x; `iter_content` só entrega com
+64 KB e deixaria o goteio passar do prazo), com teto de 8 MB do corpo DESCOMPRIMIDO (gzip/brotli bomba:
+`resposta_invalida`) e PRAZO TOTAL de 10 s da chamada ao último byte (`timeout`; menor que o `TIMEOUT_S` de 12 s
+da infra, então um Clarity gotejando não prende a thread do `EXECUTOR` compartilhado); o `timeout=8` do
+requests segue sendo por operação. O corpo de erro NUNCA é lido (`r.close()` logo após o status; a resposta é
+fechada em todos os caminhos); exceção do urllib3/requests durante a leitura vira `indisponivel`, e
+`ReadTimeoutError` no meio do corpo vira `timeout`. Dois nomes exatos de alias ao mesmo tempo (`DeadClicks` e
+`DeadClickCount`, idem Rage) = DUPLICIDADE: métrica não reconhecida (não adivinha qual vale); sozinhos, valem.
+`Scroll` e `ExcessiveScroll` não são rolagem (exige `scroll`+`depth`). `_registrar_falha` grava a falha e esgota a cota em `try` separados, com
+log próprio (só o tipo).
+Limites declarados do Clarity, sem correção: escala 0..1 em vez de 0..100 NÃO é detectável (um 0.123 apareceria
+como 0,1%): conferir na 1ª carga com o painel do Clarity; o `esgotar` pode esgotar o dia NOVO se um 429
+cruzar 00:00 UTC (~12 s por dia, por evento 429); o voo único é por PROCESSO, não por réplica (N réplicas
+gastam a cota 8/N janelas por dia e o resto do dia fica em "cota" servindo `stale`; a cota atômica no banco
+nunca passa de 8, e a folga de 2 até o limite de 10 do Clarity cobre só rajada na virada do dia ou outro
+consumidor do mesmo token; em sequência realista uma janela de 24 h fechadas pode ter até 9 chamadas, sem
+folga para outro consumidor); token inválido/401 gasta a reserva e o backoff de 3 h vive no BANCO: depois de
+CORRIGIR o token o cartão pode levar até 3 h para tentar de novo, e a mensagem acionável ("recusou as
+credenciais") aparece só na 1ª visão (depois vira "indisponível" durante o backoff, porque a tabela não
+guarda o código); ESCAPE para forçar a tentativa: `update funil_fontes_cache set falha_em = null where fonte = 'clarity'`
+(mantém o contador do dia e o último dado; só libera a próxima tentativa, que CONTA na cota). NÃO use delete:
+`delete from funil_fontes_cache where fonte = 'clarity'` (NÃO use delete) devolve a cota do dia e apaga o último dado,
+porque o contador (`dia_utc`/`chamadas_dia`) mora na MESMA linha (dá para passar de 8 chamadas por dia contra o limite
+real de 10 do Clarity); o prazo total de 10 s cobre o corpo, mas a fase de conexão e de cabeçalhos usa o
+`timeout=8` por operação (connect e leitura de cabeçalho, no pior caso ~16 s antes do 1º byte); o front trata só `null` como
+n/d (`""`, `false` ou `[]` virariam "0"/"NaN%"; o servidor nunca os manda); a cabeça pública de um JWT
+(20 caracteres, 2 dígitos) e strings curtas como `hunter2`/`Joao Silva` passam na allowlist de nome do log
+(hipótese aceita: o Clarity teria de pôr dado em nome de campo); `sessoes === 0` também vale quando bots ≥ total
+(clamp a 0) e o cartão diz "Sem visitas"; `r.close()` não é determinístico se houver exceção retida
+(traceback guardado: o socket só fecha quando a referência cai; teórico); campo numérico com lixo mostra
+"NaN" no front (o backend só manda número); texto de 300 caracteres sem espaço estoura a largura (as
+mensagens vêm de tabela fixa); com gzip/brotli o teto de 8 MB vale para o corpo descomprimido (testado
+com bombas). Sem `stale` parcial (uma chamada traz todas as métricas, ou tudo ou erro).
+**Avisos para as fontes com cota (Clarity, já feito, e as demais)**: `reservar` reserva 1 por `buscar`, não por
+chamada HTTP (o `buscar` do Clarity faz EXATAMENTE 1 chamada externa); falha, timeout
 ou `ocupada` depois da reserva queimam cota sem devolução, e com `backoff_s=60` a cota diária
 pode acabar em ~8 min (o Clarity precisa de backoff de horas); TTL de 3 h × 8/dia é
 exatamente a cota, sem folga; resposta de 1.000 linhas só cabe nos limites do `_validar` (20
