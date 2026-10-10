@@ -564,6 +564,8 @@ async def serve_robots_txt():
         "Disallow: /admin",
         "Disallow: /assinar",
         "Disallow: /q",
+        "Disallow: /teste",
+        "Disallow: /t/",
         f"Sitemap: {public_site_url('/sitemap.xml')}",
         "",
     ])
@@ -1176,23 +1178,73 @@ async def serve_brand_asset(path: str):
     )
 
 
+def _link_whatsapp(texto: str) -> str:
+    """Deep link do chat com o Piggy, com `texto` pré-preenchido. O número real
+    fica no servidor (WHATSAPP_NUMBER). Sem número, cai no seletor genérico."""
+    import os
+    import urllib.parse
+
+    text = urllib.parse.quote(texto)
+    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
+    return (
+        f"https://api.whatsapp.com/send?phone={number}&text={text}"
+        if number
+        else f"https://wa.me/?text={text}"
+    )
+
+
 @router.get("/wa")
 async def open_whatsapp_bot():
     """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""
-    import os
-    import urllib.parse
-
-    text = urllib.parse.quote("Oi Piggy! Quero acessar minha conta PigBank 🐷")
-    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
-    url = (
-        f"https://api.whatsapp.com/send?phone={number}&text={text}"
-        if number
-        else f"https://wa.me/?text={text}"
+    return RedirectResponse(
+        _link_whatsapp("Oi Piggy! Quero acessar minha conta PigBank 🐷"), status_code=302
     )
-    return RedirectResponse(url, status_code=302)
+
+
+# ─── "Testar o Piggy" (demo no WhatsApp, sem conta) ──────────────────────────
+# Destino fixo do funil do teste. NÃO soma utm_source: sobrescreveria a
+# atribuição de quem veio do anúncio (os utms originais ficam em demo_sessions).
+_PRECOS_DO_TESTE = "/precos?origem=teste"
+_NO_STORE = {"Cache-Control": "no-store"}  # senão o Cloudflare serve o mesmo código a todos
+
+
+def _utm(request: Request, nome: str) -> str | None:
+    """Só letras, dígitos, _ . - (até 64): o utm vai para o banco e nunca sai de lá."""
+    return re.sub(r"[^\w.\-]", "", request.query_params.get(nome, ""))[:64] or None
+
+
+@router.get("/teste")
+@limiter.limit("20/minute")
+def abrir_teste(request: Request):
+    """Botão "Testar o Piggy": registra o clique (utms) e abre o WhatsApp com um
+    código que liga a conversa a este clique. Interruptor: DEMO_DAILY_MAX <= 0 ou
+    sem WHATSAPP_NUMBER devolve o visitante à página de preços, sem gravar linha."""
+    import os
+
+    from db import demo_funnel
+
+    if demo_funnel.teto_diario() <= 0 or not os.getenv("WHATSAPP_NUMBER", "").strip():
+        return RedirectResponse(_PRECOS_DO_TESTE, status_code=302, headers=_NO_STORE)
+    code = demo_funnel.criar_clique(_utm(request, "utm_source"), _utm(request, "utm_campaign"))
+    texto = "Oi Piggy! Quero testar o PigBank 🐷" + (f" (teste {code})" if code else "")
+    return RedirectResponse(_link_whatsapp(texto), status_code=302, headers=_NO_STORE)
+
+
+# `shared_limit(scope=)` e NÃO `limit()`: com o `key_style="url"` do Limiter cada
+# código inventado cairia num balde novo e o teto nunca valeria (ver /d/{code}).
+@router.get("/t/{code}")
+@limiter.shared_limit("30/minute", scope="teste_link_checkout")
+def link_do_teste(request: Request, code: str):
+    """Link final do demo: carimba o clique (1ª vez) e manda para os preços.
+    O destino é fixo — nada da URL entra nele — e código inválido faz o mesmo 302."""
+    from db import demo_funnel
+
+    if demo_funnel.CODIGO_RE.fullmatch(code):
+        demo_funnel.marcar_checkout(code)
+    return RedirectResponse(_PRECOS_DO_TESTE, status_code=302, headers=_NO_STORE)
 
 
 @router.post("/contact")

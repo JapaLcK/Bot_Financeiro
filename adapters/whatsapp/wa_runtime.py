@@ -17,6 +17,7 @@ from adapters.whatsapp.wa_client import (
     send_text,
     send_typing_indicator,
 )
+from adapters.whatsapp import wa_demo
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
     get_tutorial_button_id,
@@ -529,11 +530,8 @@ def _is_link_code_attempt(text: str) -> bool:
 
 
 def _signup_url() -> str:
-    from core.dashboard_links import get_dashboard_base_url
-    base = get_dashboard_base_url()
-    if not base.startswith("https://"):
-        base = "https://pigbankai.com"
-    return f"{base}/cadastro"
+    from core.dashboard_links import base_url_publica
+    return f"{base_url_publica()}/cadastro"
 
 
 def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], user_id: int) -> None:
@@ -733,6 +731,18 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
     return False
 
 
+def _message_id(message: InboundMessage) -> str:
+    """Id usado na dedupe (`_seen_recent`) e no indicador de digitação."""
+    try:
+        msg_id = str(message.raw.get("id") or message.timestamp or "")
+    except Exception:
+        msg_id = str(message.timestamp or "")
+
+    if not msg_id:
+        msg_id = hashlib.sha256(repr(message.raw).encode("utf-8")).hexdigest()
+    return msg_id
+
+
 def process_message(message: InboundMessage) -> None:
     core_started = False
     # Turno atendido aqui, sem chegar ao `handle_incoming` (botão, `ajuda`,
@@ -751,6 +761,19 @@ def process_message(message: InboundMessage) -> None:
             len(message.text or ""),
             len(message.attachments or []),
         )
+        # "Testar o Piggy": desvio ANTES de qualquer coisa que grave (usuário
+        # canônico, vínculo, ai_messages). Número com conta, `vincular 123456`
+        # e quem não é do demo seguem o fluxo normal (decidir devolve None). A
+        # dedupe é própria e só roda depois de decidir que a mensagem é do demo:
+        # marcá-la antes faria a mensagem cair no fluxo normal e ser descartada.
+        plano = None if _is_link_code_attempt(message.text or "") else wa_demo.decidir(message)
+        if plano is not None:
+            msg_id = _message_id(message)
+            if _seen_recent(msg_id):
+                logger.info("WA demo duplicate ignored message_id=%s", msg_id)
+                return
+            wa_demo.executar(plano, message, msg_id)
+            return
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, mask_phone(message.wa_id))
         # Número JÁ ligado à conta sem senha (vínculo anterior ao PR 4 ou por
@@ -1403,13 +1426,7 @@ def process_message(message: InboundMessage) -> None:
             else:
                 return
 
-        try:
-            msg_id = str(message.raw.get("id") or message.timestamp or "")
-        except Exception:
-            msg_id = str(message.timestamp or "")
-
-        if not msg_id:
-            msg_id = hashlib.sha256(repr(message.raw).encode("utf-8")).hexdigest()
+        msg_id = _message_id(message)
 
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)

@@ -552,7 +552,7 @@ _PROIBIDAS_PARTE = ("user_id", "quiz", "profile", "hash")
 _JANELA = {
     "dias", "inicio", "viram_precos_medido", "emails_verificacao", "etapas", "abandono",
     "expiraram_sem_concluir", "estado_atual", "canais", "origens", "checkout", "ativacao",
-    "trial", "pix", "ebook",
+    "trial", "pix", "ebook", "teste",
 }
 _LINHA = {"cadastros", "viram_precos", "abriram_checkout", "concluiram", "taxa_conclusao"}
 _CHAVES_PERMITIDAS = (
@@ -565,6 +565,7 @@ _CHAVES_PERMITIDAS = (
     | {"iniciaram", "em_trial", "pagando", "cancelaram", "outros"}
     | {"gerados", "pagos", "expirados", "cancelados", "abertos", "taxa_pago"}
     | {"entregas", "enviados", "nao_comprou", "estornados", "pendentes"}
+    | {"clicaram", "abriram", "organicos", "responderam", "no_limite", "clicaram_checkout"}
 )
 
 

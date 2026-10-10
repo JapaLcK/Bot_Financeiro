@@ -255,6 +255,7 @@ def test_robots_txt():
     assert "Disallow: /app" in resp.text
     assert "Disallow: /assinar\n" in resp.text
     assert "Disallow: /q\n" in resp.text
+    assert "Disallow: /teste\n" in resp.text and "Disallow: /t/\n" in resp.text
     assert "Sitemap:" in resp.text
 
 

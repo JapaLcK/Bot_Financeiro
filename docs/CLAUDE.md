@@ -1100,6 +1100,40 @@ Categorização tem uma armadilha própria: **categoria e regra de categoria sã
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria
 na inferência.
 
+**"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
+grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";
+`adapters/whatsapp/wa_demo.py` desvia a mensagem no começo de `process_message`, ANTES de
+`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre uma persona
+fictícia (`core/services/demo/`), sem ferramentas. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
+(contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
+ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
+normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
+`Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
+abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
+`wa_hash` é zerado após 30 dias (`esquecer_numeros_antigos`, em `table_cleanup`); copy: "o que você
+escrever aqui não é salvo no PigBank, só vai para a IA que responde", nunca "não guardamos nada" nem "nada
+fica salvo" (o hash do telefone é o mesmo de `auth_accounts.phone_hash`).
+Painel: bloco `teste` do `/admin/funil` ("Clicaram" são cliques, não pessoas). Limites declarados:
+histórico da conversa em memória (reinício zera; o contador não), teto diário não estritamente atômico entre
+instâncias, falha de banco ao abrir sessão aparece como "lotou". Também: (a) `DEMO_DAILY_MAX` padrão 0 = desligado; o dono
+liga na Railway (sugestão inicial 300; medir a latência da fila do worker antes de subir); (b) `wa_hash` = mesmo HMAC de `auth_accounts.phone_hash`,
+guardado 30 dias: a política de privacidade deve citar o teste; (c) o texto vai à OpenAI e o histórico fica só em
+RAM (sem prazo estrito; some no reinício); (d) falha transitória de banco em `sessao_recente` faz `decidir`
+devolver `None` e a mensagem seguir o fluxo normal, que pode criar linha em `user_identities` (fail-open raro);
+(e) linhas de clique em `/teste` sem abrir nunca são podadas;
+(f) L2: resposta 401 do `send_text` (token expirado) conta a pergunta sem entrega;
+(g) depois do "lotou" a mensagem seguinte do número segue o fluxo normal e cria `user_identities`;
+(h) se `sessao_recente` falhar no banco e a mensagem tiver o gatilho, `decidir` manda abrir e nasce a 2ª
+sessão com 8 perguntas novas (fail-open raro);
+(i) o webhook (`wa_app.py`, ~:313-324) grava `recipient_id` CRU em `system_event_logs` quando a Meta devolve
+erro de envio: defeito ANTERIOR a este PR e de todos os usuários;
+(j) o worker do WhatsApp é único e serial (`wa_app.py`, ~:360-364): cada pergunta do demo ocupa a fila dos
+pagantes por até 30s×2 tentativas, e a fila (maxsize 500) descarta o excedente: medir a latência antes de
+subir o teto;
+(k) `/teste` e `/t/` estão em `Disallow` no robots.txt, o que mitiga cliques de robôs; linhas sem abrir não
+são podadas.
+
 ### E-mail
 
 **Resend** (`RESEND_API_KEY`), em `core/services/email_service.py` — **não é mais
