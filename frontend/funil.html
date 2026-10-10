@@ -173,7 +173,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     return card(title, what, '<div class="facts">' + facts.join("") + "</div>");
   }
 
-  // ── Fontes externas (Stripe, GA4, Clarity e, no PR seguinte, Meta) ─────────
+  // ── Fontes externas (Stripe, GA4, Clarity, Meta) ─────────────────────────────
   // Tudo que vem do servidor aqui é dado de fonte externa: texto SEMPRE por esc(), número
   // por n()/pct()/brl(), e `estado` só entra no HTML depois de passar pela whitelist.
   const ESTADOS = { ok: 1, nao_configurado: 1, erro: 1, stale: 1 };
@@ -245,6 +245,27 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
       '<p class="note">Só a página /precos; janela máxima de 3 dias; sessões sem bots quando o Clarity informa; o Clarity pode truncar em 1.000 linhas (“números parciais”); a cota do Clarity é de 10 consultas por dia, por isso o cartão atualiza no máximo a cada 3 h. Usuários de variantes da mesma URL podem se repetir.</p>';
   }
 
+  // Meta: janela FIXA de 7 dias (limite da API), então ignora o seletor 7d/30d. Mesma lista (e ordem) de
+  // `EVENTOS` em core/funil_fonte_meta.py; um teste compara as duas. A ordem vem DAQUI (o jsonb reordena).
+  const META_EVENTOS = [
+    ["PageView", "Página vista"], ["ViewContent", "Viu os planos (/precos)"], ["InitiateCheckout", "Começou o checkout"],
+    ["CompleteRegistration", "Cadastro"], ["StartTrial", "Iniciou o trial"], ["OnboardingComplete", "Concluiu o onboarding"],
+    ["TesteClick", "Cliques em Testar o Piggy"], ["Purchase", "Compra (inclui as do servidor)"],
+  ];
+
+  function metaCorpo(x) {
+    const ev = x.eventos, ok = x.reconhecido === true;  // sem formato reconhecido os zeros seriam falsos: "n/d"
+    return (ok ? "" : '<div class="banner" role="status">Formato da resposta da Meta não reconhecido; o log do servidor tem os nomes dos campos.</div>') +
+      '<div class="sub">Disparos do pixel, últimos 7 dias</div>' +
+      '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Evento</th><th>Disparos</th></tr></thead><tbody>' +
+      META_EVENTOS.map((e) => {
+        const v = ev[e[0]] || 0;
+        return `<tr><td>${esc(e[1])}<span class="cod">${esc(e[0])}</span></td><td>${ok ? n(v) : "n/d"}</td></tr>`;
+      }).join("") +
+      "</tbody></table></div>" +
+      '<p class="note">São DISPAROS do pixel recebidos pela Meta (navegador + servidor), não conversões deduplicadas: podem divergir do nosso banco e do GA4. A janela de 7 dias é o limite da API da Meta.</p>';
+  }
+
   const FONTES = {
     stripe: {
       rotulo: "Stripe", titulo: "8a. Stripe: assinaturas e cobranças", corpo: stripeCorpo,
@@ -257,6 +278,10 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     clarity: {
       rotulo: "Clarity", titulo: "8c. Clarity: a página /precos nos últimos 3 dias", corpo: clarityCorpo,
       what: "<b>O que é:</b> visitas, rolagem e % de sessões com cliques mortos e de raiva (frustração) da página /precos, direto da API do Microsoft Clarity. <b>O que não é:</b> o nosso banco, outras páginas, nem gravações de sessão.",
+    },
+    meta: {
+      rotulo: "Meta", titulo: "8d. Meta: disparos do pixel nos últimos 7 dias", corpo: metaCorpo,
+      what: "<b>O que é:</b> quantas vezes cada evento do pixel chegou à Meta nos últimos 7 dias, direto da API do pixel. <b>O que não é:</b> conversões deduplicadas, o nosso banco, nem lista de pessoas.",
     },
   };
 
