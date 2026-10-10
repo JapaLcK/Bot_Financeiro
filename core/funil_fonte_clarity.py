@@ -39,7 +39,7 @@ SIMPLES das variantes (peso 1; com `fbclid` cada anúncio é uma variante e a m�
 valor real; ponderar pelo `totalSessionCount` do Traffic da MESMA URL é melhoria futura); em só
 algumas linhas, `null`.
 NUNCA soma parcial: se qualquer linha de /precos não tiver o número legível, o campo agregado vira
-`null`. Sem linha de /precos: sessões e usuários 0, médias `null`; com `truncado` e sem linha de
+`null`; se qualquer linha da métrica não tiver URL legível, a métrica inteira vira `null`. Sem linha de /precos: sessões e usuários 0, médias `null`; com `truncado` e sem linha de
 /precos, sessões e usuários `null` (a linha pode estar na parte cortada).
 Resposta lida em stream (`read1`), com teto de 8 MB descomprimido e PRAZO TOTAL de 10 s (menor que o
 `TIMEOUT_S` da infra: goteio não prende a thread do executor); corpo de erro não é lido (`r.close()`).
@@ -167,14 +167,20 @@ _ESPEC = {"trafego": (_traf, (_soma, _soma)), "rolagem": (_roll, (_media,)),
 
 def _agrega(linhas: list, ext, aggs: tuple):
     """(campos, reconhecida) da métrica para a página /precos. Reconhecida = a URL e CADA campo
-    apareceram em alguma linha (de qualquer página); sem nenhuma linha, vale (sem visita)."""
+    apareceram em alguma linha (de qualquer página); sem nenhuma linha, vale (sem visita).
+    Se QUALQUER linha não tem URL legível, o agregado da métrica é DESCONHECIDO (`null` em todos os campos):
+    a linha descartada pode ser de /precos e não dá para afirmar zero nem somar parcial. O formato segue
+    reconhecido (só os dados são incertos); uma URL legível de outra página (até "(not set)") não conta."""
     pares = [(ext(r), _pagina(r)) for r in linhas]
     achou = [any(t[i] is not None for t, _ in pares) for i in range(len(aggs))]
-    url_ok = any(p is not None for _, p in pares)
+    alguma = any(p is not None for _, p in pares)
+    ilegivel = any(p is None for _, p in pares)
     sel = [t for t, p in pares if p]
-    campos = [None if pares and not (url_ok and achou[i]) else ag([(t[i], t[-1]) for t in sel])
+    if alguma and ilegivel:  # só texto fixo: sem número, nome ou valor
+        log.warning("[funil_clarity] linha sem URL legível: os campos da métrica ficam n/d")
+    campos = [None if pares and not (alguma and not ilegivel and achou[i]) else ag([(t[i], t[-1]) for t in sel])
               for i, ag in enumerate(aggs)]
-    return campos, (not pares) or (url_ok and all(achou))
+    return campos, (not pares) or (alguma and all(achou))
 
 
 def _nome(v) -> str:

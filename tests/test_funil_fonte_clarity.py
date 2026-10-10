@@ -1417,3 +1417,57 @@ def test_nenhum_texto_do_repo_recomenda_delete_na_tabela_de_cache_do_clarity():
         for linha in (raiz / arq).read_text(encoding="utf-8").splitlines():
             if "delete from funil_fontes_cache" in linha.lower():
                 assert "NÃO use delete" in linha or "NAO use delete" in linha, (arq, linha)
+
+
+# ══ Codex: linha com URL ilegível torna o agregado da métrica DESCONHECIDO ═════════════════════
+
+def _sem_url(linha):
+    return {k: v for k, v in linha.items() if k != "Url"}
+
+
+def _avisos_sem_url(caplog):
+    return [x.getMessage() for x in caplog.records
+            if x.name == clarity.__name__ and "sem URL legível" in x.getMessage()]
+
+
+def test_linha_sem_url_legivel_torna_toda_a_metrica_desconhecida_nunca_soma_parcial_nem_zero(caplog):
+    linhas = [_t("/precos", 100, 0, 5), _t("/outra", 50, 0, 3), _sem_url(_t("", 40, 0, 2))]
+    with caplog.at_level(logging.DEBUG):
+        d = clarity._dados([{"metricName": "Traffic", "information": linhas}] + _completa()[1:])
+    assert d["trafego"] == {"sessoes": None, "usuarios": None}  # não 100, não 0
+    assert d["reconhecido"] is True and _log_formato(caplog) == []  # o formato é reconhecido; só os dados são incertos
+    assert _avisos_sem_url(caplog) == ["[funil_clarity] linha sem URL legível: os campos da métrica ficam n/d"]
+    assert d["rolagem_media_pct"] == 40.0  # a linha ilegível de UMA métrica não contamina as outras
+
+
+def test_linha_ilegivel_unica_de_precos_nao_vira_zero():
+    # as outras URLs são legíveis e não são /precos; a única que poderia ser (sem URL) não pode virar "0 visitas"
+    d = clarity._dados([{"metricName": "Traffic", "information": [_t("/outra", 50, 0, 3), _sem_url(_t("", 40, 0, 2))]}])
+    assert d["trafego"] == {"sessoes": None, "usuarios": None}
+
+
+@pytest.mark.parametrize("ilegivel", [{"Url": None}, {"Url": 5}, {"Url": ["/precos"]}, {"x": "/precos"}, {}])
+def test_formas_de_url_ilegivel_todas_desconhecem_a_metrica(ilegivel):
+    ruim = {"averageScrollDepth": 1.0} | ilegivel  # sem a chave `Url` (ou com valor que não é texto)
+    d = clarity._dados([{"metricName": "ScrollDepth", "information": [_s("/precos", 8, 40.0), ruim]}])
+    assert d["rolagem_media_pct"] is None
+
+
+def test_so_linhas_legiveis_mantem_o_comportamento_e_not_set_e_outra_pagina():
+    d = clarity._dados([{"metricName": "Traffic", "information": [_t("/precos", 100, 0, 5), _t("(not set)", 7, 0, 1),
+                                                                     _t("", 3, 0, 1)]}])
+    assert d["trafego"] == {"sessoes": 100, "usuarios": 5}  # "(not set)" e "" são outras páginas legíveis
+    assert clarity._dados(_resp()) == ESPERADO
+
+
+def test_todas_as_linhas_sem_url_continua_formato_nao_reconhecido():
+    resp = [{"metricName": "Traffic", "information": [_sem_url(_t("", 9, 0, 1))] * 2}] + _completa()[1:]
+    d = clarity._dados(resp)
+    assert d["reconhecido"] is False and d["trafego"] == {"sessoes": None, "usuarios": None}
+
+
+def test_cartao_nao_diz_sem_visitas_quando_a_metrica_e_desconhecida(api):
+    api.resp = [{"metricName": "Traffic", "information": [_t("/outra", 50, 0, 3), _sem_url(_t("", 40, 0, 2))]}] + _completa()[1:]
+    j = _get().json()
+    assert j["estado"] == "ok" and j["dados"]["trafego"] == {"sessoes": None, "usuarios": None}
+    assert j["dados"]["reconhecido"] is True

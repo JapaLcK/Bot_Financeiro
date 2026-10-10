@@ -1461,7 +1461,14 @@ e podem repetir pessoa. Regras do parser (1ª passada do Tester): a métrica é 
 `scrolldepth`, `deadclickcount`/`deadclicks`, `rageclickcount`/`rageclicks`); sem exata vale a ÚNICA que
 contém o fragmento; duas ou mais candidatas (ou o mesmo nome repetido) = não reconhecida (nunca soma
 métricas diferentes: `TrafficSources` não dobra `Traffic`). NUNCA soma parcial: se qualquer linha de /precos
-não tem o número legível, o campo agregado vira `null` (peso presente em só algumas linhas: média `null`;
+não tem o número legível, o campo agregado vira `null`; se QUALQUER linha da métrica não tem URL legível (chave
+ausente ou valor que não é texto), a métrica inteira fica DESCONHECIDA (`null` em todos os campos dela, "n/d" no
+cartão, nunca "Sem visitas"), porque a linha descartada pode ser de /precos; `reconhecido` segue `true` (o formato é
+reconhecido, só os dados são incertos; o contrato fechado do `dados` não ganha chave) e sai UMA linha de log de
+texto fixo `[funil_clarity] linha sem URL legível: os campos da métrica ficam n/d` (sem nome, valor ou número, no
+máximo uma por métrica). Uma URL legível de OUTRA página, inclusive a string "(not set)", é "outra página" e não torna
+o agregado desconhecido. Risco: se o Clarity mandar uma linha sem URL em cada resposta (ex.: sessões sem URL), o
+cartão fica "n/d" sem aviso amarelo: o dono vê o log do Railway (peso presente em só algumas linhas: média `null`;
 em nenhuma: média simples). Sem linha de /precos: sessões e usuários 0 e as MÉDIAS `null`; com `truncado` e
 sem linha de /precos, sessões e usuários `null` (a linha pode estar no corte) e o cartão só diz "Números
 parciais", nunca "Sem visitas". A resposta é lida em stream por `r.raw.read1(65536, decode_content=True)` (urllib3 2.x; `iter_content` só entrega com
