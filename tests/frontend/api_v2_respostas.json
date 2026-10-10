@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, Investido, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -186,6 +186,45 @@
       "fora_do_envelope": true,
       "body": { "detail": "Token CSRF inválido ou ausente." }
     }
+  },
+  "investido": {
+    "com_banco": {
+      "total": "57123.45",
+      "por_tipo": [
+        { "tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": "40000.00", "motivos": [] },
+        { "tipo": "acoes", "rotulo": "Ações", "valor": "17123.45", "motivos": [] }
+      ],
+      "por_banco": [
+        { "banco": "Nubank", "valor": "50000.00", "motivos": [] },
+        { "banco": "XP", "valor": "7123.45", "motivos": [] }
+      ],
+      "motivos": []
+    },
+    "com_motivos": {
+      "total": "1234.50",
+      "por_tipo": [{ "tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": "1234.50", "motivos": ["banco_desatualizado"] }],
+      "por_banco": [{ "banco": "Nubank", "valor": "1234.50", "motivos": ["banco_desatualizado"] }],
+      "motivos": ["banco_desatualizado", "outra_moeda"]
+    },
+    "parte_sem_saldo": {
+      "total": "500.00",
+      "por_tipo": [
+        { "tipo": "renda_fixa", "rotulo": "Renda fixa", "valor": "500.00", "motivos": [] },
+        { "tipo": "fundos", "rotulo": "Fundos de investimento", "valor": null, "motivos": ["saldo_ausente"] }
+      ],
+      "por_banco": [{ "banco": "Nubank", "valor": "500.00", "motivos": ["saldo_ausente"] }],
+      "motivos": ["saldo_ausente"]
+    },
+    "sem_banco": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["sem_banco_conectado"] },
+    "pausada": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["sem_banco_conectado", "conexao_pausada"] },
+    "todas_sem_saldo": {
+      "total": null,
+      "por_tipo": [{ "tipo": "fundos", "rotulo": "Fundos de investimento", "valor": null, "motivos": ["saldo_ausente"] }],
+      "por_banco": [{ "banco": "Nubank", "valor": null, "motivos": ["saldo_ausente"] }],
+      "motivos": ["saldo_ausente"]
+    },
+    "nunca_lida": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"] },
+    "nenhum_investimento": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["nenhum_investimento"] }
   },
   "previsao": {
     "plus30": {
@@ -4140,6 +4179,467 @@
       "trajetoria": null,
       "pior_dia": null,
       "compromissos": null
+    },
+    "recorrencia_banco": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00Z",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "3500",
+        "origem": "consolidated",
+        "contas_bancarias": 2,
+        "bancos_excluidos": false,
+        "motivos": [
+          "carteira_nao_confirmada",
+          "especie_incompleta",
+          "banco_desatualizado",
+          "saldo_ausente"
+        ]
+      },
+      "estado": "a_conferir",
+      "motivos": [
+        {
+          "codigo": "carteira_nao_confirmada",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "especie_incompleta",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "banco_desatualizado",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "saldo_ausente",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "cobertura_bancaria_nao_comprovada",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "recorrencia_banco_estimada",
+          "direcao_do_erro": "ambos"
+        },
+        {
+          "codigo": "receita_nao_garantida",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "recorrencia_banco_atrasada",
+          "direcao_do_erro": "so_piora"
+        },
+        {
+          "codigo": "recorrencia_banco_conta_fora_da_base",
+          "direcao_do_erro": "so_melhora"
+        },
+        {
+          "codigo": "gastos_variaveis_nao_estimados",
+          "direcao_do_erro": "so_melhora"
+        }
+      ],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados.",
+        "Do banco, só entram cobranças e receitas que se repetem todo mês; contas anuais e boletos ainda não pagos não aparecem."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [
+          "banco_desatualizado",
+          "carteira_nao_confirmada",
+          "cobertura_bancaria_nao_comprovada",
+          "especie_incompleta",
+          "gastos_variaveis_nao_estimados",
+          "receita_nao_garantida",
+          "recorrencia_banco_atrasada",
+          "recorrencia_banco_conta_fora_da_base",
+          "recorrencia_banco_estimada",
+          "saldo_ausente"
+        ],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "8460.10"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "3500.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "3500.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "3460.10",
+          "compromissos": [
+            {
+              "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
+              "ciclo": "2026-10-08",
+              "data": "2026-10-08",
+              "fonte": "recorrencia_banco",
+              "tipo": "gasto_fixo",
+              "nome": "NETFLIX.COM",
+              "valor": "39.90",
+              "direcao": "saida",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "3460.10",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "8460.10",
+          "compromissos": [
+            {
+              "chave": "94a68fff3eb1e90a3bc0abc6394c149938e3204a013d3b26439008304fcb4729",
+              "ciclo": "2026-11-05",
+              "data": "2026-11-05",
+              "fonte": "recorrencia_banco",
+              "tipo": "receita",
+              "nome": "SALARIO EMPRESA X",
+              "valor": "5000",
+              "direcao": "entrada",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                },
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-08",
+        "saldo": "3460.10",
+        "desde": "2026-10-06",
+        "causas": [
+          {
+            "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
+            "ciclo": "2026-10-08",
+            "data": "2026-10-08",
+            "fonte": "recorrencia_banco",
+            "tipo": "gasto_fixo",
+            "nome": "NETFLIX.COM",
+            "valor": "39.90",
+            "direcao": "saida",
+            "qualidade_valor": "estimado",
+            "qualidade_data": "presumida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": [
+              {
+                "codigo": "recorrencia_banco_estimada",
+                "direcao_do_erro": "ambos"
+              }
+            ]
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "7cf697b94c85ff3720ca3c5d76f1ef6ab2d821ba5ecd4320f2b37048a9ba89eb",
+          "fonte": "recorrencia_banco",
+          "nome": "SALARIO EMPRESA X",
+          "primeira_data": "2026-10-05",
+          "ultima_data": "2026-11-05",
+          "ocorrencias": [
+            {
+              "chave": "d98c2571715f44f8bfac1471c9e2e7cdb0536e9a7bbd44197865ce31e92e847c",
+              "ciclo": "2026-10-05",
+              "data": "2026-10-05",
+              "fonte": "recorrencia_banco",
+              "tipo": "receita",
+              "nome": "SALARIO EMPRESA X",
+              "valor": "5000",
+              "direcao": "entrada",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "a_conferir",
+              "incluida_no_calculo": false,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                },
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                },
+                {
+                  "codigo": "recorrencia_banco_atrasada",
+                  "direcao_do_erro": "so_piora"
+                }
+              ]
+            },
+            {
+              "chave": "94a68fff3eb1e90a3bc0abc6394c149938e3204a013d3b26439008304fcb4729",
+              "ciclo": "2026-11-05",
+              "data": "2026-11-05",
+              "fonte": "recorrencia_banco",
+              "tipo": "receita",
+              "nome": "SALARIO EMPRESA X",
+              "valor": "5000",
+              "direcao": "entrada",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                },
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "824a4ed46d89399e5435db25bac34d2a0a98734479078f14395bed9a169355ea",
+          "fonte": "recorrencia_banco",
+          "nome": "NETFLIX.COM",
+          "primeira_data": "2026-10-08",
+          "ultima_data": "2026-10-08",
+          "ocorrencias": [
+            {
+              "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
+              "ciclo": "2026-10-08",
+              "data": "2026-10-08",
+              "fonte": "recorrencia_banco",
+              "tipo": "gasto_fixo",
+              "nome": "NETFLIX.COM",
+              "valor": "39.90",
+              "direcao": "saida",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "chave": "fba9e6cc918c34406b8403b4215c0f25a514355fdc5aa5a750a2d2044e33aad4",
+          "fonte": "recorrencia_banco",
+          "nome": "ACADEMIA",
+          "primeira_data": "2026-10-12",
+          "ultima_data": "2026-10-12",
+          "ocorrencias": [
+            {
+              "chave": "70697faab763b224a6affc79584101aee221024c65736f3a5f9048c1d0671d0f",
+              "ciclo": "2026-10-12",
+              "data": "2026-10-12",
+              "fonte": "recorrencia_banco",
+              "tipo": "gasto_fixo",
+              "nome": "ACADEMIA",
+              "valor": "100",
+              "direcao": "saida",
+              "qualidade_valor": "estimado",
+              "qualidade_data": "presumida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": false,
+              "motivos": [
+                {
+                  "codigo": "recorrencia_banco_estimada",
+                  "direcao_do_erro": "ambos"
+                },
+                {
+                  "codigo": "recorrencia_banco_conta_fora_da_base",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   }
 }

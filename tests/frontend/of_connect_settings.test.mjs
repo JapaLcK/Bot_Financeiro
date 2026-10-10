@@ -402,6 +402,33 @@ test("destroy() cancela o que está em voo e a Pluggy não abre depois", async (
   await page.__ctx.close();
 });
 
+test("o widget pede os produtos que o connect-token devolveu", async () => {
+  // Fonte única (CLAUDE.md §0.7): a lista é a de pluggy_products(), que foi no token.
+  // Controle negativo: voltar a lista fixa no openWidget deixa este caso vermelho.
+  const page = await abrirSettings();
+  await page.addInitScript(() => {
+    window.PluggyConnect = function (o) { window.__opts = JSON.parse(JSON.stringify(o)); this.init = function () {}; };
+  });
+  await page.reload();
+  await page.waitForFunction(() => {
+    const b = document.getElementById("connect-btn");
+    const l = document.getElementById("connections-list");
+    return !!(b && b.onclick && l && l.children.length > 0);
+  });
+  await page.route("**/open-finance/1/connect-token", (route) =>
+    route.fulfill(json({ ok: true, accessToken: "x", products: ["ACCOUNTS", "TRANSACTIONS"] })));
+
+  await abrirPicker(page);
+  await page.click('#bankpick-list .bank-row[data-name="Nubank"]');
+  await page.click("#bankpick-go");
+  await page.waitForFunction(() => !!window.__opts);
+
+  const opts = await page.evaluate(() => window.__opts);
+  assert.deepEqual(opts.products, ["ACCOUNTS", "TRANSACTIONS"]);
+  assert.equal(opts.connectToken, "x");
+  await page.__ctx.close();
+});
+
 test("mensagem estruturada do backend chega ao usuário", async () => {
   // Apontamento P2 do Codex: o detail do FastAPI vem string OU objeto. Aceitar
   // só string trocaria a mensagem acionável do limite de plano por um genérico.

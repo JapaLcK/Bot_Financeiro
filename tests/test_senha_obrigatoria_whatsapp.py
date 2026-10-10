@@ -196,8 +196,9 @@ def test_conta_sem_senha_consegue_desligar_notificacoes(enviadas, botao, desligo
     assert enviadas == [wr.PRECISA_SENHA_WA] and _gastos(uid) == 0
 
 
-# Apontamento do Codex no #716: o envio de atualizações vai ao `phone_e164` da conta
-# paga mesmo sem o número ligado (`send_update_whatsapp.get_all_update_targets`). O
+# Apontamento do Codex no #716: o envio de atualizações ia ao `phone_e164` da conta
+# paga mesmo sem o número ligado. Desde a #721 o `send_update_whatsapp` só envia a
+# número em `user_identities`, mas o botão de mensagens já enviadas continua clicável. O
 # clique chega com o uid do usuário só-WhatsApp, cai no `precisa_senha` do
 # auto-vínculo e tem de desligar a conta ALVO. Controle negativo: trocar o
 # `_tratar_opt_out` do ramo `precisa_senha` pelo PRECISA_SENHA_WA de antes deixa os

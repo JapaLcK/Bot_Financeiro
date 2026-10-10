@@ -59,8 +59,8 @@ it("filtros refluem na troca live sem perder seleção, busca ou instância do c
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
  expect(screen.getByLabelText("Buscar lançamento")).toBe(campo); expect(campo.props.value).toBe("mercado");
- expect(temColuna(screen.getByRole("button", { name: "Banco · selecionado" }))).toBe(true);
- expect(temColuna(screen.getByRole("button", { name: "Tudo · selecionado" }))).toBe(true);
+ expect(temColuna(screen.getByRole("button", { name: "Banco", selected: true }))).toBe(true);
+ expect(temColuna(screen.getByRole("button", { name: "Tudo", selected: true }))).toBe(true);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
 it("reflow durante POST mantém draft/voo e aceita a resposta do mesmo usuário", async () => {
@@ -80,4 +80,12 @@ it("reflow durante POST mantém draft/voo e aceita a resposta do mesmo usuário"
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
  atraso.soltar(); await act(async () => { await drenar(); }); await waitFor(() => expect(screen.getByText("Resposta após reflow")).toBeTruthy());
  expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe(""); expect(screen.getByText("13 de 1000 mensagens utilizadas")).toBeTruthy();
+});
+it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e embaixo dela com fonte ampliada", async (escala) => {
+ await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Saídas" })).toBeTruthy());
+ // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
+ await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Saídas" })); await drenar(); });
+ await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
+ const titulo = screen.getByText("Mercado"), valor = screen.getByLabelText("menos 120 reais");
+ expect(escala > 1 ? paiVisual(titulo) : paiVisual(paiVisual(titulo)!)).toBe(paiVisual(valor));
 });

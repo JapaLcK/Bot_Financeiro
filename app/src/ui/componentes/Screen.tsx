@@ -1,5 +1,6 @@
-import type { ReactNode } from "react";
-import { RefreshControl, ScrollView, View } from "react-native";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+// eslint-disable-next-line no-restricted-imports -- só o `TextInput.State` (quem tem o foco); nada de texto é renderizado aqui.
+import { Keyboard, Platform, RefreshControl, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTema } from "@/ui/tema";
@@ -23,6 +24,11 @@ type Props = {
       rolar?: true;
       onAtualizar?: () => void;
       atualizando?: boolean;
+      /**
+       * Teclado como inset inferior + rolagem até o campo focado. `false` em
+       * tela que já usa `KeyboardAvoidingView` (contaria o teclado duas vezes).
+       */
+      ajustarTeclado?: boolean;
     }
   | {
       children: ReactNode;
@@ -30,6 +36,27 @@ type Props = {
       rolar: false;
     }
 );
+
+/**
+ * `automaticallyAdjustKeyboardInsets` rola só até o CURSOR
+ * (`RCTTextInputComponentView.mm`), e o botão depois do campo ficava atrás do
+ * teclado. No `keyboardDidShow` (inset já aplicado) pede rolagem até o rótulo
+ * do campo focado: o `scrollTo` nativo corta no fim do conteúdo, então é "até o
+ * fim, mas nunca passando do campo". Só no iOS: no Android o `resize` do
+ * sistema já encolhe a tela, caminho nunca verificado num aparelho Android.
+ */
+export function useRolarAteCampoFocado(ativo: boolean, rolagem: RefObject<ScrollView | null>, conteudo: RefObject<View | null>) {
+  useEffect(() => {
+    if (!ativo || Platform.OS !== "ios") return;
+    const sub = Keyboard.addListener("keyboardDidShow", () => {
+      const campo = TextInput.State.currentlyFocusedInput();
+      if (!conteudo.current || !campo) return;
+      // `xxxl` acima do TextInput: o rótulo do `Input` fica ali.
+      campo.measureLayout(conteudo.current, (_x, y) => rolagem.current?.scrollTo({ y: y - espaco.xxxl }), () => undefined);
+    });
+    return () => sub.remove();
+  }, [ativo, rolagem, conteudo]);
+}
 
 /**
  * Casca de tela: fundo do tema + área segura nos QUATRO lados (top/bottom
@@ -40,6 +67,10 @@ type Props = {
 export function Screen(props: Props) {
   const { cores, acesso } = useTema();
   const insets = useSafeAreaInsets();
+  const rolagem = useRef<ScrollView>(null);
+  const conteudo = useRef<View>(null);
+  const ajustar = props.rolar === false ? false : (props.ajustarTeclado ?? true);
+  useRolarAteCampoFocado(ajustar, rolagem, conteudo);
   const topo = props.sobCabecalho ? 0 : insets.top;
   const preenchimento = {
     paddingTop: topo,
@@ -61,9 +92,13 @@ export function Screen(props: Props) {
   return (
     <View style={{ flex: 1, backgroundColor: cores.bg }}>
       <ScrollView
+        ref={rolagem}
+        // O .d.ts do RN tipa sem o `| null` que o `useRef` do React 19 devolve.
+        innerViewRef={conteudo as RefObject<View>}
         testID="tela"
         style={{ flex: 1, backgroundColor: cores.bg }}
         contentContainerStyle={preenchimento}
+        automaticallyAdjustKeyboardInsets={ajustar}
         // Hipótese conhecida da RN, só o simulador/aparelho prova: sem isto, o
         // primeiro toque num botão da tela com o teclado aberto só fecha o
         // teclado (o toque é "engolido"), precisando de um segundo toque.

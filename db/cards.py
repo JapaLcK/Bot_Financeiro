@@ -750,6 +750,19 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
+def reabrir_faturas_com_saldo(cur, user_id: int, bill_ids) -> None:
+    """Fatura paga/fechada cujo total passou a superar o pago volta a 'open' (mesmo padrão de
+    `add_credit_installments`). Para quem mexe no total fora do insert: sync do OF e remoção."""
+    ids = [b for b in bill_ids if b is not None]
+    if ids:
+        cur.execute(
+            "update credit_bills set status='open', paid_at=null "
+            "where user_id=%s and id=any(%s) and status in ('paid','closed') "
+            "and total > coalesce(paid_amount, 0)",
+            (user_id, ids),
+        )
+
+
 def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None, disconnect=False):
     """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
 
@@ -788,6 +801,7 @@ def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None
                 "update credit_bills set total = total - %s where id=%s and user_id = %s",
                 (v, tx["bill_id"], user_id),
             )
+            reabrir_faturas_com_saldo(cur, user_id, [tx["bill_id"]])  # tirar estorno/pagamento sobe o total
         conn.commit()
     return {"removed_total": float(v), "ct_id": ct_id}
 
@@ -806,6 +820,15 @@ def extract_installment_info(raw) -> tuple[int | None, int | None]:
     return (n, total) if (total and total > 1) else (None, None)
 
 
+def sinal_cartao_of(amount) -> tuple[Decimal, bool, str]:
+    """(valor, is_refund, tipo) de uma linha de cartão do OF. Única fonte do sinal.
+
+    Cartão na Pluggy: amount > 0 é compra (type DEBIT), < 0 é estorno/crédito (type CREDIT).
+    Doc do campo `amount` e produção (2026-10-09). O sandbox Pluggy Bank mostrou o oposto."""
+    v = Decimal(str(amount))
+    return v, v < 0, ("estorno" if v < 0 else "credito")
+
+
 def add_imported_credit_purchase(
     user_id: int,
     card_id: int,
@@ -821,19 +844,16 @@ def add_imported_credit_purchase(
 ):
     """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
 
-    `amount` vem assinado (negativo = compra, positivo = pagamento/estorno). A fatura sobe
-    com compras e cai com pagamentos/estornos. Parcela (installment_no/total) e group_id
+    `amount` vem assinado (positivo = compra, negativo = estorno). A fatura sobe
+    com compras e cai com estornos. Parcela (installment_no/total) e group_id
     populam as colunas que já existem, ligando as parcelas do mesmo compra (#11).
     Retorna (tx_id, criado: bool).
     """
     ensure_user(user_id)
-    amt = Decimal(str(amount))
-    is_refund = amt > 0
     # CONVENÇÃO CANÔNICA (igual add_credit_refund): valor ASSINADO — compra positiva,
-    # estorno/pagamento negativo. Fatura += valor. Assim undo_credit_transaction e todos
+    # estorno negativo. Fatura += valor. Assim undo_credit_transaction e todos
     # os leitores tratam o sinal uniformemente (não subtraem estorno em dobro).
-    valor = -amt
-    tipo = "estorno" if is_refund else "credito"
+    valor, is_refund, tipo = sinal_cartao_of(amount)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1118,21 +1138,35 @@ def update_credit_transaction_fields(
     return True
 
 
+class CompraDoBanco(ValueError):
+    """A compra/parcelamento veio do banco (Open Finance): o sync é dono do valor e da fatura.
+
+    Apagar ou antecipar aqui é desfeito no sync seguinte (a linha volta; na antecipação a Carteira
+    fica debitada e a fatura volta ao que era). Mesmo `pode` do v2: `PODE_CARTAO_SQL` não dá `apagar`."""
+
+
+MSG_COMPRA_DO_BANCO = ("Essa compra vem do seu banco (Open Finance), então não dá pra apagar nem "
+                       "antecipar por aqui: ela segue o que o banco informa.")
+
+
 def undo_credit_transaction(user_id: int, ct_id: int):
     """
     Desfaz um crédito CT#.
     Se pertence a parcelamento (group_id), desfaz o grupo inteiro.
+    Levanta `CompraDoBanco` se a compra é do Open Finance.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, bill_id, valor, group_id, installment_no, installments_total "
+                "select id, bill_id, valor, group_id, installment_no, installments_total, source "
                 "from credit_transactions where user_id=%s and id=%s",
                 (user_id, ct_id),
             )
             tx = cur.fetchone()
             if not tx:
                 return None
+            if tx["source"] == "open_finance":
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             group_id = tx.get("group_id")
             installments_total = int(tx.get("installments_total") or 0)
@@ -1202,6 +1236,7 @@ def undo_installment_group(user_id: int, group_id: str):
     ajuste manual se sentir falta.
 
     Mudança de comportamento (era refundar paid_amount via launch).
+    Levanta `CompraDoBanco` se o parcelamento é do Open Finance.
     """
     today = date.today()
     note_suffix = f" [Parcelamento removido em {today.strftime('%d/%m/%Y')}]"
@@ -1211,7 +1246,7 @@ def undo_installment_group(user_id: int, group_id: str):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select t.id, t.bill_id, t.valor, t.card_id, t.nota,
+                select t.id, t.bill_id, t.valor, t.card_id, t.nota, t.source,
                        b.status as bill_status
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
@@ -1222,6 +1257,8 @@ def undo_installment_group(user_id: int, group_id: str):
             rows = cur.fetchall()
             if not rows:
                 return None
+            if any(r["source"] == "open_finance" for r in rows):
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             tx_to_delete: list[dict] = []
             tx_to_orphan: list[dict] = []
@@ -1366,7 +1403,7 @@ def anticipate_installment(user_id: int, group_id: str):
       e nota explicitando que foi antecipação. is_internal_movement=False
       pra contar nas analytics do user (preserva categoria original).
 
-    Retorna None se não há parcela pendente.
+    Retorna None se não há parcela pendente. Levanta `CompraDoBanco` se é do Open Finance.
     """
     today = date.today()
 
@@ -1375,7 +1412,7 @@ def anticipate_installment(user_id: int, group_id: str):
             cur.execute(
                 """
                 select t.id, t.bill_id, t.valor, t.categoria, t.nota,
-                       t.installment_no, t.installments_total, t.card_id,
+                       t.installment_no, t.installments_total, t.card_id, t.source,
                        coalesce(c.name, 'Cartão') as card_name
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
@@ -1391,6 +1428,8 @@ def anticipate_installment(user_id: int, group_id: str):
             tx = cur.fetchone()
             if not tx:
                 return None
+            if tx["source"] == "open_finance":
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             valor = Decimal(str(tx["valor"]))
             bill_id = tx["bill_id"]

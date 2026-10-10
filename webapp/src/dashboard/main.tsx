@@ -5,8 +5,8 @@ import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas } from "./lib/api-v2.gen";
+import { DEMO, contasQuery, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Investido } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -27,6 +27,13 @@ if (DEMO) {
     total: txt(BALANCE_TODAY + 60), motivos: ["carteira_nao_confirmada"], fora_do_total: 0,
     carteira: { saldo: txt(60), motivos: ["carteira_nao_confirmada"] },
     contas: [conta(1, "Nubank", BALANCE_TODAY - 250), conta(2, "Inter", 250)],
+  });
+  // Os rótulos são cópia de `db/investido.py::TIPOS` (dado de exemplo: deriva sem dano).
+  qc.setQueryData<Investido>(investidoQuery.queryKey, {
+    total: "23480.00", motivos: [],
+    por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "20000.00", motivos: [] },
+      { tipo: "acoes", rotulo: "Ações", valor: "3480.00", motivos: [] }],
+    por_banco: [{ banco: "Nubank", valor: "23480.00", motivos: [] }],
   });
   for (const mes of MONTHS) {
     const m = summary(mes), prev = previousKey(mes);

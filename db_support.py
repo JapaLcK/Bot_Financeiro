@@ -377,6 +377,22 @@ def claim_weekly_report_send_impl(get_conn, ensure_user, user_id: int, period_da
     return row is not None
 
 
+def release_weekly_report_claim_impl(get_conn, user_id: int, period_date) -> None:
+    """Devolve o claim de `period_date` quando o build do resumo falhou depois dele.
+
+    Só zera se a data gravada ainda é a do claim (não pisa num claim mais novo).
+    Só o dono do claim chama: o próximo ciclo do tick tenta de novo.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update daily_report_prefs set last_weekly_sent_date = null"
+                " where user_id = %s and last_weekly_sent_date = %s",
+                (user_id, period_date),
+            )
+        conn.commit()
+
+
 def claim_monthly_report_send_impl(get_conn, ensure_user, user_id: int, period_date) -> bool:
     """Reserva atomicamente o envio do resumo mensal para `period_date` (o dia 1 do mês).
 
@@ -1095,7 +1111,25 @@ def attempt_whatsapp_phone_link_impl(
             )
             existing_current_wa = cur.fetchone()
 
+            # Sem telefone que case, o número ainda pode já estar numa conta: o
+            # `vincular CODIGO` liga sem olhar o telefone digitado no site. O que
+            # separa isso do só-WhatsApp (que `get_or_create_canonical_user` cria
+            # com a identidade do número) é conta web ou outro canal ligado.
+            ja_em_conta = False
+            if not matches:
+                cur.execute(
+                    """
+                    select exists (select 1 from auth_accounts where user_id = %s)
+                        or exists (select 1 from user_identities
+                                   where user_id = %s and provider <> 'whatsapp') as ligado
+                    """,
+                    (current_user_id, current_user_id),
+                )
+                ja_em_conta = bool(cur.fetchone()["ligado"])
+
     if not matches:
+        if ja_em_conta:
+            return {"status": "already_linked", "user_id": int(current_user_id), "wa_phone": wa_phone}
         return {"status": "no_match", "wa_phone": wa_phone}
 
     if len(matches) > 1:
@@ -1163,8 +1197,9 @@ def attempt_whatsapp_phone_link_impl(
                 if _tem_dados_financeiros(cur, int(current_user_id)):
                     return {"status": "remetente_com_dados", "wa_phone": wa_phone,
                             "target_user_id": target_user_id}
-            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
-            # clique de opt-out deste número tem de desligar a preferência dela.
+            # `target_user_id`: o clique de opt-out deste número tem de desligar a
+            # preferência dela. Desde a #721 a atualização só vai a número ligado, mas
+            # o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
             return {"status": "precisa_senha", "wa_phone": wa_phone,
                     "target_user_id": target_user_id}
 

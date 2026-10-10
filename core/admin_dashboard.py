@@ -1028,8 +1028,12 @@ def _fetch_stripe_billing_sync() -> dict[str, Any]:
             elif status == "trialing":
                 trial_mrr += monthly
     except Exception as exc:
-        logging.getLogger(__name__).warning("[admin] Stripe billing summary falhou: %s", exc)
-        return {"available": False, "reason": str(exc)[:200]}
+        # Só o NOME do tipo, no log e no `reason`: `str(exc)` de um erro do Stripe pode
+        # trazer prefixo da chave, e-mail ou id de cliente; o log vai para
+        # `system_event_logs` e o `reason` fica no cache em memória e no JSON do painel.
+        logging.getLogger(__name__).warning(
+            "[admin] Stripe billing summary falhou: %s", type(exc).__name__)
+        return {"available": False, "reason": type(exc).__name__}
 
     return {
         "available": True,
@@ -1737,7 +1741,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
-        if not _check_admin_password(password):
+        if not await asyncio.to_thread(_check_admin_password, password):
             await log_system_event(
                 "warning",
                 "admin_login_failed",

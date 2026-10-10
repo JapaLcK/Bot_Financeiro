@@ -7,7 +7,7 @@ from tests.test_pr3_tester2_cartoes import account, snapshot, tx
 from tests.test_of_identidade_e_campos_bancarios import conta, ciclo, conecta, q
 
 
-def legado_reconectado(uid, amount=-20):
+def legado_reconectado(uid, amount=20):
     old_connections, card_ids = [], []
     for num in (1, 2):
         cid = conecta(uid, f"legado-{num}-{uid}")
@@ -46,7 +46,7 @@ def test_estado_novo_prevalece_sobre_fk_antiga(user_id, status, disconnect_old):
 
 
 def test_estorno_sem_fk_mantem_cobertura_ativa(user_id):
-    old, newest, card_ids = legado_reconectado(user_id, amount=20)
+    old, newest, card_ids = legado_reconectado(user_id, amount=-20)
     before = snapshot(user_id)
     for cid in old:
         db.disconnect_open_finance_connection(user_id, cid)

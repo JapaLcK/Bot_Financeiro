@@ -458,7 +458,17 @@ async def serve_como_funciona():
 
 
 @router.get("/precos")
-async def serve_precos():
+def serve_precos(request: Request):
+    """`def` (threadpool): o resolver consulta o banco. Logado grava
+    `viewed_pricing` (topo do funil); anônimo/cookie inválido só serve a página."""
+    from db import record_pricing_viewed
+
+    try:
+        uid = _resolve_page_user_id(request)
+        if uid is not None:
+            record_pricing_viewed(uid)
+    except Exception:  # telemetria nunca derruba a página de venda
+        logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
     return html_file(FRONTEND_DIR / "precos.html", clarity=True)
 
 
@@ -466,6 +476,16 @@ async def serve_precos():
 async def serve_lp():
     # Landing de anúncio: VSL obrigatória e um único botão para o quiz (quiz.pigbankai.com).
     return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
+
+
+@router.get("/vsl")
+async def serve_vsl():
+    # A mesma VSL da /lp, depois do XQuiz (a /q sem plano manda pra cá): o botão vai à
+    # /precos. Trocado aqui, e não no JS, para valer também sem JavaScript.
+    resp = await serve_lp()
+    resp.body = resp.body.replace(b'href="https://quiz.pigbankai.com/"', b'href="/precos"')
+    resp.headers["content-length"] = str(len(resp.body))
+    return resp
 
 
 @router.get("/continuar-compra")
@@ -746,6 +766,15 @@ async def serve_dashboard_agent_chat_js():
     )
 
 
+@router.get("/dashboard-agent-esperado.js")
+async def serve_dashboard_agent_esperado_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-agent-esperado.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/launch-type-labels.js")
 async def serve_launch_type_labels_js():
     """Fonte única dos rótulos de `tipo` de lançamento — dashboard.html e
@@ -908,6 +937,18 @@ async def serve_of_connect_js():
     navegador — não há StaticFiles mount neste projeto."""
     return FileResponse(
         FRONTEND_DIR / "open-finance-connect.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/of-status-poll.js")
+async def serve_of_status_poll_js():
+    """Acompanhamento da coleta do Open Finance (Onda 5, D6), carregado pelo
+    settings.html. Sem esta rota o arquivo dá 404 e o sintoma só aparece no
+    navegador — não há StaticFiles mount neste projeto."""
+    return FileResponse(
+        FRONTEND_DIR / "of-status-poll.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )

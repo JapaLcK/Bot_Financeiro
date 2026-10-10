@@ -13,7 +13,7 @@ def account(uid, cid):
     return q('select a.id from open_finance_accounts a join open_finance_connections c on c.id=a.connection_id where c.user_id=%s and c.id=%s', (uid,cid),True)[0]['id']
 
 
-def tx(ident, value=-12):
+def tx(ident, value=12):
     result = transacao(value)
     result['provider_transaction_id'] = ident
     return result
@@ -34,7 +34,7 @@ def test_prioriza_cartao_com_compra_e_preserva_ambos(user_id, with_purchases):
     for c in [c1,c2]:
         ids.append(q("insert into credit_cards(user_id,name,closing_day,due_day,open_finance_account_id) values (%s,%s,1,10,%s) returning id",(uid,f'cartao-{c}',account(uid,c)),True)[0]['id'])
     if with_purchases:
-        cards.add_imported_credit_purchase(uid,ids[1],-12,'lazer',transacao()['transaction_date'],'legado')
+        cards.add_imported_credit_purchase(uid,ids[1],12,'lazer',transacao()['transaction_date'],'legado')
     before=snapshot(uid)
     c3=conecta(uid,f'novo-{uid}')
     db.save_open_finance_sync(c3,[conta('estavel','CREDIT')])
@@ -136,7 +136,7 @@ def test_dois_legados_com_compras_reconecta_e_desconecta_antigas(user_id):
     for num in [1,2]:
         cid=conecta(uid,f'legado-{num}-{uid}')
         old_connections.append(cid)
-        transaction=tx(f't{num}',-num*10)
+        transaction=tx(f"t{num}",num*10)
         db.save_open_finance_sync(cid,[conta('estavel','CREDIT',transaction)])
         aid=account(uid,cid)
         card=q("insert into credit_cards(user_id,name,closing_day,due_day,open_finance_account_id) values (%s,%s,1,10,%s) returning id",(uid,f'legado-{num}',aid),True)[0]['id']
@@ -146,7 +146,7 @@ def test_dois_legados_com_compras_reconecta_e_desconecta_antigas(user_id):
     before=snapshot(uid)
     newest=conecta(uid,f'novo-{uid}')
     a=conta('estavel','CREDIT')
-    a['transactions']=[tx('t1',-10),tx('t2',-20)]
+    a['transactions']=[tx('t1',10),tx('t2',20)]
     ciclo(uid,newest,[a])
     # Chaves externas podem ser canonizadas, mas IDs/faturas/totais não mudam.
     after=snapshot(uid)

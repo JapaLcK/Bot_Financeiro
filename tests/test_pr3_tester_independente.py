@@ -111,7 +111,7 @@ def test_historico_antigo_nao_retoma_cartao_da_conexao_nova(user_id):
     ciclo(user_id,cid2,[conta('estavel','CREDIT')])
     acc2 = q('select a.id from open_finance_accounts a join open_finance_connections c on c.id=a.connection_id where c.user_id=%s and c.id=%s',(user_id,cid2),True)[0]['id']
     assert q('select open_finance_account_id from credit_cards where user_id=%s',(user_id,),True)[0]['open_finance_account_id'] == acc2
-    historical = transacao(-12)
+    historical = transacao(12)
     historical['provider_transaction_id'] = 'historico-ainda-nao-na-resposta-parcial'
     ciclo(user_id,cid1,[conta('estavel','CREDIT',historical)])
     db.disconnect_open_finance_connection(user_id,cid1)

@@ -262,6 +262,27 @@ async def agents_feed_seen_route(request: Request, user_id: int):
     return {"ok": True, "marked": n}
 
 
+class EsperadoBody(BaseModel):
+    esperado: bool
+
+
+@router.put("/agents/{user_id}/xerife/lancamentos/{launch_id}/esperado")
+async def xerife_esperado_route(request: Request, user_id: int, launch_id: int, body: EsperadoBody):
+    """"Era esperado": tira UM lançamento do alerta e da média do Xerife (PL-04). Estado explícito
+    e idempotente. 404 igual para "não existe" e "é de outro usuário"."""
+    shared.authorize_dashboard_access(request, user_id)
+    _require_agents_beta(user_id)
+    from db import marcar_lancamento_esperado
+
+    v2_on, v2_allowed = await asyncio.to_thread(_v2_agents_gate, user_id, "xerife")
+    if v2_on and not v2_allowed:
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
+    achou = await asyncio.to_thread(marcar_lancamento_esperado, user_id, launch_id, body.esperado)
+    if not achou:
+        raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    return {"ok": True, "esperado": body.esperado}
+
+
 class AgentChatBody(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     context: str | None = Field(default=None, max_length=160000)

@@ -32,7 +32,8 @@ function aplicar(g, c) {
 // `dica`: a de Assinaturas "vista" (a da fixture), "nova" (ainda não vista), "sem" (o plano não
 // dá) ou "ausente" (servidor anterior ao #728, sem a chave `dicas`); `dicaLenta`: o POST
 // /guia/dica responde depois de N ms ou quando a promise dada resolve. `s.dicas`: os ids postados.
-export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
+// `postLento(c, n)`: o mesmo para o POST /guia de número `n` (ms, promise ou nada).
+export async function abrir({ width = 1280, height = 800, guia = "oferecer", perfil = "padrao", plano = "pro", motion = "reduce", post, postLento, rota = "/", perfilLento = 0, semDialog = false, antes, dica = "vista", dicaLenta = 0 } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, reducedMotion: motion, timezoneId: "America/Sao_Paulo" });
   // A caixa do Piggy pelo left/top gravado, sem o transform: a inclinação e o voo aumentam o
   // retângulo pintado, e "encostar" é sobre onde ele pousa.
@@ -66,8 +67,17 @@ export async function abrir({ width = 1280, height = 800, guia = "oferecer", per
     s.posts.push(c);
     const outro = await post?.(c, s.posts.length, s);
     if (outro) return r.fulfill({ status: outro.status, json: outro.json });
-    s.g = aplicar(s.g, c);
-    return r.fulfill({ json: s.g });
+    // db/guia.py (`_GESTO`/`_NOVO`): dispensar/reabrir da MESMA aba com n <= o do último gesto
+    // aplicado não grava o efeito (responde o estado atual); sem `ordem` sempre aplica e zera a guarda.
+    const gesto = c.acao === "dispensar" || c.acao === "reabrir";
+    if (!(gesto && c.ordem && s.ordem?.aba === c.ordem.aba && c.ordem.n <= s.ordem.n)) {
+      s.g = aplicar(s.g, c);
+      if (gesto) s.ordem = c.ordem ?? null;
+    }
+    // Como o da dica: aplicado na chegada, a lentidão é a da volta.
+    const json = structuredClone(s.g), lento = postLento?.(c, s.posts.length);
+    if (lento) await (typeof lento === "number" ? new Promise((ok) => setTimeout(ok, lento)) : lento);
+    return r.fulfill({ json });
   });
   await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: "http://127.0.0.1:1" }]);
   await antes?.(ctx, s); // rotas a mais antes de a página abrir (o SSE da coreografia)
@@ -87,9 +97,9 @@ export const vaoDoVeu = () => {
   const [f0, f1, f2, f3] = [...document.querySelectorAll(".guia-veu")].map((e) => e.getBoundingClientRect());
   return { left: f2.right, top: f0.bottom, right: f3.left, bottom: f1.top };
 };
-export const tocarAba = async (page) => {
-  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout: 10000 });
-  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout: 10000 }); // pousou
+export const tocarAba = async (page, timeout = 10000) => {
+  await page.locator("#guia-titulo", { hasText: ABA }).waitFor({ timeout });
+  await page.waitForFunction(() => !document.querySelector(".guia-anel").hidden, null, { timeout }); // pousou
   const v = await page.evaluate(vaoDoVeu);
   await page.mouse.click((v.left + v.right) / 2, (v.top + v.bottom) / 2);
 };
@@ -97,9 +107,14 @@ export const tocarAba = async (page) => {
 // mesmo com o "Entendi"). 10 s: festa (1,6 s), o voo até a aba e o da tela nova.
 export const esperaTitulo = async (page, t) => {
   const alvo = page.locator("#guia-titulo", { hasText: t }), aba = page.locator("#guia-titulo", { hasText: ABA });
-  for (let i = 0; i < 100 && !(await alvo.count()); i++) {
-    if (!String(t).startsWith(ABA) && (await aba.count())) await tocarAba(page).catch(() => {});
-    else await page.waitForTimeout(100);
+  for (const fim = Date.now() + 10000; Date.now() < fim && !(await alvo.count());) {
+    // 500 ms: se o toque anterior já pegou, o guia navegou e o "Agora toca" não volta
+    if (!String(t).startsWith(ABA) && (await aba.count())) {
+      // Depois do toque, espera o "Agora toca" sair: o React troca o título um tempo depois do
+      // clique, e voltar ao laço antes disso toca de novo, no mesmo ponto — que na tela nova é o
+      // véu, e o clique no véu tira o foco do título (o foco com o véu acabava em <body>).
+      if (await tocarAba(page, 500).then(() => true, () => false)) await aba.waitFor({ state: "detached", timeout: 2000 }).catch(() => {});
+    } else await page.waitForTimeout(100);
   }
   await alvo.waitFor({ timeout: 10000 });
 };

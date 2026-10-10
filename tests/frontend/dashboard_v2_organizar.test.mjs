@@ -32,7 +32,7 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir({ semInert = false, organizar = false } = {}) {
+async function abrir({ semInert = false, organizar = false, agora = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
   await servir(ctx);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
@@ -44,6 +44,7 @@ async function abrir({ semInert = false, organizar = false } = {}) {
     Element.prototype.toggleAttribute = function (n, f) { return n === "inert" ? false : ta.call(this, n, f); };
     delete HTMLElement.prototype.inert;
   });
+  if (agora) await page.clock.install({ time: agora });
   await page.goto(`${PAINEL}#/`);
   await page.locator(HERO).first().waitFor();
   if (organizar) {
@@ -111,7 +112,8 @@ test("Organizar sem inert (Safari < 15.5): teclas e digitação em controle inte
 });
 
 test("Organizar sem inert: o Tab não entra em controle interno, e no Pronto eles voltam à ordem de Tab", async () => {
-  const { ctx, page } = await abrir({ organizar: true, semInert: true });
+  // a paleta lista os 6 últimos meses pelo relógio real; sem fixá-lo "Agosto" some em fev/2027
+  const { ctx, page } = await abrir({ organizar: true, semInert: true, agora: new Date("2026-10-15T15:00:00Z") });
   const organizando = await tabs(page, "Pronto");
   // Trocar o mês pela paleta (o ⌘K passa no Organizar) re-renderiza o conteúdo com nós novos.
   await page.keyboard.press("Control+k");

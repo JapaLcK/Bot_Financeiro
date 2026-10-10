@@ -4,6 +4,7 @@ import { RECURRING } from "./data.js";
 import { money, money0, monthName, monthYear, signed0 } from "./format.js";
 import { get } from "./store.js";
 import type { DashState, Launch } from "./types";
+import { InvestidoResposta } from "../parts/InvestidoResposta";
 import { Ledger } from "../parts/Ledger";
 import type { Path } from "../router";
 import { Bills } from "../widgets/Bills";
@@ -24,11 +25,12 @@ import { Yield } from "../widgets/Yield";
 // produção, quem escolhe o assunto é a IA (as tools de /ai/chat), não esta tabela.
 // Cada bloco é função do estado da resposta (`s0` na hora da pergunta, depois o que o
 // usuário mexe nela: parts/LiveAnswer.tsx); bloco que devolve null não aparece.
-export type TopicId = "categorias" | "categoria" | "lancamentos" | "fatura" | "investimentos" | "metas" | "saldo" | "renda";
+export type TopicId = "categorias" | "categoria" | "lancamentos" | "fatura" | "investimentos" | "metas" | "saldo" | "renda" | "investido";
 // `key` escolhe a resposta própria da pergunta (LEADS), quando o assunto sozinho não a responde.
 export interface Follow { label: string; topic: TopicId; cat?: string; key?: string }
 export type Block = (s: DashState) => ReactNode;
-export interface Answer { text: ReactNode; blocks: Block[]; follow: Follow[]; s0?: DashState; page?: Path }
+// `real`: a resposta vem do servidor (sem o selo "demonstração" na mensagem).
+export interface Answer { text: ReactNode; blocks: Block[]; follow: Follow[]; s0?: DashState; page?: Path; real?: boolean }
 
 const NOW = MONTHS[MONTHS.length - 1];
 const DAY = TODAY.getDate();
@@ -41,7 +43,7 @@ const spentIn = (key: string, cat: string) => (summary(key).launches as Launch[]
 const snap = (cat: string | null = null): DashState => ({ ...get(), month: NOW, filter: { category: cat, day: null, query: "", source: "todos" }, highlight: null, editing: false });
 
 // A página do painel de cada assunto ("Abrir no painel"). O bloco Renda só existe no Resumo.
-const PAGE: Record<TopicId, Path> = { categorias: "/gastos", categoria: "/gastos", lancamentos: "/lancamentos", fatura: "/previsao", investimentos: "/patrimonio", metas: "/metas", saldo: "/previsao", renda: "/" };
+const PAGE: Record<TopicId, Path> = { categorias: "/gastos", categoria: "/gastos", lancamentos: "/lancamentos", fatura: "/previsao", investimentos: "/patrimonio", metas: "/metas", saldo: "/previsao", renda: "/", investido: "/patrimonio" };
 
 function byTopic(topic: TopicId, cat: string | null): Answer {
   const m = summary(NOW);
@@ -110,6 +112,13 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
         follow: [{ label: "Pra onde vai meu dinheiro?", topic: "categorias" }, { label: "E a minha fatura?", topic: "fatura" }, { label: "Quanto falta pras minhas metas?", topic: "metas" }],
       };
     }
+    case "investido":
+      return {
+        text: <InvestidoResposta />,
+        blocks: [],
+        real: true,
+        follow: [{ label: "Quanto falta pras minhas metas?", topic: "metas" }, { label: "Quanto sobra pra investir?", topic: "saldo", key: "quanto-investir" }, { label: "Como anda a minha renda?", topic: "renda" }],
+      };
     case "renda": {
       const rows = incomeHistory();
       const vals = rows.map((r) => r.value);
@@ -293,5 +302,5 @@ export function answer(topic: TopicId, cat: string | null = null, key?: string):
 export const DEMO: Answer = {
   text: <>Aqui no protótipo eu respondo pelos atalhos. No app de verdade eu entendo qualquer pergunta sobre o seu dinheiro. Quer ver um destes?</>,
   blocks: [],
-  follow: [{ label: "Pra onde vai meu dinheiro?", topic: "categorias" }, { label: "E a minha fatura?", topic: "fatura" }, { label: "Como estão meus investimentos?", topic: "investimentos" }, { label: "Quanto falta pras minhas metas?", topic: "metas" }],
+  follow: [{ label: "Pra onde vai meu dinheiro?", topic: "categorias" }, { label: "E a minha fatura?", topic: "fatura" }, { label: "Quanto eu tenho investido?", topic: "investido" }, { label: "Quanto falta pras minhas metas?", topic: "metas" }],
 };

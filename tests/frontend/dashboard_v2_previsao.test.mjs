@@ -108,7 +108,7 @@ test("Plus: 1 marco, motivos e premissas; convite ao Pro no lugar do gráfico e 
   assert.deepEqual(r, {
     valor: "R$ 7,33", marcos: 0, svg: 0, grupos: 0, radios: 0, horizonte: "30 dias",
     convites: [["O saldo dia a dia, o menor saldo e os compromissos de cada dia são do Pro.", "/precos"], ["A lista de contas e receitas de cada dia é do Pro.", "/precos"]],
-    motivos: ["gastos do dia a dia fora da conta · o real pode ser melhor", "pedido pendente na conversa · pode variar para os dois lados"],
+    motivos: ["gastos do dia a dia fora da conta · o real pode ser pior", "pedido pendente na conversa · pode variar para os dois lados"],
     premissas: 4, nenhum: false,
   });
   assert.deepEqual(pedidos, [""]);
@@ -178,7 +178,7 @@ test("compromissos: desconhecido, homônimos separados, grupo repetido sem soma,
   assert.equal(focado, "Ônibus");
   assert.deepEqual(aberto, ["true", 3]);
   assert.equal(fechado, "false");
-  assert.match(luz, /^04\/10 −R\$ 89,90 venceu 04\/10 a conferir pagamento do boleto a conferir · o real pode ser pior$/);
+  assert.match(luz, /^04\/10 −R\$ 89,90 venceu 04\/10 a conferir pagamento do boleto a conferir · o real pode ser melhor$/);
   assert.equal(pago, false);
 });
 // O id do useId tem ":" ("«r1»" no React 19 sai como ":r1:"): escapa para o seletor.
@@ -245,16 +245,16 @@ test("qualidade: estado, motivos em português com a direção, código novo sai
   const cru = await page.evaluate(() => [...document.querySelectorAll("#w-previsao-qualidade .prev-motivos li")].map((li) => li.textContent));
   await ctx.close();
   assert.deepEqual(r, ["A conferir", [
-    "gastos do dia a dia fora da conta · o real pode ser melhor", "receita não garantida · o real pode ser melhor",
-    "pagamento do boleto a conferir · o real pode ser pior", "pode já estar na fatura · o real pode ser melhor",
-    "pagamento da fatura a conferir · o real pode ser pior"], 4]);
+    "gastos do dia a dia fora da conta · o real pode ser pior", "receita não garantida · o real pode ser pior",
+    "pagamento do boleto a conferir · o real pode ser melhor", "pode já estar na fatura · o real pode ser pior",
+    "pagamento da fatura a conferir · o real pode ser melhor"], 4]);
   assert.deepEqual(cru, ["pedido pendente na conversa · pode variar para os dois lados", "codigo_novo_x · pode variar para os dois lados"]);
 });
 
 // §0.7: os códigos moram no Python e os rótulos no Selos.tsx. Servidos todos de uma vez,
 // nenhum pode sair cru na tela.
-test("paridade: todo `_motivo(s, '…')` do cashflow_snapshot.py tem rótulo em português", async () => {
-  const py = readFileSync(join(RAIZ, "core", "services", "cashflow_snapshot.py"), "utf8");
+test("paridade: todo `_motivo(s, '…')` do motor (cashflow_snapshot.py e previsao_recorrencias.py) tem rótulo em português", async () => {
+  const py = ["cashflow_snapshot.py", "previsao_recorrencias.py"].map((f) => readFileSync(join(RAIZ, "core", "services", f), "utf8")).join("\n");
   const codigos = [...new Set([...py.matchAll(/_motivo\(s, '([a-z_]+)'/g)].map((m) => m[1]))];
   assert.ok(codigos.length >= 20, `poucos códigos lidos: ${codigos}`);
   const corpo = { ...RESPOSTAS.previsao.pro30, estado: "a_conferir", motivos: codigos.map((codigo) => ({ codigo, direcao_do_erro: "ambos" })) };

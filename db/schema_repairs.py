@@ -17,6 +17,8 @@ import logging
 
 import psycopg
 
+from .connection import get_conn
+
 logger = logging.getLogger(__name__)
 
 
@@ -206,6 +208,87 @@ def ensure_lower_name_unique(cur) -> list[str]:
                            "maiúscula; índice uq_%s_user_lower_name NÃO criado", t, t)
             pulou.append(t)
     return pulou
+
+
+# FKs sem índice (#253): sem ele, cada linha-pai apagada varre a tabela-filha INTEIRA
+# (a global, não a fatia do usuário) — é o que alonga o `delete from launches` do reset.
+# (tabela, coluna, parcial). Parcial (`where col is not null`) nas `on delete set null`,
+# quase todas nulas; os lotes são `not null`, índice total. Fonte única: a auditoria de
+# tests/test_fk_indexes.py acha FK nova sem índice sem consultar esta lista.
+_FK_INDEXES = (
+    ("bill_instances", "launch_id", True),
+    ("open_finance_transactions", "match_launch_id", True),
+    ("open_finance_transactions", "imported_credit_tx_id", True),
+    ("recurring_charges", "launch_id", True),
+    ("recurring_charges", "credit_tx_id", True),
+    ("recurring_income_credits", "launch_id", True),
+    ("pocket_lots", "pocket_id", False),
+    ("investment_lots", "investment_id", False),
+    # FK para users: o `delete from users` também varria as duas. E o auto-vínculo do WhatsApp
+    # (`attempt_whatsapp_phone_link_impl`) as consulta por `user_id` em TODA mensagem (#722).
+    ("auth_accounts", "user_id", False),
+    ("user_identities", "user_id", False),
+)
+
+
+def ensure_fk_indexes(cur) -> list[str]:
+    """Cria os índices de `_FK_INDEXES` sem travar escrita; devolve os que falharam.
+    NÃO é chamada pelo `init_db`: ver `ensure_fk_indexes_once`.
+
+    Exige AUTOCOMMIT (o modo do `_run_ddl`): `create index concurrently` não roda em
+    transação. Um CONCURRENTLY que falha deixa índice INVÁLIDO, que o planner ignora
+    e o `if not exists` pula para sempre — por isso o inválido é derrubado antes de
+    recriar. Erro vira WARNING (nome do índice e sqlstate, nada de usuário) e segue:
+    o próximo boot repara. Idempotente; índice válido não é reconstruído.
+
+    ponytail: sem `lock_timeout` — o CONCURRENTLY espera as transações abertas que
+    já tocam a tabela terminarem; por isso roda em tarefa de fundo, não no boot.
+    """
+    falhou: list[str] = []
+    for tabela, coluna, parcial in _FK_INDEXES:
+        nome = f"idx_{tabela}_{coluna}"
+        try:
+            cur.execute("select not (indisvalid and indisready) as invalido from pg_index "
+                        "where indexrelid = to_regclass(%s)", (nome,))
+            atual = cur.fetchone()
+            if atual and atual["invalido"]:
+                cur.execute(f"drop index concurrently if exists {nome}")
+            cur.execute(f"create index concurrently if not exists {nome} on {tabela} ({coluna})"
+                        + (f" where {coluna} is not null" if parcial else ""))
+        except psycopg.Error as exc:  # sqlstate, nunca o texto: ele pode trazer dado
+            logger.warning("[schema_repairs] AVISO #253: índice %s NÃO criado (sqlstate=%s); o "
+                           "próximo boot tenta de novo", nome, getattr(exc, "sqlstate", None))
+            falhou.append(nome)
+    return falhou
+
+
+# Lock de SESSÃO próprio, não o `SCHEMA_INIT_LOCK`: um container que sobe durante o
+# CONCURRENTLY esperaria o do init_db, que roda sob o `wait_for` de
+# `STARTUP_STEP_TIMEOUT` (default configurável) no startup.
+FK_INDEXES_LOCK = 728_531_005
+
+
+def ensure_fk_indexes_once() -> list[str] | None:
+    """`ensure_fk_indexes` numa conexão em autocommit, fora do `init_db` (#253).
+
+    Roda numa tarefa de fundo do app web (`lifespan`), DEPOIS do boot: o CONCURRENTLY
+    espera as transações abertas que tocam a tabela, e dentro do `init_db` isso
+    estourava o `wait_for` do startup. `None` = outro processo já está construindo.
+    A conexão sai do pool e volta ao autocommit original, como no `init_db`.
+    """
+    with get_conn() as conn:
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute("select pg_try_advisory_lock(%s) as ok", (FK_INDEXES_LOCK,))
+                if not cur.fetchone()["ok"]:
+                    return None
+                try:
+                    return ensure_fk_indexes(cur)
+                finally:
+                    cur.execute("select pg_advisory_unlock(%s)", (FK_INDEXES_LOCK,))
+        finally:
+            conn.autocommit = False
 
 
 def _decode_action(code: str) -> str:

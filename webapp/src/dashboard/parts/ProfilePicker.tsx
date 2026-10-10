@@ -6,7 +6,7 @@ import { NATIVE, hide, isOpen, show } from "./dialog";
 // e "Pular" dão o painel padrão, e a escolha fica lembrada do mesmo jeito. Se gravar a
 // escolha falhou, ele reabre com o `aviso`.
 // Mora dentro de #pigbank-dashboard (sem portal): o Tailwind do painel tem escopo lá.
-export function ProfilePicker({ onPick, aviso }: { onPick: (p: string) => void; aviso?: ReactNode }) {
+export function ProfilePicker({ onPick, aviso, falhas }: { onPick: (p: string) => void; aviso?: ReactNode; falhas: number }) {
   const dlg = useRef<HTMLDialogElement>(null);
   const done = useRef(false);
   // Toda saída passa aqui uma vez. O Esc nativo sem gesto do usuário antes (Chrome) fecha
@@ -23,6 +23,16 @@ export function ProfilePicker({ onPick, aviso }: { onPick: (p: string) => void; 
     // fallback precisa soltar a trava de foco.
     return () => { window.removeEventListener("keydown", onKey); if (!NATIVE && isOpen(d)) hide(d); };
   }, []);
+
+  // Falha do PUT antes de o React pintar a escolha: o seletor não desmontou, mas o `pick` já o
+  // fechou. Reabre com o aviso. Num seletor recém-montado já está aberto, e `show` não faz nada.
+  useEffect(() => {
+    const d = dlg.current;
+    if (!falhas || isOpen(d)) return;
+    done.current = false;
+    show(d, "button");
+    if (!NATIVE) d?.querySelector("button")?.focus();
+  }, [falhas]);
 
   return (<>
     <dialog ref={dlg} className={NATIVE ? "picker" : "picker picker-fb"} role={NATIVE ? undefined : "dialog"} aria-modal={NATIVE ? undefined : true}

@@ -35,6 +35,7 @@ from core.handlers import (
     launches   as h_launches,
     pockets    as h_pockets,
     investments as h_investments,
+    investido  as h_investido,
     report     as h_report,
     help_handler as h_help,
     categories as h_categories,
@@ -903,10 +904,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
             "Não entendi exatamente" in inferred_help
             and any(term in norm for term in ("investimento", "investimentos", "aporte", "resgate", "cdb", "tesouro", "cdi"))
         ):
-            return h_investments.list_investments(
-                user_id,
-                "Não entendi exatamente o pedido de investimentos. Aqui está sua carteira:",
-            )
+            return h_investido.carteira(user_id)
         return inferred_help
 
     # -----------------------------------------------------------------------
@@ -1361,7 +1359,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
 
     # --- investimentos ---
     if intent == "investments.list":
-        return h_investments.list_investments(user_id)
+        return h_investido.carteira(user_id)
 
     if intent == "investments.create":
         raw_name = entities.get("raw_name") or ""
@@ -1394,7 +1392,7 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
         return h_report.monthly(user_id)
 
     if intent == "report.weekly_enable":
-        return h_report.enable_weekly(user_id)
+        return h_report.enable_weekly(user_id, text)
 
     if intent == "report.weekly_disable":
         return h_report.disable_weekly(user_id)

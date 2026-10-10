@@ -46,6 +46,21 @@ const ACOES: Record<string, { feito: (antes: Retrato, agora: Retrato) => boolean
 type Modo = "fechado" | "convite" | "ativo";
 type Etapa = "bloco" | "alvo";
 const TECLAS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
+// Os POST /guia em fila: a ordem é a do clique enquanto a fila anda em até ESPERA desde o clique
+// (um `visto` lento não volta por cima do `feito`); um POST pendurado não trava os seguintes além
+// disso. E a resposta mais velha (emitida antes de uma que já gravou) não grava por cima da mais
+// nova (`emitido` numera o clique, `aplicado` é o do último retrato gravado); em vez disso relê o
+// guia: o servidor pode ter aplicado em outra ordem entre abas (na mesma aba, a `ordem` {aba, n} do
+// POST faz o servidor ignorar o dispensar/reabrir velho, db/guia.py; o limite que resta é entre abas).
+// Não cobre a resposta velha que chega ANTES e grava (o cache fica velho até o próximo GET ou POST). Não é o `scope`
+// do TanStack: ele não tem o teto de ESPERA (um POST pendurado seguraria a fila para sempre). O catch: a falha de um
+// não trava os seguintes.
+const ESPERA = 5000;
+let fila: Promise<unknown> = Promise.resolve();
+let emitido = 0, aplicado = 0;
+const ordem = new WeakMap<object, number>(); // resposta -> o clique que a pediu
+// Esta aba, para a `ordem` do servidor. getRandomValues: o randomUUID não existe no Safari 14.
+const ABA = crypto.getRandomValues(new Uint32Array(1))[0].toString(36);
 
 export function Guia({ s, path }: { s: DashState; path: Path }) {
   const qc = useQueryClient();
@@ -77,10 +92,20 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
 
   const m = useMutation({
     mutationKey: ["guia"],
-    mutationFn: (c: AcaoGuia) => apiPost("/guia", c),
+    mutationFn: (c: AcaoGuia) => {
+      const n = ++emitido;
+      const p = Promise.race([fila.catch(() => {}), new Promise((ok) => setTimeout(ok, ESPERA))])
+        .then(() => apiPost("/guia", { ...c, ordem: { aba: ABA, n } })).then((r) => { ordem.set(r, n); return r; });
+      fila = p; return p;
+    },
     // A comemoração só depois do 200: o progresso está salvo.
-    onSuccess: (novo, c) => {
-      qc.setQueryData(guiaQuery.queryKey, novo);
+    onSuccess: async (novo, c) => {
+      if (ordem.get(novo)! > aplicado) {
+        aplicado = ordem.get(novo)!;
+        // O GET que saiu antes deste POST traz o retrato velho. O await importa: o revert do cancel é assíncrono.
+        await qc.cancelQueries({ queryKey: guiaQuery.queryKey });
+        qc.setQueryData(guiaQuery.queryKey, novo);
+      } else qc.invalidateQueries({ queryKey: guiaQuery.queryKey }); // o servidor pode ter aplicado em outra ordem: a verdade é o GET
       if (c.acao === "feito" && c.passo) { setVistos((v) => [...v, c.passo!]); setFesta(c.passo); }
     },
     // 409: o passo deixou de valer (o banco sumiu do mês). Não é "tentar de novo": relê e

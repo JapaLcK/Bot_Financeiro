@@ -48,10 +48,12 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `concluido`: o convite do guia não aparece nos testes que não são dele). O GET `/previsao` responde
  * a fixture `previsao` quando dada; sem ela, como o servidor: Pro → `pro<dias, padrão 30>`, Plus →
  * `plus30` (sem `dias` ou 30) e 403 `forecast_horizon_not_allowed` em 60/90, os outros → 403
- * `pro_required`. Registrar de novo vale para as próximas requisições (atraso, falha, troca de
+ * `pro_required`. O GET `/investido` responde a fixture de nome `investido` (padrão `com_banco`);
+ * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`.
+ * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -69,6 +71,10 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
       const primeira = RESPOSTAS.lancamentos[lancamentos];
       const pagina = url.searchParams.has("cursor") ? RESPOSTAS.lancamentos.segunda : primeira;
       return r.fulfill({ json: { ...pagina, mes: url.searchParams.get("mes") ?? pagina.mes } });
+    }
+    if (url.pathname === "/api/v2/investido") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "free" ? r.fulfill({ status: e.status, json: e.body }) : r.fulfill({ json: RESPOSTAS.investido[investido] });
     }
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });

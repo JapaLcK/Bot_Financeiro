@@ -23,7 +23,7 @@ def transacao(amount=-100, day=JAN, at=None):
 
 def conta(ident, kind="BANK", tx=None):
     return dict(provider_account_id=ident, name=ident, type=kind, currency="BRL", balance=900,
-                raw={}, transactions=[tx or transacao()])
+                raw={}, transactions=[tx or transacao(100 if kind == "CREDIT" else -100)])
 
 
 def ciclo(uid, cid, accounts):
@@ -73,7 +73,7 @@ def fundida(uid, source="manual", confirm=True):
 def test_mesmo_id_em_duas_contas_e_outro_usuario(user_id, kind):
     uid = user_id
     cid = conecta(uid, f"item-{uid}")
-    accounts = [conta("a", kind), conta("b", kind, transacao(-70))]
+    accounts = [conta("a", kind), conta("b", kind, transacao(70 if kind == "CREDIT" else -70))]
     ciclo(uid, cid, accounts)
     link = "imported_launch_id" if kind == "BANK" else "imported_credit_tx_id"
     ids = [r[link] for r in espelho(uid)]
@@ -117,7 +117,7 @@ def test_reconexao_reutiliza_identidade_e_edicao(user_id, kind, legacy):
     assert q(f"select valor from {table} where user_id=%s and id=%s", (uid, ident), True)[0]["valor"] == 100
     if kind == "CREDIT":
         assert q("select id from credit_cards where user_id=%s", (uid,), True) == previous_card
-        ciclo(uid, cid2, [conta("estavel", kind, transacao(25, FEV))])
+        ciclo(uid, cid2, [conta("estavel", kind, transacao(-25, FEV))])
         assert q("select sum(total) as total from credit_bills where user_id=%s", (uid,), True)[0]["total"] == -25
 
 

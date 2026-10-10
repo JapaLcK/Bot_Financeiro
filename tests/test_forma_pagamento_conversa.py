@@ -402,9 +402,9 @@ def _importa_compra_cartao(uid, valor: str, descricao: str, tx_id: str) -> None:
         "id": f"item-{tx_id}", "connector": {"id": 612, "name": "Nubank"}, "status": "UPDATED"})
     db.save_open_finance_sync(conexao["id"], [{
         "provider_account_id": f"acc-{tx_id}", "name": "Nubank", "type": "CREDIT",
-        "currency": "BRL", "balance": Decimal("-" + valor), "raw": {},
+        "currency": "BRL", "balance": Decimal(valor), "raw": {},
         "transactions": [{"provider_transaction_id": tx_id, "description": descricao,
-                          "amount": Decimal("-" + valor), "transaction_date": today_tz(),
+                          "amount": Decimal(valor), "transaction_date": today_tz(),
                           "transacted_at": None, "category": "Shopping", "raw": {}}]}])
     db.import_open_finance_credit(uid, conexao["id"])
 

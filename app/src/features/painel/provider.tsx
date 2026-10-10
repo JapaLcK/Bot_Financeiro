@@ -64,6 +64,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const leituras = useRef(new Map<Recurso, AbortController>());
   const ultimaCarga = useRef<{ uid: number; versao: number; mes: string; dias?: number; geracao: number } | null>(null);
   const emVoo = useRef(false);
+  const leituraPerfil = useRef<AbortController | null>(null);
   const layouts = useRef(new Map<S.PerfilPainel, Widget[]>());
   const filaStorage = useRef(Promise.resolve());
   const sessaoRef = useRef(sessao); sessaoRef.current = sessao;
@@ -104,7 +105,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       ...(anterior.mes !== mes ? ["resumo", "detalhes"] as const : []),
       ...(anterior.dias !== dias ? ["previsao"] as const : []),
     ];
-    if (completa) { cancelar(); setDados({}); }
+    // Não cancela aqui (#849): o efeito do pai roda depois do dos filhos e mataria a página recém-pedida. Quem pede a recarga cancela antes (atualizar, cleanup do portão); o setVersao do finally de mudarPerfil pode vir sem cancelar (limite de 15s do PUT), e por isso as leituras se superam por recurso e a de perfil pela mais nova.
+    if (completa) setDados({});
     const g = geracao.current;
     ultimaCarga.current = { uid, versao, mes, dias, geracao: g };
     if (!recursos.length) return;
@@ -133,9 +135,10 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     };
     void Promise.all(recursos.map(carregar));
     if (completa && !emVoo.current) {
-      const c = new AbortController(); controladores.current.add(c);
-      const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid;
-      void lerRecurso("/api/app/perfil", S.perfilPainelSchema, c).then((p) => { if (atual() && !emVoo.current) { setPerfil(p.perfil ?? "padrao"); setEscolhendo(p.perfil === null); } }).catch((e: unknown) => { if (atual() && !(e instanceof RequisicaoSuperada)) { falhou(e); setAviso("Não conseguimos carregar seu perfil. Tente atualizar."); } }).finally(() => controladores.current.delete(c));
+      leituraPerfil.current?.abort(); // a leitura de perfil de uma carga completa supera a anterior (como `leituras`, fora dele: não conta em `atualizando`)
+      const c = new AbortController(); leituraPerfil.current = c; controladores.current.add(c);
+      const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid && leituraPerfil.current === c;
+      void lerRecurso("/api/app/perfil", S.perfilPainelSchema, c).then((p) => { if (atual() && !emVoo.current) { setPerfil(p.perfil ?? "padrao"); setEscolhendo(p.perfil === null); } }).catch((e: unknown) => { if (atual() && !(e instanceof RequisicaoSuperada)) { falhou(e); setAviso("Não conseguimos carregar seu perfil. Tente atualizar."); } }).finally(() => { controladores.current.delete(c); if (leituraPerfil.current === c) leituraPerfil.current = null; });
     }
   }, [gate, usuario, mes, dias, versao, ativo, travado, cancelar, falhou]);
   useEffect(() => {
@@ -170,7 +173,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const uid = usuario.user_id;
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
-  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => setVersao((v) => v + 1), atualizando, dias, mudarDias: setDias, versao, operacao, falhou }}>{children}</Contexto.Provider>;
+  // atualizar cancela no pedido, não no efeito: o efeito do pai roda depois do dos filhos e mataria a página recém-pedida (#849).
+  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); setVersao((v) => v + 1); }, atualizando, dias, mudarDias: setDias, versao, operacao, falhou }}>{children}</Contexto.Provider>;
 }
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {

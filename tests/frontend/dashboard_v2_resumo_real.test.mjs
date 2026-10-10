@@ -124,6 +124,28 @@ const aviso = async (page, sel) => [await page.locator(sel).textContent(), await
 for (const [nome, erro, esperado] of [["500", RESPOSTAS.erros["500"], GENERICO], ["403 password_required", RESPOSTAS.erros["403_password_required"], SENHA]]) {
   test(`PUT ${nome} no modal: desfaz (o modal volta) e avisa`, async () => {
     const { ctx, page, ir } = await abrir({ perfil: null });
+    // O PUT só falha depois de a tela já ter trocado para a escolha (otimista): é essa troca que o
+    // "desfaz" desfaz, e o seletor desmonta e volta. Sem a espera o caminho dependia de quem
+    // chegava primeiro, a resposta do mock ou o quadro do React; o outro caminho é o teste seguinte.
+    await ctx.route("**/api/v2/perfil", async (r) => {
+      if (r.request().method() !== "PUT") return r.fallback();
+      await page.waitForFunction(() => document.querySelector("#board-profile")?.value === "investir", null, { timeout: 5000 });
+      return r.fulfill({ status: erro.status, json: erro.body });
+    });
+    await ir();
+    await page.getByRole("button", { name: /^Investir/ }).click();
+    await page.locator(".picker[open] .picker-aviso").waitFor();
+    const r = [await aviso(page, ".picker-aviso"), await aviso(page, ".board-aviso"), await page.locator(".picker[open]").count()];
+    await ctx.close();
+    assert.deepEqual(r, [esperado, esperado, 1]);
+  });
+
+  // O erro chega antes de o React pintar a escolha otimista: `null → escolha → null` é agrupado e o
+  // seletor não desmonta. O notify do TanStack Query vai num `setTimeout(0)`; atrasado, a resposta
+  // imediata do mock ganha dele de forma determinística (ao natural, é a corrida rara do CI).
+  test(`PUT ${nome} no modal, com o erro antes de a tela pintar a escolha: o modal reabre e avisa`, async () => {
+    const { ctx, page, ir } = await abrir({ perfil: null });
+    await ctx.addInitScript(() => { const st = window.setTimeout.bind(window); window.setTimeout = (f, d, ...a) => st(f, d || 200, ...a); });
     await ctx.route("**/api/v2/perfil", (r) => (r.request().method() === "PUT" ? r.fulfill({ status: erro.status, json: erro.body }) : r.fallback()));
     await ir();
     await page.getByRole("button", { name: /^Investir/ }).click();
@@ -324,7 +346,14 @@ test("seletor: 6 meses reais; voltar pede o mês escolhido e os blocos de exempl
 
 // --- Selo nas telas de exemplo -------------------------------------------------------
 
-const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo"] };
+// Na conversa o selo é por mensagem (a resposta de exemplo leva, a real não): o título não leva.
+const SELO = { "/": [".piggy-band-by > .selo"], "/lancamentos": ["#ledger-h > .selo"], "/piggy": ["#page-title > .selo", ".chat > .msg-piggy .msg-by > .selo"] };
+// Texto livre sem assunto: o Piggy responde com os atalhos (resposta de exemplo).
+async function conversar(page) {
+  await page.locator("#askbar-input").fill("oi");
+  await page.locator("#askbar-input").press("Enter");
+  await page.locator(".chat > .msg-piggy").waitFor();
+}
 for (const demo of [false, true]) {
   test(`selo "demonstração" na faixa do Piggy, no extrato demonstrativo e na conversa: ${demo ? "não no protótipo" : "com backend"}; no título do Resumo, nunca`, async () => {
     const { ctx, page, ir } = await abrir({ demo, espera: "#page-title" });
@@ -335,13 +364,14 @@ for (const demo of [false, true]) {
         await page.locator("#board-profile").waitFor();
         r.titulo = [await page.locator("#page-title").textContent(), await page.locator("#page-title .selo").count()];
       }
+      if (rota === "/piggy") await conversar(page);
       for (const s of seletores) r[s + " " + rota] = await page.locator(s).allTextContents();
       if (rota === "/lancamentos" && !demo) assert.equal(await page.locator("#w-lancamentos").getAttribute("data-dado"), "real");
     }
     await ctx.close();
     const um = demo ? [] : ["demonstração"];
     const titulo = [demo ? "Resumo de setembro" : "Resumo de outubro", 0];
-    assert.deepEqual(r, { titulo, ...Object.fromEntries(Object.entries(SELO).flatMap(([rota, ss]) => ss.map((s) => [s + " " + rota, rota === "/lancamentos" ? [] : um]))) });
+    assert.deepEqual(r, { titulo, ".piggy-band-by > .selo /": um, "#ledger-h > .selo /lancamentos": [], "#page-title > .selo /piggy": [], ".chat > .msg-piggy .msg-by > .selo /piggy": um });
   });
 }
 
@@ -353,11 +383,12 @@ for (const width of [1440, 1100, 390, 375]) {
     for (const rota of Object.keys(SELO)) {
       await ir(rota);
       if (rota === "/") await page.locator("#w-resumo .stat-value").first().waitFor();
+      if (rota === "/piggy") await conversar(page);
       r[rota] = await page.evaluate(() => {
         const cortado = (e) => e.scrollWidth > e.clientWidth;
         const fora = (s, h) => { const a = s.getBoundingClientRect(), b = h.getBoundingClientRect(); return a.right > b.right + 0.5 || a.right > innerWidth; };
         const ruins = [];
-        for (const s of document.querySelectorAll(".w-title > .selo, #page-title > .selo, #ledger-h > .selo, .piggy-band-by > .selo")) {
+        for (const s of document.querySelectorAll(".w-title > .selo, #page-title > .selo, #ledger-h > .selo, .piggy-band-by > .selo, .msg-by > .selo")) {
           const h = s.parentElement;
           const titulo = h.matches(".w-title") ? h.firstElementChild : h;
           if (cortado(titulo) || cortado(s) || fora(s, h)) ruins.push(h.id || h.className);

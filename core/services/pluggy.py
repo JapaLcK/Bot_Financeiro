@@ -302,7 +302,9 @@ def list_pluggy_transactions(
 def pluggy_products() -> list[str]:
     """Produtos que o connect token pede à Pluggy. Fonte única: o wizard
     (/onboarding, GET /onboarding/state → `of_produtos`) mostra esta lista ao
-    usuário como o que o PigBank lê do banco dele."""
+    usuário como o que o PigBank lê do banco dele. A resposta do connect-token
+    (POST /open-finance/{user_id}/connect-token) também a devolve, e os widgets (site e app)
+    a repassam como `products`."""
     # INVESTMENTS é obrigatório: o sync lê /investments pra achar a Caixinha
     # (FIXED_INCOME/CDB). Se o item não coletar esse produto, /investments volta
     # vazio e a detecção de caixinha (base do Banqueiro OF-native) quebra.

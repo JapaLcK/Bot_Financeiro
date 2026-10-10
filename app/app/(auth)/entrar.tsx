@@ -54,7 +54,7 @@ export default function Entrar() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-      <Screen sobCabecalho>
+      <Screen sobCabecalho ajustarTeclado={false}>
         <Stack.Screen options={{ gestureEnabled: !emVoo }} />
         <View style={{ gap: espaco.xl, paddingTop: espaco.xxl }}>
           <Texto variante="titulo">
@@ -91,7 +91,7 @@ export default function Entrar() {
                   <View style={{ alignSelf: "flex-end" }}>
                     <Button
                       rotulo="Esqueci a senha"
-                      variante="ghost"
+                      variante="link"
                       desativado={ocupado}
                       onPress={() => router.push("/esqueci-senha")}
                     />

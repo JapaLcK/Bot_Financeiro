@@ -38,6 +38,7 @@ from db import (
     set_card_limit,
     set_default_card,
     set_pending_action,
+    CompraDoBanco,
     undo_credit_transaction,
     undo_installment_group,
     update_card_reminder_settings,
@@ -2083,6 +2084,8 @@ def handle(user_id: int, text: str) -> str | None:
                     f"🗑️ Parcelamento desfeito ({_group_code(res['group_id'])}).\n"
                     f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
                 )
+            except CompraDoBanco as e:
+                return f"❌ {e}"
             except Exception as e:
                 # `undo_installment_group` não levanta exceção prevista: "não
                 # achei" volta como None e já foi tratado acima. Então tudo que
@@ -2109,6 +2112,8 @@ def handle(user_id: int, text: str) -> str | None:
                     f"🗑️ Compra no crédito CC{ct_id} apagada.\n"
                     f"Removido: {fmt_brl(res['removed_total'])}."
                 )
+            except CompraDoBanco as e:
+                return f"❌ {e}"
             except Exception as e:
                 # Idem: `undo_credit_transaction` devolve None pra "não achei"
                 # (tratado acima) e não levanta exceção prevista.

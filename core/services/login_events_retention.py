@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 # zera contador com janela correndo. Maior janela = 3600 s (register,
 # forgot-password, quiz, quiz-webhook, quiz-conta), medida em 2026-10-06 com
 #   grep -rn "_check_persistent_rate_limit(\|EMAIL_RATE_LIMITS = \|TETO_GLOBAL_WEBHOOK =\|LIMITE_IP_QUIZ =" frontend/
+# mais o síncrono de `db/rate_limits.py` (wa-link-code, 900 s, 2026-10-08):
+#   grep -rn "rate_limit_estourado(\|_TETO_CODIGO =" core/
 # — remeça antes de baixar este valor.
 RATE_LIMITS_RETENTION = "1 day"
 

@@ -585,6 +585,8 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         # 2. id de credit_transaction
         try:
             result = db.undo_credit_transaction(user_id, lid)
+        except db.CompraDoBanco as e:
+            return f"🐷 {e}"
         except Exception as e:
             _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=lid)
             return _ERRO_APAGAR
@@ -599,6 +601,8 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
     if group_id:
         try:
             result = db.undo_installment_group(user_id, group_id)
+        except db.CompraDoBanco as e:
+            return f"🐷 {e}"
         except Exception as e:
             _log_falha("undo_installment_group", user_id, e, group_id=group_id)
             return _ERRO_APAGAR

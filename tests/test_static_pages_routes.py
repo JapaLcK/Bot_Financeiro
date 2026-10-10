@@ -32,6 +32,7 @@ HTML_PAGES = [
     "/como-funciona",
     "/precos",
     "/lp",
+    "/vsl",
     "/continuar-compra",
     "/suporte",
 ]
@@ -268,6 +269,16 @@ def test_lp_landing_de_anuncio():
     assert 'href="/brand.css' not in resp.text
 
 
+def test_vsl_e_a_lp_com_o_botao_para_a_precos():
+    resp = client.get("/vsl")
+    assert len(resp.content) == int(resp.headers["content-length"])
+    lp, vsl = client.get("/lp").text, resp.text
+    assert 'id="lp-cta" class="lp-cta" href="https://quiz.pigbankai.com/"' in lp
+    assert 'id="lp-cta" class="lp-cta" href="/precos"' in vsl
+    assert "quiz.pigbankai.com" not in vsl
+    assert vsl.replace('href="/precos"', "") == lp.replace('href="https://quiz.pigbankai.com/"', "")
+
+
 def test_assinar_e_seus_assets():
     resp = client.get("/assinar")
     assert resp.status_code == 200
@@ -361,6 +372,9 @@ def test_assets_estaticos():
         ("/manifest.json", "application/manifest+json"),
         ("/dashboard.js", "application/javascript"),
         ("/dashboard-chat.js", "application/javascript"),
+        # JS novo sem rota dá 404 só no navegador, e o test_frontend_assets_e_rotas
+        # não pega mais (CLAUDE.md §5, "Assets").
+        ("/of-status-poll.js", "application/javascript"),
     ]:
         resp = client.get(path)
         assert resp.status_code == 200, path

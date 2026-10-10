@@ -10,7 +10,9 @@ que podem tê-lo (`em_andamento` e `indisponivel`).
 
 O POST é escrita: o CSRF do monólito vale antes. `feito` sem `passo` = 422 no
 envelope; `passo` fora do roteiro = 422 pelo Literal; `feito` de passo indisponível = 409
-`passo_indisponivel`, sem gravar. Nas outras ações `passo` é ignorado.
+`passo_indisponivel`, sem gravar. Nas outras ações `passo` é ignorado. `ordem {aba, n}`
+(opcional) em `dispensar`/`reabrir`: o gesto da mesma aba que o último gesto aplicado do usuário, com `n` menor ou igual
+ao dele, não grava.
 
 `DICAS`: a dica de primeiro uso de cada tela (o cliente a mostra uma vez; `vista` = já
 apareceu). Só vem a dica da tela que o plano dá (`_RECURSO`). `POST /guia/dica` carimba a
@@ -21,7 +23,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.v2.sessao import usuario_atual
 from core.services.plan_service import plan_gate_ok
@@ -98,9 +100,16 @@ class Guia(BaseModel):
     dicas: list[Dica]
 
 
+class Ordem(BaseModel):
+    """`aba` sorteada por carregamento de página; `n` só cresce dentro da aba."""
+    aba: str = Field(min_length=1, max_length=32, pattern=r"^[^\x00]+$")
+    n: int = Field(ge=1, le=2**31 - 1)
+
+
 class AcaoGuia(BaseModel):
     acao: Literal["visto", "feito", "dispensar", "reabrir"]
     passo: PassoId | None = None
+    ordem: Ordem | None = None
 
 
 class DicaIn(BaseModel):
@@ -142,7 +151,8 @@ def registrar(corpo: AcaoGuia, uid: int = Depends(usuario_atual)) -> Guia:
     motivo1 = guia.motivo_resumo(uid)
     if corpo.acao == "feito" and not _disponivel(corpo.passo, motivo1):
         raise HTTPException(status_code=409, detail={"error": "passo_indisponivel"})
-    return _guia(guia.registrar(uid, corpo.acao, corpo.passo, IDS), motivo1, uid)
+    return _guia(guia.registrar(uid, corpo.acao, corpo.passo, IDS,
+                                  corpo.ordem and (corpo.ordem.aba, corpo.ordem.n)), motivo1, uid)
 
 
 @router.post("/guia/dica", response_model=Guia)

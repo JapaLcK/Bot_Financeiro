@@ -71,8 +71,10 @@ export const escuro: Paleta = {
   brand: "#FF4FA0",
   brandSoft: "#351827",
   brandInk: "#FF4FA0",
-  acao: "#FF4FA0",
-  onAcao: "#0E0E10",
+  // Botão primário: #CE2572 sobre #0E0E10 dá ~3,8: `acao` é só fundo de botão e trilha do switch.
+  // TEXTO rosa usa só `brandInk`; `brand` fica para ícone/gráfico (não textual, mínimo 3:1).
+  acao: "#CE2572",
+  onAcao: "#FFFAFD",
   positive: "#47CD89",
   warning: "#FDB022",
   danger: "#F97066",
@@ -82,7 +84,8 @@ export const escuro: Paleta = {
 
 /** Grade de 4pt. */
 export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 48 } as const;
-export const raio = { sm: 8, md: 12, lg: 20 } as const;
+/** `pilula`: raio cheio de seletor (Chip); maior que qualquer altura, o RN corta na metade. */
+export const raio = { sm: 8, md: 12, lg: 20, pilula: 999 } as const;
 
 // `fontFamily`, não `fontWeight`: peso + família custom cai de volta no
 // sistema no Android (RN não faz "negrito sintético" de uma TTF nomeada).
@@ -103,5 +106,5 @@ export const acessoClaro: Paleta = {
 };
 export const acessoEscuro: Paleta = {
   ...escuro, surface: "#24242F", surfaceRaised: "#24242F",
-  ink: "#F8F8FC", inkMuted: "#A0A0AF", acao: "#CE2572", onAcao: "#FFFAFD",
+  ink: "#F8F8FC", inkMuted: "#A0A0AF",
 };

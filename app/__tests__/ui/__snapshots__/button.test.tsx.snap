@@ -117,7 +117,7 @@ exports[`Button snapshot (dois temas): escuro 1`] = `
     style={
       {
         "alignItems": "center",
-        "backgroundColor": "#FF4FA0",
+        "backgroundColor": "#CE2572",
         "borderColor": undefined,
         "borderRadius": 12,
         "borderWidth": 0,
@@ -143,7 +143,7 @@ exports[`Button snapshot (dois temas): escuro 1`] = `
             "lineHeight": 18,
           },
           {
-            "color": "#0E0E10",
+            "color": "#FFFAFD",
           },
           {
             "opacity": 1,

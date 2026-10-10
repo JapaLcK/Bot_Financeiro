@@ -8,7 +8,8 @@
  *  · em toda rota de 320 a 1440, sem rolagem lateral e sem a etiqueta de página "Dados de
  *    demonstração": desde a Etapa 1 parte do Resumo é real, e o selo é de cada bloco
  *    inventado (dashboard_v2_resumo_real.test.mjs);
- *  · "Painel antigo" em Ferramentas leva ao /app.
+ *  · "Painel antigo" em Ferramentas leva ao /app no protótipo; no /painel é
+ *    dashboard_v2_navegacao.test.mjs.
  *
  * Rodar:  npm run test:frontend   (abre o artefato commitado: mudou webapp/src, rode
  *         `npm --prefix webapp run build`)
@@ -80,12 +81,12 @@ for (const [nome, url, raiz] of PAGINAS) {
     }
     assert.deepEqual(problemas, []);
   });
-
-  test(`${nome}: "Painel antigo" em Ferramentas leva ao /app`, async () => {
-    const { ctx, page } = await abrir(url, raiz, 1440);
-    await ir(page, "/ferramentas");
-    const href = await page.locator(".tools a.tool", { hasText: "Painel antigo" }).getAttribute("href");
-    await ctx.close();
-    assert.equal(href, "/app");
-  });
 }
+
+test(`protótipo: "Painel antigo" em Ferramentas leva ao /app`, async () => {
+  const { ctx, page } = await abrir(PROTOTIPO, RAIZ, 1440);
+  await ir(page, "/ferramentas");
+  const href = await page.locator(".tools a.tool", { hasText: "Painel antigo" }).getAttribute("href");
+  await ctx.close();
+  assert.equal(href, "/app");
+});

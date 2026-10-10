@@ -45,7 +45,7 @@ from pydantic import BaseModel, Field, model_validator
 from slowapi.errors import RateLimitExceeded
 from config.env import load_app_env
 from core.client_ip import client_ip as ip_cliente, rate_limit_key
-from token_utils import decode_dashboard_token_full, make_dashboard_token
+from token_utils import decode_dashboard_token_full, make_dashboard_token, motivo_jwt_secret_fraco
 from utils_date import now_tz, today_tz, tz_name
 from utils_phone import normalize_phone_e164
 from core.admin_dashboard import (
@@ -57,6 +57,7 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
+from core.funil_routes import register_funil_routes
 from core.audit import (
     AuditEvent,
     maybe_record_login_from_new_ip,
@@ -79,6 +80,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
+from db.rate_limits import RATE_LIMIT_UPSERT_SQL
 from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (
     accrue_all_pockets,
@@ -105,6 +107,7 @@ from db import (
     LaunchDateLockedError,
     update_credit_transaction_fields,
     undo_credit_transaction,
+    CompraDoBanco,
     delete_launch_and_rollback,
     LaunchNoEffects,
     InvestmentLotHasWithdrawal,
@@ -343,6 +346,14 @@ if not DATABASE_URL:
 if not JWT_SECRET:
     print("ERROR: JWT_SECRET not set. Refusing to start with insecure default.", file=sys.stderr)
     sys.exit(1)
+
+if _APP_ENV in ("prod", "production"):
+    _motivo = motivo_jwt_secret_fraco(JWT_SECRET)
+    if _motivo:
+        print(f"ERROR: JWT_SECRET {_motivo} (APP_ENV={_APP_ENV}). Refusing to start. "
+              "Gere um com: python -c \"import secrets; print(secrets.token_urlsafe(48))\"",
+              file=sys.stderr)
+        sys.exit(1)
 
 # jdump (serializer JSON) e db_connect (pool async) vêm de frontend/routes/shared.py
 
@@ -1794,6 +1805,24 @@ async def _open_finance_refresh():
             print(f"[open_finance_refresh] erro: {exc}", file=sys.stderr)
 
 
+async def _tarefa_fk_indexes():
+    # Índices das FKs (#253), CONCURRENTLY: espera as transações em voo, o que
+    # não cabe no wait_for (STARTUP_STEP_TIMEOUT) do init_db. Tarefa de fundo,
+    # uma vez por boot. Logger e não print: o `_DashboardHandler` do root grava
+    # WARNING em `system_event_logs`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.schema_repairs import ensure_fk_indexes_once  # noqa: PLC0415
+        falhou = await asyncio.to_thread(ensure_fk_indexes_once)
+        if falhou is None:
+            log.info("[fk_indexes] outro processo está construindo; nada a fazer aqui")
+        else:
+            log.info("[fk_indexes] terminou; índices não criados: %s", falhou or "nenhum")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[fk_indexes] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2217,6 +2246,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_pix_worker(), name="pix_worker"),
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
+                asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
             ]
         )
     else:
@@ -2555,25 +2585,7 @@ async def _check_persistent_rate_limit(bucket: str, identifier: str, max_attempt
     async with await db_connect() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """
-                INSERT INTO auth_rate_limits (bucket, identifier, window_started_at, attempts, updated_at)
-                VALUES (%s, %s, NOW(), 1, NOW())
-                ON CONFLICT (bucket, identifier) DO UPDATE SET
-                    window_started_at = CASE
-                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
-                        THEN NOW()
-                        ELSE auth_rate_limits.window_started_at
-                    END,
-                    attempts = CASE
-                        WHEN auth_rate_limits.window_started_at <= NOW() - (%s * INTERVAL '1 second')
-                        THEN 1
-                        ELSE auth_rate_limits.attempts + 1
-                    END,
-                    updated_at = NOW()
-                RETURNING
-                    attempts,
-                    EXTRACT(EPOCH FROM (NOW() - window_started_at)) AS elapsed_seconds
-                """,
+                RATE_LIMIT_UPSERT_SQL,
                 (bucket, identifier, window_seconds, window_seconds),
             )
             row = await cur.fetchone()
@@ -2760,6 +2772,7 @@ app.add_middleware(
 
 # ─── Admin dashboard routes (delegado para core/admin_dashboard.py) ───────────
 register_admin_routes(app, HERE, JWT_SECRET, limiter)
+register_funil_routes(app, HERE, JWT_SECRET)
 
 # ─── Auth helpers ────────────────────────────────────────────────────────────
 
@@ -3494,7 +3507,7 @@ async def auth_login(request: Request, response: Response, body: LoginBody):
         )
         raise HTTPException(status_code=401, detail="E-mail ou senha incorretos.")
 
-    result = login_auth_user(body.email, body.password)
+    result = await asyncio.to_thread(login_auth_user, body.email, body.password)
     if not result:
         await log_auth_login_event(
             body.email,
@@ -3769,29 +3782,36 @@ async def auth_refresh(request: Request, response: Response):
     return {"ok": True, **credenciais}
 
 
+def _reset_de_senha_em_segundo_plano(email: str) -> None:
+    """Token, consulta e envio rodam fora da resposta (threadpool do Starlette), em
+    paralelo com o fim dela.
+
+    O ramo "e-mail existe" faz INSERT e envio; o "não existe" não. Dentro da
+    resposta, esse trabalho a mais é um oráculo de tempo de enumeração de contas.
+    Falha vai para o log SEM e-mail nem texto da exceção.
+    """
+    try:
+        from db import create_password_reset_token, email_has_password
+        from core.services.email_service import send_password_reset_email
+
+        token = create_password_reset_token(email)
+        if token:
+            reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
+            send_password_reset_email(email.strip().lower(), reset_url, email_has_password(email))
+    except Exception as exc:
+        logging.getLogger(__name__).error("forgot_password_background: %s", type(exc).__name__)
+
+
 @app.post("/auth/forgot-password")
 @limiter.limit("3/hour")
-async def auth_forgot_password(request: Request, body: EmailBody):
+async def auth_forgot_password(request: Request, body: EmailBody, background_tasks: BackgroundTasks):
     """
     Solicita recuperação de senha. Envia e-mail com link se o e-mail existir.
     Sempre retorna 200 para não revelar se o e-mail está cadastrado.
     """
-    import sys
-    sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import create_password_reset_token, email_has_password
-    from core.services.email_service import send_password_reset_email
-
     await _check_auth_rate_limits("forgot-password", request, body.email)
 
-    token = await asyncio.to_thread(create_password_reset_token, body.email)
-    if token:
-        reset_url = f"{DASHBOARD_URL}/reset-password#token={token}"
-        # a consulta fica DENTRO do if: o ramo "e-mail não existe" continua
-        # instrução por instrução igual, e a resposta abaixo nunca muda
-        has_password = await asyncio.to_thread(email_has_password, body.email)
-        await asyncio.to_thread(
-            send_password_reset_email, body.email.strip().lower(), reset_url, has_password
-        )
+    background_tasks.add_task(_reset_de_senha_em_segundo_plano, body.email)
 
     # sempre retorna 200 — não revela se o e-mail existe ou não
     return {"message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."}
@@ -3810,7 +3830,7 @@ async def auth_reset_password(request: Request, body: ResetPasswordBody):
     if len(body.new_password) < 8:
         raise HTTPException(status_code=400, detail="Senha deve ter pelo menos 8 caracteres.")
 
-    user_id = consume_password_reset_token(body.token, body.new_password)
+    user_id = await asyncio.to_thread(consume_password_reset_token, body.token, body.new_password)
     if not user_id:
         raise HTTPException(status_code=400, detail="Link inválido ou expirado. Solicite um novo.")
 
@@ -6696,6 +6716,14 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 except Exception as exc:
                     print(f"[billing] ga4 purchase (invoice) falhou user={user_id}: {exc}")
 
+    elif event["type"] == "checkout.session.expired":
+        # Funil: sem usuário resolvido é no-op (200). Reentrega grava outra linha.
+        session = event["data"]["object"]
+        user_id = await _resolve_user(session)
+        if user_id:
+            from db import record_checkout_expired
+            await asyncio.to_thread(record_checkout_expired, user_id, _g(session, "id"))
+
     elif event["type"] == "customer.subscription.trial_will_end":
         # Stripe dispara ~3 dias antes do trial acabar. Email de aviso (item 38)
         # — fonte primária; scheduler interno fica como fallback se o webhook
@@ -7966,6 +7994,8 @@ async def delete_credit_transaction_route(
 
     try:
         result = await asyncio.to_thread(undo_credit_transaction, user_id, int(tx_id))
+    except CompraDoBanco as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o

@@ -161,9 +161,9 @@ def normalize_pluggy_account(raw: dict) -> dict:
 def normalize_pluggy_transaction(raw: dict) -> dict:
     """Confia no `amount` do Pluggy, que já vem assinado (negativo = saída, positivo = entrada).
 
-    NÃO deriva o sinal do campo `type`: no cartão, uma compra vem como type=CREDIT com
-    amount negativo — inverter pelo type transformaria compra em receita (bug pego no E2E
-    sandbox). O `type` fica só no `raw`.
+    NÃO deriva o sinal do campo `type`. No cartão, na produção a compra vem DEBIT com amount
+    positivo; o sandbox Pluggy Bank mostrou CREDIT negativa. O sinal segue a doc do `amount`
+    (`db.cards.sinal_cartao_of`); o `type` carrega o mesmo bit e fica só no `raw`.
     """
     return {
         "provider_transaction_id": str(raw.get("id") or ""),

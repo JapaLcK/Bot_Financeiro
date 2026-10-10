@@ -8,6 +8,8 @@ import { appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta
 
 // Só a fronteira WebView nativa é dublada; Router, autorização e HTTP são reais.
 jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: () => null }));
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 
 const B = "banco_b";
 function servidor(completo = true, pausa?: Promise<void>) {
@@ -214,7 +216,7 @@ it("navigate Piggy repetido não trava o destino nem duplica a pilha", async () 
 
 it.each([["Ver lançamentos", true], ["Ver lançamentos", false], ["01/10/2026", true], ["01/10/2026", false]])("Retomar × link do widget %s, recovery primeiro=%s, usa a mesma reserva", async (irma, recoveryPrimeiro) => {
  servidor(); const r = renderRouter("./app", { initialUrl: "/" }); await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
- const a = screen.getByRole("button", { name: "Retomar conexão" }), b = screen.getByRole("button", { name: irma });
+ const a = screen.getByRole("button", { name: "Retomar conexão" }), b = irma === "Ver lançamentos" ? screen.getByRole("button", { name: irma }) : screen.getByTestId("calendario-dia-2026-10-01");
  await act(async () => { fireEvent.press(recoveryPrimeiro ? a : b); fireEvent.press(recoveryPrimeiro ? b : a); await drenar(); });
  expect(pilha(r)?.map((p) => p.nome)).toEqual(recoveryPrimeiro ? ["(painel)", "open-finance-volta"] : ["(painel)"]);
  expect(screen).toHavePathname(recoveryPrimeiro ? "/open-finance-volta" : "/extrato");

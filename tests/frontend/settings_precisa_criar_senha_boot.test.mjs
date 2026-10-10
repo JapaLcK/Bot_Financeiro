@@ -10,7 +10,8 @@
  * CONTROLE NEGATIVO (§3 do CLAUDE.md): com a escrita do boot incondicional (sem o
  * respostaDoGateMaisNova no initSettings), cai o B1; comparando com `meGen ===
  * _hasPwGen`, cai o B4 (a falha do puxão apaga a resposta do boot). O B2 cobre o
- * espelho (o puxão trava e recarrega) e os B3 são o positivo: sem puxão, o boot decide.
+ * espelho (o puxão trava e recarrega) e o positivo (sem puxão, o boot decide) são o
+ * T1, T6 e T8 de settings_precisa_criar_senha.test.mjs.
  *
  * Rodar:  node --test tests/frontend/settings_precisa_criar_senha_boot.test.mjs
  */
@@ -31,7 +32,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const SEM = { precisa_criar_senha: true, has_password: false, of_ui_enabled: true };
 const LIVRE = { precisa_criar_senha: false, has_password: true, of_ui_enabled: true };
-const GOOGLE = { precisa_criar_senha: false, has_password: false, of_ui_enabled: true };
 const FALHA = [500, { detail: "erro" }];
 const BLOQUEADO = /\/open-finance\/|\/settings\/1\/(activity|notifications)/;
 const SECOES = ["open-finance", "security", "notifications", "data", "legal"];
@@ -131,20 +131,3 @@ test("B4 boot velho precisa_criar_senha:true, puxão novo falha antes: termina T
     assert.deepEqual(await visiveis(t.page), ["security"]);
   } finally { await t.fechar(); }
 });
-
-// ── B3 positivo: sem puxão, o boot decide sozinho ─────────────────────────────────
-for (const [rotulo, resp, menu, trava] of [
-  ["precisa_criar_senha:true", [200, SEM], ["security"], true],
-  ["com senha", [200, LIVRE], SECOES, false],
-  ["só-Google (has_password:false)", [200, GOOGLE], SECOES, false],
-  ["/auth/me 500 (fail-open)", FALHA, SECOES, false],
-]) {
-  test(`B3 boot sem puxão, ${rotulo}: o boot decide`, async () => {
-    const t = await abre(() => resp);
-    try {
-      await bootou(t.page);
-      assert.equal(await travada(t.page), trava);
-      assert.deepEqual(await visiveis(t.page), menu);
-    } finally { await t.fechar(); }
-  });
-}

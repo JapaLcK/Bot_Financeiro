@@ -29,7 +29,17 @@ Insights são barrados antes de cache ou geração, inclusive no pré-processame
 O dashboard Essencial mantém as análises básicas e não solicita os endpoints
 avançados. O resumo semanal é conferido na ativação e em cada envio automático;
 preferência antiga ligada não contorna um downgrade. Desligar continua permitido.
+No job do WhatsApp o plano é checado ANTES do claim da semana, então o downgrade não
+consome o envio (`tests/test_resumo_semanal.py`, banco real). A linha de comparação com a
+semana anterior no texto do resumo semanal segue o gate `financial_comparison` (Plus+); o
+Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a variação.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
+
+O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação
+"era esperado", PL-04) é do agente: Plus e Pro, pelo orçamento de energia. Essencial e Grátis não
+recebem evento de anomalia (o runner confere o plano antes de ler ou gravar) e o `PUT` de "esperado"
+responde 403 `pro_required`. O lembrete simples do Essencial é o alerta de orçamento por categoria
+(80/100/120%, `core/budget_alerts.py`), que não mudou.
 
 Orçamento Doméstico é o método específico de dividir a renda em potes, diferente
 do orçamento mensal por categoria. As regras existentes de correção/aprendizado

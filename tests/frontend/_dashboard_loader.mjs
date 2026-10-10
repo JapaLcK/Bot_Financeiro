@@ -48,9 +48,10 @@ export const abrirBrowser = async () => (browser ||= await chromium.launch());
 export const fecharBrowser = async () => { await browser?.close(); browser = undefined; };
 export const novaPagina = () => browser.newPage();
 
-/** `semMapa`: não injeta o /launch-type-labels.js — simula o 404/blip dele. */
-export async function loadDashboardJs({ semMapa = false } = {}) {
-  const page = await browser.newPage();
+/** `semMapa`: não injeta o /launch-type-labels.js — simula o 404/blip dele.
+    `pageOptions`: viewport/hasTouch/isMobile da página (ex.: 390x844 com toque). */
+export async function loadDashboardJs({ semMapa = false, pageOptions } = {}) {
+  const page = await browser.newPage(pageOptions);
   const errs = [];
   page.__errs = errs;
   page.on("pageerror", (e) => errs.push(String(e)));
