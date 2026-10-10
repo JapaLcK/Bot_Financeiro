@@ -12116,6 +12116,7 @@ function _renderAgentes(data) {
         ${chips ? `<div class="ag-chips">${chips}</div>` : ""}
         ${card.disponivel ? `<button type="button" class="ag-card-open" data-agent-chat="${esc(card.kind)}" aria-label="Conversar com ${esc(card.nome)}"></button>` : ""}
         ${btn}
+        ${card.kind === "xerife" && card.status && canActivate ? '<button type="button" class="ag-btn btn-cancel" data-xerife-config>Configurar alertas e esperados</button>' : ""}
       </div>
     `;
   }).join("");

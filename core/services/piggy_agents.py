@@ -33,8 +33,7 @@ AGENTS_ENABLED = os.getenv("AGENTS_ENABLED", "1") != "0"
 AGENTS_INTERVAL_SEC = int(os.getenv("AGENTS_INTERVAL_SEC", str(60 * 60)))
 
 # Xerife: defaults dos thresholds (config do agente pode sobrescrever).
-XERIFE_MULTIPLIER = 2.5     # gasto único > N× a média da categoria
-XERIFE_MIN_VALOR = 50.0     # ignora anomalia abaixo disso (ruído)
+from core.services.xerife_config import XERIFE_MULTIPLIER, XERIFE_MIN_VALOR, config_publica
 
 MESES_PT = [
     "", "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -55,13 +54,13 @@ def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> tuple[int, in
     from core.services.anomalia import avaliar_candidatos, limiar
     from db import listar_candidatos_xerife, record_agent_event
 
-    cfg = agent.get("config") or {}
+    cfg = config_publica(agent.get("config"))
     user_id = agent["user_id"]
     fired = 0
     payloads: list[dict[str, Any]] = []
     suprimidos = 0
 
-    # Falha na anomalia (ex.: `config` crua do cliente) não derruba o bloco de limites.
+    # Falha na consulta/explicação não derruba o bloco de limites.
     try:
         agora = datetime.now(timezone.utc)
         payloads, suprimidos = avaliar_candidatos(
@@ -75,7 +74,7 @@ def _xerife_detect_for_user(agent: dict[str, Any], today: date) -> tuple[int, in
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Limite mensal por categoria (config: {"limites": {"delivery": 200}}).
-            limites: dict[str, Any] = cfg.get("limites") or {}
+            limites = cfg["limites"]
             estouros: list[dict[str, Any]] = []
             if limites:
                 cur.execute(
@@ -1228,7 +1227,7 @@ def run_agent_emails_once(now: datetime | None = None) -> dict:
             # a cada tick — nada é carimbado no evento. Religar (por qualquer
             # caminho) passa a ter efeito imediato no próximo tick, sem precisar
             # sincronizar cópia nenhuma. O evento segue vivo no feed.
-            cfg = a.get("config") or {}
+            cfg = config_publica(a.get("config")) if kind == "xerife" else (a.get("config") or {})
             if not cfg.get("email_enabled", True):
                 continue
             interval_h = _AGENT_EMAIL_INTERVAL_H.get(kind, _DEFAULT_EMAIL_INTERVAL_H)

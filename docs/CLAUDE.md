@@ -1191,13 +1191,15 @@ expiração. `PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado` (`{
 mesmas portas das rotas de agentes; 404 igual para inexistente e de outro usuário) grava a coluna,
 tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anomalia:{id}`; desmarcar
 não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
-Fora do PR A (PR B): os contadores do topo da aba ("Disparos") e a tela de "esperados"; sensibilidade editável (a `config` do agente ainda chega crua), canais,
-tela para listar/desfazer, regra de esperado recorrente ou por período, `_detect_category_spike`
-(`db/insights.py`, compara mês parcial com meses cheios), cartão no Xerife. Limites conhecidos: o
+PR B: sensibilidade editável, validação estrita da config, e-mail configurável, lista de esperados
+e regras recorrentes com teto/data final estão descritos em `docs/pl04-prb.md`. O contador já exclui
+eventos stale. Continuam fora: `_detect_category_spike` (`db/insights.py`, compara mês parcial
+com meses cheios) e cartão no Xerife (PL-06/07). Limites conhecidos: o
 mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
 parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
-(`anomalia.limiar`); lixo não numérico ("abc") só derruba a anomalia daquele usuário (logada pelo nome
-da classe), não o bloco `limites`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
+(`anomalia.limiar`) no PR A. No PR B, `config_publica` recupera campos legados inválidos por
+campo, inclusive lixo não numérico, com os mesmos padrões exibidos na tela; regras legadas
+inválidas são ignoradas por `regras_publicas`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
 transação (SQL local em `db/anomalias.py`; `record_agent_event` e `mark_agent_event_stale`, compartilhados,
 não foram tocados), e o detector que já leu o lançamento esbarra na chave ocupada. Continua verdadeiro: e-mail
 já enviado antes do PUT não é desfeito.

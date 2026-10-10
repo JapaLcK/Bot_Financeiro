@@ -127,7 +127,10 @@ def activate_agent(
                 values (%s, %s, %s::jsonb, 'active')
                 on conflict (user_id, kind) do update
                   set status = 'active',
-                      config = case when excluded.config <> '{}'::jsonb
+                      config = case when agents.kind = 'xerife'
+                                    then (case when jsonb_typeof(agents.config) = 'object'
+                                               then agents.config else '{}'::jsonb end) || excluded.config
+                                    when excluded.config <> '{}'::jsonb
                                     then excluded.config else agents.config end
                 returning id, kind, config, status, created_at
                 """,
@@ -166,6 +169,23 @@ def record_agent_event(
     no feed nem vai por e-mail, e o `do nothing` não o ressuscita depois."""
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if kind == "xerife" and (payload or {}).get("tipo") == "anomalia":
+                from .anomalias import _regra_matches_sql
+                from core.services.xerife_config import regras_publicas
+                # Serializa com criação/remoção de regra. O detector pode ter lido antes
+                # da regra; a decisão no momento da gravação usa o estado atual.
+                cur.execute("select config from agents where id = %s and user_id = %s for update",
+                            (agent_id, user_id))
+                agent = cur.fetchone()
+                if agent:
+                    regras = regras_publicas(agent["config"])
+                    cur.execute(
+                        f"select (l.esperado_em is not null or {_regra_matches_sql('%s::jsonb')}) as esperado "
+                        "from launches l where l.id = %s and l.user_id = %s",
+                        (json.dumps(regras), payload.get("launch_id"), user_id),
+                    )
+                    launch = cur.fetchone()
+                    silencioso = silencioso or not launch or launch["esperado"]
             cur.execute(
                 """
                 insert into agent_events
