@@ -943,8 +943,11 @@ dele não roda nada: a mensagem volta ao roteador (ou, se já houve escrita no t
 turno (`SEM_LLM_NO_TURNO`): classificador sem tier 3 e categoria sem GPT. Com a flag, o
 `add_launch` da IA pede "sim" quando QUALQUER parâmetro que a gravação usa não está
 apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schema): valor
-(um número só, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
-ao do texto; texto sem data → IA sem data ou hoje); tipo (verbo de receita); categoria
+(exatamente um número em dígitos e nenhum por extenso, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
+ao do texto; texto sem data → IA sem data ou hoje); tipo (lista positiva: receita só
+com verbo de receita no começo; despesa só com verbo de saída no começo, ou forma curta
+"mercado 80" em que toda palavra além do número e de "R$/reais" é do alvo — "o mercado
+me devolveu 50 reais" e "R$ 1.234,56 no aluguel" são incertos); categoria
 (regra local confiante; hashtag só se a regra local da nota não a contradiz);
 `forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma); alvo e
 nota (se vieram, palavras inteiras do texto, sem acento nem caixa); texto com negação

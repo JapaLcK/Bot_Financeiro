@@ -19,6 +19,8 @@ import os
 import re
 from contextvars import ContextVar
 
+from utils_text import PT_NUM_ALT_NO_ARTICLE
+
 logger = logging.getLogger(__name__)
 _LIGADA = {"1", "true", "yes", "on"}
 
@@ -37,6 +39,25 @@ _NUMERO_RE = re.compile(r"\d+(?:[.,]\d+)*")
 # Turno do WhatsApp em que a IA foi tentada e desistiu: o resto do turno (o
 # roteador) não chama LLM de novo. Ligada e zerada pelo `handle_incoming`.
 SEM_LLM_NO_TURNO: ContextVar[bool] = ContextVar("wa_ia_primeiro_sem_llm", default=False)
+
+
+# Número por extenso (a mesma fonte do parser de valor, sem "um"/"uma", que são
+# artigos: "comprei um tênis de 280").
+_EXTENSO_RE = re.compile(rf"\b(?:{PT_NUM_ALT_NO_ARTICLE})\b")
+_SO_VALOR = frozenset({"r", "rs", "real", "reais"})
+
+
+def _forma_curta(sem_data: str, args: dict) -> bool:
+    """"mercado 80", "uber 23", "77,90 mercado": tirando o número e "R$/reais",
+    TODAS as palavras que sobram são do alvo (ou da nota) — só então é despesa.
+    Qualquer palavra a mais ("o mercado me devolveu 50 reais") é incerto."""
+    from utils_text import normalize_text
+    sobra = normalize_text(_NUMERO_RE.sub(" ", sem_data)).split()
+    sobra = [p for p in sobra if p not in _SO_VALOR]
+    do_alvo = set()
+    for campo in ("alvo", "nota"):
+        do_alvo |= set(normalize_text(str(args.get(campo) or "")).split())
+    return bool(sobra) and all(p in do_alvo for p in sobra)
 
 
 def ativo(user_id: int) -> bool:
@@ -69,11 +90,15 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     """True só se valor, data, tipo e categoria que a IA mandou batem com o que
     o texto do usuário diz por si só, sem LLM:
 
-    (a) valor: um número só no texto (fora a data), igual ao da IA;
+    (a) valor: exatamente um número em dígitos e nenhum por extenso no texto
+        (fora a data), igual ao da IA;
     (d) data: texto com data → `args["data"]` no mesmo dia; texto sem data →
         `data` ausente ou hoje. Dia no fuso do app (`_tz`, o mesmo do
         `extract_date_from_text` e do `_parse_iso_datetime_for_launch`);
-    (c) tipo: receita só com verbo de receita no começo; despesa só sem;
+    (c) tipo, por lista positiva: receita só com verbo de receita no começo;
+        despesa só com verbo de saída no começo (`VERBOS_DE_SAIDA`) ou na forma
+        curta ("mercado 80": sem o número e "R$/reais", toda palavra que sobra é
+        do alvo); sem verbo e sem forma curta, incerto;
     (b) categoria: com hashtag, a IA ecoa a da hashtag E a regra local da nota
         não a contradiz (senão o cross-check do `add_from_entities` a trocaria);
         sem hashtag, regra local confiante na nota e no texto, iguais;
@@ -89,6 +114,7 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     from core.handlers.launches import MOTIVOS_CONFIANTES
     from core.services.ai_chat.tools.launches import _parse_iso_datetime_for_launch
     from core.services.category_service import infer_category
+    from core.intent_classifier import VERBOS_DE_SAIDA
     from parsers import RECEITA_START_VERBS, _extract_explicit_category, _extract_valor
     from utils_date import _tz, extract_date_from_text, today_tz
     from utils_text import normalize_text
@@ -116,19 +142,30 @@ def lancamento_com_certeza(user_id: int, args: dict, texto_do_usuario: str) -> b
     elif dia_ia not in (None, today_tz()):
         return False
 
-    # (a) valor: um número só no texto, igual ao da IA.
+    # (a) valor: EXATAMENTE um número em dígitos e nenhum por extenso (o
+    # `_extract_valor` soma "cinquenta … dois" em 52), igual ao da IA.
     try:
         valor_ia = float(args.get("valor") or 0)
     except (TypeError, ValueError):
         return False
     valor_txt = _extract_valor(sem_data)
     if (valor_txt is None or abs(valor_txt - valor_ia) >= 0.005
-            or len(_NUMERO_RE.findall(sem_data)) > 1):
+            or len(_NUMERO_RE.findall(sem_data)) != 1
+            or _EXTENSO_RE.search(normalize_text(sem_data))):
         return False
 
-    # (c) tipo: receita só com verbo de receita no começo; despesa só sem.
-    receita = normalize_text(sem_data).startswith(RECEITA_START_VERBS)
-    if str(args.get("tipo") or "").strip().lower() != ("receita" if receita else "despesa"):
+    # (c) tipo por lista positiva: receita só com verbo de receita no começo;
+    # despesa só com verbo de saída no começo, ou na forma curta ("mercado 80").
+    norm_sem_data = normalize_text(sem_data)
+    if norm_sem_data.startswith(RECEITA_START_VERBS):
+        tipo_do_texto = "receita"
+    elif norm_sem_data.split()[:1] and norm_sem_data.split()[0] in VERBOS_DE_SAIDA:
+        tipo_do_texto = "despesa"
+    elif _forma_curta(sem_data, args):
+        tipo_do_texto = "despesa"
+    else:
+        return False
+    if str(args.get("tipo") or "").strip().lower() != tipo_do_texto:
         return False
 
     # (e) forma: declarada pela IA só vale se o texto declara a mesma.

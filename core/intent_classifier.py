@@ -297,6 +297,9 @@ _VERBOS_ENTRADA = ("recebi", "ganhei", "entrou", "caiu", "pingou", "pinguei",
                    "embolsei")
 _VERBOS_SAIDA = _VERBOS_CARTAO + _VERBOS_ENVIO
 _VERBOS_SAIDA_SOLTA = _VERBOS_SAIDA + ("gastando",)
+# Público: os verbos de saída de lançamento (o `wa_ia_primeiro` os lê para dar a
+# despesa por certa só com verbo reconhecido).
+VERBOS_DE_SAIDA = _VERBOS_SAIDA_SOLTA
 
 # A UNIÃO — o que o veto do crédito lê. Verbo novo em QUALQUER uma das tuplas
 # entra no veto sem ninguém precisar lembrar de mexer no outro arquivo.

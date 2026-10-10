@@ -170,8 +170,22 @@ def _a(valor, alvo, tipo="despesa"):
 
 @pytest.mark.parametrize("frase,args,certo", [
     ("77,90 mercado", _a(77.9, "mercado"), True),
-    ("R$ 1.234,56 no aluguel", _a(1234.56, "aluguel"), True),
-    ("cinquenta reais no mercado", _a(50, "mercado"), True),
+    # Era certo; agora incerto: sem verbo, "no" sobra e não é do alvo (forma curta estrita).
+    ("R$ 1.234,56 no aluguel", _a(1234.56, "aluguel"), False),
+    ("R$ 1.234,56 aluguel", _a(1234.56, "aluguel"), True),     # forma curta de verdade
+    # Era certo; agora incerto: número por extenso não conta como "um número só".
+    ("cinquenta reais no mercado", _a(50, "mercado"), False),
+    ("mercado 80", _a(80, "mercado"), True),
+    ("uber 23", _a(23, "uber"), True),
+    ("paguei 32,90 no ifood", _a(32.9, "ifood"), True),
+    ("comprei um mercado de 280", _a(280, "mercado"), True),   # "um" é artigo, não número
+    ("caiu 200 no mercado", _a(200, "mercado", "receita"), True),
+    ("pinguei 90 no mercado", _a(90, "mercado", "receita"), True),
+    ("mercado 80", _a(80, "mercado", "receita"), False),       # forma curta é só despesa
+    ("o mercado me devolveu 50 reais", _a(50, "mercado"), False),
+    ("o mercado me devolveu 50 reais", _a(50, "mercado", "receita"), False),   # sem verbo de receita
+    ("gastei cinquenta reais no mercado com dois amigos", _a(52, "mercado"), False),
+    ("gastei 50 no mercado com dois amigos", _a(50, "mercado"), False),
     ("torrei 30 no ifood", _a(30, "ifood"), True),
     ("ontem gastei 50 no mercado", _a(50, "mercado"), True),
     ("Gastei 50 no MERCADO", _a(50, "MERCADO"), True),
@@ -591,6 +605,35 @@ def test_negacao_ou_pergunta_confirma(uid_pro, monkeypatch, frase):
     r = diga(uid_pro, frase)
     assert "Só confirmando" in r, r
     assert lancamentos(uid_pro) == []
+
+
+# ── Valor e tipo por lista positiva ─────────────────────────────────────────
+
+@pytest.mark.parametrize("frase,args", [
+    ("gastei cinquenta reais no mercado com dois amigos", lancamento(52)),
+    ("gastei 50 no mercado com dois amigos", lancamento(50)),   # 1 dígito + 1 extenso
+    ("o mercado me devolveu 50 reais", lancamento(50)),
+    ("o mercado me devolveu 50 reais", lancamento(50, tipo="receita")),
+], ids=["extenso-soma-52", "digito-e-extenso", "devolveu-despesa", "devolveu-receita"])
+def test_valor_ou_tipo_sem_apoio_confirma(uid_pro, monkeypatch, frase, args):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, args)
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+@pytest.mark.parametrize("frase,valor,alvo", [
+    ("gastei 50 no mercado", 50, "mercado"),
+    ("mercado 80", 80, "mercado"),
+    ("uber 23", 23, "uber"),
+], ids=["verbo", "forma-curta-mercado", "forma-curta-uber"])
+def test_verbo_ou_forma_curta_grava_direto(uid_pro, monkeypatch, frase, valor, alvo):
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(valor, alvo=alvo))
+    r = diga(uid_pro, frase)
+    assert "Só confirmando" not in r, r
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": float(valor)}]
 
 
 def test_nao_dentro_de_outra_palavra_nao_e_negacao(uid_pro):
