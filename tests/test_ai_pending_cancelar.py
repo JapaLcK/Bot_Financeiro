@@ -92,3 +92,30 @@ def test_b9_cota_esgotada_a_pendencia_viva_cancela_mesmo_assim():
     r = c.delete("/ai/pending", headers=H)
     assert r.status_code == 200 and r.json() == {"cancelada": "apagar tudo"}, r.text
     assert not _pendencia_existe(uid)
+
+
+def test_b10_aviso_usa_a_linha_apagada_nao_uma_leitura_anterior(monkeypatch):
+    # Corrida: se o clear LÊ antes de apagar, outra requisição troca a pendência no meio.
+    # O aviso tem de descrever a linha que o DELETE apagou (o summary devolvido).
+    import db.pending as pending
+    uid, _ = _conta()
+    assert db.ai_set_pending_action(uid, "recategorize_launch", {}, "recategorizar")
+    real, troca = pending.ler_para_aviso, [True]
+
+    def le_e_troca(cur, user_id, **kw):
+        lido = real(cur, user_id, **kw)
+        if troca:
+            troca.clear()
+            with get_conn() as conn, conn.cursor() as c2:  # outra conexão, commit
+                c2.execute("update ai_pending_actions set tool_name = 'add_launch', summary = 'lançar'"
+                           " where user_id = %s", (user_id,))
+                conn.commit()
+        return lido
+
+    avisos = []
+    monkeypatch.setattr(pending, "ler_para_aviso", le_e_troca)
+    monkeypatch.setattr(pending, "avisar_mudanca_financeira",
+                        lambda cur, u, antes, depois, **kw: avisos.append((antes, depois)))
+    apagada = db.ai_clear_pending_action(uid)
+    ferramenta = {"lançar": "add_launch", "recategorizar": "recategorize_launch"}[apagada]
+    assert len(avisos) == 1 and avisos[0][0][0] == ferramenta and avisos[0][1] is None, (apagada, avisos)

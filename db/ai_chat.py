@@ -260,16 +260,16 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
 
 def clear_pending_action(user_id: int) -> Optional[str]:
     """Apaga a pendência. Devolve o summary se ela ainda estava viva (TTL), senão None."""
-    from .pending import ler_para_aviso, avisar_mudanca_financeira
+    from .pending import avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
-        anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
-            "delete from ai_pending_actions where user_id = %s returning summary, created_at",
+            "delete from ai_pending_actions where user_id = %s"
+            " returning tool_name, tool_args, summary, created_at",
             (int(user_id),),
         )
         row = cur.fetchone()
-        if row:
-            avisar_mudanca_financeira(cur, user_id, anterior, None, ia=True)
+        if row:  # o aviso decide pela linha realmente apagada, não por uma leitura anterior
+            avisar_mudanca_financeira(cur, user_id, (row["tool_name"], row["tool_args"]), None, ia=True)
         conn.commit()
     if not row:
         return None
