@@ -1000,7 +1000,16 @@ devolve o espelho da nova, que nunca o ligou) é achado por `pagamentos_no_carta
 sem recorte por conexão, e quem decide se a linha é pagamento é o espelho MAIS NOVO ligado a ela
 (maior conexão, depois maior id); o sync e o script usam o mesmo. A remoção recusa se aparecer
 vínculo novo depois do select (`of_tx_ids` = todas as referências vistas); o sync seguinte decide
-de novo.
+de novo. Fatura `paid`/`closed` que passa a dever reabre na mesma transação
+(`db.cards.reabrir_faturas_com_saldo`).
+**Limite declarado (decisão do dono, 2026-10-09):** a correção do cartão não serializa dois
+syncs de itens DIFERENTES do mesmo usuário (a trava é por item). Com a mesma transação nas duas
+conexões, sincronizando ao mesmo tempo, (1) o outro sync pode reclassificar o espelho de pagamento
+para compra entre a decisão e a remoção, e a compra sai até o sync seguinte reimportá-la; (2) a
+fatura de destino de uma data corrigida é criada ou reaberta antes da guarda do `update`, e pode
+ficar aberta com 0 a pagar se a linha não migrar. Na produção, em 2026-10-09, nenhuma transação de
+cartão estava em mais de uma conexão (consulta M11). Fechar a classe pede fila por usuário na
+correção do cartão: PR próprio, faixa Completo.
 **Compra e parcela do banco não se apagam nem se antecipam** (`undo_credit_transaction`,
 `undo_installment_group`, `anticipate_installment` levantam `db.CompraDoBanco`; /app responde
 409, WhatsApp e IA a frase): o sync reimporta a linha e, na antecipação, a Carteira ficava
