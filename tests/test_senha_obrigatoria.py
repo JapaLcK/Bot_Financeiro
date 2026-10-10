@@ -103,7 +103,7 @@ def test_auth_me_diz_se_precisa_criar_senha(credencial, esperado):
 
 _BLOQUEADAS = [
     ("GET", "/data/{uid}", None), ("GET", "/ai/messages", None),
-    ("POST", "/ai/chat", {"message": "oi"}), ("POST", "/auth/link-code", None),
+    ("POST", "/ai/chat", {"message": "oi"}), ("DELETE", "/ai/pending", None), ("POST", "/auth/link-code", None),
     ("POST", "/billing/portal", None), ("GET", "/billing/subscription", None),
     ("POST", "/billing/change-plan", {"plan": "pro"}), ("POST", "/billing/cancel-change", None),
     ("POST", "/api/affiliate/payout", {"pix_key": "x"}), ("POST", "/api/push/register", {"token": "t"}),

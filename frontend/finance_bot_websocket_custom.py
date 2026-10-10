@@ -7183,6 +7183,15 @@ async def ai_messages(
     return {"messages": out, "usage": {"used": used_after, "limit": monthly_limit}}
 
 
+@app.delete("/ai/pending")
+async def ai_pending_cancelar(user_id: int = Depends(_get_current_user)):
+    """Cancela a pendência do chat IA do usuário da sessão. Idempotente: sem linha, null.
+    Sem o gate de plano e cota: cancelar tem de funcionar com a cota esgotada."""
+    await asyncio.to_thread(_exigir_credencial, user_id)
+    from db import ai_clear_pending_action
+    return {"cancelada": await asyncio.to_thread(ai_clear_pending_action, user_id)}
+
+
 def _db_ai_usage(user_id: int) -> int:
     """Lê o contador sem incrementar (pra devolver no response)."""
     from db import ai_get_usage_this_month
