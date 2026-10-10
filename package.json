@@ -3,7 +3,7 @@
   "private": true,
   "description": "Só o harness de testes de frontend (tests/frontend/). O site é HTML estático servido pelo backend, com uma ilha React que tem build PRÓPRIO em webapp/; este package.json não tem script build de propósito.",
   "scripts": {
-    "test:frontend": "node --test tests/frontend/*.test.mjs",
+    "test:frontend": "node --test --test-timeout=300000 tests/frontend/*.test.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
