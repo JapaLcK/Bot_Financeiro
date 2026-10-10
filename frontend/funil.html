@@ -297,7 +297,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
   }
 
   function render() {
-    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, d = data.atraso;
+    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, tt = w.teste, d = data.atraso;
     const html = [
       funnel(w),
       channels(w),
@@ -325,6 +325,11 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
         "<b>O que é:</b> entregas do e-book da /assinar criadas na janela. “Pendente” = ainda sem fechamento.",
         [fact("Entregas", n(e.entregas)), fact("Enviadas", n(e.enviados)), fact("Não comprou", n(e.nao_comprou)),
          fact("Estornadas", n(e.estornados)), fact("Pendentes", n(e.pendentes))]),
+      simple("6b. Teste do Piggy (WhatsApp)",
+        "<b>O que é:</b> sessões do botão “Testar o Piggy” iniciadas na janela. “Clicaram” são <i>cliques</i>, não pessoas (o mesmo visitante pode clicar de novo). “Orgânicos” abriram o teste sem passar pelo botão.",
+        [fact("Clicaram", n(tt.clicaram)), fact("Abriram o WhatsApp", n(tt.abriram), pct(tt.clicaram ? tt.abriram / tt.clicaram : null)),
+         fact("Orgânicos", n(tt.organicos)), fact("Responderam", n(tt.responderam)),
+         fact("Chegaram ao limite", n(tt.no_limite)), fact("Clicaram no link final", n(tt.clicaram_checkout))]),
       simple("7. Cobrança em atraso agora",
         "<b>O que é:</b> contas com cobrança falha em aberto neste momento (não depende da janela de 7/30 dias).",
         [fact("Em atraso", n(d.total)), fact(`Além de ${n(d.carencia_dias)} dias`, n(d.alem_carencia), "fora da carência")]),

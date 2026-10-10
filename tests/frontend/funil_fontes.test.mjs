@@ -34,6 +34,7 @@ const FUNIL = {
     trial: { iniciaram: 0, em_trial: 0, pagando: 0, cancelaram: 0, outros: 0 },
     pix: { gerados: 0, pagos: 0, expirados: 0, cancelados: 0, abertos: 0, taxa_pago: null },
     ebook: { entregas: 0, enviados: 0, nao_comprou: 0, estornados: 0, pendentes: 0 },
+    teste: { clicaram: 0, abriram: 0, organicos: 0, responderam: 0, no_limite: 0, clicaram_checkout: 0 },
   }])),
   atraso: { total: 0, alem_carencia: 0, carencia_dias: 3 },
   links: [{ painel: "Afiliados", url: "/admin", olhar: "x" }],

@@ -1,6 +1,8 @@
 """
 db/schema.py — DDL e inicialização do banco de dados.
 """
+from core.services.demo.dados import CODIGO_PADRAO
+
 from .connection import get_conn
 from .schema_repairs import (
     ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
@@ -3035,6 +3037,29 @@ def init_db():
                 or old.plan_expires_at is distinct from new.plan_expires_at)
           execute function pb_aviso_escrita()
         """,
+        # "Testar o Piggy" (demo no WhatsApp): tabela ANÔNIMA — sem user_id de
+        # propósito (o demo não cria usuário nem toca em nenhuma tabela de
+        # usuário). Só o funil lê. wa_hash = HMAC do telefone, zerado após 30
+        # dias (db/demo_funnel.py). O limite de mensagens NÃO mora aqui: é a
+        # constante LIMITE_MSGS do código.
+        f"""
+        create table if not exists demo_sessions (
+          code text primary key check (code ~ '^{CODIGO_PADRAO}$'),
+          wa_hash text,
+          utm_source text check (char_length(utm_source) <= 64),
+          utm_campaign text check (char_length(utm_campaign) <= 64),
+          clicked_at timestamptz,
+          opened_at timestamptz,
+          first_answer_at timestamptz,
+          limit_at timestamptz,
+          checkout_at timestamptz,
+          msgs_used smallint not null default 0 check (msgs_used >= 0),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """create index if not exists idx_demo_sessions_wa_hash
+           on demo_sessions (wa_hash, opened_at desc) where wa_hash is not null""",
+        """create index if not exists idx_demo_sessions_opened_at on demo_sessions (opened_at)""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

@@ -208,6 +208,21 @@ async def _janela(cur, dias: int, agora: datetime, desde, ck: dict) -> dict:
         """, p)
     ebook = dict(await cur.fetchone())
 
+    # Bloco 8: Teste do Piggy (demo no WhatsApp). Coorte = sessões cujo início caiu
+    # na janela. SÓ contagens (a tabela é anônima; wa_hash/utm/código não saem
+    # daqui). "clicaram" são CLIQUES, não pessoas; "organicos" abriram sem clique.
+    await cur.execute(
+        """
+        SELECT count(*) FILTER (WHERE clicked_at IS NOT NULL)                           AS clicaram,
+               count(*) FILTER (WHERE clicked_at IS NOT NULL AND opened_at IS NOT NULL) AS abriram,
+               count(*) FILTER (WHERE clicked_at IS NULL)                               AS organicos,
+               count(*) FILTER (WHERE first_answer_at IS NOT NULL)                      AS responderam,
+               count(*) FILTER (WHERE limit_at IS NOT NULL)                             AS no_limite,
+               count(*) FILTER (WHERE checkout_at IS NOT NULL)                          AS clicaram_checkout
+        FROM demo_sessions WHERE coalesce(clicked_at, opened_at) >= %(ini)s
+        """, p)
+    teste = dict(await cur.fetchone())
+
     return {
         "dias": dias,
         "inicio": ini,
@@ -226,6 +241,7 @@ async def _janela(cur, dias: int, agora: datetime, desde, ck: dict) -> dict:
         "trial": trial,
         "pix": pix,
         "ebook": ebook,
+        "teste": teste,
     }
 
 
