@@ -285,7 +285,8 @@ def test_falha_de_envio_devolve_a_mensagem_e_nao_carimba(mundo, monkeypatch):
 
 def _historico_visto(mundo):
     """O que a ÚLTIMA chamada ao modelo recebeu entre o system e a pergunta atual."""
-    return [m["content"] for m in mundo.chamadas[-1][1:-1]]
+    msgs = [m for m in mundo.chamadas[-1][1:] if m["content"] != conversa.ULTIMA_RESPOSTA]
+    return [m["content"] for m in msgs[:-1]]
 
 
 def test_resposta_nao_entregue_nao_entra_no_historico(mundo, monkeypatch):
@@ -397,6 +398,15 @@ def test_prompt_do_demo_tem_as_regras_e_a_persona():
     assert "NUNCA afirme que registrou, salvou ou lançou" in conversa.PROMPT
     marca = "DADOS DE EXEMPLO (a Ana, fictícia):\n"
     assert json.loads(conversa.PROMPT.split(marca, 1)[1]) == dados.PERSONA
+
+
+def test_prompt_do_demo_tem_as_regras_de_conta_formato_e_gravacao():
+    p = conversa.PROMPT
+    assert "gasto_projetado_fim_do_mes" in p and "sobra_projetada_fim_do_mes" in p
+    assert "NUNCA use a renda como se fosse gasto" in p
+    assert 'PISO "sem juros"' in p and "NÃO invente taxa" in p
+    assert "ERRADO: **Academia:**" in p
+    assert 'NUNCA escreva "nada fica salvo"' in p
 
 
 def test_historico_e_por_numero_e_nao_vaza_entre_dois(mundo):
