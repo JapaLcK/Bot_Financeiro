@@ -35,6 +35,10 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if usados is not None and len(usados) >= MAX_POR_TURNO:
         return _erro("limite_de_cards", f"no máximo {MAX_POR_TURNO} cards por resposta")
 
+    if usados is not None and card in usados:
+        return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. Para comparar "
+                     "meses, chame show_card uma vez só com meses=[...]")
+
     meses = args.get("meses") or []
     if (not isinstance(meses, list) or not all(isinstance(m, str) and _MES.match(m) for m in meses)
             or len(set(meses)) != len(meses)):

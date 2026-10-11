@@ -187,6 +187,21 @@ def test_so_card_com_bloco_gasta_vaga_do_teto(mundo):
         runner.CARDS_DO_TURNO.set(None)
 
 
+def test_card_repetido_no_turno_e_recusado_sem_gastar_vaga(mundo):
+    a, _ = mundo
+    runner.CARDS_DO_TURNO.set([])
+    try:
+        assert "error" not in mostrar(a, card="contas")[0]
+        r, blocos, ev = mostrar(a, card="contas")
+        assert r["error"] == "card_repetido" and "meses" in r["message"] and not blocos and not ev
+        # não gastou vaga: ainda cabem 2 cards diferentes (total 3) e só então o teto
+        for card in ("metas", "fatura"):
+            assert "error" not in mostrar(a, card=card)[0], card
+        assert mostrar(a, card="parcelas")[0]["error"] == "limite_de_cards"
+    finally:
+        runner.CARDS_DO_TURNO.set(None)
+
+
 def test_o_maximo_do_prompt_e_da_tool_vem_da_constante():
     frase = f"no máximo {cards.MAX_POR_TURNO} "
     assert frase in ADENDO_CARDS and frase in SCHEMA["function"]["description"]
