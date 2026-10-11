@@ -3262,6 +3262,15 @@ def disconnect_open_finance_connection(
                 cur.execute("select count(*) as n from credit_transactions where card_id=%s", (cid,))
                 if cur.fetchone()["n"] == 0:
                     cur.execute("delete from credit_cards where id=%s and user_id=%s", (cid, user_id))
+                else:
+                    # Cartão que sobrevive: sem o banco para limitá-lo, o pago do banco não passa do total do Pig (aparado).
+                    # Efeito aceito pelo dono: compra manual ainda não paga pode passar a aparecer paga.
+                    cur.execute(
+                        "update credit_bills set paid_amount = least(paid_amount, greatest(total, 0)),"
+                        " status = case when total > 0 then 'paid' else status end,"
+                        " paid_at = case when total > 0 then coalesce(paid_at, now()) else paid_at end"
+                        " where user_id = %s and card_id = %s and paid_amount > greatest(total, 0)",
+                        (user_id, cid))
 
         conn.commit()
 

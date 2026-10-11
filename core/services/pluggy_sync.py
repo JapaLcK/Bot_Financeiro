@@ -64,7 +64,7 @@ from db import (
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
 from db.open_finance_state import _SEM_CHECAGEM, _TERMINAL as CONEXAO_TERMINAL
-from db.of_card_bills import salvar_faturas_do_banco
+from db.of_card_bills import quitar_pelo_banco, salvar_faturas_do_banco
 from db.of_recurring import salvar_recorrencias
 
 
@@ -589,6 +589,12 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         imported_credit = import_open_finance_credit(connection["user_id"], connection["id"])
         # Propaga correções da Pluggy (transactions/updated) pros já importados (não deixa stale).
         updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
+        # Depois do import (compras e `bill_id` já atualizados), ainda sob o lock do item: é ele a trava.
+        try:
+            quitar_pelo_banco(connection["user_id"], connection["id"])
+        except Exception as exc:
+            print(f"[pluggy_sync] quitação pelo banco falhou item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
         # Concluído: ESTE é o único carimbo de sucesso do sistema. Dentro do
         # lock de propósito — ele afirma que as escritas acima valeram.

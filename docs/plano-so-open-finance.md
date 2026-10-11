@@ -14,7 +14,7 @@
 |---|---|
 | 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
 | 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
-| 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2 (quitar pelo extrato) depois da consulta V1 em produção. Vem antes de travar o "pagar fatura" do cartão OF. |
+| 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2a (`quitar_pelo_banco`: grava `paid_amount` do cartão OF pelo `of_card_bills`, regra por conta; vale para todo usuário com banco conectado, sem flag) em código. PR 2b (recusar o "pagar fatura" manual no cartão do banco) só depois da consulta V1 das outras contas, da consulta pós-deploy do 2a (abaixo) e do 2a em produção. Vem antes de travar o "pagar fatura" do cartão OF. |
 | 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
 | 3. Esconder o legado | A fazer. |
@@ -238,9 +238,51 @@ feita (§9).
 - **Faz:** o pagamento de fatura reconhecido no extrato quita a fatura certa do cartão OF da
   mesma instituição. Isso pode ser por casamento valor × data × cartão ou pela leitura do
   `/bills` da Pluggy (escolher no PR, medindo). Ambíguo vira motivo, nunca quitação
-  silenciosa.
+  silenciosa. No 2a o ambíguo só loga (`regra indefinida`); o motivo na Previsão ficou adiado.
 - **Não faz:** cartão manual.
-- **Consulta V1 (só leitura, antes do PR 2).** Decide o desenho do PR 2 a partir do que o
+- **PR 2a (feito no código).** `db/of_card_bills.py::quitar_pelo_banco`, chamado pelo sync sob o lock do item
+  (fail-soft): para cada fatura FECHADA do banco, `paid_amount` das compras dela (casadas pelo `billId`) =
+  Σ valor × parte paga, com teto 1 (sem crédito carregado para a fatura seguinte). Regra por conta: a "própria"
+  (o pagamento da fatura Y quita Y) é aplicada; a "N+1" só pontua, e conta em que ela vence ou empata não quita
+  (`[of_card_bills] conta=<id> regra indefinida`). Conta com uma única fatura fechada ainda não paga empata 0 a 0
+  e fica como está; fatura com pagamentos de sinais misturados fica fora, e a de total <= 0,05 entra com parte 0 (o pago das compras dela volta a 0).
+  Decisões do dono que o 2a cumpre, por extenso: vale para todo usuário com banco conectado, sem flag nem
+  restrição à chave do painel novo; o valor pago pelo banco substitui o pagamento manual no cartão do banco
+  (escrita absoluta); pagamento acima do total não vira crédito na fatura seguinte por enquanto (isso se decide
+  pela consulta V1); só quita, sem realinhar o calendário de fechamento. O desfazer de pagamento
+  manual desconta como antes (o próximo sync regrava o valor do banco nas faturas dele). Ao desconectar, o pago do
+  cartão que sobrevive é aparado no total (com `paid_at`). **Consequência aceita pelo dono do aparo:** uma compra
+  manual ainda não paga no cartão do banco pode passar a aparecer paga, porque o pago do banco das compras que saem
+  fica no limite do total (exemplo do teste `test_desconectar_apara_o_pago_do_cartao_que_sobrevive`: total 150 com
+  120 pago vira 30 com 30 pago, `paid`). Fica para depois: a recusa do "pagar fatura" manual no cartão do banco
+  (PR 2b), rotativo/encargos e o ramo N+1.
+  **Sem teste:** o caminho `transactions/deleted` (estorno que some da Pluggy) não tem teste, porque o harness
+  não apaga transação.
+- **Consulta pós-deploy do 2a (condição para o PR 2b).** Só leitura, transação `read only`, só contagens, por
+  conta anônima (sem id de conta nem de usuário), com o dono e avisando antes, pelo `railway`, como a V1. Compara,
+  nas faturas de cartão OF fechadas há mais de 40 dias (cobre o prazo até o vencimento, que passa de 10 dias em
+  alguns cartões, e a folga para o banco informar o pagamento), as que o Pig deu por pagas (`pagas`) com as que
+  seguem com saldo (`com_saldo`). As duas colunas são complementares e deixam de fora as faturas sem valor
+  (total <= 0,05). É a condição para o PR 2b.
+  ```sql
+  begin transaction isolation level repeatable read read only;
+  with f as (
+    select cc.open_finance_account_id as conta_id, b.total, b.paid_amount
+      from credit_bills b
+      join credit_cards cc on cc.id = b.card_id and cc.user_id = b.user_id
+     where cc.open_finance_account_id is not null
+       and b.period_end < current_date - 40
+  ), contas as (
+    select conta_id, row_number() over (order by conta_id) as conta from (select distinct conta_id from f) d
+  )
+  select c.conta,
+         count(*) filter (where f.total > 0.05 and coalesce(f.paid_amount,0) >= f.total - 0.05) as pagas,
+         count(*) filter (where f.total > 0.05 and f.total > coalesce(f.paid_amount,0) + 0.05)  as com_saldo
+    from f join contas c using (conta_id)
+   group by c.conta order by c.conta;
+  rollback;
+  ```
+- **Consulta V1 (só leitura, antes do PR 2b).** Decide o 2b e o que o 2a ainda pode mudar (crédito para a fatura seguinte, regra da fatura seguinte) a partir do que o
   banco manda no `/bills`. Quando rodar: depois do deploy do PR 1 e de ao menos um sync de cada
   conexão; só leitura, só contagens (sem dado de usuário), com o dono e avisando antes, pelo
   `railway`, como a medição do §9: confira o host da credencial antes de rodar e use a

@@ -1132,7 +1132,22 @@ marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna 
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,
 só contas `CREDIT`), por upsert em (conta, `provider_bill_id`); fail-soft (leitura ou gravação que
-falha vira log, o sync carimba igual) e **nenhuma tela a lê ainda** (só o export LGPD). Sem user_id: o dono é conta -> conexão.
+falha vira log, o sync carimba igual). Sem user_id: o dono é conta -> conexão. **Quem a lê:** `quitar_pelo_banco`
+(mesmo módulo), chamado pelo sync logo depois do import, sob o `pluggy_item_lock`, também fail-soft: grava
+`credit_bills.paid_amount` do cartão OF pelo que o banco pagou, compra a compra (`creditCardMetadata.billId`), só em
+fatura FECHADA (`(closing_date or due_date) < hoje`) de moeda BRL ou nula, com total > 0,05 e pagamento legível (sinais
+misturados na lista de pagamentos = ilegível), teto 1 por fatura (fechada com total <= 0,05 entra com parte 0: o banco zerou
+a fatura, o pago das compras dela volta a 0, e ela não pontua a regra), escrita
+absoluta (sobrescreve o pago manual antigo). Regra por conta: a conta só quita quando a leitura "própria" (pagamento de
+Y quita Y) vence a "N+1"; empate ou N+1 melhor não quita e loga `regra indefinida`. Limites: sem crédito carregado
+para a fatura seguinte, rotativo (encargos) não tratado, conexão PAUSED não sincroniza, compra sem espelho na conta
+atual não conta, estorno sem `billId` faz o pago parcial sair maior (o teto é o total do Pig). O desfazer de
+pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também no cartão OF: o próximo sync regrava o
+valor do banco nas faturas que ele possui, e nas outras (compra manual sem espelho) o desconto é o correto; com a conexão
+PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Desconectar
+apara `paid_amount` ao total (e marca `paid`/`paid_at`) no cartão que sobrevive; consequência aceita pelo dono: compra
+manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago vira 30 com 30 pago), porque o pago
+do banco das compras que saem fica no limite do total. (também o export LGPD, `db/privacy.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
