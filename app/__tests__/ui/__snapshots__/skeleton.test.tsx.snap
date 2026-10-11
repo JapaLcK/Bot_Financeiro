@@ -24,7 +24,7 @@ exports[`Skeleton snapshot (dois temas): escuro 1`] = `
   collapsable={false}
   style={
     {
-      "backgroundColor": "#2A2A2F",
+      "backgroundColor": "#24242A",
       "borderRadius": 8,
       "height": 24,
       "opacity": 0.5,

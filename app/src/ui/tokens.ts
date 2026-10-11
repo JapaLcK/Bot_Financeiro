@@ -19,7 +19,11 @@ export const marca = "#FF2D8E";
  */
 export interface Paleta {
   bg: string;
+  /** plane1 do PDF: Card/bloco, grupo de ListRow, Banner. */
   surface: string;
+  /** plane2 do PDF: Chip, trilho do segmentado, Acao, Button secondary, Input, composer, bolha do usuário. */
+  surfaceControl: string;
+  /** plane3 do PDF: polegar do segmentado, avatar, Card raised, enviar desligado. */
   surfaceRaised: string;
   border: string;
   ink: string;
@@ -32,77 +36,100 @@ export interface Paleta {
   onAcao: string;
   positive: string;
   warning: string;
+  /** Laranja do PDF: barra "Saiu" do Calendário. */
+  alert: string;
   danger: string;
   onDanger: string;
   /** Só `shadowColor` (Card raised no claro) — nunca texto nem contorno, por isso sem par em `PARES`. */
   shadow: string;
 }
 
+// Valores do escuro = pág. 25 do PDF de identidade visual; o claro é adaptação.
+// Contrastes medidos com `contraste()` em 2026-10-10 — remeça se a paleta mudar.
 export const claro: Paleta = {
   bg: "#FFFFFF",
   surface: "#F6F6F7",
+  surfaceControl: "#EFEFF1",
   surfaceRaised: "#FFFFFF",
   border: "#E6E6E9",
   ink: "#111113",
   inkMuted: "#5F5F6A",
-  inkFaint: "#8A8A94",
+  // 4,59 sobre surfaceControl (o PDF §13 aceita ink-3 como texto).
+  inkFaint: "#6B6B75",
   brand: marca,
   brandSoft: "#FFE6F1",
   brandInk: "#C7186B",
-  acao: "#C7186B",
-  onAcao: "#FFFFFF",
+  // Botão primário: rosa com texto #0F172A (5,12:1; branco daria 3,49) nos dois temas.
+  acao: marca,
+  onAcao: "#0F172A",
   positive: "#067647",
   warning: "#B54708",
+  alert: "#E8590C",
   danger: "#B42318",
   onDanger: "#FFFFFF",
   shadow: "#000000",
 };
 
 export const escuro: Paleta = {
-  bg: "#0E0E10",
-  surface: "#17171A",
-  surfaceRaised: "#202024",
-  border: "#2A2A2F",
-  ink: "#F2F2F3",
-  inkMuted: "#9B9BA6",
-  inkFaint: "#6E6E78",
-  // O rosa sobe de luminância no escuro: #FF2D8E sobre #0E0E10 não alcança o
-  // contraste de texto. Mesma matiz, não outra cor.
-  brand: "#FF4FA0",
-  brandSoft: "#351827",
-  brandInk: "#FF4FA0",
-  // Botão primário: #CE2572 sobre #0E0E10 dá ~3,8: `acao` é só fundo de botão e trilha do switch.
+  bg: "#09090B",
+  surface: "#101013",
+  surfaceControl: "#16161A",
+  surfaceRaised: "#1D1D22",
+  border: "#24242A",
+  ink: "#F4F4F6",
+  inkMuted: "#A8A8B3",
+  inkFaint: "#8B8B96",
+  brand: marca,
+  // pink-wash 10% composto sobre bg, em hex sólido (`contraste()` só lê 6 dígitos).
+  brandSoft: "#220D18",
   // TEXTO rosa usa só `brandInk`; `brand` fica para ícone/gráfico (não textual, mínimo 3:1).
-  acao: "#CE2572",
-  onAcao: "#FFFAFD",
-  positive: "#47CD89",
-  warning: "#FDB022",
+  brandInk: "#FF5AA6",
+  acao: marca,
+  onAcao: "#0F172A",
+  positive: "#3DDC97",
+  warning: "#F5B544",
+  alert: "#FF7A45",
+  // O PDF não tem vermelho de erro; segue o bg novo (7,14 sobre danger).
   danger: "#F97066",
-  onDanger: "#0E0E10",
+  onDanger: "#09090B",
   shadow: "#000000",
 };
 
 /** Grade de 4pt. */
 export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 48 } as const;
-/** `pilula`: raio cheio de seletor (Chip); maior que qualquer altura, o RN corta na metade. */
-export const raio = { sm: 8, md: 12, lg: 20, pilula: 999 } as const;
+/**
+ * Escala de raio do PDF, só com os valores em uso. `pilula`: maior que qualquer
+ * altura, o RN corta na metade. `bloco`: Card/Banner/faixa do Piggy;
+ * `controle`: Button, Input, trilho do segmentado, grupo de ListRow; `chip`: Chip;
+ * `celula`: polegar do segmentado; `barra`: ProgressBar; `cartao`: o resto.
+ */
+export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8, celula: 7, barra: 4 } as const;
 
 // `fontFamily`, não `fontWeight`: peso + família custom cai de volta no
 // sistema no Android (RN não faz "negrito sintético" de uma TTF nomeada).
 // Cada peso da Inter é o arquivo certo, não uma variação do mesmo.
+// Escala do PDF; `letterSpacing` em px (em × tamanho).
 export const texto = {
-  display: { fontSize: 40, lineHeight: 44, fontFamily: "Inter-Bold" },
-  titulo: { fontSize: 28, lineHeight: 34, fontFamily: "Inter-Bold" },
-  secao: { fontSize: 20, lineHeight: 26, fontFamily: "Inter-SemiBold" },
-  corpo: { fontSize: 16, lineHeight: 22, fontFamily: "Inter-Regular" },
-  rotulo: { fontSize: 14, lineHeight: 18, fontFamily: "Inter-Medium" },
-  legenda: { fontSize: 12, lineHeight: 16, fontFamily: "Inter-Regular" },
+  display: { fontSize: 40, lineHeight: 44, fontFamily: "Inter-SemiBold", letterSpacing: -1.4 },
+  titulo: { fontSize: 24, lineHeight: 28, fontFamily: "Inter-SemiBold", letterSpacing: -0.6 },
+  secao: { fontSize: 20, lineHeight: 26, fontFamily: "Inter-SemiBold", letterSpacing: -0.4 },
+  corpo: { fontSize: 14, lineHeight: 21, fontFamily: "Inter-Regular", letterSpacing: 0 },
+  rotulo: { fontSize: 13, lineHeight: 18, fontFamily: "Inter-Medium", letterSpacing: 0 },
+  legenda: { fontSize: 12, lineHeight: 16, fontFamily: "Inter-Medium", letterSpacing: 0 },
 } as const;
+
+/**
+ * Cores de categoria (donut e barras do painel), por POSIÇÃO e iguais nos dois
+ * temas: as categorias reais não casam com as chaves do protótipo. DECORATIVAS:
+ * o nome e o valor estão escritos na linha e a barra é `accessibilityElementsHidden`,
+ * então a cor nunca é o único sinal e fica fora do portão de contraste.
+ */
+export const CORES_CATEGORIA = ["#3987E5", "#D95926", "#2FA0C8", "#C98500", "#9085E9", "#E66767", "#7C8391", "#5A5F6A"] as const;
 
 /** Paleta das telas de acesso: mantém o fundo da tampa biométrica nativa. */
 export const acessoClaro: Paleta = {
   ...claro, surface: "#F0F0F5", surfaceRaised: "#F6F6FA",
-  ink: "#191921", inkMuted: "#686875", acao: "#C7186B", onAcao: "#FFFFFF",
+  ink: "#191921", inkMuted: "#686875",
 };
 export const acessoEscuro: Paleta = {
   ...escuro, surface: "#24242F", surfaceRaised: "#24242F",

@@ -35,7 +35,7 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
   style={
     {
       "justifyContent": "center",
-      "minHeight": 44,
+      "paddingVertical": 8,
     }
   }
 >
@@ -45,13 +45,12 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
       {
         "alignItems": "center",
         "backgroundColor": "#FFE6F1",
-        "borderColor": "#C7186B",
-        "borderRadius": 999,
-        "borderWidth": 1,
+        "borderRadius": 8,
         "justifyContent": "center",
-        "minHeight": 34,
+        "minHeight": 28,
         "minWidth": 44,
-        "paddingHorizontal": 14,
+        "paddingHorizontal": 10,
+        "paddingVertical": 6,
         "transform": [
           {
             "scale": 1,
@@ -66,16 +65,14 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
-            "lineHeight": 18,
+            "fontSize": 12,
+            "letterSpacing": 0,
+            "lineHeight": 16,
           },
           {
             "color": "#C7186B",
           },
-          {
-            "fontSize": 15,
-            "lineHeight": 20,
-          },
+          {},
           null,
         ]
       }
@@ -121,7 +118,7 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
   style={
     {
       "justifyContent": "center",
-      "minHeight": 44,
+      "paddingVertical": 8,
     }
   }
 >
@@ -130,14 +127,13 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
     style={
       {
         "alignItems": "center",
-        "backgroundColor": "#351827",
-        "borderColor": "#FF4FA0",
-        "borderRadius": 999,
-        "borderWidth": 1,
+        "backgroundColor": "#220D18",
+        "borderRadius": 8,
         "justifyContent": "center",
-        "minHeight": 34,
+        "minHeight": 28,
         "minWidth": 44,
-        "paddingHorizontal": 14,
+        "paddingHorizontal": 10,
+        "paddingVertical": 6,
         "transform": [
           {
             "scale": 1,
@@ -152,16 +148,14 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
-            "lineHeight": 18,
+            "fontSize": 12,
+            "letterSpacing": 0,
+            "lineHeight": 16,
           },
           {
-            "color": "#FF4FA0",
+            "color": "#FF5AA6",
           },
-          {
-            "fontSize": 15,
-            "lineHeight": 20,
-          },
+          {},
           null,
         ]
       }

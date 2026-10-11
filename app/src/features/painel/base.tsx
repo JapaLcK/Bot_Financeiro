@@ -6,18 +6,18 @@ import { useTema } from "@/ui/tema";
 import { Card } from "@/ui/componentes/Card";
 import { Money } from "@/ui/componentes/Money";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
-import { espaco, raio, type Paleta } from "@/ui/tokens";
+import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { TITULOS, type Widget } from "./catalogo";
 import { usePainel, type Dados, type Recurso } from "./provider";
 /**
- * Com texto, espelha os tokens do `Button secondary` (contorno `inkMuted`, texto `ink`). `texto` é o visível; `rotulo`, o do VoiceOver.
- * O contorno tem 36pt (`compacta`: 30pt, ao lado de valor), mas o alvo de toque é o `Pressable` de 44pt em volta, não `hitSlop` (o pai o recorta; ver `Chip`).
+ * Com texto, espelha os tokens do `Button secondary` (PDF "Fantasma": fundo `surfaceControl`, sem contorno, texto `ink` SemiBold). `texto` é o visível; `rotulo`, o do VoiceOver.
+ * O botão visível tem 36pt (`compacta`: 30pt, ao lado de valor), mas o alvo de toque é o `Pressable` de 44pt em volta, não `hitSlop` (o pai o recorta; ver `Chip`).
  */
 export function Acao({ rotulo, texto = rotulo, onPress, icone, iconeFim, somenteIcone = false, desativado = false, compacta = false }: { rotulo: string; texto?: string; onPress: () => void; icone?: NomeIcone; iconeFim?: NomeIcone; somenteIcone?: boolean; desativado?: boolean; compacta?: boolean }) {
   const { cores } = useTema(); const pressao = usePressao();
-  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, borderWidth: 1, borderColor: cores.inkMuted, borderRadius: compacta ? raio.sm : raio.md, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" style={[{ flexShrink: 1 }, !compacta && { fontSize: 15, lineHeight: 20 }]}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} />}</Animated.View></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, backgroundColor: cores.surfaceControl, borderRadius: compacta ? raio.chip : raio.controle, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" style={{ flexShrink: 1, fontFamily: escalas.secao.fontFamily }}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} />}</Animated.View></Pressable>;
 }
 export function Valor({ valor, destaque = false, pequeno = false, tipo = "saldo" }: { valor: number | null; destaque?: boolean; pequeno?: boolean; tipo?: "saldo" | "entrada" | "saida" }) {
   const { oculto } = usePainel(); const { fontScale } = useTipografiaPainel();
@@ -85,12 +85,10 @@ export function Curva({ valores }: { valores: (number | null)[] }) {
   const pontos = nums.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, nums.length - 1)},${100 - (v - min) / amplitude * 85}`).join(" ");
   return <Svg width="100%" height={112} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período"><Path d={pontos} fill="none" stroke={cores.brand} strokeWidth={3} /></Svg>;
 }
-/** Cor de cada categoria, pelo índice: o donut do "Para onde vai" e o que mais combinar com ele. */
-export const CORES_CATEGORIA = ["brand", "positive", "warning", "inkMuted"] as const satisfies readonly (keyof Paleta)[];
 export function Anel({ partes }: { partes: number[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();
   if (oculto) return <Texto tom="inkMuted">Distribuição oculta</Texto>;
   const total = partes.reduce((a, b) => a + Math.max(0, b), 0); if (!total) return null;
   let acumulado = 0;
-  return <Svg width={120} height={120} viewBox="0 0 120 120" accessible accessibilityLabel="Distribuição por categoria"><Circle cx={60} cy={60} r={44} stroke={cores.border} fill="none" strokeWidth={16} />{partes.map((v, i) => { const comprimento = Math.max(0, v) / total * 276.46, inicio = acumulado; acumulado += comprimento; return <Circle key={i} cx={60} cy={60} r={44} fill="none" stroke={cores[CORES_CATEGORIA[i % CORES_CATEGORIA.length]!]} strokeWidth={16} strokeDasharray={`${comprimento} ${276.46 - comprimento}`} strokeDashoffset={-inicio} rotation={-90} origin="60,60" />; })}</Svg>;
+  return <Svg width={120} height={120} viewBox="0 0 120 120" accessible accessibilityLabel="Distribuição por categoria"><Circle cx={60} cy={60} r={44} stroke={cores.border} fill="none" strokeWidth={16} />{partes.map((v, i) => { const comprimento = Math.max(0, v) / total * 276.46, inicio = acumulado; acumulado += comprimento; return <Circle key={i} cx={60} cy={60} r={44} fill="none" stroke={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} strokeWidth={16} strokeDasharray={`${comprimento} ${276.46 - comprimento}`} strokeDashoffset={-inicio} rotation={-90} origin="60,60" />; })}</Svg>;
 }

@@ -36,7 +36,7 @@ export default {
       bold: [texto.titulo.fontFamily],
     },
     // Vazios de propósito: tamanho e peso de texto são só do componente
-    // `Texto` (tokens.ts:112 — `fontWeight` com Inter quebra no Android).
+    // `Texto` (`texto` em tokens.ts — `fontWeight` com Inter quebra no Android).
     fontSize: {},
     fontWeight: {},
     // Mesmo motivo: `lineHeight`/`letterSpacing` são parte da tipografia do

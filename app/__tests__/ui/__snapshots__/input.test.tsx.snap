@@ -8,7 +8,8 @@ exports[`Input snapshot (dois temas): claro 1`] = `
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
@@ -30,16 +31,19 @@ exports[`Input snapshot (dois temas): claro 1`] = `
     }
     editable={true}
     maxFontSizeMultiplier={1.3}
+    selectionColor="#FF2D8E"
     style={
       [
         {
           "fontFamily": "Inter-Regular",
-          "fontSize": 16,
-          "lineHeight": 22,
+          "fontSize": 14,
+          "letterSpacing": 0,
+          "lineHeight": 21,
         },
         {
+          "backgroundColor": "#EFEFF1",
           "borderColor": "#B42318",
-          "borderRadius": 12,
+          "borderRadius": 10,
           "borderWidth": 1,
           "color": "#111113",
           "minHeight": 44,
@@ -54,8 +58,9 @@ exports[`Input snapshot (dois temas): claro 1`] = `
     style={
       [
         {
-          "fontFamily": "Inter-Regular",
+          "fontFamily": "Inter-Medium",
           "fontSize": 12,
+          "letterSpacing": 0,
           "lineHeight": 16,
         },
         {
@@ -79,11 +84,12 @@ exports[`Input snapshot (dois temas): escuro 1`] = `
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
-          "color": "#F2F2F3",
+          "color": "#F4F4F6",
         },
         {},
         null,
@@ -101,18 +107,21 @@ exports[`Input snapshot (dois temas): escuro 1`] = `
     }
     editable={true}
     maxFontSizeMultiplier={1.3}
+    selectionColor="#FF2D8E"
     style={
       [
         {
           "fontFamily": "Inter-Regular",
-          "fontSize": 16,
-          "lineHeight": 22,
+          "fontSize": 14,
+          "letterSpacing": 0,
+          "lineHeight": 21,
         },
         {
+          "backgroundColor": "#16161A",
           "borderColor": "#F97066",
-          "borderRadius": 12,
+          "borderRadius": 10,
           "borderWidth": 1,
-          "color": "#F2F2F3",
+          "color": "#F4F4F6",
           "minHeight": 44,
           "paddingHorizontal": 16,
           "paddingVertical": 12,
@@ -125,8 +134,9 @@ exports[`Input snapshot (dois temas): escuro 1`] = `
     style={
       [
         {
-          "fontFamily": "Inter-Regular",
+          "fontFamily": "Inter-Medium",
           "fontSize": 12,
+          "letterSpacing": 0,
           "lineHeight": 16,
         },
         {

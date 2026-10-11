@@ -51,6 +51,18 @@ describe("Card", () => {
     expect(estilo.shadowOpacity).toBeUndefined();
   });
 
+  it("o anel de 1px com `border` vale nos dois temas e nas duas elevações", () => {
+    for (const elevacao of ["surface", "raised"] as const) {
+      const { claro: c, escuro: e } = renderNosDoisTemas(
+        <Card elevacao={elevacao}>
+          <Text>x</Text>
+        </Card>,
+      );
+      expect(estiloDe(c)).toMatchObject({ borderWidth: 1, borderColor: claro.border });
+      expect(estiloDe(e)).toMatchObject({ borderWidth: 1, borderColor: escuro.border });
+    }
+  });
+
   it("snapshot (dois temas)", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(
       <Card elevacao="raised">

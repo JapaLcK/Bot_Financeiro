@@ -22,7 +22,8 @@ exports[`Avatar snapshot (dois temas): claro 1`] = `
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
@@ -48,7 +49,7 @@ exports[`Avatar snapshot (dois temas): escuro 1`] = `
   style={
     {
       "alignItems": "center",
-      "backgroundColor": "#17171A",
+      "backgroundColor": "#101013",
       "borderRadius": 20,
       "height": 40,
       "justifyContent": "center",
@@ -63,11 +64,12 @@ exports[`Avatar snapshot (dois temas): escuro 1`] = `
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
-          "color": "#9B9BA6",
+          "color": "#A8A8B3",
         },
         {
           "fontSize": 16,

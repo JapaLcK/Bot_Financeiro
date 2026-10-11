@@ -21,11 +21,11 @@ Extensão iOS do mundo PigBank existente, modo **Operate**: compreender o mês e
 
 ## Colors
 
-Fonte normativa nativa: `app/src/ui/tokens.ts`, paleta `escuro`. O painel força tema escuro em seu próprio layout. Fundo `bg` (#0E0E10), conteúdo `surface` (#17171A), superfície elevada `surfaceRaised` (#202024), contorno `border` (#2A2A2F); texto `ink` (#F2F2F3) e `inkMuted` (#9B9BA6). A marca original é #FF2D8E; o rosa legível do tema (`brand`, `brandInk`, `acao`) é #FF4FA0. Entradas usam `positive` (#47CD89) com sinal; saídas usam texto com menos, sem vermelho financeiro (`Money.tsx`). `warning` informa cobertura e precisão; `danger` indica erros.
+Fonte normativa nativa: `app/src/ui/tokens.ts` (valores lá, não aqui). O app segue o tema do iPhone (claro e escuro). Planos: `bg`, `surface`, `surfaceControl`, `surfaceRaised`; contorno `border`; texto `ink`, `inkMuted` e `inkFaint`. A marca é o rosa de `brand` e `acao`; `brandInk` é o rosa de texto. Entradas usam `positive` com sinal; saídas usam texto com menos, sem vermelho financeiro (`Money.tsx`). `warning` informa cobertura e precisão; `danger` indica erros.
 
 ## Typography
 
-Inter local em quatro TTFs: Regular, Medium, SemiBold, Bold (`app/assets/fonts/`, carregamento em `app/app/_layout.tsx`). Escala nativa em pontos: display 40/44, título 28/34, seção 20/26, corpo 16/22, rótulo 14/18 e legenda 12/16. A família codifica o peso; números usam `tabular-nums` (`tokens.ts`, `Texto.tsx`, `Money.tsx`).
+Inter local em três TTFs: Regular, Medium, SemiBold (`app/assets/fonts/`, carregamento em `app/app/_layout.tsx`). Escala nativa em `texto` de `tokens.ts`. A família codifica o peso; números usam `tabular-nums` (`tokens.ts`, `Texto.tsx`, `Money.tsx`).
 
 `TipografiaPainelProvider` acompanha `fontScale` por `useWindowDimensions`; acima de 1,1, as composições afetadas empilham conteúdo ou reduzem colunas. `TextoPainel`, `ButtonPainel` e `Valor` invalidam apenas a apresentação medida ao mudar a escala; formulário, seleção e dados permanecem no pai (`tipografia.tsx`, `base.tsx`). O componente global `Texto` limita a ampliação a 1,3. O valor display usa uma linha e ajuste mínimo de escala 0,6. Estes limites são fatos da implementação, não prova de suporte irrestrito a todos os tamanhos de acessibilidade.
 

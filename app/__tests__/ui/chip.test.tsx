@@ -35,20 +35,22 @@ describe("Chip", () => {
     expect(naoSel.getByRole("button").props.accessibilityState).toMatchObject({ selected: false });
   });
 
-  it("selecionado usa brandSoft/brandInk; não selecionado usa surface/inkMuted", () => {
+  it("selecionado usa brandSoft/brandInk; não selecionado usa surfaceControl/inkMuted", () => {
     const { claro: sel } = renderNosDoisTemas(<Chip rotulo="x" selecionado onPress={jest.fn()} />);
     expect(estiloVisual(sel).backgroundColor).toBe(claro.brandSoft);
     expect(sel.getByText("x").props.style.some((s: { color?: string }) => s?.color === claro.brandInk)).toBe(true);
 
     const { escuro: naoSel } = renderNosDoisTemas(<Chip rotulo="x" selecionado={false} onPress={jest.fn()} />);
-    expect(estiloVisual(naoSel).backgroundColor).toBe(escuro.surface);
+    expect(estiloVisual(naoSel).backgroundColor).toBe(escuro.surfaceControl);
   });
 
-  it("é pílula com contorno: brandInk no selecionado, inkMuted no não selecionado (o fundo surface some dentro do Card)", () => {
+  it("tem raio chip e nenhum contorno (o fundo surfaceControl se destaca do Card)", () => {
     const { claro: sel } = renderNosDoisTemas(<Chip rotulo="x" selecionado onPress={jest.fn()} />);
     const { claro: naoSel } = renderNosDoisTemas(<Chip rotulo="x" selecionado={false} onPress={jest.fn()} />);
-    expect(estiloVisual(sel)).toMatchObject({ borderRadius: raio.pilula, borderWidth: 1, borderColor: claro.brandInk });
-    expect(estiloVisual(naoSel)).toMatchObject({ borderRadius: raio.pilula, borderWidth: 1, borderColor: claro.inkMuted });
+    expect(estiloVisual(sel)).toMatchObject({ borderRadius: raio.chip });
+    expect(estiloVisual(naoSel)).toMatchObject({ borderRadius: raio.chip });
+    expect(estiloVisual(sel).borderWidth).toBeUndefined();
+    expect(estiloVisual(naoSel).borderWidth).toBeUndefined();
   });
 
   it("desativado não chama onPress e anuncia disabled", () => {
@@ -59,13 +61,17 @@ describe("Chip", () => {
     expect(getByRole("button").props.accessibilityState).toMatchObject({ disabled: true });
   });
 
-  it("altura de toque de 44pt vem do tamanho real do Pressable, não de hitSlop (que o pai recorta); a pílula visível tem 34", () => {
+  it("altura de toque de 44pt vem do tamanho real do Pressable, não de hitSlop (que o pai recorta); o chip visível tem 28", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(
       <Chip rotulo="x" selecionado={false} onPress={jest.fn()} />,
     );
-    expect(StyleSheet.flatten(c.getByRole("button").props.style).minHeight).toBeGreaterThanOrEqual(44);
-    expect(StyleSheet.flatten(e.getByRole("button").props.style).minHeight).toBeGreaterThanOrEqual(44);
-    expect(estiloVisual(c).minHeight).toBe(34);
+    // 8 + 28 + 8 = 44. Nada de `minHeight` no Pressable: ele abriria um vão maior entre chips de uma linha do que entre os de duas.
+    for (const r of [c, e]) {
+      const alvo = StyleSheet.flatten(r.getByRole("button").props.style);
+      expect(alvo.paddingVertical).toBe(8);
+      expect(alvo.minHeight).toBeUndefined();
+    }
+    expect(estiloVisual(c).minHeight).toBe(28);
     expect(c.getByRole("button").props.hitSlop).toBeUndefined();
   });
 

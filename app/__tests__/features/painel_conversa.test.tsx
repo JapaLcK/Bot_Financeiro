@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { KeyboardAvoidingView, StyleSheet, View } from "react-native";
+import { claro } from "@/ui/tokens";
 import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { BY_PROFILE, COMMON } from "@/features/painel/perguntas";
@@ -67,10 +68,10 @@ it("o teclado desconta o Y do pai do campo na janela (measureInWindow), não um 
  await act(async () => { fireEvent(kav().parent!, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 700 } } }); });
  expect(medir).toHaveBeenCalled(); expect(kav().props.keyboardVerticalOffset).toBe(91);
 });
-it("bolha do usuário é cinza (surface) e sem borda; nome do Piggy é neutro", async () => {
+it("bolha do usuário é cinza (surfaceControl) e sem borda; nome do Piggy é neutro", async () => {
  await abrir(); await enviar("Minha pergunta"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
  const bolha = StyleSheet.flatten(screen.getByTestId("bolha-usuario").props.style);
- expect(bolha.backgroundColor).toBe("#F6F6F7"); expect(bolha.borderWidth).toBeUndefined();
+ expect(bolha.backgroundColor).toBe(claro.surfaceControl); expect(bolha.borderWidth).toBeUndefined();
  expect(StyleSheet.flatten(screen.getByTestId("fala-piggy-nome").props.style).color).not.toBe("#FF2D8E");
 });
 it("o histórico do servidor não aparece ao abrir; o GET só lê a cota (limit=1)", async () => {

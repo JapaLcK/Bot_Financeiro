@@ -25,7 +25,8 @@ exports[`ConnectionStatus snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
@@ -43,8 +44,9 @@ exports[`ConnectionStatus snapshot (dois temas): claro 1`] = `
       style={
         [
           {
-            "fontFamily": "Inter-Regular",
+            "fontFamily": "Inter-Medium",
             "fontSize": 12,
+            "letterSpacing": 0,
             "lineHeight": 16,
           },
           {
@@ -95,9 +97,9 @@ exports[`ConnectionStatus snapshot (dois temas): claro 1`] = `
           {
             "alignItems": "center",
             "backgroundColor": "transparent",
-            "borderColor": "#5F5F6A",
-            "borderRadius": 12,
-            "borderWidth": 1,
+            "borderColor": undefined,
+            "borderRadius": 10,
+            "borderWidth": 0,
             "justifyContent": "center",
             "minHeight": 44,
             "opacity": 1,
@@ -116,13 +118,15 @@ exports[`ConnectionStatus snapshot (dois temas): claro 1`] = `
             [
               {
                 "fontFamily": "Inter-Medium",
-                "fontSize": 14,
+                "fontSize": 13,
+                "letterSpacing": 0,
                 "lineHeight": 18,
               },
               {
                 "color": "#C7186B",
               },
               {
+                "fontFamily": "Inter-SemiBold",
                 "opacity": 1,
               },
               null,
@@ -162,7 +166,8 @@ exports[`ConnectionStatus snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
@@ -180,12 +185,13 @@ exports[`ConnectionStatus snapshot (dois temas): escuro 1`] = `
       style={
         [
           {
-            "fontFamily": "Inter-Regular",
+            "fontFamily": "Inter-Medium",
             "fontSize": 12,
+            "letterSpacing": 0,
             "lineHeight": 16,
           },
           {
-            "color": "#9B9BA6",
+            "color": "#A8A8B3",
           },
           {},
           null,
@@ -232,9 +238,9 @@ exports[`ConnectionStatus snapshot (dois temas): escuro 1`] = `
           {
             "alignItems": "center",
             "backgroundColor": "transparent",
-            "borderColor": "#9B9BA6",
-            "borderRadius": 12,
-            "borderWidth": 1,
+            "borderColor": undefined,
+            "borderRadius": 10,
+            "borderWidth": 0,
             "justifyContent": "center",
             "minHeight": 44,
             "opacity": 1,
@@ -253,13 +259,15 @@ exports[`ConnectionStatus snapshot (dois temas): escuro 1`] = `
             [
               {
                 "fontFamily": "Inter-Medium",
-                "fontSize": 14,
+                "fontSize": 13,
+                "letterSpacing": 0,
                 "lineHeight": 18,
               },
               {
-                "color": "#FF4FA0",
+                "color": "#FF5AA6",
               },
               {
+                "fontFamily": "Inter-SemiBold",
                 "opacity": 1,
               },
               null,

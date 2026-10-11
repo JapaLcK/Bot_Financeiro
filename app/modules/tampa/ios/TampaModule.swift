@@ -4,7 +4,7 @@ import UIKit
 // Os mesmos `claro.bg` e `escuro.bg` de `src/ui/tokens.ts`
 // (`__tests__/modules/tampa_espelho.test.ts` compara os dois lados).
 let fundoClaro = 0xFFFFFF
-let fundoEscuro = 0x0E0E10
+let fundoEscuro = 0x09090B
 
 private func cor(_ hex: Int) -> UIColor {
   UIColor(

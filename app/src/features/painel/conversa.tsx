@@ -5,7 +5,7 @@ import { Screen } from "@/ui/componentes/Screen";
 import { Icone } from "@/ui/componentes/Icone";
 import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
-import { texto as escalas } from "@/ui/tokens";
+import { raio, texto as escalas } from "@/ui/tokens";
 import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
 import { BotaoPrivacidade } from "./cabecalho";
@@ -37,10 +37,10 @@ export function Conversa() {
         {!c.turnos.length ? <EstadoVazio desativado={!livre || cheia || c.enviando} escolher={(s) => void c.enviar(s.ask, s)} />
           : c.turnos.map((t, i) => <TurnoChat key={t.id} turno={t} abrir={setDetalhe} onLayout={i === c.turnos.length - 1 ? (y) => { if (rolado.current !== t.id) { rolado.current = t.id; rolagem.current?.scrollTo({ y, animated: true }); } } : undefined} />)}
       </ScrollView>
-      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderWidth: 1, borderColor: cores.inkMuted, backgroundColor: cores.surface, borderRadius: 26, paddingLeft: 12, paddingRight: 4, paddingVertical: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderWidth: 1, borderColor: cores.border, backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, paddingLeft: 12, paddingRight: 4, paddingVertical: 4 }}>
         <Image source={SIMBOLO} style={{ width: 24, height: 24, marginBottom: 10 }} accessibilityIgnoresInvertColors />
-        <TextInput accessibilityLabel="Mensagem para o Piggy" placeholder="Converse com o Piggy…" placeholderTextColor={cores.inkMuted} value={p.oculto ? "" : c.rascunho} onChangeText={c.setRascunho} editable={!p.oculto} multiline maxLength={2000} maxFontSizeMultiplier={1.3} style={[escalas.corpo, { flex: 1, color: cores.ink, minHeight: 44, maxHeight: 120, paddingVertical: 10 }]} />
-        <Pressable accessibilityRole="button" accessibilityLabel="Enviar mensagem" accessibilityState={{ disabled: !podeEnviar }} disabled={!podeEnviar} onPress={() => void c.enviar(c.rascunho)} style={{ width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: podeEnviar ? cores.acao : cores.inkFaint }}><Icone nome="ArrowUp" tom="onAcao" /></Pressable>
+        <TextInput accessibilityLabel="Mensagem para o Piggy" placeholder="Converse com o Piggy…" placeholderTextColor={cores.inkFaint} selectionColor={cores.brand} value={p.oculto ? "" : c.rascunho} onChangeText={c.setRascunho} editable={!p.oculto} multiline maxLength={2000} maxFontSizeMultiplier={1.3} style={[escalas.corpo, { flex: 1, color: cores.ink, minHeight: 44, maxHeight: 120, paddingVertical: 10 }]} />
+        <Pressable accessibilityRole="button" accessibilityLabel="Enviar mensagem" accessibilityState={{ disabled: !podeEnviar }} disabled={!podeEnviar} onPress={() => void c.enviar(c.rascunho)} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 36, borderRadius: raio.pilula, alignItems: "center", justifyContent: "center", backgroundColor: podeEnviar ? cores.acao : cores.surfaceRaised }}><Icone nome="ArrowUp" tom={podeEnviar ? "onAcao" : "inkFaint"} /></View></Pressable>
       </View>
       {!p.oculto && c.uso && <Texto variante="legenda" tom="inkMuted" style={{ paddingTop: 6 }}>{c.uso.used} de {c.uso.limit} mensagens utilizadas</Texto>}
     </KeyboardAvoidingView>
