@@ -36,7 +36,7 @@ def _sem_gate(uid: int, a: dict) -> None:
 class Card(NamedTuple):
     ler: Callable[[int, dict], list[tuple[str | None, dict]]]  # [(mes, {recurso: objeto})]
     visao: Callable[[dict], dict]                              # {recurso: dict} -> dict
-    gate: Callable[[int, dict], None] = _sem_gate              # recusa ANTES de ler dado (e da prévia)
+    gate: Callable[[int, dict], None] = _sem_gate              # recusa ANTES de ler dado
 
 
 def exigir_acesso_do_app(uid: int) -> None:
@@ -102,7 +102,7 @@ def registro() -> dict[str, Card]:
     from fastapi import HTTPException
     from frontend.routes.shared import require_plan_feature
 
-    # Os gates recusam ANTES de ler dado e de mandar a prévia ao app.
+    # Os gates recusam ANTES de ler dado.
     def gate_mes(uid, a):
         for m in a["meses"]:
             mes_pedido(m)  # mês no futuro: o mesmo 422 do endpoint
@@ -180,14 +180,14 @@ def registro() -> dict[str, Card]:
     }
 
 
-def montar(card: str, uid: int, a: dict, previa: Callable[[], None] = lambda: None) -> tuple[dict, dict]:
-    """(bloco, visão do modelo) do card. Levanta o que o endpoint levantaria
-    (`HTTPException` dos gates, `RequestValidationError` do mês). `previa()` roda
-    depois do gate e antes de ler os dados."""
+def montar(card: str, uid: int, a: dict) -> tuple[dict, dict]:
+    """(bloco, visão do modelo) do card: acesso, gate, leitores, montagem. Levanta o que o
+    endpoint levantaria (`HTTPException` dos gates, `RequestValidationError` do mês) ou o que
+    a leitura levantar. Não emite nada ao app: quem chama manda a prévia e o bloco juntos,
+    só depois de `montar` voltar."""
     c = registro()[card]
     exigir_acesso_do_app(uid)
     c.gate(uid, a)
-    previa()
     abas, visao = [], []
     for mes, objs in c.ler(uid, a):
         rec = {n: _fio(o) for n, o in objs.items()}

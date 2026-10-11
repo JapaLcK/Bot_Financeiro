@@ -644,7 +644,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 history_content, this_terminal = _NAO_EXECUTADA, None
             else:
                 antes = _PENDENCIA_DO_TURNO.get()
-                if streaming.ativo() and name != "show_card":  # o show_card manda o próprio passo, depois do gate
+                if streaming.ativo() and name != "show_card":  # o show_card manda o próprio passo, junto do bloco
                     streaming.passo(name, getattr(get_tool(name), "is_write", False))
                 history_content, this_terminal = _dispatch_tool(user_id, name, args)
 

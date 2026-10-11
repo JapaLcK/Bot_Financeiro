@@ -186,6 +186,21 @@ def test_card_recusado_nao_manda_previa(mundo):
     assert previas == ["resumo"] and len(blocos) == 1
 
 
+def test_leitor_que_levanta_nao_deixa_esqueleto_no_app(monkeypatch, mundo):
+    """Exceção na leitura (depois do gate): nenhum passo/prévia nem bloco; o modelo recebe erro."""
+    a, _ = mundo
+    monkeypatch.setattr("api.v2.contas.contas", lambda uid: (_ for _ in ()).throw(RuntimeError("banco caiu")))
+    cards.registro.cache_clear()
+    try:
+        openai_falso(monkeypatch, rodada(None, ("show_card", {"card": "contas"})), rodada("Não consegui."))
+        r, ev, _ = executar(a, "meu saldo")
+        assert r.reply == "Não consegui." and not [e for e in ev if e["tipo"] in ("passo", "bloco")]
+        (tool,) = [json.loads(l["content"]) for l in linhas(a) if l["role"] == "tool"]
+        assert "banco caiu" in tool["error"]
+    finally:
+        cards.registro.cache_clear()
+
+
 def test_previa_vem_antes_do_bloco(mundo):
     a, _ = mundo
     _, _, ev = mostrar(a, card="metas")

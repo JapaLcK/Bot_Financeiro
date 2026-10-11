@@ -5,6 +5,9 @@ cards do painel, com os mesmos números do widget (`cards.py`).
 Fica FORA de `SCHEMAS` (WhatsApp e /ai/chat não a oferecem): só `SCHEMAS_APP`, com
 emissor. `get_tool` a resolve sempre, para o modelo que a imite no histórico
 compartilhado: sem emissor devolve só os dados, sem bloco.
+
+Ordem: gate, leitores, montagem do bloco e da visão; só então `passo` (com `previa`) e
+`bloco`, juntos. Recusa ou exceção antes disso não emite nada ao app.
 """
 from __future__ import annotations
 
@@ -57,8 +60,7 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     try:
         bloco, visao = montar(card, user_id, {"meses": meses if card in _COM_MES else [],
                                               "dias": None if dias is None else str(dias),
-                                              "quantidade_meses": qtd},
-                                 previa=lambda: streaming.passo("show_card", False, card))
+                                              "quantidade_meses": qtd})
     except HTTPException as e:
         d = e.detail if isinstance(e.detail, dict) else {}
         if e.status_code == 402:  # conta sem plano ativo: o app a recusa também
@@ -71,8 +73,11 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return _erro("indisponivel", f"{e}. Diga que ainda não estão prontas e siga sem o card.")
     except RequestValidationError:
         return _erro("mes_invalido", "Mês no futuro ou fora do formato.")
+    # Só com o bloco pronto: prévia e bloco saem juntos, em sequência. Exceção antes daqui
+    # (gate, leitor, serialização) não deixa o app com esqueleto sem bloco.
     if usados is not None:
         usados.append(card)
+    streaming.passo("show_card", False, card)
     streaming.emitir({"tipo": "bloco", "bloco": bloco})
     return visao
 
