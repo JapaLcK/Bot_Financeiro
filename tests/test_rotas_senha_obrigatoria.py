@@ -88,6 +88,8 @@ TABELA = {
     ("POST", "/billing/retomada/senha"): (P, "cookie de retomada, sem sessão"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
+    ("POST", "/ai/chat/stream"): (B, "require_pro_feature"),
+    ("POST", "/ai/messages/{message_id}/feedback"): (B, "require_pro_feature"),
     ("DELETE", "/ai/pending"): (B, "_get_current_user + _exigir_credencial, sem plano/cota"),
     # ── links e utilidades públicas ──
     ("GET", "/d/{code}"): (P, "magic link"), ("GET", "/r/{code}"): (P, "link de afiliado"),
