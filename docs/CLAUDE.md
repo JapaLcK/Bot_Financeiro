@@ -188,13 +188,39 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
   dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
-  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de mês inteiro
+  (`get_period_summary` e `compare_periods` chamam `resumo_do_mes`, inclusive o corte da janela do
+  plano; `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
+  cartão pela fatura, com o MESMO corte (`motivos: [inicio_do_historico]` quando o corte cai
+  no dia 1 do mês pedido ou depois; o "mês anterior cortado" do resumo não tem par nas listas; mês todo
+  cortado = lista vazia com as datas do mês); mês = dia 1 até o último dia, ou, no corrente, dia 1
+  até hoje ou depois; `_mes_inteiro`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
+  hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
+  mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado
+  (parcelas do cartão, lançamentos com data futura), igual nas listas; sai com `motivos: [mes_futuro]`
+  e a nota "não é previsão", sem `error` (o turno do agente cai em `DataQueryError` com `error`);
+  `forecast_month_end` só projeta o mês corrente; (c) período livre não corta pela janela do plano; data
+  inválida é erro (`data inválida: <campo> (use AAAA-MM-DD)`), não "hoje"; `2026-10-01T00:00:00`
+  e espaços em volta valem como a data, só em `launches.py`: `investments.py:35` tem cópia própria
+  de `_parse_iso_date` (lá datetime ISO e data inválida ainda viram o mês corrente em silêncio;
+  follow-up). (d) com o corte do plano no MEIO do mês, as listas devolvem `start_date = corte`; o
+  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_mes_inteiro` dá None
+  e vira período livre (data da compra, sem corte). (e) `inicio_do_historico` nas tools só sai com
+  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado).
+  `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
   `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
-  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
-  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
-  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
+  (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
+  sem o cartão. Das tools da IA em período livre (vários meses também), só `get_period_summary`
+  e `compare_periods` são só `launches` (saem com `cartao_incluido: false` e uma `nota`);
+  `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
+  `get_category_spend` lê o cartão sempre pela fatura (`period_end`) e `get_spending_trend` soma o
+  cartão pela data da compra. Pré-existente, não corrigido: `get_top_categories` mostra lançamento
+  sem categoria como `outros`, mas `get_category_spend("outros")` só soma a categoria `outros`; o
+  sem categoria fica em "sem categoria". Limites mantidos de
   propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
   conciliação pendente conta em dobro (sai com motivo), estorno não abate.
   **Semanal (PL-05):** `build_weekly_report_data` (`core/reports/weekly.py`, reexportada por `reports_daily`) é o
