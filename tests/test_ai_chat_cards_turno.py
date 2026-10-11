@@ -62,6 +62,24 @@ def test_entrada_invalida_vira_erro_sem_bloco(mundo, args, erro):
     assert r["error"] == erro and not ev
 
 
+@pytest.mark.parametrize("campo,valor,erro", [
+    ("meses", "", "mes_invalido"), ("meses", {}, "mes_invalido"), ("meses", False, "mes_invalido"),
+    ("meses", 0, "mes_invalido"), ("dias", "", "dias_invalido"), ("dias", False, "dias_invalido"),
+    ("dias", 0, "dias_invalido"), ("quantidade_meses", False, "quantidade_invalida"),
+    ("quantidade_meses", "", "quantidade_invalida"), ("quantidade_meses", 0, "quantidade_invalida")])
+def test_valor_falso_de_tipo_errado_e_erro_nao_o_padrao(mundo, campo, valor, erro):
+    a, _ = mundo
+    card = {"meses": "resumo", "dias": "hero", "quantidade_meses": "renda"}[campo]
+    r, blocos, ev = mostrar(a, card=card, **{campo: valor})
+    assert r["error"] == erro and not blocos and not ev
+
+
+@pytest.mark.parametrize("extra", [{}, {"meses": None}], ids=["ausente", "null"])
+def test_meses_ausente_ou_null_mostra_o_mes_atual(mundo, extra):
+    a, _ = mundo
+    assert mostrar(a, card="resumo", **extra)[1][0]["abas"][0]["mes"] == f"{now_tz():%Y-%m}"
+
+
 def test_mes_valido_e_tres_meses_em_categorias_passam(mundo):
     a, _ = mundo
     assert len(mostrar(a, card="categorias", meses=[M, M0, "2020-01"])[1][0]["abas"]) == 3

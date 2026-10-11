@@ -39,7 +39,9 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. Para comparar "
                      "meses, chame show_card uma vez só com meses=[...]")
 
-    meses = args.get("meses") or []
+    meses = args.get("meses")
+    if meses is None:  # ausente ou null (o modelo manda null em opcional): o mês atual
+        meses = []
     if (not isinstance(meses, list) or not all(isinstance(m, str) and _MES.match(m) for m in meses)
             or len(set(meses)) != len(meses)):
         return _erro("mes_invalido", "meses: lista de AAAA-MM sem repetição")
