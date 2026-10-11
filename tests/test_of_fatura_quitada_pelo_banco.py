@@ -16,10 +16,18 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
     reconexao_recalcula_pela_conta_nova_sem_dobrar vermelhos;
   • aparo do pago tirado de disconnect_open_finance_connection -> desconectar_apara_o_pago_do_cartao_que_sobrevive e
     desconectar_apara_so_ate_zero_em_fatura_de_total_zero_ou_negativo vermelhos;
+  • `APARAR_PAGO_SQL` tirado de `quitar_pelo_banco` -> compra_casada_que_sumiu_nao_deixa_pago_velho,
+    compra_casada_que_sumiu_com_compra_manual_apara_ate_o_total e quitar_sem_regra_ainda_apara vermelhos;
+  • where do aparo reduzido a `paid_amount > greatest(total, 0)` (sem o ramo pago == total) ->
+    desconectar_deixando_pago_igual_ao_total_marca_paga vermelho;
+  • where do aparo ampliado para `or total > 0` (toca fatura aberta com pago menor) ->
+    aparo_nao_toca_fatura_aberta_com_pago_menor vermelho;
   • fatura com total <= TOL fora de `cobertura` (em vez de parte 0) -> total_zero_entra_com_parte_zero e
     banco_estorna_tudo_zera_o_pago vermelhos;
   • checagem de sinais misturados tirada de `_soma` -> pagamentos_de_sinais_misturados vermelho;
-  • `least(b.total, ...)` tirado do UPDATE -> estorno_sem_bill_id_o_teto vermelho.
+  • o teto do total tem DUAS guardas (o `least(b.total, ...)` do UPDATE e o aparo logo depois): tirar só uma deixa tudo
+    verde; tirando as duas -> estorno_sem_bill_id_o_teto vermelho;
+  • `card_id` tirado do where de `APARAR_PAGO_SQL` -> aparo_nao_toca_cartao_manual_do_mesmo_usuario vermelho.
 """
 from __future__ import annotations
 
@@ -31,7 +39,8 @@ import pytest
 import core.services.pluggy_sync as ps
 import db
 from core.services.cashflow_snapshot import carregar
-from db.of_card_bills import COMPRAS_POR_FATURA_SQL, TOL, _fracao, cobertura, pago_por_fatura_pig
+from db.of_card_bills import (
+    APARAR_PAGO_SQL, COMPRAS_POR_FATURA_SQL, TOL, _fracao, cobertura, pago_por_fatura_pig, quitar_pelo_banco)
 from tests._fusao_of_helpers import ia_fora, manda, uid_pro  # noqa: F401 (fixtures)
 from tests._of_cash_helpers import conecta, q
 from tests.test_of_card_bills_ingestao import carimbado, gravadas
@@ -273,7 +282,8 @@ def test_estorno_na_mesma_fatura_e_pagamento_que_diminui_reabre(uid_pro, rodar):
 
 
 def test_estorno_sem_bill_id_o_teto_do_total_do_pig_segura(uid_pro, rodar):
-    """Limite declarado: o estorno sem `billId` não entra no pago (100, não 70); o `least(b.total, ...)` segura."""
+    """Limite declarado: o estorno sem `billId` não entra no pago (100, não 70); o `least(b.total, ...)` do UPDATE
+    e o aparo que vem depois seguram (só tirando os dois este teste fica vermelho)."""
     est = pluggy_tx("e1", -30, "Transfers", "Estorno loja", extra={"date": f"{dia(35)}T12:00:00.000Z"})
     rodar(uid_pro, [P0, ("c1", 100, "bill-1", 35), est], [F0, fat("bill-1", 70, 70)])
     assert pig(uid_pro)[1] == (70, 70, "paid")
@@ -342,7 +352,8 @@ def test_banco_total_zero_com_compra_casada_nao_quita(uid_pro, rodar):
 
 
 def test_cura_status_open_com_pago_igual_ao_total(uid_pro, rodar):
-    """Ramo 2 do WHERE do UPDATE: pago já é o total, só o status ficou para trás."""
+    """Ramo 2 do WHERE do UPDATE: pago já é o total, só o status ficou para trás. O aparo (pago == total e aberta)
+    cura o mesmo caso: este teste só fica vermelho sem o ramo 2 E sem esse ramo do aparo."""
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])
     q("update credit_bills set status='open', paid_at=null where user_id=%s and total=120", (uid_pro,))
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])
@@ -453,6 +464,84 @@ def test_desconectar_apara_so_ate_zero_em_fatura_de_total_zero_ou_negativo(uid_p
         "select paid_amount, status from credit_bills where id = any(%s) order by period_start", (ids,), True)] \
         == [(0, "open"), (0, "open")]
     assert all(r["paid_at"] is None for r in q("select paid_at from credit_bills where id = any(%s)", (ids,), True))
+
+
+def _conexao(uid):
+    return q("select id from open_finance_connections where user_id=%s", (uid,), True)[0]["id"]
+
+
+def _webhook_apaga(uid, *ids):
+    """O caminho real do `transactions/deleted`: apaga o espelho e tira a compra da fatura do Pig."""
+    assert db.delete_open_finance_transactions(f"item-qb-{uid}", list(ids)) == len(ids)
+
+
+def test_compra_casada_que_sumiu_nao_deixa_pago_velho(uid_pro, rodar):
+    """A única compra casada da fatura some: a fatura sai de `pagos` e o pago do banco (120) ficaria sobre total 0."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])
+    assert pig(uid_pro) == [(100, 100, "paid"), (120, 120, "paid")]
+    _webhook_apaga(uid_pro, "p1")
+    assert pig(uid_pro)[1][:2] == (0, 120)                         # o webhook não mexe no pago: o defeito
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    assert pig(uid_pro)[1][:2] == (0, 0)
+    assert pig(uid_pro)[0] == (100, 100, "paid")                   # a outra fatura segue como estava
+
+
+def test_compra_casada_que_sumiu_com_compra_manual_apara_ate_o_total(uid_pro, rodar):
+    """Mesmo efeito aceito do disconnect: a compra manual restante (30) passa a aparecer paga."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])
+    cid = q("select id from credit_cards where user_id=%s", (uid_pro,), True)[0]["id"]
+    db.add_credit_purchase(uid_pro, cid, 30, "outros", "manual", dia(35))     # na mesma fatura do Pig
+    _webhook_apaga(uid_pro, "p1")
+    assert pig(uid_pro)[1][:2] == (30, 120)
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    assert pig(uid_pro)[1] == (30, 30, "paid")
+    assert q("select paid_at from credit_bills where user_id=%s and total=30", (uid_pro,), True)[0]["paid_at"] is not None
+
+
+def test_quitar_sem_regra_ainda_apara(uid_pro, rodar):
+    """`cobertura` vazia (a conta perdeu as faturas do banco) não pula o aparo."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])
+    _webhook_apaga(uid_pro, "p1")
+    q("delete from of_card_bills where account_id in (select id from open_finance_accounts where connection_id=%s)",
+      (_conexao(uid_pro),))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    assert pig(uid_pro)[1][:2] == (0, 0)
+
+
+def test_desconectar_deixando_pago_igual_ao_total_marca_paga(uid_pro, rodar):
+    """200 de total com 100 pago: tirar as compras do banco deixa 100/100 (pago == total, não >)."""
+    rodar(uid_pro, [("p1", 100, "bill-1", 35)], [fat("bill-1", 100, 100)])
+    cid = q("select id from credit_cards where user_id=%s", (uid_pro,), True)[0]["id"]
+    db.add_credit_purchase(uid_pro, cid, 100, "outros", "manual", dia(35))
+    q("update credit_bills set paid_amount=100, status='open', paid_at=null where user_id=%s", (uid_pro,))
+    assert pig(uid_pro) == [(200, 100, "open")]
+
+    db.disconnect_open_finance_connection(uid_pro, _conexao(uid_pro))
+
+    assert pig(uid_pro) == [(100, 100, "paid")]
+    assert q("select paid_at from credit_bills where user_id=%s", (uid_pro,), True)[0]["paid_at"] is not None
+
+
+def test_aparo_nao_toca_fatura_aberta_com_pago_menor(uid_pro, rodar):
+    """Positivo: o aparo não recusa tudo. Pago < total e aberta fica como está (e a paga com pago == total também)."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 60)])
+    cid = q("select id from credit_cards where user_id=%s", (uid_pro,), True)[0]["id"]
+    antes = q("select id, total, paid_amount, status, paid_at from credit_bills where user_id=%s order by id", (uid_pro,), True)
+    assert [(r["total"], r["paid_amount"], r["status"]) for r in antes] == [(100, 100, "paid"), (120, 60, "open")]
+    q(APARAR_PAGO_SQL, (uid_pro, cid))
+    assert q("select id, total, paid_amount, status, paid_at from credit_bills where user_id=%s order by id", (uid_pro,), True) == antes
+
+
+def test_aparo_nao_toca_cartao_manual_do_mesmo_usuario(uid_pro, rodar):
+    """Escopo do aparo: fatura de cartão manual com pago > total, do mesmo usuário, fica intacta no `quitar_pelo_banco`."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 60)])
+    manual = q("insert into credit_cards (user_id, name, closing_day, due_day) values (%s, 'Manual', 5, 15) returning id",
+               (uid_pro,), True)[0]["id"]
+    q("insert into credit_bills (user_id, card_id, period_start, period_end, status, total, paid_amount)"
+      " values (%s, %s, '2026-01-01', '2026-01-31', 'open', 50, 80)", (uid_pro, manual))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    assert q("select total, paid_amount, status from credit_bills where card_id=%s", (manual,), True) \
+        == [{"total": 50, "paid_amount": 80, "status": "open"}]
 
 
 def test_falha_da_quitacao_nao_derruba_o_sync(uid_pro, rodar, monkeypatch):

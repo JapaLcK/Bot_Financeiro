@@ -1144,10 +1144,17 @@ para a fatura seguinte, rotativo (encargos) não tratado, conexão PAUSED não s
 atual não conta, estorno sem `billId` faz o pago parcial sair maior (o teto é o total do Pig). O desfazer de
 pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também no cartão OF: o próximo sync regrava o
 valor do banco nas faturas que ele possui, e nas outras (compra manual sem espelho) o desconto é o correto; com a conexão
-PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Desconectar
-apara `paid_amount` ao total (e marca `paid`/`paid_at`) no cartão que sobrevive; consequência aceita pelo dono: compra
-manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago vira 30 com 30 pago), porque o pago
-do banco das compras que saem fica no limite do total. (também o export LGPD, `db/privacy.py`, lê a tabela.)
+PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Pago que não cabe no total do Pig é
+aparado (`APARAR_PAGO_SQL`: `paid_amount` ao total, `paid`/`paid_at`; pega pago > total e também pago == total com a fatura
+ainda aberta): a cada `quitar_pelo_banco`, em todo cartão da conexão (cobre, no próximo sync, a única compra casada que some por
+`transactions/deleted`, que só reabre a fatura e deixaria total 0 com pago velho; o webhook não resincroniza, e até o sync a fatura
+fica com pago acima do total), e ao desconectar, no cartão que sobrevive;
+consequência aceita pelo dono: compra manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago
+vira 30 com 30 pago), porque o pago do banco das compras que saem fica no limite do total. Limite: o aparo também alcança a fatura
+corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma compra some é aparado ao total, como o
+`rebuild_bill_totals` já faz. Limite: se o `billId` de uma compra
+passa a apontar para fatura do banco que não está no `/bills` (a aberta), a fatura antiga do Pig mantém o pago anterior até a
+do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com

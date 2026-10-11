@@ -250,14 +250,20 @@ feita (§9).
   restrição à chave do painel novo; o valor pago pelo banco substitui o pagamento manual no cartão do banco
   (escrita absoluta); pagamento acima do total não vira crédito na fatura seguinte por enquanto (isso se decide
   pela consulta V1); só quita, sem realinhar o calendário de fechamento. O desfazer de pagamento
-  manual desconta como antes (o próximo sync regrava o valor do banco nas faturas dele). Ao desconectar, o pago do
-  cartão que sobrevive é aparado no total (com `paid_at`). **Consequência aceita pelo dono do aparo:** uma compra
+  manual desconta como antes (o próximo sync regrava o valor do banco nas faturas dele). O pago que fica acima do total do Pig é
+  aparado nele (com `paid_at`; também quando pago == total e a fatura segue aberta, `APARAR_PAGO_SQL`): a cada quitação,
+  em todo cartão da conexão (no próximo sync, a única compra casada que some por `transactions/deleted` não deixa total 0 com pago
+  velho; o webhook não resincroniza, e até o sync a fatura fica com pago acima do total), e ao
+  desconectar, no cartão que sobrevive. **Consequência aceita pelo dono do aparo:** uma compra
   manual ainda não paga no cartão do banco pode passar a aparecer paga, porque o pago do banco das compras que saem
   fica no limite do total (exemplo do teste `test_desconectar_apara_o_pago_do_cartao_que_sobrevive`: total 150 com
   120 pago vira 30 com 30 pago, `paid`). Fica para depois: a recusa do "pagar fatura" manual no cartão do banco
   (PR 2b), rotativo/encargos e o ramo N+1.
-  **Sem teste:** o caminho `transactions/deleted` (estorno que some da Pluggy) não tem teste, porque o harness
-  não apaga transação.
+  **Limite:** o aparo também alcança a fatura corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma
+  compra some é aparado ao total, como o `rebuild_bill_totals` já faz.
+  **Limite:** se o `billId` de uma compra passa a apontar para fatura do banco que não está no `/bills` (a aberta), a
+  fatura antiga do Pig mantém o pago anterior até a do banco fechar e voltar no `/bills`. O `transactions/deleted` da
+  única compra casada é coberto por `test_compra_casada_que_sumiu_nao_deixa_pago_velho`.
 - **Consulta pós-deploy do 2a (condição para o PR 2b).** Só leitura, transação `read only`, só contagens, por
   conta anônima (sem id de conta nem de usuário), com o dono e avisando antes, pelo `railway`, como a V1. Compara,
   nas faturas de cartão OF fechadas há mais de 40 dias (cobre o prazo até o vencimento, que passa de 10 dias em

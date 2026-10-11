@@ -148,7 +148,7 @@ def cobertura(faturas: list[dict], hoje: date) -> dict[str, Decimal]:
 
 def pago_por_fatura_pig(compras: list[dict], frac: dict[str, Decimal]) -> dict[int, Decimal]:
     """`{credit_bill_id: pago}`: Σ valor × parte paga da fatura do banco, só das compras casadas.
-    Limite: estorno sem `billId` não entra, e o pago de fatura parcial sai maior (o teto do UPDATE segura o integral)."""
+    Limite: estorno sem `billId` não entra, e o pago de fatura parcial sai maior (o integral é contido pelo `least` do UPDATE e pelo aparo que vem depois)."""
     pagos: dict[int, Decimal] = {}
     for c in compras:
         f = frac.get(c["fatura_banco"])
@@ -172,9 +172,19 @@ update credit_bills b set
         or (b.status = 'paid' and b.total > {_NOVO}))"""
 
 
+# Pago que não cabe no total do Pig (compra casada que saiu, ou o banco que se foi) é aparado nele. Cobre também pago ==
+# total com a fatura ainda aberta. Roda a cada quitação e no disconnect (db/open_finance.py). Params: (user_id, card_id).
+APARAR_PAGO_SQL = """
+update credit_bills set paid_amount = least(paid_amount, greatest(total, 0)),
+  status = case when total > 0 then 'paid' else status end,
+  paid_at = case when total > 0 then coalesce(paid_at, now()) else paid_at end
+ where user_id = %s and card_id = %s
+   and (paid_amount > greatest(total, 0) or (total > 0 and paid_amount >= total and status <> 'paid'))"""
+
+
 def quitar_pelo_banco(user_id: int, connection_id: int) -> None:
     """Grava em `credit_bills.paid_amount` o que o banco pagou, por cartão da conexão. Escrita ABSOLUTA
-    (idempotente). Quem chama segura o `pluggy_item_lock` do item: é ele a trava, sem `for update`."""
+    (idempotente), e depois o aparo do pago que ficou acima do total. Quem chama segura o `pluggy_item_lock` do item: é ele a trava, sem `for update`."""
     hoje = today_tz()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -187,10 +197,10 @@ def quitar_pelo_banco(user_id: int, connection_id: int) -> None:
             p = {"card": card, "uid": user_id}
             cur.execute(FATURAS_DO_CARTAO_SQL, p)
             frac = cobertura(cur.fetchall(), hoje)
-            if not frac:
-                continue
-            cur.execute(COMPRAS_POR_FATURA_SQL, p)
-            pagos = pago_por_fatura_pig(cur.fetchall(), frac)
-            if pagos:
-                cur.execute(_GRAVA_SQL, {**p, "ids": list(pagos), "pagos": list(pagos.values())})
+            if frac:
+                cur.execute(COMPRAS_POR_FATURA_SQL, p)
+                pagos = pago_por_fatura_pig(cur.fetchall(), frac)
+                if pagos:
+                    cur.execute(_GRAVA_SQL, {**p, "ids": list(pagos), "pagos": list(pagos.values())})
+            cur.execute(APARAR_PAGO_SQL, (user_id, card))   # compra casada que sumiu deixa pago velho > total
         conn.commit()
