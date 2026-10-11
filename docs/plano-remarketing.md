@@ -2,7 +2,7 @@
 
 Faixa **Completo**: dinheiro, envio irreversível a pessoas reais, consentimento e uma
 credencial que deixa comprar sem login. Versão 2 do plano do Arquiteto (2026-10-09),
-depois das respostas P1–P5 do dono. O PR 1, o PR 2 e o PR 3 (seção 4) estão implementados; os demais não.
+depois das respostas P1–P5 do dono. O PR 1 ao PR 4 (seção 4) estão implementados; os demais não.
 
 ## Decisões do dono (2026-10-09)
 
@@ -105,7 +105,11 @@ refresh, que a `/precos` anônima provoca).
 - Token Fernet, chave derivada de `JWT_SECRET`, rótulo `b"pigbank:retomada:v1"` (padrão
   de `core/services/agent_chat.py:47-52`), validade 7 dias, carrega `user_id` e `etapa`.
   Não é JWT, nunca vira sessão.
-- Cookie `pb_retomada`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Max-Age` 2 h.
+- Cookie `pb_retomada`: `HttpOnly`, `Secure`, `SameSite=Strict`, `Max-Age` 2 h. O valor NÃO
+  é o token do link: é um token próprio, emitido pelo `/retomar` depois de todas as guardas,
+  com rótulo `b"pigbank:retomada:cookie:v1"` e validade de 2 h conferida no servidor (o
+  `Max-Age` só vale no navegador). Assim o token do link, posto à mão no cookie, não abre
+  nada e não contorna o `ja_comprou` do `/retomar`.
 - `GET /retomar?t=…&utm_*` (sem HTML): token inválido/vencido ou conta inexistente/em
   exclusão → 303 `/precos` sem cookie; `ja_comprou` → 303 `/login`; pedido com cookie ou
   header de sessão → 303 `/precos` sem cookie; senão grava o cookie e `clicado_em` e faz
@@ -126,11 +130,12 @@ refresh, que a `/precos` anônima provoca).
 | cupom, Express, `confirm` | Stripe.js no cliente; nada muda |
 | `POST /billing/pix/checkout` | `comprador()`; `confirm_cancel_stripe` = 409 `retomada_sem_migracao` |
 | `GET /billing/pix-extras`, `GET /billing/pix/{token}` | `comprador()`, filtrando pelo dono |
-| `POST /auth/logout` | o `Clear-Site-Data: "cookies"` apaga o `pb_retomada` (saída do modo) |
+| `POST /auth/logout`, `DELETE /auth/account` | expiram o `pb_retomada` explicitamente (saída do modo); o refresh falho NÃO o expira |
 | `change-plan`, `cancel-change`, `portal`, `/settings/*`, `/api/v2/*`, `/auth/*` | não aceitam |
 
-`_checkout_session_matches` passa a comparar a presença de `rm_etapa` (sessão de
-retomada não é reaproveitada pelo fluxo logado, e vice-versa).
+`_checkout_session_matches` passa a comparar o VALOR de `rm_etapa` (sessão de
+retomada não é reaproveitada pelo fluxo logado, e vice-versa; link de outra etapa também
+não reaproveita a sessão: a anterior é expirada e nasce uma nova).
 
 **Volta sem sessão:** cartão volta para `/retomar/pronto?sid=…`; Pix: o `pix-poll.js`
 consulta com o cookie e, pago, vai para `/retomar/pronto?gw=pix`. A página mostra
@@ -222,7 +227,12 @@ move código. `pix-checkout.js` (350) não é tocado.
 - `frontend/assinar.js` + `assinar-rede.js`: sem sessão e com `retomada`, mostra
   "Assinando como l•••@dominio" e vai direto ao pagamento (sem o formulário); "Sair"
   apaga o cookie e volta ao formulário.
-- `frontend/pix-poll.js`: em retomada, destino `/retomar/pronto?gw=pix`.
+- `frontend/pix-poll.js`: em retomada, destino `/retomar/pronto?gw=pix`. Pix pago depois
+  das 2 h do cookie (o QR vale 3 dias): o poll dá 401 e a página não pode tratar isso como
+  erro de pagamento. Mostra "Se você já pagou, entre pelo e-mail" com o link para `/login`
+  ("Esqueci a senha" manda o link de criar senha à conta sem senha). O pagamento em si
+  não depende do cookie (webhook do Asaas), e reabrir o link de quem já comprou leva à
+  `/login` (apontamento do Codex no PR 4).
 - `frontend/retomar-pronto.html` + `.js` (novos), rota em `static_pages.py`, shim
   `safe-area.js`, tabela de `docs/armadilhas.md`. Skill `pigbank-frontend`, desktop e
   mobile.
@@ -285,8 +295,18 @@ falhas, presos em `enviando`, cliques, recuperados (`completed` depois de
 ## 6. Riscos e limites declarados
 
 - Número ou e-mail errado leva a mensagem a um estranho (aceito). Se ele clicar, vê o
-  e-mail mascarado, pode pagar pela conta e pedir o "Definir senha", que vai ao e-mail
-  do dono. Não lê dado nem troca o contato.
+  e-mail mascarado na nossa página, pode pagar pela conta e pedir o "Definir senha", que
+  vai ao e-mail do dono. Não troca o contato. **Mas o checkout do Stripe nasce no customer
+  da conta, que carrega o e-mail completo:** quem tem o link pode vê-lo na página do
+  Stripe ou pelo Stripe.js (achado do Tester no PR 4; aceito pelo dono em 2026-10-10).
+- Com o cookie, um 409 do checkout (já assinante, Pix já pago) mostra plano e datas da
+  conta: só acontece se ela comprou depois do clique, dentro das 2 h do cookie.
+- O token vai na query (`/retomar?t=`), porque o botão do template da Meta só preenche a
+  URL: logs de borda (Cloudflare, Railway) podem guardá-lo por até 7 dias.
+- O limite de 3/h do "Definir senha" é por IP e também é gasto por pedidos sem cookie
+  (como o `forgot-password`); um IP compartilhado de operadora pode travar outro.
+- Cada `/retomar`, `plans-config` com cookie e "Definir senha" lê o e-mail cifrado e grava
+  uma linha em `pii_access_log` (ator `system`).
 - Resíduo do refresh cookie de outra conta (seção 3).
 - Pelo link não se migra assinatura de cartão para Pix (409).
 - Sem Purchase do pixel no cliente na volta sem sessão; o servidor cobre.

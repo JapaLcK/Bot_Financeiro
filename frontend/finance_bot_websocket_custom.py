@@ -126,6 +126,9 @@ from api.nativo.app import app as api_nativo_app
 from frontend.routes.affiliates import router as affiliates_router
 from frontend.routes.billing_pix import router as billing_pix_router
 from frontend.routes.billing_bump import router as billing_bump_router
+from frontend.routes.retomada import (
+    COOKIE as RETOMADA_COOKIE, Comprador, comprador, email_mascarado, router as retomada_router,
+)
 from frontend.routes.agents import router as agents_router
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
@@ -3649,6 +3652,7 @@ async def auth_logout(request: Request, response: Response):
             )
 
     _clear_session_cookies(response)
+    _expire_cookie(response, RETOMADA_COOKIE)   # saída deliberada; no refresh falho o comprador do link fica
     # SEM `"storage"`, e a ausência é a regra — não esquecimento. O diretivo é
     # tudo-ou-nada (não tem granularidade por chave) e apagava localStorage,
     # sessionStorage, Cache Storage e service workers INTEIROS, atropelando o
@@ -4461,6 +4465,7 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
         await asyncio.to_thread(send_account_deletion_scheduled_email, email.strip().lower(), scheduled_txt)
 
     _clear_session_cookies(response)
+    _expire_cookie(response, RETOMADA_COOKIE)   # saída deliberada; no refresh falho o comprador do link fica
     _no_store(response)
     return json.loads(jdump({
         "ok": True,
@@ -5052,7 +5057,7 @@ async def _billing_user_lock(user_id: int):
 
 def _checkout_session_matches(session, user_id: int, plan: str, interval: str, price_id: str,
                               origem: str = "precos", embutido: bool = False,
-                              elementos: bool = False) -> bool:
+                              elementos: bool = False, retomada_etapa: int | None = None) -> bool:
     metadata = _sg(session, "metadata", {}) or {}
     # Sem `origem` no metadata = sessão anterior a este campo, e toda sessão
     # daquela época nasceu na /precos. O modo sai de `url` (hospedado) ou
@@ -5071,6 +5076,9 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
         and _sg(metadata, "interval") == interval
         and _sg(metadata, "price_id") == price_id
         and (_sg(metadata, "origem") or "precos") == origem
+        # Sessão de retomada (`rm_etapa`) só é reaproveitada pela retomada da MESMA etapa,
+        # e a do fluxo logado nunca por ela: o rastro da compra não se mistura.
+        and str(_sg(metadata, "rm_etapa") or "") == str(retomada_etapa or "")
         and modo_ok
     )
 
@@ -5078,7 +5086,7 @@ def _checkout_session_matches(session, user_id: int, plan: str, interval: str, p
 async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interval: str,
                                      price_id: str, rastreio: dict[str, str] | None = None,
                                      origem: str = "precos", embutido: bool = False,
-                                     elementos: bool = False):
+                                     elementos: bool = False, retomada_etapa: int | None = None):
     """Cria ou reutiliza um checkout. Deve rodar sob ``_billing_user_lock``.
 
     `rastreio` são os identificadores de anúncio já validados (`ga_client_id`,
@@ -5171,7 +5179,7 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
     reusable = next(
         (s for s in open_sessions if _checkout_session_matches(
-            s, user_id, plan, interval, price_id, origem, embutido, elementos)),
+            s, user_id, plan, interval, price_id, origem, embutido, elementos, retomada_etapa)),
         None,
     )
     for open_session in open_sessions:
@@ -5284,6 +5292,8 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             "td": str(trial_days),
         }
         metadata.update(rastreio or {})
+        if retomada_etapa:   # vem do token no servidor; vai na sessão E na assinatura (cópia abaixo)
+            metadata["rm_etapa"] = str(retomada_etapa)
         # Produtos extras nas DUAS origens. Foto (preço + URL) no nascimento da
         # sessão: o webhook e o job leem dela, nunca da env do momento.
         extras = [(p, u) for p, u, _ in ofertas] if elementos else da_env()
@@ -5305,6 +5315,9 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
             f"&ev={'trial' if trial_days > 0 else 'purchase'}"
             f"&td={trial_days}&pl={plan}&ia={ia_quota}"
         )
+        if retomada_etapa:   # sem sessão não há /home: a volta é a página própria da retomada
+            success_url = f"{DASHBOARD_URL}/retomar/pronto?sid={{CHECKOUT_SESSION_ID}}"
+
         kwargs = dict(
             customer=cust_id,
             payment_method_types=["card"],
@@ -5396,14 +5409,18 @@ async def _billing_checkout_for_user(stripe_mod, user_id: int, plan: str, interv
 
 
 @app.get("/billing/plans-config")
-async def billing_plans_config():
+async def billing_plans_config(request: Request, response: Response):
     """Config pública da página de planos (sem auth): a /precos usa isto pra
     decidir se mostra a escada v2 (Grátis/Essencial/Plus/Pro/Premium) ou o
     layout legado de plano único. Flag off = página atual intacta.
-    `pagina_propria`: com ela, o deslogado (cartão) da /precos vai à /assinar."""
+    `pagina_propria`: com ela, o deslogado (cartão) da /precos vai à /assinar.
+    `retomada`: `{email: "l•••@dominio"}` só com o cookie de retomada válido e sem sessão."""
     from core.services.extras_assinar import pagina_propria_ligada
     from core.services.pix_checkout import pix_annual_available
     from core.services.plan_service import plans_v2_enabled, trial_days_total
+    mascara = await asyncio.to_thread(email_mascarado, request)
+    retomada = {"email": mascara} if mascara else None
+    response.headers["Cache-Control"] = "no-store"   # a resposta depende do cookie
     return {
         "plans_v2_enabled": plans_v2_enabled(),
         "essencial_available": bool(STRIPE_PRICE_ID_ESSENCIAL_MENSAL),
@@ -5417,6 +5434,7 @@ async def billing_plans_config():
         # com quem a obedece.
         "pix_annual_available": pix_annual_available(),
         "pagina_propria": pagina_propria_ligada(),
+        "retomada": retomada,
     }
 
 
@@ -5425,9 +5443,12 @@ async def billing_plans_config():
 async def billing_create_checkout(
     request: Request,
     payload: CreateCheckoutBody | None = None,
-    user_id: int = Depends(_get_current_user),
+    quem: Comprador = Depends(comprador),
 ):
     """Cria a sessão de checkout no Stripe para o plano escolhido.
+
+    `quem` é a sessão normal OU, sem nenhuma credencial de sessão, o cookie de retomada
+    (`frontend/routes/retomada.py`): aí `quem.etapa` marca a sessão com `rm_etapa`.
 
     Body: {"plan": "essencial" | "plus" | "pro" (obrigatório),
            "interval": "monthly" | "annual" (default monthly),
@@ -5457,6 +5478,7 @@ async def billing_create_checkout(
     """
     from core.services.plan_service import TIER_TO_STORED_PLAN  # noqa: PLC0415
 
+    user_id = quem.user_id
     # Sem body, `payload` chega None (o modelo nem é instanciado). Não é caminho
     # de sucesso: sem `plan` a validação abaixo recusa com 400.
     payload = payload if payload is not None else CreateCheckoutBody()
@@ -5516,7 +5538,8 @@ async def billing_create_checkout(
     try:
         async with _billing_user_lock(user_id):
             result = await _billing_checkout_for_user(
-                stripe, user_id, plan, interval, price_id, rastreio, origem, embutido, elementos)
+                stripe, user_id, plan, interval, price_id, rastreio, origem, embutido, elementos,
+                quem.etapa)
         if embutido:
             result["publishable_key"] = STRIPE_PUBLISHABLE_KEY
         # Funil de checkout: registra a ABERTURA na tabela dedicada, com o
@@ -9437,6 +9460,8 @@ app.include_router(billing_pix_router)
 # Order bump da página própria (frontend/routes/billing_bump.py); incondicional
 # como o do Pix: a flag mora na criação da sessão, não na rota.
 app.include_router(billing_bump_router)
+# Link de retomada do checkout abandonado (frontend/routes/retomada.py); inerte sem token.
+app.include_router(retomada_router)
 
 # ─── /api/v2 (dashboard v2) → api/v2/: sub-app com o envelope de erro próprio ──
 app.mount("/api/v2", api_v2_app)

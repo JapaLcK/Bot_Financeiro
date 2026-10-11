@@ -82,10 +82,13 @@ def logado(monkeypatch, user_id):
     # dashboard, o Stripe por `Depends(_get_current_user)`), e a comparação entre
     # elas precisa das duas logadas — senão o teste mede 401, não vocabulário.
     app.dependency_overrides[dashboard._get_current_user] = lambda: user_id
+    # create-checkout autentica por `Depends(comprador)`, que chama o resolver direto.
+    app.dependency_overrides[dashboard.comprador] = lambda: dashboard.Comprador(user_id)
     cliente = TestClient(app)
     cliente.cookies.set(dashboard.CSRF_COOKIE_NAME, _CSRF)
     yield SimpleNamespace(user_id=user_id, http=cliente)
     app.dependency_overrides.pop(dashboard._get_current_user, None)
+    app.dependency_overrides.pop(dashboard.comprador, None)
 
 
 _CSRF = "test-csrf-vocabulario"
