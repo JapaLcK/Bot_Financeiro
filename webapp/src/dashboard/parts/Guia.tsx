@@ -316,7 +316,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   const entendi = (id: string) => { setFase({ id, etapa: "alvo" }); focar.current = true; };
   const status = !aberto || s.editing ? ""
     : modo === "convite" ? "O Piggy quer te mostrar o painel."
-    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda." : "Passo feito.")
+    : festa ? (fim ? "Guia concluído." : acabou ? "Por agora é isso. O passo que ficou pra depois volta na Ajuda (no celular, dentro do Menu)." : "Passo feito.")
     // Cada etapa muda o texto (senão a região não fala): o que o balão diz, sem adiantar o passo.
     : leva ?? (mot || tipo === "ausente" ? `Guia, passo ${n} de ${passos.length}: ${atual!.fala.titulo}`
       : etapa === "bloco" ? `Passo ${n} de ${passos.length}: ${atual!.fala.titulo}. ${atual!.fala.apresenta}` : atual!.fala.texto);
@@ -335,7 +335,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
   } else if (festa) {
     corpo = <>
       <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{fim ? "Fechou! O painel é seu." : acabou ? "Por agora é isso" : "Isso aí!"}</h2>
-      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda." : "Passo feito. Bora pro próximo."}</p>
+      <p id="guia-texto">{fim ? "Quando quiser rever, o guia mora em Ajuda (no celular, dentro do Menu)." : acabou ? "O passo que ficou pra depois volta quando você abrir a Ajuda (no celular, dentro do Menu)." : "Passo feito. Bora pro próximo."}</p>
       {acabou && <div className="guia-acoes"><button type="button" className="btn btn-primary" onClick={() => fechar(false)}>Fechar</button></div>}
     </>;
   } else {

@@ -1,13 +1,13 @@
 // Guia do /painel (#728, PR B): a tela de parts/Guia.tsx — o Piggy e o balão no lugar desde o
 // 1º quadro, o movimento só sem `reduce`, a posição longe dos alvos, a rolagem que não puxa a
-// página de quem rolou, o teclado e a barra de baixo (6 itens; 5 abaixo de 360, folga ≥ 12 px).
+// página de quem rolou, o teclado e a barra de baixo (5 itens em toda largura, folga ≥ 12 px).
 // Com o véu (decisão do dono): só o alvo do passo e o balão recebem toque e Tab. O que o véu
 // acende e escurece em cada etapa está em dashboard_v2_guia_veu.test.mjs; o fluxo e o servidor,
 // em dashboard_v2_guia.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, PROTOTIPO, RAIZ, servir } from "./_painel.mjs";
-import { FAZER, PASSOS, abrir, acoes, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
+import { FAZER, PASSOS, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, navegador } from "./_guia.mjs";
 
 const browser = navegador();
 
@@ -35,7 +35,7 @@ test("Piggy e balão entram já no lugar: o left/top calculado é o gravado, sem
         if (g.some((v, i) => !(Math.abs(v - c[i]) <= 1))) window.__moveu.push({ el: e.className, g, c });
       })).observe(document.body, { attributes: true, attributeFilter: ["style"], subtree: true });
     });
-    await page.getByRole("button", { name: "Ajuda" }).click();
+    if (width < 761) await ajudaDoMenu(page); else await page.getByRole("button", { name: "Ajuda" }).click();
     await esperaTitulo(page, PASSOS[0].fala.titulo);
     await FAZER["mes.trocado"](page);
     await esperaTitulo(page, PASSOS[1].fala.titulo);
@@ -62,23 +62,22 @@ test("movimento: com `reduce` o Piggy e o anel ficam parados; sem a preferência
   assert.deepEqual(nomes, [["none", "none"], ["guia-entra", "guia-pulso"]]);
 });
 
-test("barra de baixo: 6 itens a partir de 360; abaixo, a Ajuda sai e ficam 5; folga ≥ 12 px do maior rótulo de 320 a 375", async () => {
+test("barra de baixo: 5 itens de 320 a 375, o último é o Menu; folga ≥ 12 px do maior rótulo", async () => {
   const r = {};
   for (const width of [320, 340, 359, 360, 375]) {
     const { ctx, page } = await abrir({ width, height: 812, guia: "concluido" });
     r[width] = await page.evaluate(() => {
       const itens = [...document.querySelectorAll(".tabbar a, .tabbar button")].filter((e) => e.getClientRects().length);
       const folgas = itens.map((e) => { const s = e.querySelector("span"); const g = document.createRange(); g.selectNodeContents(s); return e.getBoundingClientRect().width - g.getBoundingClientRect().width; });
-      const ajuda = document.querySelector(".tabbar button");
-      return { n: itens.length, folga: Math.round(Math.min(...folgas) * 10) / 10, ajuda: ajuda.getClientRects().length, nome: ajuda.getAttribute("aria-label"), cabe: document.querySelector(".tabbar").scrollWidth <= innerWidth };
+      const menu = document.querySelector(".tabbar button");
+      return { n: itens.length, folga: Math.round(Math.min(...folgas) * 10) / 10, menu: menu.getClientRects().length, nome: menu.textContent.trim(), cabe: document.querySelector(".tabbar").scrollWidth <= innerWidth };
     });
     await ctx.close();
   }
   console.log("# barra de baixo:", JSON.stringify(r));
   for (const [w, x] of Object.entries(r)) {
-    const larga = Number(w) >= 360;
-    assert.equal(x.n, larga ? 6 : 5, w); assert.ok(x.folga >= 12, `${w}: folga ${x.folga}`); assert.equal(x.nome, "Ajuda"); assert.ok(x.cabe, w);
-    assert.equal(x.ajuda > 0, larga, w);
+    assert.equal(x.n, 5, w); assert.ok(x.folga >= 12, `${w}: folga ${x.folga}`); assert.equal(x.nome, "Menu"); assert.ok(x.cabe, w);
+    assert.ok(x.menu > 0, w);
   }
 });
 
@@ -190,7 +189,7 @@ test("teclado: do topo da página, o [Bora] do convite chega em poucos Tabs", as
   assert.ok(tabs <= 3, `${tabs} Tabs`);
 });
 
-test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; no /painel, 5 em 320 (a Ajuda sai) e 6 em 375", async () => {
+test("barra de baixo do protótipo e do /painel: 5 colunas e o Piggy no centro em 320 e 375", async () => {
   const r = [];
   for (const [nome, url, raiz] of [["protótipo", PROTOTIPO, RAIZ], ["painel", PAINEL, undefined]]) {
     for (const width of [320, 375]) {
@@ -210,7 +209,7 @@ test("barra de baixo do protótipo (sem Ajuda): 5 colunas e o Piggy no centro; n
   }
   console.log("# barra de baixo [colunas, Piggy − centro px]:", JSON.stringify(r));
   assert.deepEqual(r.filter(([n]) => n === "protótipo").map(([, , [c, d]]) => [c, d]), [[5, 0], [5, 0]]);
-  assert.deepEqual(r.filter(([n]) => n === "painel").map(([, w, [c, d]]) => w === 320 ? [c, d] : c), [[5, 0], 6]);
+  assert.deepEqual(r.filter(([n]) => n === "painel").map(([, , [c, d]]) => [c, d]), [[5, 0], [5, 0]]);
 });
 
 const SAIU = '[data-guia="resumo.saiu"]';

@@ -5,7 +5,7 @@ import type { Path } from "../router";
 import { abrirDica, dicaDe } from "./Dica";
 import { abrirGuia } from "./Guia";
 
-// A Ajuda do trilho e da barra de baixo. Na tela que tem dica (parts/Dica.tsx) vira um menu de
+// A Ajuda do trilho (no celular ela mora no Menu, parts/MenuTelas.tsx, com as mesmas ações). Na tela que tem dica (parts/Dica.tsx) vira um menu de
 // dois itens: o guia do painel e a dica da tela. Nas outras, o botão de sempre: abre o guia.
 export function Ajuda({ path, title, children }: { path: Path; title?: string; children: ReactNode }) {
   const dica = !!dicaDe(useQuery(guiaQuery).data, path);
