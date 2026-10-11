@@ -1153,8 +1153,25 @@ async function saveCard() {
 }
 
 // ── Modal excluir cartão (mostra impacto antes) ───────────────────────
+let _cardDeleteGer = 0; // resposta de delete-impact velha (modal reaberto) não atropela a do cartão atual
+
+// Estado "cartão do banco": só o aviso e "Entendi", sem o botão destrutivo (GET delete-impact e 409 do DELETE).
+function _cardDeleteBloqueado(texto) {
+  const btn = document.getElementById("card-delete-confirm-btn");
+  btn.hidden = true; btn.onclick = null;
+  document.getElementById("card-delete-body").textContent = texto;
+  const cancel = document.getElementById("card-delete-cancel-btn");
+  cancel.textContent = "Entendi";
+  cancel.focus(); // o botão com foco acabou de sumir (409): sem isto o foco cai no body
+}
+
 async function openCardDeleteModal(cardId, cardName) {
+  const ger = ++_cardDeleteGer;
   const body = document.getElementById("card-delete-body");
+  const btn = document.getElementById("card-delete-confirm-btn");
+  const cancel = document.getElementById("card-delete-cancel-btn");
+  // Reset antes do fetch: sem isso o botão (e o onclick) do cartão anterior ficavam vivos.
+  btn.hidden = true; btn.onclick = null; cancel.textContent = "Cancelar";
   body.innerHTML = "Verificando impacto…";
   document.getElementById("card-delete-overlay").classList.add("open");
 
@@ -1165,6 +1182,9 @@ async function openCardDeleteModal(cardId, cardName) {
     });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
+    if (ger !== _cardDeleteGer) return;
+    // Cartão do banco (Open Finance): só avisa; apagar seria desfeito no sync.
+    if (data.bloqueio) return _cardDeleteBloqueado(data.bloqueio);
     const imp = data.impact || {};
     const openTotal = Number(imp.open_bill_total || 0);
     const futCount = Number(imp.future_installments_count || 0);
@@ -1192,9 +1212,10 @@ async function openCardDeleteModal(cardId, cardName) {
       </p>
     `;
 
-    const btn = document.getElementById("card-delete-confirm-btn");
+    btn.hidden = false;
     btn.onclick = () => confirmDeleteCard(cardId, cardName);
   } catch (err) {
+    if (ger !== _cardDeleteGer) return;
     body.innerHTML = `<span style="color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</span>`;
   }
 }
@@ -1204,6 +1225,7 @@ function closeCardDeleteModal() {
 }
 
 async function confirmDeleteCard(cardId, cardName) {
+  const ger = _cardDeleteGer;
   const btn = document.getElementById("card-delete-confirm-btn");
   btn.disabled = true; const original = btn.textContent; btn.textContent = "Excluindo…";
   try {
@@ -1214,6 +1236,12 @@ async function confirmDeleteCard(cardId, cardName) {
     });
     if (!resp.ok) {
       const errBody = await resp.json().catch(() => ({}));
+      // 409: o cartão virou do banco com o modal aberto; some o botão em vez de deixar clicar de novo.
+      // Se o modal já foi reaberto para outro cartão (geração mudou), o 409 velho não pinta o novo.
+      if (resp.status === 409 && errBody.detail) {
+        if (ger === _cardDeleteGer) _cardDeleteBloqueado(errBody.detail);
+        return;
+      }
       throw new Error(errBody.detail || `HTTP ${resp.status}`);
     }
     closeCardDeleteModal();

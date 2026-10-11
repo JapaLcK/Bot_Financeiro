@@ -302,7 +302,7 @@ async def card_delete_impact_route(request: Request, user_id: int, card_id: int)
     """Retorna o que será apagado se o cartão for excluído.
     Frontend usa pra mostrar confirmação ao usuário."""
     shared.authorize_dashboard_access(request, user_id)
-    from db.cards import get_card_delete_impact, get_card_by_id
+    from db.cards import MSG_CARTAO_DO_BANCO, get_card_delete_impact, get_card_by_id
 
     card = await asyncio.to_thread(get_card_by_id, user_id, card_id)
     if not card:
@@ -312,6 +312,8 @@ async def card_delete_impact_route(request: Request, user_id: int, card_id: int)
         "ok": True,
         "card_name": card["name"],
         "impact": impact,
+        # Cartão do banco: o modal avisa já e não oferece apagar (o DELETE recusa com 409).
+        "bloqueio": MSG_CARTAO_DO_BANCO if card.get("open_finance_account_id") else None,
     }
 
 
@@ -320,7 +322,7 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
     """Exclui um cartão e tudo vinculado (faturas, parcelamentos).
     ON DELETE CASCADE cuida das tabelas credit_bills/credit_transactions."""
     shared.authorize_dashboard_access(request, user_id)
-    from db.cards import delete_card, get_card_by_id
+    from db.cards import CartaoDoBanco, delete_card, get_card_by_id
 
     card = await asyncio.to_thread(get_card_by_id, user_id, card_id)
     if not card:
@@ -328,6 +330,8 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
 
     try:
         deleted = await asyncio.to_thread(delete_card, user_id, card_id)
+    except CartaoDoBanco as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         # Mesmo buraco de `/installments`, na mesma porta de cartão: sem este
         # `except`, apagar um cartão (e, por CASCADE, faturas e compras)

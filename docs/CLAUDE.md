@@ -1120,6 +1120,8 @@ correção do cartão: PR próprio, faixa Completo.
 `undo_installment_group`, `anticipate_installment` levantam `db.CompraDoBanco`; /app responde
 409, WhatsApp e IA a frase): o sync reimporta a linha e, na antecipação, a Carteira ficava
 debitada com a fatura de volta. Mesmo `pode` do v2 (`PODE_CARTAO_SQL`).
+**O cartão do banco também não se apaga** (`delete_card` levanta `db.CartaoDoBanco`; WhatsApp e /app
+recusam com `MSG_CARTAO_DO_BANCO`, /app com 409 e o modal só avisa): o sync o recriaria. Para tirar, desconectar o banco.
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o
