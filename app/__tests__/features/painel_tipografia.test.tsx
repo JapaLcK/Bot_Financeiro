@@ -63,23 +63,25 @@ it("filtros refluem na troca live sem perder seleção, busca ou instância do c
  expect(temColuna(screen.getByRole("button", { name: "Tudo", selected: true }))).toBe(true);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
-it("reflow durante POST mantém draft/voo e aceita a resposta do mesmo usuário", async () => {
+it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do mesmo usuário", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
   if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; return resposta(200, { reply: "Resposta após reflow", usage: { used: 13, limit: 1000 } }); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
+ await waitFor(() => expect(screen.getByRole("button", { name: /Onde eu consigo economizar/ })).toBeEnabled());
  const campo = screen.getByLabelText("Mensagem para o Piggy");
- await act(async () => { fireEvent.changeText(campo, "Rascunho preservado"); await drenar(); });
+ await act(async () => { fireEvent.changeText(campo, "Primeira pergunta"); await drenar(); });
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Enviar mensagem" })); await drenar(); });
+ await act(async () => { fireEvent.changeText(campo, "Rascunho preservado"); await drenar(); });
  const post = fetchFalso.mock.calls.find(([u]) => new URL(String(u)).pathname === "/ai/chat")!;
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
  expect(screen.getByLabelText("Mensagem para o Piggy")).toBe(campo); expect(campo.props.value).toBe("Rascunho preservado"); expect(post[1].signal.aborted).toBe(false);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
  atraso.soltar(); await act(async () => { await drenar(); }); await waitFor(() => expect(screen.getByText("Resposta após reflow")).toBeTruthy());
- expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe(""); expect(screen.getByText("13 de 1000 mensagens utilizadas")).toBeTruthy();
+ expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("13 de 1000 mensagens utilizadas")).toBeTruthy();
 });
 it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e embaixo dela com fonte ampliada", async (escala) => {
  await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Saídas" })).toBeTruthy());

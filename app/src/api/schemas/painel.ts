@@ -28,5 +28,6 @@ export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
 export const respostaChatSchema = z.object({ reply: z.string(), usage });
+export const cancelamentoSchema = z.object({ cancelada: z.string().nullable() });
 export type PerfilPainel = NonNullable<z.infer<typeof perfilPainelSchema>["perfil"]>;
 export type Lancamento = z.infer<typeof lancamentoSchema>;

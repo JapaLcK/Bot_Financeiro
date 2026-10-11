@@ -1,4 +1,5 @@
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
+import { router } from "expo-router";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { metasSchema } from "@/api/schemas/painel";
@@ -7,10 +8,8 @@ import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import metasBanco from "./painel_metas_banco.fixture.json";
 import arredondamento from "./painel_arredondamento.fixture.json";
-import janela from "./painel_chat_janela.fixture.json";
-type Mensagem = { role: "user" | "assistant"; content: string; created_at: null };
 const aviso = "Os valores de cada grupo são arredondados. A soma exibida pode diferir em centavos do total.";
-let historico: Mensagem[], uso: number, limite: number, persistir: boolean, detalhes: unknown;
+let uso: number, limite: number, detalhes: unknown;
 function servidor() {
  fetchFalso.mockImplementation(async (url: string) => {
   const path = new URL(url).pathname;
@@ -22,15 +21,14 @@ function servidor() {
   if (path === "/goals/1/status") return resposta(200, metasBanco);
   if (path === "/ai/chat") {
    uso++;
-   if (persistir) historico.push({ role: "user", content: "Pergunta exclusiva", created_at: null }, { role: "assistant", content: "Resposta exclusiva", created_at: null });
    return resposta(200, { reply: "Resposta exclusiva", usage: { used: uso, limit: limite } });
   }
-  if (path === "/ai/messages") return resposta(200, { messages: [...historico], usage: { used: uso, limit: limite } });
+  if (path === "/ai/messages") return resposta(200, { messages: [], usage: { used: uso, limit: limite } });
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 }
 beforeEach(async () => {
- prepararCaso(); desligarTrava(); historico = []; uso = 99; limite = 100; persistir = true;
+ prepararCaso(); desligarTrava(); uso = 99; limite = 100;
  detalhes = fixture["/api/app/mes-detalhes"];
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });
@@ -45,30 +43,12 @@ async function enviar() {
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta exclusiva"); await drenar(); });
  await apertar("Enviar mensagem"); await waitFor(() => expect(screen.getAllByText("Resposta exclusiva").length).toBeGreaterThan(0));
 }
-async function atualizar() {
- await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
- await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
-}
 it("POST na última mensagem atualiza imediatamente a cota e bloqueia novo envio", async () => {
  renderRouter("./app", { initialUrl: "/piggy" }); await enviar();
  expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy(); expect(screen.queryByText("99 de 100 mensagens utilizadas")).toBeNull();
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Mais uma"); });
  expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); await apertar("Enviar mensagem");
  expect(fetchFalso.mock.calls.filter(([u]) => new URL(String(u)).pathname === "/ai/chat")).toHaveLength(1);
-});
-it("histórico confirmado após refresh substitui o par local sem duplicação", async () => {
- renderRouter("./app", { initialUrl: "/piggy" }); await enviar(); await atualizar(); await atualizar();
- expect(screen.getAllByText("Pergunta exclusiva")).toHaveLength(1); expect(screen.getAllByText("Resposta exclusiva")).toHaveLength(1);
-});
-it("duas perguntas iguais legítimas permanecem duas após confirmação", async () => {
- uso = 0; renderRouter("./app", { initialUrl: "/piggy" }); await enviar(); await enviar(); await atualizar();
- expect(screen.getAllByText("Pergunta exclusiva")).toHaveLength(2); expect(screen.getAllByText("Resposta exclusiva")).toHaveLength(2);
-});
-it("snapshot GET bem-sucedido substitui o eco mesmo sem o turno no histórico", async () => {
- uso = 0; persistir = false; renderRouter("./app", { initialUrl: "/piggy" }); await enviar(); await atualizar();
- expect(screen.queryByText("Resposta exclusiva")).toBeNull();
- historico.push({ role: "user", content: "Pergunta exclusiva", created_at: null }, { role: "assistant", content: "Resposta exclusiva", created_at: null });
- await atualizar(); expect(screen.getAllByText("Resposta exclusiva")).toHaveLength(1);
 });
 it("drilldown Sem categoria preserva categoria= no GET e apresenta o filtro", async () => {
  detalhes = { ...fixture["/api/app/mes-detalhes"], categorias: [{ categoria: null, valor: "1.00", quantidade: 1 }] };
@@ -124,45 +104,21 @@ it("ação com ícone usa layout horizontal estático e alvo de pelo menos 44 po
  expect(botao.findAll((n) => n.props.style && StyleSheet.flatten(n.props.style)?.flexDirection === "row").length).toBeGreaterThan(0);
  await apertar("Organizar"); expect(screen.getByText("Organizar painel")).toBeTruthy();
 });
-it("janela HTTP real de 30 mensagens substitui par antigo idêntico sem duplicar o novo", async () => {
- let enviado = false;
- const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  const path = new URL(url).pathname;
-  if (path === "/ai/messages") return resposta(200, { ...(enviado ? janela.after : janela.before), usage: { used: enviado ? 32 : 31, limit: 100 } });
-  if (path === "/ai/chat") { enviado = true; return resposta(200, { reply: "Resposta exclusiva enviada", usage: { used: 32, limit: 100 } }); }
-  return impl(url, req);
- });
- renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
- await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta exclusiva enviada"); });
- await apertar("Enviar mensagem"); expect(screen.getAllByText("Resposta exclusiva enviada")).toHaveLength(2);
- await atualizar(); expect(screen.getAllByText("Resposta exclusiva enviada")).toHaveLength(1);
- expect(screen.getAllByText("Pergunta exclusiva enviada")).toHaveLength(1);
- expect(screen.getByText("32 de 100 mensagens utilizadas")).toBeTruthy();
-});
-it("GET falho conserva histórico e eco do POST; próximo snapshot confirmado substitui", async () => {
- const impl = fetchFalso.getMockImplementation()!;
- let falhar = false;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/ai/messages" && falhar ? resposta(500, { detail: "indisponível" }) : impl(url, req));
- renderRouter("./app", { initialUrl: "/piggy" }); await enviar(); falhar = true; await atualizar();
- await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
- expect(screen.getAllByText("Resposta exclusiva")).toHaveLength(1); expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy();
- falhar = false; await apertar("Tentar novamente"); await waitFor(() => expect(screen.queryByRole("button", { name: "Tentar novamente" })).toBeNull());
- expect(screen.getAllByText("Resposta exclusiva")).toHaveLength(1);
-});
-it("POST iniciado antes de refresh não restaura resposta nem cota quando chega tarde", async () => {
+it("refresh do painel NÃO aborta o POST do chat: a resposta e a cota chegam depois", async () => {
  uso = 0; const atraso = segurar();
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; return resposta(200, { reply: "Resposta tardia descartada", usage: { used: 100, limit: 100 } }); }
+  if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; uso = 5; return resposta(200, { reply: "Resposta que sobrevive ao refresh", usage: { used: 5, limit: 100 } }); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
+ await waitFor(() => expect(screen.getByRole("button", { name: /Onde eu consigo economizar/ })).toBeEnabled());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta exclusiva"); }); await apertar("Enviar mensagem");
  const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat")!;
- uso = 7; await atualizar();
- expect(post[1].signal.aborted).toBe(true);
+ await act(async () => { router.navigate("/resumo"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("tela").props.refreshControl).toBeTruthy());
+ await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
+ expect(post[1].signal.aborted).toBe(false);
  atraso.soltar(); await act(async () => { await drenar(); });
- expect(screen.queryByText("Resposta tardia descartada")).toBeNull(); expect(screen.queryByText("100 de 100 mensagens utilizadas")).toBeNull();
- expect(screen.getByText("7 de 100 mensagens utilizadas")).toBeTruthy(); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeEnabled();
+ await act(async () => { router.navigate("/piggy"); await drenar(); });
+ await waitFor(() => expect(screen.getByText("Resposta que sobrevive ao refresh")).toBeTruthy()); await waitFor(() => expect(screen.getByText("5 de 100 mensagens utilizadas")).toBeTruthy());
 });

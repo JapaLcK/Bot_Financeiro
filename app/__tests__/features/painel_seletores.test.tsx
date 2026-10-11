@@ -1,9 +1,12 @@
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { router } from "expo-router";
 import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 const escopo = "Buscando em todo o histórico do seu plano";
 function servidor() {
  fetchFalso.mockImplementation(async (url: string) => {
@@ -101,15 +104,23 @@ it("resumo e detalhes tardios do mês anterior não substituem o mês mais recen
  atraso.soltar(); await act(drenar); expect(screen.queryByLabelText(/^(mais )?111 reais$/)).toBeNull(); expect(screen.getAllByLabelText(/^(mais )?222 reais$/)).toHaveLength(2);
 });
 it("POST do Piggy em voo não é cancelado pela seleção de mês e conserva sua cota", async () => {
- const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => { if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; return resposta(200, { reply: "Resposta preservada no mês", usage: { used: 100, limit: 100 } }); } return impl(url, req); });
+ const atraso = segurar(), impl = fetchFalso.getMockImplementation()!; let enviado = false;
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
+  const caminho = new URL(url).pathname;
+  if (caminho === "/ai/chat") { await atraso.promessa; enviado = true; return resposta(200, { reply: "Resposta preservada no mês", usage: { used: 100, limit: 100 } }); }
+  if (caminho === "/ai/messages") return resposta(200, { messages: [], usage: { used: enviado ? 100 : 2, limit: 100 } });
+  return impl(url, req);
+ });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
+ await waitFor(() => expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta em voo"); }); await apertar("Enviar mensagem");
  const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat")!;
+ await act(async () => { router.navigate("/gastos"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
  await escolherMes(mesesAnteriores(mesAtual())[1]!); expect(post[1].signal.aborted).toBe(false);
- expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Pergunta em voo");
- atraso.soltar(); await act(drenar); expect(screen.getByText("Resposta preservada no mês")).toBeTruthy(); expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy();
- expect(fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/ai/messages")).toHaveLength(1);
+ atraso.soltar(); await act(drenar);
+ await act(async () => { router.navigate("/piggy"); await drenar(); });
+ await waitFor(() => expect(screen.getByText("Resposta preservada no mês")).toBeTruthy()); await waitFor(() => expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy());
+ expect(screen.getByText("Pergunta em voo")).toBeTruthy(); expect(post[1].signal.aborted).toBe(false);
 });
 it("PUT de perfil atravessa mês e horizonte sem cancelamento, rollback ou GET adicional", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
@@ -133,7 +144,7 @@ it("refresh completo supera previsão em voo e revalida todos os recursos", asyn
  const antiga = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).searchParams.get("dias") === "60")!;
  const antes = fetchFalso.mock.calls.length;
  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
- expect(caminhos(antes)).toHaveLength(16); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
+ expect(caminhos(antes)).toHaveLength(15); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).not.toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
  expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); atraso.soltar(); await act(drenar);
  expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); expect(screen.queryByRole("button", { name: "30 dias", selected: true })).toBeNull();
 });
