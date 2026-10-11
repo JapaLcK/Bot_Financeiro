@@ -34,7 +34,7 @@ async function abrir() {
  renderRouter("./app", { initialUrl: "/resumo" });
  await waitFor(() => expect(screen.getByText("Guardado líquido")).toBeTruthy());
 }
-const ROTULO = "Gasto acumulado no mês";
+const ROTULO = "Compras feitas no mês";
 const LEGENDA = "Setembro fechou em R$ 4.110,00";
 
 it("Resumo do mês desenha a curva do fixture (dias 1 a 6 somando 2.380,50), com a legenda do mês passado, e ela some com valores ocultos", async () => {
@@ -59,11 +59,13 @@ it("mês passado: a curva aparece, sem o ponto de hoje", async () => {
  expect(screen.getByTestId("curva-linha", H)).toBeTruthy();
  expect(screen.queryByTestId("ponto-hoje", H)).toBeNull();
 });
-it("cartão: compra de setembro (29/09) na fatura de outubro entra na base e a curva aparece quando a soma fecha com o Saiu do card (2.480,50)", async () => {
+it("cartão: compra de setembro (29/09) na fatura de outubro fica fora da curva, que aparece quando a soma de todos os dias fecha com o Saiu do card (2.480,50)", async () => {
  com(RES, (o) => ({ ...o, saiu: "2480.50" }));
  com(DET, (o) => ({ ...o, saiu: "2480.50", dias: [dia("2026-09-29", "100.00"), ...o.dias] }));
  await abrir();
  expect(screen.getByTestId("curva-acumulada", H)).toBeTruthy();
+ expect(screen.getByText(ROTULO)).toBeTruthy();
+ expect(screen.queryByText("Gasto acumulado no mês")).toBeNull(); // texto antigo não existe mais
 });
 it.each([
  ["a compra de setembro não está no Saiu do card", RES, (o: any) => o, DET, (o: any) => ({ ...o, dias: [dia("2026-09-29", "100.00"), ...o.dias] })],

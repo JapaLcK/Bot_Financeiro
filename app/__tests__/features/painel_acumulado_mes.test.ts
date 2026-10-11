@@ -23,9 +23,19 @@ describe("pontosAcumulados", () => {
     expect(r.pontos).toEqual([100, 100, 350]);
     expect(r.indiceHoje).toBeNull();
   });
-  it("dia ANTERIOR ao mês (compra de cartão na fatura do mês) vira a base da curva e a soma ainda fecha", () => {
-    const r = roda(caso("2026-10", [dia("2026-09-28", 5000), dia("2026-10-01", 100), dia("2026-10-02", 200)]), "2026-10-03")!;
-    expect(r.pontos).toEqual([5100, 5300, 5300]);
+  it("dia ANTERIOR ao mês (compra de cartão na fatura do mês) fica FORA da curva, que começa em 0, e a soma geral ainda fecha", () => {
+    const c = caso("2026-10", [dia("2026-09-28", 5000), dia("2026-10-01", 100), dia("2026-10-02", 200)]);
+    const r = roda(c, "2026-10-03")!;
+    expect(r.pontos).toEqual([100, 300, 300]);
+    expect(r.pontos.at(-1)).toBe(100 + 200); // soma só dos dias do mês...
+    expect(c.d.saiu).toBe(5300); // ...enquanto o Saiu do card inclui a fatura do mês anterior
+  });
+  it("esconde: dia anterior ao mês alterado em 1 centavo faz a soma geral não fechar (a coerência olha TODOS os dias); sem a alteração aparece", () => {
+    const dias = [dia("2026-09-28", 5000), dia("2026-10-01", 100), dia("2026-10-02", 200)];
+    const c = caso("2026-10", dias);
+    expect(roda(c, "2026-10-03")).not.toBeNull();
+    const torto = { d: c.d, m: { ...c.m, dias: [dia("2026-09-28", 5001), ...dias.slice(1)] } as unknown as M };
+    expect(roda(torto, "2026-10-03")).toBeNull();
   });
   it.each([
     ["dia POSTERIOR ao fim do mês", "2026-10", [dia("2026-10-01", 100), dia("2026-11-01", 50)], "2026-10-20"],
