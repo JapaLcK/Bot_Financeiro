@@ -5,6 +5,7 @@ import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import { claro, escuro } from "@/ui/tokens";
+import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 // Dados no formato REAL da API (conexão "partial", chave de categoria sem acento, slug do cartão):
 // o fixture já vem bonito e não pegaria nenhum destes rótulos crus.
 let extra: Record<string, unknown>, falhar: string[];
@@ -19,7 +20,7 @@ function servidor() {
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 }
-beforeEach(async () => { prepararCaso(); desligarTrava(); extra = {}; falhar = []; await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
+beforeEach(async () => { __resetAvisoBanco(); prepararCaso(); desligarTrava(); extra = {}; falhar = []; await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); });
 afterEach(() => jest.restoreAllMocks());
 const banco = ["banco_desatualizado"], dias = ["carteira_nao_confirmada", "banco_desatualizado", "conciliacao_pendente"];
 function bancoDesatualizado() {
@@ -47,6 +48,15 @@ it("o aviso do banco aparece em cada aba, não só no Resumo", async () => {
 it("contas sem motivo de banco não ganham aviso no topo", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await pronto();
  expect(screen.queryByText(/precisam ser atualizados/)).toBeNull(); expect(screen.queryByText("Dados do banco desatualizados")).toBeNull();
+});
+// Controle: trocar o estado de módulo (avisoBanco.ts) por useState deixa este teste vermelho na remontagem.
+it("fechar o aviso do banco o esconde, e remontar a tela não o reabre", async () => {
+ bancoDesatualizado(); const tela = renderRouter("./app", { initialUrl: "/resumo" });
+ await waitFor(() => expect(screen.getAllByText(/precisam ser atualizados/)).toHaveLength(1));
+ await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Fechar aviso" })); await drenar(); });
+ expect(screen.queryByText("Dados do banco desatualizados")).toBeNull();
+ tela.unmount(); renderRouter("./app", { initialUrl: "/resumo" }); await pronto(); await act(async () => { await drenar(); });
+ expect(screen.queryByText("Dados do banco desatualizados")).toBeNull(); expect(screen.queryByRole("button", { name: "Fechar aviso" })).toBeNull();
 });
 // O sinal de banco não pode depender só de /contas: ele falha, ou a conexão desatualizada é só de investimentos.
 it("contas fora do ar não apagam o aviso: patrimônio com banco desatualizado gera o aviso genérico", async () => {

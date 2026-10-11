@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { AccessibilityInfo, View } from "react-native";
+import { AccessibilityInfo, Pressable, View } from "react-native";
 
 import { useTema } from "@/ui/tema";
 import { espaco, raio, type Paleta } from "@/ui/tokens";
@@ -20,6 +20,8 @@ interface Props {
   titulo?: string;
   mensagem: string;
   acao?: Acao;
+  /** Com ela, o banner ganha o botão de fechar; sem ela fica idêntico. */
+  aoFechar?: () => void;
 }
 
 /**
@@ -34,7 +36,7 @@ const VISUAL: Record<Tom, { tom: keyof Paleta; icone: NomeIcone }> = {
   danger: { tom: "danger", icone: "WarningOctagon" },
 };
 
-export function Banner({ tom = "info", titulo, mensagem, acao }: Props) {
+export function Banner({ tom = "info", titulo, mensagem, acao, aoFechar }: Props) {
   const { cores } = useTema();
   const visual = VISUAL[tom];
 
@@ -70,6 +72,17 @@ export function Banner({ tom = "info", titulo, mensagem, acao }: Props) {
         </Texto>
         {acao ? <Button rotulo={acao.rotulo} variante="ghost" tamanho="M" onPress={acao.onPress} /> : null}
       </View>
+      {aoFechar ? (
+        // Alvo de 44x44 com margem negativa: o X fica no canto sem engordar o padding do banner.
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Fechar aviso"
+          onPress={aoFechar}
+          style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", alignSelf: "flex-start", margin: -espaco.md }}
+        >
+          <Icone nome="X" tamanho={20} tom="inkMuted" />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
