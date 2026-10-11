@@ -20,7 +20,11 @@ const MES = /^\d{4}-(0[1-9]|1[0-2])$/, DIA = /^\d{4}-\d{2}-\d{2}$/;
  *  - `detalhes` de outro mês que o `resumo`, ou `m.saiu`/soma de `dias[].saiu` diferentes de `d.saiu` (outra moeda no
  *    total legado, mês parcial, corrida entre as duas chamadas);
  *  - dia depois do fim do mês, ou depois de HOJE no mês corrente com valor (não desenhamos o futuro);
- *  - menos de 2 pontos (dia 1 do mês corrente, mês futuro, mês sem lançamento).
+ *  - menos de 2 pontos (dia 1 do mês corrente, mês futuro, mês sem lançamento);
+ *  - `m.motivos` com "inicio_do_historico": o plano corta o histórico DENTRO do mês, o detalhe soma só a partir do
+ *    corte e o resumo parcial ainda fecha com ele — a curva preencheria com zero os dias sem dado e afirmaria, falsamente,
+ *    que não houve gasto ali. Esconder é o lado honesto. (O mesmo motivo só em `d.motivos` = corte no mês ANTERIOR: o mês
+ *    está completo e a curva aparece.)
  *
  * DIAS ANTES DO DIA 1: compras de cartão entram pelo dia da compra mas pertencem à fatura que fecha no mês, então
  * `dias` pode trazer datas do mês anterior e `d.saiu` as inclui. Descartá-las faria a curva não fechar com `saiu`
@@ -30,7 +34,7 @@ const MES = /^\d{4}-(0[1-9]|1[0-2])$/, DIA = /^\d{4}-\d{2}-\d{2}$/;
  * dia com lançamento.
  */
 export function pontosAcumulados(d: Dados["resumo"], m: Dados["detalhes"], hoje: string): Acumulado | null {
-  if (!MES.test(d.mes) || !DIA.test(hoje) || m.mes !== d.mes || m.saiu !== d.saiu) return null;
+  if (!MES.test(d.mes) || !DIA.test(hoje) || m.mes !== d.mes || m.saiu !== d.saiu || m.motivos.includes("inicio_do_historico")) return null;
   const mesHoje = hoje.slice(0, 7);
   if (d.mes > mesHoje) return null;
   const corrente = d.mes === mesHoje, diasNoMes = new Date(Date.UTC(Number(d.mes.slice(0, 4)), Number(d.mes.slice(5, 7)), 0)).getUTCDate();

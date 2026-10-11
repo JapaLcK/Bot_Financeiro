@@ -70,6 +70,7 @@ it.each([
  ["o detalhe fecha 1 centavo a menos que o resumo", RES, (o: any) => o, DET, (o: any) => ({ ...o, saiu: "2380.49", dias: o.dias.map((x: any, i: number) => i === 5 ? { ...x, saiu: "279.99" } : x) })],
  ["a soma dos dias não fecha com o Saiu (outra moeda no total legado)", RES, (o: any) => o, DET, (o: any) => ({ ...o, dias: o.dias.slice(0, 5) })],
  ["o detalhe é de outro mês", RES, (o: any) => o, DET, (o: any) => ({ ...o, mes: "2026-09" })],
+ ["o plano cortou o histórico dentro do mês (inicio_do_historico)", RES, (o: any) => o, DET, (o: any) => ({ ...o, motivos: [...o.motivos, "inicio_do_historico"] })],
  ["tem lançamento depois de hoje", RES, (o: any) => o, DET, (o: any) => ({ ...o, dias: o.dias.slice(0, 5).concat(dia("2026-10-09", "280.00")) })],
 ])("sem curva e sem legenda, e o resto do card segue como estava: %s", async (_n, p1, f1, p2, f2) => {
  com(p1, f1); com(p2, f2);

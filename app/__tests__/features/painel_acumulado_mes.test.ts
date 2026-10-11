@@ -7,7 +7,7 @@ const dia = (d: string, saiu: number) => ({ dia: d, entrou: 0, saiu });
 function caso(mes: string, dias: ReturnType<typeof dia>[], o: { resumo?: Record<string, unknown>; detalhe?: Record<string, unknown> } = {}) {
   const saiu = dias.reduce((s, x) => s + x.saiu, 0);
   const d = { mes, ate: `${mes}-28`, entrou: 0, saiu, anterior: { mes: "2026-09", entrou: 0, saiu: 411000 }, motivos: [], ...o.resumo } as unknown as R;
-  const m = { mes, ate: `${mes}-28`, entrou: 0, saiu, dias, ...o.detalhe } as unknown as M;
+  const m = { mes, ate: `${mes}-28`, entrou: 0, saiu, dias, motivos: [], ...o.detalhe } as unknown as M;
   return { d, m };
 }
 const roda = (c: { d: R; m: M }, hoje: string) => pontosAcumulados(c.d, c.m, hoje);
@@ -54,6 +54,15 @@ describe("pontosAcumulados", () => {
     expect(roda(igual, "2026-10-05")).not.toBeNull();
     expect(roda({ d: { ...igual.d, saiu: 201 }, m: { ...igual.m, saiu: 201 } }, "2026-10-05")).toBeNull();
     expect(roda({ d: { ...igual.d, saiu: 199 }, m: { ...igual.m, saiu: 199 } }, "2026-10-05")).toBeNull();
+  });
+  it("esconde: histórico do plano cortado DENTRO do mês (m.motivos); o mesmo cenário sem o motivo aparece", () => {
+    const dias = [dia("2026-10-04", 100), dia("2026-10-05", 200)];
+    expect(roda(caso("2026-10", dias), "2026-10-06")).not.toBeNull();
+    expect(roda(caso("2026-10", dias, { detalhe: { motivos: ["inicio_do_historico"] } }), "2026-10-06")).toBeNull();
+  });
+  it("corte só no mês ANTERIOR (motivo apenas em d.motivos): o mês está completo e a curva aparece", () => {
+    const dias = [dia("2026-10-01", 100), dia("2026-10-02", 200)];
+    expect(roda(caso("2026-10", dias, { resumo: { motivos: ["inicio_do_historico"] } }), "2026-10-06")).not.toBeNull();
   });
   it("sem anterior (null), ou anterior zerado, não há referência, mas a curva aparece", () => {
     const dias = [dia("2026-10-01", 100), dia("2026-10-02", 100)];
