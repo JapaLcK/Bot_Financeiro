@@ -304,12 +304,28 @@ def get_card_delete_impact(user_id: int, card_id: int) -> dict:
     }
 
 
+class CartaoDoBanco(ValueError):
+    """Cartão vinculado ao Open Finance: apagar é desfeito no sync seguinte (recria o cartão e
+    reimporta as compras), perdendo paid_amount manual, categorias, nome e limite."""
+
+
+MSG_CARTAO_DO_BANCO = ("Esse cartão vem do seu banco (Open Finance). Para tirar, "
+                       "desconecte o banco em Configurações.")
+
+
 def delete_card(user_id: int, card_id: int) -> bool:
+    """Levanta `CartaoDoBanco` (antes de qualquer escrita) se o cartão é do Open Finance."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select id from credit_cards where id=%s and user_id=%s", (card_id, user_id))
-            if not cur.fetchone():
+            cur.execute(
+                "select open_finance_account_id from credit_cards where id=%s and user_id=%s for update",
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
                 return False
+            if row["open_finance_account_id"] is not None:
+                raise CartaoDoBanco(MSG_CARTAO_DO_BANCO)
             cur.execute(
                 "update users set default_card_id=null where id=%s and default_card_id=%s",
                 (user_id, card_id),
