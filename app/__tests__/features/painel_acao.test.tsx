@@ -1,20 +1,21 @@
 import { Animated, StyleSheet } from "react-native";
 import { Acao } from "@/features/painel/base";
-import { claro } from "@/ui/tokens";
+import { claro, raio } from "@/ui/tokens";
 import { renderInterativo } from "../ui/_render";
 
 const visual = (r: ReturnType<typeof renderInterativo>) => r.UNSAFE_getByType(Animated.View);
 
-it("Acao tem cara de botão: contorno, alinhada ao início e não esticada na coluna", () => {
+it("Acao tem cara de botão: fundo surfaceControl sem contorno, alinhada ao início e não esticada na coluna", () => {
   const r = renderInterativo(<Acao rotulo="Ver lançamentos" onPress={jest.fn()} />);
   expect(StyleSheet.flatten(r.getByRole("button").props.style)).toMatchObject({ alignSelf: "flex-start", minHeight: 44 });
-  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ borderWidth: 1, borderColor: claro.inkMuted, minHeight: 36 });
+  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ backgroundColor: claro.surfaceControl, minHeight: 36 });
+  expect(StyleSheet.flatten(visual(r).props.style).borderWidth).toBeUndefined();
 });
 
-it("compacta (ao lado de valor) fica com 30pt de contorno, mas o alvo de toque continua 44", () => {
+it("compacta (ao lado de valor) fica com 30pt de altura, mas o alvo de toque continua 44", () => {
   const r = renderInterativo(<Acao rotulo="Ignorar Netflix" texto="Ignorar" compacta onPress={jest.fn()} />);
   expect(StyleSheet.flatten(r.getByRole("button").props.style)).toMatchObject({ minHeight: 44 });
-  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ minHeight: 30, borderWidth: 1 });
+  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ minHeight: 30, borderRadius: raio.chip });
 });
 
 it("texto visível curto, rótulo do VoiceOver completo; iconeFim vem depois do texto", () => {

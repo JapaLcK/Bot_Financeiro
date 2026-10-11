@@ -38,7 +38,9 @@ from db import (
     set_card_limit,
     set_default_card,
     set_pending_action,
+    CartaoDoBanco,
     CompraDoBanco,
+    MSG_CARTAO_DO_BANCO,
     undo_credit_transaction,
     undo_installment_group,
     update_card_reminder_settings,
@@ -1354,10 +1356,19 @@ def _card_summary(card: dict) -> str:
 
 
 def _extract_card_name_for_delete(text: str) -> str | None:
-    m = re.search(r"(?:excluir|apagar|remover|deletar)\s+cart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    # Ancorada no começo: o verbo abre a frase, só precedido de até 5 palavras de cortesia/ligação (lista
+    # fechada: "não", "saber", "dizer", "posso", "já"… não estão nela, então negação, pergunta e hipótese
+    # não armam a confirmação). Marcador/emoji/número/pontuação iniciais são descartados antes (linear).
+    text = text[re.match(r"[\W\d_]*", text).end():]
+    m = re.match(
+        r"(?:(?:por|favor|pode|poderia|quero|eu|preciso|queria|gostaria|de|vc|voce|você|vamos|me|ajudar|ajuda|ok|a|agora|tá|ta"
+        r"|então|entao)[\s,]+){0,5}"
+        r"(?:excluir|exclui|exclua|apagar|apaga|apague|remover|remove|remova|deletar|deleta|delete)\s+"
+        r"(?:(?:o\s+)?meu\s+|o\s+|esse\s+|este\s+)?cart[aã]o(?:\s+de\s+cr[eé]dito)?\s+(.+)",
+        text, re.IGNORECASE | re.DOTALL)  # DOTALL: o nome cobre a mensagem toda ("nubank\nnão, pera" não vira "nubank")
     if not m:
         return None
-    return (m.group(1) or "").strip() or None
+    return (m.group(1) or "").strip(" \t\r\n.!?") or None  # sem `[\s.!?]*$` na regex: era quadrático
 
 
 def _purchase_code(tx_id: int) -> str:
@@ -1708,7 +1719,10 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
         # Devolve a confirmação se o delete em cascata estourar (FK, timeout):
         # sem isso o usuário perde a pergunta e refaz "excluir cartão X".
         with restore_pending_on_error(user_id, pending, 20):
-            deleted = delete_card(user_id, int(card_id))
+            try:
+                deleted = delete_card(user_id, int(card_id))
+            except CartaoDoBanco as e:  # dentro do with: fora dele a pendência volta e o "sim" repete
+                return f"❌ {e}"
         if not deleted:
             return f"❌ Não consegui excluir o cartão **{card_name}**."
         return f"✅ Cartão **{card_name}** excluído com sucesso."
@@ -1783,6 +1797,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if _is_delete(answer):
             # Pede confirmação antes de excluir
             existing_name = payload.get("existing_card_name", "")
+            existing = get_card_by_id(user_id, payload["existing_card_id"]) or {}
+            if existing.get("open_finance_account_id"):
+                return f"❌ {MSG_CARTAO_DO_BANCO}\n\nDigite outro nome ou **cancelar**."
             payload["step"] = "confirm_delete_existing_card"
             set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
             return (
@@ -1874,7 +1891,10 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             # cadastro inteiro (card_name, closing_day, due_day, ask_primary),
             # e a mensagem de erro abaixo ainda diz "Tente novamente".
             with restore_pending_on_error(user_id, pending, 20):
-                deleted = delete_card(user_id, int(existing_id))
+                try:
+                    deleted = delete_card(user_id, int(existing_id))
+                except CartaoDoBanco as e:
+                    return f"❌ {e}"
             if not deleted:
                 return f"❌ Não consegui excluir o cartão **{existing_name}**. Tente novamente."
 
@@ -2057,10 +2077,14 @@ def handle(user_id: int, text: str) -> str | None:
 
     delete_card_name = _extract_card_name_for_delete(t)
     if delete_card_name:
-        card_id = get_card_id_by_name(user_id, delete_card_name)
+        # "o cartão do nubank": tenta o nome inteiro (cartão "Do Bem") e só então sem o "do/da".
+        card_id = (get_card_id_by_name(user_id, delete_card_name)
+                   or get_card_id_by_name(user_id, re.sub(r"^d[oa]\s+", "", delete_card_name, flags=re.I)))
         if not card_id:
             return f"❌ Não achei o cartão '{delete_card_name}'."
         card = get_card_by_id(user_id, card_id)
+        if card and card.get("open_finance_account_id"):
+            return f"❌ {MSG_CARTAO_DO_BANCO}"
         set_pending_action(
             user_id,
             "credit_delete_card",

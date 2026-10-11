@@ -2,7 +2,7 @@ import { ActivityIndicator, Animated, Pressable, View } from "react-native";
 
 import { usePressao } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
-import { espaco, raio, type Paleta } from "@/ui/tokens";
+import { espaco, raio, texto, type Paleta } from "@/ui/tokens";
 
 import { Icone, type NomeIcone } from "./Icone";
 import { Texto } from "./Texto";
@@ -31,16 +31,15 @@ export const ALTURA_ACESSO: Record<Tamanho, number> = { M: 48, L: 54 };
 
 /**
  * Rosa só onde há decisão (identidade pigbank-frontend): só `primary` usa
- * `acao`; `ghost` e `link` usam `brandInk` no TEXTO, nunca em fundo. `secondary`
- * e `ghost` têm contorno `inkMuted` (3:1 sobre `surface`/`bg`, já medido em
- * `PARES`), nunca `border` (decorativo, não é contorno de controle —
- * CLAUDE.md/tokens.ts). `ghost` é o par do `Acao` do painel (contorno, raio
- * `md`); `link` é só texto, para onde contorno não cabe ("Esqueci a senha").
+ * `acao`; `ghost` e `link` usam `brandInk` no TEXTO, nunca em fundo. Segue o
+ * PDF: `secondary` = "Fantasma" (fundo `surfaceControl`, sem contorno) e
+ * `ghost` = "Link de ação" (transparente, sem contorno), par do `Acao` do
+ * painel; `link` é só texto ("Esqueci a senha").
  */
 const VISUAL: Record<Variante, { bg: keyof Paleta | "transparent"; tom: keyof Paleta; borda?: keyof Paleta }> = {
   primary: { bg: "acao", tom: "onAcao" },
-  secondary: { bg: "surface", tom: "ink", borda: "inkMuted" },
-  ghost: { bg: "transparent", tom: "brandInk", borda: "inkMuted" },
+  secondary: { bg: "surfaceControl", tom: "ink" },
+  ghost: { bg: "transparent", tom: "brandInk" },
   link: { bg: "transparent", tom: "brandInk" },
   danger: { bg: "danger", tom: "onDanger" },
 };
@@ -76,7 +75,7 @@ export function Button({
         style={[
           {
             minHeight: acesso ? ALTURA_ACESSO[tamanho] : ALTURA[tamanho],
-            borderRadius: raio.md,
+            borderRadius: raio.controle,
             paddingHorizontal: espaco.xl,
             alignItems: "center",
             justifyContent: "center",
@@ -94,12 +93,12 @@ export function Button({
           // lê `opacity` direto no estilo do `Texto`, não de um invólucro).
           <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.sm, opacity: carregando ? 0 : 1 }}>
             <Icone nome={icone} tom={v.tom} tamanho={20} />
-            <Texto variante="rotulo" tom={v.tom}>
+            <Texto variante="rotulo" tom={v.tom} style={{ fontFamily: texto.secao.fontFamily }}>
               {rotulo}
             </Texto>
           </View>
         ) : (
-          <Texto variante="rotulo" tom={v.tom} style={{ opacity: carregando ? 0 : 1 }}>
+          <Texto variante="rotulo" tom={v.tom} style={{ opacity: carregando ? 0 : 1, fontFamily: texto.secao.fontFamily }}>
             {rotulo}
           </Texto>
         )}

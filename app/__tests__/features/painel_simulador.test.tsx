@@ -1,8 +1,7 @@
 jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => "dark" }));
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { Dimensions, StyleSheet, View } from "react-native";
-import { CORES_CATEGORIA } from "@/features/painel/base";
-import { escuro } from "@/ui/tokens";
+import { CORES_CATEGORIA } from "@/ui/tokens";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
@@ -44,5 +43,5 @@ it("Simulador: nome à esquerda e '30% · valor' à direita na mesma linha, sem 
 it("Para onde vai: a barra de cada categoria tem a cor da fatia dela no donut", async () => {
  renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByLabelText("Corte em Moradia")).toBeTruthy());
  const cores = (nome: RegExp) => screen.getByRole("button", { name: nome }).findAll((n) => n.type === View).map((n) => StyleSheet.flatten(n.props.style)?.backgroundColor).filter(Boolean);
- expect(cores(/^Alimentação/)).toContain(escuro[CORES_CATEGORIA[0]]); expect(cores(/^Moradia/)).toContain(escuro[CORES_CATEGORIA[1]]);
+ expect(cores(/^Alimentação/)).toContain(CORES_CATEGORIA[0]); expect(cores(/^Moradia/)).toContain(CORES_CATEGORIA[1]);
 });

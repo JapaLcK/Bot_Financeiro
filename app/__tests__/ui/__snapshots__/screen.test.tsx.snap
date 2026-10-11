@@ -85,7 +85,7 @@ exports[`Screen snapshot (dois temas): escuro, sem rolar 1`] = `
     style={
       [
         {
-          "backgroundColor": "#0E0E10",
+          "backgroundColor": "#09090B",
           "flex": 1,
         },
         {

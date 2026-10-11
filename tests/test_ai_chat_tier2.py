@@ -3,8 +3,10 @@ Cobre as tools Tier 2 da E2 (analítics que respondem perguntas como
 'onde gastei mais?', 'gastei mais em abril ou maio?', etc).
 """
 from datetime import date, datetime
+from unittest.mock import patch
 
 import db
+from core.services.ai_chat.tools import launches as tools_launches
 from core.services.ai_chat.tools.launches import (
     _compare_periods,
     _forecast_month_end,
@@ -24,7 +26,7 @@ def test_top_categories_agrega_despesas_e_credito(user_id):
     )
 
     # Compra no cartão de R$ 80 em alimentação
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_credit_purchase(
         user_id, card_id, 80, "alimentação", "ifood", date.today(),
@@ -129,7 +131,7 @@ def test_largest_expenses_ordena_desc(user_id):
 
 def test_largest_expenses_inclui_credito(user_id):
     """Compra no cartão deve aparecer junto com despesas normais."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
     db.add_credit_purchase(user_id, card_id, 200, "lazer", "show", date.today())
@@ -272,8 +274,16 @@ def test_largest_expenses_manual_sem_instituicao_nem_parcela(user_id):
     assert r["instituicao"] is None and r["parcela"] is None
 
 
+def _periodo_livre():
+    # "Hoje" = dia 28: nem "dia 1 até hoje" (no dia 1) nem a janela dia 1..15 viram o mês corrente
+    # inteiro, o único que lê o cartão pela fatura e solta a parcela. Estes testes medem o texto
+    # do período livre (compra pela data), em qualquer dia do mês.
+    return patch.object(tools_launches, "today_tz", lambda: date.today().replace(day=28))
+
+
 def _tool(uid, limit=20):
-    return _get_largest_expenses(uid, {"start_date": date.today().isoformat(), "limit": limit})["expenses"]
+    with _periodo_livre():
+        return _get_largest_expenses(uid, {"start_date": date.today().isoformat(), "limit": limit})["expenses"]
 
 
 def _parcelado(uid, card, valor, nota, n, cat="lazer"):
@@ -654,7 +664,7 @@ def test_spending_trend_tendencia_estavel_com_1_mes(pro_user_id):
 
 def test_top_categories_exclui_reembolso_cartao(user_id):
     """credit_transactions com is_refund=true não conta como gasto."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_credit_purchase(user_id, card_id, 100, "lazer", "show", date.today())
     # Reembolso de R$ 100 — mesma categoria
@@ -671,8 +681,9 @@ def test_top_categories_exclui_reembolso_cartao(user_id):
 
 
 def _tool_janela(uid, meses):
-    return _get_largest_expenses(uid, {"start_date": date.today().replace(day=1).isoformat(),
-                                       "end_date": _mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
+    with _periodo_livre():
+        return _get_largest_expenses(uid, {"start_date": date.today().replace(day=1).isoformat(),
+                                           "end_date": _mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
 
 
 def test_parcelamento_manual_compra_inteira(user_id):

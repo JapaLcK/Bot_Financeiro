@@ -10,6 +10,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import type { WebBrowserAuthSessionResult } from "expo-web-browser";
 import { Platform, StyleSheet } from "react-native";
+import { raio } from "@/ui/tokens";
 
 import { lerCredenciais } from "@/storage/secure";
 
@@ -58,7 +59,7 @@ async function tocar(nome: string) {
 describe("(auth)/entrar — Continuar com a Apple", () => {
   it("iOS: botão do sistema CONTINUE, contorno branco no claro, raio e altura do Google; sem 'em breve'", async () => {
     await abrirEntrar();
-    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: 12, style: { height: 48 } });
+    expect(botao(APPLE).props).toMatchObject({ buttonType: 1, buttonStyle: 1, cornerRadius: raio.controle, style: { height: 48 } });
     expect(screen.queryByText("Entrar com Apple chega em breve.")).toBeNull();
     expect(involucro()).toEqual({ pointerEvents: "auto", opacity: 1 });
   });

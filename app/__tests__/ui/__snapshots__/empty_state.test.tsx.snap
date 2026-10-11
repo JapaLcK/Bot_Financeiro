@@ -33,8 +33,9 @@ exports[`EmptyState snapshot (dois temas): claro 1`] = `
       [
         {
           "fontFamily": "Inter-Regular",
-          "fontSize": 16,
-          "lineHeight": 22,
+          "fontSize": 14,
+          "letterSpacing": 0,
+          "lineHeight": 21,
         },
         {
           "color": "#5F5F6A",
@@ -85,9 +86,9 @@ exports[`EmptyState snapshot (dois temas): claro 1`] = `
       style={
         {
           "alignItems": "center",
-          "backgroundColor": "#C7186B",
+          "backgroundColor": "#FF2D8E",
           "borderColor": undefined,
-          "borderRadius": 12,
+          "borderRadius": 10,
           "borderWidth": 0,
           "justifyContent": "center",
           "minHeight": 44,
@@ -107,13 +108,15 @@ exports[`EmptyState snapshot (dois temas): claro 1`] = `
           [
             {
               "fontFamily": "Inter-Medium",
-              "fontSize": 14,
+              "fontSize": 13,
+              "letterSpacing": 0,
               "lineHeight": 18,
             },
             {
-              "color": "#FFFFFF",
+              "color": "#0F172A",
             },
             {
+              "fontFamily": "Inter-SemiBold",
               "opacity": 1,
             },
             null,
@@ -141,7 +144,7 @@ exports[`EmptyState snapshot (dois temas): escuro 1`] = `
     style={
       {
         "alignItems": "center",
-        "backgroundColor": "#17171A",
+        "backgroundColor": "#101013",
         "borderRadius": 68,
         "height": 136,
         "justifyContent": "center",
@@ -171,11 +174,12 @@ exports[`EmptyState snapshot (dois temas): escuro 1`] = `
       [
         {
           "fontFamily": "Inter-Regular",
-          "fontSize": 16,
-          "lineHeight": 22,
+          "fontSize": 14,
+          "letterSpacing": 0,
+          "lineHeight": 21,
         },
         {
-          "color": "#9B9BA6",
+          "color": "#A8A8B3",
         },
         {
           "textAlign": "center",
@@ -223,9 +227,9 @@ exports[`EmptyState snapshot (dois temas): escuro 1`] = `
       style={
         {
           "alignItems": "center",
-          "backgroundColor": "#CE2572",
+          "backgroundColor": "#FF2D8E",
           "borderColor": undefined,
-          "borderRadius": 12,
+          "borderRadius": 10,
           "borderWidth": 0,
           "justifyContent": "center",
           "minHeight": 44,
@@ -245,13 +249,15 @@ exports[`EmptyState snapshot (dois temas): escuro 1`] = `
           [
             {
               "fontFamily": "Inter-Medium",
-              "fontSize": 14,
+              "fontSize": 13,
+              "letterSpacing": 0,
               "lineHeight": 18,
             },
             {
-              "color": "#FFFAFD",
+              "color": "#0F172A",
             },
             {
+              "fontFamily": "Inter-SemiBold",
               "opacity": 1,
             },
             null,

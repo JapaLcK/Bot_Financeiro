@@ -5,13 +5,18 @@ db/resumo_mes.py — Entrou e Saiu do mês: a regra única do mês-calendário (
 `criado_em` (a forma legada canonizada por `TIPO_CANON_SQL`) + compras no cartão sem
 estorno pelo `period_end` da fatura (parcelado: uma parcela por mês). Leem daqui
 `GET /api/v2/resumo-do-mes`, o "Gastos em <mês>" do WhatsApp, o relatório mensal, a
-consulta 5 do /app e `compute_kpis` das Análises; as pernas dela (`MES_*_SQL`), a lista de
-`GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em consulta
-única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
+consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de mês inteiro
+(`get_period_summary`, `compare_periods`; `get_top_categories`, `get_largest_expenses` e
+`get_category_spend` pela fatura: `core/services/ai_chat/tools/launches.py`); as pernas dela (`MES_*_SQL`), a
+lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
+consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 
-Ficam na regra antiga (só `launches`, sem cartão: `get_summary_by_period`) de propósito,
-e é divergência conhecida: relatório diário e semanal, ferramentas da IA de período
-livre, projeção de fechamento e o Repórter (`piggy_agents._month_stats`). Ver
+Ficam fora da regra, de propósito, e é divergência conhecida: relatório diário e semanal
+(só `launches`, sem cartão: `get_summary_by_period`), projeção de fechamento, o Repórter
+(`piggy_agents._month_stats`) e as ferramentas da IA de período livre: só `get_period_summary`
+e `compare_periods` são só launches (`cartao_incluido: false`); `get_top_categories` e
+`get_largest_expenses` incluem o cartão pela data da compra, `get_category_spend` pela fatura
+e `get_spending_trend` pela data da compra. Ver
 `docs/CLAUDE.md`, "API v2".
 
 Limites declarados (não mudam número nenhum em relação às regras de antes): o mês corta
