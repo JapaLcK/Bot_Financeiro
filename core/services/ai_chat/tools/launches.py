@@ -105,6 +105,16 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _texto_parcelamento(r: dict[str, Any]) -> str | None:
+    """Texto pronto: o modelo confundia `parcela` "1/3" (valor da parcela) com compra em 3x."""
+    if r.get("parcelas"):
+        return f"compra de {fmt_brl(r['valor'])} em {r['parcelas']}x"
+    if r.get("parcela"):
+        n, total = r["parcela"].split("/")
+        return f"parcela {n} de {total} — {fmt_brl(r['valor'])} neste período"
+    return None
+
+
 def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     today = date.today()
     start = _parse_iso_date(args.get("start_date")) or today.replace(day=1)
@@ -121,7 +131,12 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
     categoria = (args.get("categoria") or "").strip() or None
 
-    rows = db.get_largest_expenses(user_id, start, end, limit, categoria=categoria)
+    rows = db.get_largest_expenses(user_id, start, end, limit, categoria=categoria, juntar_parcelas=True)
+    for r in rows:
+        r["parcelamento"] = _texto_parcelamento(r)
+        # só o texto pronto vai à IA: os campos crus foram mal lidos ("parcelado em 3x" numa parcela OF)
+        r.pop("parcela", None)
+        r.pop("parcelas", None)
     return {
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
@@ -866,7 +881,13 @@ TOOLS: list[Tool] = [
                     "mês', 'top 3 compras', 'em que gastei mais de uma vez "
                     "só'. Passe `categoria` pra restringir a uma categoria "
                     "('meus maiores gastos em mercado'). Inclui despesas reais "
-                    "+ compras no cartão. Sem datas, usa o mês corrente até hoje."
+                    "+ compras no cartão. Sem datas, usa o mês corrente até hoje. "
+                    "Cada item traz `categoria`, `instituicao` (banco ou cartão), "
+                    "`data` e `valor`. Quando houver `parcelamento`, copie esse "
+                    "texto como está; não reescreva nem calcule. "
+                    "É ESTA a tool de 'mais detalhes' depois de uma "
+                    "lista de categorias ou de gastos: chame sem `categoria`, "
+                    "limit=20, e agrupe pelo campo `categoria`."
                 ),
                 "parameters": {
                     "type": "object",

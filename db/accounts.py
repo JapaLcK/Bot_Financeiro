@@ -691,6 +691,8 @@ def get_largest_expenses(
     limit: int = 5,
     categoria: str | None = None,
     by_bill_month: bool = False,
+    *,
+    juntar_parcelas: bool = False,
 ):
     """Top N maiores gastos INDIVIDUAIS no período (não agregados por categoria).
 
@@ -709,13 +711,22 @@ def get_largest_expenses(
         regra do dashboard. Um gasto parcelado conta uma parcela por mês. Usado
         pela resposta "quanto gastei" do bot, pra bater com o dashboard.
 
+    `juntar_parcelas=True`: compra parcelada (mesmo `group_id`) vira UMA linha
+    ANTES do order/limit, mas SÓ se as N parcelas estão na janela: `valor` = soma,
+    `data` = a da 1ª parcela, `parcela` None, `parcelas` = N. Janela com menos de N
+    (típico do Open Finance/OFX, 1 linha por mês) ou crédito sem `group_id`: as linhas
+    ficam soltas, cada uma com `parcela` "n/N" e sem `parcelas`.
+
     Se `categoria` for informada, filtra pelos gastos daquela categoria
     (match case- e acento-insensível, mesmo critério de
     `sum_spent_in_category_period` — a lista é sempre subconjunto do total).
 
-    Retorna lista [{valor, categoria, descricao, data, fonte}].
+    Retorna lista [{valor, categoria, descricao, data, fonte, instituicao, parcela}]
+    (+ `parcelas` nas linhas juntadas).
     `fonte` = 'launches' | 'credito' (frontend pode renderizar tag).
     `descricao` = alvo (se launches) ou nota (se credito).
+    `instituicao` = banco da conexão Open Finance (launches) ou nome do cartão
+    (credito); None em lançamento manual. `parcela` = "n/total" se total > 1.
     """
     ensure_user(user_id)
 
@@ -754,17 +765,63 @@ def get_largest_expenses(
         credit_params.append(categoria)
     credit_params += credit_date_params
 
+    cte = ""
+    cte_params: list = []
+    cred_where = f"""where ct.user_id = %s
+                      and ct.is_refund = false
+                      {cat_filter_ct}
+                      {credit_date}"""
+    if juntar_parcelas:
+        # Compra parcelada vira 1 linha SÓ se as N parcelas estão na janela (count(*) over
+        # roda depois do WHERE). Open Finance/OFX gravam 1 linha por parcela, cada uma com a
+        # data do seu mês e o mesmo group_id: por isso a chave não tem purchased_at.
+        # Parcela solta (janela parcial) e órfã (group_id null) ficam cruas, com "n/N".
+        cte = f"""with cred as (
+                select ct.id, ct.user_id, ct.card_id, ct.valor, ct.group_id,
+                       ct.installment_no, ct.installments_total,
+                       coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
+                       coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
+                       ct.purchased_at as dt,
+                       (ct.group_id is not null and ct.installments_total > 1
+                        and count(*) over (partition by ct.user_id, ct.card_id, ct.group_id)
+                            = ct.installments_total) as junta
+                {credit_from}
+                {cred_where}
+            )
+            """
+        cte_params = credit_params
+        credit_branch = """select min(id), user_id, sum(valor), null::int, installments_total, card_id,
+                           (array_agg(categoria order by id))[1], (array_agg(descricao order by id))[1],
+                           min(dt), 'credito', true
+                    from cred where junta
+                    group by user_id, card_id, group_id, installments_total
+                    union all
+                    select id, user_id, valor, installment_no, installments_total, card_id,
+                           categoria, descricao, dt, 'credito', false
+                    from cred where not junta"""
+        credit_params = []
+    else:
+        credit_branch = f"""select ct.id, ct.user_id, ct.valor, ct.installment_no, ct.installments_total, ct.card_id,
+                           coalesce(nullif(ct.categoria, ''), 'outros'),
+                           coalesce(nullif(ct.nota, ''), 'compra no crédito'),
+                           ct.purchased_at, 'credito', false
+                    {credit_from}
+                    {cred_where}"""
+
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select valor, categoria, descricao, dt, fonte
+                {cte}select agg.valor, agg.categoria, agg.descricao, agg.dt, agg.fonte,
+                       coalesce(oi.institution_name, cc.name) as instituicao,
+                       agg.installment_no, agg.installments_total, agg.juntada
                 from (
-                    select valor,
+                    select id, user_id, valor,
+                           null::int as installment_no, null::int as installments_total, null::bigint as card_id,
                            coalesce(nullif(categoria, ''), 'outros') as categoria,
                            coalesce(nullif(alvo, ''), nullif(nota, ''), '—') as descricao,
                            criado_em::date as dt,
-                           'launches' as fonte
+                           'launches' as fonte, false as juntada
                     from launches
                     where user_id = %s
                       and {TIPO_DESPESA_SQL}
@@ -772,21 +829,25 @@ def get_largest_expenses(
                       {cat_filter}
                       and criado_em >= %s and criado_em < %s
                     union all
-                    select ct.valor,
-                           coalesce(nullif(ct.categoria, ''), 'outros') as categoria,
-                           coalesce(nullif(ct.nota, ''), 'compra no crédito') as descricao,
-                           ct.purchased_at as dt,
-                           'credito' as fonte
-                    {credit_from}
-                    where ct.user_id = %s
-                      and ct.is_refund = false
-                      {cat_filter_ct}
-                      {credit_date}
+                    {credit_branch}
+                    order by 3 desc
+                    limit %s
                 ) agg
-                order by valor desc
-                limit %s
+                -- mesmo critério do lateral de db/lancamentos.py (_PERNA_LANCAMENTO): dono = conexão do user
+                left join lateral (
+                    select tc.institution_name
+                      from open_finance_transactions t
+                      join open_finance_accounts ta on ta.id = t.account_id
+                      join open_finance_connections tc
+                        on tc.id = ta.connection_id and tc.user_id = agg.user_id
+                     where agg.fonte = 'launches' and t.imported_launch_id = agg.id
+                     order by t.id desc limit 1) oi on true
+                left join credit_cards cc
+                  on cc.id = agg.card_id and cc.user_id = agg.user_id
+                order by agg.valor desc
                 """,
                 (
+                    *cte_params,
                     *launches_params,
                     *credit_params,
                     int(limit),
@@ -794,16 +855,26 @@ def get_largest_expenses(
             )
             rows = cur.fetchall()
 
-    return [
+    out = [
         {
             "valor": float(r["valor"] or 0),
             "categoria": r["categoria"],
             "descricao": r["descricao"],
             "data": r["dt"].isoformat() if r.get("dt") else None,
             "fonte": r["fonte"],
+            "instituicao": r["instituicao"],
+            "parcela": (
+                f"{r['installment_no']}/{r['installments_total']}"
+                if (r["installments_total"] or 0) > 1 and r["installment_no"]
+                else None
+            ),
         }
         for r in rows
     ]
+    for o, r in zip(out, rows):
+        if r["juntada"]:
+            o["parcelas"] = r["installments_total"]
+    return out
 
 
 # Nenhum writer atual escreve 'entrada'/'saida', mas MUITO read path de produção
