@@ -227,7 +227,12 @@ move código. `pix-checkout.js` (350) não é tocado.
 - `frontend/assinar.js` + `assinar-rede.js`: sem sessão e com `retomada`, mostra
   "Assinando como l•••@dominio" e vai direto ao pagamento (sem o formulário); "Sair"
   apaga o cookie e volta ao formulário.
-- `frontend/pix-poll.js`: em retomada, destino `/retomar/pronto?gw=pix`.
+- `frontend/pix-poll.js`: em retomada, destino `/retomar/pronto?gw=pix`. Pix pago depois
+  das 2 h do cookie (o QR vale 3 dias): o poll dá 401 e a página não pode tratar isso como
+  erro de pagamento. Mostra "Se você já pagou, entre pelo e-mail" com o link para `/login`
+  ("Esqueci a senha" manda o link de criar senha à conta sem senha). O pagamento em si
+  não depende do cookie (webhook do Asaas), e reabrir o link de quem já comprou leva à
+  `/login` (apontamento do Codex no PR 4).
 - `frontend/retomar-pronto.html` + `.js` (novos), rota em `static_pages.py`, shim
   `safe-area.js`, tabela de `docs/armadilhas.md`. Skill `pigbank-frontend`, desktop e
   mobile.
