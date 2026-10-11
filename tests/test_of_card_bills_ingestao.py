@@ -6,7 +6,9 @@ dela não derruba o sync, e que o dono é sempre conta -> conexão.
 CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
   • try/except por conta da leitura tirado do sync -> 2 vermelho;
   • try/except da gravação tirado do sync -> 3 vermelho;
-  • `connection_id` tirado do select do upsert -> 4 vermelho.
+  • `connection_id` tirado do select do upsert -> 4 vermelho;
+  • retorno de `salvar_faturas_do_banco` com os pares de `itens` (ou `if True`) em vez de `validas` ->
+    retorno_so_traz_os_pares_das_faturas_validas vermelho.
   Paginador (pluggy_bills.py): cada cláusula do `if` de metadata e o raise do teto têm um
   caso parametrizado em `test_paginador_levanta_se_incoerente`.
 """
@@ -145,6 +147,16 @@ def test_fatura_invalida_e_pulada_e_as_outras_gravam(uid_pro, capsys):
     assert f"[of_card_bills] conta={CONTA} sem nenhuma fatura válida" in saida and "CPF123" not in saida
     salvar_faturas_do_banco(conn, {CONTA: []})  # vazio lido é vazio
     assert sorted(gravadas(uid_pro)) == [(CONTA, "ok", 150), ("acc-outra", "o2", 7)]
+
+
+def test_retorno_so_traz_os_pares_das_faturas_validas(uid_pro):
+    """O que o sync passa à quitação: só (conta, fatura) válida gravada agora; inválida, `[]` ou conta ausente = nada."""
+    conn = conecta(uid_pro, "item-ret")
+    _conta(conn, CONTA, "acc-outra")
+    ruins = [fatura("sem-venc", venc=None), fatura("nan", total="NaN"), "lixo"]
+    assert salvar_faturas_do_banco(conn, {CONTA: ruins, "acc-outra": []}) == set()
+    assert salvar_faturas_do_banco(conn, {CONTA: ruins + [fatura("a"), fatura("b")], "acc-outra": [fatura("c")]}) \
+        == {(CONTA, "a"), (CONTA, "b"), ("acc-outra", "c")}
 
 
 def test_duas_contas_credit_uma_falha_a_outra_grava_e_a_falha_nao_perde(uid_pro, rodar, monkeypatch):

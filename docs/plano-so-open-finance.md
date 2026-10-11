@@ -245,7 +245,11 @@ feita (§9).
   Σ valor × parte paga, com teto 1 (sem crédito carregado para a fatura seguinte). Regra por conta: a "própria"
   (o pagamento da fatura Y quita Y) é aplicada; a "N+1" só pontua, e conta em que ela vence ou empata não quita
   (`[of_card_bills] conta=<id> regra indefinida`). Conta com uma única fatura fechada ainda não paga empata 0 a 0
-  e fica como está; fatura com pagamentos de sinais misturados fica fora, e a de total <= 0,05 entra com parte 0 (o pago das compras dela volta a 0).
+  e fica como está; fatura com pagamentos de sinais misturados fica fora, e a de total <= 0,05 entra com parte 0 (o pago das compras dela volta a 0, mesmo em empate/N+1 da regra).
+  Só quita com fatura fresca (frescor por fatura): `salvar_faturas_do_banco` devolve os pares (conta, fatura) válidos
+  gravados naquele sync e `quitar_pelo_banco` só usa as linhas desses pares (fatura que veio inválida, que sumiu da
+  Pluggy, `/bills` que falhou ou gravação que levantou: a linha velha não se combina com compra nova); o aparo roda
+  em todo cartão da conexão.
   Decisões do dono que o 2a cumpre, por extenso: vale para todo usuário com banco conectado, sem flag nem
   restrição à chave do painel novo; o valor pago pelo banco substitui o pagamento manual no cartão do banco
   (escrita absoluta); pagamento acima do total não vira crédito na fatura seguinte por enquanto (isso se decide

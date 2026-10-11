@@ -542,8 +542,9 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             except Exception as exc:
                 print(f"[pluggy_sync] recorrências não gravadas item={provider_item_id} "
                       f"erro={type(exc).__name__}", flush=True)
+        frescas: set[tuple[str, str]] = set()   # (conta, fatura) regravadas agora; a quitação só confia nessas
         try:
-            salvar_faturas_do_banco(connection["id"], faturas)
+            frescas = salvar_faturas_do_banco(connection["id"], faturas)
         except Exception as exc:
             print(f"[pluggy_sync] faturas não gravadas item={provider_item_id} "
                   f"erro={type(exc).__name__}", flush=True)
@@ -591,7 +592,7 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
         # Depois do import (compras e `bill_id` já atualizados), ainda sob o lock do item: é ele a trava.
         try:
-            quitar_pelo_banco(connection["user_id"], connection["id"])
+            quitar_pelo_banco(connection["user_id"], connection["id"], frescas)
         except Exception as exc:
             print(f"[pluggy_sync] quitação pelo banco falhou item={provider_item_id} "
                   f"erro={type(exc).__name__}", flush=True)

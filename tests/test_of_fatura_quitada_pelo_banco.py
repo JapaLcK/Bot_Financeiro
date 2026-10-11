@@ -27,6 +27,12 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
   • checagem de sinais misturados tirada de `_soma` -> pagamentos_de_sinais_misturados vermelho;
   • o teto do total tem DUAS guardas (o `least(b.total, ...)` do UPDATE e o aparo logo depois): tirar só uma deixa tudo
     verde; tirando as duas -> estorno_sem_bill_id_o_teto vermelho;
+  • filtro por par `(conta, fatura) in frescas` tirado de `quitar_pelo_banco` (todas as linhas da conta) ->
+    snapshot_velho_nao_quita_compra_nova[bills], [gravacao] e fatura_velha_nao_quita_compra_nova[invalida] e [sumiu]
+    vermelhos (pago 150 de 150); `salvar_faturas_do_banco` devolvendo os pares de `itens` em vez de `validas` ->
+    test_of_card_bills_ingestao::test_retorno_so_traz_os_pares_das_faturas_validas vermelho;
+  • `cobertura` devolvendo `{}` no empate (em vez das zeradas) -> zeradas_entram_mesmo_sem_regra_nem_fatura_de_valor e
+    banco_corrige_fatura_paga_para_total_zero_zera_o_pago_mesmo_sem_regra vermelhos;
   • `card_id` tirado do where de `APARAR_PAGO_SQL` -> aparo_nao_toca_cartao_manual_do_mesmo_usuario vermelho.
 """
 from __future__ import annotations
@@ -131,6 +137,12 @@ def test_regra_da_conta_empate_zero_a_zero(capsys):
     assert "regra indefinida" in capsys.readouterr().out
 
 
+def test_zeradas_entram_mesmo_sem_regra_nem_fatura_de_valor():
+    """Todas as fechadas com total <= TOL (`fech` vazio) e empate com fatura de valor: as zeradas valem 0, não `{}`."""
+    assert cobertura([F("z", 0, 0), F("t", 30, TOL)], HOJE) == {"z": 0, "t": 0}
+    assert cobertura([F("a", 0, 100), F("b", 30, 120), F("z", 60, 0)], HOJE) == {"z": 0}   # empate: só a de valor cai
+
+
 def test_n_mais_1_guarda_de_vizinha():
     """Par a 50 dias fica fora da N+1: sem a guarda, ela empata com a própria e a conta não quita."""
     fs = [F("a", 0, 100, 0), F("b", 50, 200, 100), F("c", 100, 50, 50)]
@@ -196,6 +208,7 @@ def compra(ident, valor, bill, dias):
 # Uma fatura anterior exata: com ela a regra "própria" vale e o caso do teste é lido.
 P0, F0 = ("p0", 100, "bill-0", 80), fat("bill-0", 100, 100, 70)
 P1 = ("p1", 120, "bill-1", 35)
+FRESCAS = {(CARTAO["id"], "bill-0"), (CARTAO["id"], "bill-1")}   # o que `salvar_faturas_do_banco` devolveria
 
 
 @pytest.fixture
@@ -481,7 +494,7 @@ def test_compra_casada_que_sumiu_nao_deixa_pago_velho(uid_pro, rodar):
     assert pig(uid_pro) == [(100, 100, "paid"), (120, 120, "paid")]
     _webhook_apaga(uid_pro, "p1")
     assert pig(uid_pro)[1][:2] == (0, 120)                         # o webhook não mexe no pago: o defeito
-    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), FRESCAS)
     assert pig(uid_pro)[1][:2] == (0, 0)
     assert pig(uid_pro)[0] == (100, 100, "paid")                   # a outra fatura segue como estava
 
@@ -493,7 +506,7 @@ def test_compra_casada_que_sumiu_com_compra_manual_apara_ate_o_total(uid_pro, ro
     db.add_credit_purchase(uid_pro, cid, 30, "outros", "manual", dia(35))     # na mesma fatura do Pig
     _webhook_apaga(uid_pro, "p1")
     assert pig(uid_pro)[1][:2] == (30, 120)
-    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), FRESCAS)
     assert pig(uid_pro)[1] == (30, 30, "paid")
     assert q("select paid_at from credit_bills where user_id=%s and total=30", (uid_pro,), True)[0]["paid_at"] is not None
 
@@ -504,8 +517,45 @@ def test_quitar_sem_regra_ainda_apara(uid_pro, rodar):
     _webhook_apaga(uid_pro, "p1")
     q("delete from of_card_bills where account_id in (select id from open_finance_accounts where connection_id=%s)",
       (_conexao(uid_pro),))
-    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), FRESCAS)
     assert pig(uid_pro)[1][:2] == (0, 0)
+
+
+def test_banco_corrige_fatura_paga_para_total_zero_zera_o_pago_mesmo_sem_regra(uid_pro, rodar):
+    """Fatura única 100/100 paga; o banco a corrige para 0 e a compra do Pig segue 100: `fech` fica vazio (empate), e o
+    pago tem de voltar a 0 mesmo assim."""
+    c = ("p1", 100, "bill-1", 35)
+    rodar(uid_pro, [c], [fat("bill-1", 100, 100)])
+    assert pig(uid_pro) == [(100, 100, "paid")]
+    rodar(uid_pro, [c], [fat("bill-1", 0)])
+    assert pig(uid_pro) == [(100, 0, "open")]
+
+
+@pytest.mark.parametrize("falha", ["bills", "gravacao"])
+def test_snapshot_velho_nao_quita_compra_nova(uid_pro, rodar, monkeypatch, falha):
+    """Sync 1 grava 100/100 e quita. No sync 2 o `/bills` da conta falha (ou a gravação levanta) e a compra sobe para
+    150: o snapshot velho não pode virar fração 1 sobre os 150. Positivo: o sync normal quita (testes acima)."""
+    rodar(uid_pro, [("p1", 100, "bill-1", 35)], [fat("bill-1", 100, 100)])
+    assert pig(uid_pro) == [(100, 100, "paid")]
+
+    def quebra(*a, **k):
+        raise RuntimeError("falha")
+    monkeypatch.setattr(ps, "list_pluggy_bills" if falha == "bills" else "salvar_faturas_do_banco", quebra)
+    rodar(uid_pro, [("p1", 150, "bill-1", 35)], [fat("bill-1", 100, 100)])
+    total, pago, _ = pig(uid_pro)[0]
+    assert total == 150 and pago == 100, pig(uid_pro)
+
+
+@pytest.mark.parametrize("caso", ["invalida", "sumiu"])
+def test_fatura_velha_nao_quita_compra_nova(uid_pro, rodar, caso):
+    """Sync 1 grava bill-0 e bill-1 100/100 e quita. No sync 2 a bill-0 vem válida, a bill-1 vem sem `dueDate`
+    (invalida) ou nem vem (sumiu); a compra sobe para 150. A linha velha da bill-1 (100/100) não pode virar fração 1
+    sobre os 150. Positivo: a bill-0, fresca, segue quitada (testes acima quitam)."""
+    rodar(uid_pro, [P0, ("p1", 100, "bill-1", 35)], [F0, fat("bill-1", 100, 100)])
+    assert pig(uid_pro) == [(100, 100, "paid"), (100, 100, "paid")]
+    nova = {**fat("bill-1", 100, 100), "dueDate": None} if caso == "invalida" else None
+    rodar(uid_pro, [P0, ("p1", 150, "bill-1", 35)], [F0] + ([nova] if nova else []))
+    assert pig(uid_pro) == [(100, 100, "paid"), (150, 100, "open")]
 
 
 def test_desconectar_deixando_pago_igual_ao_total_marca_paga(uid_pro, rodar):
@@ -539,7 +589,7 @@ def test_aparo_nao_toca_cartao_manual_do_mesmo_usuario(uid_pro, rodar):
                (uid_pro,), True)[0]["id"]
     q("insert into credit_bills (user_id, card_id, period_start, period_end, status, total, paid_amount)"
       " values (%s, %s, '2026-01-01', '2026-01-31', 'open', 50, 80)", (uid_pro, manual))
-    quitar_pelo_banco(uid_pro, _conexao(uid_pro))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), FRESCAS)
     assert q("select total, paid_amount, status from credit_bills where card_id=%s", (manual,), True) \
         == [{"total": 50, "paid_amount": 80, "status": "open"}]
 

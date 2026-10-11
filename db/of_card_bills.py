@@ -5,7 +5,8 @@ cartão do banco o que o banco já recebeu (o export LGPD, db/privacy.py, també
 conexão, e quem ler filtra por `join open_finance_accounts a ... join open_finance_connections c ...
 where c.user_id = %s` (como `of_recurring_payments`, ver db/of_recurring.py).
 
-ponytail: fatura que some da Pluggy fica gravada (o upsert nunca apaga).
+ponytail: fatura que some da Pluggy fica gravada (o upsert nunca apaga), mas não entra na quitação: só vale a fatura
+gravada NESTE sync (frescor por fatura, ver `quitar_pelo_banco`).
 """
 from datetime import date
 from decimal import Decimal
@@ -21,7 +22,7 @@ TOL = Decimal("0.05")
 
 # Única definição de "fatura do banco" do cartão (isolamento: cartão, conta e conexão do mesmo user_id).
 FATURAS_DO_CARTAO_SQL = """
-select a.id as account_id, b.provider_bill_id, b.due_date, b.closing_date, b.total_amount, b.currency,
+select a.id as account_id, a.provider_account_id, b.provider_bill_id, b.due_date, b.closing_date, b.total_amount, b.currency,
        b.raw->'payments' as payments, b.raw->'financeCharges' as charges
   from credit_cards cc
   join open_finance_accounts a on a.id = cc.open_finance_account_id
@@ -51,11 +52,14 @@ def _data(v):
         return None
 
 
-def salvar_faturas_do_banco(connection_id: int, por_conta: dict[str, list]) -> None:
+def salvar_faturas_do_banco(connection_id: int, por_conta: dict[str, list]) -> set[tuple[str, str]]:
     """Upsert por (conta, id da fatura), numa transação. `por_conta` é
     `{provider_account_id: faturas da Pluggy}`. Fatura sem id, sem `dueDate` válido
     ou com `totalAmount` que não é número é pulada. Conta com itens e nenhum
-    válido é pulada com uma linha de log (formato mudou); as outras contas gravam."""
+    válido é pulada com uma linha de log (formato mudou); as outras contas gravam.
+    Devolve os pares (provider_account_id, provider_bill_id) das faturas válidas gravadas NESTA chamada: só elas são
+    frescas, e é só nelas que `quitar_pelo_banco` pode confiar (se levanta, nada foi gravado). Fatura inválida ou
+    que sumiu da Pluggy deixa a linha velha na tabela, mas fora do conjunto."""
     linhas = []
     for pid, itens in por_conta.items():
         validas = []
@@ -83,6 +87,7 @@ def salvar_faturas_do_banco(connection_id: int, por_conta: dict[str, list]) -> N
                 " currency = excluded.currency, raw = excluded.raw, updated_at = now()",
                 (*resto, connection_id, pid))
         conn.commit()
+    return {(pid, bid) for pid, bid, *_ in linhas}
 
 
 def _soma(itens, absoluto=False):
@@ -116,7 +121,8 @@ def cobertura(faturas: list[dict], hoje: date) -> dict[str, Decimal]:
     fatura: o pago das compras dela volta a 0), mas não pontua. Duas regras de leitura do pagamento são pontuadas
     por conta (exatas, cobertas): a "própria" (o pagamento da fatura Y quita Y) e a "N+1" (o de Y+1, sem
     encargos, quita Y; só vizinhas a 20-40 dias).
-    Só a "própria" é aplicada; N+1 vencendo ou empate devolve {} (conta ambígua não quita)."""
+    Só a "própria" é aplicada; N+1 vencendo ou empate descarta as faturas de valor (conta ambígua não quita), mas as
+    zeradas (parte 0) entram sempre: o banco zerar a fatura não depende da regra de leitura do pagamento."""
     fech, zeradas = [], []
     for b in faturas:
         moeda, pay = b["currency"], _soma(b["payments"], absoluto=True)
@@ -141,7 +147,7 @@ def cobertura(faturas: list[dict], hoje: date) -> dict[str, Decimal]:
     if prop <= nmais:
         if fech:
             print(f"[of_card_bills] conta={faturas[0]['account_id']} regra indefinida", flush=True)
-        return {}
+        return dict.fromkeys(zeradas, Decimal(0))
     return {**dict.fromkeys(zeradas, Decimal(0)),
             **{b["provider_bill_id"]: _fracao(pay, total) for b, total, pay, _ in fech}}
 
@@ -182,9 +188,12 @@ update credit_bills set paid_amount = least(paid_amount, greatest(total, 0)),
    and (paid_amount > greatest(total, 0) or (total > 0 and paid_amount >= total and status <> 'paid'))"""
 
 
-def quitar_pelo_banco(user_id: int, connection_id: int) -> None:
+def quitar_pelo_banco(user_id: int, connection_id: int, frescas: set[tuple[str, str]]) -> None:
     """Grava em `credit_bills.paid_amount` o que o banco pagou, por cartão da conexão. Escrita ABSOLUTA
-    (idempotente), e depois o aparo do pago que ficou acima do total. Quem chama segura o `pluggy_item_lock` do item: é ele a trava, sem `for update`."""
+    (idempotente), e depois o aparo do pago que ficou acima do total. Só entram na cobertura as faturas
+    cujo par (`provider_account_id`, `provider_bill_id`) está em `frescas` (o que `salvar_faturas_do_banco` gravou
+    neste sync): linha velha de `of_card_bills` (fatura que veio inválida ou sumiu da Pluggy) não pode se combinar com
+    compras novas. Cartão sem fatura fresca não calcula cobertura. O aparo roda em TODO cartão da conexão. Quem chama segura o `pluggy_item_lock` do item: é ele a trava, sem `for update`."""
     hoje = today_tz()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
@@ -196,7 +205,8 @@ def quitar_pelo_banco(user_id: int, connection_id: int) -> None:
         for card in [r["id"] for r in cur.fetchall()]:
             p = {"card": card, "uid": user_id}
             cur.execute(FATURAS_DO_CARTAO_SQL, p)
-            frac = cobertura(cur.fetchall(), hoje)
+            frac = cobertura([f for f in cur.fetchall()
+                              if (f["provider_account_id"], f["provider_bill_id"]) in frescas], hoje)
             if frac:
                 cur.execute(COMPRAS_POR_FATURA_SQL, p)
                 pagos = pago_por_fatura_pig(cur.fetchall(), frac)

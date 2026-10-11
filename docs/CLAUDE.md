@@ -1139,7 +1139,12 @@ fatura FECHADA (`(closing_date or due_date) < hoje`) de moeda BRL ou nula, com t
 misturados na lista de pagamentos = ilegível), teto 1 por fatura (fechada com total <= 0,05 entra com parte 0: o banco zerou
 a fatura, o pago das compras dela volta a 0, e ela não pontua a regra), escrita
 absoluta (sobrescreve o pago manual antigo). Regra por conta: a conta só quita quando a leitura "própria" (pagamento de
-Y quita Y) vence a "N+1"; empate ou N+1 melhor não quita e loga `regra indefinida`. Limites: sem crédito carregado
+Y quita Y) vence a "N+1"; empate ou N+1 melhor não quita as faturas de valor e loga `regra indefinida`, mas as zeradas
+(total <= 0,05) entram sempre. Só quita com fatura FRESCA (frescor por fatura): `salvar_faturas_do_banco` devolve os pares
+(conta, fatura) válidos gravados naquele sync e `quitar_pelo_banco(user_id, connection_id, frescas)` só usa as linhas
+de `of_card_bills` desses pares. Fatura que veio inválida, que sumiu da Pluggy (fica gravada, o upsert nunca apaga),
+`/bills` que falhou ou gravação que levantou ficam fora: a linha velha não pode se combinar com compra nova; o aparo
+roda em todo cartão mesmo assim. Limites: sem crédito carregado
 para a fatura seguinte, rotativo (encargos) não tratado, conexão PAUSED não sincroniza, compra sem espelho na conta
 atual não conta, estorno sem `billId` faz o pago parcial sair maior (o teto é o total do Pig). O desfazer de
 pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também no cartão OF: o próximo sync regrava o
