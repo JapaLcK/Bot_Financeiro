@@ -56,7 +56,7 @@ from core.services.cashflow_snapshot import carregar
 from db.of_card_bills import (
     APARAR_PAGO_SQL, COMPRAS_POR_FATURA_SQL, TOL, _fracao, cobertura, pago_por_fatura_pig, quitar_pelo_banco)
 from tests._fusao_of_helpers import ia_fora, manda, uid_pro  # noqa: F401 (fixtures)
-from tests._of_cash_helpers import conecta, q
+from tests._of_cash_helpers import conecta, pagamento_legado, q
 from tests.test_of_card_bills_ingestao import carimbado, gravadas
 from tests.test_of_cartao_sinal import BANCO, CARTAO, ITEM, pluggy_tx
 from utils_date import today_tz
@@ -423,7 +423,7 @@ def test_reconexao_recalcula_pela_conta_nova_sem_dobrar(uid_pro, rodar):
 def test_pago_manual_antigo_e_sobrescrito(uid_pro, rodar):
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])
     cid, nome, bill = manual_pay_alvo(uid_pro)
-    db.pay_bill_amount(uid_pro, cid, nome, 50, bill_id=bill)               # pagamento manual de antes
+    pagamento_legado(uid_pro, cid, nome, 50, bill)               # pagamento manual de antes
     assert pig(uid_pro)[1][1] == 50
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])                     # o banco não pagou
     assert pig(uid_pro)[1] == (120, 0, "open")
@@ -434,7 +434,7 @@ def test_pago_manual_antigo_e_sobrescrito(uid_pro, rodar):
 def test_desfazer_pagamento_manual_e_o_proximo_sync_devolve_o_pago_do_banco(uid_pro, rodar):
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120)])
     cid, nome, bill = manual_pay_alvo(uid_pro)
-    launch = db.pay_bill_amount(uid_pro, cid, nome, 50, bill_id=bill)["launch_id"]
+    launch = pagamento_legado(uid_pro, cid, nome, 50, bill)["launch_id"]
     rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 120)])                # o banco grava o total
     assert pig(uid_pro)[1] == (120, 120, "paid")
 
@@ -452,7 +452,7 @@ def test_desfazer_pagamento_em_fatura_sem_espelho_do_cartao_of_volta_a_zero(uid_
     cid, nome, _ = manual_pay_alvo(uid_pro)
     db.add_credit_purchase(uid_pro, cid, 30, "outros", "manual", dia(200))
     antiga = q("select id from credit_bills where user_id=%s order by period_start limit 1", (uid_pro,), True)[0]["id"]
-    launch = db.pay_bill_amount(uid_pro, cid, nome, 30, bill_id=antiga)["launch_id"]
+    launch = pagamento_legado(uid_pro, cid, nome, 30, antiga)["launch_id"]
     db.delete_launch_and_rollback(uid_pro, launch)
     assert pig(uid_pro)[0] == (30, 0, "open")
 

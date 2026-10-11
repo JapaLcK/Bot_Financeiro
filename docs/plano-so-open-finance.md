@@ -14,7 +14,7 @@
 |---|---|
 | 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
 | 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
-| 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2a (`quitar_pelo_banco`: grava `paid_amount` do cartão OF pelo `of_card_bills`, regra por conta; vale para todo usuário com banco conectado, sem flag) em código. PR 2b (recusar o "pagar fatura" manual no cartão do banco) só depois da consulta V1 das outras contas, da consulta pós-deploy do 2a (abaixo) e do 2a em produção. Vem antes de travar o "pagar fatura" do cartão OF. |
+| 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2a (`quitar_pelo_banco`: grava `paid_amount` do cartão OF pelo `of_card_bills`, regra por conta; vale para todo usuário com banco conectado, sem flag) em código. PR 2b (recusar o "pagar fatura" manual no cartão do banco, `db.cards.pay_bill_amount` levanta `CartaoDoBanco`; WhatsApp, IA e /app) **entrou no B2 por decisão do dono em 2026-10-11, sem esperar a consulta pós-deploy do 2a**; limite aceito: banco com "regra indefinida" ou N+1 deixa no máximo UMA fatura fechada em aberto até o PR da regra N+1. |
 | 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
 | 3. Esconder o legado | A fazer. |
@@ -70,7 +70,7 @@ inventário.
 | 2 | **Lançamento na Carteira (dinheiro vivo)**, saldo inicial e ajuste | os mesmos do #1, mais /app `mono:8622` (initial-balance) e `mono:8657` (adjust-balance) | o mesmo do #1 | **Fica** (é a exceção) |
 | 3 | **Cartão de crédito manual**: criar, editar dias, limite, apagar | WA `credit.py:1548` (fluxo), criação em `:1574`, `:1832`, `:1954`, `:2231`; limite `:2018`, `:2737`; apagar `:1710`, `:1876`. /app `frontend/routes/cards.py:35`, `:234`, `:318` | `db/cards.py:157` `create_card`, `:193` `update_card_meta`, `:457`, `:307` → `credit_cards` | **Não** |
 | 4 | **Compra manual no cartão** (à vista e parcelada) | WA `credit.py:976` → `:924`/`:1042`; IA `add_credit_purchase` (`tools/cards.py:537`); /app `POST /launches` tipo `credito` `mono:7617`/`:7659` | `db/cards.py:902`, `:944` → `credit_transactions`, `credit_bills` | Só para quem tem a chave (Q36). Sem a chave e com OF, grava se o cartão for manual (`credit.py:773`). |
-| 5 | **Pagar fatura à mão** (do cartão manual **e** do cartão OF) | WA `credit.py:118`, `:161`, `:2799`; IA `pay_bill` (`tools/cards.py:590`, chamada em `:378`); /app `frontend/routes/cards.py:645` | `db/cards.py:1671` `pay_bill_amount` → `credit_bills.paid_amount/status` (+ `launches`; com OF, delta 0) | **Não.** É hoje o **único** jeito de uma fatura OF ficar paga (§3.3). |
+| 5 | **Pagar fatura à mão** (do cartão manual **e** do cartão OF) | WA `credit.py:118`, `:161`, `:2799`; IA `pay_bill` (`tools/cards.py:590`, chamada em `:378`); /app `frontend/routes/cards.py:645` | `db/cards.py:1671` `pay_bill_amount` → `credit_bills.paid_amount/status` (+ `launches`; com OF, delta 0) | Cartão OF: **sim** (B2, `CartaoDoBanco` em `pay_bill_amount`; o banco quita pelo `quitar_pelo_banco`). Cartão manual: não. |
 | 6 | **Parcelamento**: antecipar, editar, apagar grupo, desfazer compra | /app `cards.py:410`, `:465`, `:427`; WA `credit.py:2079`, `:2100`; IA `delete_launch` (`tools/launches.py:521`, `:535`) | `db/cards.py:1358`, `:1560`, `:1188`, `:1121` | Não |
 | 7 | **Importar fatura OFX** | WA `core/handle_incoming.py:999`, `:1009`; /app `mono:8121` → `:8164` | `core/services/ofx_service.py:154` → `db/cards.py:2151` | Só para quem tem a chave |
 | 8 | **Importar extrato OFX/CSV/PDF**. É input manual: é arquivo, não OF. | WA `handle_incoming.py:998`, `:1013`, `:1058`; /app `mono:8166` | `ofx_service.py:74`, `statement_service.py:95` → `db/accounts.py:2453` (`launches`) + `set_balance` (`ofx_import.py:266`, `statement_import.py:714`) | Só para quem tem a chave |
@@ -261,14 +261,14 @@ feita (§9).
   desconectar, no cartão que sobrevive. **Consequência aceita pelo dono do aparo:** uma compra
   manual ainda não paga no cartão do banco pode passar a aparecer paga, porque o pago do banco das compras que saem
   fica no limite do total (exemplo do teste `test_desconectar_apara_o_pago_do_cartao_que_sobrevive`: total 150 com
-  120 pago vira 30 com 30 pago, `paid`). Fica para depois: a recusa do "pagar fatura" manual no cartão do banco
-  (PR 2b), rotativo/encargos e o ramo N+1.
+  120 pago vira 30 com 30 pago, `paid`). A recusa do "pagar fatura" manual no cartão do banco (PR 2b) entrou no B2 (decisão do
+  dono, 2026-10-11). Fica para depois: rotativo/encargos e o ramo N+1 (até lá, no máximo uma fatura fechada fica "a pagar").
   **Limite:** o aparo também alcança a fatura corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma
   compra some é aparado ao total, como o `rebuild_bill_totals` já faz.
   **Limite:** se o `billId` de uma compra passa a apontar para fatura do banco que não está no `/bills` (a aberta), a
   fatura antiga do Pig mantém o pago anterior até a do banco fechar e voltar no `/bills`. O `transactions/deleted` da
   única compra casada é coberto por `test_compra_casada_que_sumiu_nao_deixa_pago_velho`.
-- **Consulta pós-deploy do 2a (condição para o PR 2b).** Só leitura, transação `read only`, só contagens, por
+- **Consulta pós-deploy do 2a (era a condição do PR 2b; dispensada em 2026-10-11, segue válida como conferência).** Só leitura, transação `read only`, só contagens, por
   conta anônima (sem id de conta nem de usuário), com o dono e avisando antes, pelo `railway`, como a V1. Compara,
   nas faturas de cartão OF fechadas há mais de 40 dias (cobre o prazo até o vencimento, que passa de 10 dias em
   alguns cartões, e a folga para o banco informar o pagamento), as que o Pig deu por pagas (`pagas`) com as que

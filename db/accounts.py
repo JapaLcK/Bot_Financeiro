@@ -85,9 +85,14 @@ def add_launch_and_update_balance(
     apply_delta: bool = True,
     *,
     origem: str | None = ORIGEM_CARTEIRA,
+    cur=None,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
+
+    `cur`: cursor de uma transação do chamador (ex.: `pay_bill_amount`, que já segura o
+    `for update` da fatura). Então tudo roda nele e NÃO há `commit` aqui: quem chamou commita o
+    débito junto do resto. Sem `cur` (todos os outros chamadores), abre a conexão e commita.
     Regra: despesa → saldo -= valor; receita → saldo += valor.
 
     `extra_efeitos` é mesclado dentro de `efeitos` jsonb. Use pra que
@@ -125,31 +130,33 @@ def add_launch_and_update_balance(
     if extra_efeitos:
         efeitos.update(extra_efeitos)
 
+    def grava(cur):
+        cur.execute(
+            "update accounts set balance = balance + %s where user_id=%s returning balance",
+            (delta, user_id),
+        )
+        new_bal = cur.fetchone()["balance"]
+
+        cur.execute(
+            """
+            insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos,
+                                 is_internal_movement, origem)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            returning id, user_seq
+            """,
+            (user_id, tipo, v, alvo, nota, cat, criado_em,
+             Json(efeitos), is_internal_movement, origem),
+        )
+        row = cur.fetchone()
+        return row["id"], row["user_seq"], new_bal
+
+    if cur is not None:
+        return grava(cur)
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "update accounts set balance = balance + %s where user_id=%s returning balance",
-                (delta, user_id),
-            )
-            new_bal = cur.fetchone()["balance"]
-
-            cur.execute(
-                """
-                insert into launches(user_id, tipo, valor, alvo, nota, categoria, criado_em, efeitos,
-                                     is_internal_movement, origem)
-                values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                returning id, user_seq
-                """,
-                (user_id, tipo, v, alvo, nota, cat, criado_em,
-                 Json(efeitos), is_internal_movement, origem),
-            )
-            row = cur.fetchone()
-            launch_id = row["id"]
-            user_seq = row["user_seq"]
-
+        with conn.cursor() as c:
+            resultado = grava(c)
         conn.commit()
-
-    return launch_id, user_seq, new_bal
+    return resultado
 
 
 def list_launches(user_id: int, limit: int = 10):

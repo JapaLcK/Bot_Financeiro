@@ -41,6 +41,7 @@ from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_l
 from utils_date import _tz, today_tz
 from utils_text import fmt_brl
 
+from .. import streaming
 from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from ._base import Tool
 
@@ -111,6 +112,16 @@ def _mes_inteiro(start: date, end: date) -> tuple[int, int] | None:
     if end == prox - timedelta(days=1) or (hoje.replace(day=1) == inicio and end >= hoje):
         return start.year, start.month
     return None  # ponytail: vários meses seguem como período livre (só launches)
+
+
+def _recusa_se_for_do_card(start: date, end: date) -> dict[str, Any] | None:
+    """No app, mês inteiro (passado ou corrente) é o card `categorias` (`mes_detalhes`). O mês
+    futuro o `show_card` recusa (`mes_pedido`): esse segue pela tool, senão não tem saída."""
+    mes = _mes_inteiro(start, end)
+    hoje = today_tz()
+    if streaming.ativo() and mes and mes <= (hoje.year, hoje.month):
+        return {"error": "mes_inteiro_no_card", "message": "use show_card categorias"}
+    return None
 
 
 def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dict[str, Any]]:
@@ -299,6 +310,22 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _tendencia(despesas: list[float]) -> dict[str, Any]:
+    """Último mês vs média dos anteriores: +/-10% = subindo/descendo, senão estável.
+    Pura: serve ao `get_spending_trend` e ao card `renda` (mesmas linhas, `cards.py`)."""
+    out = {"tendencia_despesa": "estavel", "variacao_pct": 0.0}
+    if len(despesas) >= 2:
+        media_ant = sum(despesas[:-1]) / (len(despesas) - 1)
+        if media_ant > 0:
+            var = ((despesas[-1] - media_ant) / media_ant) * 100
+            out["variacao_pct"] = round(var, 1)
+            if var > 10:
+                out["tendencia_despesa"] = "subindo"
+            elif var < -10:
+                out["tendencia_despesa"] = "descendo"
+    return out
+
+
 def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     from core.services.plan_service import plan_gate_ok
     if not plan_gate_ok(user_id, "financial_comparison"):
@@ -318,8 +345,7 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "media_despesa": 0.0,
         "media_receita": 0.0,
         "saldo_medio": 0.0,
-        "tendencia_despesa": "estavel",
-        "variacao_pct": 0.0,
+        **_tendencia([r["despesa"] for r in rows]),
     }
     if rows:
         total_d = sum(r["despesa"] for r in rows)
@@ -328,18 +354,6 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         summary["media_despesa"] = round(total_d / n, 2)
         summary["media_receita"] = round(total_r / n, 2)
         summary["saldo_medio"] = round((total_r - total_d) / n, 2)
-
-        if n >= 2:
-            anteriores = rows[:-1]
-            ultimo = rows[-1]
-            media_ant = sum(r["despesa"] for r in anteriores) / len(anteriores)
-            if media_ant > 0:
-                var = ((ultimo["despesa"] - media_ant) / media_ant) * 100
-                summary["variacao_pct"] = round(var, 1)
-                if var > 10:
-                    summary["tendencia_despesa"] = "subindo"
-                elif var < -10:
-                    summary["tendencia_despesa"] = "descendo"
 
     return {
         "months": months,
@@ -433,6 +447,9 @@ def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         limit = 5
     limit = max(1, min(limit, 20))
 
+    if erro := _recusa_se_for_do_card(start, end):
+        return erro
+
     start, end, por_fatura, extra = _janela(user_id, start, end)
     rows = db.get_top_expense_categories(user_id, start, end, limit, by_bill_month=por_fatura)
     return {
@@ -457,6 +474,9 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     categoria = (args.get("categoria") or "").strip()
     if not categoria:
         return {"error": "categoria obrigatória"}
+
+    if erro := _recusa_se_for_do_card(start, end):
+        return erro
 
     start, end, _, extra = _janela(user_id, start, end)  # o cartão já é pela fatura; muda a janela
     total = db.sum_spent_in_category_period(user_id, categoria, start, end)
