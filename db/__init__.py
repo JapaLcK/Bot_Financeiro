@@ -409,6 +409,7 @@ from .mfa import (
 )
 
 # ── Chat IA (Pro v1 Fase 2 Bloco A) ──────────────────────────────────────────
+from .ai_feedback import set_feedback as ai_set_feedback
 from .ai_chat import (
     append_message as ai_append_message,
     get_recent_messages as ai_get_recent_messages,
@@ -606,7 +607,7 @@ __all__ = [
     "mfa_cleanup_expired_challenges",
     "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
     # ai chat
-    "ai_append_message", "ai_get_recent_messages", "ai_get_last_message", "ai_get_last_messages", "ai_append_message_if_last",
+    "ai_append_message", "ai_set_feedback", "ai_get_recent_messages", "ai_get_last_message", "ai_get_last_messages", "ai_append_message_if_last",
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
     "ai_consume_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",

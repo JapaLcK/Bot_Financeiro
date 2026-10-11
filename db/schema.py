@@ -1844,6 +1844,10 @@ def init_db():
         create index if not exists idx_ai_messages_user_created
           on ai_messages (user_id, created_at desc)
         """,
+        # 👍 = 1, 👎 = -1, NULL = sem nota. Sem CHECK de propósito: a borda valida
+        # (`Literal[-1, 1] | None`), e uma constraint num ALTER em tabela cheia
+        # varre tudo no boot.
+        "alter table ai_messages add column if not exists feedback smallint",
 
         # Pending action: write proposto pela IA aguardando confirmação do user.
         # Quando o user manda "sim" / "confirma", a ação é executada e a linha

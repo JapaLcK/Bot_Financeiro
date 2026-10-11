@@ -130,6 +130,7 @@ from frontend.routes.retomada import (
     COOKIE as RETOMADA_COOKIE, Comprador, comprador, email_mascarado, router as retomada_router,
 )
 from frontend.routes.agents import router as agents_router
+from frontend.routes.ai_chat import AIChatBody, criar_router as criar_ai_chat_router, texto_valido
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
 from frontend.routes.categories import router as categories_router
@@ -7128,10 +7129,6 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
 AI_CHAT_MONTHLY_LIMIT = int(os.getenv("AI_CHAT_MONTHLY_LIMIT", "1000"))
 
 
-class AIChatBody(BaseModel):
-    message: str
-
-
 @app.post("/ai/chat")
 @limiter.limit("12/minute")
 async def ai_chat(
@@ -7146,11 +7143,7 @@ async def ai_chat(
     Body: {"message": "texto"}
     Response: {"reply": "...", "usage": {"used": N, "limit": N}}
     """
-    text = (body.message or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="message vazio.")
-    if len(text) > 2000:
-        raise HTTPException(status_code=400, detail="message muito longo (máx 2000 chars).")
+    text = texto_valido(body.message)
 
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -7219,6 +7212,10 @@ def _db_ai_usage(user_id: int) -> int:
     """Lê o contador sem incrementar (pra devolver no response)."""
     from db import ai_get_usage_this_month
     return ai_get_usage_this_month(user_id)
+
+
+# ─── Chat do app em streaming + 👍👎 → frontend/routes/ai_chat.py ────────────
+app.include_router(criar_ai_chat_router(require_pro_feature("ai_chat")))
 
 
 @app.get("/conta")

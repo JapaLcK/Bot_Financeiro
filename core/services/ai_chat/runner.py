@@ -35,11 +35,14 @@ import os
 import time
 import unicodedata
 from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 import db
+from db.ai_turno import trava_do_turno
 
+from . import streaming
 from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
@@ -58,6 +61,52 @@ _TURN_WRITE_ATTEMPTED = ContextVar("ai_chat_turn_write_attempted", default=False
 # Saída que não é a pergunta dela (erro, prazo, texto fixo de código) a cancela:
 # pendência viva e invisível vira um "sim" que executa o que o usuário não viu.
 _PENDENCIA_DO_TURNO: ContextVar[dict | None] = ContextVar("ai_chat_pendencia_do_turno", default=None)
+
+
+# Notas do turno para o `chat_detalhado` (id da resposta gravada, se foi parado,
+# se os chips podem sair). None fora dele: `_nota` não faz nada.
+_ESTADO: ContextVar[dict | None] = ContextVar("ai_chat_estado_do_turno", default=None)
+
+# Linha `system` quando o usuário para a resposta: sem ela a IA do turno seguinte
+# não saberia por que a conversa parou depois da pergunta.
+_INTERROMPIDA = "O usuário interrompeu esta resposta."
+
+# Um turno por usuário por vez (`db/ai_turno.py`). Quem chega no meio de outro
+# espera até aqui: cobre o resto de uma rodada de tools depois de um "parar" (o
+# cancelamento é cooperativo) e, no WhatsApp, o ia_primeiro (prazo de turno 15 s,
+# então espera menos). Estourou: nada é gravado nem reservado.
+TURNO_ESPERA_S = 10.0
+TURNO_ESPERA_IA_PRIMEIRO_S = 3.0
+# Um "sim"/"não" que chegou SEM pendência e, ao pegar a vez, encontra uma que o
+# turno anterior armou: o usuário nunca viu essa pergunta. Ela segue viva.
+_PERGUNTA_NOVA = ("🐷 Tem uma pergunta nova esperando a sua confirmação, logo acima. "
+                  "Confere ela e me responde.")
+_OCUPADO = "🐷 Ainda estou terminando a resposta anterior. Tenta de novo em instantes."
+
+
+class TurnoOcupado(Exception):
+    """`ia_primeiro` não conseguiu a vez: quem chama devolve a mensagem ao roteador."""
+
+
+@dataclass
+class Resultado:
+    reply: str | None
+    message_id: int | None = None   # linha `assistant` da resposta; None = nada gravado
+    interrompida: bool = False
+    sugerivel: bool = False         # texto do modelo, sem pendência armada, sem parada
+
+
+def _nota(**kw) -> None:
+    estado = _ESTADO.get()
+    if estado is not None:
+        estado.update(kw)
+
+
+def _grava_assistant(user_id: int, content: str | None, **kw) -> int:
+    """`ai_append_message(..., "assistant", ...)` anotando o id da linha."""
+    mid = db.ai_append_message(user_id, "assistant", content, **kw)
+    _nota(message_id=mid)
+    return mid
 
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -172,14 +221,50 @@ def chat(
     nenhuma escrita foi tentada no turno — quem chama devolve a mensagem ao
     roteador. Com escrita tentada, nunca None. False = comportamento de sempre.
     """
-    token_pf = CURRENT_PLATFORM.set(platform)
-    token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
-    try:
-        return _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
-                           ia_primeiro=ia_primeiro)
-    finally:
-        CURRENT_USER_MESSAGE.reset(token_msg)
-        CURRENT_PLATFORM.reset(token_pf)
+    return chat_detalhado(user_id, user_text, monthly_limit=monthly_limit,
+                          platform=platform, ia_primeiro=ia_primeiro).reply
+
+
+def chat_detalhado(
+    user_id: int,
+    user_text: str,
+    *,
+    monthly_limit: int = 1000,
+    platform: str = "dashboard",
+    ia_primeiro: bool = False,
+) -> Resultado:
+    """`chat` com o que o stream precisa saber do turno: o id da resposta gravada
+    (para o 👍👎), se foi interrompido e se cabem chips."""
+    # Um "sim"/"não" responde ao que o usuário VIA ao chegar (`visto`). Se essa
+    # pendência some enquanto o turno espera a vez (outra janela consumiu), é o
+    # `_CAS_PERDIDO` de sempre; se aparece uma que ele não via (o turno anterior a
+    # armou), o "sim" não a confirma. Sem pendência antes nem depois, é conversa
+    # comum e segue ao modelo.
+    confirma = is_confirm(user_text or "") or is_cancel(user_text or "")
+    visto = db.ai_get_pending_action(int(user_id)) if confirma else None
+    with trava_do_turno(int(user_id), TURNO_ESPERA_IA_PRIMEIRO_S if ia_primeiro else TURNO_ESPERA_S) as vez:
+        if not vez:
+            if ia_primeiro:
+                raise TurnoOcupado()
+            return Resultado(_OCUPADO)
+        if visto is not None and not _ainda_e_a_mesma(int(user_id), visto):
+            return Resultado(_CAS_PERDIDO)
+        if confirma and visto is None and db.ai_get_pending_action(int(user_id)) is not None:
+            return Resultado(_PERGUNTA_NOVA)
+        token_pf = CURRENT_PLATFORM.set(platform)
+        token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
+        estado: dict = {}
+        token_estado = _ESTADO.set(estado)
+        try:
+            reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
+                                ia_primeiro=ia_primeiro)
+        finally:
+            _ESTADO.reset(token_estado)
+            CURRENT_USER_MESSAGE.reset(token_msg)
+            CURRENT_PLATFORM.reset(token_pf)
+    # Erro não é resposta: sem id, o app não oferece 👍👎 nele.
+    mid = None if reply == ERROR_MSG else estado.get("message_id")
+    return Resultado(reply, mid, estado.get("interrompida", False), estado.get("sugerivel", False))
 
 
 # Quem PERDE o CAS do `ai_consume_pending_action` sabe exatamente um fato: a
@@ -200,6 +285,9 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
     user_text = (user_text or "").strip()
     if not user_text:
         return "🐷 Manda sua pergunta aí, tô ouvindo."
+    if streaming.cancelado():  # desconectou antes de começar: nada reservado nem gravado
+        _nota(interrompida=True)
+        return None
 
     # 1. Pending action? Processa primeiro.
     pending = db.ai_get_pending_action(user_id)
@@ -220,7 +308,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
                 return _CAS_PERDIDO
             result = _execute_pending(user_id, pending)
             db.ai_append_message(user_id, "user", user_text)
-            db.ai_append_message(user_id, "assistant", result)
+            _grava_assistant(user_id, result)
             return result
         if is_cancel(user_text):
             # Perder o CAS aqui NÃO é "não havia nada pra cancelar": outra
@@ -235,7 +323,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             else:
                 msg = _CAS_PERDIDO
             db.ai_append_message(user_id, "user", user_text)
-            db.ai_append_message(user_id, "assistant", msg)
+            _grava_assistant(user_id, msg)
             return msg
         # User mudou de assunto — descarta pending e segue com nova msg.
         # Aqui o retorno é ignorado DE PROPÓSITO: perder o CAS significa que
@@ -252,7 +340,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
     fast = _try_fast_path(user_id, user_text)
     if fast is not None:
         db.ai_append_message(user_id, "user", user_text)
-        db.ai_append_message(user_id, "assistant", fast)
+        _grava_assistant(user_id, fast)
         return fast
 
     # 4. Monta contexto + chama OpenAI
@@ -302,9 +390,18 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
         if ia_primeiro and final_text in (None, ERROR_MSG) and not _TURN_WRITE_ATTEMPTED.get():
             return _desiste(user_id)
         final_text = final_text or ERROR_MSG
-        db.ai_append_message(user_id, "assistant", final_text)
+        _grava_assistant(user_id, final_text)
         completed = True
         return final_text
+    except streaming.Interrompido:
+        # Parar NÃO devolve a vaga (`completed`/`final_text` abaixo): a OpenAI
+        # já foi paga. O texto parcial não é gravado.
+        _cancela_pendencia_do_turno(user_id)
+        db.ai_append_message(user_id, "system", _INTERROMPIDA)
+        _nota(interrompida=True)
+        # Parar só conta na cota se a OpenAI já foi chamada; antes disso a vaga volta.
+        completed, final_text = bool((_ESTADO.get() or {}).get("llm")), _INTERROMPIDA
+        return None
     except Exception:
         _cancela_pendencia_do_turno(user_id)
         if not ia_primeiro:
@@ -439,6 +536,8 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
     inicio_do_turno = len(messages)
     prazo = time.monotonic() + IA_PRIMEIRO_PRAZO_TURNO
     for _ in range(MAX_TOOL_LOOPS):
+        if streaming.cancelado():  # (a) topo da volta: a rodada anterior já está inteira
+            raise streaming.Interrompido()
         if ia_primeiro and time.monotonic() > prazo:
             logger.warning("ai_chat ia_primeiro: prazo do turno estourado pra user %s", user_id)
             _cancela_pendencia_do_turno(user_id)
@@ -447,8 +546,10 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         # requisição); fora dele, a chamada de sempre.
         por_requisicao = ({"timeout": min(IA_PRIMEIRO_TIMEOUT, prazo - time.monotonic())}
                           if ia_primeiro else {})
+        _nota(llm=True)
         try:
-            resp = client.chat.completions.create(
+            resp = streaming.completar(
+                client,
                 model=MODEL,
                 temperature=TEMPERATURE,
                 messages=messages,
@@ -456,10 +557,16 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 max_tokens=MAX_TOKENS,
                 **por_requisicao,
             )
+        except streaming.Interrompido:
+            raise
         except Exception as e:
             logger.error("erro na chamada OpenAI: %s", e)
             _cancela_pendencia_do_turno(user_id)
             return ERROR_MSG
+
+
+        if streaming.cancelado():  # (c) a resposta chegou: nada dela é gravado
+            raise streaming.Interrompido()
 
         msg = resp.choices[0].message
         tool_calls = getattr(msg, "tool_calls", None) or []
@@ -476,12 +583,14 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
             _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
             if not final:
                 _cancela_pendencia_do_turno(user_id)
+            else:
+                _nota(sugerivel=_PENDENCIA_DO_TURNO.get() is None)
             return final or ERROR_MSG
 
         # Persistir assistant message com tool_calls — limpa `###`
         # também aqui pra não contaminar histórico futuro.
         cleaned_content = strip_markdown_headers(msg.content)
-        tool_calls_dicts = [tc.model_dump() for tc in tool_calls]
+        tool_calls_dicts = [tc if isinstance(tc, dict) else tc.model_dump() for tc in tool_calls]
 
         # Override defensivo (Bug 2): se o LLM escolheu `report_out_of_scope`
         # mas o user pediu tendência ("tendência deste ano", "evolução mês a
@@ -509,12 +618,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
             _cancela_pendencia_do_turno(user_id)
             return _UM_POR_VEZ
 
-        db.ai_append_message(
-            user_id,
-            "assistant",
-            cleaned_content,
-            tool_calls=tool_calls_dicts,
-        )
+        _grava_assistant(user_id, cleaned_content, tool_calls=tool_calls_dicts)
         messages.append({
             "role": "assistant",
             "content": cleaned_content,
@@ -538,6 +642,8 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 history_content, this_terminal = _NAO_EXECUTADA, None
             else:
                 antes = _PENDENCIA_DO_TURNO.get()
+                if streaming.ativo():
+                    streaming.passo(name, getattr(get_tool(name), "is_write", False))
                 history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
             db.ai_append_message(
@@ -568,6 +674,10 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
             # que outra tool da rodada sobrescreveu não a mostram.
             if pergunta is None or pergunta is not _PENDENCIA_DO_TURNO.get():
                 _cancela_pendencia_do_turno(user_id)
+            # Parou durante as tools: a pergunta não chega a quem a faria, e o
+            # "sim" seguinte executaria o que ele nunca viu. `_chat_inner` desarma.
+            if streaming.cancelado():
+                raise streaming.Interrompido()
             return terminal_msg
 
     logger.warning("MAX_TOOL_LOOPS atingido pra user %s", user_id)
@@ -758,4 +868,4 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
     return (json.dumps(result, ensure_ascii=False, default=str), None)
 
 
-__all__ = ["chat"]
+__all__ = ["chat", "chat_detalhado", "Resultado"]

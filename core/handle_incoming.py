@@ -414,10 +414,13 @@ def _ia_primeiro(uid: int, text: str):
     if wa_ia_primeiro.fica_no_roteador(uid, text) or not ai_chat_allowed(uid):
         return None
     from core.services import ai_chat
+    from core.services.ai_chat.runner import TurnoOcupado
     try:
         reply = ai_chat.chat(uid, text, monthly_limit=ai_monthly_limit_for(uid),
                              platform="whatsapp", ia_primeiro=True)
         motivo = "a IA desistiu sem escrever"
+    except TurnoOcupado:
+        reply, motivo = None, "a IA estava terminando a resposta anterior"
     except Exception as exc:
         logger.warning("ia_primeiro: a IA levantou pra user %s: %s", uid, exc)
         reply, motivo = None, f"a IA levantou {type(exc).__name__}"
