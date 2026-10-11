@@ -33,7 +33,14 @@ CONTROLES NEGATIVOS (rodados na entrega, ver o relato):
     test_of_card_bills_ingestao::test_retorno_so_traz_os_pares_das_faturas_validas vermelho;
   • `cobertura` devolvendo `{}` no empate (em vez das zeradas) -> zeradas_entram_mesmo_sem_regra_nem_fatura_de_valor e
     banco_corrige_fatura_paga_para_total_zero_zera_o_pago_mesmo_sem_regra vermelhos;
-  • `card_id` tirado do where de `APARAR_PAGO_SQL` -> aparo_nao_toca_cartao_manual_do_mesmo_usuario vermelho.
+  • `card_id` tirado do where de `APARAR_PAGO_SQL` -> aparo_nao_toca_cartao_manual_do_mesmo_usuario vermelho;
+  • CASE do `_GRAVA_SQL` sem o `or novo <= 0` (volta a 'open' só com `b.total > novo`) ->
+    banco_zera_compra_e_fatura_paga_reabre_com_total_zero vermelho (fica 0/0 'paid' com paid_at velho);
+  • `APARAR_PAGO_SQL` sem o ramo da zumbi (`status = 'paid' and least(paid_amount, greatest(total, 0)) <= 0`) ->
+    aparo_reabre_fatura_zumbi_total_zero_paga vermelho; positivos: aparo_nao_toca_fatura_aberta_com_pago_menor e a 100/100
+    paga que nao reabre (banco_zera_compra_e_fatura_paga_reabre_com_total_zero, 1a fatura);
+  • CASE do `APARAR_PAGO_SQL` com `total > 0` no lugar de `total > 0 and paid_amount > 0` ->
+    aparo_reabre_fatura_paga_com_total_positivo_e_pago_zero vermelho.
 """
 from __future__ import annotations
 
@@ -44,6 +51,7 @@ import pytest
 
 import core.services.pluggy_sync as ps
 import db
+import db.of_card_bills as of_card_bills
 from core.services.cashflow_snapshot import carregar
 from db.of_card_bills import (
     APARAR_PAGO_SQL, COMPRAS_POR_FATURA_SQL, TOL, _fracao, cobertura, pago_por_fatura_pig, quitar_pelo_banco)
@@ -359,6 +367,21 @@ def test_banco_estorna_tudo_zera_o_pago(uid_pro, rodar):
     assert pig(uid_pro)[1] == (0, 0, "open")
 
 
+def test_banco_zera_compra_e_fatura_paga_reabre_com_total_zero(uid_pro, rodar, monkeypatch):
+    """Convencao da casa (db/cards.py): 'paid' so com paid > 0. Compra casada + estorno igual levam o total do Pig a 0 e o
+    banco a fatura a 0 (pago 0), mas a linha chega ao UPDATE ainda 'paid' com paid_at velho: tem de voltar a 'open' com
+    paid_at nulo, nao ficar zumbi. O aparo sai de cena de proposito (e quem tambem cura o caso): isola o CASE do `_GRAVA_SQL`.
+    Positivo: a 100/100 vizinha continua paga."""
+    c = ("c1", 100, "bill-1", 35)
+    rodar(uid_pro, [P0, c, ("e1", -100, "bill-1", 34)], [F0, fat("bill-1", 0)])
+    assert pig(uid_pro) == [(100, 100, "paid"), (0, 0, "open")]
+    q("update credit_bills set status='paid', paid_at='2026-01-01' where user_id=%s and total=0", (uid_pro,))
+    monkeypatch.setattr(of_card_bills, "APARAR_PAGO_SQL", "select %s, %s")
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), FRESCAS)
+    assert pig(uid_pro) == [(100, 100, "paid"), (0, 0, "open")]
+    assert q("select paid_at from credit_bills where user_id=%s and total=0", (uid_pro,), True)[0]["paid_at"] is None
+
+
 def test_banco_total_zero_com_compra_casada_nao_quita(uid_pro, rodar):
     rodar(uid_pro, [P0, ("c1", 500, "bill-1", 35)], [F0, fat("bill-1", 0)])
     assert pig(uid_pro)[1] == (500, 0, "open")
@@ -580,6 +603,26 @@ def test_aparo_nao_toca_fatura_aberta_com_pago_menor(uid_pro, rodar):
     assert [(r["total"], r["paid_amount"], r["status"]) for r in antes] == [(100, 100, "paid"), (120, 60, "open")]
     q(APARAR_PAGO_SQL, (uid_pro, cid))
     assert q("select id, total, paid_amount, status, paid_at from credit_bills where user_id=%s order by id", (uid_pro,), True) == antes
+
+
+def test_aparo_reabre_fatura_zumbi_total_zero_paga(uid_pro, rodar):
+    """Fatura do cartao do banco com total 0, pago 0, 'paid' e paid_at velho (sem compra casada: so o aparo a alcanca,
+    por `quitar_pelo_banco`) volta a 'open' com paid_at nulo. Positivo: a 100/100 paga vizinha nao reabre."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 60)])
+    q("update credit_bills set total=0, paid_amount=0, status='paid', paid_at='2026-01-01'"
+      " where user_id=%s and total=120", (uid_pro,))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), set())
+    assert pig(uid_pro) == [(100, 100, "paid"), (0, 0, "open")]
+    assert q("select paid_at from credit_bills where user_id=%s and total=0", (uid_pro,), True)[0]["paid_at"] is None
+
+
+def test_aparo_reabre_fatura_paga_com_total_positivo_e_pago_zero(uid_pro, rodar):
+    """Zumbi com total > 0: 120, pago 0, 'paid' e paid_at velho. O aparo reabre ('open', paid_at nulo) em vez de re-fechar."""
+    rodar(uid_pro, [P0, P1], [F0, fat("bill-1", 120, 60)])
+    q("update credit_bills set paid_amount=0, status='paid', paid_at='2026-01-01' where user_id=%s and total=120", (uid_pro,))
+    quitar_pelo_banco(uid_pro, _conexao(uid_pro), set())
+    assert pig(uid_pro) == [(100, 100, "paid"), (120, 0, "open")]
+    assert q("select paid_at from credit_bills where user_id=%s and total=120", (uid_pro,), True)[0]["paid_at"] is None
 
 
 def test_aparo_nao_toca_cartao_manual_do_mesmo_usuario(uid_pro, rodar):

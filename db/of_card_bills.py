@@ -168,24 +168,26 @@ _GRAVA_SQL = f"""
 update credit_bills b set
   paid_amount = {_NOVO},
   status = case when b.total > 0 and {_NOVO} >= b.total then 'paid'
-                when b.status = 'paid' and b.total > {_NOVO} then 'open' else b.status end,
+                when b.status = 'paid' and (b.total > {_NOVO} or {_NOVO} <= 0) then 'open' else b.status end,
   paid_at = case when b.total > 0 and {_NOVO} >= b.total then coalesce(b.paid_at, now())
-                 when b.status = 'paid' and b.total > {_NOVO} then null else b.paid_at end
+                 when b.status = 'paid' and (b.total > {_NOVO} or {_NOVO} <= 0) then null else b.paid_at end
  from unnest(%(ids)s::bigint[], %(pagos)s::numeric[]) as v(id, pago)
  where b.id = v.id and b.user_id = %(uid)s and b.card_id = %(card)s
    and (b.paid_amount is distinct from {_NOVO}
         or (b.total > 0 and {_NOVO} >= b.total and b.status <> 'paid')
-        or (b.status = 'paid' and b.total > {_NOVO}))"""
+        or (b.status = 'paid' and (b.total > {_NOVO} or {_NOVO} <= 0)))"""
 
 
 # Pago que não cabe no total do Pig (compra casada que saiu, ou o banco que se foi) é aparado nele. Cobre também pago ==
-# total com a fatura ainda aberta. Roda a cada quitação e no disconnect (db/open_finance.py). Params: (user_id, card_id).
+# total com a fatura ainda aberta. Fatura 'paid' com pago <= 0 (zumbi, de qualquer total) reabre como 'open' com paid_at nulo, pela
+# convenção de db/cards.py de que 'paid' exige pago > 0 (ramo `status = 'paid' and least(...) <= 0` do where). Roda a cada quitação e no disconnect (db/open_finance.py). Params: (user_id, card_id).
 APARAR_PAGO_SQL = """
 update credit_bills set paid_amount = least(paid_amount, greatest(total, 0)),
-  status = case when total > 0 then 'paid' else status end,
-  paid_at = case when total > 0 then coalesce(paid_at, now()) else paid_at end
+  status = case when total > 0 and paid_amount > 0 then 'paid' when status = 'paid' then 'open' else status end,
+  paid_at = case when total > 0 and paid_amount > 0 then coalesce(paid_at, now()) when status = 'paid' then null else paid_at end
  where user_id = %s and card_id = %s
-   and (paid_amount > greatest(total, 0) or (total > 0 and paid_amount >= total and status <> 'paid'))"""
+   and (paid_amount > greatest(total, 0) or (total > 0 and paid_amount >= total and status <> 'paid')
+        or (status = 'paid' and least(paid_amount, greatest(total, 0)) <= 0))"""
 
 
 def quitar_pelo_banco(user_id: int, connection_id: int, frescas: set[tuple[str, str]]) -> None:

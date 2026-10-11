@@ -1151,7 +1151,7 @@ pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também n
 valor do banco nas faturas que ele possui, e nas outras (compra manual sem espelho) o desconto é o correto; com a conexão
 PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Pago que não cabe no total do Pig é
 aparado (`APARAR_PAGO_SQL`: `paid_amount` ao total, `paid`/`paid_at`; pega pago > total e também pago == total com a fatura
-ainda aberta): a cada `quitar_pelo_banco`, em todo cartão da conexão (cobre, no próximo sync, a única compra casada que some por
+ainda aberta; fatura 'paid' com pago <= 0, a zumbi (de qualquer total, inclusive total > 0 com pago 0), reabre como 'open' com `paid_at` nulo, igual o `UPDATE` da quitação, pela convenção de `db/cards.py` de que 'paid' exige pago > 0): a cada `quitar_pelo_banco`, em todo cartão da conexão (cobre, no próximo sync, a única compra casada que some por
 `transactions/deleted`, que só reabre a fatura e deixaria total 0 com pago velho; o webhook não resincroniza, e até o sync a fatura
 fica com pago acima do total), e ao desconectar, no cartão que sobrevive;
 consequência aceita pelo dono: compra manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago

@@ -255,7 +255,7 @@ feita (§9).
   (escrita absoluta); pagamento acima do total não vira crédito na fatura seguinte por enquanto (isso se decide
   pela consulta V1); só quita, sem realinhar o calendário de fechamento. O desfazer de pagamento
   manual desconta como antes (o próximo sync regrava o valor do banco nas faturas dele). O pago que fica acima do total do Pig é
-  aparado nele (com `paid_at`; também quando pago == total e a fatura segue aberta, `APARAR_PAGO_SQL`): a cada quitação,
+  aparado nele (com `paid_at`; também quando pago == total e a fatura segue aberta, `APARAR_PAGO_SQL`; 'paid' sem pago > 0, a zumbi (de qualquer total, inclusive total > 0 com pago 0), volta a 'open' com `paid_at` nulo, no aparo e no `UPDATE` da quitação): a cada quitação,
   em todo cartão da conexão (no próximo sync, a única compra casada que some por `transactions/deleted` não deixa total 0 com pago
   velho; o webhook não resincroniza, e até o sync a fatura fica com pago acima do total), e ao
   desconectar, no cartão que sobrevive. **Consequência aceita pelo dono do aparo:** uma compra
