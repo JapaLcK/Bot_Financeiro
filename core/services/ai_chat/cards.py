@@ -94,6 +94,7 @@ def registro() -> dict[str, Card]:
     from api.v2.previsao import _assinante as gate_previsao, previsao
     from api.v2.resumo_mes import mes_pedido, resumo
     from core.ai_patterns import INSIGHTS_CACHE_TTL_SECONDS, _cache_kind, _get_cached
+    from core.services.ai_chat.tools.launches import _tendencia
     from core.services.metas_status import status_metas
     from core.services.plan_service import forecast_horizons_for, plan_gate_ok
     from db import compute_evolution
@@ -175,7 +176,10 @@ def registro() -> dict[str, Card]:
                        todo("cartoes")),
         "parcelas": Card(lambda uid, a: [(None, {"parcelas": {
             "ok": True, "installments": list_installment_groups_detailed(uid, "urgency")}})], todo("parcelas")),
-        "renda": Card(renda, todo("renda"), gate_renda),
+        # `tendencia` = a do get_spending_trend (oculta no app), das mesmas linhas do bloco. Como lá,
+        # só entram os meses com movimento: o `compute_evolution` preenche os N meses com zero.
+        "renda": Card(renda, lambda r: {**r["renda"], "tendencia": _tendencia(
+            [m["expense"] for m in r["renda"]["evolution"] if m["income"] or m["expense"]])}, gate_renda),
         "piggy": Card(piggy, todo("insights"), gate_piggy),
     }
 

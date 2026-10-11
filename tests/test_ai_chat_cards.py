@@ -93,7 +93,9 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
     args, _ = CASOS[card]
     r, (bloco,), _ = mostrar(a, card=card, **args)
     assert r["card"] == card and len(r["abas"]) == len(bloco["abas"])
-    assert _numeros(r) <= _numeros(bloco)
+    # `tendencia` (renda) é derivada das mesmas linhas e sai da conta; o B2 testa a derivação
+    sem_tendencia = [{k: v for k, v in a.items() if k != "tendencia"} for a in r["abas"]]
+    assert _numeros(sem_tendencia) <= _numeros(bloco)
     assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "rendimento", "piggy"), \
         "a visão do modelo tem número como número"
     json.dumps(r)  # serializa como o runner serializa

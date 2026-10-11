@@ -39,7 +39,7 @@ def test_passo_delta_e_id_da_resposta_gravada(monkeypatch, pro_user_id):
 
 
 def test_reinicio_quando_a_rodada_vira_tool_call(monkeypatch, pro_user_id):
-    openai_falso(monkeypatch, rodada("Vou olhar seu saldo.", ("get_balance", {})), rodada("Pronto."))
+    openai_falso(monkeypatch, rodada("Vou olhar seu saldo.", ("list_pockets", {})), rodada("Pronto."))
     r, ev, _ = executar(pro_user_id, "saldo?")
     tipos = [e["tipo"] for e in ev]
     assert tipos.index("reinicio") < tipos.index("passo") and tipos.count("reinicio") == 1

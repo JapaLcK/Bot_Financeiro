@@ -1384,6 +1384,7 @@
       Compras desta fatura
     </div>
     <div class="bill-tx-list" id="bill-detail-tx"></div>
+    <p class="msub" id="bill-detail-pay-aviso" style="display:none;margin:12px 0 8px"></p>
     <div class="modal-acts">
       <button class="btn-cancel" type="button" onclick="closeBillDetailModal()">Fechar</button>
       <button class="btn-save" type="button" id="bill-detail-pay-btn" onclick="payFromDetail()">Pagar fatura</button>
@@ -1403,7 +1404,7 @@
     </div>
 
     <div id="pay-bill-empty" class="empty" style="display:none;padding:18px 4px;text-align:center;font-size:.85rem;color:var(--text-2)">
-      <i class="ph ph-tray" aria-hidden="true"></i> Nenhuma fatura em aberto.
+      <i class="ph ph-tray" aria-hidden="true"></i> <span id="pay-bill-empty-txt"></span>
     </div>
 
     <div class="bill-list" id="pay-bill-list"></div>

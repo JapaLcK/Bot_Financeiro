@@ -9,15 +9,15 @@ from decimal import Decimal
 
 import db
 import db.cards as cards
-from tests._of_cash_helpers import q
+from tests._of_cash_helpers import pagamento_legado, q
 from tests.test_of_cartao_sinal import A, B, faturas, linhas, regra_velha, rodar  # noqa: F401
 from tests._fusao_of_helpers import ia_fora, uid_pro  # noqa: F401 (fixtures)
 
 
 def paga(uid):
-    """O que o usuário fez: pagar a fatura em aberto pelo caminho de produção."""
+    """O que o usuário fez ANTES de o cartão ser do banco: pagar a fatura em aberto."""
     card = q("select id, name from credit_cards where user_id=%s", (uid,), True)[0]
-    db.pay_bill_amount(uid, card["id"], card["name"], None)
+    pagamento_legado(uid, card["id"], card["name"], None, None)
     return card["id"]
 
 

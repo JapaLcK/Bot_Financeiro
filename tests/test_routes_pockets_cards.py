@@ -8,6 +8,7 @@ pela cadeia de auth do dashboard. Não toca dados — 401 sem token.
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
+from utils_date import billing_period_for_close_day, today_tz
 
 client = TestClient(dashboard.app)
 
@@ -99,10 +100,11 @@ def _seed(uid):
     )
     db.pocket_deposit_from_account(uid, "viagem", 300.0, "aporte")
     card_id = db.create_card(uid, "Nubank", 5, 12, credit_limit=5000.0)
+    ps, pe = billing_period_for_close_day(today_tz(), 5)  # a fatura do período de hoje (nada de data fixa)
     with get_conn() as conn, conn.cursor() as cur:
         for ps, pe, st, tot, paid in (
-            ("2026-09-06", "2026-10-05", "paid", 400, 400),
-            ("2026-10-06", "2026-11-05", "open", 800, 100),
+            (ps - timedelta(days=31), ps - timedelta(days=1), "paid", 400, 400),
+            (ps, pe, "open", 800, 100),
         ):
             cur.execute(
                 "insert into credit_bills (user_id, card_id, period_start, period_end,"
@@ -133,7 +135,8 @@ def _esperado_cartoes(card_id):
         "id": card_id, "name": "Nubank", "color": None, "flag": None, "last4": None,
         "closing_day": 5, "due_day": 12, "credit_limit": 5000.0, "is_default": False,
         "open_bill": {"id": None, "total": 800.0, "paid_amount": 100.0,
-                      "due_amount": 700.0, "period_end": "2026-11-05"},
+                      "due_amount": 700.0,
+                      "period_end": billing_period_for_close_day(today_tz(), 5)[1].isoformat()},
         "credit_used": 700.0, "credit_available": 4300.0,
     }]
 

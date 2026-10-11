@@ -1,13 +1,6 @@
-"""Faturas encerram sua transação antes da conferência de declarações BANK."""
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
-from threading import Event, local
-
-import psycopg
+"""Pagamento manual em cartão do banco é recusado (CartaoDoBanco), nada é gravado e a fase credit segue; faturas encerram sua transação antes da conferência de declarações BANK."""
 import pytest
 import db
-import db.cards as cards
-import db.open_finance as of
 import db.bank_movements as movements
 from tests.test_bank_movements import _bank, _deposit, _tx
 
@@ -35,7 +28,9 @@ def _credit(uid, cid):
 
 @pytest.mark.parametrize("operation", ["sync", "disconnect"])
 @pytest.mark.parametrize("with_declaration", [False, True])
-def test_pagamento_e_fase_credit_progridem_sem_ciclo(user_id, monkeypatch, operation, with_declaration):
+def test_pagamento_manual_recusado_sem_gravar_e_fase_credit_segue(user_id, operation, with_declaration):
+    """Cartão do banco não tem pagamento manual (`CartaoDoBanco`): a recusa vem antes de qualquer
+    lock/escrita, então a fase credit (sync ou disconnect) conclui sem esperar e nada é gravado."""
     cid, source = _bank(user_id)
     if with_declaration:
         _deposit(user_id, source)
@@ -46,50 +41,16 @@ def test_pagamento_e_fase_credit_progridem_sem_ciclo(user_id, monkeypatch, opera
     else:
         # Cartão vazio com fatura real: DELETE card chega ao cascade de bill.
         _write("delete from credit_transactions where id=%s", (linked["imported_credit_tx_id"],))
-    bill_locked, credit_write = Event(), Event()
-    phase = local()
-    original_payment, original_execute, original_conn = cards.add_launch_and_update_balance, psycopg.Cursor.execute, of.get_conn
-    def payment_write(*args, **kwargs):
-        bill_locked.set()
-        assert credit_write.wait(5)
-        return original_payment(*args, **kwargs)
-    def execute(cur, query, *args, **kwargs):
-        sql = str(query).strip().lower()
-        if getattr(phase, "credit", False) and sql.startswith(("update credit_bills", "delete from credit_cards")):
-            credit_write.set()
-        return original_execute(cur, query, *args, **kwargs)
-    @contextmanager
-    def bounded(*args, **kwargs):
-        with original_conn(*args, **kwargs) as conn:
-            conn.execute("set local statement_timeout='1500ms'")
-            yield conn
-    monkeypatch.setattr(cards, "add_launch_and_update_balance", payment_write)
-    monkeypatch.setattr(psycopg.Cursor, "execute", execute)
-    monkeypatch.setattr(of, "get_conn", bounded)
-    def update():
-        assert bill_locked.wait(5)
-        phase.credit = True
-        if operation == "sync":
-            return db.sync_imported_open_finance_updates(user_id, cid)
-        return db.disconnect_open_finance_connection(user_id, cid)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        paid = pool.submit(db.pay_bill_amount, user_id, linked["card_id"], "Cartão", 100, linked["bill_id"])
-        changed = pool.submit(update)
-        res_pago = paid.result(timeout=10)
-        assert res_pago
-        assert changed.result(timeout=10)
-    # NO CONTRATO NOVO o pagamento da fatura com Open Finance ativo NÃO debita
-    # a Carteira Piggy (o débito ocorre no banco): saldo intacto e o lançamento
-    # do pagamento carrega `delta_conta: 0` + origem `bank`. O que este teste
-    # mede é a ordenação de travas (pagamento × fase credit sem ciclo) — a
-    # aritmética do saldo é só o efeito observável do pagamento ter passado.
+    with pytest.raises(db.CartaoDoBanco, match="pagamento manual de fatura"):
+        db.pay_bill_amount(user_id, linked["card_id"], "Cartão", 100, linked["bill_id"])
+    assert db.sync_imported_open_finance_updates(user_id, cid) if operation == "sync" \
+        else db.disconnect_open_finance_connection(user_id, cid)
     assert db.get_balance(user_id) == 1000
-    efeitos = _row("select efeitos from launches where id=%s", (res_pago["launch_id"],))["efeitos"]
-    assert efeitos["delta_conta"] == 0
-    assert efeitos["funding_source"]["kind"] == "bank"
+    assert _row("select count(*) as n from launches where user_id=%s and categoria='pagamento_fatura'",
+                (user_id,))["n"] == 0
     if operation == "sync":
         bill = _row("select total,paid_amount from credit_bills where id=%s", (linked["bill_id"],))
-        assert bill == {"total": 200, "paid_amount": 100}
+        assert bill == {"total": 200, "paid_amount": 0}
     else:
         assert _row("select id from credit_cards where id=%s", (linked["card_id"],)) is None
     if with_declaration:

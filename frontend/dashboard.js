@@ -10299,6 +10299,8 @@ async function openBillDetailModal(billId, opts = {}) {
   document.getElementById("bill-detail-tx").innerHTML = "";
   document.getElementById("bill-detail-pay-btn").disabled = true;
   document.getElementById("bill-detail-pay-btn").dataset.billId = "";
+  document.getElementById("bill-detail-pay-btn").style.display = "";
+  document.getElementById("bill-detail-pay-aviso").style.display = "none";
   _renderBillNav();
   overlay.classList.add("open");
 
@@ -10340,6 +10342,11 @@ async function openBillDetailModal(billId, opts = {}) {
     payBtn.disabled = !(b.due_amount > 0);
     payBtn.dataset.billId = String(b.id || "");
     payBtn.textContent = b.due_amount > 0 ? "Pagar fatura" : "Sem saldo em aberto";
+    // Cartão do banco não tem pagamento manual: a frase no lugar do botão.
+    payBtn.style.display = b.aviso_pagamento ? "none" : "";
+    const avisoEl = document.getElementById("bill-detail-pay-aviso");
+    avisoEl.textContent = b.aviso_pagamento || "";
+    avisoEl.style.display = b.aviso_pagamento ? "" : "none";
   } catch (err) {
     document.getElementById("bill-detail-title").textContent = "Erro";
     document.getElementById("bill-detail-sub").textContent = err.message || "Não foi possível carregar a fatura.";
@@ -10576,7 +10583,9 @@ async function openPayBillModal(opts) {
     if (!res.ok) throw new Error(await readApiError(res));
     const data = await res.json();
     payBillState.balance = Number(data.balance) || 0;
-    payBillState.bills = data.bills || [];
+    payBillState.bills = (data.bills || []).filter(b => !b.aviso_pagamento);  // cartão do banco não se paga à mão
+    // Só havia fatura de cartão do banco: o estado vazio explica, em vez de dizer que não há fatura.
+    payBillState.aviso = payBillState.bills.length ? "" : ((data.bills || []).find(b => b.aviso_pagamento) || {}).aviso_pagamento || "";
     document.getElementById("pay-bill-balance").textContent = fmtBillValue(payBillState.balance);
     renderPayBillList();
     if (opts.preselectId) selectPayBill(Number(opts.preselectId));
@@ -10591,6 +10600,7 @@ function renderPayBillList() {
   const el = document.getElementById("pay-bill-list");
   if (!list.length) {
     el.innerHTML = "";
+    document.getElementById("pay-bill-empty-txt").textContent = payBillState.aviso || "Nenhuma fatura em aberto.";
     document.getElementById("pay-bill-empty").style.display = "";
     return;
   }

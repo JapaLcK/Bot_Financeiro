@@ -379,7 +379,7 @@ fixo de toda mudança de layout.
   toma o mutex quando o pagamento é financiado/ligado ao banco (Open Finance); nesse caso
   `pay_bill_amount` × undo trava sem deadlock detectável, e o par pagamento de fatura que
   ganha ligação OF depois do preview × sync dá DeadlockDetected quando o undo chega
-  primeiro. Sem Open Finance a ordem é fatura → conta (`pay_bill_amount` segura a fatura
+  primeiro. Sem Open Finance a ordem é cartão (FOR SHARE) → fatura → conta → launches (`pay_bill_amount` segura a fatura
   enquanto outra conexão pede `accounts`) e cruza com reset, merge e `delete_user_data`; o
   próprio `pay_bill_amount` também pode travar sem deadlock detectável contra reset e merge; (2)
   `delete_user_data` apaga Open Finance e crédito ANTES de `accounts` (mutex antes do laço,

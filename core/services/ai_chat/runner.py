@@ -47,8 +47,9 @@ from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
+from .cards import MAX_MESES_RENDA
 from .system_prompt import ADENDO_CARDS, SYSTEM_PROMPT
-from .tools import SCHEMAS, SCHEMAS_APP, get_tool
+from .tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP, get_tool
 from .tools._base import OUTRO_PEDIDO
 
 
@@ -644,7 +645,8 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 history_content, this_terminal = _NAO_EXECUTADA, None
             else:
                 antes = _PENDENCIA_DO_TURNO.get()
-                if streaming.ativo() and name != "show_card":  # o show_card manda o próprio passo, junto do bloco
+                # o show_card manda o próprio passo, junto do bloco; a oculta é recusada no despacho
+                if streaming.ativo() and name != "show_card" and name not in OCULTAS_NO_APP:
                     streaming.passo(name, getattr(get_tool(name), "is_write", False))
                 history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
@@ -745,8 +747,12 @@ def _maybe_override_trend(tool_calls_dicts: list[dict[str, Any]], user_id: int) 
                 months,
                 user_id,
             )
-            fn["name"] = "get_spending_trend"
-            fn["arguments"] = json.dumps({"months": months})
+            if streaming.ativo():  # no app a tendência é o card renda (`get_spending_trend` está oculta)
+                fn["name"] = "show_card"
+                fn["arguments"] = json.dumps({"card": "renda", "quantidade_meses": min(months, MAX_MESES_RENDA)})
+            else:
+                fn["name"] = "get_spending_trend"
+                fn["arguments"] = json.dumps({"months": months})
 
 
 def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, str | None]:
@@ -768,6 +774,13 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
     if tool is None:
         return (
             json.dumps({"error": f"tool desconhecida: {name}"}, ensure_ascii=False),
+            None,
+        )
+    if name in OCULTAS_NO_APP and streaming.ativo():  # o modelo imitou o histórico do WhatsApp
+        return (
+            json.dumps({"error": "indisponivel_no_app",
+                        "message": "Não existe no app. Use show_card (contas, hero, fatura, parcelas, renda)."},
+                       ensure_ascii=False),
             None,
         )
 

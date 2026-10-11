@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from core.observability import _log_falha
 from db import create_card
 from db.cartoes_resumo import resumo_cartoes
-from db.cards import MAX_CARD_NAME_LEN
+from db.cards import MAX_CARD_NAME_LEN, MSG_FATURA_DO_BANCO
 from db.open_finance import merged_wallet_delta_async
 from db.reconciliation import wallet_guard_delta_async
 from core.services.funding import carteira_txt
@@ -448,6 +448,8 @@ def _serialize_bill(row: dict) -> dict:
         "total": total,
         "paid_amount": paid,
         "due_amount": due,
+        # o front esconde "Pagar fatura" e mostra esta frase (cartão do banco: quem paga é o banco)
+        "aviso_pagamento": MSG_FATURA_DO_BANCO if row.get("do_banco") else None,
     }
 
 
@@ -482,7 +484,8 @@ async def list_bills_route(
                 f"""
                 SELECT b.id, b.card_id, c.name AS card_name,
                        b.period_start, b.period_end, b.status,
-                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount
+                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount,
+                       (c.open_finance_account_id IS NOT NULL) AS do_banco
                 FROM credit_bills b
                 JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id = %s
@@ -522,7 +525,8 @@ async def get_bill_detail_route(request: Request, user_id: int, bill_id: int):
                 """
                 SELECT b.id, b.card_id, c.name AS card_name,
                        b.period_start, b.period_end, b.status,
-                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount
+                       b.total, COALESCE(b.paid_amount, 0) AS paid_amount,
+                       (c.open_finance_account_id IS NOT NULL) AS do_banco
                 FROM credit_bills b
                 JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id=%s AND b.id=%s
@@ -578,7 +582,7 @@ async def pay_bill_route(
     shared.authorize_dashboard_access(request, user_id)
     import sys
     sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
-    from db import pay_bill_amount
+    from db import CartaoDoBanco, pay_bill_amount
 
     # Carrega fatura + saldo
     async with await shared.db_connect() as conn:
@@ -588,7 +592,7 @@ async def pay_bill_route(
                 SELECT b.id, b.card_id, c.name AS card_name,
                        b.period_end, b.total,
                        COALESCE(b.paid_amount, 0) AS paid_amount,
-                       b.status
+                       b.status, c.open_finance_account_id
                 FROM credit_bills b
                 JOIN credit_cards c ON c.id = b.card_id AND c.user_id = b.user_id
                 WHERE b.user_id=%s AND b.id=%s
@@ -613,6 +617,10 @@ async def pay_bill_route(
             delta_tela = await merged_wallet_delta_async(cur, int(user_id))
     balance = (float(acc["balance"]) if acc else 0.0) + float(delta_fundido)
     balance_tela = (float(acc["balance"]) if acc else 0.0) + float(delta_tela)
+
+    # Antes da guarda de saldo: a recusa certa é a do banco, não "saldo insuficiente".
+    if bill["open_finance_account_id"] is not None:
+        raise HTTPException(status_code=409, detail=MSG_FATURA_DO_BANCO)
 
     total = float(bill["total"] or 0)
     paid = float(bill["paid_amount"] or 0)
@@ -656,6 +664,8 @@ async def pay_bill_route(
         res = await asyncio.to_thread(
             pay_bill_amount, int(user_id), int(bill["card_id"]), card_name, float(amount), int(bill_id)
         )
+    except CartaoDoBanco as exc:  # a adoção pelo banco entre a leitura acima e o pagamento
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao pagar fatura: {exc}") from exc
 

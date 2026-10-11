@@ -24,7 +24,7 @@ from db import (
     get_card_by_id,
     get_card_credit_usage,
     get_card_id_by_name,
-    get_current_open_bill_id,
+    fatura_a_pagar,
     get_default_card_id,
     get_installment_group_summaries,
     get_pending_action,
@@ -41,6 +41,7 @@ from db import (
     CartaoDoBanco,
     CompraDoBanco,
     MSG_CARTAO_DO_BANCO,
+    MSG_FATURA_DO_BANCO,
     undo_credit_transaction,
     undo_installment_group,
     update_card_reminder_settings,
@@ -139,6 +140,8 @@ def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str
             f"Conta agora: {fmt_brl(res['new_balance'])}\n"
             f"ID lançamento: #{_display_id_for(user_id, res['launch_id'])}"
         )
+    except CartaoDoBanco as e:
+        return f"🏦 {e}"
     except Exception as e:
         return f"❌ Erro ao pagar fatura: {e}"
 
@@ -239,7 +242,12 @@ def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
             if r["period_end"].month == month and (year is None or r["period_end"].year == year)
         ]
 
+    do_banco = [r for r in candidates if r["open_finance_account_id"] is not None]
+    candidates = [r for r in candidates if r["open_finance_account_id"] is None]
+
     if not candidates:
+        if do_banco:
+            return f"🏦 {MSG_FATURA_DO_BANCO}"
         if card_id is not None and month is not None:
             ref = f"{_MONTH_NAMES_PT[month - 1]}" + (f"/{year}" if year else "")
             return f"📭 Nenhuma fatura em aberto desse cartão para {ref}."
@@ -250,7 +258,8 @@ def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
             return f"📭 Nenhuma fatura em aberto para {ref}."
         return "📭 Nenhuma fatura em aberto."
 
-    if len(candidates) == 1:
+    # Se o filtro tirou faturas do banco, o usuário pediu algo ambíguo: pergunta, não paga a sobrante.
+    if len(candidates) == 1 and not do_banco:
         return _execute_pay_bill(user_id, candidates[0], amount)
 
     return _ask_which_bill(user_id, candidates, amount)
@@ -2613,7 +2622,8 @@ def handle(user_id: int, text: str) -> str | None:
             paid = float(bill.get("paid_amount", 0) or 0)
             due = max(0.0, total - paid)
             lines = [
-                f"💳 Fatura atual ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
+                f"💳 Fatura {'atual' if bill['period_start'] <= today_tz() <= bill['period_end'] else 'a pagar'}"
+                f" ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
                 f"Total: {fmt_brl(total)} | Pago: {fmt_brl(paid)} | Em aberto: {fmt_brl(due)}",
             ]
             # mostra uso do limite se definido
@@ -2821,25 +2831,29 @@ def handle(user_id: int, text: str) -> str | None:
         amount = float(parse_money(amount_match.group(1))) if amount_match and parse_money(amount_match.group(1)) else None
 
         try:
-            bill_id = get_current_open_bill_id(user_id, card_id, today_tz())
+            bill_id = fatura_a_pagar(user_id, card_id, today_tz())
             if not bill_id:
                 return "📭 Nenhuma fatura aberta para pagar."
 
-            res = pay_bill_amount(user_id, card_id, resolved_name, amount, bill_id=bill_id)
+            # `resolved_name` vale "padrão" quando o cartão não é nomeado.
+            nome = (get_card_by_id(user_id, card_id) or {}).get("name") or resolved_name
+            res = pay_bill_amount(user_id, card_id, nome, amount, bill_id=bill_id)
             if isinstance(res, dict) and res.get("error") == "amount_too_high":
                 return (
                     f"❌ Valor maior que o em aberto ({fmt_brl(res['due'])}).\n"
-                    f"Use: *pagar fatura {resolved_name} com saldo {fmt_brl(res['due'])}*"
+                    f"Use: *pagar fatura {nome} com saldo {fmt_brl(res['due'])}*"
                 )
             if isinstance(res, dict) and res.get("error") == "invalid_amount":
                 return "❌ Valor inválido."
             if not res:
                 return "📭 Nada para pagar."
             return (
-                f"✅ Pagamento da fatura **{resolved_name}** realizado!\n"
+                f"✅ Pagamento da fatura **{_format_bill_label({'card_name': nome, 'period_end': res['period_end']})}** realizado!\n"
                 f"Valor pago: {fmt_brl(res['paid'])}\n"
                 f"Saldo da conta: {fmt_brl(res['new_balance'])}"
             )
+        except CartaoDoBanco as e:
+            return f"🏦 {e}"
         except Exception as e:
             return f"❌ Erro ao pagar fatura: {e}"
 

@@ -1,10 +1,12 @@
 """Resumo dos cartões (fatura aberta, limite usado) em 1 query agregada.
 
-Extraído de frontend/routes/cards.py::cards_summary_route sem mudar a conta:
-a rota chama esta função, e o show_card do chat da IA (PR B1) vai chamar a mesma.
+Extraído de frontend/routes/cards.py::cards_summary_route: a rota e o show_card do chat da IA
+chamam esta mesma função.
 """
 
+from db.cards import fatura_a_pagar
 from db.connection import get_conn
+from utils_date import today_tz
 
 
 def resumo_cartoes(user_id: int) -> list[dict]:
@@ -16,41 +18,6 @@ def resumo_cartoes(user_id: int) -> list[dict]:
                   c.id, c.name, c.color, c.flag, c.last4,
                   c.closing_day, c.due_day, c.credit_limit,
                   (u.default_card_id = c.id) as is_default,
-                  coalesce((
-                    select b.total - coalesce(b.paid_amount, 0)
-                      from credit_bills b
-                     where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
-                     order by b.period_end desc
-                     limit 1
-                  ), 0) as open_due,
-                  coalesce((
-                    select b.total
-                      from credit_bills b
-                     where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
-                     order by b.period_end desc
-                     limit 1
-                  ), 0) as open_total,
-                  coalesce((
-                    select b.paid_amount
-                      from credit_bills b
-                     where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
-                     order by b.period_end desc
-                     limit 1
-                  ), 0) as open_paid,
-                  (
-                    select b.id
-                      from credit_bills b
-                     where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
-                     order by b.period_end desc
-                     limit 1
-                  ) as open_bill_id,
-                  (
-                    select b.period_end
-                      from credit_bills b
-                     where b.card_id = c.id and b.user_id = c.user_id and b.status = 'open'
-                     order by b.period_end desc
-                     limit 1
-                  ) as open_period_end,
                   coalesce((
                     select sum(b.total - coalesce(b.paid_amount, 0))
                       from credit_bills b
@@ -65,11 +32,27 @@ def resumo_cartoes(user_id: int) -> list[dict]:
             )
             rows = cur.fetchall()
 
+    # A fatura do card é a que vence primeiro (`fatura_a_pagar`, a mesma do `get_open_bill`,
+    # do "pagar com saldo" e do `pay_bill`), não a última aberta por `period_end`. Fora do `with`
+    # acima: cada `fatura_a_pagar` abre a própria conexão, e aninhar seguraria 2 do pool.
+    # ponytail: 1 consulta por cartão; um agregado só se alguém tiver dezenas de cartões.
+    hoje = today_tz()
+    ids = {int(r["id"]): fatura_a_pagar(user_id, int(r["id"]), hoje) for r in rows}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "select id, total, coalesce(paid_amount, 0) as paid_amount, period_end"
+                " from credit_bills where user_id = %s and id = any(%s)",
+                (user_id, [i for i in ids.values() if i]),
+            )
+            faturas = {int(b["id"]): b for b in cur.fetchall()}
+
     out = []
     for r in rows:
         credit_limit = float(r["credit_limit"]) if r.get("credit_limit") is not None else None
         usage = float(r["credit_used"] or 0)
         available = (credit_limit - usage) if credit_limit is not None else None
+        f = faturas.get(ids[int(r["id"])])
         out.append({
             "id": int(r["id"]),
             "name": r["name"],
@@ -81,11 +64,11 @@ def resumo_cartoes(user_id: int) -> list[dict]:
             "credit_limit": credit_limit,
             "is_default": bool(r.get("is_default")),
             "open_bill": {
-                "id": int(r["open_bill_id"]) if r.get("open_bill_id") else None,
-                "total": float(r["open_total"] or 0),
-                "paid_amount": float(r["open_paid"] or 0),
-                "due_amount": float(r["open_due"] or 0),
-                "period_end": r["open_period_end"].isoformat() if r.get("open_period_end") else None,
+                "id": int(f["id"]) if f else None,
+                "total": float(f["total"] or 0) if f else 0.0,
+                "paid_amount": float(f["paid_amount"] or 0) if f else 0.0,
+                "due_amount": float((f["total"] or 0) - f["paid_amount"]) if f else 0.0,
+                "period_end": f["period_end"].isoformat() if f else None,
             },
             "credit_used": usage,
             "credit_available": available,
