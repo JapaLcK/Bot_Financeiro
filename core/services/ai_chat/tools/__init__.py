@@ -5,6 +5,7 @@ Cada módulo neste pacote exporta uma lista `TOOLS: list[Tool]` (ver `_base.py`)
 Este `__init__` agrega todas e expõe utilitários comuns:
 
   SCHEMAS         — list[dict] no formato OpenAI, passada em tools=[]
+  SCHEMAS_APP     — SCHEMAS + show_card (só o stream do app)
   WRITE_TOOL_NAMES — set de nomes de tools que precisam de pending action
   get_tool(name)   — lookup; retorna Tool ou None
 
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import balance, bills, budgets, cards, categories, investments, launches, meta, pockets, reports, simulator
+from . import balance, bills, budgets, cards, categories, investments, launches, meta, mostrar_card, pockets, reports, simulator
 from ._base import Tool
 
 
@@ -34,10 +35,13 @@ _ALL_TOOLS: list[Tool] = [
 ]
 
 
-_BY_NAME: dict[str, Tool] = {t.name: t for t in _ALL_TOOLS}
+# `show_card` resolve em `get_tool` mas só o app a oferece (`SCHEMAS_APP`, com emissor).
+_BY_NAME: dict[str, Tool] = {t.name: t for t in (*_ALL_TOOLS, *mostrar_card.TOOLS)}
 
 
 SCHEMAS: list[dict[str, Any]] = [t.schema for t in _ALL_TOOLS]
+
+SCHEMAS_APP: list[dict[str, Any]] = [*SCHEMAS, *(t.schema for t in mostrar_card.TOOLS)]
 
 
 WRITE_TOOL_NAMES: set[str] = {t.name for t in _ALL_TOOLS if t.is_write}
@@ -47,4 +51,4 @@ def get_tool(name: str) -> Optional[Tool]:
     return _BY_NAME.get(name)
 
 
-__all__ = ["SCHEMAS", "WRITE_TOOL_NAMES", "get_tool", "Tool"]
+__all__ = ["SCHEMAS", "SCHEMAS_APP", "WRITE_TOOL_NAMES", "get_tool", "Tool"]

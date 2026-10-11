@@ -13,11 +13,15 @@ from db.open_finance_onboarding import get_open_finance_onboarding
 from . import mes_detalhes, patrimonio, rendimento
 
 
-def usuario_do_app(request: Request) -> int:
-    uid = usuario_assinante(request)
+def exigir_onboarding(uid: int) -> None:
     if not get_open_finance_onboarding(uid)["completed"]:
         raise HTTPException(status_code=403,
                             detail={"error": "open_finance_onboarding_required"})
+
+
+def usuario_do_app(request: Request) -> int:
+    uid = usuario_assinante(request)
+    exigir_onboarding(uid)
     return uid
 
 

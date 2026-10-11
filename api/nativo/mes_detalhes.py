@@ -32,12 +32,20 @@ class Guardado(BaseModel):
     cobertura: Literal["movimentos_registrados"]
 
 
+class Origens(BaseModel):
+    cartao: Dinheiro
+    banco: Dinheiro
+    carteira: Dinheiro
+    registro_antigo: Dinheiro
+
+
 class MesDetalhes(BaseModel):
     mes: str
     ate: str
     entrou: Dinheiro
     saiu: Dinheiro
     categorias: list[Categoria]
+    origens: Origens
     dias: list[Dia]
     guardado: Guardado
     motivos: list[str]
