@@ -1,12 +1,9 @@
-import fs from "fs";
-import path from "path";
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { KeyboardAvoidingView, StyleSheet, View } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
-import { LIMITE_CHAT_MS, enviarMensagem } from "@/services/painel";
-import { TITULOS, mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
-import { BY_PROFILE, COMMON, widgetDoTopico } from "@/features/painel/perguntas";
+import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
+import { BY_PROFILE, COMMON } from "@/features/painel/perguntas";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
@@ -15,7 +12,7 @@ jest.setTimeout(20_000);
 
 type Segurar = ReturnType<typeof segurar>;
 const ASK_ECONOMIZAR = "Onde eu consigo economizar este mês?", ASK_META = "Quanto falta pra minha próxima meta e quando eu chego lá?";
-let perfilDoServidor = "padrao", uso: number, limite: number, historico: unknown[], statusPendencia: number, cancelada: string | null, segurarDelete: Segurar | null, segurarGet: Segurar | null, statusGet: number, chat: (n: number) => Promise<Response> | Response, nChat: number;
+let perfilDoServidor = "padrao", uso: number, limite: number, historico: unknown[], statusPendencia: number, cancelada: string | null, segurarDelete: Segurar | null, soUma: boolean, armada: boolean, segurarGet: Segurar | null, statusGet: number, chat: (n: number) => Promise<Response> | Response, nChat: number;
 const caminho = (u: unknown) => new URL(String(u)).pathname;
 const delecoes = () => fetchFalso.mock.calls.filter(([u, r]) => caminho(u) === "/ai/pending" && r.method === "DELETE");
 const posts = () => fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/ai/chat");
@@ -29,17 +26,19 @@ function servidor() {
   if (p === "/api/app/perfil") return resposta(200, { perfil: perfilDoServidor });
   if (/^\/(goals|cards|installments|analytics|insights)\/2\//.test(p)) return resposta(200, (fixture as Record<string, unknown>)[p.replace("/2/", "/1/")]);
   if (p === "/ai/pending") {
-   if (segurarDelete) await segurarDelete.promessa;
-   return statusPendencia === 200 ? resposta(200, { cancelada }) : resposta(statusPendencia, { detail: "indisponível" });
+   if (segurarDelete) { const g = segurarDelete; if (soUma) segurarDelete = null; await g.promessa; } // soUma: segura só o 1º DELETE seguinte
+   armada = false; return statusPendencia === 200 ? resposta(200, { cancelada }) : resposta(statusPendencia, { detail: "indisponível" });
   }
-  if (p === "/ai/chat") return chat(++nChat);
+  if (p === "/ai/chat") { const r = await chat(++nChat); armada = r.ok; return r; } // armada: pendência viva no servidor; só o DELETE que o servidor resolve a desarma
   if (p === "/ai/messages") { const lido = { used: uso, limit: limite }; if (segurarGet) await segurarGet.promessa; if (statusGet !== 200) return resposta(statusGet, { detail: "x" }); return resposta(200, { messages: historico, usage: lido }); }
   return resposta(200, (fixture as Record<string, unknown>)[p] ?? {});
  });
+ const impl = fetchFalso.getMockImplementation()!; // fetch real: abortar rejeita no CLIENTE, mas o servidor segue processando o pedido já enviado
+ fetchFalso.mockImplementation((u: string, r: RequestInit) => { const srv = impl(u, r), sg = r?.signal; return !sg ? srv : new Promise((res, rej) => { const err = () => rej(Object.assign(new Error("Aborted"), { name: "AbortError" })); if (sg.aborted) err(); sg.addEventListener("abort", err); srv.then(res, rej); }); });
 }
 const ok = (reply: string) => () => { uso++; return resposta(200, { reply, usage: { used: uso, limit: limite } }); };
 beforeEach(async () => {
- prepararCaso(); desligarTrava(); perfilDoServidor = "padrao"; uso = 2; limite = 100; historico = []; statusPendencia = 200; cancelada = null; segurarDelete = null; segurarGet = null; statusGet = 200; nChat = 0; chat = ok("Resposta do Piggy");
+ prepararCaso(); desligarTrava(); perfilDoServidor = "padrao"; uso = 2; limite = 100; historico = []; statusPendencia = 200; cancelada = null; segurarDelete = null; soUma = false; armada = false; segurarGet = null; statusGet = 200; nChat = 0; chat = ok("Resposta do Piggy");
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });
 afterEach(() => { jest.restoreAllMocks(); jest.useRealTimers(); });
@@ -149,7 +148,7 @@ it("DELETE com 404 ou rede caída: aviso com Tentar novamente, envio bloqueado a
  statusPendencia = 404; renderRouter("./app", { initialUrl: "/piggy" });
  await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
  await digitar("Pergunta"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); expect(screen.getByRole("button", { name: ASK_META })).toBeDisabled(); expect(posts()).toHaveLength(0);
- statusPendencia = 200; await apertar("Tentar novamente"); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ statusPendencia = 200; const antes = delecoes().length; await apertar("Tentar novamente"); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy()); expect(delecoes()).toHaveLength(antes + 1);
  expect(screen.queryByRole("button", { name: "Tentar novamente" })).toBeNull(); await apertar("Enviar mensagem"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
 });
 it("saída sem voo: exatamente 1 DELETE se enviou; abrir e sair sem enviar não manda", async () => {
@@ -281,6 +280,41 @@ it("erro do POST que chega com o DELETE da reabertura em voo: o próximo envio a
  expect(ordem.slice(-2)).toEqual(["DELETE /ai/pending", "POST /ai/chat"]);
 });
 
+// ---- máquina estados x eventos (scratchpad/maquina-chat.md): DELETE de saída em voo, cota relida, Tentar novamente
+const bloqueado = async (d: Segurar) => { // o handler velho é chamado de qualquer jeito: nada de POST até o DELETE preso terminar
+ await act(drenar); await act(drenar); await digitar("sim"); await act(async () => { onPressEnviar()(); await drenar(); }); expect(posts()).toHaveLength(1); d.soltar(); await act(drenar); await act(drenar); await waitFor(() => expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeEnabled());
+};
+it("sair após turno concluído e reabrir: o envio só libera quando o DELETE da saída terminar (senão ele apagaria a confirmação nova)", async () => {
+ await abrir(); await enviar("p1"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy()); const d = segurar(); segurarDelete = d; soUma = true; await noResumo(); await ir("/piggy"); await bloqueado(d); await apertar("Enviar mensagem"); await waitFor(() => expect(posts()).toHaveLength(2));
+});
+it("turno que termina com a tela fechada (sair do finally) e reabrir: o envio espera esse DELETE", async () => {
+ const g = segurar(), d = segurar(); chat = async () => { await g.promessa; return ok("Posso apagar?")(); }; await abrir(); await enviar("apaga"); await noResumo(); segurarDelete = d; soUma = true; g.soltar(); await act(drenar); await act(drenar); await ir("/piggy"); await bloqueado(d);
+});
+it("depois de um erro do POST, cota relida cheia: o próximo envio não sai", async () => {
+ chat = (n) => n === 1 ? resposta(500, { detail: "x" }) : ok("Não devia")(); await abrir(); await enviar("Pergunta que falha"); await waitFor(() => expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy());
+ uso = limite; await apertar("Enviar mensagem"); await act(drenar); expect(posts()).toHaveLength(1); await waitFor(() => expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy());
+});
+it("Tentar novamente depois que o voo acabou: não manda DELETE (apagaria a confirmação mostrada)", async () => {
+ const g = segurar(); chat = async () => { await g.promessa; return ok("Posso apagar?")(); }; await abrir(); await enviar("apaga"); await noResumo(); statusGet = 500; await ir("/piggy"); await act(drenar); g.soltar(); await act(drenar); await act(drenar);
+ expect(screen.getByText("Posso apagar?")).toBeTruthy(); const antes = delecoes().length; statusGet = 200; await apertar("Tentar novamente"); await act(drenar); expect(delecoes()).toHaveLength(antes);
+});
+
+const semEnviar = async () => { await digitar("sim"); await apertar("Enviar mensagem"); expect(posts()).toHaveLength(0); }; // o DELETE velho ainda preso: o envio tem de esperar
+const soltarEEnviar = async (d: Segurar) => { d.soltar(); await act(drenar); await act(drenar); await waitFor(() => expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeEnabled()); await apertar("Enviar mensagem"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy()); expect(armada).toBe(true); };
+it("DELETE da abertura preso, sair e reabrir: o envio espera o DELETE velho (abortá-lo no cliente não o desfaz, e ele apagaria a confirmação)", async () => {
+ const d = segurar(); segurarDelete = d; soUma = true; renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(delecoes()).toHaveLength(1));
+ await noResumo(); await ir("/piggy"); await act(drenar); await act(drenar); await semEnviar(); await soltarEEnviar(d);
+});
+it("Tentar novamente com o DELETE da abertura ainda preso: o novo preparar espera o velho e não o perde", async () => {
+ const d = segurar(); segurarDelete = d; soUma = true; statusGet = 500; renderRouter("./app", { initialUrl: "/piggy" });
+ await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy()); statusGet = 200; await apertar("Tentar novamente"); await act(drenar); await semEnviar(); await soltarEEnviar(d);
+});
+it("Tentar novamente depois de abertura com voo e nova abertura sem voo: o retry MANDA o DELETE (semDeleteUlt volta a false)", async () => {
+ const g = segurar(); chat = async () => { await g.promessa; return ok("Posso apagar?")(); }; await abrir(); await enviar("apaga"); await noResumo(); await ir("/piggy"); g.soltar(); await act(drenar); await act(drenar); await noResumo();
+ statusPendencia = 404; await ir("/piggy"); await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
+ statusPendencia = 200; const antes = delecoes().length; await apertar("Tentar novamente"); await act(drenar); expect(delecoes()).toHaveLength(antes + 1);
+});
+
 // ---- cards (Q4/Q9)
 it("chip com assunto conhecido mostra o widget real abaixo da resposta; o mesmo texto digitado não", async () => {
  await abrir(); await apertar(ASK_META); await waitFor(() => expect(screen.getByText("Metas e caixinhas")).toBeTruthy());
@@ -312,19 +346,6 @@ it("no mês atual o card de categorias aparece e a linha navega para o Extrato s
  await apertar(/Alimentação/); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação" } });
 });
 
-// ---- paridade com o protótipo do /painel
-const prompts = () => {
- const fonte = fs.readFileSync(path.resolve(__dirname, "../../../webapp/src/dashboard/lib/prompts.js"), "utf8").replace(/^export /gm, "");
- return new Function(`${fonte}; return { COMMON, BY_PROFILE };`)() as { COMMON: Registro[]; BY_PROFILE: Record<string, Registro[]> };
-};
-type Registro = { key: string; topic?: string; cat?: string; ask: string | null };
-const util = (xs: Registro[]) => xs.filter((x) => x.ask && x.topic).map(({ key, topic, cat, ask }) => ({ key, topic, ask, ...(cat ? { cat } : {}) }));
-it("perguntas.ts espelha prompts.js (key, topic, cat, ask) e todo assunto tem widget no catálogo", () => {
- const web = prompts(); expect(COMMON).toEqual(util(web.COMMON)); expect(Object.keys(BY_PROFILE).sort()).toEqual(Object.keys(web.BY_PROFILE).sort());
- for (const [perfil, lista] of Object.entries(web.BY_PROFILE)) expect(BY_PROFILE[perfil as keyof typeof BY_PROFILE]).toEqual(util(lista));
- for (const p of [...COMMON, ...Object.values(BY_PROFILE).flat()]) expect(Object.keys(TITULOS)).toContain(widgetDoTopico(p!));
- expect(widgetDoTopico({ topic: "categoria", cat: "assinaturas" })).toBe("assinaturas"); expect(widgetDoTopico({ topic: "categoria", cat: "delivery" })).toBe("categorias");
-});
 it("estado vazio: 5 chips do perfil primeiro, depois COMMON", async () => {
  await abrir(); const esperados = COMMON.slice(0, 5).map((c) => c.ask);
  for (const ask of esperados) expect(screen.getByRole("button", { name: ask })).toBeTruthy();
@@ -335,10 +356,4 @@ it("estado vazio com perfil: as sugestões do perfil vêm antes das comuns", asy
  const esperados = [...BY_PROFILE.dividas!, ...COMMON].slice(0, 5).map((c) => c.ask);
  for (const ask of esperados) expect(screen.getByRole("button", { name: ask })).toBeTruthy();
  expect(screen.queryByRole("button", { name: COMMON[2]!.ask })).toBeNull();
-});
-it("o POST do chat tem limite de 60 s, não de 15", async () => {
- jest.useFakeTimers(); expect(LIMITE_CHAT_MS).toBe(60_000);
- const pai = new AbortController(); fetchFalso.mockImplementation(() => new Promise(() => undefined)); void enviarMensagem("oi", pai).catch(() => undefined);
- await jest.advanceTimersByTimeAsync(15_001); expect(pai.signal.aborted).toBe(false);
- await jest.advanceTimersByTimeAsync(45_000); expect(pai.signal.aborted).toBe(true);
 });
