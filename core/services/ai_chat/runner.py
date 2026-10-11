@@ -43,12 +43,12 @@ import db
 from db.ai_turno import trava_do_turno
 
 from . import streaming
-from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
+from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
-from .system_prompt import SYSTEM_PROMPT
-from .tools import SCHEMAS, get_tool
+from .system_prompt import ADENDO_CARDS, SYSTEM_PROMPT
+from .tools import SCHEMAS, SCHEMAS_APP, get_tool
 from .tools._base import OUTRO_PEDIDO
 
 
@@ -255,10 +255,12 @@ def chat_detalhado(
         token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
         estado: dict = {}
         token_estado = _ESTADO.set(estado)
+        token_cards = CARDS_DO_TURNO.set([])
         try:
             reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
                                 ia_primeiro=ia_primeiro)
         finally:
+            CARDS_DO_TURNO.reset(token_cards)
             _ESTADO.reset(token_estado)
             CURRENT_USER_MESSAGE.reset(token_msg)
             CURRENT_PLATFORM.reset(token_pf)
@@ -380,7 +382,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
                 m["content"] = strip_markdown_headers(m["content"])
 
         today_str = date.today().strftime("%d/%m/%Y")
-        system_with_date = SYSTEM_PROMPT + f"\n\nData de hoje: {today_str}."
+        system_with_date = SYSTEM_PROMPT + (ADENDO_CARDS if streaming.ativo() else "") + f"\n\nData de hoje: {today_str}."
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
@@ -553,7 +555,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 model=MODEL,
                 temperature=TEMPERATURE,
                 messages=messages,
-                tools=SCHEMAS,
+                tools=SCHEMAS_APP if streaming.ativo() else SCHEMAS,
                 max_tokens=MAX_TOKENS,
                 **por_requisicao,
             )
@@ -642,7 +644,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 history_content, this_terminal = _NAO_EXECUTADA, None
             else:
                 antes = _PENDENCIA_DO_TURNO.get()
-                if streaming.ativo():
+                if streaming.ativo() and name != "show_card":  # o show_card manda o próprio passo, junto do bloco
                     streaming.passo(name, getattr(get_tool(name), "is_write", False))
                 history_content, this_terminal = _dispatch_tool(user_id, name, args)
 
