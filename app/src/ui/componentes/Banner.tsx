@@ -54,7 +54,7 @@ export function Banner({ tom = "info", titulo, mensagem, acao }: Props) {
         flexDirection: "row",
         gap: espaco.md,
         padding: espaco.lg,
-        borderRadius: raio.md,
+        borderRadius: raio.bloco,
         backgroundColor: cores.surface,
       }}
     >

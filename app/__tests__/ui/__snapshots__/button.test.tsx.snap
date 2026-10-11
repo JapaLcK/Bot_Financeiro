@@ -38,9 +38,9 @@ exports[`Button snapshot (dois temas): claro 1`] = `
     style={
       {
         "alignItems": "center",
-        "backgroundColor": "#C7186B",
+        "backgroundColor": "#FF2D8E",
         "borderColor": undefined,
-        "borderRadius": 12,
+        "borderRadius": 10,
         "borderWidth": 0,
         "justifyContent": "center",
         "minHeight": 44,
@@ -60,13 +60,15 @@ exports[`Button snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
-            "color": "#FFFFFF",
+            "color": "#0F172A",
           },
           {
+            "fontFamily": "Inter-SemiBold",
             "opacity": 1,
           },
           null,
@@ -117,9 +119,9 @@ exports[`Button snapshot (dois temas): escuro 1`] = `
     style={
       {
         "alignItems": "center",
-        "backgroundColor": "#CE2572",
+        "backgroundColor": "#FF2D8E",
         "borderColor": undefined,
-        "borderRadius": 12,
+        "borderRadius": 10,
         "borderWidth": 0,
         "justifyContent": "center",
         "minHeight": 44,
@@ -139,13 +141,15 @@ exports[`Button snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
-            "color": "#FFFAFD",
+            "color": "#0F172A",
           },
           {
+            "fontFamily": "Inter-SemiBold",
             "opacity": 1,
           },
           null,

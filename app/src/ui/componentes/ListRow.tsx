@@ -86,7 +86,7 @@ export function GrupoDeLinhas({ children }: { children: ReactNode }) {
   const { cores } = useTema();
   const linhas = Children.toArray(children);
   return (
-    <View style={{ backgroundColor: cores.surface, borderRadius: raio.md, paddingHorizontal: espaco.lg }}>
+    <View style={{ backgroundColor: cores.surface, borderRadius: raio.controle, paddingHorizontal: espaco.lg }}>
       {linhas.map((linha, i) => (
         <View key={i}>
           {i > 0 ? <View testID="grupo-separador" style={{ height: StyleSheet.hairlineWidth, backgroundColor: cores.border }} /> : null}

@@ -163,7 +163,7 @@ export function AtivarMfa({ aoEnviar, aoFalhar, aoConcluir, aoGerarNovos }: Prop
       <View
         accessible
         accessibilityLabel="QR code para o app autenticador"
-        style={{ alignSelf: "center", backgroundColor: claro.bg, padding: espaco.md, borderRadius: raio.md }}
+        style={{ alignSelf: "center", backgroundColor: claro.bg, padding: espaco.md, borderRadius: raio.cartao }}
       >
         <SvgXml xml={setup.svg} width={LADO_QR} height={LADO_QR} />
       </View>

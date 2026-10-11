@@ -11,14 +11,17 @@ exports[`Money — snapshot (dois temas) saldo negativo em display: claro 1`] = 
   style={
     [
       {
-        "fontFamily": "Inter-Bold",
+        "fontFamily": "Inter-SemiBold",
         "fontSize": 40,
+        "letterSpacing": -1.4,
         "lineHeight": 44,
       },
       {
         "color": "#111113",
       },
-      {},
+      {
+        "fontFamily": "Inter-SemiBold",
+      },
       {
         "fontVariant": [
           "tabular-nums",
@@ -33,14 +36,17 @@ exports[`Money — snapshot (dois temas) saldo negativo em display: claro 1`] = 
     style={
       [
         {
-          "fontFamily": "Inter-Bold",
+          "fontFamily": "Inter-SemiBold",
           "fontSize": 40,
+          "letterSpacing": -1.4,
           "lineHeight": 44,
         },
         {
           "color": "#5F5F6A",
         },
-        {},
+        {
+          "fontFamily": "Inter-SemiBold",
+        },
         {
           "fontVariant": [
             "tabular-nums",
@@ -65,14 +71,17 @@ exports[`Money — snapshot (dois temas) saldo negativo em display: escuro 1`] =
   style={
     [
       {
-        "fontFamily": "Inter-Bold",
+        "fontFamily": "Inter-SemiBold",
         "fontSize": 40,
+        "letterSpacing": -1.4,
         "lineHeight": 44,
       },
       {
-        "color": "#F2F2F3",
+        "color": "#F4F4F6",
       },
-      {},
+      {
+        "fontFamily": "Inter-SemiBold",
+      },
       {
         "fontVariant": [
           "tabular-nums",
@@ -87,14 +96,17 @@ exports[`Money — snapshot (dois temas) saldo negativo em display: escuro 1`] =
     style={
       [
         {
-          "fontFamily": "Inter-Bold",
+          "fontFamily": "Inter-SemiBold",
           "fontSize": 40,
+          "letterSpacing": -1.4,
           "lineHeight": 44,
         },
         {
-          "color": "#9B9BA6",
+          "color": "#A8A8B3",
         },
-        {},
+        {
+          "fontFamily": "Inter-SemiBold",
+        },
         {
           "fontVariant": [
             "tabular-nums",
