@@ -28,6 +28,9 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const [bloqueio, setBloqueio] = useState<Bloqueio>("abrindo");
   const [enviando, setEnviando] = useState(false);
   const [rascunho, setRascunho] = useState("");
+  // Estado atrelado ao dono: ajusta DURANTE o render (o React refaz o render antes de commitar), senão um quadro mostraria o turno de A com o uid de B; o useEffect abaixo segue abortando pedidos e limpando refs.
+  const [de, setDe] = useState(uid);
+  if (de !== uid) { setDe(uid); setTurnos([]); setRascunho(""); setUso(null); setEnviando(false); setBloqueio("abrindo"); }
   const aberta = useRef(false), enviou = useRef(false), sujo = useRef(false), erros = useRef(0), proximo = useRef(0), abertura = useRef(0), versaoUso = useRef(0); // versaoUso: o POST que grava o uso invalida a cota que um GET mais antigo ainda traz
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
