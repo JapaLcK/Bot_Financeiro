@@ -51,3 +51,11 @@ def test_feedback_gate_403():
     mid = _msg(uid)
     esgota_a_cota(uid)
     assert c.post(f"/ai/messages/{mid}/feedback", json={"nota": 1}, headers=H).status_code == 403
+
+
+def test_feedback_rate_limit_vale_para_qualquer_message_id():
+    """Cada id num balde próprio tornaria o teto decorativo: a 61ª dá 429."""
+    _, c = conta()
+    codigos = [c.post(f"/ai/messages/{2**40 + i}/feedback", json={"nota": 1}, headers=H).status_code
+               for i in range(61)]
+    assert codigos[:60] == [404] * 60 and codigos[60] == 429

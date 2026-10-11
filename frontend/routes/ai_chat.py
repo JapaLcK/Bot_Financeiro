@@ -116,7 +116,10 @@ def criar_router(pro) -> APIRouter:
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @router.post("/ai/messages/{message_id}/feedback")
-    @shared.limiter.limit("60/minute")  # chave padrão do limiter (IP); nada de key_style=url
+    # `shared_limit(scope=)` e não `limit()`: o limiter compartilhado usa o key_style
+    # "url" do slowapi, e com ele cada `message_id` abriria um balde próprio (teto
+    # decorativo). O stream, sem path param, serve com `limit()`.
+    @shared.limiter.shared_limit("60/minute", scope="ai_feedback")
     async def ai_feedback(
         request: Request, body: FeedbackBody,
         message_id: int = Path(ge=1, le=2**63 - 1), user_id: int = Depends(pro),
