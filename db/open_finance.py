@@ -21,6 +21,7 @@ from .cards import (
 )
 from .connection import TIPO_CANON_SQL, get_conn
 from .of_snapshots import grava_fotos_posicoes
+from .of_card_bills import APARAR_PAGO_SQL
 from .of_identity import (
     LATEST_TRANSACTION_SQL, assert_unambiguous_links, bind_import,
     external_id as of_external_id, existing_import,
@@ -3262,6 +3263,10 @@ def disconnect_open_finance_connection(
                 cur.execute("select count(*) as n from credit_transactions where card_id=%s", (cid,))
                 if cur.fetchone()["n"] == 0:
                     cur.execute("delete from credit_cards where id=%s and user_id=%s", (cid, user_id))
+                else:
+                    # Cartão que sobrevive: sem o banco para limitá-lo, o pago do banco não passa do total do Pig (aparado).
+                    # Efeito aceito pelo dono: compra manual ainda não paga pode passar a aparecer paga.
+                    cur.execute(APARAR_PAGO_SQL, (user_id, cid))
 
         conn.commit()
 

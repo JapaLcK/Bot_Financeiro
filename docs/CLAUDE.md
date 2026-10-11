@@ -1132,7 +1132,34 @@ marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna 
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,
 só contas `CREDIT`), por upsert em (conta, `provider_bill_id`); fail-soft (leitura ou gravação que
-falha vira log, o sync carimba igual) e **nenhuma tela a lê ainda** (só o export LGPD). Sem user_id: o dono é conta -> conexão.
+falha vira log, o sync carimba igual). Sem user_id: o dono é conta -> conexão. **Quem a lê:** `quitar_pelo_banco`
+(mesmo módulo), chamado pelo sync logo depois do import, sob o `pluggy_item_lock`, também fail-soft: grava
+`credit_bills.paid_amount` do cartão OF pelo que o banco pagou, compra a compra (`creditCardMetadata.billId`), só em
+fatura FECHADA (`(closing_date or due_date) < hoje`) de moeda BRL ou nula, com total > 0,05 e pagamento legível (sinais
+misturados na lista de pagamentos = ilegível), teto 1 por fatura (fechada com total <= 0,05 entra com parte 0: o banco zerou
+a fatura, o pago das compras dela volta a 0, e ela não pontua a regra), escrita
+absoluta (sobrescreve o pago manual antigo). Regra por conta: a conta só quita quando a leitura "própria" (pagamento de
+Y quita Y) vence a "N+1"; empate ou N+1 melhor não quita as faturas de valor e loga `regra indefinida`, mas as zeradas
+(total <= 0,05) entram sempre. Só quita com fatura FRESCA (frescor por fatura): `salvar_faturas_do_banco` devolve os pares
+(conta, fatura) válidos gravados naquele sync e `quitar_pelo_banco(user_id, connection_id, frescas)` só usa as linhas
+de `of_card_bills` desses pares. Fatura que veio inválida, que sumiu da Pluggy (fica gravada, o upsert nunca apaga),
+`/bills` que falhou ou gravação que levantou ficam fora: a linha velha não pode se combinar com compra nova; o aparo
+roda em todo cartão mesmo assim. Limites: sem crédito carregado
+para a fatura seguinte, rotativo (encargos) não tratado, conexão PAUSED não sincroniza, compra sem espelho na conta
+atual não conta, estorno sem `billId` faz o pago parcial sair maior (o teto é o total do Pig). O desfazer de
+pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também no cartão OF: o próximo sync regrava o
+valor do banco nas faturas que ele possui, e nas outras (compra manual sem espelho) o desconto é o correto; com a conexão
+PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Pago que não cabe no total do Pig é
+aparado (`APARAR_PAGO_SQL`: `paid_amount` ao total, `paid`/`paid_at`; pega pago > total e também pago == total com a fatura
+ainda aberta; fatura 'paid' com pago <= 0, a zumbi (de qualquer total, inclusive total > 0 com pago 0), reabre como 'open' com `paid_at` nulo, igual o `UPDATE` da quitação, pela convenção de `db/cards.py` de que 'paid' exige pago > 0): a cada `quitar_pelo_banco`, em todo cartão da conexão (cobre, no próximo sync, a única compra casada que some por
+`transactions/deleted`, que só reabre a fatura e deixaria total 0 com pago velho; o webhook não resincroniza, e até o sync a fatura
+fica com pago acima do total), e ao desconectar, no cartão que sobrevive;
+consequência aceita pelo dono: compra manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago
+vira 30 com 30 pago), porque o pago do banco das compras que saem fica no limite do total. Limite: o aparo também alcança a fatura
+corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma compra some é aparado ao total, como o
+`rebuild_bill_totals` já faz. Limite: se o `billId` de uma compra
+passa a apontar para fatura do banco que não está no `/bills` (a aberta), a fatura antiga do Pig mantém o pago anterior até a
+do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
