@@ -95,6 +95,15 @@ export const escuro: Paleta = {
   shadow: "#000000",
 };
 
+/**
+ * Cor de marca dos bancos conhecidos (chave = nome sem acento, minúsculo). Sem verde (reservado a ganho) e sem
+ * rosa (a marca): PicPay e afins ficam fora de propósito e caem na escala de tinta (`composicaoContas.ts`).
+ */
+export const coresBanco: Record<string, string> = {
+  nubank: "#820AD1", itau: "#EC7000", bradesco: "#CC092F", santander: "#EC0000", inter: "#FF7A00",
+  "banco do brasil": "#FAE128", caixa: "#0070AF", "mercado pago": "#009EE3", xp: "#F5C400", btg: "#001E62",
+};
+
 /** Grade de 4pt. */
 export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 48 } as const;
 /**
