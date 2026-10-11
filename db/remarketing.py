@@ -88,3 +88,16 @@ def ja_comprou(user_id: int) -> bool:
         contas = cur.fetchall()
         conn.commit()
     return any(plan_service.tem_direito_hoje(c) for c in contas)
+
+
+def marcar_clique(user_id: int, etapa: int) -> None:
+    """Carimba o 1º clique no link da etapa (`clicado_em`, só se ainda nulo). Sem a linha
+    (a etapa não foi reivindicada: link forjado ou de teste) não faz nada. Prévias de link
+    inflam o número (plano §6)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "update remarketing_envios set clicado_em = now()"
+            " where user_id = %s and etapa = %s and clicado_em is null",
+            (int(user_id), int(etapa)),
+        )
+        conn.commit()

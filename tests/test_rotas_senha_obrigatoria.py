@@ -83,6 +83,9 @@ TABELA = {
     ("POST", "/billing/pix/checkout"): (L, "compra"),
     ("GET", "/billing/pix/{public_token}"): (L, "compra"),
     ("GET", "/billing/pix-extras"): (L, "compra"),
+    # ── retomada do checkout abandonado: token/cookie próprio, sem sessão de usuário ──
+    ("GET", "/retomar"): (P, "link de retomada"), ("GET", "/retomar/pronto"): (P, "volta da retomada"),
+    ("POST", "/billing/retomada/senha"): (P, "cookie de retomada, sem sessão"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
     ("DELETE", "/ai/pending"): (B, "_get_current_user + _exigir_credencial, sem plano/cota"),

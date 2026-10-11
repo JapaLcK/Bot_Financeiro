@@ -812,6 +812,28 @@ metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
 do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
 flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
+**Retomada do checkout abandonado (PR 4 de `docs/plano-remarketing.md`; inerte até o PR 6
+emitir um token).** `GET /retomar?t=…` (`frontend/routes/retomada.py`, só 303) troca o token
+Fernet (`core/services/retomada.py`, rótulo próprio de `JWT_SECRET`, 7 dias, `user_id` +
+etapa 1–3) pelo cookie `pb_retomada` (`HttpOnly`, `Secure`, `SameSite=Strict`, 2 h; o valor é
+um token próprio do cookie, emitido no clique, com rótulo e validade de 2 h no servidor: o token do
+link não serve de cookie) e marca `remarketing_envios.clicado_em`. O cookie NÃO é sessão: só
+a dependência `comprador`/`comprador_pix` o lê — em `POST /billing/create-checkout`,
+`POST /billing/checkout/bump`, `POST /billing/pix/checkout`, `GET /billing/pix-extras`,
+`GET /billing/pix/{token}` e `GET /billing/plans-config` (`retomada: {email: "l•••@dominio"}`).
+Sessão válida vence; o cookie só vale se o pedido não traz cookie de acesso, cookie do painel
+nem `Authorization`; credencial de sessão inválida segue 401. As outras rotas
+continuam com o resolver de sessão delas e dão 401 com só o cookie. A sessão do Stripe leva `rm_etapa` (sessão e
+assinatura) e volta em `/retomar/pronto?sid=…` (rota provisória até o PR 5);
+`_checkout_session_matches` compara o valor de `rm_etapa` e não mistura sessão de retomada
+com a logada. O Pix recusa
+`confirm_cancel_stripe` com 409 `retomada_sem_migracao`. `POST /billing/retomada/senha` (3/h,
+CSRF, só com cookie e sem sessão) reaproveita o reset de senha só para conta sem credencial,
+com resposta igual nos dois casos, e expira o cookie. O `POST /auth/logout` e o
+`DELETE /auth/account` expiram o `pb_retomada`; o `_clear_session_cookies` não, porque o 401
+do `/auth/refresh` (que a `/precos` deslogada provoca) o chama e mataria o link. Testes:
+`tests/test_retomada_backend.py`.
+
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
 dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
 `ebook_n_price`/`ebook_n_url` (posição na oferta, não o slot da env), lidos por `core/services/extras_assinar.da_metadata`.
