@@ -54,7 +54,7 @@ export function Command() {
 
   useEffect(() => {
     // Com o véu do guia (parts/Guia.tsx), só o balão e o alvo do passo respondem.
-    const open = () => { if (document.querySelector(".guia-veu, .lanc-form[open]")) return; setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
+    const open = () => { if (document.querySelector(".guia-veu, .lanc-form[open], .menu-telas[open]")) return; setQ(""); setActive(0); setOpened((n) => n + 1); show(dlg.current, "input"); input.current?.focus(); };
     const onKey = (e: globalThis.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); if (isOpen(dlg.current)) hide(dlg.current); else open(); }
       else if (e.key === "/" && !(e.target as HTMLElement).closest("input, textarea, select") && !isOpen(dlg.current)) { e.preventDefault(); open(); }

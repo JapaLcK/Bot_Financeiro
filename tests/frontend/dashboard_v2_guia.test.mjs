@@ -4,14 +4,14 @@
 //   · cada passo avança pela ação real (seta do mês, categoria em Gastos, pergunta ao Piggy),
 //     só depois de o passo começar, e comemora só com o 200 do POST; entre telas, a aba espera o toque;
 //   · 500 → "Tentar de novo"; 409 passo_indisponivel → orientação do motivo, sem "Tentar";
-//   · Esc/Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem;
+//   · Esc/Pular dispensam; Ajuda (menu; no celular, pelo Menu da barra de baixo) e Cmd-K reabrem;
 //   · âncora no bloco certo (data-dado = dado do roteiro).
 // O roteiro vem de api_v2_respostas.json, que tests/test_api_v2_contrato.py iguala ao PASSOS
 // do servidor: passo novo sem âncora na tela ou sem ação aqui fica vermelho.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAINEL, RESPOSTAS } from "./_painel.mjs";
-import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
+import { ALVO, FAZER, PASSOS, ROTA, abrir, acoes, ajudaDoMenu, bora, esperaTitulo, irAoAlvo, naRota, navegador, piggyEm } from "./_guia.mjs";
 
 navegador();
 
@@ -89,7 +89,7 @@ test("os 3 passos pela ação real, de tela em tela pela aba: nada sai sem ela; 
 test("celular: o guia leva à conversa e destaca o chip do gasto do mês, que conta como pergunta", async () => {
   const { ctx, page, s } = await abrir({ width: 375, height: 812, guia: "em_andamento" });
   s.g.passos[0].feito = true; s.g.passos[2].feito = false; s.g.passos[1].feito = true;
-  await page.getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoMenu(page);
   await esperaTitulo(page, PASSOS[2].fala.titulo);
   await naRota(page, "#/piggy");
   await irAoAlvo(page, '[data-guia="piggy.chip"]');
@@ -202,7 +202,7 @@ test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o 
   const aberto = await page.locator(".guia-balao").count();
   await ctx.close();
   assert.deepEqual(r, [0, "em_andamento"]);
-  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda."), JSON.stringify(status));
+  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda (no celular, dentro do Menu)."), JSON.stringify(status));
   assert.ok(!status.some((t) => t.includes("concluído")), JSON.stringify(status));
   assert.equal(aberto, 0);
   assert.deepEqual(acoes(s), ["reabrir", "feito:gastos.categoria", "feito:piggy.pergunta"]);
@@ -230,7 +230,7 @@ test("1 e 2 feitos, Seguir no 3: \"Por agora é isso\" (sem \"Fechou!\"); Fechar
   const aberto = await page.locator(".guia-balao").count();
   await ctx.close();
   assert.deepEqual(r, [0, "guia-titulo"]);
-  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda."), JSON.stringify(status));
+  assert.ok(status.includes("Por agora é isso. O passo que ficou pra depois volta na Ajuda (no celular, dentro do Menu)."), JSON.stringify(status));
   assert.ok(!status.some((t) => t.includes("concluído")), JSON.stringify(status));
   assert.equal(aberto, 0);
   assert.deepEqual(acoes(s), ["reabrir"]);
@@ -251,7 +251,7 @@ test("revisão com o servidor concluído, Seguir até o fim: \"Fechou!\", não \
   assert.deepEqual(acoes(s), ["reabrir"]);
 });
 
-test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", async () => {
+test("Esc e Pular dispensam; Ajuda (trilho, ou Menu da barra de baixo) e Cmd-K reabrem", async () => {
   const esc = await abrir();
   await esc.page.getByRole("button", { name: "Bora", exact: true }).waitFor();
   await esc.page.keyboard.press("Escape");
@@ -271,7 +271,7 @@ test("Esc e Pular dispensam; Ajuda (menu, barra de baixo) e Cmd-K reabrem", asyn
   assert.deepEqual(r2, [0, ["visto", "dispensar"]]);
   assert.deepEqual(acoes(esc.s), ["visto", "dispensar", "reabrir", "dispensar", "reabrir"]);
   const cel = await abrir({ width: 375, height: 812, guia: "dispensado" });
-  await cel.page.locator(".tabbar").getByRole("button", { name: "Ajuda" }).click();
+  await ajudaDoMenu(cel.page);
   await esperaTitulo(cel.page, PASSOS[1].fala.titulo); // o 1 já estava feito na fixture `dispensado`
   await cel.ctx.close();
   assert.deepEqual(acoes(cel.s), ["reabrir"]);

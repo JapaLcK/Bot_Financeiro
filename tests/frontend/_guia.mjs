@@ -118,6 +118,11 @@ export const esperaTitulo = async (page, t) => {
   }
   await alvo.waitFor({ timeout: 10000 });
 };
+// No celular a Ajuda mora no Menu da barra de baixo (parts/MenuTelas.tsx): abre a folha e toca o item.
+export const ajudaDoMenu = async (page, item = "Guia do painel") => {
+  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+  await page.locator(".menu-telas").getByRole("button", { name: item }).click();
+};
 export const bora = async (page) => { await page.getByRole("button", { name: "Bora", exact: true }).click(); await esperaTitulo(page, PASSOS[0].fala.titulo); };
 
 // O anel em volta do 1º visível de `sel`, com folga de 2 a 8 px (o voo já pousou).
