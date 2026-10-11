@@ -37,6 +37,11 @@ def test_script_do_fragmento_roda_antes_do_pixel_e_do_ga4(monkeypatch):
     assert tag.start() < html.index("gtag('config'")
     assert not re.search(r"\b(defer|async)\b", tag.group(0)), tag.group(0)
     assert tag.start() < html.lower().index("</head>")
+    # O assinar.js lê `post`/`sessaoViva` do assinar-rede.js na carga: sem ele, ou depois
+    # dele, a página trava no spinner (o frontend só pega isso por timeout).
+    rede = re.search(r'<script[^>]*src="/assinar-rede\.js[^"]*"[^>]*>', html)
+    assert rede and rede.start() < tag.start(), "assinar-rede.js ausente ou depois do assinar.js"
+    assert not re.search(r"\b(defer|async)\b", rede.group(0)), rede.group(0)
 
 
 def test_assinar_sem_clarity(monkeypatch):

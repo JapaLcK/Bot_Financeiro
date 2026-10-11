@@ -430,6 +430,17 @@ def build_user_export_zip(user_id: int) -> bytes:
                 """,
                 (user_id,),
             ),
+            (
+                "faturas_cartao_open_finance",
+                """
+                select b.*
+                from of_card_bills b
+                join open_finance_accounts a on a.id = b.account_id
+                join open_finance_connections c on c.id = a.connection_id
+                where c.user_id = %s
+                """,
+                (user_id,),
+            ),
         ]
 
         for name, sql, params in queries:

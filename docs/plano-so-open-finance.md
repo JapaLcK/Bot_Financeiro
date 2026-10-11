@@ -14,7 +14,7 @@
 |---|---|
 | 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
 | 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
-| 1b. Fatura OF paga pelo extrato | A fazer. Vem antes de travar o "pagar fatura" do cartão OF. |
+| 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2 (quitar pelo extrato) depois da consulta V1 em produção. Vem antes de travar o "pagar fatura" do cartão OF. |
 | 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
 | 3. Esconder o legado | A fazer. |
@@ -240,6 +240,86 @@ feita (§9).
   `/bills` da Pluggy (escolher no PR, medindo). Ambíguo vira motivo, nunca quitação
   silenciosa.
 - **Não faz:** cartão manual.
+- **Consulta V1 (só leitura, antes do PR 2).** Decide o desenho do PR 2 a partir do que o
+  banco manda no `/bills`. Quando rodar: depois do deploy do PR 1 e de ao menos um sync de cada
+  conexão; só leitura, só contagens (sem dado de usuário), com o dono e avisando antes, pelo
+  `railway`, como a medição do §9: confira o host da credencial antes de rodar e use a
+  transação `read only`. Troque `:deploy_pr1` pelo horário do deploy. **Remeça antes de
+  reusar:** o resultado muda a cada sync.
+  **O contrato da Pluggy NÃO foi verificado contra a Pluggy real**: a paginação (`accountId`,
+  `page` de 1 em diante, `totalPages`) e os nomes de campo lidos (`billClosingDate`,
+  `totalAmountCurrencyCode`, `payments`, `financeCharges`). O leitor
+  (`core/services/pluggy_bills.py`) foi escrito pela doc.
+  ```sql
+  begin transaction isolation level repeatable read read only;
+  with contas as (
+    select a.id, row_number() over (order by a.id) as conta
+      from open_finance_accounts a
+      join open_finance_connections c on c.id = a.connection_id
+     where upper(a.type) = 'CREDIT'
+       and upper(coalesce(c.status,'')) not in ('PAUSED','DELETED')
+       and c.last_sync_at > :deploy_pr1
+  ), f as (
+    select b.account_id, b.due_date, b.closing_date, b.total_amount, b.currency,
+           case when jsonb_typeof(b.raw->'payments') = 'array' then jsonb_array_length(b.raw->'payments') else 0 end as n_pay,
+           (select count(*) from jsonb_array_elements(case when jsonb_typeof(b.raw->'payments')='array' then b.raw->'payments' else '[]' end) p
+             where (p->>'amount')::numeric < 0) as pay_neg,
+           (select coalesce(sum(abs((p->>'amount')::numeric)),0) from jsonb_array_elements(case when jsonb_typeof(b.raw->'payments')='array' then b.raw->'payments' else '[]' end) p) as pay,
+           (select coalesce(sum((x->>'amount')::numeric),0) from jsonb_array_elements(case when jsonb_typeof(b.raw->'financeCharges')='array' then b.raw->'financeCharges' else '[]' end) x) as chg
+      from of_card_bills b join contas on contas.id = b.account_id
+  ), par as (
+    select f.*, lead(due_date) over w as due_s, lead(pay) over w as pay_s, lead(chg) over w as chg_s
+      from f window w as (partition by account_id order by due_date)
+  )
+  select ct.conta,
+         count(p.account_id)                                                   as faturas,
+         count(*) filter (where p.closing_date is not null)                    as com_fechamento,
+         count(*) filter (where p.n_pay > 0)                                   as com_pagamento,
+         coalesce(sum(p.pay_neg),0)                                            as pagamentos_negativos,
+         count(*) filter (where coalesce(p.currency,'BRL') <> 'BRL')           as nao_brl,
+         count(*) filter (where p.currency is null)                            as moeda_nula,
+         count(*) filter (where p.closing_date >= current_date)                as abertas_por_fechamento,
+         count(*) filter (where p.due_date >= current_date)                    as vencimento_futuro,
+         count(*) filter (where p.due_s is not null)                           as pares,
+         count(*) filter (where p.due_s - p.due_date not between 20 and 40)    as pares_com_buraco,
+         count(*) filter (where p.pay_s - p.chg_s >= p.total_amount - 0.05)    as pares_quitados,
+         count(*) filter (where abs(p.pay_s - p.chg_s - p.total_amount) <= 0.05) as pares_exatos,
+         count(*) filter (where p.total_amount <= 0.05)                        as total_zero_ou_negativo,
+         (select count(distinct t.raw->'creditCardMetadata'->>'billId') from open_finance_transactions t
+           where t.account_id = ct.id and t.raw->'creditCardMetadata' ? 'billId')   as billids_nas_compras,
+         (select count(distinct t.raw->'creditCardMetadata'->>'billId') from open_finance_transactions t
+            join of_card_bills b2 on b2.account_id = t.account_id
+                                 and b2.provider_bill_id = t.raw->'creditCardMetadata'->>'billId'
+           where t.account_id = ct.id)                                          as billids_casados
+    from contas ct left join par p on p.account_id = ct.id
+   group by ct.conta, ct.id order by ct.conta;
+  rollback;
+  ```
+  O que cada coluna decide:
+  - `faturas` = 0 em conta sincronizada: o banco não manda `/bills` (**mas antes faça o passo
+    de log abaixo**).
+  - `com_fechamento` = 0 em conta com faturas: suspeite do nome do campo (`billClosingDate`)
+    antes de concluir algo sobre fechamento.
+  - `com_pagamento` = 0: a conta fica fora do domínio. Se for 0 em todas as contas, suspeite
+    do nome `payments` antes de concluir que o banco não manda.
+  - `billids_casados` e `billids_nas_compras` (compra de fatura que não está em
+    `of_card_bills`, a aberta ou a mais antiga que a janela do `/bills`, faz casados ficar
+    abaixo de nas_compras mesmo com ids iguais):
+    - casados = 0 com nas_compras > 0: os ids diferem; parar e rever a rota.
+    - 0 < casados < nas_compras: conferir se a diferença é a fatura aberta ou a janela do
+      `/bills` antes de concluir.
+    - nas_compras = 0: a compra não traz `billId`; a rota por `billId` não se aplica, parar
+      e rever.
+  - `abertas_por_fechamento` = 0: o PR 3 é necessário.
+  - `pares_exatos` / `pares`: se a regra da Pluggy vale aqui.
+  - `pagamentos_negativos`: o sinal de `payments[].amount`.
+  - `pares_com_buraco`: se a guarda de 20 a 40 dias entre vencimentos tem trabalho.
+  **Passo de log antes de ler "0 faturas" como "o banco não manda":** procure nos logs do
+  Railway `faturas indisponíveis`, `faturas não gravadas` e `[of_card_bills] conta=`. O leitor
+  LEVANTA quando a metadata foge do contrato (`totalPages` ausente, eco de `page` diferente)
+  e o sync engole o erro (fail-soft). Então zero linhas pode ser contrato da Pluggy diferente
+  do esperado, não ausência de faturas. Esse passo não pega nome de campo errado: o leitor
+  não levanta por campo ausente, só grava a coluna nula ou o `raw` sem a chave.
 - **Pronto:** fatura paga no banco sai da Previsão sem ação do usuário. Pagamento parcial.
   Duas faturas abertas. Estorno. Reconexão. O mesmo pagamento não quita duas faturas.
 

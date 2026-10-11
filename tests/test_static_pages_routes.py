@@ -288,7 +288,7 @@ def test_assinar_e_seus_assets():
     assert "content-security-policy" in resp.headers
     assert '<meta name="robots" content="noindex"/>' in resp.text
     # bump-caixas.* também servem o modal do Pix da /precos, com o pix-extras.js.
-    for path, tipo in (("/assinar.js", "application/javascript"), ("/assinar.css", "text/css"),
+    for path, tipo in (("/assinar.js", "application/javascript"), ("/assinar-rede.js", "application/javascript"), ("/assinar.css", "text/css"),
                        ("/bump-caixas.js", "application/javascript"), ("/bump-caixas.css", "text/css"),
                        ("/pix-extras.js", "application/javascript"), ("/pagamento-caixas.js", "application/javascript")):
         asset = client.get(path)

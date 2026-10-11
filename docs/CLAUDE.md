@@ -569,7 +569,27 @@ A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (rela
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
 preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número), e nada além da preferência é gravado.
+conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+atualizações" também apaga pendências do remetente (abaixo). O texto digitado
+que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
+`parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
+decisão do dono; "pare" e "para" ficam fora, são palavras de cancelar do fluxo de valor
+pendente) vale como o botão de "parar atualizações" nesses mesmos pontos e no fluxo comum,
+antes das pendências e do paywall. "parar report diario" não casa e segue para `report.disable`.
+O "parar atualizações" (botão ou digitado; NÃO os botões de relatório) também apaga as
+pendências de confirmação do bot (`pending_actions`) e da IA (`ai_pending_actions`), para um
+"sim" depois não executar o que a pessoa mandou parar, e encerra a pergunta aberta da IA
+(`finally` do `process_message`: todos os ramos menos `conta_sem_credencial`, onde a âncora
+nem é lida). A limpeza vale só para o remetente (quem conversa: `uid` do fluxo comum e do
+`remetente_com_dados`, a própria conta no `conta_sem_credencial`, o usuário do WhatsApp no
+`precisa_senha`), nunca para a conta sem senha que digitou o número: o opt-out vale para as
+duas, as pendências são de cada um. Se a gravação ou a limpeza falha, responde
+`OPT_OUT_FALHOU_WA` (nunca silêncio; falha só da limpeza deixa o opt-out gravado e um 2º PARAR
+conserta). Nada no bot religa o opt-out (só a tela de
+Configurações). Nos dois ramos sem senha, quem nunca comprou
+(`db.remarketing.ja_comprou` falso) recebe `CONVITE_LEAD_WA` no lugar de `PRECISA_SENHA_WA` e
+`PARAR_LEAD_WA` ao digitar PARAR; quem comprou, os textos de antes. `ja_comprou` que levanta vale
+como "comprou" (log, e a mensagem segue).
 Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
 (`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
@@ -1062,6 +1082,9 @@ sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marca
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
+`of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,
+só contas `CREDIT`), por upsert em (conta, `provider_bill_id`); fail-soft (leitura ou gravação que
+falha vira log, o sync carimba igual) e **nenhuma tela a lê ainda** (só o export LGPD). Sem user_id: o dono é conta -> conexão.
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
@@ -1206,8 +1229,8 @@ na inferência.
 **"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
 grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";
 `adapters/whatsapp/wa_demo.py` desvia a mensagem no começo de `process_message`, ANTES de
-`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre uma persona
-fictícia (`core/services/demo/`), sem ferramentas. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
+`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre dados
+fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
 entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
@@ -1294,7 +1317,7 @@ entram em "cadastros".
 chamada por fonte, e `/admin/api/funil` NÃO muda. `nome` só vale se estiver em
 `funil_fontes.MODULOS` (fonte nova = uma linha lá + um módulo que exporta `FONTE`); fora
 disso, 404. Hoje `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
-é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total), `ga4` e `clarity` (abaixo). Envelope
+é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total), `ga4`, `clarity` e `meta` (abaixo). Envelope
 comum e fechado: `fonte`, `estado` (`ok|nao_configurado|erro|stale`), `mensagem` (SEMPRE
 da tabela fixa `MENSAGENS`, nunca texto da fonte), `falta` (só NOMES de env, quando
 `nao_configurado`), `buscado_em`, `janela {rotulo, fuso}`, `dados`. Cache em TABELA
@@ -1504,6 +1527,68 @@ n/d (`""`, `false` ou `[]` virariam "0"/"NaN%"; o servidor nunca os manda); a ca
 "NaN" no front (o backend só manda número); texto de 300 caracteres sem espaço estoura a largura (as
 mensagens vêm de tabela fixa); com gzip/brotli o teto de 8 MB vale para o corpo descomprimido (testado
 com bombas). Sem `stale` parcial (uma chamada traz todas as métricas, ou tudo ou erro).
+**Fonte Meta** (`core/funil_fonte_meta.py`, cartão "8d. Meta"): estatísticas do pixel pela Graph API
+(`GET https://graph.facebook.com/v25.0/{pixel_id}/stats?aggregation=event_total_counts&start_time=<agora-7d>&end_time=<agora>`),
+TTL 30 min, backoff 600 s, SEM `limite_dia` (a Graph tem limite próprio, tratado como `limite` + backoff), EXATAMENTE
+1 chamada HTTP por `buscar`. A versão v25.0 é constante do módulo; o `core/services/meta_capi.py` (Conversions API,
+escrita) segue na v21.0 e NÃO foi alinhado. Envs: `META_INSIGHTS_ACCESS_TOKEN` (usuário do sistema do Business Manager
+com o pixel atribuído e, provavelmente, permissão de leitura de anúncios (a exata não foi confirmada); SEPARADO do `META_PIXEL_ACCESS_TOKEN` da CAPI, que esta fonte
+nunca lê) e `META_PIXEL_ID` (só `[0-9]{1,20}`, validado ANTES de montar a URL; ID ruim vira `nao_encontrado` sem
+chamada). `faltam()` lista só NOMES, lidos na hora. O token vai SÓ no cabeçalho `Authorization: Bearer` (nunca em
+query/params: o `str()` de exceção do requests carrega a URL) e só depois de casar `[A-Za-z0-9._~+/=-]{1,4096}` (senão
+`auth` SEM chamada: aspas, prefixo "Bearer " ou espaço no meio; o token colado errado é recusado pela Meta de qualquer jeito); host fixo; redirecionamento NÃO é seguido; log só com `type(exc).__name__`, status HTTP e o
+inteiro `error.code`; `from None`. Devolve (lista fechada) `{eventos: {<evento>: int}, reconhecido: bool}` para TODOS os
+nomes de `EVENTOS` (0 se ausentes), na janela fixa de 7 dias (limite da API; o cartão ignora o seletor 7d/30d). `EVENTOS`
+= os nomes que o app dispara no pixel e na CAPI: `PageView` (snippet em `frontend/routes/shared.py`), `ViewContent`
+(/precos), `InitiateCheckout`, `CompleteRegistration`, `StartTrial`, `Purchase`, e os `trackCustom` `OnboardingComplete`
+(`comecar.js`) e `TesteClick` (`teste-piggy.js`); um teste compara a lista com o código e o front tem a mesma em
+`META_EVENTOS` (comparada em `tests/frontend/funil_meta.test.mjs`). Evento fora da lista é DESCARTADO (nome exato, caixa
+inclusa) e nunca chega ao JSON.
+ERROS: a Graph responde 400/401/403 com `{"error":{"code":N,...}}`. O corpo de erro é lido em stream com teto de 64 KB e
+dele sai SÓ o inteiro `error.code` (0..999999; mensagem, subcódigo e `fbtrace_id` nunca são guardados nem logados).
+190 `auth`; 200 e 10 `permissao_meta` (mensagem fixa: o usuário do sistema precisa ter o pixel atribuído no Business
+Manager e o token "provavelmente" a permissão de leitura de anúncios, "a permissão exata não foi confirmada": o texto
+(e o `.env.example`) têm hedge explícito, porque a permissão exata não foi confirmada); 80004, 4, 17, 32 e
+613 `limite`; 100 `nao_encontrado` (a Graph usa 100 também para pixel que o token não enxerga, então "não encontrou o
+recurso" pode ser ID errado OU pixel não atribuído ao usuário do sistema); código legível mas desconhecido,
+`indisponivel`. SEM `error.code` legível (corpo vazio, HTML, sem o campo, não inteiro): o STATUS decide: 401 `auth`,
+403 `permissao_meta`, 429 `limite` (corpo nem é lido); 400, 404, 5xx, 3xx e o resto `indisponivel`; timeout `timeout`; 200 com corpo ilegível ou
+que não é objeto JSON `resposta_invalida`. Resposta 200 lida em stream (`read1`), teto de 1 MB DESCOMPRIMIDO e PRAZO TOTAL de
+10 s (menor que o `TIMEOUT_S` de 12 s da infra; vale também para o corpo de erro); o `timeout=8` do requests é por operação.
+FORMATO NÃO CONFIRMADO: a doc diz `data` = lista de resultados (`aggregation`, `start_time`, `data` = lista de
+`{value, count}`), mas os nomes `value`/`count` não foram vistos numa resposta real. Parser tolerante: aceita (a) resultados
+com `data` aninhada e (b) entradas direto em `data`; chaves normalizadas (minúsculas, só letras e dígitos): nome =
+`value`/`event`/`eventname`, contagem = `count`/`eventcount`/`total`; soma as contagens do mesmo evento (buckets); contagem
+não numérica, negativa, booleana, >= 1e15, NaN/inf ou nome que não é texto IGNORA a entrada; a SOMA de buckets também
+para em 10**15 (`min`). `reconhecido` = true SÓ se ao menos uma entrada de evento da lista foi lida OU se `data` é uma
+lista vazia (ou só de resultados com `data` vazia: "sem disparos"). É false (+ a linha de log) para `data` ausente, null
+ou que não é lista (200 com `{}`, `{"success":false}`, `{"error":{"code":190}}`, `{"events":[...]}`), para item que não
+é objeto em qualquer nível (`[1,"x"]`, `["PageView"]`, pares `[["PageView",5]]`, `[null,5,"x"]` dentro da `data`
+interna) e para entradas sem nenhum evento da lista com forma legível (inclui o caso de a Meta só ter disparado eventos de
+fora da lista); um evento da lista lido basta para true mesmo com lixo ao lado.
+Nesse caso o cartão mostra a faixa âmbar "formato não reconhecido" e "n/d" no lugar dos zeros, e sai UMA linha de log só com
+NOMES (allowlist `[A-Za-z][A-Za-z0-9_ ]{0,39}` com no máximo 2 dígitos, senão `(nome fora do padrão)`; até 30 nomes; nunca
+valor, ID ou contagem): `[funil_meta] formato: chaves=[...]`.
+VALIDAÇÃO DA 1ª CARGA (a fazer pelo dono): abrir Events Manager > o pixel > Visão geral, janela de 7 dias, e comparar os
+disparos de `PageView`, `ViewContent`, `InitiateCheckout`, `CompleteRegistration` e `Purchase` com o cartão (os números
+são DISPAROS recebidos, navegador + servidor, sem deduplicação: podem divergir do Events Manager e do nosso banco; o do
+GA4 também). Cartão amarelo ("formato não reconhecido"): copiar do log do Railway a linha `[funil_meta] formato:` e fixar o
+parser com a forma real. Cartão vermelho: a mensagem é fixa; o log tem `[funil_meta] HTTP <status> código <N>`, que diz o
+código da Graph que caiu em `indisponivel` (ex.: código novo a mapear). `permissao_meta`/`nao_encontrado` persistentes:
+conferir no Business Manager se o usuário do sistema tem o pixel atribuído e se o token foi gerado com ele.
+Limites declarados do Meta, sem correção: `start_time` = agora - 7 dias + 1 h de folga (se a Graph ainda recusar a janela, o erro
+seria 100 e apareceria como `nao_encontrado`; conferir na 1ª carga); a permissão exata do token
+não foi confirmada; a Graph pode PAGINAR (`paging.next`) e só a 1ª página é lida (se houver mais, os números ficam
+parciais, sem aviso); token inválido/expirado volta como 190 `auth` e o backoff de 600 s vive no BANCO (depois de corrigir a
+env o cartão pode levar até 10 min para tentar de novo; `update funil_fontes_cache set falha_em = null where fonte = 'meta'`
+libera a próxima tentativa). Um payload `reconhecido:false` (ou um 0 errado) já CACHEADO continua sendo servido até o TTL
+(30 min) vencer, mesmo depois de um deploy que conserta o parser; para forçar a nova busca na hora, recue o relógio do
+cache (o `update` mantém o último dado como `stale` se a nova busca falhar): `update funil_fontes_cache set buscado_em = buscado_em - interval '1 day', falha_em = null where fonte = 'meta'`
+(um teste executa este SQL no Postgres de teste; NÃO use `delete`). O `timeout=8` do requests NÃO limita
+goteio de cabeçalho: medido, um servidor que manda 1 byte a cada 5 s prende a thread por ~60 s, e o prazo total de 10 s só
+vale dentro da leitura do corpo (`_ler`); mesmo limite do GA4, contido pelo backoff e pela marca `_EM_VOO` (no máximo 1
+thread por processo) e sem watchdog; só `PageView` etc. por NOME exato (renomear um evento no pixel exige atualizar `EVENTOS`, `META_EVENTOS` e
+o teste); `HTTP_PROXY` não-https mandaria o Bearer ao proxy em claro (em produção a URL é https).
 **Avisos para as fontes com cota (Clarity, já feito, e as demais)**: `reservar` reserva 1 por `buscar`, não por
 chamada HTTP (o `buscar` do Clarity faz EXATAMENTE 1 chamada externa); falha, timeout
 ou `ocupada` depois da reserva queimam cota sem devolução, e com `backoff_s=60` a cota diária

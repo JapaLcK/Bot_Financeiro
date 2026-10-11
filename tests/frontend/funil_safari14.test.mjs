@@ -71,6 +71,11 @@ const DADOS_CLARITY = { pagina: "/precos", janela_dias: 3, trafego: { sessoes: 1
   cliques_mortos: { pct_sessoes: 7.3 }, cliques_raiva: { pct_sessoes: null }, truncado: true, reconhecido: true };
 const clarity = (e) => ({ ...e, fonte: "clarity", janela: { rotulo: "últimos 3 dias (UTC)", fuso: "UTC" },
   dados: e.dados ? DADOS_CLARITY : null, falta: e.falta ? ["CLARITY_API_TOKEN"] : null });
+// Cartão Meta (8d): idem; `Purchase` com 0 e os demais com número, para passar por `n()`.
+const DADOS_META = { eventos: Object.fromEntries(["PageView", "ViewContent", "InitiateCheckout", "CompleteRegistration",
+  "StartTrial", "OnboardingComplete", "TesteClick", "Purchase"].map((e, i) => [e, 1000 * i])), reconhecido: true };
+const meta = (e) => ({ ...e, fonte: "meta", janela: { rotulo: "Meta", fuso: "UTC" },
+  dados: e.dados ? DADOS_META : null, falta: e.falta ? ["META_INSIGHTS_ACCESS_TOKEN"] : null });
 const json = (b) => ({ status: 200, contentType: "application/json", body: JSON.stringify(b) });
 
 const CASOS = [
@@ -106,14 +111,17 @@ for (const [nome, corpo, esperado] of CASOS) {
     await page.route("**/admin/api/funil/fonte/stripe", (r) => r.fulfill(json(corpo)));
     await page.route("**/admin/api/funil/fonte/ga4", (r) => r.fulfill(json(ga4(corpo))));
     await page.route("**/admin/api/funil/fonte/clarity", (r) => r.fulfill(json(clarity(corpo))));
+    await page.route("**/admin/api/funil/fonte/meta", (r) => r.fulfill(json(meta(corpo))));
     await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#f-stripe:not([data-estado=carregando])");
     await page.waitForSelector("#f-ga4:not([data-estado=carregando])");
     await page.waitForSelector("#f-clarity:not([data-estado=carregando])");
+    await page.waitForSelector("#f-meta:not([data-estado=carregando])");
     const r = await page.evaluate(() => [typeof Object.hasOwn, typeof structuredClone, typeof [].at,
       document.getElementById("f-stripe").dataset.estado, document.getElementById("main").textContent,
       document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent,
-      document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent]);
+      document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent,
+      document.getElementById("f-meta").dataset.estado, document.getElementById("f-meta").textContent]);
     await ctx.close();
     assert.deepEqual(r.slice(0, 3), ["undefined", "undefined", "undefined"]);
     assert.equal(r[3], esperado);
@@ -128,6 +136,11 @@ for (const [nome, corpo, esperado] of CASOS) {
       assert.ok(r[8].includes("8c. Clarity") && r[8].includes("165") && r[8].includes("54,6%") && r[8].includes("n/d") && r[8].includes("números parciais"), r[8].slice(0, 160));
     }
     if (esperado === "nao_configurado") assert.ok(r[8].includes("Defina CLARITY_API_TOKEN no Railway"));
+    assert.equal(r[9], esperado);  // e o cartão Meta
+    if (esperado === "ok" || esperado === "stale") {
+      assert.ok(r[10].includes("8d. Meta") && r[10].includes("TesteClick") && r[10].includes("7.000"), r[10].slice(0, 160));
+    }
+    if (esperado === "nao_configurado") assert.ok(r[10].includes("Defina META_INSIGHTS_ACCESS_TOKEN no Railway"));
     assert.deepEqual(erros, []);
   });
 }
@@ -143,20 +156,22 @@ async function comFalha(preparaFalha) {
     String.prototype.replace = function (...a) { if (window.__quebra) throw new Error("esc quebrado"); return replace.apply(this, a); };
   });
   await page.route("**/admin/api/funil", (r) => r.fulfill(json(FUNIL)));
-  for (const nome of ["stripe", "ga4", "clarity"]) {
+  for (const nome of ["stripe", "ga4", "clarity", "meta"]) {
     await page.route(`**/admin/api/funil/fonte/${nome}`, async (r) => {
       await page.waitForSelector("#f-stripe");  // o painel já montou; agora provoca a falha
       await preparaFalha(page);
-      return r.fulfill(json(nome === "ga4" ? ga4(env()) : nome === "clarity" ? clarity(env()) : env()));
+      return r.fulfill(json(nome === "ga4" ? ga4(env()) : nome === "clarity" ? clarity(env()) : nome === "meta" ? meta(env()) : env()));
     });
   }
   await page.goto(`${ORIGIN}/funil.html`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#f-stripe:not([data-estado=carregando])", { timeout: 5000 });
   await page.waitForSelector("#f-ga4:not([data-estado=carregando])", { timeout: 5000 });
   await page.waitForSelector("#f-clarity:not([data-estado=carregando])", { timeout: 5000 });
+  await page.waitForSelector("#f-meta:not([data-estado=carregando])", { timeout: 5000 });
   const r = await page.evaluate(() => [document.getElementById("f-stripe").dataset.estado, document.getElementById("f-stripe").textContent,
     document.getElementById("f-ga4").dataset.estado, document.getElementById("f-ga4").textContent,
-    document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent]);
+    document.getElementById("f-clarity").dataset.estado, document.getElementById("f-clarity").textContent,
+    document.getElementById("f-meta").dataset.estado, document.getElementById("f-meta").textContent]);
   await page.close();
   return { r, erros };
 }
@@ -169,6 +184,8 @@ test("exceção na checagem do estado (hasOwnProperty quebrado) vira cartão err
   assert.ok(r[3].includes("Não foi possível consultar esta fonte") && !r[3].includes("Buscando"));
   assert.equal(r[4], "erro");  // e o cartão Clarity
   assert.ok(r[5].includes("Não foi possível consultar esta fonte") && !r[5].includes("Buscando"));
+  assert.equal(r[6], "erro");  // e o cartão Meta
+  assert.ok(r[7].includes("Não foi possível consultar esta fonte") && !r[7].includes("Buscando"));
 });
 
 test("exceção até na moldura do cartão (esc quebrado) cai no último recurso: erro com texto fixo", async () => {
@@ -179,4 +196,6 @@ test("exceção até na moldura do cartão (esc quebrado) cai no último recurso
   assert.ok(r[3].includes("8b. GA4") && r[3].includes("Não foi possível consultar esta fonte") && !r[3].includes("Buscando"));
   assert.equal(r[4], "erro");
   assert.ok(r[5].includes("8c. Clarity") && r[5].includes("Não foi possível consultar esta fonte") && !r[5].includes("Buscando"));
+  assert.equal(r[6], "erro");
+  assert.ok(r[7].includes("8d. Meta") && r[7].includes("Não foi possível consultar esta fonte") && !r[7].includes("Buscando"));
 });

@@ -219,6 +219,12 @@ async def serve_assinar():
     return html_file(FRONTEND_DIR / "assinar.html", pixel=True, clarity=False)
 
 
+@router.get("/assinar-rede.js")
+async def serve_assinar_rede_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar-rede.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/assinar.js")
 async def serve_assinar_js(request: Request):
     return FileResponse(FRONTEND_DIR / "assinar.js", media_type="application/javascript",
