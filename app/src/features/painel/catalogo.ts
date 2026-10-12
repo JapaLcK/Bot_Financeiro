@@ -25,6 +25,8 @@ const MES_ISO = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const nomeMes = (mes: string) => MES_ISO.test(mes) ? new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${mes}-01T12:00:00Z`)) : mes;
 /** Mês ISO de fatura ("2026-10") vira "out/2026"; fora do formato ou mês fora de 01–12, passa intacto. */
 export const mesCurto = (mes: string) => MES_ISO.test(mes) ? `${nomeMes(mes).slice(0, 3)}/${mes.slice(0, 4)}` : mes;
+/** "2026-10" vira "out" (eixo de gráfico); fora do formato passa intacto. */
+export const mesAbrev = (mes: string) => MES_ISO.test(mes) ? nomeMes(mes).slice(0, 3) : mes;
 /** Instante ISO em "06/10", no fuso do aparelho; o ano só aparece quando não é o corrente. */
 export function dataCurta(instante: string, agora = new Date()) {
   const d = new Date(instante);

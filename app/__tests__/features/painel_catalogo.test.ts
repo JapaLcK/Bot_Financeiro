@@ -1,4 +1,4 @@
-import { hojeSP, mesAtual } from "@/features/painel/catalogo";
+import { hojeSP, mesAbrev, mesAtual } from "@/features/painel/catalogo";
 
 afterEach(() => { jest.useRealTimers(); });
 
@@ -14,5 +14,11 @@ describe("hojeSP / mesAtual", () => {
     expect(hojeSP()).toBe(esperado);
     expect(mesAtual()).toMatch(/^\d{4}-(0[1-9]|1[0-2])$/);
     expect(mesAtual()).toBe(esperado.slice(0, 7));
+  });
+});
+
+describe("mesAbrev", () => {
+  it.each([["2026-05", "mai"], ["2026-10", "out"], ["2026-03", "mar"], ["2026-13", "2026-13"], ["lixo", "lixo"]])("mesAbrev(%s) = %s", (mes, esperado) => {
+    expect(mesAbrev(mes)).toBe(esperado);
   });
 });

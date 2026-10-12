@@ -3,7 +3,7 @@ import { Animated, processColor, StyleSheet } from "react-native";
 
 import { LinearGradient, Stop } from "react-native-svg";
 
-import { CurvaAcumulada, rotuloY, ticksY, type CurvaAcumuladaProps } from "@/ui/componentes/CurvaAcumulada";
+import { CurvaAcumulada, rotuloCompacto, ticksY, type CurvaAcumuladaProps } from "@/ui/componentes/CurvaAcumulada";
 import { TemaProvider } from "@/ui/tema";
 import { claro, escuro } from "@/ui/tokens";
 
@@ -83,7 +83,7 @@ describe("CurvaAcumulada", () => {
     const r = await desenhada({ pontos: [100, 200, 300, 400], anterior: ANT, indiceHoje: 3 }); // ANT chega a 165000; o atual só a 400
     const topo = ticksY(165000).at(-1)!;
     expect(topo).toBeGreaterThanOrEqual(165000);
-    expect(r.getAllByTestId("curva-rotulo-y", H).map((t) => t.props.children)).toEqual(ticksY(165000).map(rotuloY));
+    expect(r.getAllByTestId("curva-rotulo-y", H).map((t) => t.props.children)).toEqual(ticksY(165000).map(rotuloCompacto));
     const ys = (d: string) => [...d.matchAll(/[ML][\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
     const yAnt = ys(r.getByTestId("curva-anterior", H).props.d as string), yAtual = ys(r.getByTestId("curva-linha", H).props.d as string);
     expect(Math.min(...yAnt)).toBeGreaterThanOrEqual(0); // nenhum ponto sai pelo topo do SVG
@@ -96,7 +96,7 @@ describe("CurvaAcumulada", () => {
     const d = r.getByTestId("curva-anterior", H).props.d as string, xs = [...d.matchAll(/[ML]([\d.]+),/g)].map((m) => Number(m[1]));
     expect(xs).toHaveLength(28); // sem o corte seriam 31
     expect(Math.max(...xs)).toBeCloseTo(300 - 12, 1); // o último ponto cai na margem direita, nenhum passa dela
-    expect(r.getAllByTestId("curva-rotulo-y", H).map((t) => t.props.children)).toEqual(ticksY(47000).map(rotuloY)); // 47.000 = máximo dos 28 primeiros; com os excedentes seria R$ 9k+
+    expect(r.getAllByTestId("curva-rotulo-y", H).map((t) => t.props.children)).toEqual(ticksY(47000).map(rotuloCompacto)); // 47.000 = máximo dos 28 primeiros; com os excedentes seria R$ 9k+
   });
   it("eixo Y: um rótulo e uma linha de grade por degrau, de R$ 0 ao topo; eixo X: dias 1, 15, 25 e o último", async () => {
     const r = await desenhada({ pontos: [100000, 400000, 900000, 1150000], diasNoMes: 31 });
@@ -169,7 +169,15 @@ describe("CurvaAcumulada", () => {
   });
 });
 
-describe("ticksY e rotuloY", () => {
+describe("rotuloCompacto", () => {
+  it.each([
+    [720000, "R$ 7,2k"], [700000, "R$ 7k"], [1200000, "R$ 12k"], [95000, "R$ 950"], [0, "R$ 0"], [99950, "R$ 1k"], [723456, "R$ 7,2k"], [100000, "R$ 1k"], [1234500, "R$ 12,3k"], [99900, "R$ 999"], [15050, "R$ 151"],
+  ])("rotuloCompacto(%i) = %s (vírgula pt-BR, uma casa, sem ruído de arredondamento)", (centavos, esperado) => {
+    expect(rotuloCompacto(centavos)).toBe(esperado);
+  });
+});
+
+describe("ticksY e rotuloCompacto", () => {
   it.each([
     [30000, ["R$ 0", "R$ 100", "R$ 200", "R$ 300"]], // centenas (R$ 300)
     [75000, ["R$ 0", "R$ 200", "R$ 400", "R$ 600", "R$ 800"]],
@@ -179,7 +187,7 @@ describe("ticksY e rotuloY", () => {
     [2500000, ["R$ 0", "R$ 10k", "R$ 20k", "R$ 30k"]],
   ])("máximo %i centavos: degraus redondos que cobrem o máximo", (maximo, rotulos) => {
     const t = ticksY(maximo);
-    expect(t.map(rotuloY)).toEqual(rotulos);
+    expect(t.map(rotuloCompacto)).toEqual(rotulos);
     expect(t.at(-1)!).toBeGreaterThanOrEqual(maximo);
     expect(t.length - 1).toBeLessThanOrEqual(4);
   });

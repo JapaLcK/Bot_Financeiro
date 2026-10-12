@@ -31,8 +31,12 @@ export function ticksY(maximo: number) {
   }
   return [0, maximo]; // ponytail: acima de R$ 10 trilhões não há degrau redondo; ninguém chega lá
 }
-/** "R$ 0", "R$ 750", "R$ 3k", "R$ 1,5k" (centavos inteiros em degraus redondos, então sem arredondar). */
-export const rotuloY = (centavos: number) => centavos >= 100_000 ? `R$ ${String(centavos / 100_000).replace(".", ",")}k` : `R$ ${centavos / 100}`;
+/** Centavos em "R$ 950", "R$ 7,2k", "R$ 12k" (reais inteiros; no "k", uma casa e vírgula pt-BR); o valor exato fica na lista. */
+// ponytail: sem "mi" — acima de R$ 999,9 mil sai "R$ 1000k"; trocar por Intl compact se alguém chegar lá
+export function rotuloCompacto(centavos: number) {
+  const reais = centavos / 100;
+  return Math.round(reais) < 1000 ? `R$ ${Math.round(reais)}` : `R$ ${String(Math.round(reais / 100) / 10).replace(".", ",")}k`;
+}
 
 /**
  * Curva de acumulado (identidade do /painel): linha de 2pt na cor do tom, área em degradê vertical da mesma cor, e, quando há,
@@ -84,7 +88,7 @@ export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje,
     <View testID="curva-acumulada" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ gap: 8 }}>
       <View style={{ flexDirection: "row" }}>
         <View style={{ width: COLUNA_Y, height: ALTURA }}>
-          {ticks.map((t) => <Texto key={t} testID="curva-rotulo-y" variante="legenda" tom="inkFaint" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ position: "absolute", right: 6, top: y(t) - 8, height: 16, lineHeight: 16 }}>{rotuloY(t)}</Texto>)}
+          {ticks.map((t) => <Texto key={t} testID="curva-rotulo-y" variante="legenda" tom="inkFaint" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ position: "absolute", right: 6, top: y(t) - 8, height: 16, lineHeight: 16 }}>{rotuloCompacto(t)}</Texto>)}
         </View>
         <View style={{ flex: 1 }}>
           <View testID="curva-plot" onLayout={(e) => setLargura(e.nativeEvent.layout.width)} style={{ height: ALTURA }}>
