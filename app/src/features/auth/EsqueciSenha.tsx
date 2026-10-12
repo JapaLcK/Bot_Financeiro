@@ -13,6 +13,11 @@ import { espaco } from "@/ui/tokens";
 const MENSAGEM_NEUTRA =
   "Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.";
 
+// Modo `emailFixo`: o reset revoga as outras sessões (`/auth/reset-password`), então a volta do
+// navegador cai no login. A copy avisa, em vez de prometer "volte e continue logado".
+const DEPOIS_DO_LINK = "Abra o link no navegador, crie a senha e volte ao app: você vai precisar entrar de novo.";
+const ENVIADO_DEFINIR = `Enviamos um link para definir sua senha, se o e-mail for válido. ${DEPOIS_DO_LINK}`;
+
 /**
  * `/auth/forgot-password` SEMPRE responde 200 com uma mensagem neutra (o
  * backend não revela se o e-mail existe — CLAUDE.md, isolamento de conta). O
@@ -68,8 +73,7 @@ export function EsqueciSenha({ emailFixo }: { emailFixo?: string } = {}) {
       <View style={{ gap: espaco.lg }}>
         <Texto variante="secao">Verifique seu e-mail</Texto>
         <Texto variante="corpo" tom="inkMuted">
-          {MENSAGEM_NEUTRA}
-          {emailFixo !== undefined && " Abra o link no navegador e volte ao app."}
+          {emailFixo === undefined ? MENSAGEM_NEUTRA : ENVIADO_DEFINIR}
         </Texto>
       </View>
     );
@@ -82,7 +86,7 @@ export function EsqueciSenha({ emailFixo }: { emailFixo?: string } = {}) {
       <Texto variante="corpo" tom="inkMuted">
         {emailFixo === undefined
           ? "Digite seu e-mail: se ele estiver cadastrado, enviamos um link para redefinir a senha."
-          : `Sua conta ainda não tem senha. Vamos enviar um link para ${emailFixo}: abra no navegador, crie a senha e volte ao app.`}
+          : `Sua conta ainda não tem senha. Vamos enviar um link para ${emailFixo}. ${DEPOIS_DO_LINK}`}
       </Texto>
       {emailFixo === undefined && (
         <Input

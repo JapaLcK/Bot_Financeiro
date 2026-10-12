@@ -13,6 +13,8 @@ import { chamadas, prepararCaso, resposta, rotear, S, segurar, type Rota } from 
 
 const MFA_DESLIGADO = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
 const NEUTRA = "Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.";
+const RELOGIN = "Abra o link no navegador, crie a senha e volte ao app: você vai precisar entrar de novo.";
+const ENVIADO = `Enviamos um link para definir sua senha, se o e-mail for válido. ${RELOGIN}`;
 
 const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -59,7 +61,8 @@ describe("Segurança — conta sem senha", () => {
     await tocar("Enviar link");
 
     expect(forgot()).toEqual([expect.objectContaining({ corpo: { email: "s@x.com" } })]);
-    expect(screen.getByText(`${NEUTRA} Abra o link no navegador e volte ao app.`)).toBeTruthy();
+    expect(screen.getByText(ENVIADO)).toBeTruthy();
+    expect(screen.queryByText(NEUTRA)).toBeNull();
   });
 
   it.each([
@@ -106,7 +109,9 @@ describe("Segurança — conta sem senha", () => {
     expect(screen.queryByText("Definir senha")).toBeNull();
   });
 
-  it("volta do Safari (background -> active) com a senha já definida: troca o bloco por Ativar, sem spinner", async () => {
+  // Caminho RARO: o reset de senha revoga as sessões (ver X1), então só chega aqui se a revogação
+  // falhou e a sessão sobreviveu. Aí a recarga em foreground troca o bloco por Ativar sem reentrar.
+  it("RARO — volta do Safari com a sessão ainda viva e a senha definida: troca o bloco por Ativar, sem spinner", async () => {
     const conta = { valor: false as boolean | undefined };
     await abrir(conta);
     await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
@@ -129,7 +134,7 @@ describe("Segurança — conta sem senha", () => {
     await appVai("background");
     await appVai("active");
 
-    expect(screen.getByText(/Abra o link no navegador/)).toBeTruthy();
+    expect(screen.getByText(ENVIADO)).toBeTruthy();
     expect(forgot()).toHaveLength(1);
     expect(chamadas().filter((c) => c.caminho === "/auth/me").length).toBeGreaterThanOrEqual(2);
   });
@@ -217,9 +222,9 @@ describe("Segurança — conta sem senha", () => {
     expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
   });
 
-  it("A3 — antes do envio o texto está no futuro; 'Enviamos' só depois", async () => {
+  it("A3 — antes do envio o texto está no futuro e já avisa do novo login; 'Enviamos' só depois", async () => {
     await abrir({ valor: false });
-    await waitFor(() => expect(screen.getByText(/Vamos enviar um link para s@x\.com/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(`Sua conta ainda não tem senha. Vamos enviar um link para s@x.com. ${RELOGIN}`)).toBeTruthy());
     expect(screen.queryByText(/Enviamos um link para/)).toBeNull();
   });
 
@@ -238,7 +243,10 @@ describe("Segurança — conta sem senha", () => {
     expect(me()).toBe(base + 1);
   });
 
-  it("X1 — sessão expirada numa recarga SILENCIOSA (tela em pronto) ainda leva a /entrar com o aviso", async () => {
+  // Caminho COMUM: `/auth/reset-password` revoga as outras sessões e os refresh tokens, então a volta
+  // do Safari encontra 401 + refresh 401 e a recarga em foreground leva a /entrar. É por isso que a
+  // copy do bloco avisa que será preciso entrar de novo.
+  it("X1 — COMUM: volta do Safari após o reset (401 + refresh 401) numa recarga SILENCIOSA leva a /entrar com o aviso", async () => {
     let morta = false;
     await abrir(
       { valor: false },
@@ -249,7 +257,7 @@ describe("Segurança — conta sem senha", () => {
     );
     await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
 
-    morta = true; // revogada em outro aparelho enquanto o app estava no fundo
+    morta = true; // o reset de senha, feito no navegador, revogou a sessão do app
     await appVai("background");
     await appVai("active");
 
