@@ -81,9 +81,9 @@ it("calendário distingue meses de compra e mantém a data civil no drilldown", 
  await act(async () => { fireEvent.press(screen.getByTestId("calendario-dia-2026-09-03")); await drenar(); });
  await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy()); expect(screen.getByText("03/09/2026")).toBeTruthy();
 });
-it("grupos arredondados apresentam aviso em Categorias e Calendário", async () => {
- detalhes = arredondamento; renderRouter("./app", { initialUrl: "/gastos" }); await abrirRessalvas(3);
- await waitFor(() => expect(screen.getAllByText(aviso)).toHaveLength(3)); expect(screen.queryByText("arredondamento por grupo")).toBeNull();
+it("grupos arredondados apresentam aviso em Categorias, Calendário e nos números do mês", async () => {
+ detalhes = arredondamento; renderRouter("./app", { initialUrl: "/gastos" }); await abrirRessalvas(4); // 3 blocos do `detalhes` + o "Entrou e saiu no mês" (o aviso do detalhe que o resumo não traz)
+ await waitFor(() => expect(screen.getAllByText(aviso)).toHaveLength(4)); expect(screen.queryByText("arredondamento por grupo")).toBeNull();
 });
 it("patrimônio preserva total oficial e informa diferença de centavos entre grupos", async () => {
  const impl = fetchFalso.getMockImplementation()!;
