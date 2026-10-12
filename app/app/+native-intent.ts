@@ -16,9 +16,19 @@ const VOLTA = [
 ];
 
 /**
- * O expo-router passa TODO link de entrada por aqui; `null` = não navega. Só
- * descarta a volta do OAuth que chega com o app aberto e o widget da Pluggy em
- * foco (ver `definirWidgetAberto`); qualquer outro link segue sem mudança.
+ * As rotas de entrada (`(auth)`) e a `auth` do retorno do Google (#604). Um
+ * link `pigbank://` de FORA nunca deve levar até elas: a pessoa abriria a tela
+ * de login/cadastro por um link de terceiro (e no Android, `auth` sem rota vira
+ * "Unmatched Route"). Só o esquema do app e o caminho cru; `exp://` e o dev
+ * client (`exp+pigbank://`) não casam de propósito.
+ */
+const ENTRADA = /^(?:pigbank(?:-staging|-dev)?:\/\/\/?|\/)(?:\(auth\)\/)?(?:auth|entrar|criar-conta|esqueci-senha|boas-vindas)(?:[/?#]|$)/i;
+
+/**
+ * O expo-router passa TODO link de entrada por aqui; `null` = não navega. Descarta
+ * a volta do OAuth que chega com o app aberto e o widget da Pluggy em foco (ver
+ * `definirWidgetAberto`) e os links para `ENTRADA`: `null` com o app aberto, `/`
+ * na abertura a frio (`initial`). Qualquer outro link segue sem mudança.
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   if (VOLTA.some((r) => r.test(path))) {
@@ -62,5 +72,6 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     ];
     return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }
+  if (ENTRADA.test(path)) return initial ? "/" : null;
   return path;
 }

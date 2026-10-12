@@ -7,7 +7,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
   default: () => mockEsquema.valor,
 }));
 
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 import type { WebBrowserAuthSessionResult } from "expo-web-browser";
 import { Platform, StyleSheet } from "react-native";
 import { raio } from "@/ui/tokens";
@@ -17,6 +17,7 @@ import { lerCredenciais } from "@/storage/secure";
 import { credencialApple, folhaApple, rotasApple, voltaDaApple } from "./apple_apoio";
 import { chamadas, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { abrirFolha } from "./google_apoio";
+import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 /** Drena microtarefas sem `setTimeout(0)`, que trava dentro de `act()` com `renderRouter`. */
 const respirar = async () => {
@@ -43,7 +44,7 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 async function abrirEntrar() {
-  renderRouter("./app", { initialUrl: "/entrar" });
+  abrirRotaDeEntrada("/entrar");
   await waitFor(() => expect(screen).toHavePathname("/entrar"));
   // A 1ª montagem da suíte, com o Jest em paralelo, pode vir depois do caminho.
   await waitFor(() => botao("Continuar com Google"));

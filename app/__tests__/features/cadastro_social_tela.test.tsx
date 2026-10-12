@@ -5,7 +5,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
   default: () => "light",
 }));
 
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 import { Linking } from "react-native";
 
 import { LEGENDA_WHATSAPP } from "@/features/auth/criarConta";
@@ -17,6 +17,7 @@ import { lerCredenciais } from "@/storage/secure";
 import { chamadas, credencialDe, falharEscrita, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { PENDENTE_APPLE, rotasApple, voltaDaApple } from "./apple_apoio";
 import { PENDENTE, rotasGoogle, voltaDoGoogle } from "./google_apoio";
+import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 const respirar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -35,7 +36,7 @@ afterEach(() => jest.restoreAllMocks());
 
 /** Entrar → Google → conta nova: chega em C. */
 async function irAoCadastro() {
-  renderRouter("./app", { initialUrl: "/entrar" });
+  abrirRotaDeEntrada("/entrar");
   await waitFor(() => expect(screen).toHavePathname("/entrar"));
   await waitFor(() => botao("Continuar com Google"));
   fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
@@ -102,7 +103,8 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     await waitFor(() => expect(screen.getByText(/Bom dia, Bia/)).toBeTruthy());
     expect(screen).toHavePathname("/resumo");
     expect(cadastros().map((c) => c.corpo)).toEqual([
-      { token: "gso_bia", name: "Bia S.", phone: "11999998888", accepted_terms: true },
+      // O verifier do Google atravessa `cadastro-social` → `criando-social` até o complete-signup (#604).
+      { token: "gso_bia", name: "Bia S.", phone: "11999998888", accepted_terms: true, code_verifier: expect.stringMatching(/^[0-9a-f]{64}$/) },
     ]);
   });
 
@@ -177,7 +179,7 @@ describe("(auth)/entrar — cadastro pela Apple (C/K)", () => {
   async function irAoCadastroApple() {
     rotasApple();
     voltaDaApple({ identityToken: "id-token-leo" });
-    renderRouter("./app", { initialUrl: "/entrar" });
+    abrirRotaDeEntrada("/entrar");
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
     await waitFor(() => botao("Continuar com a Apple"));
     await act(async () => {

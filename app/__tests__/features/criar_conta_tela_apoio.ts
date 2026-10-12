@@ -1,6 +1,7 @@
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
 import { chamadas, credencialDe, resposta, rotear, type Rota } from "./auth_apoio";
+import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 /** Ajudantes da tela Criar conta, divididos entre `criar_conta_tela*.test.tsx` (teto de 350 linhas). */
 
@@ -29,7 +30,7 @@ export function rotas(extra: Record<string, Rota> = {}) {
 }
 
 export async function abrir() {
-  renderRouter("./app", { initialUrl: "/criar-conta" });
+  abrirRotaDeEntrada("/criar-conta");
   await waitFor(() => expect(screen).toHavePathname("/criar-conta"));
 }
 

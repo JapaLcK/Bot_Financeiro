@@ -165,9 +165,11 @@ jest.mock("expo-crypto", () => {
   const nodeCrypto = require("crypto");
   return {
     CryptoDigestAlgorithm: { SHA1: "SHA-1", SHA256: "SHA-256", SHA384: "SHA-384", SHA512: "SHA-512" },
+    CryptoEncoding: { HEX: "hex", BASE64: "base64" },
     randomUUID: jest.fn(() => nodeCrypto.randomUUID()),
-    digestStringAsync: jest.fn(async (algoritmo, dado) =>
-      nodeCrypto.createHash(algoritmo.replace("-", "").toLowerCase()).update(dado).digest("hex"),
+    getRandomBytes: jest.fn((n) => new Uint8Array(nodeCrypto.randomBytes(n))),
+    digestStringAsync: jest.fn(async (algoritmo, dado, opcoes) =>
+      nodeCrypto.createHash(algoritmo.replace("-", "").toLowerCase()).update(dado).digest(opcoes?.encoding ?? "hex"),
     ),
   };
 });

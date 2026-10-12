@@ -26,6 +26,7 @@ import { guardarCredenciais } from "@/storage/secure";
 
 import { S, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { CODIGO_INVALIDO, rotasGoogle, voltaDoGoogle } from "./google_apoio";
+import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 /** Drena microtarefas sem `setTimeout(0)`, que trava dentro de `act()` com `renderRouter`. */
 const respirar = async () => {
@@ -167,7 +168,7 @@ describe("(auth)/boas-vindas — navegação", () => {
   // `router.back()` com a troca em voo sai para /boas-vindas.
   it("N3 — [BV, Entrar] com o Google em voo no Entrar: voltar não sai; depois sai, e o Google da BV entra", async () => {
     const portao = trocaPresa();
-    renderRouter("./app", { initialUrl: "/entrar" });
+    abrirRotaDeEntrada("/entrar");
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
     await waitFor(() => botao("Continuar com Google"));
 

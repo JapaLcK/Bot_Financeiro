@@ -25,8 +25,9 @@ export type EstadoEntrar =
   | { fase: "google" }
   | { fase: "apple" }
   // O cadastro de quem entrou por um dos dois sem conta (`cadastroSocial.ts`).
-  | { fase: "cadastro-social"; provedor: ProvedorSocial; token: string; email: string; nome: string; aviso?: string }
-  | { fase: "criando-social"; provedor: ProvedorSocial; token: string; email: string };
+  // `verificador`: o PKCE do Google (#604), só em memória; a Apple não tem.
+  | { fase: "cadastro-social"; provedor: ProvedorSocial; token: string; email: string; nome: string; verificador?: string; aviso?: string }
+  | { fase: "criando-social"; provedor: ProvedorSocial; token: string; email: string; verificador?: string };
 
 /**
  * Quais fases apagam o campo Senha ao entrar nelas. O iOS só oferece "Salvar
@@ -65,9 +66,13 @@ export function textoDaFalha(e: unknown): string {
   return GENERICO;
 }
 
-/** Google e Apple: 5xx, rede, tempo limite e contrato quebrado dão o genérico; o resto, o `detail` do servidor. */
+/**
+ * Google e Apple: 5xx, rede, tempo limite, contrato quebrado e 422 (corpo recusado
+ * pelo Pydantic, ex.: `code_verifier` fora do RFC 7636 — defeito do app, não "código
+ * inválido") dão o genérico; o resto, o `detail` do servidor.
+ */
 export function textoSocial(e: unknown): string {
-  return e instanceof ErroDeApi && e.status >= 500 ? GENERICO : textoDaFalha(e);
+  return e instanceof ErroDeApi && (e.status >= 500 || e.status === 422) ? GENERICO : textoDaFalha(e);
 }
 
 /**
