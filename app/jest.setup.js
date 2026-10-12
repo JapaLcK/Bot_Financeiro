@@ -210,6 +210,11 @@ jest.mock("@react-native-community/slider", () => ({
   default: (props) => require("react").createElement(require("react-native").View, props),
 }));
 
+// Reanimated: o mock dele importa o worklets real (`loadUnpackers` quebra), então o do worklets vem ANTES.
+// `entering`/`exiting` chegam como prop no nó host: é o que os testes de "reduzir movimento" leem.
+jest.mock("react-native-worklets", () => require("react-native-worklets/src/mock"));
+jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock"));
+
 // `expo/fetch` (stream do chat) é nativo: no Jest ele delega ao `globalThis.fetch`, que cada teste troca por `fetchFalso`.
 // Função comum, não `jest.fn`: `jest.restoreAllMocks()` apaga a implementação de um `jest.fn` (Jest 29).
 jest.mock("expo/fetch", () => ({ fetch: (...a) => globalThis.fetch(...a) }));

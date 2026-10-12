@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing } from "react-native";
+import { Easing as EasingR, FadeInDown } from "react-native-reanimated";
 
 /** feedback = toque; transicao = crossfade/entrada de tela; sheet = abrir folha. */
 export const duracoes = { feedback: 160, transicao: 240, sheet: 400 } as const;
 
 /** Curva única do produto (emil-design-eng): nunca ease-in, sempre esta saída suave. */
-export const facilitador = Easing.bezier(0.23, 1, 0.32, 1);
+const CURVA = [0.23, 1, 0.32, 1] as const;
+export const facilitador = Easing.bezier(...CURVA);
+
+const ENTRADA = FadeInDown.duration(duracoes.transicao).easing(EasingR.bezier(...CURVA));
+/** `entering` das bolhas e dos chips; `undefined` (sem animação) com "reduzir movimento". */
+export function useEntrada() {
+  return useReduzirMovimento() ? undefined : ENTRADA;
+}
 
 /** Lê e acompanha "Reduzir movimento" do sistema (iOS/Android). */
 export function useReduzirMovimento(): boolean {
@@ -25,9 +33,8 @@ export function useReduzirMovimento(): boolean {
 }
 
 /**
- * Press scale 0.97/160ms, `Animated` nativo — sem reanimated: com o Sheet
- * nativo do expo-router (decisão do dono), nada nesta fase precisa dele, e
- * `Animated` com `useNativeDriver` cobre transform e opacidade. Nunca `scale(0)`, só
+ * Press scale 0.97/160ms, `Animated` nativo: `useNativeDriver` cobre transform
+ * e opacidade; o Reanimated fica só para entrada/saída (`useEntrada`). Nunca `scale(0)`, só
  * transform/opacity, sempre `useNativeDriver`.
  *
  * Com "reduzir movimento" a escala fica parada e só a opacidade desce a 0.85:
