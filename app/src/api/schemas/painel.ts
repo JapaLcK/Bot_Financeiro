@@ -28,7 +28,11 @@ export const rendaSchema = z.object({ ok: z.literal(true), evolution: z.array(z.
 export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(z.object({ key: z.string(), title: z.string(), message: z.string(), severity: z.string(), action_label: texto, action_view: texto })) });
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
-const cardId = z.enum(Object.keys(TITULOS) as [keyof typeof TITULOS, ...(keyof typeof TITULOS)[]]);
+/** `periodo` existe só no chat (card sem widget): fica FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
+type CardChat = keyof typeof TITULOS | "periodo";
+const cardId = z.enum(["periodo", ...Object.keys(TITULOS)] as [CardChat, ...CardChat[]]);
+/** O recurso `periodo` do card (`api/nativo/mes_detalhes.py`), uma aba com `mes: null`. Fixture: `tests/fixtures/ai_chat_bloco_periodo.json`. */
+export const periodoSchema = z.object({ inicio: z.string(), fim: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema).max(5) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
 /** Eventos do `/ai/chat/stream`, um schema por `tipo`. O `bloco` só tem o ENVELOPE validado (`recursos` fica solto: o E1 o refina por card). */
 const eventosChat = {
   passo: z.object({ texto: z.string(), previa: cardId.nullable().catch(null) }),

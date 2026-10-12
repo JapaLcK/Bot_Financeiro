@@ -73,7 +73,8 @@ def test_top_categories_respeita_limit(user_id):
     assert len(result["categories"]) == 3
 
 
-def test_top_categories_filtra_por_periodo(user_id):
+def test_top_categories_filtra_por_periodo(pro_user_id):
+    user_id = pro_user_id  # meses inteiros levam o corte do plano; o Essencial não veria maio
     """Despesa fora do range não aparece."""
     db.add_launch_and_update_balance(
         user_id, "despesa", 100, "antiga", "antiga",
@@ -520,7 +521,8 @@ def test_spending_trend_retorna_dados_dos_meses(pro_user_id):
 
 def test_spending_trend_clamp_limite(pro_user_id):
     result = _get_spending_trend(pro_user_id, {"months": 100})
-    assert result["months"] == 24  # clamp em 24
+    assert result["months"] == 12  # teto de 12 (uma regra só: MAX_MESES_PERIODO)
+    assert result["limitado_a_12_meses"] and result["pedido"] == {"months": 100}
 
 
 def test_spending_trend_inclui_credito(pro_user_id):

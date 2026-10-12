@@ -194,7 +194,15 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   cartão pela fatura, com o MESMO corte (`motivos: [inicio_do_historico]` quando o corte cai
   no dia 1 do mês pedido ou depois; o "mês anterior cortado" do resumo não tem par nas listas; mês todo
   cortado = lista vazia com as datas do mês); mês = dia 1 até o último dia, ou, no corrente, dia 1
-  até hoje ou depois; `_mes_inteiro`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  até hoje ou depois; `_meses_inteiros`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  **Vários meses inteiros** (2 a 12) seguem a mesma regra, mês a mês: `get_period_summary` e `compare_periods`
+  chamam `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
+  `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada); no app,
+  `get_top_categories`/`get_category_spend` nessa faixa são recusadas com `periodo_no_card`. **Teto de 12
+  meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
+  e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
+  `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
+  futuro termina no fim do mês corrente, com `fim_ajustado` e `aviso_fim`.
   Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
   hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
   mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado
@@ -205,18 +213,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   e espaços em volta valem como a data, só em `launches.py`: `investments.py:35` tem cópia própria
   de `_parse_iso_date` (lá datetime ISO e data inválida ainda viram o mês corrente em silêncio;
   follow-up). (d) com o corte do plano no MEIO do mês, as listas devolvem `start_date = corte`; o
-  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_mes_inteiro` dá None
+  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_meses_inteiros` dá None
   e vira período livre (data da compra, sem corte). (e) `inicio_do_historico` nas tools só sai com
-  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado).
+  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado); no resumo de
+  2+ meses o motivo segue o `>` do painel (`ler_periodo`), nas listas o `>=` (limite declarado).
   `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
   `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
   (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
-  sem o cartão. Das tools da IA em período livre (vários meses também), só `get_period_summary`
-  e `compare_periods` são só `launches` (saem com `cartao_incluido: false` e uma `nota`);
-  `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
+  sem o cartão. Das tools da IA em período livre (não são meses inteiros), `get_period_summary` e
+  `compare_periods` somam `launches` + cartão pela DATA DA COMPRA (Σ de `get_top_expense_categories`,
+  a mesma consulta da lista; saem com `cartao_por: data_da_compra` e uma `nota`; meses inteiros saem com
+  `cartao_por: fatura`); `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
   `get_category_spend` lê o cartão sempre pela fatura (`period_end`) e `get_spending_trend` soma o
   cartão pela data da compra. Pré-existente, não corrigido: `get_top_categories` mostra lançamento
   sem categoria como `outros`, mas `get_category_spend("outros")` só soma a categoria `outros`; o

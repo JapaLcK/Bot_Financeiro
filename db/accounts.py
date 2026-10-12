@@ -1226,7 +1226,7 @@ def get_top_expense_categories(
     user_id: int,
     start_date: date,
     end_date: date,
-    limit: int = 5,
+    limit: int | None = 5,
     by_bill_month: bool = False,
     include_card: bool = True,
 ):
@@ -1296,7 +1296,7 @@ def get_top_expense_categories(
                 (
                     user_id, start_dt, end_excl,
                     *((user_id, *credit_date_params) if include_card else ()),
-                    int(limit),
+                    None if limit is None else int(limit),  # None = sem teto (LIMIT NULL)
                 ),
             )
             rows = cur.fetchall()

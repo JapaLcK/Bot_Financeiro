@@ -24,6 +24,7 @@ import unicodedata
 from typing import Any
 
 import db
+from core.observability import _log_falha
 
 from ._base import OUTRO_PEDIDO, Tool
 
@@ -226,8 +227,9 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
 
     try:
         saved_cat, created = db.upsert_budget(user_id, canon, budget)
-    except ValueError as e:
-        return f"🐷 Não consegui salvar: {e}"
+    except ValueError as e:  # db levanta códigos (CATEGORIA_INVALIDA...), não texto de usuário
+        _log_falha("set_budget", user_id, e)
+        return "🐷 Não consegui salvar esse orçamento. Confere a categoria e o valor."
 
     if created:
         return (
