@@ -15,14 +15,19 @@ export function useEntrada() {
   return useReduzirMovimento() ? undefined : ENTRADA;
 }
 
+// Último valor lido: a leitura é assíncrona, então montagens novas começariam em `false` por 1 quadro.
+let ultimoValor = false;
+
 /** Lê e acompanha "Reduzir movimento" do sistema (iOS/Android). */
 export function useReduzirMovimento(): boolean {
-  const [reduzir, setReduzir] = useState(false);
+  const [reduzir, setReduzirEstado] = useState(ultimoValor);
   useEffect(() => {
     let montado = true;
-    AccessibilityInfo.isReduceMotionEnabled().then((v) => {
-      if (montado) setReduzir(v);
-    });
+    const setReduzir = (v: boolean) => {
+      ultimoValor = v;
+      if (montado) setReduzirEstado(v);
+    };
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduzir);
     const assinatura = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduzir);
     return () => {
       montado = false;
