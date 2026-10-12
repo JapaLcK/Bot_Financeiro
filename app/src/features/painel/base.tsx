@@ -1,10 +1,11 @@
 import type { Href } from "expo-router";
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { usePressao, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { Card } from "@/ui/componentes/Card";
+import { SegurouContext } from "@/ui/componentes/CurvaAcumulada";
 import { Money } from "@/ui/componentes/Money";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
@@ -47,12 +48,16 @@ export function tituloWidget(id: Widget, dados: ReturnType<typeof usePainel>["da
 /**
  * `ir`: o card INTEIRO leva a `destino` (aba) ao toque. O `Pressable` de fora só captura o toque (`accessible={false}`: o VoiceOver
  * continua lendo os textos e o `Avisos` de dentro, que seria engolido por um botão único); o título é o botão que o VoiceOver anuncia.
+ * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
+ * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
+ * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
  */
 export function Bloco({ id, children, abrir, ir }: { id: Widget; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } }) {
-  const titulo = tituloWidget(id, usePainel().dados); const { navegar } = useNavegacaoPainel(); const aoIr = () => ir && navegar(ir.rota);
+  const titulo = tituloWidget(id, usePainel().dados); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
+  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
   const cabecalho = <Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>;
-  const card = <Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card>;
-  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
+  const card = <SegurouContext.Provider value={segurou}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPressIn={zerar} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></SegurouContext.Provider>;
+  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
 }
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(); const r = p.dados[nome];

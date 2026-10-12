@@ -206,6 +206,64 @@ it("o card inteiro leva à aba Gastos: tocar no número (fora do título) navega
  await act(async () => { fireEvent.press(carta().getByLabelText("729 reais e 50 centavos")); });
  expect(screen).toHavePathname("/gastos");
 });
+// Pressability de verdade (sem mock): o card é o responder desde o início do toque.
+const dedo = { persist() {}, currentTarget: 1, nativeEvent: { pageX: 100, pageY: 100, locationX: 100, locationY: 20, timestamp: 0, touches: [{ pageX: 100, pageY: 100, identifier: 1 }], changedTouches: [{ pageX: 100, pageY: 100, identifier: 1 }] } };
+const espera = (ms: number) => act(async () => { jest.advanceTimersByTime(ms); }); // o `renderRouter` liga o relógio falso
+it("toque curto no card (sem nenhum evento no gráfico) navega ao soltar", async () => {
+ await abrir(); await medir();
+ await act(async () => { fireEvent(screen.getByTestId("bloco-resumo"), "responderGrant", dedo); });
+ await act(async () => { fireEvent(screen.getByTestId("bloco-resumo"), "responderRelease", dedo); });
+ expect(screen).toHavePathname("/gastos");
+});
+const card = () => screen.getByTestId("bloco-resumo");
+const tocar = async (alvo: () => any) => { await act(async () => { fireEvent(alvo(), "responderGrant", dedo); }); await act(async () => { fireEvent(alvo(), "responderRelease", dedo); }); };
+it("toque curto QUE PASSA PELO GRÁFICO (touchStart/touchEnd em < 250ms) navega ao soltar: o aviso do gráfico só vale depois que a bolha abre", async () => {
+ await abrir(); await medir();
+ const gesto = screen.getByTestId("curva-scrub", H);
+ await act(async () => { fireEvent(card(), "responderGrant", dedo); fireEvent(gesto, "touchStart", dedo); });
+ await espera(100);
+ expect(carta().queryByTestId("curva-bolha", H)).toBeNull();
+ await act(async () => { fireEvent(gesto, "touchEnd", dedo); fireEvent(card(), "responderRelease", dedo); });
+ expect(screen).toHavePathname("/gastos");
+});
+it("segurar o card 400ms SEM nada no gráfico e soltar NAVEGA (toque lento não é scrub)", async () => {
+ await abrir(); await medir();
+ await act(async () => { fireEvent(card(), "responderGrant", dedo); });
+ await espera(400);
+ await act(async () => { fireEvent(card(), "responderRelease", dedo); });
+ expect(screen).toHavePathname("/gastos");
+});
+it("segurar no gráfico 255ms (bolha aberta) e soltar NÃO navega, e fecha a bolha", async () => {
+ await abrir(); await medir();
+ const gesto = screen.getByTestId("curva-scrub", H);
+ await act(async () => { fireEvent(card(), "responderGrant", dedo); fireEvent(gesto, "touchStart", dedo); });
+ await espera(255);
+ expect(carta().getByTestId("curva-bolha", H)).toBeTruthy();
+ await act(async () => { fireEvent(card(), "responderRelease", dedo); fireEvent(gesto, "touchEnd", dedo); });
+ expect(screen).toHavePathname("/resumo");
+ expect(carta().queryByTestId("curva-bolha", H)).toBeNull();
+});
+it.each([["o card", () => screen.getByTestId("bloco-resumo")], ["o título", () => screen.getByRole("button", { name: "Resumo do mês, abrir Gastos" })]] as const)("scrub cancelado (rolagem: touchCancel e o card nem recebe o soltar) não deixa o aviso preso: o toque seguinte em %s navega", async (_n, alvo) => {
+ await abrir(); await medir();
+ const gesto = screen.getByTestId("curva-scrub", H);
+ await act(async () => { fireEvent(card(), "responderGrant", dedo); fireEvent(gesto, "touchStart", dedo); });
+ await espera(255);
+ expect(carta().getByTestId("curva-bolha", H)).toBeTruthy();
+ await act(async () => { fireEvent(gesto, "touchCancel", dedo); fireEvent(card(), "responderTerminate", dedo); });
+ expect(screen).toHavePathname("/resumo");
+ await tocar(alvo);
+ expect(screen).toHavePathname("/gastos");
+});
+it("o gráfico do card mostra o dia segurado com o valor da MESMA série desenhada (dia 6 = hoje: R$ 2.380,50 este mês, R$ 3.110,00 o mês passado)", async () => {
+ await abrir(); await medir();
+ const gesto = screen.getByTestId("curva-scrub", H);
+ await act(async () => { fireEvent(gesto, "touchStart", { nativeEvent: { locationX: 290, pageX: 290, pageY: 20 } }); });
+ await espera(300);
+ expect(carta().getByText("dia 6 · R$ 2.380,50", H)).toBeTruthy(); expect(carta().getByText("mês passado R$ 3.110,00", H)).toBeTruthy();
+ // O card segue sendo o responder durante o arrasto (o gráfico não o disputa): só os eventos de toque do gráfico trocam o dia (x=12 = dia 1, R$ 900,00).
+ await act(async () => { fireEvent(gesto, "touchMove", { nativeEvent: { locationX: 12, pageX: 12, pageY: 20 } }); });
+ expect(carta().getByText("dia 1 · R$ 900,00", H)).toBeTruthy();
+});
 it("tocar no título também abre Gastos", async () => {
  await abrir();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Resumo do mês, abrir Gastos" })); });

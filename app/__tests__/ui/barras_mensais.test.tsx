@@ -2,6 +2,7 @@ import { act } from "@testing-library/react-native";
 import { Animated, StyleSheet } from "react-native";
 
 import { alturaBarra, BarrasMensais, type BarraMensal } from "@/ui/componentes/BarrasMensais";
+import { contraste } from "@/ui/contraste";
 import { claro, escuro } from "@/ui/tokens";
 
 import { renderNosDoisTemas } from "./_render";
@@ -37,12 +38,20 @@ describe("BarrasMensais", () => {
     expect(r.getAllByTestId("barra", H).map((b) => estilo(b).height)).toEqual([103, 115, 107, 117, 113, 120]);
     expect(r.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
   });
-  it("mês atual em tinta cheia e os outros a 50%, na cor do tema; trilho neutro de 120pt, raio 4", () => {
+  it("mês atual em rosa da marca cheio e os outros a 50%, na cor do tema; trilho neutro de 120pt, raio 4", () => {
     for (const [esquema, paleta] of [["dark", escuro], ["light", claro]] as const) {
       const r = renderNosDoisTemas(<BarrasMensais meses={meses()} rotuloValor={rotulo} />)[esquema === "dark" ? "escuro" : "claro"];
       expect(r.getAllByTestId("barra", H).map((b) => estilo(b).opacity)).toEqual([0.5, 0.5, 0.5, 0.5, 0.5, 1]);
-      for (const b of r.getAllByTestId("barra", H)) expect(estilo(b)).toMatchObject({ backgroundColor: paleta.ink, borderTopLeftRadius: 4, borderTopRightRadius: 4 });
+      for (const b of r.getAllByTestId("barra", H)) expect(estilo(b)).toMatchObject({ backgroundColor: paleta.brand, borderTopLeftRadius: 4, borderTopRightRadius: 4 });
       for (const t of r.getAllByTestId("barra-trilho", H)) expect(estilo(t)).toMatchObject({ width: 26, height: 120, borderRadius: 4, backgroundColor: paleta.surfaceControl });
+    }
+  });
+  it("rótulo do mês atual em brandInk (texto), os outros em inkMuted, o valor segue em ink; a barra cheia dá 3:1 sobre o trilho nos dois temas", () => {
+    for (const [esquema, paleta] of [["dark", escuro], ["light", claro]] as const) {
+      const r = renderNosDoisTemas(<BarrasMensais meses={meses()} rotuloValor={rotulo} />)[esquema === "dark" ? "escuro" : "claro"];
+      expect(r.getAllByTestId("barra-mes", H).map((t) => estilo(t).color)).toEqual([...Array(5).fill(paleta.inkMuted), paleta.brandInk]);
+      expect(estilo(r.getByTestId("barra-valor", H)).color).toBe(paleta.ink);
+      expect(contraste(paleta.brand, paleta.surfaceControl)).toBeGreaterThanOrEqual(3);
     }
   });
   it("valor compacto SÓ no mês atual, com a marcação 'em andamento' uma vez", () => {
