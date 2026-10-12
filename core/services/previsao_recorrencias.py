@@ -10,7 +10,8 @@ do banco segue como sem casamento). Sem casamento, a saída do banco entra
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 from core.services.assinaturas import DIAS_ATIVA, _merchant, cadeias, dia_da_cadeia
 from core.services.cashflow import _recurring_occurrence_dates
@@ -21,6 +22,7 @@ from db.open_finance import RECON_AMOUNT_TOL, merchant_similarity
 from db.patrimonio import BANCO_VELHO
 from utils_date import add_months, clamp_day
 
+CENTAVO = Decimal('0.01')
 MEIO_CICLO = 15  # cobrança a menos de 15 dias do dia esperado cobre aquele ciclo
 TOLERANCIA_DIA = 5  # a da Pluggy (30±5 dias)
 PREMISSA = ('Do banco, só entram cobranças e receitas que se repetem todo mês; '
@@ -73,22 +75,10 @@ def _casar(manuais: list[dict], cs: list[dict]) -> dict[int, date | None]:
     return casadas
 
 
-def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instancias: list,
-           contas_na_base: set) -> None:
-    """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
-    hoje = s.hoje
-    conexoes = ler_frescor(cur, user_id)
-    if not conexoes:
-        return
-    s.premissas.append(PREMISSA)
-    velho = s.calculado_em - BANCO_VELHO
-    if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
-        _motivo(s, 'recorrencias_banco_nao_lidas')
-    for c in conexoes:  # a previsão em cache vence quando a lista vira velha
-        if c['recurring_fetched_at'] is not None and c['recurring_fetched_at'] >= velho:
-            s.valido_ate = min(s.valido_ate, c['recurring_fetched_at'] + BANCO_VELHO)
-
-    linhas = ler_ocorrencias(cur, user_id, receitas=True)
+def cadeias_do_banco(cur, user_id: int, *, receitas: bool) -> list[dict]:
+    """As cadeias mensais do banco, na seleção de Assinaturas (a mesma da Previsão e do custo
+    da reserva): `ignorar` já aplicado (só saída), cartão incluído. `receitas=False` lê só saída."""
+    linhas = ler_ocorrencias(cur, user_id, receitas=receitas)
     # Positivo no cartão é pagamento de fatura ou estorno, não receita.
     no_cartao = {r['rp_id'] for r in linhas if r['average_amount'] > 0 and r['account_type'] == 'CREDIT'}
     marcas = ler_marcas(cur, user_id)
@@ -106,6 +96,46 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
                        'dia': dia_da_cadeia(ls), 'ultima': ult['transaction_date'],
                        'cartao': not entrada and ult['account_type'] == 'CREDIT',
                        'conta': ult['account_id']})
+    return cs
+
+
+def custo_mensal(cur, user_id: int, hoje: date) -> dict:
+    """Custo mensal das saídas recorrentes do banco, cartão incluído, para a reserva de
+    emergência: a soma do último valor de cada cadeia ATIVA (última cobrança há até
+    `DIAS_ATIVA` dias). `valor` é `None` (nunca 0) sem banco vivo ou com a soma em 0 (sem cadeia
+    ativa, ou só de cobrança 0): o `custo_desconhecido` da reserva, que já trata 0 assim.
+    ponytail: duas conexões do mesmo banco dobram a cadeia (herdado da Previsão)."""
+    conexoes = ler_frescor(cur, user_id)
+    if not conexoes:
+        return {'valor': None, 'recorrencias': 0, 'motivos': ['sem_banco_conectado']}
+    velho = datetime.now(timezone.utc) - BANCO_VELHO
+    motivos = []
+    ativas = [c['valor'] for c in cadeias_do_banco(cur, user_id, receitas=False)
+              if (hoje - c['ultima']).days <= DIAS_ATIVA]
+    total = sum(ativas, Decimal(0)).quantize(CENTAVO)
+    if not total:
+        motivos.append('sem_recorrencias')
+    if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
+        motivos.append('recorrencias_banco_nao_lidas')
+    return {'valor': total or None, 'recorrencias': len(ativas) if total else 0, 'motivos': motivos}
+
+
+def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instancias: list,
+           contas_na_base: set) -> None:
+    """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
+    hoje = s.hoje
+    conexoes = ler_frescor(cur, user_id)
+    if not conexoes:
+        return
+    s.premissas.append(PREMISSA)
+    velho = s.calculado_em - BANCO_VELHO
+    if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
+        _motivo(s, 'recorrencias_banco_nao_lidas')
+    for c in conexoes:  # a previsão em cache vence quando a lista vira velha
+        if c['recurring_fetched_at'] is not None and c['recurring_fetched_at'] >= velho:
+            s.valido_ate = min(s.valido_ate, c['recurring_fetched_at'] + BANCO_VELHO)
+
+    cs = cadeias_do_banco(cur, user_id, receitas=True)
 
     fixos = [dict(r) for r in recs if r['is_active']]
     rendas = [dict(r) for r in receitas if r['is_active']]

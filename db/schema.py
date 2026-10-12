@@ -27,7 +27,7 @@ TABELAS_QUE_AVISAM: dict[str, str | None] = {
         "recurring_charges", "category_budgets", "household_budget_config",
         "household_budget_income", "user_categories", "user_category_rules",
         "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
-        "open_finance_connections", "patrimonio_fotos", "subscription_marks",
+        "open_finance_connections", "patrimonio_fotos", "subscription_marks", "metas",
     )),
     "open_finance_accounts": "conexao",
     "open_finance_investments": "conexao",
@@ -3030,6 +3030,38 @@ def init_db():
         """alter table guia_painel add column if not exists dicas jsonb not null default '{}',
           add column if not exists ordem_aba text,
           add column if not exists ordem_n int""",
+        # Metas do /painel (`db/metas.py`, `/api/v2/metas`): organização sobre dado do banco,
+        # sem dinheiro próprio. `fonte_ref` = `provider_account_id` (conta) ou o nome do banco;
+        # `fonte_banco`/`fonte_numero`/`fonte_rotulo` = a instituição, o número da conta e o rótulo
+        # na hora de criar (a conta reconectada com id novo casa por instituição + número).
+        # `alvo` null só na reserva (vem de `meses`).
+        """
+        create table if not exists metas (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          nome text not null,
+          tipo text not null check (tipo in ('meta', 'reserva')),
+          alvo numeric(12,2) check (alvo > 0),
+          meses smallint check (meses between 1 and 24),
+          data_alvo date,
+          fonte_tipo text not null check (fonte_tipo in ('investido', 'banco', 'conta')),
+          fonte_ref text,
+          fonte_banco text,
+          fonte_numero text,
+          fonte_rotulo text,
+          criada_em timestamptz not null default now(),
+          atualizada_em timestamptz not null default now(),
+          check ((tipo = 'meta' and alvo is not null and meses is null)
+              or (tipo = 'reserva' and alvo is null and meses is not null)),
+          check ((fonte_tipo = 'investido') = (fonte_ref is null))
+        )
+        """,
+        "create index if not exists idx_metas_user on metas (user_id)",
+        # Uma reserva por usuário, no banco: o `_lock_user` não trava sem linha em `accounts` e o
+        # merge de contas junta duas reservas. Quem perde a corrida/junção leva `UniqueViolation`.
+        "create unique index if not exists uq_metas_reserva on metas (user_id) where tipo = 'reserva'",
+        # Tipo/subtipo da conta na criação: "mesmo número" de outro tipo (poupança) não casa.
+        "alter table metas add column if not exists fonte_tipo_conta text",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os

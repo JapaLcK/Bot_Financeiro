@@ -470,6 +470,59 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
   `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
 
+- `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
+  regra em `db/metas.py`, tabela `metas`; também em `/api/app/metas`): metas do `/painel`. Meta não
+  guarda dinheiro, só organiza dado do banco (sem input financeiro manual): `nome` (1 a 60, com ao menos um caractere visível e sem caractere de controle; NUL no meio é saneado), `tipo`
+  (`meta` | `reserva`), `alvo` (texto `_VALOR`, > 0), `data_alvo` opcional (hoje ou depois, no fuso
+  do app; na edição só a data NOVA precisa ser futura, a meta vencida reenvia a velha) e a FONTE que o usuário escolhe (P5): `investido` (tudo investido), `banco` (investido num
+  banco) ou `conta` (saldo de uma conta). O `atual` é o valor de HOJE da fonte, pela MESMA regra das
+  telas (`db/investido.calcular` e `db/contas_hoje.listar`, num snapshot só). O cliente manda a conta
+  pelo `id` público de `/contas` e o banco pelo texto de `por_banco` de `/investido`; o servidor
+  resolve DENTRO do que é do usuário (de outro usuário ou fora do BRL = 422, nada gravado) e grava
+  `fonte_ref` (o `provider_account_id`, não o `id` da linha, que muda a cada reconexão),
+  `fonte_banco`, `fonte_numero` e `fonte_rotulo`. Conta: casa pelo `provider_account_id`; se ele
+  sumiu OU está numa conexão PAUSED/DELETED (`conexao_pausada`: o webhook `item/deleted` grava DELETED e mantém a linha) e há UMA conta VIVA com a
+  mesma instituição + número + tipo/subtipo guardados (poupança ≠ corrente), a viva vence (reconexão com ids novos; o GET não grava, a
+  meta segue guardando o id antigo); ambíguo (2+ vivas) ou sem candidato: a conta antiga com o motivo dela (`conexao_pausada`), ou
+  `fonte_indisponivel` se nem ela existe. `provider_*_id` e o número da conta nunca saem.
+  Resposta `{metas: [...], custo_mensal: {valor, recorrencias, motivos}}`; cada meta: `id`, `nome`,
+  `tipo`, `meses`, `data_alvo`, `atual`, `alvo`, `falta`, `percentual` (inteiro, piso, entre 0 e 100),
+  `por_mes` (falta ÷ meses de calendário até `data_alvo`, mês parcial conta cheio, arredondado para
+  cima; `null` sem data ou com `prazo_passou`), `motivos` e `fonte {tipo, rotulo, conta_id, banco}`.
+  `atual: null` (e `falta`/`percentual`/`por_mes` com ele) quando a fonte não dá número: conta
+  pausada, saldo ausente, outra moeda, banco que sumiu (sem nenhuma linha no espelho), parte com `valor: null`,
+  fonte que sumiu, nunca R$ 0; banco lido que resgatou tudo mostra `0.00` SEMPRE (`por_banco_com_zero` de
+  `db/investido.calcular`, que `/investido` não expõe; a posição `TOTAL_WITHDRAWAL` de conexão viva é R$ 0 conhecido e conta como "dentro", mesmo com irmão pausado ou em dólar: `0.00` + o motivo); o banco que sumiu (nenhuma linha no espelho do usuário) sai só com `fonte_indisponivel` (+ `sem_banco_conectado` se não há conexão viva), sem herdar motivo de outro banco; banco que só tem linhas de conexão pausada NÃO sumiu: `null` + `conexao_pausada` (+ `sem_banco_conectado` se for o caso, como em `/investido`); `falta` e `por_mes` saem em centavos (`falta`
+  HALF_UP) e `atual` segue o da tela da fonte; sem o recurso `investments` do plano (o gate de
+  `/investido`, que com o freio `PLANS_V2_ENABLED=0` fecha o Essencial) as fontes `investido`/`banco`
+  saem `atual: null` + `plano_sem_investimentos`, e criar/editar com elas é o mesmo 403 `pro_required`. Regra do `atual` nas fontes `investido`/`banco`: a mesma SOMA de `/investido` e `/contas`; a meta anula (`null`) quando nada da fonte ficou dentro do recorte (ex.: banco só em dólar; conta em outra moeda), onde `/investido` mostra `0.00` e `/contas` o saldo na outra moeda — exclusão PARCIAL não anula o número. Posição em reais + dinheiro fora do recorte (`outra_moeda`, `conexao_pausada`, do banco escolhido) → `atual` = o R$ de `/investido` com o motivo (a tela mostra "a conferir"; item vivo zerado + irmão pausado = `0.00` + `conexao_pausada`). `atual: null` só quando NADA da fonte ficou dentro (`com_posicao`/`bancos_com_posicao` de `investido.calcular(com_zero=True)`, que contam a resgatada de conexão viva): banco só em dólar ou só com item pausado; `saldo_ausente` já vem como valor `null`. `banco_desatualizado`, `moeda_presumida` e `conta_fora_do_ultimo_sync` só acompanham (`FORA` em `db/metas.py`). Fonte `conta` em outra moeda segue `null` (a conta inteira está fora).
+  **Reserva de emergência** = meta `reserva`, no máximo uma por usuário (409 `reserva_ja_existe`: o
+  índice único parcial `uq_metas_reserva`, que vale na corrida mesmo sem linha em `accounts`): `alvo` = `meses` (1 a 24, padrão
+  `db.metas.MESES_RESERVA` = 6) × `custo_mensal`, quantizado em 2 casas. O custo é
+  `previsao_recorrencias.custo_mensal`: a soma do último valor das cadeias de SAÍDA ativas do Open
+  Finance (última cobrança há até `DIAS_ATIVA` dias), cartão INCLUÍDO, `ignorar` respeitado, mesma
+  seleção da Previsão (`cadeias_do_banco`). Sem o recurso `subscriptions` do plano (o gate de `/assinaturas`: é a lista de
+  cadeias de `of_recurring_payments` que o custo soma; Essencial leva 403 lá e na Previsão) o custo nem é lido:
+  `custo_mensal {valor: null, recorrencias: 0, motivos: ["plano_sem_custo_mensal"]}` e a reserva sai com `alvo`
+  `null` + esse motivo (o usuário a converte em meta comum com o valor dele). Sem custo: `alvo`/`falta`/`percentual` `null` + motivo
+  `custo_desconhecido` (o `atual` aparece), e o topo traz por quê (`sem_banco_conectado`,
+  `sem_recorrencias` — também quando a soma das cadeias ativas dá 0, que vira `valor: null`, `recorrencias: 0` —,
+  `recorrencias_banco_nao_lidas` — esta também acompanha um valor velho). O
+  usuário converte a reserva em meta comum com o alvo digitado (`/metas/editar` com `tipo: "meta"` +
+  `alvo`; os `meses` saem); meta virar reserva é 422. `/metas/editar` aceita `nome`, `alvo` (só
+  meta), `meses` (só reserva, 1 a 24), `data_alvo` (`null` explícito limpa), `fonte` e a conversão;
+  `null` em qualquer outro campo é 422, mesmo junto de campos válidos; corpo só com `id` é 422
+  "nada para editar", e campo igual ao gravado é 200 (nada escrito, nem SSE). O cliente manda só os campos que
+  mudaram: reenviar o objeto do `GET` inteiro dá 422 (`meses: null` numa meta, `alvo` numa reserva).
+  Escrita: `def` síncronas, id no corpo, CSRF do pai (403 `{"detail"}` fora do envelope), resposta
+  `{id}`; 404 `meta_nao_encontrada` (o MESMO corpo para id de outro usuário e inexistente), 422
+  `validation_error`. NUL no nome é saneado (`limpa_para_pg`), não recusado. A tabela avisa o SSE
+  (`TABELAS_QUE_AVISAM`), entra na exportação LGPD (`metas`), no "Recomeçar do zero" e no merge
+  (`_MOVIDAS`; reserva dos dois lados = `UniqueViolation` → `MergeRefused` `colisao`, nada movido;
+  `metas` não entra em `_tem_dados_financeiros`: só a reserva colide). Limites declarados: duas conexões do mesmo banco dobram a cadeia no custo (herdado
+  da Previsão); autotransferência genérica entra como recorrência; sem teto de metas por usuário;
+  a reconexão só desvia para a conta viva quando a conta antiga está em conexão PAUSED/DELETED (`conexao_pausada`); se a conexão antiga está em erro (`ERROR`/`item_missing`, `LOGIN_ERROR`, `OUTDATED`; o item apagado na Pluggy chega como `item_missing`, `core/services/pluggy_health.py:~248-250`), a meta segue a conta antiga com `banco_desatualizado`, como `/contas` (que soma as duas); decidir se `item_missing` conta como conexão morta é decisão para o sistema inteiro (`/contas` + metas); `atual` de conta não é quantizado (paridade com `/contas`, saldo `numeric` sem escala); o ritmo (crescimento da fonte) fica para o PR A2.
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
