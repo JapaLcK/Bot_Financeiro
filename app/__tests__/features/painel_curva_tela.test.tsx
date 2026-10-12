@@ -17,6 +17,8 @@ import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 
+jest.setTimeout(20_000); // monta o painel inteiro pelo router: no CI carregado o 1º teste passa dos 5 s padrão (igual a painel_seletores/painel_conversa)
+
 const F = fixture as Record<string, any>, DET = "/api/app/mes-detalhes", RES = "/api/app/resumo-do-mes";
 const H = { includeHiddenElements: true }; // a curva é oculta ao VoiceOver de propósito
 // O provider pede o mês anterior ao selecionado numa 3ª chamada de mes-detalhes; o servidor falso casa só o caminho, então o mês passado é escolhido pela query.
