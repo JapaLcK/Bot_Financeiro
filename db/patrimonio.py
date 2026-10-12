@@ -58,6 +58,8 @@ CONTAS_BANCO_SQL = """
         upper(coalesce(a.currency, 'BRL')) as currency,
         a.raw->>'currencyCode' as currency_code,
         a.raw->>'balance' as raw_balance, a.connection_id, a.updated_at,
+        a.raw->>'number' as numero,  -- só a meta (db/metas.py) lê: reconectar troca os ids
+        concat_ws('/', a.type, a.subtype) as tipo_conta,  -- idem: poupança ≠ corrente, mesmo número
         upper(coalesce(c.status, '')) as connection_status
     from open_finance_accounts a
     join open_finance_connections c on c.id = a.connection_id
