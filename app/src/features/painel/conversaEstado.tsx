@@ -79,7 +79,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     const alvo = dono.current;
     if (enviou.current && !voo.current && alvo !== null) { enviou.current = false; sair(alvo); }
   }, [sair]);
-  const enviar = async (texto: string, assunto?: Pergunta, doCampo = false) => { // doCampo: só o envio do campo limpa o rascunho (e o recupera no erro); chip e sugestão preservam o que está digitado
+  const enviar = async (texto: string, assunto?: Pergunta, doCampo = false) => { // doCampo: só o envio do campo limpa o rascunho; chip e sugestão preservam o que está digitado. No erro, qualquer origem volta ao campo vazio
     const message = texto.trim(), alvo = dono.current, minha = abertura.current;
     const pode = () => dono.current === alvo && aberta.current && !voo.current && !oculto.current && !!message && message.length <= 2000;
     if (alvo === null || !pode() || bloqueio !== "livre" || !uso || uso.used >= uso.limit) return;
