@@ -113,6 +113,11 @@ export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32,
  * `celula`: polegar do segmentado; `barra`: ProgressBar; `cartao`: o resto.
  */
 export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8, celula: 7, barra: 4 } as const;
+/**
+ * Fundo de chip de tom (`positive`/`warning`): o tom nesta opacidade sobre o fundo; o texto fica no tom cheio (par medido em
+ * `contraste.test.ts`). No claro o texto escuro já está a ~4,6:1 do fundo e qualquer tinta o rebaixa (12% dava 4,24 a 4,44; 8%, 4,49): 6%.
+ */
+export const ALFA_FUNDO_TOM = { light: 0.06, dark: 0.14 } as const;
 
 // `fontFamily`, não `fontWeight`: peso + família custom cai de volta no
 // sistema no Android (RN não faz "negrito sintético" de uma TTF nomeada).

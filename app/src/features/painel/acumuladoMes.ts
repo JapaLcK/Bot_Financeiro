@@ -1,5 +1,3 @@
-import { partes } from "@/ui/dinheiro";
-import { nomeMes } from "./catalogo";
 import type { Dados } from "./provider";
 
 export interface Acumulado {
@@ -8,8 +6,6 @@ export interface Acumulado {
   diasNoMes: number;
   /** Último índice de `pontos` quando o mês é o corrente (marca "hoje"); `null` em mês passado. */
   indiceHoje: number | null;
-  /** Total do mês anterior inteiro (centavos), para a linha de referência; `null` sem mês anterior. */
-  referencia: number | null;
 }
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/, DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,6 +16,7 @@ const MES = /^\d{4}-(0[1-9]|1[0-2])$/, DIA = /^\d{4}-\d{2}-\d{2}$/;
  *  - `detalhes` de outro mês que o `resumo`, ou `m.saiu`/soma de `dias[].saiu` diferentes de `d.saiu` (outra moeda no
  *    total legado, mês parcial, corrida entre as duas chamadas);
  *  - dia depois do fim do mês, ou depois de HOJE no mês corrente com valor (não desenhamos o futuro);
+ *  - algum ponto acumulado negativo (dia com `saiu` negativo): o eixo começa em 0 e a curva sairia do desenho;
  *  - menos de 2 pontos (dia 1 do mês corrente, mês futuro, mês sem lançamento);
  *  - `m.motivos` com "inicio_do_historico": o plano corta o histórico DENTRO do mês, o detalhe soma só a partir do
  *    corte e o resumo parcial ainda fecha com ele — a curva preencheria com zero os dias sem dado e afirmaria, falsamente,
@@ -29,7 +26,7 @@ const MES = /^\d{4}-(0[1-9]|1[0-2])$/, DIA = /^\d{4}-\d{2}-\d{2}$/;
  * DIAS ANTES DO DIA 1: compras de cartão entram pelo dia da compra mas pertencem à fatura que fecha no mês, então
  * `dias` pode trazer datas do mês anterior e `d.saiu` as inclui. Esses dias só entram na checagem de coerência (`soma`);
  * a curva NÃO os desenha: ela mostra as compras feitas dentro do mês, começa em 0 e por isso, quando há fatura de cartão
- * do mês anterior, pode terminar abaixo do "Saiu" do card (decisão do dono; o rótulo é "Compras feitas no mês").
+ * do mês anterior, pode terminar abaixo do `d.saiu` (decisão do dono).
  *
  * `hoje` ("AAAA-MM-DD", fuso de Brasília) vem de fora para o teste ser determinístico. Mês passado: vai até o último
  * dia com lançamento.
@@ -54,12 +51,44 @@ export function pontosAcumulados(d: Dados["resumo"], m: Dados["detalhes"], hoje:
   if (!Number.isSafeInteger(soma) || soma !== d.saiu || ultimo < 2) return null;
   let acc = 0;
   const pontos = Array.from({ length: ultimo }, (_, i) => (acc += porDia.get(i + 1) ?? 0));
-  const ref = d.anterior?.saiu ?? 0;
-  return { pontos, diasNoMes, indiceHoje: corrente ? ultimo - 1 : null, referencia: ref > 0 ? ref : null };
+  if (pontos.some((v) => v < 0)) return null; // o eixo começa em 0; o backend não produz saída negativa (estorno de cartão fica fora)
+  return { pontos, diasNoMes, indiceHoje: corrente ? ultimo - 1 : null };
 }
 
-/** "Setembro fechou em R$ 4.110,00": texto real da linha tracejada (a cor sozinha não diz o que ela é). */
-export function legendaReferencia(referencia: number | null, mesAnterior: string): string | null {
-  const p = referencia === null ? null : partes(referencia), nome = nomeMes(mesAnterior).split(" ")[0]!;
-  return p && nome ? `${nome[0]!.toUpperCase()}${nome.slice(1)} fechou em R$ ${p.inteiro},${p.centavos}` : null;
+export interface Ritmo {
+  atual: Acumulado;
+  /** Mês passado inteiro (acumulado completo, repetindo o último valor até o fim do mês); `null` sem curva válida do mês passado. */
+  anterior: Acumulado | null;
+  /** Acumulado deste mês até o dia de comparação (hoje, ou o fim do mês quando o mês já fechou). */
+  gasto: number;
+  /** Acumulado do mês passado nesse mesmo dia; `null` sem `anterior`. */
+  base: number | null;
+}
+
+/**
+ * Duas curvas do "ritmo de gastos". A deste mês usa `pontosAcumulados` tal e qual; a do mês passado usa a MESMA regra, com o
+ * `anterior` do resumo (total do mês passado inteiro) no papel de resumo: `mAnt.mes` tem de ser `d.anterior.mes`, `mAnt.saiu`
+ * e a soma dos dias têm de fechar com `d.anterior.saiu`, sem `inicio_do_historico` e com 2+ pontos. Sem `d.anterior`, sem `mAnt`
+ * ou incoerente, só não há mês passado (`anterior: null`); sem a curva deste mês, não há ritmo (`null`).
+ * Dia de comparação: o de hoje no mês corrente (mês passado mais curto cai no seu último dia); em mês fechado, o último dia de cada um.
+ */
+export function ritmoDoMes(d: Dados["resumo"], m: Dados["detalhes"], mAnt: Dados["detalhes"] | null, hoje: string): Ritmo | null {
+  const atual = pontosAcumulados(d, m, hoje);
+  if (!atual) return null;
+  const ant = d.anterior && mAnt ? pontosAcumulados({ ...d, mes: d.anterior.mes, saiu: d.anterior.saiu, anterior: null }, mAnt, hoje) : null;
+  const anterior = ant && { ...ant, pontos: Array.from({ length: ant.diasNoMes }, (_, i) => ant.pontos[Math.min(i, ant.pontos.length - 1)]!) };
+  const base = anterior && anterior.pontos[atual.indiceHoje === null ? anterior.pontos.length - 1 : Math.min(atual.indiceHoje, anterior.pontos.length - 1)]!;
+  return { atual, anterior, gasto: atual.pontos.at(-1)!, base };
+}
+
+/** `abaixo`: gastou menos que o mês passado no mesmo dia. `diferenca` em módulo; `pct` (com sinal, em %) só com base > 0. */
+export function variacao(gasto: number, base: number) {
+  const dif = gasto - base;
+  return { sentido: dif < 0 ? "abaixo" : dif > 0 ? "acima" : "igual", diferenca: Math.abs(dif), pct: base > 0 ? (dif / base) * 100 : null } as const;
+}
+
+/** "-32,4%" / "+12,5%" / "0,0%": uma casa, vírgula, sinal ASCII (o zero arredondado não leva sinal). */
+export function textoPct(pct: number) {
+  const r = Math.round(pct * 10) / 10;
+  return `${r < 0 ? "-" : r > 0 ? "+" : ""}${Math.abs(r).toFixed(1).replace(".", ",")}%`;
 }
