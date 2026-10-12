@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
-import { ScrollView, StyleSheet } from "react-native";
+import { AccessibilityInfo, ScrollView, StyleSheet } from "react-native";
 import { prepararCaso } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { abrir, enviar, fim, reiniciar, respostaFluxo, srv, type Fluxo } from "./conversa_apoio";
@@ -26,10 +26,13 @@ it("status: frase divertida antes do 1º passo (troca a cada 2 s, rótulo fixo),
   await act(async () => { jest.advanceTimersByTime(2000); });
   expect(screen.getByText("Abrindo o cofrinho…")).toBeTruthy(); expect(screen.queryByText("Contando as moedinhas…")).toBeNull();
   expect(status()!.props.accessibilityLabel).toBe("Piggy está respondendo");
+  const anuncios = () => jest.mocked(AccessibilityInfo.announceForAccessibility).mock.calls.map((c) => c[0]);
+  expect(anuncios()).toEqual([]); // a frase divertida nunca é anunciada
   await empurrar(passo("Resumindo o período")); expect(screen.getByText("Resumindo o período")).toBeTruthy(); expect(screen.queryByText("Abrindo o cofrinho…")).toBeNull();
   expect(screen.getByLabelText("Piggy está respondendo: Resumindo o período")).toBeTruthy(); expect(status()).toBeNull();
   expect(limpar).toHaveBeenCalledWith(idDoIntervalo(intervalo)); // a troca de frase parou
   await empurrar(passo("Montando o card")); expect(screen.getByText("Montando o card")).toBeTruthy(); expect(screen.queryByText("Resumindo o período")).toBeNull();
+  expect(anuncios()).toEqual(["Resumindo o período", "Montando o card"]); // iOS: cada passo real, uma vez
   await empurrar(delta("Vou ver")); expect(status()).toBeNull();
 });
 it("sair da tela com o status à mostra limpa o timer: nada dispara depois", async () => {
