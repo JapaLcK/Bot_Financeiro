@@ -118,6 +118,25 @@ describe("ritmoDoMes", () => {
     expect(r.atual.indiceHoje).toBeNull();
     expect(r).toMatchObject({ gasto: 600, base: 3500 });
   });
+  // Mês fechado: compara até o ÚLTIMO DIA DO MÊS SELECIONADO (o gráfico corta o mês passado aí); `fecha` = mês selecionado × anterior.
+  const fecha = (mes: string, atual: ReturnType<typeof dia>[], mesAnt: string, ant: ReturnType<typeof dia>[]) => {
+    const c = caso(mes, atual, { resumo: { anterior: { mes: mesAnt, entrou: 0, saiu: soma(ant) } } });
+    return ritmoDoMes(c.d, c.m, caso(mesAnt, ant).m, "2027-06-15")!;
+  };
+  it("mês fechado CURTO × anterior longo (fev 28 × jan 31): exclui jan 29–31 e a base é o último ponto do mês passado que o gráfico mostra", () => {
+    const r = fecha("2027-02", [dia("2027-02-01", 100), dia("2027-02-10", 200)], "2027-01", [dia("2027-01-02", 1000), dia("2027-01-28", 500), dia("2027-01-30", 7000)]);
+    expect(r).toMatchObject({ gasto: 300, base: 1500 }); // sem os 7000 dos dias 29–31 (o total de jan seria 8500)
+    expect(r.base).toBe(r.anterior!.pontos.slice(0, r.atual.diasNoMes).at(-1)); // o que o CurvaAcumulada desenha
+    expect(variacao(r.gasto, r.base!).pct).toBeCloseTo(-80);
+  });
+  it("mês fechado de 31 dias × anterior de 30: usa o último dia do anterior (clamp)", () => {
+    const r = fecha("2026-10", [dia("2026-10-01", 100), dia("2026-10-31", 200)], "2026-09", ANT);
+    expect(r).toMatchObject({ gasto: 300, base: 3500 });
+  });
+  it("mês fechado do mesmo tamanho (31 × 31): compara o último dia dos dois", () => {
+    const r = fecha("2026-08", [dia("2026-08-01", 100), dia("2026-08-15", 200)], "2026-07", [dia("2026-07-02", 1000), dia("2026-07-31", 500)]);
+    expect(r).toMatchObject({ gasto: 300, base: 1500 });
+  });
   it("dias anteriores ao dia 1 do mês passado (fatura) entram só na coerência: a curva dele começa em 0 e a soma ainda fecha", () => {
     const r = ritmo(ATUAL, [dia("2026-08-30", 700), ...ANT], "2026-10-03")!;
     expect(r.anterior!.pontos[0]).toBe(1000);

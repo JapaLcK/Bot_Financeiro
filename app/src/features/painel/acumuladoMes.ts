@@ -59,7 +59,7 @@ export interface Ritmo {
   atual: Acumulado;
   /** Mês passado inteiro (acumulado completo, repetindo o último valor até o fim do mês); `null` sem curva válida do mês passado. */
   anterior: Acumulado | null;
-  /** Acumulado deste mês até o dia de comparação (hoje, ou o fim do mês quando o mês já fechou). */
+  /** Acumulado deste mês até o dia de comparação (hoje, ou o último dia do mês quando ele já fechou). */
   gasto: number;
   /** Acumulado do mês passado nesse mesmo dia; `null` sem `anterior`. */
   base: number | null;
@@ -70,14 +70,14 @@ export interface Ritmo {
  * `anterior` do resumo (total do mês passado inteiro) no papel de resumo: `mAnt.mes` tem de ser `d.anterior.mes`, `mAnt.saiu`
  * e a soma dos dias têm de fechar com `d.anterior.saiu`, sem `inicio_do_historico` e com 2+ pontos. Sem `d.anterior`, sem `mAnt`
  * ou incoerente, só não há mês passado (`anterior: null`); sem a curva deste mês, não há ritmo (`null`).
- * Dia de comparação: o de hoje no mês corrente (mês passado mais curto cai no seu último dia); em mês fechado, o último dia de cada um.
+ * Dia de comparação: o de hoje no mês corrente; em mês fechado, o último dia do mês SELECIONADO (o gráfico corta o mês passado aí). Mês passado mais curto cai no seu último dia.
  */
 export function ritmoDoMes(d: Dados["resumo"], m: Dados["detalhes"], mAnt: Dados["detalhes"] | null, hoje: string): Ritmo | null {
   const atual = pontosAcumulados(d, m, hoje);
   if (!atual) return null;
   const ant = d.anterior && mAnt ? pontosAcumulados({ ...d, mes: d.anterior.mes, saiu: d.anterior.saiu, anterior: null }, mAnt, hoje) : null;
   const anterior = ant && { ...ant, pontos: Array.from({ length: ant.diasNoMes }, (_, i) => ant.pontos[Math.min(i, ant.pontos.length - 1)]!) };
-  const base = anterior && anterior.pontos[atual.indiceHoje === null ? anterior.pontos.length - 1 : Math.min(atual.indiceHoje, anterior.pontos.length - 1)]!;
+  const base = anterior && anterior.pontos[Math.min(atual.indiceHoje ?? atual.diasNoMes - 1, anterior.pontos.length - 1)]!;
   return { atual, anterior, gasto: atual.pontos.at(-1)!, base };
 }
 
