@@ -171,27 +171,32 @@ jest.mock("expo-local-authentication", () => ({
 // AppState: o dublê do RN não dispara eventos. Este guarda `currentState` num
 // objeto (mesmo padrão do AccessibilityInfo acima: só o CAMPO muda) e dispara
 // "change" para quem assinou. Outros eventos (memoryWarning, focus...) são
-// aceitos e nunca disparam.
-const mockAppState = { atual: "active", ouvintes: new Set() };
-global.__definirAppState = (v) => (mockAppState.atual = v);
+// aceitos e nunca disparam. O estado mora no `globalThis` e nasce no 1º acesso: o
+// `jest.mock` sobe acima desta linha, e um import cedo (css-interop via mock do
+// reanimated) assina o AppState antes de o setup chegar aqui (apontado pelo Codex).
+const mockEstadoApp = () => (globalThis.__mockAppState ??= { atual: "active", ouvintes: new Set() });
+global.__definirAppState = (v) => (mockEstadoApp().atual = v);
 global.__dispararAppState = (v) => {
-  mockAppState.atual = v;
-  mockAppState.ouvintes.forEach((fn) => fn(v));
+  mockEstadoApp().atual = v;
+  mockEstadoApp().ouvintes.forEach((fn) => fn(v));
 };
-jest.mock("react-native/Libraries/AppState/AppState", () => ({
-  __esModule: true,
-  default: {
-    get currentState() {
-      return mockAppState.atual;
+jest.mock("react-native/Libraries/AppState/AppState", () => {
+  const estado = () => (globalThis.__mockAppState ??= { atual: "active", ouvintes: new Set() });
+  return {
+    __esModule: true,
+    default: {
+      get currentState() {
+        return estado().atual;
+      },
+      isAvailable: true,
+      addEventListener: (evento, fn) => {
+        if (evento !== "change") return { remove: () => undefined };
+        estado().ouvintes.add(fn);
+        return { remove: () => estado().ouvintes.delete(fn) };
+      },
     },
-    isAvailable: true,
-    addEventListener: (evento, fn) => {
-      if (evento !== "change") return { remove: () => undefined };
-      mockAppState.ouvintes.add(fn);
-      return { remove: () => mockAppState.ouvintes.delete(fn) };
-    },
-  },
-}));
+  };
+});
 
 // A tampa nativa (`modules/tampa`) não existe no Jest: `requireNativeModule`
 // lançaria. Espiãs globais; `bloqueio_tampa.test.tsx` testa o `tampa.ts` real
