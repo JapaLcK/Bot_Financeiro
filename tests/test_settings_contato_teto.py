@@ -257,3 +257,20 @@ def test_cache_velho_de_email_conta_no_teto(user_id):
 
     assert patch(email=email_x).status_code == 200
     assert _tentativas(user_id) == 1
+
+
+def test_cache_repovoado_depois_de_invalidar_nao_decide_o_mudou(user_id, monkeypatch):
+    """Codex, 2ª thread do #911: um leitor em voo republica X no cache depois da
+    invalidação. O `get_auth_user` sempre velho é esse pior caso."""
+    import frontend.routes.settings as rota
+    from db import get_auth_user
+    tel_x = _com_nove()
+    patch, _, _ = _conta(user_id, phone=tel_x)
+    velho = get_auth_user(user_id)
+    _outro_processo_troca(user_id, "phone_e164", _telefone())  # banco: Y
+    _outra_conta(phone=_sem_nove(tel_x))  # B pega a variante de X
+    monkeypatch.setattr(rota, "get_auth_user", lambda uid: dict(velho))
+
+    resp = patch(phone=tel_x)
+    assert _tentativas(user_id) == 1
+    assert resp.status_code == 409, resp.text
