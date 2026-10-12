@@ -1,9 +1,13 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { setStringAsync } from "expo-clipboard";
-import { ActivityIndicator, Image, Pressable, View } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, Image, Platform, Pressable, View } from "react-native";
+import Animated, { FadeIn } from "react-native-reanimated";
+import { useIsFocused } from "expo-router";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { useToast } from "@/ui/componentes/Toast";
+import { Skeleton } from "@/ui/componentes/Skeleton";
 import { sucesso } from "@/ui/haptics";
+import { duracoes, useEntrada, useReduzirMovimento } from "@/ui/motion";
 import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
 import { Bloco } from "./base";
@@ -21,14 +25,41 @@ export function ComNegrito({ texto }: { texto: string }) {
   return <Texto>{texto.split(NEGRITO).map((parte, i) => i % 2 ? <Texto key={i} style={{ fontFamily: escalas.secao.fontFamily }}>{parte}</Texto> : parte)}</Texto>;
 }
 export function BolhaUsuario({ texto }: { texto: string }) {
-  const { cores } = useTema();
-  return <View testID="bolha-usuario" style={{ alignSelf: "flex-end", maxWidth: "80%", backgroundColor: cores.surfaceControl, borderRadius: raio.bloco, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10 }}><Texto>{texto}</Texto></View>;
+  const { cores } = useTema(); const entrada = useEntrada();
+  return <Animated.View entering={entrada} testID="bolha-usuario" style={{ alignSelf: "flex-end", maxWidth: "80%", backgroundColor: cores.surfaceControl, borderRadius: raio.bloco, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10 }}><Texto>{texto}</Texto></Animated.View>;
 }
 export function FalaPiggy({ children }: { children: ReactNode }) {
-  return <View testID="fala-piggy" style={{ alignSelf: "flex-start", maxWidth: "100%", gap: 6 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Image source={SIMBOLO} style={{ width: 24, height: 24 }} accessibilityIgnoresInvertColors /><Texto testID="fala-piggy-nome" variante="legenda" tom="inkMuted">Piggy</Texto></View>{children}</View>;
+  const entrada = useEntrada();
+  return <Animated.View entering={entrada} testID="fala-piggy" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Image source={SIMBOLO} style={{ width: 24, height: 24 }} accessibilityIgnoresInvertColors /><Texto testID="fala-piggy-nome" variante="legenda" tom="inkMuted">Piggy</Texto></View>{children}</Animated.View>;
 }
-export function Digitando() {
-  return <FalaPiggy><View style={{ alignSelf: "flex-start" }}><ActivityIndicator accessibilityLabel="Piggy está respondendo" /></View></FalaPiggy>;
+const FRASES_PIGGY = ["Contando as moedinhas…", "Abrindo o cofrinho…", "Fuçando seus gastos…", "Farejando os números…", "Separando as notinhas…", "Dando uma olhada no extrato…", "Calculando aqui, um segundinho…"];
+/** Em voo, antes do texto: a frase divertida troca a cada 2 s até chegar o 1º passo; depois, só o último passo. O rótulo não anuncia a frase divertida; com passo real, anuncia o passo. */
+export function StatusPiggy({ passos }: { passos: string[] }) {
+  const reduzir = useReduzirMovimento(); const sem = passos.length === 0;
+  const [i, setI] = useState(() => Math.floor(Math.random() * FRASES_PIGGY.length));
+  useEffect(() => { if (!sem) return; const id = setInterval(() => setI((n) => (n + 1) % FRASES_PIGGY.length), 2000); return () => clearInterval(id); }, [sem]);
+  const texto = passos.at(-1) ?? FRASES_PIGGY[i];
+  const passo = passos.at(-1), focada = useIsFocused(); // iOS não tem live region: anuncia só o passo real, nunca a frase divertida, e só com a aba à vista
+  useEffect(() => { if (passo && focada && Platform.OS === "ios") AccessibilityInfo.announceForAccessibility(passo); }, [passo]); // `focada` fora das deps: voltar à aba não repete o passo
+  return <View accessible accessibilityLabel={sem ? "Piggy está respondendo" : `Piggy está respondendo: ${texto}`} accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <ActivityIndicator size="small" />
+    <Animated.View key={texto} entering={reduzir ? undefined : FadeIn.duration(duracoes.feedback)}><Texto variante="legenda" tom="inkMuted">{texto}</Texto></Animated.View>
+  </View>;
+}
+const PONTO = /^(?:- |• )(.*)$/;
+/** Markdown mínimo do servidor: parágrafos (linha em branco) e itens `- `/`• `; o resto vira texto com o negrito do WhatsApp. */
+export function Markdown({ texto }: { texto: string }) {
+  if (!texto) return null;
+  return <View style={{ gap: 8 }}>{texto.replace(/\r\n?/g, "\n").split(/\n\s*\n/).map((par, i) => {
+    const blocos: { item: boolean; s: string }[] = [];
+    for (const linha of par.split("\n")) {
+      const m = PONTO.exec(linha), ult = blocos[blocos.length - 1];
+      if (m) { if (m[1]!.trim()) blocos.push({ item: true, s: m[1]! }); } else if (ult && !ult.item) ult.s += `\n${linha}`; else blocos.push({ item: false, s: linha });
+    }
+    return <View key={i} style={{ gap: 4 }}>{blocos.map((b, j) => b.item
+      ? <View key={j} style={{ flexDirection: "row", gap: 8 }}><Texto>•</Texto><View style={{ flex: 1 }}><ComNegrito texto={b.s} /></View></View>
+      : <ComNegrito key={j} texto={b.s} />)}</View>;
+  })}</View>;
 }
 function BotaoAcao({ rotulo, icone, selecionado, onPress }: { rotulo: string; icone: NomeIcone; selecionado?: boolean; onPress: () => void }) {
   const { cores } = useTema(); const marcado = !!selecionado;
@@ -53,12 +84,21 @@ function Acoes({ turno: t }: { turno: Turno }) {
 export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (w: Widget) => void }) {
   const p = usePainel(); const widget = t.assunto && widgetDoTopico(t.assunto);
   const card = !p.oculto && t.resposta !== undefined && widget && (!WIDGETS_DO_MES.includes(widget) || p.mes === mesAtual()) ? widget : null;
+  const emVoo = t.resposta === undefined && !t.erro && !t.interrompida, status = emVoo && !t.parcial;
+  const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto; enquanto o status os mostra, não duplica
   return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}>
     {p.oculto ? <Texto tom="inkMuted">{OCULTA}</Texto> : <>
       <BolhaUsuario texto={t.pergunta} />
-      {t.erro || t.resposta !== undefined ? <FalaPiggy>{t.erro ? <Texto tom="warning">{t.erro}</Texto> : <ComNegrito texto={t.resposta!} />}{t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}{card && <Bloco id={card} abrir={abrir && (() => abrir(card))}><WidgetConteudo id={card} /></Bloco>}{t.resposta !== undefined && <Acoes turno={t} />}</FalaPiggy>
-        : t.interrompida ? <FalaPiggy>{!!t.parcial && <ComNegrito texto={t.parcial} />}<Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto></FalaPiggy>
-        : t.parcial ? <FalaPiggy><ComNegrito texto={t.parcial} /></FalaPiggy> : <Digitando />}
+      <FalaPiggy>
+        {status && <StatusPiggy passos={t.passos} />}
+        {!status && !!passos && <Texto variante="legenda" tom="inkMuted">{passos}</Texto>}
+        {emVoo && t.previa && t.blocos.at(-1)?.card !== t.previa && <Skeleton largura="100%" altura={120} raio={raio.bloco} />}
+        {t.erro ? <Texto tom="warning">{t.erro}</Texto> : <Markdown texto={t.resposta ?? t.parcial} />}
+        {t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}
+        {t.interrompida && t.resposta === undefined && !t.erro && <Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto>}
+        {card && <Bloco id={card} abrir={abrir && (() => abrir(card))}><WidgetConteudo id={card} /></Bloco>}
+        {t.resposta !== undefined && <Acoes turno={t} />}
+      </FalaPiggy>
     </>}
   </View>;
 }

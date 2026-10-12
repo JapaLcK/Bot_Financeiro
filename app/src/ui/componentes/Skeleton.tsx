@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
-import { Animated } from "react-native";
+import { Animated, type DimensionValue } from "react-native";
 
 import { facilitador, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { raio as raioTokens } from "@/ui/tokens";
 
 interface Props {
-  largura: number;
+  largura: DimensionValue;
   altura: number;
   raio?: number;
 }

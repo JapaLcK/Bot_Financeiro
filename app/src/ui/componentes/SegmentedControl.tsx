@@ -26,9 +26,8 @@ interface Props {
 /**
  * `selecao()` só na TROCA (nunca ao tocar a opção já ativa — mesma regra do
  * `useAvisoAoErrar`: sinal tátil é para transição, não para repetição). O
- * destaque crossfada 150ms (`duracoes.feedback`) em vez de deslizar: sem
- * `reanimated` nesta fase (decisão do dono), opacidade é a única transição
- * barata com `Animated` nativo entre N opções dinâmicas.
+ * destaque crossfada 150ms (`duracoes.feedback`) em vez de deslizar: `Animated`
+ * nativo basta aqui, e opacidade é a única transição barata entre N opções dinâmicas.
  *
  * Estado indexado por POSIÇÃO, nunca pelo rótulo: com dois rótulos iguais
  * (`["Mês", "Mês"]`), uma `Map<string, Animated.Value>` chaveada por texto
