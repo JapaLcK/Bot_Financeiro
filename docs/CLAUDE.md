@@ -507,7 +507,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `null` + esse motivo (o usuário a converte em meta comum com o valor dele). Sem custo: `alvo`/`falta`/`percentual` `null` + motivo
   `custo_desconhecido` (o `atual` aparece), e o topo traz por quê (`sem_banco_conectado`,
   `sem_recorrencias` — também quando a soma das cadeias ativas dá 0, que vira `valor: null`, `recorrencias: 0` —,
-  `recorrencias_banco_nao_lidas` — esta também acompanha um valor velho). O
+  `recorrencias_banco_nao_lidas` — esta também acompanha um valor velho —, `recorrencia_valor_invalido` — valor NaN/±Infinity no espelho, que a coluna `numeric` aceita: `valor: null`, nunca um 500 nem uma soma parcial). O
   usuário converte a reserva em meta comum com o alvo digitado (`/metas/editar` com `tipo: "meta"` +
   `alvo`; os `meses` saem); meta virar reserva é 422. `/metas/editar` aceita `nome`, `alvo` (só
   meta), `meses` (só reserva, 1 a 24), `data_alvo` (`null` explícito limpa), `fonte` e a conversão;

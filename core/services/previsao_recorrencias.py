@@ -11,7 +11,7 @@ do banco segue como sem casamento). Sem casamento, a saída do banco entra
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from core.services.assinaturas import DIAS_ATIVA, _merchant, cadeias, dia_da_cadeia
 from core.services.cashflow import _recurring_occurrence_dates
@@ -103,17 +103,23 @@ def custo_mensal(cur, user_id: int, hoje: date) -> dict:
     """Custo mensal das saídas recorrentes do banco, cartão incluído, para a reserva de
     emergência: a soma do último valor de cada cadeia ATIVA (última cobrança há até
     `DIAS_ATIVA` dias). `valor` é `None` (nunca 0) sem banco vivo ou com a soma em 0 (sem cadeia
-    ativa, ou só de cobrança 0): o `custo_desconhecido` da reserva, que já trata 0 assim.
+    ativa, ou só de cobrança 0) ou com valor não finito no espelho (`recorrencia_valor_invalido`): o
+    `custo_desconhecido` da reserva, que já trata 0 assim.
     ponytail: duas conexões do mesmo banco dobram a cadeia (herdado da Previsão)."""
     conexoes = ler_frescor(cur, user_id)
     if not conexoes:
         return {'valor': None, 'recorrencias': 0, 'motivos': ['sem_banco_conectado']}
     velho = datetime.now(timezone.utc) - BANCO_VELHO
     motivos = []
-    ativas = [c['valor'] for c in cadeias_do_banco(cur, user_id, receitas=False)
-              if (hoje - c['ultima']).days <= DIAS_ATIVA]
-    total = sum(ativas, Decimal(0)).quantize(CENTAVO)
-    if not total:
+    try:
+        ativas = [c['valor'] for c in cadeias_do_banco(cur, user_id, receitas=False)
+                  if (hoje - c['ultima']).days <= DIAS_ATIVA]
+        total, invalido = sum(ativas, Decimal(0)).quantize(CENTAVO), False
+    except InvalidOperation:  # `amount` do espelho é `numeric` e guarda NaN/±Infinity (ou estoura a precisão)
+        ativas, total, invalido = [], Decimal(0), True  # custo desconhecido, nunca uma soma menor com cara de exata
+    if invalido:
+        motivos.append('recorrencia_valor_invalido')
+    elif not total:
         motivos.append('sem_recorrencias')
     if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
         motivos.append('recorrencias_banco_nao_lidas')

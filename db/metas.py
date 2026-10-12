@@ -24,7 +24,7 @@ from .connection import get_conn
 MESES_RESERVA = 6
 CENTAVO = Decimal("0.01")
 MOTIVOS_CUSTO = ("sem_banco_conectado", "sem_recorrencias", "recorrencias_banco_nao_lidas",
-                 "plano_sem_custo_mensal")
+                 "plano_sem_custo_mensal", "recorrencia_valor_invalido")
 MOTIVOS = tuple(dict.fromkeys(
     (*investido.MOTIVOS, *contas_hoje.MOTIVOS_CONTA, "fonte_indisponivel", "custo_desconhecido",
      "plano_sem_investimentos", "plano_sem_custo_mensal")))

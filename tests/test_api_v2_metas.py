@@ -355,6 +355,24 @@ def test_custo_sem_banco_e_lista_velha(uid):
     assert c["valor"] == "39.90" and c["motivos"] == ["recorrencias_banco_nao_lidas"]
 
 
+@pytest.mark.parametrize("ruim", ["NaN", "Infinity", "-Infinity"])
+def test_valor_nao_finito_no_espelho_nao_derruba_e_o_custo_vira_desconhecido(uid, ruim):
+    """`open_finance_transactions.amount` é `numeric` sem restrição e guarda NaN/±Infinity: a cadeia
+    suja tira o custo do ar (`None` + motivo), nunca 500 nem um custo menor com cara de exato."""
+    hoje = today_tz()
+    ok = ap.mensais("ok", ["-39.90"] * 3, ultima=hoje - timedelta(days=10), desc="NETFLIX.COM")
+    mau = ap.mensais("mau", ["-10", "-10", ruim], ultima=hoje - timedelta(days=12), desc="ACADEMIA XYZ")
+    ap.semeia(uid, [ap.conta("acc-ok", ok), ap.conta("acc-mau", mau)],
+              [ap.rp("NETFLIX.COM", -39.9, ok), ap.rp("ACADEMIA XYZ", -10, mau)])
+    mid = cria(uid, **RESERVA)
+    r = ler(uid)
+    assert r["custo_mensal"]["valor"] is None and r["custo_mensal"]["recorrencias"] == 0
+    assert "recorrencia_valor_invalido" in r["custo_mensal"]["motivos"]
+    m = meta(uid, mid)
+    assert (m["alvo"], m["falta"], m["percentual"]) == (None, None, None)
+    assert "custo_desconhecido" in m["motivos"]
+
+
 def test_custo_de_a_nao_entra_na_reserva_de_b(dois):
     a, b = dois
     recorrentes(a, ITENS[:1])
