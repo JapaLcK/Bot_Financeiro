@@ -532,17 +532,22 @@ Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`
 significa sem PKCE (web, app antigo, Apple, link do bot). Código com challenge só é
 consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
 código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
-pendente. Cookie do challenge presente mas inválido (vazio, não-ASCII) faz o callback
-falhar fechado.
+pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
+`[A-Za-z0-9_-]` faz o callback falhar fechado.
 
-Limites conhecidos, todos fecham quando o challenge virar obrigatório (após o app antigo
+Limites conhecidos, que fecham quando o challenge virar obrigatório (após o app antigo
 sair de circulação):
 - Transição: código sem challenge continua trocável, com ou sem verifier.
 - Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
   ou seja, a PKCE cai em silêncio naquele login.
 - Com o verifier opcional, a PKCE cobre interceptação do código, não injeção de código
   (login CSRF com código da conta do atacante); a mitigação é do lado do app (PR-3).
-- `GET google/pending/{token}` devolve e-mail e nome sem exigir o verifier (resíduo anterior).
+- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
+  pressuposto do login CSRF por state, não uma regressão da PKCE.
+
+Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
+devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
+a rota (e o contrato com o app).
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
