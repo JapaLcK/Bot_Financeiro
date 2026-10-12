@@ -11,6 +11,9 @@ nenhum cookie de sessão, nenhuma linha nova em `auth_sessions`/`auth_accounts`
 Controle negativo (medido; resultado no relato do PR): tirar o `code_challenge`
 do `where` de `consume_dashboard_session` → vermelhos P3 a P7; tirar a
 comparação de `consume_pending_google_signup` → vermelho P9.
+Rodada do Tester (T1 a T6): cada um vermelho com o seu mutante (plain, cookie
+lido fora do `nat-`, sem falha fechada, `if guardado` truthy, SQL sem caixa,
+atributo do cookie, `_clear` sem o challenge).
 Controle positivo: P1/P2 (fluxo legítimo entra) e C1/C2 (sem PKCE, como antes).
 """
 import base64
@@ -289,3 +292,131 @@ def test_c5_web_nao_ganha_challenge(monkeypatch):
     state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
     cb = client.get("/auth/google/callback", params={"code": "c", "state": state}, follow_redirects=False)
     assert cb.status_code == 302 and "auth_token=" in cb.headers["set-cookie"]
+
+
+# ── Rodada do Tester: cookie adulterado, plain, atributos, limpeza ───────────
+
+def _challenge_do_codigo(code: str):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select code_challenge from dashboard_sessions where code = %s", (code,))
+        return cur.fetchone()["code_challenge"]
+
+
+def _callback_com_cookie(monkeypatch, email: str, app: int, cookie: str | None):
+    """start (sem challenge) e callback num cliente SEM jar, com o cabeçalho
+    `Cookie` montado à mão: é como se planta valor que o start nunca gravaria
+    (vazio, não-ASCII). Devolve o 302 do callback."""
+    google_de_mentira(monkeypatch, email)
+    inicio = TestClient(dashboard.app).get(f"/auth/google/start?app={app}", follow_redirects=False)
+    state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
+    pedaco = f"google_oauth_state={state}"
+    if cookie is not None:
+        pedaco += f"; google_oauth_challenge={cookie}"
+    return TestClient(dashboard.app, raise_server_exceptions=False).get(
+        "/auth/google/callback",
+        params={"code": "code-do-google", "state": state},
+        headers={"cookie": pedaco.encode("latin-1")},
+        follow_redirects=False,
+    )
+
+
+def test_t1_plain_nao_e_aceito(monkeypatch):
+    """O verifier NÃO pode ser o próprio challenge que o start devolveu."""
+    verifier, desafio = _par()
+    uid, code = _codigo(monkeypatch, desafio)
+    _sem_sessao(_troca(code, desafio), uid, 0)
+    assert _troca(code, verifier).status_code == 200
+
+
+def test_t2_callback_nat_le_o_cookie_mas_app_antigo_e_web_ignoram(monkeypatch):
+    _, desafio = _par()
+    uid, email = _conta()
+    # nat-: o cookie plantado é o que vai para a linha.
+    cb = _callback_com_cookie(monkeypatch, email, 2, desafio)
+    code = parse_qs(urlparse(cb.headers["location"]).query)["code"][0]
+    assert _challenge_do_codigo(code) == desafio
+    # app- : cookie válido plantado é ignorado, o código nasce sem challenge.
+    cb = _callback_com_cookie(monkeypatch, email, 1, desafio)
+    code = parse_qs(urlparse(cb.headers["location"]).query)["code"][0]
+    assert _challenge_do_codigo(code) is None
+    # app- e web: nem o cookie INVÁLIDO derruba o login (só o nat- falha fechado).
+    cb = _callback_com_cookie(monkeypatch, email, 1, "")
+    assert cb.headers["location"].startswith("pigbankai://auth?code=")
+    cb = _callback_com_cookie(monkeypatch, email, 0, "")
+    assert cb.status_code == 302 and "auth_token=" in cb.headers["set-cookie"]
+
+
+@pytest.mark.parametrize("ruim", ["", "caf\xe9" + "a" * 39, "curto", "a" * 44])
+def test_t3_cookie_invalido_no_callback_nat_falha_fechado(monkeypatch, ruim):
+    uid, email = _conta()
+    cb = _callback_com_cookie(monkeypatch, email, 2, ruim)
+    assert cb.status_code == 302, cb.text
+    assert cb.headers["location"] == "pigbank://auth?erro=falha"
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from dashboard_sessions where user_id = %s", (uid,))
+        assert cur.fetchone()["n"] == 0
+    assert _sessoes(uid) == 0
+    # Conta nova: nenhum pendente com valor ruim.
+    novo = f"pkce-novo-{uuid.uuid4().hex[:10]}@example.com"
+    cb = _callback_com_cookie(monkeypatch, novo, 2, ruim)
+    assert cb.headers["location"] == "pigbank://auth?erro=falha"
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select count(*) as n from pending_google_signups where provider_sub = %s",
+            (f"sub-{novo}",),
+        )
+        assert cur.fetchone()["n"] == 0
+
+
+def test_t3b_pendente_com_challenge_vazio_nao_completa_sem_verifier():
+    """Defesa em profundidade: '' guardado é challenge, não 'sem PKCE'."""
+    email = f"pkce-novo-{uuid.uuid4().hex[:10]}@example.com"
+    token = db.create_pending_google_signup(f"sub-{email}", email, "Fulana", code_challenge="")
+    for verifier in (None, _par()[0]):
+        r = _completa(token, verifier)
+        assert r.status_code == 400, r.text
+        assert _contas(email) == 0
+
+
+def test_t4_challenge_em_outra_caixa_e_recusado_no_sql(monkeypatch):
+    verifier, desafio = _par()
+    uid, code = _codigo(monkeypatch, desafio)
+    assert desafio.swapcase() != desafio
+    assert db.consume_dashboard_session(code, desafio.swapcase()) is None
+    _sem_sessao(_troca(code, verifier.swapcase()), uid, 0)
+    assert _troca(code, verifier).status_code == 200
+
+
+def _atributos(set_cookie: str) -> set[str]:
+    return {p.strip().lower() for p in set_cookie.split(";")[1:]}
+
+
+def test_t5_cookie_do_challenge_tem_os_atributos_do_cookie_de_state(monkeypatch):
+    _, desafio = _par()
+    google_de_mentira(monkeypatch, "x@example.com")
+    r = TestClient(dashboard.app).get(
+        f"/auth/google/start?app=2&code_challenge={desafio}", follow_redirects=False
+    )
+    por_nome = {c.split("=", 1)[0]: c for c in r.headers.get_list("set-cookie")}
+    state, challenge = por_nome["google_oauth_state"], por_nome["google_oauth_challenge"]
+    assert _atributos(challenge) == _atributos(state)
+    assert {"httponly", "max-age=600", "path=/auth/google", "samesite=lax"} <= _atributos(challenge)
+
+
+@pytest.mark.parametrize("caminho", ["erro_do_google_no_app", "state_invalido"])
+def test_t6_caminho_de_erro_apaga_o_cookie_do_challenge(monkeypatch, caminho):
+    _, desafio = _par()
+    google_de_mentira(monkeypatch, "x@example.com")
+    client = TestClient(dashboard.app)
+    inicio = client.get(f"/auth/google/start?app=2&code_challenge={desafio}", follow_redirects=False)
+    state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
+    assert client.cookies.get("google_oauth_challenge") == desafio
+    params = {"error": "access_denied", "state": state} if caminho == "erro_do_google_no_app" else {
+        "code": "c", "state": "state-errado"}
+    cb = client.get("/auth/google/callback", params=params, follow_redirects=False)
+    assert cb.status_code == 302
+    assert client.cookies.get("google_oauth_challenge") is None
+    assert any(
+        c.startswith('google_oauth_challenge=""') and "max-age=0" in c.lower()
+        for c in cb.headers.get_list("set-cookie")
+    )

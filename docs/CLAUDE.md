@@ -517,29 +517,41 @@ e a `/q` chama o mesmo `verify-email` depois de o usuário confirmar o e-mail na
 para a `/assinar` (nome, e-mail e WhatsApp no fragmento `n/e/w`); `forgot-password`/`reset-password`; **Google OAuth**
 (`google/start`, `google/callback`, `google/complete-signup`, `google/pending/{token}`,
 e `google/exchange`, que troca por Bearer o código que o callback devolve ao app nativo
-quando o login começa em `google/start?app=2`); o `app=2` aceita **PKCE S256**
-(#604, `core/services/pkce.py`): o app manda `code_challenge` no start (cookie
-`google_oauth_challenge`, nunca no `state` do Google; inválido → 400) e o
-`code_verifier` no CORPO de `google/exchange` e `google/complete-signup`. O callback grava
-o challenge em `dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`
-(nulos = sem PKCE: web, app antigo, Apple, link do bot). Código com challenge só é
-consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
-código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
-pendente. Transição: código sem challenge continua trocável (com ou sem verifier). Teto:
-tornar o challenge obrigatório quando o app antigo sair de circulação. **MFA (#605)**: conta
-com MFA ligado NUNCA ganha sessão só pelo Google ou pelo link do bot. O callback web e
-`GET /d/{code}` (todo código: bot ou app antigo) respondem 302 para
-`/login?next=<destino>#mfa=<desafio>` sem cookie nem `auth_sessions`; o desafio vai no
-fragmento (não chega ao servidor nem ao Referer) e o `login.html` abre o formulário de código;
-a sessão nasce em `mfa/verify-login`, que também registra o login (o callback `app-` não
-registra mais quando há MFA). O desafio vem de `_desafio_mfa`, o mesmo de `_concluir_login`.
-O `next` de `/d/` só chega ao destino se estiver na allowlist do `login.html`. Resíduo conhecido:
-`GET google/pending/{token}` devolve e-mail e nome sem o verifier; **Apple**, só no app nativo iOS
+quando o login começa em `google/start?app=2`); **Apple**, só no app nativo iOS
 (`apple/exchange`, que verifica o identity token pelo JWKS da Apple e devolve sessão,
 desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora na
 mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
+`code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
+`google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de
+`google/exchange` e `google/complete-signup`. O callback `nat-` grava o challenge em
+`dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`; nulo
+significa sem PKCE (web, app antigo, Apple, link do bot). Código com challenge só é
+consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
+código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
+pendente. Cookie do challenge presente mas inválido (vazio, não-ASCII) faz o callback
+falhar fechado.
+
+Limites conhecidos, todos fecham quando o challenge virar obrigatório (após o app antigo
+sair de circulação):
+- Transição: código sem challenge continua trocável, com ou sem verifier.
+- Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
+  ou seja, a PKCE cai em silêncio naquele login.
+- Com o verifier opcional, a PKCE cobre interceptação do código, não injeção de código
+  (login CSRF com código da conta do atacante); a mitigação é do lado do app (PR-3).
+- `GET google/pending/{token}` devolve e-mail e nome sem exigir o verifier (resíduo anterior).
+
+**MFA no Google web e no magic link (#605).** Conta com MFA ligado NUNCA ganha sessão só
+pelo Google ou pelo link do bot. O callback web e `GET /d/{code}` (todo código: bot ou app
+antigo) respondem 302 para `/login?next=<destino>#mfa=<desafio>` sem cookie nem
+`auth_sessions`; o desafio vai no fragmento (não chega ao servidor nem ao Referer) e o
+`login.html` abre o formulário de código; a sessão nasce em `mfa/verify-login`, que também
+registra o login (o callback `app-` não registra mais quando há MFA). O desafio vem de
+`_desafio_mfa`, o mesmo de `_concluir_login`. O `next` de `/d/` só chega ao destino se
+estiver na allowlist do `login.html`.
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
