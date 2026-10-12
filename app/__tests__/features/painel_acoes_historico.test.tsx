@@ -120,5 +120,6 @@ it("nova UID começa no mês atual e não herda seleção inacessível da conta 
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: nomeMes(mesAtual()).slice(0, 3) })).toBeTruthy()); await apertar(nomeMes(mesAtual()).slice(0, 3)); await apertar(nomeMes(antigo));
  await appVai("background"); await guardarCredenciais({ access: "access-bela", refresh: "rt_bela" }); const antes = fetchFalso.mock.calls.length; await appVai("active"); await waitFor(() => expect(screen.getByText("Bom dia, Bela")).toBeTruthy()); await act(drenar);
  const mensais = fetchFalso.mock.calls.slice(antes).filter(([url]) => ["/api/app/resumo-do-mes", "/api/app/mes-detalhes"].includes(new URL(String(url)).pathname));
- expect(mensais).toHaveLength(2); for (const [url, req] of mensais) { expect(new URL(String(url)).searchParams.get("mes")).toBe(mesAtual()); expect(req.headers.Authorization).toBe("Bearer access-bela"); }
+ expect(mensais).toHaveLength(3); for (const [, req] of mensais) expect(req.headers.Authorization).toBe("Bearer access-bela");
+ expect(mensais.map(([url]) => new URL(String(url)).searchParams.get("mes")).sort()).toEqual([mesesAnteriores(mesAtual(), 2)[1], mesAtual(), mesAtual()]); // resumo e detalhes do mês atual + detalhes do mês anterior (curva de comparação)
 });

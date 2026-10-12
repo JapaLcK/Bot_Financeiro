@@ -1,3 +1,4 @@
+import type { Href } from "expo-router";
 import { useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -10,6 +11,7 @@ import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { TITULOS, type Widget } from "./catalogo";
+import { useNavegacaoPainel } from "./navegacao";
 import { usePainel, type Dados, type Recurso } from "./provider";
 /**
  * Com texto, espelha os tokens do `Button secondary` (PDF "Fantasma": fundo `surfaceControl`, sem contorno, texto `ink` SemiBold). `texto` é o visível; `rotulo`, o do VoiceOver.
@@ -42,7 +44,16 @@ export function SeteDias<T>({ itens, children }: { itens: T[]; children: (item: 
 }
 /** Compromissos acompanha o horizonte da previsão (30/60/90); sem previsão pronta, o título fixo do catálogo. */
 export function tituloWidget(id: Widget, dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return id === "compromissos" && r?.fase === "pronto" ? `Próximos ${r.dado.dias} dias` : TITULOS[id]; }
-export function Bloco({ id, children, abrir }: { id: Widget; children: ReactNode; abrir?: () => void }) { const titulo = tituloWidget(id, usePainel().dados); return <Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card>; }
+/**
+ * `ir`: o card INTEIRO leva a `destino` (aba) ao toque. O `Pressable` de fora só captura o toque (`accessible={false}`: o VoiceOver
+ * continua lendo os textos e o `Avisos` de dentro, que seria engolido por um botão único); o título é o botão que o VoiceOver anuncia.
+ */
+export function Bloco({ id, children, abrir, ir }: { id: Widget; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } }) {
+  const titulo = tituloWidget(id, usePainel().dados); const { navegar } = useNavegacaoPainel(); const aoIr = () => ir && navegar(ir.rota);
+  const cabecalho = <Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>;
+  const card = <Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card>;
+  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
+}
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(); const r = p.dados[nome];
   if (!r || r.fase === "carregando") return <ActivityIndicator accessibilityLabel="Carregando dados" />;
