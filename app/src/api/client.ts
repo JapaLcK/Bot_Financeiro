@@ -1,7 +1,9 @@
 import Constants from "expo-constants";
+import { fetch as fetchFluxo } from "expo/fetch";
 import { z } from "zod";
 
 import { USER_AGENT } from "./aparelho";
+import { lerEventos } from "./sse";
 import { credenciaisSchema } from "./schemas/auth";
 import { lerCredenciais, limparSe, trocarSe } from "../storage/secure";
 
@@ -329,7 +331,7 @@ type Opcoes = {
   sinal?: AbortSignal;
 };
 
-async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
+async function enviar(rota: string, opcoes: Opcoes, access: string | null, buscar: typeof fetch = fetch) {
   const metodo = opcoes.metodo ?? "GET";
   const cabecalhos: Record<string, string> = { ...CABECALHOS_DO_APP };
   if (access) cabecalhos["Authorization"] = `Bearer ${access}`;
@@ -338,7 +340,7 @@ async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
   // `urlencoded`, `multipart` ou `text/plain`, então exigir JSON fecha a porta
   // pela qual um navegador atacaria. Escrita sem o cabeçalho toma 403.
   if (metodo !== "GET") cabecalhos["Content-Type"] = "application/json";
-  return fetch(`${baseUrl()}${rota}`, {
+  return buscar(`${baseUrl()}${rota}`, {
     method: metodo,
     headers: cabecalhos,
     body: opcoes.corpo === undefined ? undefined : JSON.stringify(opcoes.corpo),
@@ -352,16 +354,16 @@ async function enviar(rota: string, opcoes: Opcoes, access: string | null) {
 }
 
 /**
- * O corpo de uma chamada: manda, renova uma vez em 401, valida a forma da
- * resposta. Não faz a conferência de dono — isso é do invólucro `chamar`.
+ * Manda, renova uma vez em 401 e lança `ErroDeApi` no `!ok`: devolve a resposta 2xx
+ * sem ler o corpo. Não faz a conferência de dono — isso é do invólucro `comDono`.
  */
-async function executar<T>(
+async function responder(
   rota: string,
-  schema: z.ZodType<T>,
   opcoes: Opcoes,
   guardadas: { access: string; refresh: string } | null,
-): Promise<T> {
-  let resposta = await enviar(rota, opcoes, guardadas?.access ?? null);
+  buscar: typeof fetch = fetch,
+): Promise<Response> {
+  let resposta = await enviar(rota, opcoes, guardadas?.access ?? null, buscar);
   // 401 que diz "sessão": todo 401, salvo nas rotas de credencial secundária,
   // onde só o que traz a marca do servidor.
   const deSessao = (r: Response) =>
@@ -381,7 +383,7 @@ async function executar<T>(
       }
       throw new SessaoExpirada();
     }
-    resposta = await enviar(rota, opcoes, renovada.access);
+    resposta = await enviar(rota, opcoes, renovada.access, buscar);
     if (deSessao(resposta)) {
       // Renovou e AINDA assim tomou 401: a sessão morreu entre as duas
       // requisições (revogada noutro aparelho, logout, troca de senha). É
@@ -405,7 +407,17 @@ async function executar<T>(
     const corpo = resposta.status >= 500 ? undefined : await resposta.json().catch(() => undefined);
     throw new ErroDeApi(resposta.status, mensagemDeErro(resposta.status, corpo), corpo);
   }
+  return resposta;
+}
 
+/** O corpo de uma chamada: `responder` + JSON validado pelo schema. */
+async function executar<T>(
+  rota: string,
+  schema: z.ZodType<T>,
+  opcoes: Opcoes,
+  guardadas: { access: string; refresh: string } | null,
+): Promise<T> {
+  const resposta = await responder(rota, opcoes, guardadas);
   const bruto = await resposta.json().catch(() => null);
   const conferido = schema.safeParse(bruto);
   if (!conferido.success) throw new ContratoInvalido(rota, conferido.error);
@@ -439,21 +451,37 @@ async function executar<T>(
  *
  * `schema` não é opcional de propósito — ver `ContratoInvalido`.
  */
-export async function chamar<T>(
-  rota: string,
-  schema: z.ZodType<T>,
-  opcoes: Opcoes = {},
+export const chamar = <T>(rota: string, schema: z.ZodType<T>, opcoes: Opcoes = {}): Promise<T> =>
+  comDono(opcoes, (g) => executar(rota, schema, opcoes, g));
+
+/**
+ * Stream de eventos (`/ai/chat/stream`): mesma conferência de dono de `chamar`,
+ * e mais uma ANTES de ler o corpo — um stream que nasceu na conta A nunca entrega
+ * evento depois de o cofre virar B. O POST renovado depois de um 401 é seguro de
+ * reenviar: o servidor não rodou o turno. A validação de cada evento é de quem chama
+ * (`aoEvento` recebe o JSON bruto); `chamar` exige schema, este não tem corpo único.
+ */
+export const chamarFluxo = (rota: string, opcoes: Opcoes, aoEvento: (bruto: unknown) => void): Promise<void> =>
+  comDono(opcoes, async (g) => {
+    const r = await responder(rota, opcoes, g, fetchFluxo as unknown as typeof fetch);
+    if (g && (await superada(g.refresh, false))) throw new RequisicaoSuperada();
+    await lerEventos(r.body, aoEvento);
+  });
+
+async function comDono<T>(
+  opcoes: Opcoes,
+  corpo: (guardadas: { access: string; refresh: string } | null) => Promise<T>,
 ): Promise<T> {
   const guardadas = opcoes.semAuth
     ? null
     : (opcoes.credencial ?? (await lerCredenciais()));
   // rota pública não tem sessão a trair; credencial fixa (logout) quer o fim dela
   if (!guardadas || opcoes.credencial) {
-    return executar(rota, schema, opcoes, guardadas);
+    return corpo(guardadas);
   }
   let valor: T;
   try {
-    valor = await executar(rota, schema, opcoes, guardadas);
+    valor = await corpo(guardadas);
   } catch (e) {
     // Falha ao LER o cofre aqui (keychain recusou): só relança `e` se ele for
     // `SessaoExpirada` — esse erro não carrega nada da conta A, é o motivo

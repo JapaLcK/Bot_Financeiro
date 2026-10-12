@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
-import { ActivityIndicator, Image, View } from "react-native";
+import { setStringAsync } from "expo-clipboard";
+import { ActivityIndicator, Image, Pressable, View } from "react-native";
+import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
+import { useToast } from "@/ui/componentes/Toast";
+import { sucesso } from "@/ui/haptics";
 import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
 import { Bloco } from "./base";
@@ -8,7 +12,7 @@ import { raio, texto as escalas } from "@/ui/tokens";
 import { ChipPainel, TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
 import { sugestoes, widgetDoTopico, WIDGETS_DO_MES, type Pergunta } from "./perguntas";
-import type { Turno } from "./conversaEstado";
+import { useConversa, type Turno } from "./conversaEstado";
 import { WidgetConteudo } from "./widgets";
 export const OCULTA = "Mensagem oculta enquanto os valores estão privados.";
 /** O servidor usa o negrito do WhatsApp (`*x*`): o conteúdo começa e termina com não-espaço, colado aos asteriscos; dígito colado não vale (`5*3*4` é conta). */
@@ -26,14 +30,35 @@ export function FalaPiggy({ children }: { children: ReactNode }) {
 export function Digitando() {
   return <FalaPiggy><View style={{ alignSelf: "flex-start" }}><ActivityIndicator accessibilityLabel="Piggy está respondendo" /></View></FalaPiggy>;
 }
-/** Um turno: pergunta à direita, fala do Piggy à esquerda e, se o chip tinha assunto e a resposta veio, o widget real abaixo. */
+function BotaoAcao({ rotulo, icone, selecionado, onPress }: { rotulo: string; icone: NomeIcone; selecionado?: boolean; onPress: () => void }) {
+  const { cores } = useTema(); const marcado = !!selecionado;
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={selecionado === undefined ? undefined : { selected: marcado }} onPress={onPress} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+    <View style={{ width: 32, height: 32, borderRadius: raio.pilula, alignItems: "center", justifyContent: "center", backgroundColor: marcado ? cores.brandSoft : undefined }}><Icone nome={icone} tamanho={20} tom={marcado ? "brandInk" : "inkMuted"} /></View>
+  </Pressable>;
+}
+/** Copiar (sem os `*` do negrito do WhatsApp) e 👍👎 (só com `messageId`: resposta de erro/cota não tem nota). */
+function Acoes({ turno: t }: { turno: Turno }) {
+  const c = useConversa(); const toast = useToast();
+  const copiar = async () => {
+    try { await setStringAsync(t.resposta!.replace(new RegExp(NEGRITO.source, "g"), "$1")); sucesso(); toast.mostrar({ mensagem: "Copiado", tom: "sucesso" }); }
+    catch { toast.mostrar({ mensagem: "Não conseguimos copiar.", tom: "erro" }); }
+  };
+  const nota = async (n: 1 | -1) => { if (!(await c.avaliar(t, n))) toast.mostrar({ mensagem: "Não conseguimos registrar sua avaliação.", tom: "erro" }); };
+  return <View style={{ flexDirection: "row", marginLeft: -10 }}>
+    <BotaoAcao rotulo="Copiar resposta" icone="Copy" onPress={() => void copiar()} />
+    {t.messageId !== null && <><BotaoAcao rotulo="Gostei da resposta" icone="ThumbsUp" selecionado={t.feedback === 1} onPress={() => void nota(1)} /><BotaoAcao rotulo="Não gostei da resposta" icone="ThumbsDown" selecionado={t.feedback === -1} onPress={() => void nota(-1)} /></>}
+  </View>;
+}
+/** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e, se o chip tinha assunto e a resposta veio, o widget real abaixo. */
 export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (w: Widget) => void }) {
   const p = usePainel(); const widget = t.assunto && widgetDoTopico(t.assunto);
   const card = !p.oculto && t.resposta !== undefined && widget && (!WIDGETS_DO_MES.includes(widget) || p.mes === mesAtual()) ? widget : null;
   return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}>
     {p.oculto ? <Texto tom="inkMuted">{OCULTA}</Texto> : <>
       <BolhaUsuario texto={t.pergunta} />
-      {t.erro || t.resposta !== undefined ? <FalaPiggy>{t.erro ? <Texto tom="warning">{t.erro}</Texto> : <ComNegrito texto={t.resposta!} />}{t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}{card && <Bloco id={card} abrir={abrir && (() => abrir(card))}><WidgetConteudo id={card} /></Bloco>}</FalaPiggy> : <Digitando />}
+      {t.erro || t.resposta !== undefined ? <FalaPiggy>{t.erro ? <Texto tom="warning">{t.erro}</Texto> : <ComNegrito texto={t.resposta!} />}{t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}{card && <Bloco id={card} abrir={abrir && (() => abrir(card))}><WidgetConteudo id={card} /></Bloco>}{t.resposta !== undefined && <Acoes turno={t} />}</FalaPiggy>
+        : t.interrompida ? <FalaPiggy>{!!t.parcial && <ComNegrito texto={t.parcial} />}<Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto></FalaPiggy>
+        : t.parcial ? <FalaPiggy><ComNegrito texto={t.parcial} /></FalaPiggy> : <Digitando />}
     </>}
   </View>;
 }

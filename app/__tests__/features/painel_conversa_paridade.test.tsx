@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { LIMITE_CHAT_MS, enviarMensagem } from "@/services/painel";
+import { LIMITE_CHAT_MS, conversarFluxo } from "@/services/painel";
 import { TITULOS } from "@/features/painel/catalogo";
 import { BY_PROFILE, COMMON, widgetDoTopico } from "@/features/painel/perguntas";
 import { fetchFalso, prepararCaso } from "./auth_apoio";
@@ -23,7 +23,7 @@ it("perguntas.ts espelha prompts.js (key, topic, cat, ask) e todo assunto tem wi
 });
 it("o POST do chat tem limite de 60 s, não de 15", async () => {
  jest.useFakeTimers(); expect(LIMITE_CHAT_MS).toBe(60_000);
- const pai = new AbortController(); fetchFalso.mockImplementation(() => new Promise(() => undefined)); void enviarMensagem("oi", pai).catch(() => undefined);
+ const pai = new AbortController(); fetchFalso.mockImplementation(() => new Promise(() => undefined)); void conversarFluxo("oi", pai, () => undefined).catch(() => undefined);
  await jest.advanceTimersByTimeAsync(15_001); expect(pai.signal.aborted).toBe(false);
  await jest.advanceTimersByTimeAsync(45_000); expect(pai.signal.aborted).toBe(true);
 });

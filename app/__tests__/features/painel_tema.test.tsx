@@ -10,6 +10,7 @@ import { claro, escuro } from "@/ui/tokens";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+import { fluxoFim } from "./conversa_apoio";
 beforeEach(async () => {
  prepararCaso(); desligarTrava(); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" });
  fetchFalso.mockImplementation(async (url: string) => {
@@ -47,7 +48,7 @@ it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia
 it.each([["light", claro], ["dark", escuro]] as const)("rótulo \"Piggy\" da fala do chat (%s) é inkMuted e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
  const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/ai/chat" ? resposta(200, { reply: "Oi", usage: { used: 1, limit: 100 } }) : impl(url, req));
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/ai/chat/stream" ? fluxoFim("Oi", 1) : impl(url, req));
  renderRouter("./app", { initialUrl: "/piggy" });
  await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Olá"); });

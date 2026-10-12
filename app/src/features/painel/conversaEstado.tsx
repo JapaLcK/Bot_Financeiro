@@ -1,17 +1,22 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { conversaSchema } from "@/api/schemas/painel";
-import { cancelarPendencia, enviarMensagem, lerRecurso } from "@/services/painel";
+import { AccessibilityInfo } from "react-native";
+import { ErroDeApi } from "@/api/client";
+import { conversaSchema, lerEvento, type BlocoChat } from "@/api/schemas/painel";
+import { avaliarResposta, cancelarPendencia, conversarFluxo, lerRecurso } from "@/services/painel";
 import { mensagemRecurso, useEstadoPainel } from "./provider";
 import type { Pergunta } from "./perguntas";
-export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string };
+/** `passos`/`previa`/`blocos` são só GUARDADOS aqui: quem os desenha é o D2/E1. `parcial` = texto do stream até o `fim`. */
+export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; interrompida: boolean; chips: string[] };
+const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
 type Bloqueio = "abrindo" | "livre" | "falhou";
-type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta) => Promise<void> };
+type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean> };
 const Contexto = createContext<Conversa | null>(null);
 export function useConversa() { const c = useContext(Contexto); if (!c) throw new Error("Conversa indisponível"); return c; }
 /**
  * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela no segundo plano e o turno em voo tem de sobreviver.
+ * Resposta em stream (`/ai/chat/stream`): TODO evento passa por `vivo()` (mesmo dono E mesmo voo); o `fim` encerra o voo, então o que vier depois cai nessa guarda. `parar()` aborta o voo e marca `parado`: é o que separa parar dos 60 s e da troca de conta.
  * O POST tem AbortController PRÓPRIO (fora de p.operacao()): o cancelar() do painel (segundo plano, trava, atualizar) não o toca;
  * só a troca de conta, o logout, o limite de 60 s do POST e a desmontagem do provider o abortam.
  * Pendência (ai_pending_actions): DELETE bloqueante na abertura sem turno em voo (com voo, só lê a cota: a pendência do POST em voo é do turno que a tela vai mostrar, e um DELETE em paralelo a apagaria) e antes do envio seguinte a um erro (erro que chega com um DELETE em voo mantém `sujo`); na saída, só se enviou.
@@ -33,7 +38,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   if (de !== uid) { setDe(uid); setTurnos([]); setRascunho(""); setUso(null); setEnviando(false); setBloqueio("abrindo"); }
   const aberta = useRef(false), enviou = useRef(false), sujo = useRef(false), erros = useRef(0), proximo = useRef(0), abertura = useRef(0), versaoUso = useRef(0); // versaoUso: o POST que grava o uso invalida a cota que um GET mais antigo ainda traz
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
-  const voo = useRef<AbortController | null>(null), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
+  const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
     const alvo = dono.current; if (alvo === null) return null;
@@ -74,28 +79,59 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     const alvo = dono.current;
     if (enviou.current && !voo.current && alvo !== null) { enviou.current = false; sair(alvo); }
   }, [sair]);
-  const enviar = async (texto: string, assunto?: Pergunta) => {
+  const enviar = async (texto: string, assunto?: Pergunta, doCampo = false) => { // doCampo: só o envio do campo limpa o rascunho; chip e sugestão preservam o que está digitado. No erro, qualquer origem volta ao campo vazio
     const message = texto.trim(), alvo = dono.current, minha = abertura.current;
     const pode = () => dono.current === alvo && aberta.current && !voo.current && !oculto.current && !!message && message.length <= 2000;
     if (alvo === null || !pode() || bloqueio !== "livre" || !uso || uso.used >= uso.limit) return;
     if (sujo.current) { const cota = await preparar(); if (!cota || !pode() || cota.used >= cota.limit) return; } // depois de erro: DELETE bloqueante e cota relida antes de enviar
     const ctrl = new AbortController(); ativos.current.add(ctrl); voo.current = ctrl;
     const id = ++proximo.current; enviou.current = true;
-    setEnviando(true); setRascunho(""); setTurnos((ts) => [...ts, { id, pergunta: message, assunto }]);
-    const marcar = (campos: Partial<Turno>) => setTurnos((ts) => ts.map((t) => t.id === id ? { ...t, ...campos } : t));
+    setEnviando(true); if (doCampo) setRascunho(""); setTurnos((ts) => [...ts, { id, pergunta: message, assunto, ...NOVO }]);
+    const vivo = () => dono.current === alvo && voo.current === ctrl;
+    const atualizar = (f: (t: Turno) => Partial<Turno>) => setTurnos((ts) => ts.map((t) => t.id === id ? { ...t, ...f(t) } : t));
+    const concluir = () => {
+      voo.current = null; setEnviando(false);
+      if (aberta.current) enviou.current = true; // o turno terminou nesta abertura: a saída cancela o que ele armou
+      else { enviou.current = false; sair(alvo, id); }
+    };
+    let fim = false;
     try {
-      const r = await enviarMensagem(message, ctrl);
-      if (dono.current === alvo) { marcar({ resposta: r.reply }); versaoUso.current++; setUso(r.usage); }
+      await conversarFluxo(message, ctrl, (bruto) => {
+        if (!vivo()) return;
+        const e = lerEvento(bruto); if (!e) return;
+        if (e.tipo === "passo") atualizar((t) => ({ passos: [...t.passos, e.texto], previa: e.previa }));
+        else if (e.tipo === "bloco") atualizar((t) => ({ blocos: [...t.blocos, e.bloco] }));
+        else if (e.tipo === "delta") atualizar((t) => ({ parcial: t.parcial + e.texto }));
+        else if (e.tipo === "reinicio") atualizar(() => ({ parcial: "" }));
+        else if (e.tipo === "erro") throw new ErroDeApi(500, e.mensagem ?? "erro");
+        else {
+          fim = true; atualizar(() => ({ resposta: e.reply, parcial: "", messageId: e.message_id, chips: aberta.current ? e.chips : [] }));
+          versaoUso.current++; setUso(e.usage);
+          if (aberta.current) AccessibilityInfo.announceForAccessibility("Piggy respondeu");
+          concluir();
+        }
+      });
+      if (!fim && vivo()) throw new Error("stream sem fim");
     } catch (e) {
-      if (dono.current === alvo) { sujo.current = true; erros.current++; falhou(e); marcar({ erro: mensagemRecurso(e) }); if (aberta.current && abertura.current === minha) setRascunho((r) => r || message); }
-    } finally {
-      ativos.current.delete(ctrl);
-      if (dono.current === alvo && voo.current === ctrl) {
-        voo.current = null; setEnviando(false);
-        if (aberta.current) enviou.current = true; // o turno terminou nesta abertura: a saída cancela o que ele armou
-        else { enviou.current = false; sair(alvo, id); }
+      if (vivo()) {
+        sujo.current = true; erros.current++;
+        if (parado.current === ctrl) atualizar(() => ({ interrompida: true }));
+        else { falhou(e); atualizar(() => ({ erro: mensagemRecurso(e), parcial: "" })); if (aberta.current && abertura.current === minha) setRascunho((r) => r || message); }
+        concluir();
       }
-    }
+    } finally { ativos.current.delete(ctrl); }
+  };
+  const parar = () => { const c = voo.current; if (!c || !aberta.current) return; parado.current = c; c.abort(); };
+  /** `false` = falhou e o toast é da UI. Otimista; tocar a nota já marcada manda `null`. Um POST por turno por vez. */
+  const avaliar = async (turno: Turno, nota: 1 | -1): Promise<boolean> => {
+    const alvo = dono.current, id = turno.messageId;
+    if (alvo === null || id === null || avaliando.current.has(turno.id)) return true;
+    const antes = turno.feedback, nova = antes === nota ? null : nota;
+    const gravar = (feedback: 1 | -1 | null) => setTurnos((ts) => ts.map((t) => t.id === turno.id ? { ...t, feedback } : t));
+    avaliando.current.add(turno.id); gravar(nova); const c = novo();
+    try { await avaliarResposta(id, nova, c); return true; }
+    catch (e) { if (dono.current !== alvo) return true; gravar(antes); falhou(e); return false; }
+    finally { ativos.current.delete(c); avaliando.current.delete(turno.id); }
   };
   const antes = useRef(uid);
   useEffect(() => {
@@ -108,5 +144,5 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (aberta.current && uid !== null) void preparar();
   }, [uid, preparar]);
   useEffect(() => () => { for (const c of ativos.current) c.abort(); }, []);
-  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar, parar, avaliar }}>{children}</Contexto.Provider>;
 }

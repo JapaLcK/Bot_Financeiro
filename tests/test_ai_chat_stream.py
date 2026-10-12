@@ -6,12 +6,14 @@ trava do turno: `test_ai_chat_parar.py` e `test_ai_chat_turno.py`; 👍👎:
 """
 import json
 import threading
+from pathlib import Path
 
 import pytest
 
 import db
 from core.services.ai_chat import runner, streaming
 from frontend.routes import ai_chat as rota
+from _cards_apoio import CASOS, mostrar, mundo  # noqa: F401  (mundo é fixture)
 from _ia_stream_helpers import (conta, esgota_a_cota, eventos_sse, executar, linhas,
                                 openai_falso, rodada)
 from test_quiz_conta import _navegador
@@ -130,3 +132,34 @@ def test_endpoint_rate_limit_antes_do_stream(monkeypatch):
     openai_falso(monkeypatch, *[rodada("ok") for _ in range(12)])
     codigos = [c.post("/ai/chat/stream", json={"message": "oi"}, headers=H).status_code for _ in range(13)]
     assert codigos[:12] == [200] * 12 and codigos[12] == 429
+
+
+# ── contrato com o app: `tests/fixtures/ai_chat_eventos.json` é lido também pelo jest (lerEvento) ──
+
+def _forma(e):
+    """Chaves do evento e, por dentro, as do `bloco`/da aba e do `usage`: é o que o zod do app exige."""
+    f = {"chaves": sorted(e)}
+    if "bloco" in e:
+        f |= {"bloco": sorted(e["bloco"]), "aba": sorted(e["bloco"]["abas"][0])}
+    if "usage" in e:
+        f["usage"] = sorted(e["usage"])
+    return f
+
+
+def test_eventos_reais_tem_as_chaves_da_fixture_do_app(monkeypatch, mundo):
+    exemplo = json.loads((Path(__file__).parent / "fixtures" / "ai_chat_eventos.json").read_text(encoding="utf-8"))
+    a, _ = mundo
+    # passo + delta + reinicio + fim: um turno que vira tool call depois de texto
+    openai_falso(monkeypatch, rodada("Vou olhar.", ("list_pockets", {})), rodada("Pronto."))
+    _, ev, _ = executar(a, "saldo?")
+    reais = {e["tipo"]: e for e in ev}
+    reais["bloco"] = next(e for e in mostrar(a, card="contas", **CASOS["contas"][0])[2] if e["tipo"] == "bloco")
+    # fim e erro saem do endpoint
+    uid, c = conta()
+    openai_falso(monkeypatch, rodada("Tudo certo."))
+    reais["fim"] = eventos_sse(c.post("/ai/chat/stream", json={"message": "oi"}, headers=H))[-1]
+    monkeypatch.setattr(streaming, "executar", lambda *a, **k: 1 / 0)
+    reais["erro"] = eventos_sse(c.post("/ai/chat/stream", json={"message": "oi"}, headers=H))[-1]
+    assert set(reais) == set(exemplo), "tipo novo ou removido: atualize a fixture E o zod do app"
+    for tipo, real in reais.items():
+        assert _forma(real) == _forma(exemplo[tipo]), tipo

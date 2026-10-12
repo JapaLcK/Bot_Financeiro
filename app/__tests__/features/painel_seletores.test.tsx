@@ -5,6 +5,7 @@ import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+import { fluxoFim } from "./conversa_apoio";
 // O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
 jest.setTimeout(20_000);
 const escopo = "Buscando em todo o histórico do seu plano";
@@ -127,14 +128,14 @@ it("POST do Piggy em voo não é cancelado pela seleção de mês e conserva sua
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!; let enviado = false;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
   const caminho = new URL(url).pathname;
-  if (caminho === "/ai/chat") { await atraso.promessa; enviado = true; return resposta(200, { reply: "Resposta preservada no mês", usage: { used: 100, limit: 100 } }); }
+  if (caminho === "/ai/chat/stream") { await atraso.promessa; enviado = true; return fluxoFim("Resposta preservada no mês", 100); }
   if (caminho === "/ai/messages") return resposta(200, { messages: [], usage: { used: enviado ? 100 : 2, limit: 100 } });
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  await waitFor(() => expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta em voo"); }); await apertar("Enviar mensagem");
- const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat")!;
+ const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat/stream")!;
  await act(async () => { router.navigate("/gastos"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
  await escolherMes(mesesAnteriores(mesAtual())[1]!); expect(post[1].signal.aborted).toBe(false);
  atraso.soltar(); await act(drenar);

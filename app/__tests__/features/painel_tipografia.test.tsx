@@ -4,6 +4,7 @@ import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+import { fluxoFim } from "./conversa_apoio";
 type No = ReturnType<typeof screen.getByText>;
 const janelaOriginal = Dimensions.get("window");
 async function fonte(fontScale: number) {
@@ -66,7 +67,7 @@ it("filtros refluem na troca live sem perder seleção, busca ou instância do c
 it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do mesmo usuário", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; return resposta(200, { reply: "Resposta após reflow", usage: { used: 13, limit: 1000 } }); }
+  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; return fluxoFim("Resposta após reflow", 13, 1000); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
@@ -75,7 +76,7 @@ it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do 
  await act(async () => { fireEvent.changeText(campo, "Primeira pergunta"); await drenar(); });
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Enviar mensagem" })); await drenar(); });
  await act(async () => { fireEvent.changeText(campo, "Rascunho preservado"); await drenar(); });
- const post = fetchFalso.mock.calls.find(([u]) => new URL(String(u)).pathname === "/ai/chat")!;
+ const post = fetchFalso.mock.calls.find(([u]) => new URL(String(u)).pathname === "/ai/chat/stream")!;
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
  expect(screen.getByLabelText("Mensagem para o Piggy")).toBe(campo); expect(campo.props.value).toBe("Rascunho preservado"); expect(post[1].signal.aborted).toBe(false);
