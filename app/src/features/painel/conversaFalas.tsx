@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { setStringAsync } from "expo-clipboard";
 import { AccessibilityInfo, ActivityIndicator, Image, Platform, Pressable, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
+import { useIsFocused } from "expo-router";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { useToast } from "@/ui/componentes/Toast";
 import { Skeleton } from "@/ui/componentes/Skeleton";
@@ -38,8 +39,8 @@ export function StatusPiggy({ passos }: { passos: string[] }) {
   const [i, setI] = useState(() => Math.floor(Math.random() * FRASES_PIGGY.length));
   useEffect(() => { if (!sem) return; const id = setInterval(() => setI((n) => (n + 1) % FRASES_PIGGY.length), 2000); return () => clearInterval(id); }, [sem]);
   const texto = passos.at(-1) ?? FRASES_PIGGY[i];
-  const passo = passos.at(-1); // iOS não tem live region: anuncia só o passo real, nunca a frase divertida
-  useEffect(() => { if (passo && Platform.OS === "ios") AccessibilityInfo.announceForAccessibility(passo); }, [passo]);
+  const passo = passos.at(-1), focada = useIsFocused(); // iOS não tem live region: anuncia só o passo real, nunca a frase divertida, e só com a aba à vista
+  useEffect(() => { if (passo && focada && Platform.OS === "ios") AccessibilityInfo.announceForAccessibility(passo); }, [passo]); // `focada` fora das deps: voltar à aba não repete o passo
   return <View accessible accessibilityLabel={sem ? "Piggy está respondendo" : `Piggy está respondendo: ${texto}`} accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
     <ActivityIndicator size="small" />
     <Animated.View key={texto} entering={reduzir ? undefined : FadeIn.duration(duracoes.feedback)}><Texto variante="legenda" tom="inkMuted">{texto}</Texto></Animated.View>

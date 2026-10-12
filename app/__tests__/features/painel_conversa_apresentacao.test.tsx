@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 import { AccessibilityInfo, ScrollView, StyleSheet } from "react-native";
 import { prepararCaso } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, enviar, fim, reiniciar, respostaFluxo, srv, type Fluxo } from "./conversa_apoio";
+import { abrir, enviar, fim, noResumo, reiniciar, respostaFluxo, srv, type Fluxo } from "./conversa_apoio";
 // Apresentação do chat: status, passos, prévia (Skeleton), markdown mínimo, entradas animadas e "voltar ao fim".
 jest.setTimeout(20_000);
 
@@ -34,6 +34,12 @@ it("status: frase divertida antes do 1º passo (troca a cada 2 s, rótulo fixo),
   await empurrar(passo("Montando o card")); expect(screen.getByText("Montando o card")).toBeTruthy(); expect(screen.queryByText("Resumindo o período")).toBeNull();
   expect(anuncios()).toEqual(["Resumindo o período", "Montando o card"]); // iOS: cada passo real, uma vez
   await empurrar(delta("Vou ver")); expect(status()).toBeNull();
+});
+it("passo que chega com outra aba à vista não é anunciado (o turno em voo segue montado)", async () => {
+  jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear(); // a espiã é global: o caso anterior anunciou o mesmo passo
+  await abrir(); await enviar("oi"); await waitFor(() => expect(status()).toBeTruthy()); await noResumo();
+  await empurrar(passo("Resumindo o período"));
+  expect(jest.mocked(AccessibilityInfo.announceForAccessibility).mock.calls.map((c) => c[0])).not.toContain("Resumindo o período");
 });
 it("sair da tela com o status à mostra limpa o timer: nada dispara depois", async () => {
   const erro = jest.spyOn(console, "error").mockImplementation(() => undefined);
