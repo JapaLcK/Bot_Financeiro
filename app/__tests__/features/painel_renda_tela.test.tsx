@@ -54,10 +54,10 @@ it("a lista continua igual: 6 meses, cada um com a renda e a linha 'Saídas' (ve
  expect(screen.getByLabelText("7200 reais")).toBeTruthy(); // renda de outubro
  expect(screen.getByLabelText("4500 reais")).toBeTruthy(); // saídas de maio
 });
-it("outro mês corrente: a marcação acompanha o mês de hoje (maio vira o atual)", async () => {
+it("outro mês corrente: a marcação acompanha o mês de hoje (maio vira o atual e o último do gráfico)", async () => {
  mockHoje = "2026-05-20";
  await abrir();
- expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai*", "jun", "jul", "ago", "set", "out"]);
+ expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai*"]); // meses depois do atual ficam fora do gráfico (a lista mantém os 6)
  expect(screen.getAllByTestId("barra-valor", H).map((t) => t.props.children)).toEqual(["R$ 6,2k"]);
 });
 it("valores ocultos: o gráfico e os valores somem ('Gráfico oculto') e a lista segue mascarada; voltam ao mostrar", async () => {
@@ -82,4 +82,13 @@ it("histórico vazio: o texto de antes e nenhum gráfico", async () => {
  renderRouter("./app", { initialUrl: "/resumo" });
  await waitFor(() => expect(screen.getByText("Ainda não há histórico de renda disponível.")).toBeTruthy());
  expect(screen.queryByTestId("barras-mensais", H)).toBeNull();
+});
+it("hoje 31/10 (BRT) e o servidor já em novembro (UTC): o gráfico para no mês atual; a lista mantém os 7 meses", async () => {
+ mockHoje = "2026-10-31";
+ evolucao = { ...F[EVO], evolution: [...F[EVO].evolution, { month: "2026-11", income: 5000, expense: 100, net: 4900 }] };
+ renderRouter("./app", { initialUrl: "/resumo" });
+ await waitFor(() => expect(screen.getByText("novembro de 2026")).toBeTruthy());
+ expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
+ expect(screen.getAllByTestId("barra", H)).toHaveLength(6);
+ expect(screen.getAllByText("Saídas")).toHaveLength(7);
 });
