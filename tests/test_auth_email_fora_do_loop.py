@@ -6,12 +6,21 @@ bloqueante mockada dorme 1 s; um batimento de 0,05 s no mesmo loop cobre o pedid
 inteiro e mede o maior intervalo entre batidas. ASGI cru e não TestClient: o
 TestClient roda o app em outra thread e não mede o loop do teste.
 
-Controles (medidos no PR, maior intervalo ~1,0 s em cada um, 0,05 s com o
-conserto): chamada direta do `send_verification_email` no register → T1[novo]
-vermelho, T1[existente] segue verde (esse caminho já usava `to_thread`); chamada
-direta do `send_password_reset_email`, do `create_password_reset_token` ou do
-`email_has_password` no forgot-password → T3 vermelho.
+Controles: chamada direta do `send_verification_email` no register →
+test_register_envia_o_codigo_fora_do_event_loop[novo] vermelho, [existente] segue
+verde (esse caminho já usava `to_thread`). No forgot-password, o token, a consulta e o
+envio rodam numa tarefa de fundo em thread; este arquivo garante só que essa tarefa não
+trava o loop (test_forgot_password_envia_fora_do_event_loop). Que nada disso atrasa a
+resposta é de test_forgot_password_nao_enumera.py.
 Positivo: o código enviado no T1[novo] confirma a conta no verify-email.
+
+#681: o bcrypt do /auth/reset-password, do /auth/login e do /admin/auth/login
+também sai do loop. Como o conftest força bcrypt de custo 4 (rápido), quem prova o
+bloqueio é o mock que dorme 1 s no lugar da função síncrona. Controles: chamada
+direta de `consume_password_reset_token`, de `login_auth_user` ou de
+`_check_admin_password` → o teste da rota fica vermelho (o maior intervalo entre
+batidas encosta no tempo do mock); com `asyncio.to_thread` fica abaixo do teto de
+0,5 s. Positivo: `test_reset_e_login_reais`.
 """
 import asyncio
 import json
@@ -31,7 +40,7 @@ SENHA = "senha-forte-123"
 CSRF = "csrf-email-fora-do-loop"
 
 
-async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
+async def _post(caminho, dados, ao_enviar=None):  # ASGI cru: o conftest bloqueia o httpx async
     corpo_b = json.dumps(dados).encode()
     scope = {
         "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
@@ -49,6 +58,8 @@ async def _post(caminho, dados):  # ASGI cru: o conftest bloqueia o httpx async
 
     async def send(msg):
         msgs.append(msg)
+        if ao_enviar:
+            ao_enviar(msg)
 
     await dashboard.app(scope, receive, send)
     return msgs[0]["status"], json.loads(b"".join(m.get("body", b"") for m in msgs[1:]))
@@ -134,6 +145,10 @@ def test_register_falha_no_envio_continua_500(monkeypatch):
 
 
 def test_forgot_password_envia_fora_do_event_loop(monkeypatch):
+    """O envio (e o token) rodam na tarefa de fundo, em thread: o loop segue livre.
+
+    Que nada disso roda ANTES da resposta é outro teste: test_forgot_password_nao_enumera.
+    """
     enviados = []
     monkeypatch.setattr(db, "create_password_reset_token", _lento([], "tok-x"))
     monkeypatch.setattr(db, "email_has_password", _lento([], False))
@@ -146,3 +161,67 @@ def test_forgot_password_envia_fora_do_event_loop(monkeypatch):
         "message": "Se este e-mail estiver cadastrado, você receberá as instruções em breve."
     })
     assert enviados == [(email, f"{dashboard.DASHBOARD_URL}/reset-password#token=tok-x", False)]
+
+
+_FRASE_401 = {"detail": "E-mail ou senha incorretos."}
+
+
+def test_reset_password_consome_o_token_fora_do_event_loop(monkeypatch):
+    consumos = []
+    monkeypatch.setattr(db, "consume_password_reset_token", _lento(consumos, None))
+
+    status, corpo = _sem_travar_o_loop(
+        "/auth/reset-password", {"token": "tok-x", "new_password": "senha-nova-123"}
+    )
+
+    assert (status, corpo) == (400, {"detail": "Link inválido ou expirado. Solicite um novo."})
+    assert consumos == [("tok-x", "senha-nova-123")]
+
+
+def test_login_confere_a_senha_fora_do_event_loop(monkeypatch):
+    conferidas = []
+    monkeypatch.setattr(db, "login_auth_user", _lento(conferidas, None))
+    email = _email("login")
+
+    status, corpo = _sem_travar_o_loop("/auth/login", {"email": email, "password": SENHA})
+
+    assert (status, corpo) == (401, _FRASE_401)
+    assert conferidas == [(email, SENHA)]
+
+
+def test_admin_login_confere_a_senha_fora_do_event_loop(monkeypatch):
+    import core.admin_dashboard as admin_dashboard
+
+    async def _sem_log(*args, **kwargs):
+        return None
+
+    conferidas = []
+    monkeypatch.setattr(admin_dashboard, "ADMIN_DASHBOARD_PASSWORD", "senha-admin")
+    monkeypatch.setattr(admin_dashboard, "log_system_event", _sem_log)
+    monkeypatch.setattr(admin_dashboard, "_check_admin_password", _lento(conferidas, False))
+
+    status, corpo = _sem_travar_o_loop(
+        "/admin/auth/login",
+        {"username": admin_dashboard.ADMIN_DASHBOARD_USERNAME, "password": "qualquer"},
+    )
+
+    assert (status, corpo) == (401, {"detail": "Credenciais inválidas."})
+    assert conferidas == [("qualquer",)]
+
+
+def test_reset_e_login_reais():
+    """Positivo: o caminho legítimo segue igual com o bcrypt em thread."""
+    email = _email("login")
+    db.register_auth_user(email, SENHA)
+    token = db.create_password_reset_token(email)
+    client = TestClient(dashboard.app)
+    headers = csrf(client)
+
+    r = client.post("/auth/reset-password", headers=headers,
+                    json={"token": token, "new_password": "senha-nova-456"})
+    assert r.status_code == 200, r.text
+
+    r = client.post("/auth/login", headers=headers, json={"email": email, "password": "senha-nova-456"})
+    assert r.status_code == 200, r.text
+    r = client.post("/auth/login", headers=headers, json={"email": email, "password": SENHA})
+    assert (r.status_code, r.json()) == (401, _FRASE_401)

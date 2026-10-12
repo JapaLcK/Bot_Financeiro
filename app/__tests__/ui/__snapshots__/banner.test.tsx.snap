@@ -6,7 +6,7 @@ exports[`Banner snapshot (dois temas): claro 1`] = `
   style={
     {
       "backgroundColor": "#F6F6F7",
-      "borderRadius": 12,
+      "borderRadius": 16,
       "flexDirection": "row",
       "gap": 12,
       "padding": 16,
@@ -28,7 +28,8 @@ exports[`Banner snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
@@ -47,8 +48,9 @@ exports[`Banner snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Regular",
-            "fontSize": 16,
-            "lineHeight": 22,
+            "fontSize": 14,
+            "letterSpacing": 0,
+            "lineHeight": 21,
           },
           {
             "color": "#5F5F6A",
@@ -98,9 +100,9 @@ exports[`Banner snapshot (dois temas): claro 1`] = `
           {
             "alignItems": "center",
             "backgroundColor": "transparent",
-            "borderColor": "#5F5F6A",
-            "borderRadius": 12,
-            "borderWidth": 1,
+            "borderColor": undefined,
+            "borderRadius": 10,
+            "borderWidth": 0,
             "justifyContent": "center",
             "minHeight": 44,
             "opacity": 1,
@@ -119,13 +121,15 @@ exports[`Banner snapshot (dois temas): claro 1`] = `
             [
               {
                 "fontFamily": "Inter-Medium",
-                "fontSize": 14,
+                "fontSize": 13,
+                "letterSpacing": 0,
                 "lineHeight": 18,
               },
               {
                 "color": "#C7186B",
               },
               {
+                "fontFamily": "Inter-SemiBold",
                 "opacity": 1,
               },
               null,
@@ -145,8 +149,8 @@ exports[`Banner snapshot (dois temas): escuro 1`] = `
   accessibilityRole="alert"
   style={
     {
-      "backgroundColor": "#17171A",
-      "borderRadius": 12,
+      "backgroundColor": "#101013",
+      "borderRadius": 16,
       "flexDirection": "row",
       "gap": 12,
       "padding": 16,
@@ -168,11 +172,12 @@ exports[`Banner snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Medium",
-            "fontSize": 14,
+            "fontSize": 13,
+            "letterSpacing": 0,
             "lineHeight": 18,
           },
           {
-            "color": "#F2F2F3",
+            "color": "#F4F4F6",
           },
           {},
           null,
@@ -187,11 +192,12 @@ exports[`Banner snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Regular",
-            "fontSize": 16,
-            "lineHeight": 22,
+            "fontSize": 14,
+            "letterSpacing": 0,
+            "lineHeight": 21,
           },
           {
-            "color": "#9B9BA6",
+            "color": "#A8A8B3",
           },
           {},
           null,
@@ -238,9 +244,9 @@ exports[`Banner snapshot (dois temas): escuro 1`] = `
           {
             "alignItems": "center",
             "backgroundColor": "transparent",
-            "borderColor": "#9B9BA6",
-            "borderRadius": 12,
-            "borderWidth": 1,
+            "borderColor": undefined,
+            "borderRadius": 10,
+            "borderWidth": 0,
             "justifyContent": "center",
             "minHeight": 44,
             "opacity": 1,
@@ -259,13 +265,15 @@ exports[`Banner snapshot (dois temas): escuro 1`] = `
             [
               {
                 "fontFamily": "Inter-Medium",
-                "fontSize": 14,
+                "fontSize": 13,
+                "letterSpacing": 0,
                 "lineHeight": 18,
               },
               {
-                "color": "#FF4FA0",
+                "color": "#FF5AA6",
               },
               {
+                "fontFamily": "Inter-SemiBold",
                 "opacity": 1,
               },
               null,

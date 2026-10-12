@@ -1,12 +1,13 @@
-"""As quatro TTFs do app (`app/assets/fonts/`) são espelho das woff2 do site
+"""As três TTFs do app (`app/assets/fonts/`) são espelho das woff2 do site
 (`frontend/fonts/`), convertidas com fontTools — não uma fonte baixada à parte.
 
 O app carrega fonte local (`require()`, ver `app/app/_layout.tsx`), não a
 mesma URL do site; sem este teste, as duas árvores podem divergir em silêncio
 (peso errado, subset diferente, versão velha) e só apareceria no aparelho.
 
-Compara estrutura (glyph order, cmap, versão) em vez de bytes crus: o TTF não
-é woff2 recomprimido, é o MESMO font grafo salvo sem a flag `flavor`.
+Compara estrutura (conjunto de glifos, cmap, versão) em vez de bytes crus: o
+TTF não é woff2 recomprimido, é o MESMO grafo salvo sem a flag `flavor`, com
+`cv11`+`ss01`+`ss03` congeladas (ver `app/assets/fonts/README.md`).
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "Connection
 APP_CONFIG_TS = RAIZ / "app" / "app.config.ts"
 VOLTA_OF_TS = RAIZ / "app" / "src" / "features" / "openFinance" / "volta.ts"
 
-PESOS = ["Regular", "Medium", "SemiBold", "Bold"]
+PESOS = ["Regular", "Medium", "SemiBold"]
 
 # `Texto.tsx` liga `fontVariant: ["tabular-nums"]` em valor numérico — sem a
 # feature `tnum` o número desalinha sem erro (mesmo risco do
@@ -41,7 +42,11 @@ def _par(peso: str) -> tuple[pathlib.Path, pathlib.Path]:
     return (FONTES_APP / f"Inter-{peso}.ttf", FONTES_SITE / f"Inter-{peso}.woff2")
 
 
-def test_os_quatro_pesos_existem_dos_dois_lados():
+def _nomes_reais(font: TTFont) -> set[str]:
+    return {n for n in font.getGlyphOrder() if not re.fullmatch(r"glyph\d+", n)}
+
+
+def test_os_tres_pesos_existem_dos_dois_lados():
     for peso in PESOS:
         ttf, woff2 = _par(peso)
         assert ttf.is_file(), f"falta {ttf}"
@@ -57,8 +62,15 @@ def test_ttf_e_o_ttf_puro_do_mesmo_grafo_da_woff2():
         woff2 = TTFont(woff2_path)
         assert ttf.flavor is None, f"{ttf_path.name} não é TTF puro (flavor={ttf.flavor})"
         assert woff2.flavor == "woff2", f"{woff2_path.name} não é a woff2 de origem"
-        assert ttf.getGlyphOrder() == woff2.getGlyphOrder(), (
-            f"{ttf_path.name} tem glyph order diferente da origem — não é a mesma conversão"
+        # O freeze (pyftfeatfreeze) PERMUTA glifos: a ordem, os nomes sintéticos
+        # `glyphNNNNN` e o `hmtx` por nome divergem da woff2. Igual: o total, os
+        # nomes reais e a multiset das métricas; um peso copiado por cima de
+        # outro muda a multiset.
+        assert len(ttf.getGlyphOrder()) == len(woff2.getGlyphOrder()), (
+            f"{ttf_path.name} tem número de glifos diferente da origem — não é a mesma conversão"
+        )
+        assert _nomes_reais(ttf) == _nomes_reais(woff2), (
+            f"{ttf_path.name} tem glifos nomeados diferentes da origem — não é a mesma conversão"
         )
         assert ttf.getBestCmap() == woff2.getBestCmap(), (
             f"{ttf_path.name} tem cmap diferente da origem"
@@ -73,8 +85,21 @@ def test_ttf_e_o_ttf_puro_do_mesmo_grafo_da_woff2():
         assert ttf["OS/2"].usWeightClass == woff2["OS/2"].usWeightClass, (
             f"{ttf_path.name} tem usWeightClass diferente da woff2 — peso trocado na conversão"
         )
-        assert ttf["hmtx"].metrics == woff2["hmtx"].metrics, (
+        assert sorted(ttf["hmtx"].metrics.values()) == sorted(woff2["hmtx"].metrics.values()), (
             f"{ttf_path.name} tem métricas horizontais diferentes da woff2 — peso trocado na conversão"
+        )
+
+
+def test_ttf_tem_o_freeze_aplicado():
+    """O TTF cru do site tem o `a` de dois andares trocado pelo de um andar
+    (`cv11`) só via feature; o app congela isso no glifo. Com o freeze, o
+    GID do `a` (U+0061) no TTF difere do da woff2 — se alguém recolocar o
+    TTF cru, os GIDs voltam a ser iguais e este teste fica vermelho."""
+    for peso in PESOS:
+        ttf_path, woff2_path = _par(peso)
+        gid = lambda f: (lambda font: font.getGlyphID(font.getBestCmap()[0x61]))(f)
+        assert gid(TTFont(ttf_path)) != gid(TTFont(woff2_path)), (
+            f"{ttf_path.name} sem o freeze cv11/ss01/ss03 (igual ao TTF cru do site)"
         )
 
 

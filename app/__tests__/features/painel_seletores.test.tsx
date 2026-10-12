@@ -1,9 +1,13 @@
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
+import { router } from "expo-router";
 import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+import { fluxoFim } from "./conversa_apoio";
+// O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
+jest.setTimeout(20_000);
 const escopo = "Buscando em todo o histórico do seu plano";
 function servidor() {
  fetchFalso.mockImplementation(async (url: string) => {
@@ -52,7 +56,7 @@ it("seletores recarregam somente mês ou horizonte e preservam os recursos indep
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy()); await act(drenar);
  const antesMes = fetchFalso.mock.calls.length;
  await escolherMes(mesesAnteriores(mesAtual())[1]!);
- expect(caminhos(antesMes)).toEqual(["/api/app/mes-detalhes", "/api/app/resumo-do-mes"]);
+ expect(caminhos(antesMes)).toEqual(["/api/app/mes-detalhes", "/api/app/mes-detalhes", "/api/app/resumo-do-mes"]); // detalhes do mês + detalhes do mês anterior (curva de comparação)
  const antesDias = fetchFalso.mock.calls.length;
  await apertar("60 dias");
  expect(caminhos(antesDias)).toEqual(["/api/app/previsao"]);
@@ -89,27 +93,55 @@ it("resumo e detalhes tardios do mês anterior não substituem o mês mais recen
   if ((u.pathname === "/api/app/resumo-do-mes" || u.pathname === "/api/app/mes-detalhes") && m && m !== meses[0]) {
    if (m === meses[1]) await atraso.promessa;
    const valor = m === meses[1] ? "111.00" : "222.00";
-   if (u.pathname === "/api/app/resumo-do-mes") return resposta(200, { ...fixture[u.pathname], mes: m, entrou: valor });
+   if (u.pathname === "/api/app/resumo-do-mes") return resposta(200, { ...fixture[u.pathname], mes: m, entrou: valor, saiu: valor });
    return resposta(200, { ...fixture["/api/app/mes-detalhes"], mes: m, guardado: { ...fixture["/api/app/mes-detalhes"].guardado, liquido: valor } });
   }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy());
  await escolherMes(meses[1]!); const antigas = fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).searchParams.get("mes") === meses[1]);
- await escolherMes(meses[2]!, meses[1]!); expect(antigas).toHaveLength(2); for (const [, req] of antigas) expect(req.signal.aborted).toBe(true);
- expect(screen.getAllByLabelText(/^(mais )?222 reais$/)).toHaveLength(2);
- atraso.soltar(); await act(drenar); expect(screen.queryByLabelText(/^(mais )?111 reais$/)).toBeNull(); expect(screen.getAllByLabelText(/^(mais )?222 reais$/)).toHaveLength(2);
+ await escolherMes(meses[2]!, meses[1]!); expect(antigas).toHaveLength(3); for (const [, req] of antigas) expect(req.signal.aborted).toBe(true);
+ expect(screen.getAllByLabelText(/^menos 222 reais$/)).toHaveLength(1); // o "Saiu no mês" do card (a curva não fecha com os dias do fixture)
+ atraso.soltar(); await act(drenar); expect(screen.queryByLabelText(/^menos 111 reais$/)).toBeNull(); expect(screen.getAllByLabelText(/^menos 222 reais$/)).toHaveLength(1);
+});
+// Cada mês devolve resumo, detalhes e detalhes do mês passado COERENTES entre si (300,00 nos dois), então o card do mês novo fecha em "igual" com "vs"
+// (estado (a)). Resposta velha que entrasse no lugar da nova (detalhes de outro mês, ou o do mês passado errado) derrubaria o card para (b) ou (c).
+it.each([["detalhes", 1], ["detalhesAnterior", 2]] as const)("%s tardio do mês antigo não sobrescreve o do mês novo: o card segue com as duas curvas", async (_nome, segurado) => {
+ const atraso = segurar(), impl = fetchFalso.getMockImplementation()!, meses = mesesAnteriores(mesAtual());
+ let travar = false, preso: RequestInit | null = null; // a carga inicial também pede meses[1] (detalhesAnterior do mês atual): só vale a 1ª chamada DEPOIS da seleção
+ const dia = (d: string, saiu: string) => ({ dia: d, entrou: "0.00", saiu });
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
+  const u = new URL(url), m = u.searchParams.get("mes");
+  if (!m || m === meses[0] || (u.pathname !== "/api/app/resumo-do-mes" && u.pathname !== "/api/app/mes-detalhes")) return impl(url, req);
+  if (u.pathname === "/api/app/resumo-do-mes") return resposta(200, { ...fixture[u.pathname], mes: m, ate: `${m}-28`, entrou: "0.00", saiu: "300.00", anterior: { mes: mesesAnteriores(m, 2)[1], entrou: "0.00", saiu: "300.00" }, motivos: [] });
+  if (travar && !preso && m === meses[segurado]) { preso = req; await atraso.promessa; } // o `detalhes` de meses[1], ou o `detalhesAnterior` (= detalhes de meses[2]) pedido ao selecionar meses[1]
+  return resposta(200, { ...fixture[u.pathname], mes: m, ate: `${m}-28`, entrou: "0.00", saiu: "300.00", dias: [dia(`${m}-01`, "100.00"), dia(`${m}-02`, "200.00")], motivos: [] });
+ });
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "60 dias" })).toBeTruthy());
+ travar = true; await escolherMes(meses[1]!); expect(preso).not.toBeNull();
+ await escolherMes(meses[2]!, meses[1]!); await act(drenar);
+ const card = () => within(screen.getByTestId("bloco-resumo")), duasCurvas = () => { expect(card().getByText("igual")).toBeTruthy(); expect(card().getByText("vs")).toBeTruthy(); expect(card().queryByText("Saiu no mês")).toBeNull(); };
+ duasCurvas(); expect(preso!.signal!.aborted).toBe(true); // o mês novo já está completo com a resposta velha ainda presa
+ atraso.soltar(); for (let i = 0; i < 20; i++) await act(drenar); duasCurvas(); // a resposta presa leva dezenas de microtarefas até o provider: um só drenar não a alcança
 });
 it("POST do Piggy em voo não é cancelado pela seleção de mês e conserva sua cota", async () => {
- const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => { if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; return resposta(200, { reply: "Resposta preservada no mês", usage: { used: 100, limit: 100 } }); } return impl(url, req); });
+ const atraso = segurar(), impl = fetchFalso.getMockImplementation()!; let enviado = false;
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
+  const caminho = new URL(url).pathname;
+  if (caminho === "/ai/chat/stream") { await atraso.promessa; enviado = true; return fluxoFim("Resposta preservada no mês", 100); }
+  if (caminho === "/ai/messages") return resposta(200, { messages: [], usage: { used: enviado ? 100 : 2, limit: 100 } });
+  return impl(url, req);
+ });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
+ await waitFor(() => expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta em voo"); }); await apertar("Enviar mensagem");
- const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat")!;
+ const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat/stream")!;
+ await act(async () => { router.navigate("/gastos"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
  await escolherMes(mesesAnteriores(mesAtual())[1]!); expect(post[1].signal.aborted).toBe(false);
- expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Pergunta em voo");
- atraso.soltar(); await act(drenar); expect(screen.getByText("Resposta preservada no mês")).toBeTruthy(); expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy();
- expect(fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/ai/messages")).toHaveLength(1);
+ atraso.soltar(); await act(drenar);
+ await act(async () => { router.navigate("/piggy"); await drenar(); });
+ await waitFor(() => expect(screen.getByText("Resposta preservada no mês")).toBeTruthy()); await waitFor(() => expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy());
+ expect(screen.getByText("Pergunta em voo")).toBeTruthy(); expect(post[1].signal.aborted).toBe(false);
 });
 it("PUT de perfil atravessa mês e horizonte sem cancelamento, rollback ou GET adicional", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
@@ -133,7 +165,7 @@ it("refresh completo supera previsão em voo e revalida todos os recursos", asyn
  const antiga = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).searchParams.get("dias") === "60")!;
  const antes = fetchFalso.mock.calls.length;
  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
- expect(caminhos(antes)).toHaveLength(16); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
+ expect(caminhos(antes)).toHaveLength(16); expect(caminhos(antes)).toContain("/api/app/categorias"); expect(caminhos(antes)).not.toContain("/ai/messages"); expect(caminhos(antes)).toContain("/insights/1/current"); expect(antiga[1].signal.aborted).toBe(true);
  expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); atraso.soltar(); await act(drenar);
  expect(screen.getByRole("button", { name: "60 dias", selected: true })).toBeTruthy(); expect(screen.queryByRole("button", { name: "30 dias", selected: true })).toBeNull();
 });

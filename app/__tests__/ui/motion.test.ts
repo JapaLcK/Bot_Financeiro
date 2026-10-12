@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react-native";
 import { AccessibilityInfo, Animated } from "react-native";
 
-import { duracoes, facilitador, usePressao } from "@/ui/motion";
+import { duracoes, facilitador, usePressao, useReduzirMovimento } from "@/ui/motion";
 
 declare const global: typeof globalThis & {
   __definirReduzirMovimento: (v: boolean) => void;
@@ -94,5 +94,23 @@ describe("usePressao", () => {
 
     expect(remover).toHaveBeenCalledTimes(1);
     addSpy.mockRestore();
+  });
+});
+
+describe("useReduzirMovimento", () => {
+  it("montagem nova já começa com o último valor lido, sem 1º quadro falso", async () => {
+    global.__definirReduzirMovimento(true);
+    renderHook(() => useReduzirMovimento());
+    await act(async () => {}); // 1ª leitura resolve
+
+    const valores: boolean[] = [];
+    renderHook(() => {
+      const v = useReduzirMovimento();
+      valores.push(v);
+      return v;
+    });
+    expect(valores[0]).toBe(true);
+    await act(async () => {});
+    act(() => global.__dispararReduzirMovimento(false)); // dispara o evento: zera também o último valor do módulo
   });
 });

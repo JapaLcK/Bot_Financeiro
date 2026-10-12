@@ -1153,8 +1153,25 @@ async function saveCard() {
 }
 
 // ── Modal excluir cartão (mostra impacto antes) ───────────────────────
+let _cardDeleteGer = 0; // resposta de delete-impact velha (modal reaberto) não atropela a do cartão atual
+
+// Estado "cartão do banco": só o aviso e "Entendi", sem o botão destrutivo (GET delete-impact e 409 do DELETE).
+function _cardDeleteBloqueado(texto) {
+  const btn = document.getElementById("card-delete-confirm-btn");
+  btn.hidden = true; btn.onclick = null;
+  document.getElementById("card-delete-body").textContent = texto;
+  const cancel = document.getElementById("card-delete-cancel-btn");
+  cancel.textContent = "Entendi";
+  cancel.focus(); // o botão com foco acabou de sumir (409): sem isto o foco cai no body
+}
+
 async function openCardDeleteModal(cardId, cardName) {
+  const ger = ++_cardDeleteGer;
   const body = document.getElementById("card-delete-body");
+  const btn = document.getElementById("card-delete-confirm-btn");
+  const cancel = document.getElementById("card-delete-cancel-btn");
+  // Reset antes do fetch: sem isso o botão (e o onclick) do cartão anterior ficavam vivos.
+  btn.hidden = true; btn.onclick = null; cancel.textContent = "Cancelar";
   body.innerHTML = "Verificando impacto…";
   document.getElementById("card-delete-overlay").classList.add("open");
 
@@ -1165,6 +1182,9 @@ async function openCardDeleteModal(cardId, cardName) {
     });
     if (!resp.ok) throw new Error(await resp.text());
     const data = await resp.json();
+    if (ger !== _cardDeleteGer) return;
+    // Cartão do banco (Open Finance): só avisa; apagar seria desfeito no sync.
+    if (data.bloqueio) return _cardDeleteBloqueado(data.bloqueio);
     const imp = data.impact || {};
     const openTotal = Number(imp.open_bill_total || 0);
     const futCount = Number(imp.future_installments_count || 0);
@@ -1192,9 +1212,10 @@ async function openCardDeleteModal(cardId, cardName) {
       </p>
     `;
 
-    const btn = document.getElementById("card-delete-confirm-btn");
+    btn.hidden = false;
     btn.onclick = () => confirmDeleteCard(cardId, cardName);
   } catch (err) {
+    if (ger !== _cardDeleteGer) return;
     body.innerHTML = `<span style="color:var(--red)">Erro: ${escapeHtmlSafe(String(err.message || err))}</span>`;
   }
 }
@@ -1204,6 +1225,7 @@ function closeCardDeleteModal() {
 }
 
 async function confirmDeleteCard(cardId, cardName) {
+  const ger = _cardDeleteGer;
   const btn = document.getElementById("card-delete-confirm-btn");
   btn.disabled = true; const original = btn.textContent; btn.textContent = "Excluindo…";
   try {
@@ -1214,6 +1236,12 @@ async function confirmDeleteCard(cardId, cardName) {
     });
     if (!resp.ok) {
       const errBody = await resp.json().catch(() => ({}));
+      // 409: o cartão virou do banco com o modal aberto; some o botão em vez de deixar clicar de novo.
+      // Se o modal já foi reaberto para outro cartão (geração mudou), o 409 velho não pinta o novo.
+      if (resp.status === 409 && errBody.detail) {
+        if (ger === _cardDeleteGer) _cardDeleteBloqueado(errBody.detail);
+        return;
+      }
       throw new Error(errBody.detail || `HTTP ${resp.status}`);
     }
     closeCardDeleteModal();
@@ -10271,6 +10299,8 @@ async function openBillDetailModal(billId, opts = {}) {
   document.getElementById("bill-detail-tx").innerHTML = "";
   document.getElementById("bill-detail-pay-btn").disabled = true;
   document.getElementById("bill-detail-pay-btn").dataset.billId = "";
+  document.getElementById("bill-detail-pay-btn").style.display = "";
+  document.getElementById("bill-detail-pay-aviso").style.display = "none";
   _renderBillNav();
   overlay.classList.add("open");
 
@@ -10312,6 +10342,11 @@ async function openBillDetailModal(billId, opts = {}) {
     payBtn.disabled = !(b.due_amount > 0);
     payBtn.dataset.billId = String(b.id || "");
     payBtn.textContent = b.due_amount > 0 ? "Pagar fatura" : "Sem saldo em aberto";
+    // Cartão do banco não tem pagamento manual: a frase no lugar do botão.
+    payBtn.style.display = b.aviso_pagamento ? "none" : "";
+    const avisoEl = document.getElementById("bill-detail-pay-aviso");
+    avisoEl.textContent = b.aviso_pagamento || "";
+    avisoEl.style.display = b.aviso_pagamento ? "" : "none";
   } catch (err) {
     document.getElementById("bill-detail-title").textContent = "Erro";
     document.getElementById("bill-detail-sub").textContent = err.message || "Não foi possível carregar a fatura.";
@@ -10548,7 +10583,9 @@ async function openPayBillModal(opts) {
     if (!res.ok) throw new Error(await readApiError(res));
     const data = await res.json();
     payBillState.balance = Number(data.balance) || 0;
-    payBillState.bills = data.bills || [];
+    payBillState.bills = (data.bills || []).filter(b => !b.aviso_pagamento);  // cartão do banco não se paga à mão
+    // Só havia fatura de cartão do banco: o estado vazio explica, em vez de dizer que não há fatura.
+    payBillState.aviso = payBillState.bills.length ? "" : ((data.bills || []).find(b => b.aviso_pagamento) || {}).aviso_pagamento || "";
     document.getElementById("pay-bill-balance").textContent = fmtBillValue(payBillState.balance);
     renderPayBillList();
     if (opts.preselectId) selectPayBill(Number(opts.preselectId));
@@ -10563,6 +10600,7 @@ function renderPayBillList() {
   const el = document.getElementById("pay-bill-list");
   if (!list.length) {
     el.innerHTML = "";
+    document.getElementById("pay-bill-empty-txt").textContent = payBillState.aviso || "Nenhuma fatura em aberto.";
     document.getElementById("pay-bill-empty").style.display = "";
     return;
   }
@@ -12134,6 +12172,7 @@ function _renderAgentes(data) {
               <div class="ag-event-body">
                 <p class="ag-event-msg">${esc(p.mensagem || p.titulo || "Disparo")}</p>
                 <p class="ag-event-when">${esc(_agentName(ev.kind))} · ${fmtDate(ev.fired_at)}${ev.channel === "email" ? " · <i class='ph ph-envelope' aria-hidden='true'></i> no seu e-mail" : ""}</p>
+                ${ev.kind === "xerife" && p.tipo === "anomalia" && Number.isInteger(p.launch_id) ? `<button type="button" class="ag-event-esperado" data-esperado-lancamento="${p.launch_id}" aria-label="Marcar como esperado${p.categoria ? ": " + esc(String(p.categoria).slice(0, 40)) : ""}">Era esperado</button>` : ""}
               </div>
             </div>
           `;

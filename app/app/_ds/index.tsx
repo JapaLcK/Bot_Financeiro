@@ -74,7 +74,7 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
             minHeight: 44,
             justifyContent: "center",
             paddingHorizontal: espaco.lg,
-            borderRadius: raio.lg,
+            borderRadius: raio.cartao,
             backgroundColor: cores.brandSoft,
           }}
         >
@@ -90,7 +90,7 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
               style={{
                 width: 32,
                 height: 32,
-                borderRadius: raio.sm,
+                borderRadius: raio.chip,
                 backgroundColor: cores[nome],
                 borderWidth: 1,
                 borderColor: cores.border,
@@ -125,7 +125,7 @@ function Catalogo(props: { esquema: Esquema; onTrocar: () => void }) {
                   minHeight: 44,
                   justifyContent: "center",
                   paddingHorizontal: espaco.lg,
-                  borderRadius: raio.md,
+                  borderRadius: raio.cartao,
                   backgroundColor: cores.surface,
                 }}
               >

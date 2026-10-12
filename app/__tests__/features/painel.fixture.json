@@ -450,12 +450,8 @@
       "limit": 100
     }
   },
-  "/ai/chat": {
-    "reply": "Vamos conferir os gastos por categoria deste mês antes de decidir uma mudança.",
-    "usage": {
-      "used": 3,
-      "limit": 100
-    }
+  "/ai/pending": {
+    "cancelada": null
   },
   "/api/app/previsao": {
     "hoje": "2026-10-06",

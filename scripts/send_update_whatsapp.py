@@ -29,7 +29,7 @@ load_dotenv(os.path.join(ROOT, ".env"))
 
 import db
 from adapters.whatsapp.wa_client import send_template
-from utils_phone import mask_phone, phone_lookup_candidates
+from utils_phone import mask_phone, normalize_phone_e164, phone_lookup_candidates
 
 DEFAULT_TEMPLATE_NAME = "atualizacao_pigbank"
 DEFAULT_TEMPLATE_LANGUAGE = "pt_BR"
@@ -42,6 +42,7 @@ class UpdateTarget:
     to: str
     email: str = ""
     source: str = "phone"
+    raw: str = ""  # `external_id` como está gravado, para a reconferência achar a própria linha
 
 
 def _env_flag(name: str) -> bool:
@@ -56,13 +57,22 @@ def _normalize_whatsapp_target(raw: str) -> tuple[str, set[str]]:
 def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
     targets: list[UpdateTarget] = []
     seen: set[str] = set()
+    ambiguos = 0
+
+    # Opt-out vale para o número: barra todas as variantes dele, em qualquer conta.
+    for row in rows:
+        if row.get("opt_out"):
+            try:
+                seen.update(_normalize_whatsapp_target(row["identity_phone"].strip())[1])
+            except ValueError:
+                pass
 
     for row in rows:
+        if row.get("opt_out"):  # só barra (acima); nunca é destinatário
+            continue
         user_id = int(row["user_id"])
         email = (row.get("email") or "").strip()
-        raw_identity = (row.get("identity_phone") or "").strip()
-        raw_auth_phone = (row.get("auth_phone") or "").strip()
-        raw_phone = raw_identity or raw_auth_phone
+        raw_phone = (row.get("identity_phone") or "").strip()
         if not raw_phone:
             continue
 
@@ -70,6 +80,15 @@ def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
             normalized, candidates = _normalize_whatsapp_target(raw_phone)
         except ValueError:
             print(f"  ! telefone invalido ignorado user_id={user_id}: {mask_phone(raw_phone)}")
+            continue
+
+        # #901: o `wa_id` da Meta traz o código do país. Com 10/11 dígitos (o que não
+        # normaliza sem o 55 padrão) é ambíguo: brasileiro antigo sem 55 ou estrangeiro
+        # que viraria um número brasileiro de outra pessoa. Falha fechado.
+        try:
+            normalize_phone_e164(raw_phone, default_country_code="")
+        except ValueError:
+            ambiguos += 1
             continue
 
         if seen.intersection(candidates):
@@ -81,37 +100,69 @@ def _dedupe_targets(rows: list[dict]) -> list[UpdateTarget]:
                 user_id=user_id,
                 to=normalized,
                 email=email,
-                source="whatsapp" if raw_identity else "auth_phone",
+                source="whatsapp",
+                raw=row["identity_phone"],
             )
         )
 
+    if ambiguos:
+        print(f"  ! {ambiguos} destinatário(s) com número ambíguo (10/11 dígitos) ignorado(s), ver #901")
     return targets
 
 
-def get_all_update_targets() -> list[UpdateTarget]:
-    conn = db.get_conn()
-    with conn.cursor() as cur:
+def _sem_exclusao_pedida(rows: list[dict]) -> list[dict]:
+    # Conta com exclusão pedida não recebe. A que também tem opt-out fica: ela não
+    # recebe (o opt-out barra o número) e continua barrando as variantes nas outras.
+    # ponytail: uma consulta por linha, para reusar a fonte única
+    # (`db.is_account_scheduled_for_deletion`); vira join se o volume pesar.
+    return [
+        row for row in rows
+        if row.get("opt_out") or not db.is_account_scheduled_for_deletion(int(row["user_id"]))
+    ]
+
+
+def get_all_update_targets(numeros: list[str] | None = None) -> list[UpdateTarget]:
+    """`numeros` restringe os destinatários às identidades com esses números: é a
+    reconferência antes de cada envio. As linhas com opt-out vêm sempre, em qualquer
+    formato, para o `_dedupe_targets` normalizá-las e barrar as variantes como na
+    montagem completa.
+
+    ponytail: cada reconferência normaliza todas as linhas com opt-out, então o custo
+    por envio cresce com elas; `functools.lru_cache` em `_normalize_whatsapp_target`
+    corta a parte de CPU se pesar."""
+    with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
             select
               a.user_id,
               a.email,
-              a.phone_e164 as auth_phone,
-              i.external_id as identity_phone
+              i.external_id as identity_phone,
+              coalesce(a.whatsapp_updates_opt_out, false) as opt_out
             from auth_accounts a
-            left join user_identities i
+            join user_identities i
               on i.user_id = a.user_id
              and i.provider = 'whatsapp'
-            where coalesce(a.whatsapp_updates_opt_out, false) = false
+            where nullif(i.external_id, '') is not null
               and (
-                nullif(a.phone_e164, '') is not null
-                or nullif(i.external_id, '') is not null
+                %(numeros)s::text[] is null
+                or i.external_id = any(%(numeros)s::text[])
+                or coalesce(a.whatsapp_updates_opt_out, false)
               )
             order by a.user_id asc
-            """
+            """,
+            {"numeros": numeros},
         )
         rows = cur.fetchall() or []
-    return _dedupe_targets(rows)
+    return _dedupe_targets(_sem_exclusao_pedida(rows))
+
+
+def _ainda_recebe(target: UpdateTarget) -> bool:
+    """O disparo enviaria a este número agora? Mesma montagem, com os destinatários
+    restritos às variantes dele (opt-out por número em qualquer conta e formato, e
+    exclusão pedida)."""
+    return bool(get_all_update_targets(
+        sorted(_normalize_whatsapp_target(target.to)[1] | {target.raw})
+    ))
 
 
 def get_test_targets(value: str) -> list[UpdateTarget]:
@@ -123,26 +174,26 @@ def get_test_targets(value: str) -> list[UpdateTarget]:
         normalized, _ = _normalize_whatsapp_target(value)
         return [UpdateTarget(user_id=0, to=normalized, source="test")]
 
-    conn = db.get_conn()
-    with conn.cursor() as cur:
+    with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
             select
               a.user_id,
               a.email,
-              a.phone_e164 as auth_phone,
               i.external_id as identity_phone
             from auth_accounts a
-            left join user_identities i
+            join user_identities i
               on i.user_id = a.user_id
              and i.provider = 'whatsapp'
             where lower(a.email) = lower(%s)
+              and nullif(i.external_id, '') is not null
             order by a.user_id asc
             """,
             (value,),
         )
         rows = cur.fetchall() or []
-    return _dedupe_targets(rows)
+    # Consentimento igual ao do disparo: o `--dry-run` lista o que seria enviado.
+    return [t for t in _dedupe_targets(_sem_exclusao_pedida(rows)) if _ainda_recebe(t)]
 
 
 def build_quick_reply_buttons(enabled: bool) -> list[dict] | None:
@@ -187,12 +238,18 @@ def main() -> None:
         print(f"{prefix}Aviso: número passado em --test não é validado no banco.")
     elif test_value:
         print(f"{prefix}Destinatários encontrados para o e-mail de teste: {len(targets)}")
+        if not targets:
+            print(
+                f"{prefix}Aviso: nenhum destinatário para este e-mail (sem WhatsApp ligado, "
+                "opt-out, exclusão pedida ou número ambíguo); nada será enviado."
+            )
     else:
         print(f"{prefix}Destinatários encontrados na base: {len(targets)}")
     print()
 
     ok = 0
     fail = 0
+    pulados = 0
     buttons = build_quick_reply_buttons(args.stop_button)
 
     for target in targets:
@@ -205,12 +262,22 @@ def main() -> None:
             continue
 
         try:
-            send_template(
+            # Opt-out (Configurações ou botão de atualização anterior) ou exclusão pedidos
+            # durante a execução valem para quem ainda não recebeu, também no
+            # `--test email` (#874); o `--test numero` é digitado pelo operador, sem conta.
+            if not direct_test_number and not _ainda_recebe(target):
+                print(f"  PULADO (opt-out ou exclusão pedida) {label}")
+                pulados += 1
+                continue
+
+            # `None` é o 401 da Meta (token inválido), que `send_template` não levanta.
+            if send_template(
                 target.to,
                 args.template,
                 language_code=args.language,
                 quick_reply_buttons=buttons,
-            )
+            ) is None:
+                raise RuntimeError("envio recusado (token do WhatsApp inválido)")
             print(f"  OK {label}")
             ok += 1
         except Exception as exc:
@@ -218,7 +285,7 @@ def main() -> None:
             fail += 1
 
     if not args.dry_run:
-        print(f"\nEnviados: {ok} | Falhas: {fail}")
+        print(f"\nEnviados: {ok} | Falhas: {fail} | Pulados: {pulados}")
 
 
 if __name__ == "__main__":

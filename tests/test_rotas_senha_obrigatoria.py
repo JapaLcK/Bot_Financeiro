@@ -83,11 +83,18 @@ TABELA = {
     ("POST", "/billing/pix/checkout"): (L, "compra"),
     ("GET", "/billing/pix/{public_token}"): (L, "compra"),
     ("GET", "/billing/pix-extras"): (L, "compra"),
+    # ── retomada do checkout abandonado: token/cookie próprio, sem sessão de usuário ──
+    ("GET", "/retomar"): (P, "link de retomada"), ("GET", "/retomar/pronto"): (P, "volta da retomada"),
+    ("POST", "/billing/retomada/senha"): (P, "cookie de retomada, sem sessão"),
     # ── IA ──
     ("POST", "/ai/chat"): (B, "require_pro_feature"), ("GET", "/ai/messages"): (B, "require_pro_feature"),
+    ("POST", "/ai/chat/stream"): (B, "require_pro_feature"),
+    ("POST", "/ai/messages/{message_id}/feedback"): (B, "require_pro_feature"),
+    ("DELETE", "/ai/pending"): (B, "_get_current_user + _exigir_credencial, sem plano/cota"),
     # ── links e utilidades públicas ──
     ("GET", "/d/{code}"): (P, "magic link"), ("GET", "/r/{code}"): (P, "link de afiliado"),
     ("GET", "/i/{code}"): (P, "link de prospect"), ("GET", "/wa"): (P, "abre o WhatsApp"),
+    ("GET", "/teste"): (P, "teste do Piggy"), ("GET", "/t/{code}"): (P, "link do teste"),
     ("POST", "/contact"): (P, "formulário"), ("GET", "/health"): (P, "health"),
     ("GET", "/unsubscribe"): (P, "descadastro"), ("POST", "/unsubscribe"): (P, "descadastro"),
     ("GET", "/api/commands-catalog"): (P, "catálogo"), ("GET", "/api/blog/news"): (P, "blog"),
@@ -123,6 +130,9 @@ TABELA = {
     ("POST", "/api/v2/lancamentos/apagar"): (B, "usuario_atual"),
     ("GET", "/api/v2/guia"): (B, "usuario_atual"), ("POST", "/api/v2/guia"): (B, "usuario_atual"),
     ("POST", "/api/v2/guia/dica"): (B, "usuario_atual"),
+    ("GET", "/api/v2/metas"): (B, "usuario_atual"), ("POST", "/api/v2/metas"): (B, "usuario_atual"),
+    ("POST", "/api/v2/metas/editar"): (B, "usuario_atual"),
+    ("POST", "/api/v2/metas/apagar"): (B, "usuario_atual"),
     # ── /api/app: mesma guarda de credencial, antes do marco bancário ──
     ("GET", "/api/app/me"): (B, "usuario_do_app"),
     ("GET", "/api/app/assinaturas"): (B, "usuario_do_app"),
@@ -140,6 +150,9 @@ TABELA = {
     ("GET", "/api/app/guia"): (B, "usuario_do_app"),
     ("POST", "/api/app/guia"): (B, "usuario_do_app"),
     ("POST", "/api/app/guia/dica"): (B, "usuario_do_app"),
+    ("GET", "/api/app/metas"): (B, "usuario_do_app"), ("POST", "/api/app/metas"): (B, "usuario_do_app"),
+    ("POST", "/api/app/metas/editar"): (B, "usuario_do_app"),
+    ("POST", "/api/app/metas/apagar"): (B, "usuario_do_app"),
     ("GET", "/api/app/patrimonio"): (B, "usuario_do_app"),
     ("GET", "/api/app/rendimento"): (B, "usuario_do_app"),
     ("GET", "/api/app/mes-detalhes"): (B, "usuario_do_app"),
@@ -178,7 +191,8 @@ GET /analytics/{user_id}/categories|GET /analytics/{user_id}/weekday-pattern
 GET /analytics/{user_id}/top-merchants|GET /insights/{user_id}/current|GET /analytics/{user_id}/patterns
 GET /agents/{user_id}|POST /agents/{user_id}/{kind}/activate|POST /agents/{user_id}/{kind}/pause
 POST /agents/{user_id}/{kind}/email|GET /agents/{user_id}/feed|POST /agents/{user_id}/feed/seen
-POST /agents/{user_id}/{kind}/chat|GET /categories/{user_id}/launches|POST /simulator/{user_id}
+POST /agents/{user_id}/{kind}/chat|PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado
+GET /categories/{user_id}/launches|POST /simulator/{user_id}
 GET /debug/ai/{user_id}/payload|GET /history/{user_id}/list|GET /history/{user_id}/quick-stats
 POST /ofx/import/{user_id}|POST /export/{user_id}|GET /budgets/{user_id}|POST /budgets/{user_id}
 DELETE /budgets/{user_id}/{categoria}|GET /budgets/{user_id}/status|GET /household-budget/{user_id}/status

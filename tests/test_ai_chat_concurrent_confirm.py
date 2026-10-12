@@ -19,9 +19,14 @@ Controles positivos do grupo vivem em `tests/test_delete_all_launches.py`
 
 import threading
 
+import pytest
+
 import db
 from db import add_launch_and_update_balance, get_balance
 from core.services.ai_chat import chat
+
+
+pytestmark = pytest.mark.usefixtures("sem_trava_do_turno")  # disputam o mesmo usuário de propósito
 
 
 def _bal(uid: int) -> float:

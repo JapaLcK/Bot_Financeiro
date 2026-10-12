@@ -17,6 +17,7 @@ from adapters.whatsapp.wa_client import (
     send_text,
     send_typing_indicator,
 )
+from adapters.whatsapp import wa_demo
 from adapters.whatsapp.wa_parse import InboundAttachmentRef, InboundMessage, extract_messages, get_interactive_id
 from adapters.whatsapp.wa_tutorial import (
     get_tutorial_button_id,
@@ -77,6 +78,15 @@ WA_UPDATES_DISABLE_IDS = {
     "whatsapp_updates_disable",
     "updates_disable",
 }
+# PARAR digitado vale como o botão de "parar atualizações" (mesmo setter, mesma resposta).
+WA_PARAR_DIGITADO_ID = "parar atualizacoes"
+# A mensagem INTEIRA, normalizada (`intent_classifier._normalize`: sem caixa, acento nem
+# pontuação), igual a um destes. Decisão do dono. "pare" e "para" ficam de fora de propósito:
+# são palavras de cancelar do fluxo de valor pendente (`launches._CANCEL_WORDS`). "stop" e
+# "sair" não são comando nem palavra de pendência em lugar nenhum (grep em core/ e adapters/).
+WA_PARAR_TEXTOS = frozenset({
+    "parar", "stop", "sair", "parar mensagens", "parar de receber", "nao quero mais receber",
+})
 
 
 _SEEN: dict[str, float] = {}
@@ -514,6 +524,19 @@ PRECISA_SENHA_WA = (
     "senha pelo link que enviamos para o seu e-mail."
 )
 
+# Mesmo número/conta sem senha, mas quem NUNCA comprou (lead do remarketing, plano
+# `docs/plano-remarketing.md` PR 2): o convite é concluir a assinatura, e o PARAR
+# digitado tem resposta própria. Textos do dono.
+CONVITE_LEAD_WA = (
+    "Oi! Aqui é o Piggy 🐷 Vi que você começou a assinatura do PigBank mas não "
+    "terminou. Pra eu começar a cuidar do seu dinheiro por aqui, é só concluir em "
+    "pigbankai.com/precos\n\n"
+    "Se não quiser receber mensagens, responda PARAR."
+)
+PARAR_LEAD_WA = "Pronto, não vou mais te mandar mensagens por aqui. Se mudar de ideia, é só me chamar aqui."
+# O opt-out (botão ou digitado) não conseguiu gravar: dizer isso, nunca ficar em silêncio.
+OPT_OUT_FALHOU_WA = "Não consegui registrar agora. Tenta mandar PARAR de novo em instantes."
+
 # Tentativa de vincular por código ("link 123456" / "vincular 123456"). Espelha
 # os padrões do intent_classifier (account.link / account.vincular). Um número
 # SEM conta usa exatamente esse fluxo pra se vincular, então não pode ser barrado
@@ -529,11 +552,8 @@ def _is_link_code_attempt(text: str) -> bool:
 
 
 def _signup_url() -> str:
-    from core.dashboard_links import get_dashboard_base_url
-    base = get_dashboard_base_url()
-    if not base.startswith("https://"):
-        base = "https://pigbankai.com"
-    return f"{base}/cadastro"
+    from core.dashboard_links import base_url_publica
+    return f"{base_url_publica()}/cadastro"
 
 
 def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], user_id: int) -> None:
@@ -651,14 +671,53 @@ def _pergunta_da_ia(uid: int):
         return None, None
 
 
+def _eh_parar(texto: str | None) -> bool:
+    """O texto digitado é só um dos `WA_PARAR_TEXTOS` (caixa, acento e pontuação não contam)."""
+    from core.intent_classifier import _normalize
+    return _normalize(texto or "") in WA_PARAR_TEXTOS
+
+
+def _lead_sem_compra(conta: int) -> bool:
+    """Conta que nunca comprou. Falha do `ja_comprou` = comprou: é o que valia antes
+    (PRECISA_SENHA_WA, e o PARAR responde 'parei as atualizações', que não mente para
+    quem continua recebendo relatórios). Erro nunca derruba a mensagem.
+
+    `db.remarketing` entra por import TARDIO (como o `wa_demo`): o harness hermético
+    (harness_support/safe_runtime.py) carrega este módulo com `db` trocado por um stub que
+    não é pacote, e um import de topo quebraria o `import` inteiro."""
+    try:
+        from db.remarketing import ja_comprou
+        return not ja_comprou(conta)
+    except Exception as exc:
+        logger.warning("WA ja_comprou falhou uid=%s: %s", conta, exc)
+        return False
+
+
+def _barra_sem_senha(conta: int, reply_to: str, message: InboundMessage, remetente: int) -> None:
+    """Número de conta sem senha (`conta_sem_credencial` e `precisa_senha`): opt-out
+    por botão ou PARAR digitado, senão o texto da situação dela. Lead que nunca
+    comprou recebe o convite/resposta de lead; quem comprou, os de sempre.
+    `conta`: a conta sem senha (no `precisa_senha`, a alvo); `remetente`: o usuário que
+    conversa, o dono das pendências que o PARAR encerra."""
+    iid = get_interactive_id(message.raw or {})
+    if not iid and _eh_parar(message.text):
+        _tratar_opt_out(conta, reply_to, WA_PARAR_DIGITADO_ID, resposta=PARAR_LEAD_WA if _lead_sem_compra(conta) else None,
+                        remetente=remetente)
+    elif not _tratar_opt_out(conta, reply_to, iid, remetente=remetente):
+        _send_reply(reply_to, CONVITE_LEAD_WA if _lead_sem_compra(conta) else PRECISA_SENHA_WA)
+
+
 def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
-                    tambem: int | None = None) -> bool:
+                    tambem: int | None = None, resposta: str | None = None,
+                    remetente: int | None = None) -> bool:
     """Botões de opt-out (`_WA_INTERACTIVE_ISENTOS`): True se tratou o clique.
 
     Chamado também pela guarda de conta sem credencial: quem não consegue usar
     o bot tem de conseguir PARAR de receber mensagem nossa. `tambem`: outra conta
     que recebe envios neste número (a sem credencial do auto-vínculo); só a
-    preferência dela muda, e a resposta é uma só.
+    preferência dela muda, e a resposta é uma só. `resposta`: texto no lugar do de
+    "parar atualizações" (só o PARAR digitado por lead sem compra). `remetente`: o usuário
+    que conversa (padrão `uid`); só as pendências DELE são encerradas, nunca as de `tambem`.
     """
     if not interactive_id:
         return False
@@ -713,24 +772,60 @@ def _tratar_opt_out(uid: int, reply_to: str, interactive_id: str | None,
         return True
     elif interactive_id.strip().lower() in WA_UPDATES_DISABLE_IDS:
         logger.info("WA updates disable button clicked wa_id=%s uid=%s", mask_phone(reply_to), uid)
-        try:
-            for u in uids:
+        # Import tardio pelo mesmo motivo do `_lead_sem_compra` (stub de `db` no harness).
+        from db import ai_clear_pending_action, clear_pending_action
+        falhou = False
+        for u in uids:
+            try:
                 set_whatsapp_updates_opt_out(u, True)
-            _send_reply(
-                reply_to,
-                "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
-            )
+            except Exception as e:
+                falhou = True
+                logger.exception("WA updates disable button error wa_id=%s uid=%s: %s", mask_phone(reply_to), u, e)
+                log_system_event_sync(
+                    "warning",
+                    "whatsapp_updates_disable_button_error",
+                    f"Erro ao processar botão de parar atualizações: {e}",
+                    source="wa_runtime",
+                    user_id=u,
+                )
+        # PARAR encerra também as confirmações pendentes (as do bot e as da IA), senão um "sim"
+        # depois executaria o que a pessoa mandou parar. Só as de QUEM CONVERSA: a conta de
+        # `tambem` (a sem senha que digitou o número) é outra pessoa e não pode perder as dela.
+        rem = uid if remetente is None else remetente
+        try:
+            clear_pending_action(rem)
+            ai_clear_pending_action(rem)
         except Exception as e:
-            logger.exception("WA updates disable button error wa_id=%s: %s", mask_phone(reply_to), e)
+            falhou = True
+            logger.exception("WA updates disable pending error wa_id=%s uid=%s: %s", mask_phone(reply_to), rem, e)
             log_system_event_sync(
                 "warning",
                 "whatsapp_updates_disable_button_error",
-                f"Erro ao processar botão de parar atualizações: {e}",
+                f"Erro ao encerrar pendências no PARAR: {e}",
                 source="wa_runtime",
-                user_id=uid,
+                user_id=rem,
             )
+        try:
+            _send_reply(
+                reply_to,
+                OPT_OUT_FALHOU_WA if falhou else resposta or "Pronto, parei as atualizações do Piggy por aqui. Você pode religar quando quiser em Configurações > Notificações.",
+            )
+        except Exception as e:
+            logger.exception("WA updates disable reply error wa_id=%s: %s", mask_phone(reply_to), e)
         return True
     return False
+
+
+def _message_id(message: InboundMessage) -> str:
+    """Id usado na dedupe (`_seen_recent`) e no indicador de digitação."""
+    try:
+        msg_id = str(message.raw.get("id") or message.timestamp or "")
+    except Exception:
+        msg_id = str(message.timestamp or "")
+
+    if not msg_id:
+        msg_id = hashlib.sha256(repr(message.raw).encode("utf-8")).hexdigest()
+    return msg_id
 
 
 def process_message(message: InboundMessage) -> None:
@@ -751,16 +846,29 @@ def process_message(message: InboundMessage) -> None:
             len(message.text or ""),
             len(message.attachments or []),
         )
+        # "Testar o Piggy": desvio ANTES de qualquer coisa que grave (usuário
+        # canônico, vínculo, ai_messages). Número com conta, `vincular 123456`
+        # e quem não é do demo seguem o fluxo normal (decidir devolve None). A
+        # dedupe é própria e só roda depois de decidir que a mensagem é do demo:
+        # marcá-la antes faria a mensagem cair no fluxo normal e ser descartada.
+        plano = None if _is_link_code_attempt(message.text or "") else wa_demo.decidir(message)
+        if plano is not None:
+            msg_id = _message_id(message)
+            if _seen_recent(msg_id):
+                logger.info("WA demo duplicate ignored message_id=%s", msg_id)
+                return
+            wa_demo.executar(plano, message, msg_id)
+            return
         uid = get_or_create_canonical_user("whatsapp", message.wa_id)
         logger.info("WA canonical user resolved uid=%s from=%s", uid, mask_phone(message.wa_id))
         # Número JÁ ligado à conta sem senha (vínculo anterior ao PR 4 ou por
-        # `vincular CODIGO`): não lê nem grava nada. O auto-vínculo abaixo barra
-        # o outro caminho, o de ligar o número agora (`precisa_senha`).
+        # `vincular CODIGO`): não lê nem grava dado financeiro. Só lê `ja_comprou` (para
+        # escolher o texto) e o opt-out grava a preferência e apaga as pendências do remetente.
+        # O auto-vínculo abaixo barra o outro caminho, o de ligar o número agora (`precisa_senha`).
         # ponytail: +1 query por mensagem; se pesar, `password_hash is null` no
         # SELECT cacheado do get_auth_user (o reset já invalida esse cache).
         if conta_sem_credencial(uid):
-            if not _tratar_opt_out(uid, reply_to, get_interactive_id(message.raw or {})):
-                _send_reply(reply_to, PRECISA_SENHA_WA)
+            _barra_sem_senha(uid, reply_to, message, uid)
             return
         # Âncora lida antes de qualquer tratamento pré-núcleo: pergunta que o app
         # criar durante este turno não é deste turno e fica aberta.
@@ -832,10 +940,9 @@ def process_message(message: InboundMessage) -> None:
             # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
             # para o código de vínculo: seguindo, ele pararia no _paywall_gate
             # do usuário do WhatsApp (sem plano) com a copy de "assine". O opt-out
-            # desliga a conta paga: é ela que recebe os envios por `phone_e164`.
-            if not _tratar_opt_out(auto_link_result["target_user_id"], reply_to,
-                                   get_interactive_id(message.raw or {})):
-                _send_reply(reply_to, PRECISA_SENHA_WA)
+            # desliga a conta paga: desde a #721 a atualização só vai a número ligado,
+            # mas o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
+            _barra_sem_senha(auto_link_result["target_user_id"], reply_to, message, uid)
             return
         elif auto_link_result["status"] in {
             "multiple_accounts",
@@ -1175,6 +1282,13 @@ def process_message(message: InboundMessage) -> None:
             elif _tratar_opt_out(uid, reply_to, interactive_id,
                                  auto_link_result.get("target_user_id")):
                 return
+        elif _eh_parar(message.text):
+            # PARAR digitado: opt-out como o botão, ANTES das pendências e do paywall
+            # (quem foi cortado também tem de conseguir parar). Não religa sozinho:
+            # só a tela de Configurações grava `opt_out = False`.
+            _tratar_opt_out(uid, reply_to, WA_PARAR_DIGITADO_ID,
+                            auto_link_result.get("target_user_id"))
+            return
 
         ignora_pendencias = False  # ver o CAS da porta 4, mais abaixo
 
@@ -1402,13 +1516,7 @@ def process_message(message: InboundMessage) -> None:
             else:
                 return
 
-        try:
-            msg_id = str(message.raw.get("id") or message.timestamp or "")
-        except Exception:
-            msg_id = str(message.timestamp or "")
-
-        if not msg_id:
-            msg_id = hashlib.sha256(repr(message.raw).encode("utf-8")).hexdigest()
+        msg_id = _message_id(message)
 
         if _seen_recent(msg_id):
             logger.info("WA duplicate ignored message_id=%s", msg_id)

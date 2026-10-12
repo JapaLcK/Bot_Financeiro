@@ -125,7 +125,7 @@ test("trilho 1280: Ajuda é menu (guia ou dica); a dica reabre com o foco no tí
   assert.deepEqual(s.dicas, []); // reabrir a dica não grava nada
 });
 
-test("telas sem dica (/ e /gastos): a Ajuda é o botão de sempre e abre o guia direto", async () => {
+test("telas sem dica (/ e /gastos): a Ajuda é o botão de sempre e abre o guia direto; no Menu do celular, só o guia", async () => {
   for (const rota of ["/", "/gastos"]) {
     const { ctx, page, s } = await abrir({ guia: "concluido", rota });
     const ajuda = menu(page, ".rail");
@@ -135,39 +135,52 @@ test("telas sem dica (/ e /gastos): a Ajuda é o botão de sempre e abre o guia 
     await ctx.close();
     assert.equal(exp, null, rota);
     assert.deepEqual(acoes(s), ["reabrir"], rota);
+    const cel = await abrir({ width: 375, height: 812, guia: "concluido", rota });
+    await cel.page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+    const itens = await ajudaDaFolha(cel.page);
+    await cel.ctx.close();
+    assert.deepEqual(itens, ["Guia do painel"], rota);
   }
 });
 
-test("390: o menu da barra de baixo abre acima dela e dentro da tela; o item reabre o card; nada estoura", async () => {
+// A Ajuda do celular mora no Menu da barra de baixo (parts/MenuTelas.tsx): as mesmas ações do menu do trilho.
+const ajudaDaFolha = (page) => page.locator(".menu-telas li button").allTextContents();
+test("390: o Menu mostra a Ajuda com a dica da tela, dentro da tela; o item fecha a folha e reabre o card; nada estoura", async () => {
   const { ctx, page } = await abrir({ width: 390, height: 844, guia: "concluido", rota: "/assinaturas" });
-  const ajuda = menu(page, ".tabbar");
-  await ajuda.click();
+  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+  const itens = await ajudaDaFolha(page);
   const r = await page.evaluate(() => {
-    const m = document.querySelector(".tabbar .ajuda-menu").getBoundingClientRect(), t = document.querySelector(".tabbar").getBoundingClientRect();
-    return { dentro: m.left >= 0 && m.right <= innerWidth, acima: m.bottom <= t.top, cabe: document.documentElement.scrollWidth <= innerWidth };
+    const m = document.querySelector(".menu-telas").getBoundingClientRect();
+    return { dentro: m.left >= 0 && m.right <= innerWidth && m.bottom <= innerHeight, cabe: document.documentElement.scrollWidth <= innerWidth };
   });
-  await page.locator(".tabbar .ajuda-menu").getByRole("button", { name: "Como funciona esta tela" }).click();
+  await page.locator(".menu-telas").getByRole("button", { name: "Como funciona esta tela" }).click();
+  const aberta = await page.locator(".menu-telas[open]").count();
   await focoNoTitulo(page);
   const card = await page.evaluate((sel) => {
     const b = document.querySelector(sel).getBoundingClientRect();
     return b.left >= 0 && b.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth;
   }, CARD);
   await ctx.close();
-  assert.deepEqual(r, { dentro: true, acima: true, cabe: true });
+  assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
+  assert.deepEqual(r, { dentro: true, cabe: true });
+  assert.equal(aberta, 0);
   assert.ok(card);
 });
 
-// Decisão do dono (2026-10-04): abaixo de 360 a Ajuda sai da barra e a dica não reabre por ela.
-test("320: a Ajuda fica fora da barra; a dica nova aparece inteira na tela", async () => {
+// Antes (decisão de 2026-10-04) abaixo de 360 a Ajuda saía da barra e a dica não reabria por ela;
+// agora a Ajuda mora no Menu, que cabe em 320.
+test("320: a dica nova aparece inteira na tela e a Ajuda do Menu a reabre", async () => {
   const { ctx, page } = await abrir({ width: 320, height: 640, guia: "concluido", dica: "nova", rota: "/assinaturas" });
   await page.locator(CARD).waitFor();
   const r = await page.evaluate((sel) => {
     const b = document.querySelector(sel).getBoundingClientRect();
-    return { ajuda: document.querySelector(".tabbar .ajuda").getClientRects().length, card: b.left >= 0 && b.right <= innerWidth,
-      cabe: document.documentElement.scrollWidth <= innerWidth };
+    return { card: b.left >= 0 && b.right <= innerWidth, cabe: document.documentElement.scrollWidth <= innerWidth };
   }, CARD);
+  await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
+  const itens = await ajudaDaFolha(page);
   await ctx.close();
-  assert.deepEqual(r, { ajuda: 0, card: true, cabe: true });
+  assert.deepEqual(r, { card: true, cabe: true });
+  assert.deepEqual(itens, ["Guia do painel", "Como funciona esta tela"]);
 });
 
 test("guia aberto: o convite segue na tela de Assinaturas e a dica espera; \"Agora não\" e ela entra, com um POST", async () => {
@@ -223,3 +236,20 @@ test("Cmd-K: \"Como funciona esta tela\" só na tela com dica; escolhido, mostra
   await ctx.close();
   assert.deepEqual([naHome, naTela], [false, true]);
 });
+
+// O duplo toque no "Menu": a folha abre embaixo do dedo e o 2º toque cairia no item que ficou ali
+// (Guia do painel, que faz POST `reabrir`; "Como funciona esta tela"). O "Fechar" da folha ocupa essa
+// faixa (parts/MenuTelas.tsx): o duplo toque vira abrir+fechar, sem efeito colateral.
+for (const [semDialog, rota, w, h] of [[false, "/", 375, 812], [true, "/", 375, 812], [false, "/assinaturas", 375, 812], [true, "/assinaturas", 320, 568]]) {
+  test(`${w}×${h} ${rota} (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): duplo toque no Menu abre e fecha a folha, sem abrir guia nem dica nem POST`, async () => {
+    const { ctx, page, s } = await abrir({ width: w, height: h, guia: "concluido", rota, semDialog });
+    await page.locator(".tabbar").getByRole("button", { name: "Menu" }).dblclick();
+    await page.waitForTimeout(400);
+    const r = await page.evaluate((sel) => ({
+      folha: document.querySelectorAll(".menu-telas[open]").length, guia: document.querySelectorAll(".guia-balao, .guia-piggy").length, dica: document.querySelectorAll(sel).length, hash: location.hash,
+    }), CARD);
+    await ctx.close();
+    assert.deepEqual(r, { folha: 0, guia: 0, dica: 0, hash: `#${rota}` }, `${rota}`); // hash: o 2º toque não navegou para a tela de baixo
+    assert.deepEqual(acoes(s), [], `${rota}`);
+  });
+}

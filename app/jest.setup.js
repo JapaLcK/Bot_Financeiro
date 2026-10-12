@@ -1,9 +1,24 @@
+// Estado de TODOS os dublês abaixo. As fábricas de `jest.mock` são içadas para o
+// topo do arquivo, e um import cedo (o mock do reanimated carrega o css-interop)
+// pode chamar um dublê antes de qualquer `const` daqui executar: lido de uma
+// `const`, o estado seria `undefined`. Declaração de função sobe inteira, então
+// DENTRO das fábricas leia sempre `mockEstado().x`, nunca uma `const`. O prefixo
+// `mock` é exigência do Jest para referenciar de dentro da fábrica. O estado
+// mora no `globalThis` (um por arquivo de teste) e nasce no 1º acesso.
+function mockEstado() {
+  return (globalThis.__mockSetup ??= {
+    cofre: new Map(),
+    falha: { escrita: false, apagar: false },
+    atraso: { escrita: null },
+    fonte: { carregado: true, erro: null },
+    acessibilidade: { valor: false, ouvintes: new Set() },
+    app: { atual: "active", ouvintes: new Set() },
+  });
+}
+
 // SecureStore é nativo: no Jest ele não existe. O dublê guarda em memória, que
 // é o suficiente para o que os testes medem (o cliente de API, não o keychain).
-// O prefixo `mock` no nome é exigência do Jest: a fábrica do `jest.mock` é
-// içada para antes das declarações, e só variáveis assim prefixadas podem ser
-// referenciadas dentro dela.
-const mockCofre = new Map();
+const mockCofre = mockEstado().cofre;
 global.__cofreDeTeste = mockCofre;
 // A falha é injetada por SINALIZADOR lido dentro do dublê, não por
 // reatribuição do método: o módulo sob teste importa o namespace, e trocar a
@@ -12,27 +27,27 @@ global.__cofreDeTeste = mockCofre;
 // Dois sinalizadores, e não um: gravar e apagar falham por motivos diferentes,
 // e um teste que só consegue quebrar os dois juntos não distingue "o conserto
 // limpou" de "nem o conserto conseguiu limpar".
-const mockFalha = { escrita: false, apagar: false };
+const mockFalha = mockEstado().falha;
 // Um portão na GRAVAÇÃO, para os testes conseguirem parar o tempo dentro da
 // fila do cofre e provar o que acontece na janela entre conferir e gravar.
-const mockAtraso = { escrita: null };
+const mockAtraso = mockEstado().atraso;
 global.__atrasarEscritaNoCofre = (p) => (mockAtraso.escrita = p);
 global.__falharEscritaNoCofre = (v) => (mockFalha.escrita = v);
 global.__falharApagarNoCofre = (v) => (mockFalha.apagar = v);
 jest.mock("expo-secure-store", () => ({
-  getItemAsync: async (k) => (mockCofre.has(k) ? mockCofre.get(k) : null),
+  getItemAsync: async (k) => (mockEstado().cofre.has(k) ? mockEstado().cofre.get(k) : null),
   setItemAsync: async (k, v) => {
-    if (mockAtraso.escrita) {
-      const espera = mockAtraso.escrita;
-      mockAtraso.escrita = null;
+    if (mockEstado().atraso.escrita) {
+      const espera = mockEstado().atraso.escrita;
+      mockEstado().atraso.escrita = null;
       await espera;
     }
-    if (mockFalha.escrita) throw new Error("keychain recusou");
-    mockCofre.set(k, v);
+    if (mockEstado().falha.escrita) throw new Error("keychain recusou");
+    mockEstado().cofre.set(k, v);
   },
   deleteItemAsync: async (k) => {
-    if (mockFalha.apagar) throw new Error("keychain recusou apagar");
-    mockCofre.delete(k);
+    if (mockEstado().falha.apagar) throw new Error("keychain recusou apagar");
+    mockEstado().cofre.delete(k);
   },
 }));
 
@@ -78,15 +93,15 @@ jest.mock("expo-system-ui", () => ({
 // expo-font: controlável por teste. `layout.test.tsx` precisa dos três
 // estados do `_layout.tsx` (carregando, carregado, erro) sem depender de TTF
 // de verdade — o padrão default é "carregado", o caso comum.
-const mockFonte = { carregado: true, erro: null };
+const mockFonte = mockEstado().fonte;
 global.__definirEstadoDaFonte = (v) => Object.assign(mockFonte, v);
 jest.mock("expo-font", () => ({
-  useFonts: () => [mockFonte.carregado, mockFonte.erro],
+  useFonts: () => [mockEstado().fonte.carregado, mockEstado().fonte.erro],
 }));
 
 // AccessibilityInfo: `motion.test.ts` prova `useReduzirMovimento` controlando
 // a leitura e disparando o evento, sem sistema operacional real por trás.
-const mockAcessibilidade = { valor: false, ouvintes: new Set() };
+const mockAcessibilidade = mockEstado().acessibilidade;
 global.__definirReduzirMovimento = (v) => {
   mockAcessibilidade.valor = v;
 };
@@ -102,10 +117,10 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
   // antes deste comentário existir.
   __esModule: true,
   default: {
-    isReduceMotionEnabled: () => Promise.resolve(mockAcessibilidade.valor),
+    isReduceMotionEnabled: () => Promise.resolve(mockEstado().acessibilidade.valor),
     addEventListener: (_evento, fn) => {
-      mockAcessibilidade.ouvintes.add(fn);
-      return { remove: () => mockAcessibilidade.ouvintes.delete(fn) };
+      mockEstado().acessibilidade.ouvintes.add(fn);
+      return { remove: () => mockEstado().acessibilidade.ouvintes.delete(fn) };
     },
     // `Toast` (PR C2) anuncia cada mensagem — sem espiã aqui a chamada
     // lançaria "não é uma função" no Jest (o módulo real é nativo).
@@ -172,23 +187,22 @@ jest.mock("expo-local-authentication", () => ({
 // objeto (mesmo padrão do AccessibilityInfo acima: só o CAMPO muda) e dispara
 // "change" para quem assinou. Outros eventos (memoryWarning, focus...) são
 // aceitos e nunca disparam.
-const mockAppState = { atual: "active", ouvintes: new Set() };
-global.__definirAppState = (v) => (mockAppState.atual = v);
+global.__definirAppState = (v) => (mockEstado().app.atual = v);
 global.__dispararAppState = (v) => {
-  mockAppState.atual = v;
-  mockAppState.ouvintes.forEach((fn) => fn(v));
+  mockEstado().app.atual = v;
+  mockEstado().app.ouvintes.forEach((fn) => fn(v));
 };
 jest.mock("react-native/Libraries/AppState/AppState", () => ({
   __esModule: true,
   default: {
     get currentState() {
-      return mockAppState.atual;
+      return mockEstado().app.atual;
     },
     isAvailable: true,
     addEventListener: (evento, fn) => {
       if (evento !== "change") return { remove: () => undefined };
-      mockAppState.ouvintes.add(fn);
-      return { remove: () => mockAppState.ouvintes.delete(fn) };
+      mockEstado().app.ouvintes.add(fn);
+      return { remove: () => mockEstado().app.ouvintes.delete(fn) };
     },
   },
 }));
@@ -204,8 +218,18 @@ jest.mock("@/features/bloqueio/tampa", () => ({
 // O slider é nativo (UISlider): no Jest, um View que repassa as props, para o teste
 // achar pelo rótulo e disparar `fireEvent(slider, "valueChange", n)`.
 // O `require` fica dentro do componente: resolver "react-native" já na fábrica
-// carrega o css-interop antes do `mockAppState` existir (apontado pelo Codex).
+// carrega o css-interop antes de o estado do setup existir (apontado pelo Codex).
 jest.mock("@react-native-community/slider", () => ({
   __esModule: true,
   default: (props) => require("react").createElement(require("react-native").View, props),
 }));
+
+// Reanimated: o mock dele importa o worklets real (`loadUnpackers` quebra), então o do worklets vem ANTES.
+// `entering`/`exiting` chegam como prop no nó host: é o que os testes de "reduzir movimento" leem.
+jest.mock("react-native-worklets", () => require("react-native-worklets/src/mock"));
+jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock"));
+
+// `expo/fetch` (stream do chat) é nativo: no Jest ele delega ao `globalThis.fetch`, que cada teste troca por `fetchFalso`.
+// Função comum, não `jest.fn`: `jest.restoreAllMocks()` apaga a implementação de um `jest.fn` (Jest 29).
+jest.mock("expo/fetch", () => ({ fetch: (...a) => globalThis.fetch(...a) }));
+jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }));

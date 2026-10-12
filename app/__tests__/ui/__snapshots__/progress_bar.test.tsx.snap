@@ -13,7 +13,7 @@ exports[`ProgressBar snapshot (dois temas): claro 1`] = `
   style={
     {
       "backgroundColor": "#E6E6E9",
-      "borderRadius": 8,
+      "borderRadius": 4,
       "height": 8,
       "overflow": "hidden",
     }
@@ -48,8 +48,8 @@ exports[`ProgressBar snapshot (dois temas): escuro 1`] = `
   }
   style={
     {
-      "backgroundColor": "#2A2A2F",
-      "borderRadius": 8,
+      "backgroundColor": "#24242A",
+      "borderRadius": 4,
       "height": 8,
       "overflow": "hidden",
     }
@@ -58,7 +58,7 @@ exports[`ProgressBar snapshot (dois temas): escuro 1`] = `
   <View
     style={
       {
-        "backgroundColor": "#47CD89",
+        "backgroundColor": "#3DDC97",
         "flex": 1,
         "transform": [
           {

@@ -460,12 +460,24 @@ def _inline_css_assets(html_text: str, asset_names: tuple[str, ...]) -> str:
     return html_text
 
 
+# Tudo que o "Testar o Piggy agora" põe no HTML: cada `<a data-teste ...>` (com a
+# indentação que o antecede), o `<p id="testar-piggy">` da /precos (que também embrulha
+# um) e o <script> do teste. Sem aninhamento de <a>/<p> no HTML de origem.
+_BOTAO_TESTE_RE = re.compile(
+    r'\s*<a\b[^>]*\sdata-teste(?=[\s>=/])[^>]*>.*?</a>'
+    r'|<p\b[^>]*\sid="testar-piggy"[^>]*>.*?</p>'
+    r'|\s*<script\b[^>]*teste-piggy\.js[^>]*></script>',
+    re.S,
+)
+
+
 def html_file(
     path: pathlib.Path,
     pixel: bool = True,
     clarity: bool = False,
     inline_css: tuple[str, ...] = (),
     defer_tracking: bool = False,
+    sem_teste: bool = False,
 ) -> Response:
     """Serve um .html do frontend com cache desligado.
 
@@ -481,8 +493,12 @@ def html_file(
     páginas da área logada (dashboard, settings, onboarding) passam
     `pixel=False`: o rastreio fica nas páginas públicas e na /home, que é onde a
     volta do checkout (?upgrade=success) dispara a conversão.
+    `sem_teste=True` tira os botões "Testar o Piggy agora" (demo desligado, ou
+    visitante que já tem conta): o link do HTML nunca promete o que o servidor recusa.
     """
     text = path.read_text(encoding="utf-8")
+    if sem_teste:  # `lp-com-teste` (lp.html) é o CSS que reserva a dobra do 2º botão
+        text = _BOTAO_TESTE_RE.sub("", text).replace(' lp-com-teste"', '"')
     if inline_css:
         text = _inline_css_assets(text, inline_css)
     if pixel:

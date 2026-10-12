@@ -41,7 +41,7 @@ def _launch(uid, cat, source="manual"):
 
 def _credito_of(uid, cat):
     card = db.create_card(uid, f"Cartao {uuid.uuid4().hex[:6]}", 10, 17)
-    tx_id, _ = db.add_imported_credit_purchase(uid, card, -10, cat, date.today(), uuid.uuid4().hex)
+    tx_id, _ = db.add_imported_credit_purchase(uid, card, 10, cat, date.today(), uuid.uuid4().hex)
     return tx_id
 
 

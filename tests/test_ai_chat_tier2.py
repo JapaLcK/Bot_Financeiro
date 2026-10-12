@@ -3,8 +3,10 @@ Cobre as tools Tier 2 da E2 (analítics que respondem perguntas como
 'onde gastei mais?', 'gastei mais em abril ou maio?', etc).
 """
 from datetime import date, datetime
+from unittest.mock import patch
 
 import db
+from core.services.ai_chat.tools import launches as tools_launches
 from core.services.ai_chat.tools.launches import (
     _compare_periods,
     _forecast_month_end,
@@ -24,7 +26,7 @@ def test_top_categories_agrega_despesas_e_credito(user_id):
     )
 
     # Compra no cartão de R$ 80 em alimentação
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_credit_purchase(
         user_id, card_id, 80, "alimentação", "ifood", date.today(),
@@ -129,7 +131,7 @@ def test_largest_expenses_ordena_desc(user_id):
 
 def test_largest_expenses_inclui_credito(user_id):
     """Compra no cartão deve aparecer junto com despesas normais."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
     db.add_credit_purchase(user_id, card_id, 200, "lazer", "show", date.today())
@@ -179,6 +181,284 @@ def test_largest_expenses_vazio_sem_gastos(user_id):
     result = _get_largest_expenses(user_id, {})
     assert result["expenses"] == []
     assert result["count"] == 0
+
+
+def _of_tx(uid, launch_id, nome="Itau", ident="x"):
+    """Conexão + conta + transação OF de `uid` apontando para `launch_id`."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "insert into open_finance_connections (user_id, provider, provider_item_id, status,"
+            " institution_id, institution_name) values (%s,'pluggy',%s,'UPDATED','i',%s) returning id",
+            (uid, ident, nome),
+        )
+        c = cur.fetchone()["id"]
+        cur.execute(
+            "insert into open_finance_accounts (connection_id, provider_account_id, name, type)"
+            " values (%s,'a','cc','BANK') returning id", (c,))
+        a = cur.fetchone()["id"]
+        cur.execute(
+            "insert into open_finance_transactions (account_id, provider_transaction_id, description,"
+            " amount, transaction_date, imported_launch_id) values (%s,'t','d',-1,current_date,%s)",
+            (a, launch_id),
+        )
+
+
+def _lancamento(uid, valor=99):
+    db.add_launch_and_update_balance(uid, "despesa", valor, "x", "x", categoria="outros")
+    return db.get_largest_expenses(uid, date.today().replace(day=1), date.today(), limit=1)
+
+
+def _launch_id(uid):
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select max(id) as i from launches where user_id=%s", (uid,))
+        return cur.fetchone()["i"]
+
+
+def test_largest_expenses_parcela_e_cartao(pro_user_id):
+    card_id = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase_installments(pro_user_id, card_id, 300, "lazer", "tv", date.today(), 3)
+    rows = db.get_largest_expenses(pro_user_id, date.today(), date.today(), limit=5)
+    assert rows and all(r["instituicao"] == "Nubank" for r in rows)
+    assert {r["parcela"] for r in rows} <= {"1/3", "2/3", "3/3"} and rows[0]["parcela"]
+
+
+def test_largest_expenses_instituicao_open_finance(user_id):
+    _lancamento(user_id)
+    _of_tx(user_id, _launch_id(user_id), nome="Itau")
+    assert _lancamento_rows(user_id)[0]["instituicao"] == "Itau"
+
+
+def _lancamento_rows(uid):
+    return db.get_largest_expenses(uid, date.today().replace(day=1), date.today(), limit=1)
+
+
+def test_largest_expenses_instituicao_nao_vaza_entre_usuarios(user_id):
+    from tests.conftest import _cleanup_user
+    import uuid
+    outro = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    try:
+        _lancamento(user_id)
+        # conexão do OUTRO usuário apontando para o lançamento de `user_id`
+        _of_tx(outro, _launch_id(user_id), nome="BancoDoOutro", ident="b")
+        r = _lancamento_rows(user_id)[0]
+        assert r["instituicao"] is None
+    finally:
+        _cleanup_user(outro)
+
+
+def test_largest_expenses_credito_nao_pega_banco_de_launch_de_mesmo_id(user_id):
+    card_id = db.create_card(user_id, "CartaoA", closing_day=10, due_day=17)
+    db.add_credit_purchase_installments(user_id, card_id, 300, "lazer", "tv", date.today(), 3)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from credit_transactions where user_id=%s limit 1", (user_id,))
+        ct_id = cur.fetchone()["id"]
+    _lancamento(user_id, valor=1)
+    with db.get_conn() as conn, conn.cursor() as cur:  # launch com o MESMO id da compra
+        cur.execute("update launches set id=%s where id=%s", (ct_id, _launch_id(user_id)))
+    _of_tx(user_id, ct_id, nome="BancoColide")
+    rows = db.get_largest_expenses(user_id, date.today(), date.today(), limit=5)
+    cred = [r for r in rows if r["fonte"] == "credito"]
+    assert cred and all(r["instituicao"] == "CartaoA" for r in cred)
+
+
+def test_largest_expenses_a_vista_sem_parcela(user_id):
+    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase_installments(user_id, card_id, 80, "lazer", "jogo", date.today(), 1)
+    r = db.get_largest_expenses(user_id, date.today(), date.today(), limit=1)[0]
+    assert r["fonte"] == "credito" and r["parcela"] is None
+
+
+def test_largest_expenses_manual_sem_instituicao_nem_parcela(user_id):
+    r = _lancamento(user_id)[0]
+    assert r["instituicao"] is None and r["parcela"] is None
+
+
+def _periodo_livre():
+    # "Hoje" = dia 28: nem "dia 1 até hoje" (no dia 1) nem a janela dia 1..15 viram o mês corrente
+    # inteiro, o único que lê o cartão pela fatura e solta a parcela. Estes testes medem o texto
+    # do período livre (compra pela data), em qualquer dia do mês.
+    return patch.object(tools_launches, "today_tz", lambda: date.today().replace(day=28))
+
+
+def _tool(uid, limit=20):
+    with _periodo_livre():
+        return _get_largest_expenses(uid, {"start_date": date.today().isoformat(), "limit": limit})["expenses"]
+
+
+def _parcelado(uid, card, valor, nota, n, cat="lazer"):
+    db.add_credit_purchase_installments(uid, card, valor, cat, nota, date.today(), n)
+
+
+def test_tool_a_limit_nao_corta_parcela_antes_da_juncao(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 300, "tv", 3)
+    db.add_launch_and_update_balance(user_id, "despesa", 150, "x", "x", categoria="outros")
+    db.add_launch_and_update_balance(user_id, "despesa", 120, "y", "y", categoria="outros")
+    es = _tool(user_id, limit=3)
+    assert [(e["valor"], e["parcelamento"]) for e in es] == [(300, "compra de R$ 300,00 em 3x"), (150, None), (120, None)]
+
+
+def test_tool_b_compras_iguais_nao_se_juntam(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 30, "Uber", 3)
+    _parcelado(user_id, card, 30, "Uber", 3)
+    assert [e["valor"] for e in _tool(user_id)] == [30, 30]
+
+
+def test_tool_b_duas_sem_nota_nao_se_juntam(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 90, None, 3)
+    _parcelado(user_id, card, 60, None, 3)
+    assert [e["valor"] for e in _tool(user_id)] == [90, 60]
+
+
+def test_tool_legado_sem_group_id_nao_agrega(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 80, "x", 1)
+    _parcelado(user_id, card, 70, "x", 1)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update credit_transactions set group_id = null where user_id=%s", (user_id,))
+    assert [e["valor"] for e in _tool(user_id)] == [80, 70]
+
+
+def test_tool_c_centavos_sem_valor_parcela(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 100, "tv", 3)
+    (e,) = _tool(user_id)
+    assert (e["valor"], e["parcelamento"]) == (100, "compra de R$ 100,00 em 3x") and "valor_parcela" not in e
+    assert "parcela" not in e and "parcelas" not in e  # campos crus não vão à IA
+
+
+def test_tool_avista_e_manual_ficam_iguais(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 80, "jogo", 1)
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+    es = _tool(user_id)
+    assert [(e["valor"], e["parcelamento"]) for e in es] == [(80, None), (50, None)]
+
+
+def test_chamador_cru_continua_com_parcelas_separadas(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 300, "tv", 3)
+    rows = db.get_largest_expenses(user_id, date.today(), date.today(), limit=10)
+    assert sorted((r["valor"], r["parcela"]) for r in rows) == [(100, "1/3"), (100, "2/3"), (100, "3/3")]  # empate de valor: ordem livre
+    assert all("parcelas" not in r for r in rows)
+
+
+def test_juntar_parcelas_nao_vaza_entre_usuarios(user_id):
+    from tests.conftest import _cleanup_user
+    import uuid
+    outro = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    try:
+        c1 = db.create_card(user_id, "Meu", closing_day=10, due_day=17)
+        c2 = db.create_card(outro, "DoOutro", closing_day=10, due_day=17)
+        _parcelado(user_id, c1, 300, "tv", 3)
+        _parcelado(outro, c2, 900, "carro", 3)
+        rows = db.get_largest_expenses(user_id, date.today(), date.today(), limit=10, juntar_parcelas=True)
+        assert [(r["valor"], r["instituicao"]) for r in rows] == [(300, "Meu")]
+    finally:
+        _cleanup_user(outro)
+
+
+def test_juntar_parcelas_credito_nao_pega_banco_de_launch_de_mesmo_id(user_id):
+    card = db.create_card(user_id, "CartaoA", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 300, "tv", 3)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select min(id) as i from credit_transactions where user_id=%s", (user_id,))
+        ct_id = cur.fetchone()["i"]
+    _lancamento(user_id, valor=1)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update launches set id=%s where id=%s", (ct_id, _launch_id(user_id)))
+    _of_tx(user_id, ct_id, nome="BancoColide")
+    rows = db.get_largest_expenses(user_id, date.today(), date.today(), limit=5, juntar_parcelas=True)
+    cred = [r for r in rows if r["fonte"] == "credito"]
+    assert cred and all(r["instituicao"] == "CartaoA" for r in cred)
+
+
+def _mes(d, k):
+    m = d.month - 1 + k
+    return d.replace(year=d.year + m // 12, month=m % 12 + 1, day=15)
+
+
+def _parcelas_of(uid, card, n=3, grupo="g", valor=200, nota="TV LOJA", total=None, so=None):
+    """Formato Open Finance/OFX: 1 linha por parcela, data do mês dela, mesmo group_id."""
+    import uuid
+    g = uuid.uuid5(uuid.NAMESPACE_OID, grupo) if grupo else None
+    with db.get_conn() as conn, conn.cursor() as cur:
+        for i in range(n):
+            if so is not None and i not in so:
+                continue
+            d = _mes(date.today(), i)
+            bill = db.get_or_create_open_bill(uid, card, d)
+            cur.execute(
+                "insert into credit_transactions (bill_id,user_id,card_id,valor,categoria,nota,purchased_at,"
+                "group_id,installment_no,installments_total,is_refund) values (%s,%s,%s,%s,'lazer',%s,%s,%s,%s,%s,false)",
+                (bill, uid, card, valor, nota, d, g, i + 1, total or n))
+
+
+def _janela(uid, meses):
+    rows = db.get_largest_expenses(uid, date.today().replace(day=1), _mes(date.today(), meses - 1),
+                                   limit=20, juntar_parcelas=True)
+    return [(r["valor"], r.get("parcelas"), r["parcela"], r["data"]) for r in rows]
+
+
+def test_juntar_manual_as_n_na_janela(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 600, "tv", 3)
+    assert _janela(user_id, 1) == [(600, 3, None, date.today().isoformat())]
+
+
+def test_juntar_of_janela_de_um_mes_mostra_n_de_N(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card)
+    assert _janela(user_id, 1) == [(200, None, "1/3", _mes(date.today(), 0).isoformat())]
+
+
+def test_juntar_of_janela_cobre_as_n(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card)
+    # data = a da 1ª parcela (min): é quando a compra começou a pesar
+    assert _janela(user_id, 3) == [(600, 3, None, _mes(date.today(), 0).isoformat())]
+
+
+def test_juntar_of_dois_de_tres_nao_junta_parcial(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card)
+    assert sorted(x[:3] for x in _janela(user_id, 2)) == [(200, None, "1/3"), (200, None, "2/3")]
+
+
+def test_juntar_orfa_sem_group_id_mostra_n_de_N(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card, grupo=None, so={1})
+    assert [x[:3] for x in _janela(user_id, 3)] == [(200, None, "2/3")]
+
+
+def test_juntar_a_vista_sem_parcela_nem_parcelas(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card, n=1, valor=80)
+    assert [x[:3] for x in _janela(user_id, 1)] == [(80, None, None)]
+
+
+def test_juntar_instituicao_nao_pega_cartao_de_outro_usuario(user_id):
+    from tests.conftest import _cleanup_user
+    import uuid
+    outro = int(uuid.uuid4().int % 10_000_000_000)
+    db.ensure_user(outro)
+    try:
+        meu = db.create_card(user_id, "Meu", closing_day=10, due_day=17)
+        # compra de `user_id` com card_id de um cartão do OUTRO usuário
+        dele = db.create_card(outro, "CartaoDoOutro", closing_day=10, due_day=17)
+        _parcelas_of(user_id, meu, n=1, valor=80)
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("update credit_transactions set card_id=%s where user_id=%s", (dele, user_id))
+        for juntar in (False, True):
+            r = db.get_largest_expenses(user_id, date.today().replace(day=1), _mes(date.today(), 0),
+                                        limit=5, juntar_parcelas=juntar)
+            assert [x["instituicao"] for x in r] == [None]
+    finally:
+        _cleanup_user(outro)
 
 
 # ─── compare_periods ────────────────────────────────────────────────────────
@@ -384,7 +664,7 @@ def test_spending_trend_tendencia_estavel_com_1_mes(pro_user_id):
 
 def test_top_categories_exclui_reembolso_cartao(user_id):
     """credit_transactions com is_refund=true não conta como gasto."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
     db.set_default_card(user_id, card_id)
     db.add_credit_purchase(user_id, card_id, 100, "lazer", "show", date.today())
     # Reembolso de R$ 100 — mesma categoria
@@ -398,3 +678,30 @@ def test_top_categories_exclui_reembolso_cartao(user_id):
     # Compra (100) sem subtração do reembolso — porque a tool agrega APENAS
     # gastos, e o reembolso é ignorado. Total = 100.
     assert cats.get("lazer") == 100.0
+
+
+def _tool_janela(uid, meses):
+    with _periodo_livre():
+        return _get_largest_expenses(uid, {"start_date": date.today().replace(day=1).isoformat(),
+                                           "end_date": _mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
+
+
+def test_parcelamento_manual_compra_inteira(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 600, "tv", 3)
+    assert [e["parcelamento"] for e in _tool_janela(user_id, 1)] == ["compra de R$ 600,00 em 3x"]
+
+
+def test_parcelamento_of_uma_parcela(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelas_of(user_id, card)
+    es = _tool_janela(user_id, 1)
+    assert [e["parcelamento"] for e in es] == ["parcela 1 de 3 — R$ 200,00 neste período"]
+    assert "parcela" not in es[0] and "parcelas" not in es[0]
+
+
+def test_parcelamento_none_a_vista_e_lancamento(user_id):
+    card = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
+    _parcelado(user_id, card, 80, "jogo", 1)
+    db.add_launch_and_update_balance(user_id, "despesa", 50, "x", "x", categoria="outros")
+    assert [e["parcelamento"] for e in _tool_janela(user_id, 1)] == [None, None]

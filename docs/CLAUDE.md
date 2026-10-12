@@ -188,13 +188,39 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   no mês-calendário INTEIRO (a fatura que fecha depois de hoje, dentro do mês, entra). Leem
   dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
-  consulta 5 do /app e `compute_kpis` das Análises. `compute_evolution` é cópia em consulta
+  consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de mês inteiro
+  (`get_period_summary` e `compare_periods` chamam `resumo_do_mes`, inclusive o corte da janela do
+  plano; `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
+  cartão pela fatura, com o MESMO corte (`motivos: [inicio_do_historico]` quando o corte cai
+  no dia 1 do mês pedido ou depois; o "mês anterior cortado" do resumo não tem par nas listas; mês todo
+  cortado = lista vazia com as datas do mês); mês = dia 1 até o último dia, ou, no corrente, dia 1
+  até hoje ou depois; `_mes_inteiro`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
+  hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
+  mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado
+  (parcelas do cartão, lançamentos com data futura), igual nas listas; sai com `motivos: [mes_futuro]`
+  e a nota "não é previsão", sem `error` (o turno do agente cai em `DataQueryError` com `error`);
+  `forecast_month_end` só projeta o mês corrente; (c) período livre não corta pela janela do plano; data
+  inválida é erro (`data inválida: <campo> (use AAAA-MM-DD)`), não "hoje"; `2026-10-01T00:00:00`
+  e espaços em volta valem como a data, só em `launches.py`: `investments.py:35` tem cópia própria
+  de `_parse_iso_date` (lá datetime ISO e data inválida ainda viram o mês corrente em silêncio;
+  follow-up). (d) com o corte do plano no MEIO do mês, as listas devolvem `start_date = corte`; o
+  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_mes_inteiro` dá None
+  e vira período livre (data da compra, sem corte). (e) `inicio_do_historico` nas tools só sai com
+  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado).
+  `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
   `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
-  **Divergência conhecida:** relatório diário e semanal, ferramentas da IA de período
-  livre e projeção de fechamento (`get_summary_by_period`) e o Repórter
-  (`piggy_agents._month_stats`) seguem só em `launches`, sem o cartão. Limites mantidos de
+  **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
+  (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
+  sem o cartão. Das tools da IA em período livre (vários meses também), só `get_period_summary`
+  e `compare_periods` são só `launches` (saem com `cartao_incluido: false` e uma `nota`);
+  `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
+  `get_category_spend` lê o cartão sempre pela fatura (`period_end`) e `get_spending_trend` soma o
+  cartão pela data da compra. Pré-existente, não corrigido: `get_top_categories` mostra lançamento
+  sem categoria como `outros`, mas `get_category_spend("outros")` só soma a categoria `outros`; o
+  sem categoria fica em "sem categoria". Limites mantidos de
   propósito: o mês corta `criado_em` pela data ingênua (fuso da sessão do Postgres), a
   conciliação pendente conta em dobro (sai com motivo), estorno não abate.
   **Semanal (PL-05):** `build_weekly_report_data` (`core/reports/weekly.py`, reexportada por `reports_daily`) é o
@@ -444,6 +470,68 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
   `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
 
+- `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
+  regra em `db/metas.py`, tabela `metas`; também em `/api/app/metas`): metas do `/painel`. Meta não
+  guarda dinheiro, só organiza dado do banco (sem input financeiro manual): `nome` (1 a 60, com ao menos um caractere visível e sem caractere de controle; NUL no meio é saneado), `tipo`
+  (`meta` | `reserva`), `alvo` (texto `_VALOR`, > 0), `data_alvo` opcional (hoje ou depois, no fuso
+  do app; na edição só a data NOVA precisa ser futura, a meta vencida reenvia a velha) e a FONTE que o usuário escolhe (P5): `investido` (tudo investido), `banco` (investido num
+  banco) ou `conta` (saldo de uma conta). O `atual` é o valor de HOJE da fonte, pela MESMA regra das
+  telas (`db/investido.calcular` e `db/contas_hoje.listar`, num snapshot só). O cliente manda a conta
+  pelo `id` público de `/contas` e o banco pelo texto de `por_banco` de `/investido`; o servidor
+  resolve DENTRO do que é do usuário (de outro usuário ou fora do BRL = 422, nada gravado) e grava
+  `fonte_ref` (o `provider_account_id`, não o `id` da linha, que muda a cada reconexão),
+  `fonte_banco`, `fonte_numero` e `fonte_rotulo`. Conta: casa pelo `provider_account_id`; se ele
+  sumiu OU está numa conexão PAUSED/DELETED (`conexao_pausada`: o webhook `item/deleted` grava DELETED e mantém a linha) e há UMA conta VIVA com a
+  mesma instituição + número + tipo/subtipo guardados (poupança ≠ corrente), a viva vence (reconexão com ids novos; o GET não grava, a
+  meta segue guardando o id antigo); ambíguo (2+ vivas) ou sem candidato: a conta antiga com o motivo dela (`conexao_pausada`), ou
+  `fonte_indisponivel` se nem ela existe. `provider_*_id` e o número da conta nunca saem.
+  Resposta `{metas: [...], custo_mensal: {valor, recorrencias, motivos}}`; cada meta: `id`, `nome`,
+  `tipo`, `meses`, `data_alvo`, `atual`, `alvo`, `falta`, `percentual` (inteiro, piso, entre 0 e 100),
+  `por_mes` (falta ÷ meses de calendário até `data_alvo`, mês parcial conta cheio, arredondado para
+  cima; `null` sem data ou com `prazo_passou`), `motivos` e `fonte {tipo, rotulo, conta_id, banco}`.
+  `atual: null` (e `falta`/`percentual`/`por_mes` com ele) quando a fonte não dá número: conta
+  pausada, saldo ausente, outra moeda, banco que sumiu (sem nenhuma linha no espelho), parte com `valor: null`,
+  fonte que sumiu, nunca R$ 0; banco lido que resgatou tudo mostra `0.00` SEMPRE (`por_banco_com_zero` de
+  `db/investido.calcular`, que `/investido` não expõe; a posição `TOTAL_WITHDRAWAL` de conexão viva é R$ 0 conhecido e conta como "dentro", mesmo com irmão pausado ou em dólar: `0.00` + o motivo); o banco que sumiu (nenhuma linha no espelho do usuário) sai só com `fonte_indisponivel` (+ `sem_banco_conectado` se não há conexão viva), sem herdar motivo de outro banco; banco que só tem linhas de conexão pausada NÃO sumiu: `null` + `conexao_pausada` (+ `sem_banco_conectado` se for o caso, como em `/investido`); `falta` e `por_mes` saem em centavos (`falta`
+  HALF_UP) e `atual` segue o da tela da fonte; sem o recurso `investments` do plano (o gate de
+  `/investido`, que com o freio `PLANS_V2_ENABLED=0` fecha o Essencial) as fontes `investido`/`banco`
+  saem `atual: null` + `plano_sem_investimentos`, e criar/editar com elas é o mesmo 403 `pro_required`. Regra do `atual` nas fontes `investido`/`banco`: a mesma SOMA de `/investido` e `/contas`; a meta anula (`null`) quando nada da fonte ficou dentro do recorte (ex.: banco só em dólar; conta em outra moeda), onde `/investido` mostra `0.00` e `/contas` o saldo na outra moeda — exclusão PARCIAL não anula o número. Posição em reais + dinheiro fora do recorte (`outra_moeda`, `conexao_pausada`, do banco escolhido) → `atual` = o R$ de `/investido` com o motivo (a tela mostra "a conferir"; item vivo zerado + irmão pausado = `0.00` + `conexao_pausada`). `atual: null` só quando NADA da fonte ficou dentro (`com_posicao`/`bancos_com_posicao` de `investido.calcular(com_zero=True)`, que contam a resgatada de conexão viva): banco só em dólar ou só com item pausado; `saldo_ausente` já vem como valor `null`. `banco_desatualizado`, `moeda_presumida` e `conta_fora_do_ultimo_sync` só acompanham (`FORA` em `db/metas.py`). Fonte `conta` em outra moeda segue `null` (a conta inteira está fora).
+  **Reserva de emergência** = meta `reserva`, no máximo uma por usuário (409 `reserva_ja_existe`: o
+  índice único parcial `uq_metas_reserva`, que vale na corrida mesmo sem linha em `accounts`): `alvo` = `meses` (1 a 24, padrão
+  `db.metas.MESES_RESERVA` = 6) × `custo_mensal`, quantizado em 2 casas. O custo é
+  `previsao_recorrencias.custo_mensal`: a soma do último valor das cadeias de SAÍDA ativas do Open
+  Finance (última cobrança há até `DIAS_ATIVA` dias), cartão INCLUÍDO, `ignorar` respeitado, mesma
+  seleção da Previsão (`cadeias_do_banco`). Sem o recurso `subscriptions` do plano (o gate de `/assinaturas`: é a lista de
+  cadeias de `of_recurring_payments` que o custo soma; Essencial leva 403 lá e na Previsão) o custo nem é lido:
+  `custo_mensal {valor: null, recorrencias: 0, motivos: ["plano_sem_custo_mensal"]}` e a reserva sai com `alvo`
+  `null` + esse motivo (o usuário a converte em meta comum com o valor dele). Sem custo: `alvo`/`falta`/`percentual` `null` + motivo
+  `custo_desconhecido` (o `atual` aparece), e o topo traz por quê (`sem_banco_conectado`,
+  `sem_recorrencias` — também quando a soma das cadeias ativas dá 0, que vira `valor: null`, `recorrencias: 0` —,
+  `recorrencias_banco_nao_lidas` — esta também acompanha um valor velho —, `recorrencia_valor_invalido` — valor NaN/±Infinity no espelho, que a coluna `numeric` aceita: `valor: null`, nunca um 500 nem uma soma parcial). O
+  usuário converte a reserva em meta comum com o alvo digitado (`/metas/editar` com `tipo: "meta"` +
+  `alvo`; os `meses` saem); meta virar reserva é 422. `/metas/editar` aceita `nome`, `alvo` (só
+  meta), `meses` (só reserva, 1 a 24), `data_alvo` (`null` explícito limpa), `fonte` e a conversão;
+  `null` em qualquer outro campo é 422, mesmo junto de campos válidos; corpo só com `id` é 422
+  "nada para editar", e campo igual ao gravado é 200 (nada escrito, nem SSE). O cliente manda só os campos que
+  mudaram: reenviar o objeto do `GET` inteiro dá 422 (`meses: null` numa meta, `alvo` numa reserva).
+  Escrita: `def` síncronas, id no corpo, CSRF do pai (403 `{"detail"}` fora do envelope), resposta
+  `{id}`; 404 `meta_nao_encontrada` (o MESMO corpo para id de outro usuário e inexistente), 422
+  `validation_error`. NUL no nome é saneado (`limpa_para_pg`), não recusado. A tabela avisa o SSE
+  (`TABELAS_QUE_AVISAM`), entra na exportação LGPD (`metas`), no "Recomeçar do zero" e no merge
+  (`_MOVIDAS`; reserva dos dois lados = `UniqueViolation` → `MergeRefused` `colisao`, nada movido;
+  `metas` não entra em `_tem_dados_financeiros`: só a reserva colide). Limites declarados: duas conexões do mesmo banco dobram a cadeia no custo (herdado
+  da Previsão); autotransferência genérica entra como recorrência; sem teto de metas por usuário;
+  a reconexão só desvia para a conta viva quando a conta antiga está em conexão PAUSED/DELETED (`conexao_pausada`); se a conexão antiga está em erro (`ERROR`/`item_missing`, `LOGIN_ERROR`, `OUTDATED`; o item apagado na Pluggy chega como `item_missing`, `core/services/pluggy_health.py:~248-250`), a meta segue a conta antiga com `banco_desatualizado`, como `/contas` (que soma as duas); decidir se `item_missing` conta como conexão morta é decisão para o sistema inteiro (`/contas` + metas); `atual` de conta não é quantizado (paridade com `/contas`, saldo `numeric` sem escala).
+  **Ritmo** (`db/metas_ritmo.py`, PR A2): cada meta traz `ritmo {valor, dias_de_historico, parcial, motivos}` e `chega_em` (`AAAA-MM`).
+  - `valor` = o crescimento ATUAL da fonte, R$/mês (pode ser negativo), ao lado do `por_mes` (o NECESSÁRIO): (`atual` − valor em D0) ÷ dias × 30. Medido nas fotos POR POSIÇÃO (`open_finance_investment_snapshots`), não em `patrimonio_fotos` (só tem o total). O valor de um dia sai da MESMA regra de `investido.calcular` (`separar_posicoes` + `q_posicao`); a moeda vem do espelho (posição que já saiu dele entra como BRL com `moeda_presumida`); só foto `collection_confirmed`.
+  - Pertinência (`_DE`, uma regra para o valor do dia E para o dia-base): as fotos do passado cobrem as MESMAS posições de hoje, por identidade do provedor. A foto PERTENCE à fonte quando a VENCEDORA de hoje da identidade (`POSICOES_BANCO_SQL`, `c.id desc` entre TODAS as conexões do dono) é uma conexão da fonte; a foto pode vir de QUALQUER conexão do dono (identidade que mudou de conexão a → c vale pela foto da antiga a; com foto nas duas no mesmo dia, vale a da mais nova). Vencedora fora da fonte (pausada, outro banco): a foto não entra no passado, como não entra hoje. Identidade fora do espelho vale pela foto de conexão da fonte.
+  - D0 = o dia mais antigo de [hoje − 90, hoje) em que TODAS as conexões que compõem a fonte HOJE (`conexoes_por_banco` de `investido.calcular(com_zero=True)`: vivas com posição VENCEDORA no espelho; as do banco, na fonte `banco`; conexão viva que só perde identidades não conta, mas empresta as fotos) têm foto que pertence à fonte e NENHUMA foto do dia que pertence à fonte é não confirmada (dia misto subestimaria D0 e inflaria o ritmo; coleta que nunca confirma uma posição deixa a base `null`; foto não confirmada de quem não pertence à fonte não decide o dia). Conexão que entrou depois empurra D0 para a primeira foto dela e a série recomeça; conexão apagada leva as fotos (cascata) e recomeça sozinha; pausada fica fora nas duas pontas; posição nova ou resgatada DENTRO da mesma conexão não quebra a série (é crescimento ou dinheiro que saiu).
+  - `parcial: true` = há número com `dias_de_historico` < 90. Sem número (`valor: null`) há TRÊS situações, cada uma com o seu motivo: (1) `historico_curto` com `dias_de_historico` = N quando há dia-base com menos de `RITMO_DIAS_MINIMOS` dias, e com `dias_de_historico: null` quando não há dia comum a todas as conexões da fonte na janela (esperar resolve); (2) `historico_incompleto` (`dias_de_historico: null`) SÓ quando existe na janela ao menos um dia com foto (de qualquer confirmação) de TODAS as conexões da fonte e, ainda assim, nenhum dia serve de base: falta a confirmação (p.ex. uma conexão cujo INVESTMENTS parado na Pluggy nunca confirma a coleta: esperar não resolve). Conexão da fonte ainda sem foto na janela (recém-conectada, ou identidade que migrou para conexão nova) ou sem dia em comum com as outras é `historico_curto`: o tempo resolve. Limite (hipótese, não provada com dado real): conexões que sincronizam em dias alternados nunca têm dia comum e ficam `historico_curto`; (3) banco que perdeu todas as identidades para outro (sem conexão na fonte, nenhuma foto a medir): também `historico_incompleto`, porque `historico_curto` prometeria que o tempo traz a base. O valor sai sem `-0.00`.
+  - Fonte `conta`: `null` + `sem_historico_da_fonte` (não há histórico de saldo por conta e reconstruir pelas transações é proibido). Os motivos da fonte acompanham o ritmo; `saldo_ausente` na foto de D0 com soma 0 deixa o valor `null`. O tipo `Ritmo.motivos` leva só o que o ritmo pode emitir (`MOTIVOS_RITMO` em `db/metas.py`: os da fonte e os três do histórico, sem `custo_desconhecido` nem `plano_sem_custo_mensal`, que são do alvo da reserva).
+  - Nunca 500: saldo de foto que o `quantize` não alcança (≥ 1e26) é foto ilegível (`saldo_ausente`); ritmo que não cabe no `quantize` (|Δ|·30÷dias ≥ 1e26) sai `null` + `saldo_ausente`; o `percentual` não faz `//` quando o alvo já foi batido.
+  - `chega_em` = hoje + ⌈falta ÷ ritmo × 30⌉ dias, em `AAAA-MM`; `null` com ritmo `null`/≤ 0, alvo desconhecido (reserva sem custo) ou alvo batido (`falta` 0).
+  - LIMITES declarados: o ritmo NÃO separa aporte de rendimento (a tela diz "inclui rendimento e variação"); portabilidade de outro banco conta como crescimento; mês de 30 dias; dia sem foto de uma posição dentro de conexão que tem foto no dia não é detectado; identidade que mudou de conexão cuja antiga está pausada/apagada começa do zero no passado (cresce de repente); foto antiga não confirmada, mesmo sombreada por uma mais nova confirmada da mesma identidade, invalida o dia (conservador); `falta` com `atual` ≤ −1e26 (saldo negativo absurdo) ainda estoura o `quantize` (não coberto; PR A, fora do ritmo); moeda e status do passado vêm do espelho da conexão da FOTO, não da vencedora de hoje (identidade que muda de moeda entre reconexões entra no passado e fica fora de hoje, onde o ritmo mostra `outra_moeda`); identidade sem espelho com foto em dois bancos conta uma vez no total e uma vez em cada banco no passado (os dois improváveis); uma leitura de fotos por composição de conexões distinta (cache por GET).
+
 - **Dinheiro na v2 é `Decimal` e sai como TEXTO decimal** (`"1234.56"`, sem arredondar e sem
   float), em toda rota: no TS é `string`. A escala é a da coluna (`"1000"` e `"1000.00"`
   valem). O contrato vale para toda rota futura.
@@ -569,7 +657,27 @@ A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (rela
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
 preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número), e nada além da preferência é gravado.
+conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+atualizações" também apaga pendências do remetente (abaixo). O texto digitado
+que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
+`parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
+decisão do dono; "pare" e "para" ficam fora, são palavras de cancelar do fluxo de valor
+pendente) vale como o botão de "parar atualizações" nesses mesmos pontos e no fluxo comum,
+antes das pendências e do paywall. "parar report diario" não casa e segue para `report.disable`.
+O "parar atualizações" (botão ou digitado; NÃO os botões de relatório) também apaga as
+pendências de confirmação do bot (`pending_actions`) e da IA (`ai_pending_actions`), para um
+"sim" depois não executar o que a pessoa mandou parar, e encerra a pergunta aberta da IA
+(`finally` do `process_message`: todos os ramos menos `conta_sem_credencial`, onde a âncora
+nem é lida). A limpeza vale só para o remetente (quem conversa: `uid` do fluxo comum e do
+`remetente_com_dados`, a própria conta no `conta_sem_credencial`, o usuário do WhatsApp no
+`precisa_senha`), nunca para a conta sem senha que digitou o número: o opt-out vale para as
+duas, as pendências são de cada um. Se a gravação ou a limpeza falha, responde
+`OPT_OUT_FALHOU_WA` (nunca silêncio; falha só da limpeza deixa o opt-out gravado e um 2º PARAR
+conserta). Nada no bot religa o opt-out (só a tela de
+Configurações). Nos dois ramos sem senha, quem nunca comprou
+(`db.remarketing.ja_comprou` falso) recebe `CONVITE_LEAD_WA` no lugar de `PRECISA_SENHA_WA` e
+`PARAR_LEAD_WA` ao digitar PARAR; quem comprou, os textos de antes. `ja_comprou` que levanta vale
+como "comprou" (log, e a mensagem segue).
 Saem livres as rotas da própria conta (`authorize_account_access`), o `PATCH /settings/{id}/security/contact`
 (`exige_credencial=False`), o `/auth/me` (campo `precisa_criar_senha`), login,
 logout, refresh e o reset. Quem bloqueia e quem libera, rota a rota, está em
@@ -766,6 +874,28 @@ metadata não muda). Recusa do Stripe no `modify` (`InvalidRequestError`) é 409
 do checkout), limite de 120/h por IP, CSRF do middleware global, e **não olha a
 flag**: com ela desligada não nasce sessão `elements`, e a página já aberta segue pagável.
 
+**Retomada do checkout abandonado (PR 4 de `docs/plano-remarketing.md`; inerte até o PR 6
+emitir um token).** `GET /retomar?t=…` (`frontend/routes/retomada.py`, só 303) troca o token
+Fernet (`core/services/retomada.py`, rótulo próprio de `JWT_SECRET`, 7 dias, `user_id` +
+etapa 1–3) pelo cookie `pb_retomada` (`HttpOnly`, `Secure`, `SameSite=Strict`, 2 h; o valor é
+um token próprio do cookie, emitido no clique, com rótulo e validade de 2 h no servidor: o token do
+link não serve de cookie) e marca `remarketing_envios.clicado_em`. O cookie NÃO é sessão: só
+a dependência `comprador`/`comprador_pix` o lê — em `POST /billing/create-checkout`,
+`POST /billing/checkout/bump`, `POST /billing/pix/checkout`, `GET /billing/pix-extras`,
+`GET /billing/pix/{token}` e `GET /billing/plans-config` (`retomada: {email: "l•••@dominio"}`).
+Sessão válida vence; o cookie só vale se o pedido não traz cookie de acesso, cookie do painel
+nem `Authorization`; credencial de sessão inválida segue 401. As outras rotas
+continuam com o resolver de sessão delas e dão 401 com só o cookie. A sessão do Stripe leva `rm_etapa` (sessão e
+assinatura) e volta em `/retomar/pronto?sid=…` (rota provisória até o PR 5);
+`_checkout_session_matches` compara o valor de `rm_etapa` e não mistura sessão de retomada
+com a logada. O Pix recusa
+`confirm_cancel_stripe` com 409 `retomada_sem_migracao`. `POST /billing/retomada/senha` (3/h,
+CSRF, só com cookie e sem sessão) reaproveita o reset de senha só para conta sem credencial,
+com resposta igual nos dois casos, e expira o cookie. O `POST /auth/logout` e o
+`DELETE /auth/account` expiram o `pb_retomada`; o `_clear_session_cookies` não, porque o 401
+do `/auth/refresh` (que a `/precos` deslogada provoca) o chama e mataria o link. Testes:
+`tests/test_retomada_backend.py`.
+
 **Entrega do e-book (#708) — N produtos por compra.** A metadata da sessão é a foto
 dos produtos oferecidos: o 1º em `ebook_price`/`ebook_url`, o n-ésimo (2..10) em
 `ebook_n_price`/`ebook_n_url` (posição na oferta, não o slot da env), lidos por `core/services/extras_assinar.da_metadata`.
@@ -927,6 +1057,57 @@ emergência e colapsa no binário legado). **A fonte de verdade é
 `core/services/plan_service.py`** — não duplique a tabela de tiers, limites ou nomes
 em outro lugar (§0.7 da raiz). Limites por plano em `core/services/plan_limits.py`.
 
+**IA primeiro no WhatsApp** (`core/services/wa_ia_primeiro.py`): com
+`WA_IA_PRIMEIRO` em `1`/`true`/`yes`/`on`, o texto do WhatsApp vai à IA antes do
+classificador; o roteador fica com a lista fechada de `fica_no_roteador`
+(saudação, ajuda, e-mails, relatórios, desfazer, cartão,
+recorrência/conta a pagar, vários lançamentos numa frase), com pendência viva e
+com o que a IA devolve sem resposta. `WA_IA_PRIMEIRO_USER_IDS` (ids por vírgula):
+ausente ou `""` exato = todos; com ids, só os listados; qualquer outro valor que
+não dê id válido (`,`, só espaços, `abc`) = ninguém, com warning no log. As duas são lidas a cada mensagem, mas
+trocar env no Railway reinicia o serviço (~1 min sem bot). O prazo do turno da IA
+(`IA_PRIMEIRO_PRAZO_TURNO`, 15 s) também limita cada chamada à OpenAI (timeout por
+requisição = o menor entre 8 s e o que sobra), e resposta com tool calls que chega depois
+dele não roda nada: a mensagem volta ao roteador (ou, se já houve escrita no turno,
+`ERROR_MSG`). Quando a mensagem volta ao roteador, ele não chama LLM de novo no mesmo
+turno (`SEM_LLM_NO_TURNO`): classificador sem tier 3 e categoria sem GPT. Com a flag, o
+`add_launch` da IA pede "sim" quando QUALQUER parâmetro que a gravação usa não está
+apoiado no texto (`lancamento_com_certeza`, um critério por parâmetro do schema): valor
+(exatamente um número em dígitos e nenhum por extenso, igual); data (o dia do mesmo parser da gravação, no fuso do app, igual
+ao do texto; texto sem data → IA sem data ou hoje); tipo (lista positiva: receita só
+com verbo de receita no começo; despesa só com verbo de saída no começo, ou forma curta
+"mercado 80": além do número e de "R$/reais" sobra UMA palavra e ela é o alvo inteiro —
+"o mercado me devolveu 50 reais", "reembolso mercado 50", "uber aeroporto 23" e
+"R$ 1.234,56 no aluguel" são incertos; na forma curta a categoria local também tem de ser
+de despesa padrão — "dividendo 50" (rendimentos) e categoria personalizada são incertos;
+despesa em categoria só de receita é incerta mesmo com verbo); categoria
+(regra local confiante; hashtag só se a regra local da nota não a contradiz);
+`forma_pagamento` (se veio, `forma_pagamento.detectar` do texto dá a mesma — também
+quando a decisão é BANCO, que não grava: forma "banco" inventada para um gasto em
+dinheiro pede confirmação, apoiada no texto ("no pix") segue direto com o `msg_banco`); alvo e
+nota (se vieram, palavras inteiras do texto, sem acento nem caixa); texto com negação
+("não", "nem", "nunca", "sem", "jamais", palavra inteira) ou pergunta ("?") nunca é
+certo ("não gastei 50…" não vira lançamento). O resumo da
+confirmação (`_add_launch_summary`; só é usado por esta confirmação — WhatsApp com a
+flag —, porque o `add_launch` não pede confirmação em nenhum outro caminho) mostra tipo,
+valor, alvo, nota, categoria, o dia que vai ser gravado e a forma, se veio, e o "sim"
+grava exatamente isso: o dia efetivo do resumo (`_dia_efetivo`, a mesma função do
+congelamento) vira `data` da pendência, então um "sim" depois da meia-noite grava o dia
+mostrado; com hashtag no texto, a pendência guarda a categoria dela e a
+marca `_categoria_explicita` (do código; o runner descarta toda chave `_` vinda do
+modelo), e a gravação a passa como `explicit`, que o cross-check com a regra local não
+troca (a categoria vai canonizada, como a gravação a deixa). Sem hashtag, quando a IA
+mandou categoria, o resumo e a pendência levam a categoria EFETIVA: a que a execução usaria
+depois do cross-check com a regra local (`resolver_categoria_da_ia`, a mesma função do
+`add_from_entities`), com o motivo dela em `_category_reason` (chave do código). Sem
+categoria da IA, a execução infere e o resumo não mostra categoria. Rodada do modelo com uma
+escrita que armaria pendência e QUALQUER outra escrita: nada roda (seção "IA"), também
+no modo ia_primeiro (o roteador não faz as duas juntas). Leituras não contam: a que vem
+antes do `_CONFIRMA` roda; a que vem depois recebe "não executada: aguardando a
+confirmação do usuário" (corte, rede de segurança).
+Desligar a flag NÃO desfaz o cancelamento da confirmação da IA não mostrada (seção
+"IA"): ele vale para todos os canais (decisão do dono, 2026-10-08).
+
 **Inadimplência de cartão** (`core/services/billing_dunning.py`): a coluna
 `auth_accounts.past_due_since` guarda a **primeira falha de cobrança do ciclo**,
 carimbada pelo webhook `invoice.payment_failed` (`db.dunning.claim_past_due_since`,
@@ -1011,10 +1192,76 @@ sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marca
 usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
+`of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,
+só contas `CREDIT`), por upsert em (conta, `provider_bill_id`); fail-soft (leitura ou gravação que
+falha vira log, o sync carimba igual). Sem user_id: o dono é conta -> conexão. **Quem a lê:** `quitar_pelo_banco`
+(mesmo módulo), chamado pelo sync logo depois do import, sob o `pluggy_item_lock`, também fail-soft: grava
+`credit_bills.paid_amount` do cartão OF pelo que o banco pagou, compra a compra (`creditCardMetadata.billId`), só em
+fatura FECHADA (`(closing_date or due_date) < hoje`) de moeda BRL ou nula, com total > 0,05 e pagamento legível (sinais
+misturados na lista de pagamentos = ilegível), teto 1 por fatura (fechada com total <= 0,05 entra com parte 0: o banco zerou
+a fatura, o pago das compras dela volta a 0, e ela não pontua a regra), escrita
+absoluta (sobrescreve o pago manual antigo). Regra por conta: a conta só quita quando a leitura "própria" (pagamento de
+Y quita Y) vence a "N+1"; empate ou N+1 melhor não quita as faturas de valor e loga `regra indefinida`, mas as zeradas
+(total <= 0,05) entram sempre. Só quita com fatura FRESCA (frescor por fatura): `salvar_faturas_do_banco` devolve os pares
+(conta, fatura) válidos gravados naquele sync e `quitar_pelo_banco(user_id, connection_id, frescas)` só usa as linhas
+de `of_card_bills` desses pares. Fatura que veio inválida, que sumiu da Pluggy (fica gravada, o upsert nunca apaga),
+`/bills` que falhou ou gravação que levantou ficam fora: a linha velha não pode se combinar com compra nova; o aparo
+roda em todo cartão mesmo assim. Limites: sem crédito carregado
+para a fatura seguinte, rotativo (encargos) não tratado, conexão PAUSED não sincroniza, compra sem espelho na conta
+atual não conta, estorno sem `billId` faz o pago parcial sair maior (o teto é o total do Pig). O desfazer de
+pagamento manual (`db/accounts.py`) segue descontando do `paid_amount` também no cartão OF: o próximo sync regrava o
+valor do banco nas faturas que ele possui, e nas outras (compra manual sem espelho) o desconto é o correto; com a conexão
+PAUSED (ou a conta com regra `{}`) não há sync que regrave, e o pago fica reduzido até o próximo sync que quite. Pago que não cabe no total do Pig é
+aparado (`APARAR_PAGO_SQL`: `paid_amount` ao total, `paid`/`paid_at`; pega pago > total e também pago == total com a fatura
+ainda aberta; fatura 'paid' com pago <= 0, a zumbi (de qualquer total, inclusive total > 0 com pago 0), reabre como 'open' com `paid_at` nulo, igual o `UPDATE` da quitação, pela convenção de `db/cards.py` de que 'paid' exige pago > 0): a cada `quitar_pelo_banco`, em todo cartão da conexão (cobre, no próximo sync, a única compra casada que some por
+`transactions/deleted`, que só reabre a fatura e deixaria total 0 com pago velho; o webhook não resincroniza, e até o sync a fatura
+fica com pago acima do total), e ao desconectar, no cartão que sobrevive;
+consequência aceita pelo dono: compra manual ainda não paga nesse cartão pode passar a aparecer paga (150 de total com 120 pago
+vira 30 com 30 pago), porque o pago do banco das compras que saem fica no limite do total. Limite: o aparo também alcança a fatura
+corrente do cartão do banco: pagamento manual acima do total que sobra depois que uma compra some é aparado ao total, como o
+`rebuild_bill_totals` já faz. Limite: se o `billId` de uma compra
+passa a apontar para fatura do banco que não está no `/bills` (a aberta), a fatura antiga do Pig mantém o pago anterior até a
+do banco fechar e voltar no `/bills`. (também o export LGPD, `db/privacy.py`, lê a tabela.)
 `open_finance_connections.recurring_fetched_at` e `recurring_seed_silent` controlam o
 silêncio da 1ª busca do Detetive numa conexão que já existia: as chaves dela — a foto
 guardada em `recurring_seed_descricoes`, não a atual — viram lápide por `record_agent_event(silencioso=True)`, que grava o evento já com
 `stale_at` (não aparece no feed nem vai por e-mail).
+
+**Cartão do Open Finance (medido na produção em 2026-10-09)**: no `amount` da conta `CREDIT`,
+**positivo é compra** (`type: DEBIT`) e **negativo é estorno ou pagamento** (`type: CREDIT`),
+como diz a doc do campo. `db.cards.sinal_cartao_of` é a única fonte do sinal: `valor = amount`
+(assinado, a fatura faz `total += valor`), `is_refund = amount < 0`, `tipo`. Sem ramo por conector
+nem por sandbox (o sandbox Pluggy Bank mostrou o oposto). O pagamento da fatura **não entra**:
+`db.open_finance.pagamento_no_cartao` = `is_credit_card_payment` ou crédito (`amount < 0`) da
+categoria `transferencia_interna` ("Transfer - Internal" é o pagamento visto do cartão), sem regra
+de texto; é só do lado CREDIT, o BANK segue em `is_credit_card_payment`. O sync de cada item
+deriva `valor`/`is_refund`/`tipo` do espelho (`_sync_imported_credit_updates`) e tira da fatura
+o pagamento já importado; `scripts/corrigir_sinal_cartao_of.py` faz o mesmo (dry-run por padrão,
+`--user`, `--apply`) para a conexão que não sincroniza; imprime banco e host antes de agir.
+O pagamento legado ligado só ao espelho de uma conexão substituída por reconexão (o `LATEST`
+devolve o espelho da nova, que nunca o ligou) é achado por `pagamentos_no_cartao_legados`:
+sem recorte por conexão, e quem decide se a linha é pagamento é o espelho MAIS NOVO ligado a ela
+(maior conexão, depois maior id); o sync e o script usam o mesmo. A remoção recusa se aparecer
+vínculo novo depois do select (`of_tx_ids` = todas as referências vistas); o sync seguinte decide
+de novo. Fatura `paid`/`closed` que passa a dever reabre na mesma transação
+(`db.cards.reabrir_faturas_com_saldo`).
+**Limite declarado (decisão do dono, 2026-10-09):** a correção do cartão não serializa dois
+syncs de itens DIFERENTES do mesmo usuário (a trava é por item). Com a mesma transação nas duas
+conexões, sincronizando ao mesmo tempo, (1) o outro sync pode reclassificar o espelho de pagamento
+para compra entre a decisão e a remoção, e a compra sai até o sync seguinte reimportá-la; (2) a
+fatura de destino de uma data corrigida é criada ou reaberta antes da guarda do `update`, e pode
+ficar aberta com 0 a pagar se a linha não migrar. Na produção, em 2026-10-09, nenhuma transação de
+cartão estava em mais de uma conexão (consulta M11). Fechar a classe pede fila por usuário na
+correção do cartão: PR próprio, faixa Completo.
+**Compra e parcela do banco não se apagam nem se antecipam** (`undo_credit_transaction`,
+`undo_installment_group`, `anticipate_installment` levantam `db.CompraDoBanco`; /app responde
+409, WhatsApp e IA a frase): o sync reimporta a linha e, na antecipação, a Carteira ficava
+debitada com a fatura de volta. Mesmo `pode` do v2 (`PODE_CARTAO_SQL`).
+**O cartão do banco também não se apaga** (`delete_card` levanta `db.CartaoDoBanco`; WhatsApp e /app
+recusam com `MSG_CARTAO_DO_BANCO`, /app com 409 e o modal só avisa): o sync o recriaria. Para tirar, desconectar o banco.
+**Cartão do banco também não tem "pagar fatura" manual** (`pay_bill_amount` levanta `db.CartaoDoBanco` com
+`MSG_FATURA_DO_BANCO`, com `for share` no cartão para a adoção não passar no meio; WhatsApp, IA e /app 409; o modal
+do /app esconde o botão): quem quita é o banco, via `quitar_pelo_banco`.
 
 Boa parte do comportamento é regida por flags `OF_*` (beta por e-mail/user_id, limite
 de bancos no free, refresh proativo). Antes de mexer, leia as flags — o
@@ -1030,9 +1277,130 @@ atrás de `AGENTS_ENABLED` + listas de beta).
 A tool `simulate_purchase` (`core/services/ai_chat/tools/simulator.py`) usa o mesmo
 simulador e a mesma validação da rota `/simulator`, com gate soft de Pro.
 
+**Confirmação da IA armada e não mostrada é cancelada.** Em qualquer canal, com ou
+sem `WA_IA_PRIMEIRO`, a pendência da IA (`ai_pending_actions`) armada num turno é
+cancelada por CAS (`db.ai_consume_pending_action`) quando o turno termina com uma
+resposta que não é a pergunta dela: erro (`ERROR_MSG`), texto vazio do modelo, prazo
+estourado, `MAX_TOOL_LOOPS`, `_UM_POR_VEZ`, write direto ou recusa de validação na
+mesma rodada, ou exceção. Senão um "sim" posterior executaria algo que o usuário nunca
+viu (ex.: um `delete_all_launches` escondido atrás de um erro). Limites declarados:
+texto livre do modelo depois de armar não cancela; falha depois do commit da
+pendência e antes de o runner receber a linha gravada não cancela; falha ao cancelar só
+loga. O token do CAS é a linha que o próprio `ai_set_pending_action` devolve
+(`returning`), sem reler: outra janela que re-arme no meio não é cancelada.
+
+**Pendência viva não é sobrescrita** (todos os canais; contrato da confirmação).
+`db.ai_chat.set_pending_action` só substitui a linha existente se ela já venceu o TTL
+(`PENDING_TTL_MINUTES`); com pendência viva de outro pedido devolve None e não grava. O
+runner responde `_OUTRO_PEDIDO` ("tem outro pedido seu esperando confirmação") no
+`_CONFIRMA` do `add_launch` e também no ramo `requires_confirmation`, onde a resposta é
+fixa e não o texto do modelo (que ofereceria um "confirma?" cujo "sim" executaria o outro);
+o `set_budget` faz o mesmo. A janela de corrida entre gravar e entregar deixou de existir;
+a releitura `_ainda_e_a_mesma` no `_CONFIRMA` ficou como redundância barata para o caso de
+a outra janela consumir ("não") e armar a dela no meio. O "mudou de assunto" já consome a
+pendência anterior no começo do turno, então nenhuma conversa fica bloqueada pela própria
+pendência. Se a rodada seguinte do MESMO turno tentar armar outra depois de armar a
+primeira, a viva é deste turno: o modelo recebe "já existe uma confirmação pendente deste
+turno" (resultado de tool, sem resposta final) e a primeira não é cancelada;
+`_OUTRO_PEDIDO` fica só para pendência viva de outra janela. Código em
+`core/services/ai_chat/runner.py` (`_cancela_pendencia_do_turno`); testes `test_p*` em
+`tests/test_wa_ia_primeiro_runner.py`.
+
+**Uma escrita com pendência por rodada.** Em qualquer canal, com ou sem
+`WA_IA_PRIMEIRO`, uma rodada do modelo com uma escrita que armaria pendência
+(`requires_confirmation=True`, sem rodar o `validate`; `arma_pendencia_no_execute=True`,
+a que arma a pergunta dentro do próprio execute — `set_budget` e `mark_bill_paid` contadas
+SEMPRE, mesmo quando aquela chamada não armaria; o `add_launch` por predicado, só quando
+armaria a Q40, no WhatsApp com `WA_IA_PRIMEIRO`; ou `confirmar_se` verdadeiro) e
+QUALQUER outra escrita, em qualquer ordem, não roda nada (nem as leituras dela): a
+pendência do turno é cancelada e a resposta é o texto fixo `_UM_POR_VEZ` ("me manda um
+por mensagem"). Antes, no dashboard e com a flag desligada, "gasta 50 no ifood e apaga o
+#3" gravava o gasto e deixava a pendência do apagar viva e escondida (e, com o
+cancelamento acima, ela sumia calada). Escrita com pendência sozinha na rodada, ou só
+com leituras, segue como sempre. Limites: a pendência que o execute arma por conta
+própria não é rastreada pelo turno (não é cancelada se uma exceção vier depois dela no
+mesmo execute); e as ofertas de conveniência (botões de recategorizar / apagar) e a
+oferta de gasto fixo que o `add_launch` arma pelo `add_from_entities` não entram na regra.
+
+O "sim"/"não" de uma confirmação da IA já mostrada não gasta cota: quando o plano tem IA
+e só a cota acabou (`aviso_de_cota` devolve texto; inclusive se a própria mensagem que
+armou a pergunta gastou a última), o `handle_ai_chat_command` ainda o leva ao runner,
+que resolve a pendência antes da cota. Sem IA no plano (v1 sem Pro, downgrade), o gate
+de sempre: pendência descartada e mensagem de upgrade. Qualquer outro texto com a cota
+zerada também segue como antes: aviso de cota e pendência descartada.
+
+**Xerife, alerta de anomalia explicado (PL-04 PR A).** A regra, a amostra e o texto moram em
+`core/services/anomalia.py` (puro, Decimal; `AMOSTRA_MINIMA` é a única constante da regra de amostra:
+hoje 5 lançamentos, `dias=0`) e o SQL em `db/anomalias.py` (`listar_candidatos_xerife`). Compara UM
+lançamento das últimas 24h com a média POR LANÇAMENTO da mesma categoria (`lower`) nos 90 dias que
+terminam 24h antes; limiar 2,5x, mínimo R$ 50 e janela não mudaram. Três mudanças de gatilho: (1) média
+de referência <= 0 não alerta (antes disparava por `valor > 2,5 * 0`); (2) o empate EXATO no limiar (2,5x
+ou o limiar da `config`) não alerta: o SQL antigo comparava em float8 e alertava por ruído de float
+(ex.: histórico 89,44/182,40/137,42/70,26/41,56 e gasto de 260,54 = 2,5 × 104,216), e agora a conta é
+em Decimal e estrita; (3) `config` com `multiplicador`/`minimo` `nan`, `inf`, `<= 0` ou `0` cai no
+padrão (na main, nan/inf nunca alertavam e -2 alertava sempre) e "abc", que na main derrubava o Xerife
+inteiro do usuário (inclusive o evento de limite), agora derruba só a anomalia. Só `launches` entra:
+compra no cartão (`credit_transactions`) fica fora do Xerife. O evento mantém os campos legados
+(`tipo`, `launch_id`, `categoria`, `descricao`, `valor`, `media`, `titulo`, `mensagem`) e ganha
+`explicacao` (versao 1: `detector`, `calculado_em`, `fonte`, `referencia`, `atual`, `diferenca`,
+`amostra` com `historico_incompleto` e `esperados_fora`); evento antigo não tem o bloco. Histórico
+incompleto (menos de 90 dias desde a primeira despesa do usuário) é flag e frase na mensagem, não
+bloqueio. Candidato que o piso de amostra suprimiu volta em `suprimidos_amostra` no retorno de
+`run_xerife_once` (sem lápide: o sync do Open Finance pode completar o histórico depois). Se a
+explicação falha ao montar, o alerta sai com o texto simples. `launches.esperado_em` (timestamptz,
+nulo = não esperado) marca UM lançamento como "era esperado": fora do candidato e da média, sem
+expiração. `PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado` (`{"esperado": bool}`,
+mesmas portas das rotas de agentes; 404 igual para inexistente e de outro usuário) grava a coluna,
+tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anomalia:{id}`; desmarcar
+não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
+Fora do PR A (PR B): os contadores do topo da aba ("Disparos") e a tela de "esperados"; sensibilidade editável (a `config` do agente ainda chega crua), canais,
+tela para listar/desfazer, regra de esperado recorrente ou por período, `_detect_category_spike`
+(`db/insights.py`, compara mês parcial com meses cheios), cartão no Xerife. Limites conhecidos: o
+mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
+parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
+(`anomalia.limiar`); lixo não numérico ("abc") só derruba a anomalia daquele usuário (logada pelo nome
+da classe), não o bloco `limites`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
+transação (SQL local em `db/anomalias.py`; `record_agent_event` e `mark_agent_event_stale`, compartilhados,
+não foram tocados), e o detector que já leu o lançamento esbarra na chave ocupada. Continua verdadeiro: e-mail
+já enviado antes do PUT não é desfeito.
+
 Categorização tem uma armadilha própria: **categoria e regra de categoria são tabelas
 diferentes** (`user_categories` × `user_category_rules`) e a regra ganha da categoria
 na inferência.
+
+**"Testar o Piggy" (demo no WhatsApp, sem conta).** `GET /teste` (`frontend/routes/static_pages.py`)
+grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o PigBank (teste CODIGO)";
+`adapters/whatsapp/wa_demo.py` desvia a mensagem no começo de `process_message`, ANTES de
+`get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre dados
+fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
+(contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
+ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
+normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
+`Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
+abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
+`wa_hash` é zerado após 30 dias (`esquecer_numeros_antigos`, em `table_cleanup`); copy: "o que você
+escrever aqui não é salvo no PigBank, só vai para a IA que responde", nunca "não guardamos nada" nem "nada
+fica salvo" (o hash do telefone é o mesmo de `auth_accounts.phone_hash`).
+Painel: bloco `teste` do `/admin/funil` ("Clicaram" são cliques, não pessoas). Limites declarados:
+histórico da conversa em memória (reinício zera; o contador não), teto diário não estritamente atômico entre
+instâncias, falha de banco ao abrir sessão aparece como "lotou". Também: (a) `DEMO_DAILY_MAX` padrão 0 = desligado; o dono
+liga na Railway (sugestão inicial 300; medir a latência da fila do worker antes de subir); (b) `wa_hash` = mesmo HMAC de `auth_accounts.phone_hash`,
+guardado 30 dias: a política de privacidade deve citar o teste; (c) o texto vai à OpenAI e o histórico fica só em
+RAM (sem prazo estrito; some no reinício); (d) falha transitória de banco em `sessao_recente` faz `decidir`
+devolver `None` e a mensagem seguir o fluxo normal, que pode criar linha em `user_identities` (fail-open raro);
+(e) linhas de clique em `/teste` sem abrir nunca são podadas;
+(f) L2: resposta 401 do `send_text` (token expirado) conta a pergunta sem entrega;
+(g) depois do "lotou" a mensagem seguinte do número segue o fluxo normal e cria `user_identities`;
+(h) se `sessao_recente` falhar no banco e a mensagem tiver o gatilho, `decidir` manda abrir e nasce a 2ª
+sessão com 8 perguntas novas (fail-open raro);
+(i) o webhook (`wa_app.py`, ~:313-324) grava `recipient_id` CRU em `system_event_logs` quando a Meta devolve
+erro de envio: defeito ANTERIOR a este PR e de todos os usuários;
+(j) o worker do WhatsApp é único e serial (`wa_app.py`, ~:360-364): cada pergunta do demo ocupa a fila dos
+pagantes por até 30s×2 tentativas, e a fila (maxsize 500) descarta o excedente: medir a latência antes de
+subir o teto;
+(k) `/teste` e `/t/` estão em `Disallow` no robots.txt, o que mitiga cliques de robôs; linhas sem abrir não
+são podadas.
 
 ### E-mail
 
@@ -1090,8 +1458,8 @@ entram em "cadastros".
 `GET /admin/api/funil/fonte/{nome}` (mesma auth do painel, `no-store`, só GET), uma
 chamada por fonte, e `/admin/api/funil` NÃO muda. `nome` só vale se estiver em
 `funil_fontes.MODULOS` (fonte nova = uma linha lá + um módulo que exporta `FONTE`); fora
-disso, 404. Hoje só `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
-é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total). Envelope
+disso, 404. Hoje `stripe` (assinaturas agora; cobranças de cartão em 7d/30d; a receita
+é só do Stripe, o Pix anual NÃO entra, e `canceladas` é o histórico total), `ga4`, `clarity` e `meta` (abaixo). Envelope
 comum e fechado: `fonte`, `estado` (`ok|nao_configurado|erro|stale`), `mensagem` (SEMPRE
 da tabela fixa `MENSAGENS`, nunca texto da fonte), `falta` (só NOMES de env, quando
 `nao_configurado`), `buscado_em`, `janela {rotulo, fuso}`, `dados`. Cache em TABELA
@@ -1138,6 +1506,59 @@ a ~4-5 threads vivas. O `timeout=8` da listagem é por OPERAÇÃO de rede: servi
 bytes segura a thread além do prazo de 10s. O SDK loga sozinho no logger `stripe` (INFO
 com `error_message`, DEBUG com o corpo): o módulo do Stripe fixa esse logger em WARNING. O `reason` dele agora é
 só o NOME do tipo da exceção (antes era `str(exc)`, que podia levar a chave).
+**Fonte GA4** (`core/funil_fonte_ga4.py`, cartão "8b. GA4"): Google Analytics Data API
+(`runReport`), TTL 30 min, backoff 300 s, SEM cota diária; cada refresh faz no máximo 3 chamadas
+(token da conta de serviço, só quando o de ~1 h venceu, mais 2 relatórios), ou seja, bem abaixo
+da cota da API. Envs: `GA4_PROPERTY_ID` (só dígitos, validado ANTES de montar a URL; ID ruim
+vira `nao_encontrado` sem nenhuma chamada) e `GA4_SERVICE_ACCOUNT_JSON` (o JSON inteiro da chave;
+`faltam()` lista só os nomes). Hosts FIXOS (`oauth2.googleapis.com/token` e
+`analyticsdata.googleapis.com`): o `token_uri` de dentro do JSON nunca é lido. A troca do JWT é
+PyJWT + `requests` (e não `google-auth`, cujas exceções podem carregar trecho do corpo do Google
+ou do JSON); o token fica em memória, com chave = SHA-256 do JSON (trocar a env invalida) e
+`_LOCK`; 401 da Data API zera o token. Devolve (lista fechada) `eventos {7d|30d: {<evento>:
+{eventos, usuarios}}}`, só para a lista `EVENTOS` (única fonte: `page_view` do `gtag('config')`,
+`view_item_list`, `begin_checkout`, `sign_up`, `start_trial`, `onboarding_complete` (via
+`pbTrack` em `comecar.js`), `vsl_play`, `vsl_progress`, `teste_click` (botão "Testar o Piggy", `teste-piggy.js`) e `purchase` do servidor; um teste compara a
+lista com o que o código dispara, e o front tem a mesma lista em `GA4_EVENTOS`, comparada em
+`tests/frontend/funil_ga4.test.mjs`) e `origens {7d|30d: [{canal, sessoes, usuarios}]}` (top 8
+por janela; `canal` é texto do GA, sanitizado e truncado em 40, e o front o passa por `esc()`).
+Evento fora da lista é descartado; sem linha = zeros; número que vem como texto vira `int`.
+Códigos de erro (mensagens fixas em `MENSAGENS`): 400 `resposta_invalida`, 401 `auth`, 403
+`permissao_ga4` (API não habilitada no projeto OU conta de serviço sem papel Leitor), 404
+`nao_encontrado` (ID da propriedade errado), 429 `limite`, timeout `timeout`, JSON de credencial
+ilegível/sem campo/PEM ruim `credencial_invalida` (nada do JSON é ecoado). SEGREDO: a
+`private_key` e o token OAuth não saem do módulo (log só com `type(exc).__name__`, status e
+código; `from None`); o `urllib3` em DEBUG só imprime host, caminho e status, então nenhum
+logger é rebaixado. Limites declarados: 7d/30d são `7daysAgo..today` e `30daysAgo..today`
+(incluem HOJE, parcial) no fuso da propriedade; os números do GA4 não batem com os do banco
+(bloqueador de anúncio, consentimento); `purchase` inclui os enviados pelo servidor
+(Measurement Protocol); usuários não somam entre linhas; `timeout=5` é por operação de rede (o
+backoff limita threads presas); o formato de `runReport` foi seguido pela documentação e testado
+contra um servidor local, NÃO contra o Google real (parser tolerante). O `limit` da API vale para
+as linhas dos dois ranges juntas: pede-se 100 e corta-se em 8 por janela no parser. Fica de fora
+de propósito: demografia, dimensões customizadas (ex.: `method` do `sign_up`) e o relatório de
+funil nativo (v1alpha).
+Limites do GA4 declarados, sem correção: o corpo da resposta não tem teto de tamanho (um par
+hostil no TLS poderia mandar 100 MB: ~20 s de parse e ~900 MB de RSS) e o `timeout` do requests é
+por operação, não total (resposta que goteja segura a thread; até ~21 min por ciclo, limitado
+pelo backoff). Sem `orderBys`: com mais de 100 linhas somadas (7d+30d; só com muitos canais
+personalizados) o top 8 pode ficar errado sem aviso (com ~18 grupos padrão são ~36 linhas);
+`rowCount` é ignorado. Um 403 de COTA esgotada aparece como a mensagem de permissão (a cota
+normal esgotada é 429, `limite`); `invalid_grant` por relógio adiantado da instância aparece
+como "recusou as credenciais". `HTTP_PROXY` não-https mandaria o assertion ao proxy em claro (em
+produção a URL é https: o proxy só vê o CONNECT). O `_TOKEN` guarda o access_token em claro, por
+desenho (é o que se reaproveita); redirecionamentos NÃO são seguidos (3xx vira `indisponivel`).
+O `access_token` só passa se casar `[A-Za-z0-9._~+/=-]{1,4096}`. Dois canais iguais após a
+sanitização aparecem como duas linhas. `obter` (infra) devolve `erro` genérico se o módulo da
+fonte não importa, `faltam()` quebra ou a montagem do envelope falha (só o NOME do tipo vai ao
+log); só o cancelamento propaga.
+Outros limites aceitos do GA4: o `overflow-wrap: anywhere` do `.wrapcol` (tabelas do cartão) é
+ignorado no Safari 14 (cosmético: o canal tem no máximo 40 caracteres e a tabela rola dentro
+do `.tblwrap`); 400 da Data API e resposta que não é JSON mostram a mesma mensagem ("não deu
+para ler"), e quem distingue é o log do Railway (`[funil_ga4] dados: HTTP 400`); ID de
+propriedade errado tende a aparecer como 403 (por isso a mensagem de `permissao_ga4` manda
+conferir `GA4_PROPERTY_ID`). Dois logs só de etapa ajudam a primeira carga: `[funil_ga4] token:
+formato recusado` e `[funil_ga4] credencial: JSON inválido` (nunca o valor, o tamanho ou o tipo).
 Limites declarados da infra de fontes (sem correção): a marca `_EM_VOO` é por processo e a
 corrida entre loops só existe com vários workers (o limite real é a cota no banco); o
 executor tem 4 threads, então 4 fontes travadas ao mesmo tempo fazem a 5ª virar `timeout` e
@@ -1147,8 +1568,171 @@ queimar cota (toda fonte nova precisa de timeout próprio); `buscar` que levanta
 estouraria o layout (inalcançável: as mensagens vêm da tabela fixa); o WARNING persistido
 pelo `_DashboardHandler` faz um INSERT síncrono no loop (uma falha por backoff); `async def
 buscar` com corpo bloqueante trava o loop.
-**Avisos para o PR C (Clarity) e os demais**: `reservar` reserva 1 por `buscar`, não por
-chamada HTTP (o `buscar` do Clarity deve fazer EXATAMENTE 1 chamada externa); falha, timeout
+**Fonte Clarity** (`core/funil_fonte_clarity.py`, cartão "8c. Clarity"): Microsoft Clarity Data Export
+API (`GET https://www.clarity.ms/export-data/api/v1/project-live-insights`, `numOfDays=3`,
+`dimension1=URL`, `Authorization: Bearer`). Env: só `CLARITY_API_TOKEN` (JWT do projeto: Clarity >
+Settings > Data Export > Generate new API token, aparece uma vez; o `CLARITY_PROJECT_ID` NÃO é
+necessário, só alimenta o link do card "9"). Devolve (lista fechada) `{pagina: "/precos", janela_dias: 3,
+trafego {sessoes, usuarios}, rolagem_media_pct, cliques_mortos {pct_sessoes}, cliques_raiva
+{pct_sessoes}, truncado, reconhecido}`; `null` = "n/d" (nunca 0). Só a página /precos
+(`path.rstrip("/") == "/precos"`, host/query/fragmento ignorados, soma de todas as variantes, caixa
+EXATA: `/PRECOS` e `/precos-app.js` não contam); janela FIXA "últimos 3 dias (UTC)" (o cartão ignora o
+seletor 7d/30d). Sessões = `totalSessionCount − totalBotSessionCount` (sem o campo de bots vale o
+total); rolagem e % de cliques são médias ponderadas pelas sessões da própria linha SÓ quando a linha
+traz a chave `session`+`count` (a doc pública do Clarity só mostra a contagem no Traffic; na rolagem é incerto);
+sem ela em nenhuma linha a média é SIMPLES das variantes da URL, e o cartão só diz "média das variantes da URL;
+ponderada pelas sessões só quando o Clarity informa a contagem". Risco: com tráfego de anúncio cada `fbclid`
+vira uma variante da URL e a média simples pode divergir muito do valor real (1 sessão a 10% e 99 a 60% dão 35,0%
+em vez de 59,5%): conferir na 1ª carga. Melhoria futura (NÃO implementada): ponderar pelo `totalSessionCount` da
+linha de Traffic da MESMA URL.
+Cliques mortos e de raiva mostram SÓ o % das sessões (chave `session`+`percentage`, sem
+`without`/`bot`, 0..100): a CONTAGEM de sessões deles NÃO é exposta porque `sessionsCount` nessas
+métricas provavelmente é o total de sessões da URL e não as com o evento (memória não confirmada: é
+ambíguo até haver resposta real). Quando houver resposta real, o parser fixa e a contagem volta. Fica de fora de
+propósito: dimensões device/país/campanha, engagement time, quickback, erros de script, páginas
+populares. COTA (a mais apertada de todas as fontes): o Clarity aceita 10 requisições por projeto por
+dia, então `limite_dia=8` (reserva real no banco; 2 de folga), `ttl_s=10800` (3 h × 8/dia = a cota,
+sem folga para falha), `backoff_s=10800` e EXATAMENTE 1 chamada HTTP por `buscar` (a reserva é por
+`buscar`). Falha, timeout e token ilegível depois da reserva QUEIMAM cota sem devolução (o backoff de
+3 h limita isso a 1 por ciclo); `ocupada` não queima. Um 429 vira `cota` e a infra ESGOTA o dia no
+banco (`funil_fontes_cache.esgotar`: `chamadas_dia = limite`, no dia UTC do relógio do banco, nunca
+baixa o contador nem afeta dia mais novo): a fonte só volta quando o dia UTC virar, servindo `stale`.
+Erros por STATUS (corpo nunca lido): 401 `auth`, 403 `permissao`, 429 `cota`, 400 `resposta_invalida`,
+demais `indisponivel`, timeout `timeout` (8 s), conexão `indisponivel`; resposta que não é lista JSON
+`resposta_invalida`. Redirecionamento não é seguido. Token fora de `[A-Za-z0-9._~+/=-]{1,4096}` vira
+`resposta_invalida` SEM chamada (e sem log do valor; a reserva já foi gasta). Resposta de 1.000 linhas
+(limite da API, sem paginação) marca `truncado: true` ("números parciais"; com `fbclid` nas URLs de
+anúncio a dimensão URL pode truncar) e só cabe no `_validar` porque o módulo agrega antes.
+VALIDAÇÃO DA 1ª CARGA (a fazer pelo dono): abrir o painel do Clarity para /precos na janela de 72 h e comparar
+sessões, rolagem, % de cliques mortos e de raiva com o cartão; se a rolagem ou os percentuais parecerem pequenos
+demais (ex.: 0,1%), a escala pode ser 0 a 1 (o cartão traz o aviso); se o cartão ficar amarelo ("formato não
+reconhecido"), copiar do log do Railway a linha `[funil_clarity] formato:`.
+Mais limites declarados: o campo de usuários (`distantUserCount`) provavelmente inclui bots (o cartão só avisa dos
+bots nas sessões); o prazo total de 10 s só é conferido depois que chega um pedaço do corpo (conexão e cabeçalhos
+usam `timeout=8` por operação: até ~18 s de thread presa contra os 12 s da infra, sem cota extra); `numOfDays=3` é
+janela móvel das últimas 72 h; o limite de 1.000 linhas pode ser por métrica ou total (a doc não diz) e `truncado`
+só detecta se ALGUMA métrica chegar a 1.000.
+FORMATO NÃO CONFIRMADO: a doc não dá os nomes exatos de `metricName` nem dos campos de Scroll Depth,
+Dead Click Count e Rage Click Count, nem a chave da dimensão URL; o parser é tolerante (nomes
+normalizados, heurística descrita no docstring do módulo) e honesto (`null`, `reconhecido: false`,
+aviso amarelo no cartão). PROCEDIMENTO se o cartão disser "formato não reconhecido": copiar do log do
+Railway a linha `[funil_clarity] formato: metricas=[...] campos={...}` (só NOMES de métrica e de campo
+da 1ª linha, até 20 métricas e 30 campos por busca; cada nome passa por ALLOWLIST
+`[A-Za-z][A-Za-z0-9_ ]{0,39}` com no máximo 2 dígitos, senão vira a constante `(nome fora do padrão)`,
+sem nenhum caractere do original: o Clarity pode mandar DADO como nome de campo; nunca valores, URLs ou números;
+nomes fora do padrão colapsam numa só chave de `campos`; `sessionsWithoutMetricPercentage` passa) e fixar o
+parser com a forma real. Usuários somam as variantes da URL
+e podem repetir pessoa. Regras do parser (1ª passada do Tester): a métrica é a de nome normalizado EXATO (`traffic`,
+`scrolldepth`, `deadclickcount`/`deadclicks`, `rageclickcount`/`rageclicks`); sem exata vale a ÚNICA que
+contém o fragmento; duas ou mais candidatas (ou o mesmo nome repetido) = não reconhecida (nunca soma
+métricas diferentes: `TrafficSources` não dobra `Traffic`). NUNCA soma parcial: se qualquer linha de /precos
+não tem o número legível, o campo agregado vira `null`; se QUALQUER linha da métrica não tem URL legível (chave
+ausente ou valor que não é texto), a métrica inteira fica DESCONHECIDA (`null` em todos os campos dela, "n/d" no
+cartão, nunca "Sem visitas"), porque a linha descartada pode ser de /precos; `reconhecido` segue `true` (o formato é
+reconhecido, só os dados são incertos; o contrato fechado do `dados` não ganha chave) e sai UMA linha de log de
+texto fixo `[funil_clarity] linha sem URL legível: os campos da métrica ficam n/d` (sem nome, valor ou número, no
+máximo uma por métrica). Uma URL legível de OUTRA página, inclusive a string "(not set)", é "outra página" e não torna
+o agregado desconhecido. Risco: se o Clarity mandar uma linha sem URL em cada resposta (ex.: sessões sem URL), o
+cartão fica "n/d" sem aviso amarelo: o dono vê o log do Railway (peso presente em só algumas linhas: média `null`;
+em nenhuma: média simples). Sem linha de /precos: sessões e usuários 0 e as MÉDIAS `null`; com `truncado` e
+sem linha de /precos, sessões e usuários `null` (a linha pode estar no corte) e o cartão só diz "Números
+parciais", nunca "Sem visitas". A resposta é lida em stream por `r.raw.read1(65536, decode_content=True)` (urllib3 2.x; `iter_content` só entrega com
+64 KB e deixaria o goteio passar do prazo), com teto de 8 MB do corpo DESCOMPRIMIDO (gzip/brotli bomba:
+`resposta_invalida`) e PRAZO TOTAL de 10 s da chamada ao último byte (`timeout`; menor que o `TIMEOUT_S` de 12 s
+da infra, então um Clarity gotejando não prende a thread do `EXECUTOR` compartilhado); o `timeout=8` do
+requests segue sendo por operação. O corpo de erro NUNCA é lido (`r.close()` logo após o status; a resposta é
+fechada em todos os caminhos); exceção do urllib3/requests durante a leitura vira `indisponivel`, e
+`ReadTimeoutError` no meio do corpo vira `timeout`. Dois nomes exatos de alias ao mesmo tempo (`DeadClicks` e
+`DeadClickCount`, idem Rage) = DUPLICIDADE: métrica não reconhecida (não adivinha qual vale); sozinhos, valem.
+`Scroll` e `ExcessiveScroll` não são rolagem (exige `scroll`+`depth`). `_registrar_falha` grava a falha e esgota a cota em `try` separados, com
+log próprio (só o tipo).
+Limites declarados do Clarity, sem correção: escala 0..1 em vez de 0..100 NÃO é detectável (um 0.123 apareceria
+como 0,1%): conferir na 1ª carga com o painel do Clarity; o `esgotar` pode esgotar o dia NOVO se um 429
+cruzar 00:00 UTC (~12 s por dia, por evento 429); o voo único é por PROCESSO, não por réplica (N réplicas
+gastam a cota 8/N janelas por dia e o resto do dia fica em "cota" servindo `stale`; a cota atômica no banco
+nunca passa de 8, e a folga de 2 até o limite de 10 do Clarity cobre só rajada na virada do dia ou outro
+consumidor do mesmo token; em sequência realista uma janela de 24 h fechadas pode ter até 9 chamadas, sem
+folga para outro consumidor); token inválido/401 gasta a reserva e o backoff de 3 h vive no BANCO: depois de
+CORRIGIR o token o cartão pode levar até 3 h para tentar de novo, e a mensagem acionável ("recusou as
+credenciais") aparece só na 1ª visão (depois vira "indisponível" durante o backoff, porque a tabela não
+guarda o código); ESCAPE para forçar a tentativa: `update funil_fontes_cache set falha_em = null where fonte = 'clarity'`
+(mantém o contador do dia e o último dado; só libera a próxima tentativa, que CONTA na cota). NÃO use delete:
+`delete from funil_fontes_cache where fonte = 'clarity'` (NÃO use delete) devolve a cota do dia e apaga o último dado,
+porque o contador (`dia_utc`/`chamadas_dia`) mora na MESMA linha (dá para passar de 8 chamadas por dia contra o limite
+real de 10 do Clarity); o prazo total de 10 s cobre o corpo, mas a fase de conexão e de cabeçalhos usa o
+`timeout=8` por operação (connect e leitura de cabeçalho, no pior caso ~16 s antes do 1º byte); o front trata só `null` como
+n/d (`""`, `false` ou `[]` virariam "0"/"NaN%"; o servidor nunca os manda); a cabeça pública de um JWT
+(20 caracteres, 2 dígitos) e strings curtas como `hunter2`/`Joao Silva` passam na allowlist de nome do log
+(hipótese aceita: o Clarity teria de pôr dado em nome de campo); `sessoes === 0` também vale quando bots ≥ total
+(clamp a 0) e o cartão diz "Sem visitas"; `r.close()` não é determinístico se houver exceção retida
+(traceback guardado: o socket só fecha quando a referência cai; teórico); campo numérico com lixo mostra
+"NaN" no front (o backend só manda número); texto de 300 caracteres sem espaço estoura a largura (as
+mensagens vêm de tabela fixa); com gzip/brotli o teto de 8 MB vale para o corpo descomprimido (testado
+com bombas). Sem `stale` parcial (uma chamada traz todas as métricas, ou tudo ou erro).
+**Fonte Meta** (`core/funil_fonte_meta.py`, cartão "8d. Meta"): estatísticas do pixel pela Graph API
+(`GET https://graph.facebook.com/v25.0/{pixel_id}/stats?aggregation=event_total_counts&start_time=<agora-7d>&end_time=<agora>`),
+TTL 30 min, backoff 600 s, SEM `limite_dia` (a Graph tem limite próprio, tratado como `limite` + backoff), EXATAMENTE
+1 chamada HTTP por `buscar`. A versão v25.0 é constante do módulo; o `core/services/meta_capi.py` (Conversions API,
+escrita) segue na v21.0 e NÃO foi alinhado. Envs: `META_INSIGHTS_ACCESS_TOKEN` (usuário do sistema do Business Manager
+com o pixel atribuído e, provavelmente, permissão de leitura de anúncios (a exata não foi confirmada); SEPARADO do `META_PIXEL_ACCESS_TOKEN` da CAPI, que esta fonte
+nunca lê) e `META_PIXEL_ID` (só `[0-9]{1,20}`, validado ANTES de montar a URL; ID ruim vira `nao_encontrado` sem
+chamada). `faltam()` lista só NOMES, lidos na hora. O token vai SÓ no cabeçalho `Authorization: Bearer` (nunca em
+query/params: o `str()` de exceção do requests carrega a URL) e só depois de casar `[A-Za-z0-9._~+/=-]{1,4096}` (senão
+`auth` SEM chamada: aspas, prefixo "Bearer " ou espaço no meio; o token colado errado é recusado pela Meta de qualquer jeito); host fixo; redirecionamento NÃO é seguido; log só com `type(exc).__name__`, status HTTP e o
+inteiro `error.code`; `from None`. Devolve (lista fechada) `{eventos: {<evento>: int}, reconhecido: bool}` para TODOS os
+nomes de `EVENTOS` (0 se ausentes), na janela fixa de 7 dias (limite da API; o cartão ignora o seletor 7d/30d). `EVENTOS`
+= os nomes que o app dispara no pixel e na CAPI: `PageView` (snippet em `frontend/routes/shared.py`), `ViewContent`
+(/precos), `InitiateCheckout`, `CompleteRegistration`, `StartTrial`, `Purchase`, e os `trackCustom` `OnboardingComplete`
+(`comecar.js`) e `TesteClick` (`teste-piggy.js`); um teste compara a lista com o código e o front tem a mesma em
+`META_EVENTOS` (comparada em `tests/frontend/funil_meta.test.mjs`). Evento fora da lista é DESCARTADO (nome exato, caixa
+inclusa) e nunca chega ao JSON.
+ERROS: a Graph responde 400/401/403 com `{"error":{"code":N,...}}`. O corpo de erro é lido em stream com teto de 64 KB e
+dele sai SÓ o inteiro `error.code` (0..999999; mensagem, subcódigo e `fbtrace_id` nunca são guardados nem logados).
+190 `auth`; 200 e 10 `permissao_meta` (mensagem fixa: o usuário do sistema precisa ter o pixel atribuído no Business
+Manager e o token "provavelmente" a permissão de leitura de anúncios, "a permissão exata não foi confirmada": o texto
+(e o `.env.example`) têm hedge explícito, porque a permissão exata não foi confirmada); 80004, 4, 17, 32 e
+613 `limite`; 100 `nao_encontrado` (a Graph usa 100 também para pixel que o token não enxerga, então "não encontrou o
+recurso" pode ser ID errado OU pixel não atribuído ao usuário do sistema); código legível mas desconhecido,
+`indisponivel`. SEM `error.code` legível (corpo vazio, HTML, sem o campo, não inteiro): o STATUS decide: 401 `auth`,
+403 `permissao_meta`, 429 `limite` (corpo nem é lido); 400, 404, 5xx, 3xx e o resto `indisponivel`; timeout `timeout`; 200 com corpo ilegível ou
+que não é objeto JSON `resposta_invalida`. Resposta 200 lida em stream (`read1`), teto de 1 MB DESCOMPRIMIDO e PRAZO TOTAL de
+10 s (menor que o `TIMEOUT_S` de 12 s da infra; vale também para o corpo de erro); o `timeout=8` do requests é por operação.
+FORMATO NÃO CONFIRMADO: a doc diz `data` = lista de resultados (`aggregation`, `start_time`, `data` = lista de
+`{value, count}`), mas os nomes `value`/`count` não foram vistos numa resposta real. Parser tolerante: aceita (a) resultados
+com `data` aninhada e (b) entradas direto em `data`; chaves normalizadas (minúsculas, só letras e dígitos): nome =
+`value`/`event`/`eventname`, contagem = `count`/`eventcount`/`total`; soma as contagens do mesmo evento (buckets); contagem
+não numérica, negativa, booleana, >= 1e15, NaN/inf ou nome que não é texto IGNORA a entrada; a SOMA de buckets também
+para em 10**15 (`min`). `reconhecido` = true SÓ se ao menos uma entrada de evento da lista foi lida OU se `data` é uma
+lista vazia (ou só de resultados com `data` vazia: "sem disparos"). É false (+ a linha de log) para `data` ausente, null
+ou que não é lista (200 com `{}`, `{"success":false}`, `{"error":{"code":190}}`, `{"events":[...]}`), para item que não
+é objeto em qualquer nível (`[1,"x"]`, `["PageView"]`, pares `[["PageView",5]]`, `[null,5,"x"]` dentro da `data`
+interna) e para entradas sem nenhum evento da lista com forma legível (inclui o caso de a Meta só ter disparado eventos de
+fora da lista); um evento da lista lido basta para true mesmo com lixo ao lado.
+Nesse caso o cartão mostra a faixa âmbar "formato não reconhecido" e "n/d" no lugar dos zeros, e sai UMA linha de log só com
+NOMES (allowlist `[A-Za-z][A-Za-z0-9_ ]{0,39}` com no máximo 2 dígitos, senão `(nome fora do padrão)`; até 30 nomes; nunca
+valor, ID ou contagem): `[funil_meta] formato: chaves=[...]`.
+VALIDAÇÃO DA 1ª CARGA (a fazer pelo dono): abrir Events Manager > o pixel > Visão geral, janela de 7 dias, e comparar os
+disparos de `PageView`, `ViewContent`, `InitiateCheckout`, `CompleteRegistration` e `Purchase` com o cartão (os números
+são DISPAROS recebidos, navegador + servidor, sem deduplicação: podem divergir do Events Manager e do nosso banco; o do
+GA4 também). Cartão amarelo ("formato não reconhecido"): copiar do log do Railway a linha `[funil_meta] formato:` e fixar o
+parser com a forma real. Cartão vermelho: a mensagem é fixa; o log tem `[funil_meta] HTTP <status> código <N>`, que diz o
+código da Graph que caiu em `indisponivel` (ex.: código novo a mapear). `permissao_meta`/`nao_encontrado` persistentes:
+conferir no Business Manager se o usuário do sistema tem o pixel atribuído e se o token foi gerado com ele.
+Limites declarados do Meta, sem correção: `start_time` = agora - 7 dias + 1 h de folga (se a Graph ainda recusar a janela, o erro
+seria 100 e apareceria como `nao_encontrado`; conferir na 1ª carga); a permissão exata do token
+não foi confirmada; a Graph pode PAGINAR (`paging.next`) e só a 1ª página é lida (se houver mais, os números ficam
+parciais, sem aviso); token inválido/expirado volta como 190 `auth` e o backoff de 600 s vive no BANCO (depois de corrigir a
+env o cartão pode levar até 10 min para tentar de novo; `update funil_fontes_cache set falha_em = null where fonte = 'meta'`
+libera a próxima tentativa). Um payload `reconhecido:false` (ou um 0 errado) já CACHEADO continua sendo servido até o TTL
+(30 min) vencer, mesmo depois de um deploy que conserta o parser; para forçar a nova busca na hora, recue o relógio do
+cache (o `update` mantém o último dado como `stale` se a nova busca falhar): `update funil_fontes_cache set buscado_em = buscado_em - interval '1 day', falha_em = null where fonte = 'meta'`
+(um teste executa este SQL no Postgres de teste; NÃO use `delete`). O `timeout=8` do requests NÃO limita
+goteio de cabeçalho: medido, um servidor que manda 1 byte a cada 5 s prende a thread por ~60 s, e o prazo total de 10 s só
+vale dentro da leitura do corpo (`_ler`); mesmo limite do GA4, contido pelo backoff e pela marca `_EM_VOO` (no máximo 1
+thread por processo) e sem watchdog; só `PageView` etc. por NOME exato (renomear um evento no pixel exige atualizar `EVENTOS`, `META_EVENTOS` e
+o teste); `HTTP_PROXY` não-https mandaria o Bearer ao proxy em claro (em produção a URL é https).
+**Avisos para as fontes com cota (Clarity, já feito, e as demais)**: `reservar` reserva 1 por `buscar`, não por
+chamada HTTP (o `buscar` do Clarity faz EXATAMENTE 1 chamada externa); falha, timeout
 ou `ocupada` depois da reserva queimam cota sem devolução, e com `backoff_s=60` a cota diária
 pode acabar em ~8 min (o Clarity precisa de backoff de horas); TTL de 3 h × 8/dia é
 exatamente a cota, sem folga; resposta de 1.000 linhas só cabe nos limites do `_validar` (20

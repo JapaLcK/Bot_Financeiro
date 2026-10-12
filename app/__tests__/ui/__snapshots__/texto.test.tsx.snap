@@ -8,6 +8,7 @@ exports[`Texto snapshot (dois temas): claro 1`] = `
       {
         "fontFamily": "Inter-SemiBold",
         "fontSize": 20,
+        "letterSpacing": -0.4,
         "lineHeight": 26,
       },
       {
@@ -34,10 +35,11 @@ exports[`Texto snapshot (dois temas): escuro 1`] = `
       {
         "fontFamily": "Inter-SemiBold",
         "fontSize": 20,
+        "letterSpacing": -0.4,
         "lineHeight": 26,
       },
       {
-        "color": "#FF4FA0",
+        "color": "#FF5AA6",
       },
       {},
       {

@@ -64,7 +64,10 @@ def listar(cur, user_id: int, *, agora: datetime | None = None) -> dict:
         c = por_id[r["connection_id"]]
         conta = {"id": r["id"], "instituicao": c["institution_name"], "nome": r["name"],
                  "moeda": r["currency"], "conexao": estados[str(c["id"])],
-                 "sincronizado_em": c["last_sync_at"]}
+                 "sincronizado_em": c["last_sync_at"],
+                 # Só para `db/metas.py`: o response_model de `api/v2/contas.py` os descarta.
+                 "provider_account_id": r["provider_account_id"], "numero": r["numero"],
+                 "tipo_conta": r["tipo_conta"]}
         if r["connection_status"] in _TERMINAL:
             conta.update(saldo=None, no_total=False, motivos=["conexao_pausada"])
         else:

@@ -19,6 +19,7 @@ from typing import Any
 import db
 from utils_date import _tz
 
+from .. import streaming
 from ._base import Tool
 
 
@@ -104,7 +105,8 @@ def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) ->
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
                 **({"last_interest_date": r.get("last_interest_date")} if not accrue else {}),
-                **insight,
+                # no app a meta (alvo e prazo) fica; progresso e ritmo são do card metas
+                **({k: insight[k] for k in ("target_amount", "target_date")} if streaming.ativo() else insight),
             }
         )
     result = {"pockets": pockets}

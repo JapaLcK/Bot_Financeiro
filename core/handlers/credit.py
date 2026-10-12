@@ -24,7 +24,7 @@ from db import (
     get_card_by_id,
     get_card_credit_usage,
     get_card_id_by_name,
-    get_current_open_bill_id,
+    fatura_a_pagar,
     get_default_card_id,
     get_installment_group_summaries,
     get_pending_action,
@@ -38,6 +38,10 @@ from db import (
     set_card_limit,
     set_default_card,
     set_pending_action,
+    CartaoDoBanco,
+    CompraDoBanco,
+    MSG_CARTAO_DO_BANCO,
+    MSG_FATURA_DO_BANCO,
     undo_credit_transaction,
     undo_installment_group,
     update_card_reminder_settings,
@@ -136,6 +140,8 @@ def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str
             f"Conta agora: {fmt_brl(res['new_balance'])}\n"
             f"ID lançamento: #{_display_id_for(user_id, res['launch_id'])}"
         )
+    except CartaoDoBanco as e:
+        return f"🏦 {e}"
     except Exception as e:
         return f"❌ Erro ao pagar fatura: {e}"
 
@@ -236,7 +242,12 @@ def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
             if r["period_end"].month == month and (year is None or r["period_end"].year == year)
         ]
 
+    do_banco = [r for r in candidates if r["open_finance_account_id"] is not None]
+    candidates = [r for r in candidates if r["open_finance_account_id"] is None]
+
     if not candidates:
+        if do_banco:
+            return f"🏦 {MSG_FATURA_DO_BANCO}"
         if card_id is not None and month is not None:
             ref = f"{_MONTH_NAMES_PT[month - 1]}" + (f"/{year}" if year else "")
             return f"📭 Nenhuma fatura em aberto desse cartão para {ref}."
@@ -247,7 +258,8 @@ def _handle_pay_bill_command(user_id: int, text: str) -> str | None:
             return f"📭 Nenhuma fatura em aberto para {ref}."
         return "📭 Nenhuma fatura em aberto."
 
-    if len(candidates) == 1:
+    # Se o filtro tirou faturas do banco, o usuário pediu algo ambíguo: pergunta, não paga a sobrante.
+    if len(candidates) == 1 and not do_banco:
         return _execute_pay_bill(user_id, candidates[0], amount)
 
     return _ask_which_bill(user_id, candidates, amount)
@@ -1353,10 +1365,19 @@ def _card_summary(card: dict) -> str:
 
 
 def _extract_card_name_for_delete(text: str) -> str | None:
-    m = re.search(r"(?:excluir|apagar|remover|deletar)\s+cart[aã]o\s+(.+)$", text, re.IGNORECASE)
+    # Ancorada no começo: o verbo abre a frase, só precedido de até 5 palavras de cortesia/ligação (lista
+    # fechada: "não", "saber", "dizer", "posso", "já"… não estão nela, então negação, pergunta e hipótese
+    # não armam a confirmação). Marcador/emoji/número/pontuação iniciais são descartados antes (linear).
+    text = text[re.match(r"[\W\d_]*", text).end():]
+    m = re.match(
+        r"(?:(?:por|favor|pode|poderia|quero|eu|preciso|queria|gostaria|de|vc|voce|você|vamos|me|ajudar|ajuda|ok|a|agora|tá|ta"
+        r"|então|entao)[\s,]+){0,5}"
+        r"(?:excluir|exclui|exclua|apagar|apaga|apague|remover|remove|remova|deletar|deleta|delete)\s+"
+        r"(?:(?:o\s+)?meu\s+|o\s+|esse\s+|este\s+)?cart[aã]o(?:\s+de\s+cr[eé]dito)?\s+(.+)",
+        text, re.IGNORECASE | re.DOTALL)  # DOTALL: o nome cobre a mensagem toda ("nubank\nnão, pera" não vira "nubank")
     if not m:
         return None
-    return (m.group(1) or "").strip() or None
+    return (m.group(1) or "").strip(" \t\r\n.!?") or None  # sem `[\s.!?]*$` na regex: era quadrático
 
 
 def _purchase_code(tx_id: int) -> str:
@@ -1707,7 +1728,10 @@ def _resolve_delete_card(user_id: int, text: str, pending: dict) -> str | None:
         # Devolve a confirmação se o delete em cascata estourar (FK, timeout):
         # sem isso o usuário perde a pergunta e refaz "excluir cartão X".
         with restore_pending_on_error(user_id, pending, 20):
-            deleted = delete_card(user_id, int(card_id))
+            try:
+                deleted = delete_card(user_id, int(card_id))
+            except CartaoDoBanco as e:  # dentro do with: fora dele a pendência volta e o "sim" repete
+                return f"❌ {e}"
         if not deleted:
             return f"❌ Não consegui excluir o cartão **{card_name}**."
         return f"✅ Cartão **{card_name}** excluído com sucesso."
@@ -1782,6 +1806,9 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if _is_delete(answer):
             # Pede confirmação antes de excluir
             existing_name = payload.get("existing_card_name", "")
+            existing = get_card_by_id(user_id, payload["existing_card_id"]) or {}
+            if existing.get("open_finance_account_id"):
+                return f"❌ {MSG_CARTAO_DO_BANCO}\n\nDigite outro nome ou **cancelar**."
             payload["step"] = "confirm_delete_existing_card"
             set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
             return (
@@ -1873,7 +1900,10 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             # cadastro inteiro (card_name, closing_day, due_day, ask_primary),
             # e a mensagem de erro abaixo ainda diz "Tente novamente".
             with restore_pending_on_error(user_id, pending, 20):
-                deleted = delete_card(user_id, int(existing_id))
+                try:
+                    deleted = delete_card(user_id, int(existing_id))
+                except CartaoDoBanco as e:
+                    return f"❌ {e}"
             if not deleted:
                 return f"❌ Não consegui excluir o cartão **{existing_name}**. Tente novamente."
 
@@ -2056,10 +2086,14 @@ def handle(user_id: int, text: str) -> str | None:
 
     delete_card_name = _extract_card_name_for_delete(t)
     if delete_card_name:
-        card_id = get_card_id_by_name(user_id, delete_card_name)
+        # "o cartão do nubank": tenta o nome inteiro (cartão "Do Bem") e só então sem o "do/da".
+        card_id = (get_card_id_by_name(user_id, delete_card_name)
+                   or get_card_id_by_name(user_id, re.sub(r"^d[oa]\s+", "", delete_card_name, flags=re.I)))
         if not card_id:
             return f"❌ Não achei o cartão '{delete_card_name}'."
         card = get_card_by_id(user_id, card_id)
+        if card and card.get("open_finance_account_id"):
+            return f"❌ {MSG_CARTAO_DO_BANCO}"
         set_pending_action(
             user_id,
             "credit_delete_card",
@@ -2083,6 +2117,8 @@ def handle(user_id: int, text: str) -> str | None:
                     f"🗑️ Parcelamento desfeito ({_group_code(res['group_id'])}).\n"
                     f"Removido: {fmt_brl(res['removed_total'])} em {res['removed_count']} itens."
                 )
+            except CompraDoBanco as e:
+                return f"❌ {e}"
             except Exception as e:
                 # `undo_installment_group` não levanta exceção prevista: "não
                 # achei" volta como None e já foi tratado acima. Então tudo que
@@ -2109,6 +2145,8 @@ def handle(user_id: int, text: str) -> str | None:
                     f"🗑️ Compra no crédito CC{ct_id} apagada.\n"
                     f"Removido: {fmt_brl(res['removed_total'])}."
                 )
+            except CompraDoBanco as e:
+                return f"❌ {e}"
             except Exception as e:
                 # Idem: `undo_credit_transaction` devolve None pra "não achei"
                 # (tratado acima) e não levanta exceção prevista.
@@ -2584,7 +2622,8 @@ def handle(user_id: int, text: str) -> str | None:
             paid = float(bill.get("paid_amount", 0) or 0)
             due = max(0.0, total - paid)
             lines = [
-                f"💳 Fatura atual ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
+                f"💳 Fatura {'atual' if bill['period_start'] <= today_tz() <= bill['period_end'] else 'a pagar'}"
+                f" ({card['name']}) {fmt_br(bill['period_start'])} → {fmt_br(bill['period_end'])}",
                 f"Total: {fmt_brl(total)} | Pago: {fmt_brl(paid)} | Em aberto: {fmt_brl(due)}",
             ]
             # mostra uso do limite se definido
@@ -2792,25 +2831,29 @@ def handle(user_id: int, text: str) -> str | None:
         amount = float(parse_money(amount_match.group(1))) if amount_match and parse_money(amount_match.group(1)) else None
 
         try:
-            bill_id = get_current_open_bill_id(user_id, card_id, today_tz())
+            bill_id = fatura_a_pagar(user_id, card_id, today_tz())
             if not bill_id:
                 return "📭 Nenhuma fatura aberta para pagar."
 
-            res = pay_bill_amount(user_id, card_id, resolved_name, amount, bill_id=bill_id)
+            # `resolved_name` vale "padrão" quando o cartão não é nomeado.
+            nome = (get_card_by_id(user_id, card_id) or {}).get("name") or resolved_name
+            res = pay_bill_amount(user_id, card_id, nome, amount, bill_id=bill_id)
             if isinstance(res, dict) and res.get("error") == "amount_too_high":
                 return (
                     f"❌ Valor maior que o em aberto ({fmt_brl(res['due'])}).\n"
-                    f"Use: *pagar fatura {resolved_name} com saldo {fmt_brl(res['due'])}*"
+                    f"Use: *pagar fatura {nome} com saldo {fmt_brl(res['due'])}*"
                 )
             if isinstance(res, dict) and res.get("error") == "invalid_amount":
                 return "❌ Valor inválido."
             if not res:
                 return "📭 Nada para pagar."
             return (
-                f"✅ Pagamento da fatura **{resolved_name}** realizado!\n"
+                f"✅ Pagamento da fatura **{_format_bill_label({'card_name': nome, 'period_end': res['period_end']})}** realizado!\n"
                 f"Valor pago: {fmt_brl(res['paid'])}\n"
                 f"Saldo da conta: {fmt_brl(res['new_balance'])}"
             )
+        except CartaoDoBanco as e:
+            return f"🏦 {e}"
         except Exception as e:
             return f"❌ Erro ao pagar fatura: {e}"
 

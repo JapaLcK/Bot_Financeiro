@@ -1741,7 +1741,7 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
             )
             raise HTTPException(status_code=401, detail="Credenciais inválidas.")
 
-        if not _check_admin_password(password):
+        if not await asyncio.to_thread(_check_admin_password, password):
             await log_system_event(
                 "warning",
                 "admin_login_failed",

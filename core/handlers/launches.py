@@ -1065,6 +1065,27 @@ def _maybe_recurring_offer(
         return None
 
 
+# Regra determinística confiante o bastante para vencer a categoria do LLM
+# (aqui) e para o `core/services/wa_ia_primeiro.py` dar a categoria por certa.
+MOTIVOS_CONFIANTES = frozenset({"user_rule", "user_category", "ticker_match", "local_rule"})
+
+
+def resolver_categoria_da_ia(user_id: int, categoria: str, nota_clean: str) -> tuple[str, str]:
+    """(categoria, motivo) que o `add_from_entities` usa para uma categoria que
+    veio do LLM: a regra local confiante que a contradiz vence. Pura (só lê);
+    também chamada pela confirmação do `add_launch`, para o resumo mostrar a
+    categoria que o "sim" vai gravar."""
+    categoria_ai = infer_category(user_id, "", categoria).category
+    local = infer_category(user_id, nota_clean, None, allow_ai=False)
+    if local.reason in MOTIVOS_CONFIANTES and local.category != categoria_ai:
+        logger.info(
+            "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
+            categoria_ai, local.category, local.reason, nota_clean,
+        )
+        return local.category, local.reason
+    return categoria_ai, "ai"
+
+
 def add_from_entities(
     user_id: int,
     *,
@@ -1131,17 +1152,8 @@ def add_from_entities(
             # pra "alimentação"). Faz cross-check com as regras determinísticas:
             # um match confiante de regra do usuário / ticker / LOCAL_RULES que
             # CONTRADIZ a IA vence. allow_ai=False pra não gastar 2ª chamada de LLM.
-            categoria_ai = infer_category(user_id, "", categoria).category
-            local = infer_category(user_id, nota_clean, None, allow_ai=False)
-            if local.reason in {"user_rule", "user_category", "ticker_match", "local_rule"} and local.category != categoria_ai:
-                logger.info(
-                    "categoria da IA (%s) sobreposta por regra local (%s via %s) — nota=%r",
-                    categoria_ai, local.category, local.reason, nota_clean,
-                )
-                categoria_final = local.category
-                reason_final = local.reason
-            else:
-                categoria_final = categoria_ai
+            categoria_final, reason_final = resolver_categoria_da_ia(
+                user_id, categoria, nota_clean)
         else:
             categoria_final = infer_category(user_id, "", categoria).category
     else:

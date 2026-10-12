@@ -33,7 +33,7 @@
   font-weight: 500;
   transition: color var(--t-fast) ease, background-color var(--t-fast) ease;
 }
-/* "Ajuda" (abre o guia, parts/Guia.tsx): botão com a cara dos links. */
+/* "Ajuda" (abre o guia, parts/Guia.tsx) e "Menu" da barra de baixo: botão com a cara dos links. */
 .rail-list button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
 .rail-list i { font-size: 17px; }
 .rail-list a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
@@ -41,8 +41,7 @@
 @media (hover: hover) and (pointer: fine) {
   .rail-list a:hover, .rail-list button:hover { color: var(--ink); background: var(--plane-1); }
 }
-/* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira
-   (a folga da barra de baixo é medida nele). O trilho sobe acima do conteúdo da página, que
+/* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira. O trilho sobe acima do conteúdo da página, que
    tem `position: relative` com z-index: senão o menu, que abre para a direita, fica embaixo. */
 .rail { z-index: 21; }
 .ajuda { position: relative; display: grid; }
@@ -55,14 +54,14 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--rule);
 }
 .rail .ajuda-menu { left: calc(100% + 8px); bottom: 0; }
-.rail-list .ajuda-menu button, .tabbar .ajuda-menu button {
+.rail-list .ajuda-menu button {
   display: flex; justify-content: flex-start; align-items: center;
   width: 100%; height: 40px; padding: 0 12px;
   border-radius: 8px;
   font-size: 14px; font-weight: 500; color: var(--ink);
 }
 @media (hover: hover) and (pointer: fine) {
-  .rail-list .ajuda-menu button:hover, .tabbar .ajuda-menu button:hover { background: var(--plane-3); }
+  .rail-list .ajuda-menu button:hover { background: var(--plane-3); }
 }
 
 .rail-foot { margin-top: auto; padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
@@ -146,7 +145,7 @@
 }
 
 @media (max-width: 760px) {
-  :root { --gutter: 16px; }
+  :root { --gutter: 16px; --tabbar-h: calc(68px + env(safe-area-inset-bottom)); } /* a barra inteira (borda, padding e botões); o Fechar da folha do Menu usa o mesmo valor */
   html { scroll-padding-top: 64px; }
   .shell { grid-template-columns: minmax(0, 1fr); }
   .rail { display: none; }
@@ -165,7 +164,7 @@
     z-index: 30;
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    min-height: var(--tabbar-h); padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); /* cresce com o texto ampliado; o Fechar do Menu mede a altura real ao abrir */
     background: rgba(12, 12, 15, 0.88);
     backdrop-filter: saturate(140%) blur(16px);
     -webkit-backdrop-filter: saturate(140%) blur(16px);
@@ -178,24 +177,53 @@
     color: var(--ink-3);
   }
   .tabbar i { font-size: 21px; }
-  .tabbar a[aria-current="page"] { color: var(--ink); }
-  .tabbar a[aria-current="page"] i { color: var(--pink); }
+  /* "Menu" leva aria-current="true" quando a página atual está nele (não é um link para ela). */
+  .tabbar [aria-current] { color: var(--ink); }
+  .tabbar [aria-current] i { color: var(--pink); }
   /* O Piggy no meio: a logo do PigBank no lugar do ícone. Como a logo já é rosa, fora da
      página ela fica cinza como os outros ícones, e só ganha a cor quando é a atual. */
   .tabbar img { margin-top: -3px; filter: grayscale(1) brightness(1.35); opacity: 0.7; }
   .tabbar a[aria-current="page"] img { filter: none; opacity: 1; }
-  .tabbar.tabbar-ajuda { grid-template-columns: repeat(6, 1fr); } /* /painel: + Ajuda; o protótipo não tem guia */
-  .tabbar .ajuda-menu { bottom: calc(100% + 8px); right: 0; }
 }
 @media (max-width: 400px) { .topbar .btn-primary i { display: none; } }
-/* Seis abas não deixam folga abaixo de 360px (o CI no Linux mede o texto mais largo que o
-   macOS): ali a Ajuda sai da barra e as cinco abas voltam à largura do protótipo. O guia
-   continua em Ferramentas ("Guia do painel", pages.tsx) e no Cmd-K. Folga medida em
-   tests/frontend/dashboard_v2_guia_tela.test.mjs. */
-@media (max-width: 359.98px) {
-  .tabbar.tabbar-ajuda { grid-template-columns: repeat(5, 1fr); }
-  .tabbar .ajuda { display: none; }
+/* O Menu da barra de baixo (parts/MenuTelas.tsx): folha presa embaixo, como o Cmd-K sem animação.
+   Sem `inset` (Safari 14.0); itens em grid, não flex com gap (flexgap.css). */
+.menu-telas {
+  top: auto; right: 0; bottom: 0; left: 0;
+  width: 100%; max-width: none; margin: 0; padding: 0;
+  max-height: calc(100vh - 48px); /* Safari < 15.4 não tem dvh */
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border: 0; border-radius: 16px 16px 0 0;
+  background: var(--plane-2); color: var(--ink);
+  box-shadow: 0 -1px 0 var(--rule-strong), 0 -20px 60px -20px rgba(0, 0, 0, 0.85);
 }
+.menu-telas::backdrop { background: rgba(0, 0, 0, 0.55); }
+.menu-telas:not([open]) { display: none; }
+.menu-telas-fb { position: fixed; z-index: 91; }
+.menu-telas-body { padding: 8px 8px 0; }
+.menu-telas h2 { margin: 0; padding: 8px 12px 0; font-size: 17px; }
+.menu-telas [role="group"] { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.menu-telas-sec { margin: 0; padding: 12px 12px 4px; font-size: 11.5px; color: var(--ink-3); }
+/* Fechar: a faixa toda de baixo, até a borda (área segura inclusa), presa ao rodapé da folha — com a altura da
+   barra inteira, não só do botão Menu: o 2º toque de um duplo toque pode cair em qualquer ponto dele. */
+.menu-telas-fechar {
+  position: sticky; bottom: 0; display: block; width: calc(100% + 16px); margin: 8px -8px 0;
+  min-height: var(--tabbar-h); padding: 0 0 env(safe-area-inset-bottom);
+  border: 0; border-top: 1px solid var(--rule); background: var(--plane-2);
+  font: inherit; font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer;
+}
+.menu-telas ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.menu-telas li a, .menu-telas li button {
+  display: grid; grid-template-columns: 22px 1fr; align-items: center; column-gap: 12px;
+  width: 100%; min-height: 48px; padding: 0 12px;
+  border: 0; border-radius: 10px; background: none;
+  font: inherit; font-size: 15px; font-weight: 500; text-align: left;
+  color: var(--ink-2); cursor: pointer;
+}
+.menu-telas li i { font-size: 20px; }
+.menu-telas li a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
+.menu-telas li a[aria-current="page"] i { color: var(--pink); }
 /* Mês, busca e Ferramentas lado a lado não deixam folga: o CI no Linux mede o texto mais
    largo que o macOS e estourava em 320 e em 361px. Até 420px o ano sai do título; até
    360px a busca sai também. */
