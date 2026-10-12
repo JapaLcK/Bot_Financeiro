@@ -11,7 +11,8 @@ desconecta. O runner só o consulta em pontos seguros:
   - (a) topo de cada volta do loop;
   - (b) cada chunk do stream;
   - (c) a resposta da OpenAI chegou, antes de gravar a rodada;
-  - depois das tools da rodada, antes de devolver o `terminal_msg`.
+  - depois das tools da rodada, antes de devolver o `terminal_msg`;
+  - (d) antes da chamada dos chips (`executar`, já fora da trava do turno).
 NUNCA entre as tools de uma rodada: `tool_calls` órfão no histórico faz a OpenAI
 recusar todo turno futuro do usuário, inclusive no WhatsApp.
 """
@@ -116,14 +117,18 @@ def executar(user_id: int, texto: str, *, monthly_limit: int, emissor: Callable[
     """Roda UM turno do chat com emissor e cancelamento. Síncrona: o endpoint a
     chama em `to_thread` com `contextvars.copy_context()`. Devolve o `Resultado`
     do runner; o `fim` (usage, chips) é montado pelo endpoint."""
+    from . import chips
     from .runner import chat_detalhado
 
     t1, t2 = EMISSOR.set(emissor), CANCELA.set(cancela)
     try:
-        return chat_detalhado(user_id, texto, monthly_limit=monthly_limit, platform="dashboard")
+        r = chat_detalhado(user_id, texto, monthly_limit=monthly_limit, platform="dashboard")
     finally:
         CANCELA.reset(t2)
         EMISSOR.reset(t1)
+    if r.sugerivel and not cancela.is_set():  # (d)
+        r.chips = chips.sugerir(texto, r.reply, r.cards)
+    return r
 
 
 __all__ = ["Interrompido", "ativo", "cancelado", "completar", "emitir", "executar", "passo"]

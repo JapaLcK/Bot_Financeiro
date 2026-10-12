@@ -76,12 +76,22 @@ def _chunks(r):
     return out
 
 
-def openai_falso(monkeypatch, *rodadas, pausa=0):
-    """Cada `create` consome uma rodada. Devolve `.creates` (kwargs) e `.fluxos`."""
-    fila = list(rodadas)
-    reg = SimpleNamespace(creates=[], fluxos=[])
+def openai_falso(monkeypatch, *rodadas, pausa=0, chips=()):
+    """Cada `create` consome uma rodada. Devolve `.creates` (kwargs), `.fluxos`,
+    `.clientes` (kwargs do construtor) e `.chips`: a chamada com `response_format`
+    (os chips) vai para a fila `chips` (cada item: JSON str, ou exceção a levantar)
+    e não conta em `.creates`."""
+    fila, fila_chips = list(rodadas), list(chips)
+    reg = SimpleNamespace(creates=[], fluxos=[], clientes=[], chips=[])
 
     def create(**kw):
+        if "response_format" in kw:
+            reg.chips.append(kw)
+            assert fila_chips, "chips chamados além do roteiro"
+            c = fila_chips.pop(0)
+            if isinstance(c, BaseException):
+                raise c
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=c))])
         reg.creates.append(kw)
         _pares(kw["messages"])
         assert fila, "IA falsa chamada além do roteiro"
@@ -101,7 +111,7 @@ def openai_falso(monkeypatch, *rodadas, pausa=0):
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
 
     cliente = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    monkeypatch.setattr(openai, "OpenAI", lambda **kw: cliente)
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: (reg.clientes.append(kw), cliente)[1])
     monkeypatch.setenv("OPENAI_API_KEY", "test-only")
     return reg
 
