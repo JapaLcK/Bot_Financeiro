@@ -2,6 +2,7 @@
 let mockEsquema = "dark";
 jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => mockEsquema }));
 // O ícone é um stub sem identidade no Jest; aqui ele expõe o nome (`icone-ArrowDown`) para provar a seta do chip.
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- a fábrica do jest.mock não pode importar módulos de fora (hoisting).
 jest.mock("@/ui/componentes/Icone", () => ({ Icone: ({ nome }: { nome: string }) => require("react").createElement(require("react-native").View, { testID: `icone-${nome}` }) }));
 // "Hoje" fixo: o fixture é de 2026-10 (dias 1 a 6) e o CI roda em qualquer data.
 let mockHoje = "2026-10-06";
