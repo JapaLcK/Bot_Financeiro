@@ -1,9 +1,12 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { Animated, View } from "react-native";
+import { createContext, useContext, useEffect, useId, useRef, useState } from "react";
+import { Animated, type GestureResponderEvent, StyleSheet, View } from "react-native";
 import Svg, { Defs, Line, LinearGradient, Path, Stop } from "react-native-svg";
 
+import { partes } from "@/ui/dinheiro";
+import { selecao } from "@/ui/haptics";
 import { facilitador, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
+import { raio, texto as escala } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
 
@@ -20,7 +23,17 @@ export interface CurvaAcumuladaProps {
 }
 
 const ALTURA = 130, MARGEM_X = 12, TOPO = 8, BASE = 8, RAIO_PONTO = 4, COLUNA_Y = 44;
+const SEGURAR_MS = 250, FOLGA_DEDO = 10, BOLHA_W = 124, BOLHA_W_COM_ANTERIOR = 148, ALTURA_LINHA = 16, FOLGA_BOLHA = 10;
 const DESENHO_MS = 500, PULSO_MS = 2400; // duração própria do gráfico: `duracoes` do app é de feedback/transição (≤ 400)
+/** Aviso do gráfico ao card que o contém: `current = true` quando a bolha abre (o toque que segue NÃO é um toque no card). Quem zera é o card. */
+export const SegurouContext = createContext<{ current: boolean } | null>(null);
+/**
+ * A bolha vai ACIMA do ponto; se não cabe dentro do gráfico (ponto perto do topo, ela cobriria a linha "vs R$ ... mês anterior"), vai ABAIXO.
+ * Usa `lineHeight` fixo de 16 (a `legenda`): com fonte ampliada a bolha cresce e a escolha pode errar; limite aceito.
+ */
+export function ladoDaBolha(cy: number, linhas: number) {
+  return cy >= linhas * ALTURA_LINHA + 8 + FOLGA_BOLHA ? "acima" : "abaixo"; // 8 = padding 3+3 e borda 1+1
+}
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 /** Degraus "redondos" (1, 2, 3, 5 × 10^n reais) com no máximo 4 intervalos; em centavos, de 0 até o topo, que cobre `maximo`. */
@@ -38,18 +51,37 @@ export function rotuloCompacto(centavos: number) {
   return Math.round(reais) < 1000 ? `R$ ${Math.round(reais)}` : `R$ ${String(Math.round(reais / 100) / 10).replace(".", ",")}k`;
 }
 
+/** Índice do dia mais próximo de `x` (pt dentro do plot, mesma régua do desenho), preso a [0, `limite`]: nunca depois de "hoje". */
+export function indiceDoDia(x: number, largura: number, diasNoMes: number, limite: number) {
+  const util = largura - 2 * MARGEM_X;
+  if (util <= 0 || diasNoMes < 2) return 0;
+  return Math.min(Math.max(Math.round(((x - MARGEM_X) / util) * (diasNoMes - 1)), 0), limite);
+}
+const reais = (c: number) => { const p = partes(c); return p ? `R$ ${p.inteiro},${p.centavos}` : "—"; };
+/** Textos da bolha: o valor é o `pontos[i]` desenhado (nunca recalculado); a 2ª linha ("mês passado R$ ...") só com a série do mês passado, no mesmo `i` (a série já vem preenchida até o fim do mês). */
+export function conteudoBolha(i: number, pontos: number[], anterior: number[] | null) {
+  return { dia: `dia ${i + 1}`, valor: reais(pontos[i]!), anterior: anterior && `mês passado ${reais(anterior[Math.min(i, anterior.length - 1)]!)}` };
+}
+
 /**
  * Curva de acumulado (identidade do /painel): linha de 2pt na cor do tom, área em degradê vertical da mesma cor, e, quando há,
  * o mês passado só em linha tracejada cinza no MESMO eixo Y (o máximo das duas séries). Eixo Y em degraus redondos com grade
  * bem fraca, eixo X com os dias 1, 15, 25 e o último, legenda embaixo e, só em "hoje", ponto com anel pulsante (escala 1 a 3,2 em 2,4s).
  * A linha se desenha da esquerda para a direita em 500ms; com "reduzir movimento" a curva já nasce pronta e o anel nem existe.
- * Decorativa: tudo, inclusive os rótulos, some do VoiceOver; quem usa o gráfico lê os números e o chip ao lado.
+ * Segurar o dedo (250ms) no gráfico abre a bolha do dia (valor deste mês e, se houver, do mês passado) e arrastar troca o dia; soltar fecha.
+ * O gesto usa só os eventos brutos de toque (`onTouch*`), que chegam ao View onde o dedo pousou MESMO com o card (`Pressable`) sendo o responder.
+ * Não dá para disputar o responder: com um ancestral já responder, o ResponderEventPlugin só negocia a troca com os ANTEPASSADOS dele,
+ * nunca com um filho (`onMoveShouldSetResponderCapture`/`onResponderMove` do filho não rodam). Por isso o toque curto segue para o card
+ * (navega) e, ao abrir a bolha, o gráfico marca `SegurouContext` para o card (ver `Bloco`) não navegar ao soltar.
+ * Decorativa: tudo, inclusive os rótulos e a bolha, some do VoiceOver; quem usa o gráfico lê os números e o chip ao lado.
  */
 export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje, tom = "ink" }: CurvaAcumuladaProps) {
   const { cores } = useTema();
   const idArea = `area${useId().replace(/\W/g, "")}`; // um id por instância: várias curvas na tela não podem compartilhar o degradê
   const reduzir = useReduzirMovimento();
   const [largura, setLargura] = useState(0);
+  const segurou = useContext(SegurouContext), [sel, setSel] = useState<number | null>(null);
+  const ativo = useRef<number | null>(null), timer = useRef<ReturnType<typeof setTimeout>>(undefined), origem = useRef({ x: 0, y: 0 });
   const desenho = useRef(new Animated.Value(0)).current;
   const pulso = useRef(new Animated.Value(0)).current;
 
@@ -60,6 +92,8 @@ export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje,
     a.start();
     return () => a.stop();
   }, [reduzir, desenho]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   useEffect(() => {
     if (reduzir || indiceHoje === null) return;
@@ -81,6 +115,19 @@ export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje,
   const hoje = indiceHoje === null ? null : { cx: x(indiceHoje), cy: y(pontos[indiceHoje]!) };
   const cor = cores[tom];
   const ponto = { position: "absolute", width: 2 * RAIO_PONTO, height: 2 * RAIO_PONTO, borderRadius: RAIO_PONTO, backgroundColor: cor } as const;
+  const limite = indiceHoje ?? pontos.length - 1;
+  const escolher = (px: number) => { if (segurou) segurou.current = true; const i = indiceDoDia(px, largura, diasNoMes, limite); if (i !== ativo.current) { ativo.current = i; selecao(); setSel(i); } };
+  const fechar = () => { clearTimeout(timer.current); ativo.current = null; setSel(null); };
+  const gesto = {
+    onTouchStart: (e: GestureResponderEvent) => { const { locationX, pageX, pageY } = e.nativeEvent; origem.current = { x: pageX, y: pageY }; clearTimeout(timer.current); timer.current = setTimeout(() => escolher(locationX), SEGURAR_MS); },
+    onTouchMove: (e: GestureResponderEvent) => {
+      const { locationX, pageX, pageY } = e.nativeEvent; // `locationX` é do View onde o dedo pousou (este, sem filhos), também nas moves
+      if (ativo.current !== null) escolher(locationX);
+      else if (Math.hypot(pageX - origem.current.x, pageY - origem.current.y) > FOLGA_DEDO) clearTimeout(timer.current); // moveu antes da hora: é rolagem, não segurar
+    },
+    onTouchEnd: fechar, onTouchCancel: fechar,
+  };
+  const bolha = sel === null || sel >= pontos.length ? null : { cx: x(sel), cy: y(pontos[sel]!), w: serieAnterior ? BOLHA_W_COM_ANTERIOR : BOLHA_W, lado: ladoDaBolha(y(pontos[sel]!), serieAnterior ? 2 : 1), ...conteudoBolha(sel, pontos, serieAnterior) };
   const dias = [...new Set([1, 15, 25, diasNoMes])].filter((n) => n <= diasNoMes);
   const legenda = [{ rotulo: "Este mês", tracejado: false }, ...(serieAnterior ? [{ rotulo: "Mês passado", tracejado: true }] : [])];
 
@@ -107,6 +154,17 @@ export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje,
                     <View testID="ponto-hoje-centro" style={[ponto, { left: 0, top: 0 }]} />
                   </Animated.View>
                 )}
+                {bolha && (
+                  <>
+                    <View pointerEvents="none" testID="scrub-linha" style={{ position: "absolute", left: bolha.cx - 0.5, top: TOPO, width: 1, height: ALTURA - TOPO - BASE, backgroundColor: cores.inkFaint }} />
+                    <View pointerEvents="none" testID="scrub-ponto" style={[ponto, { left: bolha.cx - RAIO_PONTO, top: bolha.cy - RAIO_PONTO }]} />
+                    <View pointerEvents="none" testID="curva-bolha" style={{ position: "absolute", width: bolha.w, left: Math.min(Math.max(bolha.cx - bolha.w / 2, 0), Math.max(0, largura - bolha.w)), ...(bolha.lado === "acima" ? { bottom: ALTURA - bolha.cy + FOLGA_BOLHA } : { top: bolha.cy + FOLGA_BOLHA }), paddingHorizontal: 6, paddingVertical: 3, borderRadius: raio.chip, borderWidth: 1, borderColor: cores.border, backgroundColor: cores.surfaceRaised, shadowColor: cores.shadow, shadowOpacity: 0.15, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
+                      <Texto variante="legenda" tom="inkMuted" numerico numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{bolha.dia} · <Texto variante="legenda" numerico style={{ fontFamily: escala.secao.fontFamily }}>{bolha.valor}</Texto></Texto>
+                      {bolha.anterior && <Texto variante="legenda" tom="inkMuted" numerico numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{bolha.anterior}</Texto>}
+                    </View>
+                  </>
+                )}
+                <View testID="curva-scrub" {...gesto} style={StyleSheet.absoluteFill} />
               </>
             )}
           </View>
