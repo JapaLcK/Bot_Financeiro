@@ -544,6 +544,9 @@ sair de circulação):
   (login CSRF com código da conta do atacante); a mitigação é do lado do app (PR-3).
 - Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
   pressuposto do login CSRF por state, não uma regressão da PKCE.
+- A PKCE não cobre um fluxo iniciado pelo próprio sequestrador do scheme no aparelho (ele
+  abre `/auth/google/start` e usa o próprio par verifier/challenge); a defesa estrutural
+  seria App Links https no Android no lugar do scheme customizado, follow-up da #604.
 
 Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
 devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar

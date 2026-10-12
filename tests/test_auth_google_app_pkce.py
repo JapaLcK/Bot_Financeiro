@@ -388,6 +388,19 @@ def test_t3_cookie_invalido_no_callback_nat_falha_fechado(monkeypatch, ruim):
         assert cur.fetchone()["n"] == 0
 
 
+def test_t3c_cookie_ausente_no_callback_nat_gera_codigo_sem_challenge(monkeypatch):
+    """LIMITE CONHECIDO da transição (docs/CLAUDE.md, "Limites conhecidos"): se o
+    cookie do challenge se perde entre o start e o callback, o código nasce SEM
+    challenge e a troca sem verifier entra, ou seja, a PKCE cai em silêncio.
+    Quem "consertar" isso (exigir challenge com cookie ausente) precisa antes
+    medir o impacto no app iOS já instalado, que ainda não manda PKCE."""
+    uid, email = _conta()
+    cb = _callback_com_cookie(monkeypatch, email, 2, None)
+    code = parse_qs(urlparse(cb.headers["location"]).query)["code"][0]
+    assert _challenge_do_codigo(code) is None
+    assert _troca(code).status_code == 200
+
+
 def test_t3a_cookie_invalido_vence_o_error_do_google(monkeypatch):
     """A checagem vem ANTES do `if error`: `access_denied` com cookie ruim é
     `falha`, não `cancelado`."""
