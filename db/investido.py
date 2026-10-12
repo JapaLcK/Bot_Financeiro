@@ -52,6 +52,12 @@ def tipo_da_posicao(inv_type: str | None, subtype: str | None) -> str:
     return {"MUTUAL_FUND": "fundos", "ETF": "etf"}.get(t, "outros")
 
 
+def q_posicao(p) -> Decimal:
+    """O valor da posição na soma, em centavos (saldo não finito soma 0). A regra do total de hoje e
+    a do histórico do ritmo (`db/metas_ritmo.py`): uma só."""
+    return p["balance"].quantize(CENTAVO) if finito(p["balance"]) else Decimal("0.00")
+
+
 def _ordem(motivos: set, lista=MOTIVOS) -> list[str]:
     return [m for m in lista if m in motivos]
 
@@ -75,7 +81,8 @@ def _partes(acc: dict, chave: str, rotulo, *, zeradas: bool = False, ordem=MOTIV
 
 def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool = False) -> dict:
     """`com_zero` (só `db/metas.py`) acrescenta `por_banco_com_zero`: `por_banco` mais o banco lido
-    que resgatou tudo, em R$ 0. Sem ele o retorno é o de sempre."""
+    que resgatou tudo, em R$ 0 (e `com_posicao`, `bancos_com_posicao`, `conexoes_por_banco`). Sem ele o
+    retorno é o de sempre."""
     conexoes, estados = ler_conexoes(cur, user_id)
     por_id = {c["id"]: c for c in conexoes}
     vivas = [c for c in conexoes if (c["status"] or "").upper() not in _TERMINAL]
@@ -95,7 +102,7 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
                                     ("moeda_presumida", not p["currency_code"]),
                                     ("conta_fora_do_ultimo_sync", fora_do_sync(p, ultima))) if sim}
         topo |= motivos
-        q = p["balance"].quantize(CENTAVO) if finito(p["balance"]) else Decimal("0.00")
+        q = q_posicao(p)
         total += q
         for acc, k in ((por_tipo, tipo_da_posicao(p["type"], p["subtype"])),
                        (por_banco, c["institution_name"] or SEM_NOME)):
@@ -128,7 +135,8 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
         pausados = {k: (Decimal("0.00"), _motivos_fora(f)) for k, f in fora_b.items() if _motivos_fora(f)}
         return {**vazio, "por_banco_com_zero": _partes(pausados, "banco", lambda k: {}, zeradas=True,
                                                         ordem=MOTIVOS_BANCO),
-                "com_posicao": False, "bancos_com_posicao": set()}
+                "com_posicao": False, "bancos_com_posicao": set(),
+                "conexoes_por_banco": {}}
     if total == 0 and "saldo_ausente" in topo:
         total = None  # soma 0 com um saldo desconhecido não é R$ 0: o critério da parte `null`
     dados = {
@@ -156,6 +164,13 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
         # A resgatada de conexão viva é R$ 0 conhecido, não dinheiro que sumiu: conta como dentro.
         dados["com_posicao"] = bool(posicoes) or bool(fora["resgatada"])
         dados["bancos_com_posicao"] = set(por_banco) | resgatados
+        # As conexões VIVAS com alguma posição VENCEDORA (`linhas`), por banco: quem compõe a fonte hoje,
+        # e o que o ritmo (`db/metas_ritmo.py`) exige com foto no dia-base. Conexão que só perde
+        # identidades para outra mais nova não entra; as fotos dela valem pela identidade, não por ela.
+        dados["conexoes_por_banco"] = {}
+        for r in linhas:
+            if r["connection_status"] not in _TERMINAL:
+                dados["conexoes_por_banco"].setdefault(nome(r["connection_id"]), set()).add(r["connection_id"])
     return dados
 
 

@@ -32,6 +32,13 @@ class FonteSaida(BaseModel):
     banco: str | None
 
 
+class Ritmo(BaseModel):
+    valor: Decimal | None  # R$/mês, pode ser negativo; `null` sem histórico suficiente
+    dias_de_historico: int | None
+    parcial: bool  # há número, com menos de 90 dias de histórico
+    motivos: list[Literal[metas.MOTIVOS_RITMO]]
+
+
 class Meta(BaseModel):
     id: int
     nome: str
@@ -44,6 +51,8 @@ class Meta(BaseModel):
     percentual: int | None
     por_mes: Decimal | None
     prazo_passou: bool
+    ritmo: Ritmo
+    chega_em: str | None  # AAAA-MM
     motivos: list[Literal[metas.MOTIVOS]]
     fonte: FonteSaida
 

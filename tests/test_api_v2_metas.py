@@ -736,7 +736,8 @@ def test_custo_zero_e_custo_desconhecido_sem_dividir_por_zero():
     l = {"id": 1, "nome": "R", "tipo": "reserva", "meses": 6, "alvo": None, "data_alvo": None,
          "fonte_tipo": "investido", "fonte_rotulo": None, "fonte_ref": None, "fonte_banco": None}
     inv = {"total": D(500), "motivos": [], "por_banco_com_zero": []}
-    m = dbmetas._meta(l, inv, None, {"valor": D(0), "recorrencias": 1, "motivos": []}, date(2026, 10, 11))
+    m = dbmetas._meta(l, inv, None, {"valor": D(0), "recorrencias": 1, "motivos": []}, date(2026, 10, 11),
+                    lambda *a: (None, None, set()))  # o ritmo tem os testes dele
     assert (m["alvo"], m["falta"], m["percentual"]) == (None, None, None)
     assert m["atual"] == 500 and "custo_desconhecido" in m["motivos"]
 
