@@ -118,6 +118,25 @@ describe("ritmoDoMes", () => {
     expect(r.atual.indiceHoje).toBeNull();
     expect(r).toMatchObject({ gasto: 600, base: 3500 });
   });
+  it("mês fechado sem lançamento perto do fim: a série deste mês vai até o último dia (repete o total), gasto e base não mudam", () => {
+    const r = ritmo([dia("2026-10-01", 100), dia("2026-10-10", 200)], ANT, "2026-11-15")!;
+    expect(r.atual.pontos).toHaveLength(31);
+    expect(r.atual.pontos.slice(9)).toEqual(Array(22).fill(300)); // dias 10–31
+    expect(r.atual.indiceHoje).toBeNull();
+    expect(r).toMatchObject({ gasto: 300, base: 3500 });
+  });
+  it("mês fechado com lançamento no último dia: série igual à de antes", () => {
+    const r = ritmo([dia("2026-10-01", 100), dia("2026-10-31", 200)], ANT, "2026-11-15")!;
+    expect(r.atual.pontos).toHaveLength(31);
+    expect(r.atual.pontos[29]).toBe(100);
+    expect(r.atual.pontos[30]).toBe(300);
+  });
+  it("mês corrente: a série vai só até hoje (não estende ao futuro)", () => {
+    const r = ritmo(ATUAL, ANT, "2026-10-10")!;
+    expect(r.atual.pontos).toHaveLength(10);
+    expect(r.atual.indiceHoje).toBe(9);
+    expect(ritmo(ATUAL, ANT, "2026-10-03")!.atual.pontos).toHaveLength(3);
+  });
   // Mês fechado: compara até o ÚLTIMO DIA DO MÊS SELECIONADO (o gráfico corta o mês passado aí); `fecha` = mês selecionado × anterior.
   const fecha = (mes: string, atual: ReturnType<typeof dia>[], mesAnt: string, ant: ReturnType<typeof dia>[]) => {
     const c = caso(mes, atual, { resumo: { anterior: { mes: mesAnt, entrou: 0, saiu: soma(ant) } } });

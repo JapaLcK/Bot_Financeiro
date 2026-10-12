@@ -56,6 +56,7 @@ export function pontosAcumulados(d: Dados["resumo"], m: Dados["detalhes"], hoje:
 }
 
 export interface Ritmo {
+  /** Este mês: vai até hoje no mês corrente; em mês fechado, até o último dia do mês (repete o último valor), como o `anterior`. */
   atual: Acumulado;
   /** Mês passado inteiro (acumulado completo, repetindo o último valor até o fim do mês); `null` sem curva válida do mês passado. */
   anterior: Acumulado | null;
@@ -73,10 +74,12 @@ export interface Ritmo {
  * Dia de comparação: o de hoje no mês corrente; em mês fechado, o último dia do mês SELECIONADO (o gráfico corta o mês passado aí). Mês passado mais curto cai no seu último dia.
  */
 export function ritmoDoMes(d: Dados["resumo"], m: Dados["detalhes"], mAnt: Dados["detalhes"] | null, hoje: string): Ritmo | null {
-  const atual = pontosAcumulados(d, m, hoje);
-  if (!atual) return null;
+  const a = pontosAcumulados(d, m, hoje);
+  if (!a) return null;
+  const ate = (p: number[], n: number) => Array.from({ length: n }, (_, i) => p[Math.min(i, p.length - 1)]!); // repete o último valor até o dia n
+  const atual = a.indiceHoje === null ? { ...a, pontos: ate(a.pontos, a.diasNoMes) } : a;
   const ant = d.anterior && mAnt ? pontosAcumulados({ ...d, mes: d.anterior.mes, saiu: d.anterior.saiu, anterior: null }, mAnt, hoje) : null;
-  const anterior = ant && { ...ant, pontos: Array.from({ length: ant.diasNoMes }, (_, i) => ant.pontos[Math.min(i, ant.pontos.length - 1)]!) };
+  const anterior = ant && { ...ant, pontos: ate(ant.pontos, ant.diasNoMes) };
   const base = anterior && anterior.pontos[Math.min(atual.indiceHoje ?? atual.diasNoMes - 1, anterior.pontos.length - 1)]!;
   return { atual, anterior, gasto: atual.pontos.at(-1)!, base };
 }
