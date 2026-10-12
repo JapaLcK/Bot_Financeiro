@@ -17,7 +17,7 @@ from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
 import psycopg.errors
 
-from . import contas_hoje, investido
+from . import contas_hoje, investido, metas_ritmo
 from .bank_movements import _lock_user
 from .connection import get_conn
 
@@ -28,6 +28,9 @@ MOTIVOS_CUSTO = ("sem_banco_conectado", "sem_recorrencias", "recorrencias_banco_
 MOTIVOS = tuple(dict.fromkeys(
     (*investido.MOTIVOS, *contas_hoje.MOTIVOS_CONTA, "fonte_indisponivel", "custo_desconhecido",
      "plano_sem_investimentos", "plano_sem_custo_mensal")))
+# O ritmo é lido antes de os motivos do alvo da reserva entrarem: esses dois ele nunca emite.
+MOTIVOS_RITMO = (*(m for m in MOTIVOS if m not in ("custo_desconhecido", "plano_sem_custo_mensal")),
+                 *metas_ritmo.MOTIVOS_RITMO)
 # Dinheiro que ficou FORA da soma (`outra_moeda`, `conexao_pausada`): exclusão parcial não anula o
 # número (é o R$ de `/investido`, com o motivo, que a tela mostra "a conferir"); só vira `None` se
 # NADA da fonte ficou dentro (R$ 0 sem posição em reais não é R$ 0). `saldo_ausente` já chega como
@@ -119,9 +122,10 @@ def _meses_ate(hoje, alvo) -> int:
     return max(n, 1)
 
 
-def _meta(l: dict, inv, contas, custo: dict, hoje) -> dict:
+def _meta(l: dict, inv, contas, custo: dict, hoje, ritmo) -> dict:
     atual, motivos, conta_id = _fonte(l, inv, contas)
     motivos = set(motivos)
+    r_valor, r_dias, r_motivos = ritmo(l, inv, atual, motivos)  # antes dos motivos do alvo da reserva
     alvo = l["alvo"]
     if l["tipo"] == "reserva":
         alvo = custo["valor"] * l["meses"] if custo["valor"] else None  # custo 0 = não sabe
@@ -139,9 +143,15 @@ def _meta(l: dict, inv, contas, custo: dict, hoje) -> dict:
         "id": l["id"], "nome": l["nome"], "tipo": l["tipo"], "meses": l["meses"],
         "data_alvo": l["data_alvo"].isoformat() if l["data_alvo"] else None,
         "atual": atual, "alvo": alvo, "falta": falta,
-        # Piso e teto em 100: "100" só quando o alvo foi batido.
-        "percentual": max(0, min(100, int(atual * 100 // alvo))) if sabe else None,
+        # Piso e teto em 100: "100" só quando o alvo foi batido. Sem o `//` quando já bateu: com `atual`
+        # enorme e alvo ínfimo o quociente passa de 28 dígitos (`InvalidOperation`).
+        "percentual": (0 if atual <= 0 else 100 if atual >= alvo else int(atual * 100 // alvo)) if sabe else None,
         "por_mes": por_mes, "prazo_passou": passou,
+        # O ritmo ATUAL (crescimento da fonte, com rendimento) ao lado do NECESSÁRIO (`por_mes`).
+        "ritmo": {"valor": r_valor, "dias_de_historico": r_dias,
+                  "parcial": r_valor is not None and r_dias < metas_ritmo.RITMO_DIAS_JANELA,
+                  "motivos": [m for m in MOTIVOS_RITMO if m in r_motivos]},
+        "chega_em": metas_ritmo.chega_em(falta, r_valor, hoje),
         "motivos": [m for m in MOTIVOS if m in motivos],
         "fonte": {"tipo": l["fonte_tipo"], "rotulo": l["fonte_rotulo"], "conta_id": conta_id,
                   "banco": l["fonte_ref"] if l["fonte_tipo"] == "banco" else l["fonte_banco"]},
@@ -162,8 +172,10 @@ def listar(user_id: int, investimentos: bool = True, recorrencias: bool = True) 
         inv, contas = _ler_fontes(cur, user_id, {l["fonte_tipo"] for l in linhas}, investimentos)
         custo = (custo_mensal(cur, user_id, hoje) if recorrencias
                  else {"valor": None, "recorrencias": 0, "motivos": ["plano_sem_custo_mensal"]})
+        ritmo = metas_ritmo.leitor(cur, user_id, hoje)  # lê as fotos no MESMO snapshot
+        metas = [_meta(l, inv, contas, custo, hoje, ritmo) for l in linhas]
         conn.rollback()
-    return {"metas": [_meta(l, inv, contas, custo, hoje) for l in linhas], "custo_mensal": custo}
+    return {"metas": metas, "custo_mensal": custo}
 
 
 def resolver_fonte(user_id: int, tipo: str, banco: str | None, conta: int | None) -> dict:
