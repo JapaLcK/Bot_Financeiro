@@ -302,11 +302,24 @@ def _challenge_do_codigo(code: str):
         return cur.fetchone()["code_challenge"]
 
 
-def _callback_com_cookie(monkeypatch, email: str, app: int, cookie: str | None):
+def _callback_com_cookie(
+    monkeypatch, email: str, app: int, cookie: str | None, rede: list | None = None, **params
+):
     """start (sem challenge) e callback num cliente SEM jar, com o cabeçalho
     `Cookie` montado à mão: é como se planta valor que o start nunca gravaria
-    (vazio, não-ASCII). Devolve o 302 do callback."""
+    (vazio, não-ASCII). Devolve o 302 do callback. `rede`: lista que recebe uma
+    entrada por ida ao Google (`exchange_code_for_tokens`); `params`, a query."""
+    import core.services.google_oauth as google_oauth
+
     google_de_mentira(monkeypatch, email)
+    if rede is not None:
+        troca = google_oauth.exchange_code_for_tokens
+
+        async def _espia(code):
+            rede.append(code)
+            return await troca(code)
+
+        monkeypatch.setattr(google_oauth, "exchange_code_for_tokens", _espia)
     inicio = TestClient(dashboard.app).get(f"/auth/google/start?app={app}", follow_redirects=False)
     state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
     pedaco = f"google_oauth_state={state}"
@@ -314,7 +327,7 @@ def _callback_com_cookie(monkeypatch, email: str, app: int, cookie: str | None):
         pedaco += f"; google_oauth_challenge={cookie}"
     return TestClient(dashboard.app, raise_server_exceptions=False).get(
         "/auth/google/callback",
-        params={"code": "code-do-google", "state": state},
+        params={"code": "code-do-google", "state": state, **params},
         headers={"cookie": pedaco.encode("latin-1")},
         follow_redirects=False,
     )
@@ -349,9 +362,16 @@ def test_t2_callback_nat_le_o_cookie_mas_app_antigo_e_web_ignoram(monkeypatch):
 @pytest.mark.parametrize("ruim", ["", "caf\xe9" + "a" * 39, "curto", "a" * 44])
 def test_t3_cookie_invalido_no_callback_nat_falha_fechado(monkeypatch, ruim):
     uid, email = _conta()
-    cb = _callback_com_cookie(monkeypatch, email, 2, ruim)
+    rede = []
+    cb = _callback_com_cookie(monkeypatch, email, 2, ruim, rede)
     assert cb.status_code == 302, cb.text
     assert cb.headers["location"] == "pigbank://auth?erro=falha"
+    assert rede == [], "a recusa tem de vir ANTES da ida ao Google"
+    # Falha fechada limpa os três cookies do fluxo, não só devolve o erro.
+    apagados = {
+        c.split("=", 1)[0] for c in cb.headers.get_list("set-cookie") if "max-age=0" in c.lower()
+    }
+    assert {"google_oauth_state", "google_oauth_next", "google_oauth_challenge"} <= apagados
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("select count(*) as n from dashboard_sessions where user_id = %s", (uid,))
         assert cur.fetchone()["n"] == 0
@@ -366,6 +386,27 @@ def test_t3_cookie_invalido_no_callback_nat_falha_fechado(monkeypatch, ruim):
             (f"sub-{novo}",),
         )
         assert cur.fetchone()["n"] == 0
+
+
+def test_t3c_cookie_ausente_no_callback_nat_gera_codigo_sem_challenge(monkeypatch):
+    """LIMITE CONHECIDO da transição (docs/CLAUDE.md, "Limites conhecidos"): se o
+    cookie do challenge se perde entre o start e o callback, o código nasce SEM
+    challenge e a troca sem verifier entra, ou seja, a PKCE cai em silêncio.
+    Quem "consertar" isso (exigir challenge com cookie ausente) precisa antes
+    medir o impacto no app iOS já instalado, que ainda não manda PKCE."""
+    uid, email = _conta()
+    cb = _callback_com_cookie(monkeypatch, email, 2, None)
+    code = parse_qs(urlparse(cb.headers["location"]).query)["code"][0]
+    assert _challenge_do_codigo(code) is None
+    assert _troca(code).status_code == 200
+
+
+def test_t3a_cookie_invalido_vence_o_error_do_google(monkeypatch):
+    """A checagem vem ANTES do `if error`: `access_denied` com cookie ruim é
+    `falha`, não `cancelado`."""
+    _, email = _conta()
+    cb = _callback_com_cookie(monkeypatch, email, 2, "", error="access_denied")
+    assert cb.headers["location"] == "pigbank://auth?erro=falha"
 
 
 def test_t3b_pendente_com_challenge_vazio_nao_completa_sem_verifier():

@@ -532,17 +532,25 @@ Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`
 significa sem PKCE (web, app antigo, Apple, link do bot). Código com challenge só é
 consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
 código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
-pendente. Cookie do challenge presente mas inválido (vazio, não-ASCII) faz o callback
-falhar fechado.
+pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
+`[A-Za-z0-9_-]` faz o callback falhar fechado.
 
-Limites conhecidos, todos fecham quando o challenge virar obrigatório (após o app antigo
+Limites conhecidos, que fecham quando o challenge virar obrigatório (após o app antigo
 sair de circulação):
 - Transição: código sem challenge continua trocável, com ou sem verifier.
 - Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
   ou seja, a PKCE cai em silêncio naquele login.
 - Com o verifier opcional, a PKCE cobre interceptação do código, não injeção de código
   (login CSRF com código da conta do atacante); a mitigação é do lado do app (PR-3).
-- `GET google/pending/{token}` devolve e-mail e nome sem exigir o verifier (resíduo anterior).
+- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
+  pressuposto do login CSRF por state, não uma regressão da PKCE.
+- A PKCE não cobre um fluxo iniciado pelo próprio sequestrador do scheme no aparelho (ele
+  abre `/auth/google/start` e usa o próprio par verifier/challenge); a defesa estrutural
+  seria App Links https no Android no lugar do scheme customizado, follow-up da #604.
+
+Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
+devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
+a rota (e o contrato com o app).
 
 **MFA no Google web e no magic link (#605).** Conta com MFA ligado NUNCA ganha sessão só
 pelo Google ou pelo link do bot. O callback web e `GET /d/{code}` (todo código: bot ou app
