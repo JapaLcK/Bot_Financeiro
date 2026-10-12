@@ -16,7 +16,7 @@ export interface BarrasMensaisProps {
 }
 
 // Colunas flex:1 em pai que encolhe ao conteúdo (fala do Piggy no chat) ficariam espremidas: piso por coluna, cabe o "R$ 12,3k".
-const ALTURA = 120, COLUNA_MIN = 44, LARGURA = 26, MINIMA = 4, CRESCER_MS = 450, OPACIDADE_OUTROS = 0.5;
+const ALTURA = 120, COLUNA_MIN = 40, LARGURA = 26, MINIMA = 4, CRESCER_MS = 450, OPACIDADE_OUTROS = 0.5;
 
 /** Altura em pt: proporcional ao MÁXIMO entre os meses, mínimo de 4 para valor > 0; valor <= 0 = só o trilho. */
 export const alturaBarra = (valor: number, maximo: number, altura: number) => valor > 0 && maximo > 0 ? Math.max(MINIMA, Math.round(valor / maximo * altura)) : 0;
@@ -24,7 +24,7 @@ export const alturaBarra = (valor: number, maximo: number, altura: number) => va
 /**
  * Barras verticais de 26pt sobre um trilho neutro, topo arredondado (raio 4); o mês atual em tinta cheia e os outros a 50%.
  * Crescem de baixo para cima em 450ms ao montar (transform nativo; com "reduzir movimento" o hook começa em false e resolve assíncrono: o 1º quadro pode animar e termina parado em 1, limite aceito).
- * Decorativo: some do VoiceOver, os números exatos estão na lista abaixo.
+ * O desenho some do VoiceOver (os números exatos estão na lista abaixo); a legenda do mês em andamento não, para o valor parcial ser anunciado.
  */
 export function BarrasMensais({ meses, rotuloValor }: BarrasMensaisProps) {
   const { cores } = useTema();
@@ -42,8 +42,8 @@ export function BarrasMensais({ meses, rotuloValor }: BarrasMensaisProps) {
   if (!meses.length) return null;
   const maximo = Math.max(...meses.map((m) => m.valor));
   return (
-    <View testID="barras-mensais" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ gap: 8, minWidth: meses.length * COLUNA_MIN }}>
-      <View style={{ flexDirection: "row" }}>
+    <View testID="barras-mensais" style={{ gap: 8, minWidth: meses.length * COLUNA_MIN }}>
+      <View testID="barras-mensais-desenho" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: "row" }}>
         {meses.map((m) => {
           const h = alturaBarra(m.valor, maximo, ALTURA);
           return (
@@ -59,7 +59,7 @@ export function BarrasMensais({ meses, rotuloValor }: BarrasMensaisProps) {
           );
         })}
       </View>
-      {meses.some((m) => m.atual) && <Texto variante="legenda" tom="inkMuted" style={{ textAlign: "center" }}>* mês em andamento</Texto>}
+      {meses.some((m) => m.atual) && <Texto variante="legenda" tom="inkMuted" accessibilityLabel="Mês atual em andamento: o valor ainda é parcial" style={{ textAlign: "center" }}>* mês em andamento</Texto>}
     </View>
   );
 }

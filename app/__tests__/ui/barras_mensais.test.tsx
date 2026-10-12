@@ -8,7 +8,7 @@ import { renderNosDoisTemas } from "./_render";
 
 declare const global: typeof globalThis & { __definirReduzirMovimento: (v: boolean) => void };
 
-// O gráfico é oculto ao VoiceOver de propósito: a query precisa enxergar elementos ocultos.
+// O desenho é oculto ao VoiceOver de propósito: a query precisa enxergar elementos ocultos.
 const H = { includeHiddenElements: true };
 const estilo = (el: { props: { style?: unknown } }) => StyleSheet.flatten(el.props.style as never) as Record<string, any>;
 const rotulo = (v: number) => `R$ ${v / 100}`;
@@ -70,11 +70,19 @@ describe("BarrasMensais", () => {
     const { escuro: r } = renderNosDoisTemas(<BarrasMensais meses={[]} rotuloValor={rotulo} />);
     expect(r.queryByTestId("barras-mensais", H)).toBeNull();
   });
-  it("é decorativo para o VoiceOver", () => {
+  it("o desenho é oculto ao VoiceOver, mas a legenda do mês em andamento é lida (valor parcial)", () => {
     const { escuro: r } = renderNosDoisTemas(<BarrasMensais meses={meses()} rotuloValor={rotulo} />);
-    const el = r.getByTestId("barras-mensais", H);
-    expect(el.props.accessibilityElementsHidden).toBe(true);
-    expect(el.props.importantForAccessibility).toBe("no-hide-descendants");
+    const oculto = (el: { props: any }) => el.props.accessibilityElementsHidden === true || el.props.importantForAccessibility === "no-hide-descendants";
+    const desenho = r.getByTestId("barras-mensais-desenho", H);
+    expect(desenho.props.accessibilityElementsHidden).toBe(true);
+    expect(desenho.props.importantForAccessibility).toBe("no-hide-descendants");
+    const legenda = r.getByText("* mês em andamento", H);
+    expect(legenda.props.accessibilityLabel).toBe("Mês atual em andamento: o valor ainda é parcial");
+    for (let el: any = legenda; el; el = el.parent) expect(oculto(el)).toBe(false);
+  });
+  it("sem mês atual não há legenda para o VoiceOver", () => {
+    const { escuro: r } = renderNosDoisTemas(<BarrasMensais meses={meses(-1)} rotuloValor={rotulo} />);
+    expect(r.queryByLabelText("Mês atual em andamento: o valor ainda é parcial", H)).toBeNull();
   });
   it("cresce de baixo para cima em 450ms (escala 0 -> 1, driver nativo); com reduzir movimento termina parado em 1", async () => {
     const timing = jest.spyOn(Animated, "timing"), setValue = jest.spyOn(Animated.Value.prototype, "setValue");
