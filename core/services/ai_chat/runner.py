@@ -35,7 +35,7 @@ import os
 import time
 import unicodedata
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -95,6 +95,8 @@ class Resultado:
     message_id: int | None = None   # linha `assistant` da resposta; None = nada gravado
     interrompida: bool = False
     sugerivel: bool = False         # texto do modelo, sem pendência armada, sem parada
+    cards: list[str] = field(default_factory=list)   # ids dos cards do turno
+    chips: list[str] = field(default_factory=list)   # preenchido por `streaming.executar`
 
 
 def _nota(**kw) -> None:
@@ -256,7 +258,8 @@ def chat_detalhado(
         token_msg = CURRENT_USER_MESSAGE.set((user_text or "").strip())
         estado: dict = {}
         token_estado = _ESTADO.set(estado)
-        token_cards = CARDS_DO_TURNO.set([])
+        cards: list[str] = []
+        token_cards = CARDS_DO_TURNO.set(cards)
         try:
             reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
                                 ia_primeiro=ia_primeiro)
@@ -267,7 +270,7 @@ def chat_detalhado(
             CURRENT_PLATFORM.reset(token_pf)
     # Erro não é resposta: sem id, o app não oferece 👍👎 nele.
     mid = None if reply == ERROR_MSG else estado.get("message_id")
-    return Resultado(reply, mid, estado.get("interrompida", False), estado.get("sugerivel", False))
+    return Resultado(reply, mid, estado.get("interrompida", False), estado.get("sugerivel", False), cards)
 
 
 # Quem PERDE o CAS do `ai_consume_pending_action` sabe exatamente um fato: a
