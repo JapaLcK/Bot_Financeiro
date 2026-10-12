@@ -8,6 +8,7 @@ import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import metasBanco from "./painel_metas_banco.fixture.json";
 import arredondamento from "./painel_arredondamento.fixture.json";
+import { fluxoFim } from "./conversa_apoio";
 const aviso = "Os valores de cada grupo são arredondados. A soma exibida pode diferir em centavos do total.";
 let uso: number, limite: number, detalhes: unknown;
 function servidor() {
@@ -19,9 +20,9 @@ function servidor() {
   if (path === "/api/app/perfil") return resposta(200, { perfil: "padrao" });
   if (path === "/api/app/mes-detalhes") return resposta(200, detalhes);
   if (path === "/goals/1/status") return resposta(200, metasBanco);
-  if (path === "/ai/chat") {
+  if (path === "/ai/chat/stream") {
    uso++;
-   return resposta(200, { reply: "Resposta exclusiva", usage: { used: uso, limit: limite } });
+   return fluxoFim("Resposta exclusiva", uso, limite);
   }
   if (path === "/ai/messages") return resposta(200, { messages: [], usage: { used: uso, limit: limite } });
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
@@ -48,7 +49,7 @@ it("POST na última mensagem atualiza imediatamente a cota e bloqueia novo envio
  expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy(); expect(screen.queryByText("99 de 100 mensagens utilizadas")).toBeNull();
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Mais uma"); });
  expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); await apertar("Enviar mensagem");
- expect(fetchFalso.mock.calls.filter(([u]) => new URL(String(u)).pathname === "/ai/chat")).toHaveLength(1);
+ expect(fetchFalso.mock.calls.filter(([u]) => new URL(String(u)).pathname === "/ai/chat/stream")).toHaveLength(1);
 });
 it("drilldown Sem categoria preserva categoria= no GET e apresenta o filtro", async () => {
  detalhes = { ...fixture["/api/app/mes-detalhes"], categorias: [{ categoria: null, valor: "1.00", quantidade: 1 }] };
@@ -108,13 +109,13 @@ it("refresh do painel NÃO aborta o POST do chat: a resposta e a cota chegam dep
  uso = 0; const atraso = segurar();
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat") { await atraso.promessa; uso = 5; return resposta(200, { reply: "Resposta que sobrevive ao refresh", usage: { used: 5, limit: 100 } }); }
+  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; uso = 5; return fluxoFim("Resposta que sobrevive ao refresh", 5); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  await waitFor(() => expect(screen.getByRole("button", { name: /Onde eu consigo economizar/ })).toBeEnabled());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta exclusiva"); }); await apertar("Enviar mensagem");
- const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat")!;
+ const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat/stream")!;
  await act(async () => { router.navigate("/resumo"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("tela").props.refreshControl).toBeTruthy());
  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
  expect(post[1].signal.aborted).toBe(false);

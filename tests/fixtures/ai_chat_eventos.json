@@ -1,0 +1,8 @@
+{
+  "passo": {"tipo": "passo", "previa": "contas", "texto": "Montando o card"},
+  "bloco": {"tipo": "bloco", "bloco": {"card": "contas", "abas": [{"mes": null, "recursos": {"contas": {}}}]}},
+  "delta": {"tipo": "delta", "texto": "Oi"},
+  "reinicio": {"tipo": "reinicio"},
+  "fim": {"tipo": "fim", "reply": "Oi!", "message_id": 41, "usage": {"used": 3, "limit": 100}, "chips": ["E o mês passado?"]},
+  "erro": {"tipo": "erro", "mensagem": "Não consegui responder agora."}
+}

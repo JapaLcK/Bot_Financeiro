@@ -43,7 +43,11 @@ export type NomeIcone =
   | "PiggyBank"
   | "Gear"
   | "CalendarBlank"
-  | "ArrowsClockwise";
+  | "ArrowsClockwise"
+  | "Copy"
+  | "ThumbsUp"
+  | "ThumbsDown"
+  | "Stop";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -92,6 +96,10 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   Gear: resolver(require("phosphor-react-native/src/icons/Gear"), "GearIcon"),
   CalendarBlank: resolver(require("phosphor-react-native/src/icons/CalendarBlank"), "CalendarBlankIcon"),
   ArrowsClockwise: resolver(require("phosphor-react-native/src/icons/ArrowsClockwise"), "ArrowsClockwiseIcon"),
+  Copy: resolver(require("phosphor-react-native/src/icons/Copy"), "CopyIcon"),
+  ThumbsUp: resolver(require("phosphor-react-native/src/icons/ThumbsUp"), "ThumbsUpIcon"),
+  ThumbsDown: resolver(require("phosphor-react-native/src/icons/ThumbsDown"), "ThumbsDownIcon"),
+  Stop: resolver(require("phosphor-react-native/src/icons/Stop"), "StopIcon"),
 
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
   Wallet: resolver(require("phosphor-react-native/src/icons/Wallet"), "WalletIcon"),

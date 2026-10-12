@@ -209,3 +209,8 @@ jest.mock("@react-native-community/slider", () => ({
   __esModule: true,
   default: (props) => require("react").createElement(require("react-native").View, props),
 }));
+
+// `expo/fetch` (stream do chat) é nativo: no Jest ele delega ao `globalThis.fetch`, que cada teste troca por `fetchFalso`.
+// Função comum, não `jest.fn`: `jest.restoreAllMocks()` apaga a implementação de um `jest.fn` (Jest 29).
+jest.mock("expo/fetch", () => ({ fetch: (...a) => globalThis.fetch(...a) }));
+jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }));

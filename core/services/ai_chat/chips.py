@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 MODELO_CHIPS = "gpt-4o-mini"
 TIMEOUT_S = 4.0
 MAX_CHIPS = 4
-MAX_UTF16 = 40  # o `z.string().max(40)` do app conta unidades UTF-16
+MAX_UTF16 = 40  # 40 unidades UTF-16: o mais restritivo entre as contagens do zod e do JS
 
 PROMPT_CHIPS = (
     "Você sugere o que o usuário pode perguntar a seguir num app de finanças pessoais. "

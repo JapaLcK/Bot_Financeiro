@@ -453,13 +453,6 @@
   "/ai/pending": {
     "cancelada": null
   },
-  "/ai/chat": {
-    "reply": "Vamos conferir os gastos por categoria deste mês antes de decidir uma mudança.",
-    "usage": {
-      "used": 3,
-      "limit": 100
-    }
-  },
   "/api/app/previsao": {
     "hoje": "2026-10-06",
     "calculado_em": "2026-10-06T12:00:00Z",
