@@ -1087,9 +1087,13 @@ def attempt_whatsapp_phone_link_impl(
     wa_candidates: list[str],
     current_user_id: int,
 ) -> dict:
+    # Só a forma que reconhece este número de volta (#909): `phone_lookup_candidates`
+    # tira o 9 de todo celular, e "55119"+L com L em 2-5 daria o FIXO "5511"+L, de
+    # outro dono. Vale para a busca do telefone e para o alias abaixo.
+    wa_candidates = [c for c in wa_candidates if c and wa_phone in phone_lookup_candidates(c)]
     with get_conn() as conn:
         with conn.cursor() as cur:
-            wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates if c]
+            wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates]
             cur.execute(
                 """
                 select user_id, phone_e164

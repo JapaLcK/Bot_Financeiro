@@ -191,29 +191,77 @@ def _poe_telefone(uid: int, fone: str) -> None:
     db_support.invalidate_auth_user_cache(uid)
 
 
+# Os dois sentidos: B com o fixo e A no celular, e B com o celular (ligado por
+# código) e o fixo digitado, com A no fixo. Este segundo é o que a checagem do
+# alias nos dois sentidos fecha sozinha: o fixo de A casa de verdade com o
+# telefone digitado em B, e o celular de B "contém" o fixo pela interseção.
+@pytest.mark.parametrize("sentido", ["b_no_fixo", "b_no_celular"])
 @pytest.mark.parametrize("caso", ["v1", "v2"])
-def test_fixo_de_b_nao_e_alias_do_celular_de_a(enviadas, caso):
+def test_fixo_de_b_nao_e_alias_do_celular_de_a(enviadas, caso, sentido):
     local = f"{2 + secrets.randbelow(4)}{secrets.randbelow(10**7):07d}"  # 2-5: fixo
     fixo, celular = f"5511{local}", f"55119{local}"
+    de_b, de_a = (fixo, celular) if sentido == "b_no_fixo" else (celular, fixo)
     b = com_plano()
     _poe_telefone(b, fixo)
-    _manda(fixo, "oi")  # o fixo de B liga em B, legítimo
-    assert _dono_do_numero(fixo) == b, enviadas
+    if sentido == "b_no_fixo":
+        _manda(fixo, "oi")  # o fixo de B liga em B, legítimo
+    else:
+        db.link_platform_identity("whatsapp", celular, b)  # o celular de B, por código
+    assert _dono_do_numero(de_b) == b, enviadas
     if caso == "v1":
-        a = db.get_or_create_canonical_user("whatsapp", celular)
+        a = db.get_or_create_canonical_user("whatsapp", de_a)
         db.add_launch_and_update_balance(a, "despesa", 50, None, "farmacia")
     else:
         a = cadastro_novo()
-        db.link_platform_identity("whatsapp", celular, a)
+        db.link_platform_identity("whatsapp", de_a, a)
 
     for texto in ("gastei 30 na farmacia", "saldo"):
         enviadas.clear()
-        _manda(celular, texto)
-        assert _dono_do_numero(celular) == a, ("o celular de A foi ligado à conta de B", texto, enviadas)
+        _manda(de_a, texto)
+        assert _dono_do_numero(de_a) == a, ("o número de A foi ligado à conta de B", texto, enviadas)
         assert _gastos(b) == 0, ("os lançamentos de A foram para B", texto, enviadas)
     assert _existe("users", "id", a)
     if caso == "v2":
         assert _existe("auth_accounts", "user_id", a), "o login de A foi apagado"
+
+
+# R2-1 do Tester, mesma raiz do T1, sem identidade em B: B digitou o PRÓPRIO fixo
+# "5511"+L (L em 2-5) e nunca falou com o bot. A busca pelo telefone usava os
+# candidatos do celular "55119"+L de A, que incluem o fixo, e ligava A na conta de B.
+# Controle negativo: tirar o filtro de candidatos do impl deixa os dois vermelhos.
+@pytest.mark.parametrize("caso", ["v3", "v1"])
+def test_celular_de_a_nao_casa_com_o_fixo_digitado_por_b(enviadas, caso):
+    local = f"{2 + secrets.randbelow(4)}{secrets.randbelow(10**7):07d}"
+    fixo, celular = f"5511{local}", f"55119{local}"
+    b = com_plano()
+    _poe_telefone(b, fixo)
+    if caso == "v1":
+        a = db.get_or_create_canonical_user("whatsapp", celular)
+        db.add_launch_and_update_balance(a, "despesa", 50, None, "farmacia")
+
+    for texto in ("oi", "gastei 30 na farmacia"):
+        enviadas.clear()
+        _manda(celular, texto)
+        assert _dono_do_numero(celular) != b, ("o celular de A foi ligado à conta de B", texto, enviadas)
+        assert _gastos(b) == 0, (texto, enviadas)
+        assert wr.NAO_JUNTEI_WA not in enviadas, (texto, enviadas)
+        assert "Ainda não tenho uma conta ligada" in enviadas[0], (texto, enviadas)
+
+
+# Positivo do R2-1: B digitou o próprio celular num formato (L em 6-9, celular
+# antigo) e o WhatsApp dele chega no outro. Continua ligando, nos dois sentidos.
+@pytest.mark.parametrize("digitado_com_9", [False, True])
+def test_celular_legitimo_liga_nos_dois_formatos(enviadas, digitado_com_9):
+    local = f"{6 + secrets.randbelow(4)}{secrets.randbelow(10**7):07d}"
+    com_9, sem_9 = f"55119{local}", f"5511{local}"
+    digitado, wa = (com_9, sem_9) if digitado_com_9 else (sem_9, com_9)
+    b = com_plano()
+    _poe_telefone(b, digitado)
+
+    _manda(wa, "oi")
+    assert _dono_do_numero(wa) == b and "WELCOME" in enviadas, enviadas
+    _manda(wa, "gastei 50 mercado")
+    assert _gastos(b) == 1, enviadas
 
 
 # R2-2: o `merge_conflict` que sobra (remetente só-WhatsApp vazio) diz o motivo
