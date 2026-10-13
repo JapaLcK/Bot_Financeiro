@@ -6,11 +6,11 @@ import { TIERS } from "./data.js";
 
 export const PROFILES = [
   { id: "economizar", label: "Economizar", icon: "ph-piggy-bank",
-    line: "Pra guardar mais todo mês. Mostra quanto sobrou, suas metas e onde dá pra cortar.",
-    preset: ["contas", "resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"] },
+    line: "Pra guardar mais todo mês. Mostra quanto sobrou e onde dá pra cortar.",
+    preset: ["contas", "resumo", "patrimonio", "piggy", "categorias", "assinaturas", "simulador", "compromissos"] },
   { id: "investir", label: "Investir", icon: "ph-trend-up",
     line: "Pra fazer o dinheiro trabalhar. Mostra seu patrimônio, quanto rendeu perto do CDI e onde ele está.",
-    preset: ["contas", "patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"] },
+    preset: ["contas", "patrimonio", "rendimento", "wealth", "simulador", "resumo", "piggy"] },
   { id: "controlar", label: "Controlar gastos", icon: "ph-chart-bar",
     line: "Pra saber pra onde vai cada real. Mostra os gastos por categoria, dia a dia, e as contas que vêm aí.",
     preset: ["contas", "categorias", "calendario", "resumo", "compromissos", "assinaturas", "fatura", "piggy"] },
@@ -19,7 +19,7 @@ export const PROFILES = [
     preset: ["contas", "parcelas", "fatura", "compromissos", "hero", "resumo", "categorias", "piggy"] },
   { id: "autonomo", label: "Autônomo", icon: "ph-briefcase",
     line: "Pra quem tem renda que muda todo mês. Mostra sua renda mês a mês, quanto a reserva segura e as contas fixas.",
-    preset: ["contas", "renda", "hero", "resumo", "compromissos", "metas", "categorias", "piggy"] },
+    preset: ["contas", "renda", "hero", "resumo", "compromissos", "patrimonio", "categorias", "piggy"] },
 ];
 const IDS = ["padrao", ...PROFILES.map((p) => p.id)];
 

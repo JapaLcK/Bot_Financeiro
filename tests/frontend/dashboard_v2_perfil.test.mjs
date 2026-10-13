@@ -21,9 +21,9 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const PADRAO = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
-const INVESTIR = ["contas", "patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"];
-const ECONOMIZAR = ["contas", "resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"];
+const PADRAO = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "patrimonio"];
+const INVESTIR = ["contas", "patrimonio", "rendimento", "wealth", "simulador", "resumo", "piggy"];
+const ECONOMIZAR = ["contas", "resumo", "patrimonio", "piggy", "categorias", "assinaturas", "simulador", "compromissos"];
 
 let browser;
 before(async () => {
@@ -129,12 +129,12 @@ test("o ajuste é por perfil: esconder em Investir não mexe em Economizar e fic
 test("Restaurar padrão volta ao preset do perfil atual, não aos 10", async () => {
   const { ctx, page } = await abrir({ perfil: "investir" });
   await organizar(page);
-  await page.getByRole("button", { name: "Esconder Metas e caixinhas" }).click();
+  await page.getByRole("button", { name: "Esconder Patrimônio" }).click();
   const mexido = await painel(page);
   await page.getByRole("button", { name: "Restaurar padrão" }).click();
   const r = [await painel(page), await salvo(page, "pigbank.dashboard.layout.v1.investir")];
   await ctx.close();
-  assert.ok(!mexido.includes("metas"));
+  assert.ok(!mexido.includes("patrimonio"));
   assert.deepEqual(ordenado(r[0]), ordenado(INVESTIR));
   assert.equal(r[1], null);
 });
@@ -254,7 +254,9 @@ test("390: modal, seletor e catálogo sem rolagem horizontal; ✕ com 44 × 44",
 // Dívidas (PR C2): Parcelas futuras sobe de 4º para 2º; em troca a Fatura desce de 2º para 3º e
 // os Compromissos de 3º para 4º: decisão do dono, porque Parcelas pesam mais para quem está em
 // dívida e o `contas` grande no topo só deixa a casa (0,3) para um bloco de uma coluna.
-for (const [perfil, bloco, posicao] of [["investir", "rendimento", 3], ["dividas", "parcelas", 2], ["autonomo", "renda", 2]]) {
+// Investir (PR B das Metas): sem o card Metas e caixinhas o preset tem 20 células e o ladrilhador
+// ordena Patrimônio, Onde está o dinheiro e Piggy antes do Rendimento: ele passa de 3º para 5º, sem buraco.
+for (const [perfil, bloco, posicao] of [["investir", "rendimento", 5], ["dividas", "parcelas", 2], ["autonomo", "renda", 2]]) {
   test(`1440: ${bloco} abre o painel ${perfil}, sem buraco e sem estourar a célula`, async () => {
     const { ctx, page, erros } = await abrir({ perfil });
     const r = await page.evaluate((id) => {
