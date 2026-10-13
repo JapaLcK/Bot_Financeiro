@@ -59,17 +59,23 @@ def _stub_deposito(monkeypatch, *, meta=None):
 
 
 def test_deposito_de_1_centavo_numa_meta_grande_nao_pede_para_repetir(monkeypatch, carteira):
-    """Caso REAL: `_pace_line` projeta 1000/0,01 = 100 mil meses e `date + timedelta`
-    estoura OverflowError — com o depósito já commitado."""
+    """Caso REAL: `_pace_line` projetava 1000/0,01 = 100 mil meses e `date + timedelta`
+    estourava OverflowError, com o depósito já commitado. A projeção sem sentido sai,
+    a linha de progresso (que não depende dela) fica."""
     chamadas = _stub_deposito(monkeypatch, meta=1000)
-    with pytest.raises(OverflowError):  # a premissa: o trecho pós-commit realmente levanta
-        t_pockets._pace_line(0.01, 1000.0, date(2026, 10, 13))
 
     msg = t_pockets._pocket_deposit_execute(1, {"pocket_name": "Viagem", "amount": 0.01})
 
     _ok(msg)
-    assert "Depositado R$ 0,01" in msg
+    assert "Depositado R$ 0,01" in msg and "📊 Agora" in msg
+    assert "Mantendo esse ritmo" not in msg
     assert chamadas == [0.01]
+
+
+def test_pace_line_limite_de_100_anos():
+    hoje = date(2026, 10, 13)
+    assert t_pockets._pace_line(0.01, 1000.0, hoje) == ""  # era OverflowError
+    assert t_pockets._pace_line(100.0, 1000.0, hoje).startswith("⏳ Mantendo esse ritmo")
 
 
 def test_deposito_followup_levantando_keyerror_nao_vira_nao_achei(monkeypatch, carteira):
@@ -142,6 +148,9 @@ def test_saque_caixinha_controle_positivo(monkeypatch):
     monkeypatch.setattr(db, "pocket_withdraw_to_account", lambda *a, **k: (_ for _ in ()).throw(LookupError()))
     assert "Não achei a caixinha" in t_pockets._pocket_withdraw_execute(1, {"pocket_name": "X", "amount": 1})
 
+    monkeypatch.setattr(db, "pocket_withdraw_to_account", lambda *a, **k: _boom())
+    assert "Tenta de novo" in t_pockets._pocket_withdraw_execute(1, {"pocket_name": "X", "amount": 1})
+
 
 # ── investimento ─────────────────────────────────────────────────────────────
 
@@ -194,6 +203,9 @@ def test_resgate_investimento_controle_positivo(monkeypatch):
 
     monkeypatch.setattr(db, "investment_withdraw_to_account", lambda *a, **k: (_ for _ in ()).throw(LookupError()))
     assert "Não achei o investimento" in t_inv._investment_withdraw_execute(1, {"name": "X", "amount": 1})
+
+    monkeypatch.setattr(db, "investment_withdraw_to_account", lambda *a, **k: _boom())
+    assert "Tenta de novo" in t_inv._investment_withdraw_execute(1, {"name": "X", "amount": 1})
 
 
 # ── fatura do cartão ─────────────────────────────────────────────────────────

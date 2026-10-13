@@ -172,6 +172,8 @@ def _pace_line(amount: float, remaining: float, today: date) -> str:
     if amount <= 0 or remaining <= 0:
         return ""
     months = remaining / amount
+    if months > 1200:  # 100 anos: projeção sem sentido (e `date + timedelta` estoura em ~95 mil meses)
+        return ""
     months_ceil = max(1, math.ceil(months))
     projected = today + timedelta(days=round(months * 30.44))
     quando = projected.strftime("%m/%Y")
@@ -266,8 +268,10 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Não consegui depositar agora. Tenta de novo em instantes."
 
     # DEPOIS do commit: o dinheiro JÁ ANDOU. Nada daqui pode virar "tenta de novo"
-    # nem "não achei" (o usuário repetiria o depósito); falha na montagem só tira o
-    # que sobrar da mensagem. Mesmo contrato do WhatsApp (core/handlers/pockets.py).
+    # nem "não achei" (o usuário repetiria o depósito). A origem e a nota de sync são
+    # strings puras sobre `source`; o bloco de status lê o banco e faz conta, então é
+    # o único com guarda: se falhar, só ele sai. Mesmo contrato do WhatsApp
+    # (core/handlers/pockets.py).
     msg = (f'✅ Depositado {_brl(amount)} na caixinha "{canon}"'
            f'{funding.origem_txt(source)}.')
     if source["kind"] == funding.BANK:
