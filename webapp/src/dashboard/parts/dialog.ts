@@ -1,3 +1,5 @@
+import { useEffect, useRef, type KeyboardEvent as TeclaReact } from "react";
+
 // Safari < 15.4 não tem <dialog>: sem showModal/close/.open. Lá abre e fecha pelo
 // atributo, com um fundo próprio (não há ::backdrop), o Esc tratado por quem usa, o foco
 // preso nos controles `focus` enquanto aberto (o Tab circula entre eles e foco fora volta
@@ -41,3 +43,42 @@ export const hide = (d: HTMLDialogElement | null) => {
   if (NATIVE) d.close();
   else { drop(); d.removeAttribute("open"); (document.activeElement as HTMLElement | null)?.blur(); back?.focus(); }
 };
+
+// O esqueleto de modal dos formulários (LancamentoForm, MetaForm): abre ao montar, foco no
+// primeiro controle, Esc no fallback, Tab preso no nativo, Cancel/clique no fundo fecham.
+// O chamador espalha `props` no <dialog> e, sem NATIVE, põe o scrim `lanc-scrim` ao lado, com `onClick={fundo}`.
+// O 2º clique de um duplo clique no botão que abriu o diálogo cai no fundo dele (::backdrop ou o scrim) e o
+// fecharia na hora; o clique no fundo só vale passada esta janela.
+const JANELA_DO_FUNDO = 400;
+export const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="-1"]';
+export function useDialogo(fechar: () => void) {
+  const dlg = useRef<HTMLDialogElement>(null);
+  const abertoEm = useRef(0);
+  useEffect(() => {
+    const d = dlg.current;
+    abertoEm.current = performance.now();
+    show(d, FOCUS);
+    d?.querySelector<HTMLElement>(FOCUS)?.focus();
+    const esc = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && !NATIVE && isOpen(d)) { e.preventDefault(); hide(d); fechar(); }
+    };
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("keydown", esc); if (isOpen(d)) hide(d); else untrap(); };
+  }, []);
+  const fecharDialog = () => { hide(dlg.current); fechar(); };
+  const fundo = () => { if (performance.now() - abertoEm.current > JANELA_DO_FUNDO) fecharDialog(); };
+  const props = {
+    ref: dlg,
+    role: NATIVE ? undefined : "dialog",
+    "aria-modal": NATIVE ? undefined : true,
+    onKeyDown: (e: TeclaReact<HTMLDialogElement>) => {
+      if (!NATIVE || e.key !== "Tab") return;
+      const all = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUS)];
+      const at = all.indexOf(document.activeElement as HTMLElement);
+      if ((e.shiftKey && at === 0) || (!e.shiftKey && at === all.length - 1)) { e.preventDefault(); all[e.shiftKey ? all.length - 1 : 0]?.focus(); }
+    },
+    onCancel: (e: { preventDefault: () => void }) => { e.preventDefault(); fecharDialog(); },
+    onClick: (e: { target: EventTarget }) => { if (e.target === dlg.current) fundo(); },
+  };
+  return { dlg, fecharDialog, fundo, props };
+}
