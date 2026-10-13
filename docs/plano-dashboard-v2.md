@@ -763,10 +763,12 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
-- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+- [x] Etapa 0 · [x] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
 
-Situação em 2026-10-13, conferida contra os PRs mergeados (a Etapa 3 fica aberta: simulador
-v2 e estimativa variável não entraram, ver o PR2 da Etapa 3; a 4 fica aberta: falta o PR C):
+Situação em 2026-10-13, conferida contra os PRs mergeados. Ficam abertas: a Etapa 2, porque
+depósito em caixinha e aporte (P8) seguem fora da lista de lançamentos, à espera de o dono
+decidir se são entrada ou saída (ver o PR 1 da Etapa 2); a 3, porque simulador v2 e estimativa
+variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta o PR C.
 
 | Etapa | PRs mergeados |
 |---|---|
