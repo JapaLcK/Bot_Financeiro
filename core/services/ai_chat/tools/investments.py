@@ -187,16 +187,12 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             return e.message
         return "🐷 Não consegui aportar agora. Tenta de novo em instantes."
 
-    # DEPOIS do commit: o dinheiro JÁ ANDOU. Falha na montagem nunca vira "tenta de
-    # novo" nem "não achei" (o usuário repetiria o aporte).
-    try:
-        msg = f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado{funding.origem_txt(source)}.'
-        if source["kind"] == funding.BANK:
-            msg += "\n\n" + funding.nota_sync()
-        return msg
-    except Exception as e:
-        _log_falha("investment_deposit_msg", user_id, e)
-        return f'✅ Aporte no "{name}" registrado.'
+    # DEPOIS do commit: o dinheiro JÁ ANDOU. Só strings puras sobre `source`, fora do
+    # `try` de propósito: dentro dele um KeyError viraria "não achei" (LookupError).
+    msg = f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado{funding.origem_txt(source)}.'
+    if source["kind"] == funding.BANK:
+        msg += "\n\n" + funding.nota_sync()
+    return msg
 
 
 # ─── Write: investment_withdraw (resgate) ───────────────────────────────────

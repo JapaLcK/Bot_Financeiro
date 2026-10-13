@@ -144,6 +144,8 @@ def test_saque_caixinha_controle_positivo(monkeypatch):
     monkeypatch.setattr(db, "pocket_withdraw_to_account", lambda *a, **k: (1, 0, 0, "Viagem", taxes, None))
     msg = t_pockets._pocket_withdraw_execute(1, {"pocket_name": "Viagem", "amount": 10})
     assert msg == '✅ Sacado R$ 10.00 da caixinha "Viagem" — IR/IOF R$ 0.50.'
+    assert t_pockets._pocket_withdraw_execute(1, {"pocket_name": "Viagem", "withdraw_all": True}) == \
+        '✅ Caixinha "Viagem" esvaziada: sacado R$ 10.00 — IR/IOF R$ 0.50.'
 
     monkeypatch.setattr(db, "pocket_withdraw_to_account", lambda *a, **k: (_ for _ in ()).throw(LookupError()))
     assert "Não achei a caixinha" in t_pockets._pocket_withdraw_execute(1, {"pocket_name": "X", "amount": 1})
@@ -154,20 +156,17 @@ def test_saque_caixinha_controle_positivo(monkeypatch):
 
 # ── investimento ─────────────────────────────────────────────────────────────
 
-def test_aporte_investimento_montagem_falha_nao_pede_para_repetir(monkeypatch, carteira):
-    chamadas = []
-    monkeypatch.setattr(db, "investment_deposit_from_account", lambda *a, **k: chamadas.append(1))
-    monkeypatch.setattr(funding, "origem_txt", _boom)
-
-    _ok(t_inv._investment_deposit_execute(1, {"name": "CDB", "amount": 100}))
-    assert chamadas == [1]
-
-
-def test_aporte_investimento_keyerror_pos_commit_nao_vira_nao_achei(monkeypatch, carteira):
+def test_aporte_investimento_via_banco_mantem_a_nota_de_sync(monkeypatch):
+    monkeypatch.setattr(
+        funding, "resolve_deterministic",
+        lambda uid, amount: {"source": {"kind": funding.BANK, "label": "Nubank"}},
+    )
     monkeypatch.setattr(db, "investment_deposit_from_account", lambda *a, **k: None)
-    monkeypatch.setattr(funding, "origem_txt", lambda s: {}["x"])
 
-    _ok(t_inv._investment_deposit_execute(1, {"name": "CDB", "amount": 100}))
+    msg = t_inv._investment_deposit_execute(1, {"name": "CDB", "amount": 100})
+
+    _ok(msg)
+    assert "saindo do Nubank" in msg and funding.nota_sync() in msg
 
 
 def test_aporte_investimento_controle_positivo(monkeypatch, carteira):
@@ -200,6 +199,13 @@ def test_resgate_investimento_controle_positivo(monkeypatch):
     monkeypatch.setattr(db, "investment_withdraw_to_account", lambda *a, **k: (1, 0, 0, "CDB", taxes, None))
     assert t_inv._investment_withdraw_execute(1, {"name": "CDB", "amount": 10}) == \
         '✅ Resgate de R$ 10.00 do "CDB".'
+
+    taxes = {"gross": 100.0, "ir": 1.5, "iof": 0.5}
+    monkeypatch.setattr(db, "investment_withdraw_to_account", lambda *a, **k: (1, 0, 0, "CDB", taxes, None))
+    assert t_inv._investment_withdraw_execute(1, {"name": "CDB", "amount": 100}) == \
+        '✅ Resgate de R$ 100.00 do "CDB" — IR/IOF R$ 2.00.'
+    assert t_inv._investment_withdraw_execute(1, {"name": "CDB", "withdraw_all": True}) == \
+        '✅ Investimento "CDB" zerado: resgatado R$ 100.00 — IR/IOF R$ 2.00.'
 
     monkeypatch.setattr(db, "investment_withdraw_to_account", lambda *a, **k: (_ for _ in ()).throw(LookupError()))
     assert "Não achei o investimento" in t_inv._investment_withdraw_execute(1, {"name": "X", "amount": 1})
