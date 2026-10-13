@@ -105,8 +105,8 @@ def _data_invalida(args: dict[str, Any], *campos: str) -> dict[str, str] | None:
 _AVISO_12 = ("explique ao usuário que o Piggy consulta até 12 meses e que estes são os 12 mais "
              "recentes do período pedido")
 
-_AVISO_FIM = ("diga ao usuário que os dados vão até o fim do mês atual e que o que já está lançado "
-              "no futuro não entra")
+_AVISO_FIM = ("diga ao usuário que o período foi até o fim do mês atual e que os meses seguintes "
+              "ficaram de fora")
 
 
 def _limita_periodo(start: date, end: date) -> tuple[date, date, dict[str, Any]]:
@@ -1178,9 +1178,8 @@ TOOLS: list[Tool] = [
                         "months": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": MAX_MESES_PERIODO,
                             "default": 6,
-                            "description": "Quantos meses olhar pra trás (1 a 12, padrão 6).",
+                            "description": "Quantos meses olhar pra trás (até 12; acima disso a resposta vem cortada com aviso; padrão 6).",
                         },
                     },
                 },

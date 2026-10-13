@@ -483,3 +483,9 @@ def test_compare_periods_repassa_o_fim_ajustado_so_no_lado_cortado(mundo):
     assert r["period_b"]["fim_ajustado"] is True and r["period_b"]["aviso_fim"] == launches._AVISO_FIM
     assert r["period_b"]["pedido"]["end_date"] == fim_futuro
     assert "fim_ajustado" not in r["period_a"] and "aviso_fim" not in r["period_a"]
+
+
+def test_schemas_nao_publicam_maximum_para_o_modelo_poder_pedir_18():
+    q = get_tool("show_card").schema["function"]["parameters"]["properties"]["quantidade_meses"]
+    m = get_tool("get_spending_trend").schema["function"]["parameters"]["properties"]["months"]
+    assert "maximum" not in q and "maximum" not in m
