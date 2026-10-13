@@ -763,7 +763,33 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
-- [ ] Etapa 0 · [ ] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+
+Situação em 2026-10-13, conferida contra os PRs mergeados (a Etapa 3 fica aberta: simulador
+v2 e estimativa variável não entraram, ver o PR2 da Etapa 3; a 4 fica aberta: falta o PR C):
+
+| Etapa | PRs mergeados |
+|---|---|
+| 0 | #632, #659, #669, #675, #678, #688, #691, #723 |
+| 1 | #750 (A), #754 (B), #757 (D), #764 (C), #781 (C2) |
+| 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4) |
+| 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
+| 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
+| 5 e 6 | nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |
+| 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
+
+- Etapa 4, PR A (#950) e PR A2 (#954): a tabela `metas` e `GET`/`POST /api/v2/metas`
+  (`/metas/editar`, `/metas/apagar`), com a fonte do `atual` escolhida pelo usuário (tudo
+  investido, um banco ou uma conta), a reserva de emergência (no máximo uma, alvo = meses ×
+  custo mensal das recorrências do banco) e, no A2, o `ritmo` (crescimento atual da fonte em
+  R$/mês, medido nas fotos por posição) e o `chega_em`. O contrato, os motivos e os limites
+  declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. Faltam o PR
+  C (IA e WhatsApp usarem a mesma regra) e a conferência pós-deploy.
+- Chat do Piggy (Etapa 7, lado do backend e do app nativo): `POST /ai/chat/stream` com
+  parar e 👍👎 (#943), `show_card` com a mesma fonte do app (#946, #947), chips de
+  continuação (#949), períodos de até 12 meses e card `periodo` (#957), e o consumo no app
+  (#927, #953, #956). O `/painel` web ainda não chama `/ai/chat/stream`: a Etapa 7 do web
+  continua inteira.
 
 ### Etapa 3 — PR2: API v2 da previsão (implementação local, 06/10/2026)
 
