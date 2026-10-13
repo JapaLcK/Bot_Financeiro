@@ -255,14 +255,6 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         _lid, _acc, new_pocket, canon = db.pocket_deposit_from_account(
             user_id, pocket_name, amount, funding_source=funding.to_db_arg(source)
         )
-        msg = (f'✅ Depositado {_brl(amount)} na caixinha "{canon}"'
-               f'{funding.origem_txt(source)}.')
-        if source["kind"] == funding.BANK:
-            msg += "\n" + funding.nota_sync()
-        followup = _deposit_followup_lines(user_id, canon, amount, float(new_pocket))
-        if followup:
-            msg += "\n" + followup
-        return msg
     except LookupError:
         return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
@@ -272,6 +264,22 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             return "🐷 " + funding.msg_insuficiente(user_id, amount, acao="depósito")
         _log_falha("deposit_to_pocket", user_id, e)
         return "🐷 Não consegui depositar agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: o dinheiro JÁ ANDOU. Nada daqui pode virar "tenta de novo"
+    # nem "não achei" (o usuário repetiria o depósito); falha na montagem só tira o
+    # que sobrar da mensagem. Mesmo contrato do WhatsApp (core/handlers/pockets.py).
+    msg = (f'✅ Depositado {_brl(amount)} na caixinha "{canon}"'
+           f'{funding.origem_txt(source)}.')
+    if source["kind"] == funding.BANK:
+        msg += "\n" + funding.nota_sync()
+    try:
+        followup = _deposit_followup_lines(user_id, canon, amount, float(new_pocket))
+    except Exception as e:
+        _log_falha("deposit_to_pocket_followup", user_id, e)
+        followup = ""
+    if followup:
+        msg += "\n" + followup
+    return msg
 
 
 # ─── Write: pocket_withdraw ─────────────────────────────────────────────────
@@ -301,12 +309,6 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         _lid, _acc, _pkt, canon, taxes, _dest = db.pocket_withdraw_to_account(
             user_id, pocket_name, None if withdraw_all else amount, withdraw_all=withdraw_all,
         )
-        gross = float(taxes.get("gross", 0)) if taxes else 0.0
-        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
-        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
-        if withdraw_all:
-            return f'✅ Caixinha "{canon}" esvaziada: sacado R$ {gross:.2f}{tax_txt}.'
-        return f'✅ Sacado R$ {gross:.2f} da caixinha "{canon}"{tax_txt}.'
     except ValueError as e:
         if "OF_POCKET_READONLY" in str(e):
             return "🐷 Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
@@ -318,6 +320,18 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except Exception as e:
         _log_falha("withdraw_from_pocket", user_id, e)
         return "🐷 Não consegui sacar agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: o dinheiro JÁ ANDOU (ver `_pocket_deposit_execute`).
+    try:
+        gross = float(taxes.get("gross", 0)) if taxes else 0.0
+        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
+        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
+        if withdraw_all:
+            return f'✅ Caixinha "{canon}" esvaziada: sacado R$ {gross:.2f}{tax_txt}.'
+        return f'✅ Sacado R$ {gross:.2f} da caixinha "{canon}"{tax_txt}.'
+    except Exception as e:
+        _log_falha("withdraw_from_pocket_msg", user_id, e)
+        return f'✅ Saque da caixinha "{canon}" registrado.'
 
 
 # ─── Write: delete_pocket ───────────────────────────────────────────────────

@@ -168,10 +168,6 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         source = funding.resolve_deterministic(user_id, amount)["source"]
         db.investment_deposit_from_account(
             user_id, name, amount, funding_source=funding.to_db_arg(source))
-        msg = f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado{funding.origem_txt(source)}.'
-        if source["kind"] == funding.BANK:
-            msg += "\n\n" + funding.nota_sync()
-        return msg
     except LookupError:
         # INV_NOT_FOUND: o cadastro é só pelo dashboard, então aponta o caminho.
         return (
@@ -190,6 +186,17 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         if isinstance(e, PlanLimitExceeded):
             return e.message
         return "🐷 Não consegui aportar agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: o dinheiro JÁ ANDOU. Falha na montagem nunca vira "tenta de
+    # novo" nem "não achei" (o usuário repetiria o aporte).
+    try:
+        msg = f'✅ Aporte de R$ {amount:.2f} no "{name}" registrado{funding.origem_txt(source)}.'
+        if source["kind"] == funding.BANK:
+            msg += "\n\n" + funding.nota_sync()
+        return msg
+    except Exception as e:
+        _log_falha("investment_deposit_msg", user_id, e)
+        return f'✅ Aporte no "{name}" registrado.'
 
 
 # ─── Write: investment_withdraw (resgate) ───────────────────────────────────
@@ -221,12 +228,6 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
         _lid, _acc, _inv, canon, taxes, _dest = db.investment_withdraw_to_account(
             user_id, name, None if withdraw_all else amount, withdraw_all=withdraw_all,
         )
-        gross = float(taxes.get("gross", 0)) if taxes else 0.0
-        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
-        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
-        if withdraw_all:
-            return f'✅ Investimento "{canon}" zerado: resgatado R$ {gross:.2f}{tax_txt}.'
-        return f'✅ Resgate de R$ {gross:.2f} do "{canon}"{tax_txt}.'
     except ValueError as e:
         if "INSUFFICIENT_INVEST" in str(e):
             return f'🐷 O investimento "{name}" não tem esse saldo.'
@@ -236,6 +237,18 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except Exception as e:
         _log_falha("redeem_investment", user_id, e)
         return "🐷 Não consegui resgatar agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: o dinheiro JÁ ANDOU (ver `_investment_deposit_execute`).
+    try:
+        gross = float(taxes.get("gross", 0)) if taxes else 0.0
+        tax = (float(taxes.get("ir", 0)) + float(taxes.get("iof", 0))) if taxes else 0.0
+        tax_txt = f" — IR/IOF R$ {tax:.2f}" if tax > 0 else ""
+        if withdraw_all:
+            return f'✅ Investimento "{canon}" zerado: resgatado R$ {gross:.2f}{tax_txt}.'
+        return f'✅ Resgate de R$ {gross:.2f} do "{canon}"{tax_txt}.'
+    except Exception as e:
+        _log_falha("redeem_investment_msg", user_id, e)
+        return f'✅ Resgate do "{canon}" registrado.'
 
 
 # ─── Write: delete_investment ───────────────────────────────────────────────
