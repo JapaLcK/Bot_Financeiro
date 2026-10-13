@@ -21,8 +21,8 @@ from tests.test_resumo_mes_regra import INICIO
 from utils_date import now_tz
 
 
-def test_o_registro_cobre_os_16_cards():
-    assert set(CASOS) == set(cards.IDS) == set(cards.registro()) and len(cards.IDS) == 16
+def test_o_registro_cobre_os_17_cards():
+    assert set(CASOS) == set(cards.IDS) == set(cards.registro()) and len(cards.IDS) == 17
 
 
 def _sem_relogio(o):
@@ -46,7 +46,7 @@ def confere_paridade(uid, card):
     return r, bloco
 
 
-@pytest.mark.parametrize("card", list(CASOS))
+@pytest.mark.parametrize("card", [c for c in CASOS if c != "periodo"])  # sem rota
 def test_paridade_http_x_bloco(mundo, card):
     a, _ = mundo
     _, bloco = confere_paridade(a, card)

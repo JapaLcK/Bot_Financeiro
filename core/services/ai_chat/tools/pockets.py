@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import db
+from core.observability import _log_falha
 from utils_date import _tz
 
 from .. import streaming
@@ -146,7 +147,8 @@ def _create_pocket_execute(user_id: int, args: dict[str, Any]) -> str:
         from core.services.plan_limits import PlanLimitExceeded
         if isinstance(e, PlanLimitExceeded):
             return e.message
-        return f"🐷 Não consegui criar a caixinha: {e}"
+        _log_falha("create_pocket", user_id, e)
+        return "🐷 Não consegui criar a caixinha agora. Tenta de novo em instantes."
 
 
 # ─── Helpers de status/progresso pra mensagens de depósito ───────────────────
@@ -261,10 +263,15 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
         if followup:
             msg += "\n" + followup
         return msg
+    except LookupError:
+        return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
         if "OF_POCKET_READONLY" in str(e):
             return "🐷 Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
-        return f"🐷 Não consegui depositar: {e}"
+        if "INSUFFICIENT_ACCOUNT" in str(e):
+            return "🐷 " + funding.msg_insuficiente(user_id, amount, acao="depósito")
+        _log_falha("deposit_to_pocket", user_id, e)
+        return "🐷 Não consegui depositar agora. Tenta de novo em instantes."
 
 
 # ─── Write: pocket_withdraw ─────────────────────────────────────────────────
@@ -309,7 +316,8 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except LookupError:
         return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
-        return f"🐷 Não consegui sacar: {e}"
+        _log_falha("withdraw_from_pocket", user_id, e)
+        return "🐷 Não consegui sacar agora. Tenta de novo em instantes."
 
 
 # ─── Write: delete_pocket ───────────────────────────────────────────────────
@@ -331,7 +339,8 @@ def _delete_pocket_execute(user_id: int, args: dict[str, Any]) -> str:
                 f'🐷 A caixinha "{pocket_name}" ainda tem saldo. '
                 "Saca o que tem dentro antes de apagar."
             )
-        return f"🐷 {e}"
+        _log_falha("delete_pocket", user_id, e)
+        return "🐷 Não consegui apagar a caixinha agora. Tenta de novo em instantes."
     except LookupError:
         return f'🐷 Não achei a caixinha "{pocket_name}".'
 

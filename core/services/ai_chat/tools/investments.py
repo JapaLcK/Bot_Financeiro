@@ -25,8 +25,10 @@ from typing import Any
 import db
 from core.services import fonte_unica
 from db import investido
+from core.observability import _log_falha
 
 from ._base import Tool
+from .launches import _limita_periodo
 
 
 _PERIODS = ("daily", "monthly", "yearly")
@@ -67,6 +69,7 @@ def _get_investment_contributions(user_id: int, args: dict[str, Any]) -> dict[st
     if end < start:
         return {"error": "end_date anterior a start_date"}
 
+    start, end, limite = _limita_periodo(start, end)
     launches = db.get_launches_by_period(user_id, start, end)
 
     total = 0.0
@@ -89,6 +92,7 @@ def _get_investment_contributions(user_id: int, args: dict[str, Any]) -> dict[st
         "by_investment": [
             {"name": k, "total": v} for k, v in sorted(by_investment.items())
         ],
+        **limite,
     }
 
 
@@ -130,10 +134,11 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
         if launch_id is None:
             return f'ℹ️ O investimento "{canon}" já existe.'
         return f'✅ Investimento "{canon}" criado.'
-    except ValueError as e:
-        return f"🐷 {e}" if isinstance(e, fonte_unica.FonteUnicaOF) else f"🐷 Não consegui criar: {e}"
     except Exception as e:
-        return f"🐷 Não consegui criar: {e}"
+        if isinstance(e, fonte_unica.FonteUnicaOF):
+            return f"🐷 {e}"
+        _log_falha("create_investment", user_id, e)
+        return "🐷 Não consegui criar o investimento agora. Tenta de novo em instantes."
 
 
 # ─── Write: investment_deposit (aporte) ─────────────────────────────────────
@@ -229,7 +234,8 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except LookupError:
         return f'🐷 Não achei o investimento "{name}".'
     except Exception as e:
-        return f"🐷 Não consegui resgatar: {e}"
+        _log_falha("redeem_investment", user_id, e)
+        return "🐷 Não consegui resgatar agora. Tenta de novo em instantes."
 
 
 # ─── Write: delete_investment ───────────────────────────────────────────────

@@ -1,0 +1,66 @@
+{
+  "inicio": "2026-08",
+  "fim": "2026-09",
+  "ate": "2026-09-30",
+  "entrou": "3000.00",
+  "saiu": "1300.50",
+  "saldo": "1699.50",
+  "meses": [
+    {
+      "mes": "2026-08",
+      "entrou": "1500.00",
+      "saiu": "600.00"
+    },
+    {
+      "mes": "2026-09",
+      "entrou": "1500.00",
+      "saiu": "700.50"
+    }
+  ],
+  "categorias": [
+    {
+      "categoria": "mercado",
+      "valor": "900.50",
+      "quantidade": 2,
+      "percentual": 70,
+      "maiores": [
+        {
+          "id": "l10",
+          "data": "2026-09-03",
+          "hora": "10:15",
+          "tipo": "saida",
+          "interno": false,
+          "valor": "500.50",
+          "moeda": "BRL",
+          "descricao": "Supermercado",
+          "mensagem": "gastei 500 no mercado",
+          "categoria": "mercado",
+          "origem": "cartao",
+          "fundido": false,
+          "instituicao": "Nubank",
+          "conta_id": null,
+          "cartao_id": 7,
+          "parcela": {
+            "n": 3,
+            "total": 10
+          },
+          "fatura": "2026-09",
+          "pode": [
+            "apagar"
+          ],
+          "motivos": []
+        }
+      ]
+    },
+    {
+      "categoria": "transporte",
+      "valor": "400.00",
+      "quantidade": 1,
+      "percentual": 30,
+      "maiores": []
+    }
+  ],
+  "motivos": [],
+  "historico_desde": null,
+  "fora_do_total": 0
+}

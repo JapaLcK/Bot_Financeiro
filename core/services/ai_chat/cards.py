@@ -1,4 +1,4 @@
-"""Os 16 cards do painel que o chat do app mostra (tool `show_card`).
+"""Os 16 cards do painel que o chat do app mostra (tool `show_card`), mais o `periodo`, só do chat.
 
 Cada leitor chama a MESMA função que o endpoint do widget chama (as de `api/v2`,
 `api/nativo`, ou o corpo que a rota legada chama: `status_metas`, `resumo_cartoes`,
@@ -19,9 +19,9 @@ from pydantic import BaseModel
 
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "fatura", "parcelas",
-       "renda", "piggy")
+       "renda", "piggy", "periodo")
 MAX_MESES = 3
-MAX_MESES_RENDA = 24
+MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
 MAX_POR_TURNO = 3
 
 
@@ -86,7 +86,7 @@ def _mes(uid: int, a: dict, **recursos: Callable) -> list[tuple[str | None, dict
 @cache
 def registro() -> dict[str, Card]:
     # Imports aqui: o WhatsApp importa este módulo e não paga os routers.
-    from api.nativo.mes_detalhes import mes_detalhes
+    from api.nativo.mes_detalhes import mes_detalhes, periodo
     from api.nativo.patrimonio import patrimonio
     from api.nativo.rendimento import rendimento
     from api.v2.assinaturas import _assinante as gate_assinaturas, assinaturas
@@ -118,6 +118,18 @@ def registro() -> dict[str, Card]:
         if not plan_gate_ok(uid, "simulator"):  # a mesma regra da rota do simulador
             raise HTTPException(403, {"error": "pro_required", "feature": "simulator"})
 
+    def gate_periodo(uid, a):
+        mes_pedido(a["ate"])  # defensivo: quem chama já cortou o futuro
+
+    def le_periodo(uid, a):
+        ym = lambda m: (int(m[:4]), int(m[5:]))  # noqa: E731
+        return [(None, {"periodo": periodo(ym(a["de"]), ym(a["ate"]), uid)})]
+
+    def visao_periodo(r):
+        # Sem `maiores` (tokens): transação citada vem de get_largest_expenses.
+        p = r["periodo"]
+        return {**p, "categorias": [{k: v for k, v in c.items() if k != "maiores"} for c in p["categorias"]]}
+
     def gate_renda(uid, a):
         require_plan_feature(uid, "financial_comparison")
 
@@ -133,7 +145,7 @@ def registro() -> dict[str, Card]:
         return [(None, {"assinaturas": assinaturas(uid=uid)})]
 
     def renda(uid, a):
-        n = max(1, min(int(a["quantidade_meses"] or 6), MAX_MESES_RENDA))
+        n = max(1, min(int(a["quantidade_meses"] or 6), MAX_MESES_PERIODO))
         return [(None, {"renda": {"ok": True, "evolution": compute_evolution(uid, n), "months": n}})]
 
     def piggy(uid, a):
@@ -181,6 +193,7 @@ def registro() -> dict[str, Card]:
         "renda": Card(renda, lambda r: {**r["renda"], "tendencia": _tendencia(
             [m["expense"] for m in r["renda"]["evolution"] if m["income"] or m["expense"]])}, gate_renda),
         "piggy": Card(piggy, todo("insights"), gate_piggy),
+        "periodo": Card(le_periodo, visao_periodo, gate_periodo),
     }
 
 

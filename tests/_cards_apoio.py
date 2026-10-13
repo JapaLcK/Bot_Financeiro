@@ -39,6 +39,8 @@ CASOS = {
     "parcelas": ({}, [{"parcelas": ("/installments/{uid}/list", {})}]),
     "renda": ({"quantidade_meses": 4}, [{"renda": ("/analytics/{uid}/evolution", {"months": 4})}]),
     "piggy": ({}, [{"insights": ("/insights/{uid}/current", {})}]),
+    # sem rota HTTP (só do chat): a paridade com `mes-detalhes` mês a mês mora em test_ai_chat_periodo.py
+    "periodo": ({"de": M0, "ate": M}, None),
 }
 
 

@@ -7,9 +7,9 @@ regra do mês (a do /painel e do "Gastos em <mês>") dava 4.357,46: faltavam as 
 Os dados são os de `tests/test_resumo_mes_regra.py` no mês anterior: ENTROU 1040 / SAIU 490
 contra 1040 / 260 só em `launches` (o cartão soma 230; o estorno de 25 não abate). O modelo é
 falso, mas lê o JSON que a tool entregou e escreve o número dele: o que a conversa mostra é o
-que a tool devolveu. Período livre (dia 3 a 8) segue só em `launches`, com `cartao_incluido: false`.
+que a tool devolveu. Período livre (dia 3 a 8) inclui o cartão pela data da compra (Q3): 390, `cartao_por: data_da_compra`.
 
-Controle NEGATIVO (§3), medido: `_mes_inteiro` devolvendo sempre None (tudo vira período livre,
+Controle NEGATIVO (§3), medido: `_meses_inteiros` devolvendo sempre None (tudo vira período livre,
 o `get_summary_by_period` de antes) deixa vermelhos os casos de mês de summary/compare/guarda; só
 `_janela` devolvendo `by_bill_month=False` deixa vermelhos os de categorias e maiores gastos.
 Controle POSITIVO: período livre, mês sem cartão, usuário B e mês futuro seguem como devem.
@@ -117,16 +117,13 @@ def test_mes_sem_cartao_e_so_launches():
     assert (r["receita"], r["despesa"], r["saldo_periodo"], r["cartao_incluido"]) == (300.0, 100.0, 200.0, True)
 
 
-def test_periodo_livre_segue_so_em_launches_e_avisa():
+def test_periodo_livre_soma_cartao_pela_data_da_compra():
     a, _ = _par()
     r = _tool("get_period_summary", a, start_date=INICIO.replace(day=3).isoformat(),
               end_date=INICIO.replace(day=8).isoformat())
-    assert (r["receita"], r["despesa"]) == (1040.0, 260.0)  # sem os 230 do cartão
-    assert r["cartao_incluido"] is False and "NÃO entram" in r["nota"] and "motivos" not in r
-    # vários meses também são período livre (limite declarado)
-    r = _tool("get_period_summary", a, start_date=(INICIO - timedelta(days=1)).replace(day=1).isoformat(),
-              end_date=ULTIMO.isoformat())
-    assert r["cartao_incluido"] is False and r["despesa"] == 260.0
+    assert (r["receita"], r["despesa"]) == (1040.0, 390.0)  # 260 + os 130 do cartão pela data da compra
+    assert r["cartao_incluido"] is True and r["cartao_por"] == "data_da_compra" and "motivos" not in r
+    assert "data da compra" in r["nota"]
 
 
 def _futuro():
@@ -204,8 +201,8 @@ def test_compare_periods_mes_x_mes_e_mes_x_livre_sem_typeerror():
 
     r = _tool("compare_periods", a, period_a_start=INICIO.isoformat(), period_a_end=ULTIMO.isoformat(),
               period_b_start=INICIO.replace(day=3).isoformat(), period_b_end=INICIO.replace(day=8).isoformat())
-    assert (r["period_a"]["despesa"], r["period_b"]["despesa"], r["diff_despesa"]) == (490.0, 260.0, -230.0)
-    assert (r["period_a"]["cartao_incluido"], r["period_b"]["cartao_incluido"]) == (True, False)
+    assert (r["period_a"]["despesa"], r["period_b"]["despesa"], r["diff_despesa"]) == (490.0, 390.0, -100.0)
+    assert (r["period_a"]["cartao_por"], r["period_b"]["cartao_por"]) == ("fatura", "data_da_compra")
 
 
 def test_categorias_e_maiores_gastos_do_mes_somam_a_despesa_da_regra():
@@ -366,7 +363,7 @@ def test_compare_avisa_quando_um_lado_tem_cartao_e_o_outro_nao():
     mes = dict(period_a_start=INICIO.isoformat(), period_a_end=ULTIMO.isoformat())
     livre = dict(period_b_start=INICIO.replace(day=3).isoformat(), period_b_end=INICIO.replace(day=8).isoformat())
     mes_b = dict(period_b_start=INICIO.isoformat(), period_b_end=ULTIMO.isoformat())
-    assert "NÃO é variação de gasto" in _tool("compare_periods", a, **mes, **livre)["nota"]
+    assert "pela data da compra" in _tool("compare_periods", a, **mes, **livre)["nota"]
     assert "nota" not in _tool("compare_periods", a, **mes, **mes_b)
 
 

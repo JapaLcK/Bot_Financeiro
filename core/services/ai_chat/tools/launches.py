@@ -38,11 +38,12 @@ from db import resumo_mes
 # porta e não pela outra.
 from core.observability import _log_falha
 from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
-from utils_date import _tz, today_tz
+from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl
 
 from .. import streaming
 from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
+from ..cards import MAX_MESES_PERIODO
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -101,43 +102,74 @@ def _data_invalida(args: dict[str, Any], *campos: str) -> dict[str, str] | None:
     return {"error": f"data inválida: {c} (use AAAA-MM-DD)"} if c else None
 
 
-def _mes_inteiro(start: date, end: date) -> tuple[int, int] | None:
-    """(ano, mês) quando o período é UM mês-calendário inteiro, senão None. Inteiro = dia 1
-    até o último dia, ou, no mês corrente, dia 1 até hoje ou depois (o default das tools e
-    "esse mês"). Só aí vale a regra única do mês (cartão pela fatura, `db/resumo_mes.py`)."""
-    inicio, prox = resumo_mes.mes_de(start)
-    if start != inicio or not (start <= end < prox):
+_AVISO_12 = ("explique ao usuário que o Piggy consulta até 12 meses e que estes são os 12 mais "
+             "recentes do período pedido")
+
+_AVISO_FIM = ("diga ao usuário que o período foi até o fim do mês atual e que os meses seguintes "
+              "ficaram de fora")
+
+
+def _limita_periodo(start: date, end: date) -> tuple[date, date, dict[str, Any]]:
+    """(início, fim, extra) com o teto de `MAX_MESES_PERIODO` meses-calendário tocados, nunca erro.
+    Período que começa no passado e entra no futuro termina no fim do mês corrente ("este ano");
+    mês só futuro fica como está. Fim cortado: `fim_ajustado`. Mais de 12 meses: os 12 mais
+    recentes, e `extra` leva `limitado_a_12_meses`. Os dois levam o `pedido` ORIGINAL e um aviso
+    para o modelo explicar."""
+    hoje = today_tz()
+    pedido = {"start_date": start.isoformat(), "end_date": end.isoformat()}
+    fim_atual = resumo_mes.mes_de(hoje)[1] - timedelta(days=1)
+    extra: dict[str, Any] = {}
+    if start <= hoje and end > fim_atual:
+        end = fim_atual
+        extra = {"fim_ajustado": True, "pedido": pedido, "aviso_fim": _AVISO_FIM}
+    corte = end.year * 12 + end.month - MAX_MESES_PERIODO  # índice (ano*12+mês-1) do 1º mês aceito
+    if start.year * 12 + start.month - 1 >= corte:
+        return start, end, extra
+    return (date(corte // 12, corte % 12 + 1, 1), end,
+            {**extra, "limitado_a_12_meses": True, "pedido": pedido, "aviso_limite": _AVISO_12})
+
+
+def _meses_inteiros(start: date, end: date) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """((ano, mês) do 1º, (ano, mês) do último) quando o período são meses-calendário INTEIROS, senão
+    None. Inteiro = dia 1 até o último dia do mês, ou, no mês corrente, até hoje ou depois (o default
+    das tools e "esse mês"). Só aí vale a regra única do mês (cartão pela fatura, `db/resumo_mes.py`)."""
+    hoje = today_tz()
+    prox = resumo_mes.mes_de(end)[1]
+    if start.day != 1 or end < start:
         return None
-    hoje = today_tz()
-    if end == prox - timedelta(days=1) or (hoje.replace(day=1) == inicio and end >= hoje):
-        return start.year, start.month
-    return None  # ponytail: vários meses seguem como período livre (só launches)
-
-
-def _recusa_se_for_do_card(start: date, end: date) -> dict[str, Any] | None:
-    """No app, mês inteiro (passado ou corrente) é o card `categorias` (`mes_detalhes`). O mês
-    futuro o `show_card` recusa (`mes_pedido`): esse segue pela tool, senão não tem saída."""
-    mes = _mes_inteiro(start, end)
-    hoje = today_tz()
-    if streaming.ativo() and mes and mes <= (hoje.year, hoje.month):
-        return {"error": "mes_inteiro_no_card", "message": "use show_card categorias"}
+    if end == prox - timedelta(days=1) or (hoje.replace(day=1) == end.replace(day=1) and end >= hoje):
+        return (start.year, start.month), (end.year, end.month)
     return None
 
 
+def _recusa_se_for_do_card(start: date, end: date, extra: dict[str, Any]) -> dict[str, Any] | None:
+    """No app, meses inteiros (passados ou o corrente) são cards: 1 mês = `categorias`, 2 a 12 =
+    `periodo` (`mes_detalhes`). Mês futuro o `show_card` recusa (`mes_pedido`): esse segue pela
+    tool, senão não tem saída. `extra` é o de `_limita_periodo`: o período pedido passou de 12 meses."""
+    meses = _meses_inteiros(start, end)
+    hoje = today_tz()
+    if not (streaming.ativo() and meses and meses[1] <= (hoje.year, hoje.month)):
+        return None
+    if meses[0] == meses[1]:
+        return {"error": "mes_inteiro_no_card", "message": "use show_card categorias"}
+    msg = "use show_card periodo com de={:04d}-{:02d} e ate={:04d}-{:02d}".format(*meses[0], *meses[1])
+    return {"error": "periodo_no_card", "message": msg + "".join(f". Depois, {extra[k]}" for k in ("aviso_limite", "aviso_fim") if k in extra)}
+
+
 def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dict[str, Any]]:
-    """(início, fim, by_bill_month, extra) das tools de lista: no mês inteiro, o mês TODO (o
+    """(início, fim, by_bill_month, extra) das tools de lista: em meses inteiros, o último mês TODO (o
     corrente também: a fatura que fecha depois de hoje entra, como na regra), o cartão pela
     fatura e o MESMO corte da janela do plano que `resumo_do_mes` aplica (`extra` leva
     `motivos: [inicio_do_historico]` quando o corte cai no dia 1 do mês pedido ou depois; o "mês
     anterior cortado" do resumo não tem par em lista). Mês todo cortado: início > fim = lista
     vazia, e `extra` devolve as datas do mês pedido (sobrescrevem as da janela). Período livre
     não corta (limite declarado)."""
-    if not _mes_inteiro(start, end):
+    if not _meses_inteiros(start, end):
         return start, end, False, {}
     from core.services.plan_service import history_earliest_date
     from utils_date import now_tz
 
-    end = resumo_mes.mes_de(start)[1] - timedelta(days=1)
+    end = resumo_mes.mes_de(end)[1] - timedelta(days=1)
     corte = history_earliest_date(user_id, now_tz())
     if corte and corte >= start:
         extra = {"motivos": ["inicio_do_historico"]}
@@ -148,33 +180,42 @@ def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dic
 
 
 def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
-    """Receita/despesa/saldo de um período. Mês inteiro = a MESMA regra do /painel
-    (`resumo_mes.resumo_do_mes`, cartão pela fatura, corte da janela do plano); período livre =
-    só `launches` (`get_summary_by_period`), avisado em `nota`. Dinheiro sai em float (o
-    `ai_guard` só reconhece número JSON como evidência; `Decimal` vira string e a afirmação
-    certa apareceria como "sem evidência"), mas a conta é em Decimal: o saldo e o diff de
+    """Receita/despesa/saldo de um período, com o teto de 12 meses (`_limita_periodo`). Meses
+    inteiros = a MESMA regra do /painel (cartão pela fatura, corte da janela do plano): 1 mês no
+    `resumo_do_mes`, 2 a 12 no `ler_periodo` (o do card `periodo`). Período livre = `launches` +
+    cartão pela data da compra (a regra da lista de `get_top_categories`), avisado em `nota`. Dinheiro
+    sai em float (o `ai_guard` só reconhece número JSON como evidência; `Decimal` vira string e a
+    afirmação certa apareceria como "sem evidência"), mas a conta é em Decimal: o saldo e o diff de
     `compare_periods` não misturam float com Decimal."""
-    mes = _mes_inteiro(start, end)
-    if mes:
-        inicio, prox = resumo_mes.mes_de(start)
-        r = resumo_mes.resumo_do_mes(user_id, *mes)  # mês futuro também: parcelas e datas futuras já lançadas
-        motivos = list(r["motivos"])
+    start, end, limite = _limita_periodo(start, end)
+    meses = _meses_inteiros(start, end)
+    if meses:
+        a, b = meses
+        inicio, prox = date(*a, 1), resumo_mes.mes_de(date(*b, 1))[1]
+        if a == b:
+            r = resumo_mes.resumo_do_mes(user_id, *a)  # mês futuro também: parcelas e datas futuras já lançadas
+            motivos = list(r["motivos"])
+        else:
+            from db.mes_detalhes import ler_periodo
+
+            r = ler_periodo(user_id, a, b, now_tz())
+            motivos = [m for m in resumo_mes.MOTIVOS if m in r["motivos"]]
         if "inicio_do_historico" in motivos:
             # o resumo também levanta o motivo quando o corte cai no mês ANTERIOR (o `anterior` dele
-            # sai None); aqui o mês pedido está inteiro, então só vale o corte a partir do dia 1 dele
+            # sai None); aqui o período pedido está inteiro, então só vale o corte a partir do dia 1 dele
             from core.services.plan_service import history_earliest_date
-            from utils_date import now_tz
 
             corte = history_earliest_date(user_id, now_tz())
             if not (corte and corte >= inicio):
                 motivos.remove("inicio_do_historico")
         hoje = today_tz()
-        futuro = mes > (hoje.year, hoje.month)
+        futuro = b > (hoje.year, hoje.month)
         nota = (
             "mês futuro: só o que já está lançado (parcelas do cartão, lançamentos com data futura); "
             "não é previsão."
             if futuro else
-            "Mês inteiro, com as compras no cartão pela fatura que fecha no mês (igual ao painel)."
+            ("Mês inteiro" if a == b else "Meses inteiros")
+            + ", com as compras no cartão pela fatura que fecha no mês (igual ao painel)."
         )
         if motivos:
             nota += f" Número pode estar desatualizado ou incompleto ({', '.join(motivos)}); avise o usuário."
@@ -187,22 +228,28 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
             "despesa": float(r["saiu"]),
             "saldo_periodo": float(r["entrou"] - r["saiu"]),
             "cartao_incluido": True,
+            "cartao_por": "fatura",
             "motivos": motivos,
             "nota": nota,
+            **limite,
         }
-    summary = db.get_summary_by_period(user_id, start, end)
-    receita, despesa = (Decimal(str(summary.get(k) or 0)) for k in ("receita", "despesa"))
+    receita = Decimal(str(db.get_summary_by_period(user_id, start, end).get("receita") or 0))
+    # A MESMA consulta e os mesmos argumentos de get_top_categories nesse período: total e categorias batem.
+    categorias = db.get_top_expense_categories(user_id, start, end, limit=None, by_bill_month=False)
+    despesa = sum((Decimal(str(c["total"])) for c in categorias), Decimal(0))
     return {
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "receita": float(receita),
         "despesa": float(despesa),
         "saldo_periodo": float(receita - despesa),
-        "cartao_incluido": False,
+        "cartao_incluido": True,
+        "cartao_por": "data_da_compra",
         "nota": (
-            "Compras no cartão de crédito NÃO entram neste período. Não diga que o usuário "
-            "está no positivo ou no negativo sem ressalvar o cartão."
+            "Período livre: as compras no cartão entram pela data da compra (o painel de mês inteiro "
+            "usa a fatura), então o número pode diferir do painel. Avise o usuário."
         ),
+        **limite,
     }
 
 
@@ -247,6 +294,7 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
     categoria = (args.get("categoria") or "").strip() or None
 
+    start, end, limite = _limita_periodo(start, end)
     start, end, por_fatura, extra = _janela(user_id, start, end)
     rows = db.get_largest_expenses(
         user_id, start, end, limit, categoria=categoria, by_bill_month=por_fatura, juntar_parcelas=True,
@@ -262,6 +310,7 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "categoria": categoria,
         "expenses": rows,
         "count": len(rows),
+        **limite,
         **extra,
     }
 
@@ -290,7 +339,8 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return {
             "start": sm["start_date"], "end": sm["end_date"], "label": label,
             "receita": sm["receita"], "despesa": sm["despesa"],
-            **{k: sm[k] for k in ("cartao_incluido", "motivos", "nota") if k in sm},
+            **{k: sm[k] for k in ("cartao_incluido", "cartao_por", "motivos", "nota", "limitado_a_12_meses",
+                                  "pedido", "aviso_limite", "fim_ajustado", "aviso_fim") if k in sm},
         }
 
     def diff(k: str) -> float:
@@ -302,10 +352,10 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "diff_despesa": diff("despesa"),
         "diff_receita": diff("receita"),
     }
-    if sum_a["cartao_incluido"] != sum_b["cartao_incluido"]:
+    if sum_a["cartao_por"] != sum_b["cartao_por"]:
         out["nota"] = (
-            "Um lado inclui o cartão (mês inteiro, pela fatura) e o outro não: a diferença mistura "
-            "regras e NÃO é variação de gasto. Não a apresente como tal."
+            "Um lado inclui o cartão pela fatura (meses inteiros) e o outro pela data da compra (período "
+            "livre): a diferença mistura regras e pode não ser só variação de gasto. Avise o usuário."
         )
     return out
 
@@ -334,7 +384,10 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         months = int(args.get("months") or 6)
     except (TypeError, ValueError):
         months = 6
-    months = max(1, min(months, 24))
+    limite = {}
+    if months > MAX_MESES_PERIODO:
+        limite = {"limitado_a_12_meses": True, "pedido": {"months": months}, "aviso_limite": _AVISO_12}
+    months = max(1, min(months, MAX_MESES_PERIODO))
 
     rows = db.get_spending_trend(user_id, months)
 
@@ -359,6 +412,7 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "months": months,
         "data": rows,  # list of {year, month, despesa, receita}
         "summary": summary,
+        **limite,
     }
 
 
@@ -447,7 +501,8 @@ def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         limit = 5
     limit = max(1, min(limit, 20))
 
-    if erro := _recusa_se_for_do_card(start, end):
+    start, end, limite = _limita_periodo(start, end)
+    if erro := _recusa_se_for_do_card(start, end, limite):
         return erro
 
     start, end, por_fatura, extra = _janela(user_id, start, end)
@@ -457,6 +512,7 @@ def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "end_date": end.isoformat(),
         "categories": rows,
         "count": len(rows),
+        **limite,
         **extra,
     }
 
@@ -475,7 +531,8 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if not categoria:
         return {"error": "categoria obrigatória"}
 
-    if erro := _recusa_se_for_do_card(start, end):
+    start, end, limite = _limita_periodo(start, end)
+    if erro := _recusa_se_for_do_card(start, end, limite):
         return erro
 
     start, end, _, extra = _janela(user_id, start, end)  # o cartão já é pela fatura; muda a janela
@@ -485,6 +542,7 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "total": total,
+        **limite,
         **extra,
     }
 
@@ -918,7 +976,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_period_summary",
-                "description": "Retorna o resumo financeiro de um período: total de receitas e despesas reais (NÃO inclui aportes de investimento — pra aportes, use `get_investment_contributions`). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Sem datas, retorna o mês corrente (inteiro, com o cartão). Mês-calendário inteiro (dia 1 até o último dia, ou até hoje no mês corrente) = a regra do painel: inclui as compras no cartão pela fatura que fecha no mês. Outro período (um dia, uma semana, vários meses) soma só lançamentos, SEM o cartão: o resultado traz `cartao_incluido: false` e uma `nota`, e você deve avisar o usuário.",
+                "description": "Retorna o resumo financeiro de um período: total de receitas e despesas reais (NÃO inclui aportes de investimento — pra aportes, use `get_investment_contributions`). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Sem datas, retorna o mês corrente (inteiro, com o cartão). Aceita até 12 meses (mais que isso vem cortado nos 12 mais recentes, com `limitado_a_12_meses`: explique o limite). Meses-calendário inteiros (dia 1 até o último dia, ou até hoje no mês corrente; um mês ou vários) = a regra do painel: cartão pela fatura de cada mês (`cartao_por: fatura`). Outro período (um dia, uma semana, 10/03 a 25/04) é período livre: o cartão entra pela data da compra (`cartao_por: data_da_compra`) e a `nota` pede que você avise o usuário.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -948,8 +1006,8 @@ TOOLS: list[Tool] = [
                     "movimentações internas e reembolsos). Use pra 'onde "
                     "gastei mais?', 'quais minhas maiores categorias?', "
                     "'em que torrei mais dinheiro?', 'top 3 categorias do "
-                    "mês'. Sem datas, usa o mês corrente. Período que é um mês "
-                    "inteiro conta o mês todo com o cartão pela fatura (igual ao painel)."
+                    "mês'. Sem datas, usa o mês corrente. Período de meses "
+                    "inteiros conta o mês todo com o cartão pela fatura (igual ao painel). Até 12 meses."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1076,8 +1134,8 @@ TOOLS: list[Tool] = [
                     "Use pra 'gastei mais em abril ou maio?', 'comparar último "
                     "mês com este', 'esse mês vs o anterior'. Retorna totais "
                     "+ diferença pra cada métrica. Lado que é um mês-calendário "
-                    "inteiro inclui o cartão (fatura do mês); os outros não "
-                    "(`cartao_incluido` por lado)."
+                    "inteiro inclui o cartão pela fatura; os outros, pela data da compra "
+                    "(`cartao_por` por lado). Cada lado aceita até 12 meses."
                 ),
                 "parameters": {
                     "type": "object",
@@ -1120,9 +1178,8 @@ TOOLS: list[Tool] = [
                         "months": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 24,
                             "default": 6,
-                            "description": "Quantos meses olhar pra trás (1 a 24, padrão 6).",
+                            "description": "Quantos meses olhar pra trás (até 12; acima disso a resposta vem cortada com aviso; padrão 6).",
                         },
                     },
                 },
