@@ -15,10 +15,10 @@ import { lerRecurso, salvarPerfil } from "@/services/painel";
 import { Screen } from "@/ui/componentes/Screen";
 import { Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
-import { chaveLayout, mesAtual, sanitizarLayout, type Widget } from "./catalogo";
+import { chaveLayout, mesAtual, mesesAnteriores, sanitizarLayout, type Widget } from "./catalogo";
 import Inicio from "../../../app/(app)/index";
 
-export const schemas = { contas: S.contasSchema, resumo: S.resumoSchema, detalhes: S.detalhesMesSchema, patrimonio: S.patrimonioSchema, rendimento: S.rendimentoSchema, previsao: S.previsaoSchema, assinaturas: S.assinaturasSchema, metas: S.metasSchema, cartoes: S.cartoesSchema, parcelas: S.parcelasSchema, renda: S.rendaSchema, insights: S.insightsSchema, conversa: S.conversaSchema, plano: S.planoSchema, categorias: S.categoriasSchema };
+export const schemas = { contas: S.contasSchema, resumo: S.resumoSchema, detalhes: S.detalhesMesSchema, detalhesAnterior: S.detalhesMesSchema, patrimonio: S.patrimonioSchema, rendimento: S.rendimentoSchema, previsao: S.previsaoSchema, assinaturas: S.assinaturasSchema, metas: S.metasSchema, cartoes: S.cartoesSchema, parcelas: S.parcelasSchema, renda: S.rendaSchema, insights: S.insightsSchema, plano: S.planoSchema, categorias: S.categoriasSchema };
 export type Recurso = keyof typeof schemas;
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };
@@ -35,7 +35,7 @@ export function mensagemRecurso(e: unknown) {
 }
 function rota(k: Recurso, uid: number, mes: string, dias?: number) {
   const base = `/api/app/`;
-  return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: `/goals/${uid}/status`, cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, conversa: "/ai/messages", plano: base + "me", categorias: base + "categorias" })[k];
+  return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, detalhesAnterior: base + `mes-detalhes?mes=${mesesAnteriores(mes, 2)[1]}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: `/goals/${uid}/status`, cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, plano: base + "me", categorias: base + "categorias" })[k];
 }
 export function PainelProvider({ children }: { children: ReactNode }) {
   const sessao = useSessao();
@@ -102,7 +102,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const uid = usuario.user_id, anterior = ultimaCarga.current;
     const completa = !anterior || anterior.uid !== uid || anterior.versao !== versao || anterior.geracao !== geracao.current;
     const recursos: Recurso[] = completa ? Object.keys(schemas) as Recurso[] : [
-      ...(anterior.mes !== mes ? ["resumo", "detalhes"] as const : []),
+      ...(anterior.mes !== mes ? ["resumo", "detalhes", "detalhesAnterior"] as const : []),
       ...(anterior.dias !== dias ? ["previsao"] as const : []),
     ];
     // Não cancela aqui (#849): o efeito do pai roda depois do dos filhos e mataria a página recém-pedida. Quem pede a recarga cancela antes (atualizar, cleanup do portão); o setVersao do finally de mudarPerfil pode vir sem cancelar (limite de 15s do PUT), e por isso as leituras se superam por recurso e a de perfil pela mais nova.
@@ -119,6 +119,9 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       // Seletores superam somente a leitura deste recurso; refresh e acesso superam toda a geração.
       const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid && leituras.current.get(k) === c;
       try {
+        // Só economia de requisição: o servidor responderia 200 (com `inicio_do_historico`) para o mês anterior ao corte, e o `anterior` do resumo já vem null nesse caso; aqui nem pede e cai em "negado" (o card segue sem a comparação).
+        const inicio = usuario.history_earliest_date?.slice(0, 7);
+        if (k === "detalhesAnterior" && inicio && mesesAnteriores(mes, 2)[1]! < inicio) { if (atual()) setDados((d) => ({ ...d, [k]: { fase: "negado", mensagem: "Mês anterior fora do seu histórico." } })); return; }
         const dado = await lerRecurso(rota(k, uid, mes, dias), schemas[k] as unknown as z.ZodType<Dados[K]>, c);
         if (atual()) setDados((d) => ({ ...d, [k]: { fase: "pronto", dado } }));
       } catch (e) {

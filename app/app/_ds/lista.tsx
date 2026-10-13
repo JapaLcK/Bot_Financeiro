@@ -51,7 +51,7 @@ export default function TelaLista() {
             minHeight: 44,
             justifyContent: "center",
             paddingHorizontal: espaco.lg,
-            borderRadius: raio.lg,
+            borderRadius: raio.cartao,
             backgroundColor: cores.brandSoft,
           }}
         >

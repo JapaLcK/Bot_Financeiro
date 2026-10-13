@@ -211,15 +211,17 @@ it("navigate Piggy repetido não trava o destino nem duplica a pilha", async () 
  servidor(); const r = renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByRole("button", { name: "Conversar com o Piggy" })).toBeTruthy());
  const antes = pilha(r); const b = screen.getByRole("button", { name: "Conversar com o Piggy" }); await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy");
  await act(async () => { fireEvent.press(b); await drenar(); }); expect(screen).toHavePathname("/piggy"); expect(pilha(r)).toEqual(antes);
+ // A aba Piggy é só o chat (sem Minha conta nem Retomar): a trava de entrada do Resumo não pode ter ficado presa.
+ await act(async () => { router.navigate("/resumo"); await drenar(); });
  await apertar("Abrir minha conta"); expect(screen.getByText("Minha conta")).toBeTruthy(); await apertar("Fechar"); await apertar("Retomar conexão"); expect(pilha(r)?.filter((p) => p.nome === "open-finance-volta")).toHaveLength(1);
 });
 
-it.each([["Ver lançamentos", true], ["Ver lançamentos", false], ["01/10/2026", true], ["01/10/2026", false]])("Retomar × link do widget %s, recovery primeiro=%s, usa a mesma reserva", async (irma, recoveryPrimeiro) => {
+it.each([["Resumo do mês, abrir Gastos", true], ["Resumo do mês, abrir Gastos", false], ["01/10/2026", true], ["01/10/2026", false]])("Retomar × link do widget %s, recovery primeiro=%s, usa a mesma reserva", async (irma, recoveryPrimeiro) => {
  servidor(); const r = renderRouter("./app", { initialUrl: "/" }); await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
- const a = screen.getByRole("button", { name: "Retomar conexão" }), b = irma === "Ver lançamentos" ? screen.getByRole("button", { name: irma }) : screen.getByTestId("calendario-dia-2026-10-01");
+ const a = screen.getByRole("button", { name: "Retomar conexão" }), b = irma !== "01/10/2026" ? screen.getByRole("button", { name: irma }) : screen.getByTestId("calendario-dia-2026-10-01");
  await act(async () => { fireEvent.press(recoveryPrimeiro ? a : b); fireEvent.press(recoveryPrimeiro ? b : a); await drenar(); });
  expect(pilha(r)?.map((p) => p.nome)).toEqual(recoveryPrimeiro ? ["(painel)", "open-finance-volta"] : ["(painel)"]);
- expect(screen).toHavePathname(recoveryPrimeiro ? "/open-finance-volta" : "/extrato");
- if (!recoveryPrimeiro && irma !== "Ver lançamentos") expect(r.getSearchParams().dia).toBe("2026-10-01");
+ expect(screen).toHavePathname(recoveryPrimeiro ? "/open-finance-volta" : irma === "01/10/2026" ? "/extrato" : "/gastos");
+ if (!recoveryPrimeiro && irma === "01/10/2026") expect(r.getSearchParams().dia).toBe("2026-10-01");
  expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });

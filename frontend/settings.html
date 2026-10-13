@@ -1163,6 +1163,7 @@ body.balance-hidden .account-balance {
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
 <script src="/open-finance-connect.js?v=1"></script>
+<script src="/of-status-poll.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
   <script src="/app-mode.js?v=34"></script>
 </head>
@@ -2068,6 +2069,7 @@ function showSettingsSection(section) {
   window.history.replaceState({}, "", url);
   if (target === "security") { loadSecuritySettings(); loadMfaStatus(); }
   if (target === "notifications" && !notificationSettingsLoaded) loadNotificationSettings();
+  if (target === "open-finance") PBColetaOF.retomar();   // o acompanhamento pausa fora desta seção
 }
 
 function displayValue(value, fallback="Não vinculado") {
@@ -2935,6 +2937,16 @@ let OF_COBRANCA_EM_ATRASO = false; // carência (vem do /auth/me): o CTA vai pro
    O picker, o trap de foco e o widget da Pluggy saíram daqui pra serem
    compartilhados com o wizard de primeira configuração. Tudo que é específico
    desta tela entra por callback. */
+// Acompanhamento da coleta (frontend/of-status-poll.js). `propagate: true` é
+// obrigatório: sem ele uma falha de rede no tique apagaria a lista e daria toast.
+// `caixinhas: false`: o renderCaixinhas refaz o card e tirava o foco do <select>
+// de vincular meta a cada tique; só relê o de uma carga completa que o tique
+// superou (`_caixPendente`). Só lê com a seção de Open Finance na tela.
+PBColetaOF.configurar({
+  reler: (signal) => loadData({ propagate: true, caixinhas: false, signal }),   // signal: o prazo da leitura
+  ocupado: () => _ofRefreshVigente !== null,   // o Atualizar mais recente em voo e dentro do prazo
+  visivel: () => !document.getElementById("section-open-finance").hidden,
+});
 PBOpenFinance.init({
   apiBase: API,
   get userId() { return USER_ID; },   // resolvido no validateSettingsSession
@@ -2950,6 +2962,11 @@ PBOpenFinance.init({
     setStep(2);
   },
   onConnected: (data) => {
+    // Invalida um loadData em voo (boot ou acompanhamento) que leu o snapshot
+    // antes do POST /pluggy-item: chegando depois, ele repintaria a lista SEM a
+    // conexão nova e o `observar` desligaria o acompanhamento.
+    ++_dataGen;
+    PBColetaOF.novoCiclo();
     const c = data.connections  || [];
     const a = data.accounts     || [];
     const t = data.transactions || [];
@@ -2958,6 +2975,7 @@ PBOpenFinance.init({
     renderAccounts(a);
     renderTransactions(t);
     setStep(3);
+    caixinhasPendentes();
   },
   onError: (msg) => {
     const btn = document.getElementById("connect-btn");
@@ -3068,6 +3086,7 @@ function renderConnections(list) {
   const el = document.getElementById("connections-list");
   if (!list.length) {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon"><i class="ph ph-plug" aria-hidden="true"></i></div><div class="empty-title">Nenhum banco conectado</div><div class="empty-sub">Escolha uma instituição ao lado para começar.</div></div>`;
+    PBColetaOF.observar(list);
     return;
   }
   el.innerHTML = list.map(c => {
@@ -3088,6 +3107,7 @@ function renderConnections(list) {
       <span class="pill ${pc}">${esc(pl)}</span>
     </div>`;
   }).join("");
+  PBColetaOF.observar(list);   // único pintor da lista: "Atualizando…" na tela ⇒ acompanhamento ligado
 }
 
 function renderAccounts(list) {
@@ -3152,7 +3172,18 @@ function updateStats(connections, accounts, transactions) {
 // chegar por último, sobrescreveria as conexões/contas/txs mais novas. Só a
 // geração mais recente pinta; resposta superada vira no-op.
 let _dataGen = 0;
-async function loadData({ propagate = false } = {}) {
+// Uma carga completa começou e o loadCaixinhas dela ainda não rodou. Superada
+// (por um tique do acompanhamento ou por um pintor direto), ela sai sem chamar
+// o caixinhas; quem vence a corrida chama no lugar dela (caixinhasPendentes).
+// Sem isto, remover as conexões com um tique no meio deixava o card de
+// caixinhas do banco removido na tela.
+let _caixPendente = false;
+function caixinhasPendentes(opts) {
+  if (!_caixPendente) return Promise.resolve();
+  _caixPendente = false;
+  return loadCaixinhas(opts);
+}
+async function loadData({ propagate = false, caixinhas = true, signal } = {}) {
   if (PRECISA_SENHA) return;   // rotas de Open Finance barradas (#758)
   if (!USER_ID) {
     if (propagate) throw new Error("Sessão inválida");
@@ -3161,9 +3192,10 @@ async function loadData({ propagate = false } = {}) {
     return;
   }
   const myGen = ++_dataGen;
+  if (caixinhas) _caixPendente = true;
   let ownErr = null;
   try {
-    const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders() }));
+    const resp = await fetch(`${API}/open-finance/${USER_ID}`, authOptions({ headers: authHeaders(), signal }));
     // 402 = sem plano ativo (#380). Este GET dispara no boot em QUALQUER aba, então
     // sem este ramo o cortado leva um toast de erro só por abrir a saída de
     // emergência. Estado, não erro — e nem com propagate ele tinge o PTR de âmbar.
@@ -3188,12 +3220,19 @@ async function loadData({ propagate = false } = {}) {
         // um console.error, ou rejeitando o PTR em âmbar. Some o card e pronto.
         // Invalida também o filho iniciado por uma carga anterior bem-sucedida.
         ++_caixGen;
+        _caixPendente = false;
         const caixCard = document.getElementById("caixinhas-card");
         if (caixCard) caixCard.style.display = "none";
+        PBColetaOF.parar();   // não pinta a lista: sem isto o acompanhamento bateria 402 por 30 min
+        clearTimeout(_ofReleitura);   // nem a releitura de um Atualizar abortado (Tester r7, D)
       }
       return;
     }
-    if (!resp.ok) throw new Error(await readApiError(resp));
+    if (!resp.ok) {
+      const err = new Error(await readApiError(resp));
+      err.status = resp.status;   // o acompanhamento para em 401/403/404 e segue no resto
+      throw err;
+    }
     const data = await resp.json();
     if (myGen !== _dataGen) return;   // superado: não pinta nem chama o caixinhas (quem superou faz os dois)
     // Desfaz o estado "sem plano ativo": um PBRefresh depois de o plano voltar
@@ -3222,14 +3261,18 @@ async function loadData({ propagate = false } = {}) {
   }
   // Caixinhas FORA do try — mesmo invariante do fan-out de segurança (documentado
   // acima de loadSecuritySettings): o bumper mais recente de _dataGen é dono do
-  // loadCaixinhas e do desfecho, e loadData é o único que bumpa. Dentro do try ele
+  // loadCaixinhas e do desfecho. Os pintores diretos da lista (onConnected e o
+  // botão Atualizar) também bumpam, para invalidar um loadData em voo; eles só
+  // chamam o caixinhas que esse loadData deixou pendente. Dentro do try ele
   // ficava órfão quando esta geração falhava com propagate (sai por throw antes) e
   // a anterior caía no guard de geração — ninguém o chamava.
   // await + propaga: sem isso o loadData soltava o indicador do PTR antes do
   // caixinhas assentar (segundo pull podia sobrepor) e uma falha transitória
   // escondia o card já renderizado com o refresh reportando sucesso.
   // Erro do pai ganha do erro do filho (é mais informativo).
-  await loadCaixinhas({ propagate }).catch(function (childErr) { if (!ownErr) ownErr = childErr; });
+  // O acompanhamento da coleta não pede o caixinhas (`caixinhas: false`, ver o
+  // PBColetaOF.configurar), mas chama o de uma carga completa que ele superou.
+  await caixinhasPendentes({ propagate }).catch(function (childErr) { if (!ownErr) ownErr = childErr; });
   // Re-checa a geração pelo mesmo motivo do loadSecuritySettings: o await acima é
   // mais um GET, e um loadData mais novo (2º pull, disconnectAll) que
   // tenha superado este é o dono do desfecho — o erro desta geração morta não
@@ -3350,6 +3393,31 @@ async function bindCaixinha(ofInvestmentId, newPocketVal, currentPocketId) {
    ficam de fora, porque nesse caminho o botão nem existe (some no modo app).
    `wait`: teto de espera mandado na query — o watchdog do PTR é 12s, e o
    default de 18s do servidor faria todo gesto bem-sucedido terminar em âmbar. */
+// Atualizar em voo (todos, inclusive um velho preso no GET do PTR). Só sonda dos
+// testes (of_acompanha_geracao, of_acompanha_foco_post): não entra na trava, que
+// é `ocupado` = `_ofRefreshVigente`.
+let _ofRefreshEmVoo = 0;
+// Geração do Atualizar: a trava, o prazo e a releitura são do MAIS RECENTE.
+let _ofRefreshGen = 0;
+// Prazo do Atualizar: cobre a espera mais longa do servidor (teto de 18 s do
+// `?wait` e default de OF_REFRESH_WAIT_SEC) + 2,5 s da última volta do poll + um
+// PLUGGY_TIMEOUT inteiro (20 s) no PATCH/sync, ~40 s, com 50% de folga para
+// snapshot e rede. Vale duas vezes:
+// - o POST é abortado nele (o `finally` roda e o botão volta). O abort não
+//   cancela o servidor: OF_RELEITURA_MS depois, o acompanhamento relê UMA vez.
+// - a trava do acompanhamento (`ocupado`, `_ofRefreshVigente`) é do Atualizar
+//   mais recente e sai no fim dele (`finally`) ou no prazo, o que vier antes,
+//   mesmo com o `finally` preso no GET que o PTR e o 402 fazem depois do POST:
+//   a cadência volta a ler, a volta ao foco pendente é cumprida e o botão volta.
+//   Cada Atualizar novo renova o prazo; um velho que termina depois não mexe nela.
+// `AbortController` + `setTimeout`, não `AbortSignal.timeout` (iOS 14, ver pb-nav.js).
+const OF_REFRESH_PRAZO_MS = 60000;
+let _ofRefreshVigente = null;
+// Releitura depois do abort: 30 s depois dele são 90 s desde o início do
+// Atualizar, mais que o dobro dos ~40 s do pior caso do servidor. Uma só: se a
+// coleta seguir, o `observar` dessa leitura liga o ciclo.
+const OF_RELEITURA_MS = 30000;
+let _ofReleitura = null;
 async function refreshOpenFinance(opts) {
   const { propagate = false, wait = null } = opts || {};
   if (!USER_ID) {
@@ -3359,14 +3427,38 @@ async function refreshOpenFinance(opts) {
     return;
   }
   const btn = propagate ? null : document.getElementById("of-refresh-btn");
-  const orig = btn ? btn.textContent : "";
   if (btn) { btn.disabled = true; btn.textContent = "↻ Atualizando…"; }
   if (!propagate) showToast("Buscando novidades no seu banco… pode levar alguns segundos.", "ok");
+  _ofRefreshEmVoo++;
+  const gen = ++_ofRefreshGen;
+  // Fim deste Atualizar: no `finally` ou no prazo. Só o do mais recente mexe:
+  // um velho que termina depois (GET do 402 preso) não reabilita o botão com
+  // outro em voo. O do mais recente sempre devolve o botão, mesmo sendo um
+  // PTR por cima de um clique, para ele nunca ficar preso. Esse par é só
+  // sintético: em produção o PTR é só do app (app-mode.js) e o app esconde o
+  // botão (app-mode.css, html.pb-app). Nele, um 3º clique pode gerar POST
+  // concorrente; aceito (dono, 2026-10-09), o backend serializa por
+  // `claim_manual_refresh`.
+  const fim = () => {
+    if (gen !== _ofRefreshGen) return;
+    const b = document.getElementById("of-refresh-btn");
+    if (b) { b.disabled = false; b.textContent = "↻ Atualizar"; }
+    clearTimeout(_ofRefreshVigente);
+    _ofRefreshVigente = null;
+    PBColetaOF.fimDoAtualizar();   // volta ao foco barrada pelo POST: lê agora (qualquer desfecho)
+  };
+  clearTimeout(_ofReleitura);   // este Atualizar repinta: a releitura do anterior sai
+  clearTimeout(_ofRefreshVigente);
+  _ofRefreshVigente = setTimeout(fim, OF_REFRESH_PRAZO_MS);
+  const prazo = new AbortController();
+  // O motivo é o texto que o toast de erro já usa (o AbortError do navegador viria em inglês).
+  const prazoTimer = setTimeout(() => prazo.abort(new Error("Erro ao atualizar")), OF_REFRESH_PRAZO_MS);
   try {
     const qs = wait ? `?wait=${encodeURIComponent(wait)}` : "";
     const resp = await fetch(`${API}/open-finance/${USER_ID}/refresh${qs}`, authOptions({
       method: "POST",
       headers: authHeaders({ "Content-Type": "application/json" }),
+      signal: prazo.signal,
     }));
     // 402 = sem plano ativo (#380). Esta é a QUARTA porta da mesma classe (as
     // outras três são loadData, loadActivityLog e loadNotificationSettings), e é
@@ -3378,13 +3470,16 @@ async function refreshOpenFinance(opts) {
     // `await loadData` da branch de sucesso abaixo. O GET dela responde o mesmo
     // 402 e cai no ramo que pinta o estado, sem toast.
     if (resp.status === 402) {
+      clearTimeout(prazoTimer);   // o POST assentou: o prazo não corta o GET seguinte
       await loadData({ propagate });
       if (!propagate) showToast("Indisponível sem plano ativo.", "info");
       return;
     }
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
+    clearTimeout(prazoTimer);   // o POST assentou: o prazo não "aborta" o que já acabou (Tester r7, I)
     const veredito = refreshVerdict(data.sync || {});
+    PBColetaOF.novoCiclo(data);   // o teto e a cadência contam do Atualizar; `still_updating` liga o ciclo
     if (propagate) {
       // Repinta pela porta canônica: `loadData` é quem bumpa `_dataGen`, é dono
       // do fan-out (caixinhas) e tem a guarda de geração. Pintar aqui direto
@@ -3395,20 +3490,26 @@ async function refreshOpenFinance(opts) {
       const c = data.connections  || [];
       const a = data.accounts     || [];
       const t = data.transactions || [];
+      ++_dataGen;   // invalida a leitura do acompanhamento em voo (mesmo motivo do onConnected)
       updateStats(c, a, t);
       renderConnections(c);
       renderAccounts(a);
       renderTransactions(t);
       if (c.length > 0) setStep(3);
+      caixinhasPendentes();
       showToast(veredito.msg, veredito.tone);
     }
     // Já repintado: agora sim o indicador do gesto pode virar âmbar.
     if (propagate && veredito.tone === "error") throw new Error(veredito.msg);
   } catch (err) {
+    // Só o abort que cortou o POST, e só se outro Atualizar não começou depois (E).
+    if (prazo.signal.aborted && gen === _ofRefreshGen) { clearTimeout(_ofReleitura); _ofReleitura = setTimeout(PBColetaOF.releitura, OF_RELEITURA_MS); }
     if (propagate) throw err;
     showToast(err.message || "Erro ao atualizar", "error");
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = orig || "↻ Atualizar"; }
+    clearTimeout(prazoTimer);
+    _ofRefreshEmVoo--;
+    fim();
   }
 }
 
@@ -3445,7 +3546,10 @@ const OF_VERDICT_OK = ["updated", "rate_limited"];
 // SEM item: é o ramo `still_updating > 0`, que fala do lote, não de um banco.
 // Por isso ela é a única frase deste bloco sem `ofNome` — e por isso ela NÃO
 // serve de fallback do `updating`, que tem item na mão.
-const OF_UPDATING_LOTE = "O banco ainda está atualizando. Se faltar algo, toque em Atualizar de novo.";
+// A tela relê sozinha durante a coleta (of-status-poll.js), então a frase não
+// manda tocar de novo (Onda 5, PR-E, DP1 = A).
+const OF_SOZINHOS = "Seus dados aparecem aqui sozinhos quando terminar.";
+const OF_UPDATING_LOTE = `O banco ainda está atualizando. ${OF_SOZINHOS}`;
 
 // "Banco ainda coletando" NÃO é erro, e os DOIS caminhos que dizem isso usam
 // este tom: o ramo do lote (`still_updating`) e a entrada `updating` da tabela
@@ -3461,6 +3565,16 @@ const OF_TOM_COLETANDO = "info";
 // devolve `updating` também para a 1ª conexão cujo sync FALHOU (o portão não olha
 // o motivo), então neutro só vale sem motivo de falha.
 const OF_REASONS_OK = ["", "ok"];
+// Exceção LOCAL à entrada `updating`, sem tocar no espelho acima (DP1 = A, PR-E):
+// `no_accounts` numa 1ª coleta em curso é a Pluggy ainda sem contas, e o
+// `connection_ui_state` mantém "Atualizando…" nesse caso — não é falha.
+const OF_REASONS_COLETANDO = [...OF_REASONS_OK, "no_accounts"];
+
+// Detalhe que já manda atualizar: o toast de erro não repete a ordem. Os
+// detalhes vêm de constantes do backend (`_DETALHE_COLETA_VENCIDA` e irmãs em
+// core/services/pluggy_health.py, todas com "atualize de novo") que o front não
+// importa; por isso a regra olha a instrução, não o texto inteiro (§0.7).
+const OF_JA_MANDA_ATUALIZAR = /\batualize\b/i;
 
 const OF_VERDICT = [
   ["item_missing",      (i) => `A conexão ${ofBanco(i)} foi perdida. Refaça a conexão.`],
@@ -3470,8 +3584,8 @@ const OF_VERDICT = [
   // backend sempre preenche o detalhe deste estado, e repetir a instrução aqui
   // é a duplicação que já mandou "reautorize" para quem precisava autorizar.
   ["needs_user_action", (i) => i.detail
-      ? `Ação necessária no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
-      : `Ação necessária no ${ofNome(i)}.`],
+      ? `Ação necessária n${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Ação necessária n${ofArtigo(i)} ${ofNome(i)}.`],
   // O backend anexa o porquê ao detalhe. Sem ternário: para `no_accounts` o
   // `detail` nunca vem nulo (`_FIXED_DETAIL` tem a chave), e repetir a copy do
   // backend aqui é o que o comentário do `needs_user_action` proíbe.
@@ -3482,19 +3596,34 @@ const OF_VERDICT = [
   // lote (`OF_UPDATING_LOTE`), que fala de `still_updating` e não tem item.
   // Exceção por entrada é o buraco por onde esta classe reabriu três vezes.
   ["partial",           (i) => i.detail
-      ? `Atualizei o que deu no ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
-      : `Atualizei o que deu no ${ofNome(i)} — parte dos dados não veio.`],
+      ? `Atualizei o que deu n${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+      : `Atualizei o que deu n${ofArtigo(i)} ${ofNome(i)} — parte dos dados não veio.`],
   // Detalhe VARIÁVEL desde o PR-B2: o item em ERROR na Pluggy (E13) diz que o banco
   // errou e que só um novo Atualizar ajuda; o erro comum promete a retentativa.
   // Sem ternário: o `_FIXED_DETAIL` do backend sempre preenche o detalhe.
-  ["error_recoverable", (i) => `Não consegui atualizar o ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
-  ["updating",          (i) => i.detail
-      ? `${ofNome(i)}: ${ofInstrucao(i.detail)}. Toque em Atualizar de novo em instantes.`
-      : `O ${ofNome(i)} ainda está atualizando. Se faltar algo, toque em Atualizar de novo.`],
+  ["error_recoverable", (i) => `Não consegui atualizar ${ofArtigo(i)} ${ofNome(i)}: ${ofInstrucao(i.detail)}.`],
+  // Dois tons, duas frases (PR-E, achado 3 do Tester r1). Neutro (coleta sem
+  // falha): com detalhe, só o detalhe — o da D1 já diz "atualize de novo", e
+  // repetir a instrução era a duplicação da pendência de 2026-09-30; sem
+  // detalhe, a tela relê sozinha (of-status-poll.js). Erro (`neutro` falso,
+  // motivo de falha): diz o que falhou e manda tentar de novo, salvo quando o
+  // detalhe já manda (OF_JA_MANDA_ATUALIZAR); "aparecem aqui
+  // sozinhos" não vale, porque nada garante que a coleta siga.
+  ["updating",          (i, neutro) => neutro
+      ? (i.detail
+        ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.`
+        : `${ofArtigo(i).toUpperCase()} ${ofNome(i)} ainda está atualizando. ${OF_SOZINHOS}`)
+      : (i.detail
+        ? `${ofNome(i)}: ${ofInstrucao(i.detail)}.${OF_JA_MANDA_ATUALIZAR.test(i.detail) ? "" : " Tente de novo em alguns minutos."}`
+        : `Não consegui atualizar ${ofArtigo(i)} ${ofNome(i)} agora. Tente de novo em alguns minutos.`)],
 ];
 
-function ofBanco(i) { return i.institution ? `com o ${i.institution}` : "com o banco"; }
+function ofBanco(i) { return i.institution ? `com ${ofArtigo(i)} ${i.institution}` : "com o banco"; }
 function ofNome(i)  { return i.institution || "banco"; }
+// "a Caixa", "o Nubank". ponytail: só a Caixa (e a Caixa Econômica Federal) é
+// feminina entre os bancos que conectamos hoje; banco novo com nome feminino
+// entra aqui.
+function ofArtigo(i) { return /^caixa\b/i.test(String(i.institution || "").trim()) ? "a" : "o"; }
 // O detalhe do backend começa em maiúscula ("Autorize o acesso…"); aqui ele
 // entra no meio da frase. `showToast` faz o `esc()`.
 // `String(d)` porque várias entradas do `OF_VERDICT` chamam isto, e um `detail`
@@ -3521,10 +3650,10 @@ function refreshVerdict(sync) {
   for (const [estado, msg] of OF_VERDICT) {
     for (const i of items) {
       if (i.state !== estado) continue;
-      if (estado === "updating" && OF_REASONS_OK.includes(String(i.reason ?? "").toLowerCase())) {
-        if (!coletando) coletando = { tone: OF_TOM_COLETANDO, msg: msg(i) };
+      if (estado === "updating" && OF_REASONS_COLETANDO.includes(String(i.reason ?? "").toLowerCase())) {
+        if (!coletando) coletando = { tone: OF_TOM_COLETANDO, msg: msg(i, true) };
       } else {
-        return { tone: "error", msg: msg(i) };
+        return { tone: "error", msg: msg(i, false) };
       }
     }
   }
@@ -3532,8 +3661,8 @@ function refreshVerdict(sync) {
   if (items.some((i) => !OF_VERDICT_OK.includes(i.state) && i.state !== "updating")) return erro;
   if (coletando) return coletando;
   // `still_updating` conta item que a Pluggy ainda reporta coletando quando o
-  // servidor olha (fim da espera, ou health regravado no cooldown). A FRASE é a
-  // mesma de antes (decisão do dono); só o tom é neutro.
+  // servidor olha (fim da espera, ou health regravado no cooldown). Tom neutro;
+  // a frase é a da DP1 do PR-E (a tela relê sozinha).
   if (Number(sync.still_updating) > 0)
     return { tone: OF_TOM_COLETANDO, msg: OF_UPDATING_LOTE };
   if (items.length === 0 && sync.ok === false) return erro;

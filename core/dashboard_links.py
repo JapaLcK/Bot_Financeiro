@@ -13,6 +13,13 @@ def get_dashboard_base_url() -> str:
     return base_url.rstrip("/")
 
 
+def base_url_publica() -> str:
+    """Base https pública do site; fora de https (dev/localhost) cai no domínio
+    de produção. Usada nos links que vão para fora do app (WhatsApp)."""
+    base = get_dashboard_base_url()
+    return base if base.startswith("https://") else "https://pigbankai.com"
+
+
 logger = logging.getLogger(__name__)
 
 

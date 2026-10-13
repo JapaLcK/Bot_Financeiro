@@ -304,12 +304,31 @@ def get_card_delete_impact(user_id: int, card_id: int) -> dict:
     }
 
 
+class CartaoDoBanco(ValueError):
+    """Cartão vinculado ao Open Finance: apagar é desfeito no sync seguinte (recria o cartão e
+    reimporta as compras), perdendo paid_amount manual, categorias, nome e limite. Também recusa
+    o pagamento manual de fatura (`pay_bill_amount`): quem paga é o banco."""
+
+
+MSG_CARTAO_DO_BANCO = ("Esse cartão vem do seu banco (Open Finance). Para tirar, "
+                       "desconecte o banco em Configurações.")
+MSG_FATURA_DO_BANCO = ("Cartão do banco (Open Finance) não tem pagamento manual de fatura: quando "
+                       "você paga no banco, a fatura atualiza aqui sozinha na próxima sincronização.")
+
+
 def delete_card(user_id: int, card_id: int) -> bool:
+    """Levanta `CartaoDoBanco` (antes de qualquer escrita) se o cartão é do Open Finance."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select id from credit_cards where id=%s and user_id=%s", (card_id, user_id))
-            if not cur.fetchone():
+            cur.execute(
+                "select open_finance_account_id from credit_cards where id=%s and user_id=%s for update",
+                (card_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
                 return False
+            if row["open_finance_account_id"] is not None:
+                raise CartaoDoBanco(MSG_CARTAO_DO_BANCO)
             cur.execute(
                 "update users set default_card_id=null where id=%s and default_card_id=%s",
                 (user_id, card_id),
@@ -590,6 +609,33 @@ def get_current_open_bill_id(user_id: int, card_id: int, as_of: date):
             return int(b["id"]) if b else None
 
 
+def fatura_a_pagar(user_id: int, card_id: int, as_of: date):
+    """Id da fatura que o usuário vê e paga: a do período ANTERIOR (a já fechada, que vence
+    primeiro) se ainda `open` e com saldo; senão a do período de `as_of`. Faturas mais velhas não
+    viram "a fatura" (seguem na lista do painel), nem depois de mudar o dia de fechamento.
+    `get_current_open_bill_id` é o PERÍODO de hoje (o fallback daqui e o pagar com saldo antigo);
+    compra entra na fatura certa por `get_or_create_open_bill`."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select closing_day from credit_cards where id=%s and user_id=%s limit 1",
+                        (card_id, user_id))
+            row = cur.fetchone()
+            if not row:
+                return None
+            inicio, fim = billing_period_for_close_day(as_of, int(row["closing_day"]))
+            ps, pe = billing_period_for_close_day(inicio - timedelta(days=1), int(row["closing_day"]))
+            cur.execute(
+                "select id, status, period_start, total - coalesce(paid_amount, 0) as devido "
+                "from credit_bills where user_id=%s and card_id=%s and period_end in (%s, %s)",
+                (user_id, card_id, pe, fim),
+            )
+            dois = cur.fetchall()
+            for b in dois:
+                if b["period_start"] == ps and b["status"] == "open" and b["devido"] > 0:
+                    return int(b["id"])
+    return get_current_open_bill_id(user_id, card_id, as_of)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Transações de crédito
 # ──────────────────────────────────────────────────────────────────────────────
@@ -750,6 +796,19 @@ def get_or_create_open_finance_card(user_id: int, of_account_id: int, name: str 
     return card_id
 
 
+def reabrir_faturas_com_saldo(cur, user_id: int, bill_ids) -> None:
+    """Fatura paga/fechada cujo total passou a superar o pago volta a 'open' (mesmo padrão de
+    `add_credit_installments`). Para quem mexe no total fora do insert: sync do OF e remoção."""
+    ids = [b for b in bill_ids if b is not None]
+    if ids:
+        cur.execute(
+            "update credit_bills set status='open', paid_at=null "
+            "where user_id=%s and id=any(%s) and status in ('paid','closed') "
+            "and total > coalesce(paid_amount, 0)",
+            (user_id, ids),
+        )
+
+
 def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None, disconnect=False):
     """Remove UMA transação de cartão (nunca cascateia o parcelamento), ajustando a fatura.
 
@@ -788,6 +847,7 @@ def remove_single_credit_transaction(user_id: int, ct_id: int, *, of_tx_ids=None
                 "update credit_bills set total = total - %s where id=%s and user_id = %s",
                 (v, tx["bill_id"], user_id),
             )
+            reabrir_faturas_com_saldo(cur, user_id, [tx["bill_id"]])  # tirar estorno/pagamento sobe o total
         conn.commit()
     return {"removed_total": float(v), "ct_id": ct_id}
 
@@ -806,6 +866,15 @@ def extract_installment_info(raw) -> tuple[int | None, int | None]:
     return (n, total) if (total and total > 1) else (None, None)
 
 
+def sinal_cartao_of(amount) -> tuple[Decimal, bool, str]:
+    """(valor, is_refund, tipo) de uma linha de cartão do OF. Única fonte do sinal.
+
+    Cartão na Pluggy: amount > 0 é compra (type DEBIT), < 0 é estorno/crédito (type CREDIT).
+    Doc do campo `amount` e produção (2026-10-09). O sandbox Pluggy Bank mostrou o oposto."""
+    v = Decimal(str(amount))
+    return v, v < 0, ("estorno" if v < 0 else "credito")
+
+
 def add_imported_credit_purchase(
     user_id: int,
     card_id: int,
@@ -821,19 +890,16 @@ def add_imported_credit_purchase(
 ):
     """Importa uma transação de cartão do Open Finance, idempotente por (user, source, external_id).
 
-    `amount` vem assinado (negativo = compra, positivo = pagamento/estorno). A fatura sobe
-    com compras e cai com pagamentos/estornos. Parcela (installment_no/total) e group_id
+    `amount` vem assinado (positivo = compra, negativo = estorno). A fatura sobe
+    com compras e cai com estornos. Parcela (installment_no/total) e group_id
     populam as colunas que já existem, ligando as parcelas do mesmo compra (#11).
     Retorna (tx_id, criado: bool).
     """
     ensure_user(user_id)
-    amt = Decimal(str(amount))
-    is_refund = amt > 0
     # CONVENÇÃO CANÔNICA (igual add_credit_refund): valor ASSINADO — compra positiva,
-    # estorno/pagamento negativo. Fatura += valor. Assim undo_credit_transaction e todos
+    # estorno negativo. Fatura += valor. Assim undo_credit_transaction e todos
     # os leitores tratam o sinal uniformemente (não subtraem estorno em dobro).
-    valor = -amt
-    tipo = "estorno" if is_refund else "credito"
+    valor, is_refund, tipo = sinal_cartao_of(amount)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -1118,21 +1184,35 @@ def update_credit_transaction_fields(
     return True
 
 
+class CompraDoBanco(ValueError):
+    """A compra/parcelamento veio do banco (Open Finance): o sync é dono do valor e da fatura.
+
+    Apagar ou antecipar aqui é desfeito no sync seguinte (a linha volta; na antecipação a Carteira
+    fica debitada e a fatura volta ao que era). Mesmo `pode` do v2: `PODE_CARTAO_SQL` não dá `apagar`."""
+
+
+MSG_COMPRA_DO_BANCO = ("Essa compra vem do seu banco (Open Finance), então não dá pra apagar nem "
+                       "antecipar por aqui: ela segue o que o banco informa.")
+
+
 def undo_credit_transaction(user_id: int, ct_id: int):
     """
     Desfaz um crédito CT#.
     Se pertence a parcelamento (group_id), desfaz o grupo inteiro.
+    Levanta `CompraDoBanco` se a compra é do Open Finance.
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "select id, bill_id, valor, group_id, installment_no, installments_total "
+                "select id, bill_id, valor, group_id, installment_no, installments_total, source "
                 "from credit_transactions where user_id=%s and id=%s",
                 (user_id, ct_id),
             )
             tx = cur.fetchone()
             if not tx:
                 return None
+            if tx["source"] == "open_finance":
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             group_id = tx.get("group_id")
             installments_total = int(tx.get("installments_total") or 0)
@@ -1202,6 +1282,7 @@ def undo_installment_group(user_id: int, group_id: str):
     ajuste manual se sentir falta.
 
     Mudança de comportamento (era refundar paid_amount via launch).
+    Levanta `CompraDoBanco` se o parcelamento é do Open Finance.
     """
     today = date.today()
     note_suffix = f" [Parcelamento removido em {today.strftime('%d/%m/%Y')}]"
@@ -1211,7 +1292,7 @@ def undo_installment_group(user_id: int, group_id: str):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                select t.id, t.bill_id, t.valor, t.card_id, t.nota,
+                select t.id, t.bill_id, t.valor, t.card_id, t.nota, t.source,
                        b.status as bill_status
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
@@ -1222,6 +1303,8 @@ def undo_installment_group(user_id: int, group_id: str):
             rows = cur.fetchall()
             if not rows:
                 return None
+            if any(r["source"] == "open_finance" for r in rows):
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             tx_to_delete: list[dict] = []
             tx_to_orphan: list[dict] = []
@@ -1366,7 +1449,7 @@ def anticipate_installment(user_id: int, group_id: str):
       e nota explicitando que foi antecipação. is_internal_movement=False
       pra contar nas analytics do user (preserva categoria original).
 
-    Retorna None se não há parcela pendente.
+    Retorna None se não há parcela pendente. Levanta `CompraDoBanco` se é do Open Finance.
     """
     today = date.today()
 
@@ -1375,7 +1458,7 @@ def anticipate_installment(user_id: int, group_id: str):
             cur.execute(
                 """
                 select t.id, t.bill_id, t.valor, t.categoria, t.nota,
-                       t.installment_no, t.installments_total, t.card_id,
+                       t.installment_no, t.installments_total, t.card_id, t.source,
                        coalesce(c.name, 'Cartão') as card_name
                 from credit_transactions t
                 join credit_bills b on b.id = t.bill_id and b.user_id = t.user_id
@@ -1391,6 +1474,8 @@ def anticipate_installment(user_id: int, group_id: str):
             tx = cur.fetchone()
             if not tx:
                 return None
+            if tx["source"] == "open_finance":
+                raise CompraDoBanco(MSG_COMPRA_DO_BANCO)
 
             valor = Decimal(str(tx["valor"]))
             bill_id = tx["bill_id"]
@@ -1644,12 +1729,16 @@ def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None)
             period_start, period_end = billing_period_for_close_day(as_of, closing_day)
             bill_id = get_or_create_open_bill(user_id, card_id, as_of)
 
+            # A fatura que o usuário vê é a que vence primeiro (`fatura_a_pagar`); o período de
+            # hoje só aparece quando nenhuma tem saldo (e a do período acaba de ser garantida acima).
+            a_pagar = fatura_a_pagar(user_id, card_id, as_of)
             cur.execute(
                 "select id, period_start, period_end, total, "
                 "coalesce(paid_amount, 0) as paid_amount, status "
                 "from credit_bills "
-                "where user_id=%s and card_id=%s and period_start=%s and period_end=%s limit 1",
-                (user_id, card_id, period_start, period_end),
+                "where user_id=%s and card_id=%s and "
+                "(id=%s or (%s::int is null and period_start=%s and period_end=%s)) limit 1",
+                (user_id, card_id, a_pagar, a_pagar, period_start, period_end),
             )
             bill = cur.fetchone()
             if not bill:
@@ -1675,19 +1764,27 @@ def pay_bill_amount(
     amount: float | None,
     bill_id: int | None = None,
 ):
-    # Não valida que o cartão é do dono da fatura: quem chama traz `card_id`/`bill_id` de uma
-    # consulta já guardada por `c.user_id = b.user_id` (#770).
+    # Cartão do banco não tem pagamento manual. `for share` bloqueia a adoção do cartão manual
+    # pelo Open Finance até o commit (ordem de lock: cartão → fatura → conta → launches); a
+    # recusa vem antes de qualquer escrita, inclusive a do ramo `due <= 0`.
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("select open_finance_account_id from credit_cards "
+                        "where id=%s and user_id=%s for share", (card_id, user_id))
+            card = cur.fetchone()
+            if not card:
+                return None
+            if card["open_finance_account_id"] is not None:
+                raise CartaoDoBanco(MSG_FATURA_DO_BANCO)
             if bill_id is not None:
                 cur.execute(
-                    "select id, total, coalesce(paid_amount, 0) as paid_amount, status "
+                    "select id, total, coalesce(paid_amount, 0) as paid_amount, status, period_end "
                     "from credit_bills where id=%s and user_id=%s and card_id=%s limit 1 for update",
                     (bill_id, user_id, card_id),
                 )
             else:
                 cur.execute(
-                    "select id, total, coalesce(paid_amount, 0) as paid_amount, status "
+                    "select id, total, coalesce(paid_amount, 0) as paid_amount, status, period_end "
                     "from credit_bills where user_id=%s and card_id=%s and status in ('open','closed') "
                     "order by period_start desc limit 1 for update",
                     (user_id, card_id),
@@ -1735,24 +1832,26 @@ def pay_bill_amount(
         from .open_finance import has_open_finance_connections
 
         of_ativo = has_open_finance_connections(user_id)
-        launch_id, _user_seq, new_balance = add_launch_and_update_balance(
-            user_id=user_id,
-            tipo="despesa",
-            valor=float(pay),
-            alvo=f"fatura:{card_name}",
-            nota=f"Pagamento de fatura ({card_name})",
-            categoria="pagamento_fatura",
-            is_internal_movement=True,
-            extra_efeitos={
-                "bill_id": int(bill["id"]),
-                "paid_amount_added": float(pay),
-                **({"funding_source": {"kind": "bank"}} if of_ativo else {}),
-            },
-            apply_delta=not of_ativo,
-        )
-
-    with get_conn() as conn:
+        # Débito da conta, lançamento e baixa da fatura na MESMA transação do `for update` (ordem de
+        # lock cartão (FOR SHARE) → fatura → conta → launches, a do undo): falha no meio desfaz tudo, e a retentativa
+        # não debita de novo. O lock da fatura vale até o `commit` final.
         with conn.cursor() as cur:
+            launch_id, _user_seq, new_balance = add_launch_and_update_balance(
+                user_id=user_id,
+                tipo="despesa",
+                valor=float(pay),
+                alvo=f"fatura:{card_name}",
+                nota=f"Pagamento de fatura ({card_name})",
+                categoria="pagamento_fatura",
+                is_internal_movement=True,
+                extra_efeitos={
+                    "bill_id": int(bill["id"]),
+                    "paid_amount_added": float(pay),
+                    **({"funding_source": {"kind": "bank"}} if of_ativo else {}),
+                },
+                apply_delta=not of_ativo,
+                cur=cur,
+            )
             cur.execute(
                 """
                 update credit_bills
@@ -1766,14 +1865,14 @@ def pay_bill_amount(
                 """,
                 (pay, pay, bill["id"]),
             )
-            conn.commit()
+        conn.commit()
 
     # Carteira EXIBIDA: `core/handlers/credit.py:133` ("Conta agora") e `:2718`
     # ("Saldo da conta") mostram este número. Ninguém autoriza contra ele — a
     # guarda do pagamento é a de `frontend/routes/cards.py`. Pós-commit, falha
     # cai no cru em vez de subir (a fatura já foi paga).
     from .accounts import carteira_exibida
-    return {"paid": float(pay), "launch_id": launch_id,
+    return {"paid": float(pay), "launch_id": launch_id, "period_end": bill["period_end"],
             "new_balance": carteira_exibida(user_id, new_balance)}
 
 
@@ -1936,7 +2035,7 @@ def list_open_bills(user_id: int):
             cur.execute(
                 """
                 select b.id, b.card_id, c.name as card_name, b.period_start, b.period_end,
-                       b.total, coalesce(b.paid_amount, 0) as paid_amount, b.status
+                       b.total, coalesce(b.paid_amount, 0) as paid_amount, b.status, c.open_finance_account_id
                 from credit_bills b
                 join credit_cards c on c.id = b.card_id and c.user_id = b.user_id
                 where b.user_id=%s and b.status='open'

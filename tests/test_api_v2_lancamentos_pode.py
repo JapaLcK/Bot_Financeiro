@@ -60,7 +60,7 @@ def test_tabela_de_estados(libera):
     sombra = _sombra(a, 38)
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
     manual_ct = db.add_credit_purchase(a, cartao, 39, "mercado", "manual", date.today())[0]
-    of_ct = db.add_imported_credit_purchase(a, cartao, -40, "mercado", date.today(), "ct-ext-1")[0]
+    of_ct = db.add_imported_credit_purchase(a, cartao, 40, "mercado", date.today(), "ct-ext-1")[0]
     libera(a)
 
     it = _itens(a)

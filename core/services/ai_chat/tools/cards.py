@@ -25,7 +25,10 @@ from datetime import date
 from typing import Any
 
 import db
+from utils_date import today_tz
+from utils_text import fmt_brl
 
+from .. import streaming
 from ._base import Tool
 
 
@@ -84,7 +87,7 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "Fatura em aberto não encontrada pra esse cartão."}
 
     bill, items = result
-    return {
+    out = {
         "card_id": card_id,
         "bill_id": bill["id"],
         "period_start": bill["period_start"].isoformat(),
@@ -110,6 +113,10 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             for it in items
         ],
     }
+    if streaming.ativo():  # no app o total da fatura é o card fatura
+        for k in ("total", "paid_amount", "remaining"):
+            del out[k]
+    return out
 
 
 # ─── Read: get_card_limit_usage ─────────────────────────────────────────────
@@ -351,11 +358,34 @@ def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
 
 # ─── Write: pay_bill ────────────────────────────────────────────────────────
 
+def _pay_bill_validate(user_id: int, args: dict[str, Any]) -> str | None:
+    """Fixa QUAL fatura a pergunta mostra (`_bill_id`, `_rotulo`): o "sim" paga essa, não a que
+    `fatura_a_pagar` apontar depois. Chaves com "_" são do código (o despacho tira as do modelo).
+    Cartão do banco: recusa aqui (`validation_failed`), sem pendência nem "confirma?"."""
+    card_id = _resolve_card_id(user_id, args.get("card_name"))
+    card = db.get_card_by_id(user_id, card_id) if card_id else None
+    if card and card.get("open_finance_account_id") is not None:
+        return f"🐷 {db.MSG_FATURA_DO_BANCO}"
+    bill_id = db.fatura_a_pagar(user_id, card_id, today_tz()) if card_id else None
+    if not bill_id:
+        return None
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select period_end from credit_bills where id=%s and user_id=%s", (bill_id, user_id))
+        b = cur.fetchone()
+    if b:
+        from core.handlers.credit import _format_bill_label  # o mesmo rótulo do "pagar fatura"
+        args["_bill_id"] = bill_id
+        args["_rotulo"] = _format_bill_label({"card_name": card["name"] if card else "cartão",
+                                              "period_end": b["period_end"]})
+    return None
+
+
 def _pay_bill_summary(args: dict[str, Any]) -> str:
     card = args.get("card_name") or "cartão padrão"
+    alvo = f"da fatura {args['_rotulo']}" if args.get("_rotulo") else f"da fatura do {card}"
     if isinstance(args.get("amount"), (int, float)):
-        return f'pagar R$ {args.get("amount"):.2f} da fatura do {card}'
-    return f'pagar a fatura do {card}'
+        return f'pagar R$ {args.get("amount"):.2f} {alvo}'
+    return f'pagar a fatura {alvo[len("da fatura "):]}'
 
 
 def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
@@ -374,9 +404,24 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     if amount_f is None or amount_f <= 0:
         return "🐷 Informa o valor a pagar."
 
+    # A que vence primeiro (a que `get_open_bill` e o card mostram), nunca "a de period_start
+    # mais novo": com parcelado essa era a de meses à frente.
+    bill_id = args.get("_bill_id") or db.fatura_a_pagar(user_id, card_id, today_tz())  # a que a pergunta mostrou
+    if not bill_id:
+        return "🐷 Não há fatura aberta para pagar."
     try:
-        db.pay_bill_amount(user_id, card_id, card_name, amount_f)
-        return f"✅ Pagamento de R$ {amount_f:.2f} registrado."
+        res = db.pay_bill_amount(user_id, card_id, card_name, amount_f, bill_id=bill_id)
+        if not res:
+            return "🐷 Nada para pagar nessa fatura."
+        if res.get("error"):
+            if res["error"] == "amount_too_high":
+                return f"🐷 Valor maior do que o em aberto ({fmt_brl(res['due'])})."
+            return "🐷 Valor inválido."
+        from core.handlers.credit import _format_bill_label  # o mesmo rótulo do "pagar fatura"
+        label = _format_bill_label({"card_name": card_name, "period_end": res["period_end"]})
+        return f"✅ Pagamento de R$ {amount_f:.2f} da fatura {label} registrado."
+    except db.CartaoDoBanco as e:
+        return f"🐷 {e}"
     except Exception as e:
         return f"🐷 Não consegui registrar o pagamento: {e}"
 
@@ -588,7 +633,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "pay_bill",
-                "description": "Registra pagamento (parcial ou total) da fatura em aberto. Debita a conta corrente. ESCRITA — pede confirmação.",
+                "description": "Registra pagamento (parcial ou total) da fatura em aberto. Debita a conta corrente. Só para cartão cadastrado à mão; cartão do banco (Open Finance) atualiza sozinho. ESCRITA — pede confirmação.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -601,6 +646,7 @@ TOOLS: list[Tool] = [
         },
         is_write=True,
         summary=_pay_bill_summary,
+        validate=_pay_bill_validate,
         execute=_pay_bill_execute,
     ),
 ]

@@ -110,6 +110,7 @@ export function AmountInput({ centavos, onChange, rotulo, erro, desativado = fal
           onChangeText={aoDigitar}
           editable={!desativado}
           keyboardType="number-pad"
+          selectionColor={cores.brand}
           selection={{ start: fim, end: fim }}
           maxFontSizeMultiplier={1.3}
           autoCorrect={false}

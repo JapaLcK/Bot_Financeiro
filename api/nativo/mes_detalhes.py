@@ -32,12 +32,20 @@ class Guardado(BaseModel):
     cobertura: Literal["movimentos_registrados"]
 
 
+class Origens(BaseModel):
+    cartao: Dinheiro
+    banco: Dinheiro
+    carteira: Dinheiro
+    registro_antigo: Dinheiro
+
+
 class MesDetalhes(BaseModel):
     mes: str
     ate: str
     entrou: Dinheiro
     saiu: Dinheiro
     categorias: list[Categoria]
+    origens: Origens
     dias: list[Dia]
     guardado: Guardado
     motivos: list[str]
@@ -50,7 +58,8 @@ def mes_detalhes(mes: str | None = Query(None, pattern=PADRAO_MES),
                  uid: int = Depends(usuario_atual)) -> MesDetalhes:
     dados = MesDetalhes(**ler(uid, *mes_pedido(mes)))
     grupos = ([c.valor for c in dados.categorias],
-              [d.entrou for d in dados.dias], [d.saiu for d in dados.dias])
+              [d.entrou for d in dados.dias], [d.saiu for d in dados.dias],
+              [getattr(dados.origens, k) for k in Origens.model_fields])
     if any(soma_arredondada_diverge(grupo) for grupo in grupos):
         dados.motivos.append("arredondamento_por_grupo")
     return dados

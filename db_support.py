@@ -1214,8 +1214,9 @@ def attempt_whatsapp_phone_link_impl(
         # ligado a ela (current == target) não passa aqui: o `process_message`
         # barra antes de chamar o auto-vínculo.
         if conta_sem_credencial(target_user_id):
-            # `target_user_id`: os envios proativos vão ao `phone_e164` dela, e o
-            # clique de opt-out deste número tem de desligar a preferência dela.
+            # `target_user_id`: o clique de opt-out deste número tem de desligar a
+            # preferência dela. Desde a #721 a atualização só vai a número ligado, mas
+            # o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
             return {"status": "precisa_senha", "wa_phone": wa_phone,
                     "target_user_id": target_user_id}
 

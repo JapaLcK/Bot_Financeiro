@@ -156,6 +156,17 @@ def test_opt_out_desliga_a_e_b(enviadas, caso, botao):
     assert _dono_do_numero(n) == a and _gastos(b) == 0
 
 
+# O PARAR digitado (da `main`, `WA_PARAR_TEXTOS`) passa pelo ramo novo do V1 como o
+# botão: sem isso, o V1 recebia o `NAO_JUNTEI_WA` e não conseguia parar.
+def test_v1_parar_digitado_desliga_a_e_b(enviadas):
+    a, b, n = _v1()
+
+    _manda(n, "Parar")
+    assert db.get_whatsapp_updates_opt_out(b), enviadas
+    assert len(enviadas) == 1 and enviadas[0] != wr.NAO_JUNTEI_WA, enviadas
+    assert _dono_do_numero(n) == a and _gastos(b) == 0
+
+
 # A saída legítima de V1/V2: o código de B, que prova os dois lados. `link` é o
 # verbo que o `NAO_JUNTEI_WA` ensina; a resposta não pode falar de Discord.
 @pytest.mark.parametrize("caso,verbo,esperado", [

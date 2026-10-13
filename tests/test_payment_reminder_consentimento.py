@@ -40,8 +40,8 @@ from test_payment_reminder_whatsapp import (  # noqa: F401
 # para NÃO receber neste canal. Mandar mesmo assim não é bug de mecânica, é
 # violação de consentimento.
 #
-# O precedente do repositório está do lado certo: `scripts/send_update_whatsapp.py:105`
-# filtra `where coalesce(a.whatsapp_updates_opt_out, false) = false`. E o canal
+# O precedente do repositório está do lado certo: `send_update_whatsapp.get_all_update_targets`
+# barra o número de quem tem `whatsapp_updates_opt_out`. E o canal
 # de E-MAIL desta mesma feature respeita o `engagement_opt_out`
 # (`db/dunning.py`) — então, antes deste conserto, dentro da MESMA feature um
 # canal respeitava a preferência e o outro não.

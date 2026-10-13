@@ -347,6 +347,106 @@ test("veredito do refresh: só estado conhecido-bom fica verde", async () => {
 });
 
 /**
+ * Onda 5, PR-E (DP1 = A): com a coleta em andamento a tela relê sozinha
+ * (of-status-poll.js), então o toast não manda tocar em Atualizar de novo.
+ * Sem detalhe: a frase de "aparecem sozinhos"; com detalhe do backend: só o
+ * detalhe; `no_accounts` durante a coleta é neutro. Os pares (detalhe, motivo)
+ * são os que `_refresh_items_report` (core/services/pluggy_sync.py) consegue
+ * devolver com `state="updating"`, enumerados pelo `connection_ui_state`:
+ * detalhe None / "Ainda não sincronizou" / o da D1; motivo vazio, "ok",
+ * `no_accounts` (1ª coleta sem contas ainda), `investments_read_failed` (sem
+ * sync) e `refresh_failed` (PATCH falhou, vem do próprio refresh).
+ * Discrimina: a frase antiga ("Toque em Atualizar de novo") deixa os casos de
+ * texto vermelhos; tirar `no_accounts` do neutro deixa os dois de tom vermelhos.
+ *
+ * Tom de ERRO (achado 3 do Tester r1): o motivo de falha não garante que a
+ * coleta siga, então a frase diz o que falhou e manda tentar de novo; "aparecem
+ * aqui sozinhos" é só do neutro. Controle negativo: o `msg(i, true)` no ramo de
+ * erro do `refreshVerdict` deixa os seis casos de erro vermelhos.
+ * Detalhe que já manda atualizar (D1 vencida) com motivo de falha: sem o
+ * "Tente de novo" repetido (Tester r2, achado 2). Controle negativo: o teste do
+ * `OF_JA_MANDA_ATUALIZAR` tirado do ramo de erro deixa os três casos D1+falha
+ * vermelhos; "Ainda não sincronizou" com falha é o positivo (segue com a ordem).
+ */
+test("toast do Atualizar com coleta em andamento: não repete instrução, neutro sem falha", async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.refreshVerdict === "function"),
+                  "refreshVerdict existir na página");
+    const D1 = "Está demorando mais que o normal — atualize de novo";
+    const SOZINHO = "O Nubank ainda está atualizando. Seus dados aparecem aqui sozinhos quando terminar.";
+    const NAO_CONSEGUI = "Não consegui atualizar o Nubank agora. Tente de novo em alguns minutos.";
+    const CASOS = [
+      // [detalhe, motivo, mensagem exata, tom]
+      [null,                    null,                      SOZINHO,                                  "info"],
+      [null,                    "ok",                      SOZINHO,                                  "info"],
+      [null,                    "no_accounts",             SOZINHO,                                  "info"],
+      ["Ainda não sincronizou", null,                      "Nubank: ainda não sincronizou.",         "info"],
+      [D1,                      null,                      `Nubank: ${"e" + D1.slice(1)}.`,           "info"],
+      // A pendência de 2026-09-30: era erro E repetia a instrução.
+      [D1,                      "no_accounts",             `Nubank: ${"e" + D1.slice(1)}.`,           "info"],
+    ];
+    // Tom de erro: os três motivos de falha que chegam com `updating`, com e sem detalhe.
+    for (const reason of ["refresh_failed", "read_failed", "investments_read_failed"]) {
+      CASOS.push([null, reason, NAO_CONSEGUI, "error"],
+                 ["Ainda não sincronizou", reason, "Nubank: ainda não sincronizou. Tente de novo em alguns minutos.", "error"],
+                 // Detalhe que já manda atualizar (D1 vencida): não repete a ordem (Tester r2, achado 2).
+                 [D1, reason, `Nubank: ${"e" + D1.slice(1)}.`, "error"]);
+    }
+    for (const [detail, reason, msg, tone] of CASOS) {
+      const v = await page.evaluate(([d, r]) => window.refreshVerdict({ ok: true, still_updating: 0, items: [{
+        item_id: "a", institution: "Nubank", state: "updating", label: "Atualizando…", detail: d, reason: r }] }),
+        [detail, reason]);
+      const rot = `detail=${JSON.stringify(detail)} reason=${JSON.stringify(reason)}`;
+      assert.equal(v.msg, msg, rot);
+      assert.equal(v.tone, tone, rot);
+      assert.doesNotMatch(v.msg, /toque em atualizar/i, `${rot}: instrução de tocar de novo voltou`);
+      if (tone === "error") assert.doesNotMatch(v.msg, /sozinhos/, `${rot}: erro prometendo que a tela se atualiza`);
+    }
+    const lote = await page.evaluate(() => window.refreshVerdict({ ok: true, still_updating: 2, items: [] }));
+    assert.equal(lote.msg, "O banco ainda está atualizando. Seus dados aparecem aqui sozinhos quando terminar.");
+    assert.equal(lote.tone, "info");
+    // CONTROLE POSITIVO: `no_accounts` FORA da coleta continua erro (o neutro é local ao `updating`).
+    const semDados = await page.evaluate(() => window.refreshVerdict({ ok: true, items: [{
+      item_id: "a", institution: "Nubank", state: "no_accounts", reason: "no_accounts",
+      detail: "O banco não devolveu contas nem investimentos" }] }));
+    assert.equal(semDados.tone, "error", semDados.msg);
+  } finally { await page.__ctx.close(); }
+});
+
+/**
+ * Artigo do banco no toast (Obs 6 do Tester r1): "a Caixa", "o Nubank". Regra
+ * local em `ofArtigo` (settings.html), sem mapa de bancos no repo para reusar.
+ * Controle negativo: `ofArtigo` devolvendo sempre "o" deixa os casos da Caixa
+ * vermelhos; os outros cinco são o positivo (a regra não engole banco nenhum).
+ */
+test("toast do Atualizar: artigo do banco ('a Caixa', 'o Itaú')", async () => {
+  const page = await newPage({ viewport: { width: 390, height: 844 } });
+  try {
+    await page.goto(`${ORIGIN}/settings.html?view=open-finance`);
+    await waitFor(() => page.evaluate(() => typeof window.refreshVerdict === "function"),
+                  "refreshVerdict existir na página");
+    const BANCOS = [["Caixa", "a"], ["Caixa Econômica Federal", "a"], ["Itaú", "o"], ["Banco Inter", "o"],
+                    ["Banco do Brasil", "o"], ["C6 Bank", "o"], ["Nubank", "o"]];
+    for (const [nome, art] of BANCOS) {
+      const v = (state, reason, detail) => page.evaluate(([n, s, r, d]) => window.refreshVerdict({ ok: false,
+        still_updating: 0, items: [{ item_id: "a", institution: n, state: s, reason: r, detail: d }] }).msg,
+        [nome, state, reason, detail]);
+      assert.equal(await v("updating", null, null),
+        `${art.toUpperCase()} ${nome} ainda está atualizando. Seus dados aparecem aqui sozinhos quando terminar.`);
+      assert.equal(await v("updating", "read_failed", null),
+        `Não consegui atualizar ${art} ${nome} agora. Tente de novo em alguns minutos.`);
+      assert.equal(await v("error_recoverable", "x", "Tentaremos de novo automaticamente"),
+        `Não consegui atualizar ${art} ${nome}: tentaremos de novo automaticamente.`);
+      assert.equal(await v("item_missing", null, null), `A conexão com ${art} ${nome} foi perdida. Refaça a conexão.`);
+      assert.equal(await v("partial", null, null),
+        `Atualizei o que deu n${art} ${nome} — parte dos dados não veio.`);
+    }
+  } finally { await page.__ctx.close(); }
+});
+
+/**
  * O toast é a ÚNICA superfície dessas mensagens (mobile/desktop web; no app e
  * na PWA o gesto descarta a string) — e ele CORTAVA: `white-space:nowrap` com
  * `position:fixed; left:50%` e sem teto de largura punha o fim da frase fora da
@@ -395,6 +495,8 @@ test("toast do refresh: cabe na LARGURA da tela e o texto cabe na caixa, de 320 
       // A instrução mais longa do `_DETALHE_POR_STATUS`, a que mais cortava.
       ["needs_user_action", "Autorize o acesso no app do banco", null],
       ["paused", null, null],
+      // A frase mais longa da coleta em andamento (PR-E, DP1 = A).
+      ["updating", null, null],
       // CONTROLE POSITIVO da asserção: copy curta é legítima e não pode reprovar.
       [null, null, "Tudo em dia!"],
       // `err.message` do servidor cai no toast em 21 chamadas desta página, e

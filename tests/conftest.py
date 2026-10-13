@@ -592,3 +592,19 @@ def usuario_pagante(plan: str = "pro") -> int:
 @pytest.fixture()
 def pro_small_uid() -> int:
     return usuario_pagante()
+
+
+@pytest.fixture()
+def sem_trava_do_turno(monkeypatch):
+    """Troca a trava de um-turno-por-usuário (`db/ai_turno.py`) por uma passagem
+    livre. Só para teste que disputa o MESMO usuário em duas threads DE PROPÓSITO
+    (CAS da confirmação, reserva da última vaga): a trava tornaria a disputa
+    impossível, e eles medem as defesas de baixo."""
+    from contextlib import contextmanager
+    from core.services.ai_chat import runner
+
+    @contextmanager
+    def passa(*_a, **_k):
+        yield True
+
+    monkeypatch.setattr(runner, "trava_do_turno", passa)

@@ -41,8 +41,9 @@ export function Card({ children, elevacao = "surface" }: Props) {
     <View
       style={[
         {
-          borderRadius: raio.md,
-          padding: acesso ? 0 : espaco.lg,
+          borderRadius: raio.bloco,
+          // PDF: padding interno do bloco 16 em cima, 18 nos lados e embaixo; o anel é a borda de 1px.
+          ...(acesso ? { padding: 0 } : { paddingTop: espaco.lg, paddingHorizontal: 18, paddingBottom: 18, borderWidth: 1, borderColor: cores.border }),
           backgroundColor: acesso ? cores.bg : raised ? cores.surfaceRaised : cores.surface,
         },
         // `shadowColor` vem de `cores.shadow` (tokens.ts), não do literal
@@ -50,7 +51,7 @@ export function Card({ children, elevacao = "surface" }: Props) {
         // cor de sombra é regra de produto igual a qualquer outra — uma
         // fonte só, mesmo sem precisar de par de contraste (sombra não é
         // texto nem contorno de controle).
-        comSombra ? { borderWidth: 1, borderColor: cores.border, shadowColor: cores.shadow, ...SOMBRA_RAISED_CLARO } : null,
+        comSombra ? { shadowColor: cores.shadow, ...SOMBRA_RAISED_CLARO } : null,
       ]}
     >
       {children}

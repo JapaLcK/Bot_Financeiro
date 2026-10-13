@@ -4,6 +4,7 @@ Totais mantêm TOTAIS_SQL. Categorias/dias retiram internos e moeda não BRL:
 se a regra legada somou outra moeda, a divergência é explícita na cobertura.
 O cartão pertence à fatura selecionada e conserva o dia original da compra.
 """
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,10 @@ from core.services.plan_service import history_earliest_date
 from . import lancamentos, resumo_mes
 from .connection import get_conn
 from .contas_hoje import listar as contas
+
+
+logger = logging.getLogger(__name__)
+_AVISADAS: set = set()  # uma vez por origem, não por linha
 
 
 def ler(user_id: int, ano: int, mes: int, agora) -> dict:
@@ -39,6 +44,7 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
     if corte and corte > inicio:
         motivos.add("inicio_do_historico")
     categorias, dias = {}, {}
+    origens = dict.fromkeys(("cartao", "banco", "carteira", "registro_antigo"), Decimal(0))
     guardado = {"aportes": Decimal(0), "saques": Decimal(0)}
     fora = 0
     for r in movimentos:
@@ -63,9 +69,17 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
                 "categoria": r["categoria"], "valor": Decimal(0), "quantidade": 0})
             categoria["valor"] += r["valor"]
             categoria["quantidade"] += 1
+            # O SQL só produz as 4; o que vier de fora cai em registro_antigo em vez de derrubar o mês.
+            if r["origem"] not in origens:
+                if r["origem"] not in _AVISADAS:
+                    _AVISADAS.add(r["origem"])
+                    logger.warning("mes_detalhes: origem desconhecida %r contada em registro_antigo", r["origem"])
+                r = {**r, "origem": "registro_antigo"}
+            origens[r["origem"]] += r["valor"]
     return {"mes": f"{ano:04d}-{mes:02d}", "ate": (fim - timedelta(days=1)).isoformat(),
             "entrou": total["entrou"], "saiu": total["saiu"],
             "categorias": sorted(categorias.values(), key=lambda c: (-c["valor"], c["categoria"] or "")),
+            "origens": origens,
             "dias": [dias[dia] for dia in sorted(dias)],
             "guardado": {**guardado, "liquido": guardado["aportes"] - guardado["saques"],
                          "cobertura": "movimentos_registrados"},

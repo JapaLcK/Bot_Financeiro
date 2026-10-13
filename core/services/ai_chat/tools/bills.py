@@ -399,6 +399,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # reversível (undo), igual add_launch
         execute=_pay_bill_execute,
+        arma_pendencia_no_execute=True,  # "quanto veio este mês?" (bill_amount_expected)
     ),
     Tool(
         schema={

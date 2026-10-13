@@ -2479,6 +2479,16 @@ body.light .ag-toggle-track { background: rgba(15,23,42,.24); }
 .ag-event-body { min-width: 0; }
 .ag-event-msg { margin: 0; font-size: 13.5px; line-height: 1.45; }
 .ag-event-when { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
+.ag-event-esperado {
+  margin-top: 8px; min-height: 36px; padding: 0 14px; border-radius: 10px;
+  border: 1px solid var(--glass-border); background: transparent; color: var(--text-2);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.ag-event-esperado:hover { border-color: rgba(255, 45, 142, .45); color: var(--text); }
+.ag-event-esperado:focus-visible { outline: 2px solid #FF2D8E; outline-offset: 2px; }
+.ag-feed:focus { outline: none; }
+.ag-event-esperado:disabled { opacity: .6; cursor: default; }
+@media (pointer: coarse) { .ag-event-esperado { min-height: 44px; } }
 
 /* ── Esconder saldo (olho) ────────────────────────────────────────────────
    Borra todos os valores em R$ menos a lista de lançamentos (data-num="lnc_…")
