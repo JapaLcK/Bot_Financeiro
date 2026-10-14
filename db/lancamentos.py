@@ -64,6 +64,16 @@ FUNDIDO_SQL = f"""coalesce(source, 'manual') <> 'open_finance' and exists (
           join open_finance_connections oc on oc.id = oa.connection_id and oc.user_id = launches.user_id
          where o.imported_launch_id = launches.id and o.reconciliation_status in {_FUSED})"""
 
+# Despesa/receita declarada "paga pelo banco" (`db/bank_declaracoes.py`), sobre `launches` SEM alias.
+# Só o fluxo (a mesma definição de `db.bank_declaracoes.e_fluxo`, comparada em teste): despesa/receita
+# com `account_id` NULL. Aporte/resgate e declaração com conta explícita não mudam de leitura.
+DECLARADA_SQL = """(tipo in ('despesa', 'receita') and exists (
+        select 1 from bank_movement_declarations d
+         where d.launch_id = launches.id and d.user_id = launches.user_id and d.account_id is null))"""
+CASADA_SQL = f"""({DECLARADA_SQL} and exists (
+        select 1 from bank_movement_declarations d where d.launch_id = launches.id
+           and d.user_id = launches.user_id and d.matched_transaction_id is not null))"""
+
 # Estado de cada linha, sobre `launches` SEM alias (dentro do FROM dela; a CTE `pendentes`
 # precisa estar no ar). "Carteira" = manual com `delta_conta` ≠ 0; manual com delta 0 não é.
 _ESTADO_SQL = f"""
@@ -76,13 +86,16 @@ _ESTADO_SQL = f"""
         select 1 from bill_instances bi where bi.launch_id = launches.id
            and bi.user_id = launches.user_id) as paga_conta,
       {FUNDIDO_SQL} as fundido,
-      coalesce(id in (select id from pendentes), false) as pendente"""
+      coalesce(id in (select id from pendentes), false) as pendente,
+      {DECLARADA_SQL} as declarada,
+      {CASADA_SQL} as casada"""
 
 # Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência: o vínculo do dinheiro
 # em espécie e o pagamento de conta vencem a fusão e o par pendente — menos na data, que a
 # fusão tira também do pagamento de conta (P3: o banco é dono da data em todo canal).
 PODE_SQL = """case
       when source = 'open_finance' then array['categoria','descricao']
+      when declarada then array['categoria','descricao','apagar']
       when not (carteira and marcada) then '{}'::text[]
       when especie then array['descricao','apagar']
       when paga_conta and fundido then array['categoria']
@@ -126,15 +139,16 @@ _PERNA_LANCAMENTOS = f"""
            coalesce(upper(a.currency), upper(l.currency), 'BRL') as moeda,
            l.alvo as descricao, l.nota as mensagem, {_chave('l.categoria')} as categoria,
            case when l.source = 'open_finance' then 'banco'
+                when l.declarada then 'banco'
                 when l.carteira and l.marcada then 'carteira' else 'registro_antigo' end as origem,
-           l.fundido, conn.institution_name as instituicao,
+           l.fundido or l.casada as fundido, conn.institution_name as instituicao,
            (select a2.id from open_finance_accounts a2
               join open_finance_connections c2 on c2.id = a2.connection_id and c2.user_id = l.user_id
              where a2.provider_account_id = a.provider_account_id and upper(a2.type) = 'BANK'
              order by c2.id desc limit 1) as conta_id,
            null::bigint as cartao_id, null::int as parcela_n, null::int as parcela_total,
            null::text as fatura, l.pode,
-           {_motivos(("conciliacao_pendente", "l.pendente"),
+           {_motivos(("conciliacao_pendente", "l.pendente or (l.declarada and not l.casada)"),
                      ("transacao_pendente", "t.status_banco = 'PENDING'"), *_moeda("a"))} as motivos
       from (select launches.*, {TIPO_CANON_SQL} as tipo_canon, {LAUNCH_HAS_TIME_SQL} as has_time,
                    case when not ({LAUNCH_HAS_TIME_SQL}) and posted_at is not null then posted_at

@@ -86,6 +86,7 @@ def add_launch_and_update_balance(
     *,
     origem: str | None = ORIGEM_CARTEIRA,
     cur=None,
+    declaracao_banco: bool = False,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -107,7 +108,30 @@ def add_launch_and_update_balance(
 
     `origem` grava a marca `launches.origem` (padrão: todo canal marca sem lembrar).
     `None` = só leitura no v2: quem passa é quem grava efeito que o `efeitos` não desfaz.
+
+    `declaracao_banco=True` (despesa/receita "paga pelo banco"): `delta_conta: 0`, `origem=None`,
+    e a declaração (`db/bank_declaracoes.py`) nasce no MESMO cursor/commit do lançamento, que
+    ainda concilia com o extrato. Erros `ValueError` `DECLARACAO_*` antes de abrir a conexão; não aceita `cur` externo.
     """
+    if declaracao_banco:
+        if tipo not in ("despesa", "receita"):
+            raise ValueError("DECLARACAO_TIPO_INVALIDO")
+        from .bank_movements import _amount, _money
+        # Sem arredondar em silêncio: ou é um valor > 0 de até 2 casas, ou a recusa diz qual é o problema.
+        d, recebido = _amount(valor), str(valor)[:40]
+        m = _money(d) if d is not None and d > 0 else None
+        if m is None:
+            raise ValueError(f"DECLARACAO_VALOR_INVALIDO: o valor precisa ser um número maior que zero (recebido: {recebido})")
+        if m != d:
+            raise ValueError(f"DECLARACAO_VALOR_CASAS: o valor aceita no máximo 2 casas decimais (recebido: {recebido})")
+        if is_internal_movement:
+            raise ValueError("DECLARACAO_INTERNA")
+        if extra_efeitos:
+            raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
+        if cur is not None:  # tomaria o mutex do usuário dentro da transação do chamador
+            raise ValueError("DECLARACAO_CURSOR_EXTERNO")
+        apply_delta, origem = False, None
+        extra_efeitos = {"funding_source": {"kind": "bank", "of_account_id": None, "account_ambiguous": False}}
     ensure_user(user_id)
 
     v = Decimal(str(valor))
@@ -148,6 +172,10 @@ def add_launch_and_update_balance(
              Json(efeitos), is_internal_movement, origem),
         )
         row = cur.fetchone()
+        if declaracao_banco:
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, row["id"], extra_efeitos["funding_source"],
+                                 -v if tipo == "despesa" else v)
         return row["id"], row["user_seq"], new_bal
 
     if cur is not None:
@@ -513,9 +541,10 @@ def update_launch_fields(
                 # editáveis: a sync não toca em `nota`/`alvo`; a categoria
                 # editada também sobrevive, por `categoria_editada`.)
                 # A fundida (P3, dono): o banco é dono da data em todo canal.
-                from .lancamentos import FUNDIDO_SQL
+                from .lancamentos import CASADA_SQL, DECLARADA_SQL, FUNDIDO_SQL
                 cur.execute(
-                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido "
+                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido, "
+                    f"{DECLARADA_SQL} as declarada, {CASADA_SQL} as casada "
                     "from launches where user_id=%s and id=%s",
                     (user_id, launch_id),
                 )
@@ -524,6 +553,13 @@ def update_launch_fields(
                     raise LaunchDateLockedError(
                         "A data deste lançamento vem do banco conectado e é "
                         "atualizada por ele. Dá pra editar a descrição e a categoria."
+                    )
+                if row and row["declarada"]:
+                    raise LaunchDateLockedError(
+                        "Esse lançamento está declarado como pago pelo banco e "
+                        + ("confere com o extrato. " if row["casada"] else "ainda não foi conferido com o extrato. ")
+                        + "Dá pra editar descrição e categoria; para corrigir valor ou data, apague e "
+                        "lance de novo."
                     )
                 if row and row["fundido"]:
                     raise LaunchDateLockedError(

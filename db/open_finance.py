@@ -1983,6 +1983,8 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date, propri
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
+          and not exists (select 1 from bank_movement_declarations d
+                           where d.launch_id = launches.id and d.user_id = launches.user_id)
           and not {RESERVA_SQL.format(t="launches", proprio="%s")}
         ) c where %s or not c.interno
         """,
@@ -2230,6 +2232,8 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                          join open_finance_connections c on c.id = a.connection_id
                         where c.user_id = %s
                           and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
+                   and not exists (select 1 from bank_movement_declarations d
+                                    where d.launch_id = m.id and d.user_id = m.user_id)
                    and not {RESERVADO_SQL.format(t="m")}
                 """,
                 (launch_id, user_id, user_id),
