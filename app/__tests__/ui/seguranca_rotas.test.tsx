@@ -119,6 +119,7 @@ describe("Segurança — rotas", () => {
     expect(screen).toHavePathname("/seguranca");
   });
 
+  // Exercita o gate de rota (pilha/guarda) com o dublê do `jest.setup.js` para o caminho cru; não prova alcançabilidade por link real (isso é `native_intent_roteador.test.tsx`).
   it("deep link frio em /seguranca: voltar leva ao Início", async () => {
     await guardarCredenciais(S);
     servidorMfa({ ligado: true, restantes: 7 });

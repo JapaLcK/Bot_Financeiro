@@ -19,10 +19,18 @@ import { FalhaNoCofre } from "@/storage/secure";
  * medição no Android, onde o retorno do Custom Tab vem pelo `Linking` (#604).
  *
  * PKCE (#604): cada toque gera um `code_verifier` que vive só na memória DESTA
- * chamada (nunca em módulo, cofre ou disco). O código só é trocado por quem o
- * pediu, com o verifier da tentativa; sem tentativa em voo não há verifier e
- * nenhum código é trocado. O verifier segue em `cadastro-social` (`verificador`)
- * até o `complete-signup`, e morre com o estado.
+ * chamada (nunca em módulo, cofre ou disco), e segue em `cadastro-social`
+ * (`verificador`) até o `complete-signup`, morrendo com o estado.
+ *
+ * O que isso NÃO garante sozinho. No Android a folha aberta aceita qualquer
+ * `pigbank://auth?code=…` que chegue pelo `Linking` do `expo-web-browser`
+ * (`WebBrowser.js` ~:350, `event.url.startsWith(returnUrl)`); o filtro do
+ * roteador (`+native-intent.ts`) não alcança isso. A injeção de código é fechada
+ * NO SERVIDOR: o backend do PR-2 só troca o código se `code_challenge =
+ * S256(verifier)` (igualdade estrita); sem ele no ar, o verifier não protege
+ * nada. E um app malicioso que registre o scheme `pigbank` e inicie o PRÓPRIO
+ * fluxo (com o próprio verifier) NÃO é coberto: a defesa estrutural é trocar o
+ * scheme por App Links https (follow-up da #604).
  */
 const RETORNO = "pigbank://auth";
 

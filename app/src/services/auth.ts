@@ -118,9 +118,10 @@ async function tentativa<T>(
  * de QUALQUER um deles. Caso real: um verify de cadastro em voo
  * em `/criar-conta`, `/entrar` empilhada por cima (por link `pigbank://` de fora
  * isso deixou de acontecer: `+native-intent.ts` só deixa passar a volta do Open
- * Finance (#604); sobra o dev client / `exp://` em `__DEV__`. Nem a
- * volta do Google nem a da Apple passam pelo expo-router — chegam pelo retorno
- * do `openAuthSessionAsync` e do `signInAsync`; no Android, sem medição),
+ * Finance (#604); sobra o dev client / `exp://` em `__DEV__`. A volta da Apple
+ * chega pelo `signInAsync`. A do Google chega pelo `openAuthSessionAsync` e, no
+ * Android, o mesmo `pigbank://auth?code=` também chega ao expo-router, onde o
+ * `+native-intent` a descarta; só medido em Jest),
  * login de outra conta que para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
  * no servidor e a sessão dela é descartada sem aviso (recuperação: Entrar com
  * e-mail e senha). O Voltar do cadastro social não chama isto, de propósito.
