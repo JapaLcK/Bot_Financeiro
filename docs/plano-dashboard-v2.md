@@ -92,7 +92,7 @@ em lugar nenhum).
   (proposta; o código ainda recusa até os PRs de código dela). O texto acima fica como histórico.
   A pergunta “dinheiro vivo ou banco?” continua. “Banco” passará a **gravar** como declaração,
   conferida com o extrato: o PR-B entrega esse caminho atrás de uma flag que nasce desligada, e
-  ligá-la é um ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; pela decisão do dono de 2026-10-13, “foi em dinheiro” fica sem efeito automático na Carteira até haver regra) vêm antes (ordem decidida pelo dono); tratar o PR-A2 como pré-condição para ligar a flag para usuários é proposta do Arquiteto, ainda sem decisão do dono. **A Q40 tem coorte
+  ligá-la é um ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. **A Q40 tem coorte
   própria** (quem tem Open Finance conectado, `regra_ativa`), diferente da Q36 (chave do v2).
 - **Q41 — saque e depósito em espécie** que o Open Finance trouxer mexem na carteira
   sozinhos, com um aviso que o usuário pode desfazer. Dinheiro mudando de lugar não é gasto
