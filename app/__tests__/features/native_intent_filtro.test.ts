@@ -27,6 +27,10 @@ const BLOQUEADOS = [
   "pigbank://resumo", "pigbank://seguranca", "/resumo", "pigbankai://auth?code=c", "https://pigbankai.com/entrar",
   "pigbank://open-finance-voltax", "pigbank://x/open-finance-volta", "https://open-finance-volta/", "PIGBANK://open-finance-volta",
   "pigbank://", "pigbank:///", "pigbank-dev:///",
+  // esquema parecido ou link dentro de outro: a volta do Open Finance exige esquema fechado e âncora `^`
+  "pigbank-evil://open-finance-volta", "pigbankx://open-finance-volta", "x?pigbank://open-finance-volta", "https://x/?u=pigbank://open-finance-volta",
+  // caminho cru para as rotas de entrada (no app real só chega "/"; o harness antigo é dublado no setup)
+  "/criar-conta", "/auth", "/auth?code=a", "/esqueci-senha", "/boas-vindas",
 ];
 
 describe("allowlist: bloqueado", () => {
