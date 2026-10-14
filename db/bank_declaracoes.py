@@ -19,6 +19,16 @@ FLUXO_CONGELA_DIAS = 45  # fluxo já casado há mais que isso sai da conferênci
 MANUAL_TOL_ABS, MANUAL_TOL_PCT = Decimal("5.00"), Decimal("0.10")
 
 
+# O mesmo conceito de `e_fluxo` em SQL (um teste compara os dois), sobre `launches` SEM alias: despesa/receita
+# declarada com `account_id` NULL. Aporte/resgate e declaração com conta explícita não mudam de leitura.
+DECLARADA_SQL = """(tipo in ('despesa', 'receita') and exists (
+        select 1 from bank_movement_declarations d
+         where d.launch_id = launches.id and d.user_id = launches.user_id and d.account_id is null))"""
+CASADA_SQL = f"""({DECLARADA_SQL} and exists (
+        select 1 from bank_movement_declarations d where d.launch_id = launches.id
+           and d.user_id = launches.user_id and d.matched_transaction_id is not null))"""
+
+
 def e_fluxo(declaration: dict) -> bool:
     return declaration.get("tipo") in TIPOS_FLUXO and declaration.get("account_id") is None
 

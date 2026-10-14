@@ -100,18 +100,19 @@ import scripts._ai_meter as meter  # noqa: E402
 
 meter.install()
 
-# Modelos que ESTE código usa de fato: o do .env (6 módulos leem a mesma env)
-# e os dois fixos do media_service. Conferir antes vira erro de apelido aqui,
-# em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
+# Modelos que ESTE código usa de fato: o do .env (`CHAT_MODEL`, que os módulos
+# de chat compartilham) e os dois fixos do media_service. Conferir antes vira
+# erro de apelido aqui, em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
 # ABORTA só no que este harness realmente alcança. O `msg()` monta TODA
 # mensagem com `attachments=[]` (linha única no arquivo), então nenhuma cena
 # chega no whisper nem no gpt-4o de visão. Barrar a rodada porque a chave não
 # tem acesso a um modelo de mídia que ninguém vai chamar é impedir trabalho
 # válido — defeito que EU introduzi ao fazer o preflight abortar.
-_MODELO_DE_CHAT = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+from core.services.modelo_openai import CHAT_MODEL as _MODELO_DE_CHAT, VISION_MODEL  # noqa: E402  (só depois da carga da env acima)
+
 _MODELOS_DE_MIDIA = [
-    "whisper-1",  # core/services/media_service.py:102
-    "gpt-4o",     # core/services/media_service.py:187
+    "whisper-1",  # core/services/media_service.py
+    VISION_MODEL,  # core/services/media_service.py
 ]
 MODEL_PROBLEMS = meter.check_models([_MODELO_DE_CHAT])
 # Os de mídia continuam conferidos, mas só AVISAM: o dia em que entrar cena

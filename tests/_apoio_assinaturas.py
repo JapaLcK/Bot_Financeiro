@@ -18,8 +18,14 @@ def conexao(uid: int) -> int:
     return db.save_pluggy_open_finance_item(uid, item)["id"]
 
 
-def tx(tid, valor, dia, *, category=None, merchant=None, cc=None, desc="Compra"):
+def tx(tid, valor, dia, *, category=None, merchant=None, cc=None, desc="Compra",
+       pagador=None, recebedor=None, nome_pagador=None):
+    """`pagador`/`recebedor`: documento (CPF/CNPJ) do `paymentData` do Pix; `nome_pagador`: nome dele."""
     raw = {"id": tid}
+    if pagador or recebedor or nome_pagador:
+        doc = lambda v: {"documentNumber": {"type": "CPF", "value": v}} if v else {}  # noqa: E731
+        raw["paymentData"] = {"payer": doc(pagador) | ({"name": nome_pagador} if nome_pagador else {}),
+                              "receiver": doc(recebedor)}
     if merchant is not None:
         raw["merchant"] = merchant
     if cc is not None:

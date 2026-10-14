@@ -541,7 +541,8 @@ def update_launch_fields(
                 # editáveis: a sync não toca em `nota`/`alvo`; a categoria
                 # editada também sobrevive, por `categoria_editada`.)
                 # A fundida (P3, dono): o banco é dono da data em todo canal.
-                from .lancamentos import CASADA_SQL, DECLARADA_SQL, FUNDIDO_SQL
+                from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
+                from .lancamentos import FUNDIDO_SQL
                 cur.execute(
                     f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido, "
                     f"{DECLARADA_SQL} as declarada, {CASADA_SQL} as casada "

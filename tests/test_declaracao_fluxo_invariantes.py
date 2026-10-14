@@ -13,8 +13,7 @@ from datetime import timedelta
 import db
 import db.bank_movements as movements
 from conftest import usuario_pagante
-from db.bank_declaracoes import e_fluxo
-from db.lancamentos import DECLARADA_SQL
+from db.bank_declaracoes import DECLARADA_SQL, e_fluxo
 from tests._patrimonio_helpers import q
 from tests.test_bank_movements import _bank, _deposit, _sync
 from tests.test_declaracao_fluxo_reconcilia import decl, declara, n_linhas, sincroniza, tx

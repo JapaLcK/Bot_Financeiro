@@ -9,6 +9,7 @@ import logging
 import os
 import random
 from datetime import datetime
+from core.services.modelo_openai import CHAT_MODEL, completion_options
 from utils_text import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,6 @@ def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None, us
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         period = _period_of_day()
 
@@ -195,9 +195,7 @@ def _greeting_with_ai(text: str, greeting_type: str, name: str | None = None, us
         )
 
         resp = client.chat.completions.create(
-            model=model,
-            temperature=1.0,
-            max_tokens=100,
+            **completion_options(CHAT_MODEL, 100, 1.0),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text},

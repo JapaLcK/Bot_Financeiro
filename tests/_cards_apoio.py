@@ -3,6 +3,7 @@ e a chamada da tool com emissor."""
 import json
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 
@@ -12,6 +13,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from conftest import usuario_pagante
 from core.services.ai_chat import streaming
 from core.services.ai_chat.tools import get_tool
+from db import metas as dbmetas
 from db.pockets import update_pocket_meta
 from test_api_app_sessao import cliente, completo
 from tests.test_resumo_mes_regra import INICIO, semeia_a, semeia_b
@@ -34,7 +36,8 @@ CASOS = {
     "wealth": ({}, [{"patrimonio": ("/api/app/patrimonio", {})}]),
     "rendimento": ({}, [{"rendimento": ("/api/app/rendimento", {})}]),
     "assinaturas": ({}, [{"assinaturas": ("/api/app/assinaturas", {})}]),
-    "metas": ({}, [{"metas": ("/goals/{uid}/status", {})}]),
+    "metas": ({}, [{"metas": ("/api/app/metas", {})}]),
+    "caixinhas": ({}, [{"caixinhas": ("/goals/{uid}/status", {})}]),
     "fatura": ({}, [{"cartoes": ("/cards/{uid}/summary", {})}]),
     "parcelas": ({}, [{"parcelas": ("/installments/{uid}/list", {})}]),
     "renda": ({"quantidade_meses": 4}, [{"renda": ("/analytics/{uid}/evolution", {"months": 4})}]),
@@ -52,6 +55,12 @@ def _semeia_metas_e_cartao(uid, nome):
     db.pocket_deposit_from_account(uid, nome, 300.0, "aporte")
 
 
+def semeia_meta(uid, nome):
+    """Uma meta de verdade (fonte: tudo investido, sem banco: `atual` null)."""
+    return dbmetas.criar(uid, {"nome": nome, "tipo": "meta", "alvo": Decimal("1000"), "meses": None,
+                               "data_alvo": None, **dbmetas.resolver_fonte(uid, "investido", None, None)})
+
+
 @pytest.fixture
 def mundo(monkeypatch):
     monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
@@ -62,6 +71,11 @@ def mundo(monkeypatch):
     semeia_b(b)
     _semeia_metas_e_cartao(a, "viagem")
     _semeia_metas_e_cartao(b, "SEGREDO-B")
+    semeia_meta(a, "Casa nova")
+    semeia_meta(b, "SEGREDO-B meta")
+    # a chave do /painel novo: o card `metas` e a tool `list_metas` só leem para quem a tem (P1-b).
+    # Depois de semear: com a chave, a escrita manual de investimento é recusada (fonte única).
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{b}")
     # `_call_llm` falso: o insights passa pelo cache de verdade e é igual nas duas leituras.
     monkeypatch.setattr("core.ai_patterns._call_llm", lambda *a, **k: [
         {"title": "Mercado subiu", "message": "Gastou R$ 80", "severity": "info", "key": "k1"}])
