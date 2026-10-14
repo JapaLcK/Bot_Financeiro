@@ -868,7 +868,7 @@ def valor_valido(v) -> bool:
     `inf` para dígitos enormes."""
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int de 400 dígitos
         return False
     return isfinite(f) and 0 < f <= VALOR_MAX
 

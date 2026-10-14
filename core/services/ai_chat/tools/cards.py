@@ -327,7 +327,7 @@ def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
 
     try:
         valor = float(args.get("valor") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor inválido."
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
