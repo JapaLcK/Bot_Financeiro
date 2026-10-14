@@ -89,8 +89,9 @@ export async function desafioDe(verificador: string): Promise<string> {
  */
 export async function continuarComGoogle(autenticar: () => void): Promise<EstadoEntrar> {
   let retorno: RetornoGoogle;
-  const verificador = novoVerificador();
+  let verificador = "";
   try {
+    verificador = novoVerificador();
     const desafio = await desafioDe(verificador);
     const r = await WebBrowser.openAuthSessionAsync(`${baseUrl()}/auth/google/start?app=2&code_challenge=${desafio}`, RETORNO);
     // cancel, dismiss, locked: a pessoa fechou a folha (inclusive na landing de state vencido).

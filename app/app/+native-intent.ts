@@ -22,7 +22,30 @@ const VOLTA = [
  * "Unmatched Route"). Só o esquema do app e o caminho cru; `exp://` e o dev
  * client (`exp+pigbank://`) não casam de propósito.
  */
-const ENTRADA = /^(?:pigbank(?:-staging|-dev)?:\/\/\/?|\/)(?:\(auth\)\/)?(?:auth|entrar|criar-conta|esqueci-senha|boas-vindas)(?:[/?#]|$)/i;
+const ENTRADA = new Set(["auth", "entrar", "criar-conta", "esqueci-senha", "boas-vindas"]);
+
+/**
+ * O expo-router normaliza o link DEPOIS deste filtro (`new URL`: `//` repetido,
+ * `(auth)` repetido, `%61`, `.`/`..`), então testar a string crua deixava
+ * `pigbank:////entrar` e `/(auth)//entrar` passarem. Normaliza à mão, sem `URL`
+ * (o do Hermes é incerto, como no `VOLTA` acima) e compara o primeiro segmento.
+ */
+function levaAEntrada(path: string): boolean {
+  const resto = /^(?:pigbank(?:-staging|-dev)?:|(?=\/))/i.exec(path);
+  if (!resto) return false;
+  let caminho = path.slice(resto[0].length).split(/[?#]/, 1)[0] ?? "";
+  try {
+    caminho = decodeURIComponent(caminho);
+  } catch {
+    return false; // malformado: o roteador também não o resolve para uma rota
+  }
+  const segmentos: string[] = [];
+  for (const seg of caminho.replace(/[\t\n\r]/g, "").split("/")) {
+    if (seg === "..") segmentos.pop();
+    else if (seg && seg !== "." && seg.toLowerCase() !== "(auth)") segmentos.push(seg);
+  }
+  return ENTRADA.has((segmentos[0] ?? "").toLowerCase());
+}
 
 /**
  * O expo-router passa TODO link de entrada por aqui; `null` = não navega. Descarta
@@ -72,6 +95,6 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     ];
     return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }
-  if (ENTRADA.test(path)) return initial ? "/" : null;
+  if (levaAEntrada(path)) return initial ? "/" : null;
   return path;
 }

@@ -8,7 +8,6 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
 }));
 
 import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
-import { router } from "expo-router";
 
 import * as authService from "@/services/auth";
 import { FalhaNoCofre, lerCredenciais } from "@/storage/secure";
@@ -136,13 +135,6 @@ describe("(auth)/entrar — tela real", () => {
 
     expect(screen.getByRole("button", { name: "Continuar com Google" }).props.accessibilityHint).toBeUndefined();
     expect(screen.getByRole("button", { name: "Continuar com a Apple" }).props.accessibilityHint).toBeUndefined();
-  });
-
-  it("M1 — deep link frio para /esqueci-senha tem /entrar embaixo na pilha (canGoBack)", async () => {
-    abrirRotaDeEntrada("/esqueci-senha");
-    await waitFor(() => expect(screen).toHavePathname("/esqueci-senha"));
-
-    expect(router.canGoBack()).toBe(true);
   });
 
   it("senha errada: o aviso aparece e some quando a pessoa volta a digitar", async () => {

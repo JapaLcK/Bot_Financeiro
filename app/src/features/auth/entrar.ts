@@ -27,7 +27,7 @@ export type EstadoEntrar =
   // O cadastro de quem entrou por um dos dois sem conta (`cadastroSocial.ts`).
   // `verificador`: o PKCE do Google (#604), só em memória; a Apple não tem.
   | { fase: "cadastro-social"; provedor: ProvedorSocial; token: string; email: string; nome: string; verificador?: string; aviso?: string }
-  | { fase: "criando-social"; provedor: ProvedorSocial; token: string; email: string; verificador?: string };
+  | { fase: "criando-social"; provedor: ProvedorSocial; token: string; email: string };
 
 /**
  * Quais fases apagam o campo Senha ao entrar nelas. O iOS só oferece "Salvar

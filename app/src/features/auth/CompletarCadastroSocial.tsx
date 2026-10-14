@@ -51,8 +51,9 @@ export function CompletarCadastroSocial({ estado, autenticar, aplicar }: Props) 
     setErros(encontrados);
     setAvisoLink(false);
     if (Object.keys(encontrados).length > 0) return;
-    const { provedor, token, email, verificador } = estado;
-    aplicar({ fase: "criando-social", provedor, token, email, verificador });
+    const { provedor, token, email } = estado;
+    const verificador = "verificador" in estado ? estado.verificador : undefined;
+    aplicar({ fase: "criando-social", provedor, token, email });
     void tocar(() => criarContaSocial({ provedor, token, email, nome, verificador }, telefone, autenticar), aplicar);
   };
 

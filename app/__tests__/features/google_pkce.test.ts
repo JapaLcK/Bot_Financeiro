@@ -6,6 +6,8 @@
  */
 import { createHash } from "crypto";
 
+import * as Crypto from "expo-crypto";
+
 import { tocar, type EstadoEntrar } from "@/features/auth/entrar";
 import { criarContaSocial } from "@/features/auth/cadastroSocial";
 import { continuarComGoogle, desafioDe } from "@/features/auth/google";
@@ -117,6 +119,25 @@ describe("continuarComGoogle com PKCE", () => {
     voltaDoGoogle("pigbank://auth?code=code-ana");
     expect(await google()).toEqual([{ fase: "formulario", aviso: GENERICO }]);
     await expect(lerCredenciais()).resolves.toBeNull();
+  });
+});
+
+describe("falha ao gerar o verifier", () => {
+  // Controle negativo (medido): `novoVerificador()` fora do try deixa este vermelho
+  // (a função rejeita e a fila de `tocar` trava na 1ª tentativa).
+  it("getRandomBytes lança: devolve o formulário com o genérico, sem rejeitar nem abrir a folha; a 2ª tentativa funciona", async () => {
+    backendComPkce();
+    voltaDoGoogle("pigbank://auth?code=code-ana");
+    jest.mocked(Crypto.getRandomBytes).mockImplementationOnce(() => {
+      throw new Error("sem entropia");
+    });
+
+    expect(await google()).toEqual([{ fase: "formulario", aviso: GENERICO }]);
+    expect(abrirFolha).not.toHaveBeenCalled();
+    expect(chamadas()).toEqual([]);
+
+    expect(await google()).toEqual([{ fase: "google" }]);
+    expect(abrirFolha).toHaveBeenCalledTimes(1);
   });
 });
 

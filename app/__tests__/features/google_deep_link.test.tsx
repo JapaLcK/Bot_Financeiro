@@ -50,7 +50,7 @@ describe("deep link pigbank://auth de fora", () => {
  * `/entrar`, `/criar-conta` e `/esqueci-senha` ficam vermelhos (a tela abre).
  */
 describe("link frio para as rotas de entrada", () => {
-  it.each(["/entrar", "/criar-conta", "/esqueci-senha", "/auth?code=code-ana"])(
+  it.each(["/entrar", "/criar-conta", "/esqueci-senha", "/auth?code=code-ana", "/(auth)//entrar", "/(auth)/(auth)/entrar", "/%61uth?code=code-ana", "/%65ntrar"])(
     "%s: cai na raiz, nada empilha, nenhuma requisição",
     async (url) => {
       renderRouter("./app", { initialUrl: url });
@@ -80,6 +80,17 @@ describe("redirectSystemPath: links de entrada", () => {
     "/entrar",
     "/auth?code=c",
     "/(auth)/criar-conta",
+    // O expo-router normaliza DEPOIS do filtro: estas formas abriam a tela mesmo assim.
+    "pigbank:////entrar",
+    "pigbank:///(auth)//entrar",
+    "/(auth)//entrar",
+    "/(auth)/(auth)/entrar",
+    "pigbank:////auth?code=a",
+    "/%61uth?code=a",
+    "/%65ntrar",
+    "/./entrar",
+    "/x/../entrar",
+    "pigbank://%2e%2e/entrar",
   ];
 
   it.each(ALVOS)("%s: null com o app aberto, '/' na abertura a frio", (path) => {
@@ -94,6 +105,12 @@ describe("redirectSystemPath: links de entrada", () => {
     "pigbank://entrarx",
     "pigbank://authx?code=c",
     "pigbank://autenticar",
+    "pigbank://entrar-com-codigo",
+    "pigbank://criar-conta-x",
+    "/authx",
+    "/(app)/entrar",
+    "exp+pigbank://entrar",
+    "pigbank://%E0%A4%A", // malformado: não resolve para rota nenhuma
     "pigbank://x/entrar",
     "pigbankai://auth?code=c",
     "exp://192.168.0.5:8081/--/entrar",
