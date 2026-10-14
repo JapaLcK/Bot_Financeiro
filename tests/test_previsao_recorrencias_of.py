@@ -46,8 +46,9 @@ def netflix(uid, valores=("-39.90",) * 3, ultima=date(2026, 9, 5), prefixo="nf",
 
 
 def salario(uid, valor="5000", ultima=date(2026, 9, 5), prefixo="sal", desc="SALARIO EMPRESA X"):
-    txs = mensais(prefixo, [valor] * 3, ultima=ultima, desc=desc)
-    return semeia(uid, [conta(f"acc-{prefixo}", txs)], [rp(desc, float(valor), txs)])
+    """Só os créditos no extrato, com o documento do pagador: a receita vem do extrato (P7 a), nunca do `rp` de entrada."""
+    txs = mensais(prefixo, [valor] * 3, ultima=ultima, desc=desc, pagador="11122233344")
+    return semeia(uid, [conta(f"acc-{prefixo}", txs)], [])
 
 
 def test_1_saida_mensal_simples_e_valor_exato_na_v2(user_id):
@@ -128,11 +129,12 @@ def test_8_receita_entra_como_nao_garantida(user_id):
     assert (m.direcao_do_erro, m.efeito_quantificado) == ("so_melhora", D("5000"))
 
 
-def test_9_ignorar_some_com_a_saida_e_nao_com_a_receita_homonima(user_id):
-    # A saída termina antes da entrada começar: sem a direção na cadeia, as duas colariam.
+def test_9_ignorar_vale_para_a_saida_e_a_receita_do_extrato_nao_le_marcas(user_id):
+    # A saída (rp) termina antes da entrada (só no extrato) começar. A receita do extrato não lê marcas
+    # (o "ignorar receita" é o PR B), então marcar a saída não a toca: este teste mede só isso.
     out = mensais("tj-out", ["-100"] * 3, ultima=date(2026, 6, 5), desc="TRANSF JOAO")
-    inn = mensais("tj-in", ["300"] * 3, ultima=date(2026, 9, 6), desc="TRANSF JOAO")
-    semeia(user_id, [conta("acc-tj", out + inn)], [rp("TRANSF JOAO", -100, out), rp("TRANSF JOAO", 300, inn)])
+    inn = mensais("tj-in", ["300"] * 3, ultima=date(2026, 9, 6), desc="TRANSF JOAO", pagador="11122233344")
+    semeia(user_id, [conta("acc-tj", out + inn)], [rp("TRANSF JOAO", -100, out)])
     assert {e.direcao for e in do_banco(ler_em(user_id))} == {"entrada", "saida"}
     marcar(user_id, "transf joao", "ignorar")
     es = do_banco(ler_em(user_id))
@@ -170,8 +172,8 @@ def test_12_isolamento_entre_usuarios_pelo_id_de_transacao():
 
 def test_13_cartao_saida_fora_e_receita_no_cartao_descartada(user_id):
     netflix_no_cartao(user_id)
-    est = mensais("est", ["15"] * 3, desc="ESTORNO LOJA")
-    semeia(user_id, [conta("acc-est", est, tipo="CREDIT")], [rp("ESTORNO LOJA", 15, est)])
+    est = mensais("est", ["15"] * 3, desc="ESTORNO LOJA", pagador="55566677788")  # com documento: só a conta CREDIT o descarta
+    semeia(user_id, [conta("acc-est", est, tipo="CREDIT")], [])
     es = do_banco(ler_em(user_id))
     assert len(es) == 3 and {e.nome for e in es} == {"NETFLIX.COM"}
     assert not any(e.incluida for e in es)
@@ -248,9 +250,9 @@ def test_22_recorrencia_de_conta_fora_da_base_fica_fora(user_id):
 def test_23_todas_as_contas_fora_da_base_nao_descontam_a_base_manual(user_id):
     db.set_balance(user_id, D(1000))
     nf = mensais("nf", ["-39.90"] * 3, desc="NETFLIX.COM")
-    sal = mensais("sal", ["5000"] * 3, desc="SALARIO EMPRESA X")
+    sal = mensais("sal", ["5000"] * 3, desc="SALARIO EMPRESA X", pagador="11122233344")
     semeia(user_id, [conta("acc-nf", nf, saldo=None), conta("acc-sal", sal, saldo=None)],
-           [rp("NETFLIX.COM", -39.9, nf), rp("SALARIO EMPRESA X", 5000, sal)])
+           [rp("NETFLIX.COM", -39.9, nf)])
     s = ler_em(user_id)
     es = do_banco(s)
     assert s.base["balance_source"] == "manual" and len(es) == 6 and not any(e.incluida for e in es)
