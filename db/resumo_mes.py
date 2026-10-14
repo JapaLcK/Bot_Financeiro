@@ -37,12 +37,14 @@ from datetime import date, datetime, timedelta
 
 from .connection import CAT_VAZIA_LABEL, TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, cat_key_sql, get_conn
 
-# As duas pernas do mês, também lidas pela lista de `db/lancamentos.py` (§0.7). Params:
+# As duas pernas do mês. A lista de `db/lancamentos.py` lê a mesma janela (`MES_JANELA_SQL`) e
+# a perna do cartão (§0.7); só os tipos ela alarga (guardado, nunca em total). Params:
 # (user_id, início, fim) e (user_id, user_id, início, fim). A de `launches` é sem alias e
-# SEM o filtro de interno: a lista mostra o interno marcado; a soma o tira abaixo.
-MES_LANCAMENTOS_SQL = f"""user_id = %s
-               and criado_em >= %s and criado_em < %s
-               and ({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"""
+# SEM o filtro de interno: a lista mostra o interno marcado; a soma o tira abaixo. Janela e tipos
+# separados porque a lista alarga só os tipos (guardado, P8); a soma não muda.
+MES_JANELA_SQL = "user_id = %s and criado_em >= %s and criado_em < %s"
+MES_TIPOS_SQL = f"({TIPO_DESPESA_SQL} or {TIPO_RECEITA_SQL})"
+MES_LANCAMENTOS_SQL = f"{MES_JANELA_SQL} and {MES_TIPOS_SQL}"
 # O FROM da perna do cartão, com o join da fatura e a barreira no MESMO texto (o portão de
 # `tests/test_barreira_fatura.py` lê o literal). Cada perna filtra pelo usuário, inclusive a
 # FATURA (`b.user_id`; a NULL, a coluna aceita sem backfill, vale pelo dono do cartão dela).

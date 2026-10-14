@@ -30,6 +30,7 @@
           "hora": "10:15",
           "tipo": "saida",
           "interno": false,
+          "guardado": false,
           "valor": "500.50",
           "moeda": "BRL",
           "descricao": "Supermercado",
