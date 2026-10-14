@@ -43,12 +43,12 @@ import db
 from db.ai_turno import trava_do_turno
 
 from . import streaming
-from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE
+from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, METAS_DO_TURNO, metas_do_turno
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
-from .system_prompt import ADENDO_CARDS, ERROR_MSG, SYSTEM_PROMPT
-from .tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP, get_tool
+from .system_prompt import ERROR_MSG, prompt_do_usuario
+from .tools import OCULTAS_NO_APP, get_tool, schemas_para
 from .tools._base import OUTRO_PEDIDO
 
 
@@ -367,6 +367,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
         return None if ia_primeiro else LIMIT_MSG_TEMPLATE.format(limit=monthly_limit)
     write_token = _TURN_WRITE_ATTEMPTED.set(False)
     pendencia_token = _PENDENCIA_DO_TURNO.set(None)
+    metas_token = METAS_DO_TURNO.set(None)
     final_text = ERROR_MSG
     completed = False
     try:
@@ -380,7 +381,9 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
                 m["content"] = strip_markdown_headers(m["content"])
 
         today_str = date.today().strftime("%d/%m/%Y")
-        system_with_date = SYSTEM_PROMPT + (ADENDO_CARDS if streaming.ativo() else "") + f"\n\nData de hoje: {today_str}."
+        metas = metas_do_turno(user_id)
+        METAS_DO_TURNO.set(metas)
+        system_with_date = prompt_do_usuario(metas, streaming.ativo()) + f"\n\nData de hoje: {today_str}."
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
@@ -415,6 +418,7 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
         attempted_write = _TURN_WRITE_ATTEMPTED.get()
         _TURN_WRITE_ATTEMPTED.reset(write_token)
         _PENDENCIA_DO_TURNO.reset(pendencia_token)
+        METAS_DO_TURNO.reset(metas_token)
         # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
         if (not completed or final_text == ERROR_MSG) and not attempted_write:
             refund_usage(user_id, reservation)
@@ -553,7 +557,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 model=MODEL,
                 temperature=TEMPERATURE,
                 messages=messages,
-                tools=SCHEMAS_APP if streaming.ativo() else SCHEMAS,
+                tools=schemas_para(user_id, streaming.ativo()),
                 max_tokens=MAX_TOKENS,
                 # Última volta: sem tool, o modelo responde com o que já leu em vez de ERROR_MSG.
                 **({"tool_choice": "none"} if volta == MAX_TOOL_LOOPS - 1 else {}),
@@ -778,7 +782,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
     if name in OCULTAS_NO_APP and streaming.ativo():  # o modelo imitou o histórico do WhatsApp
         return (
             json.dumps({"error": "indisponivel_no_app",
-                        "message": "Não existe no app. Use show_card (contas, hero, fatura, parcelas, renda)."},
+                        "message": "Não existe no app. Use show_card (contas, hero, fatura, parcelas, renda"
+                                   + (", metas, caixinhas)." if metas_do_turno(user_id) else ").")},
                        ensure_ascii=False),
             None,
         )

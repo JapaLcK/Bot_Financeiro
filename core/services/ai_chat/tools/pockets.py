@@ -106,7 +106,7 @@ def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) ->
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
                 **({"last_interest_date": r.get("last_interest_date")} if not accrue else {}),
-                # no app a meta (alvo e prazo) fica; progresso e ritmo são do card metas
+                # no app a meta (alvo e prazo) fica; progresso e ritmo são do card caixinhas (`show_card metas` para quem não tem a chave)
                 **({k: insight[k] for k in ("target_amount", "target_date")} if streaming.ativo() else insight),
             }
         )

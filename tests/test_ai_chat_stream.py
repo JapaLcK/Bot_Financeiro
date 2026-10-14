@@ -12,6 +12,7 @@ import pytest
 
 import db
 from core.services.ai_chat import runner, streaming
+from core.services.ai_chat.tools import SCHEMAS
 from frontend.routes import ai_chat as rota
 from _cards_apoio import CASOS, mostrar, mundo  # noqa: F401  (mundo é fixture)
 from _ia_stream_helpers import (conta, esgota_a_cota, eventos_sse, executar, linhas,
@@ -25,7 +26,7 @@ def test_sem_emissor_a_chamada_a_openai_e_a_de_sempre(monkeypatch, pro_user_id):
     assert runner.chat(pro_user_id, "oi", monthly_limit=100) == "Oi!"
     (kw,) = reg.creates
     assert "stream" not in kw and set(kw) == {"model", "temperature", "messages", "tools", "max_tokens"}
-    assert kw["tools"] is runner.SCHEMAS
+    assert kw["tools"] is SCHEMAS
 
 
 def test_passo_delta_e_id_da_resposta_gravada(monkeypatch, pro_user_id):
