@@ -1,12 +1,20 @@
 """
 db/lancamentos.py — a lista de lançamentos do `/painel` (`GET /api/v2/lancamentos`). Só lê.
 
-O mês é a regra de `db/resumo_mes.TOTAIS_SQL`, pelas MESMAS pernas (`MES_LANCAMENTOS_SQL`,
-`MES_CARTAO_SQL`): lançamentos por `criado_em` (forma legada canonizada), compras no cartão
+O mês é a regra de `db/resumo_mes.TOTAIS_SQL`: mesma janela (`MES_JANELA_SQL`) e mesma regra
+de totais (a soma dos não internos fecha com `resumo-do-mes`); a lista só alarga os TIPOS com o
+guardado, que nunca entra em total (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`).
+Lançamentos por `criado_em` (forma legada canonizada), compras no cartão (`MES_CARTAO_SQL`)
 sem estorno pela fatura (`period_end`), mostrando o dia da COMPRA (P6). A diferença é de
 propósito: o interno entra, com `interno=true`, e fica fora de qualquer soma (P8). Assim a
 soma dos não internos de um mês é o Entrou/Saiu de `resumo-do-mes`
-(`tests/test_api_v2_lancamentos.py`). Com busca (`q`), o mês dá lugar à janela inteira
+(`tests/test_api_v2_lancamentos.py`). Guardado (P8): depósito de caixinha e aporte saem da conta
+(`saida`), saque e resgate entram (`entrada`), valor BRUTO, `guardado=true`; e guardado ⇒
+`interno=true` (forçado aqui, não depende da flag gravada), então nunca entra em soma nem
+agregado (`mes_detalhes._em_reais` descarta o interno). `categoria=` nunca devolve guardado.
+Sem `conta_id`, `pode=[]`, origem `registro_antigo`. O guardado é OPT-IN (`com_guardado`, `guardado=1`
+na rota): sem ele a lista é a de antes da P8, porque o app nativo monta o mesmo router
+(`/api/app/lancamentos`) e os apps instalados não se atualizam com o backend. Com busca (`q`), o mês dá lugar à janela inteira
 do plano (P7).
 
 Ordem e página: KEYSET em (dia desc, instante desc, tabela desc, id desc); o cursor leva
@@ -20,8 +28,9 @@ por padrão, em todo canal) e o saque/depósito automático da Q41 (`open_financ
 
 Limites declarados: o mês corta `criado_em` pela data ingênua, como `TOTAIS_SQL`, e o dia
 mostrado é o de `launch_day` — numa linha antiga do Open Finance (meia-noite UTC) o dia
-pode cair fora do mês da lista. Tipos que não são despesa/receita (caixinha, aporte,
-`criar_caixinha`) ficam fora, como na soma.
+pode cair fora do mês da lista. `criar_caixinha` & cia seguem fora, como na soma. Depósito pago
+pelo banco gera 2 linhas fora do total (a do banco e a guardado), sem vínculo; caixinha do banco
+(Open Finance) não gera guardado; `conta=` e `origem=carteira` não pegam guardado.
 """
 from __future__ import annotations
 
@@ -37,12 +46,18 @@ from .connection import LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_no
 from .open_finance import ACTIONABLE_PENDING_SQL, actionable_pending_params
 from .open_finance_cash import VINCULADO_SQL
 from .reconciliation import FUSED_STATUSES
-from .resumo_mes import MES_CARTAO_SQL, MES_LANCAMENTOS_SQL
+from .resumo_mes import MES_CARTAO_SQL, MES_JANELA_SQL, MES_TIPOS_SQL
 
 ORIGENS = ("carteira", "banco", "cartao", "registro_antigo")
 PODE = ("categoria", "descricao", "data", "valor", "apagar")
 MOTIVOS_ITEM = ("conciliacao_pendente", "transacao_pendente", "outra_moeda", "moeda_presumida")
 _FUSED = "(" + ",".join(f"'{s}'" for s in FUSED_STATUSES) + ")"
+# Guardado (P8): os tipos gravados pelos escritores de caixinha/investimento (fonte da lista e de
+# `db/mes_detalhes.py`, o bloco `guardado`). GUARDAR sai da conta, RESGATAR volta a ela.
+GUARDAR = ("deposito_caixinha", "aporte_investimento")
+RESGATAR = ("saque_caixinha", "resgate_investimento")
+_GUARDADO = "(" + ",".join(f"'{s}'" for s in GUARDAR + RESGATAR) + ")"
+_RESGATAR = "(" + ",".join(f"'{s}'" for s in RESGATAR) + ")"
 _MAX_ID = 2**63 - 1
 
 # Lançamentos em par pendente com o banco, dos dois lados (o manual e a sombra): o mesmo
@@ -78,12 +93,16 @@ _ESTADO_SQL = f"""
       {FUNDIDO_SQL} as fundido,
       coalesce(id in (select id from pendentes), false) as pendente"""
 
-# Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência: o vínculo do dinheiro
-# em espécie e o pagamento de conta vencem a fusão e o par pendente — menos na data, que a
+# Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência. A 1ª cláusula, `tipo in
+# guardado`, vence TODAS as outras (inclusive P5 e `source='open_finance'`): defesa em
+# profundidade, pois nenhum escritor real grava esses tipos com `origem`/`source='open_finance'`;
+# só linha forjada ou legado. É também a guarda de escrita (`pode_da_linha`). Depois dela, o
+# vínculo do dinheiro em espécie e o pagamento de conta vencem a fusão e o par pendente — menos na data, que a
 # fusão tira também do pagamento de conta (P3: o banco é dono da data em todo canal).
-PODE_SQL = """case
+PODE_SQL = f"""case
+      when tipo in {_GUARDADO} then '{{}}'::text[]
       when source = 'open_finance' then array['categoria','descricao']
-      when not (carteira and marcada) then '{}'::text[]
+      when not (carteira and marcada) then '{{}}'::text[]
       when especie then array['descricao','apagar']
       when paga_conta and fundido then array['categoria']
       when paga_conta then array['categoria','data']
@@ -117,12 +136,17 @@ def _chave(col: str) -> str:
     return f"case when nullif({col}, '') is null then null else {cat_norm_sql(col)} end"
 
 
-# Params: tz, tz, `MES_LANCAMENTOS_SQL` (uid, início, fim), uid (a transação do banco).
+# Os tipos da lista: o mês mais o guardado. `listar(com_guardado=False)` troca este trecho por
+# `MES_TIPOS_SQL` (a perna de antes da P8), sem duplicar a perna.
+_TIPOS_COM_GUARDADO = f"({MES_TIPOS_SQL} or tipo in {_GUARDADO})"
+
+# Params: tz, tz, `MES_JANELA_SQL` (uid, início, fim), uid (a transação do banco).
 _PERNA_LANCAMENTOS = f"""
     select 'l' as tabela, l.id, l.dia, l.criado_em as instante,
            case when l.has_time then l.hhmm end as hora,
-           case when l.tipo_canon = 'receita' then 'entrada' else 'saida' end as tipo,
-           l.is_internal_movement as interno, l.valor,
+           case when l.tipo_canon = 'receita' or l.tipo in {_RESGATAR} then 'entrada'
+                else 'saida' end as tipo,
+           l.is_internal_movement or l.guardado as interno, l.guardado, l.valor,
            coalesce(upper(a.currency), upper(l.currency), 'BRL') as moeda,
            l.alvo as descricao, l.nota as mensagem, {_chave('l.categoria')} as categoria,
            case when l.source = 'open_finance' then 'banco'
@@ -139,15 +163,16 @@ _PERNA_LANCAMENTOS = f"""
       from (select launches.*, {TIPO_CANON_SQL} as tipo_canon, {LAUNCH_HAS_TIME_SQL} as has_time,
                    case when not ({LAUNCH_HAS_TIME_SQL}) and posted_at is not null then posted_at
                         else (criado_em at time zone %s)::date end as dia,
-                   to_char(criado_em at time zone %s, 'HH24:MI') as hhmm,{_ESTADO_SQL}
-              from launches where {MES_LANCAMENTOS_SQL}) l0
+                   to_char(criado_em at time zone %s, 'HH24:MI') as hhmm,
+                   tipo in {_GUARDADO} as guardado,{_ESTADO_SQL}
+              from launches where {MES_JANELA_SQL} and {_TIPOS_COM_GUARDADO}) l0
       cross join lateral (select l0.*, {PODE_SQL} as pode) l
       left join lateral (
         select t.account_id, t.raw ->> 'status' as status_banco
           from open_finance_transactions t
           join open_finance_accounts ta on ta.id = t.account_id
           join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
-         where t.imported_launch_id = l.id order by t.id desc limit 1) t on true
+         where t.imported_launch_id = l.id and not l.guardado order by t.id desc limit 1) t on true
       left join open_finance_accounts a on a.id = t.account_id
       left join open_finance_connections conn on conn.id = a.connection_id
      where true"""
@@ -157,7 +182,7 @@ _PERNA_LANCAMENTOS = f"""
 _PERNA_CARTAO = f"""
     select 'c' as tabela, ct.id, ct.purchased_at as dia,
            coalesce(ct.created_at, ct.purchased_at::timestamptz) as instante,
-           null::text as hora, 'saida' as tipo, false as interno, ct.valor,
+           null::text as hora, 'saida' as tipo, false as interno, false as guardado, ct.valor,
            coalesce(upper(oa.currency), 'BRL') as moeda,
            coalesce(nullif(ct.nota, ''), o.description) as descricao, null::text as mensagem,
            {_chave('ct.categoria')} as categoria,
@@ -184,7 +209,7 @@ _PERNA_CARTAO = f"""
 # pontas, como `_RECORTE_TX_FROM_SQL`: pega a transação presa a uma conexão antiga da mesma
 # conta. Sem o recorte do saldo (BRL, conexão viva): `/contas` lista a pausada e a de
 # outra moeda, e o filtro tem de achar as dela. Params: uid, uid, conta.
-_DA_CONTA_SQL = """ and l.id in (
+_DA_CONTA_SQL = """ and not l.guardado and l.id in (
         select t.imported_launch_id from open_finance_accounts ra
           join open_finance_connections rc on rc.id = ra.connection_id and rc.user_id = %s
           join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id
@@ -229,12 +254,16 @@ def ler_cursor(texto: str) -> tuple:
 
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
-           categoria=None, tipo=None, q=None, apos=None, limite=50) -> tuple[list[dict], bool]:
+           categoria=None, tipo=None, q=None, apos=None, limite=50,
+           com_guardado=False) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
-    `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida."""
+    `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
+    `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
+    agregados internos (`mes_detalhes`) seguem sem passá-lo."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
-    perna_l = _PERNA_LANCAMENTOS + (_DA_CONTA_SQL if conta is not None else "")
+    perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
+    perna_l += _DA_CONTA_SQL if conta is not None else ""
     perna_l += " and false" if cartao is not None else ""
     params += [tz, tz, user_id, inicio, fim, user_id]
     params += [user_id, user_id, conta] if conta is not None else []
@@ -248,7 +277,7 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
         filtros.append("(x.dia, x.instante, x.tabela, x.id) < (%s, %s, %s, %s)")
         params += apos
     for sql, valor in (("x.origem = %s", origem), ("x.tipo = %s", tipo),
-                       (f"{cat_key_sql('x.categoria')} = {cat_key_sql('%s')}", categoria)):
+                       (f"not x.guardado and {cat_key_sql('x.categoria')} = {cat_key_sql('%s')}", categoria)):
         if valor is not None:
             filtros.append(sql)
             params.append(valor)
@@ -279,7 +308,7 @@ def _item(r: dict) -> dict:
     parcela = ({"n": r["parcela_n"], "total": r["parcela_total"]}
                if r["parcela_n"] is not None and r["parcela_total"] is not None else None)
     return {"id": f"{r['tabela']}{r['id']}", "data": r["dia"].isoformat(), "hora": r["hora"],
-            "tipo": r["tipo"], "interno": r["interno"], "valor": r["valor"], "moeda": r["moeda"],
+            "tipo": r["tipo"], "interno": r["interno"], "guardado": r["guardado"], "valor": r["valor"], "moeda": r["moeda"],
             "descricao": r["descricao"], "mensagem": r["mensagem"], "categoria": r["categoria"],
             "origem": r["origem"], "fundido": r["fundido"], "instituicao": r["instituicao"],
             "conta_id": r["conta_id"], "cartao_id": r["cartao_id"], "parcela": parcela,

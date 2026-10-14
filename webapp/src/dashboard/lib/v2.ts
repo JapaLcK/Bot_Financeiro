@@ -165,10 +165,12 @@ export const previsaoQuery = (dias: 30 | 60 | 90 | null) => queryOptions({
   },
 });
 
+// `guardado: true`: a tela de Lançamentos mostra o guardado (P8); no backend ele é opt-in porque o
+// app nativo monta a mesma rota e não conhece o campo.
 export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor">) => infiniteQueryOptions({
   queryKey: ["lancamentos", filtros],
   initialPageParam: null as string | null,
-  queryFn: ({ signal, pageParam }) => apiGet("/lancamentos", signal, { ...filtros, cursor: pageParam }),
+  queryFn: ({ signal, pageParam }) => apiGet("/lancamentos", signal, { ...filtros, guardado: true, cursor: pageParam }),
   getNextPageParam: (pagina) => pagina.proximo ?? undefined,
   ...vivo,
 });

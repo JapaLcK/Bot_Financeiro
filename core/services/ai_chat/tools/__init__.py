@@ -6,6 +6,7 @@ Este `__init__` agrega todas e expõe utilitários comuns:
 
   SCHEMAS         — list[dict] no formato OpenAI, passada em tools=[]
   SCHEMAS_APP     — SCHEMAS sem OCULTAS_NO_APP + show_card (só o stream do app)
+  schemas_para    — o de cima, mais as metas para quem tem a chave (`list_metas` etc.)
   WRITE_TOOL_NAMES — set de nomes de tools que precisam de pending action
   get_tool(name)   — lookup; retorna Tool ou None
 
@@ -16,7 +17,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from . import balance, bills, budgets, cards, categories, investments, launches, meta, mostrar_card, pockets, reports, simulator
+from . import balance, bills, budgets, cards, categories, investments, launches, meta, metas, mostrar_card, pockets, reports, simulator
+from .._context import metas_do_turno
 from ._base import Tool
 
 
@@ -36,7 +38,8 @@ _ALL_TOOLS: list[Tool] = [
 
 
 # `show_card` resolve em `get_tool` mas só o app a oferece (`SCHEMAS_APP`, com emissor).
-_BY_NAME: dict[str, Tool] = {t.name: t for t in (*_ALL_TOOLS, *mostrar_card.TOOLS)}
+# `list_metas` também: só quem tem a chave das metas a recebe (`schemas_para`).
+_BY_NAME: dict[str, Tool] = {t.name: t for t in (*_ALL_TOOLS, *metas.TOOLS, *mostrar_card.TOOLS)}
 
 
 SCHEMAS: list[dict[str, Any]] = [t.schema for t in _ALL_TOOLS]
@@ -46,13 +49,20 @@ SCHEMAS: list[dict[str, Any]] = [t.schema for t in _ALL_TOOLS]
 # com o WhatsApp). O WhatsApp e o /ai/chat seguem com todas.
 OCULTAS_NO_APP = frozenset({
     "get_balance", "forecast_balance", "get_spending_trend", "get_card_limit_usage",
-    "get_total_debt", "forecast_next_bill", "list_installments",
+    "get_total_debt", "forecast_next_bill", "list_installments", "list_metas",
 })
 
 SCHEMAS_APP: list[dict[str, Any]] = [
     *(s for s in SCHEMAS if s["function"]["name"] not in OCULTAS_NO_APP),
     *(t.schema for t in mostrar_card.TOOLS),
 ]
+
+
+def schemas_para(user_id: int, app: bool) -> list[dict[str, Any]]:
+    """O que o modelo vê neste turno: `SCHEMAS`/`SCHEMAS_APP` como eram, e só para quem tem a
+    chave do /painel novo (P1-b) com as metas (`list_metas`, `show_card` metas e caixinhas)."""
+    base = SCHEMAS_APP if app else SCHEMAS
+    return metas.schemas_com_metas(base, app) if metas_do_turno(user_id) else base
 
 
 WRITE_TOOL_NAMES: set[str] = {t.name for t in _ALL_TOOLS if t.is_write}
@@ -62,4 +72,4 @@ def get_tool(name: str) -> Optional[Tool]:
     return _BY_NAME.get(name)
 
 
-__all__ = ["OCULTAS_NO_APP", "SCHEMAS", "SCHEMAS_APP", "WRITE_TOOL_NAMES", "get_tool", "Tool"]
+__all__ = ["OCULTAS_NO_APP", "SCHEMAS", "SCHEMAS_APP", "WRITE_TOOL_NAMES", "get_tool", "schemas_para", "Tool"]

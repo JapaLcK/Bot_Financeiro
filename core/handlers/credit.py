@@ -134,16 +134,24 @@ def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str
             return "❌ Valor inválido. Use: pagar fatura 300"
         if not res:
             return "📭 Nada para pagar nessa fatura."
+    except CartaoDoBanco as e:
+        return f"🏦 {e}"
+    except Exception as e:
+        _log_falha("pay_bill", user_id, e, bill_id=bill_id)
+        return "❌ Não consegui registrar o pagamento da fatura agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: a fatura JÁ foi paga. Falha na mensagem nunca vira "tenta de novo".
+    try:
         from db import display_id_for as _display_id_for
         return (
             f"✅ Pagamento registrado: {fmt_brl(res['paid'])} ({_format_bill_label(bill_row)})\n"
             f"Conta agora: {fmt_brl(res['new_balance'])}\n"
             f"ID lançamento: #{_display_id_for(user_id, res['launch_id'])}"
         )
-    except CartaoDoBanco as e:
-        return f"🏦 {e}"
     except Exception as e:
-        return f"❌ Erro ao pagar fatura: {e}"
+        _log_falha("pay_bill_msg", user_id, e, bill_id=bill_id)
+        # Sem ID: `launch_id` interno != user_seq; `apagar #id` poderia casar com outro lançamento.
+        return f"✅ Pagamento registrado: {fmt_brl(res['paid'])} ({card_name})."
 
 
 def _ask_which_bill(user_id: int, candidates: list[dict], amount: float | None) -> str:
@@ -941,6 +949,14 @@ def add_credit_from_entities(
             nota=nota,
             purchased_at=purchased_at,
         )
+    except FonteUnicaOF as e:
+        return str(e)
+    except Exception as e:
+        _log_falha("add_credit_purchase", user_id, e, card_id=card_id)
+        return "❌ Não consegui registrar a compra no crédito agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: a compra JÁ está na fatura. Falha na mensagem nunca vira "tenta de novo".
+    try:
         if desc_clean:
             learn_from_inference(
                 user_id, desc_clean, categoria,
@@ -957,10 +973,12 @@ def add_credit_from_entities(
                 user_id, tx_id, exc_info=True,
             )
         return _format_credit_purchase_success(card_label, float(valor), purchased_at, float(due), int(tx_id))
-    except FonteUnicaOF as e:
-        return str(e)
     except Exception as e:
-        return f"❌ Erro registrando compra no crédito: {e}"
+        _log_falha("add_credit_purchase_msg", user_id, e, credit_tx_id=tx_id)
+        return (
+            f"✅ Compra de {fmt_brl(float(valor))} registrada no {card_label}. "
+            f"Código: {_purchase_code(tx_id)}\n\nPra apagar: `apagar {_purchase_code(tx_id)}`"
+        )
 
 
 def negada_com_o_of(user_id: int, text: str) -> bool:
@@ -1060,9 +1078,19 @@ def _create_installments(
             purchased_at=purchased_at,
             installments=n,
         )
+    except FonteUnicaOF as e:
+        return str(e)
+    except Exception as e:
+        _log_falha("add_credit_purchase_installments", user_id, e, card_id=card_id)
+        return "❌ Não consegui registrar a compra no crédito agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: as parcelas JÁ estão na fatura. Falha na mensagem nunca vira "tenta de novo".
+    group_id, total = None, valor
+    try:
         result = ret[0] if isinstance(ret, tuple) else ret
+        group_id = result.get("group_id")  # antes do total: o fallback ainda acha o código
         total = float(ret[1]) if isinstance(ret, tuple) and len(ret) >= 2 else valor
-        group_id = result.get("group_id")
+        code = _group_code(group_id)
         learn_from_inference(
             user_id,
             nota,
@@ -1073,7 +1101,6 @@ def _create_installments(
         # Valor por parcela arredondado pra exibição (último ajuste de centavos
         # fica na última parcela; aqui mostramos o nominal pra UX limpa).
         v_parc = valor / n if n else valor
-        code = _group_code(group_id)
         return (
             f"✅ **Parcelamento Registrado!**\n\n"
             f"📝 **Descrição:** {nota}\n"
@@ -1083,10 +1110,13 @@ def _create_installments(
             f"⚙️ **Código:** {code}\n\n"
             f"Pra apagar: `apagar {code}`"
         )
-    except FonteUnicaOF as e:
-        return str(e)
     except Exception as e:
-        return f"❌ Erro ao parcelar no cartão: {e}"
+        _log_falha("add_credit_purchase_installments_msg", user_id, e, group_id=group_id)
+        msg = f"✅ Parcelamento de {fmt_brl(total)} em {n}x registrado no {resolved_name}."
+        if group_id:  # `PC?` não é acionável
+            code = _group_code(group_id)
+            msg += f" Código: {code}\n\nPra apagar: `apagar {code}`"
+        return msg
 
 
 def _extract_installment_group_id(user_id: int, text: str) -> str | None:
@@ -2847,15 +2877,22 @@ def handle(user_id: int, text: str) -> str | None:
                 return "❌ Valor inválido."
             if not res:
                 return "📭 Nada para pagar."
+        except CartaoDoBanco as e:
+            return f"🏦 {e}"
+        except Exception as e:
+            _log_falha("pay_bill_saldo", user_id, e, card_id=card_id)
+            return "❌ Não consegui registrar o pagamento da fatura agora. Tenta de novo em instantes."
+
+        # DEPOIS do commit: a fatura JÁ foi paga. Falha na mensagem nunca vira "tenta de novo".
+        try:
             return (
                 f"✅ Pagamento da fatura **{_format_bill_label({'card_name': nome, 'period_end': res['period_end']})}** realizado!\n"
                 f"Valor pago: {fmt_brl(res['paid'])}\n"
                 f"Saldo da conta: {fmt_brl(res['new_balance'])}"
             )
-        except CartaoDoBanco as e:
-            return f"🏦 {e}"
         except Exception as e:
-            return f"❌ Erro ao pagar fatura: {e}"
+            _log_falha("pay_bill_saldo_msg", user_id, e, card_id=card_id)
+            return f"✅ Pagamento de {fmt_brl(res['paid'])} da fatura do {nome} realizado!"
 
     if t_low in ("parcelamentos", "listar parcelamentos"):
         return _list_active_installments(user_id)

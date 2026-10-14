@@ -1,6 +1,8 @@
 """Recorrências do Open Finance na Previsão (Fase 1a): as cadeias mensais de
 `of_recurring_payments`, na seleção da tela de Assinaturas, viram ocorrências
-estimadas do motor. Chamado por `cashflow_snapshot.ler`, só com os bancos na base.
+estimadas do motor (saídas). A receita vem SÓ do extrato (P7 a): `receitas_do_extrato`
+acha o crédito que se repete todo mês; a recorrência de entrada da Pluggy não é lida.
+Chamado por `cashflow_snapshot.ler`, só com os bancos na base.
 
 O fixo e a receita manuais continuam contando. Quando um deles e uma cadeia do
 banco parecem a mesma coisa (casamento 1:1, nunca guloso), conta o manual e a do
@@ -10,14 +12,18 @@ do banco segue como sem casamento). Sem casamento, a saída do banco entra
 """
 from __future__ import annotations
 
+import re
+from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from statistics import median
 
-from core.services.assinaturas import DIAS_ATIVA, _merchant, cadeias, dia_da_cadeia
+from core.crypto import hash_pii
+from core.services.assinaturas import DIAS_ATIVA, _interno, _merchant, cadeias, dia_da_cadeia
 from core.services.cashflow import _recurring_occurrence_dates
 from core.services.cashflow_contract import Ocorrencia, dinheiro
 from core.services.cashflow_snapshot import _data, _motivo
-from db.of_recurring import ler_frescor, ler_marcas, ler_ocorrencias
+from db.of_recurring import ler_creditos, ler_frescor, ler_marcas, ler_ocorrencias
 from db.open_finance import RECON_AMOUNT_TOL, merchant_similarity
 from db.patrimonio import BANCO_VELHO
 from utils_date import add_months, clamp_day
@@ -25,6 +31,10 @@ from utils_date import add_months, clamp_day
 CENTAVO = Decimal('0.01')
 MEIO_CICLO = 15  # cobrança a menos de 15 dias do dia esperado cobre aquele ciclo
 TOLERANCIA_DIA = 5  # a da Pluggy (30±5 dias)
+JANELA_EXTRATO = 180  # dias de extrato lidos para achar receita
+MINIMO = 2  # créditos seguidos (30±5 dias, valores a ±20% da mediana) para valer como receita
+TOLERANCIA_VALOR = Decimal('0.2')
+_RENDIMENTO = re.compile(r'\b(interests?|dividends?|dividendos?|rendimentos?)\b', re.I)  # palavra inteira: juro e dividendo mensais não são renda
 PREMISSA = ('Do banco, só entram cobranças e receitas que se repetem todo mês; '
             'contas anuais e boletos ainda não pagos não aparecem.')
 
@@ -75,27 +85,74 @@ def _casar(manuais: list[dict], cs: list[dict]) -> dict[int, date | None]:
     return casadas
 
 
-def cadeias_do_banco(cur, user_id: int, *, receitas: bool) -> list[dict]:
-    """As cadeias mensais do banco, na seleção de Assinaturas (a mesma da Previsão e do custo
-    da reserva): `ignorar` já aplicado (só saída), cartão incluído. `receitas=False` lê só saída."""
-    linhas = ler_ocorrencias(cur, user_id, receitas=receitas)
-    # Positivo no cartão é pagamento de fatura ou estorno, não receita.
-    no_cartao = {r['rp_id'] for r in linhas if r['average_amount'] > 0 and r['account_type'] == 'CREDIT'}
+def cadeias_do_banco(cur, user_id: int) -> list[dict]:
+    """As cadeias mensais de SAÍDA do banco, na seleção de Assinaturas (a mesma da Previsão e do
+    custo da reserva): `ignorar` já aplicado, cartão incluído."""
     marcas = ler_marcas(cur, user_id)
     cs = []
-    for chave, lista in cadeias([r for r in linhas if r['rp_id'] not in no_cartao]).items():
+    for chave, lista in cadeias(ler_ocorrencias(cur, user_id)).items():
         for k, ls in enumerate(lista):
             ult = ls[-1]
-            entrada = ult['average_amount'] > 0
-            # A marca é por chave, sem direção, e só a tela de despesas marca.
-            if not entrada and marcas.get(chave, (None,))[0] == 'ignorar':
+            if marcas.get(chave, (None,))[0] == 'ignorar':
                 continue
-            cs.append({'id': f'{chave}#{k}', 'direcao': 'entrada' if entrada else 'saida',
+            cs.append({'id': f'{chave}#{k}', 'direcao': 'saida',
                        'nome': _merchant(ult).get('name') or ult['description'],
                        'descricao': ult['description'], 'valor': abs(ult['amount']),
                        'dia': dia_da_cadeia(ls), 'ultima': ult['transaction_date'],
-                       'cartao': not entrada and ult['account_type'] == 'CREDIT',
+                       'cartao': ult['account_type'] == 'CREDIT',
                        'conta': ult['account_id']})
+    return cs
+
+
+def _doc(v: str | None) -> str:
+    """Só documento de verdade serve de chave: 11 (CPF) ou 14 (CNPJ) dígitos e não todo zero. Curto,
+    mascarado ("***.456.789-**") ou "0" viraria a mesma chave para pessoas diferentes."""
+    d = re.sub(r'\D', '', v or '', flags=re.A)
+    return d if len(d) in (11, 14) and d.strip('0') else ''
+
+
+def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
+    """Receitas mensais achadas nos créditos de `ler_creditos`, no formato de `cadeias_do_banco`.
+    Chave = documento do pagador (`_doc`: 11 ou 14 dígitos): crédito sem ele, ou com documento
+    inválido, fica fora (a descrição do Pix é genérica e uniria pessoas diferentes). Fica fora o
+    movimento interno, o rendimento (as palavras interest(s)/dividend(s)/dividendo(s)/rendimento(s),
+    por palavra inteira, na categoria OU na descrição) e o Pix para si (pagador = recebedor). Crédito idêntico (chave, data, valor)
+    conta uma vez: pendente e efetivado, ou duas conexões do mesmo banco, dariam intervalo 0.
+    Créditos do mesmo documento no mesmo dia SOMAM num só (salário + vale; senão o intervalo 0 mata a
+    cadeia). Cada parcela somada leva o conjunto das contas das suas cópias idênticas; `grupos` são
+    esses conjuntos no último crédito: a receita só entra se TODA parcela tem pelo menos UMA conta na
+    base (parcelas diferentes somam, então todas precisam; cópias da mesma parcela, como a mesma conta
+    em duas conexões, bastam por uma).
+    Cadeia = de trás para frente enquanto o intervalo for 30±`TOLERANCIA_DIA`; vale com `MINIMO`
+    créditos e todos a ±20% da mediana. Valor = o último. O id é um hash com pepper: o documento
+    nunca sai daqui.
+    ponytail: 13º/bônus no meio ou depois do último quebra a cadeia, aumento > 20%, quinzenal e receita
+    sem documento do pagador não são detectados; pendente em D × efetivado em D+1 quebra a cadeia; o
+    mesmo documento com formato diferente entre meses (zeros à esquerda) vira chaves distintas; cashback
+    com documento pode entrar."""
+    por_doc = defaultdict(lambda: defaultdict(dict))
+    for r in linhas:
+        doc, eu = _doc(r['pagador_doc']), _doc(r['recebedor_doc'])
+        if doc and doc != eu and not _interno(r) and not _RENDIMENTO.search(f"{r['category'] or ''} {r['description']}"):
+            ja = por_doc[doc][r['transaction_date']].get(r['amount'])
+            por_doc[doc][r['transaction_date']][r['amount']] = {
+                **r, 'grupo': {r['account_id']} | (ja['grupo'] if ja else set())}
+    cs = []
+    for doc, por_data in por_doc.items():
+        ls = [{**max(rs.values(), key=lambda r: r['amount']), 'amount': sum(rs),
+               'grupos': [r['grupo'] for r in rs.values()]} for _, rs in sorted(por_data.items())]
+        i = len(ls) - 1
+        while i > 0 and abs((ls[i]['transaction_date'] - ls[i - 1]['transaction_date']).days - 30) <= TOLERANCIA_DIA:
+            i -= 1
+        seq = ls[i:]
+        med = median(r['amount'] for r in seq)
+        if len(seq) < MINIMO or any(abs(r['amount'] - med) > med * TOLERANCIA_VALOR for r in seq):
+            continue
+        ult = seq[-1]
+        cs.append({'id': 'extrato#' + hash_pii(doc)[:16], 'direcao': 'entrada',
+                   'nome': ult['pagador_nome'] or ult['description'], 'descricao': ult['description'],
+                   'valor': ult['amount'], 'dia': dia_da_cadeia(seq), 'ultima': ult['transaction_date'],
+                   'cartao': False, 'grupos': ult['grupos']})
     return cs
 
 
@@ -112,7 +169,7 @@ def custo_mensal(cur, user_id: int, hoje: date) -> dict:
     velho = datetime.now(timezone.utc) - BANCO_VELHO
     motivos = []
     try:
-        ativas = [c['valor'] for c in cadeias_do_banco(cur, user_id, receitas=False)
+        ativas = [c['valor'] for c in cadeias_do_banco(cur, user_id)
                   if (hoje - c['ultima']).days <= DIAS_ATIVA]
         total, invalido = sum(ativas, Decimal(0)).quantize(CENTAVO), False
     except InvalidOperation:  # `amount` do espelho é `numeric` e guarda NaN/±Infinity (ou estoura a precisão)
@@ -141,7 +198,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
         if c['recurring_fetched_at'] is not None and c['recurring_fetched_at'] >= velho:
             s.valido_ate = min(s.valido_ate, c['recurring_fetched_at'] + BANCO_VELHO)
 
-    cs = cadeias_do_banco(cur, user_id, receitas=True)
+    cs = cadeias_do_banco(cur, user_id) + receitas_do_extrato(
+        ler_creditos(cur, user_id, hoje - timedelta(days=JANELA_EXTRATO)))
 
     fixos = [dict(r) for r in recs if r['is_active']]
     rendas = [dict(r) for r in receitas if r['is_active']]
@@ -172,8 +230,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
             if atrasada and d < hoje:
                 incluida = incluida and saida
                 motivos.append(_motivo(s, 'recorrencia_banco_atrasada', 'so_piora', c['id']))
-            if not c['cartao'] and c['conta'] not in contas_na_base:
-                incluida = False  # o saldo dessa conta não está na base: seria conta pela metade
+            if not c['cartao'] and not all(g & contas_na_base for g in c.get('grupos') or [{c['conta']}]):
+                incluida = False  # o saldo dessa parcela não está na base: seria conta pela metade
                 motivos.append(_motivo(s, 'recorrencia_banco_conta_fora_da_base',
                                        'so_melhora' if saida else 'so_piora', c['id']))
             if interrompida:

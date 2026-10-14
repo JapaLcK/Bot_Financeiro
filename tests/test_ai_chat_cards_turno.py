@@ -93,7 +93,7 @@ def test_o_user_id_nunca_vem_dos_args(mundo):
         r = get_tool("show_card").execute(a, {"card": "metas", "user_id": b, "uid": b})
     finally:
         streaming.EMISSOR.reset(t)
-    assert "SEGREDO-B" not in json.dumps(ev) and "viagem" in json.dumps(ev)
+    assert "SEGREDO-B" not in json.dumps(ev) and "Casa nova" in json.dumps(ev)
 
 
 # ── no runner: schemas, teto, ordem dos eventos ────────────────────────────────
@@ -117,7 +117,7 @@ def test_com_emissor_oferece_show_card_e_o_adendo(monkeypatch, pro_user_id):
     (kw,) = reg.creates
     assert kw["tools"] is SCHEMAS_APP and "show_card" in _nomes(kw)
     assert "show_card" in kw["messages"][0]["content"]
-    assert [s for s in SCHEMAS_APP if s not in SCHEMAS][0]["function"]["parameters"]["properties"]["card"]["enum"] == list(cards.IDS)
+    assert [s for s in SCHEMAS_APP if s not in SCHEMAS][0]["function"]["parameters"]["properties"]["card"]["enum"] == [i for i in cards.IDS if i != "caixinhas"]  # sem a chave das metas: como era
 
 
 def test_modelo_que_imita_show_card_no_whatsapp_recebe_dados_sem_bloco(monkeypatch, pro_user_id):
