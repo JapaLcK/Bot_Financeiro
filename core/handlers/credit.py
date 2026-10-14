@@ -49,7 +49,7 @@ from db import (
 from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
-    fmt_brl, normalize_text, parse_money, parse_pt_number,
+    fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
     PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
@@ -875,7 +875,7 @@ def add_credit_from_entities(
     # Q36: antes de cartão, sync e limite, que mandariam criar cartão à toa.
     if (recusa := recusa_q36(user_id, "cartao")):
         return recusa
-    if valor is None or float(valor) <= 0:
+    if not valor_valido(valor):
         return "❌ Valor inválido."
 
     if purchased_at is None:
@@ -2073,7 +2073,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if _is_no(answer):
             return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
         limit_val = parse_money(answer)
-        if limit_val is None or float(limit_val) <= 0:
+        if not valor_valido(limit_val):
             return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
         set_card_limit(user_id, card_id, float(limit_val))
         # O limite já aparece no _card_summary dentro de _finish_card_setup — não precisa prefixar
@@ -2435,6 +2435,8 @@ def handle(user_id: int, text: str) -> str | None:
             valor = parse_money(t_low)
         if valor is None:
             return "Use: parcelar 300 em 3x no cartao nubank"
+        if not valor_valido(valor):  # antes de perguntar o nome: `inf` derrubava o fluxo
+            return "❌ Valor inválido."
 
         # ── data ────────────────────────────────────────────────────────────
         dt_evento, rest2 = extract_date_from_text(t)
@@ -2795,7 +2797,7 @@ def handle(user_id: int, text: str) -> str | None:
         raw_val = _limit_set_match.group("val") or ""
         raw_card = (_limit_set_match.group("card") or "").strip()
         amount = parse_money(raw_val)
-        if amount is None or float(amount) <= 0:
+        if not valor_valido(amount):
             return "❌ Valor inválido. Ex: *definir limite nubank 5000*"
 
         card_name_hint = raw_card if raw_card else _find_card_name_in_text(user_id, t)

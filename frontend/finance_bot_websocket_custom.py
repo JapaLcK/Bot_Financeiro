@@ -7632,6 +7632,9 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         raise HTTPException(status_code=400, detail="Valor inválido.")
     if valor <= 0:
         raise HTTPException(status_code=400, detail="O valor deve ser maior que zero.")
+    from utils_text import valor_valido
+    if not valor_valido(valor):
+        raise HTTPException(status_code=400, detail="Valor inválido.")
 
     alvo = (payload.alvo or "").strip() or None
     nota_in = (payload.nota or "").strip() or None
