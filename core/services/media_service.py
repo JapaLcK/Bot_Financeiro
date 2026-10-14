@@ -22,6 +22,8 @@ import logging
 import os
 from typing import Any
 
+from core.services.modelo_openai import VISION_MODEL, completion_options
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -184,8 +186,7 @@ def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
         image_url = f"data:{mime};base64,{b64}"
 
         response = client.chat.completions.create(
-            model="gpt-4o",
-            temperature=0,
+            **completion_options(VISION_MODEL, 500, 0),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _IMAGE_SYSTEM_PROMPT},
@@ -203,7 +204,6 @@ def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
                     ],
                 },
             ],
-            max_tokens=500,
         )
 
         raw = response.choices[0].message.content or "{}"

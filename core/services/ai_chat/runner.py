@@ -41,6 +41,7 @@ from typing import Any
 
 import db
 from db.ai_turno import trava_do_turno
+from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from . import streaming
 from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, METAS_DO_TURNO, metas_do_turno
@@ -111,7 +112,7 @@ def _grava_assistant(user_id: int, content: str | None, **kw) -> int:
     return mid
 
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MODEL = CHAT_MODEL
 TEMPERATURE = 0.3
 MAX_TOOL_LOOPS = 6
 # Teto de tokens de saída por chamada — impede que uma resposta (ou um prompt
@@ -554,11 +555,9 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         try:
             resp = streaming.completar(
                 client,
-                model=MODEL,
-                temperature=TEMPERATURE,
+                **completion_options(MODEL, MAX_TOKENS, TEMPERATURE, with_tools=True),
                 messages=messages,
                 tools=schemas_para(user_id, streaming.ativo()),
-                max_tokens=MAX_TOKENS,
                 # Última volta: sem tool, o modelo responde com o que já leu em vez de ERROR_MSG.
                 **({"tool_choice": "none"} if volta == MAX_TOOL_LOOPS - 1 else {}),
                 **por_requisicao,

@@ -29,10 +29,12 @@ import os
 from datetime import date
 from typing import Any
 
+from core.services.modelo_openai import CHAT_MODEL, completion_options
+
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MODEL = CHAT_MODEL
 TEMPERATURE = 0.4  # ligeiramente acima do chat IA pra ter variedade nas narrativas
 
 INSIGHTS_CACHE_TTL_SECONDS = 6 * 3600     # 6h
@@ -680,8 +682,7 @@ def _call_llm(system_prompt: str, user_data: dict[str, Any]) -> list[dict] | Non
 
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
-            temperature=TEMPERATURE,
+            **completion_options(MODEL, None, TEMPERATURE),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
