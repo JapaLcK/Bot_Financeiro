@@ -218,11 +218,12 @@ def consume_pending_google_signup(
     Finaliza o cadastro: cria auth_account (sem senha), grava auth_identities
     e devolve {user_id, email, link_code}.
 
-    `challenge` é o S256 do `code_verifier` que o app mandou (#604). Pendente
-    criado COM challenge só se completa com o mesmo challenge; senão a mesma
-    recusa de "expirado" (não diz que o token existe) e o pendente segue de pé
-    para o dono. Pendente sem challenge (web, app antigo, Apple) ignora o
-    parâmetro: é a transição, como em `consume_dashboard_session`.
+    `challenge` é o S256 do `code_verifier` que o app mandou (#604), com
+    igualdade estrita como em `consume_dashboard_session`: pendente com
+    challenge só se completa com o mesmo challenge, e pendente SEM challenge
+    (web, iOS antigo, Apple, ou injetado por outro app) só se completa sem
+    verifier. Não casar dá a mesma recusa de "expirado" (não diz que o token
+    existe) e o pendente segue de pé para o dono.
 
     Lança ValueError com mensagem amigável se algo falhar.
     """
@@ -230,7 +231,9 @@ def consume_pending_google_signup(
     if not pending:
         raise ValueError(_CADASTRO_EXPIRADO[provider])
     guardado = pending["code_challenge"]
-    if guardado is not None and not (challenge and hmac.compare_digest(challenge, guardado)):
+    if (guardado is None) != (challenge is None) or (
+        guardado is not None and not hmac.compare_digest(challenge, guardado)
+    ):
         raise ValueError(_CADASTRO_EXPIRADO[provider])
 
     # O e-mail ganhou conta depois do pendente (outra aba, outro provedor): o
