@@ -39,6 +39,7 @@ from core.help_text import HELP_TRIGGERS
 from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
+from core.services.email_service import SUPPORT_EMAIL
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
@@ -524,9 +525,15 @@ PRECISA_SENHA_WA = (
     "senha pelo link que enviamos para o seu e-mail."
 )
 
-# #711/#630 (D1(a), texto do dono): o número está digitado numa conta do site,
-# mas quem manda já tem conta ou dados próprios, e o auto-vínculo não juntou.
-# Serve aos dois status: `wa_linked_other_account` e `remetente_com_dados`.
+# #711/#630 (D1(a), textos do dono): o número está digitado numa conta do site, e o
+# auto-vínculo não juntou. `remetente_com_dados` (só-WhatsApp com dados) recebe a
+# saída pelo código; `wa_linked_other_account` (quem já é conta) não recebe o código,
+# porque com login nos dois lados a junção é recusada (`apagaria_login`, #970).
+JA_E_CONTA_WA = (
+    "⚠️ Este número também está cadastrado em outra conta do site, mas não juntei nada: você "
+    "continua usando a sua conta por aqui. Se as duas contas são suas e você quer uni-las, "
+    f"fale com a gente em {SUPPORT_EMAIL}."
+)
 NAO_JUNTEI_WA = (
     "Encontrei uma conta do site com este número, mas este WhatsApp já tem um histórico "
     "próprio, então não juntei os dois. Para usar a sua conta do site aqui: entre nela (ou "
@@ -619,7 +626,7 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
     if status == "multiple_accounts":
         return "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente."
     if status == "wa_linked_other_account":
-        return NAO_JUNTEI_WA
+        return JA_E_CONTA_WA
     if status == "account_has_other_whatsapp":
         return (
             "⚠️ Sua conta já tem outro WhatsApp vinculado. "

@@ -98,12 +98,15 @@ def test_v2_conta_do_site_nao_perde_o_login(enviadas, a_com_plano):
 
     _manda(n, "oi")
     assert _existe("auth_accounts", "user_id", a), "o login de A foi apagado pelo merge (#630)"
-    assert _dono_do_numero(n) == a
-    assert enviadas == [wr.NAO_JUNTEI_WA], enviadas
+    assert _dono_do_numero(n) == a and _existe("auth_accounts", "user_id", b)
+    # Texto do dono para quem já é conta: sem a instrução do código, que com login
+    # nos dois lados terminaria em `apagaria_login` (#970).
+    assert enviadas == [wr.JA_E_CONTA_WA], enviadas
+    assert "vincular 123456" not in enviadas[0]
 
     enviadas.clear()
     _manda(n, "gastei 50 mercado")
-    assert wr.NAO_JUNTEI_WA not in enviadas, "o aviso é só na saudação, uma vez"
+    assert wr.JA_E_CONTA_WA not in enviadas, "o aviso é só na saudação, uma vez"
     assert _dono_do_numero(n) == a and _gastos(b) == 0
     assert _gastos(a) == (1 if a_com_plano else 0), enviadas
     assert a_com_plano or "/precos" in enviadas[0], enviadas
@@ -119,7 +122,7 @@ def test_v2_discord_identidade_do_discord_fica_com_a(enviadas):
     db.link_platform_identity("whatsapp", n, a)
 
     _manda(n, "oi")
-    assert enviadas == [wr.NAO_JUNTEI_WA], enviadas
+    assert enviadas == [wr.JA_E_CONTA_WA], enviadas
     assert _dono_do_numero(n) == a
     assert db.get_or_create_canonical_user("discord", discord) == a, "o Discord de A foi para B"
     assert _existe("users", "id", a)

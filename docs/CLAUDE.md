@@ -704,9 +704,10 @@ lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloquea
 confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
 (`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
 fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
-nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. O aviso é o `NAO_JUNTEI_WA`
-(`wa_runtime.py`): na saudação, uma vez, no primeiro status; em toda mensagem no segundo
-com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
+nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. Os avisos (`wa_runtime.py`): `wa_linked_other_account`
+recebe o `JA_E_CONTA_WA` (sem a instrução do código, que com login nos dois lados terminaria em
+`apagaria_login`; para unir, o suporte) na saudação, uma vez; `remetente_com_dados` recebe o
+`NAO_JUNTEI_WA` (a saída pelo código) em toda mensagem, com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
 como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
 ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,

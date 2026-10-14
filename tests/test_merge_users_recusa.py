@@ -100,7 +100,7 @@ def test_conversa_oi_e_saldo_nao_quebram_e_o_aviso_sai_uma_vez(user_id, monkeypa
     """O auto-link REAL, pelo `process_message`, com estado real no banco.
 
     Desde a #711 a origem com login (o `promote_to_pro`) nem chega ao merge: o
-    aviso é o `NAO_JUNTEI_WA` do `wa_linked_other_account`, também uma vez só."""
+    aviso é o `JA_E_CONTA_WA` do `wa_linked_other_account`, também uma vez só."""
     from tests._billing_grants_helpers import garantir_system_event_logs
     garantir_system_event_logs()  # o "uma vez" do aviso mora nela
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -121,7 +121,7 @@ def test_conversa_oi_e_saldo_nao_quebram_e_o_aviso_sai_uma_vez(user_id, monkeypa
         assert len(enviadas) > n, f"{texto!r} ficou sem resposta"
 
     assert not any(wr._PROCESSING_FAILURE_MESSAGE in m for m in enviadas), enviadas
-    avisos = [m for m in enviadas if m == wr.NAO_JUNTEI_WA]
+    avisos = [m for m in enviadas if m == wr.JA_E_CONTA_WA]
     assert len(avisos) == 1, enviadas
     assert any("R$ 250,00" in m for m in enviadas), "o saldo tem de ser o da conta do WhatsApp"
     assert _dono_do_numero(wa_phone) == wa_uid
