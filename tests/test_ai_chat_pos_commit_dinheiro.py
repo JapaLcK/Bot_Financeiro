@@ -246,3 +246,17 @@ def test_pagar_fatura_controle_positivo(monkeypatch):
 
     monkeypatch.setattr(db, "pay_bill_amount", lambda *a, **k: _boom())
     assert "Tenta de novo" in t_cards._pay_bill_execute(1, {"card_name": "Nubank", "amount": 50})
+
+
+# ── a leitura pós-commit DENTRO dos helpers do db ────────────────────────────
+
+def test_carteira_exibida_com_fallback_nao_le_nada_se_a_leitura_falha(monkeypatch):
+    """Os helpers `db.pocket_*`/`db.investment_*`/`db.pay_bill_amount` chamam
+    `carteira_exibida(user_id, new_acc)` DEPOIS do commit. Com o consolidado E o saldo cru
+    falhando (banco fora), nada pode escapar nem reler: o fallback é devolvido."""
+    from db import accounts, open_finance
+
+    monkeypatch.setattr(open_finance, "get_consolidated_balance", _boom)
+    monkeypatch.setattr(accounts, "get_balance", _boom)
+
+    assert accounts.carteira_exibida(1, 5) == 5
