@@ -47,7 +47,7 @@ from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
-from .system_prompt import ADENDO_CARDS, SYSTEM_PROMPT
+from .system_prompt import ADENDO_CARDS, ERROR_MSG, SYSTEM_PROMPT
 from .tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP, get_tool
 from .tools._base import OUTRO_PEDIDO
 
@@ -162,12 +162,6 @@ _UM_POR_VEZ = ("🐷 Recebi mais de um pedido de uma vez. Me manda um por "
 LIMIT_MSG_TEMPLATE = (
     "🐷 Você usou todas suas {limit} perguntas de IA esse mês.\n"
     "Zera no dia 1. Enquanto isso, dá pra usar o dashboard: https://pigbankai.com/app"
-)
-
-
-ERROR_MSG = (
-    "🐷 Não consegui terminar essa resposta agora: foi uma falha do meu lado, não do seu pedido. "
-    "Tenta de novo em instantes; se continuar, fala com a gente: suporte@pigbankai.com"
 )
 
 
