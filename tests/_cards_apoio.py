@@ -1,6 +1,7 @@
 """Apoio dos testes do `show_card` (B1): usuários A e B com dados, o cliente com sessão
 e a chamada da tool com emissor."""
 import json
+import re
 import uuid
 from datetime import timedelta
 from decimal import Decimal
@@ -46,6 +47,38 @@ CASOS = {
     "periodo": ({"de": M0, "ate": M}, None),
 }
 
+
+_NUM = re.compile(r"^-?\d+(\.\d+)?$")
+
+
+def _numeros(o, sem_ids=False):
+    if isinstance(o, bool):
+        return set()
+    if isinstance(o, (int, float)):
+        return {float(o)}
+    if isinstance(o, str):
+        return {float(o)} if _NUM.match(o) else set()
+    if isinstance(o, dict):
+        filhos = [v for k, v in o.items() if not (sem_ids and (k == "id" or k.endswith("_id")))]
+    else:
+        filhos = o if isinstance(o, list) else []
+    return set().union(*(_numeros(f, sem_ids) for f in filhos)) if filhos else set()
+
+
+def _reais(o):
+    """Os `R$ 1.234,56` de todo texto do objeto, como Decimal em módulo."""
+    if isinstance(o, str):
+        return {abs(Decimal(x.replace(".", "").replace(",", "."))) for x in re.findall(r"R\$ (-?[\d.]+,\d\d)", o)}
+    filhos = o.values() if isinstance(o, dict) else o if isinstance(o, list) else []
+    return set().union(*map(_reais, filhos)) if filhos else set()
+
+
+MARCAS_DE_B = {7777.0, 5555.0, 888.0}  # as de `semeia_b`: despesa, receita e compra no cartão
+
+
+def valores_de_b_em(o, marcas=MARCAS_DE_B):
+    """Quais `marcas` (números) aparecem em `o` como VALOR (em módulo): número, texto numérico ou `R$` — ids ficam de fora."""
+    return ({abs(x) for x in _numeros(o, sem_ids=True)} | {float(x) for x in _reais(o)}) & marcas
 
 
 def _semeia_metas_e_cartao(uid, nome):
