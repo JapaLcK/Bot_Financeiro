@@ -4826,10 +4826,10 @@ async def auth_google_exchange(request: Request, response: Response, body: Googl
     """
     from db import consume_dashboard_session, get_auth_user
 
-    # PKCE (#604): com `code_verifier` consome o código que tem esse challenge
-    # (ou sem challenge, transição); sem ele, SÓ código sem challenge. Verifier
-    # errado ou ausente não casa no DELETE: recusa antes de qualquer sessão e o
-    # código não é queimado, o app legítimo ainda troca.
+    # PKCE (#604): com `code_verifier` consome SÓ o código que tem esse challenge;
+    # sem ele, SÓ código sem challenge. O que não casa (verifier errado ou
+    # ausente, código injetado sem challenge) é recusado antes de qualquer
+    # sessão e o código não é queimado, o dono ainda troca.
     user_id = await asyncio.to_thread(
         consume_dashboard_session, body.code.strip(), pkce_s256(body.code_verifier)
     )
@@ -4904,7 +4904,8 @@ async def _completar_cadastro_social(
             body.token, body.name, body.phone,
             signup_source_from_request(request, provedor=provider),
             provider,
-            challenge=pkce_s256(body.code_verifier),
+            # Apple não tem PKCE: o verifier (se vier) não pode recusar o pendente dela.
+            challenge=pkce_s256(body.code_verifier) if provider == "google" else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc))

@@ -529,24 +529,30 @@ Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`
 `google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de
 `google/exchange` e `google/complete-signup`. O callback `nat-` grava o challenge em
 `dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`; nulo
-significa sem PKCE (web, app antigo, Apple, link do bot). Código com challenge só é
-consumido por `exchange` com o verifier certo; `/d/{code}` e `dashboard-link` só consomem
-código SEM challenge; verifier errado ou ausente recusa sem queimar o código nem o
-pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
-`[A-Za-z0-9_-]` faz o callback falhar fechado.
+significa sem PKCE (web, iOS antigo, Apple, link do bot). **Igualdade estrita nos dois
+sentidos** (`consume_dashboard_session`, `consume_pending_google_signup`): com
+`code_verifier` só se consome o código/pendente cujo challenge é `S256(verifier)`; sem
+verifier, só o que NÃO tem challenge. Daí: `/d/{code}` e `dashboard-link` (sem verifier)
+não consomem código do app; e código/pendente SEM challenge (injetado por outro app, do
+bot, ou de cookie perdido) não é trocável por quem manda verifier, que é o app novo, então
+a injeção de código não entra. O que não casa recusa antes de qualquer sessão e NÃO queima
+o código nem o pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
+`[A-Za-z0-9_-]` faz o callback falhar fechado. A Apple não tem PKCE: o verifier é ignorado
+no `apple/complete-signup`.
 
-Limites conhecidos, que fecham quando o challenge virar obrigatório (após o app antigo
-sair de circulação):
-- Transição: código sem challenge continua trocável, com ou sem verifier.
+Limites conhecidos:
+- O iOS antigo, sem verifier, continua na janela: seu código sem challenge é trocável por
+  quem o interceptar. Fecha quando o challenge virar obrigatório (app antigo fora de
+  circulação).
 - Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
-  ou seja, a PKCE cai em silêncio naquele login.
-- Com o verifier opcional, a PKCE cobre interceptação do código, não injeção de código
-  (login CSRF com código da conta do atacante); a mitigação é do lado do app (PR-3).
-- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
-  pressuposto do login CSRF por state, não uma regressão da PKCE.
+  que o app novo, mandando verifier, recusa: falha fechado e a pessoa tenta de novo. A
+  validar no aparelho Android: se o cookie `google_oauth_challenge` sobrevive ao Custom Tab
+  (se não, o login Google do Android falharia sempre).
 - A PKCE não cobre um fluxo iniciado pelo próprio sequestrador do scheme no aparelho (ele
   abre `/auth/google/start` e usa o próprio par verifier/challenge); a defesa estrutural
   seria App Links https no Android no lugar do scheme customizado, follow-up da #604.
+- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
+  pressuposto do login CSRF por state, não uma regressão da PKCE.
 
 Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
 devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar

@@ -14,7 +14,8 @@ comparação de `consume_pending_google_signup` → vermelho P9.
 Rodada do Tester (T1 a T6): cada um vermelho com o seu mutante (plain, cookie
 lido fora do `nat-`, sem falha fechada, `if guardado` truthy, SQL sem caixa,
 atributo do cookie, `_clear` sem o challenge).
-Controle positivo: P1/P2 (fluxo legítimo entra) e C1/C2 (sem PKCE, como antes).
+Controle positivo: P1/P2 (fluxo legítimo entra) e C1/C4 (sem PKCE, como antes).
+Injeção (I1 a I3): código/pendente sem challenge não troca com verifier.
 """
 import base64
 import hashlib
@@ -262,10 +263,24 @@ def test_c1_sem_challenge_e_sem_verifier_troca_como_antes(monkeypatch):
     assert _troca(code).status_code == 200
 
 
-def test_c2_verifier_enviado_em_codigo_sem_challenge_passa(monkeypatch):
-    """Decisão: app novo × código emitido antes do deploy da PKCE."""
+def test_i1_codigo_injetado_sem_challenge_nao_troca_com_verifier(monkeypatch):
+    """INJEÇÃO: o "atacante" faz o próprio start SEM challenge e entrega o código
+    da conta dele ao app da vítima (`pigbank://auth?code=X`). O app novo sempre
+    manda verifier, e código sem challenge não é trocável por quem o manda: a
+    vítima não entra na conta do atacante. O código não é queimado."""
     uid, code = _codigo(monkeypatch, None)
-    assert _troca(code, _par()[0]).status_code == 200
+    _sem_sessao(_troca(code, _par()[0]), uid, 0)
+    assert _troca(code).status_code == 200  # o dono sem PKCE (iOS antigo) ainda entra
+
+
+def test_i3_codigo_do_bot_nao_troca_com_verifier():
+    """Mesmo vale para o magic link do bot (`core/dashboard_links`, sem challenge)."""
+    from core.dashboard_links import build_dashboard_link
+
+    uid, _ = _conta()
+    code = build_dashboard_link(uid).split("/d/")[1].split("?")[0]
+    _sem_sessao(_troca(code, _par()[0]), uid, 0)
+    assert _troca(code).status_code == 200
 
 
 def test_c3_app_antigo_ignora_o_challenge_e_o_d_abre(monkeypatch):
@@ -275,9 +290,28 @@ def test_c3_app_antigo_ignora_o_challenge_e_o_d_abre(monkeypatch):
     assert r.status_code == 302 and "dashboard_token=" in r.headers["set-cookie"]
 
 
-def test_c4_cadastro_sem_challenge_ignora_o_verifier(monkeypatch):
+def test_i2_pendente_injetado_sem_challenge_nao_completa_com_verifier(monkeypatch):
+    """Idem para `onboarding=<pending sem challenge>`: recusado, e o pendente
+    segue de pé para quem não manda verifier (iOS antigo)."""
     email, token = _pendente(monkeypatch, None)
-    assert _completa(token, _par()[0]).status_code == 200
+    r = _completa(token, _par()[0])
+    assert r.status_code == 400, r.text
+    assert "access_token" not in r.json() and _contas(email) == 0
+    assert _completa(token).status_code == 200
+    assert _contas(email) == 1
+
+
+def test_c4_apple_ignora_o_verifier(monkeypatch):
+    """Apple não tem PKCE: o corpo é o mesmo, e o verifier não pode recusá-la."""
+    email = f"pkce-apple-{uuid.uuid4().hex[:10]}@example.com"
+    token = db.create_pending_google_signup(f"sub-{email}", email, "Fulana", "apple")
+    r = TestClient(dashboard.app).post(
+        "/auth/apple/complete-signup",
+        headers={dashboard.APP_CLIENT_HEADER: "app", "User-Agent": UA_APP},
+        json={"token": token, "name": "Fulana", "phone": f"55119{uuid.uuid4().int % 100_000_000:08d}",
+              "accepted_terms": True, "code_verifier": _par()[0]},
+    )
+    assert r.status_code == 200, r.text
     assert _contas(email) == 1
 
 
@@ -388,16 +422,17 @@ def test_t3_cookie_invalido_no_callback_nat_falha_fechado(monkeypatch, ruim):
         assert cur.fetchone()["n"] == 0
 
 
-def test_t3c_cookie_ausente_no_callback_nat_gera_codigo_sem_challenge(monkeypatch):
-    """LIMITE CONHECIDO da transição (docs/CLAUDE.md, "Limites conhecidos"): se o
-    cookie do challenge se perde entre o start e o callback, o código nasce SEM
-    challenge e a troca sem verifier entra, ou seja, a PKCE cai em silêncio.
-    Quem "consertar" isso (exigir challenge com cookie ausente) precisa antes
-    medir o impacto no app iOS já instalado, que ainda não manda PKCE."""
+def test_t3c_cookie_ausente_no_callback_nat_o_app_novo_falha_fechado(monkeypatch):
+    """Cookie do challenge perdido entre o start e o callback: o código nasce SEM
+    challenge (iOS antigo, que não manda PKCE, precisa disso). O app novo manda
+    verifier e por isso FALHA FECHADO (400, tenta de novo); a troca sem verifier
+    segue valendo. Quem exigir challenge no callback precisa antes medir o impacto
+    no iOS já instalado."""
     uid, email = _conta()
     cb = _callback_com_cookie(monkeypatch, email, 2, None)
     code = parse_qs(urlparse(cb.headers["location"]).query)["code"][0]
     assert _challenge_do_codigo(code) is None
+    _sem_sessao(_troca(code, _par()[0]), uid, 0)
     assert _troca(code).status_code == 200
 
 

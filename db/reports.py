@@ -121,15 +121,14 @@ def create_dashboard_session(
 
 
 def consume_dashboard_session(code: str, challenge: str | None = None) -> int | None:
-    # PKCE (#604): código criado COM challenge só é consumido por quem manda o
-    # mesmo challenge; `challenge=None` (`/d/{code}`, `/auth/dashboard-link`,
-    # troca sem verifier) só consome código SEM challenge, então um código
-    # roubado do `pigbank://` não vira sessão por essas rotas. Challenge errado
-    # não casa no DELETE e o código segue de pé para o dono. `= NULL` é
-    # desconhecido, então com `None` o `or` se reduz a `code_challenge is null`.
-    # Troca COM verifier de código SEM challenge passa de propósito: app novo ×
-    # código emitido antes do deploy. Teto: tornar o challenge obrigatório
-    # quando o app antigo sair de circulação.
+    # PKCE (#604), igualdade estrita nos dois sentidos (`is not distinct from`):
+    # com `challenge` só consome código criado com ESSE challenge; com `None`
+    # (`/d/{code}`, `/auth/dashboard-link`, troca sem verifier) só código SEM
+    # challenge. Logo um código roubado do `pigbank://` não vira sessão por essas
+    # rotas, e um código sem challenge (injetado por outro app, do bot, ou de
+    # cookie perdido) não é trocável por quem manda verifier: o app novo sempre
+    # manda, então a injeção de código não entra. Não casar não queima o código.
+    # Teto: o iOS antigo, sem verifier, segue na janela até sair de circulação.
     # `/d/{code}` é ANÔNIMA: com NUL no path o psycopg
     # estourava antes do DELETE e o 500 virava uma linha em `system_event_logs`
     # por requisição, de graça (#321). "Código com veneno" = "código que não
@@ -145,7 +144,7 @@ def consume_dashboard_session(code: str, challenge: str | None = None) -> int | 
         with conn.cursor() as cur:
             cur.execute(
                 "delete from dashboard_sessions where code = %s and expires_at > now()"
-                " and (code_challenge is null or code_challenge = %s) returning user_id",
+                " and code_challenge is not distinct from %s returning user_id",
                 (code, challenge),
             )
             row = cur.fetchone()
