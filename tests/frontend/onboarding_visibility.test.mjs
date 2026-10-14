@@ -163,7 +163,7 @@ test("sem WhatsApp vinculado, mostra o código e esconde a confirmação", async
   assert.equal(await display(page, "wa-linked"), "none",
     '"WhatsApp conectado com sucesso" aparecia junto com o pedido de vínculo');
   assert.notEqual(await display(page, "wa-pending"), "none");
-  assert.equal(await page.$eval('[data-role="wa-code"]', (e) => e.textContent), "link 482913");
+  assert.equal(await page.$eval('[data-role="wa-code"]', (e) => e.textContent), "vincular 482913");
   await page.close();
 });
 

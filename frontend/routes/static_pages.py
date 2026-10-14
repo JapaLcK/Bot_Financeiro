@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
+from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from frontend.routes.shared import (
     FRONTEND_DIR,
@@ -1224,21 +1225,6 @@ async def serve_brand_asset(path: str):
     )
 
 
-def _link_whatsapp(texto: str) -> str:
-    """Deep link do chat com o Piggy, com `texto` pré-preenchido. O número real
-    fica no servidor (WHATSAPP_NUMBER). Sem número, cai no seletor genérico."""
-    import os
-    import urllib.parse
-
-    text = urllib.parse.quote(texto)
-    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
-    return (
-        f"https://api.whatsapp.com/send?phone={number}&text={text}"
-        if number
-        else f"https://wa.me/?text={text}"
-    )
-
-
 @router.get("/wa")
 async def open_whatsapp_bot():
     """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
@@ -1246,7 +1232,7 @@ async def open_whatsapp_bot():
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""
     return RedirectResponse(
-        _link_whatsapp("Oi Piggy! Quero acessar minha conta PigBank 🐷"), status_code=302
+        link_whatsapp("Oi Piggy! Quero acessar minha conta PigBank 🐷", seletor=True), status_code=302
     )
 
 
@@ -1264,11 +1250,13 @@ def _utm(request: Request, nome: str) -> str | None:
 
 
 def demo_ligado() -> bool:
-    """O interruptor do demo: DEMO_DAILY_MAX > 0 e WHATSAPP_NUMBER. É a condição do
-    /teste e também a de mostrar os botões "Testar o Piggy" nas páginas."""
+    """O interruptor do demo: DEMO_DAILY_MAX > 0 e um WHATSAPP_NUMBER que gere link
+    (o mesmo critério do `link_whatsapp`, para o /teste nunca gravar clique sem
+    ter para onde mandar). É a condição do /teste e também a de mostrar os botões
+    "Testar o Piggy" nas páginas."""
     from db import demo_funnel
 
-    return demo_funnel.teto_diario() > 0 and bool(os.getenv("WHATSAPP_NUMBER", "").strip())
+    return demo_funnel.teto_diario() > 0 and bool(link_whatsapp("x"))
 
 
 @router.get("/teste")
@@ -1283,7 +1271,7 @@ def abrir_teste(request: Request):
         return RedirectResponse(_PRECOS_DO_TESTE, status_code=302, headers=_NO_STORE)
     code = demo_funnel.criar_clique(_utm(request, "utm_source"), _utm(request, "utm_campaign"))
     texto = "Oi Piggy! Quero testar o PigBank 🐷" + (f" (teste {code})" if code else "")
-    return RedirectResponse(_link_whatsapp(texto), status_code=302, headers=_NO_STORE)
+    return RedirectResponse(link_whatsapp(texto), status_code=302, headers=_NO_STORE)
 
 
 # `shared_limit(scope=)` e NÃO `limit()`: com o `key_style="url"` do Limiter cada

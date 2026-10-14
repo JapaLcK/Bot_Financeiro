@@ -954,7 +954,7 @@ async function connectWhatsAppFromHome(event) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.whatsapp_link) {
-      await alertModal(strDetail(data) || "Não foi possível gerar seu link do WhatsApp agora.", { title: "WhatsApp" });
+      await alertModal(strDetail(data) || (res.ok ? "WhatsApp ainda não configurado neste ambiente." : "Não foi possível gerar seu link do WhatsApp agora."), { title: "WhatsApp" });
       return;
     }
     const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");

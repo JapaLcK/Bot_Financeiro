@@ -119,6 +119,7 @@ from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
+from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
@@ -206,7 +207,6 @@ DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 # de auth iriam sem o Secure em produção).
 _APP_ENV = (os.getenv("APP_ENV") or "").strip().lower()
 COOKIE_SECURE = DASHBOARD_URL.startswith("https://") or _APP_ENV in ("prod", "production")
-WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
@@ -3024,16 +3024,6 @@ def _post_login_url(user_id: int | None = None) -> str:
     return _dashboard_url("/home")
 
 
-def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
-    if not WHATSAPP_NUMBER:
-        return ""
-    safe_number = "".join(ch for ch in WHATSAPP_NUMBER if ch.isdigit())
-    if not safe_number:
-        return ""
-    text = urllib.parse.quote("Olá")
-    return f"https://api.whatsapp.com/send?phone={safe_number}&text={text}"
-
-
 async def _get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -3474,7 +3464,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "user_id": user_id,
@@ -3574,7 +3564,7 @@ async def _concluir_login(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "user_id": user_id,
@@ -3872,7 +3862,7 @@ async def auth_new_link_code(request: Request, user_id: int = Depends(_get_curre
     from db import create_link_code
 
     link_code = create_link_code(user_id, minutes_valid=15)
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "link_code": link_code,
@@ -4245,7 +4235,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
     return {
         "user_id": user_id,
         "email": user["email"],
@@ -4886,7 +4876,7 @@ async def _completar_cadastro_social(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {result['link_code']}")
 
     return {
         "user_id": user_id,

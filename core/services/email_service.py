@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from html import escape as _esc
 from typing import Optional
 
+from core.dashboard_links import link_whatsapp
+
 logger = logging.getLogger(__name__)
 
 EMAIL_FROM          = os.getenv("EMAIL_FROM",          "PigBank <suporte@pigbankai.com>")
@@ -320,27 +322,13 @@ def send_verification_email(to: str, code: str) -> bool:
     return send_email(to=to, subject=f"🔐 {code} — seu código de verificação PigBank", html_body=html, text_body=text)
 
 
-def _whatsapp_link(greeting: str = "Oi! Quero ativar minha conta no PigBank 🐷") -> str:
-    """Link que abre o chat DIRETO com o bot no WhatsApp, já com uma saudação
-    preenchida — o usuário só toca em enviar. O bot reconhece o número pelo
-    phone_hash do cadastro e vincula sozinho (auto-link), sem código nem prazo.
-    Usa WHATSAPP_NUMBER (número dialável do bot) do ambiente; sem esse número,
-    cai no seletor genérico do WhatsApp (degradado, mas não quebra o e-mail)."""
-    import urllib.parse
-    text = urllib.parse.quote(greeting)
-    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
-    if number:
-        return f"https://api.whatsapp.com/send?phone={number}&text={text}"
-    return f"https://wa.me/?text={text}"
-
-
 def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool:
     """Envia e-mail de boas-vindas após o cadastro (web).
 
     A conta recém-criada NÃO entra no bot direto: o gate manda pra /precos
     (routes/shared.py). Então a ordem aqui é ativar o teste de 15 dias
     (plan_service.TRIAL_DAYS_DEFAULT, exposto em /billing/plans-config) e só
-    depois mandar o oi no WhatsApp — prometer uso imediato era falso.
+    depois conectar o WhatsApp — prometer uso imediato era falso.
 
     O trial é 1 por telefone na vida (plan_trials, db/schema.py), e quem sabe a
     resposta pra ESTE usuário é db.plans.is_trial_eligible_for_user — que precisa
@@ -352,10 +340,11 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
     confirmar antes de cobrar, nunca como fato consumado.
 
     `link_code` e `dashboard_url` chegam dos chamadores e não são usados: os
-    links saem do _public_base_url() e do _whatsapp_link(). A assinatura fica
-    como está — mexer nela são 3 chamadores fora do escopo desta mudança.
+    links saem do _public_base_url(). O e-mail NÃO leva o código de vínculo (vale
+    15 min e o e-mail é lido depois): o botão leva ao site, onde "Conectar
+    WhatsApp" gera um código novo no clique. A assinatura fica como está —
+    mexer nela são 3 chamadores fora do escopo desta mudança.
     """
-    vincular_wpp = _whatsapp_link()
     base = _public_base_url()
 
     content = f"""
@@ -366,9 +355,10 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
          experimentar. O checkout mostra o que vai ser cobrado, e quando, antes
          de você confirmar — nada é cobrado sem essa confirmação.</p>
       <p style="text-align:center"><a class="btn" href="{base}/precos">🐷 Ativar meus 15 dias grátis</a></p>
-      <p><strong>2. Mande um oi pro Piggy no WhatsApp</strong> — com o teste
-         ativo, ele reconhece o seu número automaticamente e já começa a anotar.</p>
-      <p style="text-align:center"><a class="btn" href="{vincular_wpp}">📱 Abrir chat no WhatsApp</a></p>
+      <p><strong>2. Conecte o seu WhatsApp</strong> — entre no PigBank e toque em
+         <strong>Conectar WhatsApp</strong>: a mensagem já abre pronta com o seu
+         código, é só enviar.</p>
+      <p style="text-align:center"><a class="btn" href="{base}/login?next=%2Fhome">📱 Conectar meu WhatsApp</a></p>
       <p><strong>O que você vai poder fazer por lá:</strong></p>
       <ul>
         <li><code>gastei 50 mercado</code> — registrar despesa</li>
@@ -384,7 +374,8 @@ def send_welcome_email(to: str, link_code: str, dashboard_url: str = "") -> bool
         "Sua conta foi criada — falta escolher o plano que você quer testar por 15 dias grátis.\n\n"
         f"1) Ative o teste escolhendo um plano: {base}/precos\n"
         "   O checkout mostra o que vai ser cobrado, e quando, antes de você confirmar.\n"
-        "2) Depois, mande um oi pro Piggy no WhatsApp — ele reconhece seu número automaticamente.\n\n"
+        "2) Conecte o seu WhatsApp — entre no PigBank e toque em Conectar WhatsApp: a mensagem já abre pronta com o seu código, é só enviar.\n"
+        f"   {base}/login?next=%2Fhome\n\n"
         "Lá você vai poder mandar: gastei 50 mercado, recebi 1000 salário, saldo, ajuda.\n"
     )
     return send_email(to=to, subject="✅ Bem-vindo ao PigBank — ative seus 15 dias grátis", html_body=html, text_body=text)
@@ -1341,7 +1332,7 @@ def send_founder_email(to: str) -> bool:
     """
     base = _public_base_url()
     banco = f"{base}/login?next=%2Fsettings%3Fview%3Dopen-finance"
-    wpp = _whatsapp_link("Oi, Piggy!")
+    wpp = link_whatsapp("Oi, Piggy!", seletor=True)
     app = f"{base}/app"
     assunto = "oi, aqui é o Lucas do PigBank 🐷"
     content = f"""
