@@ -91,7 +91,7 @@ def test_tool_compra_no_cartao_valor_normal_segue_igual_e_a_fatura_paga():
     f"gastei {GRANDE} no cartão",
     f"parcelei {HUGE} em 3x no cartão nubank",
     f"parcelei {GRANDE} em 3x no cartão nubank",
-    "parcelei 1000000001 em 3x no cartão nubank",
+    "parcelei 100000000000000 em 3x no cartão nubank",
 ])
 def test_whatsapp_compra_no_cartao_recusa_valor_absurdo(texto):
     uid, _ = _usuario_com_cartao()
@@ -128,14 +128,14 @@ def test_whatsapp_limite_do_cartao_legitimo_grava():
 
 
 def test_tool_compra_grande_e_legitima_passa():
-    """Fixa o teto: se `VALOR_MAX` baixar, compra grande de verdade volta a ser recusada."""
+    """Sem teto de negócio: R$ 2 bi segue valendo (o repo decidiu isso); se `VALOR_MAX` baixar, volta a ser recusado."""
     from core.services.ai_chat.tools.cards import _add_credit_purchase_execute
 
     uid, _ = _usuario_com_cartao()
-    msg = _add_credit_purchase_execute(uid, {"valor": 999_999_999, "descricao": "imovel"})
+    msg = _add_credit_purchase_execute(uid, {"valor": 2_000_000_000, "descricao": "imovel"})
 
     assert "Compra no Crédito Registrada" in msg
-    assert [float(t) for t in _faturas(uid)] == [999_999_999.0]
+    assert [float(t) for t in _faturas(uid)] == [2_000_000_000.0]
 
 
 # ── camada do banco (rotas que não passam pelo handler) ────────────────────

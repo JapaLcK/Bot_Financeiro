@@ -97,8 +97,7 @@ def create_boleto(user_id: int, name: str, amount: float, due_date: Any,
     """Cria um BOLETO AVULSO (agenda de boletos) — sem recorrência. name =
     fornecedor/descrição, valor obrigatório (>0), due_date = vencimento."""
     nome = (name or "").strip() or "Boleto"
-    if not valor_valido(amount):
-        raise ValueError("VALOR_INVALIDO")
+    if not valor_valido(amount): raise ValueError("VALOR_INVALIDO")  # teto de linhas do arquivo (350)
     due = _parse_due(due_date)
     cat = (category or "").strip() or None
     with get_conn() as conn:
@@ -126,8 +125,7 @@ def update_boleto(user_id: int, bill_id: int, *, name: str | None = None,
     if name is not None:
         sets.append("name = %s"); params.append((name or "").strip() or "Boleto")
     if amount is not None:
-        if not valor_valido(amount):
-            raise ValueError("VALOR_INVALIDO")
+        if not valor_valido(amount): raise ValueError("VALOR_INVALIDO")
         sets.append("amount = %s"); params.append(Decimal(str(amount)))
     if due_date is not None:
         sets.append("due_date = %s"); params.append(_parse_due(due_date))

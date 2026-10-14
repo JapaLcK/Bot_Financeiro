@@ -134,7 +134,7 @@ def test_banco_boleto_edicao_normal_segue_igual():
 
 # ── mensagens das tools da IA (o usuário não vê "tenta de novo") ───────────
 
-@pytest.mark.parametrize("v", [float("nan"), 1e308, 10**400, 2_000_000_000])
+@pytest.mark.parametrize("v", [float("nan"), 1e308, 10**400, 10**14])
 def test_tools_dizem_valor_invalido_e_nao_convidam_a_repetir(v):
     from core.services.ai_chat.tools.bills import _add_boleto_execute
     from core.services.ai_chat.tools.cards import _add_credit_purchase_execute

@@ -857,9 +857,11 @@ def _pt_words_to_int(phrase: str) -> int | None:
     return total if found else None
 
 
-# Teto de um valor de dinheiro vindo de fora: o mesmo `le=1_000_000_000` do
-# `decision_simulator`. `numeric` do Postgres grava NaN, Infinity e 1e308.
-VALOR_MAX = 1_000_000_000
+# Limite TÉCNICO, não de negócio (o repo recusa teto de negócio: pagar/lançar R$ 2 bi
+# continua valendo, ver test_bill_amount_pending e test_full_handler_smoke): 10**13 reais
+# são 10**15 centavos, ainda exatos em float64 (< 2**53). Acima disso o centavo se perde,
+# e `numeric` do Postgres grava NaN, Infinity e 1e308 sem reclamar.
+VALOR_MAX = 10**13
 
 
 def valor_valido(v) -> bool:
