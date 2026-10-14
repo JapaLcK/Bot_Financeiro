@@ -112,6 +112,32 @@
       "categorias": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
     }
   },
+  "gastos_categoria": {
+    "padrao": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "total": "300.00", "compras": 2, "valor_medio": "150.00",
+      "ultimas": [
+        { "data": "2026-10-07", "descricao": "Restaurante", "mensagem": null, "origem": "banco", "valor": "200.00" },
+        { "data": "2026-10-03", "descricao": "Mercado", "mensagem": "gastei 100 no mercado", "origem": "carteira", "valor": "100.00" }
+      ],
+      "serie": [{ "mes": "2026-08", "valor": "180.00" }, { "mes": "2026-09", "valor": "250.00" }, { "mes": "2026-10", "valor": "300.00" }],
+      "estabelecimentos": [{ "nome": "Restaurante", "valor": "200.00", "quantidade": 1 }, { "nome": "Mercado", "valor": "100.00", "quantidade": 1 }],
+      "dias": [
+        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }] },
+        { "dia": "2026-10-07", "total": "200.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }] }
+      ],
+      "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
+    },
+    "indisponivel": {
+      "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "total": null, "compras": null, "valor_medio": null, "ultimas": [],
+      "serie": [{ "mes": "2026-04", "valor": null }, { "mes": "2026-05", "valor": null }, { "mes": "2026-06", "valor": null }],
+      "estabelecimentos": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" },
+      "saidas_em_outra_moeda": 0, "motivos": ["inicio_do_historico"]
+    }
+  },
   "guia": {
     "oferecer": {
       "estado": "oferecer",

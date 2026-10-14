@@ -5,7 +5,7 @@ import { BY_PROFILE, COMMON } from "@/features/painel/perguntas";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { abrir, apertar, bela, campo, caminho, delecoes, digitar, enviar, fim, ir, noResumo, ok, posts, reiniciar, respostaFluxo, srv, trocarParaBela, voltar, type Segurar } from "./conversa_apoio";
-import fixture from "./painel.fixture.json";
+import v2 from "../../../tests/frontend/api_v2_respostas.json";
 // O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
 jest.setTimeout(20_000);
 
@@ -53,10 +53,10 @@ it("POST lento: sair e voltar mostra o turno e o POST não é abortado", async (
  expect(post[1].signal.aborted).toBe(false); expect(screen.getByText("Pergunta lenta")).toBeTruthy(); expect(screen.getByText("Resposta tardia")).toBeTruthy();
 });
 it("privacidade: turno inteiro vira marcador, sem card; campo, chips e cota desligados", async () => {
- srv.chat = () => { srv.uso++; const f = respostaFluxo(); f.empurrar({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: fixture["/goals/1/status"] } }] } }); f.empurrar(fim("Resposta do Piggy")); f.fechar(); return f; };
- await abrir(); await enviar("metas"); await waitFor(() => expect(screen.getByText("Metas e caixinhas")).toBeTruthy());
+ srv.chat = () => { srv.uso++; const f = respostaFluxo(); f.empurrar({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2.metas.varios } }] } }); f.empurrar(fim("Resposta do Piggy")); f.fechar(); return f; };
+ await abrir(); await enviar("metas"); await waitFor(() => expect(screen.getByTestId("bloco-metas")).toBeTruthy());
  await apertar("Ocultar valores");
- expect(screen.getAllByText("Mensagem oculta enquanto os valores estão privados.")).toHaveLength(1); expect(screen.queryByText("Metas e caixinhas")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull();
+ expect(screen.getAllByText("Mensagem oculta enquanto os valores estão privados.")).toHaveLength(1); expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull();
  expect(screen.queryByText(/mensagens utilizadas/)).toBeNull(); expect(campo().props.editable).toBe(false); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
  await apertar("Mostrar valores"); expect(screen.getByText("Resposta do Piggy")).toBeTruthy();
 });
