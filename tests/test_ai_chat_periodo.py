@@ -296,6 +296,51 @@ def test_essencial_recebe_os_meses_cortados_pelo_historico():
     assert p["historico_desde"] and "inicio_do_historico" in p["motivos"]
 
 
+def test_resumo_do_periodo_diz_desde_quando_o_plano_enxerga():
+    """WhatsApp: `get_period_summary` devolvia o início PEDIDO e `historico_desde` ausente, enquanto as
+    tools de lista já devolviam o corte em `start_date`: o modelo dizia "maio a outubro" com dado só
+    desde o corte. Agora as três levam `historico_desde` (a semântica do card: o corte quando cortou)."""
+    from core.services.plan_service import history_earliest_date
+    uid = completo(usuario_pagante(plan="essencial"))
+    antigo = datetime.combine(date.today() - timedelta(days=150), datetime.min.time()).replace(hour=12)
+    db.add_launch_and_update_balance(uid, "despesa", 111, "antigo", None, criado_em=antigo)
+    db.add_launch_and_update_balance(uid, "despesa", 22, "recente", None)
+    ini, fim = _mes(-5) + "-01", date.today().isoformat()
+    corte = history_earliest_date(uid, now_tz())
+    r = _tool("get_period_summary", uid, start_date=ini, end_date=fim)
+    assert corte.isoformat() > ini and r["historico_desde"] == corte.isoformat()
+    assert "inicio_do_historico" in r["motivos"] and "Limite do plano" in r["nota"] and "incompleto" not in r["nota"]
+    top = _tool("get_top_categories", uid, start_date=ini, end_date=fim)
+    assert top["start_date"] == top["historico_desde"] == r["historico_desde"]  # as tools de lista dizem o mesmo
+    # positivo: quem enxerga tudo não leva corte (None, não a data pedida)
+    assert _tool("get_period_summary", uid=completo(usuario_pagante(plan="plus")), start_date=ini, end_date=fim)["historico_desde"] is None
+    # a regra do cartão vem também nas listas (a regra 10 do prompt manda dizê-la): meses inteiros = fatura; livre = data da compra
+    assert {r["cartao_por"], top["cartao_por"]} == {"fatura"}
+    meio = date.today().replace(day=15).isoformat()
+    for nome in ("get_top_categories", "get_largest_expenses"):
+        assert _tool(nome, uid, start_date=meio, end_date=meio)["cartao_por"] == "data_da_compra"
+        assert _tool(nome, uid, start_date=_mes(0) + "-01", end_date=fim)["cartao_por"] == "fatura"
+    assert _tool("get_category_spend", uid, start_date=ini, end_date=fim, categoria="x")["cartao_por"] == "fatura"
+
+
+def test_corte_exatamente_no_dia_1_do_periodo_nao_tem_historico_desde(monkeypatch):
+    """O mês pedido está inteiro: o motivo vale, mas `historico_desde` é None (não a data do pedido). Pega `>` -> `>=`."""
+    from core.services import plan_service
+    from db import mes_detalhes
+    uid = completo(usuario_pagante(plan="plus"))
+    ini, fim = _mes(0) + "-01", date.today().isoformat()  # 1 mês: o motivo sai com o corte no dia 1
+    corte = date.fromisoformat(ini)
+    monkeypatch.setattr(plan_service, "history_earliest_date", lambda *a, **k: corte)
+    monkeypatch.setattr(mes_detalhes, "history_earliest_date", lambda *a, **k: corte)
+    for nome in ("get_period_summary", "get_top_categories"):
+        r = _tool(nome, uid, start_date=ini, end_date=fim)
+        assert r["historico_desde"] is None and "inicio_do_historico" in r["motivos"], nome
+    # positivo: um dia depois do dia 1 já há data
+    corte = corte + timedelta(days=1)
+    for nome in ("get_period_summary", "get_top_categories"):
+        assert _tool(nome, uid, start_date=ini, end_date=fim)["historico_desde"] == corte.isoformat(), nome
+
+
 def test_periodo_de_a_nao_tem_nada_de_b(mundo):
     a, b = mundo
     ra, pa = _periodo(a, de=M0, ate=M)
@@ -489,3 +534,27 @@ def test_schemas_nao_publicam_maximum_para_o_modelo_poder_pedir_18():
     q = get_tool("show_card").schema["function"]["parameters"]["properties"]["quantidade_meses"]
     m = get_tool("get_spending_trend").schema["function"]["parameters"]["properties"]["months"]
     assert "maximum" not in q and "maximum" not in m
+
+
+def test_category_spend_livre_diz_fatura_porque_e_pela_fatura_que_soma():
+    """Período livre: `_janela` diz data_da_compra, mas `sum_spent_in_category_period` soma o cartão pela
+    fatura. Compra de 80 no dia 5 (cartão fecha dia 28), período 5 a 8: total 0 e o rótulo não pode
+    dizer que o cartão entrou pela data da compra. Pega: tirar o `cartao_por` fixo de `_get_category_spend`."""
+    uid = completo(usuario_pagante(plan="plus"))
+    passado = (date.today().replace(day=1) - timedelta(days=1)).replace(day=5)
+    db.add_credit_purchase(uid, db.create_card(uid, "Nubank", closing_day=28, due_day=5), 80, "mercado", "vista", passado)
+    ini, fim = passado.isoformat(), (passado + timedelta(days=3)).isoformat()
+    cs = _tool("get_category_spend", uid, start_date=ini, end_date=fim, categoria="mercado")
+    assert cs["total"] == 0 and cs["cartao_por"] == "fatura"
+    # as outras listas somam o período livre pela data da compra e dizem isso
+    assert _tool("get_top_categories", uid, start_date=ini, end_date=fim)["cartao_por"] == "data_da_compra"
+
+
+def test_nota_do_resumo_continua_dizendo_incompleto_para_motivo_que_nao_e_do_plano(monkeypatch):
+    """Só `inicio_do_historico` deixou de ser "incompleto"; `banco_desatualizado` etc. seguem avisando.
+    Pega: apagar o ramo `outros` de `_resumo_periodo`."""
+    real = launches.resumo_mes.resumo_do_mes
+    monkeypatch.setattr(launches.resumo_mes, "resumo_do_mes", lambda *a, **k: {**real(*a, **k), "motivos": ["banco_desatualizado"]})
+    uid = completo(usuario_pagante(plan="plus"))
+    r = _tool("get_period_summary", uid, start_date=_mes(0) + "-01", end_date=date.today().isoformat())
+    assert "banco_desatualizado" in r["motivos"] and "desatualizado ou incompleto (banco_desatualizado)" in r["nota"]
