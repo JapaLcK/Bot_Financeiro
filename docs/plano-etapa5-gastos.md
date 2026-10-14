@@ -93,7 +93,7 @@ Fontes: <https://docs.pluggy.ai/reference/transactions-list>,
 - Já guardamos tudo isso: `open_finance_transactions.raw` é o payload cru (e
   `db/of_recurring.py` já lê `raw->'merchant'`). Hoje só `description` vira `alvo`.
 
-**Medido em 2026-10-13**, na conta do dono (uid 88648360, produção, só leitura, só contagens;
+**Medido em 2026-10-13**, na conta do dono (produção, só leitura, só contagens;
 `open_finance_transactions` ligada a contas e conexões do usuário; só gasto: saída em conta
 BANK e compra em conta CREDIT). É UMA conta, 719 transações; serve para decidir a forma da
 regra, não para prometer cobertura.
@@ -163,7 +163,8 @@ para que `ler` (rota nativa, comportamento e contrato inalterados, com os testes
 e a rota nova agreguem **as mesmas linhas**. A rota lê o mês pedido e os dois anteriores numa
 **única transação repeatable read / read only**, como `ler_periodo` já faz com vários meses:
 a comparação, a série e o total da categoria saem do mesmo snapshot, e o mês escolhido na série é
-o mesmo valor da lista. Teste: uma conexão só para todos os meses. Limite declarado: as duas rotas
+o mesmo valor da lista (quando o mês escolhido está inteiro disponível; cortado pelo plano, a série
+não tem valor para ele, ver o §4.2). Teste: uma conexão só para todos os meses. Limite declarado: as duas rotas
 são duas respostas; se um lançamento entrar entre elas, o detalhe e a lista podem diferir por
 um instante, e o aviso de escrita (SSE) refaz as duas.
 
@@ -187,7 +188,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 | uma linha por categoria com gasto, em ordem decrescente | `/gastos`; categoria sem gasto no mês não aparece |
 | "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `fora_do_total` o bloco avisa quantas linhas ficaram fora |
 | traço e variação % contra o mês anterior no mesmo dia | `valor_ate_hoje` e `anterior_ate_hoje` por categoria, os dois de 1 até `hoje` (a saída com data depois de `hoje` fica fora; a de data anterior ao mês conta como dia 1), para comparar iguais com iguais; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero. A barra e o `valor` são o mês inteiro, que inclui o lançamento com data futura, como o Saiu do Resumo |
-| "Sem categoria" | rótulo `sem categoria`, emoji e cor da constante neutra (decisão 4); filtra com `categoria=sem categoria` (abaixo) |
+| "Sem categoria" | rótulo `sem categoria`; emoji e cor da constante neutra **só quando o usuário não tem categoria real com esse nome**, senão os dela (precedência da decisão 4); filtra com `categoria=sem categoria` (abaixo) |
 | clicar filtra o resto; "Limpar" | estado do cliente |
 | âncoras do guia (`data-guia="categorias.lista"` e `categorias.item`) | o PR 2 as preserva (#728) |
 | nome acessível com valor e variação | derivado dos mesmos campos |
@@ -197,7 +198,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 |---|---|
 | categoria padrão quando nenhuma foi escolhida ("maior gasto do dia a dia") | sem a marca `variable` (decisão B), vale a **maior categoria do mês**, e o rótulo vira "maior gasto do mês" |
 | No mês / Compras / Valor médio | `valor`, `quantidade` e `valor ÷ quantidade` (`null` sem compras); parcela de cartão conta uma compra por parcela do mês |
-| últimos meses | `/gastos/categoria`, 3 meses, cada valor é o mês inteiro (o do mês corrente é o mesmo `valor` da lista, inclusive lançamento com data futura); o corrente é rotulado "mês em andamento", não "até hoje"; mês cortado pelo plano é `null` |
+| últimos meses | `/gastos/categoria`, 3 meses, cada valor é o mês inteiro (o do mês corrente é o mesmo `valor` da lista, inclusive lançamento com data futura); o corrente é rotulado "mês em andamento", não "até hoje". Mês tocado pelo corte do plano é `null`, **inclusive o mês escolhido**: a igualdade série = `valor` da lista vale só quando o mês escolhido está inteiro disponível; cortado, a lista mostra o `valor` parcial com `inicio_do_historico` (rotulado "parcial") e a série não tem barra para ele |
 | onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5 |
 | últimas compras (6, com data, nome, mensagem, origem, valor) | `/gastos/categoria`, `ultimas`: as mesmas linhas que somam o total da categoria. O `/lancamentos` não serve aqui: ele devolve também interno e outra moeda, que o total exclui, e entradas |
 | "Abrir lançamentos" | link para `/lancamentos` com `mes`, `categoria` e `tipo=saida`. A tela de Lançamentos é a lista completa (mostra também o interno, marcado, e outra moeda), então a contagem dela pode ser maior que a de "Compras"; isso é declarado, não escondido |
