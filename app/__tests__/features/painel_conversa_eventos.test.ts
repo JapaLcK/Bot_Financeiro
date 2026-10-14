@@ -66,9 +66,9 @@ it("`maiores` com mais de 5 lançamentos é aceito (se o servidor subir o teto, 
   const e = lerEvento(comRecursos({ periodo: { ...periodo, categorias: cats } })) as unknown as Lido; expect(e.bloco.abas[0]!.recursos.periodo.categorias[0].maiores).toHaveLength(6);
 });
 const v2 = (metasV2 as unknown as { metas: { varios: unknown } }).metas.varios;
-it("`caixinhas` (formato legado {ok, goals}) é aceito; `metas` no formato v2 invalida o evento (o card v2 é outro PR)", () => {
+it("`caixinhas` (formato legado {ok, goals}) é aceito; `metas` no formato v2 também; o legado em `metas` invalida o evento", () => {
   const legado = (fixture as Record<string, unknown>)["/goals/1/status"];
   expect(lerEvento({ tipo: "bloco", bloco: { card: "caixinhas", abas: [{ mes: null, recursos: { caixinhas: legado } }] } })?.tipo).toBe("bloco");
-  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2 } }] } })).toBeNull();
-  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: legado } }] } })?.tipo).toBe("bloco"); // o legado em `metas` ainda passa: não há card v2 para trocar
+  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2 } }] } })?.tipo).toBe("bloco");
+  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: legado } }] } })).toBeNull(); // o legado `{ok, goals}` é do `caixinhas`
 });

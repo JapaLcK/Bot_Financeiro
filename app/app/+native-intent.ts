@@ -6,19 +6,35 @@ import { itemDoLink, tentativaDoLink, widgetAberto } from "@/features/openFinanc
  * esquema do app (`pigbank://`, `pigbank-staging://`, `pigbank-dev://`) ou
  * Expo Go (`exp://host:porta/--/…`); e, defensivamente, o caminho cru que a
  * suíte de teste usa. Regex e não `URL`: o polyfill do Hermes é incerto aqui.
- * Premissa: o servidor só emite esses esquemas, em minúscula e sem espaço;
- * `pigbank:///…` ou `PIGBANK://…` não são descartados (não saem do fluxo real).
+ * Premissa: o servidor só emite esses esquemas, em minúscula e sem espaço.
+ * Esquema fora desta lista, `pigbank:///…` e `PIGBANK://…` caem na allowlist
+ * abaixo (descartados): não saem do fluxo real. O destino devolvido é montado
+ * aqui (`/open-finance-volta?…`), nunca o texto do link, então `/..` no link
+ * não leva a outra tela.
  */
 const VOLTA = [
-  /^[a-z][a-z0-9+.-]*:\/\/open-finance-volta(?:[/?#]|$)/,
-  /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+\/--\/open-finance-volta(?:[/?#]|$)/,
+  /^pigbank(?:-staging|-dev)?:\/\/open-finance-volta(?:[/?#]|$)/,
+  /^exp:\/\/[^/?#]+\/--\/open-finance-volta(?:[/?#]|$)/,
   /^\/open-finance-volta(?:[/?#]|$)/,
 ];
 
 /**
- * O expo-router passa TODO link de entrada por aqui; `null` = não navega. Só
- * descarta a volta do OAuth que chega com o app aberto e o widget da Pluggy em
- * foco (ver `definirWidgetAberto`); qualquer outro link segue sem mudança.
+ * Só no desenvolvimento: Expo Go (`exp://`), dev client (`exp+pigbank…://`) e a
+ * indireção `<scheme>://expo-development-client/?url=…`, que o roteador segue
+ * até a URL de dentro. Em produção nada disso é um link legítimo.
+ */
+const DEV = /^(?:exp|exp\+pigbank(?:-staging|-dev)?):\/\/|^pigbank(?:-staging|-dev)?:\/\/expo-development-client(?:[/?#]|$)/;
+
+/**
+ * O expo-router passa TODO link de entrada por aqui; `null` = não navega.
+ * ALLOWLIST (#604): o app não emite deep link a não ser a volta do Open Finance
+ * (`open-finance-volta`), e o retorno do Google é lido por `openAuthSessionAsync`,
+ * não pelo roteador. Então só passam a raiz (`""`/`"/"`), a volta do Open Finance
+ * e, em `__DEV__`, os links de desenvolvimento. Todo o resto — `pigbank://entrar`,
+ * `pigbank://auth?code=…`, qualquer grafia que o roteador normalize depois (`////`,
+ * `%61`, `..`, `@`, `\`) — é `null` com o app aberto e `/` na abertura a frio
+ * (`initial`). A volta do OAuth com o app aberto e o widget da Pluggy em foco
+ * também é `null` (ver `definirWidgetAberto`).
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   if (VOLTA.some((r) => r.test(path))) {
@@ -62,5 +78,6 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     ];
     return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }
-  return path;
+  if (path === "" || path === "/" || (__DEV__ && DEV.test(path))) return path;
+  return initial ? "/" : null;
 }

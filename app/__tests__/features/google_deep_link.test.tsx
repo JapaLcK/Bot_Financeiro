@@ -28,6 +28,7 @@ beforeEach(() => {
  * não existe rota `auth`. Sem isto, qualquer um logaria o aparelho de outra
  * pessoa na conta dele mandando um link (CSRF de login).
  */
+// Exercita o gate de rota (não existe rota `auth`) com o dublê do `jest.setup.js` para o caminho cru; a alcançabilidade por link real é `native_intent_roteador.test.tsx`.
 describe("deep link pigbank://auth de fora", () => {
   // Controle negativo (medido): uma rota `(auth)/auth.tsx` que troca o `code`
   // do link deixa o caso do `code` vermelho, com a troca chamada.

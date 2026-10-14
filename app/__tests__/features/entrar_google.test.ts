@@ -29,8 +29,8 @@ describe("continuarComGoogle (G)", () => {
 
     expect(await google(autenticar)).toEqual([{ fase: "google" }]);
 
-    expect(abrirFolha).toHaveBeenCalledWith("http://backend.teste/auth/google/start?app=2", "pigbank://auth");
-    expect(chamadas()).toEqual([{ caminho: "/auth/google/exchange", auth: undefined, corpo: { code: "code-ana" } }]);
+    expect(abrirFolha).toHaveBeenCalledWith(expect.stringMatching(/^http:\/\/backend\.teste\/auth\/google\/start\?app=2&code_challenge=[A-Za-z0-9_-]{43}$/), "pigbank://auth");
+    expect(chamadas()).toEqual([{ caminho: "/auth/google/exchange", auth: undefined, corpo: { code: "code-ana", code_verifier: expect.any(String) } }]);
     expect(autenticar).toHaveBeenCalledTimes(1);
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
@@ -40,7 +40,7 @@ describe("continuarComGoogle (G)", () => {
 
     expect(await google()).toEqual([{ fase: "google" }]);
 
-    expect(chamadas()).toEqual([{ caminho: "/auth/google/exchange", auth: undefined, corpo: { code: "code-ana" } }]);
+    expect(chamadas()).toEqual([{ caminho: "/auth/google/exchange", auth: undefined, corpo: { code: "code-ana", code_verifier: expect.any(String) } }]);
     await expect(lerCredenciais()).resolves.toEqual({ access: "access-ana", refresh: "rt_ana" });
   });
 
@@ -138,7 +138,7 @@ describe("continuarComGoogle (G)", () => {
   it("7 — conta nova: busca o pré-cadastro e vai a C com o nome sugerido, sem gravar sessão", async () => {
     voltaDoGoogle("pigbank://auth?onboarding=gso_bia");
     expect(await google()).toEqual([
-      { fase: "cadastro-social", provedor: "google", token: "gso_bia", email: PENDENTE.email, nome: PENDENTE.name_hint },
+      { fase: "cadastro-social", provedor: "google", token: "gso_bia", email: PENDENTE.email, nome: PENDENTE.name_hint, verificador: expect.any(String) },
     ]);
     expect(chamadas().map((c) => c.caminho)).toEqual(["/auth/google/pending/gso_bia"]);
     await expect(lerCredenciais()).resolves.toBeNull();

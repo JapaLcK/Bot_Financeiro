@@ -62,6 +62,21 @@ registrar `pigbank` também no Android desses ambientes, ou tornar o scheme do
 Google por ambiente (`RETORNO` em `features/auth/google.ts` e o
 `_google_app_scheme` do backend). A produção não é afetada.
 
+**Validação no aparelho do login com Google (PKCE e filtro de links, #604).** Só
+o Jest foi rodado; a liberação Android depende desta validação e do PR-2 (backend
+com `code_challenge = S256(verifier)` estrito) no ar. Android e iOS:
+1. o cookie `google_oauth_challenge` sobrevive à Custom Tab / `ASWebAuthenticationSession`
+   (SameSite=lax); se não, o login falha com `google_code_invalid`;
+2. o `Linking` real entrega `pigbank://auth?code=` ao `openAuthSessionAsync` e o
+   `+native-intent` a descarta sem "Unmatched Route";
+3. links externos `pigbank://entrar` e `pigbank://auth?code=x` não mudam a tela, com o
+   app aberto e a frio;
+4. `expo-crypto` nativo no Hermes: `getRandomBytes(32)` devolve 32 bytes e
+   `digestStringAsync` com `BASE64` devolve o base64 que vira o challenge;
+5. a volta do Open Finance, a frio e com o app aberto, no Android;
+6. matar o processo durante a Custom Tab: ao reabrir, nenhum código é trocado;
+7. toque duplo em "Continuar com Google": uma folha só, um challenge por tentativa.
+
 **Variável de ambiente só vem de arquivo em desenvolvimento.** O Expo escolhe o
 arquivo de `.env` pelo `NODE_ENV`, não pelo `APP_ENV`, então um `.env.staging`
 não seria lido e o app rotulado como staging apontaria para o backend de
