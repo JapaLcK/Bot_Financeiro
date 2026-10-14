@@ -6,16 +6,21 @@ db/resumo_mes.py — Entrou e Saiu do mês: a regra única do mês-calendário (
 estorno pelo `period_end` da fatura (parcelado: uma parcela por mês). Leem daqui
 `GET /api/v2/resumo-do-mes`, o "Gastos em <mês>" do WhatsApp, o relatório mensal, a
 consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de meses inteiros
-(`get_period_summary`, `compare_periods`, que para 2 a 12 meses leem `mes_detalhes.ler_periodo`, o mesmo do
-card `periodo` do chat; `get_top_categories`, `get_largest_expenses` e
+(`get_period_summary`, que para 2 a 12 meses lê `mes_detalhes.ler_periodo`, o mesmo do
+card `periodo` do chat; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07; `get_top_categories`, `get_largest_expenses` e
 `get_category_spend` pela fatura: `core/services/ai_chat/tools/launches.py`); as pernas dela (`MES_*_SQL`), a
 lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
 consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 
+`categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); lê dela
+`core/services/comparacao_periodos.py` (`compare_periods` da IA, PL-07, com `mes=`; com datas que não são meses
+inteiros dos dois lados ele usa a regra de período livre das outras tools, cartão pela data da compra:
+`n_compras_cartao` conta essas compras).
+
 Ficam fora da regra, de propósito, e é divergência conhecida: relatório diário e semanal
 (só `launches`, sem cartão: `get_summary_by_period`), projeção de fechamento, o Repórter
-(`piggy_agents._month_stats`) e as ferramentas da IA de período livre: `get_period_summary` e
-`compare_periods` somam `launches` + cartão pela data da compra (`cartao_por: data_da_compra`), como
+(`piggy_agents._month_stats`) e as ferramentas da IA de período livre: `get_period_summary`
+soma `launches` + cartão pela data da compra (`cartao_por: data_da_compra`), como
 `get_top_categories` e `get_largest_expenses`; `get_category_spend` pela fatura
 e `get_spending_trend` pela data da compra. Ver
 `docs/CLAUDE.md`, "API v2".
@@ -30,7 +35,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
-from .connection import TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, get_conn
+from .connection import CAT_VAZIA_LABEL, TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL, cat_key_sql, get_conn
 
 # As duas pernas do mês, também lidas pela lista de `db/lancamentos.py` (§0.7). Params:
 # (user_id, início, fim) e (user_id, user_id, início, fim). A de `launches` é sem alias e
@@ -62,6 +67,25 @@ TOTAIS_SQL = f"""
               from {MES_CARTAO_SQL}) x
 """
 
+# A despesa de `TOTAIS_SQL` por categoria: as mesmas duas pernas (mesmos params), agrupada pela
+# chave de casamento (`cat_key_sql`); rótulo = grafia do lançamento mais recente (como `compute_categories`).
+CATEGORIAS_SQL = f"""
+    select {cat_key_sql("categoria")} as chave,
+           (array_agg(categoria order by dt desc))[1] as categoria,
+           sum(valor) as total, count(*) as n
+      from (select {TIPO_CANON_SQL} as tipo, valor, criado_em as dt,
+                   coalesce(nullif(categoria, ''), '{CAT_VAZIA_LABEL}') as categoria
+              from launches
+             where {MES_LANCAMENTOS_SQL}
+               and is_internal_movement = false
+            union all
+            select 'despesa', ct.valor, b.period_end::timestamptz,
+                   coalesce(nullif(ct.categoria, ''), '{CAT_VAZIA_LABEL}')
+              from {MES_CARTAO_SQL}) x
+     where tipo = 'despesa'
+     group by {cat_key_sql("categoria")}
+"""
+
 # Do bloco de contas (`db/contas_hoje.py`), a mesma regra e o mesmo limite de 48 h, mais
 # o corte da janela do plano. Ordem fixa: é a da resposta.
 MOTIVOS = ("conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado",
@@ -78,6 +102,22 @@ def totais(cur, user_id: int, inicio: date, fim_excl: date) -> dict:
     """`{"entrou", "saiu", "n", "n_cartao"}` em `[inicio, fim_excl)`, dinheiro em `Decimal`."""
     cur.execute(TOTAIS_SQL, totais_params(user_id, inicio, fim_excl))
     return dict(cur.fetchone())
+
+
+def categorias(cur, user_id: int, inicio: date, fim_excl: date) -> list[dict]:
+    """`[{"chave", "categoria", "total", "n"}]` da despesa em `[inicio, fim_excl)`; a soma é o `saiu` de `totais`."""
+    cur.execute(CATEGORIAS_SQL, totais_params(user_id, inicio, fim_excl))
+    return [dict(r) for r in cur.fetchall()]
+
+
+def n_compras_cartao(user_id: int, inicio: date, fim: date) -> int:
+    """Quantas compras de cartão (sem estorno) têm `purchased_at` em `[inicio, fim]` (fim INCLUSIVO): a
+    contagem da perna de cartão do período livre de `db.get_top_expense_categories`, que usa o mesmo filtro.
+    Abre a própria conexão, como aquela: quem chama não pode estar dentro de outro `get_conn()` (pool pequeno)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from credit_transactions where user_id = %s and is_refund = false "
+                    "and purchased_at >= %s and purchased_at <= %s", (user_id, inicio, fim))
+        return int(cur.fetchone()["n"])
 
 
 def mes_de(dia: date) -> tuple[date, date]:

@@ -249,7 +249,7 @@ def test_tools_de_data_cortam_sem_erro_e_o_agent_chat_nao_quebra(mundo):
         assert r["pedido"]["start_date"] == ini
     r = _tool("compare_periods", a, period_a_start=ini, period_a_end=fim, period_b_start=INICIO.isoformat(),
               period_b_end=ULTIMO.isoformat())
-    assert "error" not in r and r["period_a"]["limitado_a_12_meses"] is True
+    assert "error" not in r and r["anterior"]["limitado_a_12_meses"] is True
     r = _tool("get_spending_trend", a, months=18)
     assert r["months"] == 12 and r["limitado_a_12_meses"] and r["pedido"] == {"months": 18}
     r = _tool("get_investment_contributions", a, start_date=ini, end_date=fim)
@@ -480,9 +480,9 @@ def test_compare_periods_repassa_o_fim_ajustado_so_no_lado_cortado(mundo):
     fim_futuro = (date.today().replace(day=1) + timedelta(days=100)).isoformat()
     r = _tool("compare_periods", a, period_a_start=_mes(-3) + "-01", period_a_end=_mes(-2) + "-15",
               period_b_start=_mes(-1) + "-01", period_b_end=fim_futuro)
-    assert r["period_b"]["fim_ajustado"] is True and r["period_b"]["aviso_fim"] == launches._AVISO_FIM
-    assert r["period_b"]["pedido"]["end_date"] == fim_futuro
-    assert "fim_ajustado" not in r["period_a"] and "aviso_fim" not in r["period_a"]
+    assert r["atual"]["fim_ajustado"] is True and r["atual"]["aviso_fim"] == launches._AVISO_FIM
+    assert r["atual"]["pedido"]["end_date"] == fim_futuro
+    assert "fim_ajustado" not in r["anterior"] and "aviso_fim" not in r["anterior"]
 
 
 def test_schemas_nao_publicam_maximum_para_o_modelo_poder_pedir_18():

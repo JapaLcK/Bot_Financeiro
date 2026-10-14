@@ -189,15 +189,16 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de mês inteiro
-  (`get_period_summary` e `compare_periods` chamam `resumo_do_mes`, inclusive o corte da janela do
-  plano; `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
+  (`get_period_summary` chama `resumo_do_mes`, inclusive o corte da janela do
+  plano; `compare_periods` com `mes=` lê `totais`/`categorias` da mesma regra (PL-07); `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
   cartão pela fatura, com o MESMO corte (`motivos: [inicio_do_historico]` quando o corte cai
   no dia 1 do mês pedido ou depois; o "mês anterior cortado" do resumo não tem par nas listas; mês todo
   cortado = lista vazia com as datas do mês); mês = dia 1 até o último dia, ou, no corrente, dia 1
   até hoje ou depois; `_meses_inteiros`/`_janela` em `core/services/ai_chat/tools/launches.py`).
-  **Vários meses inteiros** (2 a 12) seguem a mesma regra, mês a mês: `get_period_summary` e `compare_periods`
-  chamam `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
-  `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada); no app,
+  **Vários meses inteiros** (2 a 12) seguem a mesma regra, mês a mês: `get_period_summary`
+  chama `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
+  `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada; o
+  `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
   `get_top_categories`/`get_category_spend` nessa faixa são recusadas com `periodo_no_card`. **Teto de 12
   meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
@@ -223,8 +224,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
   (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
-  sem o cartão. Das tools da IA em período livre (não são meses inteiros), `get_period_summary` e
-  `compare_periods` somam `launches` + cartão pela DATA DA COMPRA (Σ de `get_top_expense_categories`,
+  sem o cartão. Das tools da IA em período livre (não são meses inteiros), `get_period_summary`
+  soma `launches` + cartão pela DATA DA COMPRA (Σ de `get_top_expense_categories`,
   a mesma consulta da lista; saem com `cartao_por: data_da_compra` e uma `nota`; meses inteiros saem com
   `cartao_por: fatura`); `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
   `get_category_spend` lê o cartão sempre pela fatura (`period_end`) e `get_spending_trend` soma o
@@ -255,6 +256,34 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `send_template` consome o claim da semana; o resumo mensal (WhatsApp e Discord) não tem a mesma
   proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
+  **Comparação de períodos (PL-07, Plus+):** `core/services/comparacao_periodos.py` decide a janela e o
+  delta; a tool `compare_periods` da IA é o único consumidor (o endpoint e a tela v2 são o PR B). Lê a
+  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA; janela parcial
+  = faturas que fecham dentro dela). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
+  se AS DUAS janelas são meses-calendário inteiros (dia 1 até o último dia; no mês corrente, dia 1 até hoje ou
+  depois, e então vale o mês TODO) é a mesma conta de `mes=` e do painel, cartão pela FATURA ("compara abril com
+  maio" não diverge do painel); exceção: mês CORRENTE (dia 1 até hoje ou o mês todo) × o mês imediatamente anterior
+  inteiro responde como `mes=<corrente>` (os mesmos N dias, fatura; o resultado é o mesmo do chat). Senão é período livre nas DUAS janelas (nunca uma base de cada lado): reusa as
+  consultas das outras tools (`get_top_expense_categories`, `get_summary_by_period`), cartão pela DATA DA COMPRA, e a
+  compra parcelada (mesma `purchased_at` nas parcelas) entra inteira no dia da compra; o número pode diferir do painel; categoria sem nome sai "outros" (a consulta da main já agrupou
+  vazio com o "outros" real) e em `mes=` sai "sem categoria". `base.cartao`
+  (`fatura` | `data_da_compra`), `base.regra` e `escolha` dizem qual. Teto de 12 meses e fim ajustado:
+  `_limita_periodo`. Mês aberto = os MESMOS n dias do mês anterior; se ele tem menos de n dias, compara com
+  ele inteiro e marca `anterior_encurtado`. Mês fechado = mês inteiro × mês inteiro. Categoria nova tem
+  `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
+  do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
+  Saída da tool: dinheiro e `pct` são NÚMERO JSON (o `ai_guard` só lê número como evidência; mesma convenção de
+  `_resumo_periodo`) e moram em `total_atual`/`total_anterior`/`total_delta` (o guard só lê número sob chave
+  monetária; `atual`/`anterior`/`delta` soltos não contariam). `motivos` + `nota` são os avisos de dado incompleto do
+  resumo do mês (`contas_hoje.listar`, mesma ordem de `resumo_mes.MOTIVOS`, na mesma transação); o `motivo` (singular)
+  é outra coisa: por que o payload veio limitado (`sem_base`, `inicio_do_historico`, `categorias_indisponiveis`).
+  Período que ainda não terminou: `escolha` diz que só entra o já lançado (parcelas e datas futuras), não é previsão.
+  Casamento de categoria no período livre: `_chave` (Python) espelha `cat_key_sql` em nomes PT-BR (acento, caixa,
+  cedilha, til; `tests/test_comparacao_periodos.py` compara os dois); casos exóticos de Unicode (Ñ, Å, NFD,
+  ligaturas) podem diferir, e não se tentou igualar.
+  Divergência conhecida: `get_spending_trend` soma o cartão pela data da compra, então a tendência de um mês pode
+  diferir da comparação por `mes=` (fatura) na mesma conversa; `get_period_summary` e a comparação por datas
+  parciais concordam (as duas, data da compra). No período livre o rótulo da categoria é a grafia de MAIOR total.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da

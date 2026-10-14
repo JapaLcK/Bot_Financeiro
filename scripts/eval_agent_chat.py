@@ -13,7 +13,7 @@ import re
 import os
 from pathlib import Path
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def cases(suite):
@@ -66,12 +66,12 @@ def synthetic_read(uid, kind, name, arguments):
     """Usa formatos reais de consulta com fontes vazias/sintéticas, sem banco."""
     import db
     import db.bills
-    from db import resumo_mes
-    from core.services import agent_chat as chat, assinaturas, piggy_agents, plan_service
+    from core.services import agent_chat as chat, assinaturas, comparacao_periodos, piggy_agents, plan_service
     from core.services.agent_chat_data import _snapshot
     from core.services.ai_chat.tools import get_tool
     from core.services.ai_chat.tools.bills import _get_bills_to_pay
     from core.services.ai_chat.tools.pockets import _list_pockets
+    from db import resumo_mes
 
     if uid != 42 or kind not in chat.DOMAINS:
         raise AssertionError('Usuário/agente fora da fixture sintética')
@@ -101,6 +101,11 @@ def synthetic_read(uid, kind, name, arguments):
         stack.enter_context(patch.object(db.bills, 'list_bills', return_value=[]))
         stack.enter_context(patch.object(resumo_mes, 'resumo_do_mes', return_value={
             'entrou': 0, 'saiu': 0, 'motivos': []}))
+        # compare_periods: período livre lê `db.*` (patchados acima) e conta compras de cartão; `mes=` e meses inteiros
+        # leem `resumo_mes.totais` (formato {entrou, saiu, n, n_cartao}) num cursor próprio: tudo vazio, sem banco.
+        stack.enter_context(patch.object(comparacao_periodos, 'get_conn', MagicMock()))
+        stack.enter_context(patch.object(resumo_mes, 'totais', return_value={'entrou': 0, 'saiu': 0, 'n': 0, 'n_cartao': 0}))
+        stack.enter_context(patch.object(resumo_mes, 'n_compras_cartao', return_value=0))
         stack.enter_context(patch.object(plan_service, 'consolidated_balance_enabled', return_value=False))
         stack.enter_context(patch.object(plan_service, 'get_plan_tier', return_value='pro'))
         stack.enter_context(patch.object(piggy_agents, 'find_duplicate_charges', return_value=[]))

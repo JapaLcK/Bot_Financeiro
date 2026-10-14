@@ -82,6 +82,7 @@ As prioridades abaixo são uma proposta executável baseada no PDF, sem prazo co
 - **Reutilizar:** agregações de analytics e tool `compare_periods`.
 - **Aceite:** mês fechado compara com mês-calendário anterior; mês aberto compara períodos equivalentes e informa a escolha; fevereiro, ano bissexto e virada de ano têm cobertura; delta por categoria inclui categorias novas/sem gasto sem dividir por zero; período e origem visíveis; totais básicos e distribuição atual continuam no Essencial.
 - **Divisão:** um PR de contrato/algoritmo e consumidores; agrupar backend/chat/interface para não publicar interpretações divergentes.
+- **Estado (2026-10-09):** PR A em revisão (decisão do dono: dois PRs): `core/services/comparacao_periodos.py` + tool `compare_periods` + prompt + testes; Essencial recusa a comparação e o `anterior` do resumo-do-mês fica como está. PR B pendente: endpoint Plus+ em `/api/v2`, bloco na tela v2 e decisão sobre o KPI "vs período anterior" do painel antigo. O `_detect_category_spike` (`db/insights.py`), que o PL-05 deixou para o PL-07, NÃO muda neste PR por decisão dele: fica para o PL-06 (reformulação dos insights). Só depois do PR B o PL-07 fecha (aceite "interface").
 
 ### PL-08 — Previsão de contas recorrentes com cobertura explícita
 
