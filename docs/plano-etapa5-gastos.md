@@ -35,7 +35,14 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
    (`deposito_caixinha`, `aporte_investimento`): são "guardado" (§5, P8).
 7. O histórico respeita a janela do plano (`history_earliest_date`); o corte aparece com o
    motivo `inicio_do_historico`, não como mês zerado.
-8. Critério de aceite: a soma das categorias bate com o **Saiu** do Resumo do mesmo mês.
+8. Critério de aceite: a soma das categorias bate com o **Saiu** do Resumo do mesmo mês, **nos
+   meses sem `outra_moeda`**. Com `outra_moeda`, `db/mes_detalhes._em_reais` tira a linha em
+   outra moeda das categorias e `TOTAIS_SQL` ainda a soma no `saiu` (o teste
+   `test_mes_moeda_diferente_tem_cobertura_explicita_sem_donut_falso` espera categorias 10
+   contra `saiu` 110, de propósito): nesse caso a tela mostra só as categorias em reais, diz
+   quantas linhas ficaram fora (`fora_do_total`) e levanta o motivo, e o teste compara com o
+   subtotal em reais, nunca com o `saiu`. Também com o motivo `arredondamento_por_grupo` a
+   igualdade vale só até o centavo de arredondamento por grupo, como no `/mes-detalhes`.
 
 ## 3. O que já existe (não recriar — CLAUDE.md §0.1)
 
@@ -131,7 +138,15 @@ Lançamentos reais; estados de carregando, erro, vazio e dado incerto.
 - **A. Estabelecimento:** limpar por estabelecimento (decisão 3 acima), pela regra e com a
   medição do §3.1.
 - **B. Calendário:** conta todo gasto, sem marca `variable`, com a escala por percentil.
-  Aprovado.
+  Aprovado. **Compra de cartão fora do mês** (apontamento do Codex, confirmado em
+  `test_mes_completo_manual_cartao_parcela_interno_e_conciliacao`, onde um dia volta antes do
+  mês pedido): o leitor põe a compra na fatura do mês escolhido e guarda a data original, que
+  pode cair no mês anterior. Regra proposta, a confirmar na revisão do PR 2: o calendário só
+  desenha dias do próprio mês; a compra de cartão com data fora do mês não vai para nenhum dia
+  e aparece numa linha fixa "N compras do cartão com data de outro mês: R$ X", que entra nas
+  categorias e no total mas não na grade de dias. Na comparação "até o mesmo dia do mês
+  anterior" (decisão 2), a compra de data anterior ao mês conta como já ocorrida (dia 1), e a
+  de data posterior ao fim do mês conta só no total. Nenhum dia é mostrado no mês errado.
 - **C. Editar categoria:** esta etapa só lê emoji e cor. Criar, renomear, trocar emoji e cor
   e arquivar categoria **não estava em nenhuma etapa do plano** (só o painel antigo faz); entra
   no plano principal como tela própria depois das etapas (§6, "Depois"), e até lá abre o
@@ -153,7 +168,10 @@ número ajustado.
 
 ## 7. Como conferir
 
-Pytest com Postgres real para a soma (categorias = Saiu) e para o isolamento entre usuários.
+Pytest com Postgres real para a soma (categorias = Saiu nos meses sem `outra_moeda`;
+categorias = subtotal em reais, com `fora_do_total`, nos meses com ela) e para o isolamento entre
+usuários; um caso com compra de cartão de data fora do mês (a linha "outro mês", sem dia
+errado).
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
