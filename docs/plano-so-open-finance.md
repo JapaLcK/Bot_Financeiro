@@ -5,11 +5,13 @@
 > **Superado (não vale):**
 > - **§1**, a decisão "todo dado tem de vir do Open Finance, sem input de dado manual" e o seu alcance ("nada novo é aceito", "o legado manual sai da tela", "não existe mais depositar nem retirar à mão"), e a tabela "Decisão anterior" onde Q36, Q37, Q38, Q40 (A2) e Q42 aparecem como ampliadas ou superadas. A Q38 (caixinha manual continua) e a Q42 (recorrente só prevê, o cobrador não volta) **continuam valendo**, como a ADR 0006 (D4 e D5) diz.
 > - **§2.1**, o título "tem de parar" (a tabela segue como mapa), **§3.1** na parte que presume a saída do fixo e da receita manuais, **§3.2** em "O que muda" e na lista de gestos que viram recusa, e **§3.3** nos itens "o que fazer saiu da P1 e da P4" e "usuário sem banco conectado".
-> - **§4**, a regra de ordem do início (trocar a fonte, parar de aceitar, esconder), a **Fase 2** inteira (2a, 2b, 2d), a **Fase 3** inteira (3a, 3b), as linhas de "Dependências" e de "O que cada fase toca" que as citam, a frase da **1c** que manda o Carteiro e o aviso de vencimento passarem a ler o OF "ou saírem" (P4), e a instrução da **1b** de travar o "pagar fatura" manual do cartão do banco. A **Fase 1a** (#866) e a **1b** (ingestão e quitação pelo banco: #922, #941) são aditivas e **valem**.
+> - **§4**, a regra de ordem do início (trocar a fonte, parar de aceitar, esconder), a **Fase 2** (2a, 2b, 2d), **exceto** a recusa do "pagar fatura" manual no cartão do banco (veja abaixo), a **Fase 3** inteira (3a, 3b), as linhas de "Dependências" e de "O que cada fase toca" que as citam (menos a de que a 1b vem antes de travar o "pagar fatura" do cartão OF e o risco "fatura OF eternamente a conferir", que seguem), a linha da tabela do 2a que trava "pagar fatura" no **cartão manual** (o cartão manual segue como está) e a frase da **1c** que manda o Carteiro e o aviso de vencimento passarem a ler o OF "ou saírem" (P4). A **Fase 1a** (#866) e a **1b** (ingestão e quitação pelo banco: #922, #941) são aditivas e **valem**.
 > - **§5**, os riscos de parar de aceitar e esconder, enquanto se referirem às Fases 2 e 3.
 > - **§6**, as linhas "PR C: depositar e retirar — Sai", "PR D: ... Não há mais movimento manual", "metas antigas viram legado (escondidas)" e a troca do custo dos "fixos manuais" por recorrências do OF como única fonte. As demais linhas (meta sobre dado do banco, #851, ritmo) **não conflitam**; o #851 será ajustado no PR-C da ADR 0006 (D3).
 > - **§7**, "Renda do mês informada: sai". As demais premissas (categoria, orçamento, 50/30/20, assinatura, conciliação, saldo inicial e ajuste da Carteira, edição de categoria e descrição, simulador) **não conflitam** e ficam.
 > - **§8**, as perguntas **P1, P2, P3 e P4** e as respostas de 2026-10-07 correspondentes. A P4 ("a Previsão passa a ter só o que o Open Finance detecta") contradiz a ADR 0006 D5: os fixos e as receitas manuais continuam na Previsão (conferi: `core/services/cashflow_snapshot.py::ler` importa `ler_recorrentes` e `ler_receitas`, de `db/recurring.py` e `db/recurring_income.py`). Da **P7** vale a detecção da receita pelo extrato (#981), e **não** vale a ideia de que a receita manual sai.
+>
+> **Continua válido, e já implementado:** a recusa do "pagar fatura" manual no **cartão do banco** (item #5 do 2a, PR 2b da 1b): decisão do dono de **2026-10-11** (B2), posterior à de 2026-10-09; `db.cards.pay_bill_amount` levanta `CartaoDoBanco` e quem quita a fatura do cartão do banco é `quitar_pelo_banco` (`db/of_card_bills.py`). A ADR 0006 não a revoga: só destrava a compra manual em cartão **não** sincronizado. Não achei, nas datas de 2026-10-10 a 2026-10-14 que o plano registra (1b em 10-11; P7 em 10-13), outra decisão do dono marcada como superada por engano.
 >
 > **Continua válido:** o inventário do §2 como **mapa** de onde o dado manual entra (os `arquivo:linha` envelhecem); a medição em produção do §9; a Fase 1a e a 1b; a 2c ("apagar tudo" não apaga dado do OF); a P5 (metas, que o código já implementa: #950, #954, #961) e a P6 (reserva como meta), que não conflitam com a ADR 0006; e a parada do cobrador de recorrentes da 1c.
 >
@@ -410,13 +412,15 @@ a ler a recorrência do OF ou saem (P4). Faixa Leve, e Completo se mexer no moto
 
 ### Fase 2: parar de ACEITAR, por canal (reaproveita a trava da Q36)
 
-> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d). A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d), **com uma exceção**: a recusa do "pagar fatura" manual no cartão do banco (item #5 do 2a), decisão do dono de 2026-10-11 já implementada (B2), segue válida. A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). Texto original abaixo, mantido.
 
 A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`, presa por
 `tests/test_fonte_unica_q36.py:351`, que reprova escritor novo sem classificação). A fase
 **estende a trava, não cria outra.**
 
 **2a. Novos casos na trava. Faixa Completo: dinheiro, WhatsApp, IA, /app.**
+
+> **Superado em 2026-10-09** (ADR 0006), **exceto o item #5 na parte do cartão do banco**: a recusa do "pagar fatura" manual no cartão do banco é decisão do dono de 2026-10-11, já implementada (B2), e segue válida. A trava do "pagar fatura" no cartão manual e os demais casos da 2a estão superados.
 - **Faz:** novos casos em `fonte_unica.MENSAGENS`:
   - `cartao_manual`: `create_card`, editar dias/limite e apagar cartão manual (`delete_card`,
     que apaga em cascata faturas e compras); `pay_bill_amount`
