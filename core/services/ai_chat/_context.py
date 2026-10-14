@@ -27,3 +27,16 @@ CARDS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVa
 )
 """Cards que o `show_card` já MOSTROU neste turno (emitiu bloco; chamada recusada não
 entra). O teto vale por turno. Setada pelo runner; None fora dele = sem teto."""
+
+METAS_DO_TURNO: contextvars.ContextVar[bool | None] = contextvars.ContextVar(
+    "ai_chat_metas_do_turno", default=None
+)
+"""A chave das metas (`metas_conversa.metas_ligadas`), lida UMA vez por turno pelo runner: prompt,
+`tools=`, tools e cards de todas as voltas concordam (a leitura decifra o e-mail e grava
+`pii_access_log` a cada falha de cache). None = fora do `chat`: `metas_do_turno` lê na hora."""
+
+
+def metas_do_turno(uid: int) -> bool:
+    from core.services import metas_conversa
+    v = METAS_DO_TURNO.get()
+    return v if v is not None else metas_conversa.metas_ligadas(uid)

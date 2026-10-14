@@ -1,7 +1,7 @@
-"""Os 16 cards do painel que o chat do app mostra (tool `show_card`), mais o `periodo`, só do chat.
+"""Os cards que o chat do app mostra (tool `show_card`): os widgets do painel, mais `periodo` e `caixinhas`, que não são widget (só do chat).
 
 Cada leitor chama a MESMA função que o endpoint do widget chama (as de `api/v2`,
-`api/nativo`, ou o corpo que a rota legada chama: `status_metas`, `resumo_cartoes`,
+`api/nativo`, ou o corpo que a rota legada chama: `status_metas` (caixinhas), `resumo_cartoes`,
 `compute_evolution`...), sempre com `uid` explícito, nunca vindo dos args do modelo.
 O bloco é o JSON do endpoint; a visão do modelo sai do MESMO objeto, só com número
 como número (o `ai_guard` não reconhece texto como evidência). O envelope
@@ -17,8 +17,10 @@ from typing import Any, Callable, NamedTuple
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
+from ._context import metas_do_turno
+
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
-       "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "fatura", "parcelas",
+       "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
        "renda", "piggy", "periodo")
 MAX_MESES = 3
 MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
@@ -91,10 +93,12 @@ def registro() -> dict[str, Card]:
     from api.nativo.rendimento import rendimento
     from api.v2.assinaturas import _assinante as gate_assinaturas, assinaturas
     from api.v2.contas import contas
+    from api.v2.metas import listar as listar_metas
     from api.v2.previsao import _assinante as gate_previsao, previsao
     from api.v2.resumo_mes import mes_pedido, resumo
     from core.ai_patterns import INSIGHTS_CACHE_TTL_SECONDS, _cache_kind, _get_cached
     from core.services.ai_chat.tools.launches import _tendencia
+    from core.services import metas_conversa
     from core.services.metas_status import status_metas
     from core.services.plan_service import forecast_horizons_for, plan_gate_ok
     from db import compute_evolution
@@ -133,10 +137,17 @@ def registro() -> dict[str, Card]:
     def gate_renda(uid, a):
         require_plan_feature(uid, "financial_comparison")
 
+    piggy_pendente = ("as dicas do Piggy ainda não estão prontas. "
+                      "Diga que ainda não estão prontas e siga sem o card.")
+
     def gate_piggy(uid, a):
         require_plan_feature(uid, "insights")
         if _get_cached(uid, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS) is None:
-            raise CardIndisponivel("as dicas do Piggy ainda não estão prontas")
+            raise CardIndisponivel(piggy_pendente)
+
+    def gate_metas(uid, a):  # P1-b: as metas novas só para quem tem a chave do /painel; os demais, caixinhas
+        if not metas_do_turno(uid):
+            raise CardIndisponivel("metas_so_no_painel_novo. Use o card caixinhas.")
 
     def prev(uid, a):
         return [(None, {"previsao": previsao(dias=a["dias"], uid=uid)})]
@@ -154,7 +165,7 @@ def registro() -> dict[str, Card]:
         # O /insights do painel segue gerando. Gerar aqui exige timeout em `_call_llm`.
         itens = _get_cached(uid, _cache_kind("insights"), INSIGHTS_CACHE_TTL_SECONDS)
         if itens is None:
-            raise CardIndisponivel("as dicas do Piggy ainda não estão prontas")
+            raise CardIndisponivel(piggy_pendente)
         return [(None, {"insights": {"ok": True, "insights": itens}})]
 
     def historico(r):
@@ -183,7 +194,11 @@ def registro() -> dict[str, Card]:
                        _so("patrimonio", "total", "partes", "motivos")),
         "rendimento": Card(lambda uid, a: [(None, {"rendimento": rendimento(uid=uid)})], todo("rendimento")),
         "assinaturas": Card(assin, todo("assinaturas"), lambda uid, a: gate_assinaturas(uid)),
-        "metas": Card(lambda uid, a: [(None, {"metas": {"ok": True, "goals": status_metas(uid)}})], todo("metas")),
+        # a visão é o MESMO texto da tool `list_metas`: dinheiro como texto pronto, nunca float
+        "metas": Card(lambda uid, a: [(None, {"metas": listar_metas(uid=uid)})],
+                      lambda r: metas_conversa.para_conversa(r["metas"]), gate_metas),
+        "caixinhas": Card(lambda uid, a: [(None, {"caixinhas": {"ok": True, "goals": status_metas(uid)}})],
+                          todo("caixinhas")),
         "fatura": Card(lambda uid, a: [(None, {"cartoes": {"ok": True, "cards": resumo_cartoes(uid)}})],
                        todo("cartoes")),
         "parcelas": Card(lambda uid, a: [(None, {"parcelas": {
