@@ -108,7 +108,7 @@ def create_pluggy_api_key() -> str:
 #
 # Aqui e não nos 8 `Jsonb(...)` de `db/open_finance.py`: as portas de leitura da
 # API são DUAS — `_pluggy_get` (`/items/{id}`, `/accounts`, `/v2/transactions`,
-# `/investments`, `/connectors` — grep) e `list_pluggy_recurring_payments` (o
+# `/investments`, `/bills`, `/connectors` — grep) e `list_pluggy_recurring_payments` (o
 # POST do enrichment, logo abaixo) — e as duas sanam a resposta, então o ponto
 # cobre também os campos `text` que os `Jsonb` deixariam de fora. O `PATCH /items/{id}` não passa por
 # aqui e leva a sua própria chamada — os 2 chamadores descartam o retorno HOJE

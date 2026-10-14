@@ -31,6 +31,11 @@ export function moneyText(s) {
   const inteiro = (digitos.slice(0, ponto).replace(/^0+/, "") || "0").replace(/\B(?=(\d{3})+$)/g, ".");
   return `${m[1] ? "−" : ""}R$ ${inteiro},${digitos.slice(ponto).padEnd(2, "0")}`;
 }
+// O valor que o usuário digita num formulário de escrita (Lançamento, Meta): vírgula vira ponto,
+// no máximo 9 dígitos e 2 casas, maior que zero. Texto, nunca float.
+export const ERRO_VALOR = "Use um valor maior que zero, até 9 dígitos e 2 casas decimais, sem separador de milhares.";
+export const normalizaValor = (s) => s.trim().replace(",", ".");
+export const valorInvalido = (norm) => !/^\d{1,9}(\.\d{1,2})?$/.test(norm) || !/[1-9]/.test(norm);
 export const signed = (n) => { const v = zero(n, 2); return `${sign(v)}${money(Math.abs(v))}`; };
 export const signed0 = (n) => { const v = zero(n, 0); return `${sign(v)}${money0(Math.abs(v))}`; };
 // A partir de R$ 1 milhão, "R$ 1,2 mi": o valor digitado no simulador não tem teto e não pode estourar o layout.

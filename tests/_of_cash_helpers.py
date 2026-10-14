@@ -34,6 +34,18 @@ def q(sql, params=(), fetch=False):
     return rows
 
 
+def pagamento_legado(uid, cid, nome, valor, bill):
+    """Pagamento manual que existia ANTES de o cartão ser do banco (hoje `pay_bill_amount` o recusa):
+    zera a FK, paga pelo caminho de produção e restaura. Só para montar estado antigo."""
+    fk = q("select open_finance_account_id from credit_cards where id=%s and user_id=%s",
+           (cid, uid), True)[0]["open_finance_account_id"]
+    q("update credit_cards set open_finance_account_id=null where id=%s and user_id=%s", (cid, uid))
+    try:
+        return db.pay_bill_amount(uid, cid, nome, valor, bill_id=bill)
+    finally:
+        q("update credit_cards set open_finance_account_id=%s where id=%s and user_id=%s", (fk, cid, uid))
+
+
 def conecta(uid, item, desde=CONECTADO, instituicao=612, nome="Nubank"):
     """Conexão nova com `created_at` no passado (a data da 1ª conexão é o corte)."""
     conn_id = db.save_pluggy_open_finance_item(uid, {

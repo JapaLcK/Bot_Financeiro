@@ -35,7 +35,7 @@ export interface ParDeContraste {
 }
 
 const TEXTO: Chave[] = ["ink", "inkMuted", "brandInk", "positive", "warning", "danger"];
-const FUNDOS: Chave[] = ["bg", "surface", "surfaceRaised"];
+const FUNDOS: Chave[] = ["bg", "surface", "surfaceControl", "surfaceRaised"];
 
 /**
  * Todo par que o produto realmente sobrepõe (texto ou não-texto sobre fundo).
@@ -47,7 +47,7 @@ const FUNDOS: Chave[] = ["bg", "surface", "surfaceRaised"];
  * por reprovar, mas por serem só DECORAÇÃO, nunca o único sinal de um
  * estado (nenhum comunica informação sozinho, então nenhum teto de
  * contraste se aplica). Medido com a própria `contraste()` acima, hex de
- * `tokens.ts`, 2026-09-17 — remeça se a paleta mudar:
+ * `tokens.ts`, 2026-10-10 — remeça se a paleta mudar:
  *
  * `border`×`surfaceRaised` = 1,25 no claro — o friso real do Card `raised`
  * (`Card.tsx`: fundo `surfaceRaised` quando `elevacao="raised"`, borda
@@ -78,13 +78,16 @@ export const PARES: ParDeContraste[] = [
   })),
   { primeiro: "onAcao", segundo: "acao", minimo: 4.5 },
   { primeiro: "onDanger", segundo: "danger", minimo: 4.5 },
+  // Barra "Saiu" do Calendário: não-texto sobre o fundo e o Card.
+  ...(["bg", "surface"] as Chave[]).map((segundo) => ({ primeiro: "alert" as Chave, segundo, minimo: 3 as const })),
   ...FUNDOS.map((segundo) => ({ primeiro: "brand" as Chave, segundo, minimo: 3 as const })),
-  ...(["bg", "surface"] as Chave[]).map((segundo) => ({
+  ...(["bg", "surface", "surfaceControl"] as Chave[]).map((segundo) => ({
     primeiro: "inkMuted" as Chave,
     segundo,
     minimo: 3 as const,
   })),
-  ...FUNDOS.map((segundo) => ({ primeiro: "inkFaint" as Chave, segundo, minimo: 3 as const })),
+  // PDF §13: ink-3 é "cinza mais claro aceito para texto" (rótulo inativo do segmentado, placeholder).
+  ...FUNDOS.map((segundo) => ({ primeiro: "inkFaint" as Chave, segundo, minimo: 4.5 as const })),
   // Selo do indicador da meta (`patrimonio.tsx`): texto `ink` sobre fundo `border`.
   { primeiro: "ink", segundo: "border", minimo: 4.5 },
 ];

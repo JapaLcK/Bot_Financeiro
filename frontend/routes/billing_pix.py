@@ -55,6 +55,7 @@ from core.services.pix_extras import ExtrasIndisponiveis
 from core.services.pix_pricing import CoberturaJaPaga
 from core.services.plan_service import TIER_TO_STORED_PLAN, tier_publico
 from frontend.routes import shared
+from frontend.routes.retomada import comprador_pix
 
 router = APIRouter()
 
@@ -92,7 +93,7 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     o mesmo crédito, e o índice parcial do banco é a segunda barreira, não a
     primeira. Import tardio para não inverter a direção do import.
     """
-    user_id = shared.resolve_dashboard_user_id(request)
+    user_id, retomada = await comprador_pix(request)
     # O corpo fala o vocabulário PÚBLICO da /precos, o mesmo do gêmeo do Stripe
     # (`finance_bot_websocket_custom.py:4472`) — o JS que alimenta os dois é UM
     # só. Aceitar o legado aqui era a armadilha: `plus` levava 400 e o card Pro
@@ -107,6 +108,8 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     if not _documento_valido(doc):
         raise HTTPException(status_code=400,
                             detail="Informe um CPF ou CNPJ válido.")
+    if retomada and payload.confirm_cancel_stripe:   # pelo link não se migra do cartão
+        raise HTTPException(status_code=409, detail={"error": "retomada_sem_migracao"})
     extras = payload.extras
     if len(extras) > CAIXAS or len(set(extras)) != len(extras):
         raise HTTPException(status_code=400,
@@ -135,13 +138,9 @@ async def billing_pix_checkout(request: Request, payload: PixCheckoutBody):
     except Vitalicio as exc:
         # Sem consultar nada de novo: quem decidiu foi o `criar_checkout`. A
         # mensagem é COPIADA de `finance_bot_websocket_custom.py:4193` para o
-        # cliente ler o mesmo texto nas duas recusas.
-        # **Isto NÃO é o §0.7, e invocá-lo aqui era errado**: o §0.7 trata
-        # duplicação INEVITÁVEL (HTML que não importa Python) e manda um teste
-        # comparar as fontes. Esta é evitável — e consolidar num literal só
-        # resolveria 2 dos 4 sites: `:4679` já diz outra coisa ("Você tem acesso
-        # vitalício de brinde — trocar de plano substituiria isso."), e unificar
-        # o texto que o cliente lê é decisão de copy do dono, não deste PR.
+        # cliente ler o mesmo texto nas duas recusas. **Isto NÃO é o §0.7** (que
+        # trata duplicação INEVITÁVEL): é evitável, mas consolidar resolveria 2 dos
+        # 4 sites (`:4679` diz outra coisa) e unificar a copy é decisão do dono.
         raise HTTPException(status_code=409, detail={
             "error": exc.ERRO,
             "message": "Você já tem acesso vitalício de brinde — assinar um plano "
@@ -188,7 +187,7 @@ async def billing_pix_extras(request: Request):
     `/billing/pix/extras`: o poll `/billing/pix/{public_token}` engoliria o path."""
     from core.services.pix_extras import oferta, selecao  # noqa: PLC0415
 
-    user_id = shared.resolve_dashboard_user_id(request)
+    user_id = (await comprador_pix(request)).user_id
     return {"extras": await asyncio.to_thread(oferta, user_id),
             "selecao": await asyncio.to_thread(selecao, user_id)}
 
@@ -207,7 +206,7 @@ async def billing_pix_status(request: Request, public_token: str):
     from core.services.pix_extras import total_cents  # noqa: PLC0415
     from db.pix_charges import buscar_por_public_token  # noqa: PLC0415
 
-    user_id = shared.resolve_dashboard_user_id(request)
+    user_id = (await comprador_pix(request)).user_id
     linha = await asyncio.to_thread(buscar_por_public_token, user_id, public_token)
     if linha is None:
         raise HTTPException(status_code=404, detail="Cobrança não encontrada.")

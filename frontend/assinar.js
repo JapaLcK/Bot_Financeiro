@@ -1,7 +1,7 @@
 /**
  * /assinar (funil v3 do quiz): cria a conta e abre o checkout do Stripe, embutido ou hospedado. A /q manda
- * `plano`/`ciclo` na query e nome, e-mail e WhatsApp no FRAGMENTO (`n`, `e`, `w`). Este é o 1º script síncrono
- * do <head>, ANTES do ponto onde o `inject_tracking` põe o Pixel e o GA4: o topo tira o fragmento (e p/r/e/c/n/w
+ * `plano`/`ciclo` na query e nome, e-mail e WhatsApp no FRAGMENTO (`n`, `e`, `w`). Script síncrono do
+ * <head> (depois só do auth-refresh.js e do assinar-rede.js, que não leem a URL), ANTES do ponto onde o `inject_tracking` põe o Pixel e o GA4: o topo tira o fragmento (e p/r/e/c/n/w
  * da query) da URL antes de qualquer rastreio ler `location.href`. Os estados são as <section> da assinar.html; testes em tests/frontend/assinar_*.
  */
 (function () {
@@ -46,6 +46,7 @@
   let contaEmail = "";  // a conta que vai pagar, para o "Assinando como"
   let checkout = null, relogio = null, stripeJs = null, inicioSaiu = false, refazer = null;
   const $ = function (id) { return document.getElementById(id); };
+  const post = window.PBAssinarRede.post, sessaoViva = window.PBAssinarRede.sessaoViva;  // assinar-rede.js, antes deste
 
   function mostra(id) {
     estado = id;
@@ -59,23 +60,6 @@
     $(id).textContent = texto || "";
     $(id).classList.toggle("show", !!texto);
     $(id).classList.toggle("ok", !!ok);
-  }
-
-  /** POST da nossa API. Nunca lança: falha de rede volta como status 0. */
-  async function post(url, corpo) {
-    try {
-      // pbCsrfHeaders relê o cookie a cada chamada: o logout reemite o CSRF.
-      const r = await fetch(url, {
-        method: "POST", credentials: "same-origin",
-        headers: window.pbCsrfHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(corpo || {}),
-      });
-      let d = null;
-      try { d = await r.json(); } catch (_) { /* corpo vazio ou não-JSON */ }
-      return { status: r.status, ok: r.ok, d: d && typeof d === "object" ? d : {} };
-    } catch (_) {
-      return { status: 0, ok: false, d: {} };
-    }
   }
 
   // Quem navega devolve true e segura a trava até a página sair; o pageshow a solta na volta pelo bfcache.
@@ -133,18 +117,6 @@
   // ── S2: já tem conta ──────────────────────────────────────────────────────
   /** Logout; true só se o servidor respondeu ok. A limpeza do auth-refresh roda com qualquer resposta. */
   async function saiDaConta() { const r = await post("/auth/logout"); me = null; contaEmail = ""; return r.ok; }
-
-  /** O e-mail logado AGORA (carga ou outra aba); "" só no 401; null se não deu para saber (rede,
-   *  5xx, `ms`, JSON quebrado). O S2 desloga com e-mail ou null (o /login devolveria a conta logada);
-   *  com "" não (o Clear-Site-Data apagaria o _fbc). Via auth-refresh: 401 sem refresh limpa o storage
-   *  → begin() depois. `ms` só no clique (o `voo` não fica preso); a carga espera (plano §3, C). */
-  function sessaoViva(ms) {
-    const c = new AbortController(), t = ms && setTimeout(function () { c.abort(); }, ms);
-    return fetch("/auth/me", { credentials: "same-origin", signal: c.signal }).then(function (r) {
-      if (r.status === 401) return "";
-      return r.ok ? r.json().then(function (s) { return s && typeof s.email === "string" ? s.email : ""; }) : null;
-    }).catch(function () { return null; }).finally(function () { clearTimeout(t); });
-  }
 
   /** Com sessão viva, só segue se o logout deu certo: o /login devolveria a conta velha, e o S3 a cobraria (D7). */
   async function saiSeLogado() {

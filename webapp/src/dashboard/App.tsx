@@ -6,6 +6,7 @@ import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
 import { Command } from "./parts/Command";
+import { MenuTelas } from "./parts/MenuTelas";
 import { Ajuda } from "./parts/Ajuda";
 import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
@@ -104,7 +105,7 @@ export function App() {
           </main>
         </div>
       </div>
-      <nav className={DEMO ? "tabbar" : "tabbar tabbar-ajuda"} aria-label="Páginas do painel">
+      <nav className="tabbar" aria-label="Páginas do painel">
         {TABBAR.map((p) => {
           const r = route(p);
           return (
@@ -116,11 +117,12 @@ export function App() {
             </a>
           );
         })}
-        {!DEMO && <div className="ajuda"><Ajuda path={path}><i className="ph ph-question" aria-hidden="true" /><span>Ajuda</span></Ajuda></div>}
+        <button type="button" aria-haspopup="dialog" aria-current={TABBAR.includes(path) ? undefined : "true"} onClick={() => window.dispatchEvent(new Event("dash:menu"))}><i className="ph ph-list" aria-hidden="true" /><span>Menu</span></button>
       </nav>
       <AskBar path={path} />
       <Tip />
       <Command />
+      <MenuTelas />
     </>
   );
 }

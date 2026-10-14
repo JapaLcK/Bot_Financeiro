@@ -68,7 +68,7 @@ describe("SegmentedControl", () => {
     erroConsole.mockRestore();
   });
 
-  it("segmento selecionado ganha borda inkMuted (o fundo surfaceRaised sozinho não distingue: 1,08/1,10 de contraste); não selecionado fica sem borda", () => {
+  it("nenhum segmento tem borda (PDF); o selecionado é marcado pelo texto ink contra inkFaint", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(
       <SegmentedControl opcoes={["Semana", "Mês"]} valor="Mês" onChange={jest.fn()} />,
     );
@@ -78,11 +78,14 @@ describe("SegmentedControl", () => {
     const indicadorNaoSelecionado = indicadoresClaro[1]!;
     const indicadorSelecionado = indicadoresClaro[3]!;
     expect(indicadorNaoSelecionado.borderWidth).toBeFalsy();
-    expect(indicadorSelecionado.borderWidth).toBe(1);
-    expect(indicadorSelecionado.borderColor).toBe(claro.inkMuted);
+    expect(indicadorSelecionado.borderWidth).toBeFalsy();
+    expect(indicadorSelecionado.backgroundColor).toBe(claro.surfaceRaised);
+    expect(StyleSheet.flatten(c.getByText("Mês").props.style).color).toBe(claro.ink);
+    expect(StyleSheet.flatten(c.getByText("Semana").props.style).color).toBe(claro.inkFaint);
 
     const indicadoresEscuro = e.UNSAFE_getAllByType(Animated.View).map((v) => StyleSheet.flatten(v.props.style));
-    expect(indicadoresEscuro[3]!.borderColor).toBe(escuro.inkMuted);
+    expect(indicadoresEscuro[3]!.borderWidth).toBeFalsy();
+    expect(StyleSheet.flatten(e.getByText("Semana").props.style).color).toBe(escuro.inkFaint);
   });
 
   it("usa usePressao: onPressIn anima a escala para 0.97 (padrão dos quatro componentes interativos)", () => {

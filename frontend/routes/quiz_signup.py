@@ -27,6 +27,7 @@ from core.client_ip import rate_limit_key
 from core.pg_text import recusa_veneno
 from core.secure_compare import constant_time_eq
 from core.services.email_service import send_account_exists_notice, send_verification_email
+from db.remarketing import registrar_t0
 from db.reports import (
     AccountAlreadyExistsError, create_email_verification, get_auth_user, quiz_signup_pendente,
 )
@@ -94,6 +95,15 @@ def _telefone(whatsapp: str | None) -> str | None:
 async def _registra_falha(onde: str, exc: Exception | None = None) -> None:
     motivo = type(exc).__name__ if exc else "envio_falhou"
     await log_system_event("error", "quiz_signup_failed", f"{onde}: {motivo}", source="quiz")
+
+
+async def _t0_da_assinar(user_id: int, origem: str) -> None:
+    """T0 da régua de remarketing. Idempotente (não sobrescreve o já gravado); a falha não
+    derruba o cadastro: vira warning com só o tipo da exceção."""
+    try:
+        await asyncio.to_thread(registrar_t0, user_id, origem)
+    except Exception as exc:
+        await log_system_event("warning", "remarketing_t0_failed", type(exc).__name__, source="quiz")
 
 
 async def _avisa_dono(exc: AccountAlreadyExistsError) -> None:
@@ -213,7 +223,12 @@ async def quiz_conta(request: Request, response: Response, body: QuizContaBody,
             sessao = await _get_current_user(request, None)
         except HTTPException:
             sessao = None
-        return {"estado": "logado" if sessao == result["user_id"] else "tem_conta"}
+        if sessao != result["user_id"]:
+            return {"estado": "tem_conta"}
+        # 'precos' = só e-mail: o telefone guardado nesta conta não passou pela frase de opt-in
+        # (o `logado` não grava o número digitado), então o WhatsApp da régua não vale (P1).
+        await _t0_da_assinar(result["user_id"], "precos")
+        return {"estado": "logado"}
     if result["estado"] == "ocupado":  # outro pedido do mesmo e-mail: tente de novo
         return JSONResponse({"estado": "ocupado"}, status_code=409)
     if result["estado"] != "criada":
@@ -236,4 +251,5 @@ async def quiz_conta(request: Request, response: Response, body: QuizContaBody,
         raise HTTPException(status_code=503, detail="Não deu para criar a conta. Tente de novo.")
     # Só depois da sessão: com ela falhando a conta é desfeita, e o e-mail já teria saído.
     await asyncio.to_thread(boas_vindas_da_conta, email, user_id)
+    await _t0_da_assinar(user_id, "assinar")  # só depois da sessão: com ela falhando a conta é desfeita
     return {"estado": "criada", "user_id": user_id, **credenciais}

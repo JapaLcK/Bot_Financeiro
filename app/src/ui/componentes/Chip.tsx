@@ -16,15 +16,16 @@ interface Props {
 
 /**
  * Alvo de toque de 44pt na ALTURA e na LARGURA pelo tamanho real do
- * `Pressable`, não por `hitSlop`: o React Native recorta o `hitSlop` nos
+ * `Pressable` (8 de folga em cima e embaixo do chip de 28; não é `minHeight`, que
+ * abriria um vão maior entre chips de uma linha do que entre os de duas), não por `hitSlop`: o React Native recorta o `hitSlop` nos
  * limites do pai, e numa linha de chips o pai encolhe para a altura do chip
  * — a folga prometida não existiria (numa `ScrollView` horizontal, que corta
- * o conteúdo, menos ainda). Por isso a pílula visível tem 34pt e o
+ * o conteúdo, menos ainda). Por isso o chip visível tem 28pt (PDF) e o
  * `Pressable` em volta, 44pt. O `minWidth` cobre o rótulo de 1-2
  * caracteres. Selecionado usa `brandSoft`/`brandInk` (par medido em `PARES`,
- * ≥4,5 nos dois temas). O contorno de 1px (`inkMuted`/`brandInk`, também em
- * `PARES`) existe porque o fundo `surface` do não selecionado some dentro de
- * um `Card`, que tem o mesmo fundo.
+ * ≥4,5 nos dois temas). Sem contorno (PDF): o fundo `surfaceControl` é um
+ * plano acima do `surface` do Card. O `paddingVertical` deixa o rótulo quebrar
+ * em 2 linhas sem encostar na borda.
  */
 export function Chip({ rotulo, selecionado, onPress, desativado }: Props) {
   const { cores } = useTema();
@@ -43,26 +44,25 @@ export function Chip({ rotulo, selecionado, onPress, desativado }: Props) {
       disabled={desativado}
       accessibilityRole="button"
       accessibilityState={{ selected: selecionado }}
-      style={{ minHeight: 44, justifyContent: "center" }}
+      style={{ paddingVertical: 8, justifyContent: "center" }}
     >
       <Animated.View
         style={[
           {
-            paddingHorizontal: 14,
-            borderRadius: raio.pilula,
-            borderWidth: 1,
-            borderColor: selecionado ? cores.brandInk : cores.inkMuted,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: raio.chip,
             alignItems: "center",
             justifyContent: "center",
-            minHeight: 34,
+            minHeight: 28,
             minWidth: 44,
-            backgroundColor: selecionado ? cores.brandSoft : cores.surface,
+            backgroundColor: selecionado ? cores.brandSoft : cores.surfaceControl,
           },
           desativado && { opacity: 0.5 },
           pressao.estilo,
         ]}
       >
-        <Texto variante="rotulo" tom={selecionado ? "brandInk" : "inkMuted"} style={{ fontSize: 15, lineHeight: 20 }}>
+        <Texto variante="legenda" tom={selecionado ? "brandInk" : "inkMuted"}>
           {rotulo}
         </Texto>
       </Animated.View>

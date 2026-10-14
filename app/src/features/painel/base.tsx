@@ -1,23 +1,26 @@
-import { useState, type ReactNode } from "react";
+import type { Href } from "expo-router";
+import { useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
 import { usePressao, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { Card } from "@/ui/componentes/Card";
+import { SegurouContext } from "@/ui/componentes/CurvaAcumulada";
 import { Money } from "@/ui/componentes/Money";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
-import { espaco, raio, type Paleta } from "@/ui/tokens";
+import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { TITULOS, type Widget } from "./catalogo";
+import { useNavegacaoPainel } from "./navegacao";
 import { usePainel, type Dados, type Recurso } from "./provider";
 /**
- * Com texto, espelha os tokens do `Button secondary` (contorno `inkMuted`, texto `ink`). `texto` é o visível; `rotulo`, o do VoiceOver.
- * O contorno tem 36pt (`compacta`: 30pt, ao lado de valor), mas o alvo de toque é o `Pressable` de 44pt em volta, não `hitSlop` (o pai o recorta; ver `Chip`).
+ * Com texto, espelha os tokens do `Button secondary` (PDF "Fantasma": fundo `surfaceControl`, sem contorno, texto `ink` SemiBold). `texto` é o visível; `rotulo`, o do VoiceOver.
+ * O botão visível tem 36pt (`compacta`: 30pt, ao lado de valor), mas o alvo de toque é o `Pressable` de 44pt em volta, não `hitSlop` (o pai o recorta; ver `Chip`).
  */
 export function Acao({ rotulo, texto = rotulo, onPress, icone, iconeFim, somenteIcone = false, desativado = false, compacta = false }: { rotulo: string; texto?: string; onPress: () => void; icone?: NomeIcone; iconeFim?: NomeIcone; somenteIcone?: boolean; desativado?: boolean; compacta?: boolean }) {
   const { cores } = useTema(); const pressao = usePressao();
-  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, borderWidth: 1, borderColor: cores.inkMuted, borderRadius: compacta ? raio.sm : raio.md, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" style={[{ flexShrink: 1 }, !compacta && { fontSize: 15, lineHeight: 20 }]}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} />}</Animated.View></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, backgroundColor: cores.surfaceControl, borderRadius: compacta ? raio.chip : raio.controle, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" style={{ flexShrink: 1, fontFamily: escalas.secao.fontFamily }}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} />}</Animated.View></Pressable>;
 }
 export function Valor({ valor, destaque = false, pequeno = false, tipo = "saldo" }: { valor: number | null; destaque?: boolean; pequeno?: boolean; tipo?: "saldo" | "entrada" | "saida" }) {
   const { oculto } = usePainel(); const { fontScale } = useTipografiaPainel();
@@ -42,7 +45,20 @@ export function SeteDias<T>({ itens, children }: { itens: T[]; children: (item: 
 }
 /** Compromissos acompanha o horizonte da previsão (30/60/90); sem previsão pronta, o título fixo do catálogo. */
 export function tituloWidget(id: Widget, dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return id === "compromissos" && r?.fase === "pronto" ? `Próximos ${r.dado.dias} dias` : TITULOS[id]; }
-export function Bloco({ id, children, abrir }: { id: Widget; children: ReactNode; abrir?: () => void }) { const titulo = tituloWidget(id, usePainel().dados); return <Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card>; }
+/**
+ * `ir`: o card INTEIRO leva a `destino` (aba) ao toque. O `Pressable` de fora só captura o toque (`accessible={false}`: o VoiceOver
+ * continua lendo os textos e o `Avisos` de dentro, que seria engolido por um botão único); o título é o botão que o VoiceOver anuncia.
+ * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
+ * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
+ * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
+ */
+export function Bloco({ id, children, abrir, ir }: { id: Widget; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } }) {
+  const titulo = tituloWidget(id, usePainel().dados); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
+  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
+  const cabecalho = <Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>;
+  const card = <SegurouContext.Provider value={segurou}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPressIn={zerar} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></SegurouContext.Provider>;
+  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
+}
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(); const r = p.dados[nome];
   if (!r || r.fase === "carregando") return <ActivityIndicator accessibilityLabel="Carregando dados" />;
@@ -85,12 +101,10 @@ export function Curva({ valores }: { valores: (number | null)[] }) {
   const pontos = nums.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, nums.length - 1)},${100 - (v - min) / amplitude * 85}`).join(" ");
   return <Svg width="100%" height={112} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período"><Path d={pontos} fill="none" stroke={cores.brand} strokeWidth={3} /></Svg>;
 }
-/** Cor de cada categoria, pelo índice: o donut do "Para onde vai" e o que mais combinar com ele. */
-export const CORES_CATEGORIA = ["brand", "positive", "warning", "inkMuted"] as const satisfies readonly (keyof Paleta)[];
 export function Anel({ partes }: { partes: number[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();
   if (oculto) return <Texto tom="inkMuted">Distribuição oculta</Texto>;
   const total = partes.reduce((a, b) => a + Math.max(0, b), 0); if (!total) return null;
   let acumulado = 0;
-  return <Svg width={120} height={120} viewBox="0 0 120 120" accessible accessibilityLabel="Distribuição por categoria"><Circle cx={60} cy={60} r={44} stroke={cores.border} fill="none" strokeWidth={16} />{partes.map((v, i) => { const comprimento = Math.max(0, v) / total * 276.46, inicio = acumulado; acumulado += comprimento; return <Circle key={i} cx={60} cy={60} r={44} fill="none" stroke={cores[CORES_CATEGORIA[i % CORES_CATEGORIA.length]!]} strokeWidth={16} strokeDasharray={`${comprimento} ${276.46 - comprimento}`} strokeDashoffset={-inicio} rotation={-90} origin="60,60" />; })}</Svg>;
+  return <Svg width={120} height={120} viewBox="0 0 120 120" accessible accessibilityLabel="Distribuição por categoria"><Circle cx={60} cy={60} r={44} stroke={cores.border} fill="none" strokeWidth={16} />{partes.map((v, i) => { const comprimento = Math.max(0, v) / total * 276.46, inicio = acumulado; acumulado += comprimento; return <Circle key={i} cx={60} cy={60} r={44} fill="none" stroke={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} strokeWidth={16} strokeDasharray={`${comprimento} ${276.46 - comprimento}`} strokeDashoffset={-inicio} rotation={-90} origin="60,60" />; })}</Svg>;
 }

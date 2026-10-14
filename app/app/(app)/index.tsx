@@ -14,7 +14,7 @@ import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
-import { espaco } from "@/ui/tokens";
+import { espaco, raio } from "@/ui/tokens";
 
 const MENSAGEM_ERRO_SAIR = "Não conseguimos sair. Tente de novo.";
 
@@ -124,7 +124,7 @@ export default function Inicio() {
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: espaco.md }}>
               <Texto variante="titulo" style={{ flex: 1 }}>Olá, {estado.nome}</Texto>
               <Pressable accessibilityRole="button" accessibilityLabel="Configurações da conta" disabled={entrando} accessibilityState={{ disabled: entrando }} onPress={() => navegar("/configuracoes")}
-                style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}>
+                style={{ width: 48, height: 48, borderRadius: raio.pilula, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}>
                 <Texto variante="rotulo">{estado.nome.slice(0, 2).toUpperCase()}</Texto>
               </Pressable>
             </View>

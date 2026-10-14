@@ -54,7 +54,7 @@
 <div class="lp-shell">
 <p class="lp-eyebrow">Informações do PigBank</p>
 <h1>Política de Privacidade</h1>
-<p class="lp-legal-date">Última atualização: 26 de setembro de 2026</p>
+<p class="lp-legal-date">Última atualização: 10 de outubro de 2026</p>
 </div>
 </section>
 <div class="lp-shell lp-legal-layout">
@@ -114,6 +114,7 @@
 <li>Conteúdo de mensagens e interações enviadas ao bot pelo WhatsApp, quando necessário para interpretar comandos, registrar informações financeiras, responder solicitações, tratar anexos e manter a segurança do serviço.</li>
 <li>Dados técnicos e de segurança, como logs de acesso, endereço IP, user agent, eventos de autenticação, erros e registros antifraude.</li>
 <li>Respostas do quiz de perfil financeiro (como o dinheiro entra, o que sobra no fim do mês, como você usa o cartão, o que faria com R$ 1.000 e seu objetivo para os próximos 12 meses) e o perfil resultante, quando você chega ao cadastro pelo quiz. Usamos para montar o seu painel e entender quem usa o PigBank. Só guardamos se você criar a conta; elas saem no "Recomeçar do zero" e na exclusão da conta.</li>
+<li>Teste do Piggy, sem conta: se você toca em "Testar o Piggy" e conversa com ele no WhatsApp, o número de WhatsApp que envia a mensagem, o conteúdo dessa conversa e a origem do clique (parâmetros de campanha do link, como utm_source e utm_campaign) são tratados para operar o teste. Os dados financeiros do teste são fictícios: nenhum dado seu é cadastrado, lançamento nenhum é registrado e nenhuma conta é criada. O que fica guardado é só um código derivado do seu telefone, a quantidade de perguntas já usadas, as datas de cada etapa (clique, início, primeira pergunta respondida, última pergunta e clique no link de assinatura), um código aleatório da sessão (que vai na mensagem pré-preenchida do botão e no link de assinatura) e os parâmetros de campanha do clique (utm_source e utm_campaign). O código do telefone é apagado em cerca de 30 dias; o código da sessão, os contadores, as datas e os parâmetros de campanha ficam sem prazo para serem apagados. Sem o código do telefone, eles não identificam você por si sós, salvo se o link de campanha em que você clicou carregar algum dado pessoal, o que os nossos links não fazem. Se a Meta informar erro na entrega de uma resposta, o número de WhatsApp pode ficar gravado nos registros técnicos de erro da aplicação, que hoje não têm exclusão automática. Isso serve para limitar o teste e medir se ele funciona. O que você escreve não é salvo no PigBank: vai para a IA que responde (OpenAI) e fica na memória do servidor, para manter o contexto da conversa. Não há um prazo fixo para apagar essa memória: ela é descartada quando o servidor reinicia, quando a memória reservada ao teste enche ou quando a conversa é retomada depois de um intervalo de cerca de duas horas.</li>
 </ul>
 </section>
 <section id="privacy-2">
@@ -220,6 +221,17 @@
           como um número de telefone, e serve apenas para verificar se um número já usou o teste.
           É um dado pseudonimizado: não fica vinculado à conta excluída e não é usado para
           nenhuma outra finalidade.
+        </p>
+<p>
+          O teste do Piggy no WhatsApp, feito sem conta, tem retenção própria e mais curta: o código
+          derivado do telefone (gerado com a mesma chave secreta; o teste não grava o número em si) é
+          apagado em cerca de 30 dias depois do início do teste, e um mesmo número só faz um teste
+          nesse período. O código da sessão, os contadores, as datas (inclusive a da primeira pergunta
+          respondida) e os parâmetros de campanha (utm_source e utm_campaign) ficam sem o código do
+          telefone depois disso e não têm prazo para serem apagados. A única exceção em que o número em si pode ser gravado é o erro de
+          entrega informado pela Meta, que fica nos registros técnicos de erro da aplicação, sem
+          exclusão automática. Não usamos esses dados para
+          nenhuma outra finalidade além de limitar o teste e medir se ele funciona.
         </p>
 <p>
           Dados agregados ou anonimizados, que não permitam identificar razoavelmente o usuário,

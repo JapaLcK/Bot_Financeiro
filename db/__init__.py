@@ -179,6 +179,7 @@ from .cards import (
     get_or_create_open_bill,
     get_or_create_bill_by_period,
     get_current_open_bill_id,
+    fatura_a_pagar,
     add_credit_purchase,
     add_imported_credit_purchase,
     remove_single_credit_transaction,
@@ -190,6 +191,10 @@ from .cards import (
     update_credit_transaction_fields,
     undo_credit_transaction,
     undo_installment_group,
+    CompraDoBanco,
+    CartaoDoBanco,
+    MSG_CARTAO_DO_BANCO,
+    MSG_FATURA_DO_BANCO,
     get_installment_group_delete_impact,
     anticipate_installment,
     list_installment_groups_detailed,
@@ -287,6 +292,7 @@ from .push import (
 )
 
 # ── Agentes do Piggy ──────────────────────────────────────────────────────────
+from .anomalias import listar_candidatos_xerife, marcar_lancamento_esperado
 from .agents import (
     AGENT_KINDS,
     list_agents,
@@ -405,6 +411,7 @@ from .mfa import (
 )
 
 # ── Chat IA (Pro v1 Fase 2 Bloco A) ──────────────────────────────────────────
+from .ai_feedback import set_feedback as ai_set_feedback
 from .ai_chat import (
     append_message as ai_append_message,
     get_recent_messages as ai_get_recent_messages,
@@ -509,13 +516,14 @@ __all__ = [
     "set_default_card", "get_default_card_id", "list_cards", "get_card_by_id",
     "get_card_credit_usage", "set_card_limit", "update_card_reminder_settings",
     "mark_card_reminder_sent", "add_months", "bill_period_for_month",
-    "get_or_create_open_bill", "get_or_create_bill_by_period", "get_current_open_bill_id",
+    "get_or_create_open_bill", "get_or_create_bill_by_period", "get_current_open_bill_id", "fatura_a_pagar",
     "add_credit_purchase", "add_imported_credit_purchase",
     "remove_single_credit_transaction", "extract_installment_info",
     "get_or_create_open_finance_card", "credit_day_from_iso",
     "add_credit_purchase_installments", "add_credit_refund",
     "update_credit_transaction_fields",
     "undo_credit_transaction", "undo_installment_group",
+    "CompraDoBanco", "CartaoDoBanco", "MSG_CARTAO_DO_BANCO", "MSG_FATURA_DO_BANCO",
     "get_installment_group_delete_impact", "anticipate_installment",
     "list_installment_groups_detailed", "update_installment_group_meta",
     "resolve_installment_group_id",
@@ -601,7 +609,7 @@ __all__ = [
     "mfa_cleanup_expired_challenges",
     "should_show_mfa_onboarding", "mark_mfa_onboarding_shown",
     # ai chat
-    "ai_append_message", "ai_get_recent_messages", "ai_get_last_message", "ai_get_last_messages", "ai_append_message_if_last",
+    "ai_append_message", "ai_set_feedback", "ai_get_recent_messages", "ai_get_last_message", "ai_get_last_messages", "ai_append_message_if_last",
     "ai_set_pending_action", "ai_get_pending_action", "ai_clear_pending_action",
     "ai_consume_pending_action",
     "ai_get_usage_this_month", "ai_increment_usage", "log_ai_fallback",
@@ -622,6 +630,7 @@ __all__ = [
     "mark_agent_events_seen", "agents_summary", "list_users_with_active_agents",
     "list_agents_pending_email", "list_unemailed_events", "mark_events_emailed",
     "touch_agent_emailed", "set_agent_email_enabled",
+    "listar_candidatos_xerife", "marcar_lancamento_esperado",
 ]
 
 from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement

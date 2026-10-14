@@ -191,13 +191,16 @@ def test_transaction_amount_sign_is_trusted_debit_negative():
     assert tx["transaction_date"] == date(2026, 8, 4)
 
 
-def test_transaction_credit_card_purchase_stays_negative():
-    # REGRESSÃO (bug pego no E2E): compra de cartão vem type=CREDIT com amount negativo.
-    # NÃO pode virar positivo, senão compra vira receita.
-    tx = normalize_pluggy_transaction(
-        {"id": "t2", "description": "NETFLIX.COM", "amount": -55.9, "type": "CREDIT", "date": "2026-08-01"}
+def test_transaction_credit_card_amount_keeps_sign_both_ways():
+    # O normalizador não inverte o sinal pelo `type`: o `amount` segue intacto nos dois sentidos.
+    # Cartão na produção: compra DEBIT positiva (db.cards.sinal_cartao_of), estorno CREDIT negativo.
+    compra = normalize_pluggy_transaction(
+        {"id": "t2", "description": "NETFLIX.COM", "amount": 55.9, "type": "DEBIT", "date": "2026-08-01"}
     )
-    assert tx["amount"] == Decimal("-55.9")
+    estorno = normalize_pluggy_transaction(
+        {"id": "t2b", "description": "ESTORNO NETFLIX", "amount": -55.9, "type": "CREDIT", "date": "2026-08-02"}
+    )
+    assert (compra["amount"], estorno["amount"]) == (Decimal("55.9"), Decimal("-55.9"))
 
 
 def test_transaction_real_income_stays_positive():

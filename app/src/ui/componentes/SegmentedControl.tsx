@@ -4,7 +4,7 @@ import { Animated, Pressable, View } from "react-native";
 import { selecao } from "@/ui/haptics";
 import { duracoes, facilitador, usePressao } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
-import { espaco, raio } from "@/ui/tokens";
+import { raio } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
 
@@ -26,9 +26,8 @@ interface Props {
 /**
  * `selecao()` só na TROCA (nunca ao tocar a opção já ativa — mesma regra do
  * `useAvisoAoErrar`: sinal tátil é para transição, não para repetição). O
- * destaque crossfada 150ms (`duracoes.feedback`) em vez de deslizar: sem
- * `reanimated` nesta fase (decisão do dono), opacidade é a única transição
- * barata com `Animated` nativo entre N opções dinâmicas.
+ * destaque crossfada 150ms (`duracoes.feedback`) em vez de deslizar: `Animated`
+ * nativo basta aqui, e opacidade é a única transição barata entre N opções dinâmicas.
  *
  * Estado indexado por POSIÇÃO, nunca pelo rótulo: com dois rótulos iguais
  * (`["Mês", "Mês"]`), uma `Map<string, Animated.Value>` chaveada por texto
@@ -66,7 +65,7 @@ export function SegmentedControl({ opcoes, valor, onChange }: Props) {
   return (
     <View
       accessibilityRole="tablist"
-      style={{ flexDirection: "row", backgroundColor: cores.surface, borderRadius: raio.md, padding: espaco.xs }}
+      style={{ flexDirection: "row", backgroundColor: cores.surfaceControl, borderRadius: raio.controle, padding: 3 }}
     >
       {opcoes.map((opcao, indice) => (
         <Segmento
@@ -112,20 +111,16 @@ function Segmento({
             left: 0,
             right: 0,
             bottom: 0,
-            borderRadius: raio.sm,
+            borderRadius: raio.celula,
             backgroundColor: cores.surfaceRaised,
-            // A distinção NÃO pode depender só do fundo: `surfaceRaised` sobre
-            // `surface` mede 1,08 (claro) e 1,10 (escuro) — abaixo de qualquer
-            // teto de contraste, ou seja, invisível. A borda de 1px `inkMuted`
-            // (3:1, já em `PARES`) é o que de fato marca o selecionado; sem
-            // ela o indicador de fundo sozinho não se vê nos dois temas.
-            borderWidth: selecionado ? 1 : 0,
-            borderColor: cores.inkMuted,
+            // Sem borda (PDF): o polegar `surfaceRaised` sobre o trilho
+            // `surfaceControl` é sutil; quem marca o selecionado é o texto
+            // `ink` contra `inkFaint` nos inativos.
             opacity: opacidade,
           }}
         />
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <Texto variante="rotulo" tom={selecionado ? "ink" : "inkMuted"}>
+          <Texto variante="rotulo" tom={selecionado ? "ink" : "inkFaint"}>
             {opcao}
           </Texto>
         </View>

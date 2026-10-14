@@ -57,7 +57,7 @@ export function BotoesSociais({ estado, aplicar, autenticar, bloqueado = false }
                   ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
                   : AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE
               }
-              cornerRadius={raio.md}
+              cornerRadius={raio.controle}
               style={{ height: acesso ? ALTURA_ACESSO.M : ALTURA.M }}
               onPress={() => {
                 // A antes de `tocar()`, pelo mesmo motivo do Entrar (B1).

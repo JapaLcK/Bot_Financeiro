@@ -2,7 +2,7 @@ import NumberFlow from "@number-flow/react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ResumoDoMes } from "../lib/api-v2.gen";
-import { CARD, GOALS, caixinhasTotal, isCurrentMonth, keyDate, summary } from "../lib/api";
+import { CARD, isCurrentMonth, keyDate, summary } from "../lib/api";
 import { monthName, money, money0 } from "../lib/format.js";
 import type { DashState } from "../lib/types";
 import { mesDe } from "../lib/store.js";
@@ -11,9 +11,9 @@ import { Frame } from "../parts/Frame";
 import { Selos } from "../parts/Selos";
 import { BRL } from "./Hero";
 
-// Os quatro números do mês num bloco só, separados por filetes (não quatro cartões).
+// Os três números do mês num bloco só, separados por filetes (não três cartões).
 // Entrou e Saiu vêm da /api/v2/resumo-do-mes, com centavos como o servidor manda (decisão
-// do dono); Fatura e Guardado ainda são inventados e seguem sem casas. O mês anterior sai com
+// do dono); a Fatura ainda é inventada e segue sem casas. O mês anterior sai com
 // o hífen do Intl, como o NumberFlow, e não com o menos tipográfico do `money` (decisão do dono).
 const CENTAVOS = { style: "currency", currency: "BRL" } as const;
 function Stat({ title, tone, value, format = BRL, delta, demo, note, children, guia }: {
@@ -77,16 +77,6 @@ function Invoice({ s }: { s: DashState }) {
   );
 }
 
-function Saved({ s }: { s: DashState }) {
-  const m = summary(s.month);
-  const total = caixinhasTotal();
-  return (
-    <Stat title="Guardado no mês" tone="#9085e9" value={m.saved} demo delta={{ text: `automático nas ${GOALS.length} caixinhas`, good: null }}>
-      <p className="stat-note"><span className="faint">Total nas caixinhas</span> <b className="num">{money0(total)}</b></p>
-    </Stat>
-  );
-}
-
 export function MonthStats({ s }: { s: DashState }) {
   const q = useResumo(mesDe(s));
   return (
@@ -95,7 +85,6 @@ export function MonthStats({ s }: { s: DashState }) {
         <Real title="Entrou" tone="var(--gain)" k="entrou" q={q} />
         <Real title="Saiu" tone="var(--alert)" k="saiu" q={q} />
         <Invoice s={s} />
-        <Saved s={s} />
       </div>
     </Frame>
   );

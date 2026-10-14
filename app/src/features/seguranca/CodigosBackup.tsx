@@ -28,7 +28,7 @@ export function CodigosBackup({ codigos, onConcluir }: Props) {
       <Texto variante="corpo" tom="inkMuted">
         Cada um serve uma vez para entrar se você ficar sem o app autenticador. Você não verá esses códigos de novo.
       </Texto>
-      <View style={{ backgroundColor: cores.surface, borderRadius: raio.md, padding: espaco.lg }}>
+      <View style={{ backgroundColor: cores.surface, borderRadius: raio.cartao, padding: espaco.lg }}>
         <Texto selectable style={{ fontFamily: MONO, letterSpacing: 1 }}>
           {lista}
         </Texto>

@@ -7,6 +7,8 @@ import pytest
 import db
 from core.services.ai_chat import runner
 
+pytestmark = pytest.mark.usefixtures("sem_trava_do_turno")  # disputam o mesmo usuário de propósito
+
 
 @pytest.mark.parametrize('failure_after_write', [False, True], ids=['sucesso', 'erro-apos-escrita'])
 @pytest.mark.parametrize('confirmation', [False, True], ids=['alteracao-imediata', 'acao-pendente'])

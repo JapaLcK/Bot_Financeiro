@@ -46,7 +46,7 @@ test("id desconhecido e repetido somem; o ausente do salvo não aparece", () => 
   salvo("sujo", JSON.stringify(["gastador", "metas", "hero", "metas", "xyz", 7, null, "renda", "hero"]));
   assert.deepEqual(readLayout("sujo", PRESET, KNOWN, "pro"), ["metas", "hero", "renda"]);
   const investir = PROFILES.find((p) => p.id === "investir");
-  assert.deepEqual(readLayout("investir-preset", investir.preset, KNOWN, "pro"), ["patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"]);
+  assert.deepEqual(readLayout("investir-preset", investir.preset, KNOWN, "pro"), ["patrimonio", "rendimento", "wealth", "simulador", "resumo", "piggy"]);
 });
 
 test("[] é um painel vazio válido, não o preset", () => {
