@@ -142,19 +142,10 @@ def test_arredondamento_como_a_tela_meio_centavo_sobe():
 
 # ── nenhum float ─────────────────────────────────────────────────────────────────────────────
 
-def _viram_float(o):  # o que o card passa: o float de `_py`
-    if isinstance(o, dict):
-        return {k: _viram_float(v) for k, v in o.items()}
-    if isinstance(o, list):
-        return [_viram_float(v) for v in o]
-    return float(o) if isinstance(o, str) and re.fullmatch(r"-?\d+\.\d+", o) else o
-
-
 @pytest.mark.parametrize("caso", ["varios", "estresse", "sem_custo"])
 def test_nenhum_float_na_saida(caso):
     saida = mc.para_conversa(FIX[caso])
     sem_float(saida)
-    assert mc.para_conversa(_viram_float(FIX[caso])) == saida  # card (float) e tool (Decimal): o mesmo texto
     assert re.search(r"R\$ [\d.]+,\d\d", json.dumps(saida, ensure_ascii=False))
 
 
@@ -250,7 +241,7 @@ def test_todo_valor_em_reais_do_resumo_bate_com_o_da_api(dois):
     a = dois[0]
     api = mc.ler(a)["metas"][0]
     achados = {Decimal(x.replace(".", "").replace(",", ".")) for x in re.findall(r"R\$ ([\d.]+,\d\d)", lista(a)["metas"][0]["resumo"])}
-    esperados = {v.quantize(Decimal("0.01"), ROUND_HALF_UP) for v in (api["atual"], api["alvo"], api["falta"])}
+    esperados = {v.quantize(Decimal("0.01"), ROUND_HALF_UP) for v in map(Decimal, (api["atual"], api["alvo"], api["falta"]))}
     assert achados == esperados == {Decimal("300"), Decimal("1000"), Decimal("700")}
 
 

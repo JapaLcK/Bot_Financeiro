@@ -1,8 +1,8 @@
 """Metas em texto de conversa: a tool `list_metas` da IA e o card `metas` do chat do app.
 
 Uma fonte de verdade para o NÚMERO: `api.v2.metas.listar` (regra em `db/metas.py` e
-`db/metas_ritmo.py`); aqui só se escreve a frase. Dinheiro sai como texto pronto com "R$"
-(nunca float): é o que o `ai_guard` aceita como evidência e o que o gpt-4o-mini não confunde
+`db/metas_ritmo.py`); aqui só se escreve a frase. Dinheiro entra como string (o JSON da rota) e sai
+como texto pronto com "R$" (nunca float): é o que o `ai_guard` aceita como evidência e o que o gpt-4o-mini não confunde
 (`por_mes` × `ritmo.valor`, lição do #931). A cópia por motivo espelha
 `webapp/src/dashboard/lib/metas-textos.ts` (§0.7: `tests/test_ai_chat_metas.py` compara as
 chaves e a ordem), na voz da conversa. O nome da meta é texto do usuário: só vai como valor.
@@ -48,10 +48,11 @@ FRASE_CUSTO = {
 
 
 def ler(uid: int) -> dict:
-    """A resposta de `GET /api/v2/metas` (mesma função, mesmos gates de plano), com Decimal.
+    """A resposta de `GET /api/v2/metas` (mesma função, mesmos gates de plano), no JSON da rota:
+    dinheiro em STRING decimal, a mesma que o card entrega ao app (nada passa por float).
     Chave `dashboard_v2_enabled` NÃO é checada aqui: é `metas_ligadas`."""
     from api.v2.metas import listar  # tardio: o WhatsApp importa este módulo sem pagar o router
-    return listar(uid=uid).model_dump()
+    return listar(uid=uid).model_dump(mode="json")
 
 
 def metas_ligadas(uid: int) -> bool:
@@ -62,7 +63,7 @@ def metas_ligadas(uid: int) -> bool:
 
 
 def _d(x) -> Decimal | None:
-    """Decimal da API, ou o float do bloco do card (round-trip do texto)."""
+    """Decimal do dinheiro em string da API."""
     return None if x is None else Decimal(str(x))
 
 
@@ -99,7 +100,9 @@ def _resumo(m: dict, custo: dict) -> str:
             t += f" E ainda não sei o tamanho da reserva: {sem_custo}"
         return " ".join([*p, t])
     if alvo is None:  # reserva sem o tamanho
-        return " ".join([*p, f"Tem {_brl(atual)}. Ainda não sei o tamanho da reserva: {sem_custo}"])
+        # a tela mostra aqui o ritmo (ou por que não o tem), então o motivo do ritmo vai junto
+        return " ".join([*p, f"Tem {_brl(atual)}. Ainda não sei o tamanho da reserva: {sem_custo}",
+                         *([sem_ritmo] if sem_ritmo and r["valor"] is None else [])])
     if falta == 0:
         return " ".join([*p, f"Meta batida! {_brl(atual)} de {_brl(alvo)}."])
     p.append(f"{_brl(atual)} de {_brl(alvo)} ({m['percentual']}%), faltam {_brl(falta)}.")
@@ -143,10 +146,12 @@ def para_conversa(d: dict) -> dict:
     itens = []
     for m in metas[:MAX_METAS]:
         resumo = _resumo(m, d["custo_mensal"])
-        # espelha `fraseCusto` do .ts: com custo (valor) o único motivo possível é o de leitura velha;
-        # só onde o resumo fala do alvo (reserva com saldo e alvo)
-        if m["tipo"] == "reserva" and m["alvo"] is not None and m["atual"] is not None and d["custo_mensal"]["valor"] \
+        # espelha o `avisoCusto` do cartão (não depende do saldo): com custo (valor) o único motivo possível
+        # é o de leitura velha, e só onde há alvo. Sem saldo o resumo não cita o alvo: sem ele "o valor" não diz de quê
+        if m["tipo"] == "reserva" and m["alvo"] is not None and d["custo_mensal"]["valor"] is not None \
                 and "recorrencias_banco_nao_lidas" in d["custo_mensal"]["motivos"]:
+            if m["atual"] is None:
+                resumo += f" O tamanho da reserva é {_brl(_d(m['alvo']))}."
             resumo += f" {FRASE_CUSTO['recorrencias_banco_nao_lidas']} O valor pode estar velho."
         itens.append({"nome": m["nome"], "tipo": m["tipo"], "fonte": m["fonte"]["rotulo"],
                       "resumo": resumo, "avisos": _avisos(m, resumo)})

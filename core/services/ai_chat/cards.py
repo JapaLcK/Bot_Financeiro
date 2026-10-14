@@ -93,7 +93,6 @@ def registro() -> dict[str, Card]:
     from api.nativo.rendimento import rendimento
     from api.v2.assinaturas import _assinante as gate_assinaturas, assinaturas
     from api.v2.contas import contas
-    from api.v2.metas import listar as listar_metas
     from api.v2.previsao import _assinante as gate_previsao, previsao
     from api.v2.resumo_mes import mes_pedido, resumo
     from core.ai_patterns import INSIGHTS_CACHE_TTL_SECONDS, _cache_kind, _get_cached
@@ -194,8 +193,9 @@ def registro() -> dict[str, Card]:
                        _so("patrimonio", "total", "partes", "motivos")),
         "rendimento": Card(lambda uid, a: [(None, {"rendimento": rendimento(uid=uid)})], todo("rendimento")),
         "assinaturas": Card(assin, todo("assinaturas"), lambda uid, a: gate_assinaturas(uid)),
-        # a visão é o MESMO texto da tool `list_metas`: dinheiro como texto pronto, nunca float
-        "metas": Card(lambda uid, a: [(None, {"metas": listar_metas(uid=uid)})],
+        # a visão é o MESMO texto da tool `list_metas`: dinheiro como texto pronto, nunca float. O leitor
+        # devolve o dump JSON (dinheiro em string): sem o `_py`, que passaria o saldo por float
+        "metas": Card(lambda uid, a: [(None, {"metas": metas_conversa.ler(uid)})],
                       lambda r: metas_conversa.para_conversa(r["metas"]), gate_metas),
         "caixinhas": Card(lambda uid, a: [(None, {"caixinhas": {"ok": True, "goals": status_metas(uid)}})],
                           todo("caixinhas")),
