@@ -330,6 +330,27 @@ class LaunchDateLockedError(ValueError):
     linha dele ou uma fundida com a transação dele."""
 
 
+class LaunchCategoryLockedError(LaunchDateLockedError):
+    """Categoria de movimentação interna (investimento, transferência, fatura...) numa despesa/receita
+    declarada "paga pelo banco": a linha viraria interna e SAIRIA dos totais, enquanto a conciliação
+    segue tratando-a como gasto do banco. Subclasse de propósito: v2 e /app já respondem 409 a ela."""
+
+
+def _recusa_interna_declarada(cur, user_id: int, itens: list[tuple[int, str | None]]) -> None:
+    """`itens` = [(launch_id, categoria nova)]. Recusa se alguma torna interna uma declarada de fluxo."""
+    from utils_text import is_internal_category
+    ids = [i for i, c in itens if is_internal_category(c)]
+    if not ids:
+        return
+    from .bank_declaracoes import DECLARADA_SQL
+    cur.execute(f"select 1 from launches where user_id=%s and id = any(%s) and {DECLARADA_SQL}", (user_id, ids))
+    if cur.fetchone():
+        raise LaunchCategoryLockedError(
+            "Esse lançamento está declarado como pago pelo banco e conta nos seus totais. Uma categoria de "
+            "movimentação interna (investimento, transferência, fatura) o tiraria deles. Escolha outra "
+            "categoria ou apague e lance de novo como aporte ou transferência.")
+
+
 # As condições PERMANENTES de `delete_launch_and_rollback` que o usuário precisa
 # distinguir. São `ValueError` por tipo, não por código, porque quem discrimina
 # é o TIPO em cada porta (WhatsApp, /ai/chat, dashboard) — e cada porta escreve
@@ -484,6 +505,8 @@ def update_launch_fields(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if categoria is not None:
+                _recusa_interna_declarada(cur, user_id, [(launch_id, categoria.strip() or None)])
             delta_novo = None
             if exigir_pode or criado_em is not None or dia is not None:
                 from .bank_movements import _lock_user
@@ -586,6 +609,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _recusa_interna_declarada(cur, user_id, [(lid, cat) for lid, cat in items])
             cur.executemany(
                 f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
                 [(cat, is_internal_category(cat), cat, user_id, lid) for (lid, cat) in items],

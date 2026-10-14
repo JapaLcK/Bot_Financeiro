@@ -463,7 +463,7 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
 
     `launch_id` é o id INTERNO (vem do payload do botão). O display usa user_seq.
     """
-    from db import display_id_for, ensure_user_category, resolve_category_input  # local (evita ciclo)
+    from db import LaunchDateLockedError, display_id_for, ensure_user_category, resolve_category_input  # local (evita ciclo)
 
     cat = (raw_categoria or "").strip()
     if not cat:
@@ -479,6 +479,8 @@ def _apply_recategorize(user_id: int, launch_id: int, raw_categoria: str) -> str
         return "Categoria inválida. Tente novamente."
     try:
         ok = update_launch_category(user_id, launch_id, canon)
+    except LaunchDateLockedError as exc:  # trava de categoria da declarada pelo banco: a frase é do produto
+        return str(exc)
     except Exception as exc:
         logger.exception("WA recategorize update failed launch=%s: %s", launch_id, exc)
         return "Não consegui atualizar agora. Tente de novo em instantes."
