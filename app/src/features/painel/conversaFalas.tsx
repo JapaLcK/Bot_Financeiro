@@ -88,6 +88,7 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   const periodo = aba.recursos.periodo;
   if (card === "periodo") return periodo ? tituloPeriodo(periodo.inicio, periodo.fim) : "Período";
   if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
+  if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
 /** Um card por aba do bloco, cada um com os dados embutidos pelo servidor; tocar em qualquer ponto livre abre a Folha com o MESMO bloco/aba. */

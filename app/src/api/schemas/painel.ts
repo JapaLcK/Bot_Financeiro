@@ -36,8 +36,14 @@ const mesAAAAMM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/); // `tituloPeriodo
 export const periodoSchema = z.object({ inicio: mesAAAAMM, fim: mesAAAAMM, ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
 /** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
 export const schemasRecurso = { contas: contasSchema, resumo: resumoSchema, detalhes: detalhesMesSchema, detalhesAnterior: detalhesMesSchema, patrimonio: patrimonioSchema, rendimento: rendimentoSchema, previsao: previsaoSchema, assinaturas: assinaturasSchema, metas: metasSchema, cartoes: cartoesSchema, parcelas: parcelasSchema, renda: rendaSchema, insights: insightsSchema, plano: planoSchema, categorias: categoriasSchema };
-/** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; já o `metas` do chat vem no formato v2 (`/api/v2/metas`), que este app ainda não desenha: o bloco `metas` é recusado (o card de metas v2 é outro PR). */
-const schemasBloco = { ...schemasRecurso, periodo: periodoSchema, caixinhas: metasSchema };
+/** O recurso `metas` do card do chat: a forma de `GET /api/v2/metas` (`api/v2/metas.py`). Fixture: `tests/frontend/api_v2_respostas.json["metas"]`. O app só mostra: nada de `falta`/`percentual` derivado aqui. */
+export const metasV2Schema = z.object({
+  metas: z.array(z.object({ id: z.number().int(), nome: z.string(), tipo: z.enum(["meta", "reserva"]), meses: z.number().int().nullable(), data_alvo: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/).nullable(), atual: dinheiro.nullable(), alvo: dinheiro.nullable(), falta: dinheiro.nullable(), percentual: z.number().int().min(0).max(100).nullable(), por_mes: dinheiro.nullable(), prazo_passou: z.boolean(), ritmo: z.object({ valor: dinheiro.nullable(), dias_de_historico: z.number().int().nullable(), parcial: z.boolean(), motivos }), chega_em: mesAAAAMM.nullable(), motivos, fonte: z.object({ tipo: z.string(), rotulo: texto }) })),
+  custo_mensal: z.object({ valor: dinheiro.nullable(), recorrencias: z.number().int(), motivos }),
+});
+export type MetasV2 = z.output<typeof metasV2Schema>;
+/** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; o `metas` do chat vem no formato v2 (`metasV2Schema`, desenhado por `MetasChat`). Só o BLOCO troca: `schemasRecurso.metas` (provider, `TelaMetas`) segue legado, então não reaproveite `schemas[recurso]` para o card. */
+const schemasBloco = { ...schemasRecurso, metas: metasV2Schema, periodo: periodoSchema, caixinhas: metasSchema };
 export type RecursosBloco = { [K in keyof typeof schemasBloco]?: z.output<(typeof schemasBloco)[K]> };
 /** Chave desconhecida é descartada; recurso que não passa no schema do app invalida o bloco (quem lê descarta SÓ o evento). Dinheiro chega em centavos. */
 const recursosBloco = z.record(z.string(), z.unknown()).transform((bruto, ctx): RecursosBloco => {
