@@ -560,6 +560,15 @@ antigo) respondem 302 para `/login?next=<destino>#mfa=<desafio>` sem cookie nem
 registra o login (o callback `app-` não registra mais quando há MFA). O desafio vem de
 `_desafio_mfa`, o mesmo de `_concluir_login`. O `next` de `/d/` só chega ao destino se
 estiver na allowlist do `login.html`.
+O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos snippets de
+GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
+`config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
+prendem isso. Aceitos, sem código:
+- `login.html` com sessão viva de OUTRA conta pula o formulário de código ("sessão viva → pula o
+  login"), comportamento herdado do `/login`.
+- `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
+  pedir link novo).
+- `/d/` e `mfa/verify-login` não checam exclusão agendada (o callback web recusa). Follow-up.
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com

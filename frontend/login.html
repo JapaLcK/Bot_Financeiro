@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script>
+// #605: o desafio do MFA chega no fragmento (#mfa=…). Sai da URL AQUI, no topo do
+// <head>: o servidor injeta GA4/Meta Pixel no FIM do <head> (`inject_tracking`) e o
+// GA4 lê `location.href` no `config`, então um replaceState mais abaixo chegaria
+// tarde (medido: o desafio ia no `page_location`). Hash fora do formato é ignorado.
+var PB_MFA=(/^#mfa=([\w-]+)$/.exec(location.hash)||[])[1]||'';
+if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
+</script>
 <title>Entrar · PigBank</title>
 <link rel="canonical" href="https://pigbankai.com/login"/>
 <meta property="og:type" content="website"/>
@@ -199,11 +207,8 @@
     finally{b.disabled=false;b.textContent=window.PBPurchaseIntent&&window.PBPurchaseIntent.pending()?'Verificar e continuar':'Verificar código'}
   }
 
-  // Google e magic link do bot com MFA (#605): o servidor manda o desafio no
-  // FRAGMENTO (não vai ao servidor nem ao Referer). Some da URL ao ler; hash
-  // fora do formato é ignorado e o formulário normal segue.
-  var mfaHash=/^#mfa=([\w-]+)$/.exec(location.hash);
-  if(mfaHash){history.replaceState(null,'',location.pathname+location.search);showMfa(mfaHash[1],'')}
+  // Google e magic link do bot com MFA (#605): `PB_MFA` vem do <head> (já tirado da URL).
+  if(PB_MFA)showMfa(PB_MFA,'')
 
 </script>
 <script src="/auth-presentation.js?v=1" defer>

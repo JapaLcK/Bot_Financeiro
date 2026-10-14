@@ -66,6 +66,15 @@ def _logins_ok(uid: int) -> int:
         return int(cur.fetchone()["n"])
 
 
+def _eventos(uid: int, motivo: str) -> int:
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "select count(*) as n from auth_login_events where user_id = %s and failure_reason = %s",
+            (uid, motivo),
+        )
+        return int(cur.fetchone()["n"])
+
+
 def _set_cookies(r) -> list[str]:
     return [c.split("=", 1)[0] for c in r.headers.get_list("set-cookie")]
 
@@ -324,3 +333,82 @@ def test_d5_codigo_de_pkce_continua_recusado_no_d_mesmo_com_mfa():
     r = TestClient(dashboard.app).get(f"/d/{codigo}", follow_redirects=False)
     assert r.status_code == 401
     _sem_sessao(r, uid, antes)
+
+
+# ── Falha fechada, efeitos colaterais e quoting ──────────────────────────────
+
+def _quebra_mfa(monkeypatch):
+    def _boom(_uid):
+        raise RuntimeError("banco fora")
+    monkeypatch.setattr(db, "get_mfa_status", _boom)
+
+
+def test_e1_get_mfa_status_com_erro_nao_emite_sessao_no_d(monkeypatch):
+    """Fail-open em `_mfa_ligado` (erro = "sem MFA") emitiria sessão sem o código."""
+    uid, _, _ = _conta(True)
+    antes = _sessoes(uid)
+    codigo = db.create_dashboard_session(uid)
+    _quebra_mfa(monkeypatch)
+    r = TestClient(dashboard.app, raise_server_exceptions=False).get(
+        f"/d/{codigo}", follow_redirects=False)
+    assert r.status_code == 500
+    _sem_sessao(r, uid, antes)
+
+
+@pytest.mark.parametrize("app", [0, 1], ids=["web", "app_antigo"])
+def test_e2_get_mfa_status_com_erro_nao_emite_sessao_no_callback(monkeypatch, app):
+    uid, email, _ = _conta(True)
+    antes = _sessoes(uid)
+    google_de_mentira(monkeypatch, email)
+    _quebra_mfa(monkeypatch)
+    _, r = login_google(app)
+    assert r.status_code == 302 and r.headers["location"].startswith("/?google_error="), r.headers["location"]
+    _sem_sessao(r, uid, antes)
+
+
+def test_e3_new_ip_so_depois_do_codigo(monkeypatch):
+    """`maybe_record_login_from_new_ip` é efeito de LOGIN: com MFA, 0 chamadas no
+    callback e 1 no verify-login."""
+    chamadas = []
+    monkeypatch.setattr(dashboard, "maybe_record_login_from_new_ip",
+                        lambda user_id, **kw: chamadas.append(user_id))
+    uid, email, segredo = _conta(True)
+    client, r = _web(monkeypatch, email)
+    desafio = _desafio(r)
+    assert chamadas == []
+    assert _verifica(client, desafio, segredo).status_code == 200
+    assert chamadas == [uid]
+
+
+def test_e4_d_com_mfa_grava_um_mfa_pending_e_nenhum_login():
+    uid, _, _ = _conta(True)
+    r = TestClient(dashboard.app).get(f"/d/{db.create_dashboard_session(uid)}", follow_redirects=False)
+    _desafio(r)
+    assert _eventos(uid, "mfa_pending") == 1
+    assert _logins_ok(uid) == 0
+
+
+def test_e5_next_com_query_sobrevive_ao_302_com_quote():
+    uid, _, _ = _conta(True)
+    r = TestClient(dashboard.app).get(
+        f"/d/{db.create_dashboard_session(uid)}", params={"next": "/precos?a=1&b=2"},
+        follow_redirects=False)
+    _desafio(r)
+    assert r.headers["location"].startswith("/login?next=%2Fprecos%3Fa%3D1%26b%3D2#mfa=")
+    assert _next(r) == "/precos?a=1&b=2"
+
+
+# ── O desafio não pode chegar ao GA4 / Meta Pixel ────────────────────────────
+
+def test_e6_login_tira_o_hash_antes_de_qualquer_snippet_de_tracking(monkeypatch):
+    """O GA4 lê `location.href` no `config`, no FIM do <head> (`inject_tracking`).
+    O script que tira o `#mfa=` da URL tem de vir antes dele no HTML servido."""
+    from frontend.routes import shared
+
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", "G-TESTE12345")
+    monkeypatch.setattr(shared, "META_PIXEL_ID", "123456789012345")
+    html = TestClient(dashboard.app).get("/login").text
+    limpa = html.index("history.replaceState")
+    for marca in ("Meta Pixel Code", "Google Analytics (GA4)"):
+        assert marca in html, f"{marca} não foi injetado: o teste não mediria nada"
+        assert limpa < html.index(marca), f"o hash só sai depois de {marca}"
