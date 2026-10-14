@@ -265,6 +265,23 @@ describe("Segurança — conta sem senha", () => {
     expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
   });
 
+  // Corrida real desta feature: o reset de senha revoga as sessões, e o /auth/me pode descobrir isso
+  // ANTES do /auth/mfa/status (que ainda respondeu 200). O erro de sessão não pode virar "sem conta".
+  it("sessão expirada descoberta só pelo /auth/me (mfa/status 200): vai a /entrar com o aviso, sem controles velhos", async () => {
+    await abrir(
+      { valor: false },
+      {
+        "/auth/me": () => resposta(401, { detail: "expirado" }),
+        "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }),
+      },
+    );
+
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+    expect(screen.queryByText("Definir senha")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
+  });
+
   // Comportamento registrado, NÃO é defeito a corrigir: a regra "recarga que falha mantém a tela"
   // vale também para o foco de navegação. Se o MFA mudou e a recarga falha por rede, a tela fica com
   // o status velho e sem aviso; a autoridade é o servidor (/auth/mfa/setup responde 409).

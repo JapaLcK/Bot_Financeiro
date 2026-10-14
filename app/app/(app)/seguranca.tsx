@@ -2,6 +2,7 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, ScrollView, View } from "react-native";
 
+import { SessaoExpirada } from "@/api/client";
 import type { MfaStatus, Perfil } from "@/api/schemas/auth";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
@@ -36,9 +37,17 @@ export default function Seguranca() {
   const carregar = async () => {
     const minha = ++geracao.current;
     try {
-      // `conta` nula (falha do /auth/me) = lado permissivo: segue como se tivesse senha, e a
-      // autoridade é o 409 do /auth/mfa/setup (mesma decisão do settings.html).
-      const [status, conta] = await Promise.all([statusMfa(), perfil().catch(() => null)]);
+      // `conta` nula (falha RECUPERÁVEL do /auth/me) = lado permissivo: segue como se tivesse senha, e a
+      // autoridade é o 409 do /auth/mfa/setup (mesma decisão do settings.html). Sessão expirada NÃO é
+      // recuperável: sobe ao catch de baixo, onde `falha(e)` leva ao login (o reset de senha revoga
+      // sessões, então o /auth/me pode descobrir isso antes do /auth/mfa/status).
+      const [status, conta] = await Promise.all([
+        statusMfa(),
+        perfil().catch((e: unknown) => {
+          if (e instanceof SessaoExpirada) throw e;
+          return null;
+        }),
+      ]);
       if (minha === geracao.current) setEstado({ fase: "pronto", status, conta });
     } catch (e) {
       if (minha !== geracao.current) return;
