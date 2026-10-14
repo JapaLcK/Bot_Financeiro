@@ -658,7 +658,11 @@ recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (crité
 #607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
 vínculo nem mescla, e a junção é pelo `vincular CODIGO`. Exceção: o alvo já tem este número
 (com ou sem o nono dígito, conferido nos dois sentidos para um fixo não passar por celular) como
-identidade do WhatsApp, e aí junta como antes. O aviso é o `NAO_JUNTEI_WA`
+identidade do WhatsApp, e aí junta como antes: se o remetente tinha login, ele some com a linha
+`users` (#635). A busca pelo telefone usa só os candidatos que reconhecem o número de volta
+(`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
+fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
+nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. O aviso é o `NAO_JUNTEI_WA`
 (`wa_runtime.py`): na saudação, uma vez, no primeiro status; em toda mensagem no segundo
 com alvo com credencial (sem plano, o turno cairia no "/precos"). Só o só-WhatsApp vazio
 ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
@@ -1384,7 +1388,7 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos`); `vincular 123456` segue o fluxo
 normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o

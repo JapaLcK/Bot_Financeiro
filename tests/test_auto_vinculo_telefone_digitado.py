@@ -54,6 +54,12 @@ def _existe(tabela: str, coluna: str, uid: int) -> bool:
     return _q(f"select count(*) as n from {tabela} where {coluna}=%s", (uid,))["n"] > 0
 
 
+def _telefone_de(uid: int):
+    """O que só o auto-vínculo escreve: telefone confirmado e WhatsApp verificado."""
+    r = _q("select phone_status, whatsapp_verified_at from auth_accounts where user_id=%s", (uid,))
+    return r["phone_status"], r["whatsapp_verified_at"]
+
+
 def _v1():
     """A só-WhatsApp com um lançamento; B com senha e o número de A."""
     b, n = _b_com_senha()
@@ -80,6 +86,7 @@ def test_v1_so_whatsapp_com_dados_nao_vai_para_quem_digitou(enviadas):
     assert _dono_do_numero(n) == a
     assert _gastos(b) == 0 and _gastos(a) == 1
     assert _existe("users", "id", a), "a conta do WhatsApp foi apagada pelo merge"
+    assert _telefone_de(b) == ("pending", None), "o número de A virou confirmado na conta de B"
 
 
 @pytest.mark.parametrize("a_com_plano", [False, True], ids=["sem_plano", "com_plano"])
@@ -97,6 +104,7 @@ def test_v2_conta_do_site_nao_perde_o_login(enviadas, a_com_plano):
     assert _dono_do_numero(n) == a and _gastos(b) == 0
     assert _gastos(a) == (1 if a_com_plano else 0), enviadas
     assert a_com_plano or "/precos" in enviadas[0], enviadas
+    assert _telefone_de(b) == ("pending", None), "o número de A virou confirmado na conta de B"
 
 
 def test_v2_discord_identidade_do_discord_fica_com_a(enviadas):

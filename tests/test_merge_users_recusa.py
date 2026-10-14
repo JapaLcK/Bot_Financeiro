@@ -91,8 +91,9 @@ def test_whatsapp_com_dados_nos_dois_lados_recusa_sem_mexer_em_nada(user_id, nom
     assert _junta(wa_phone, user_id) == "dados_dos_dois_lados"
     assert (_foto(user_id), _foto(wa_uid)) == antes
     assert _dono_do_numero(wa_phone) == wa_uid, "o número não pode ser religado na recusa"
-    st = _sql("select phone_status from auth_accounts where user_id=%s", (user_id,))[0]
-    assert st["phone_status"] == "pending", "recusa não confirma o telefone"
+    # "Recusa não confirma o telefone" media o auto-vínculo, o único que escreve
+    # `phone_status`; pelo `link_platform_identity` ficava sempre verde. Agora mora em
+    # `test_auto_vinculo_telefone_digitado.py` (V1 e V2, `_telefone_de`).
 
 
 def test_conversa_oi_e_saldo_nao_quebram_e_o_aviso_sai_uma_vez(user_id, monkeypatch):

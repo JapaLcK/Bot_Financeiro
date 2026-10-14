@@ -7,7 +7,7 @@ import db_support as _db_support
 
 from core.crypto import hash_pii_optional
 from core.pg_text import tem_veneno
-from utils_phone import normalize_phone_e164, phone_lookup_candidates
+from utils_phone import candidatos_simetricos, normalize_phone_e164
 
 from .connection import get_conn
 from .users import (
@@ -323,7 +323,7 @@ def confirm_email_verification(email: str, code: str, source: str = "web") -> di
 def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) -> dict:
     try:
         wa_phone = normalize_phone_e164(wa_id)
-        wa_candidates = phone_lookup_candidates(wa_id)
+        wa_candidates = candidatos_simetricos(wa_id)
     except ValueError:
         return {"status": "invalid_phone"}
 
