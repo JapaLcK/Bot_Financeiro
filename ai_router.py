@@ -19,6 +19,7 @@ import unicodedata
 
 from openai import OpenAI
 from core.observability import get_logger
+from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 logger = get_logger(__name__)
 
@@ -28,7 +29,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _client: OpenAI | None = None
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MODEL = CHAT_MODEL
 
 
 def _log_category_ai_event(
@@ -214,10 +215,8 @@ def classify_category_with_gpt(descricao: str, *, user_id: int | None = None, so
 
     try:
         resp = current_client.chat.completions.create(
-            model=MODEL,
-            temperature=0,
+            **completion_options(MODEL, 10, 0),
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
         )
         cat_raw = (resp.choices[0].message.content or "").strip()
         normalized = _normalize_category(cat_raw)

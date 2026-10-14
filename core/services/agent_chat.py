@@ -20,7 +20,8 @@ from core.services.ai_chat.runner import MAX_TOKENS, OPENAI_TIMEOUT, OPENAI_MAX_
 
 from .agent_chat_data import _snapshot, SNAPSHOT_ITEMS_LIMIT
 from .agent_chat_errors import (ChatError, ModelResponseError, AnswerPolicyError, DataQueryError, handle_failure)
-from .agent_chat_policy import (completion_options, routing_format, REVIEW_FORMAT, response_text, response_json, routing_prompt, answer_prompt, review_prompt)
+from .modelo_openai import completion_options
+from .agent_chat_policy import (routing_format, REVIEW_FORMAT, response_text, response_json, routing_prompt, answer_prompt, review_prompt)
 
 MODEL = (os.getenv("AGENT_CHAT_MODEL") or "").strip() or "gpt-5.4-mini"
 

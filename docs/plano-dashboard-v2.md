@@ -541,12 +541,16 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     `termos_busca`/`clausula_busca`, usadas pelas duas listas. Medido em 2026-10-03,
     `EXPLAIN (ANALYZE, BUFFERS)` num `pytest_*` local (4 usuários × 6000 lançamentos + 1440
     compras; remeça antes de reusar): mês 5,5 ms, busca na janela inteira 250 ms (o estado de
-    toda linha é calculado antes do filtro de texto). Em aberto para o dono: o depósito em
-    caixinha e o aporte gravados pelo PigBank têm `tipo` `deposito_caixinha`/
-    `aporte_investimento` e ficam FORA da lista neste PR, como na soma — a P8 os cita, mas
-    mostrá-los pede decidir se são entrada ou saída; o que entra marcado hoje é o interno
-    com tipo despesa/receita (saque em dinheiro, pagamento de fatura, transferência do
-    banco). A lista do `/app` e o "últimos N" do WhatsApp seguem as regras deles.
+    toda linha é calculado antes do filtro de texto). O depósito em caixinha e o aporte
+    (`deposito_caixinha`/`aporte_investimento`) saíram FORA da lista neste PR, como na soma;
+    o dono decidiu em 2026-10-13 a direção e entram desde o PR #983: marcados `guardado`,
+    depósito/aporte como saída, saque/resgate como entrada, fora de todo total; em 2026-10-14
+    decidiu o valor mostrado bruto (`launches.valor`) e o rótulo "Guardado" no front na lista.
+    O guardado é opt-in (`guardado=1`; o `/painel` manda, o `/api/app` não): o app nativo monta o
+    mesmo router e apps instalados não se atualizam com o backend, então sem o parâmetro a lista é a de antes. O que entra
+    marcado como interno é o de tipo despesa/receita (saque em dinheiro, pagamento de
+    fatura, transferência do banco). A lista do `/app` e o "últimos N" do WhatsApp seguem
+    as regras deles.
   - PR 2a: a escrita da carteira (contrato em `docs/CLAUDE.md`, "API v2"):
     `POST /api/v2/lancamentos/carteira`, `/editar` e `/apagar`, e a marca `launches.origem =
     'carteira'` gravada pelo escritor da carteira em todo canal e pelo saque/depósito
@@ -660,7 +664,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Modal reutiliza dialog/fallback Safari 14 e coordena Cmd-K. Os exemplos do chat e do
     protótipo seguem demonstrativos; no painel real os CTAs abrem o extrato sem filtros
     do exemplo, e Cmd-K omite lançamentos/categorias fictícios. Mantidos fora P8 (depósitos
-    e aportes ausentes na API), filtro de cartão individual sem catálogo, busca real em
+    e aportes ausentes na API; entrou na P8, #983), filtro de cartão individual sem catálogo, busca real em
     Cmd-K, backend/schema e service worker. Validação local usa fixtures e
     bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
 - Etapa 3 — execução autorizada em 05/10/2026; PR1 motor (#842) concluído localmente em
@@ -766,18 +770,17 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
-- [x] Etapa 0 · [x] 1 · [ ] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
 
-Situação em 2026-10-13, conferida contra os PRs mergeados. Ficam abertas: a Etapa 2, porque
-depósito em caixinha e aporte (P8) seguem fora da lista de lançamentos, à espera de o dono
-decidir se são entrada ou saída (ver o PR 1 da Etapa 2); a 3, porque simulador v2 e estimativa
-variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta o PR C.
+Situação em 2026-10-13, conferida contra os PRs mergeados. Ficam abertas: a 3, porque
+simulador v2 e estimativa variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta
+o PR C.
 
 | Etapa | PRs mergeados |
 |---|---|
 | 0 | #632, #659, #669, #675, #678, #688, #691, #723 |
 | 1 | #750 (A), #754 (B), #757 (D), #764 (C), #781 (C2) |
-| 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4) |
+| 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
 | 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
 | 5 e 6 | nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |

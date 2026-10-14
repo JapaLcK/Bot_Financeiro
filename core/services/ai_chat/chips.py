@@ -14,11 +14,13 @@ import logging
 import os
 import unicodedata
 
+from core.services.modelo_openai import CHAT_MODEL, completion_options
+
 from .confirmations import is_cancel, is_confirm
 
 logger = logging.getLogger(__name__)
 
-MODELO_CHIPS = "gpt-4o-mini"
+MODELO_CHIPS = CHAT_MODEL
 TIMEOUT_S = 4.0
 MAX_CHIPS = 4
 MAX_UTF16 = 40  # 40 unidades UTF-16: o mais restritivo entre as contagens do zod e do JS
@@ -68,12 +70,12 @@ def sugerir(pergunta: str, resposta: str | None, cards: list[str]) -> list[str]:
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", "").strip(),
                         timeout=TIMEOUT_S, max_retries=0)
         r = client.chat.completions.create(
-            model=MODELO_CHIPS,
+            **completion_options(MODELO_CHIPS, 120, 0.5),
             messages=[{"role": "system", "content": PROMPT_CHIPS},
                       {"role": "user", "content":
                        f"Pergunta: {pergunta}\nResposta: {resposta}\n"
                        f"Cards mostrados: {', '.join(cards) or 'nenhum'}"}],
-            response_format=_FORMATO, max_tokens=120, temperature=0.5)
+            response_format=_FORMATO)
         return validar(json.loads(r.choices[0].message.content)["chips"])
     except Exception as e:
         logger.info("chips indisponíveis: %s", e)
