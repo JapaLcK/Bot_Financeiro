@@ -17,7 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 
-from _cards_apoio import mostrar  # noqa: F401
+from _cards_apoio import mostrar, valores_de_b_em  # noqa: F401
 from conftest import usuario_pagante
 from core.services import metas_conversa as mc
 from core.services.ai_chat import cards
@@ -216,8 +216,8 @@ def lista(quem, **args):
 def confere_isolamento(a, b, mb):
     r = lista(a, user_id=b, uid=b, id=mb, meta_id=mb)  # o modelo não escolhe o usuário
     texto = json.dumps(r, ensure_ascii=False)
-    for marca in ("SEGREDO", "7777", "7.777", "9999", "9.999"):
-        assert marca not in texto, marca
+    assert "SEGREDO" not in texto
+    assert not valores_de_b_em(r, {9999.0, 7777.0}), r  # número exato: "7777" também é trecho de id e de hora
     assert [m["nome"] for m in r["metas"]] == ["Viagem A"]
 
 

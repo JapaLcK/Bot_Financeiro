@@ -7,13 +7,13 @@ Gates, teto e eventos do stream: `test_ai_chat_cards_turno.py`.
 """
 import json
 from datetime import timedelta
-import re
 from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 
 import db
-from _cards_apoio import CASOS, M, M0, _http, mostrar, mundo  # noqa: F401  (mundo é fixture)
+from _cards_apoio import (CASOS, M, M0, _http, _numeros, _reais, mostrar, mundo,  # noqa: F401  (mundo é fixture)
+                          valores_de_b_em)
 from conftest import usuario_pagante
 from core.services.ai_chat import cards
 from db.mes_detalhes import ler
@@ -74,28 +74,6 @@ def test_paridade_pega_leitor_trocado(mundo, monkeypatch):
         confere_paridade(a, "categorias")
 
 
-_NUM = re.compile(r"^-?\d+(\.\d+)?$")
-
-
-def _numeros(o):
-    if isinstance(o, bool):
-        return set()
-    if isinstance(o, (int, float)):
-        return {float(o)}
-    if isinstance(o, str):
-        return {float(o)} if _NUM.match(o) else set()
-    filhos = o.values() if isinstance(o, dict) else o if isinstance(o, list) else []
-    return set().union(*map(_numeros, filhos)) if filhos else set()
-
-
-def _reais(o):
-    """Os `R$ 1.234,56` de todo texto do objeto, como Decimal em módulo."""
-    if isinstance(o, str):
-        return {abs(Decimal(x.replace(".", "").replace(",", "."))) for x in re.findall(r"R\$ (-?[\d.]+,\d\d)", o)}
-    filhos = o.values() if isinstance(o, dict) else o if isinstance(o, list) else []
-    return set().union(*map(_reais, filhos)) if filhos else set()
-
-
 @pytest.mark.parametrize("card", list(CASOS))
 def test_visao_do_modelo_esta_no_bloco(mundo, card):
     a, _ = mundo
@@ -137,8 +115,10 @@ def confere_isolamento(a, b, card):
     ra, (bloco_a,), _ = mostrar(a, card=card, **args)
     rb, (bloco_b,), _ = mostrar(b, card=card, **args)
     texto = json.dumps([bloco_a, ra])
-    for marca in ("SEGREDO", "7777", "5555", "888.00"):
-        assert marca not in texto, (card, marca)
+    assert "SEGREDO" not in texto, card  # texto do usuário B (uppercase: não colide com id, data nem hex)
+    # Os valores de B (`semeia_b`) valem como NÚMERO exato, nunca como trecho de texto: "7777" aparece por
+    # acaso nos microssegundos de `calculado_em` (".777712") e em ids, e isso já derrubou o CI (hero).
+    assert not valores_de_b_em([bloco_a, ra]), (card, valores_de_b_em([bloco_a, ra]))
     assert not (_ids(bloco_a) & _ids(bloco_b)), card
     if card in ("metas", "caixinhas", "fatura"):
         assert _ids(bloco_a) and _ids(bloco_b)
@@ -172,6 +152,29 @@ def test_isolamento_pega_leitor_de_metas_que_le_o_outro_usuario(mundo, monkeypat
     monkeypatch.setattr(cards, "registro", lambda: {**real, "metas": vaza})
     with pytest.raises(AssertionError):
         confere_isolamento(a, b, "metas")
+
+
+@pytest.mark.parametrize("card", ["hero", "compromissos"])
+def test_isolamento_nao_confunde_relogio_com_dado_de_b(mundo, monkeypatch, card):
+    """Regressão: `calculado_em` com microssegundos ".777712" contém "7777"; o isolamento não pode reprovar."""
+    from core.services import previsao_v2
+    real = previsao_v2.now_tz
+    monkeypatch.setattr(previsao_v2, "now_tz", lambda *a, **k: real(*a, **k).replace(microsecond=777712))
+    (_, (bloco, *_), _) = mostrar(mundo[0], card=card, **CASOS[card][0])
+    assert ".777712" in json.dumps(bloco)  # o relógio travado chegou ao bloco
+    confere_isolamento(*mundo, card)
+
+
+@pytest.mark.parametrize("card", ["resumo", "categorias"])
+def test_isolamento_pega_leitor_que_devolve_so_numeros_de_b(mundo, monkeypatch, card):
+    """Controle negativo da marca numérica: o leitor passa a ler com o id de B; sem texto "SEGREDO"."""
+    a, b = mundo
+    confere_isolamento(a, b, card)  # positivo
+    real = cards.registro()
+    vaza = cards.Card(lambda uid, args: real[card].ler(b, args), real[card].visao)
+    monkeypatch.setattr(cards, "registro", lambda: {**real, card: vaza})
+    with pytest.raises(AssertionError):
+        confere_isolamento(a, b, card)
 
 
 def test_origens_somam_o_mesmo_que_categorias(mundo):
