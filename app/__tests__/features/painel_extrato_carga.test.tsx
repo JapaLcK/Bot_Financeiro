@@ -108,3 +108,39 @@ it("troca de usuário no Extrato: o item da Ana não aparece para a Bela", async
  expect(screen.queryByText("Item da Ana")).toBeNull(); expect(screen.getByText("Item da Bela")).toBeTruthy();
  expect((chamadasLanc().at(-1)![1].headers as Record<string, string>).Authorization).toBe("Bearer access-bela");
 });
+
+// Extrato sobre o `useLancamentos` compartilhado com os cards do chat: o que é do Extrato (limite, filtro e reinício por dia, detalhe, parcela) fica fixado aqui.
+const L = (fixture as Record<string, any>)[LANC].itens;
+const com = (itens: unknown[], proximo: string | null = null) => resposta(200, { ...(fixture as Record<string, any>)[LANC], itens, proximo });
+const consulta = (n = -1) => new URL(String(chamadasLanc().at(n)![0])).searchParams;
+describe("Extrato: consulta, dia e detalhe", () => {
+ it("pede o mês do painel com limite 50 (o chat pede 10 e 100: o Extrato não)", async () => {
+  renderRouter("./app", { initialUrl: "/extrato" }); await lista();
+  expect(consulta().get("limite")).toBe("50"); expect(consulta().get("mes")).toMatch(/^\d{4}-\d{2}$/);
+ });
+ it("`?dia=` mostra só os lançamentos do dia", async () => {
+  lancamentos = () => com([L[0], L[1], L[2]]); renderRouter("./app", { initialUrl: "/extrato?dia=2026-10-02" });
+  await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy()); expect(screen.queryByText("Salário")).toBeNull(); expect(screen.queryByText("Café e almoço")).toBeNull();
+ });
+ it("trocar só o `dia` refaz a leitura (1 → 2 requisições) e mostra o dia novo", async () => {
+  lancamentos = () => com([L[0], L[1]]); renderRouter("./app", { initialUrl: "/extrato?dia=2026-10-01" }); await lista(); await act(drenar);
+  expect(chamadasLanc()).toHaveLength(1); expect(screen.queryByText("Mercado")).toBeNull();
+  await act(async () => { router.setParams({ dia: "2026-10-02" }); await drenar(); });
+  expect(chamadasLanc()).toHaveLength(2); await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy()); expect(screen.queryByText("Salário")).toBeNull();
+ });
+ it("trocar o `dia` recupera de erro na 1ª página", async () => {
+  lancamentos = () => resposta(500, { detail: "x" }); renderRouter("./app", { initialUrl: "/extrato?dia=2026-10-01" });
+  await waitFor(() => expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy());
+  lancamentos = () => com([L[0]]); await act(async () => { router.setParams({ dia: "2026-10-02" }); await drenar(); });
+  await waitFor(() => expect(screen.queryByText("Não conseguimos carregar agora. Tente novamente.")).toBeNull()); expect(chamadasLanc()).toHaveLength(2);
+ });
+ it("mudar um filtro fecha o detalhe aberto", async () => {
+  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); fireEvent.press(screen.getByText("Salário")); await act(drenar); expect(detalhe()).toBeTruthy();
+  marcar("Entradas"); await lista(); await act(drenar); expect(detalhe()).toBeNull();
+ });
+ it("a linha recolhida NÃO diz 'parcela n/N' (só o detalhe aberto: 'Parcela n/N')", async () => {
+  lancamentos = () => com([{ ...L[1], parcela: { n: 3, total: 10 } }]); renderRouter("./app", { initialUrl: "/extrato" });
+  await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy()); expect(screen.queryByText(/parcela 3\/10/)).toBeNull();
+  fireEvent.press(screen.getByText("Mercado")); await act(drenar); expect(screen.getByText(/Parcela 3\/10/)).toBeTruthy();
+ });
+});

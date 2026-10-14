@@ -28,15 +28,32 @@ export const rendaSchema = z.object({ ok: z.literal(true), evolution: z.array(z.
 export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(z.object({ key: z.string(), title: z.string(), message: z.string(), severity: z.string(), action_label: texto, action_view: texto })) });
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
-/** `periodo` existe só no chat (card sem widget): fica FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
-type CardChat = keyof typeof TITULOS | "periodo";
-const cardId = z.enum(["periodo", ...Object.keys(TITULOS)] as [CardChat, ...CardChat[]]);
+/** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
+export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas";
+const cardId = z.enum(["periodo", "caixinhas", ...Object.keys(TITULOS)] as [CardChat, ...CardChat[]]);
+const mesAAAAMM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/); // `tituloPeriodo` lança em "" (nomeMes): mês malformado invalida o bloco
 /** O recurso `periodo` do card (`api/nativo/mes_detalhes.py`), uma aba com `mes: null`. Fixture: `tests/fixtures/ai_chat_bloco_periodo.json`. */
-export const periodoSchema = z.object({ inicio: z.string(), fim: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema).max(5) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
-/** Eventos do `/ai/chat/stream`, um schema por `tipo`. O `bloco` só tem o ENVELOPE validado (`recursos` fica solto: o E1 o refina por card). */
+export const periodoSchema = z.object({ inicio: mesAAAAMM, fim: mesAAAAMM, ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
+/** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
+export const schemasRecurso = { contas: contasSchema, resumo: resumoSchema, detalhes: detalhesMesSchema, detalhesAnterior: detalhesMesSchema, patrimonio: patrimonioSchema, rendimento: rendimentoSchema, previsao: previsaoSchema, assinaturas: assinaturasSchema, metas: metasSchema, cartoes: cartoesSchema, parcelas: parcelasSchema, renda: rendaSchema, insights: insightsSchema, plano: planoSchema, categorias: categoriasSchema };
+/** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; já o `metas` do chat vem no formato v2 (`/api/v2/metas`), que este app ainda não desenha: o bloco `metas` é recusado (o card de metas v2 é outro PR). */
+const schemasBloco = { ...schemasRecurso, periodo: periodoSchema, caixinhas: metasSchema };
+export type RecursosBloco = { [K in keyof typeof schemasBloco]?: z.output<(typeof schemasBloco)[K]> };
+/** Chave desconhecida é descartada; recurso que não passa no schema do app invalida o bloco (quem lê descarta SÓ o evento). Dinheiro chega em centavos. */
+const recursosBloco = z.record(z.string(), z.unknown()).transform((bruto, ctx): RecursosBloco => {
+  const saida: Record<string, unknown> = {};
+  for (const [chave, valor] of Object.entries(bruto)) {
+    if (!Object.hasOwn(schemasBloco, chave)) continue;
+    const r = schemasBloco[chave as keyof typeof schemasBloco].safeParse(valor);
+    if (!r.success) { ctx.addIssue({ code: "custom", message: `Recurso inválido: ${chave}` }); return z.NEVER; }
+    saida[chave] = r.data;
+  }
+  return saida as RecursosBloco;
+});
+/** Eventos do `/ai/chat/stream`, um schema por `tipo`. O `bloco` valida o envelope e cada recurso embutido. */
 const eventosChat = {
   passo: z.object({ texto: z.string(), previa: cardId.nullable().catch(null) }),
-  bloco: z.object({ bloco: z.object({ card: cardId, abas: z.array(z.object({ mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).nullable(), recursos: z.record(z.string(), z.unknown()) })).min(1).max(3) }) }),
+  bloco: z.object({ bloco: z.object({ card: cardId, abas: z.array(z.object({ mes: mesAAAAMM.nullable(), recursos: recursosBloco })).min(1).max(3) }) }),
   delta: z.object({ texto: z.string() }),
   reinicio: z.object({}),
   fim: z.object({ reply: z.string(), usage, message_id: z.number().int().positive().nullable(), chips: z.array(z.string().min(1).max(40)).max(4).catch([]) }),

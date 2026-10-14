@@ -2,12 +2,16 @@ import { Contas } from "./contasResumo";
 import { ResumoMes } from "./resumoMes";
 import { Categorias, Calendario, Simulador } from "./gastos";
 import { Previsao, Compromissos } from "./futuro";
-import { Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";
+import { Caixinhas, Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";
 import { Faturas, Parcelas, Renda, Assinaturas, Notou } from "./complementos";
+import { CardPeriodo } from "./cardPeriodo";
 import { usePainel } from "./provider";
+import { useBloco } from "./blocoContexto";
 import { Vazio } from "./base";
-import type { Widget } from "./catalogo";
-const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: Categorias, calendario: Calendario, simulador: Simulador, compromissos: Compromissos, piggy: Notou, metas: Metas, patrimonio: Patrimonio, fatura: Faturas, wealth: Distribuicao, renda: Renda, rendimento: Rendimento, parcelas: Parcelas, assinaturas: Assinaturas };
-export function WidgetConteudo({ id }: { id: Widget }) { const p = usePainel();
- if (id === "simulador") { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
+import type { CardChat } from "@/api/schemas/painel";
+const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: Categorias, calendario: Calendario, simulador: Simulador, compromissos: Compromissos, piggy: Notou, metas: Metas, caixinhas: Caixinhas, patrimonio: Patrimonio, fatura: Faturas, wealth: Distribuicao, renda: Renda, rendimento: Rendimento, parcelas: Parcelas, assinaturas: Assinaturas };
+/** No chat o servidor já aplicou o plano (`plan_gate_ok`): o gate do simulador vale só FORA de um bloco. */
+export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel(); const bloco = useBloco();
+ if (id === "periodo") return <CardPeriodo />;
+ if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
  const Componente = VIEWS[id]; return <Componente />; }

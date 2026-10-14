@@ -7,7 +7,8 @@ import { raio, texto as escala } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
 
-export interface BarraMensal { chave: string; rotulo: string; valor: number; atual: boolean }
+/** `apagado`: mês antes do começo do histórico do usuário (rótulo e trilho esmaecidos; o valor é só contexto). */
+export interface BarraMensal { chave: string; rotulo: string; valor: number; atual: boolean; apagado?: boolean }
 export interface BarrasMensaisProps {
   /** Do mais antigo (esquerda) ao mais novo (direita); `atual` = mês em andamento (rosa cheio, valor escrito, rótulo com "*"). */
   meses: BarraMensal[];
@@ -16,7 +17,7 @@ export interface BarrasMensaisProps {
 }
 
 // Colunas flex:1 em pai que encolhe ao conteúdo (fala do Piggy no chat) ficariam espremidas: piso por coluna, cabe o "R$ 12,3k".
-const ALTURA = 120, COLUNA_MIN = 40, LARGURA = 26, MINIMA = 4, CRESCER_MS = 450, OPACIDADE_OUTROS = 0.5;
+const ALTURA = 120, COLUNA_MIN = 40, LARGURA = 26, MINIMA = 4, CRESCER_MS = 450, OPACIDADE_OUTROS = 0.5, OPACIDADE_APAGADO = 0.4;
 
 /** Altura em pt: proporcional ao MÁXIMO entre os meses, mínimo de 4 para valor > 0; valor <= 0 = só o trilho. */
 export const alturaBarra = (valor: number, maximo: number, altura: number) => valor > 0 && maximo > 0 ? Math.max(MINIMA, Math.round(valor / maximo * altura)) : 0;
@@ -54,10 +55,10 @@ export function BarrasMensais({ meses, rotuloValor }: BarrasMensaisProps) {
               <View style={{ height: 16, alignSelf: "stretch", justifyContent: "center" }}>
                 {m.atual && <Texto testID="barra-valor" variante="legenda" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ alignSelf: "stretch", textAlign: "center" }}>{rotuloValor(m.valor)}</Texto>}
               </View>
-              <View testID="barra-trilho" style={{ width: LARGURA, height: ALTURA, justifyContent: "flex-end", overflow: "hidden", borderRadius: raio.barra, backgroundColor: cores.surfaceControl }}>
+              <View testID="barra-trilho" style={{ width: LARGURA, height: ALTURA, justifyContent: "flex-end", overflow: "hidden", borderRadius: raio.barra, backgroundColor: cores.surfaceControl, opacity: m.apagado ? OPACIDADE_APAGADO : 1 }}>
                 {h > 0 && <Animated.View testID="barra" style={{ height: h, borderTopLeftRadius: raio.barra, borderTopRightRadius: raio.barra, backgroundColor: cores.brand, opacity: m.atual ? 1 : OPACIDADE_OUTROS, transform: [{ translateY: crescer.interpolate({ inputRange: [0, 1], outputRange: [h / 2, 0] }) }, { scaleY: crescer }] }} />}
               </View>
-              <Texto testID="barra-mes" variante="legenda" tom={m.atual ? "brandInk" : "inkMuted"} style={m.atual ? { alignSelf: "stretch", textAlign: "center", fontFamily: escala.secao.fontFamily } : { alignSelf: "stretch", textAlign: "center" }}>{`${m.rotulo}${m.atual ? "*" : ""}`}</Texto>
+              <Texto testID="barra-mes" variante="legenda" tom={m.atual ? "brandInk" : m.apagado ? "inkFaint" : "inkMuted"} style={m.atual ? { alignSelf: "stretch", textAlign: "center", fontFamily: escala.secao.fontFamily } : { alignSelf: "stretch", textAlign: "center" }}>{`${m.rotulo}${m.atual ? "*" : ""}`}</Texto>
             </View>
           );
         })}
