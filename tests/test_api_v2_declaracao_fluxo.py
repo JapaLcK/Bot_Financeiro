@@ -87,7 +87,8 @@ def test_apagar_pela_v2(libera):
     libera(uid)
     r = post(uid, "apagar", {"id": f"l{lid}"})
     assert r.status_code == 200, r.text
-    assert decl(lid) is None and n_linhas(uid, 50) == 0
+    assert decl(lid) is None and n_linhas(uid, 50) == 1  # a transação do banco volta como sombra
+    assert Decimal(str(resumo(uid)["saiu"])) == 50
     assert db.get_balance(uid) == 0
 
 

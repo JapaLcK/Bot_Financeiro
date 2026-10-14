@@ -30,9 +30,9 @@ def tx(amount=-50, txid="t1", days=0, category="Groceries", desc="Mercado Bom Pr
             "transaction_date": today_tz() + timedelta(days=days), "category": category}
 
 
-def declara(uid, valor=50, tipo="despesa", criado_em=None, alvo="mercado", nota="msg"):
+def declara(uid, valor=50, tipo="despesa", criado_em=None, alvo="mercado", nota="msg", categoria="mercado"):
     return db.add_launch_and_update_balance(
-        uid, tipo, valor, alvo, nota, "mercado", criado_em, declaracao_banco=True)[0]
+        uid, tipo, valor, alvo, nota, categoria, criado_em, declaracao_banco=True)[0]
 
 
 def sincroniza(cid, uid, *txs, saldo=1000):

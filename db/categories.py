@@ -524,6 +524,13 @@ def cascata_nome_categoria(cur, user_id: int, antigo: str, novo: str) -> dict[st
     """Troca o texto `antigo` por `novo` em toda tabela que guarda a categoria.
     Do rename e do `scripts/fundir_categorias.py`; devolve o rowcount por tabela."""
     n: dict[str, int] = {}
+    from utils_text import is_internal_category
+    if is_internal_category(novo):  # o nome interno tiraria dos totais a despesa/receita declarada pelo banco
+        from .bank_declaracoes import DECLARADA_SQL
+        cur.execute(f"select 1 from launches where user_id=%s and lower(categoria)=lower(%s) and {DECLARADA_SQL} limit 1",
+                    (user_id, antigo))
+        if cur.fetchone():
+            raise ValueError("CATEGORIA_DECLARADA_INTERNA")
 
     def ex(sql, params):
         cur.execute(sql, params)

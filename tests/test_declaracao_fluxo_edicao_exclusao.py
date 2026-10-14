@@ -72,11 +72,11 @@ def test_apagar_derruba_a_declaracao_e_a_transacao_volta_como_sombra(user_id):
     db.delete_launch_and_rollback(user_id, lid)
     assert decl(lid) is None
     assert db.get_balance(user_id) == saldo  # delta 0: nada a devolver
-    t = q("select imported_launch_id, match_launch_id from open_finance_transactions where id=%s", (tx_id,))
-    assert t["imported_launch_id"] is None and t["match_launch_id"] is None
-    assert n_linhas(user_id, 50) == 0 and saiu(user_id) == 0
+    t = q("select imported_launch_id, match_launch_id, reconciliation_status s from open_finance_transactions where id=%s", (tx_id,))
+    assert t["imported_launch_id"] not in (None, lid) and t["match_launch_id"] is None and t["s"] == "imported"
+    assert n_linhas(user_id, 50) == 1 and saiu(user_id) == 50  # a sombra já voltou, na mesma transação do apagar
     db.import_open_finance_launches(user_id)
-    assert n_linhas(user_id, 50) == 1 and saiu(user_id) == 50  # só a sombra, uma vez
+    assert n_linhas(user_id, 50) == 1 and saiu(user_id) == 50  # e o import depois não duplica
 
 
 def test_apagar_declarada_sem_par(user_id):

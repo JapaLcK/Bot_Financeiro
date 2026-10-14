@@ -67,9 +67,10 @@ def test_apagar_o_lancamento_congelado(user_id):
     _, lid, tx_id = _casada_antiga(user_id)
     db.delete_launch_and_rollback(user_id, lid)
     assert decl(lid) is None
-    assert q("select imported_launch_id i from open_finance_transactions where id=%s", (tx_id,))["i"] is None
+    assert q("select imported_launch_id i from open_finance_transactions where id=%s", (tx_id,))["i"] is not None
+    assert n_linhas(user_id, 50) == 1  # a transação já voltou como sombra
     db.import_open_finance_launches(user_id)
-    assert n_linhas(user_id, 50) == 1  # a transação volta como sombra, uma vez
+    assert n_linhas(user_id, 50) == 1  # e o import depois não duplica
 
 
 def test_editar_categoria_e_descricao_do_congelado(user_id):

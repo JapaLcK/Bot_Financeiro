@@ -2358,6 +2358,16 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                                "mudou_durante") from exc
 
+            # Declaração de fluxo casada (PR-A): a transação também volta como sombra, como a fundida.
+            if not escopo_conta_corrente:
+                from .bank_declaracoes import devolve_sombra
+                from .reconciliation import ReconciliationConflict
+                try:
+                    desfeitas += devolve_sombra(cur, user_id, launch_id, novas)
+                except (ReconciliationConflict, LookupError) as exc:
+                    raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                               "mudou_durante") from exc
+
             # apaga o lançamento
             cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
 

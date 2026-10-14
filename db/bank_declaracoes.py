@@ -88,6 +88,33 @@ def projeta(cur, user_id: int, declaration: dict, tx: dict | None = None) -> Non
         declaration["launch_valor"], declaration["launch_criado_em"] = valor, criado
 
 
+def devolve_sombra(cur, user_id: int, launch_id: int, novas: list) -> list[dict]:
+    """Apagar uma declaração de fluxo JÁ casada: a transação do banco volta como sombra na MESMA transação
+    do apagar (a fundida faz o mesmo em `reconciliation._desfaz`, que só enxerga FUSED_STATUSES e não
+    `bank_movement_confirmed`). Mesmo helper do import (`_insert_of_shadow`: idempotente por `external_id`),
+    então um import depois não duplica. Devolve as transações que voltaram (o aviso do apagar); [] se não
+    é fluxo casado. `novas` recebe a categoria nova do catálogo (garantida depois do commit)."""
+    from .open_finance import _insert_of_shadow, classify_open_finance_launch
+    from .open_finance_categories import categoria_pigbank
+    from .reconciliation import ReconciliationConflict, _locked_tx
+    cur.execute(f"""select dec.matched_transaction_id t from bank_movement_declarations dec
+                      join launches on launches.id = dec.launch_id and launches.user_id = dec.user_id
+                     where dec.launch_id=%s and dec.user_id=%s and dec.matched_transaction_id is not null
+                       and {DECLARADA_SQL}""", (launch_id, user_id))
+    achou = cur.fetchone()
+    if not achou:
+        return []
+    o = _locked_tx(cur, user_id, achou["t"])
+    shadow_id, _ = _insert_of_shadow(cur, user_id, o, classify_open_finance_launch(
+        o["amount"], o["category"], o["description"]))
+    if shadow_id is None:
+        raise ReconciliationConflict("SHADOW_NOT_CREATED")
+    cur.execute("""update open_finance_transactions set imported_launch_id=%s, match_launch_id=null,
+                          reconciliation_status='imported' where id=%s""", (shadow_id, o["id"]))
+    novas.extend(filter(None, [categoria_pigbank(o["category"])]))
+    return [o]
+
+
 def projeta_todas(cur, user_id: int, declarations: list[dict], by_id: dict) -> None:
     for d in declarations:
         projeta(cur, user_id, d, by_id.get(d["matched_transaction_id"]))
