@@ -71,7 +71,8 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
         borderWidth: acesso ? 0 : 1,
         ...(acesso ? { borderBottomWidth: 1 } : {}),
         borderColor: corBorda,
-        borderRadius: acesso ? 0 : raio.md,
+        borderRadius: acesso ? 0 : raio.controle,
+        ...(acesso ? {} : { backgroundColor: cores.surfaceControl }),
         paddingHorizontal: acesso ? 0 : espaco.lg,
         paddingVertical: espaco.md,
         minHeight: 44,
@@ -97,6 +98,7 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
     </Texto>
   ) : (
     <TextInput
+      selectionColor={cores.brand}
       {...resto}
       editable={!desativado}
       maxFontSizeMultiplier={1.3}
@@ -120,7 +122,8 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
             borderWidth: acesso ? 0 : 1,
             ...(acesso ? { borderBottomWidth: 1 } : {}),
             borderColor: corBorda,
-            borderRadius: acesso ? 0 : raio.md,
+            borderRadius: acesso ? 0 : raio.controle,
+            ...(acesso ? {} : { backgroundColor: cores.surfaceControl }),
             paddingHorizontal: acesso ? 0 : espaco.lg,
           }}
         >

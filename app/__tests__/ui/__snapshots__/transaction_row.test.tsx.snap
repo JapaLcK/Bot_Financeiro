@@ -29,8 +29,9 @@ exports[`TransactionRow snapshot (dois temas): claro 1`] = `
           [
             {
               "fontFamily": "Inter-Regular",
-              "fontSize": 16,
-              "lineHeight": 22,
+              "fontSize": 14,
+              "letterSpacing": 0,
+              "lineHeight": 21,
             },
             {
               "color": "#111113",
@@ -47,8 +48,9 @@ exports[`TransactionRow snapshot (dois temas): claro 1`] = `
         style={
           [
             {
-              "fontFamily": "Inter-Regular",
+              "fontFamily": "Inter-Medium",
               "fontSize": 12,
+              "letterSpacing": 0,
               "lineHeight": 16,
             },
             {
@@ -70,13 +72,16 @@ exports[`TransactionRow snapshot (dois temas): claro 1`] = `
         [
           {
             "fontFamily": "Inter-Regular",
-            "fontSize": 16,
-            "lineHeight": 22,
+            "fontSize": 14,
+            "letterSpacing": 0,
+            "lineHeight": 21,
           },
           {
             "color": "#111113",
           },
-          {},
+          {
+            "fontFamily": "Inter-SemiBold",
+          },
           {
             "fontVariant": [
               "tabular-nums",
@@ -121,11 +126,12 @@ exports[`TransactionRow snapshot (dois temas): escuro 1`] = `
           [
             {
               "fontFamily": "Inter-Regular",
-              "fontSize": 16,
-              "lineHeight": 22,
+              "fontSize": 14,
+              "letterSpacing": 0,
+              "lineHeight": 21,
             },
             {
-              "color": "#F2F2F3",
+              "color": "#F4F4F6",
             },
             {},
             null,
@@ -139,12 +145,13 @@ exports[`TransactionRow snapshot (dois temas): escuro 1`] = `
         style={
           [
             {
-              "fontFamily": "Inter-Regular",
+              "fontFamily": "Inter-Medium",
               "fontSize": 12,
+              "letterSpacing": 0,
               "lineHeight": 16,
             },
             {
-              "color": "#9B9BA6",
+              "color": "#A8A8B3",
             },
             {},
             null,
@@ -162,13 +169,16 @@ exports[`TransactionRow snapshot (dois temas): escuro 1`] = `
         [
           {
             "fontFamily": "Inter-Regular",
-            "fontSize": 16,
-            "lineHeight": 22,
+            "fontSize": 14,
+            "letterSpacing": 0,
+            "lineHeight": 21,
           },
           {
-            "color": "#F2F2F3",
+            "color": "#F4F4F6",
           },
-          {},
+          {
+            "fontFamily": "Inter-SemiBold",
+          },
           {
             "fontVariant": [
               "tabular-nums",

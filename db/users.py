@@ -110,7 +110,8 @@ _DESTINO_VENCE = (
 # Finance terminal e afiliado. Unique que colidir (Pix aberto, `affiliates.user_id`)
 # vira `MergeRefused` no `merge_users`.
 _MOVIDAS = ("ai_messages", "ai_fallback_log", "audit_events", "auth_login_events", "plan_grants",
-            "pix_charges", "open_finance_connections", "open_finance_item_registry", "affiliates")
+            "pix_charges", "open_finance_connections", "open_finance_item_registry", "affiliates",
+            "metas")
 
 # FKs em users(id) cuja coluna não se chama `user_id`.
 _OUTRAS_COLUNAS = (("pii_access_log", "subject_user_id"),

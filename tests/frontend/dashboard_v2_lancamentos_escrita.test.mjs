@@ -6,8 +6,9 @@ let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
 after(() => browser?.close());
 const fixture = RESPOSTAS.lancamentos.estados;
-async function abrir(opts = {}) {
+async function abrir({ fallback, ...opts } = {}) {
   const p = await abrirPainel(browser, { espera: '[data-id="l901"]', ...opts });
+  if (fallback) await p.ctx.addInitScript(() => { delete HTMLDialogElement.prototype.showModal; delete HTMLDialogElement.prototype.close; }); // Safari 14: sem <dialog>
   await p.ir("/lancamentos");
   return p;
 }
@@ -181,5 +182,25 @@ test("SSE/refetch durante formulário não transforma campo intocado em alteraç
   await page.waitForFunction(() => document.querySelector('[data-id="l901"] .lanc-valor')?.textContent.includes("80,01"));
   await salvar(page).click(); await esperarFechar(page);
   assert.deepEqual(bodies, [{ id: "l901", descricao: "Só a descrição" }]);
+  await ctx.close();
+});
+
+// O 2º clique de um duplo clique em "Lançar na Carteira" cai no fundo do diálogo recém-aberto (::backdrop nativo,
+// scrim no fallback) e o fecharia na hora: o fundo só vale passada a janela do useDialogo (400 ms).
+// O 2º clique só sai com o diálogo já aberto, no ponto do botão (fora dele): sem o conserto fecha, por mais lenta que esteja a máquina.
+for (const fallback of [false, true]) test(`${fallback ? "Safari 14 (fallback)" : "nativo"}: duplo clique em Lançar na Carteira deixa o diálogo aberto; o clique no fundo depois da janela fecha`, async () => {
+  const { ctx, page } = await abrir({ fallback });
+  const box = await page.getByRole("button", { name: "Lançar na Carteira", exact: true }).boundingBox();
+  const [x, y] = [box.x + 10, box.y + 10];
+  await page.mouse.click(x, y);
+  await page.locator(".lanc-form[open]").waitFor();
+  const t0 = await page.evaluate(() => performance.now());
+  const dentro = await page.locator(".lanc-form").boundingBox();
+  assert.ok(x < dentro.x || x > dentro.x + dentro.width || y < dentro.y || y > dentro.y + dentro.height, "o ponto do botão tem de cair no fundo, não no diálogo");
+  await page.mouse.click(x, y);
+  assert.equal(await page.locator(".lanc-form[open]").count(), 1); // o fechar é síncrono: sem sleep para "esperar que não feche"
+  await page.waitForFunction(([t, janela]) => performance.now() - t > janela, [t0, 450]);
+  await page.mouse.click(x, y); // o caso legítimo: clique no fundo, passada a janela
+  await esperarFechar(page);
   await ctx.close();
 });

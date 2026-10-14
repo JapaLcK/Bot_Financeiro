@@ -156,7 +156,7 @@ def test_valor_fora_da_carteira_pura(libera):
     sombra = _sombra(a, 38)
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
     manual_ct = db.add_credit_purchase(a, cartao, 39, "mercado", "manual", today_tz())[0]
-    of_ct = db.add_imported_credit_purchase(a, cartao, -40, "mercado", today_tz(), f"ct-v-{a}")[0]
+    of_ct = db.add_imported_credit_purchase(a, cartao, 40, "mercado", today_tz(), f"ct-v-{a}")[0]
     libera(a)
     linhas = (fundida, pendente, especie, paga, antiga, sombra)
     antes = ([estado(lid) for lid in linhas], cru(a))

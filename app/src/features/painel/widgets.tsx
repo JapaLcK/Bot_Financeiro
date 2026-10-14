@@ -1,4 +1,5 @@
-import { Contas, ResumoMes } from "./contasResumo";
+import { Contas } from "./contasResumo";
+import { ResumoMes } from "./resumoMes";
 import { Categorias, Calendario, Simulador } from "./gastos";
 import { Previsao, Compromissos } from "./futuro";
 import { Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";

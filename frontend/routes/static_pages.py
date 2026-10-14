@@ -56,6 +56,7 @@ async def serve_landing():
         clarity=True,
         inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
         defer_tracking=True,
+        sem_teste=not demo_ligado(),
     )
 
 
@@ -216,6 +217,12 @@ async def serve_assinar():
     # Funil v3: conta + checkout. Pixel e GA4 sim (o assinar.js limpa o fragmento antes
     # deles), Clarity não: a página tem nome, e-mail e WhatsApp nos campos.
     return html_file(FRONTEND_DIR / "assinar.html", pixel=True, clarity=False)
+
+
+@router.get("/assinar-rede.js")
+async def serve_assinar_rede_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "assinar-rede.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
 
 
 @router.get("/assinar.js")
@@ -463,26 +470,45 @@ def serve_precos(request: Request):
     `viewed_pricing` (topo do funil); anônimo/cookie inválido só serve a página."""
     from db import record_pricing_viewed
 
+    uid = None
     try:
         uid = _resolve_page_user_id(request)
         if uid is not None:
             record_pricing_viewed(uid)
     except Exception:  # telemetria nunca derruba a página de venda
         logging.getLogger(__name__).warning("viewed_pricing falhou", exc_info=True)
-    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
+    if uid is not None:  # T0 da régua de remarketing; try próprio, não derruba a página
+        try:
+            from db.remarketing import registrar_t0
+
+            registrar_t0(uid, "precos")
+        except Exception as exc:
+            logging.getLogger(__name__).warning("remarketing_t0 falhou: %s", type(exc).__name__)
+    # Sem convite para quem já tem conta (o JS tira o link de quem só tem refresh válido;
+    # aqui evitamos o salto de layout dos demais) e para quem acabou o demo: o /t/{code}
+    # e o /teste desligado chegam aqui com ?origem=teste, e o clique reabriria o WhatsApp.
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True,
+                     sem_teste=uid is not None or not demo_ligado()
+                     or request.query_params.get("origem") == _ORIGEM_TESTE)
+
+
+def _pagina_lp(sem_teste: bool) -> Response:
+    return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",),
+                     sem_teste=sem_teste)
 
 
 @router.get("/lp")
 async def serve_lp():
     # Landing de anúncio: VSL obrigatória e um único botão para o quiz (quiz.pigbankai.com).
-    return html_file(FRONTEND_DIR / "lp.html", clarity=True, inline_css=("brand.css",))
+    return _pagina_lp(sem_teste=not demo_ligado())
 
 
 @router.get("/vsl")
 async def serve_vsl():
     # A mesma VSL da /lp, depois do XQuiz (a /q sem plano manda pra cá): o botão vai à
-    # /precos. Trocado aqui, e não no JS, para valer também sem JavaScript.
-    resp = await serve_lp()
+    # /precos. Trocado aqui, e não no JS, para valer também sem JavaScript. Nunca leva o
+    # "Testar o Piggy": é a continuação do quiz, e o botão desviaria da compra.
+    resp = _pagina_lp(sem_teste=True)
     resp.body = resp.body.replace(b'href="https://quiz.pigbankai.com/"', b'href="/precos"')
     resp.headers["content-length"] = str(len(resp.body))
     return resp
@@ -497,7 +523,8 @@ async def serve_continuar_compra():
     pessoa não volta visualmente à seleção de planos e as regras de cartão/Pix
     continuam com uma implementação única.
     """
-    return html_file(FRONTEND_DIR / "precos.html", clarity=True)
+    # Quem continua uma compra já tem conta: nunca mostra o "Testar o Piggy".
+    return html_file(FRONTEND_DIR / "precos.html", clarity=True, sem_teste=True)
 
 
 @router.get("/suporte")
@@ -564,6 +591,8 @@ async def serve_robots_txt():
         "Disallow: /admin",
         "Disallow: /assinar",
         "Disallow: /q",
+        "Disallow: /teste",
+        "Disallow: /t/",
         f"Sitemap: {public_site_url('/sitemap.xml')}",
         "",
     ])
@@ -723,6 +752,16 @@ async def serve_nav_burger_js():
     )
 
 
+@router.get("/teste-piggy.js")
+async def serve_teste_piggy_js(request: Request):
+    """Botões 'Testar o Piggy agora' (/lp, /, /precos): utm/fbclid + eventos de clique."""
+    return FileResponse(
+        FRONTEND_DIR / "teste-piggy.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": _cache_asset_versionado(request)},
+    )
+
+
 @router.get("/blog-news.js")
 async def serve_blog_news_js():
     """JS da seção 'Notícias do mercado' do /blog (consome /api/blog/news).
@@ -761,6 +800,24 @@ async def serve_dashboard_js():
 async def serve_dashboard_agent_chat_js():
     return FileResponse(
         FRONTEND_DIR / "dashboard-agent-chat.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-agent-esperado.js")
+async def serve_dashboard_agent_esperado_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-agent-esperado.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@router.get("/dashboard-xerife.js")
+async def serve_dashboard_xerife_js():
+    return FileResponse(
+        FRONTEND_DIR / "dashboard-xerife.js",
         media_type="application/javascript",
         headers={"Cache-Control": "no-cache"},
     )
@@ -1167,23 +1224,80 @@ async def serve_brand_asset(path: str):
     )
 
 
+def _link_whatsapp(texto: str) -> str:
+    """Deep link do chat com o Piggy, com `texto` pré-preenchido. O número real
+    fica no servidor (WHATSAPP_NUMBER). Sem número, cai no seletor genérico."""
+    import os
+    import urllib.parse
+
+    text = urllib.parse.quote(texto)
+    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
+    return (
+        f"https://api.whatsapp.com/send?phone={number}&text={text}"
+        if number
+        else f"https://wa.me/?text={text}"
+    )
+
+
 @router.get("/wa")
 async def open_whatsapp_bot():
     """Abre o chat DIRETO com o Piggy no WhatsApp (deep link), com saudação
     pré-preenchida. Botões do site apontam pra cá — o número real fica no
     servidor (WHATSAPP_NUMBER), nada hardcoded no HTML. Serve pra reencontrar
     o bot rápido. Sem número configurado, cai no seletor genérico do WhatsApp."""
-    import os
-    import urllib.parse
-
-    text = urllib.parse.quote("Oi Piggy! Quero acessar minha conta PigBank 🐷")
-    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isdigit())
-    url = (
-        f"https://api.whatsapp.com/send?phone={number}&text={text}"
-        if number
-        else f"https://wa.me/?text={text}"
+    return RedirectResponse(
+        _link_whatsapp("Oi Piggy! Quero acessar minha conta PigBank 🐷"), status_code=302
     )
-    return RedirectResponse(url, status_code=302)
+
+
+# ─── "Testar o Piggy" (demo no WhatsApp, sem conta) ──────────────────────────
+# Destino fixo do funil do teste. NÃO soma utm_source: sobrescreveria a
+# atribuição de quem veio do anúncio (os utms originais ficam em demo_sessions).
+_ORIGEM_TESTE = "teste"
+_PRECOS_DO_TESTE = f"/precos?origem={_ORIGEM_TESTE}"
+_NO_STORE = {"Cache-Control": "no-store"}  # senão o Cloudflare serve o mesmo código a todos
+
+
+def _utm(request: Request, nome: str) -> str | None:
+    """Só letras, dígitos, _ . - (até 64): o utm vai para o banco e nunca sai de lá."""
+    return re.sub(r"[^\w.\-]", "", request.query_params.get(nome, ""))[:64] or None
+
+
+def demo_ligado() -> bool:
+    """O interruptor do demo: DEMO_DAILY_MAX > 0 e WHATSAPP_NUMBER. É a condição do
+    /teste e também a de mostrar os botões "Testar o Piggy" nas páginas."""
+    from db import demo_funnel
+
+    return demo_funnel.teto_diario() > 0 and bool(os.getenv("WHATSAPP_NUMBER", "").strip())
+
+
+@router.get("/teste")
+@limiter.limit("20/minute")
+def abrir_teste(request: Request):
+    """Botão "Testar o Piggy": registra o clique (utms) e abre o WhatsApp com um
+    código que liga a conversa a este clique. Interruptor: DEMO_DAILY_MAX <= 0 ou
+    sem WHATSAPP_NUMBER devolve o visitante à página de preços, sem gravar linha."""
+    from db import demo_funnel
+
+    if not demo_ligado():
+        return RedirectResponse(_PRECOS_DO_TESTE, status_code=302, headers=_NO_STORE)
+    code = demo_funnel.criar_clique(_utm(request, "utm_source"), _utm(request, "utm_campaign"))
+    texto = "Oi Piggy! Quero testar o PigBank 🐷" + (f" (teste {code})" if code else "")
+    return RedirectResponse(_link_whatsapp(texto), status_code=302, headers=_NO_STORE)
+
+
+# `shared_limit(scope=)` e NÃO `limit()`: com o `key_style="url"` do Limiter cada
+# código inventado cairia num balde novo e o teto nunca valeria (ver /d/{code}).
+@router.get("/t/{code}")
+@limiter.shared_limit("30/minute", scope="teste_link_checkout")
+def link_do_teste(request: Request, code: str):
+    """Link final do demo: carimba o clique (1ª vez) e manda para os preços.
+    O destino é fixo — nada da URL entra nele — e código inválido faz o mesmo 302."""
+    from db import demo_funnel
+
+    if demo_funnel.CODIGO_RE.fullmatch(code):
+        demo_funnel.marcar_checkout(code)
+    return RedirectResponse(_PRECOS_DO_TESTE, status_code=302, headers=_NO_STORE)
 
 
 @router.post("/contact")

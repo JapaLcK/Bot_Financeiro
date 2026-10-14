@@ -46,7 +46,7 @@ exports[`SheetConteudo snapshot (dois temas): escuro 1`] = `
   <View
     style={
       {
-        "backgroundColor": "#0E0E10",
+        "backgroundColor": "#09090B",
         "flex": 1,
         "paddingBottom": 50,
         "paddingHorizontal": 16,

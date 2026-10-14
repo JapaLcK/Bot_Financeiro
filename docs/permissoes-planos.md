@@ -33,7 +33,17 @@ No job do WhatsApp o plano é checado ANTES do claim da semana, então o downgra
 consome o envio (`tests/test_resumo_semanal.py`, banco real). A linha de comparação com a
 semana anterior no texto do resumo semanal segue o gate `financial_comparison` (Plus+); o
 Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a variação.
+A comparação por períodos equivalentes e por categoria (`compare_periods`, PL-07) é Plus+: o
+gate `financial_comparison` é a primeira instrução do serviço e o Essencial recebe `pro_required`
+sem nenhum dado lido. O "mês anterior" do Resumo do mês (`anterior` de `GET /api/v2/resumo-do-mes`:
+dois totais, sem percentual) não muda e segue no Essencial.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
+
+O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação
+"era esperado", PL-04) é do agente: Plus e Pro, pelo orçamento de energia. Essencial e Grátis não
+recebem evento de anomalia (o runner confere o plano antes de ler ou gravar) e o `PUT` de "esperado"
+responde 403 `pro_required`. O lembrete simples do Essencial é o alerta de orçamento por categoria
+(80/100/120%, `core/budget_alerts.py`), que não mudou.
 
 Orçamento Doméstico é o método específico de dividir a renda em potes, diferente
 do orçamento mensal por categoria. As regras existentes de correção/aprendizado

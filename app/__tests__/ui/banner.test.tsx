@@ -53,6 +53,17 @@ describe("Banner", () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
+  it("aoFechar: botão \"Fechar aviso\" chama o callback; sem a prop, o único botão é a ação", () => {
+    const aoFechar = jest.fn();
+    const com = renderInterativo(<Banner mensagem="x" aoFechar={aoFechar} />);
+    fireEvent.press(com.getByRole("button", { name: "Fechar aviso" }));
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+
+    const sem = renderInterativo(<Banner mensagem="x" acao={{ rotulo: "Reconectar", onPress: () => {} }} />);
+    expect(sem.queryByRole("button", { name: "Fechar aviso" })).toBeNull();
+    expect(sem.getAllByRole("button")).toHaveLength(1);
+  });
+
   it("fundo é sempre `surface`, nos dois temas", () => {
     const { claro: c, escuro: e } = renderNosDoisTemas(<Banner mensagem="x" />);
     expect(c.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(claro.surface);

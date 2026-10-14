@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TITULOS } from "@/features/painel/catalogo";
 import { decimalParaCentavos, numeroLegadoParaCentavos } from "@/features/painel/decimal";
 const dinheiro = z.string().transform((v, ctx) => { try { return decimalParaCentavos(v); } catch { ctx.addIssue({ code: "custom", message: "Dinheiro inválido" }); return z.NEVER; } });
 const legado = z.number().finite().transform((v, ctx) => { try { return numeroLegadoParaCentavos(v); } catch { ctx.addIssue({ code: "custom", message: "Dinheiro inválido" }); return z.NEVER; } });
@@ -27,6 +28,31 @@ export const rendaSchema = z.object({ ok: z.literal(true), evolution: z.array(z.
 export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(z.object({ key: z.string(), title: z.string(), message: z.string(), severity: z.string(), action_label: texto, action_view: texto })) });
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
-export const respostaChatSchema = z.object({ reply: z.string(), usage });
+/** `periodo` existe só no chat (card sem widget): fica FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
+type CardChat = keyof typeof TITULOS | "periodo";
+const cardId = z.enum(["periodo", ...Object.keys(TITULOS)] as [CardChat, ...CardChat[]]);
+/** O recurso `periodo` do card (`api/nativo/mes_detalhes.py`), uma aba com `mes: null`. Fixture: `tests/fixtures/ai_chat_bloco_periodo.json`. */
+export const periodoSchema = z.object({ inicio: z.string(), fim: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema).max(5) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
+/** Eventos do `/ai/chat/stream`, um schema por `tipo`. O `bloco` só tem o ENVELOPE validado (`recursos` fica solto: o E1 o refina por card). */
+const eventosChat = {
+  passo: z.object({ texto: z.string(), previa: cardId.nullable().catch(null) }),
+  bloco: z.object({ bloco: z.object({ card: cardId, abas: z.array(z.object({ mes: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).nullable(), recursos: z.record(z.string(), z.unknown()) })).min(1).max(3) }) }),
+  delta: z.object({ texto: z.string() }),
+  reinicio: z.object({}),
+  fim: z.object({ reply: z.string(), usage, message_id: z.number().int().positive().nullable(), chips: z.array(z.string().min(1).max(40)).max(4).catch([]) }),
+  erro: z.object({ mensagem: z.string().optional() }),
+};
+type Eventos = typeof eventosChat;
+export type EventoChat = { [K in keyof Eventos]: { tipo: K } & z.infer<Eventos[K]> }[keyof Eventos];
+export type BlocoChat = z.infer<Eventos["bloco"]>["bloco"];
+/** `null` para tipo desconhecido ou forma inválida: quem chama descarta SÓ aquele evento e segue. */
+export function lerEvento(bruto: unknown): EventoChat | null {
+  const tipo = (bruto as { tipo?: unknown } | null)?.tipo;
+  if (typeof tipo !== "string" || !Object.hasOwn(eventosChat, tipo)) return null;
+  const r = eventosChat[tipo as keyof Eventos].safeParse(bruto);
+  return r.success ? ({ ...r.data, tipo } as EventoChat) : null;
+}
+export const feedbackSchema = z.object({ ok: z.literal(true), nota: z.union([z.literal(1), z.literal(-1)]).nullable() });
+export const cancelamentoSchema = z.object({ cancelada: z.string().nullable() });
 export type PerfilPainel = NonNullable<z.infer<typeof perfilPainelSchema>["perfil"]>;
 export type Lancamento = z.infer<typeof lancamentoSchema>;

@@ -114,7 +114,7 @@ test("escolher no modal: PUT com x-csrf-token e o corpo certo; o painel é o do 
   const r = [await page.locator(".picker[open]").count(), await blocos(page)];
   await ctx.close();
   assert.deepEqual(puts, [["/api/v2/perfil", "tok-123", { perfil: "investir" }]]);
-  assert.deepEqual(r, [0, ["contas", "metas", "patrimonio", "piggy", "rendimento", "resumo", "simulador", "wealth"]]);
+  assert.deepEqual(r, [0, ["contas", "patrimonio", "piggy", "rendimento", "resumo", "simulador", "wealth"]]);
 });
 
 // O texto do aviso e o "Criar senha" (só no password_required), lidos do modal e do painel.
@@ -238,8 +238,8 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
   });
   await ctx.close();
   // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a)
-  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: true, calendario: true, simulador: true, compromissos: true, piggy: true, metas: true, patrimonio: true });
-  assert.deepEqual(r.stats, [null, null, "demonstração", "demonstração"]);
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: true, calendario: true, simulador: true, compromissos: true, piggy: true, patrimonio: true });
+  assert.deepEqual(r.stats, [null, null, "demonstração"]);
   assert.equal(r.etiqueta, false);
 });
 

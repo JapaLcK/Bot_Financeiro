@@ -10,16 +10,17 @@ export const ROUTES = [
   { path: "/gastos", label: "Para onde vai", short: "Gastos", icon: "ph-chart-bar", title: "Para onde vai o dinheiro" },
   { path: "/assinaturas", label: "Assinaturas", short: "Assinaturas", icon: "ph-arrows-clockwise", title: "Assinaturas" },
   { path: "/simulador", label: "Simulador", short: "Simulador", icon: "ph-lightning", title: "Simulador" },
-  { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas e caixinhas" },
+  { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
-  { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-list", title: "Lançamentos" },
+  { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },
 ] as const;
 
 export type Path = (typeof ROUTES)[number]["path"];
-// No celular o Piggy fica no meio; o Simulador sai daqui e segue em Ferramentas e no menu.
-export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/metas", "/lancamentos"];
+// No celular o Piggy fica no meio e o "Menu" (parts/MenuTelas.tsx) fecha a barra: toda tela que
+// não está aqui (Previsão, Metas, Simulador…) abre por ele, e a Ajuda também.
+export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa.
 export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy");
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.

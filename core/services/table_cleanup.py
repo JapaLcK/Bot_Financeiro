@@ -1,7 +1,7 @@
 """
-core/services/table_cleanup.py — Poda das três tabelas que só crescem.
+core/services/table_cleanup.py — Poda das tabelas que só crescem.
 
-As três funções de limpeza já existiam e ninguém as chamava; o cron do Railway
+As funções de limpeza (as três primeiras) já existiam e ninguém as chamava; o cron do Railway
 que deveria chamá-las nunca foi criado no painel (e, desde 2026-08-28, serviço
 novo não consegue mais optar por Config as Code). Por isso a poda passou a
 rodar como tarefa de fundo do próprio app, no lifespan:
@@ -9,12 +9,13 @@ rodar como tarefa de fundo do próprio app, no lifespan:
   core/refresh_tokens.py  cleanup_expired_refresh_tokens  → auth_refresh_tokens
   db/mfa.py               cleanup_expired_challenges      → mfa_login_challenges
   db/google_auth.py       cleanup_expired_pending_signups → pending_google_signups
+  db/demo_funnel.py       esquecer_numeros_antigos        → demo_sessions (zera wa_hash > 30 dias; não apaga linha)
 
 Uma fonte de verdade, dois consumidores: `run_table_cleanup` é chamada pelo loop
 daqui (`_table_cleanup` no lifespan) e por `scripts/cleanup_job.py` (execução
 manual, `--dry-run`).
 
-As três funções são SÍNCRONAS e usam `get_conn()` bloqueante — o loop as chama
+As funções são SÍNCRONAS e usam `get_conn()` bloqueante — o loop as chama
 por `asyncio.to_thread`, senão o event loop do app inteiro trava durante o
 DELETE.
 
@@ -90,17 +91,19 @@ def _interval_hours() -> int:
 def _cleanups() -> list[tuple[str, object]]:
     from core.refresh_tokens import cleanup_expired_refresh_tokens
     from db.google_auth import cleanup_expired_pending_signups
+    from db.demo_funnel import esquecer_numeros_antigos
     from db.mfa import cleanup_expired_challenges
 
     return [
         ("auth_refresh_tokens", cleanup_expired_refresh_tokens),
         ("mfa_login_challenges", cleanup_expired_challenges),
         ("pending_google_signups", cleanup_expired_pending_signups),
+        ("demo_sessions", esquecer_numeros_antigos),
     ]
 
 
 def run_table_cleanup(*, dry_run: bool = False) -> dict:
-    """Poda as três tabelas. Síncrona; devolve {"removed", "errors", "dry_run"}."""
+    """Poda as tabelas. Síncrona; devolve {"removed", "errors", "dry_run"}."""
     removed: dict[str, int] = {}
     errors: list[dict] = []
 
@@ -115,7 +118,7 @@ def run_table_cleanup(*, dry_run: bool = False) -> dict:
         try:
             n = int(fn() or 0)  # type: ignore[operator]
         except Exception as exc:
-            # Uma tabela que falha não pode impedir a poda das outras duas.
+            # Uma tabela que falha não pode impedir a poda das outras.
             errors.append({"table": table, "error": repr(exc)})
             print(f"[cleanup_job] {table}: FALHOU — {exc}", file=sys.stderr, flush=True)
             continue

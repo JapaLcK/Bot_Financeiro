@@ -23,7 +23,7 @@ beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredencia
 afterEach(() => jest.restoreAllMocks());
 async function apertar(label: string) { await act(async () => { fireEvent.press(screen.getByRole("button", { name: label })); await drenar(); }); }
 it.each(["/resumo", "/gastos", "/piggy", "/metas", "/extrato"] as const)("deep link %s montado só depois de acesso e marco reais", async (url) => {
- renderRouter("./app", { initialUrl: url }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
+ renderRouter("./app", { initialUrl: url }); await waitFor(() => expect(screen.getByTestId(url === "/piggy" ? "painel-privacidade" : "painel-conta")).toBeTruthy());
  expect(chamadas().findIndex((c) => c.caminho === "/onboarding/open-finance")).toBeLessThan(chamadas().findIndex((c) => c.caminho.startsWith("/api/app/")));
  const app = fetchFalso.mock.calls.filter(([u]) => String(u).includes("/api/app/")); expect(app.length).toBeGreaterThan(0);
  for (const [,req] of app) { expect(req.credentials).toBe("omit"); expect(req.headers.Authorization).toBe("Bearer access-ana"); }
@@ -47,7 +47,10 @@ it("PUT lento durante foreground não deixa seletor travado e reconcilia o perfi
 it("privacidade remove montantes, gráfico e mensagem financeira da árvore acessível", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("Disponível agora")).toBeTruthy());
  await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull();
- await act(async () => { router.navigate("/piggy"); await drenar(); }); await waitFor(() => expect(screen.getByText("Mensagem oculta enquanto os valores estão privados.")).toBeTruthy()); expect(screen.queryByText(/Oi! Posso ajudar/)).toBeNull();
+ await act(async () => { router.navigate("/piggy"); await drenar(); }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
+ // Chat privado: campo, chips e cota desligados; o histórico do servidor nunca é mostrado.
+ expect(screen.getByLabelText("Mensagem para o Piggy").props.editable).toBe(false); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+ expect(screen.queryByText(/mensagens utilizadas/)).toBeNull(); expect(screen.queryByText(/Oi! Posso ajudar/)).toBeNull();
 });
 it("contas A atrasadas após logout não são mostradas e não restauram sessão", async () => {
  const atraso = segurar(); servidor({ contasLentas: atraso }); renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
