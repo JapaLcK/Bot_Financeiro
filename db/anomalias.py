@@ -163,7 +163,13 @@ def listar_esperados_xerife(user_id: int, limit: int = 50, offset: int = 0) -> d
 
 
 def _lapides_regras(cur, user_id: int, agent_id: int, regras: list[dict]) -> None:
-    """Supressão e lápides na transação da regra: desfazer não reenvia gastos antigos."""
+    """Suprime eventos existentes e protege a janela do detector sem materializar todo o histórico.
+
+    Os 90 dias cobrem conservadoramente candidatos lidos nas últimas 24h que ainda estão
+    em processamento. Fora dessa janela, só uma chave já existente precisa de supressão.
+    """
+    from core.services.anomalia import JANELA_DIAS
+
     cur.execute(
         f"""insert into agent_events
               (agent_id, user_id, kind, dedupe_key, payload, channel, stale_at)
@@ -172,11 +178,15 @@ def _lapides_regras(cur, user_id: int, agent_id: int, regras: list[dict]) -> Non
                    'dashboard', now()
             from launches l
             where l.user_id = %(u)s and l.{TIPO_DESPESA_SQL}
+              and (l.criado_em >= now() - make_interval(days => %(dias)s)
+                   or exists (select 1 from agent_events e
+                              where e.user_id = %(u)s and e.agent_id = %(a)s
+                                and e.dedupe_key = 'anomalia:' || l.id))
               and l.is_internal_movement = false and {_regra_matches_sql('%(r)s::jsonb')}
             on conflict (agent_id, dedupe_key) do update
               set stale_at = coalesce(agent_events.stale_at, now())
               where agent_events.user_id = excluded.user_id""",
-        {"a": agent_id, "u": user_id, "r": json.dumps(regras)},
+        {"a": agent_id, "u": user_id, "r": json.dumps(regras), "dias": JANELA_DIAS},
     )
 
 
