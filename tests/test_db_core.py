@@ -18,6 +18,8 @@ from db import (
     investment_withdraw_to_account,
     delete_launch_and_rollback,
     attempt_whatsapp_phone_link,
+    link_platform_identity,
+    MergeRefused,
     confirm_email_verification,
     create_email_verification,
     create_card,
@@ -153,8 +155,11 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
     - stale_wa_uid: conta WA antiga, tem auth_account com telefone DIFERENTE do WA
     - user_id (fixture): conta correta, tem auth_account com o mesmo telefone do WA
     - current_user_id=stale_wa_uid é passado (simula get_or_create_canonical_user antigo)
-    Esperado: status='linked', user_id retornado = user_id correto (target).
-    A identidade WA deve apontar para o user_id correto depois.
+
+    #711 (D1(a)): o telefone digitado em `user_id` não prova que as duas contas são
+    da mesma pessoa, então o auto-vínculo não junta mais (`wa_linked_other_account`,
+    nada muda). Com login nos dois lados, nem o código junta: apagaria o login da
+    origem (#635), e o `merge_users` recusa até existir confirmação (dono, M8).
     """
     wa_phone = "5511987650001"
     wa_email = f"wa-stale-{uuid.uuid4().hex[:8]}@example.com"
@@ -177,41 +182,30 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
 
         result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
 
-        assert result["status"] == "linked", f"esperado 'linked', veio {result}"
-        assert result["user_id"] == user_id, (
-            f"esperado user_id={user_id} (conta correta), veio {result['user_id']}"
-        )
-
+        assert result == {"status": "wa_linked_other_account", "wa_phone": wa_phone,
+                          "target_user_id": user_id}, result
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    select user_id
-                    from user_identities
-                    where provider = 'whatsapp' and external_id = %s
-                    """,
-                    (wa_phone,),
-                )
-                row = cur.fetchone()
-
-        assert row is not None
-        assert row["user_id"] == user_id, (
-            f"identidade WA deve apontar para {user_id}, aponta para {row['user_id']}"
-        )
-
-        # #635 (D3): com login nos dois lados, o login da origem é apagado, e o
-        # e-mail dele não vira porta para o destino — cadastro novo = conta nova.
-        with get_conn() as conn:
-            with conn.cursor() as cur:
+                cur.execute("select user_id from user_identities where provider = 'whatsapp'"
+                            " and external_id = %s", (wa_phone,))
+                assert cur.fetchone()["user_id"] == stale_wa_uid, "o auto-vínculo religou o número"
                 cur.execute("select count(*) as n from auth_accounts where user_id = %s", (stale_wa_uid,))
-                assert cur.fetchone()["n"] == 0, "o login antigo da origem sobrou"
-        novo = confirm_email_verification(stale_email, create_email_verification(
-            stale_email, "senha-forte-123", f"55119{uuid.uuid4().int % 100_000_000:08d}"))
-        assert novo["user_id"] not in (user_id, stale_wa_uid)
+                assert cur.fetchone()["n"] == 1, "o auto-vínculo apagou o login da origem (#711)"
+
+        # O código gerado em `user_id` (`vincular`/`link`) também não junta: os dois
+        # lados têm login, e a junção apagaria o da origem (#635). Até existir
+        # confirmação explícita, o `merge_users` recusa (dono, M8).
+        with pytest.raises(MergeRefused) as recusa:
+            link_platform_identity("whatsapp", wa_phone, user_id)
+        assert recusa.value.motivo == "apagaria_login"
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (user_id,))
-                assert cur.fetchone()["n"] == 1, "o e-mail antigo virou 2ª conta de login no destino"
+                cur.execute("select user_id from user_identities where provider = 'whatsapp'"
+                            " and external_id = %s", (wa_phone,))
+                assert cur.fetchone()["user_id"] == stale_wa_uid, "a recusa religou o número"
+                cur.execute("select count(*) as n from auth_accounts where user_id in (%s, %s)",
+                            (stale_wa_uid, user_id))
+                assert cur.fetchone()["n"] == 2, "um dos logins sumiu na recusa"
     finally:
         # stale pode ter sido absorvido (merge) — tenta deletar mesmo assim
         with get_conn() as conn:
@@ -231,7 +225,8 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
     ensure_user(other_uid)
     # Phone único por execução pra não colidir com users reais em prod que
     # tenham o mesmo número (causava 'multiple_accounts' em vez de 'linked').
-    suffix = f"{uuid.uuid4().int % 100_000_000:08d}"
+    # Começa com 6-9: só aí "sem o 9" é celular antigo (alias). Com 2-5 é um fixo, de outro dono.
+    suffix = f"{6 + uuid.uuid4().int % 4}{uuid.uuid4().int % 10_000_000:07d}"
     phone_without_9 = f"5565{suffix}"     # 12 dígitos
     phone_with_9    = f"55659{suffix}"    # 13 dígitos (mesma raiz + 9)
 
@@ -268,7 +263,8 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
 def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_mesmo_numero(user_id):
     email = f"wa-alias-{uuid.uuid4().hex[:8]}@example.com"
     # Phone único pra não colidir com users reais em prod.
-    suffix = f"{uuid.uuid4().int % 100_000_000:08d}"
+    # Começa com 6-9: só aí "sem o 9" é celular antigo (alias). Com 2-5 é um fixo, de outro dono.
+    suffix = f"{6 + uuid.uuid4().int % 4}{uuid.uuid4().int % 10_000_000:07d}"
     old_wa = f"5565{suffix}"      # 12 dígitos (sem 9)
     new_wa = f"55659{suffix}"     # 13 dígitos (mesma raiz + 9)
     new_uid = int(uuid.uuid4().int % 10_000_000_000)
@@ -286,11 +282,13 @@ def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_me
 
         add_launch_and_update_balance(new_uid, "despesa", 109, None, "rifa")
 
+        # O mesmo número em outro formato não autoriza juntar quem tem dados (dono,
+        # M8): `remetente_com_dados`, as duas contas ficam. A junção é pelo código.
         result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
 
-        assert result["status"] == "linked"
-        assert result["user_id"] == user_id
-        assert get_balance(user_id) == D("-109")
+        assert result == {"status": "remetente_com_dados", "wa_phone": new_wa,
+                          "target_user_id": user_id}, result
+        assert get_balance(user_id) == D("0") and get_balance(new_uid) == D("-109")
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -304,13 +302,88 @@ def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_me
                 )
                 row = cur.fetchone()
 
-        assert row["user_id"] == user_id
+        assert row["user_id"] == new_uid
     finally:
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("delete from users where id = %s", (new_uid,))
             conn.commit()
 
+
+def test_attempt_whatsapp_phone_link_alias_do_mesmo_numero_vazio_junta(user_id):
+    """O alias sem dados nem login segue a regra 4, como qualquer número vazio: junta."""
+    suffix = f"{6 + uuid.uuid4().int % 4}{uuid.uuid4().int % 10_000_000:07d}"
+    old_wa, new_wa = f"5565{suffix}", f"55659{suffix}"
+    new_uid = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(new_uid)
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                insert_auth_account_pii(cur, user_id, f"wa-alias-{uuid.uuid4().hex[:8]}@example.com",
+                                        phone=old_wa, phone_status="confirmed")
+                bind_identity_pii(cur, "whatsapp", old_wa, user_id)
+                bind_identity_pii(cur, "whatsapp", new_wa, new_uid)
+            conn.commit()
+
+        result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
+
+        assert result["status"] == "linked" and result["user_id"] == user_id, result
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select user_id from user_identities where provider = 'whatsapp'"
+                            " and external_id = %s", (new_wa,))
+                assert cur.fetchone()["user_id"] == user_id
+    finally:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from users where id = %s", (new_uid,))
+            conn.commit()
+
+
+def test_attempt_whatsapp_phone_link_alias_do_mesmo_numero_com_login_nao_junta(user_id):
+    """O remetente tem login, e o alvo já tem ESTE número (sem o nono dígito) como
+    identidade do WhatsApp. Reconhecer o número como equivalente não autoriza apagar
+    uma conta (dono, M8): `wa_linked_other_account`, e os dois logins ficam.
+    """
+    email = f"wa-alias-{uuid.uuid4().hex[:8]}@example.com"
+    email_remetente = f"wa-alias-rem-{uuid.uuid4().hex[:8]}@example.com"
+    # Começa com 6-9: só aí "sem o 9" é celular antigo (alias). Com 2-5 é um fixo, de outro dono.
+    suffix = f"{6 + uuid.uuid4().int % 4}{uuid.uuid4().int % 10_000_000:07d}"
+    old_wa = f"5565{suffix}"      # 12 dígitos (sem 9)
+    new_wa = f"55659{suffix}"     # 13 dígitos (mesma raiz + 9)
+    new_uid = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(new_uid)
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                insert_auth_account_pii(
+                    cur, user_id, email, phone=old_wa, phone_status="confirmed"
+                )
+                insert_auth_account_pii(cur, new_uid, email_remetente)  # login, sem telefone
+                bind_identity_pii(cur, "whatsapp", old_wa, user_id)
+                bind_identity_pii(cur, "whatsapp", new_wa, new_uid)
+            conn.commit()
+
+        result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
+
+        assert result == {"status": "wa_linked_other_account", "wa_phone": new_wa,
+                          "target_user_id": user_id}, result
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select user_id from user_identities where provider = 'whatsapp'"
+                            " and external_id = %s", (new_wa,))
+                assert cur.fetchone()["user_id"] == new_uid
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (new_uid,))
+                assert cur.fetchone()["n"] == 1, "o login do remetente foi apagado (#635)"
+                cur.execute("select count(*) as n from auth_accounts where user_id = %s", (user_id,))
+                assert cur.fetchone()["n"] == 1
+    finally:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("delete from auth_accounts where user_id = %s", (new_uid,))
+                cur.execute("delete from users where id = %s", (new_uid,))
+            conn.commit()
 
 def test_import_credit_ofx_nao_grava_limite_automaticamente(user_id):
     card_id = create_card(user_id, "Nubank", 10, 17)

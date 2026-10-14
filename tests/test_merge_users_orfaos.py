@@ -90,13 +90,22 @@ def _origem_do_whatsapp(destino):
     return fone, origem
 
 
+def _junta(fone, destino):
+    """`merge_users` pelo caminho do código (`vincular`/`link`): None quando junta,
+    o `motivo` quando recusa. Desde a #711 o auto-vínculo por telefone não mescla
+    origem com dados financeiros; sem eles, ele continua sendo o veículo."""
+    try:
+        db.link_platform_identity("whatsapp", fone, destino)
+    except db.MergeRefused as exc:
+        return exc.motivo
+    return None
+
+
 def test_origem_some_e_numero_reciclado_nao_ve_a_conversa_anterior(user_id):
     fone, origem = _origem_do_whatsapp(user_id)
     _semeia_origem(origem)
 
-    r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
-
-    assert r["status"] == "linked" and r["user_id"] == user_id
+    assert _junta(fone, user_id) is None
     assert _sobra(origem) == {}, "a origem ficou com dado"
     assert _sql("select tool_name from ai_pending_actions where user_id = %s",
                 (user_id,))[0]["tool_name"] == "add_launch", "sem colisão, a pendência da IA vem junto"
@@ -115,7 +124,7 @@ def test_positivo_destino_mantem_o_seu_e_recebe_o_da_origem(user_id):
          (user_id,))
     _sql("insert into audit_events(user_id, event) values (%s, 'do_destino')", (user_id,))
 
-    assert attempt_whatsapp_phone_link(fone, current_user_id=origem)["status"] == "linked"
+    assert _junta(fone, user_id) is None
 
     msgs = [r["content"] for r in _sql("select content from ai_messages where user_id = %s", (user_id,))]
     assert sorted(msgs) == sorted(["do destino", "quanto gastei com mercado?", "R$ 50,00"])
@@ -192,7 +201,7 @@ def test_positivo_cada_tabela_movida_chega_ao_destino(user_id):
     espaco = "financial_spaces where user_id = %s and name = 'Espaço da origem'"
     assert _n(espaco, (origem,)) == 1
 
-    assert attempt_whatsapp_phone_link(fone, current_user_id=origem)["status"] == "linked"
+    assert _junta(fone, user_id) is None
 
     faltam = [f"{t}.{c}" for (t, c), v in antes.items() if not v <= _linhas(t, c, user_id)]
     assert faltam == [], "a linha da origem não chegou ao destino"
@@ -226,9 +235,7 @@ def test_pix_aberto_nos_dois_lados_recusa_e_nada_e_apagado(user_id):
     sem_log = lambda uid: {k: v for k, v in _sobra(uid).items() if k != "system_event_logs"}  # noqa: E731
     antes = (_sobra(origem), sem_log(user_id))
 
-    r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
-
-    assert r == {"status": "merge_conflict", "wa_phone": fone}
+    assert _junta(fone, user_id) == "colisao"
     assert (_sobra(origem), sem_log(user_id)) == antes, "a recusa grava só o log dela no destino"
     assert _sobra(origem)["users"] == 1
 
@@ -264,7 +271,7 @@ def test_afiliado_de_um_lado_indicou_o_outro_recusa_e_nada_muda(user_id, dono_e_
 
     r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
 
-    assert r == {"status": "merge_conflict", "wa_phone": fone}
+    assert r == {"status": "merge_conflict", "wa_phone": fone, "motivo": "autoindicacao"}
     assert _n("users where id = %s", (origem,)) == 1
     assert _n("affiliates where id = %s and user_id = %s", (af, dono)) == 1
     assert _n("affiliate_referrals where affiliate_id = %s and referred_user_id = %s", (af, indicado)) == 1
@@ -321,15 +328,13 @@ def test_conversa_gastei_e_saldo_com_juncao_no_turno(monkeypatch):
 
 def test_lancamento_num_espaco_da_origem_recusa_e_nada_muda(user_id):
     """`fk_launches_space` é composta (user_id, space_id): o lançamento movido
-    apontaria para o espaço da origem. Vira `merge_conflict`, não erro cru."""
+    apontaria para o espaço da origem. Vira `MergeRefused`, não erro cru."""
     fone, origem = _origem_do_whatsapp(user_id)
     db.add_launch_and_update_balance(origem, "despesa", 50, None, "mercado")
     esp = _sql("insert into financial_spaces(user_id, name) values (%s, 'Casa') returning id", (origem,))[0]["id"]
     _sql("update launches set space_id = %s where user_id = %s", (esp, origem))
 
-    r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
-
-    assert r == {"status": "merge_conflict", "wa_phone": fone}
+    assert _junta(fone, user_id) == "colisao"
     assert _n("users where id = %s", (origem,)) == 1
     assert _n("launches where user_id = %s and space_id = %s", (origem, esp)) == 1
     assert _n("launches where user_id = %s", (user_id,)) == 0

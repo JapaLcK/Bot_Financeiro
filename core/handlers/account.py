@@ -27,6 +27,11 @@ _RECUSA_POR_MOTIVO = {
         "⚠️ A conta que você usa aqui tem ou teve assinatura no site, e ela não pode ser "
         f"juntada a outra automaticamente. Fale com a gente em {SUPPORT_EMAIL}."
     ),
+    "apagaria_login": (
+        "⚠️ Não vinculei: juntar as duas contas apagaria o login do site desta conta, e você "
+        "perderia esse acesso. Por enquanto esse caso precisa do suporte: fale com a gente em "
+        f"{SUPPORT_EMAIL}."
+    ),
     "autoindicacao": (
         "⚠️ Não deu pra vincular: uma destas contas foi indicada pela outra no programa de "
         f"afiliados, e as duas não podem virar uma só. Fale com a gente em {SUPPORT_EMAIL}."
@@ -70,7 +75,7 @@ def link(platform: str, external_id: str, code: str | None) -> str:
         db.link_platform_identity(platform, external_id, target_user_id)
     except db.MergeRefused as exc:
         return _RECUSA_POR_MOTIVO.get(exc.motivo, _RECUSA_COLISAO)
-    return "✅ Contas vinculadas! Discord e WhatsApp agora usam os mesmos dados."
+    return "✅ Contas vinculadas! Este canal agora usa os dados da sua conta."
 
 
 def vincular(platform: str, external_id: str, code: str) -> str:
