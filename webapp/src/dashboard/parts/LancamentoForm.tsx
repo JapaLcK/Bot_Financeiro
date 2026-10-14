@@ -81,7 +81,7 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
           <p>{item!.descricao ?? "Sem descrição"} · {moneyIn(Number(item!.valor), item!.moeda)}</p>
           {item!.fundido && <p role="alert">A transação do banco continua na sua lista; apagar este lançamento desfaz a junção.</p>}
         </> : <div className="lanc-campos">
-          {novo ? <label>Tipo<select className="field" disabled={escrita.pendente} value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}><option value="saida">Saída</option><option value="entrada">Entrada</option></select></label> : <p>{item.interno ? "Movimento interno" : item.tipo === "entrada" ? "Entrada" : "Saída"} · {item.moeda}</p>}
+          {novo ? <label>Tipo<select className="field" disabled={escrita.pendente} value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}><option value="saida">Saída</option><option value="entrada">Entrada</option></select></label> : <p>{item.guardado ? "Guardado" : item.interno ? "Movimento interno" : item.tipo === "entrada" ? "Entrada" : "Saída"} · {item.moeda}</p>}
           {campo("descricao", "Descrição")}{campo("valor", "Valor")}{campo("data", novo ? "Data (vazia usa hoje)" : "Data", "date")}
           <label>Categoria<select className="field" name="categoria" disabled={!pode("categoria") || escrita.pendente || !categorias.length} value={campos.categoria} onChange={(e) => mudar("categoria", e.target.value)} aria-invalid={!!errors.categoria} aria-describedby={errors.categoria ? "erro-categoria" : undefined}>
             <option value="" disabled={!novo}>{novo ? "Automática" : "Sem categoria"}</option>

@@ -12,8 +12,9 @@ import re
 from pathlib import Path
 
 from core.services.ai_chat import cards, runner, system_prompt
-from core.services.ai_chat.system_prompt import ADENDO_CARDS, FORMATO_WHATSAPP, SYSTEM_PROMPT
+from core.services.ai_chat.system_prompt import ADENDO_CARDS, ADENDO_CARDS_METAS, FORMATO_WHATSAPP, SYSTEM_PROMPT
 from core.services.ai_chat.tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP
+from core.services.ai_chat.tools.metas import schemas_com_metas
 
 RAIZ = Path(__file__).resolve().parent.parent
 PASTA = RAIZ / "core/services/ai_chat"
@@ -86,13 +87,24 @@ def test_nomes_da_regra_10_sao_do_resultado_das_tools_de_periodo():
     assert set(NOME.findall(REGRA_10 + " `amount`")) - produzidos == {"amount"}  # controle negativo
 
 
-def test_adendo_respeita_o_canal_do_app():
-    """Tool citada como inexistente no app = `OCULTAS_NO_APP`; qualquer outra tool citada no ADENDO existe nele."""
-    linha = next(l for l in ADENDO_CARDS.splitlines() if l.startswith("- No app NÃO existem"))
-    assert {n for n in NOME.findall(linha) if n in NOMES_DE_TOOL} == set(OCULTAS_NO_APP)
-    app = {s["function"]["name"] for s in SCHEMAS_APP}
-    citadas = {n for n in NOME.findall(ADENDO_CARDS.replace(linha, "")) if n in NOMES_DE_TOOL}
+def _canal_do_app(adendo, ocultas, schemas):
+    tools = NOMES_DE_TOOL | {"list_metas"}  # só quem tem a chave a recebe: fora de SCHEMAS e de SCHEMAS_APP
+    linha = next(l for l in adendo.splitlines() if l.startswith("- No app NÃO existem"))
+    antes, depois = linha.split("(ignore-as", 1)  # antes = o que NÃO existe; depois = o que o modelo deve usar no lugar
+    assert {n for n in NOME.findall(antes) if n in tools} == set(ocultas)
+    app = {s["function"]["name"] for s in schemas}
+    citadas = {n for n in NOME.findall(adendo.replace(linha, "") + depois) if n in tools}
     assert citadas <= app, citadas - app
+
+
+def test_adendo_respeita_o_canal_do_app():
+    """Tool citada como inexistente no app = `OCULTAS_NO_APP`; qualquer outra tool citada no ADENDO existe nele.
+    `list_metas` só existe para quem tem a chave das metas (o ADENDO de quem não tem nem a conhece)."""
+    _canal_do_app(ADENDO_CARDS, OCULTAS_NO_APP - {"list_metas"}, SCHEMAS_APP)
+
+
+def test_adendo_das_metas_respeita_o_canal_do_app():
+    _canal_do_app(ADENDO_CARDS_METAS, OCULTAS_NO_APP, schemas_com_metas(SCHEMAS_APP, True))
 
 
 def test_system_prompt_do_whatsapp_nao_cita_tool_so_do_app():
@@ -125,8 +137,15 @@ def test_error_msg_tem_uma_fonte_so():
     assert len(copias) == 1  # só a atribuição de `ERROR_MSG`
 
 
+def _ids_do_catalogo(adendo):
+    linha = next(l for l in adendo.splitlines() if l.startswith("- Quando usar:"))
+    return sorted(parte.split()[0] for parte in linha.removeprefix("- Quando usar:").strip().split(" · "))
+
+
 def test_catalogo_do_adendo_tem_os_mesmos_ids_do_cards_ids():
-    """Só compara ids (a descrição de cada card não é conferida)."""
-    linha = next(l for l in ADENDO_CARDS.splitlines() if l.startswith("- Quando usar:"))
-    ids = [parte.split()[0] for parte in linha.removeprefix("- Quando usar:").strip().split(" · ")]
-    assert sorted(ids) == sorted(cards.IDS)
+    """Só compara ids (a descrição de cada card não é conferida). `caixinhas` é só de quem tem a chave das metas."""
+    assert _ids_do_catalogo(ADENDO_CARDS) == sorted(i for i in cards.IDS if i != "caixinhas")
+
+
+def test_catalogo_do_adendo_das_metas_tem_todos_os_ids():
+    assert _ids_do_catalogo(ADENDO_CARDS_METAS) == sorted(cards.IDS)
