@@ -118,7 +118,12 @@ agrupamento perfeito.
 
 PR 1 — API (faixa **Completo**: endpoint novo na `/api/v2`, Q21).
 - Rota de gastos do mês que reaproveita `db/mes_detalhes.ler` (a mesma função do app nativo;
-  nenhuma segunda regra do mês).
+  nenhuma segunda regra do mês). O `ler` sozinho não basta: o motivo
+  `arredondamento_por_grupo` é posto pela ROTA nativa (`api/nativo/mes_detalhes.py`), depois do
+  `ler`, com `soma_arredondada_diverge` (`api/nativo/dinheiro.py`) sobre categorias, dias e
+  origens. A rota v2 aplica a mesma checagem pelo mesmo helper (importar ou extrair para um
+  lugar comum; nunca copiar) e leva o caso de regressão do `/mes-detalhes` (duas despesas de
+  `1.005` em categorias diferentes: categorias `2.02` × `saiu` `2.01`, com o motivo).
 - Do mês anterior, o gasto por categoria **até o mesmo dia** (limitado ao último dia do mês
   anterior quando ele for mais curto).
 - Por categoria: série dos últimos meses (hoje não existe) e os estabelecimentos, pela regra
