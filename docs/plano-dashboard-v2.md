@@ -797,3 +797,23 @@ convite. Sem faixa provável, estimativa variável nem "cabe". O protótipo não
 Cmd-K real perde os atalhos de horizonte e a `/previsao` real sai do seletor de mês.
 Pendência financeira nova sem aviso SSE fica como limite declarado (`docs/CLAUDE.md`,
 API v2); fechá-la é PR Completo à parte.
+
+### Etapa 4 — PR B: tela real de metas
+
+Com backend, `/painel#/metas` mostra e escreve a `GET/POST /api/v2/metas` (#950, #954): o
+cartão de cada meta com os dois ritmos lado a lado (o que precisa × o seu ritmo), o convite
+da reserva de emergência no topo, o formulário de criar, editar só o que mudou, converter a
+reserva em meta comum e apagar. Decisões do dono: o card "Metas e caixinhas" SAIU do Resumo
+(layout padrão e presets; layout salvo com o id `metas` é filtrado pelo `readLayout`) e o
+hook `useDialogo` (`parts/dialog.ts`) é o esqueleto de modal do `LancamentoForm` e do
+`MetaForm`: o clique no fundo só vale passada a `JANELA_DO_FUNDO`, então o 2º clique de um
+duplo clique no botão que abriu o diálogo não o fecha (vale também para o lançamento da
+Carteira). Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
+fonte padrão da meta nova é a conta (`MetaFonte`). Validação e mensagem do valor em dinheiro
+são uma só para lançamento e meta (`lib/format.js`); `DIAS_MINIMOS` e `MESES_PADRAO` de
+`lib/metas-textos.ts` copiam constantes do servidor e `tests/test_metas_textos_constantes.py`
+compara as duas. "Guardado no mês" saiu do Resumo do mês (era dado inventado; o "Guardado líquido"
+do app nativo é outra coisa e não muda). O protótipo e o chat do Piggy (PR C) não mudam.
+Limite declarado: sem idempotência no POST, duas metas iguais são possíveis (a reserva tem
+o 409).
+

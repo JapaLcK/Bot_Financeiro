@@ -23,6 +23,7 @@ from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
+from api.v2.metas import Metas
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
@@ -285,6 +286,31 @@ def test_fixture_de_investido_segue_o_modelo(nome):
     for lado in ("por_tipo", "por_banco"):
         assert sum((Decimal(p["valor"] or 0) for p in f[lado]), Decimal(0)) == Decimal(f["total"] or 0)
         assert all(set(p["motivos"]) <= set(f["motivos"]) for p in f[lado])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["metas"]))
+def test_fixture_de_metas_segue_o_modelo(nome):
+    """Dinheiro é texto com 2 casas (ou null); `falta`/`percentual` seguem de `atual` e `alvo`;
+    `atual` null leva tudo junto (nunca R$ 0); no máximo uma reserva, com `alvo` = meses × custo."""
+    import re
+    from decimal import Decimal
+
+    f = FIXTURES["metas"][nome]
+    Metas.model_validate(f)
+    din = r"-?\d+\.\d{2}"
+    assert all(v is None or re.fullmatch(din, v) for v in [f["custo_mensal"]["valor"]])
+    assert sum(m["tipo"] == "reserva" for m in f["metas"]) <= 1
+    for m in f["metas"]:
+        assert all(m[k] is None or re.fullmatch(din, m[k]) for k in ("atual", "alvo", "falta", "por_mes"))
+        assert m["ritmo"]["valor"] is None or re.fullmatch(din, m["ritmo"]["valor"])
+        if m["atual"] is None or m["alvo"] is None:
+            assert m["falta"] is None and m["percentual"] is None and m["por_mes"] is None
+        else:
+            assert Decimal(m["falta"]) == max(Decimal(m["alvo"]) - Decimal(m["atual"]), 0)
+            assert m["percentual"] == min(int(Decimal(m["atual"]) * 100 // Decimal(m["alvo"])), 100)
+        if m["tipo"] == "reserva" and m["alvo"] and f["custo_mensal"]["valor"]:
+            assert Decimal(m["alvo"]) == Decimal(f["custo_mensal"]["valor"]) * m["meses"]
+        assert m["prazo_passou"] <= bool(m["data_alvo"]) and not (m["prazo_passou"] and m["por_mes"])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))

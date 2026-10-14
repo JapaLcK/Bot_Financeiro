@@ -1,6 +1,6 @@
-import type { Contas, Investido, Lancamento, MotivoPrevisao, ResumoDoMes } from "../lib/api-v2.gen";
+import type { Contas, Investido, Lancamento, Meta, MotivoPrevisao, ResumoDoMes } from "../lib/api-v2.gen";
 
-export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] | Lancamento["motivos"][number] | Investido["motivos"][number];
+export type Motivo = Contas["motivos"][number] | ResumoDoMes["motivos"][number] | Lancamento["motivos"][number] | Investido["motivos"][number] | Meta["motivos"][number];
 
 // Por que um número da /api/v2 não é exato, em português. Código novo do servidor sai cru
 // (melhor que esconder a ressalva). Os da previsão saem de core/services/cashflow_snapshot.py
@@ -20,6 +20,12 @@ const MOTIVO: Record<string, string> = {
   conexao_pausada: "conexão pausada",
   inicio_do_historico: "início do histórico",
   sem_banco_conectado: "sem banco conectado",
+  // metas
+  fonte_indisponivel: "fonte sumiu",
+  custo_desconhecido: "contas fixas desconhecidas",
+  plano_sem_investimentos: "fora do plano",
+  plano_sem_custo_mensal: "fora do plano",
+  nenhum_investimento: "sem investimentos",
   // previsão
   acao_financeira_pendente: "pedido pendente na conversa",
   bancos_excluidos: "bancos fora do cálculo",

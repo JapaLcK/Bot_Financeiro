@@ -21,6 +21,7 @@ import { GoalsTimeline } from "./widgets/GoalsTimeline";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
+import { MetasPainel } from "./widgets/Metas";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SubscriptionList } from "./widgets/Subscriptions";
@@ -118,6 +119,7 @@ function Simulate({ s }: { s: DashState }) {
 }
 
 function GoalsPage({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/metas" lede="Quanto já tem, quanto falta e se o seu ritmo chega lá."><MetasPainel /></Page>;
   const monthly = GOALS.reduce((a, g) => a + g.monthly, 0);
   const saving = simActive(s) ? monthlySaving(s.sim) : 0;
   const next = [...GOALS].map((g) => ({ g, eta: goalEta(g) })).sort((a, b) => a.eta.months - b.eta.months)[0];

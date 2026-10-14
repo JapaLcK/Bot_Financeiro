@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, Investido, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, Investido, Metas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -185,6 +185,43 @@
       "status": 403,
       "fora_do_envelope": true,
       "body": { "detail": "Token CSRF inválido ou ausente." }
+    },
+    "409_reserva_ja_existe": {
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "reserva_ja_existe",
+          "message": "Conflict"
+        }
+      }
+    },
+    "404_meta_nao_encontrada": {
+      "status": 404,
+      "body": {
+        "error": {
+          "code": "meta_nao_encontrada",
+          "message": "Not Found"
+        }
+      }
+    },
+    "422_validacao": {
+      "status": 422,
+      "body": {
+        "error": {
+          "code": "validation_error",
+          "message": "Dados inválidos.",
+          "details": [
+            {
+              "loc": [
+                "body",
+                "alvo"
+              ],
+              "msg": "String should match pattern",
+              "type": "string_pattern_mismatch"
+            }
+          ]
+        }
+      }
     }
   },
   "investido": {
@@ -4638,6 +4675,499 @@
               ]
             }
           ]
+        }
+      ]
+    }
+  },
+  "metas": {
+    "vazio": {
+      "custo_mensal": {
+        "valor": "3000.00",
+        "recorrencias": 5,
+        "motivos": []
+      },
+      "metas": []
+    },
+    "varios": {
+      "custo_mensal": {
+        "valor": "3000.00",
+        "recorrencias": 5,
+        "motivos": []
+      },
+      "metas": [
+        {
+          "id": 1,
+          "nome": "Reserva de emergência",
+          "tipo": "reserva",
+          "meses": 6,
+          "data_alvo": null,
+          "atual": "4500.00",
+          "alvo": "18000.00",
+          "falta": "13500.00",
+          "percentual": 25,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "450.00",
+            "dias_de_historico": 120,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": "2029-04",
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 2,
+          "nome": "Viagem pro Japão",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": "2027-06-30",
+          "atual": "12000.00",
+          "alvo": "20000.00",
+          "falta": "8000.00",
+          "percentual": 60,
+          "por_mes": "888.89",
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "600.00",
+            "dias_de_historico": 45,
+            "parcial": true,
+            "motivos": []
+          },
+          "chega_em": "2027-12",
+          "motivos": [],
+          "fonte": {
+            "tipo": "banco",
+            "rotulo": "Investido no Nubank",
+            "conta_id": null,
+            "banco": "Nubank"
+          }
+        },
+        {
+          "id": 3,
+          "nome": "Notebook novo",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "3000.00",
+          "alvo": "8000.00",
+          "falta": "5000.00",
+          "percentual": 37,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "-250.00",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 4,
+          "nome": "Entrada do apê",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "1200.00",
+          "alvo": "50000.00",
+          "falta": "48800.00",
+          "percentual": 2,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": 4,
+            "parcial": false,
+            "motivos": [
+              "historico_curto"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "banco",
+            "rotulo": "Investido na XP",
+            "conta_id": null,
+            "banco": "XP"
+          }
+        },
+        {
+          "id": 5,
+          "nome": "Curso de inglês",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "100.00",
+          "alvo": "2000.00",
+          "falta": "1900.00",
+          "percentual": 5,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "historico_curto"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 6,
+          "nome": "Moto",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "900.00",
+          "alvo": "9000.00",
+          "falta": "8100.00",
+          "percentual": 10,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "historico_incompleto"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 7,
+          "nome": "Festa de formatura",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": "2027-02-10",
+          "atual": "700.00",
+          "alvo": "3500.00",
+          "falta": "2800.00",
+          "percentual": 20,
+          "por_mes": "467.00",
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "sem_historico_da_fonte"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "conta",
+            "rotulo": "Nubank · Conta",
+            "conta_id": 1,
+            "banco": null
+          }
+        },
+        {
+          "id": 8,
+          "nome": "Intercâmbio",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": "2026-08-15",
+          "atual": "2000.00",
+          "alvo": "15000.00",
+          "falta": "13000.00",
+          "percentual": 13,
+          "por_mes": null,
+          "prazo_passou": true,
+          "ritmo": {
+            "valor": "100.00",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": "2037-12",
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 9,
+          "nome": "Fone de ouvido",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "1200.00",
+          "alvo": "1000.00",
+          "falta": "0.00",
+          "percentual": 100,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "80.00",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 10,
+          "nome": "Dinheiro que sumiu do banco",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": null,
+          "alvo": "5000.00",
+          "falta": null,
+          "percentual": null,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "fonte_indisponivel"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [
+            "fonte_indisponivel"
+          ],
+          "fonte": {
+            "tipo": "banco",
+            "rotulo": "Investido no Banco Sumiu",
+            "conta_id": null,
+            "banco": "Banco Sumiu"
+          }
+        },
+        {
+          "id": 11,
+          "nome": "Conta pausada",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "0.00",
+          "alvo": "4000.00",
+          "falta": "4000.00",
+          "percentual": 0,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "conexao_pausada"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [
+            "conexao_pausada"
+          ],
+          "fonte": {
+            "tipo": "conta",
+            "rotulo": "Bradesco · Conta",
+            "conta_id": 6,
+            "banco": null
+          }
+        }
+      ]
+    },
+    "estresse": {
+      "custo_mensal": {
+        "valor": "999999999.99",
+        "recorrencias": 5,
+        "motivos": []
+      },
+      "metas": [
+        {
+          "id": 3,
+          "nome": "Reserva de emergência",
+          "tipo": "reserva",
+          "meses": 24,
+          "data_alvo": null,
+          "atual": "999999999.99",
+          "alvo": "23999999999.76",
+          "falta": "22999999999.77",
+          "percentual": 4,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "-999999999.99",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 1,
+          "nome": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": "2027-06-30",
+          "atual": "0.00",
+          "alvo": "999999999.99",
+          "falta": "999999999.99",
+          "percentual": 0,
+          "por_mes": "999999999.99",
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "-999999999.99",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "banco",
+            "rotulo": "Investido no Nubank",
+            "conta_id": null,
+            "banco": "Nubank"
+          }
+        },
+        {
+          "id": 2,
+          "nome": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMM WWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": "999999999.99",
+          "alvo": "999999999.99",
+          "falta": "0.00",
+          "percentual": 100,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "999999999.99",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        }
+      ]
+    },
+    "sem_custo": {
+      "custo_mensal": {
+        "valor": null,
+        "recorrencias": 0,
+        "motivos": [
+          "plano_sem_custo_mensal"
+        ]
+      },
+      "metas": [
+        {
+          "id": 1,
+          "nome": "Reserva de emergência",
+          "tipo": "reserva",
+          "meses": 6,
+          "data_alvo": null,
+          "atual": "800.00",
+          "alvo": null,
+          "falta": null,
+          "percentual": null,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": "50.00",
+            "dias_de_historico": 100,
+            "parcial": false,
+            "motivos": []
+          },
+          "chega_em": null,
+          "motivos": [
+            "plano_sem_custo_mensal"
+          ],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
+        },
+        {
+          "id": 2,
+          "nome": "Viagem",
+          "tipo": "meta",
+          "meses": null,
+          "data_alvo": null,
+          "atual": null,
+          "alvo": "6000.00",
+          "falta": null,
+          "percentual": null,
+          "por_mes": null,
+          "prazo_passou": false,
+          "ritmo": {
+            "valor": null,
+            "dias_de_historico": null,
+            "parcial": false,
+            "motivos": [
+              "plano_sem_investimentos"
+            ]
+          },
+          "chega_em": null,
+          "motivos": [
+            "plano_sem_investimentos"
+          ],
+          "fonte": {
+            "tipo": "investido",
+            "rotulo": "Tudo que tenho investido",
+            "conta_id": null,
+            "banco": null
+          }
         }
       ]
     }

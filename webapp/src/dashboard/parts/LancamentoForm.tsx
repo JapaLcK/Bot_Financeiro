@@ -1,21 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Categoria, Conta, Edicao, Lancamento, NovoLancamento } from "../lib/api-v2.gen";
 import { ErroApi } from "../lib/v2";
-import { moneyIn } from "../lib/format.js";
+import { ERRO_VALOR, moneyIn, normalizaValor, valorInvalido } from "../lib/format.js";
 import { LancamentoContexto } from "./LancamentoLinha";
-import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
+import { NATIVE, useDialogo } from "./dialog";
 import { type Escrita, type useLancamentoMutation } from "./useLancamentoMutation";
 
 type Campos = "descricao" | "valor" | "data" | "categoria";
-const ERROS = { descricao: "Informe uma descrição com até 200 caracteres.", valor: "Use um valor maior que zero, até 9 dígitos e 2 casas decimais, sem separador de milhares.", data: "Confira a data e a janela do seu plano.", categoria: "Escolha uma categoria disponível." };
-const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="-1"]';
+const ERROS = { descricao: "Informe uma descrição com até 200 caracteres.", valor: ERRO_VALOR, data: "Confira a data e a janela do seu plano.", categoria: "Escolha uma categoria disponível." };
 
 export function LancamentoForm({ item, indisponivel, categorias, contas, escrita, fechar, conferir, rascunho, mes, historico }: {
   item?: Lancamento; indisponivel: boolean; categorias: Categoria[]; contas: Conta[];
   escrita: ReturnType<typeof useLancamentoMutation>; fechar: () => void; conferir: () => Promise<void>;
   rascunho?: NovoLancamento; mes: string; historico: boolean;
 }) {
-  const dlg = useRef<HTMLDialogElement>(null);
+  const { dlg, fecharDialog, fundo, props } = useDialogo(fechar);
   const [campos, setCampos] = useState({ descricao: item?.descricao ?? rascunho?.descricao ?? "", valor: item?.valor ?? rascunho?.valor ?? "", data: item?.data ?? rascunho?.data ?? "", categoria: item?.categoria ?? rascunho?.categoria ?? "" });
   const inicial = useRef({ ...campos }).current;
   const [tipo, setTipo] = useState<"entrada" | "saida">(rascunho?.tipo ?? "saida");
@@ -27,29 +26,18 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
   const pode = (campo: Campos | "apagar") => !indisponivel && (novo || item.pode.includes(campo));
   const travado = escrita.pendente || escrita.bloqueado || indisponivel;
   useEffect(() => {
-    const d = dlg.current;
-    show(d, FOCUS);
-    d?.querySelector<HTMLElement>(FOCUS)?.focus();
-    const esc = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && !NATIVE && isOpen(d)) { e.preventDefault(); hide(d); fechar(); }
-    };
-    window.addEventListener("keydown", esc);
-    return () => { window.removeEventListener("keydown", esc); if (isOpen(d)) hide(d); else untrap(); };
-  }, []);
-  useEffect(() => {
     const campo = Object.keys(errors)[0];
     if (campo && !escrita.pendente) dlg.current?.querySelector<HTMLElement>(`[name="${campo}"]`)?.focus();
   }, [errors, escrita.pendente]);
-  const fecharDialog = () => { hide(dlg.current); fechar(); };
   const mudar = (k: Campos, v: string) => setCampos((c) => ({ ...c, [k]: v }));
   const enviar = async (e: FormEvent) => {
     e.preventDefault();
     if (travado) return;
     setErro(""); setLimite(false);
     const falhas: Partial<Record<Campos, string>> = {};
-    const valor = campos.valor.trim().replace(",", ".");
+    const valor = normalizaValor(campos.valor);
     if (!apagar) {
-      if (pode("valor") && (novo || campos.valor !== inicial.valor) && (!/^\d{1,9}(\.\d{1,2})?$/.test(valor) || !/[1-9]/.test(valor))) falhas.valor = ERROS.valor;
+      if (pode("valor") && (novo || campos.valor !== inicial.valor) && valorInvalido(valor)) falhas.valor = ERROS.valor;
       if (pode("descricao") && (novo || campos.descricao !== inicial.descricao) && (!campos.descricao.trim() || campos.descricao.length > 200)) falhas.descricao = ERROS.descricao;
       if (pode("data") && !novo && campos.data !== inicial.data && !campos.data) falhas.data = ERROS.data;
     }
@@ -85,12 +73,7 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
     {errors[k] && <span id={`erro-${k}`} className="warn">{errors[k]}</span>}
   </label>;
   return <>
-    <dialog ref={dlg} className={`lanc-form${NATIVE ? "" : " lanc-form-fb"}`} aria-labelledby="lanc-form-title" role={NATIVE ? undefined : "dialog"} aria-modal={NATIVE ? undefined : true} onKeyDown={(e) => {
-        if (!NATIVE || e.key !== "Tab") return;
-        const all = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUS)];
-        const at = all.indexOf(document.activeElement as HTMLElement);
-        if ((e.shiftKey && at === 0) || (!e.shiftKey && at === all.length - 1)) { e.preventDefault(); all[e.shiftKey ? all.length - 1 : 0]?.focus(); }
-      }} onCancel={(e) => { e.preventDefault(); fecharDialog(); }} onClick={(e) => { if (e.target === dlg.current) fecharDialog(); }}>
+    <dialog {...props} className={`lanc-form${NATIVE ? "" : " lanc-form-fb"}`} aria-labelledby="lanc-form-title">
       <form onSubmit={enviar} noValidate>
         <header><h2 id="lanc-form-title">{novo ? "Lançar na Carteira" : apagar ? "Apagar lançamento?" : "Detalhes do lançamento"}</h2><button className="btn btn-quiet" type="button" onClick={fecharDialog} aria-label="Fechar detalhes">Fechar</button></header>
         {novo ? <p className="w-lede">Só dinheiro em espécie, na Carteira Piggy.</p> : <LancamentoContexto item={item} contas={contas} />}
@@ -117,6 +100,6 @@ export function LancamentoForm({ item, indisponivel, categorias, contas, escrita
         </footer>
       </form>
     </dialog>
-    {!NATIVE && <div className="lanc-scrim" aria-hidden="true" onClick={fecharDialog} />}
+    {!NATIVE && <div className="lanc-scrim" aria-hidden="true" onClick={fundo} />}
   </>;
 }

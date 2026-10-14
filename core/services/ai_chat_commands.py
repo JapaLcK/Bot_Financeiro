@@ -324,7 +324,4 @@ def handle_ai_chat_command(user_id: int, text: str, platform: str) -> str | None
         )
     except Exception as exc:
         logger.error("ai_chat_run falhou pra user %s: %s", user_id, exc)
-        return (
-            "🐷 Deu ruim aqui — tenta de novo. "
-            "Se persistir, fala com a gente: suporte@pigbankai.com"
-        )
+        return ERROR_MSG
