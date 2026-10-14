@@ -1,5 +1,7 @@
 # Só Open Finance: inventário do input manual e roteiro
 
+> **Premissa descartada pelo dono em 2026-10-09:** o produto NÃO fica só com dado do Open Finance. Vale a premissa do roteiro das ondas (`docs/open_finance_roteiro_ondas_4_a_8.md`): o lançamento manual e o banco convivem sem contar o mesmo dinheiro duas vezes. Ver `docs/adr/0006-declaracao-bancaria-despesa-receita.md`. Este documento fica como inventário do input manual (§2) e como registro da medição de produção (§9). A Fase 2 (parar de aceitar), a Fase 3 (esconder o legado) e as respostas P1 a P3 do §8 estão descartadas. O resto do texto abaixo é o original de 2026-10-07 e não foi reescrito.
+
 > **Roteiro aprovado pelo dono em 2026-10-07 (respostas no §8).** Ele dá a ordem das fases;
 > cada fase ainda tem plano e PR próprios, na faixa do `CLAUDE.md` §0.
 >

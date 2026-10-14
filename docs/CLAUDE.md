@@ -314,7 +314,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
-  marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
+  marca, manual com delta 0, OFX, compra manual no cartão). **Nota de 2026-10-13 (condicional, nada disto está na `main`):** se o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) for mergeado, `banco` passará a incluir também a despesa ou receita que o usuário declarou como paga pelo banco (hoje, “manual com delta 0” cai em `registro_antigo`); `fundido` passará a valer “casada com o extrato”, e a linha sem par terá o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisará tratar `instituicao` nula nessa linha sem par. **`pode`** é uma regra só
   (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
@@ -606,6 +606,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
   novo nessas tabelas ou dos importadores de arquivo reprova em
   `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
+- **Nota de revisão de 2026-10-09 (Q36 e Q40, que têm coortes diferentes):** ver
+  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), proposta decidida pelo dono, sem
+  código ainda. **O código desta seção continua valendo até os PRs de código (A, A2, B, B1, C)**; o PR-A é inerte (grava declaração sem que ninguém a use enquanto a flag do PR-B estiver desligada) e por isso não muda o comportamento; nada
+  disto mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
+  **Q40** (`core/handlers/forma_pagamento.py`, citada na tabela acima) vale para quem tem Open
+  Finance conectado (`regra_ativa`), e **não** é parte da Q36 nem depende da chave. O que a ADR
+  prevê: a Q36 deixará de travar investimento manual (PR-C) e compra manual em cartão não
+  sincronizado (PR-B1), e continuará travando extrato OFX/CSV/PDF, fatura OFX e cartão
+  sincronizado. Fora da chave do v2, quem tem banco, é Pro e importa OFX já pode dobrar hoje
+  (risco existente); o dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**, e
+  qualquer novo bloqueio de arquivo exige decisão separada. Na Q40, a resposta “banco” passará a
+  gravar como declaração conferida com o extrato: o PR-B entrega o caminho atrás de uma flag que
+  nasce desligada, e ligá-la é ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; pela decisão do dono de 2026-10-13, “foi em dinheiro” fica sem efeito automático na Carteira até haver regra) vêm antes (ordem decidida pelo dono); tratar o PR-A2 como pré-condição para ligar a flag para usuários é proposta do Arquiteto, ainda sem decisão do dono. A Q42
+  não muda.
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
