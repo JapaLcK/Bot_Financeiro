@@ -762,14 +762,31 @@ paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da crede
 `PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
 pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
 liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
-mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
-tem dados financeiros segue na própria conta, sem vínculo nem mescla
-(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+mensagem de número já ligado a conta sem credencial.
+**Auto-vínculo por telefone não mescla quem já é conta ou tem dados (#711/#630, D1(a)).**
+O telefone digitado no site não prova de quem é o número. Com outra conta dona do
+telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
+recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
+#607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
+vínculo nem mescla, e a junção é pelo `vincular CODIGO` (com login nos dois lados, recusada:
+`apagaria_login`, até a confirmação explícita da #970). Vale também quando o alvo já tem
+este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
+uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
+lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
+confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
+(`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
+fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
+nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. Os avisos (`wa_runtime.py`): `wa_linked_other_account`
+recebe o `JA_E_CONTA_WA` (sem a instrução do código, que com login nos dois lados terminaria em
+`apagaria_login`; para unir, o suporte) na saudação, uma vez; `remetente_com_dados` recebe o
+`NAO_JUNTEI_WA` (a saída pelo código) em toda mensagem, com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
+como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
+ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
-preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+preferência da conta sem credencial), no `remetente_com_dados` e no
+`wa_linked_other_account` (a do remetente e a da conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
 atualizações" também apaga pendências do remetente (abaixo). O texto digitado
 que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
 `parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
@@ -1489,7 +1506,7 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos`); `vincular 123456` segue o fluxo
 normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o

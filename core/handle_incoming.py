@@ -733,6 +733,25 @@ def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
 # Entrada principal
 # ---------------------------------------------------------------------------
 
+def isencao_do_barrado(texto: str, uid: int):
+    """Qual isenção do `_paywall_gate` esta mensagem de texto tem, e a classificação
+    (o código de vínculo mora nas entidades): "ajuda" (help, help.tutorial),
+    "billing" (assinar/cancelar/plano), "codigo" (link/vincular com código) ou None.
+
+    Fonte única (§0.7): o gate e o ramo do `remetente_com_dados` do `wa_runtime`
+    (#711, T5) perguntam aqui. `allow_ai=False`: só as regras determinísticas,
+    sem DB e sem rede."""
+    from core.services.billing_commands import is_billing_command
+    classificado = classify(texto, user_id=uid, allow_ai=False)
+    if classificado.intent in ("help", "help.tutorial"):
+        return "ajuda", classificado
+    if is_billing_command(texto):
+        return "billing", classificado
+    if classificado.intent in ("account.link", "account.vincular") and classificado.entities.get("code"):
+        return "codigo", classificado
+    return None, classificado
+
+
 def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
     """
     O bot só atende quem já escolheu um plano na /precos (v2) ou tem acesso
@@ -780,7 +799,6 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
         # aparece no dia em que o freio for puxado.
         # A política (onde vale, e por que sem isenção de app) mora na docstring
         # de plan_service.needs_plan_selection.
-        from core.services.billing_commands import is_billing_command
         from core.services.plan_service import (
             has_app_access, needs_plan_selection, plans_v2_enabled,
         )
@@ -839,8 +857,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # `allow_ai=False`: só as regras determinísticas — medido em 19 µs,
             # sem DB e sem rede. As duas rotas de ajuda do intent_router
             # (help, help.tutorial) só renderizam texto, não tocam em dinheiro.
-            classificado = classify(texto, user_id=uid, allow_ai=False)
-            ajuda = classificado.intent
+            isencao, classificado = isencao_do_barrado(texto, uid)
             # O gate DEVOLVE a resposta, em vez de isentar a mensagem e deixá-la
             # seguir. "Seguir o fluxo" entregava a mensagem ao `route()`, que
             # resolve pendências ANTES do ramo de ajuda: com um
@@ -863,7 +880,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # não no `wa_runtime`: o Discord chega neste mesmo gate. O gêmeo
             # interativo (o BOTÃO do tutorial no WhatsApp) não passa por aqui e
             # tem gate próprio em `wa_runtime`.
-            if ajuda in ("help", "help.tutorial"):
+            if isencao == "ajuda":
                 # A isenção de ajuda VOLTOU a cobrir `help.tutorial`, e o que
                 # mudou é o que ela RENDERIZA: a seção `sem_acesso`, nunca a que
                 # o texto pediu.
@@ -898,7 +915,7 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
                 return [OutgoingMessage(text=format_for_platform(
                     render_ajuda_sem_acesso(platform, estado is not None),
                     platform))]
-            if is_billing_command(texto):
+            if isencao == "billing":
                 from core.services.billing_commands import handle_billing_command
                 resposta = handle_billing_command(uid, texto, platform=platform)
                 if resposta is not None:
@@ -910,8 +927,8 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
             # novo, ou conta sem plano entrando na conta paga). Devolve a
             # resposta, pelo mesmo motivo da ajuda: seguindo, uma pendência
             # velha engoliria o código. O teto de tentativas mora no handler.
-            codigo = classificado.entities.get("code")
-            if classificado.intent in ("account.link", "account.vincular") and codigo:
+            if isencao == "codigo":
+                codigo = classificado.entities.get("code")
                 from core.handlers import account as h_account
                 vincula = (h_account.link if classificado.intent == "account.link"
                            else h_account.vincular)
