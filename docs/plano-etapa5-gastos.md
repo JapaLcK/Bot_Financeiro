@@ -126,13 +126,40 @@ PR 1 — API (faixa **Completo**: endpoint novo na `/api/v2`, Q21).
   `1.005` em categorias diferentes: categorias `2.02` × `saiu` `2.01`, com o motivo).
 - Do mês anterior, o gasto por categoria **até o mesmo dia** (limitado ao último dia do mês
   anterior quando ele for mais curto).
-- Por categoria: série dos últimos meses (hoje não existe) e os estabelecimentos, pela regra
-  do §3.1 sobre as linhas do leitor oficial (que passam a expor `merchant` e `paymentData`
-  já extraídos de `raw`, nunca o `raw` inteiro).
+- Por categoria: gasto por dia, série dos últimos meses e estabelecimentos. A origem de cada
+  um está na tabela do §4.1; os estabelecimentos usam a regra do §3.1 e uma consulta própria
+  (o leitor oficial não expõe `raw`), que extrai só `merchant.cnpj` e `paymentData.receiver.name`.
 - `/api/v2/categorias` passa a devolver `emoji` e `cor`.
 - Mesma regra de motivos do §4 do plano: banco desatualizado, outra moeda, início do
   histórico. Nada de número incerto com cara de exato.
 - Sem tabela nova, então `db/privacy.py` não muda. Teste de isolamento "B não vê o que é de A".
+
+### 4.1 Cada promessa da tela e de onde vem o dado
+
+Fechada de uma vez depois de três rodadas de revisão sobre o mesmo ponto (contrato menos
+preciso que o código). `ler` devolve só agregados do mês: `categorias {categoria, valor,
+quantidade}`, `dias {dia, entrou, saiu}` (sem categoria), `origens`, `guardado`, `motivos`,
+`fora_do_total`. Não devolve linhas.
+
+| A tela promete | Fonte hoje | O que o PR 1 acrescenta |
+|---|---|---|
+| gasto por categoria no mês | `ler.categorias` | nada |
+| variação contra o mês anterior até o mesmo dia | não existe (só o total por categoria) | `ler` (aditivo; o contrato nativo não muda) devolve o gasto por categoria **e por dia**; a rota chama `ler` no mês e no mês anterior e soma o anterior até o dia N. Duas leituras, dois snapshots: limite declarado |
+| calendário filtrado por categoria | `ler.dias` é agregado, sem categoria | o mesmo gasto por categoria e por dia (`categorias[].dias`, completo, sem paginação: no máximo categorias × 31) |
+| últimos meses de uma categoria | não existe por mês | `ler` dos 3 últimos meses (`categorias[].valor`), cortando pela janela do plano |
+| onde mais gasta (estabelecimentos) | `ler` não devolve linhas; o leitor oficial não expõe `raw` | consulta própria, só da categoria pedida, top 5, com `merchant.cnpj`/`paymentData.receiver.name` extraídos de `raw` (nunca o `raw`) e a regra do §3.1 |
+| linha "sem categoria" | `ler.categorias[].categoria` é `null` | rótulo `sem categoria` na resposta |
+| abrir os lançamentos da categoria | `GET /api/v2/lancamentos?categoria=` | ver abaixo |
+| saídas com dia fora do mês | `ler.dias` pode trazer dia anterior ao mês | o campo "outro mês" (decisão B) |
+
+**Filtro de "Sem categoria".** `categoria=None` em `listar` significa "sem filtro", mas o filtro
+compara `cat_key_sql` dos dois lados (`db/connection.py`), que colapsa vazio em
+`CAT_VAZIA_LABEL = "sem categoria"`. A linha "Sem categoria" abre os lançamentos com
+`categoria=sem categoria`, e o contrato diz isso (o cliente não escreve o literal: recebe-o da
+resposta). Uma categoria do usuário chamada "Sem categoria" cai no mesmo balde, como no donut
+antigo. **Ainda não provado**: não há teste de `/api/v2/lancamentos?categoria=sem categoria`; o
+PR 1 leva esse teste (linha de cartão do Open Finance com `categoria` NULO, que o
+`cat_key_sql` cita como o caso real) e o de navegação do PR 2.
 
 PR 2 — Tela (faixa **Leve**). Troca o protótipo pelo real nos três blocos, no Resumo e em
 `/gastos`; o Calendário passa a usar os dias reais; filtro por categoria leva aos
@@ -143,15 +170,18 @@ Lançamentos reais; estados de carregando, erro, vazio e dado incerto.
 - **A. Estabelecimento:** limpar por estabelecimento (decisão 3 acima), pela regra e com a
   medição do §3.1.
 - **B. Calendário:** conta todo gasto, sem marca `variable`, com a escala por percentil.
-  Aprovado. **Compra de cartão fora do mês** (apontamento do Codex, confirmado em
-  `test_mes_completo_manual_cartao_parcela_interno_e_conciliacao`, onde um dia volta antes do
-  mês pedido): o leitor põe a compra na fatura do mês escolhido e guarda a data original, que
-  pode cair no mês anterior. Regra proposta, a confirmar na revisão do PR 2: o calendário só
-  desenha dias do próprio mês; a compra de cartão com data fora do mês não vai para nenhum dia
-  e aparece numa linha fixa "N compras do cartão com data de outro mês: R$ X", que entra nas
-  categorias e no total mas não na grade de dias. Na comparação "até o mesmo dia do mês
-  anterior" (decisão 2), a compra de data anterior ao mês conta como já ocorrida (dia 1), e a
-  de data posterior ao fim do mês conta só no total. Nenhum dia é mostrado no mês errado.
+  Aprovado.
+  **Saída com dia fora do mês** (apontamentos do Codex; vale para cartão e para banco). O leitor
+decide o mês por uma regra (fatura no cartão; `criado_em` na linha de `launches`) e devolve o
+`dia` por outra: a compra de cartão guarda a data da compra, e a linha antiga do Open Finance sem
+hora usa `posted_at` (`db/lancamentos._PERNA_LANCAMENTOS`; o módulo documenta que esse dia pode
+cair fora do mês). Os testes `test_mes_completo_manual_cartao_parcela_interno_e_conciliacao`
+(cartão) e a regra de `posted_at` (banco) mostram os dois casos. Regra proposta, a confirmar na
+revisão do PR 2: o calendário só desenha dias do próprio mês; **toda saída cujo `dia` cai fora
+do mês** (cartão ou banco) vai para uma linha fixa "N saídas com data de outro mês: R$ X", que
+entra nas categorias e no total mas não na grade de dias. Na comparação "até o mesmo dia do mês
+anterior" (decisão 2), a saída de data anterior ao mês conta como já ocorrida (dia 1) e a de
+data posterior ao fim do mês conta só no total. Nenhum dia é mostrado no mês errado.
 - **C. Editar categoria:** esta etapa só lê emoji e cor. Criar, renomear, trocar emoji e cor
   e arquivar categoria **não estava em nenhuma etapa do plano** (só o painel antigo faz); entra
   no plano principal como tela própria depois das etapas (§6, "Depois"), e até lá abre o
@@ -175,8 +205,10 @@ número ajustado.
 
 Pytest com Postgres real para a soma (categorias = Saiu nos meses sem `outra_moeda`;
 categorias = subtotal em reais, com `fora_do_total`, nos meses com ela) e para o isolamento entre
-usuários; um caso com compra de cartão de data fora do mês (a linha "outro mês", sem dia
-errado).
+usuários; dois casos de saída com dia fora do mês, um de cartão e um de banco (`posted_at` de
+outro mês), ambos na linha "outro mês" e nunca num dia errado; gasto por categoria e dia somando
+o gasto da categoria; `/api/v2/lancamentos?categoria=sem categoria` devolvendo só as sem
+categoria.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
