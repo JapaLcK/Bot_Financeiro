@@ -21,3 +21,9 @@ CURRENT_USER_MESSAGE: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 """Mensagem do user no turno atual. Setada pelo runner e lida por tools que
 precisam logar/registrar a pergunta original (ex: `report_out_of_scope`)."""
+
+CARDS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "ai_chat_cards_do_turno", default=None
+)
+"""Cards que o `show_card` já MOSTROU neste turno (emitiu bloco; chamada recusada não
+entra). O teto vale por turno. Setada pelo runner; None fora dele = sem teto."""

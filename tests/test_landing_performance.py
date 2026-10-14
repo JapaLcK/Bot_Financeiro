@@ -156,7 +156,7 @@ def test_phosphor_usa_font_display_swap():
 def test_ctas_sem_setas_ou_dependencia_de_fonte_para_a_acao():
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
     ctas = re.findall(r'<a[^>]*class="[^"]*\b(?:lp-btn|btn-primary)\b[^"]*"[^>]*>(.*?)</a>', html)
-    assert len(ctas) == 5  # quatro cadastros + conhecer Open Finance
+    assert len(ctas) == 7  # quatro cadastros + conhecer Open Finance + dois "Testar o Piggy agora"
     assert all(not re.search(r"<i\b|<svg\b|[→↗]", cta) for cta in ctas)
     assert 'ph-arrow-right' not in html
 

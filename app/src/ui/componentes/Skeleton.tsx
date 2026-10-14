@@ -1,12 +1,12 @@
 import { useEffect, useRef } from "react";
-import { Animated } from "react-native";
+import { Animated, type DimensionValue } from "react-native";
 
 import { facilitador, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
 import { raio as raioTokens } from "@/ui/tokens";
 
 interface Props {
-  largura: number;
+  largura: DimensionValue;
   altura: number;
   raio?: number;
 }
@@ -19,7 +19,7 @@ const DURACAO_PULSO = 700;
  * um bloco genérico. Com "reduzir movimento" o pulso desliga e o bloco fica
  * parado em opacidade cheia (ainda indica "carregando", só sem o movimento).
  */
-export function Skeleton({ largura, altura, raio = raioTokens.sm }: Props) {
+export function Skeleton({ largura, altura, raio = raioTokens.chip }: Props) {
   const { cores } = useTema();
   const reduzir = useReduzirMovimento();
   const opacidade = useRef(new Animated.Value(reduzir ? 1 : 0.5)).current;

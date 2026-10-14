@@ -17,7 +17,6 @@ import { Calendar } from "../widgets/Calendar";
 import { Simulator } from "../widgets/Simulator";
 import { Bills } from "../widgets/Bills";
 import { Piggy } from "../widgets/Piggy";
-import { Goals } from "../widgets/Goals";
 import { NetWorth } from "../widgets/NetWorth";
 import { Invoice } from "../widgets/Invoice";
 import { Wealth } from "../widgets/Wealth";
@@ -31,7 +30,7 @@ import { Catalog, ProfileSelect } from "./BoardControls";
 import { ProfilePicker } from "./ProfilePicker";
 import { PiggyBand } from "./PiggyBand";
 
-// Ordem padrão (o perfil `padrao`): em 4 colunas ela ladrilha sem buraco (28 células, 7 linhas).
+// Ordem padrão (o perfil `padrao`): em 4 colunas ela ladrilha sem buraco até a última linha, onde o Patrimônio fica sozinho.
 const DEFAULT: WidgetItem[] = [
   { id: "contas", size: "lg", label: "Contas" },
   { id: "hero", size: "lg", label: "Saldo previsto" },
@@ -41,7 +40,6 @@ const DEFAULT: WidgetItem[] = [
   { id: "simulador", size: "lg", label: "Simulador" },
   { id: "compromissos", size: "tall", label: "Próximos 30 dias" },
   { id: "piggy", size: "tall", label: "Piggy notou" },
-  { id: "metas", size: "wide", label: "Metas e caixinhas" },
   { id: "patrimonio", size: "wide", label: "Patrimônio" },
 ];
 // Fora do padrão: só entram por perfil ou pelo catálogo do Organizar.
@@ -60,7 +58,7 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
   categorias: Categories, calendario: Calendar, simulador: Simulator,
-  compromissos: Bills, piggy: Piggy, metas: Goals, patrimonio: () => <NetWorth />,
+  compromissos: Bills, piggy: Piggy, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,
   assinaturas: () => <Subscriptions />,
@@ -69,7 +67,7 @@ const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
 // Página de cada bloco (o Piggy não tem página própria: as ações dele levam às outras).
 const PAGE: Record<string, Path | null> = {
   contas: null, hero: "/previsao", resumo: "/lancamentos", categorias: "/gastos", calendario: "/gastos",
-  simulador: "/simulador", compromissos: "/previsao", piggy: null, metas: "/metas", patrimonio: "/patrimonio",
+  simulador: "/simulador", compromissos: "/previsao", piggy: null, patrimonio: "/patrimonio",
   fatura: "/previsao", wealth: "/patrimonio",
   renda: "/lancamentos", rendimento: "/patrimonio", parcelas: "/previsao", assinaturas: "/assinaturas",
 };

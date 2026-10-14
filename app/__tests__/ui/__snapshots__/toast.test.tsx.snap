@@ -36,12 +36,14 @@ exports[`Toast snapshot (dois temas): claro 1`] = `
         [
           {
             "backgroundColor": "#FFFFFF",
-            "borderRadius": 12,
-            "padding": 16,
+            "borderColor": "#E6E6E9",
+            "borderRadius": 16,
+            "borderWidth": 1,
+            "paddingBottom": 18,
+            "paddingHorizontal": 18,
+            "paddingTop": 16,
           },
           {
-            "borderColor": "#E6E6E9",
-            "borderWidth": 1,
             "elevation": 2,
             "shadowColor": "#000000",
             "shadowOffset": {
@@ -70,8 +72,9 @@ exports[`Toast snapshot (dois temas): claro 1`] = `
             [
               {
                 "fontFamily": "Inter-Regular",
-                "fontSize": 16,
-                "lineHeight": 22,
+                "fontSize": 14,
+                "letterSpacing": 0,
+                "lineHeight": 21,
               },
               {
                 "color": "#111113",
@@ -126,9 +129,13 @@ exports[`Toast snapshot (dois temas): escuro 1`] = `
       style={
         [
           {
-            "backgroundColor": "#202024",
-            "borderRadius": 12,
-            "padding": 16,
+            "backgroundColor": "#1D1D22",
+            "borderColor": "#24242A",
+            "borderRadius": 16,
+            "borderWidth": 1,
+            "paddingBottom": 18,
+            "paddingHorizontal": 18,
+            "paddingTop": 16,
           },
           null,
         ]
@@ -150,11 +157,12 @@ exports[`Toast snapshot (dois temas): escuro 1`] = `
             [
               {
                 "fontFamily": "Inter-Regular",
-                "fontSize": 16,
-                "lineHeight": 22,
+                "fontSize": 14,
+                "letterSpacing": 0,
+                "lineHeight": 21,
               },
               {
-                "color": "#F2F2F3",
+                "color": "#F4F4F6",
               },
               {
                 "flex": 1,

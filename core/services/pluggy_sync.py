@@ -41,6 +41,7 @@ from core.services.pluggy_health import (
     derive_item_health,
     resolve_connection_state,
 )
+from core.services.pluggy_bills import list_pluggy_bills
 from core.services.pluggy_investments import list_pluggy_investments
 from db import (
     AmbiguousItemError,
@@ -63,6 +64,7 @@ from db import (
 # "Conexão terminal" (PAUSED/DELETED) pela lista que o `claim_manual_refresh`
 # usa — é ela que decide quem cai em `rate_limited` sem ser cooldown (§0.7).
 from db.open_finance_state import _SEM_CHECAGEM, _TERMINAL as CONEXAO_TERMINAL
+from db.of_card_bills import quitar_pelo_banco, salvar_faturas_do_banco
 from db.of_recurring import salvar_recorrencias
 
 
@@ -161,9 +163,9 @@ def normalize_pluggy_account(raw: dict) -> dict:
 def normalize_pluggy_transaction(raw: dict) -> dict:
     """Confia no `amount` do Pluggy, que já vem assinado (negativo = saída, positivo = entrada).
 
-    NÃO deriva o sinal do campo `type`: no cartão, uma compra vem como type=CREDIT com
-    amount negativo — inverter pelo type transformaria compra em receita (bug pego no E2E
-    sandbox). O `type` fica só no `raw`.
+    NÃO deriva o sinal do campo `type`. No cartão, na produção a compra vem DEBIT com amount
+    positivo; o sandbox Pluggy Bank mostrou CREDIT negativa. O sinal segue a doc do `amount`
+    (`db.cards.sinal_cartao_of`); o `type` carrega o mesmo bit e fica só no `raw`.
     """
     return {
         "provider_transaction_id": str(raw.get("id") or ""),
@@ -420,6 +422,19 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             print(f"[pluggy_sync] segunda foto do item falhou item={provider_item_id} "
                   f"erro={type(exc).__name__}", flush=True)
 
+    # Faturas que o banco fechou (`/bills`), só das contas de cartão. Fail-soft POR
+    # CONTA: a que não leu fica fora do dict e a gravação não toca nela.
+    faturas: dict[str, list] = {}
+    for conta in accounts:
+        if conta["type"].upper() != "CREDIT":
+            continue
+        try:
+            faturas[conta["provider_account_id"]] = list_pluggy_bills(
+                conta["provider_account_id"], api_key, on_page=heartbeat)
+        except Exception as exc:
+            print(f"[pluggy_sync] faturas indisponíveis item={provider_item_id} "
+                  f"erro={type(exc).__name__}: {exc}", flush=True)
+
     # ── FASE 2: escrita, serializada por item ────────────────────────────────
     with pluggy_item_lock(provider_item_id) as locked:
         if not locked:
@@ -527,6 +542,12 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
             except Exception as exc:
                 print(f"[pluggy_sync] recorrências não gravadas item={provider_item_id} "
                       f"erro={type(exc).__name__}", flush=True)
+        frescas: set[tuple[str, str]] = set()   # (conta, fatura) regravadas agora; a quitação só confia nessas
+        try:
+            frescas = salvar_faturas_do_banco(connection["id"], faturas)
+        except Exception as exc:
+            print(f"[pluggy_sync] faturas não gravadas item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
         # Caixinhas do OF viram caixinhas do Pig automaticamente (auto-create + dedup) e o
         # saldo do banco é espelhado nas vinculadas — mas SÓ pra planos pagos (Essencial+).
@@ -569,6 +590,12 @@ def _sync_pluggy_item_confirmado(provider_item_id: str, connection: dict, api_ke
         imported_credit = import_open_finance_credit(connection["user_id"], connection["id"])
         # Propaga correções da Pluggy (transactions/updated) pros já importados (não deixa stale).
         updated = sync_imported_open_finance_updates(connection["user_id"], connection["id"])
+        # Depois do import (compras e `bill_id` já atualizados), ainda sob o lock do item: é ele a trava.
+        try:
+            quitar_pelo_banco(connection["user_id"], connection["id"], frescas)
+        except Exception as exc:
+            print(f"[pluggy_sync] quitação pelo banco falhou item={provider_item_id} "
+                  f"erro={type(exc).__name__}", flush=True)
 
         # Concluído: ESTE é o único carimbo de sucesso do sistema. Dentro do
         # lock de propósito — ele afirma que as escritas acima valeram.

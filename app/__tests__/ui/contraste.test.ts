@@ -1,5 +1,5 @@
 import { contraste, PARES } from "@/ui/contraste";
-import { claro, escuro, acessoClaro, acessoEscuro } from "@/ui/tokens";
+import { ALFA_FUNDO_TOM, claro, escuro, acessoClaro, acessoEscuro } from "@/ui/tokens";
 
 describe("contraste", () => {
   // Referência do plano: prova a fórmula contra dois valores medidos à mão,
@@ -60,5 +60,26 @@ describe("contraste", () => {
   ])("acesso %s não sobrescreve acao/onAcao", (_nome, base, acesso) => {
     expect(acesso.acao).toBe(base.acao);
     expect(acesso.onAcao).toBe(base.onAcao);
+  });
+
+  // Chip do "ritmo de gastos" (`resumoMes.tsx`): texto no tom cheio sobre o MESMO tom em ALFA_FUNDO_TOM por cima do fundo do card.
+  // `contraste()` só lê hex sólido, então o fundo composto é calculado aqui (mesmo alfa de 8 bits que o componente grava).
+  // Só os temas do painel (claro/escuro): os de acesso são das telas de entrada e não têm chip.
+  const sobre = (tom: string, fundo: string, alfa: number) => {
+    const a = Math.round(alfa * 255) / 255, c = (h: string, i: number) => Number.parseInt(h.slice(i, i + 2), 16);
+    return `#${[1, 3, 5].map((i) => Math.round(c(tom, i) * a + c(fundo, i) * (1 - a)).toString(16).padStart(2, "0")).join("")}`;
+  };
+  it.each([
+    ["claro", claro, ALFA_FUNDO_TOM.light],
+    ["escuro", escuro, ALFA_FUNDO_TOM.dark],
+  ])("chip abaixo/acima (positive/warning sobre o próprio tom) alcança AA no tema %s, sobre o card e sobre o fundo", (_nome, paleta, alfa) => {
+    for (const tom of ["positive", "warning"] as const) {
+      for (const fundo of ["surface", "bg"] as const) {
+        expect(contraste(paleta[tom], sobre(paleta[tom], paleta[fundo], alfa))).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+  it("controle: 12% no claro reprovava (é por isso que o alfa do claro é menor)", () => {
+    expect(contraste(claro.warning, sobre(claro.warning, claro.surface, 0.12))).toBeLessThan(4.5);
   });
 });

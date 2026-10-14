@@ -171,10 +171,15 @@ def set_pending_action(
     tool_name: str,
     tool_args: dict[str, Any],
     summary: str,
-) -> None:
+) -> Optional[dict[str, Any]]:
     """
     Grava uma ação pendente. Apenas uma por user (upsert) — se já existe,
-    sobrescreve.
+    só substitui se a existente já venceu o TTL. Pendência VIVA de outro pedido
+    não é sobrescrita: devolve None (nada gravado), senão o "sim" do usuário
+    executaria um pedido diferente do que a resposta mostrou. Quem arma de novo
+    a própria pendência consome a anterior antes (`consume_pending_action`).
+    Devolve a linha gravada no formato do `get_pending_action`: o `created_at`
+    dela é o token do CAS de quem armou, sem reler.
     """
     from .pending import ler_para_aviso, avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
@@ -188,12 +193,30 @@ def set_pending_action(
                 tool_args = excluded.tool_args,
                 summary = excluded.summary,
                 created_at = excluded.created_at
+            where ai_pending_actions.created_at < now() - make_interval(mins => %s)
+            returning tool_name, tool_args, summary, created_at
             """,
-            (int(user_id), tool_name, json.dumps(tool_args), summary),
+            (int(user_id), tool_name, json.dumps(tool_args), summary,
+             PENDING_TTL_MINUTES),
         )
+        row = cur.fetchone()
         if cur.rowcount:
             avisar_mudanca_financeira(cur, user_id, anterior, (tool_name, tool_args), ia=True)
         conn.commit()
+    return _como_pendencia(row) if row else None
+
+
+def _como_pendencia(row) -> dict[str, Any]:
+    created_at = row["created_at"]
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    tool_args = row["tool_args"]
+    return {
+        "tool_name": row["tool_name"],
+        "tool_args": tool_args if isinstance(tool_args, dict) else json.loads(tool_args),
+        "summary": row["summary"],
+        "created_at": created_at,
+    }
 
 
 def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
@@ -232,25 +255,26 @@ def get_pending_action(user_id: int) -> Optional[dict[str, Any]]:
             conn.commit()
             return None
 
-    return {
-        "tool_name": tool_name,
-        "tool_args": tool_args if isinstance(tool_args, dict) else json.loads(tool_args),
-        "summary": summary,
-        "created_at": created_at,
-    }
+    return _como_pendencia(row)
 
 
-def clear_pending_action(user_id: int) -> None:
-    from .pending import ler_para_aviso, avisar_mudanca_financeira
+def clear_pending_action(user_id: int) -> Optional[str]:
+    """Apaga a pendência. Devolve o summary se ela ainda estava viva (TTL), senão None."""
+    from .pending import avisar_mudanca_financeira
     with get_conn() as conn, conn.cursor() as cur:
-        anterior = ler_para_aviso(cur, user_id, ia=True)
         cur.execute(
-            "delete from ai_pending_actions where user_id = %s",
+            "delete from ai_pending_actions where user_id = %s"
+            " returning tool_name, tool_args, summary, created_at",
             (int(user_id),),
         )
-        if cur.rowcount:
-            avisar_mudanca_financeira(cur, user_id, anterior, None, ia=True)
+        row = cur.fetchone()
+        if row:  # o aviso decide pela linha realmente apagada, não por uma leitura anterior
+            avisar_mudanca_financeira(cur, user_id, (row["tool_name"], row["tool_args"]), None, ia=True)
         conn.commit()
+    if not row:
+        return None
+    criada = row["created_at"].replace(tzinfo=row["created_at"].tzinfo or timezone.utc)
+    return row["summary"] if criada >= datetime.now(timezone.utc) - timedelta(minutes=PENDING_TTL_MINUTES) else None
 
 
 def consume_pending_action(user_id: int, pending: dict[str, Any]) -> bool:

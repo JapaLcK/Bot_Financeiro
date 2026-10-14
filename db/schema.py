@@ -1,6 +1,8 @@
 """
 db/schema.py — DDL e inicialização do banco de dados.
 """
+from core.services.demo.dados import CODIGO_PADRAO
+
 from .connection import get_conn
 from .schema_repairs import (
     ensure_lower_name_unique, ensure_plan_trials_user_fk, repair_user_fk_cascades,
@@ -25,7 +27,7 @@ TABELAS_QUE_AVISAM: dict[str, str | None] = {
         "recurring_charges", "category_budgets", "household_budget_config",
         "household_budget_income", "user_categories", "user_category_rules",
         "bank_movement_declarations", "of_cash_coverage", "of_cash_links",
-        "open_finance_connections", "patrimonio_fotos", "subscription_marks",
+        "open_finance_connections", "patrimonio_fotos", "subscription_marks", "metas",
     )),
     "open_finance_accounts": "conexao",
     "open_finance_investments": "conexao",
@@ -355,6 +357,11 @@ def init_db():
         -- marca de quem gravou pela regra nova (PR 2a da Etapa 2 do v2): 'carteira'; NULL =
         -- antigo, só leitura no /painel (P2). Sem default e sem backfill de propósito.
         alter table launches add column if not exists origem text
+        """,
+        """
+        -- PL-04: o usuário marcou ESTE lançamento como "era esperado" (o Xerife não alerta nem o
+        -- conta na média). Nulo = não esperado. Sem default, sem índice, sem expiração.
+        alter table launches add column if not exists esperado_em timestamptz
         """,
         """
         -- migration: marca retroativamente aportes, resgates e categorias de investimento como movimentações internas
@@ -872,6 +879,22 @@ def init_db():
         """
         create index if not exists idx_of_recurring_payments_conn
           on of_recurring_payments(connection_id)
+        """,
+        # Faturas do cartão que o BANCO fechou (`/bills` da Pluggy), por conta CREDIT.
+        # SEM user_id, como as duas de cima: o dono é conta -> conexão. Nada na tela lê.
+        """
+        create table if not exists of_card_bills (
+          id bigserial primary key,
+          account_id bigint not null references open_finance_accounts(id) on delete cascade,
+          provider_bill_id text not null,
+          due_date date not null,
+          closing_date date,
+          total_amount numeric not null,
+          currency text,
+          raw jsonb not null,
+          updated_at timestamptz not null default now(),
+          unique (account_id, provider_bill_id)
+        )
         """,
         """
         alter table open_finance_connections add column if not exists recurring_fetched_at timestamptz
@@ -1821,6 +1844,10 @@ def init_db():
         create index if not exists idx_ai_messages_user_created
           on ai_messages (user_id, created_at desc)
         """,
+        # 👍 = 1, 👎 = -1, NULL = sem nota. Sem CHECK de propósito: a borda valida
+        # (`Literal[-1, 1] | None`), e uma constraint num ALTER em tabela cheia
+        # varre tudo no boot.
+        "alter table ai_messages add column if not exists feedback smallint",
 
         # Pending action: write proposto pela IA aguardando confirmação do user.
         # Quando o user manda "sim" / "confirma", a ação é executada e a linha
@@ -2940,6 +2967,34 @@ def init_db():
         create index if not exists idx_ebook_entregas_abertas
           on ebook_entregas (criada_em) where fechada_em is null
         """,
+        # Régua de remarketing (docs/plano-remarketing.md, PR 1: só o schema e o T0;
+        # nada envia). `remarketing_regua`: T0 = primeira entrada na /precos (logado) ou
+        # a criação da conta na /assinar, gravado uma vez (`db/remarketing.registrar_t0`).
+        # `remarketing_envios`: a reivindicação atômica de cada etapa (unique user+etapa);
+        # o PR 1 não lê nem escreve nela, ela nasce junto para o schema não vir em dois
+        # deploys. Sai com a conta (cascade); fora do merge e do export LGPD.
+        """
+        create table if not exists remarketing_regua (
+          user_id bigint primary key references users(id) on delete cascade,
+          t0 timestamptz not null default now(),
+          origem text not null check (origem in ('precos', 'assinar'))
+        )
+        """,
+        """
+        create table if not exists remarketing_envios (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          etapa smallint not null check (etapa between 1 and 3),
+          status text not null check (status in ('enviando', 'enviado', 'sem_canal')),
+          email_ok boolean,
+          whatsapp_ok boolean,
+          motivo text,
+          criado_em timestamptz not null default now(),
+          fechado_em timestamptz,
+          clicado_em timestamptz,
+          unique (user_id, etapa)
+        )
+        """,
         # E-mail novo a levar ao cliente do Stripe (funil v3, PR 4b): a PATCH
         # /settings/{uid}/security/contact grava na MESMA transação da troca, o
         # job `core/services/stripe_email_sync.py` manda o e-mail ATUAL da conta
@@ -2979,6 +3034,38 @@ def init_db():
         """alter table guia_painel add column if not exists dicas jsonb not null default '{}',
           add column if not exists ordem_aba text,
           add column if not exists ordem_n int""",
+        # Metas do /painel (`db/metas.py`, `/api/v2/metas`): organização sobre dado do banco,
+        # sem dinheiro próprio. `fonte_ref` = `provider_account_id` (conta) ou o nome do banco;
+        # `fonte_banco`/`fonte_numero`/`fonte_rotulo` = a instituição, o número da conta e o rótulo
+        # na hora de criar (a conta reconectada com id novo casa por instituição + número).
+        # `alvo` null só na reserva (vem de `meses`).
+        """
+        create table if not exists metas (
+          id bigserial primary key,
+          user_id bigint not null references users(id) on delete cascade,
+          nome text not null,
+          tipo text not null check (tipo in ('meta', 'reserva')),
+          alvo numeric(12,2) check (alvo > 0),
+          meses smallint check (meses between 1 and 24),
+          data_alvo date,
+          fonte_tipo text not null check (fonte_tipo in ('investido', 'banco', 'conta')),
+          fonte_ref text,
+          fonte_banco text,
+          fonte_numero text,
+          fonte_rotulo text,
+          criada_em timestamptz not null default now(),
+          atualizada_em timestamptz not null default now(),
+          check ((tipo = 'meta' and alvo is not null and meses is null)
+              or (tipo = 'reserva' and alvo is null and meses is not null)),
+          check ((fonte_tipo = 'investido') = (fonte_ref is null))
+        )
+        """,
+        "create index if not exists idx_metas_user on metas (user_id)",
+        # Uma reserva por usuário, no banco: o `_lock_user` não trava sem linha em `accounts` e o
+        # merge de contas junta duas reservas. Quem perde a corrida/junção leva `UniqueViolation`.
+        "create unique index if not exists uq_metas_reserva on metas (user_id) where tipo = 'reserva'",
+        # Tipo/subtipo da conta na criação: "mesmo número" de outro tipo (poupança) não casa.
+        "alter table metas add column if not exists fonte_tipo_conta text",
 
         # ── Aviso de escrita ao `/painel` (TABELAS_QUE_AVISAM, no topo) ──────
         # O NOTIFY sai só no commit (rollback não avisa) e o Postgres funde os
@@ -3034,6 +3121,29 @@ def init_db():
                 or old.plan_expires_at is distinct from new.plan_expires_at)
           execute function pb_aviso_escrita()
         """,
+        # "Testar o Piggy" (demo no WhatsApp): tabela ANÔNIMA — sem user_id de
+        # propósito (o demo não cria usuário nem toca em nenhuma tabela de
+        # usuário). Só o funil lê. wa_hash = HMAC do telefone, zerado após 30
+        # dias (db/demo_funnel.py). O limite de mensagens NÃO mora aqui: é a
+        # constante LIMITE_MSGS do código.
+        f"""
+        create table if not exists demo_sessions (
+          code text primary key check (code ~ '^{CODIGO_PADRAO}$'),
+          wa_hash text,
+          utm_source text check (char_length(utm_source) <= 64),
+          utm_campaign text check (char_length(utm_campaign) <= 64),
+          clicked_at timestamptz,
+          opened_at timestamptz,
+          first_answer_at timestamptz,
+          limit_at timestamptz,
+          checkout_at timestamptz,
+          msgs_used smallint not null default 0 check (msgs_used >= 0),
+          created_at timestamptz not null default now()
+        )
+        """,
+        """create index if not exists idx_demo_sessions_wa_hash
+           on demo_sessions (wa_hash, opened_at desc) where wa_hash is not null""",
+        """create index if not exists idx_demo_sessions_opened_at on demo_sessions (opened_at)""",
     ]
 
     # autocommit: cada DDL roda em sua propria transacao e libera locks

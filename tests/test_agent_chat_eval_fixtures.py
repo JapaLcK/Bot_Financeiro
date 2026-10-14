@@ -1,6 +1,8 @@
 """O replay aceita consultas legítimas sem acessar registros reais."""
+import calendar
 import json
 import sys
+from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 import pytest
@@ -72,3 +74,42 @@ def test_gates_continuam_recusando_redirecionamento_que_consulta_dados():
         'quota_delta': 0, 'data_queries': [{'agent': 'carteiro', 'tool': 'get_bills_to_pay'}],
     })
     assert failures == ['non_answer_queried_data']
+
+
+def _formas_de_compare_periods():
+    from utils_date import today_tz
+    h = today_tz()
+    primeiro = h.replace(day=1)
+    p_ult = primeiro - timedelta(days=1)
+    p_pri = p_ult.replace(day=1)
+    pp_ult = p_pri - timedelta(days=1)
+    ult = h.replace(day=calendar.monthrange(h.year, h.month)[1])
+
+    def q4(a, b):
+        return {'period_a_start': a[0].isoformat(), 'period_a_end': a[1].isoformat(),
+                'period_b_start': b[0].isoformat(), 'period_b_end': b[1].isoformat()}
+    return {
+        'mes corrente': {'mes': f'{h:%Y-%m}'},
+        'mes anterior': {'mes': f'{p_pri:%Y-%m}'},
+        '4 datas de meses inteiros': q4((pp_ult.replace(day=1), pp_ult), (p_pri, p_ult)),
+        'corrente x anterior (redireciona)': q4((p_pri, p_ult), (primeiro, h)),
+        'corrente com fim cortado': q4((p_pri, p_ult), (primeiro, ult + timedelta(days=60))),
+        'A e B trocados': q4((primeiro, h), (p_pri, p_ult)),
+        'mais de 12 meses': q4((date(2025, 1, 1), date(2025, 9, 30)), (primeiro, h)),
+        'parcial x parcial': q4((p_pri + timedelta(days=2), p_pri + timedelta(days=9)),
+                                (primeiro, primeiro + timedelta(days=3))),
+    }
+
+
+@pytest.mark.parametrize('forma', list(_formas_de_compare_periods()))
+def test_compare_periods_sem_banco_em_todas_as_formas_de_argumento(forma):
+    """`mes=`, meses inteiros, redirecionamento e período livre: nenhuma forma abre conexão (a fixture só tinha datas
+    parciais, que caem no período livre, e `mes=` quebrava com KeyError no `totais` sem patch)."""
+    with (
+        patch('psycopg_pool.ConnectionPool.connection', side_effect=AssertionError('Acessou banco')),
+        patch('psycopg.connect', side_effect=AssertionError('Abriu conexão')),
+        patch('psycopg.Connection.connect', side_effect=AssertionError('Abriu conexão')),
+    ):
+        result = synthetic_read(42, 'reporter', 'compare_periods', _formas_de_compare_periods()[forma])
+    assert not result.get('error'), result
+    assert result['base']['cartao'] in ('fatura', 'data_da_compra')

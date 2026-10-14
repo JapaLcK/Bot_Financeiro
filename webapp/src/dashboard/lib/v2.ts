@@ -107,6 +107,12 @@ export const contasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
   ...vivo,
 };
+// As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.
+export const metasQuery = {
+  queryKey: ["metas"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/metas", signal),
+  ...vivo,
+};
 export const guiaQuery = {
   queryKey: ["guia"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),

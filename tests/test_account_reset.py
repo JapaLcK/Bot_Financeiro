@@ -142,6 +142,11 @@ def _semeia(uid: int) -> None:
                 "values (%s, 'NETFLIX.COM', -39.9, array['tx-1'])",
                 (con,),
             )
+            cur.execute(
+                "insert into of_card_bills (account_id, provider_bill_id, due_date, total_amount, raw) "
+                "values (%s, 'bill-1', %s, 100, '{}')",
+                (acc, hoje),
+            )
 
             # ── crédito (apagado) ───────────────────────────────────────────
             cur.execute(
@@ -291,6 +296,8 @@ def _semeia(uid: int) -> None:
             )
             cur.execute("insert into daily_report_prefs (user_id) values (%s)", (uid,))
             cur.execute("insert into guia_painel (user_id, concluido_em) values (%s, now())", (uid,))
+            cur.execute("insert into metas (user_id, nome, tipo, alvo, fonte_tipo)"
+                        " values (%s, 'viagem', 'meta', 1000, 'investido')", (uid,))
         conn.commit()
 
 
@@ -319,6 +326,11 @@ _OF_JOINS = {
         "select count(*) as n from of_recurring_payments rp "
         "join open_finance_connections c on c.id = rp.connection_id where c.user_id = %s"
     ),
+    "of_card_bills": (
+        "select count(*) as n from of_card_bills b "
+        "join open_finance_accounts a on a.id = b.account_id "
+        "join open_finance_connections c on c.id = a.connection_id where c.user_id = %s"
+    ),
 }
 _TABELAS_SIMPLES = (
     "open_finance_connections", "credit_transactions", "credit_bills", "credit_cards",
@@ -329,7 +341,7 @@ _TABELAS_SIMPLES = (
     "user_category_rules", "user_categories", "agent_events", "agents",
     "ai_messages", "ai_pending_actions", "ai_fallback_log", "ai_proactive_cache",
     "pending_actions",
-    "ofx_imports", "daily_report_prefs", "guia_painel", "launches", "financial_spaces",
+    "ofx_imports", "daily_report_prefs", "guia_painel", "metas", "launches", "financial_spaces",
     # `accounts` NÃO entra: desde o conserto do #246 a linha SOBREVIVE ao reset
     # com balance = 0 (é o lock dela que serializa o reset contra um lançamento
     # concorrente). A garantia real virou `balance == 0`, medida em _saldo().

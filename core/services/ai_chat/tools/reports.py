@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 import db
+from core.observability import _log_falha
 
 from ._base import Tool
 
@@ -68,7 +69,8 @@ def _enable_daily_report_execute(user_id: int, args: dict[str, Any]) -> str:
             return f"✅ Relatório diário ligado às {hour:02d}:{(minute or 0):02d}."
         return "✅ Relatório diário ligado."
     except Exception as e:
-        return f"🐷 Não consegui ligar: {e}"
+        _log_falha("enable_daily_report", user_id, e)
+        return "🐷 Não consegui ligar agora. Tenta de novo em instantes."
 
 
 # ─── Write: disable_daily_report ────────────────────────────────────────────
@@ -82,7 +84,8 @@ def _disable_daily_report_execute(user_id: int, args: dict[str, Any]) -> str:
         db.set_daily_report_enabled(user_id, False)
         return "✅ Relatório diário desligado."
     except Exception as e:
-        return f"🐷 Não consegui desligar: {e}"
+        _log_falha("disable_daily_report", user_id, e)
+        return "🐷 Não consegui desligar agora. Tenta de novo em instantes."
 
 
 # ─── Write: set_daily_report_hour ───────────────────────────────────────────
@@ -101,7 +104,8 @@ def _set_daily_report_hour_execute(user_id: int, args: dict[str, Any]) -> str:
         db.set_daily_report_hour(user_id, hour, minute or 0)
         return f"✅ Relatório diário agendado pras {hour:02d}:{(minute or 0):02d}."
     except Exception as e:
-        return f"🐷 Não consegui agendar: {e}"
+        _log_falha("set_daily_report_hour", user_id, e)
+        return "🐷 Não consegui agendar agora. Tenta de novo em instantes."
 
 
 # ─── Tools registry ─────────────────────────────────────────────────────────

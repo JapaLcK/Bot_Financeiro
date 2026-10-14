@@ -39,7 +39,7 @@ export function ProgressBar({ valor, tom = "brand" }: Props) {
     <View
       accessibilityRole="progressbar"
       accessibilityValue={{ min: 0, max: 100, now: agora }}
-      style={{ height: 8, borderRadius: raio.sm, backgroundColor: cores.border, overflow: "hidden" }}
+      style={{ height: 8, borderRadius: raio.barra, backgroundColor: cores.border, overflow: "hidden" }}
     >
       <View
         style={{
@@ -86,7 +86,7 @@ export function ProgressBarIndeterminada({ rotulo }: { rotulo: string }) {
       accessibilityLabel={rotulo}
       accessibilityState={{ busy: true }}
       onLayout={(e) => setLargura(e.nativeEvent.layout.width)}
-      style={{ height: 8, borderRadius: raio.sm, backgroundColor: cores.surface, overflow: "hidden" }}
+      style={{ height: 8, borderRadius: raio.barra, backgroundColor: cores.surface, overflow: "hidden" }}
     >
       <Animated.View style={[{ backgroundColor: cores.brand }, estilo]} />
     </View>

@@ -1,5 +1,5 @@
 import { faladoComSinal, partes, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
-import type { Paleta } from "@/ui/tokens";
+import { texto, type Paleta } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
 
@@ -19,6 +19,9 @@ interface Props {
 // "−R$ 12,30" diverge de propósito do "R$ -12,30" do site.
 const SINAL_MENOS = "−";
 
+// PDF: valores em 600, qualquer que seja a variante.
+const SEMIBOLD = { fontFamily: texto.secao.fontFamily };
+
 /**
  * Decisão 2 do dono: `entrada`/`saida` mostram o MÓDULO de `centavos` com o
  * sinal do TIPO, não o sinal do número — uma saída de -1230 (lançamento
@@ -29,7 +32,7 @@ const SINAL_MENOS = "−";
 export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = false }: Props) {
   if (oculto) {
     return (
-      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel="Valor oculto">
+      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel="Valor oculto" style={SEMIBOLD}>
         R$ ••••
       </Texto>
     );
@@ -43,7 +46,7 @@ export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = f
     // `AmountInput`, que o embutem no MEIO de uma frase maior.
     const rotulo = VALOR_INDISPONIVEL_FALADO.charAt(0).toUpperCase() + VALOR_INDISPONIVEL_FALADO.slice(1);
     return (
-      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel={rotulo}>
+      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel={rotulo} style={SEMIBOLD}>
         —
       </Texto>
     );
@@ -71,7 +74,7 @@ export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = f
 
   if (variante !== "display") {
     return (
-      <Texto variante={variante} tom={tom} numerico accessible accessibilityLabel={label}>
+      <Texto variante={variante} tom={tom} numerico accessible accessibilityLabel={label} style={SEMIBOLD}>
         {antesDaVirgula}
         {p.centavos}
       </Texto>
@@ -89,12 +92,13 @@ export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = f
       numerico
       accessible
       accessibilityLabel={label}
+      style={SEMIBOLD}
       numberOfLines={1}
       adjustsFontSizeToFit
       minimumFontScale={0.6}
     >
       {antesDaVirgula}
-      <Texto variante={variante} tom={tomCentavos} numerico>
+      <Texto variante={variante} tom={tomCentavos} numerico style={SEMIBOLD}>
         {p.centavos}
       </Texto>
     </Texto>

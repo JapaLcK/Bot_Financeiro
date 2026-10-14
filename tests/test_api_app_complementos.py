@@ -211,6 +211,19 @@ def test_arredondamento_dos_grupos_e_explicito_com_writer_real(uid, categorias, 
     assert ("arredondamento_por_grupo" in r["motivos"]) is avisa
 
 
+def test_arredondamento_das_origens_tambem_e_explicito(uid):
+    """Duas saídas de 0,004 na mesma categoria e no mesmo dia, de origens diferentes: categoria e dia
+    somam 0,01 exato; cada origem mostra 0,00. Só o grupo `origens` diverge."""
+    from tests.test_resumo_mes_regra import _lanc
+    from tests._patrimonio_helpers import q as sql
+    db.add_launch_and_update_balance(uid, "despesa", D("0.004"), "Gasto", None, categoria="a", criado_em=_em(3))
+    sql("update launches set categoria='a' where id=%s", (_lanc(uid, "despesa", D("0.004"), 3),))
+    r = leitura(uid, "mes-detalhes", mes=MES)
+    assert [c["valor"] for c in r["categorias"]] == ["0.01"] and [d["saiu"] for d in r["dias"]] == ["0.01"]
+    assert sorted(v for v in r["origens"].values() if v != "0.00") == [], r["origens"]
+    assert "arredondamento_por_grupo" in r["motivos"]
+
+
 def test_arredondamento_de_entradas_diarias_tambem_e_explicito(uid):
     for dia in (3, 4):
         db.add_launch_and_update_balance(uid, "receita", D("1.005"), "Recebimento", None,

@@ -187,10 +187,10 @@ test("utm_* (sem diferenciar maiúsculas) e fbclid seguem para o quiz; o resto n
   await ctx.close();
 });
 
-test("a página só tem links para o quiz, /termos e /privacy", async () => {
+test("a página só tem links para o quiz, o teste, /termos e /privacy", async () => {
   const { page, ctx } = await abrir({ visto: true });
   const hrefs = await page.$$eval("a[href]", as => as.map(a => a.getAttribute("href")).sort());
-  assert.deepEqual(hrefs, ["/privacy", "/termos", "https://quiz.pigbankai.com/"]);
+  assert.deepEqual(hrefs, ["/privacy", "/termos", "/teste", "https://quiz.pigbankai.com/"]);
   await ctx.close();
 });
 

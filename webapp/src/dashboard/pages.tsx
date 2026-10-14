@@ -21,6 +21,7 @@ import { GoalsTimeline } from "./widgets/GoalsTimeline";
 import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
+import { MetasPainel } from "./widgets/Metas";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SubscriptionList } from "./widgets/Subscriptions";
@@ -118,6 +119,7 @@ function Simulate({ s }: { s: DashState }) {
 }
 
 function GoalsPage({ s }: { s: DashState }) {
+  if (!DEMO) return <Page path="/metas" lede="Quanto já tem, quanto falta e se o seu ritmo chega lá."><MetasPainel /></Page>;
   const monthly = GOALS.reduce((a, g) => a + g.monthly, 0);
   const saving = simActive(s) ? monthlySaving(s.sim) : 0;
   const next = [...GOALS].map((g) => ({ g, eta: goalEta(g) })).sort((a, b) => a.eta.months - b.eta.months)[0];
@@ -166,7 +168,7 @@ function Launches({ s }: { s: DashState }) {
 
 // Ferramentas: só o Simulador já existe no protótipo; as outras vêm do dashboard atual
 // (ou são novas) e entram uma de cada vez. O Painel antigo sai do v2 para o /app. O guia mora
-// aqui também (e no Cmd-K): abaixo de 360px a Ajuda sai da barra de baixo (styles/shell.css).
+// aqui também (e no Cmd-K e na Ajuda do Menu do celular).
 const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
   { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },

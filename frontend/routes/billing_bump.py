@@ -80,11 +80,13 @@ def _bump(stripe, sg, user_id: int, customer: str | None, sid: str, posicoes: li
 async def billing_checkout_bump(request: Request, payload: BumpBody):
     # Import tardio, como o `billing_pix.py`: o monólito importa este módulo.
     from frontend.finance_bot_websocket_custom import (  # noqa: PLC0415
-        STRIPE_SECRET_KEY, _billing_user_lock, _get_current_user, _sg,
+        STRIPE_SECRET_KEY, _billing_user_lock, _sg,
     )
     from db import get_auth_user  # noqa: PLC0415
+    from frontend.routes.retomada import comprador  # noqa: PLC0415
 
-    user_id = await _get_current_user(request, None)
+    # Sessão normal ou cookie de retomada: o dono é checado igual nos dois (`_bump`).
+    user_id = (await comprador(request)).user_id
     posicoes = payload.posicoes
     if (not _SID.fullmatch(payload.sid) or len(posicoes) > SLOTS
             or len(set(posicoes)) != len(posicoes) or any(not 1 <= p <= SLOTS for p in posicoes)):

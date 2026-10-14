@@ -303,7 +303,7 @@
 <div class="wrap" id="conteudo">
 <section class="section">
 <section aria-labelledby="precos-title" class="lp-plans-intro lp-section-light"><div class="lp-shell lp-plans-intro-grid">
-<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p></div>
+<div class="lp-plans-intro-copy"><p class="lp-eyebrow">Planos PigBank</p><h1 id="precos-title">Um plano para cada <br/><span class="lp-underline">ritmo de vida.</span></h1><p class="lp-lead">Sua grana organizada no WhatsApp e no painel. Escolha como quer começar.</p><p class="lp-plans-status" id="precos-sub">15 dias grátis pra testar o plano que você escolher. Cancele antes do fim e não paga nada.</p><p class="lp-plans-status" id="testar-piggy">Ainda na dúvida? <a class="lp-text-link" data-teste href="/teste">Testar o Piggy agora</a></p></div>
 <div class="lp-plans-mascot"><div aria-hidden="true" class="lp-plans-mascot-bubble"></div><img alt="Piggy com óculos escuros, moletom preto e celular" fetchpriority="high" height="1200" src="/brand/landing-piggy-four-digits.webp?v=1" width="800"/></div>
 </div></section>
 <!-- Escada de planos (Essencial/Plus/Pro) — conteúdo ÚNICO
@@ -885,6 +885,7 @@ async function cancelChange() {
   // como qualquer um. Esconder o mandato deixaria a tela sem explicar por que
   // o dashboard não abre.
   if (!me) return;
+  document.getElementById("testar-piggy")?.remove();   // logado já tem conta: o teste anônimo não serve
   const sub = document.getElementById("precos-sub");
   if (!sub) return;
   // DOIS estados de gate, não um. `needs_plan_selection` é o cadastro NOVO que
@@ -1224,6 +1225,7 @@ enviarViewItemList();
 <script src="/pix-extras.js?v=1"></script>
 <script src="/pix-checkout.js?v=1"></script>
 <script defer="" src="/nav-auth.js?v=7"></script>
+<script defer="" src="/teste-piggy.js?v=1"></script>
 <script defer="" src="/nav-burger.js?v=1"></script>
 </body>
 </html>

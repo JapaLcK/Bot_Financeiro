@@ -56,9 +56,10 @@ def get_summary_by_period_impl(
     end_date: date,
 ):
     # Divergência conhecida (Q18): só `launches`, SEM o cartão. Fica para o relatório
-    # diário e semanal, as ferramentas da IA de período livre e a projeção de
-    # fechamento. "Gastos em <mês>", relatório mensal, /app e Análises leem a regra
-    # única do mês, com o cartão pela fatura (`db/resumo_mes.TOTAIS_SQL`).
+    # diário e semanal e a projeção de fechamento (as tools da IA de período livre já somam o
+    # cartão pela data da compra, em `db.get_top_expense_categories`). "Gastos em <mês>",
+    # relatório mensal, /app e Análises leem a regra única do mês, com o cartão pela fatura
+    # (`db/resumo_mes.TOTAIS_SQL`).
     ensure_user(user_id)
 
     start_dt = datetime.combine(start_date, datetime.min.time())
@@ -852,13 +853,16 @@ def trava_email(cur, email_hash: str | None, *, esperar: bool = True) -> bool:
     return esperar or bool(cur.fetchone()["ok"])
 
 
-def telefone_livre(cur, telefone: str | None) -> str | None:
-    """O telefone, ou None se outra conta já o tem: descarte silencioso, sem dizer
-    "em uso" (enumeraria números de WhatsApp). O cadastro segue sem WhatsApp."""
+def telefone_livre(cur, telefone: str | None, exceto_user_id: int | None = None) -> str | None:
+    """O telefone, ou None se outra conta já o tem. Os cadastros descartam em silêncio,
+    sem dizer "em uso" (enumeraria números de WhatsApp), e seguem sem WhatsApp.
+    `exceto_user_id`: a troca de telefone de uma conta existente (Configurações)
+    não colide com o número que já é dela, nem com a variante do nono dígito."""
     if not telefone:
         return None
     hashes = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(telefone) if c]
-    cur.execute("select 1 from auth_accounts where phone_hash = any(%s)", (hashes,))
+    cur.execute("select 1 from auth_accounts where phone_hash = any(%s) and user_id is distinct from %s",
+                (hashes, exceto_user_id))
     return None if cur.fetchone() else telefone
 
 

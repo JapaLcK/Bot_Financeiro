@@ -61,13 +61,13 @@ def _lock_user(cur, user_id):
     NÃO o toma: `accrue_all_*` (de propósito: o mutex serializaria a leitura do
     dashboard) vai pai → filho, e o reset, que segura accounts, apaga pai antes de
     filho (`_RESET_TABLES`). Seguir "launches → pai → lotes" SEM o mutex reabre o ciclo
-    com o reset, que apaga launches por último. Fora: cartão (fatura → conta).
+    com o reset, que apaga launches por último. Fora: cartão (cartão FOR SHARE → fatura → conta → launches, no pagamento manual).
     Sync/conferência OF usam a mesma ordem, antes de conta OF/transação/vínculo.
     Exceções conhecidas, com acompanhamento em issue separada: (1) cartão: o undo de pagamento
     de fatura só toma o mutex quando o pagamento é financiado/ligado ao banco (Open Finance);
     nesse caso `pay_bill_amount` × undo trava sem deadlock detectável, e o par pagamento de
     fatura que ganha ligação OF depois do preview × sync dá DeadlockDetected quando o undo
-    chega primeiro. Sem Open Finance a ordem é fatura → conta (`pay_bill_amount` segura a
+    chega primeiro. Sem Open Finance a ordem é cartão (FOR SHARE) → fatura → conta → launches (`pay_bill_amount` segura a
     fatura enquanto outra conexão pede `accounts`) e cruza com reset, merge e delete_user_data;
     `pay_bill_amount` também pode travar sem deadlock detectável contra reset e merge; (2)
     `delete_user_data` apaga Open Finance e crédito ANTES de `accounts` (o mutex vem antes do

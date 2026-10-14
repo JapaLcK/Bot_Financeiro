@@ -1,0 +1,29 @@
+/* Tela de metas (widgets/Metas.tsx, parts/MetaCartao.tsx, parts/MetaForm.tsx). Grid, não flex com gap (Safari 14). */
+.metas-corpo { display: grid; gap: 16px; min-width: 0; }
+.metas-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.meta-convite { display: grid; justify-items: start; gap: 10px; padding: 14px 16px; border-radius: var(--r-ctrl); background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.meta-convite b { color: var(--ink); font-weight: 600; }
+.meta-convite .btn, #w-metas-painel .btn, .meta-form .btn { min-height: 44px; height: auto; white-space: normal; }
+
+.meta { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 16px; border-radius: var(--r-ctrl); background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); overflow-wrap: anywhere; }
+.meta-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 12px; }
+.meta h3 { font-size: 15px; font-weight: 600; line-height: 1.3; }
+.meta h4 { font-size: 11.5px; font-weight: 500; color: var(--ink-3); margin-bottom: 4px; }
+.meta .btn { justify-self: start; }
+.meta-nota { font-size: 12.5px; color: var(--ink-2); }
+.meta-valores { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.meta-falta, .meta-chegada { font-size: 13px; color: var(--ink-2); }
+.meta-batida { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.meta-numero { font-size: 14px; font-weight: 600; white-space: normal; overflow-wrap: anywhere; } /* sobrescreve o nowrap do .num: R$ 999.999.999,99 não pode passar do cartão */
+.meta .meter { height: 6px; }
+.meta .meter.ok > span { background: var(--gain); }
+.meta .selo { white-space: normal; height: auto; min-height: 22px; }
+.meta-ritmos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 12px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 13px; }
+.meta-ritmos section { display: grid; gap: 6px; align-content: start; min-width: 0; }
+
+.meta-form fieldset { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.meta-form legend { padding: 0; margin-bottom: 6px; font-size: 13px; color: var(--ink-2); }
+.lanc-campos .meta-radio { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; min-height: 44px; font-size: 13px; color: var(--ink); }
+.meta-radio input { width: 20px; height: 20px; margin: 0; accent-color: var(--pink); }
+.meta-form .field[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--warn); }
+.meta .btn-ghost, .meta-convite .btn-ghost { background: var(--plane-3); }

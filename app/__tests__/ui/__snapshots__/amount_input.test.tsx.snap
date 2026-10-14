@@ -8,7 +8,8 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: claro 1`] =
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
@@ -35,9 +36,10 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: claro 1`] =
       style={
         [
           {
-            "fontFamily": "Inter-Bold",
-            "fontSize": 28,
-            "lineHeight": 34,
+            "fontFamily": "Inter-SemiBold",
+            "fontSize": 24,
+            "letterSpacing": -0.6,
+            "lineHeight": 28,
           },
           {
             "color": "#111113",
@@ -68,12 +70,14 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: claro 1`] =
           "start": 12,
         }
       }
+      selectionColor="#FF2D8E"
       style={
         [
           {
-            "fontFamily": "Inter-Bold",
-            "fontSize": 28,
-            "lineHeight": 34,
+            "fontFamily": "Inter-SemiBold",
+            "fontSize": 24,
+            "letterSpacing": -0.6,
+            "lineHeight": 28,
           },
           {
             "color": "#111113",
@@ -93,8 +97,9 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: claro 1`] =
     style={
       [
         {
-          "fontFamily": "Inter-Regular",
+          "fontFamily": "Inter-Medium",
           "fontSize": 12,
+          "letterSpacing": 0,
           "lineHeight": 16,
         },
         {
@@ -118,11 +123,12 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: escuro 1`] 
       [
         {
           "fontFamily": "Inter-Medium",
-          "fontSize": 14,
+          "fontSize": 13,
+          "letterSpacing": 0,
           "lineHeight": 18,
         },
         {
-          "color": "#F2F2F3",
+          "color": "#F4F4F6",
         },
         {},
         null,
@@ -145,12 +151,13 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: escuro 1`] 
       style={
         [
           {
-            "fontFamily": "Inter-Bold",
-            "fontSize": 28,
-            "lineHeight": 34,
+            "fontFamily": "Inter-SemiBold",
+            "fontSize": 24,
+            "letterSpacing": -0.6,
+            "lineHeight": 28,
           },
           {
-            "color": "#F2F2F3",
+            "color": "#F4F4F6",
           },
           {},
           null,
@@ -178,15 +185,17 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: escuro 1`] 
           "start": 12,
         }
       }
+      selectionColor="#FF2D8E"
       style={
         [
           {
-            "fontFamily": "Inter-Bold",
-            "fontSize": 28,
-            "lineHeight": 34,
+            "fontFamily": "Inter-SemiBold",
+            "fontSize": 24,
+            "letterSpacing": -0.6,
+            "lineHeight": 28,
           },
           {
-            "color": "#F2F2F3",
+            "color": "#F4F4F6",
             "flex": 1,
             "fontVariant": [
               "tabular-nums",
@@ -203,8 +212,9 @@ exports[`AmountInput — snapshot (dois temas) com valor e com erro: escuro 1`] 
     style={
       [
         {
-          "fontFamily": "Inter-Regular",
+          "fontFamily": "Inter-Medium",
           "fontSize": 12,
+          "letterSpacing": 0,
           "lineHeight": 16,
         },
         {

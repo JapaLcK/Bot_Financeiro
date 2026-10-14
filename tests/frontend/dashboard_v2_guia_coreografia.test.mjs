@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { RAIZ } from "./_painel.mjs";
-import { FAZER, PASSOS, abrir, acoes, anelNoAlvo, bora, botaoEntendi, entendi, esperaTitulo, navegador, piggyEm, tocarAba, vaoDoVeu } from "./_guia.mjs";
+import { FAZER, PASSOS, abrir, acoes, ajudaDoMenu, anelNoAlvo, bora, botaoEntendi, entendi, esperaTitulo, navegador, piggyEm, tocarAba, vaoDoVeu } from "./_guia.mjs";
 
 navegador();
 
@@ -189,19 +189,20 @@ test("refetch no meio: no alvo o Entendi não volta e o anel fica; na etapa da a
   assert.equal(hashes.length, 1);
 });
 
-// Abaixo de 360px a Ajuda sai da barra de baixo: o guia continua em Ferramentas e no Cmd-K.
-test("plano B em 320: o cartão \"Guia do painel\" em Ferramentas e o Cmd-K abrem o guia", async () => {
+// Em 320 a barra tem o Menu (a Ajuda mora nele); o guia abre também por Ferramentas e pelo Cmd-K.
+test("320: o cartão \"Guia do painel\" em Ferramentas, o Cmd-K e a Ajuda do Menu abrem o guia", async () => {
   const r = [];
-  for (const como of ["cartão", "Cmd-K"]) {
+  for (const como of ["cartão", "Cmd-K", "Menu"]) {
     const { ctx, page, s } = await abrir({ width: 320, height: 640, guia: "concluido", rota: como === "cartão" ? "/ferramentas" : "/" });
     const cartao = page.locator(".tools").getByRole("button", { name: /Guia do painel/ });
     if (como === "Cmd-K") { await page.keyboard.press("Meta+k"); await page.locator(".cmdk input").fill("guia"); await page.keyboard.press("Enter"); }
+    else if (como === "Menu") await ajudaDoMenu(page);
     else if (await cartao.count()) await cartao.click();
     await page.locator(".guia-balao").waitFor({ timeout: 5000 }).catch(() => {});
-    r.push([como, acoes(s), await page.evaluate(() => document.querySelector(".tabbar button")?.getClientRects().length)]);
+    r.push([como, acoes(s)]);
     await ctx.close();
   }
-  assert.deepEqual(r, [["cartão", ["reabrir"], 0], ["Cmd-K", ["reabrir"], 0]]);
+  assert.deepEqual(r, [["cartão", ["reabrir"]], ["Cmd-K", ["reabrir"]], ["Menu", ["reabrir"]]]);
 });
 
 // A região de anúncio do guia (a da conversa é outra) fala o que o balão diz em cada etapa, e

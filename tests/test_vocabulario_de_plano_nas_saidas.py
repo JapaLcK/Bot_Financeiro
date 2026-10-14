@@ -130,10 +130,13 @@ def logado(monkeypatch, user_id):
                         lambda req: user_id)
     app = dashboard.app
     app.dependency_overrides[dashboard._get_current_user] = lambda: user_id
+    # create-checkout autentica por `Depends(comprador)`, que chama o resolver direto.
+    app.dependency_overrides[dashboard.comprador] = lambda: dashboard.Comprador(user_id)
     cliente = TestClient(app)
     cliente.cookies.set(dashboard.CSRF_COOKIE_NAME, _CSRF)
     yield SimpleNamespace(user_id=user_id, http=cliente)
     app.dependency_overrides.pop(dashboard._get_current_user, None)
+    app.dependency_overrides.pop(dashboard.comprador, None)
 
 
 def _checkout(logado, plan: str):

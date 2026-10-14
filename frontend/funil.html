@@ -56,6 +56,9 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.wrapcol td:first-child { white-space: normal; overflow-wrap: anywhere; }
+.cod { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); margin-left: 6px; }
+@media (max-width: 520px) { .cod { display: block; margin: 2px 0 0; } }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { overflow-wrap: anywhere; min-width: 0; font-size: 12px; padding: 4px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); }
 .chip b { font-variant-numeric: tabular-nums; }
@@ -170,7 +173,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
     return card(title, what, '<div class="facts">' + facts.join("") + "</div>");
   }
 
-  // ── Fontes externas (Stripe e, nos PRs seguintes, GA4/Clarity/Meta) ─────────
+  // ── Fontes externas (Stripe, GA4, Clarity, Meta) ─────────────────────────────
   // Tudo que vem do servidor aqui é dado de fonte externa: texto SEMPRE por esc(), número
   // por n()/pct()/brl(), e `estado` só entra no HTML depois de passar pela whitelist.
   const ESTADOS = { ok: 1, nao_configurado: 1, erro: 1, stale: 1 };
@@ -198,10 +201,87 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
       (x.cobrancas.truncado ? '<p class="note">Mais de 1.000 cobranças em 30 dias: os números de cobrança estão parciais.</p>' : "");
   }
 
+  // Mesma lista (e ordem) de `EVENTOS` em core/funil_fonte_ga4.py; um teste compara as duas. A ordem
+  // vem DAQUI: o cache em tabela (jsonb) reordena as chaves do `dados`.
+  const GA4_EVENTOS = [
+    ["page_view", "Página vista"], ["view_item_list", "Viu os planos (/precos)"],
+    ["begin_checkout", "Começou o checkout"], ["sign_up", "Cadastro"], ["start_trial", "Iniciou o trial"],
+    ["onboarding_complete", "Concluiu o onboarding"], ["vsl_play", "Deu play no vídeo"],
+    ["vsl_progress", "Progresso do vídeo"], ["teste_click", "Cliques em Testar o Piggy"],
+    ["purchase", "Compra (inclui as do servidor)"],
+  ];
+
+  function ga4Corpo(x) {
+    const ev = x.eventos[win], og = x.origens[win], dias = win === "7d" ? 7 : 30;
+    return `<div class="sub">Eventos do funil, últimos ${dias} dias e hoje</div>` +
+      '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Evento</th><th>Usuários</th><th>Eventos</th></tr></thead><tbody>' +
+      GA4_EVENTOS.map((e) => {
+        const v = ev[e[0]] || {};
+        return `<tr><td>${esc(e[1])}<span class="cod">${esc(e[0])}</span></td><td>${n(v.usuarios || 0)}</td><td>${n(v.eventos || 0)}</td></tr>`;
+      }).join("") + "</tbody></table></div>" +
+      '<div class="sub">De onde vieram as sessões (grupo de canais do GA4)</div>' +
+      (og.length
+        ? '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Canal</th><th>Sessões</th><th>Usuários</th></tr></thead><tbody>' +
+          og.map((o) => `<tr><td>${esc(o.canal)}</td><td>${n(o.sessoes)}</td><td>${n(o.usuarios)}</td></tr>`).join("") + "</tbody></table></div>"
+        : '<p class="empty">Nenhuma sessão na janela.</p>') +
+      '<p class="note">Os números do GA4 não batem com os do nosso banco (bloqueador de anúncio, consentimento). O dia de hoje é parcial e o fuso é o da propriedade GA4. “Compra” inclui os eventos enviados pelo servidor. Usuários não se somam entre linhas.</p>';
+  }
+
+  // Clarity: janela FIXA de 3 dias (UTC) e só a página /precos, então ignora o seletor 7d/30d.
+  // `null` = o Clarity não trouxe (ou o formato não foi reconhecido): aparece como "n/d", nunca 0.
+  const nd = (v, f) => (v == null ? "n/d" : f(v));
+  const pc = (v) => Number(v).toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+  function clarityCorpo(x) {
+    const t = x.trafego, m = x.cliques_mortos, r = x.cliques_raiva;
+    return (x.reconhecido === true ? "" : '<div class="banner" role="status">Formato da resposta do Clarity não reconhecido; o log do servidor tem os nomes dos campos.</div>') +
+      '<div class="sub">Página /precos, últimos 3 dias (UTC)</div><div class="facts">' +
+      fact("Sessões", nd(t.sessoes, n), "sem bots, quando o Clarity informa") + fact("Usuários", nd(t.usuarios, n)) +
+      fact("Rolagem média", nd(x.rolagem_media_pct, pc), "média das variantes da URL; ponderada pelas sessões só quando o Clarity informa a contagem") +
+      fact("Cliques mortos", nd(m.pct_sessoes, pc), "das sessões") +
+      fact("Cliques de raiva", nd(r.pct_sessoes, pc), "das sessões") + "</div>" +
+      (x.reconhecido === true && !x.truncado && t.sessoes === 0 ? '<p class="note">Sem visitas em /precos nos últimos 3 dias.</p>' : "") +
+      (x.truncado ? '<p class="note">Números parciais: o Clarity devolveu 1.000 linhas (o limite) e pode ter cortado URLs.</p>' : "") +
+      '<p class="note">Confira com o painel do Clarity: se a rolagem ou os percentuais parecerem pequenos demais (ex.: 0,1%), a escala pode ser 0 a 1.</p>' +
+      '<p class="note">Só a página /precos; janela máxima de 3 dias; sessões sem bots quando o Clarity informa; o Clarity pode truncar em 1.000 linhas (“números parciais”); a cota do Clarity é de 10 consultas por dia, por isso o cartão atualiza no máximo a cada 3 h. Usuários de variantes da mesma URL podem se repetir.</p>';
+  }
+
+  // Meta: janela FIXA de 7 dias (limite da API), então ignora o seletor 7d/30d. Mesma lista (e ordem) de
+  // `EVENTOS` em core/funil_fonte_meta.py; um teste compara as duas. A ordem vem DAQUI (o jsonb reordena).
+  const META_EVENTOS = [
+    ["PageView", "Página vista"], ["ViewContent", "Viu os planos (/precos)"], ["InitiateCheckout", "Começou o checkout"],
+    ["CompleteRegistration", "Cadastro"], ["StartTrial", "Iniciou o trial"], ["OnboardingComplete", "Concluiu o onboarding"],
+    ["TesteClick", "Cliques em Testar o Piggy"], ["Purchase", "Compra (inclui as do servidor)"],
+  ];
+
+  function metaCorpo(x) {
+    const ev = x.eventos, ok = x.reconhecido === true;  // sem formato reconhecido os zeros seriam falsos: "n/d"
+    return (ok ? "" : '<div class="banner" role="status">Formato da resposta da Meta não reconhecido; o log do servidor tem os nomes dos campos.</div>') +
+      '<div class="sub">Disparos do pixel, últimos 7 dias</div>' +
+      '<div class="tblwrap"><table class="wrapcol"><thead><tr><th>Evento</th><th>Disparos</th></tr></thead><tbody>' +
+      META_EVENTOS.map((e) => {
+        const v = ev[e[0]] || 0;
+        return `<tr><td>${esc(e[1])}<span class="cod">${esc(e[0])}</span></td><td>${ok ? n(v) : "n/d"}</td></tr>`;
+      }).join("") +
+      "</tbody></table></div>" +
+      '<p class="note">São DISPAROS do pixel recebidos pela Meta (navegador + servidor), não conversões deduplicadas: podem divergir do nosso banco e do GA4. A janela de 7 dias é o limite da API da Meta.</p>';
+  }
+
   const FONTES = {
     stripe: {
       rotulo: "Stripe", titulo: "8a. Stripe: assinaturas e cobranças", corpo: stripeCorpo,
       what: "<b>O que é:</b> assinaturas por status agora e cobranças de cartão da janela, direto da API do Stripe. <b>O que não é:</b> Pix, nem lista de pessoas.",
+    },
+    ga4: {
+      rotulo: "GA4", titulo: "8b. GA4: eventos do funil e origem das sessões", corpo: ga4Corpo,
+      what: "<b>O que é:</b> contagem dos eventos do funil medidos no navegador (e a compra, enviada pelo servidor) e de onde vieram as sessões, direto da API do Google Analytics. <b>O que não é:</b> o nosso banco, nem lista de pessoas.",
+    },
+    clarity: {
+      rotulo: "Clarity", titulo: "8c. Clarity: a página /precos nos últimos 3 dias", corpo: clarityCorpo,
+      what: "<b>O que é:</b> visitas, rolagem e % de sessões com cliques mortos e de raiva (frustração) da página /precos, direto da API do Microsoft Clarity. <b>O que não é:</b> o nosso banco, outras páginas, nem gravações de sessão.",
+    },
+    meta: {
+      rotulo: "Meta", titulo: "8d. Meta: disparos do pixel nos últimos 7 dias", corpo: metaCorpo,
+      what: "<b>O que é:</b> quantas vezes cada evento do pixel chegou à Meta nos últimos 7 dias, direto da API do pixel. <b>O que não é:</b> conversões deduplicadas, o nosso banco, nem lista de pessoas.",
     },
   };
 
@@ -265,7 +345,7 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
   }
 
   function render() {
-    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, d = data.atraso;
+    const w = data.janelas[win], c = w.checkout, a = w.ativacao, t = w.trial, p = w.pix, e = w.ebook, tt = w.teste, d = data.atraso;
     const html = [
       funnel(w),
       channels(w),
@@ -293,6 +373,11 @@ th { font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppe
         "<b>O que é:</b> entregas do e-book da /assinar criadas na janela. “Pendente” = ainda sem fechamento.",
         [fact("Entregas", n(e.entregas)), fact("Enviadas", n(e.enviados)), fact("Não comprou", n(e.nao_comprou)),
          fact("Estornadas", n(e.estornados)), fact("Pendentes", n(e.pendentes))]),
+      simple("6b. Teste do Piggy (WhatsApp)",
+        "<b>O que é:</b> sessões do botão “Testar o Piggy” iniciadas na janela. “Clicaram” são <i>cliques</i>, não pessoas (o mesmo visitante pode clicar de novo). “Orgânicos” abriram o teste sem passar pelo botão.",
+        [fact("Clicaram", n(tt.clicaram)), fact("Abriram o WhatsApp", n(tt.abriram), pct(tt.clicaram ? tt.abriram / tt.clicaram : null)),
+         fact("Orgânicos", n(tt.organicos)), fact("Responderam", n(tt.responderam)),
+         fact("Chegaram ao limite", n(tt.no_limite)), fact("Clicaram no link final", n(tt.clicaram_checkout))]),
       simple("7. Cobrança em atraso agora",
         "<b>O que é:</b> contas com cobrança falha em aberto neste momento (não depende da janela de 7/30 dias).",
         [fact("Em atraso", n(d.total)), fact(`Além de ${n(d.carencia_dias)} dias`, n(d.alem_carencia), "fora da carência")]),

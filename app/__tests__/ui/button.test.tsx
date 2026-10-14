@@ -51,17 +51,17 @@ describe("Button", () => {
     expect(estiloVisual(cL).minHeight).toBe(52);
   });
 
-  it("primary usa acao/onAcao, secondary usa contorno inkMuted, ghost usa brandInk com contorno, link só brandInk, danger usa danger/onDanger", () => {
+  it("primary usa acao/onAcao, secondary usa surfaceControl sem contorno, ghost usa brandInk sem contorno, link só brandInk, danger usa danger/onDanger", () => {
     const { claro: c } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="primary" />);
     expect(estiloVisual(c).backgroundColor).toBe(claro.acao);
 
     const { claro: cSec } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="secondary" />);
-    expect(estiloVisual(cSec).borderColor).toBe(claro.inkMuted);
+    expect(estiloVisual(cSec)).toMatchObject({ backgroundColor: claro.surfaceControl, borderWidth: 0 });
 
     const { claro: cGhost } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="ghost" />);
     expect(estiloVisual(cGhost).backgroundColor).toBe("transparent");
-    // ghost tem cara de botão (contorno 1px inkMuted, par do `Acao` do painel); link continua só texto.
-    expect(estiloVisual(cGhost)).toMatchObject({ borderWidth: 1, borderColor: claro.inkMuted });
+    // PDF "Link de ação": transparente e sem contorno.
+    expect(estiloVisual(cGhost)).toMatchObject({ borderWidth: 0 });
     const { claro: cLink } = renderNosDoisTemas(<Button rotulo="x" onPress={jest.fn()} variante="link" />);
     expect(estiloVisual(cLink)).toMatchObject({ backgroundColor: "transparent", borderWidth: 0 });
 
