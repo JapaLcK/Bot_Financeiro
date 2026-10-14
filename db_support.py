@@ -56,9 +56,10 @@ def get_summary_by_period_impl(
     end_date: date,
 ):
     # Divergência conhecida (Q18): só `launches`, SEM o cartão. Fica para o relatório
-    # diário e semanal, as ferramentas da IA de período livre e a projeção de
-    # fechamento. "Gastos em <mês>", relatório mensal, /app e Análises leem a regra
-    # única do mês, com o cartão pela fatura (`db/resumo_mes.TOTAIS_SQL`).
+    # diário e semanal e a projeção de fechamento (as tools da IA de período livre já somam o
+    # cartão pela data da compra, em `db.get_top_expense_categories`). "Gastos em <mês>",
+    # relatório mensal, /app e Análises leem a regra única do mês, com o cartão pela fatura
+    # (`db/resumo_mes.TOTAIS_SQL`).
     ensure_user(user_id)
 
     start_dt = datetime.combine(start_date, datetime.min.time())

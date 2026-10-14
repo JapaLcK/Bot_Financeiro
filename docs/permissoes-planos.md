@@ -33,6 +33,10 @@ No job do WhatsApp o plano é checado ANTES do claim da semana, então o downgra
 consome o envio (`tests/test_resumo_semanal.py`, banco real). A linha de comparação com a
 semana anterior no texto do resumo semanal segue o gate `financial_comparison` (Plus+); o
 Essencial que pede "resumo semanal" vê resultado e maior categoria, sem a variação.
+A comparação por períodos equivalentes e por categoria (`compare_periods`, PL-07) é Plus+: o
+gate `financial_comparison` é a primeira instrução do serviço e o Essencial recebe `pro_required`
+sem nenhum dado lido. O "mês anterior" do Resumo do mês (`anterior` de `GET /api/v2/resumo-do-mes`:
+dois totais, sem percentual) não muda e segue no Essencial.
 A newsletter de curiosidades genéricas continua separada dos insights pessoais.
 
 O alerta de gasto fora do padrão do Xerife (referência, diferença, amostra e a marcação

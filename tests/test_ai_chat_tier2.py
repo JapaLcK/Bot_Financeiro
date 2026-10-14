@@ -465,7 +465,7 @@ def test_juntar_instituicao_nao_pega_cartao_de_outro_usuario(user_id):
 # ─── compare_periods ────────────────────────────────────────────────────────
 
 def test_compare_periods_diff_correto(pro_user_id):
-    """Período A com R$ 100 despesa, B com R$ 250 → diff_despesa = +150."""
+    """Período A com R$ 100 despesa, B com R$ 250 mais R$ 30 no cartão (fatura de maio) → delta +180."""
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 100, "a", "a",
         categoria="outros",
@@ -476,16 +476,20 @@ def test_compare_periods_diff_correto(pro_user_id):
         categoria="outros",
         criado_em=datetime(2026, 5, 5),
     )
+    cartao = db.create_card(pro_user_id, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase(pro_user_id, cartao, 30, "outros", "c", date(2026, 5, 5))
 
     result = _compare_periods(pro_user_id, {
         "period_a_start": "2026-04-01", "period_a_end": "2026-04-30",
         "period_b_start": "2026-05-01", "period_b_end": "2026-05-31",
-        "period_a_label": "Abril", "period_b_label": "Maio",
     })
-    assert result["period_a"]["despesa"] == 100.0
-    assert result["period_b"]["despesa"] == 250.0
-    assert result["diff_despesa"] == 150.0
-    assert result["period_a"]["label"] == "Abril"
+    assert result["modo"] == "periodos_informados"
+    assert (result["anterior"]["inicio"], result["atual"]["fim"]) == ("2026-04-01", "2026-05-31")
+    assert result["despesa"]["total_anterior"] == 100.0
+    assert result["despesa"]["total_atual"] == 280.0
+    assert result["despesa"]["total_delta"] == 180.0
+    assert result["base"]["cartao"] == "fatura"  # as duas janelas são meses inteiros: a regra do painel
+    assert result["base"]["cartao_lancamentos"] == {"atual": 1, "anterior": 0}
 
 
 def test_compare_periods_falta_arg(pro_user_id):
