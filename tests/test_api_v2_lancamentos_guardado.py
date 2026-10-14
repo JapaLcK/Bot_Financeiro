@@ -1,5 +1,7 @@
-"""Guardado (P8) em `GET /api/v2/lancamentos`: depósito de caixinha e aporte saem da conta,
-saque e resgate entram, `guardado` e `interno` verdadeiros, fora de TODO total.
+"""Guardado (P8) em `GET /api/v2/lancamentos?guardado=1`: depósito de caixinha e aporte saem da
+conta, saque e resgate entram, `guardado` e `interno` verdadeiros, fora de TODO total.
+Guardado é OPT-IN: o `todos` deste arquivo manda `guardado=1`; o `todos_antigo` (o de
+`test_api_v2_lancamentos.py`) não manda.
 
 Gravado pelos escritores reais (`db.pocket_*`, `db.investment_*`), re-datado para o mês da
 matriz de `test_resumo_mes_regra.py` (os escritores gravam "agora").
@@ -9,10 +11,14 @@ matriz de `test_resumo_mes_regra.py` (os escritores gravam "agora").
   guardado em BRL = `guardado.aportes` e entradas = `guardado.saques` (aporte em USD na mistura,
   corte do plano no meio do mês); `categoria=` nunca as devolve; B não vê as de A; /editar e
   /apagar = 409; keyset com limite=1.
+- opt-in: SEM `guardado` a lista (itens, ordem e cursor de cada página) é a de ANTES das 4 linhas
+  existirem, e `/api/app/lancamentos` (o app nativo monta o mesmo router; apps instalados não se
+  atualizam com o backend) idem; com `guardado=1` as 4 aparecem. NEGATIVO: default True = vermelho.
 - conciliado com o banco (`db.bank_movements._bind` liga a transação ao depósito/aporte): continua
   sem conta, instituição e motivo de moeda, e `conta=` não o devolve.
 - NEGATIVO (conserto desligado por monkeypatch no SQL, em caso que estava verde): N1 sem
-  `or guardado` no `interno`; N2 resgate mapeado para saída; N3 `guardado` sempre falso (o filtro
+  `or guardado` no `interno` (a lista com `guardado=1`; `mes_detalhes` nem a lê); N2 resgate
+  mapeado para saída; N3 `guardado` sempre falso (o filtro
   de categoria perde a exclusão); N4 o `left join lateral` da transação sem `not l.guardado`;
   N5 o `_DA_CONTA_SQL` sem `not l.guardado`.
 """
@@ -28,7 +34,9 @@ from core.services import plan_service
 from db import lancamentos, mes_detalhes as md
 from db.resumo_mes import resumo_do_mes
 from tests._patrimonio_helpers import q, tx_banco
-from tests.test_api_v2_lancamentos import M, ok, resumo, soma, todos
+from tests.test_api_app_sessao import cliente, completo
+from tests.test_api_v2_lancamentos import M, ok, resumo, soma
+from tests.test_api_v2_lancamentos import todos as todos_antigo
 from tests.test_api_v2_lancamentos_escrita import codigo, linha, post, saldo
 from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
 from tests.test_bank_movements import _bank, _sync, _tx
@@ -37,6 +45,10 @@ from utils_date import now_tz
 
 D = Decimal
 IGUAIS = ("entrou", "saiu", "categorias", "dias", "origens", "fora_do_total")
+
+
+def todos(quem, *args, **params) -> list[dict]:
+    return todos_antigo(quem, *args, guardado=1, **params)
 
 
 def guarda(uid: int, caixinha: str = "Viagem", banco: dict | None = None) -> dict[str, int]:
@@ -283,6 +295,52 @@ def test_keyset_com_limite_1_atravessa_o_mes_sem_repetir_nem_pular(libera):
     assert len(um_a_um) == len(set(um_a_um)) and {f"l{x}" for x in ids.values()} <= set(um_a_um)
 
 
+# ── opt-in: sem o parâmetro a lista é a de antes ────────────────────────────────
+
+def paginas(quem, **params) -> list[dict]:
+    """Cada página como veio (itens, `proximo`), de 3 em 3, até o fim."""
+    cursor, saida = None, []
+    for _ in range(50):
+        r = ok(quem, mes=M, limite=3, **params, **({"cursor": cursor} if cursor else {}))
+        saida.append({"itens": r["itens"], "proximo": r["proximo"]})
+        if not (cursor := r["proximo"]):
+            return saida
+    raise AssertionError("paginação não termina")
+
+
+def test_sem_o_parametro_a_lista_e_identica_a_de_antes_do_guardado(libera, monkeypatch):
+    a = usuario_pagante()
+    semeia_a(a)
+    libera(a)
+    antes = paginas(a)  # a matriz, sem nenhuma das 4 linhas
+    assert len(antes) > 1 and not any(i["guardado"] for p in antes for i in p["itens"])
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")  # a trava Q36 recusa os escritores da semente
+    ids = guarda(a)
+    libera(a)
+    assert paginas(a) == antes  # mesmos itens, mesma ordem, mesmo cursor
+    for tipo in ("entrada", "saida"):  # os filtros Entradas/Saídas do app também ficam sem guardado
+        assert not any(i["guardado"] for p in paginas(a, tipo=tipo) for i in p["itens"])
+    com = {i["id"] for p in paginas(a, guardado=1) for i in p["itens"]}  # controle positivo
+    assert {f"l{x}" for x in ids.values()} <= com
+
+
+def test_app_nativo_so_recebe_guardado_se_pedir(monkeypatch):
+    """`/api/app` monta o mesmo router: o app instalado não conhece `guardado` e não pode recebê-lo."""
+    a = completo(usuario_pagante())
+    semeia_a(a)
+    ids = guarda(a)
+    monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")
+    guardados = {f"l{x}" for x in ids.values()}
+
+    def do_app(**params):
+        r = cliente(a).get("/api/app/lancamentos", params={"mes": M, "limite": 100, **params})
+        assert r.status_code == 200, r.text
+        return {i["id"] for i in r.json()["itens"]}
+    assert not guardados & do_app() and not guardados & do_app(tipo="entrada") and not guardados & do_app(tipo="saida")
+    assert guardados <= do_app(guardado=1)  # controle positivo
+
+
 # ── NEGATIVOS: o conserto desligado, em caso que estava verde ───────────────────
 
 def _desliga(monkeypatch, velho: str, novo: str) -> None:
@@ -291,7 +349,7 @@ def _desliga(monkeypatch, velho: str, novo: str) -> None:
 
 
 def test_n1_interno_nao_forcado_quebra_a_soma_e_as_categorias(libera, monkeypatch):
-    """Linha `deposito_caixinha` com a flag falsa: sem `or guardado`, entra na soma e nas categorias."""
+    """Linha `deposito_caixinha` com a flag falsa: sem `or guardado`, entra na soma da lista."""
     a = usuario_pagante()
     semeia_a(a)
     falsa = _lanc(a, "deposito_caixinha", 40, 16, interno=False)
@@ -301,7 +359,7 @@ def test_n1_interno_nao_forcado_quebra_a_soma_e_as_categorias(libera, monkeypatc
     assert {i["id"]: i for i in todos(a, mes=M)}[f"l{falsa}"]["interno"] is True
     _desliga(monkeypatch, "l.is_internal_movement or l.guardado as interno", "l.is_internal_movement as interno")
     assert soma(todos(a, mes=M))[1] != SAIU
-    assert detalhes(a)["categorias"] != base["categorias"]
+    assert detalhes(a)["categorias"] == base["categorias"]  # `mes_detalhes` lê sem guardado: nem a forjada entra
 
 
 def test_n2_resgate_como_saida_quebra_entradas_igual_saques(libera, monkeypatch):

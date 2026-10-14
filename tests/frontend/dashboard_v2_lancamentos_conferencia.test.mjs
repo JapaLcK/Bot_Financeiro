@@ -16,6 +16,8 @@ after(async () => {
   if (screenshots) await rm(screenshots, { recursive: true, force: true });
 });
 const base = RESPOSTAS.lancamentos.estados;
+// Os recortes do GET, sem o `guardado=true` que a tela sempre manda (P8): ele é verificado aqui.
+const recortes = (u) => { const { guardado, ...resto } = Object.fromEntries(u.searchParams); assert.equal(guardado, "true"); return resto; };
 const save = (page) => page.locator(".lanc-form").getByRole("button", { name: "Salvar", exact: true });
 async function novo(page, data = "") {
   await page.getByRole("button", { name: "Lançar na Carteira", exact: true }).click();
@@ -35,7 +37,7 @@ async function preparado(opts = {}) {
       state.gravou = opts.status !== 503;
       return opts.status ? r.fulfill({ status: opts.status, body: opts.status === 200 ? "inválido" : "{}" }) : r.abort("failed");
     }
-    state.gets.push(Object.fromEntries(u.searchParams));
+    state.gets.push(recortes(u));
     const cursor = u.searchParams.get("cursor");
     if (state.falha || (cursor && state.proximaFalha)) return r.fulfill({ status: 400, json: {} });
     const mes = u.searchParams.get("mes") ?? state.servidor;
@@ -154,7 +156,7 @@ for (const cenario of ["historica", "pagina2", "fatura"]) test(`conferência edi
     const gets = [], posts = [];
     await p.ctx.route("**/api/v2/lancamentos**", (r) => {
       if (r.request().method() === "POST") { posts.push(r.request().postDataJSON()); return r.abort("failed"); }
-      const u = new URL(r.request().url()); gets.push(Object.fromEntries(u.searchParams));
+      const u = new URL(r.request().url()); gets.push(recortes(u));
       return r.fulfill({ json: { ...base, mes: u.searchParams.get("mes") ?? "2026-10", itens: pagina2 && !u.searchParams.has("cursor") ? [base.itens[0]] : [item], proximo: pagina2 && !u.searchParams.has("cursor") ? "opaco" : null } });
     });
     await p.ir("/lancamentos");

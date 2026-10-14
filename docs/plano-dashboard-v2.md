@@ -545,7 +545,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     (`deposito_caixinha`/`aporte_investimento`) saíram FORA da lista neste PR, como na soma;
     o dono decidiu em 2026-10-13 a direção e entram desde o PR #983: marcados `guardado`,
     depósito/aporte como saída, saque/resgate como entrada, fora de todo total; em 2026-10-14
-    decidiu o valor mostrado bruto (`launches.valor`) e o rótulo "Guardado" no front na lista. O que entra
+    decidiu o valor mostrado bruto (`launches.valor`) e o rótulo "Guardado" no front na lista.
+    O guardado é opt-in (`guardado=1`; o `/painel` manda, o `/api/app` não): o app nativo monta o
+    mesmo router e apps instalados não se atualizam com o backend, então sem o parâmetro a lista é a de antes. O que entra
     marcado como interno é o de tipo despesa/receita (saque em dinheiro, pagamento de
     fatura, transferência do banco). A lista do `/app` e o "últimos N" do WhatsApp seguem
     as regras deles.

@@ -306,7 +306,8 @@ data posterior ao fim do mês conta só no total. Nenhum dia é mostrado no mês
   aparecem marcados como "guardado", fora de todo total (como a P8 manda para o interno), o
   depósito/aporte como saída da conta e o saque/resgate como entrada (2026-10-13); o valor
   mostrado é o bruto (`launches.valor`) e o rótulo "Guardado" fica no front, na lista (2026-10-14). Isso é uma mudança da
-  Etapa 2 (a lista de `db/lancamentos.py` os mostra desde #983), não desta; entrou como PR próprio
+  Etapa 2 (a lista de `db/lancamentos.py` os mostra desde #983, só com `guardado=1`: o `/painel` pede,
+  o `/api/app` do app nativo não), não desta; entrou como PR próprio
   e a Etapa 2 só fecha com ele. Em "Para onde vai" nunca entram como categoria: o
   `guardado` de `db/mes_detalhes.ler` já os separa, e contá-los como gasto quebraria o
   critério de aceite (soma das categorias = Saiu do Resumo).

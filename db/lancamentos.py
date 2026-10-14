@@ -12,7 +12,9 @@ soma dos não internos de um mês é o Entrou/Saiu de `resumo-do-mes`
 (`saida`), saque e resgate entram (`entrada`), valor BRUTO, `guardado=true`; e guardado ⇒
 `interno=true` (forçado aqui, não depende da flag gravada), então nunca entra em soma nem
 agregado (`mes_detalhes._em_reais` descarta o interno). `categoria=` nunca devolve guardado.
-Sem `conta_id`, `pode=[]`, origem `registro_antigo`. Com busca (`q`), o mês dá lugar à janela inteira
+Sem `conta_id`, `pode=[]`, origem `registro_antigo`. O guardado é OPT-IN (`com_guardado`, `guardado=1`
+na rota): sem ele a lista é a de antes da P8, porque o app nativo monta o mesmo router
+(`/api/app/lancamentos`) e os apps instalados não se atualizam com o backend. Com busca (`q`), o mês dá lugar à janela inteira
 do plano (P7).
 
 Ordem e página: KEYSET em (dia desc, instante desc, tabela desc, id desc); o cursor leva
@@ -134,6 +136,10 @@ def _chave(col: str) -> str:
     return f"case when nullif({col}, '') is null then null else {cat_norm_sql(col)} end"
 
 
+# Os tipos da lista: o mês mais o guardado. `listar(com_guardado=False)` troca este trecho por
+# `MES_TIPOS_SQL` (a perna de antes da P8), sem duplicar a perna.
+_TIPOS_COM_GUARDADO = f"({MES_TIPOS_SQL} or tipo in {_GUARDADO})"
+
 # Params: tz, tz, `MES_JANELA_SQL` (uid, início, fim), uid (a transação do banco).
 _PERNA_LANCAMENTOS = f"""
     select 'l' as tabela, l.id, l.dia, l.criado_em as instante,
@@ -159,7 +165,7 @@ _PERNA_LANCAMENTOS = f"""
                         else (criado_em at time zone %s)::date end as dia,
                    to_char(criado_em at time zone %s, 'HH24:MI') as hhmm,
                    tipo in {_GUARDADO} as guardado,{_ESTADO_SQL}
-              from launches where {MES_JANELA_SQL} and ({MES_TIPOS_SQL} or tipo in {_GUARDADO})) l0
+              from launches where {MES_JANELA_SQL} and {_TIPOS_COM_GUARDADO}) l0
       cross join lateral (select l0.*, {PODE_SQL} as pode) l
       left join lateral (
         select t.account_id, t.raw ->> 'status' as status_banco
@@ -248,12 +254,16 @@ def ler_cursor(texto: str) -> tuple:
 
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
-           categoria=None, tipo=None, q=None, apos=None, limite=50) -> tuple[list[dict], bool]:
+           categoria=None, tipo=None, q=None, apos=None, limite=50,
+           com_guardado=False) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
-    `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida."""
+    `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
+    `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
+    agregados internos (`mes_detalhes`) seguem sem passá-lo."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
-    perna_l = _PERNA_LANCAMENTOS + (_DA_CONTA_SQL if conta is not None else "")
+    perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
+    perna_l += _DA_CONTA_SQL if conta is not None else ""
     perna_l += " and false" if cartao is not None else ""
     params += [tz, tz, user_id, inicio, fim, user_id]
     params += [user_id, user_id, conta] if conta is not None else []

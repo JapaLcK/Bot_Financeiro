@@ -51,7 +51,7 @@ test("filtros e busca histórica só no servidor; trocar combinação reinicia c
   await page.waitForFunction(() => document.querySelector('.lancamentos .w-lede')?.textContent.includes("loja ação"));
   await page.locator(".lanc-linha").nth(1).waitFor({ state: "detached" });
   const u = urls.at(-1);
-  assert.deepEqual(Object.fromEntries(u.searchParams), { mes: "2026-10", origem: "banco", tipo: "saida", categoria: "alimentacao", conta: "7", q: "loja ação" });
+  assert.deepEqual(Object.fromEntries(u.searchParams), { mes: "2026-10", origem: "banco", tipo: "saida", categoria: "alimentacao", conta: "7", q: "loja ação", guardado: "true" });
   assert.equal(await page.locator('[data-id="c55"]').count(), 1); // backend pode responder data de outro mês
   const mensal = respostaLista((p) => !p.has("q"));
   await page.getByLabel("Buscar", { exact: true }).fill("a x");
@@ -125,7 +125,7 @@ test("fronteiras reais de exemplos: CTA categoria não transfere filtros; Cmd-K 
   await page.locator(".cats .cat", { hasText: "Delivery" }).click();
   await page.getByRole("button", { name: "Abrir lançamentos reais" }).click();
   await page.locator(".lanc-linha").first().waitFor();
-  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10" });
+  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10", guardado: "true" });
   await page.keyboard.press("Control+k");
   assert.equal(await page.locator(".cmdk input").getAttribute("placeholder"), "Buscar página ou ação…");
   await page.locator(".cmdk input").fill("Aluguel");
@@ -180,16 +180,17 @@ test("chat mantém extrato demonstrativo; abrir lançamentos reais preserva mês
   const abrirReal = resposta.getByRole("link", { name: "Abrir lançamentos reais" });
   await abrirReal.click();
   await page.locator('[data-id="l901"]').waitFor();
-  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-09" });
+  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-09", guardado: "true" });
   assert.equal(await page.getByLabel("Buscar", { exact: true }).inputValue(), "");
   await ctx.close();
 });
 
-test("guardado (P8) diz Guardado, some com Registro antigo e não vira Entrada/Saída", async () => {
-  const { ctx, page, ir, erros } = await abrir();
+for (const width of [1440, 390]) test(`guardado (P8, ${width}px): a tela pede guardado=true, diz Guardado, some com Registro antigo e não vira Entrada/Saída`, async () => {
+  const { ctx, page, ir, erros } = await abrir({ width });
   const guardado = { ...fixture.itens[0], id: "l902", interno: true, guardado: true, descricao: "Viagem", origem: "registro_antigo", pode: [], motivos: [] };
   const saque = { ...guardado, id: "l903", tipo: "entrada", descricao: "Saque Viagem" };  // entrada: é onde o verde de ganho vazaria
-  await ctx.route("**/api/v2/lancamentos?*", (r) => r.fulfill({ json: { ...fixture, itens: [guardado, saque, ...fixture.itens], proximo: null } }));
+  // o backend só devolve guardado a quem pede (opt-in): sem `guardado=true` a lista é a de antes
+  await ctx.route("**/api/v2/lancamentos?*", (r) => r.fulfill({ json: { ...fixture, itens: new URL(r.request().url()).searchParams.get("guardado") === "true" ? [guardado, saque, ...fixture.itens] : fixture.itens, proximo: null } }));
   await ir("/lancamentos");
   const linha = page.locator('[data-id="l902"]');
   await linha.waitFor();
@@ -206,6 +207,7 @@ test("guardado (P8) diz Guardado, some com Registro antigo e não vira Entrada/S
   const dialog = page.locator("dialog.lanc-form");
   assert.ok((await dialog.textContent()).includes("Guardado"));
   assert.doesNotMatch(await dialog.textContent(), /Movimento|Registro antigo|Apagar|Salvar/);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "sem rolagem horizontal");
   assert.deepEqual(erros, []);
   await ctx.close();
 });
