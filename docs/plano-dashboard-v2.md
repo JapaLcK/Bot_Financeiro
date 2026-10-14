@@ -209,7 +209,10 @@ e esse histórico não se refaz:
 | 7 | Chat com IA real: o `/ai/chat` devolve texto + blocos | Completo |
 
 **Depois:** as demais telas, uma a uma; tema claro; abrir para mais gente; corte final
-(seção 1).
+(seção 1). Entre as demais telas, a de **categorias** (criar, renomear, trocar emoji e cor,
+arquivar e apagar), hoje só no painel antigo: a Etapa 5 só lê emoji e cor, e até essa tela
+existir o editar abre o painel antigo com o aviso discreto (Q1/Q15). Decisão do dono,
+2026-10-13; detalhes em `docs/plano-etapa5-gastos.md`.
 
 ## 7. O que cada etapa vai ter de resolver
 
