@@ -6,8 +6,10 @@ etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui
 
 **Estado (2026-10-14).** PR 1a feito (#998): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
 e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
-(`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna). PR 1b (`/gastos/categoria`) e PR 2 (a tela) pendentes. Onde o §4.1 e o código
-divergem, vale o código e o contrato em `docs/CLAUDE.md` ("API v2").
+(`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna).
+PR 1b feito (#NNN): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
+`db/estabelecimentos.py`). PR 2 (a tela) pendente. Onde o §4.1 e o código divergem, vale o código e o
+contrato em `docs/CLAUDE.md` ("API v2").
 
 ## 1. O que a tela é
 
@@ -134,6 +136,22 @@ senão o nome do recebedor do Pix/TED (`paymentData.receiver.name`, normalizado)
 nunca é rótulo. Cobertura em outras contas não foi medida; a tela não deve prometer
 agrupamento perfeito.
 
+**Como ficou no código (PR 1b, `db/estabelecimentos.py`).** (1) CNPJ só vale se for TEXTO com exatamente 14
+dígitos (depois de tirar o que não é dígito) e não todo zero; é a regra de `previsao_recorrencias._doc` sem o
+CPF de 11 dígitos, copiada em duas linhas e não importada (puxaria cashflow/assinaturas para `db/`).
+`merchant`/`cnpj`/`name` de tipo inesperado (objeto, número, lista) contam como ausentes. (2) A normalização
+é `utils_text.merchant_key` ("UBER *TRIP" e "Uber Trip" são `uber trip`; "NETFLIX.COM" é `netflix`). (3) Rótulo
+empatado: a descrição mais recente (a ordem do `listar`). (4) **P1 = (b), decisão do dono:** depois de rotular,
+grupos cujos rótulos têm o mesmo `merchant_key` se JUNTAM numa linha (soma de valor e quantidade; o nome é
+o rótulo mais frequente ENTRE os rótulos dos grupos que a formaram, contado nas linhas deles, empate: a mais
+recente; contar todas as linhas de novo deixava uma descrição solta vencer e repetir o nome): a tela nunca
+repete um nome. Efeito colateral aceito: "Pix enviado" para
+pessoas diferentes vira UMA linha (o nome é o mesmo). Rótulo sem letra nem dígito (`merchant_key` vazio) só junta se o
+nome for igual. (5) A leitura do `raw` é uma consulta em lote por `imported_launch_id`/`imported_credit_tx_id`
+das linhas que já somam o total; o dono da transação vem de conta -> conexão (`open_finance_transactions` não
+tem `user_id`), então uma transação forjada de outro usuário apontando para uma linha daqui não contribui.
+Limite: o ganho medido é pequeno (−10% de grupos no banco, −1% no cartão, numa conta só).
+
 ## 4. O que criar
 
 Este capítulo foi reescrito inteiro na sexta rodada de revisão do Codex, a partir de um
@@ -166,7 +184,9 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>`: o detalhe de uma categoria.
   Total, compras, valor médio, as 6 últimas compras (data, descrição, mensagem, origem, valor, feitas
   das MESMAS linhas que somam o total: sem interno nem outra moeda, só saída, nunca o `raw`),
-  os 3 últimos meses (cada um `null` se o corte do plano o toca),
+  os 3 últimos meses (`serie`, crescente, cada um `null` se o corte do plano o toca; o mês cortado nem é lido;
+  `valor_medio` arredondado HALF_UP a centavos, `null` sem compras; `total` presente; `saidas_em_outra_moeda`
+  conta só a categoria e só o mês pedido),
   os 5 estabelecimentos (regra do §3.1; o ranking é feito sobre **as mesmas linhas que somam o
   total da categoria**, ou seja, saída, não interna, em reais e do mesmo mês/fatura, e só o
   `raw` é lido à parte, por id de linha, para extrair `merchant.cnpj` e
