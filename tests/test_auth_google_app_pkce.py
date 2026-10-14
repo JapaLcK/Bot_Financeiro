@@ -496,3 +496,35 @@ def test_t6_caminho_de_erro_apaga_o_cookie_do_challenge(monkeypatch, caminho):
         c.startswith('google_oauth_challenge=""') and "max-age=0" in c.lower()
         for c in cb.headers.get_list("set-cookie")
     )
+
+
+# ── Sem oráculo: toda recusa tem status e corpo idênticos ────────────────────
+
+def test_o1_complete_signup_recusa_igual_para_token_inexistente_e_pkce_que_nao_casa(monkeypatch):
+    """Quem tenta o token não distingue "não existe" de "existe mas o verifier não
+    casa": status e corpo (bytes) iguais."""
+    verifier, desafio = _par()
+    _, com_challenge = _pendente(monkeypatch, desafio)
+    _, sem_challenge = _pendente(monkeypatch, None)
+    respostas = {
+        "inexistente": _completa("gso_nao-existe-" + uuid.uuid4().hex, verifier),
+        "sem_challenge_com_verifier": _completa(sem_challenge, verifier),
+        "verifier_errado": _completa(com_challenge, _par()[0]),
+        "verifier_ausente": _completa(com_challenge),
+    }
+    assert {r.status_code for r in respostas.values()} == {400}, {k: r.text for k, r in respostas.items()}
+    assert len({r.content for r in respostas.values()}) == 1, {k: r.text for k, r in respostas.items()}
+
+
+def test_o2_exchange_recusa_igual_para_codigo_inexistente_e_pkce_que_nao_casa(monkeypatch):
+    verifier, desafio = _par()
+    _, com_challenge = _codigo(monkeypatch, desafio)
+    _, sem_challenge = _codigo(monkeypatch, None)
+    respostas = {
+        "inexistente": _troca("codigo-inexistente-" + uuid.uuid4().hex, verifier),
+        "sem_challenge_com_verifier": _troca(sem_challenge, verifier),
+        "verifier_errado": _troca(com_challenge, _par()[0]),
+        "verifier_ausente": _troca(com_challenge),
+    }
+    assert {r.status_code for r in respostas.values()} == {400}, {k: r.text for k, r in respostas.items()}
+    assert len({r.content for r in respostas.values()}) == 1, {k: r.text for k, r in respostas.items()}
