@@ -10,6 +10,7 @@ A interface `with get_conn() as conn:` continua idêntica — callers
 existentes não precisam mudar.
 """
 import os
+import re
 import threading
 from contextvars import ContextVar
 
@@ -151,6 +152,17 @@ def cat_norm_sql(expr: str) -> str:
 # Rótulo de quem está SEM categoria. NULL e '' são a mesma coisa pro usuário —
 # `db/analytics.py` já colapsa os dois assim.
 CAT_VAZIA_LABEL = "sem categoria"
+# Visual neutro (cinza-ardósia, não o roxo que é o default da coluna) de quem não tem linha no
+# catálogo `user_categories`: "sem categoria" e a categoria que só aparece nos lançamentos.
+CAT_NEUTRA_EMOJI = "🏷️"
+CAT_NEUTRA_COR = "#94A3B8"
+
+
+def cat_visual(emoji, cor) -> dict:
+    """`{emoji, cor}` de uma linha do catálogo, nunca vazio nem inválido: o writer só faz `strip()`."""
+    emoji = (emoji or "").strip()
+    return {"emoji": emoji or CAT_NEUTRA_EMOJI,
+            "cor": cor if cor and re.fullmatch(r"#[0-9a-fA-F]{6}", cor) else CAT_NEUTRA_COR}
 
 
 def cat_key_sql(expr: str) -> str:

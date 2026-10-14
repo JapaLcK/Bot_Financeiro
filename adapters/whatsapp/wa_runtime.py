@@ -39,6 +39,7 @@ from core.help_text import HELP_TRIGGERS
 from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
+from core.services.email_service import SUPPORT_EMAIL
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
@@ -524,6 +525,23 @@ PRECISA_SENHA_WA = (
     "senha pelo link que enviamos para o seu e-mail."
 )
 
+# #711/#630 (D1(a), textos do dono): o número está digitado numa conta do site, e o
+# auto-vínculo não juntou. `remetente_com_dados` (só-WhatsApp com dados) recebe a
+# saída pelo código; `wa_linked_other_account` (quem já é conta) não recebe o código,
+# porque com login nos dois lados a junção é recusada (`apagaria_login`, #970).
+JA_E_CONTA_WA = (
+    "⚠️ Este número também está cadastrado em outra conta do site, mas não juntei nada: você "
+    "continua usando a sua conta por aqui. Se as duas contas são suas e você quer uni-las, "
+    f"fale com a gente em {SUPPORT_EMAIL}."
+)
+NAO_JUNTEI_WA = (
+    "Encontrei uma conta do site com este número, mas este WhatsApp já tem um histórico "
+    "próprio, então não juntei os dois. Para usar a sua conta do site aqui: entre nela (ou "
+    "crie a sua) em pigbankai.com, gere o código de vínculo e me mande: *vincular 123456*. "
+    "Se essa conta do site não é sua, alguém cadastrou seu número por engano, e nada seu "
+    "foi para lá."
+)
+
 # Mesmo número/conta sem senha, mas quem NUNCA comprou (lead do remarketing, plano
 # `docs/plano-remarketing.md` PR 2): o convite é concluir a assinatura, e o PARAR
 # digitado tem resposta própria. Textos do dono.
@@ -549,6 +567,20 @@ _LINK_CODE_RE = re.compile(r"^(?:link|vincular)\s+\d{6}$")
 def _is_link_code_attempt(text: str) -> bool:
     from core.intent_classifier import _normalize
     return bool(_LINK_CODE_RE.match(_normalize(text or "")))
+
+
+def _isento_do_gate(message: InboundMessage, uid: int) -> bool:
+    """A mensagem tem isenção do `_paywall_gate` (ajuda, billing ou código)? Mesmo
+    critério do gate (`isencao_do_barrado`), e só para texto, como lá. Erro = False:
+    o remetente recebe o aviso, e nada junta."""
+    if message.attachments:
+        return False
+    try:
+        from core.handle_incoming import isencao_do_barrado
+        return isencao_do_barrado((message.text or "").strip(), uid)[0] is not None
+    except Exception as exc:
+        logger.warning("WA isenção do gate falhou uid=%s: %s", uid, exc)
+        return False
 
 
 def _signup_url() -> str:
@@ -594,13 +626,18 @@ def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any
     if status == "multiple_accounts":
         return "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente."
     if status == "wa_linked_other_account":
-        return "⚠️ Este WhatsApp já está vinculado a outra conta. Revise seu cadastro ou use outro número."
+        return JA_E_CONTA_WA
     if status == "account_has_other_whatsapp":
         return (
             "⚠️ Sua conta já tem outro WhatsApp vinculado. "
             f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
         )
     if status == "merge_conflict":
+        motivo = auto_link_result.get("motivo")
+        if motivo != "dados_dos_dois_lados":
+            # Os mesmos textos da recusa do `vincular` (D6); o desconhecido cai na colisão.
+            from core.handlers.account import _RECUSA_COLISAO, _RECUSA_POR_MOTIVO
+            return _RECUSA_POR_MOTIVO.get(motivo, _RECUSA_COLISAO)
         return (
             "⚠️ Sua conta do site e este WhatsApp já têm dados cada um, então não dá pra juntar "
             "os dois automaticamente. Por enquanto, o que você mandar aqui fica na conta do WhatsApp.\n"
@@ -944,6 +981,23 @@ def process_message(message: InboundMessage) -> None:
             # mas o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
             _barra_sem_senha(auto_link_result["target_user_id"], reply_to, message, uid)
             return
+        elif (auto_link_result["status"] == "remetente_com_dados"
+              and not conta_sem_credencial(auto_link_result["target_user_id"])):
+            # #711: só-WhatsApp com dados e o número digitado numa conta com login.
+            # Segue na conta dele, que não tem plano: sem esta resposta, o turno
+            # cairia no convite do "/precos". O código de vínculo segue para o
+            # `handle_incoming` (o gate o isenta), e o opt-out (botão ou PARAR digitado)
+            # desliga as duas contas. Ajuda e billing também seguem (T5): o mesmo
+            # critério de isenção do gate, e o turno responde como a qualquer barrado.
+            if not _is_link_code_attempt(message.text or ""):
+                iid = get_interactive_id(message.raw or {})
+                if not iid and _eh_parar(message.text):
+                    iid = WA_PARAR_DIGITADO_ID
+                if _tratar_opt_out(uid, reply_to, iid, auto_link_result["target_user_id"]):
+                    return
+                if iid or not _isento_do_gate(message, uid):
+                    _send_reply(reply_to, NAO_JUNTEI_WA)
+                    return
         elif auto_link_result["status"] in {
             "multiple_accounts",
             "wa_linked_other_account",
@@ -1277,8 +1331,8 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", mask_phone(reply_to))
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            # `target_user_id` só existe no `remetente_com_dados`: a conta sem
-            # credencial que digitou este número também recebe envios nele.
+            # `target_user_id` (`remetente_com_dados`, `wa_linked_other_account`):
+            # a conta que digitou este número também recebe envios nele.
             elif _tratar_opt_out(uid, reply_to, interactive_id,
                                  auto_link_result.get("target_user_id")):
                 return

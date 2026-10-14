@@ -645,7 +645,9 @@ def get_auth_user_impl(get_conn, user_id: int) -> dict | None:
     return row
 
 
-def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> str:
+def create_dashboard_session_impl(
+    get_conn, user_id: int, hours: float = 2, code_challenge: str | None = None
+) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
     with get_conn() as conn:
@@ -654,8 +656,9 @@ def create_dashboard_session_impl(get_conn, user_id: int, hours: float = 2) -> s
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "insert into dashboard_sessions (code, user_id, expires_at) values (%s, %s, %s)",
-                        (code, user_id, expires_at),
+                        "insert into dashboard_sessions (code, user_id, expires_at, code_challenge)"
+                        " values (%s, %s, %s, %s)",
+                        (code, user_id, expires_at, code_challenge),
                     )
                 conn.commit()
                 return code
@@ -1091,6 +1094,8 @@ def attempt_whatsapp_phone_link_impl(
     wa_candidates: list[str],
     current_user_id: int,
 ) -> dict:
+    # `wa_candidates` vem de `utils_phone.candidatos_simetricos` (#909): só a forma que
+    # reconhece este número de volta. Vale para a busca do telefone e para o alias abaixo.
     with get_conn() as conn:
         with conn.cursor() as cur:
             wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates if c]
@@ -1115,12 +1120,14 @@ def attempt_whatsapp_phone_link_impl(
             )
             existing_current_wa = cur.fetchone()
 
-            # Sem telefone que case, o número ainda pode já estar numa conta: o
-            # `vincular CODIGO` liga sem olhar o telefone digitado no site. O que
-            # separa isso do só-WhatsApp (que `get_or_create_canonical_user` cria
-            # com a identidade do número) é conta web ou outro canal ligado.
+            # O remetente já é conta: conta web ou outro canal ligado. O que separa
+            # isso do só-WhatsApp (que `get_or_create_canonical_user` cria com a
+            # identidade do número). Vale para os dois ramos abaixo: sem telefone
+            # que case (o `vincular CODIGO` liga sem olhar o telefone digitado) e
+            # com telefone de outra conta (#711: não mescla). O número já ligado à
+            # conta do telefone (o caso de toda mensagem) não paga a consulta.
             ja_em_conta = False
-            if not matches:
+            if not matches or int(matches[0]["user_id"]) != int(current_user_id):
                 cur.execute(
                     """
                     select exists (select 1 from auth_accounts where user_id = %s)
@@ -1175,7 +1182,9 @@ def attempt_whatsapp_phone_link_impl(
                     target_candidates = set(phone_lookup_candidates(target_wa_id))
                 except ValueError:
                     target_candidates = {target_wa_id}
-                same_phone_alias = bool(target_candidates.intersection(set(wa_candidates)))
+                # Nos dois sentidos: `phone_lookup_candidates` tira o 9 de todo celular,
+                # e "55119"+L e "5511"+L com L em 2-5 são celular e FIXO, donos diferentes.
+                same_phone_alias = wa_phone in target_candidates and target_wa_id in wa_candidates
 
             if target_wa and target_wa_id != wa_phone and not same_phone_alias:
                 return {
@@ -1188,19 +1197,28 @@ def attempt_whatsapp_phone_link_impl(
         from db.google_auth import conta_sem_credencial  # tardio: db/ importa este módulo
         from db.users import MergeRefused, _tem_dados_financeiros
 
+        # #711/#630 (D1(a)): o telefone digitado no site não prova que o número é
+        # de quem digitou. Remetente que já é conta, ou que tem dados (critério do
+        # merge, #607), segue na conta dele, sem mesclar e sem gravar identidade;
+        # a junção legítima é pelo código. `target_user_id`: a conta que digitou
+        # o número recebe envios nele, e o opt-out daqui tem de desligá-la (#716).
+        # Vale também quando o alvo já tem este número em outro formato (alias): o
+        # número ser o mesmo não autoriza apagar uma conta (dono, M8). Remetente
+        # vazio segue para o merge, como qualquer outro.
+        if ja_em_conta:
+            return {"status": "wa_linked_other_account", "wa_phone": wa_phone,
+                    "target_user_id": target_user_id}
+        with get_conn() as conn, conn.cursor() as cur:
+            if _tem_dados_financeiros(cur, int(current_user_id)):
+                return {"status": "remetente_com_dados", "wa_phone": wa_phone,
+                        "target_user_id": target_user_id}
+
         # Conta sem senha nem Google/Apple (a do quiz) não se liga pelo telefone:
         # o número foi digitado por quem pagou, e o e-mail ainda não foi provado.
         # Sem mesclar e sem gravar user_identities (PR 4 do funil v3). Número já
         # ligado a ela (current == target) não passa aqui: o `process_message`
         # barra antes de chamar o auto-vínculo.
         if conta_sem_credencial(target_user_id):
-            # Remetente com dados é o dono do número usando o bot, não quem acabou
-            # de pagar: segue na conta dele, sem vínculo e sem aviso (status que o
-            # `process_message` não trata). O critério de dados é o do merge (#607).
-            with get_conn() as conn, conn.cursor() as cur:
-                if _tem_dados_financeiros(cur, int(current_user_id)):
-                    return {"status": "remetente_com_dados", "wa_phone": wa_phone,
-                            "target_user_id": target_user_id}
             # `target_user_id`: o clique de opt-out deste número tem de desligar a
             # preferência dela. Desde a #721 a atualização só vai a número ligado, mas
             # o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
@@ -1209,9 +1227,11 @@ def attempt_whatsapp_phone_link_impl(
 
         try:
             merge_users(int(current_user_id), target_user_id)
-        except MergeRefused:
-            # As duas contas têm dados (#607): o número segue na conta do WhatsApp.
-            return {"status": "merge_conflict", "wa_phone": wa_phone}
+        except MergeRefused as exc:
+            # Só sobra remetente só-WhatsApp sem dados; a recusa vem, por exemplo,
+            # de corrida (dado gravado depois da checagem acima), autoindicação ou colisão.
+            # O número segue na conta do WhatsApp, e o aviso diz o motivo.
+            return {"status": "merge_conflict", "wa_phone": wa_phone, "motivo": exc.motivo}
 
     with get_conn() as conn:
         with conn.cursor() as cur:

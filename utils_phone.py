@@ -41,6 +41,18 @@ def phone_lookup_candidates(phone: str | None, default_country_code: str = "55")
     return sorted(candidates)
 
 
+def candidatos_simetricos(phone: str | None) -> list[str]:
+    """Os candidatos de `phone` que reconhecem `phone` de volta: só onde há prova
+    de que é o MESMO número (auto-vínculo e o espelho dele no demo).
+
+    `phone_lookup_candidates` tira o 9 de todo celular (#909), e "55119"+L com L
+    em 0-5 daria o FIXO "5511"+L, de outro dono. Quem conserta a #909 pondo o 9
+    também nessa faixa reabre o caso: `tests/test_auto_vinculo_telefone_digitado.py`.
+    """
+    digits = normalize_phone_e164(phone)
+    return [c for c in phone_lookup_candidates(digits) if digits in phone_lookup_candidates(c)]
+
+
 def mask_phone(phone: str | None) -> str:
     digits = re.sub(r"\D+", "", str(phone or ""))
     if len(digits) < 8:

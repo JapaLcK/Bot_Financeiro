@@ -23,7 +23,7 @@ import secrets
 
 from core.crypto import hash_pii, hash_pii_optional
 from core.services.demo.dados import ALFABETO, CODIGO_PADRAO, LIMITE_MSGS
-from utils_phone import normalize_phone_e164, phone_lookup_candidates
+from utils_phone import candidatos_simetricos, normalize_phone_e164
 
 from .connection import get_conn
 
@@ -220,13 +220,13 @@ def numero_tem_conta(wa_id: str) -> bool:
     (fail-closed: na dúvida vai pro fluxo normal, nunca pro demo).
 
     Espelha attempt_whatsapp_phone_link_impl (db_support.py): telefone que casa
-    com auth_accounts, OU identidade de WhatsApp cujo usuário tem conta web /
+    com auth_accounts pelos MESMOS candidatos (`candidatos_simetricos`), OU identidade de WhatsApp cujo usuário tem conta web /
     outro canal (cobre `vincular CODIGO`, que liga sem olhar o telefone). Só-
     WhatsApp (usuário criado por mensagem anterior, sem conta) dá False e PODE
     usar o demo. O teste de paridade (tests/test_demo_whatsapp.py) compara os
     dois (§0.7)."""
     try:
-        fones = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(wa_id)]
+        fones = [hash_pii_optional(c, kind="phone") for c in candidatos_simetricos(wa_id)]
         ext = hash_pii_optional(wa_id, kind="external_id")
         with get_conn() as conn:
             with conn.cursor() as cur:

@@ -26,6 +26,7 @@ from utils_date import day_tz, now_tz
 router = APIRouter()
 _TETO = 100
 _MAX_ID = 2**63 - 1
+_DATA = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"  # `str` e não `date`: o gerador de tipos recusa format: date em query
 
 
 class Parcela(BaseModel):
@@ -75,6 +76,7 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
            categoria: str | None = Query(None, max_length=CATEGORY_NAME_MAX_LEN),
            tipo: Literal["entrada", "saida"] | None = None,
            guardado: bool = False,
+           dia: str | None = Query(None, pattern=_DATA),
            q: str | None = Query(None, max_length=200),
            cursor: str | None = Query(None, max_length=200),
            limite: int = 50,
@@ -85,10 +87,14 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
             raise _recusa(campo, "Id fora da faixa.")
     if limite < 1:
         raise _recusa("limite", "O limite mínimo é 1.")
+    try:
+        dia_pedido = date.fromisoformat(dia) if dia else None
+    except ValueError:
+        raise _recusa("dia", "Data inválida.") from None
     ano, m, agora = mes_pedido(mes)
     try:
         dados = lancamentos.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
-                                   origem=origem, conta=conta, cartao=cartao,
+                                   origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
                                    categoria=categoria, tipo=tipo, com_guardado=guardado)
     except lancamentos.CursorInvalido as e:
         raise _recusa("cursor", str(e)) from None
@@ -102,7 +108,6 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
 # Idempotency-Key (coluna pedido_id com índice único parcial, entrando na exportação, no reset
 # e na exclusão) quando a tela (PR 4) mostrar duplicata real.
 _VALOR = r"^[0-9]{1,9}(\.[0-9]{1,2})?$"
-_DATA = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
 _ID = r"^[lc][1-9][0-9]{0,18}$"
 
 
