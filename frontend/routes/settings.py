@@ -34,6 +34,7 @@ from db import (
     set_whatsapp_updates_opt_out,
     sync_engagement_opt_out,
 )
+from db.connection import get_conn
 from frontend.routes import shared
 from utils_phone import normalize_phone_e164
 
@@ -275,6 +276,27 @@ async def security_settings_route(request: Request, user_id: int):
     return await _get_security_settings(user_id)
 
 
+CONTATO_EM_USO = "Este e-mail ou telefone já está em uso."
+
+
+def _telefone_livre(telefone: str, user_id: int) -> bool:
+    """O `telefone_livre` dos cadastros (§0.7): a variante com/sem o nono dígito do
+    número de outra conta também está em uso. O índice único só vê o número exato,
+    e continua de rede para a corrida entre esta leitura e o UPDATE (#630)."""
+    from db_support import telefone_livre
+    with get_conn() as conn, conn.cursor() as cur:
+        return telefone_livre(cur, telefone, exceto_user_id=user_id) is not None
+
+
+def _contato_atual(user_id: int) -> dict | None:
+    """Hashes do contato gravado, direto do banco: o `get_auth_user` tem cache de
+    10 s que pode estar velho (até depois de invalidar, `db_support.py:587-594`),
+    e o "mudou?" decide o teto e o `telefone_livre` (#911). Hash é a forma da escrita."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select email_hash, phone_hash from auth_accounts where user_id = %s", (user_id,))
+        return cur.fetchone()
+
+
 @router.patch("/settings/{user_id}/security/contact")
 async def update_security_contact_route(
     request: Request,
@@ -293,8 +315,8 @@ async def update_security_contact_route(
     # corrigir o e-mail é a saída de quem pagou sem senha (PR 4 do funil v3).
     # Dono, exclusão agendada, DIREITO e CSRF continuam valendo.
     shared.authorize_dashboard_access(request, user_id, exige_credencial=False)
-    auth_user = await asyncio.to_thread(get_auth_user, user_id)
-    if not auth_user:
+    atual = await asyncio.to_thread(_contato_atual, user_id)
+    if not atual:
         raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
 
     email = payload.email.strip().lower() if payload.email else None
@@ -325,8 +347,16 @@ async def update_security_contact_route(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
-    old_email = (auth_user.get("email") or "").strip().lower() or None
-    email_actually_changed = bool(email) and email != old_email
+    email_actually_changed = bool(email) and hash_pii_optional(email, kind="email") != atual["email_hash"]
+    phone_actually_changed = (bool(normalized_phone)
+                              and hash_pii_optional(normalized_phone, kind="phone") != atual["phone_hash"])
+    if email_actually_changed or phone_actually_changed:
+        # #610: o 409 abaixo diz que o contato é de outra conta. Teto por conta
+        # (D5): 5 trocas/hora, contando também as que dão 409 — é a enumeração.
+        from frontend.finance_bot_websocket_custom import _check_persistent_rate_limit
+        await _check_persistent_rate_limit("settings-contact", f"user:{user_id}", 5, 60 * 60)
+    if phone_actually_changed and not await asyncio.to_thread(_telefone_livre, normalized_phone, user_id):
+        raise HTTPException(status_code=409, detail=CONTATO_EM_USO)
 
     try:
         async with await shared.db_connect() as conn:
@@ -338,7 +368,7 @@ async def update_security_contact_route(
                 if email:
                     # Pendência do e-mail no Stripe (PR 4b), na MESMA transação: o
                     # 409 do e-mail repetido desfaz as duas. Compara no banco, não
-                    # no `old_email` do cache. O `on conflict` NÃO zera o claim de
+                    # no cache. O `on conflict` NÃO zera o claim de
                     # propósito: com B em envio, C espera o `fechar` de B falhar
                     # pela versão — senão outra rodada mandaria C com B ainda em
                     # voo, e B podia chegar ao Stripe depois de C.
@@ -401,7 +431,7 @@ async def update_security_contact_route(
         from db_support import invalidate_auth_user_cache
         invalidate_auth_user_cache(user_id)
     except psycopg.errors.UniqueViolation as exc:
-        raise HTTPException(status_code=409, detail="Este e-mail ou telefone já está em uso.") from exc
+        raise HTTPException(status_code=409, detail=CONTATO_EM_USO) from exc
 
     if email_actually_changed:
         await asyncio.to_thread(

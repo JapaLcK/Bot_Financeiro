@@ -47,8 +47,7 @@ from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
-from .cards import MAX_MESES_RENDA
-from .system_prompt import ADENDO_CARDS, SYSTEM_PROMPT
+from .system_prompt import ADENDO_CARDS, ERROR_MSG, SYSTEM_PROMPT
 from .tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP, get_tool
 from .tools._base import OUTRO_PEDIDO
 
@@ -163,11 +162,6 @@ _UM_POR_VEZ = ("🐷 Recebi mais de um pedido de uma vez. Me manda um por "
 LIMIT_MSG_TEMPLATE = (
     "🐷 Você usou todas suas {limit} perguntas de IA esse mês.\n"
     "Zera no dia 1. Enquanto isso, dá pra usar o dashboard: https://pigbankai.com/app"
-)
-
-
-ERROR_MSG = (
-    "🐷 Deu ruim aqui — tenta de novo. Se persistir, fala com a gente: suporte@pigbankai.com"
 )
 
 
@@ -541,7 +535,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
     # de produção que divergia do que foi validado.
     inicio_do_turno = len(messages)
     prazo = time.monotonic() + IA_PRIMEIRO_PRAZO_TURNO
-    for _ in range(MAX_TOOL_LOOPS):
+    for volta in range(MAX_TOOL_LOOPS):
         if streaming.cancelado():  # (a) topo da volta: a rodada anterior já está inteira
             raise streaming.Interrompido()
         if ia_primeiro and time.monotonic() > prazo:
@@ -561,6 +555,8 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 messages=messages,
                 tools=SCHEMAS_APP if streaming.ativo() else SCHEMAS,
                 max_tokens=MAX_TOKENS,
+                # Última volta: sem tool, o modelo responde com o que já leu em vez de ERROR_MSG.
+                **({"tool_choice": "none"} if volta == MAX_TOOL_LOOPS - 1 else {}),
                 **por_requisicao,
             )
         except streaming.Interrompido:
@@ -752,7 +748,7 @@ def _maybe_override_trend(tool_calls_dicts: list[dict[str, Any]], user_id: int) 
             )
             if streaming.ativo():  # no app a tendência é o card renda (`get_spending_trend` está oculta)
                 fn["name"] = "show_card"
-                fn["arguments"] = json.dumps({"card": "renda", "quantidade_meses": min(months, MAX_MESES_RENDA)})
+                fn["arguments"] = json.dumps({"card": "renda", "quantidade_meses": months})
             else:
                 fn["name"] = "get_spending_trend"
                 fn["arguments"] = json.dumps({"months": months})
@@ -864,10 +860,11 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         _TURN_WRITE_ATTEMPTED.set(True)
         try:
             user_msg = tool.execute(user_id, args)
-        except Exception as e:
-            logger.error("erro em auto-write %s: %s", name, e)
+        except Exception:
+            # O texto da exceção não vai ao histórico (nem ao modelo): fica só no log.
+            logger.exception("erro em auto-write %s", name)
             return (
-                json.dumps({"error": str(e)}, ensure_ascii=False),
+                json.dumps({"error": "falha_interna"}, ensure_ascii=False),
                 ERROR_MSG,
             )
         history = json.dumps(
@@ -881,8 +878,10 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
     try:
         result = tool.execute(user_id, args)
     except Exception as e:
-        logger.error("erro em read tool %s: %s", name, e)
-        result = {"error": str(e)}
+        # O texto da exceção (até SQL) não vai ao modelo nem ao usuário; fica só no log.
+        logger.exception("erro em read tool %s", name)
+        result = {"error": "falha_interna",
+                  "message": "não consegui ler esse dado agora; diga isso em 1 linha e siga com o que tiver, sem inventar"}
     return (json.dumps(result, ensure_ascii=False, default=str), None)
 
 

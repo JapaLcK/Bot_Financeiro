@@ -37,7 +37,7 @@ FUTURO = f"{now_tz().year + 1}-01"
 
 
 @pytest.mark.parametrize("args,erro", [
-    ({"card": "resumo", "meses": [FUTURO]}, "mes_invalido"),
+    ({"card": "resumo", "meses": [FUTURO]}, "mes_futuro"),
     ({"card": "resumo", "meses": ["2026-13"]}, "mes_invalido"),
     ({"card": "resumo", "meses": ["outubro"]}, "mes_invalido"),
     ({"card": "resumo", "meses": "2026-09"}, "mes_invalido"),
@@ -47,7 +47,6 @@ FUTURO = f"{now_tz().year + 1}-01"
     ({"card": "calendario", "meses": [M, M0]}, "meses_demais"),
     ({"card": "hero", "dias": "45"}, "dias_invalido"),
     ({"card": "renda", "quantidade_meses": 0}, "quantidade_invalida"),
-    ({"card": "renda", "quantidade_meses": 25}, "quantidade_invalida"),
     ({"card": "inexistente"}, "card_desconhecido"),
     ({}, "card_desconhecido"),
 ])
@@ -196,7 +195,7 @@ def test_leitor_que_levanta_nao_deixa_esqueleto_no_app(monkeypatch, mundo):
         r, ev, _ = executar(a, "meu saldo")
         assert r.reply == "Não consegui." and not [e for e in ev if e["tipo"] in ("passo", "bloco")]
         (tool,) = [json.loads(l["content"]) for l in linhas(a) if l["role"] == "tool"]
-        assert "banco caiu" in tool["error"]
+        assert tool["error"] == "falha_interna" and "banco caiu" not in json.dumps(tool)  # o detalhe fica no log
     finally:
         cards.registro.cache_clear()
 

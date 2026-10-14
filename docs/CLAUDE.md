@@ -189,12 +189,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   dela a rota, o "Gastos em <mês>" do WhatsApp (`core/handlers/balance.py`), o relatório
   mensal (o pedido na hora também soma o mês inteiro: total, contagem e "Período"), a
   consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de mês inteiro
-  (`get_period_summary` e `compare_periods` chamam `resumo_do_mes`, inclusive o corte da janela do
-  plano; `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
+  (`get_period_summary` chama `resumo_do_mes`, inclusive o corte da janela do
+  plano; `compare_periods` com `mes=` lê `totais`/`categorias` da mesma regra (PL-07); `get_top_categories`, `get_largest_expenses` e `get_category_spend` leem o mês inteiro, o
   cartão pela fatura, com o MESMO corte (`motivos: [inicio_do_historico]` quando o corte cai
   no dia 1 do mês pedido ou depois; o "mês anterior cortado" do resumo não tem par nas listas; mês todo
   cortado = lista vazia com as datas do mês); mês = dia 1 até o último dia, ou, no corrente, dia 1
-  até hoje ou depois; `_mes_inteiro`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  até hoje ou depois; `_meses_inteiros`/`_janela` em `core/services/ai_chat/tools/launches.py`).
+  **Vários meses inteiros** (2 a 12) seguem a mesma regra, mês a mês: `get_period_summary`
+  chama `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
+  `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada; o
+  `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
+  `get_top_categories`/`get_category_spend` nessa faixa são recusadas com `periodo_no_card`. **Teto de 12
+  meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
+  e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
+  `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
+  futuro termina no fim do mês corrente, com `fim_ajustado` e `aviso_fim`.
   Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
   hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
   mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado
@@ -205,18 +214,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   e espaços em volta valem como a data, só em `launches.py`: `investments.py:35` tem cópia própria
   de `_parse_iso_date` (lá datetime ISO e data inválida ainda viram o mês corrente em silêncio;
   follow-up). (d) com o corte do plano no MEIO do mês, as listas devolvem `start_date = corte`; o
-  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_mes_inteiro` dá None
+  "mais detalhes" (#931) chama `get_largest_expenses` de novo com esse início, `_meses_inteiros` dá None
   e vira período livre (data da compra, sem corte). (e) `inicio_do_historico` nas tools só sai com
-  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado).
+  corte >= dia 1 do mês pedido (o resumo da rota também o levanta pelo mês anterior cortado); no resumo de
+  2+ meses o motivo segue o `>` do painel (`ler_periodo`), nas listas o `>=` (limite declarado).
   `compute_evolution` é cópia em consulta
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
   `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
   **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
   (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
-  sem o cartão. Das tools da IA em período livre (vários meses também), só `get_period_summary`
-  e `compare_periods` são só `launches` (saem com `cartao_incluido: false` e uma `nota`);
-  `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
+  sem o cartão. Das tools da IA em período livre (não são meses inteiros), `get_period_summary`
+  soma `launches` + cartão pela DATA DA COMPRA (Σ de `get_top_expense_categories`,
+  a mesma consulta da lista; saem com `cartao_por: data_da_compra` e uma `nota`; meses inteiros saem com
+  `cartao_por: fatura`); `get_top_categories` e `get_largest_expenses` incluem o cartão pela DATA DA COMPRA,
   `get_category_spend` lê o cartão sempre pela fatura (`period_end`) e `get_spending_trend` soma o
   cartão pela data da compra. Pré-existente, não corrigido: `get_top_categories` mostra lançamento
   sem categoria como `outros`, mas `get_category_spend("outros")` só soma a categoria `outros`; o
@@ -245,6 +256,34 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `send_template` consome o claim da semana; o resumo mensal (WhatsApp e Discord) não tem a mesma
   proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
+  **Comparação de períodos (PL-07, Plus+):** `core/services/comparacao_periodos.py` decide a janela e o
+  delta; a tool `compare_periods` da IA é o único consumidor (o endpoint e a tela v2 são o PR B). Lê a
+  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA; janela parcial
+  = faturas que fecham dentro dela). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
+  se AS DUAS janelas são meses-calendário inteiros (dia 1 até o último dia; no mês corrente, dia 1 até hoje ou
+  depois, e então vale o mês TODO) é a mesma conta de `mes=` e do painel, cartão pela FATURA ("compara abril com
+  maio" não diverge do painel); exceção: mês CORRENTE (dia 1 até hoje ou o mês todo) × o mês imediatamente anterior
+  inteiro responde como `mes=<corrente>` (os mesmos N dias, fatura; o resultado é o mesmo do chat). Senão é período livre nas DUAS janelas (nunca uma base de cada lado): reusa as
+  consultas das outras tools (`get_top_expense_categories`, `get_summary_by_period`), cartão pela DATA DA COMPRA, e a
+  compra parcelada (mesma `purchased_at` nas parcelas) entra inteira no dia da compra; o número pode diferir do painel; categoria sem nome sai "outros" (a consulta da main já agrupou
+  vazio com o "outros" real) e em `mes=` sai "sem categoria". `base.cartao`
+  (`fatura` | `data_da_compra`), `base.regra` e `escolha` dizem qual. Teto de 12 meses e fim ajustado:
+  `_limita_periodo`. Mês aberto = os MESMOS n dias do mês anterior; se ele tem menos de n dias, compara com
+  ele inteiro e marca `anterior_encurtado`. Mês fechado = mês inteiro × mês inteiro. Categoria nova tem
+  `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
+  do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
+  Saída da tool: dinheiro e `pct` são NÚMERO JSON (o `ai_guard` só lê número como evidência; mesma convenção de
+  `_resumo_periodo`) e moram em `total_atual`/`total_anterior`/`total_delta` (o guard só lê número sob chave
+  monetária; `atual`/`anterior`/`delta` soltos não contariam). `motivos` + `nota` são os avisos de dado incompleto do
+  resumo do mês (`contas_hoje.listar`, mesma ordem de `resumo_mes.MOTIVOS`, na mesma transação); o `motivo` (singular)
+  é outra coisa: por que o payload veio limitado (`sem_base`, `inicio_do_historico`, `categorias_indisponiveis`).
+  Período que ainda não terminou: `escolha` diz que só entra o já lançado (parcelas e datas futuras), não é previsão.
+  Casamento de categoria no período livre: `_chave` (Python) espelha `cat_key_sql` em nomes PT-BR (acento, caixa,
+  cedilha, til; `tests/test_comparacao_periodos.py` compara os dois); casos exóticos de Unicode (Ñ, Å, NFD,
+  ligaturas) podem diferir, e não se tentou igualar.
+  Divergência conhecida: `get_spending_trend` soma o cartão pela data da compra, então a tendência de um mês pode
+  diferir da comparação por `mes=` (fatura) na mesma conversa; `get_period_summary` e a comparação por datas
+  parciais concordam (as duas, data da compra). No período livre o rótulo da categoria é a grafia de MAIOR total.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da
@@ -522,6 +561,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `metas` não entra em `_tem_dados_financeiros`: só a reserva colide). Limites declarados: duas conexões do mesmo banco dobram a cadeia no custo (herdado
   da Previsão); autotransferência genérica entra como recorrência; sem teto de metas por usuário;
   a reconexão só desvia para a conta viva quando a conta antiga está em conexão PAUSED/DELETED (`conexao_pausada`); se a conexão antiga está em erro (`ERROR`/`item_missing`, `LOGIN_ERROR`, `OUTDATED`; o item apagado na Pluggy chega como `item_missing`, `core/services/pluggy_health.py:~248-250`), a meta segue a conta antiga com `banco_desatualizado`, como `/contas` (que soma as duas); decidir se `item_missing` conta como conexão morta é decisão para o sistema inteiro (`/contas` + metas); `atual` de conta não é quantizado (paridade com `/contas`, saldo `numeric` sem escala).
+  Consumidor: a página `/painel#/metas` (`widgets/Metas.tsx`, `parts/MetaCartao.tsx`, `parts/MetaForm.tsx`, `metasQuery` em `lib/v2.ts`; a cópia por motivo em `lib/metas-textos.ts`, com mapas exaustivos sobre o enum deste contrato; `DIAS_MINIMOS`/`MESES_PADRAO` ali copiam `RITMO_DIAS_MINIMOS`/`MESES_RESERVA` e `tests/test_metas_textos_constantes.py` compara).
   **Ritmo** (`db/metas_ritmo.py`, PR A2): cada meta traz `ritmo {valor, dias_de_historico, parcial, motivos}` e `chega_em` (`AAAA-MM`).
   - `valor` = o crescimento ATUAL da fonte, R$/mês (pode ser negativo), ao lado do `por_mes` (o NECESSÁRIO): (`atual` − valor em D0) ÷ dias × 30. Medido nas fotos POR POSIÇÃO (`open_finance_investment_snapshots`), não em `patrimonio_fotos` (só tem o total). O valor de um dia sai da MESMA regra de `investido.calcular` (`separar_posicoes` + `q_posicao`); a moeda vem do espelho (posição que já saiu dele entra como BRL com `moeda_presumida`); só foto `collection_confirmed`.
   - Pertinência (`_DE`, uma regra para o valor do dia E para o dia-base): as fotos do passado cobrem as MESMAS posições de hoje, por identidade do provedor. A foto PERTENCE à fonte quando a VENCEDORA de hoje da identidade (`POSICOES_BANCO_SQL`, `c.id desc` entre TODAS as conexões do dono) é uma conexão da fonte; a foto pode vir de QUALQUER conexão do dono (identidade que mudou de conexão a → c vale pela foto da antiga a; com foto nas duas no mesmo dia, vale a da mais nova). Vencedora fora da fonte (pausada, outro banco): a foto não entra no passado, como não entra hoje. Identidade fora do espelho vale pela foto de conexão da fonte.
@@ -1353,13 +1393,15 @@ expiração. `PUT /agents/{user_id}/xerife/lancamentos/{launch_id}/esperado` (`{
 mesmas portas das rotas de agentes; 404 igual para inexistente e de outro usuário) grava a coluna,
 tira o alerta existente do feed e da fila de e-mail e deixa uma lápide em `anomalia:{id}`; desmarcar
 não ressuscita alerta velho. A exclusão do lançamento não limpa o alerta: ele é limpo no primeiro clique em "Era esperado" (a rota responde 404 e tira o evento do feed; ocultar ao apagar é follow-up do PR B). Botão "Era esperado" no feed: `frontend/dashboard-agent-esperado.js`.
-Fora do PR A (PR B): os contadores do topo da aba ("Disparos") e a tela de "esperados"; sensibilidade editável (a `config` do agente ainda chega crua), canais,
-tela para listar/desfazer, regra de esperado recorrente ou por período, `_detect_category_spike`
-(`db/insights.py`, compara mês parcial com meses cheios), cartão no Xerife. Limites conhecidos: o
+PR B: sensibilidade editável, validação estrita da config, e-mail configurável, lista de esperados
+e regras recorrentes com teto/data final estão descritos em `docs/pl04-prb.md`. O contador já exclui
+eventos stale. Continuam fora: `_detect_category_spike` (`db/insights.py`, compara mês parcial
+com meses cheios) e cartão no Xerife (PL-06/07). Limites conhecidos: o
 mesmo gasto como lançamento manual e do Open Finance gera dois alertas; alerta gerado com histórico
 parcial no 1º sync fica gravado. `config` com `multiplicador`/`minimo` não finito ou <= 0 cai no padrão
-(`anomalia.limiar`); lixo não numérico ("abc") só derruba a anomalia daquele usuário (logada pelo nome
-da classe), não o bloco `limites`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
+(`anomalia.limiar`) no PR A. No PR B, `config_publica` recupera campos legados inválidos por
+campo, inclusive lixo não numérico, com os mesmos padrões exibidos na tela; regras legadas
+inválidas são ignoradas por `regras_publicas`. O "esperado" é atômico: o `update` da coluna, a lápide e o `stale` do evento existente rodam na mesma
 transação (SQL local em `db/anomalias.py`; `record_agent_event` e `mark_agent_event_stale`, compartilhados,
 não foram tocados), e o detector que já leu o lançamento esbarra na chave ocupada. Continua verdadeiro: e-mail
 já enviado antes do PUT não é desfeito.

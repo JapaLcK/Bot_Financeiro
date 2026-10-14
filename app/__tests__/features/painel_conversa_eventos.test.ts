@@ -1,4 +1,6 @@
-import { lerEvento } from "@/api/schemas/painel";
+import { lerEvento, periodoSchema } from "@/api/schemas/painel";
+import { TITULOS } from "@/features/painel/catalogo";
+import periodoJson from "../../../tests/fixtures/ai_chat_bloco_periodo.json";
 import exemplos from "../../../tests/fixtures/ai_chat_eventos.json"; // lido também pelo pytest (tests/test_ai_chat_stream.py)
 
 const ex = exemplos as Record<string, Record<string, unknown>>;
@@ -20,4 +22,18 @@ it("fim com chips inválidos continua válido, com chips vazios; passo com prév
   for (const chips of [["", "x"], ["a".repeat(41)], ["1", "2", "3", "4", "5"], "texto", [1]]) { const e = lerEvento({ ...ex.fim, chips }); expect(e).toMatchObject({ tipo: "fim", reply: "Oi!", chips: [] }); }
   expect(lerEvento({ ...ex.passo, previa: "inventado" })).toMatchObject({ tipo: "passo", previa: null });
   expect(lerEvento({ ...ex.fim, message_id: 0 })).toBeNull();
+});
+
+// O card `periodo` (só do chat): fixture compartilhada com o pytest (tests/test_ai_chat_periodo.py).
+const periodo = periodoJson as Record<string, unknown>;
+const blocoPeriodo = { tipo: "bloco", bloco: { card: "periodo", abas: [{ mes: null, recursos: { periodo } }] } };
+it("bloco `periodo` com uma aba de `mes: null` é aceito; card inventado continua null; `periodo` não é widget", () => {
+  expect(lerEvento(blocoPeriodo)?.tipo).toBe("bloco");
+  expect(lerEvento({ ...blocoPeriodo, bloco: { ...blocoPeriodo.bloco, card: "inventado" } })).toBeNull();
+  expect(Object.keys(TITULOS)).not.toContain("periodo");
+});
+it("`periodoSchema` aceita a fixture compartilhada e recusa a fixture sem `meses`", () => {
+  expect(periodoSchema.safeParse(periodo).success).toBe(true);
+  const { meses: _, ...semMeses } = periodo;
+  expect(periodoSchema.safeParse(semMeses).success).toBe(false);
 });

@@ -23,6 +23,9 @@ from datetime import date, timedelta
 from typing import Any
 
 from ._base import Tool
+from core.observability import _log_falha
+
+_ERRO_PAGAR = "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 
 _WD = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
 
@@ -189,14 +192,16 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         _, paid = fp.quitar(user_id, int(bill["id"]), amount, forma)
     except ValueError as e:
         if str(e) != "VALOR_INVALIDO":
-            return f"🐷 Não consegui registrar o pagamento: {e}"
+            _log_falha("mark_bill_paid", user_id, e)
+            return _ERRO_PAGAR
         # Valor não finito ou que arredonda para R$ 0,00 (a IA repassa o que o
         # usuário escreveu). Sem isto o usuário lia "VALOR_INVALIDO" na tela.
         nome = bill.get("name") or "conta"
         return (f"🐷 O valor da *{nome}* precisa ser maior que zero. "
                 f"Quanto veio este mês?")
     except Exception as e:
-        return f"🐷 Não consegui registrar o pagamento: {e}"
+        _log_falha("mark_bill_paid", user_id, e)
+        return _ERRO_PAGAR
     if paid is None:
         return "🐷 Essa conta já estava paga (ou não achei mais)."
     from core.handlers.bills import conta_paga
@@ -278,7 +283,8 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         b = create_boleto(user_id, name, amount, due)
     except Exception as e:
-        return f"🐷 Não consegui cadastrar o boleto: {e}"
+        _log_falha("add_boleto", user_id, e)
+        return "🐷 Não consegui cadastrar o boleto agora. Tenta de novo em instantes."
     d = date.fromisoformat(b["due_date"][:10]) if b.get("due_date") else due
     return (f"🧾 Boleto anotado: *{b.get('name')}* — {fmt_brl(amount)}, vence "
             f"{d.strftime('%d/%m')}. Eu te lembro perto do vencimento. 🐷")

@@ -6,8 +6,7 @@ verdes: nenhum limiar mudou. As TRÊS mudanças de gatilho declaradas:
   1. média de referência <= 0 não alerta (antes disparava por `valor > 2,5 * 0`): `media_zero`;
   2. empate EXATO no limiar não alerta: o SQL antigo comparava em float8 e alertava por ruído
      de float; o novo é Decimal e estrito: `empate_exato_que_o_float_antigo_alertava`;
-  3. `config` com `multiplicador`/`minimo` nan, inf, <= 0 ou 0 cai no padrão (na main nan/inf nunca
-     alertavam e -2 alertava sempre); "abc" derrubava o Xerife inteiro e agora só a anomalia:
+  3. `config` legada inválida recupera defaults (PL-04 B); a entrada HTTP agora é estrita.
      `test_config_crua_nao_derruba_o_bloco_de_limites`.
 """
 from __future__ import annotations
@@ -133,12 +132,12 @@ def test_outro_usuario_nao_entra_na_media_nem_dispara(uid):
 
 @pytest.mark.parametrize("bruto", ["nan", "inf", -2, 0, "abc"])
 def test_config_crua_nao_derruba_o_bloco_de_limites(uid, bruto):
-    """`config` chega crua do cliente. nan/inf/<=0 caem no padrão (a anomalia ainda alerta);
-    lixo ("abc") derruba só a anomalia daquele usuário, e o evento de limite sai igual."""
+    """Config legada inválida recupera os mesmos defaults mostrados na tela (PL-04 B).
+    A escrita HTTP recusa esses valores; DB direto aqui simula a configuração antiga."""
     for i in range(5):
         _lanca(uid, 100, dias=10 + i)
     _lanca(uid, 480, dias=0, horas=0)
     _roda(uid, {"multiplicador": bruto, "minimo": bruto, "limites": {"alimentação": 100}})
     tipos = {e["payload"]["tipo"] for e in _eventos(uid)}
     assert "limite" in tipos
-    assert ("anomalia" in tipos) is (bruto != "abc")
+    assert "anomalia" in tipos

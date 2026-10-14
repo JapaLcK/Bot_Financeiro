@@ -7,9 +7,9 @@ regra do mês (a do /painel e do "Gastos em <mês>") dava 4.357,46: faltavam as 
 Os dados são os de `tests/test_resumo_mes_regra.py` no mês anterior: ENTROU 1040 / SAIU 490
 contra 1040 / 260 só em `launches` (o cartão soma 230; o estorno de 25 não abate). O modelo é
 falso, mas lê o JSON que a tool entregou e escreve o número dele: o que a conversa mostra é o
-que a tool devolveu. Período livre (dia 3 a 8) segue só em `launches`, com `cartao_incluido: false`.
+que a tool devolveu. Período livre (dia 3 a 8) inclui o cartão pela data da compra (Q3): 390, `cartao_por: data_da_compra`. `compare_periods` (PL-07): `mes=` pela fatura, 4 datas pela data da compra.
 
-Controle NEGATIVO (§3), medido: `_mes_inteiro` devolvendo sempre None (tudo vira período livre,
+Controle NEGATIVO (§3), medido: `_meses_inteiros` devolvendo sempre None (tudo vira período livre,
 o `get_summary_by_period` de antes) deixa vermelhos os casos de mês de summary/compare/guarda; só
 `_janela` devolvendo `by_bill_month=False` deixa vermelhos os de categorias e maiores gastos.
 Controle POSITIVO: período livre, mês sem cartão, usuário B e mês futuro seguem como devem.
@@ -117,16 +117,13 @@ def test_mes_sem_cartao_e_so_launches():
     assert (r["receita"], r["despesa"], r["saldo_periodo"], r["cartao_incluido"]) == (300.0, 100.0, 200.0, True)
 
 
-def test_periodo_livre_segue_so_em_launches_e_avisa():
+def test_periodo_livre_soma_cartao_pela_data_da_compra():
     a, _ = _par()
     r = _tool("get_period_summary", a, start_date=INICIO.replace(day=3).isoformat(),
               end_date=INICIO.replace(day=8).isoformat())
-    assert (r["receita"], r["despesa"]) == (1040.0, 260.0)  # sem os 230 do cartão
-    assert r["cartao_incluido"] is False and "NÃO entram" in r["nota"] and "motivos" not in r
-    # vários meses também são período livre (limite declarado)
-    r = _tool("get_period_summary", a, start_date=(INICIO - timedelta(days=1)).replace(day=1).isoformat(),
-              end_date=ULTIMO.isoformat())
-    assert r["cartao_incluido"] is False and r["despesa"] == 260.0
+    assert (r["receita"], r["despesa"]) == (1040.0, 390.0)  # 260 + os 130 do cartão pela data da compra
+    assert r["cartao_incluido"] is True and r["cartao_por"] == "data_da_compra" and "motivos" not in r
+    assert "data da compra" in r["nota"]
 
 
 def _futuro():
@@ -166,9 +163,21 @@ def test_compare_corrente_x_futuro_mantem_o_lado_valido():
     r = _tool("compare_periods", uid, period_a_start=hoje.replace(day=1).isoformat(),
               period_a_end=_ultimo_do_mes(hoje).isoformat(), period_b_start=prox.isoformat(), period_b_end=fim.isoformat())
     assert "error" not in r
-    assert (r["period_a"]["receita"], r["period_a"]["despesa"]) == (100.0, 240.0)
-    assert (r["period_b"]["despesa"], "mes_futuro" in r["period_b"]["motivos"]) == (100.0, True)  # número da regra
-    assert (r["diff_despesa"], r["diff_receita"]) == (-140.0, -100.0)
+    # PL-07: as duas janelas são meses inteiros, então cartão pela FATURA (como o painel e o que a main garantia): A é o
+    # anterior (mês corrente: 240 = 40 + 100 do cartão + a parcela 1 do futuro) e B o atual (o mês seguinte, só a
+    # parcela 2 = 100, "número da regra"). O lado futuro não derruba o válido; `escolha` diz que não é previsão.
+    assert (r["anterior"]["inicio"], r["atual"]["inicio"]) == (hoje.replace(day=1).isoformat(), prox.isoformat())
+    assert (r["receita"]["total_anterior"], r["despesa"]["total_anterior"], r["despesa"]["total_atual"]) == (100.0, 240.0, 100.0)
+    assert (r["despesa"]["total_delta"], r["receita"]["total_delta"]) == (-140.0, -100.0)
+    assert r["base"]["cartao"] == "fatura" and r["motivo"] is None
+    assert "só entra o que já está lançado" in r["escolha"] and "não é previsão" in r["escolha"]
+    assert "contam zero" not in r["escolha"]
+    # o lado futuro traz SÓ o lançado: a parcela 2 do 3x ("casa", 100), igual à parcela 1 do mês corrente
+    casa = next(c for c in r["categorias"] if c["categoria"] == "casa")
+    assert (casa["total_atual"], casa["total_anterior"], casa["estado"]) == (100.0, 100.0, "igual")
+    assert next(c for c in r["categorias"] if c["categoria"] == "mercado")["total_atual"] == 0.0  # nada projetado
+    # mês futuro pedido por `mes` não é previsão: erro que diz o mês corrente, para o modelo tentar de novo
+    assert f"{hoje:%Y-%m}" in _tool("compare_periods", uid, mes=f"{prox:%Y-%m}")["error"]
 
 
 def test_mes_futuro_pelo_turno_do_reporter_nao_levanta_data_query_error():
@@ -199,13 +208,21 @@ def test_compare_periods_mes_x_mes_e_mes_x_livre_sem_typeerror():
     antes = (INICIO - timedelta(days=1)).replace(day=1)  # mês sem dados
     r = _tool("compare_periods", a, period_a_start=antes.isoformat(), period_a_end=(INICIO - timedelta(days=1)).isoformat(),
               period_b_start=INICIO.isoformat(), period_b_end=ULTIMO.isoformat())
-    assert (r["period_b"]["despesa"], r["diff_despesa"], r["diff_receita"]) == (490.0, 490.0, 1040.0)
-    assert r["period_a"]["cartao_incluido"] and r["period_b"]["cartao_incluido"]
+    # as duas janelas são meses inteiros (o anterior, vazio): fatura, o MESMO número de `mes=` e do painel
+    assert (r["despesa"]["total_atual"], r["despesa"]["total_delta"], r["receita"]["total_delta"]) == (490.0, 490.0, 1040.0)
+    assert r["base"]["cartao"] == "fatura" and r["base"]["cartao_lancamentos"] == {"atual": 3, "anterior": 0}
+    r = _tool("compare_periods", a, mes=f"{INICIO:%Y-%m}")  # o mesmo mês pelo argumento `mes`: fatura
+    assert (r["modo"], r["despesa"]["total_atual"], r["motivo"]) == ("mes_fechado", 490.0, "sem_base")
+    assert r["base"]["cartao"] == "fatura"
 
     r = _tool("compare_periods", a, period_a_start=INICIO.isoformat(), period_a_end=ULTIMO.isoformat(),
               period_b_start=INICIO.replace(day=3).isoformat(), period_b_end=INICIO.replace(day=8).isoformat())
-    assert (r["period_a"]["despesa"], r["period_b"]["despesa"], r["diff_despesa"]) == (490.0, 260.0, -230.0)
-    assert (r["period_a"]["cartao_incluido"], r["period_b"]["cartao_incluido"]) == (True, False)
+    # dia 3 a 8 (80 + 50 de cartão, comprados no dia 5): 390, o mesmo número que `get_period_summary` dá para o período
+    assert (r["despesa"]["total_anterior"], r["despesa"]["total_atual"], r["despesa"]["total_delta"]) == (1389.0, 390.0, -999.0)
+    assert r["base"]["cartao"] == "data_da_compra" and r["base"]["cartao_lancamentos"] == {"atual": 2, "anterior": 3}
+    assert "data da compra" in r["escolha"]  # uma janela inteira e outra parcial: data da compra nas DUAS, dito na escolha
+    livre = _tool("get_period_summary", a, start_date=INICIO.replace(day=3).isoformat(), end_date=INICIO.replace(day=8).isoformat())
+    assert livre["despesa"] == r["despesa"]["total_atual"] and livre["cartao_por"] == "data_da_compra"
 
 
 def test_categorias_e_maiores_gastos_do_mes_somam_a_despesa_da_regra():
@@ -354,20 +371,11 @@ def test_data_com_hora_ou_espacos_vale_a_data_nas_cinco_tools(variante):
     pura = {k: v.isoformat() for k, v in cmp_.items()}
     r = _tool("compare_periods", a, **{k: variante(v) for k, v in pura.items()})
     assert "error" not in r and r == _tool("compare_periods", a, **pura)
-    assert r["period_b"]["despesa"] == 490.0
+    assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"]) == (1389.0, 390.0)  # B (mês) é o atual, A (dia 3 a 8) o anterior
 
 
 def test_data_omitida_continua_no_padrao():
     assert "error" not in _tool("get_category_spend", usuario_pagante(), categoria="mercado", end_date="")
-
-
-def test_compare_avisa_quando_um_lado_tem_cartao_e_o_outro_nao():
-    a, _ = _par()
-    mes = dict(period_a_start=INICIO.isoformat(), period_a_end=ULTIMO.isoformat())
-    livre = dict(period_b_start=INICIO.replace(day=3).isoformat(), period_b_end=INICIO.replace(day=8).isoformat())
-    mes_b = dict(period_b_start=INICIO.isoformat(), period_b_end=ULTIMO.isoformat())
-    assert "NÃO é variação de gasto" in _tool("compare_periods", a, **mes, **livre)["nota"]
-    assert "nota" not in _tool("compare_periods", a, **mes, **mes_b)
 
 
 def test_usuario_b_com_cartao_e_fatura_no_mesmo_mes_nao_mexe_nas_listas_de_a():
@@ -387,3 +395,22 @@ def test_usuario_b_com_cartao_e_fatura_no_mesmo_mes_nao_mexe_nas_listas_de_a():
     assert antes[3]["total"] == 230.0
     assert antes[2]["total"] == 80.0  # só a compra à vista de A no cartão; nada dos 888 de B
 
+
+# No FIM do arquivo: o `get_largest_expenses` do teste do usuário B empata em 100.0 (lançamento x parcela) e a
+# ordem do empate muda com o volume de linhas que os testes anteriores deixam; estes não podem vir antes dele.
+def test_compare_traz_o_aviso_de_dado_incompleto_da_regra_do_mes():
+    a, _ = _par()  # o par de conciliação pendente do semeia_a
+    r = _tool("compare_periods", a, mes=f"{INICIO:%Y-%m}")
+    assert r["motivos"] == ["conciliacao_pendente"] and "incompleto" in r["nota"]
+    limpo = usuario_pagante()
+    _lanc(limpo, "despesa", 100, 3)
+    r = _tool("compare_periods", limpo, mes=f"{INICIO:%Y-%m}")
+    assert r["motivos"] == [] and r["nota"] is None
+
+
+def test_numero_do_compare_passa_pelo_ai_guard():
+    a, _ = _par()
+    r = _tool("compare_periods", a, mes=f"{INICIO:%Y-%m}")
+    evidencia = json.dumps(r, ensure_ascii=False)  # sem default=
+    assert all(c.supported for c in check("🐷 Você gastou R$ 490,00 e recebeu R$ 1.040,00.", [evidencia], "compara"))
+    assert any(not c.supported for c in check("🐷 Você gastou R$ 491,00.", [evidencia], "compara"))

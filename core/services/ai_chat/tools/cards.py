@@ -25,6 +25,7 @@ from datetime import date
 from typing import Any
 
 import db
+from core.observability import _log_falha
 from utils_date import today_tz
 from utils_text import fmt_brl
 
@@ -417,13 +418,21 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
             if res["error"] == "amount_too_high":
                 return f"🐷 Valor maior do que o em aberto ({fmt_brl(res['due'])})."
             return "🐷 Valor inválido."
-        from core.handlers.credit import _format_bill_label  # o mesmo rótulo do "pagar fatura"
-        label = _format_bill_label({"card_name": card_name, "period_end": res["period_end"]})
-        return f"✅ Pagamento de R$ {amount_f:.2f} da fatura {label} registrado."
     except db.CartaoDoBanco as e:
         return f"🐷 {e}"
     except Exception as e:
-        return f"🐷 Não consegui registrar o pagamento: {e}"
+        _log_falha("pay_credit_card", user_id, e)
+        return "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
+
+    # DEPOIS do commit: a fatura JÁ foi paga. Falha no rótulo nunca vira "tenta de
+    # novo" (o usuário pagaria duas vezes).
+    try:
+        from core.handlers.credit import _format_bill_label  # o mesmo rótulo do "pagar fatura"
+        label = _format_bill_label({"card_name": card_name, "period_end": res["period_end"]})
+        return f"✅ Pagamento de R$ {amount_f:.2f} da fatura {label} registrado."
+    except Exception as e:
+        _log_falha("pay_credit_card_msg", user_id, e)
+        return f"✅ Pagamento de R$ {amount_f:.2f} do {card_name} registrado."
 
 
 # ─── Tools registry ─────────────────────────────────────────────────────────
