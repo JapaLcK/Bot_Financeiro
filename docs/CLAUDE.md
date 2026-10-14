@@ -301,7 +301,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
   acrescenta os tipos guardado, que nunca entram em total), e a perna `MES_CARTAO_SQL`: a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
   entra pelo mês da fatura com a data da COMPRA; o interno entra com `interno: true`, fora
-  de qualquer soma. **Guardado (P8, #NNN):** depósito de caixinha e aporte entram como
+  de qualquer soma. **Guardado (P8, #983):** depósito de caixinha e aporte entram como
   `saida`, saque de caixinha e resgate como `entrada`, valor BRUTO, `guardado: true` e
   `interno: true` (forçado: guardado ⇒ interno), fora de toda soma e agregado (nada de
   `resumo-do-mes` nem `mes-detalhes` muda; o bloco `guardado` de `mes-detalhes` segue vindo

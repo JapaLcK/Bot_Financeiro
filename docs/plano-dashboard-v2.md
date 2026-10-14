@@ -543,7 +543,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     compras; remeça antes de reusar): mês 5,5 ms, busca na janela inteira 250 ms (o estado de
     toda linha é calculado antes do filtro de texto). O depósito em caixinha e o aporte
     (`deposito_caixinha`/`aporte_investimento`) saíram FORA da lista neste PR, como na soma;
-    o dono decidiu em 2026-10-13 a direção e entram desde o PR #NNN: marcados `guardado`,
+    o dono decidiu em 2026-10-13 a direção e entram desde o PR #983: marcados `guardado`,
     depósito/aporte como saída, saque/resgate como entrada, fora de todo total; em 2026-10-14
     decidiu o valor mostrado bruto (`launches.valor`) e o rótulo "Guardado" no front na lista. O que entra
     marcado como interno é o de tipo despesa/receita (saque em dinheiro, pagamento de
@@ -662,7 +662,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     Modal reutiliza dialog/fallback Safari 14 e coordena Cmd-K. Os exemplos do chat e do
     protótipo seguem demonstrativos; no painel real os CTAs abrem o extrato sem filtros
     do exemplo, e Cmd-K omite lançamentos/categorias fictícios. Mantidos fora P8 (depósitos
-    e aportes ausentes na API; entrou na P8, #NNN), filtro de cartão individual sem catálogo, busca real em
+    e aportes ausentes na API; entrou na P8, #983), filtro de cartão individual sem catálogo, busca real em
     Cmd-K, backend/schema e service worker. Validação local usa fixtures e
     bundle servido; não prova backend vivo, produção, PWA/aparelho ou callback Pluggy.
 - Etapa 3 — execução autorizada em 05/10/2026; PR1 motor (#842) concluído localmente em
@@ -778,7 +778,7 @@ o PR C.
 |---|---|
 | 0 | #632, #659, #669, #675, #678, #688, #691, #723 |
 | 1 | #750 (A), #754 (B), #757 (D), #764 (C), #781 (C2) |
-| 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #NNN (P8: guardado) |
+| 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
 | 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
 | 5 e 6 | nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |
