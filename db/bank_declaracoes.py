@@ -88,6 +88,19 @@ def projeta_todas(cur, user_id: int, declarations: list[dict], by_id: dict) -> N
         projeta(cur, user_id, d, by_id.get(d["matched_transaction_id"]))
 
 
+def tem_evidencia(declaration: dict, tx: dict) -> bool:
+    """Casamento AUTOMÁTICO do fluxo exige evidência do comércio: descrição do banco parecida com o alvo ou
+    a nota, ou declaração GENÉRICA (sem estabelecimento). Usa os mesmos primitivos do dinheiro
+    (`open_finance.merchant_similarity` e o conjunto de genéricos de `pick_reconciliation_match`), mas
+    compara alvo e nota SEPARADOS: a substring de "mercado" em "SUPERMERCADO XYZ" não sobrevive ao
+    concatenar com a nota. Sem evidência a transação segue candidata da escolha manual. Só o gatilho de
+    CRIAR o vínculo: revalidar um já feito olha valor/data, e o manual nunca exige. Aporte: True."""
+    from .open_finance import _is_generic_merchant, merchant_similarity
+    alvo, nota, desc = declaration.get("alvo"), declaration.get("nota"), tx.get("description")
+    return (not e_fluxo(declaration) or _is_generic_merchant(alvo)
+            or merchant_similarity(desc, alvo) or merchant_similarity(desc, nota))
+
+
 def congelada(declaration: dict, hoje: date) -> bool:
     return (e_fluxo(declaration) and declaration["matched_transaction_id"] is not None
             and (hoje - _dia(declaration)).days > FLUXO_CONGELA_DIAS)

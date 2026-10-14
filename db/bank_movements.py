@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from .bank_declaracoes import congelada, desde_da_leitura, e_fluxo, elegivel_fluxo, janela, projeta, projeta_todas
+from .bank_declaracoes import congelada, desde_da_leitura, e_fluxo, elegivel_fluxo, janela, projeta, projeta_todas, tem_evidencia
 from .connection import get_conn
 from utils_date import _tz
 
@@ -107,7 +107,7 @@ def _transactions(cur, user_id, *, lock=False, desde: date | None = None, ids=()
 
 def _declarations(cur, user_id):
     cur.execute(
-        """select d.*, l.alvo, l.tipo, l.valor as launch_valor, l.criado_em as launch_criado_em,
+        """select d.*, l.alvo, l.nota, l.tipo, l.valor as launch_valor, l.criado_em as launch_criado_em,
                   l.efeitos->'funding_source'->>'label' as bank_label
              from bank_movement_declarations d
              join launches l on l.id=d.launch_id and l.user_id=d.user_id
@@ -210,7 +210,7 @@ def reconcile_bank_movements(cur, user_id):
     pending = [d for d in declarations if not d["matched_transaction_id"]]
     dates = [t["transaction_date"] for t in transactions]
     graph = {d["launch_id"]: [t for t in janela(transactions, dates, d) if t["id"] not in occupied
-                              and _free(t) and _eligible(d, t)] for d in pending}
+                              and _free(t) and _eligible(d, t) and tem_evidencia(d, t)] for d in pending}
     claims = Counter(t["id"] for choices in graph.values() for t in choices)  # candidato único nos DOIS sentidos
     confirmed = 0
     for d in pending:

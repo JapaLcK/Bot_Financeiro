@@ -30,9 +30,9 @@ def tx(amount=-50, txid="t1", days=0, category="Groceries", desc="Mercado Bom Pr
             "transaction_date": today_tz() + timedelta(days=days), "category": category}
 
 
-def declara(uid, valor=50, tipo="despesa", criado_em=None):
+def declara(uid, valor=50, tipo="despesa", criado_em=None, alvo="mercado", nota="msg"):
     return db.add_launch_and_update_balance(
-        uid, tipo, valor, "mercado", "msg", "mercado", criado_em, declaracao_banco=True)[0]
+        uid, tipo, valor, alvo, nota, "mercado", criado_em, declaracao_banco=True)[0]
 
 
 def sincroniza(cid, uid, *txs, saldo=1000):
@@ -78,7 +78,7 @@ def test_ordem_inversa_sombra_some_ao_declarar(user_id):
 
 def test_receita_casa_com_credito(user_id):
     cid, _ = _bank(user_id)
-    lid = declara(user_id, 3000, "receita")
+    lid = declara(user_id, 3000, "receita", alvo="salario")  # o nome do pagador é a evidência de comércio
     sincroniza(cid, user_id, tx(3000, category="Salary", desc="Salario"))
     assert decl(lid)["matched_transaction_id"]
     assert n_linhas(user_id, 3000) == 1 and totais_do_mes(user_id, today_tz())["entrou"] == 3000
