@@ -12,7 +12,7 @@ afterEach(() => { jest.restoreAllMocks(); });
 
 const PROIBIDOS = ["Tentar novamente", "Carregando dados", "Conferindo disponibilidade do simulador…", "Simulador indisponível no seu plano.", "Dado indisponível neste card."];
 // Um texto que SÓ existe se o conteúdo do bloco foi desenhado (positivo: o card não está vazio).
-const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Economia potencial", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "CDB", assinaturas: "Netflix", metas: "Viagem", fatura: "Limite", parcelas: "Parcela 3 de 6", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
+const CONTEUDO: Record<string, string> = { contas: "Nubank", hero: "30 dias · 05/11/2026", compromissos: "Fatura Nubank", resumo: "gasto até hoje", categorias: "Alimentação", calendario: "06/10", simulador: "Economia potencial", patrimonio: "Histórico desde 01/08/2026", wealth: "Investimentos do banco", rendimento: "CDB", assinaturas: "Netflix", metas: "Viagem pro Japão", fatura: "Limite", parcelas: "Parcela 3 de 6", renda: "Saídas", piggy: "Alimentação merece atenção", caixinhas: "Viagem", periodo: "Saldo" };
 it("o mapa de conteúdo cobre os 18 cards", () => { expect(CARDS).toHaveLength(18); expect(Object.keys(CONTEUDO).sort()).toEqual([...CARDS].sort()); });
 it.each(CARDS)("%s: o card do chat desenha o bloco, sem ler o provider", async (card) => {
   comBlocos(bloco(card)); await perguntar();
@@ -35,12 +35,12 @@ it("o número do chat é o do bloco e a Folha mostra o MESMO bloco, não o provi
 
 it("card inteiro: o toque abre a Folha do mesmo bloco; o título é o botão; Fechar fecha; sair da aba fecha", async () => {
   comBlocos(bloco("metas")); await perguntar();
-  expect(screen.getByRole("button", { name: "Metas e caixinhas, abrir detalhes" })).toBeTruthy();
-  expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
-  fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.getByRole("header", { name: "Metas e caixinhas" })).toBeTruthy();
-  await apertar("Fechar"); expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Metas, abrir detalhes" })).toBeTruthy();
+  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
+  fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.getByRole("header", { name: "Metas" })).toBeTruthy();
+  await apertar("Fechar"); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
   fireEvent.press(screen.getByTestId("bloco-metas")); await noResumo(); await voltar();
-  expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
+  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
 });
 
 describe("só leitura no chat; as abas do painel seguem como eram", () => {
@@ -103,23 +103,38 @@ describe("`caixinhas` e `metas` v2 no chat", () => {
     expect(screen.getByRole("button", { name: "Caixinhas, abrir detalhes" })).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
     fireEvent.press(screen.getByTestId("bloco-caixinhas")); expect(screen.getByRole("header", { name: "Caixinhas" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2);
   });
-  // O recurso `metas` do chat vem no formato v2 (`/api/v2/metas`); o app só conhece o legado: o bloco é descartado, o resto do turno segue.
-  const metasV2 = (v2 as unknown as { metas: { varios: unknown } }).metas.varios;
-  const turnoComMetasV2 = async (previa: string) => {
+  // O recurso `metas` do chat vem no formato v2 (`/api/v2/metas`); o legado `{ok, goals}` já não vale para o bloco `metas` (é do `caixinhas`).
+  const metasV2 = (v2 as unknown as { metas: { varios: Record<string, any> } }).metas.varios;
+  const turnoCom = async (previa: string, recursos: Record<string, unknown>) => {
     let f: ReturnType<typeof respostaFluxo> | undefined; srv.chat = () => (f = respostaFluxo()); await abrir(); await enviar("oi"); await waitFor(() => expect(f).toBeDefined());
-    await act(async () => { f!.empurrar({ tipo: "passo", texto: "Montando as metas", previa }); f!.empurrar({ tipo: "bloco", bloco: bloco("metas", { metas: metasV2 }) }); await drenar(); });
+    await act(async () => { f!.empurrar({ tipo: "passo", texto: "Montando as metas", previa }); f!.empurrar({ tipo: "bloco", bloco: bloco("metas", recursos) }); await drenar(); });
     return f!;
   };
-  it("bloco `metas` v2 é descartado sem derrubar o turno: nenhum card, o Skeleton vale só em voo e o texto aparece no `fim`", async () => {
-    const f = await turnoComMetasV2("metas");
+  const fechar = async (f: ReturnType<typeof respostaFluxo>) => { await act(async () => { f.empurrar(fim("Sua reserva está em 25%.")); f.fechar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Sua reserva está em 25%.")).toBeTruthy()); };
+  it("bloco `metas` v2 é desenhado: o card aparece, a prévia some com ele e o texto do `fim` vem depois", async () => {
+    const f = await turnoCom("metas", { metas: metasV2 });
+    expect(screen.getByTestId("bloco-metas")).toBeTruthy(); expect(within(screen.getByTestId("bloco-metas")).getByText("Viagem pro Japão")).toBeTruthy();
+    expect(screen.queryByLabelText("Carregando")).toBeNull();
+    await fechar(f); expect(screen.getByTestId("bloco-metas")).toBeTruthy();
+  });
+  it("bloco `metas` LEGADO ({ok, goals}) é descartado sem derrubar o turno: nenhum card, o Skeleton vale só em voo e o texto aparece no `fim`", async () => {
+    const f = await turnoCom("metas", { metas: F["/goals/1/status"] });
     expect(screen.getByLabelText("Carregando")).toBeTruthy(); // a prévia vale até o bloco chegar: o descartado não a satisfaz
-    expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryByText(/Reserva de emergência/)).toBeNull();
-    await act(async () => { f.empurrar(fim("Sua reserva está em 25%.")); f.fechar(); await drenar(); });
-    await waitFor(() => expect(screen.getByText("Sua reserva está em 25%.")).toBeTruthy());
-    expect(screen.queryByLabelText("Carregando")).toBeNull(); expect(screen.queryByTestId("bloco-metas")).toBeNull();
+    expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryByText(/Viagem/)).toBeNull();
+    await fechar(f); expect(screen.queryByLabelText("Carregando")).toBeNull(); expect(screen.queryByTestId("bloco-metas")).toBeNull();
+  });
+  // Cada mutação invalida o recurso inteiro (zod): o bloco some e o turno segue.
+  const mutar = (f: (m: Record<string, any>) => void) => { const c = structuredClone(metasV2); f(c.metas[1]); return { metas: c }; };
+  it.each([
+    ["dinheiro em number", (m: Record<string, any>) => { m.atual = 12.5; }],
+    ["percentual 150", (m: Record<string, any>) => { m.percentual = 150; }],
+    ["chega_em mês 13", (m: Record<string, any>) => { m.chega_em = "2027-13"; }],
+    ["ritmo ausente", (m: Record<string, any>) => { delete m.ritmo; }],
+  ])("bloco `metas` v2 com %s é descartado e o turno segue", async (_nome, f) => {
+    const t = await turnoCom("metas", mutar(f)); expect(screen.queryByTestId("bloco-metas")).toBeNull(); await fechar(t);
   });
   it("controle: o mesmo turno com `caixinhas` (legado) desenha o card e a prévia `caixinhas` some com ele", async () => {
-    const f = await turnoComMetasV2("caixinhas");
+    const f = await turnoCom("caixinhas", { metas: F["/goals/1/status"] });
     await act(async () => { f.empurrar({ tipo: "bloco", bloco: bloco("caixinhas") }); await drenar(); });
     expect(screen.getByTestId("bloco-caixinhas")).toBeTruthy(); expect(screen.queryByLabelText("Carregando")).toBeNull();
   });
