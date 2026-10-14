@@ -5,7 +5,7 @@ from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from .bank_declaracoes import congelada, desde_da_leitura, e_fluxo, elegivel_fluxo, janela
+from .bank_declaracoes import congelada, desde_da_leitura, e_fluxo, elegivel_fluxo, janela, projeta, projeta_todas
 from .connection import get_conn
 from utils_date import _tz
 
@@ -107,7 +107,8 @@ def _transactions(cur, user_id, *, lock=False, desde: date | None = None, ids=()
 
 def _declarations(cur, user_id):
     cur.execute(
-        """select d.*, l.alvo, l.tipo, l.efeitos->'funding_source'->>'label' as bank_label
+        """select d.*, l.alvo, l.tipo, l.valor as launch_valor, l.criado_em as launch_criado_em,
+                  l.efeitos->'funding_source'->>'label' as bank_label
              from bank_movement_declarations d
              join launches l on l.id=d.launch_id and l.user_id=d.user_id
             where d.user_id=%s order by d.declared_at, d.launch_id""", (user_id,))
@@ -225,7 +226,9 @@ def reconcile_bank_movements(cur, user_id):
         if claims[tx["id"]] != 1:
             continue
         _bind(cur, user_id, d, tx, "automatic")
+        d["matched_transaction_id"] = tx["id"]
         confirmed += 1
+    projeta_todas(cur, user_id, declarations, by_id)  # fluxo: valor/data do lançamento seguem o extrato
     return confirmed
 
 
@@ -318,6 +321,7 @@ def confirm_bank_movement(user_id, launch_id, transaction_id):
         if not _free(tx) or not _eligible(d, tx, manual=True):
             raise ValueError("MOVEMENT_INCOMPATIBLE")
         _bind(cur, user_id, d, tx, "manual")
+        projeta(cur, user_id, d, tx)
         conn.commit()
 
 

@@ -9,7 +9,7 @@ O vínculo é aditivo: sem par a declaração segue "a conferir" e não expira (
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from utils_date import _tz
@@ -51,6 +51,31 @@ def janela(transactions: list[dict], dates: list[date], declaration: dict) -> li
     from .open_finance import RECON_DATE_WINDOW
     dia, w = _dia(declaration), timedelta(days=RECON_DATE_WINDOW)
     return transactions[bisect_left(dates, dia - w):bisect_right(dates, dia + w)]
+
+
+def projeta(cur, user_id: int, declaration: dict, tx: dict | None = None) -> None:
+    """Fluxo casado: `launches.valor`/`criado_em` passam a ser os da transação do banco (valor absoluto,
+    dia do extrato na hora local DECLARADA: o dia/mês do Resumo bate com o extrato sem inventar um horário
+    e sem cruzar a meia-noite por UTC). Sem par (nunca casou, desvinculada, transação apagada): voltam ao
+    declarado. O declarado original fica em `bank_movement_declarations.amount`/`declared_at`, e é SÓ
+    ele que a elegibilidade lê. Idempotente: só escreve quando difere. Aporte/resgate não passam aqui."""
+    from .bank_movements import _money
+    if not e_fluxo(declaration):
+        return
+    if tx is None:
+        valor, criado = abs(declaration["amount"]), declaration["declared_at"]
+    else:
+        hora = declaration["declared_at"].astimezone(_tz()).time()
+        valor, criado = abs(_money(tx["amount"])), datetime.combine(tx["transaction_date"], hora, tzinfo=_tz())
+    if (valor, criado) != (declaration["launch_valor"], declaration["launch_criado_em"]):
+        cur.execute("update launches set valor=%s, criado_em=%s where id=%s and user_id=%s",
+                    (valor, criado, declaration["launch_id"], user_id))
+        declaration["launch_valor"], declaration["launch_criado_em"] = valor, criado
+
+
+def projeta_todas(cur, user_id: int, declarations: list[dict], by_id: dict) -> None:
+    for d in declarations:
+        projeta(cur, user_id, d, by_id.get(d["matched_transaction_id"]))
 
 
 def congelada(declaration: dict, hoje: date) -> bool:

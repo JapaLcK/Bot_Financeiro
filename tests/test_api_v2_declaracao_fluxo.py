@@ -116,3 +116,16 @@ def test_modal_oferece_e_confirma_a_escolha_manual_e_a_sombra_some(libera):
     sombras = q("select valor from launches where user_id=%s and source='open_finance' order by valor",
                 (uid,), fetch=True)
     assert [Decimal(s["valor"]) for s in sombras] == [48]  # só a sombra da outra; a escolhida sumiu
+
+
+def test_lista_e_resumo_mostram_o_valor_do_extrato_depois_de_casar(libera):
+    """Opção B pela rota real: o lançamento casado mostra o valor do banco (50,04), uma linha, e o
+    Resumo do mês soma o mesmo valor."""
+    uid = usuario_pagante()
+    cid, _ = _bank(uid)
+    lid = declara(uid)
+    sincroniza(cid, uid, tx(-50.04))
+    libera(uid)
+    i = linha(uid, lid)
+    assert Decimal(str(i["valor"])) == Decimal("50.04") and i["fundido"] is True
+    assert Decimal(str(resumo(uid)["saiu"])) == Decimal("50.04")
