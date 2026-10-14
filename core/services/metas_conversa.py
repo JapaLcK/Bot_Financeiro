@@ -92,11 +92,14 @@ def _resumo(m: dict, custo: dict) -> str:
     p = []
     if m["tipo"] == "reserva":
         p.append("Reserva de emergência (%s %s de contas fixas)." % (m["meses"], "mês" if m["meses"] == 1 else "meses"))
+    sem_custo = _frase(FRASE_CUSTO, custo["motivos"]) or "não consegui calcular suas contas fixas."
     if atual is None:
-        return " ".join([*p, "Ainda não sei quanto tem: " + (sem_ritmo or "ainda não consegui ler o saldo no banco.")])
+        t = "Ainda não sei quanto tem: " + (sem_ritmo or "ainda não consegui ler o saldo no banco.")
+        if alvo is None and sem_custo != sem_ritmo:  # só a reserva fica sem alvo (db/metas.py); a tela mostra as duas frases
+            t += f" E ainda não sei o tamanho da reserva: {sem_custo}"
+        return " ".join([*p, t])
     if alvo is None:  # reserva sem o tamanho
-        return " ".join([*p, f"Tem {_brl(atual)}. Ainda não sei o tamanho da reserva: "
-                         + (_frase(FRASE_CUSTO, custo["motivos"]) or "não consegui calcular suas contas fixas.")])
+        return " ".join([*p, f"Tem {_brl(atual)}. Ainda não sei o tamanho da reserva: {sem_custo}"])
     if falta == 0:
         return " ".join([*p, f"Meta batida! {_brl(atual)} de {_brl(alvo)}."])
     p.append(f"{_brl(atual)} de {_brl(alvo)} ({m['percentual']}%), faltam {_brl(falta)}.")

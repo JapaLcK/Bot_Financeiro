@@ -307,3 +307,34 @@ def test_reserva_sem_alvo_segue_com_a_frase_do_custo():
     m = meta_de("Reserva de emergência", alvo=None, falta=None, por_mes=None, percentual=None)
     (i,) = conversa(m, custo=custo)["metas"]
     assert i["resumo"].endswith("Ainda não sei o tamanho da reserva: " + mc.FRASE_CUSTO["recorrencias_banco_nao_lidas"])
+
+
+# ── reserva sem saldo E sem tamanho: o resumo explica os dois (a tela mostra a frase do ritmo e a do custo) ──
+
+E_TAMANHO = " E ainda não sei o tamanho da reserva: "
+
+
+def _sem_saldo(nome="Reserva de emergência", custo=None, ritmo="sem_banco_conectado", **campos):
+    custo = {"valor": None, "recorrencias": 0, "motivos": [custo] if custo else []}
+    m = meta_de(nome, atual=None, ritmo={"motivos": [ritmo], "valor": None}, **campos)
+    return conversa(m, custo=custo)["metas"][0]["resumo"]
+
+
+def test_reserva_sem_saldo_e_sem_alvo_explica_o_custo():
+    sem = dict(alvo=None, falta=None, por_mes=None, percentual=None)
+    r = _sem_saldo(custo="plano_sem_custo_mensal", ritmo="fonte_indisponivel", **sem)
+    assert r.endswith(mc.FRASE_RITMO["fonte_indisponivel"] + E_TAMANHO + mc.FRASE_CUSTO["plano_sem_custo_mensal"])
+    r = _sem_saldo(custo="sem_banco_conectado", **sem)  # os dois motivos iguais, frases diferentes: as duas saem
+    assert mc.FRASE_RITMO["sem_banco_conectado"] in r and r.endswith(E_TAMANHO + mc.FRASE_CUSTO["sem_banco_conectado"])
+    assert E_TAMANHO.strip() in _sem_saldo(custo=None, **sem)  # sem motivo de custo: o fallback
+
+
+def test_reserva_sem_saldo_nao_repete_frase_igual(monkeypatch):
+    monkeypatch.setitem(mc.FRASE_CUSTO, "sem_banco_conectado", mc.FRASE_RITMO["sem_banco_conectado"])
+    r = _sem_saldo(custo="sem_banco_conectado", alvo=None, falta=None, por_mes=None, percentual=None)
+    assert r.count(mc.FRASE_RITMO["sem_banco_conectado"]) == 1 and "tamanho da reserva" not in r
+
+
+def test_sem_saldo_sem_frase_do_tamanho_quando_o_alvo_existe_ou_e_meta_comum():  # positivos
+    assert "tamanho da reserva" not in _sem_saldo(custo="plano_sem_custo_mensal")  # reserva com alvo
+    assert "tamanho da reserva" not in _sem_saldo("Viagem pro Japão", custo="plano_sem_custo_mensal")
