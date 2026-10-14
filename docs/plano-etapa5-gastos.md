@@ -141,19 +141,26 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
 **Duas rotas**, para o cliente pedir só o que mostra e o corpo ter tamanho limitado:
 
 - `GET /api/v2/gastos?mes=AAAA-MM`: a visão do mês. Por categoria: `chave`, `nome`, `emoji`,
-  `cor`, `valor` (o mês inteiro), `quantidade`, `valor_ate_hoje` (de 1 até `hoje`) e
-  `anterior_ate_hoje` (o mês anterior, de 1 até o mesmo dia; `null` pela decisão 7).
+  `cor`, `valor` (o mês inteiro), `quantidade`, `valor_ate_corte` (de 1 até `dia_de_corte`) e
+  `anterior_ate_corte` (o mês anterior, de 1 até o mesmo `dia_de_corte`; `null` pela decisão 7).
+  **`dia_de_corte`** é a regra do corte, no servidor: no mês corrente, o dia de `hoje`; em mês
+  passado, o último dia do mês escolhido (comparação do mês inteiro contra o mês anterior
+  inteiro, como o protótipo, que usa 31 fora do mês corrente). O corte do mês anterior é
+  `min(dia_de_corte, último dia do mês anterior)`, por exemplo 31 de março contra fevereiro vira
+  o fim de fevereiro. Mês futuro continua 422, como `resumo-do-mes`.
   Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
   descrição, valor e a chave da categoria), `outro_mes` (decisão B), `hoje` (AAAA-MM-DD no fuso do
-  app: o cliente não usa o relógio dele), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
+  app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `fora_do_total`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>`: o detalhe de uma categoria.
   Total, compras, valor médio, as 6 últimas compras (data, descrição, mensagem, origem, valor, feitas
   das MESMAS linhas que somam o total: sem interno nem outra moeda, só saída, nunca o `raw`),
   os 3 últimos meses (cada um `null` se o corte do plano o toca),
-  os 5 estabelecimentos (regra do §3.1; consulta própria, porque o leitor oficial não expõe
-  `raw`, extraindo só `merchant.cnpj` e `paymentData.receiver.name`) e o calendário só dessa
+  os 5 estabelecimentos (regra do §3.1; o ranking é feito sobre **as mesmas linhas que somam o
+  total da categoria**, ou seja, saída, não interna, em reais e do mesmo mês/fatura, e só o
+  `raw` é lido à parte, por id de linha, para extrair `merchant.cnpj` e
+  `paymentData.receiver.name`; nunca se parte de `raw` para escolher quem entra) e o calendário só dessa
   categoria (por dia: total e os 3 maiores), com `outro_mes`, `hoje` e `historico_desde`. Tudo completo e sem
   paginação: no máximo 31 dias × 3 maiores + 6 compras + 5 estabelecimentos + 3 meses.
 
@@ -170,7 +177,10 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 
 **Outras mudanças do PR 1**
 - `GET /api/v2/lancamentos` ganha `dia=AAAA-MM-DD` (filtra pelo `dia` devolvido), para o clique
-  no dia do calendário. Teste com o dia de uma compra de cartão de outro mês.
+  no dia do calendário. A navegação leva **sempre os dois**: `mes=<mês escolhido>&dia=<dia
+  mostrado>`, porque o cartão entra pelo mês da fatura (`period_end`), não pelo dia da compra: a
+  compra de 28 de setembro de uma fatura de outubro só aparece com `mes=outubro`. Teste: essa
+  compra, pedida com `mes=outubro&dia=28 de setembro` (aparece) e com `mes=setembro` (não aparece).
 - `GET /api/v2/categorias` passa a devolver `emoji` e `cor` (com a regra da decisão 4 para a
   linha sem catálogo).
 - Arredondamento: a rota aplica `soma_arredondada_diverge` (`api/nativo/dinheiro.py`, importar
@@ -187,7 +197,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 |---|---|
 | uma linha por categoria com gasto, em ordem decrescente | `/gastos`; categoria sem gasto no mês não aparece |
 | "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `fora_do_total` o bloco avisa quantas linhas ficaram fora |
-| traço e variação % contra o mês anterior no mesmo dia | `valor_ate_hoje` e `anterior_ate_hoje` por categoria, os dois de 1 até `hoje` (a saída com data depois de `hoje` fica fora; a de data anterior ao mês conta como dia 1), para comparar iguais com iguais; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero. A barra e o `valor` são o mês inteiro, que inclui o lançamento com data futura, como o Saiu do Resumo |
+| traço e variação % contra o mês anterior no mesmo dia | `valor_ate_corte` e `anterior_ate_corte` por categoria, os dois de 1 até `dia_de_corte` (a saída com data depois do corte fica fora; a de data anterior ao mês conta como dia 1), para comparar iguais com iguais; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero. A barra e o `valor` são o mês inteiro, que inclui o lançamento com data futura, como o Saiu do Resumo |
 | "Sem categoria" | rótulo `sem categoria`; emoji e cor da constante neutra **só quando o usuário não tem categoria real com esse nome**, senão os dela (precedência da decisão 4); filtra com `categoria=sem categoria` (abaixo) |
 | clicar filtra o resto; "Limpar" | estado do cliente |
 | âncoras do guia (`data-guia="categorias.lista"` e `categorias.item`) | o PR 2 as preserva (#728) |
@@ -199,7 +209,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 | categoria padrão quando nenhuma foi escolhida ("maior gasto do dia a dia") | sem a marca `variable` (decisão B), vale a **maior categoria do mês**, e o rótulo vira "maior gasto do mês" |
 | No mês / Compras / Valor médio | `valor`, `quantidade` e `valor ÷ quantidade` (`null` sem compras); parcela de cartão conta uma compra por parcela do mês |
 | últimos meses | `/gastos/categoria`, 3 meses, cada valor é o mês inteiro (o do mês corrente é o mesmo `valor` da lista, inclusive lançamento com data futura); o corrente é rotulado "mês em andamento", não "até hoje". Mês tocado pelo corte do plano é `null`, **inclusive o mês escolhido**: a igualdade série = `valor` da lista vale só quando o mês escolhido está inteiro disponível; cortado, a lista mostra o `valor` parcial com `inicio_do_historico` (rotulado "parcial") e a série não tem barra para ele |
-| onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5 |
+| onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5, sobre as mesmas linhas do total da categoria (a `compute_top_merchants` existente não serve: não exclui outra moeda) |
 | últimas compras (6, com data, nome, mensagem, origem, valor) | `/gastos/categoria`, `ultimas`: as mesmas linhas que somam o total da categoria. O `/lancamentos` não serve aqui: ele devolve também interno e outra moeda, que o total exclui, e entradas |
 | "Abrir lançamentos" | link para `/lancamentos` com `mes`, `categoria` e `tipo=saida`. A tela de Lançamentos é a lista completa (mostra também o interno, marcado, e outra moeda), então a contagem dela pode ser maior que a de "Compras"; isso é declarado, não escondido |
 
@@ -211,7 +221,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 | dica e nome acessível com os 3 maiores gastos do dia | `maiores` (3) por dia, em `/gastos` e em `/gastos/categoria` |
 | "média R$ X/dia · N dias sem gasto" | o cliente calcula de `dias` só de `historico_desde` até `hoje` (dia agendado e dia anterior ao corte do plano não entram, nem como zero); a API devolve só os dias com gasto e o cliente completa os zeros; o texto "Sem contas fixas" sai (agora conta todo gasto, decisão B) |
 | "Dia mais caro" | o maior `total` de `dias` (só dias com histórico) |
-| clicar no dia filtra os lançamentos do dia | `/lancamentos?dia=` (PR 1) |
+| clicar no dia filtra os lançamentos do dia | `/lancamentos?mes=<escolhido>&dia=` (PR 1; sempre os dois) |
 | calendário filtrado por categoria | `/gastos/categoria` devolve os dias só dessa categoria |
 | saída com dia fora do mês | linha "outro mês" (decisão B), fora da grade |
 
@@ -277,11 +287,13 @@ categoria; plano de 90 dias com o corte no meio do mês: comparação `null` e m
 `null` (nunca zero), com `inicio_do_historico`; linha sem categoria e categoria fora do
 catálogo com `emoji` e `cor` não nulos; uma só conexão para todos os meses lidos pela rota; os 3
 maiores gastos do dia (e o desempate); `/lancamentos?dia=` com o dia de uma compra de cartão de
-outro mês; lançamento com data futura no mês corrente (`valor` inclui, `valor_ate_hoje` e a
+outro mês; lançamento com data futura no mês corrente (`valor` inclui, `valor_ate_corte` e a
 comparação não, dia futuro agendado habilitado); categoria com entrada e saída (as 6 últimas
 compras só de saída, sem interno nem outra moeda); usuário com categoria real "Sem categoria" e linhas `NULL` (um balde, metadado
 do catálogo); `ultimas` sem a linha interna e sem a de outra moeda na categoria; plano de 90 dias com o
-corte no meio do mês: dias antes de `historico_desde` fora da média e dos "dias sem gasto".
+corte no meio do mês: dias antes de `historico_desde` fora da média e dos "dias sem gasto";
+mês passado (comparação do mês inteiro contra o mês anterior inteiro) e mês de 31 dias contra
+fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
