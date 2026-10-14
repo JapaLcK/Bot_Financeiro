@@ -787,6 +787,28 @@ Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pend
 devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
 a rota (e o contrato com o app).
 
+**MFA no Google web e no magic link (#605).** Conta com MFA ligado NUNCA ganha sessão só
+pelo Google ou pelo link do bot. O callback web e `GET /d/{code}` (todo código: bot ou app
+antigo) respondem 302 para `/login?next=<destino>#mfa=<desafio>` sem cookie nem
+`auth_sessions`; o desafio vai no fragmento (não chega ao servidor nem ao Referer) e o
+`login.html` abre o formulário de código; a sessão nasce em `mfa/verify-login`, que também
+registra o login (o callback `app-` não registra mais quando há MFA). O desafio vem de
+`_desafio_mfa`, o mesmo de `_concluir_login`. O `next` de `/d/` só chega ao destino se
+estiver na allowlist do `login.html`.
+O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos snippets de
+GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
+`config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
+prendem isso. Aceitos, sem código:
+- `login.html` com sessão viva de OUTRA conta pula o formulário de código ("sessão viva → pula o
+  login"), comportamento herdado do `/login`.
+- `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
+  pedir link novo).
+- `/d/` e `mfa/verify-login` não checam exclusão agendada (o callback web recusa). Follow-up.
+- Recarregar o `/login` depois do `replaceState` perde o formulário de código (o desafio saiu da URL);
+  no `/d/` o código do link já foi queimado, então recomeça por senha ou por um link novo.
+- O link do bot COM MFA passa a registrar login e e-mail de novo IP no `verify-login`; o SEM MFA segue
+  sem registro. Assimetria de auditoria conhecida, não decidida.
+
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
 `CLOUDFLARE_ORIGIN_SECRET` (≥ 32 chars), o `CF-Connecting-IP` só vale quando a regra da

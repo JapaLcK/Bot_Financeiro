@@ -123,6 +123,14 @@ aqui uma SPA. O piloto ainda não implementado de `/como-funciona` seguirá o me
 `webapp/`, build e deploy, com mount e fallback estritos; ver o
 [ADR 0002](adr/0002-piloto-como-funciona-como-ilha-react.md).
 
+### App nativo: deep link novo precisa entrar na allowlist
+
+`app/app/+native-intent.ts` é uma **allowlist** (#604): só a raiz, a volta do Open
+Finance e, em `__DEV__`, os links de desenvolvimento passam; todo o resto é descartado
+em silêncio (`null` com o app aberto, `/` a frio). Deep link novo (push, universal link,
+e-mail) **precisa entrar lá**, com teste em `native_intent_filtro.test.ts`; senão o link
+não faz nada e ninguém vê erro.
+
 ### `dashboard.js`: o arquivo grande demais
 
 É o maior passivo de organização do repositório e o exemplo vivo da §0.5 do `CLAUDE.md`: milhares

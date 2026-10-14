@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script>
+// #605: o desafio do MFA chega no fragmento (#mfa=…). Sai da URL AQUI, no topo do
+// <head>: o servidor injeta GA4/Meta Pixel no FIM do <head> (`inject_tracking`) e o
+// GA4 lê `location.href` no `config`, então um replaceState mais abaixo chegaria
+// tarde (medido: o desafio ia no `page_location`). Hash fora do formato é ignorado.
+var PB_MFA=(/^#mfa=([\w-]+)$/.exec(location.hash)||[])[1]||'';
+if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
+</script>
 <title>Entrar · PigBank</title>
 <link rel="canonical" href="https://pigbankai.com/login"/>
 <meta property="og:type" content="website"/>
@@ -103,8 +111,8 @@
 <!-- MFA -->
 <form id="form-mfa" onsubmit="doMfa(event)" style="display:none">
 <h1>Verificação em 2 etapas</h1>
-<p class="auth-sub">Digite o código do seu app autenticador para <b id="mfa-email">
-</b>.</p>
+<p class="auth-sub">Digite o código do seu app autenticador<span id="mfa-para"> para <b id="mfa-email">
+</b></span>.</p>
 <div class="auth-error" id="mfa-error" role="alert">
 </div>
 <div class="field">
@@ -184,7 +192,7 @@
   }
 
   var _ch=null;
-  function showMfa(ch,email){_ch=ch;document.getElementById('form-login').style.display='none';document.getElementById('form-mfa').style.display='';document.getElementById('mfa-email').textContent=email||'';document.getElementById('mfa-code').focus()}
+  function showMfa(ch,email){_ch=ch;document.getElementById('form-login').style.display='none';document.getElementById('form-mfa').style.display='';document.getElementById('mfa-email').textContent=email||'';document.getElementById('mfa-para').hidden=!email;document.getElementById('mfa-code').focus()}
   function cancelMfa(){_ch=null;document.getElementById('form-mfa').style.display='none';document.getElementById('form-login').style.display=''}
   async function doMfa(ev){ev.preventDefault();clrErr();
     var code=document.getElementById('mfa-code').value.trim(),bk=document.getElementById('mfa-backup').checked;
@@ -198,6 +206,9 @@
     }catch(e){err('mfa-error','Erro de conexão. Tente novamente.')}
     finally{b.disabled=false;b.textContent=window.PBPurchaseIntent&&window.PBPurchaseIntent.pending()?'Verificar e continuar':'Verificar código'}
   }
+
+  // Google e magic link do bot com MFA (#605): `PB_MFA` vem do <head> (já tirado da URL).
+  if(PB_MFA)showMfa(PB_MFA,'')
 
 </script>
 <script src="/auth-presentation.js?v=1" defer>
