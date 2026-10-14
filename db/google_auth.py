@@ -6,6 +6,7 @@ Estrutura:
   auth_identities          → vínculo permanente (user_id ↔ provider, provider_sub)
   pending_google_signups   → pré-cadastro: aguarda nome+telefone do usuário
 """
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -139,9 +140,11 @@ def link_google_identity(
 # ──────────────────────────────────────────────────────────────────────────────
 
 def create_pending_google_signup(
-    sub: str, email: str, name_hint: str | None, provider: str = PROVIDER_GOOGLE
+    sub: str, email: str, name_hint: str | None, provider: str = PROVIDER_GOOGLE,
+    code_challenge: str | None = None,
 ) -> str:
-    """Cria registro pendente e devolve token de uso único (URL-safe)."""
+    """Cria registro pendente e devolve token de uso único (URL-safe).
+    `code_challenge`: PKCE do app nativo (#604); ver `consume_pending_google_signup`."""
     email = (email or "").strip().lower()
     name_hint = (name_hint or "").strip() or None
     token = f"gso_{secrets.token_urlsafe(24)}"
@@ -166,13 +169,13 @@ def create_pending_google_signup(
                 """
                 insert into pending_google_signups
                   (token, provider, provider_sub, email, name_hint, expires_at,
-                   email_hash, email_enc, name_hint_enc)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   email_hash, email_enc, name_hint_enc, code_challenge)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (token, provider, sub, email, name_hint, expires_at,
                  hash_pii_optional(email, kind="email"),
                  encrypt_pii_optional(email),
-                 encrypt_pii_optional(name_hint)),
+                 encrypt_pii_optional(name_hint), code_challenge),
             )
         conn.commit()
 
@@ -190,7 +193,7 @@ def get_pending_google_signup(token: str, provider: str = PROVIDER_GOOGLE) -> di
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            select provider_sub, email, name_hint, expires_at
+            select provider_sub, email, name_hint, expires_at, code_challenge
             from pending_google_signups
             where token = %s and provider = %s
             """,
@@ -203,6 +206,7 @@ def get_pending_google_signup(token: str, provider: str = PROVIDER_GOOGLE) -> di
         "provider_sub": row["provider_sub"],
         "email": row["email"],
         "name_hint": row["name_hint"],
+        "code_challenge": row["code_challenge"],
     }
 
 
@@ -212,15 +216,28 @@ def consume_pending_google_signup(
     phone_raw: str,
     source: str = "google",
     provider: str = PROVIDER_GOOGLE,
+    challenge: str | None = None,
 ) -> dict:
     """
     Finaliza o cadastro: cria auth_account (sem senha), grava auth_identities
     e devolve {user_id, email, link_code}.
 
+    `challenge` é o S256 do `code_verifier` que o app mandou (#604), com
+    igualdade estrita como em `consume_dashboard_session`: pendente com
+    challenge só se completa com o mesmo challenge, e pendente SEM challenge
+    (web, iOS antigo, Apple, ou injetado por outro app) só se completa sem
+    verifier. Não casar dá a mesma recusa de "expirado" (não diz que o token
+    existe) e o pendente segue de pé para o dono.
+
     Lança ValueError com mensagem amigável se algo falhar.
     """
     pending = get_pending_google_signup(token, provider)
     if not pending:
+        raise ValueError(_CADASTRO_EXPIRADO[provider])
+    guardado = pending["code_challenge"]
+    if (guardado is None) != (challenge is None) or (
+        guardado is not None and not hmac.compare_digest(challenge, guardado)
+    ):
         raise ValueError(_CADASTRO_EXPIRADO[provider])
 
     # O e-mail ganhou conta depois do pendente (outra aba, outro provedor): o

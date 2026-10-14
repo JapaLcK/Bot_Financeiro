@@ -14,6 +14,8 @@ import { iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure
 import { SESSAO_OF, guardarSessaoOf as guardarCredenciais } from "./open_finance_volta_apoio";
 
 import { redirectSystemPath } from "../../app/+native-intent";
+// O setup do Jest dubla o caminho cru do harness; o filtro de verdade, em string, é este.
+const filtroReal = (jest.requireActual("../../app/+native-intent") as typeof import("../../app/+native-intent")).redirectSystemPath;
 import { chamadas, cofre, prepararCaso, rotear, S, segurar } from "./auth_apoio";
 import {
   A,
@@ -224,11 +226,11 @@ describe("open-finance-volta — link com o app aberto e o widget da Pluggy em f
     await waitFor(() => expect(deOpenFinance().filter((c) => c.caminho === "/open-finance/1")).toHaveLength(1));
   });
 
-  it("L3 — abertura fria normaliza retorno legado e preserva outras rotas mesmo com widget aberto", () => {
+  it("L3 — abertura fria normaliza retorno legado mesmo com widget aberto; outra rota é descartada pela allowlist (#604)", () => {
     definirWidgetAberto(true);
     expect(redirectSystemPath({ path: LINK, initial: true })).toBe(`/open-finance-volta?itemId=${A}`);
-    expect(redirectSystemPath({ path: "pigbank://seguranca", initial: false })).toBe("pigbank://seguranca");
-    expect(redirectSystemPath({ path: "/seguranca", initial: false })).toBe("/seguranca");
+    expect(filtroReal({ path: "pigbank://seguranca", initial: false })).toBeNull();
+    expect(filtroReal({ path: "pigbank://seguranca", initial: true })).toBe("/");
   });
 
   it.each([`pigbank-staging://open-finance-volta?itemId=${A}`, `pigbank-dev://open-finance-volta?itemId=${A}`, `exp://192.168.0.10:8081/--/open-finance-volta?itemId=${A}`, `/open-finance-volta/${origemDaTentativa()}?itemId=${A}`])(
@@ -247,9 +249,10 @@ describe("open-finance-volta — link com o app aberto e o widget da Pluggy em f
     "pigbank://seguranca?x=open-finance-volta",
     "pigbank://open-finance-volta-x",
     "pigbank://x/open-finance-volta",
-  ])("L5 — widget aberto: %s NÃO é a rota da volta e passa intacto", (path) => {
+  ])("L5 — widget aberto: %s NÃO é a rota da volta: a allowlist (#604) o descarta, sem montar /open-finance-volta", (path) => {
     definirWidgetAberto(true);
-    expect(redirectSystemPath({ path, initial: false })).toBe(path);
+    expect(filtroReal({ path, initial: false })).toBeNull();
+    expect(filtroReal({ path, initial: true })).toBe("/");
   });
 });
 

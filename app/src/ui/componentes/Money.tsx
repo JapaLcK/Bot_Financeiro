@@ -1,4 +1,4 @@
-import { faladoComSinal, partes, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
+import { faladoComSinal, MASCARA_OCULTA, partes, VALOR_INDISPONIVEL_FALADO, VALOR_OCULTO_FALADO } from "@/ui/dinheiro";
 import { texto, type Paleta } from "@/ui/tokens";
 
 import { Texto } from "./Texto";
@@ -32,8 +32,8 @@ const SEMIBOLD = { fontFamily: texto.secao.fontFamily };
 export function Money({ centavos, tipo = "saldo", variante = "corpo", oculto = false }: Props) {
   if (oculto) {
     return (
-      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel="Valor oculto" style={SEMIBOLD}>
-        R$ ••••
+      <Texto variante={variante} tom="ink" numerico accessible accessibilityLabel={VALOR_OCULTO_FALADO} style={SEMIBOLD}>
+        {MASCARA_OCULTA}
       </Texto>
     );
   }

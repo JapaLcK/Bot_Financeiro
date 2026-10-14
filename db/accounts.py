@@ -108,6 +108,9 @@ def add_launch_and_update_balance(
     `origem` grava a marca `launches.origem` (padrão: todo canal marca sem lembrar).
     `None` = só leitura no v2: quem passa é quem grava efeito que o `efeitos` não desfaz.
     """
+    # Só finitude: aceita 0 (lançamento zerado) e deixa o teto técnico para as portas de entrada.
+    if not isfinite(float(valor)):
+        raise ValueError("VALOR_INVALIDO")
     ensure_user(user_id)
 
     v = Decimal(str(valor))

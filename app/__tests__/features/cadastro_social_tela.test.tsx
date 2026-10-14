@@ -102,7 +102,8 @@ describe("(auth)/entrar — cadastro pelo Google (C/K)", () => {
     await waitFor(() => expect(screen.getByText(/Bom dia, Bia/)).toBeTruthy());
     expect(screen).toHavePathname("/resumo");
     expect(cadastros().map((c) => c.corpo)).toEqual([
-      { token: "gso_bia", name: "Bia S.", phone: "11999998888", accepted_terms: true },
+      // O verifier do Google atravessa `cadastro-social` → `criando-social` até o complete-signup (#604).
+      { token: "gso_bia", name: "Bia S.", phone: "11999998888", accepted_terms: true, code_verifier: expect.stringMatching(/^[0-9a-f]{64}$/) },
     ]);
   });
 

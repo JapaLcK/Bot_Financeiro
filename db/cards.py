@@ -7,6 +7,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from utils_date import today_tz, billing_period_for_close_day
+from utils_text import valor_valido
 
 from .connection import get_conn
 from .users import ensure_user
@@ -973,6 +974,9 @@ def add_credit_purchase(
     nota: str | None,
     purchased_at: date,
 ):
+    # `numeric` grava NaN/Infinity e a fatura vira impagável: recusa na porta do banco.
+    if not valor_valido(valor):
+        raise ValueError("VALOR_INVALIDO")
     # Q36: cartão com sync do OF ativo já é recusado antes, nos dois chamadores.
     from core.services.fonte_unica import exigir
     exigir(user_id, "cartao")
@@ -1017,6 +1021,8 @@ def add_credit_purchase_installments(
     installments: int,
 ):
     """Registra compra parcelada: uma transação por fatura futura."""
+    if not valor_valido(valor_total):
+        raise ValueError("VALOR_INVALIDO")
     from core.services.fonte_unica import exigir
     exigir(user_id, "cartao")
     ensure_user(user_id)

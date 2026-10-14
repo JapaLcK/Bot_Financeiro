@@ -11,7 +11,9 @@ import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import { CORES_CATEGORIA, espaco, raio, texto as escalas } from "@/ui/tokens";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
+import type { CardChat } from "@/api/schemas/painel";
 import { TITULOS, type Widget } from "./catalogo";
+import { useBloco } from "./blocoContexto";
 import { useNavegacaoPainel } from "./navegacao";
 import { usePainel, type Dados, type Recurso } from "./provider";
 /**
@@ -43,24 +45,28 @@ export function SeteDias<T>({ itens, children }: { itens: T[]; children: (item: 
   const [todos, setTodos] = useState(false);
   return <>{(todos ? itens : itens.slice(0, 7)).map((item) => children(item))}{itens.length > 7 && <Acao rotulo={todos ? "Mostrar menos" : `Mostrar todos os dias (${itens.length})`} onPress={() => setTodos((t) => !t)} />}</>;
 }
-/** Compromissos acompanha o horizonte da previsão (30/60/90); sem previsão pronta, o título fixo do catálogo. */
-export function tituloWidget(id: Widget, dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return id === "compromissos" && r?.fase === "pronto" ? `Próximos ${r.dado.dias} dias` : TITULOS[id]; }
+/** Compromissos acompanha o horizonte da previsão (30/60/90); sem `dias`, o título fixo do catálogo. */
+export function tituloWidget(id: Widget, dias?: number) { return id === "compromissos" && dias ? `Próximos ${dias} dias` : TITULOS[id]; }
+/** Horizonte da previsão do provider, se já pronta (o card do chat usa o do próprio bloco). */
+export function diasDoProvider(dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return r?.fase === "pronto" ? r.dado.dias : undefined; }
 /**
  * `ir`: o card INTEIRO leva a `destino` (aba) ao toque. O `Pressable` de fora só captura o toque (`accessible={false}`: o VoiceOver
  * continua lendo os textos e o `Avisos` de dentro, que seria engolido por um botão único); o título é o botão que o VoiceOver anuncia.
  * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
  * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
  * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
+ * `ir` com `acao` (o card do chat) roda a função em vez de navegar; o `ArrowSquareOut` ao lado do título só sinaliza, o botão é o título. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
  */
-export function Bloco({ id, children, abrir, ir }: { id: Widget; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } }) {
-  const titulo = tituloWidget(id, usePainel().dados); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
-  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
-  const cabecalho = <Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>;
+export function Bloco({ id, titulo: tituloDado, children, abrir, ir }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } | { destino: string; acao: () => void } }) {
+  const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
+  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } if ("acao" in ir) ir.acao(); else navegar(ir.rota); };
+  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{ir && "acao" in ir && <View accessibilityElementsHidden importantForAccessibility="no"><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></View>}</View>;
   const card = <SegurouContext.Provider value={segurou}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPressIn={zerar} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></SegurouContext.Provider>;
   return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
 }
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
-  const p = usePainel(); const r = p.dados[nome];
+  const p = usePainel(), bloco = useBloco(); const r = p.dados[nome];
+  if (bloco) { const d = bloco.recursos[nome]; return d === undefined ? <Vazio texto="Dado indisponível neste card." /> : <>{children(d as Dados[K])}</>; } // card do chat: só o que o servidor embutiu, nunca o provider
   if (!r || r.fase === "carregando") return <ActivityIndicator accessibilityLabel="Carregando dados" />;
   if (r.fase !== "pronto") return <View style={{ gap: 8 }}><Texto variante="rotulo" tom="inkMuted">{r.mensagem}</Texto>{r.fase === "erro" && <Acao rotulo="Tentar novamente" icone="ArrowsClockwise" onPress={p.atualizar} />}</View>;
   return <>{children(r.dado)}</>;
