@@ -466,8 +466,45 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   escritores compartilhados: PR próprio, faixa Completo.
   **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
   bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
-  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), despesa e
-  receita, sempre `estimado`/data `presumida`, valor = o último cobrado. Identidade
+  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), **só despesa**,
+  sempre `estimado`/data `presumida`, valor = o último cobrado. **A receita vem SÓ do extrato
+  (P7 a, PR A)**: `receitas_do_extrato` (regra pura) sobre `db.of_recurring.ler_creditos`
+  (créditos de conta BANK em BRL, conexão viva, últimos 180 dias, calculado na leitura, sem
+  tabela). A chave é **só** o documento do pagador (`paymentData.payer.documentNumber`), e só vale
+  com 11 (CPF) ou 14 (CNPJ) dígitos e não todo zero (`_doc`): crédito sem documento válido fica
+  fora, como o mascarado ou "0", que uniriam pessoas diferentes (a descrição do Pix é genérica,
+  "Pix recebido", e também uniria). A cadeia anda de trás para frente enquanto o intervalo for 30±5 dias e
+  vale com `MINIMO = 2` créditos, todos a ±20% da mediana (com 2 créditos, a mediana é a média:
+  eles podem diferir até 50%); valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
+  documento, data e valor: pendente e efetivado, ou duas conexões do mesmo banco) conta uma vez;
+  créditos do mesmo documento na mesma data **somam** num só (salário + vale; sem a soma o
+  intervalo 0 matava a cadeia); cada parcela somada guarda as contas das suas cópias idênticas
+  (`grupos`) e a receita só entra se TODA parcela tem pelo menos UMA conta na base (parcelas diferentes somam: todas precisam;
+  cópias da mesma, como a mesma conta em duas conexões vivas, bastam por uma), senão fica `incluida=False`
+  com `recorrencia_banco_conta_fora_da_base`.
+  Ficam fora o movimento interno (`assinaturas._interno`), o rendimento (as palavras
+  interest(s)/dividend(s)/dividendo(s)/rendimento(s), inteiras (`\b`: "Interestadual" não casa), na
+  categoria OU na descrição; filtro só da receita), o Pix para si (pagador =
+  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta real (`provider_account_id` diferente, não `id`: a mesma conta em duas conexões vivas não conta) BANK em BRL do MESMO
+  usuário em ±1 dia (débito em dólar de mesmo número não conta), com limites sargáveis: com `abs(...)` no `not exists` o índice por
+  conta/data não serve e a consulta degrada com o volume). A recorrência de ENTRADA da Pluggy
+  (`average_amount > 0`) deixou de ser lida (fechava a contagem dupla). Id
+  `extrato#` + `hash_pii(documento)[:16]` (o campo `documentNumber` nunca sai, nem em `origem_id`,
+  motivo, log, `/api/v2/previsao` ou IA: o id é HMAC com pepper; sem `payer.name` o nome cai na
+  descrição, que é dado do próprio usuário). Sem aviso novo de "nenhuma receita
+  detectada".
+  Limites: **receita sem documento do pagador não é detectada** (o Pix de muita gente
+  chega sem ele); 13º/bônus em outro dia do mês, no meio ou depois do último crédito quebra a cadeia por
+  ~2 meses; aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal ou irregular nunca
+  é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
+  diferente entre meses (zeros à esquerda) vira chaves distintas (o filtro de 11/14 dígitos reduz,
+  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo infla o
+  saldo.
+  Receita detectada leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
+  `cashflow.py::_risco` não dá veredito com ela), como já acontecia com a saída detectada.
+  `amount` do espelho é `numeric` e guarda NaN/±Infinity, que no Postgres são `> 0`: `_SQL_CREDITOS`
+  só lê crédito finito (`amount < 'Infinity'`, que tira os dois), senão a Previsão inteira daria 500
+  (mesma classe do `custo_mensal`, `recorrencia_valor_invalido`). Identidade
   `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
   frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
   na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
@@ -475,12 +512,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
   direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
-  saída (a marca não tem direção); positivo no cartão e o movimento interno que
-  `classify_open_finance_launch` reconhece (pagamento de fatura, aplicação e resgate,
-  caixinha, poupança, transferência "same person" da Pluggy) não entram — transferência
-  entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
-  comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
-  não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
+  saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`
+  reconhece (pagamento de fatura, aplicação e resgate, caixinha, poupança, transferência "same
+  person" da Pluggy) não entra — transferência entre contas próprias com descrição genérica e
+  sem essa categoria entra como recorrência de saída, sem casamento com a outra ponta; duas
+  conexões do mesmo banco
   duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`, e a
   previsão em cache vence quando a lista vira velha. Recorrência de conta cujo saldo não está
   na base (saldo ausente, moeda presumida, outra moeda) fica fora, com
