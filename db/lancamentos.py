@@ -166,7 +166,7 @@ _PERNA_LANCAMENTOS = f"""
           from open_finance_transactions t
           join open_finance_accounts ta on ta.id = t.account_id
           join open_finance_connections tc on tc.id = ta.connection_id and tc.user_id = %s
-         where t.imported_launch_id = l.id order by t.id desc limit 1) t on true
+         where t.imported_launch_id = l.id and not l.guardado order by t.id desc limit 1) t on true
       left join open_finance_accounts a on a.id = t.account_id
       left join open_finance_connections conn on conn.id = a.connection_id
      where true"""
@@ -203,7 +203,7 @@ _PERNA_CARTAO = f"""
 # pontas, como `_RECORTE_TX_FROM_SQL`: pega a transação presa a uma conexão antiga da mesma
 # conta. Sem o recorte do saldo (BRL, conexão viva): `/contas` lista a pausada e a de
 # outra moeda, e o filtro tem de achar as dela. Params: uid, uid, conta.
-_DA_CONTA_SQL = """ and l.id in (
+_DA_CONTA_SQL = """ and not l.guardado and l.id in (
         select t.imported_launch_id from open_finance_accounts ra
           join open_finance_connections rc on rc.id = ra.connection_id and rc.user_id = %s
           join open_finance_accounts ta on ta.provider_account_id = ra.provider_account_id

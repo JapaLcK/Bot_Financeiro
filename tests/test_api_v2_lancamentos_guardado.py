@@ -9,24 +9,29 @@ matriz de `test_resumo_mes_regra.py` (os escritores gravam "agora").
   guardado em BRL = `guardado.aportes` e entradas = `guardado.saques` (aporte em USD na mistura,
   corte do plano no meio do mês); `categoria=` nunca as devolve; B não vê as de A; /editar e
   /apagar = 409; keyset com limite=1.
+- conciliado com o banco (`db.bank_movements._bind` liga a transação ao depósito/aporte): continua
+  sem conta, instituição e motivo de moeda, e `conta=` não o devolve.
 - NEGATIVO (conserto desligado por monkeypatch no SQL, em caso que estava verde): N1 sem
   `or guardado` no `interno`; N2 resgate mapeado para saída; N3 `guardado` sempre falso (o filtro
-  de categoria perde a exclusão).
+  de categoria perde a exclusão); N4 o `left join lateral` da transação sem `not l.guardado`;
+  N5 o `_DA_CONTA_SQL` sem `not l.guardado`.
 """
 from __future__ import annotations
 
 from decimal import Decimal
+
+from psycopg.types.json import Jsonb
 
 import db
 from conftest import usuario_pagante
 from core.services import plan_service
 from db import lancamentos, mes_detalhes as md
 from db.resumo_mes import resumo_do_mes
-from tests._patrimonio_helpers import q
+from tests._patrimonio_helpers import q, tx_banco
 from tests.test_api_v2_lancamentos import M, ok, resumo, soma, todos
 from tests.test_api_v2_lancamentos_escrita import codigo, linha, post, saldo
 from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
-from tests.test_bank_movements import _bank
+from tests.test_bank_movements import _bank, _sync, _tx
 from tests.test_resumo_mes_regra import ENTROU, INICIO, SAIU, _em, _lanc, semeia_a, semeia_b
 from utils_date import now_tz
 
@@ -136,6 +141,74 @@ def test_pago_pelo_banco_tambem_e_guardado(libera):
         assert (i["tipo"], i["guardado"], i["interno"], i["pode"]) == ("saida", True, True, [])
     assert itens[f"l{ids['resgate']}"]["tipo"] == "entrada" and itens[f"l{ids['resgate']}"]["guardado"]
     assert soma(list(itens.values())) == resumo(a, mes=M)
+
+
+def _conciliado(uid, item, guardar, valor, moeda="BRL"):
+    """Depósito/aporte pago pelo banco e CONCILIADO pelo caminho real (declara com `funding_source`,
+    o extrato chega, `import_open_finance_launches`): `_bind` grava `imported_launch_id` na
+    transação. Mais uma linha normal do banco na mesma conta. Devolve (conta, guardado, normal).
+    A declaração só aceita conta BRL, então a USD é BRL conciliada e virada depois (limite)."""
+    cid = db.save_pluggy_open_finance_item(uid, {"id": item, "connector": {"id": 612, "name": "Nubank"},
+                                                 "status": "UPDATED"})["id"]
+    _sync(cid, 1000)
+    conta_id = q("select id from open_finance_accounts where connection_id = %s", (cid,))["id"]
+    lid = guardar(uid, {"kind": "bank", "of_account_id": conta_id, "label": "Nubank"}, valor)
+    _sync(cid, 1000 - valor, _tx(-valor, f"mov-{item}"))
+    db.import_open_finance_launches(uid)
+    status = q("select reconciliation_status s from open_finance_transactions where imported_launch_id = %s",
+               (lid,))["s"]
+    assert status == "bank_movement_confirmed"
+    normal = _lanc(uid, "despesa", 41, 9, source="open_finance")
+    q("update launches set external_id = %s, efeitos = %s where id = %s returning id",
+      (f"TX-{item}", Jsonb({"delta_conta": 0}), normal))
+    tx_banco(conta_id, f"TX-{item}", "-41", imported_launch_id=normal)
+    if moeda != "BRL":
+        q("update open_finance_accounts set currency = %s where id = %s returning id", (moeda, conta_id))
+    q("update launches set criado_em = %s where id = %s returning id", (_em(10), lid))
+    return conta_id, lid, normal
+
+
+def _mundo_conciliado(libera_):
+    def deposito(uid, banco, valor):
+        db.create_pocket(uid, "Viagem")
+        return db.pocket_deposit_from_account(uid, "Viagem", valor, "dep", funding_source=banco)[0]
+
+    def aporte(uid, banco, valor):
+        db.create_investment_db(uid, "CDB", rate=0.10, period="yearly", tax_profile="exempt_ir_iof")
+        return db.investment_deposit_from_account(uid, "CDB", valor, "ap", funding_source=banco)[0]
+
+    a = usuario_pagante()
+    contas = {"deposito": _conciliado(a, f"mov-brl-{a}", deposito, 120),
+              "aporte": _conciliado(a, f"mov-usd-{a}", aporte, 300, moeda="USD")}
+    libera_(a)
+    return a, contas
+
+
+def _vazamentos(a, contas) -> list:
+    """O que o guardado conciliado pega da conta do banco (vazio = o contrato vale)."""
+    achados = []
+    itens = {i["id"]: i for i in todos(a, mes=M)}
+    for nome, (conta_id, lid, normal) in contas.items():
+        i = itens[f"l{lid}"]
+        proprio = q("select coalesce(upper(currency), 'BRL') c from launches where id = %s", (lid,))["c"]
+        if (i["conta_id"], i["instituicao"], i["motivos"], i["fundido"], i["moeda"]) != (None, None, [], False, proprio):
+            achados.append((nome, "metadado", i["conta_id"], i["instituicao"], i["motivos"], i["moeda"]))
+        daconta = [x["id"] for x in todos(a, mes=M, conta=conta_id)]
+        if f"l{lid}" in daconta:
+            achados.append((nome, "conta="))
+        if f"l{normal}" not in daconta:  # controle positivo: a linha normal do banco segue vindo
+            achados.append((nome, "normal sumiu", daconta))
+    return achados
+
+
+def test_guardado_conciliado_com_o_banco_nao_pega_conta_nem_moeda(libera):
+    """`_bind` liga a transação do banco ao depósito/aporte; a lista não herda a conta dela."""
+    a, contas = _mundo_conciliado(libera)
+    assert _vazamentos(a, contas) == []
+    itens = todos(a, mes=M)
+    assert {(i["tipo"], i["guardado"], i["interno"], tuple(i["pode"])) for i in itens if i["guardado"]} == {
+        ("saida", True, True, ())}
+    assert soma(itens) == resumo(a, mes=M) == (0, 82)  # só as duas linhas normais do banco (41 + 41)
 
 
 def test_filtro_de_categoria_nunca_devolve_guardado(libera):
@@ -248,3 +321,18 @@ def test_n3_sem_guardado_o_filtro_de_categoria_devolve_o_deposito(libera, monkey
     assert todos(a, mes=M, categoria="sem categoria") == []  # com o conserto: verde
     _desliga(monkeypatch, "l.guardado, l.valor", "false as guardado, l.valor")
     assert f"l{ids['deposito']}" in {i["id"] for i in todos(a, mes=M, categoria="sem categoria")}
+
+
+def test_n4_lateral_sem_not_guardado_vaza_conta_instituicao_e_moeda(libera, monkeypatch):
+    a, contas = _mundo_conciliado(libera)
+    assert _vazamentos(a, contas) == []  # com o conserto: verde
+    _desliga(monkeypatch, "and not l.guardado order by", "order by")
+    assert {v[1] for v in _vazamentos(a, contas)} == {"metadado"}  # o `conta=` segue limpo: o N5 o guarda
+
+
+def test_n5_da_conta_sem_not_guardado_devolve_o_guardado_em_conta(libera, monkeypatch):
+    a, contas = _mundo_conciliado(libera)
+    assert _vazamentos(a, contas) == []  # com o conserto: verde
+    assert " and not l.guardado and " in lancamentos._DA_CONTA_SQL
+    monkeypatch.setattr(lancamentos, "_DA_CONTA_SQL", lancamentos._DA_CONTA_SQL.replace(" and not l.guardado", ""))
+    assert {v[1] for v in _vazamentos(a, contas)} == {"conta="}
