@@ -422,7 +422,33 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
   sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
-  difere do total (`soma_arredondada_diverge`). Falta, do plano: `/gastos/categoria` (PR 1b) e a tela (PR 2).
+  difere do total (`soma_arredondada_diverge`). Falta, do plano: a tela (PR 2).
+- `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
+  `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
+  categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
+  senão 422). A chave é o `cat_key_sql` do parâmetro (no banco, no mesmo snapshot): "Alimentação" casa com `alimentacao` e
+  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, cor}` pelo catálogo (o catálogo vence; senão
+  neutro, nome = chave). Resposta: `mes`, `disponivel`, `hoje`, `historico_desde`, `total` e `compras` (as saídas da
+  chave no mês pedido, as MESMAS linhas do `/gastos`; categoria sem gasto = `0`/`0`, nunca 404), `valor_medio`
+  (`total ÷ compras` HALF_UP a centavos, `null` sem compras), `ultimas` (as 6 primeiras na ordem do `listar`, a mais
+  recente primeiro, com data futura incluída: `{data, descricao, mensagem, origem, valor}`, descrição nunca nula),
+  `serie` (3 meses crescentes `[M-2, M-1, M]`, `{mes, valor}`; `valor` = o mês inteiro da chave, `null` quando o corte
+  do plano toca o mês, inclusive M; mês cortado nem é lido; sem corte em M, `serie[2].valor == total`; mês disponível
+  sem gasto = `0`), `estabelecimentos` (até 5, `{nome, valor, quantidade}`, `(-valor, -quantidade, nome)`), `dias` e
+  `fora_da_grade` (o mesmo cálculo do `/gastos`, só das saídas da chave), `saidas_em_outra_moeda` (só a categoria e só o
+  mês M) e `motivos`: os das CONTAS (∩ `resumo_mes.MOTIVOS`) mais os das linhas dos meses lidos da série (M-2, M-1 e M;
+  mês cortado não é lido), `inicio_do_historico` quando o corte do plano toca QUALQUER mês da série (M-2, M-1 ou M, mesmo
+  com `historico_desde` `null`), `outra_moeda` só com o contador da categoria no mês M > 0 (no `/gastos` o contador é o
+  do mês inteiro; aqui outra categoria com USD não sobe o motivo) e `arredondamento_por_grupo` olhando só os dias mais
+  `fora_da_grade` contra o total (sem a comparação por categoria do `/gastos`). Fixado em
+  `tests/test_api_v2_gastos_categoria.py` linhas 137 (corte em M-2) e 194 (USD em outra categoria). Mês todo antes do corte: `disponivel: false`, `total`/`compras`/`valor_medio` `null`, listas vazias, `serie`
+  toda `null`, `motivos` com `inicio_do_historico`. **Estabelecimento**: parte das linhas que somam o total e lê o `raw`
+  do Open Finance à parte (`merchant.cnpj` de 14 dígitos e não todo zero, senão o nome do recebedor do Pix/TED, senão a
+  descrição; o nome e a descrição passam por `utils_text.merchant_key`, o CNPJ fica só com os 14 dígitos, e a descrição sem letra nem dígito cai em `texto.strip()`), dono pela conta -> conexão do usuário (uma transação forjada de outro
+  não entra); rótulo = a descrição mais frequente; grupos de rótulo com o mesmo `merchant_key` se juntam e o nome da união é o rótulo mais frequente
+  entre os rótulos desses grupos (P1 b: "Pix enviado" para pessoas diferentes é UMA linha; nenhum nome repete). Nunca saem `raw`, CNPJ, nome do recebedor, `businessName`,
+  `provider_*`, `user_id` nem id de linha. Uma transação repeatable read / read only; o seed do catálogo roda antes.
+  Plano: `docs/plano-etapa5-gastos.md` §3.1 e §4.1.
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
