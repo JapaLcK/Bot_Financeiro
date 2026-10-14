@@ -36,6 +36,9 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
    `CAT_VAZIA_LABEL` (o valor exato é escolhido no PR 1 com a skill `pigbank-frontend`), e o
    nome é a própria chave, como já faz o app (`nomeCategoria`). O contrato garante `emoji` e
    `cor` não nulos em toda linha, para a tela nunca depender de fallback no cliente.
+   **Precedência:** o catálogo do usuário sempre ganha. Se existe uma categoria real chamada
+   "Sem categoria", o balde único (`cat_key_sql` junta essas linhas e as `NULL`) usa o nome, o
+   emoji e a cor dela; a constante neutra só vale quando não há linha de catálogo para a chave.
 5. Gasto sem categoria aparece como **"Sem categoria"**.
 6. Investimento conta no orçamento geral (decisão anterior): a compra de renda variável gravada
    como despesa entra em "Para onde vai". Não entram o depósito em caixinha nem o aporte
@@ -179,7 +182,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 |---|---|
 | uma linha por categoria com gasto, em ordem decrescente | `/gastos`; categoria sem gasto no mês não aparece |
 | "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `fora_do_total` o bloco avisa quantas linhas ficaram fora |
-| traço e variação % contra o mês anterior no mesmo dia | `anterior_ate_hoje` por categoria; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero |
+| traço e variação % contra o mês anterior no mesmo dia | `valor_ate_hoje` e `anterior_ate_hoje` por categoria, os dois de 1 até `hoje` (a saída com data depois de `hoje` fica fora; a de data anterior ao mês conta como dia 1), para comparar iguais com iguais; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero. A barra e o `valor` são o mês inteiro, que inclui o lançamento com data futura, como o Saiu do Resumo |
 | "Sem categoria" | rótulo `sem categoria`, emoji e cor da constante neutra (decisão 4); filtra com `categoria=sem categoria` (abaixo) |
 | clicar filtra o resto; "Limpar" | estado do cliente |
 | âncoras do guia (`data-guia="categorias.lista"` e `categorias.item`) | o PR 2 as preserva (#728) |
@@ -190,18 +193,18 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 |---|---|
 | categoria padrão quando nenhuma foi escolhida ("maior gasto do dia a dia") | sem a marca `variable` (decisão B), vale a **maior categoria do mês**, e o rótulo vira "maior gasto do mês" |
 | No mês / Compras / Valor médio | `valor`, `quantidade` e `valor ÷ quantidade` (`null` sem compras); parcela de cartão conta uma compra por parcela do mês |
-| últimos meses, o corrente "até hoje" | `/gastos/categoria`, 3 meses; o corrente é parcial e vem com `hoje`; mês cortado pelo plano é `null` |
+| últimos meses | `/gastos/categoria`, 3 meses, cada valor é o mês inteiro (o do mês corrente é o mesmo `valor` da lista, inclusive lançamento com data futura); o corrente é rotulado "mês em andamento", não "até hoje"; mês cortado pelo plano é `null` |
 | onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5 |
-| últimas compras (6, com data, nome, mensagem, origem, valor) | `GET /api/v2/lancamentos?categoria=&mes=&limite=6`, que já existe, ordena do mais novo e traz `mensagem` e `origem` |
+| últimas compras (6, com data, nome, mensagem, origem, valor) | `GET /api/v2/lancamentos?categoria=&mes=&tipo=saida&limite=6`, que já existe, ordena do mais novo e traz `mensagem` e `origem`; sem `tipo=saida` a lista traria também as entradas da categoria e elas tirariam compras das 6 linhas |
 | "Abrir lançamentos" | link para `/lancamentos` com `mes` e `categoria` |
 
 **Calendário** (`Calendar.tsx`)
 | Comportamento | Fonte e decisão |
 |---|---|
-| uma célula por dia do mês, futuro desabilitado, hoje marcado | `hoje` vem do servidor |
+| uma célula por dia do mês, futuro desabilitado, hoje marcado | `hoje` vem do servidor. Dia futuro SEM gasto fica desabilitado; dia futuro COM lançamento agendado fica habilitado e marcado "agendado", com o total e os maiores |
 | escala de cor | percentil sobre os dias do mês (decisão B); o cliente a calcula de `dias` |
 | dica e nome acessível com os 3 maiores gastos do dia | `maiores` (3) por dia, em `/gastos` e em `/gastos/categoria` |
-| "média R$ X/dia · N dias sem gasto" | o cliente calcula de `dias` até `hoje`; a API devolve só os dias com gasto e o cliente completa os zeros; o texto "Sem contas fixas" sai (agora conta todo gasto, decisão B) |
+| "média R$ X/dia · N dias sem gasto" | o cliente calcula de `dias` só até `hoje` (dia agendado não entra); a API devolve só os dias com gasto e o cliente completa os zeros; o texto "Sem contas fixas" sai (agora conta todo gasto, decisão B) |
 | "Dia mais caro" | o maior `total` de `dias` |
 | clicar no dia filtra os lançamentos do dia | `/lancamentos?dia=` (PR 1) |
 | calendário filtrado por categoria | `/gastos/categoria` devolve os dias só dessa categoria |
@@ -269,7 +272,10 @@ categoria; plano de 90 dias com o corte no meio do mês: comparação `null` e m
 `null` (nunca zero), com `inicio_do_historico`; linha sem categoria e categoria fora do
 catálogo com `emoji` e `cor` não nulos; uma só conexão para todos os meses lidos pela rota; os 3
 maiores gastos do dia (e o desempate); `/lancamentos?dia=` com o dia de uma compra de cartão de
-outro mês.
+outro mês; lançamento com data futura no mês corrente (`valor` inclui, `valor_ate_hoje` e a
+comparação não, dia futuro agendado habilitado); categoria com entrada e saída (as 6 últimas
+compras só de saída); usuário com categoria real "Sem categoria" e linhas `NULL` (um balde, metadado
+do catálogo).
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
