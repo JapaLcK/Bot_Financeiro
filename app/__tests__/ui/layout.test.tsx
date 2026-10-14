@@ -18,7 +18,6 @@ import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 import { claro, escuro } from "@/ui/tokens";
 
 import { prepararCaso, resposta, rotear, S } from "../features/auth_apoio";
-import { abrirRotaDeEntrada } from "../features/rota_entrada_apoio";
 
 declare const global: typeof globalThis & {
   __DEV__: boolean;
@@ -119,7 +118,7 @@ describe("_layout", () => {
     });
 
     it("login bem-sucedido troca o pathname de /entrar para /resumo", async () => {
-      abrirRotaDeEntrada("/entrar");
+      renderRouter("./app", { initialUrl: "/entrar" });
       await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
       fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");

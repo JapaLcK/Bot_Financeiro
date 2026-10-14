@@ -69,7 +69,7 @@ async function liberado() {
 
 describe("tampa — quando o JS descobre", () => {
   it("(a) a montagem do provider descobre uma vez, sem esperar evento", async () => {
-    renderRouter("./app", { initialUrl: "/" });
+    renderRouter("./app", { initialUrl: "/boas-vindas" });
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
     expect(descobrir).toHaveBeenCalledTimes(1);
   });

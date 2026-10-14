@@ -6,52 +6,35 @@ import { itemDoLink, tentativaDoLink, widgetAberto } from "@/features/openFinanc
  * esquema do app (`pigbank://`, `pigbank-staging://`, `pigbank-dev://`) ou
  * Expo Go (`exp://host:porta/--/…`); e, defensivamente, o caminho cru que a
  * suíte de teste usa. Regex e não `URL`: o polyfill do Hermes é incerto aqui.
- * Premissa: o servidor só emite esses esquemas, em minúscula e sem espaço;
- * `pigbank:///…` ou `PIGBANK://…` não são descartados (não saem do fluxo real).
+ * Premissa: o servidor só emite esses esquemas, em minúscula e sem espaço.
+ * Esquema fora desta lista, `pigbank:///…` e `PIGBANK://…` caem na allowlist
+ * abaixo (descartados): não saem do fluxo real. O destino devolvido é montado
+ * aqui (`/open-finance-volta?…`), nunca o texto do link, então `/..` no link
+ * não leva a outra tela.
  */
 const VOLTA = [
-  /^[a-z][a-z0-9+.-]*:\/\/open-finance-volta(?:[/?#]|$)/,
-  /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+\/--\/open-finance-volta(?:[/?#]|$)/,
+  /^pigbank(?:-staging|-dev)?:\/\/open-finance-volta(?:[/?#]|$)/,
+  /^exp:\/\/[^/?#]+\/--\/open-finance-volta(?:[/?#]|$)/,
   /^\/open-finance-volta(?:[/?#]|$)/,
 ];
 
 /**
- * As rotas de entrada (`(auth)`) e a `auth` do retorno do Google (#604). Um
- * link `pigbank://` de FORA nunca deve levar até elas: a pessoa abriria a tela
- * de login/cadastro por um link de terceiro (e no Android, `auth` sem rota vira
- * "Unmatched Route"). Só o esquema do app e o caminho cru; `exp://` e o dev
- * client (`exp+pigbank://`) não casam de propósito.
+ * Só no desenvolvimento: Expo Go (`exp://`), dev client (`exp+pigbank…://`) e a
+ * indireção `<scheme>://expo-development-client/?url=…`, que o roteador segue
+ * até a URL de dentro. Em produção nada disso é um link legítimo.
  */
-const ENTRADA = new Set(["auth", "entrar", "criar-conta", "esqueci-senha", "boas-vindas"]);
+const DEV = /^(?:exp|exp\+pigbank(?:-staging|-dev)?):\/\/|^pigbank(?:-staging|-dev)?:\/\/expo-development-client(?:[/?#]|$)/;
 
 /**
- * O expo-router normaliza o link DEPOIS deste filtro (`new URL`: `//` repetido,
- * `(auth)` repetido, `%61`, `.`/`..`), então testar a string crua deixava
- * `pigbank:////entrar` e `/(auth)//entrar` passarem. Normaliza à mão, sem `URL`
- * (o do Hermes é incerto, como no `VOLTA` acima) e compara o primeiro segmento.
- */
-function levaAEntrada(path: string): boolean {
-  const resto = /^(?:pigbank(?:-staging|-dev)?:|(?=\/))/i.exec(path);
-  if (!resto) return false;
-  let caminho = path.slice(resto[0].length).split(/[?#]/, 1)[0] ?? "";
-  try {
-    caminho = decodeURIComponent(caminho);
-  } catch {
-    return false; // malformado: o roteador também não o resolve para uma rota
-  }
-  const segmentos: string[] = [];
-  for (const seg of caminho.replace(/[\t\n\r]/g, "").split("/")) {
-    if (seg === "..") segmentos.pop();
-    else if (seg && seg !== "." && seg.toLowerCase() !== "(auth)") segmentos.push(seg);
-  }
-  return ENTRADA.has((segmentos[0] ?? "").toLowerCase());
-}
-
-/**
- * O expo-router passa TODO link de entrada por aqui; `null` = não navega. Descarta
- * a volta do OAuth que chega com o app aberto e o widget da Pluggy em foco (ver
- * `definirWidgetAberto`) e os links para `ENTRADA`: `null` com o app aberto, `/`
- * na abertura a frio (`initial`). Qualquer outro link segue sem mudança.
+ * O expo-router passa TODO link de entrada por aqui; `null` = não navega.
+ * ALLOWLIST (#604): o app não emite deep link a não ser a volta do Open Finance
+ * (`open-finance-volta`), e o retorno do Google é lido por `openAuthSessionAsync`,
+ * não pelo roteador. Então só passam a raiz (`""`/`"/"`), a volta do Open Finance
+ * e, em `__DEV__`, os links de desenvolvimento. Todo o resto — `pigbank://entrar`,
+ * `pigbank://auth?code=…`, qualquer grafia que o roteador normalize depois (`////`,
+ * `%61`, `..`, `@`, `\`) — é `null` com o app aberto e `/` na abertura a frio
+ * (`initial`). A volta do OAuth com o app aberto e o widget da Pluggy em foco
+ * também é `null` (ver `definirWidgetAberto`).
  */
 export function redirectSystemPath({ path, initial }: { path: string; initial: boolean }): string | null {
   if (VOLTA.some((r) => r.test(path))) {
@@ -95,6 +78,6 @@ export function redirectSystemPath({ path, initial }: { path: string; initial: b
     ];
     return `/open-finance-volta${parametros.length ? `?${parametros.join("&")}` : ""}`;
   }
-  if (levaAEntrada(path)) return initial ? "/" : null;
-  return path;
+  if (path === "" || path === "/" || (__DEV__ && DEV.test(path))) return path;
+  return initial ? "/" : null;
 }

@@ -5,7 +5,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
   default: () => "light",
 }));
 
-import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { Linking } from "react-native";
 
 import { LEGENDA_WHATSAPP } from "@/features/auth/criarConta";
@@ -17,7 +17,6 @@ import { lerCredenciais } from "@/storage/secure";
 import { chamadas, credencialDe, falharEscrita, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { PENDENTE_APPLE, rotasApple, voltaDaApple } from "./apple_apoio";
 import { PENDENTE, rotasGoogle, voltaDoGoogle } from "./google_apoio";
-import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 const respirar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
@@ -36,7 +35,7 @@ afterEach(() => jest.restoreAllMocks());
 
 /** Entrar → Google → conta nova: chega em C. */
 async function irAoCadastro() {
-  abrirRotaDeEntrada("/entrar");
+  renderRouter("./app", { initialUrl: "/entrar" });
   await waitFor(() => expect(screen).toHavePathname("/entrar"));
   await waitFor(() => botao("Continuar com Google"));
   fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");
@@ -179,7 +178,7 @@ describe("(auth)/entrar — cadastro pela Apple (C/K)", () => {
   async function irAoCadastroApple() {
     rotasApple();
     voltaDaApple({ identityToken: "id-token-leo" });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
     await waitFor(() => botao("Continuar com a Apple"));
     await act(async () => {

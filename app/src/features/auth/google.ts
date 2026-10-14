@@ -12,8 +12,8 @@ import { FalhaNoCofre } from "@/storage/secure";
  * Sem JSX, como `entrar.ts`: o Jest exercita as transições com os serviços reais.
  *
  * O retorno do Google chega SÓ pelo `openAuthSessionAsync`, que devolve a URL
- * a quem abriu. Não existe rota `auth` no expo-router, e `+native-intent.ts`
- * descarta os links de entrada para ela: um `pigbank://auth?code=` vindo de
+ * a quem abriu. Não existe rota `auth` no expo-router, e `+native-intent.ts` é uma
+ * allowlist (só a volta do Open Finance passa): um `pigbank://auth?code=` vindo de
  * fora não faz nada, e é isso que fecha o login forçado por link (CSRF de login).
  * Medido SÓ no iOS: a defesa "não existe rota auth" não tem
  * medição no Android, onde o retorno do Custom Tab vem pelo `Linking` (#604).
@@ -72,7 +72,10 @@ export function lerRetorno(url: string): RetornoGoogle {
 
 /** RFC 7636 §4.1: 32 bytes aleatórios em hex = 64 caracteres [0-9a-f], 256 bits. */
 function novoVerificador(): string {
-  return Array.from(Crypto.getRandomBytes(32), (b) => b.toString(16).padStart(2, "0")).join("");
+  const bytes = Crypto.getRandomBytes(32);
+  // Sem entropia (vazio) o verifier seria "" e o RFC 7636 §4.1 pede 43+ caracteres: falha, não segue.
+  if (bytes.length !== 32) throw new Error("sem entropia");
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** RFC 7636 §4.2 (S256): base64url sem padding do SHA-256 do verifier. */

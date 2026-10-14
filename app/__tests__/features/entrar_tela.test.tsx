@@ -7,13 +7,13 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({
   default: () => estadoDoEsquema.valor,
 }));
 
-import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { router } from "expo-router";
 
 import * as authService from "@/services/auth";
 import { FalhaNoCofre, lerCredenciais } from "@/storage/secure";
 
 import { chamadas, credencialDe, prepararCaso, resposta, rotear, segurar } from "./auth_apoio";
-import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 /**
  * Drena a fila de microtarefas SEM `setTimeout(0)`: dentro de `act()` com
@@ -39,7 +39,7 @@ describe("(auth)/entrar — tela real", () => {
 
   // Têm KeyboardAvoidingView próprio: o inset automático contaria o teclado duas vezes.
   it.each(["/entrar", "/criar-conta"])("%s não ajusta o inset do teclado (já tem KeyboardAvoidingView)", async (rota) => {
-    abrirRotaDeEntrada(rota);
+    renderRouter("./app", { initialUrl: rota });
     await waitFor(() => expect(screen).toHavePathname(rota));
     expect(screen.getByTestId("tela").props.automaticallyAdjustKeyboardInsets).toBe(false);
   });
@@ -47,7 +47,7 @@ describe("(auth)/entrar — tela real", () => {
   it("B1 — enquanto o login não responde: e-mail, senha e 'Esqueci a senha' desativados; Entrar em carregando", async () => {
     const portao = segurar();
     rotear({ "/auth/login": async () => { await portao.promessa; return resposta(200, { user_id: 1, email: "a@x.com", access_token: "x", refresh_token: "y", dashboard_token: "d", expires_in: 900 }); } });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "a@x.com");
@@ -67,7 +67,7 @@ describe("(auth)/entrar — tela real", () => {
 
   it("I3 — FalhaNoCofre mostra a fase X, BLOQUEANTE: sem formulário, sem Esqueci a senha, sem Google/Apple", async () => {
     jest.spyOn(authService, "entrar").mockRejectedValueOnce(new FalhaNoCofre(new Error("keychain recusou")));
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "a@x.com");
@@ -96,7 +96,7 @@ describe("(auth)/entrar — tela real", () => {
   it("a senha fica no campo enquanto o login não responde (o iOS só oferece salvar assim) e sai quando volta o 401", async () => {
     const portao = segurar();
     rotear({ "/auth/login": async () => { await portao.promessa; return resposta(401, { detail: "E-mail ou senha incorretos." }); } });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -114,7 +114,7 @@ describe("(auth)/entrar — tela real", () => {
 
   it("Voltar do MFA: o formulário reaparece com a senha vazia", async () => {
     rotear({ "/auth/login": () => resposta(200, MFA_ANA) });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -130,16 +130,23 @@ describe("(auth)/entrar — tela real", () => {
   });
 
   it("M3 — nenhum botão social com accessibilityHint 'Em breve' (a Apple está em entrar_apple_tela)", async () => {
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     expect(screen.getByRole("button", { name: "Continuar com Google" }).props.accessibilityHint).toBeUndefined();
     expect(screen.getByRole("button", { name: "Continuar com a Apple" }).props.accessibilityHint).toBeUndefined();
   });
 
+  it("M1 — deep link frio para /esqueci-senha tem /entrar embaixo na pilha (canGoBack)", async () => {
+    renderRouter("./app", { initialUrl: "/esqueci-senha" });
+    await waitFor(() => expect(screen).toHavePathname("/esqueci-senha"));
+
+    expect(router.canGoBack()).toBe(true);
+  });
+
   it("senha errada: o aviso aparece e some quando a pessoa volta a digitar", async () => {
     rotear({ "/auth/login": () => resposta(401, { detail: "E-mail ou senha incorretos." }) });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -163,7 +170,7 @@ describe("(auth)/entrar — tela real", () => {
           ? resposta(200, credencialDe("ana@x.com"))
           : resposta(400, { detail: "Código inválido.", code: "mfa_code_invalid" }),
     });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -207,7 +214,7 @@ describe("(auth)/entrar — tela real", () => {
         return resposta(429, { detail: "Muitas tentativas." });
       },
     });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -255,7 +262,7 @@ describe("(auth)/entrar — tela real", () => {
         return resposta(200, credencialDe("ana@x.com"));
       },
     });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -299,7 +306,7 @@ describe("(auth)/entrar — tela real", () => {
         return resposta(200, credencialDe("ana@x.com"));
       },
     });
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     fireEvent.changeText(screen.getByLabelText("E-mail"), "ana@x.com");
@@ -334,7 +341,7 @@ describe("(auth)/entrar — dicas de preenchimento automático", () => {
   });
 
   it("e-mail e senha levam autoComplete e textContentType", async () => {
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
 
     expect(screen.getByLabelText("E-mail").props).toMatchObject({ autoComplete: "email", textContentType: "username" });

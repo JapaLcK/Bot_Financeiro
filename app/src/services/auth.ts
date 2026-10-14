@@ -117,8 +117,8 @@ async function tentativa<T>(
  * (`completarCadastroSocial`), então um abandono aqui supera a entrada em voo
  * de QUALQUER um deles. Caso real: um verify de cadastro em voo
  * em `/criar-conta`, `/entrar` empilhada por cima (por link `pigbank://` de fora
- * isso deixou de acontecer: `+native-intent.ts` descarta links de entrada para
- * as rotas `(auth)` e para `auth` (#604); sobra o dev client / `exp://`. Nem a
+ * isso deixou de acontecer: `+native-intent.ts` só deixa passar a volta do Open
+ * Finance (#604); sobra o dev client / `exp://` em `__DEV__`. Nem a
  * volta do Google nem a da Apple passam pelo expo-router — chegam pelo retorno
  * do `openAuthSessionAsync` e do `signInAsync`; no Android, sem medição),
  * login de outra conta que para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe

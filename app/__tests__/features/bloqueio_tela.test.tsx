@@ -14,7 +14,6 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { guardarCredenciais } from "@/storage/secure";
 
 import { chamadas, cofre, falharApagar, me, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
-import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 declare const global: typeof globalThis & { __dispararAppState: (v: string) => void; __definirAppState: (v: string) => void };
 
@@ -122,7 +121,7 @@ describe("trava — abertura com sessão salva", () => {
 
 describe("trava — login", () => {
   it("entrar pelo formulário nunca mostra a trava nem pede prompt", async () => {
-    abrirRotaDeEntrada("/entrar");
+    renderRouter("./app", { initialUrl: "/entrar" });
     await waitFor(() => expect(screen).toHavePathname("/entrar"));
     fireEvent.changeText(screen.getByLabelText("E-mail"), "s@x.com");
     fireEvent.changeText(screen.getByLabelText("Senha"), "s3nha");

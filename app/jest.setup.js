@@ -235,3 +235,18 @@ jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock
 // Função comum, não `jest.fn`: `jest.restoreAllMocks()` apaga a implementação de um `jest.fn` (Jest 29).
 jest.mock("expo/fetch", () => ({ fetch: (...a) => globalThis.fetch(...a) }));
 jest.mock("expo-clipboard", () => ({ setStringAsync: jest.fn(async () => true) }));
+
+// +native-intent (#604, allowlist): o `ExpoRoot` do harness entrega o `initialUrl` SEM
+// esquema ("/resumo"), forma que o app real nunca recebe (lá o link vem inteiro,
+// "pigbank://…"). Com o filtro real, todo atalho `initialUrl` para uma tela seria barrado.
+// Aqui só o caminho cru fora de `/open-finance-volta` passa intacto; o link com esquema e
+// a volta do Open Finance usam o filtro de verdade. Os testes do filtro (`native_intent_*`)
+// usam link com esquema, pelo harness fiel, ou `jest.requireActual`.
+jest.mock("./app/+native-intent", () => {
+  const real = jest.requireActual("./app/+native-intent");
+  return {
+    ...real,
+    redirectSystemPath: (a) =>
+      a.path.startsWith("/") && !a.path.startsWith("/open-finance-volta") ? a.path : real.redirectSystemPath(a),
+  };
+});

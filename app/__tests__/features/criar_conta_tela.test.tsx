@@ -16,7 +16,6 @@ import { FalhaNoCofre, guardarCredenciais, lerCredenciais } from "@/storage/secu
 
 import { S, falharEscrita, fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { CORPO, abrir, botao, campo, irAoCodigo, preencher, registers, respirar, rotas, verifies } from "./criar_conta_tela_apoio";
-import { abrirRotaDeEntrada } from "./rota_entrada_apoio";
 
 beforeEach(() => {
   prepararCaso();
@@ -57,7 +56,7 @@ describe("(auth)/criar-conta — tela real", () => {
 
   it("T3 — com sessão, /criar-conta não abre: cai na tela autenticada", async () => {
     await guardarCredenciais(S);
-    abrirRotaDeEntrada("/criar-conta");
+    renderRouter("./app", { initialUrl: "/criar-conta" });
     await waitFor(() => expect(screen).toHavePathname("/resumo"));
   });
 

@@ -141,6 +141,26 @@ describe("falha ao gerar o verifier", () => {
   });
 });
 
+describe("entropia inválida", () => {
+  // Controle negativo (medido): sem a checagem de tamanho em `novoVerificador`, o vazio
+  // gera verifier "" e a folha abre com um challenge que não prova nada.
+  it.each<[string, () => Uint8Array]>([
+    ["vazio", () => new Uint8Array(0)],
+    ["curto", () => new Uint8Array(8)],
+    ["undefined", () => undefined as never],
+  ])("getRandomBytes devolve %s: genérico, sem abrir a folha; a 2ª tentativa funciona", async (_nome, bytes) => {
+    backendComPkce();
+    voltaDoGoogle("pigbank://auth?code=code-ana");
+    jest.mocked(Crypto.getRandomBytes).mockImplementationOnce(bytes);
+
+    expect(await google()).toEqual([{ fase: "formulario", aviso: GENERICO }]);
+    expect(abrirFolha).not.toHaveBeenCalled();
+    expect(chamadas()).toEqual([]);
+
+    expect(await google()).toEqual([{ fase: "google" }]);
+  });
+});
+
 describe("cadastro social carrega o verifier até o complete-signup", () => {
   it("Google: o verifier do start atravessa cadastro-social e chega ao complete-signup", async () => {
     backendComPkce();
