@@ -55,7 +55,7 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
    outra moeda das categorias e `TOTAIS_SQL` ainda a soma no `saiu` (o teste
    `test_mes_moeda_diferente_tem_cobertura_explicita_sem_donut_falso` espera categorias 10
    contra `saiu` 110, de propósito): nesse caso a tela mostra só as categorias em reais, diz
-   quantas linhas ficaram fora (`fora_do_total`) e levanta o motivo, e o teste compara com o
+   quantas SAÍDAS ficaram fora (`saidas_em_outra_moeda`, não o `fora_do_total` do `ler`) e levanta o motivo, e o teste compara com o
    subtotal em reais, nunca com o `saiu`. Também com o motivo `arredondamento_por_grupo` a
    igualdade vale só até o centavo de arredondamento por grupo, como no `/mes-detalhes`.
 
@@ -153,7 +153,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
   descrição, valor e a chave da categoria), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
-  que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `fora_do_total`, `motivos`. Alimenta o bloco
+  que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `saidas_em_outra_moeda`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>`: o detalhe de uma categoria.
   Total, compras, valor médio, as 6 últimas compras (data, descrição, mensagem, origem, valor, feitas
@@ -204,6 +204,15 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   pendente ou transação pendente do banco pode ter gasto duplicado ou sujeito a mudança, e a tela
   não o mostra como exato (§4.3). Testes: um mês com par de conciliação pendente e um com
   transação `PENDING` do banco, cada um com o motivo na resposta.
+- **Contador próprio de saídas em outra moeda.** O `fora_do_total` do `ler` mistura finalidades:
+  `_em_reais` o incrementa para toda linha não interna em outra moeda antes de olhar o `tipo`
+  (entrada inclusa) e o `ler` soma nele os movimentos de caixinha/investimento em outra moeda.
+  Para uma tela de GASTO isso diria "saída excluída" de coisa que nunca foi saída. As duas
+  rotas devolvem `saidas_em_outra_moeda`, que conta só as saídas que ficaram fora das categorias,
+  e o motivo `outra_moeda` das rotas de gasto só sobe quando esse contador é maior que zero. O
+  extrator compartilhado devolve o contador já separado por tipo. Teste: mês com entrada em
+  outra moeda e movimento de caixinha em outra moeda, sem saída em outra moeda (contador 0, sem
+  aviso), e mês com uma saída em outra moeda (contador 1, com aviso).
 - **Descrição nunca nula nas respostas de gasto.** `descricao` do leitor pode vir `None` (lançamento
   antigo com `alvo` nulo). Em `maiores`, `ultimas` e no rótulo de estabelecimento, o servidor
   devolve sempre um texto: a descrição, ou "Sem descrição" (constante do servidor), para tooltip,
@@ -223,7 +232,7 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 | Comportamento | Fonte e decisão |
 |---|---|
 | uma linha por categoria com gasto, em ordem decrescente | `/gastos`; categoria sem gasto no mês não aparece |
-| "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `fora_do_total` o bloco avisa quantas linhas ficaram fora |
+| "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `saidas_em_outra_moeda` > 0 o bloco avisa quantas saídas ficaram fora |
 | traço e variação % contra o mês anterior no mesmo dia | `valor_ate_corte` e `anterior_ate_corte` por categoria, os dois de 1 até `dia_de_corte` (a saída com data depois do corte fica fora; a de data anterior ao mês conta como dia 1), para comparar iguais com iguais; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero. A barra e o `valor` são o mês inteiro, que inclui o lançamento com data futura, como o Saiu do Resumo |
 | "Sem categoria" | rótulo `sem categoria`; emoji e cor da constante neutra **só quando o usuário não tem categoria real com esse nome**, senão os dela (precedência da decisão 4); filtra com `categoria=sem categoria` (abaixo) |
 | clicar filtra o resto; "Limpar" | estado do cliente |
@@ -310,7 +319,7 @@ número ajustado.
 ## 7. Como conferir
 
 Pytest com Postgres real para a soma (categorias = Saiu nos meses sem `outra_moeda`;
-categorias = subtotal em reais, com `fora_do_total`, nos meses com ela) e para o isolamento entre
+categorias = subtotal em reais, com `saidas_em_outra_moeda`, nos meses com ela) e para o isolamento entre
 usuários; dois casos de saída com dia fora do mês, um de cartão e um de banco (`posted_at` de
 outro mês), ambos na linha "fora do período mostrado" e nunca num dia errado; gasto por categoria e dia somando
 o gasto da categoria; `/api/v2/lancamentos?categoria=sem categoria` devolvendo só as sem
