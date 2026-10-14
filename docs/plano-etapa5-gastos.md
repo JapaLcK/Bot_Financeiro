@@ -34,8 +34,9 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
    aparece nos lançamentos mas não no catálogo também não tem metadado. Todas essas linhas
    saem com um par emoji/cor fixo e neutro, uma constante do servidor ao lado de
    `CAT_VAZIA_LABEL` (o valor exato é escolhido no PR 1 com a skill `pigbank-frontend`), e o
-   nome é a própria chave, como já faz o app (`nomeCategoria`). O contrato garante `emoji` e
-   `cor` não nulos em toda linha, para a tela nunca depender de fallback no cliente.
+   nome é a própria chave, como já faz o app (`nomeCategoria`). O contrato de `/gastos` e `/gastos/categoria`
+   garante `emoji` e `cor` não nulos em toda linha, para a tela nunca depender de fallback no
+   cliente (o `/api/v2/categorias` fica só com o catálogo, §4.1).
    **Precedência:** o catálogo do usuário sempre ganha. Se existe uma categoria real chamada
    "Sem categoria", o balde único (`cat_key_sql` junta essas linhas e as `NULL`) usa o nome, o
    emoji e a cor dela; a constante neutra só vale quando não há linha de catálogo para a chave.
@@ -181,8 +182,11 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   mostrado>`, porque o cartão entra pelo mês da fatura (`period_end`), não pelo dia da compra: a
   compra de 28 de setembro de uma fatura de outubro só aparece com `mes=outubro`. Teste: essa
   compra, pedida com `mes=outubro&dia=28 de setembro` (aparece) e com `mes=setembro` (não aparece).
-- `GET /api/v2/categorias` passa a devolver `emoji` e `cor` (com a regra da decisão 4 para a
-  linha sem catálogo).
+- `GET /api/v2/categorias` passa a devolver `emoji` e `cor`, **só do catálogo** (`user_categories`):
+  ele não tem mês nem linhas de gasto, então não conhece a categoria `NULL` nem a que só aparece
+  nos lançamentos, e não ganha entrada sintética. O fallback neutro da decisão 4 é aplicado por
+  `/gastos` e `/gastos/categoria`, que têm as linhas de gasto: cada categoria que elas devolvem
+  sai com `emoji` e `cor` do catálogo ou, sem linha de catálogo, a constante neutra.
 - Arredondamento: a rota aplica `soma_arredondada_diverge` (`api/nativo/dinheiro.py`, importar
   ou extrair para um lugar comum; nunca copiar) e levanta `arredondamento_por_grupo`, com o caso
   de duas despesas de `1.005` em categorias diferentes (categorias `2.02` × `saiu` `2.01`). O
