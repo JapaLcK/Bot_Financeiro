@@ -39,7 +39,7 @@ from db import resumo_mes
 from core.observability import _log_falha
 from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
 from utils_date import _tz, now_tz, today_tz
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
 from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
@@ -585,6 +585,8 @@ def _add_launch_execute(user_id: int, args: dict[str, Any]) -> str:
         return "🐷 Valor inválido."
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
+    if not valor_valido(valor):
+        return "🐷 Valor inválido."
 
     from core.handlers import forma_pagamento as fp
     from core.handlers.launches import add_from_entities

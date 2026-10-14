@@ -9,7 +9,7 @@ import db
 from db.accounts import _TIPO_ALIASES
 from utils_text import (
     fmt_brl, is_internal_category, canonicalize_category_label, normalize_text,
-    merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS,
+    merchant_key, RECURRING_SUGGESTION_BLOCKLIST, CATEGORY_LABELS, valor_valido,
 )
 from utils_date import (
     launch_day, extract_date_from_text, today_tz, parse_period_from_text,
@@ -1127,7 +1127,7 @@ def add_from_entities(
     fila de multi-lançamento: outra recuperação pode ter recriado a fila entre
     a reivindicação e a oferta final.
     """
-    if valor <= 0:
+    if not valor_valido(valor):
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
 
     from core.handlers import forma_pagamento as fp

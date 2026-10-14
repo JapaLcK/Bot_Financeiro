@@ -857,6 +857,22 @@ def _pt_words_to_int(phrase: str) -> int | None:
     return total if found else None
 
 
+# Teto de um valor de dinheiro vindo de fora: o mesmo `le=1_000_000_000` do
+# `decision_simulator`. `numeric` do Postgres grava NaN, Infinity e 1e308.
+VALOR_MAX = 1_000_000_000
+
+
+def valor_valido(v) -> bool:
+    """True se `v` é número finito, > 0 e <= VALOR_MAX. `float("nan") <= 0` é
+    False, então o guard `v <= 0` sozinho deixa NaN passar; `parse_money` devolve
+    `inf` para dígitos enormes."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return False
+    return isfinite(f) and 0 < f <= VALOR_MAX
+
+
 def parse_money(text: str) -> float | None:
     # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
     # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito

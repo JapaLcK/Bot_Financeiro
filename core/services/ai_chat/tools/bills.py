@@ -265,7 +265,7 @@ def _resolve_date(s: Any, days: Any = None) -> date | None:
 
 def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     from db.bills import create_boleto
-    from utils_text import fmt_brl
+    from utils_text import fmt_brl, valor_valido
 
     name = (args.get("name") or "").strip()
     if not name:
@@ -275,7 +275,7 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
         amount = float(amount)
     except (TypeError, ValueError):
         amount = 0.0
-    if amount <= 0:
+    if not valor_valido(amount):
         return "🐷 Qual o valor do boleto?"
     due = _resolve_date(args.get("due_date"), args.get("days"))
     if due is None:

@@ -15,6 +15,8 @@ from decimal import Decimal
 from math import isfinite
 from typing import Any
 
+from utils_text import valor_valido
+
 from .connection import get_conn
 
 logger = logging.getLogger(__name__)
@@ -95,7 +97,7 @@ def create_boleto(user_id: int, name: str, amount: float, due_date: Any,
     """Cria um BOLETO AVULSO (agenda de boletos) — sem recorrência. name =
     fornecedor/descrição, valor obrigatório (>0), due_date = vencimento."""
     nome = (name or "").strip() or "Boleto"
-    if amount is None or float(amount) <= 0:
+    if not valor_valido(amount):
         raise ValueError("VALOR_INVALIDO")
     due = _parse_due(due_date)
     cat = (category or "").strip() or None
