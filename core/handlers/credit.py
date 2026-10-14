@@ -1065,8 +1065,6 @@ def _create_installments(
     category_reason: str = "manual",
 ) -> str:
     """Cria as parcelas no banco e retorna a mensagem de confirmação."""
-    if not valor_valido(valor):
-        return "❌ Valor inválido."
     from datetime import date as _date
     if isinstance(purchased_at, str):
         purchased_at = _date.fromisoformat(purchased_at)

@@ -119,6 +119,25 @@ def test_whatsapp_limite_do_cartao_recusa_valor_absurdo():
     assert db.get_card_by_id(uid, cid)["credit_limit"] is None
 
 
+def test_whatsapp_limite_do_cartao_legitimo_grava():
+    uid, cid = _usuario_com_cartao()
+
+    _diga(uid, "definir limite nubank 5000")
+
+    assert float(db.get_card_by_id(uid, cid)["credit_limit"]) == 5000.0
+
+
+def test_tool_compra_grande_e_legitima_passa():
+    """Fixa o teto: se `VALOR_MAX` baixar, compra grande de verdade volta a ser recusada."""
+    from core.services.ai_chat.tools.cards import _add_credit_purchase_execute
+
+    uid, _ = _usuario_com_cartao()
+    msg = _add_credit_purchase_execute(uid, {"valor": 999_999_999, "descricao": "imovel"})
+
+    assert "Compra no Crédito Registrada" in msg
+    assert [float(t) for t in _faturas(uid)] == [999_999_999.0]
+
+
 # ── camada do banco (rotas que não passam pelo handler) ────────────────────
 
 @pytest.mark.parametrize("v", [float("nan"), float("inf"), 1e308])

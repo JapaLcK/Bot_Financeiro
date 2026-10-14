@@ -104,6 +104,8 @@ def test_painel_cartao_limite_legitimo_segue_igual(limite):
                content=f'{{"name":"Card","closing_day":10,"due_day":17,"credit_limit":{limite}}}')
 
     assert r.status_code == 200, r.text
+    cartao = _linhas("select credit_limit from credit_cards where user_id=%s", uid)[0]
+    assert float(cartao["credit_limit"] or 0) == float(limite)
 
 
 @pytest.mark.parametrize("v", [float("nan"), float("inf"), 1e308])
@@ -132,7 +134,7 @@ def test_banco_boleto_edicao_normal_segue_igual():
 
 # ── mensagens das tools da IA (o usuário não vê "tenta de novo") ───────────
 
-@pytest.mark.parametrize("v", [float("nan"), 1e308, 10**400])
+@pytest.mark.parametrize("v", [float("nan"), 1e308, 10**400, 2_000_000_000])
 def test_tools_dizem_valor_invalido_e_nao_convidam_a_repetir(v):
     from core.services.ai_chat.tools.bills import _add_boleto_execute
     from core.services.ai_chat.tools.cards import _add_credit_purchase_execute
@@ -144,5 +146,6 @@ def test_tools_dizem_valor_invalido_e_nao_convidam_a_repetir(v):
 
     assert _add_credit_purchase_execute(uid, {"valor": v, "descricao": "x"}) == "🐷 Valor inválido."
     assert _add_launch_execute(uid, {"tipo": "despesa", "valor": v, "descricao": "x"}) == "🐷 Valor inválido."
-    if v != 10**400:  # o boleto converte com `except -> 0.0`
-        assert _add_boleto_execute(uid, {"name": "IPTU", "amount": v, "due_date": "2026-12-15"}) == "🐷 Qual o valor do boleto?"
+    # `10**400` estoura em `float()` e o boleto trata como "sem valor"; o resto é valor lido e recusado
+    esperado = "🐷 Qual o valor do boleto?" if v == 10**400 else "🐷 Valor inválido."
+    assert _add_boleto_execute(uid, {"name": "IPTU", "amount": v, "due_date": "2026-12-15"}) == esperado

@@ -1127,8 +1127,10 @@ def add_from_entities(
     fila de multi-lançamento: outra recuperação pode ter recriado a fila entre
     a reivindicação e a oferta final.
     """
-    if not valor_valido(valor):
+    if valor <= 0:
         return "Não consegui identificar o valor. Tente: *gastei 50 no mercado*"
+    if not valor_valido(valor):  # NaN, inf ou acima do teto: o valor foi lido, só não cabe
+        return "❌ Valor inválido."
 
     from core.handlers import forma_pagamento as fp
     if fp.decidir(user_id, forma_pagamento) != fp.CARTEIRA:

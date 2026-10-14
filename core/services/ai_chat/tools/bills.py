@@ -273,10 +273,12 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     amount = args.get("amount")
     try:
         amount = float(amount)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         amount = 0.0
-    if not valor_valido(amount):
+    if amount <= 0:
         return "🐷 Qual o valor do boleto?"
+    if not valor_valido(amount):
+        return "🐷 Valor inválido."
     due = _resolve_date(args.get("due_date"), args.get("days"))
     if due is None:
         return "🐷 Qual o vencimento do boleto? (ex: 15/08)"
