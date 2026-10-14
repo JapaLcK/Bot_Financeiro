@@ -41,8 +41,8 @@ def test_minimo_e_a_regra_frouxa():
 
 def test_dois_creditos_mensais_detectam_com_valor_do_ultimo_e_dia_da_cadeia():
     (c,) = receitas_do_extrato([L(MESES[1], "1000"), L(MESES[2], "1100", nome="EMPRESA X LTDA")])
-    assert (c["direcao"], c["valor"], c["dia"], c["ultima"], c["cartao"], c["conta"], c["nome"]) == (
-        "entrada", D("1100"), 5, MESES[2], False, 1, "EMPRESA X LTDA")
+    assert (c["direcao"], c["valor"], c["dia"], c["ultima"], c["cartao"], c["grupos"], c["nome"]) == (
+        "entrada", D("1100"), 5, MESES[2], False, [{1}], "EMPRESA X LTDA")
     assert c["id"].startswith("extrato#") and len(c["id"]) == len("extrato#") + 16
 
 
@@ -93,14 +93,15 @@ def test_credito_duplicado_conta_uma_vez():
     assert c["ultima"] == MESES[2] and c["valor"] == D("1000")  # não somou a duplicata
 
 
-def test_creditos_do_mesmo_dia_somam_e_a_conta_e_a_do_maior():
-    """Salário + vale do mesmo CNPJ no mesmo dia: sem a soma o intervalo 0 mata a cadeia."""
+def test_creditos_do_mesmo_dia_somam_e_cada_parcela_guarda_as_contas_das_copias():
+    """Salário + vale do mesmo CNPJ no mesmo dia: sem a soma o intervalo 0 mata a cadeia. Cópia idêntica
+    em outra conta entra no grupo da parcela, não vira outra parcela (não dobra)."""
     for ordem in (1, -1):
         linhas = []
         for d in MESES:
             linhas += [L(d, "5000", conta_=1), L(d, "800", desc="VALE", conta_=2)][::ordem]
-        (c,) = receitas_do_extrato(linhas)
-        assert (c["valor"], c["conta"]) == (D("5800"), 1)
+        (c,) = receitas_do_extrato(linhas + [L(MESES[2], "5000", conta_=3)])
+        assert c["valor"] == D("5800") and sorted(map(sorted, c["grupos"])) == [[1, 3], [2]]
 
 
 def test_credito_extra_no_mesmo_dia_so_no_ultimo_mes_soma():
@@ -294,6 +295,67 @@ def test_autotransferencia_so_vale_em_um_dia_de_distancia(user_id, dias, esperad
            for i, t in enumerate(cred)]
     semeia(user_id, [conta("acc-a", cred), conta("acc-b", deb)], [])
     assert len(entradas(ler_em(user_id))) == esperado
+
+
+def test_debito_em_conta_em_dolar_nao_e_autotransferencia(user_id):
+    """Débito de US$ 1000 não é o repasse de um salário de R$ 1000: só conta BRL entra no `not exists`
+    (o controle positivo é `test_autotransferencia_entre_contas_do_usuario_fica_fora`)."""
+    cred = mensais("in", ["1000"] * 3, desc="PIX RECEBIDO JOAO", pagador=DOC)
+    deb = [tx(f"out-{i}", "-1000", t["transaction_date"], desc="PIX ENVIADO") for i, t in enumerate(cred)]
+    semeia(user_id, [conta("acc-a", cred), conta("acc-b", deb) | {"currency": "USD"}], [])
+    assert len(entradas(ler_em(user_id))) == 3
+
+
+@pytest.mark.parametrize("fora,maior", [("a", "a"), ("a", "b"), ("b", "a"), ("b", "b"), (None, "a")],
+                         ids=["maior_fora", "menor_fora_a", "menor_fora_b", "maior_fora_b", "as_duas_na_base"])
+def test_credito_somado_de_duas_contas_so_entra_com_todas_na_base(user_id, fora, maior):
+    """Salário + vale do mesmo pagador no mesmo dia em DUAS contas: o valor
+    previsto é a soma. Com uma delas fora da base, projetar a soma seria contar dinheiro de conta excluída."""
+    db.set_balance(user_id, D(1000))
+    va, vb = ("5000", "800") if maior == "a" else ("800", "5000")
+    a = mensais("a", [va] * 3, desc="SALARIO", pagador=DOC)
+    b = mensais("b", [vb] * 3, desc="VALE", pagador=DOC)
+    semeia(user_id, [conta("acc-a", a, saldo=None if fora == "a" else "0"),
+                     conta("acc-b", b, saldo=None if fora == "b" else "0")], [])
+    es = entradas(ler_em(user_id))
+    assert len(es) == 3 and {e.valor for e in es} == {D("5800")}
+    assert all(("recorrencia_banco_conta_fora_da_base" in codigos(e)) is (fora is not None) for e in es)
+    assert all(e.incluida is (fora is None) for e in es)
+
+
+@pytest.mark.parametrize("fora,entra", [("a", True), ("b", True), (None, True), ("ambas", False)])
+@pytest.mark.parametrize("ids", [("m", "n"), ("n", "m")], ids=["a_primeiro", "b_primeiro"])
+def test_credito_duplicado_em_duas_contas_entra_se_uma_esta_na_base(user_id, fora, entra, ids):
+    """Mesmo valor, pagador e dia em A e B é a MESMA parcela: conta uma vez (não dobra) e basta uma das
+    contas na base (a que está tem o saldo), qualquer que seja a linha que a deduplicação guarda."""
+    db.set_balance(user_id, D(1000))
+    a = mensais(ids[0], ["1000"] * 3, desc="SALARIO", pagador=DOC)
+    b = mensais(ids[1], ["1000"] * 3, desc="SALARIO", pagador=DOC)
+    semeia(user_id, [conta("acc-a", a, saldo=None if fora in ("a", "ambas") else "0"),
+                     conta("acc-b", b, saldo=None if fora in ("b", "ambas") else "0")], [])
+    es = entradas(ler_em(user_id))
+    assert len(es) == 3 and {e.valor for e in es} == {D("1000")}
+    assert all(("recorrencia_banco_conta_fora_da_base" in codigos(e)) is (not entra) for e in es)
+    assert all(e.incluida is entra for e in es)
+
+
+def test_reconexao_do_mesmo_banco_nao_deixa_a_receita_fora(user_id):
+    """`CONTAS_BANCO_SQL` põe na base só a conta da conexão mais nova de cada `provider_account_id`: o
+    crédito das duas conexões vivas vem com as duas contas, e a velha nunca está na base."""
+    db.set_balance(user_id, D(1000))
+    for _ in range(2):
+        semeia(user_id, [conta("acc-a", mensais("s", ["1000"] * 3, desc="SALARIO", pagador=DOC))], [])
+    es = entradas(ler_em(user_id))
+    assert len(es) == 3 and {e.valor for e in es} == {D("1000")} and all(e.incluida for e in es)
+
+
+def test_reconexao_com_salario_e_vale_no_mesmo_dia_soma_sem_dobrar(user_id):
+    db.set_balance(user_id, D(1000))
+    for _ in range(2):
+        semeia(user_id, [conta("acc-a", mensais("a", ["5000"] * 3, desc="SALARIO", pagador=DOC)),
+                         conta("acc-b", mensais("b", ["800"] * 3, desc="VALE", pagador=DOC))], [])
+    es = entradas(ler_em(user_id))
+    assert len(es) == 3 and {e.valor for e in es} == {D("5800")} and all(e.incluida for e in es)
 
 
 def test_debito_em_cartao_de_outra_conta_nao_e_autotransferencia(user_id):

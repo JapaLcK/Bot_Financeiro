@@ -478,12 +478,15 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   eles podem diferir até 50%); valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
   documento, data e valor: pendente e efetivado, ou duas conexões do mesmo banco) conta uma vez;
   créditos do mesmo documento na mesma data **somam** num só (salário + vale; sem a soma o
-  intervalo 0 matava a cadeia), com a conta do maior.
+  intervalo 0 matava a cadeia); cada parcela somada guarda as contas das suas cópias idênticas
+  (`grupos`) e a receita só entra se TODA parcela tem pelo menos UMA conta na base (parcelas diferentes somam: todas precisam;
+  cópias da mesma, como a mesma conta em duas conexões vivas, bastam por uma), senão fica `incluida=False`
+  com `recorrencia_banco_conta_fora_da_base`.
   Ficam fora o movimento interno (`assinaturas._interno`), o rendimento (as palavras
   interest(s)/dividend(s)/dividendo(s)/rendimento(s), inteiras (`\b`: "Interestadual" não casa), na
   categoria OU na descrição; filtro só da receita), o Pix para si (pagador =
-  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta BANK do MESMO
-  usuário em ±1 dia, com limites sargáveis: com `abs(...)` no `not exists` o índice por
+  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta BANK em BRL do MESMO
+  usuário em ±1 dia (débito em dólar de mesmo número não conta), com limites sargáveis: com `abs(...)` no `not exists` o índice por
   conta/data não serve e a consulta degrada com o volume). A recorrência de ENTRADA da Pluggy
   (`average_amount > 0`) deixou de ser lida (fechava a contagem dupla). Id
   `extrato#` + `hash_pii(documento)[:16]` (o campo `documentNumber` nunca sai, nem em `origem_id`,

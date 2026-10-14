@@ -119,7 +119,10 @@ def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
     por palavra inteira, na categoria OU na descrição) e o Pix para si (pagador = recebedor). Crédito idêntico (chave, data, valor)
     conta uma vez: pendente e efetivado, ou duas conexões do mesmo banco, dariam intervalo 0.
     Créditos do mesmo documento no mesmo dia SOMAM num só (salário + vale; senão o intervalo 0 mata a
-    cadeia); a conta é a do maior (determinística, ao contrário da "última").
+    cadeia). Cada parcela somada leva o conjunto das contas das suas cópias idênticas; `grupos` são
+    esses conjuntos no último crédito: a receita só entra se TODA parcela tem pelo menos UMA conta na
+    base (parcelas diferentes somam, então todas precisam; cópias da mesma parcela, como a mesma conta
+    em duas conexões, bastam por uma).
     Cadeia = de trás para frente enquanto o intervalo for 30±`TOLERANCIA_DIA`; vale com `MINIMO`
     créditos e todos a ±20% da mediana. Valor = o último. O id é um hash com pepper: o documento
     nunca sai daqui.
@@ -131,10 +134,13 @@ def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
     for r in linhas:
         doc, eu = _doc(r['pagador_doc']), _doc(r['recebedor_doc'])
         if doc and doc != eu and not _interno(r) and not _RENDIMENTO.search(f"{r['category'] or ''} {r['description']}"):
-            por_doc[doc][r['transaction_date']][r['amount']] = r
+            ja = por_doc[doc][r['transaction_date']].get(r['amount'])
+            por_doc[doc][r['transaction_date']][r['amount']] = {
+                **r, 'grupo': {r['account_id']} | (ja['grupo'] if ja else set())}
     cs = []
     for doc, por_data in por_doc.items():
-        ls = [{**max(rs.values(), key=lambda r: r['amount']), 'amount': sum(rs)} for _, rs in sorted(por_data.items())]
+        ls = [{**max(rs.values(), key=lambda r: r['amount']), 'amount': sum(rs),
+               'grupos': [r['grupo'] for r in rs.values()]} for _, rs in sorted(por_data.items())]
         i = len(ls) - 1
         while i > 0 and abs((ls[i]['transaction_date'] - ls[i - 1]['transaction_date']).days - 30) <= TOLERANCIA_DIA:
             i -= 1
@@ -146,7 +152,7 @@ def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
         cs.append({'id': 'extrato#' + hash_pii(doc)[:16], 'direcao': 'entrada',
                    'nome': ult['pagador_nome'] or ult['description'], 'descricao': ult['description'],
                    'valor': ult['amount'], 'dia': dia_da_cadeia(seq), 'ultima': ult['transaction_date'],
-                   'cartao': False, 'conta': ult['account_id']})
+                   'cartao': False, 'grupos': ult['grupos']})
     return cs
 
 
@@ -224,8 +230,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
             if atrasada and d < hoje:
                 incluida = incluida and saida
                 motivos.append(_motivo(s, 'recorrencia_banco_atrasada', 'so_piora', c['id']))
-            if not c['cartao'] and c['conta'] not in contas_na_base:
-                incluida = False  # o saldo dessa conta não está na base: seria conta pela metade
+            if not c['cartao'] and not all(g & contas_na_base for g in c.get('grupos') or [{c['conta']}]):
+                incluida = False  # o saldo dessa parcela não está na base: seria conta pela metade
                 motivos.append(_motivo(s, 'recorrencia_banco_conta_fora_da_base',
                                        'so_melhora' if saida else 'so_piora', c['id']))
             if interrompida:
