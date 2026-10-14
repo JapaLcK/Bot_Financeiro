@@ -7,7 +7,7 @@ etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui
 **Estado (2026-10-14).** PR 1a feito (#998): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
 e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
 (`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna).
-PR 1b feito (#NNN): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
+PR 1b feito (#1002): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
 `db/estabelecimentos.py`). PR 2 (a tela) pendente. Onde o §4.1 e o código divergem, vale o código e o
 contrato em `docs/CLAUDE.md` ("API v2").
 

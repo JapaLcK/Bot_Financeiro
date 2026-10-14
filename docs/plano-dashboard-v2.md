@@ -783,7 +783,7 @@ o PR C.
 | 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
 | 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
-| 5 e 6 | 5: #998 (PR 1a, API do mês), #NNN (PR 1b, API da categoria); 6: nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |
+| 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria); 6: nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |
 | 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
 
 - Etapa 4, PR A (#950) e PR A2 (#954): a tabela `metas` e `GET`/`POST /api/v2/metas`
