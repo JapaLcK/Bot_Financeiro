@@ -68,8 +68,9 @@ def ler_ocorrencias(cur, user_id: int) -> list[dict]:
 
 
 # Créditos de conta corrente para a Previsão detectar receita (`receitas_do_extrato`).
-# O `not exists` tira a autotransferência: débito de mesmo valor (±R$ 0,05) em OUTRA conta
-# BANK em BRL do MESMO usuário em ±1 dia (`c2.user_id = c.user_id`, senão o débito de outro usuário
+# O `not exists` tira a autotransferência: débito de mesmo valor (±R$ 0,05) em OUTRA conta real
+# (`provider_account_id` diferente, não `id`: a mesma conta em duas conexões vivas, por reconexão, tem dois `id`
+# e o débito dela mesma derrubaria o salário) BANK em BRL do MESMO usuário em ±1 dia (`c2.user_id = c.user_id`, senão o débito de outro usuário
 # derrubaria o crédito). Os limites são sargáveis (data e valor sem função sobre a coluna): com
 # `abs(...)` o índice por conta/data não servia. `desde - 1` poda o débito de um dia antes da janela.
 # O documento do pagador sai só para o agrupamento, nunca para a tela.
@@ -89,7 +90,7 @@ where c.user_id = %(u)s and upper(coalesce(c.status,'')) not in {_TERMINAL}
     select 1 from open_finance_transactions t2
     join open_finance_accounts a2 on a2.id = t2.account_id
     join open_finance_connections c2 on c2.id = a2.connection_id
-    where c2.user_id = c.user_id and a2.id <> a.id and upper(a2.type) = 'BANK'
+    where c2.user_id = c.user_id and a2.provider_account_id <> a.provider_account_id and upper(a2.type) = 'BANK'
       and upper(a2.currency) = 'BRL'  -- débito em dólar de mesmo número não é o repasse deste crédito em reais
       and t2.amount < 0 and t2.amount between -t.amount - 0.05 and -t.amount + 0.05
       and t2.transaction_date between t.transaction_date - 1 and t.transaction_date + 1

@@ -485,7 +485,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Ficam fora o movimento interno (`assinaturas._interno`), o rendimento (as palavras
   interest(s)/dividend(s)/dividendo(s)/rendimento(s), inteiras (`\b`: "Interestadual" não casa), na
   categoria OU na descrição; filtro só da receita), o Pix para si (pagador =
-  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta BANK em BRL do MESMO
+  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta real (`provider_account_id` diferente, não `id`: a mesma conta em duas conexões vivas não conta) BANK em BRL do MESMO
   usuário em ±1 dia (débito em dólar de mesmo número não conta), com limites sargáveis: com `abs(...)` no `not exists` o índice por
   conta/data não serve e a consulta degrada com o volume). A recorrência de ENTRADA da Pluggy
   (`average_amount > 0`) deixou de ser lida (fechava a contagem dupla). Id

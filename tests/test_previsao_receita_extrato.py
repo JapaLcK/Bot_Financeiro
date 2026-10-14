@@ -358,6 +358,18 @@ def test_reconexao_com_salario_e_vale_no_mesmo_dia_soma_sem_dobrar(user_id):
     assert len(es) == 3 and {e.valor for e in es} == {D("5800")} and all(e.incluida for e in es)
 
 
+def test_debito_na_mesma_conta_real_vista_pela_conexao_velha_nao_derruba_o_salario(user_id):
+    """Reconexão: `acc-a` em duas conexões vivas (dois `id`). Salário 1000 e compra 1000 no mesmo dia na
+    MESMA conta real não são autotransferência; com `a2.id <> a.id` a cópia da outra conexão derrubava o salário.
+    Controle positivo: `test_autotransferencia_entre_contas_do_usuario_fica_fora` (outra conta real tira)."""
+    db.set_balance(user_id, D(1000))
+    cred = mensais("in", ["1000"] * 3, desc="SALARIO", pagador=DOC)
+    deb = [tx(f"out-{i}", "-1000", t["transaction_date"], desc="COMPRA") for i, t in enumerate(cred)]
+    for _ in range(2):
+        semeia(user_id, [conta("acc-a", cred + deb)], [])
+    assert len(entradas(ler_em(user_id))) == 3
+
+
 def test_debito_em_cartao_de_outra_conta_nao_e_autotransferencia(user_id):
     cred = mensais("in", ["1000"] * 3, desc="PIX RECEBIDO JOAO", pagador=DOC)
     deb = [tx(f"out-{i}", "-1000", t["transaction_date"], desc="COMPRA") for i, t in enumerate(cred)]
