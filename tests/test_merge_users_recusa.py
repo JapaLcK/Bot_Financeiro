@@ -396,16 +396,19 @@ def _com_plano_pago(uid):
     promote_to_pro(uid)
 
 
-@pytest.mark.parametrize("prender,esperado", [
-    (lambda uid: _com_conexao_of(uid, "UPDATED"), "open_finance"),
-    (_com_plano_pago, "origem_presa"),
+@pytest.mark.parametrize("prender,esperado,destino_com_login", [
+    (lambda uid: _com_conexao_of(uid, "UPDATED"), "open_finance", True),
+    (_com_plano_pago, "origem_presa", True),
     # PAUSED é trial vencido (o item nem existe mais): não prende. Os dois lados têm
     # login, então a recusa que sobra é a última da fila, `apagaria_login` (#635).
-    (lambda uid: _com_conexao_of(uid, "PAUSED"), "apagaria_login"),
-], ids=["open_finance_vivo", "plano_pago", "open_finance_pausado"])
-def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, esperado):
+    (lambda uid: _com_conexao_of(uid, "PAUSED"), "apagaria_login", True),
+    # Destino sem login: a junção acontece, e a conexão PAUSED vai para o destino.
+    (lambda uid: _com_conexao_of(uid, "PAUSED"), None, False),
+], ids=["open_finance_vivo", "plano_pago", "open_finance_pausado", "open_finance_pausado_junta"])
+def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, esperado, destino_com_login):
     wa_phone, wa_uid = _wa_dono_do_numero()
-    _conta_site(user_id, wa_phone)
+    if destino_com_login:
+        _conta_site(user_id, wa_phone)
     with get_conn() as conn:
         with conn.cursor() as cur:
             # como o uid 832398038: a origem tem cadastro web, com OUTRO telefone
@@ -420,22 +423,27 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
         assert _dono_do_numero(wa_phone) == wa_uid
     else:
         assert _dono_do_numero(wa_phone) == user_id
+        assert _foto(user_id)["open_finance_connections"] == 1, "a conexão não foi para o destino"
 
 
-@pytest.mark.parametrize("status,plano,com_cus,esperado", [
+@pytest.mark.parametrize("status,plano,com_cus,esperado,destino_com_login", [
     # Codex P1: checkout aberto — o `checkout.session.completed` chegaria depois
-    ("inactive", "free", True, "origem_presa"),
-    ("canceled", "pro", True, "origem_presa"),  # estorno/disputa de cobrança antiga
-    ("active", "free", True, "origem_presa"),
-    ("past_due", "pro", True, "origem_presa"),
+    ("inactive", "free", True, "origem_presa", True),
+    ("canceled", "pro", True, "origem_presa", True),  # estorno/disputa de cobrança antiga
+    ("active", "free", True, "origem_presa", True),
+    ("past_due", "pro", True, "origem_presa", True),
     # grant Pix vencido deixou `active`: sem cliente, não prende; sobra o login (#635)
-    ("active", "free", False, "apagaria_login"),
-], ids=["checkout_aberto", "canceled", "active_plano_vencido", "past_due", "sem_customer"])
-def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esperado):
+    ("active", "free", False, "apagaria_login", True),
+    # Destino sem login: a junção acontece, e o login da origem vai para o destino.
+    ("active", "free", False, None, False),
+], ids=["checkout_aberto", "canceled", "active_plano_vencido", "past_due", "sem_customer",
+        "sem_customer_junta"])
+def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esperado, destino_com_login):
     """Dono (2026-09-27): qualquer `stripe_customer_id` na origem recusa. O plano
     está vencido em todos os casos — é só o cliente Stripe que prende."""
     wa_phone, wa_uid = _wa_dono_do_numero()
-    _conta_site(user_id, wa_phone)
+    if destino_com_login:
+        _conta_site(user_id, wa_phone)
     cus = f"cus_{uuid.uuid4().hex[:14]}" if com_cus else None
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -453,3 +461,5 @@ def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esp
         assert _dono_do_numero(wa_phone) == wa_uid
     else:
         assert origem == [] and _dono_do_numero(wa_phone) == user_id
+        destino = _sql("select last_payment_status from auth_accounts where user_id=%s", (user_id,))
+        assert destino == [{"last_payment_status": status}], "o login da origem não foi para o destino"
