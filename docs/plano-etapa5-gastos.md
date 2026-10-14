@@ -28,13 +28,24 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
    Regra e medição no §3.1.
 4. Categorias: **mantêm-se as existentes e as que o usuário criou**; o usuário personaliza.
    Já existe: `user_categories` guarda `name`, `emoji` e `color` por usuário, e o painel antigo
-   tem o modal de criar/editar. A v2 lê emoji e cor dali; não inventa paleta.
+   tem o modal de criar/editar. A v2 lê emoji e cor dali; não inventa paleta. **Exceção única,
+   para a linha sem linha no catálogo:** "Sem categoria" (`NULL`) não existe em
+   `user_categories` (o seed não a tem e o importador ignora nome nulo), e uma categoria que
+   aparece nos lançamentos mas não no catálogo também não tem metadado. Todas essas linhas
+   saem com um par emoji/cor fixo e neutro, uma constante do servidor ao lado de
+   `CAT_VAZIA_LABEL` (o valor exato é escolhido no PR 1 com a skill `pigbank-frontend`), e o
+   nome é a própria chave, como já faz o app (`nomeCategoria`). O contrato garante `emoji` e
+   `cor` não nulos em toda linha, para a tela nunca depender de fallback no cliente.
 5. Gasto sem categoria aparece como **"Sem categoria"**.
 6. Investimento conta no orçamento geral (decisão anterior): a compra de renda variável gravada
    como despesa entra em "Para onde vai". Não entram o depósito em caixinha nem o aporte
    (`deposito_caixinha`, `aporte_investimento`): são "guardado" (§5, P8).
-7. O histórico respeita a janela do plano (`history_earliest_date`); o corte aparece com o
-   motivo `inicio_do_historico`, não como mês zerado.
+7. O histórico respeita a janela do plano (`history_earliest_date`, que no plano de 90 dias
+   pode cair no MEIO de um mês). Regra única, a mesma de `db/resumo_mes.py` (`anterior = None`
+   quando o corte toca qualquer parte do mês anterior): **mês só entra em comparação ou série se
+   o intervalo inteiro dele está disponível**; senão sai `null` (nunca zero, nunca parcial com
+   cara de exato) e a resposta leva `inicio_do_historico`. Vale para o mês anterior da
+   comparação "até o mesmo dia" e para cada mês dos "últimos meses" de uma categoria.
 8. Critério de aceite: a soma das categorias bate com o **Saiu** do Resumo do mesmo mês, **nos
    meses sem `outra_moeda`**. Com `outra_moeda`, `db/mes_detalhes._em_reais` tira a linha em
    outra moeda das categorias e `TOTAIS_SQL` ainda a soma no `saiu` (o teste
@@ -144,11 +155,11 @@ quantidade}`, `dias {dia, entrou, saiu}` (sem categoria), `origens`, `guardado`,
 | A tela promete | Fonte hoje | O que o PR 1 acrescenta |
 |---|---|---|
 | gasto por categoria no mês | `ler.categorias` | nada |
-| variação contra o mês anterior até o mesmo dia | não existe (só o total por categoria) | `ler` (aditivo; o contrato nativo não muda) devolve o gasto por categoria **e por dia**; a rota chama `ler` no mês e no mês anterior e soma o anterior até o dia N. Duas leituras, dois snapshots: limite declarado |
+| variação contra o mês anterior até o mesmo dia | não existe (só o total por categoria) | `ler` (aditivo; o contrato nativo não muda) devolve o gasto por categoria **e por dia**; a rota chama `ler` no mês e no mês anterior e soma o anterior até o dia N. Duas leituras, dois snapshots: limite declarado. Se o corte do plano toca o mês anterior (decisão 7), a comparação é `null` com `inicio_do_historico`, como o `anterior` do Resumo |
 | calendário filtrado por categoria | `ler.dias` é agregado, sem categoria | o mesmo gasto por categoria e por dia (`categorias[].dias`, completo, sem paginação: no máximo categorias × 31) |
-| últimos meses de uma categoria | não existe por mês | `ler` dos 3 últimos meses (`categorias[].valor`), cortando pela janela do plano |
+| últimos meses de uma categoria | não existe por mês | `ler` dos 3 últimos meses (`categorias[].valor`); o mês que o corte do plano toca (inteiro ou em parte) sai `null`, nunca zero (decisão 7) |
 | onde mais gasta (estabelecimentos) | `ler` não devolve linhas; o leitor oficial não expõe `raw` | consulta própria, só da categoria pedida, top 5, com `merchant.cnpj`/`paymentData.receiver.name` extraídos de `raw` (nunca o `raw`) e a regra do §3.1 |
-| linha "sem categoria" | `ler.categorias[].categoria` é `null` | rótulo `sem categoria` na resposta |
+| linha "sem categoria" | `ler.categorias[].categoria` é `null`, sem linha em `user_categories` | rótulo `sem categoria`, emoji e cor da constante neutra (decisão 4) |
 | abrir os lançamentos da categoria | `GET /api/v2/lancamentos?categoria=` | ver abaixo |
 | saídas com dia fora do mês | `ler.dias` pode trazer dia anterior ao mês | o campo "outro mês" (decisão B) |
 
@@ -208,7 +219,9 @@ categorias = subtotal em reais, com `fora_do_total`, nos meses com ela) e para o
 usuários; dois casos de saída com dia fora do mês, um de cartão e um de banco (`posted_at` de
 outro mês), ambos na linha "outro mês" e nunca num dia errado; gasto por categoria e dia somando
 o gasto da categoria; `/api/v2/lancamentos?categoria=sem categoria` devolvendo só as sem
-categoria.
+categoria; plano de 90 dias com o corte no meio do mês: comparação `null` e mês da série
+`null` (nunca zero), com `inicio_do_historico`; linha sem categoria e categoria fora do
+catálogo com `emoji` e `cor` não nulos.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
