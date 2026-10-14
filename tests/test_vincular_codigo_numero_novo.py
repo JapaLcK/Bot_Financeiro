@@ -111,19 +111,19 @@ def test_pendencia_velha_nao_engole_o_codigo(enviadas):
 
 
 def test_conta_do_site_sem_plano_vincula_com_codigo_de_outra(enviadas):
-    """D2(b): todo barrado pode mandar o código, não só o número novo."""
+    """D2(b): todo barrado pode mandar o código, não só o número novo: a resposta é a
+    do vínculo, não o "/precos". A e C têm login, então a junção apagaria o de A
+    (#635): desde o PR-2 o `merge_users` recusa, e as duas contas ficam (dono, M8)."""
     a = cadastro_novo()
     n = _numero_novo()
     db.bind_identity("whatsapp", n, a)
     c = com_plano()
 
     _manda(n, f"vincular {db.create_link_code(c)}")
-    assert _dono_do_numero(n) == c, enviadas
-    assert enviadas[0].startswith(VINCULADO), enviadas
-    # O que o `merge_users` faz com A hoje (registro, não decisão: é o PR-2). C já
-    # tem login, então o `auth_accounts` de A não migra e some com a linha `users`.
-    assert _q("select count(*) as n from users where id=%s", (a,))["n"] == 0
-    assert _q("select count(*) as n from auth_accounts where user_id=%s", (a,))["n"] == 0
+    assert enviadas == [TEXTO["apagaria_login"]], enviadas
+    assert _dono_do_numero(n) == a
+    assert _q("select count(*) as n from auth_accounts where user_id=%s", (a,))["n"] == 1
+    assert _q("select count(*) as n from auth_accounts where user_id=%s", (c,))["n"] == 1
 
 
 # D6 (dono): a recusa do `merge_users` responde o motivo verdadeiro. A origem é a
@@ -136,6 +136,9 @@ _JUNTADA = "e ela não pode ser juntada a outra automaticamente. " + _SUPORTE
 TEXTO = {
     "origem_presa": "⚠️ A conta que você usa aqui tem ou teve assinatura no site, " + _JUNTADA,
     "open_finance": "⚠️ A conta que você usa aqui tem banco conectado pelo Open Finance, " + _JUNTADA,
+    "apagaria_login": ("⚠️ Não vinculei: juntar as duas contas apagaria o login do site desta conta, "
+                       "e você perderia esse acesso. Por enquanto esse caso precisa do suporte: "
+                       "fale com a gente em suporte@pigbankai.com."),
     "autoindicacao": ("⚠️ Não deu pra vincular: uma destas contas foi indicada pela outra no "
                       "programa de afiliados, e as duas não podem virar uma só. " + _SUPORTE),
     "dados_dos_dois_lados": ("⚠️ Não deu pra vincular: sua conta do site e esta conta já têm dados "
@@ -191,7 +194,7 @@ def test_suporte_vazio_nao_deixa_texto_sem_email():
     r = subprocess.run([sys.executable, "-c", codigo], env={**os.environ, "SUPPORT_EMAIL": ""},
                        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    assert "em ." not in r.stdout and r.stdout.count("suporte@pigbankai.com") == 4, r.stdout
+    assert "em ." not in r.stdout and r.stdout.count("suporte@pigbankai.com") == 5, r.stdout
 
 
 # Bug da main desde dba20eb7: o auto-vínculo só procura o telefone do site, e um

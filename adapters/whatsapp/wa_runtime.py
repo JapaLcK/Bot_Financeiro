@@ -529,9 +529,10 @@ PRECISA_SENHA_WA = (
 # Serve aos dois status: `wa_linked_other_account` e `remetente_com_dados`.
 NAO_JUNTEI_WA = (
     "Encontrei uma conta do site com este número, mas este WhatsApp já tem um histórico "
-    "próprio, então não juntei os dois. Se a conta do site é sua, gere um código no site "
-    "e me mande: *link 123456*. Se não é sua, alguém cadastrou seu número por engano e "
-    "nada seu foi para lá."
+    "próprio, então não juntei os dois. Para usar a sua conta do site aqui: entre nela (ou "
+    "crie a sua) em pigbankai.com, gere o código de vínculo e me mande: *vincular 123456*. "
+    "Se essa conta do site não é sua, alguém cadastrou seu número por engano, e nada seu "
+    "foi para lá."
 )
 
 # Mesmo número/conta sem senha, mas quem NUNCA comprou (lead do remarketing, plano
@@ -559,6 +560,20 @@ _LINK_CODE_RE = re.compile(r"^(?:link|vincular)\s+\d{6}$")
 def _is_link_code_attempt(text: str) -> bool:
     from core.intent_classifier import _normalize
     return bool(_LINK_CODE_RE.match(_normalize(text or "")))
+
+
+def _isento_do_gate(message: InboundMessage, uid: int) -> bool:
+    """A mensagem tem isenção do `_paywall_gate` (ajuda, billing ou código)? Mesmo
+    critério do gate (`isencao_do_barrado`), e só para texto, como lá. Erro = False:
+    o remetente recebe o aviso, e nada junta."""
+    if message.attachments:
+        return False
+    try:
+        from core.handle_incoming import isencao_do_barrado
+        return isencao_do_barrado((message.text or "").strip(), uid)[0] is not None
+    except Exception as exc:
+        logger.warning("WA isenção do gate falhou uid=%s: %s", uid, exc)
+        return False
 
 
 def _signup_url() -> str:
@@ -965,14 +980,17 @@ def process_message(message: InboundMessage) -> None:
             # Segue na conta dele, que não tem plano: sem esta resposta, o turno
             # cairia no convite do "/precos". O código de vínculo segue para o
             # `handle_incoming` (o gate o isenta), e o opt-out (botão ou PARAR digitado)
-            # desliga as duas contas.
+            # desliga as duas contas. Ajuda e billing também seguem (T5): o mesmo
+            # critério de isenção do gate, e o turno responde como a qualquer barrado.
             if not _is_link_code_attempt(message.text or ""):
                 iid = get_interactive_id(message.raw or {})
                 if not iid and _eh_parar(message.text):
                     iid = WA_PARAR_DIGITADO_ID
-                if not _tratar_opt_out(uid, reply_to, iid, auto_link_result["target_user_id"]):
+                if _tratar_opt_out(uid, reply_to, iid, auto_link_result["target_user_id"]):
+                    return
+                if iid or not _isento_do_gate(message, uid):
                     _send_reply(reply_to, NAO_JUNTEI_WA)
-                return
+                    return
         elif auto_link_result["status"] in {
             "multiple_accounts",
             "wa_linked_other_account",

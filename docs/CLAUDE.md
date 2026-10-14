@@ -667,15 +667,17 @@ O telefone digitado no site não prova de quem é o número. Com outra conta don
 telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
 recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
 #607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
-vínculo nem mescla, e a junção é pelo `vincular CODIGO`. Exceção: o alvo já tem este número
-(com ou sem o nono dígito, conferido nos dois sentidos para um fixo não passar por celular) como
-identidade do WhatsApp, e aí junta como antes: se o remetente tinha login, ele some com a linha
-`users` (#635). A busca pelo telefone usa só os candidatos que reconhecem o número de volta
+vínculo nem mescla, e a junção é pelo `vincular CODIGO`. Vale também quando o alvo já tem
+este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
+uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
+lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
+confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
 (`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
 fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
 nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. O aviso é o `NAO_JUNTEI_WA`
 (`wa_runtime.py`): na saudação, uma vez, no primeiro status; em toda mensagem no segundo
-com alvo com credencial (sem plano, o turno cairia no "/precos"). Só o só-WhatsApp vazio
+com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
+como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
 ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber

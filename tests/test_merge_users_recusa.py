@@ -399,7 +399,9 @@ def _com_plano_pago(uid):
 @pytest.mark.parametrize("prender,esperado", [
     (lambda uid: _com_conexao_of(uid, "UPDATED"), "open_finance"),
     (_com_plano_pago, "origem_presa"),
-    (lambda uid: _com_conexao_of(uid, "PAUSED"), None),  # trial vencido: o item nem existe mais
+    # PAUSED é trial vencido (o item nem existe mais): não prende. Os dois lados têm
+    # login, então a recusa que sobra é a última da fila, `apagaria_login` (#635).
+    (lambda uid: _com_conexao_of(uid, "PAUSED"), "apagaria_login"),
 ], ids=["open_finance_vivo", "plano_pago", "open_finance_pausado"])
 def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, esperado):
     wa_phone, wa_uid = _wa_dono_do_numero()
@@ -426,7 +428,8 @@ def test_origem_com_open_finance_ou_plano_pago_nao_some(user_id, prender, espera
     ("canceled", "pro", True, "origem_presa"),  # estorno/disputa de cobrança antiga
     ("active", "free", True, "origem_presa"),
     ("past_due", "pro", True, "origem_presa"),
-    ("active", "free", False, None),  # grant Pix vencido deixou `active`: sem cliente, junta
+    # grant Pix vencido deixou `active`: sem cliente, não prende; sobra o login (#635)
+    ("active", "free", False, "apagaria_login"),
 ], ids=["checkout_aberto", "canceled", "active_plano_vencido", "past_due", "sem_customer"])
 def test_origem_com_cliente_stripe_nao_some(user_id, status, plano, com_cus, esperado):
     """Dono (2026-09-27): qualquer `stripe_customer_id` na origem recusa. O plano

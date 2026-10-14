@@ -20,12 +20,15 @@ Controles negativos (medidos no PR, ver o relato):
   "dados cada um".
 Positivo: número novo e vazio liga em B e grava nele.
 """
+import re
 import secrets
 
 import pytest
 
+import core.handle_incoming as hi
 import db
 import db.users as users
+from core.types import IncomingMessage
 import db_support
 from core.crypto import encrypt_pii_optional, hash_pii_optional
 from adapters.whatsapp import wa_runtime as wr
@@ -175,12 +178,41 @@ def test_v1_parar_digitado_desliga_a_e_b(enviadas):
     assert _dono_do_numero(n) == a and _gastos(b) == 0
 
 
+# T5 (dono, M8): no V1, ajuda e billing respondem o que respondem a qualquer barrado,
+# pelo mesmo critério de isenção do `_paywall_gate` (`isencao_do_barrado`); o aviso
+# não substitui a resposta e nada junta. A referência é o próprio gate para A.
+# Controle negativo: tirar o `_isento_do_gate` do ramo deixa todos vermelhos (só o aviso).
+@pytest.mark.parametrize("texto", ["ajuda", "Ajuda", "assinar", "plano", "cancelar"])
+def test_v1_ajuda_e_billing_respondem_como_a_um_barrado(enviadas, texto):
+    a, b, n = _v1()
+
+    _manda(n, texto)
+    gate = hi._paywall_gate(IncomingMessage(platform="whatsapp", user_id=a, text=texto,
+                                            external_id=n), "whatsapp")
+    sem_link = lambda ts: [re.sub(r"https?://\S+", "<link>", t) for t in ts]  # noqa: E731 (o de assinar é único)
+    assert sem_link(enviadas) == sem_link(m.text for m in gate), enviadas
+    assert wr.NAO_JUNTEI_WA not in enviadas
+    assert _dono_do_numero(n) == a and _gastos(b) == 0 and _gastos(a) == 1
+
+    enviadas.clear()
+    _manda(n, "gastei 50")  # mensagem comum: continua o aviso
+    assert enviadas == [wr.NAO_JUNTEI_WA], enviadas
+
+
+# "quero assinar" não é comando de billing (`billing_commands._ASSINAR_TRIGGERS`), e o
+# gate não o isenta: no V1 ele recebe o aviso, que diz a saída.
+def test_v1_quero_assinar_recebe_o_aviso(enviadas):
+    a, b, n = _v1()
+    _manda(n, "quero assinar")
+    assert enviadas == [wr.NAO_JUNTEI_WA], enviadas
+
+
 # A saída legítima de V1/V2: o código de B, que prova os dois lados. `link` é o
 # verbo que o `NAO_JUNTEI_WA` ensina; a resposta não pode falar de Discord.
 @pytest.mark.parametrize("caso,verbo,esperado", [
     ("v1", "vincular", "junta"),
     ("v1", "link", "junta"),
-    ("v2_sem_plano", "vincular", "junta"),
+    ("v2_sem_plano", "vincular", "apagaria_login"),  # #635: os dois têm login (dono, M8)
     ("v2_com_plano", "vincular", "origem_presa"),  # A pagante não some: recusa com o motivo dela
 ])
 def test_vincular_codigo_de_b_e_a_saida(enviadas, caso, verbo, esperado):
@@ -196,6 +228,7 @@ def test_vincular_codigo_de_b_e_a_saida(enviadas, caso, verbo, esperado):
     else:
         assert enviadas == [TEXTO[esperado]], enviadas
         assert _dono_do_numero(n) == a and _existe("auth_accounts", "user_id", a)
+        assert _existe("auth_accounts", "user_id", b)
 
 
 # T1 do Tester: `phone_lookup_candidates` tira o 9 de todo celular, então o celular

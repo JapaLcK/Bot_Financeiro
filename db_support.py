@@ -1195,14 +1195,14 @@ def attempt_whatsapp_phone_link_impl(
         # merge, #607), segue na conta dele, sem mesclar e sem gravar identidade;
         # a junção legítima é pelo código. `target_user_id`: a conta que digitou
         # o número recebe envios nele, e o opt-out daqui tem de desligá-la (#716).
-        # Exceção: o alvo já tem ESTE número (com ou sem o nono dígito) como
-        # identidade do WhatsApp, entregue pela Meta. Há prova dos dois lados, e o
-        # `merge_users` ainda recusa dados dos dois lados dentro do lock.
-        if ja_em_conta and not same_phone_alias:
+        # Vale também quando o alvo já tem este número em outro formato (alias): o
+        # número ser o mesmo não autoriza apagar uma conta (dono, M8). Remetente
+        # vazio segue para o merge, como qualquer outro.
+        if ja_em_conta:
             return {"status": "wa_linked_other_account", "wa_phone": wa_phone,
                     "target_user_id": target_user_id}
         with get_conn() as conn, conn.cursor() as cur:
-            if not same_phone_alias and _tem_dados_financeiros(cur, int(current_user_id)):
+            if _tem_dados_financeiros(cur, int(current_user_id)):
                 return {"status": "remetente_com_dados", "wa_phone": wa_phone,
                         "target_user_id": target_user_id}
 
