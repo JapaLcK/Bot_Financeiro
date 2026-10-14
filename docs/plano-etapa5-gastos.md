@@ -151,7 +151,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   de fevereiro); em **mês passado** é o último dia REAL do mês anterior, sem `min`, para fevereiro
   (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
   Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
-  descrição, valor e a chave da categoria), `fora_da_grade` (decisão B), `hoje` (AAAA-MM-DD no fuso do
+  descrição, valor e a chave da categoria), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `fora_do_total`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
@@ -163,7 +163,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   total da categoria**, ou seja, saída, não interna, em reais e do mesmo mês/fatura, e só o
   `raw` é lido à parte, por id de linha, para extrair `merchant.cnpj` e
   `paymentData.receiver.name`; nunca se parte de `raw` para escolher quem entra) e o calendário só dessa
-  categoria (por dia: total e os 3 maiores), com `fora_da_grade`, `hoje` e `historico_desde`. Tudo completo e sem
+  categoria (por dia: total e os 3 maiores), com `fora_da_grade` (`{quantidade, valor}`, o mesmo formato), `hoje` e `historico_desde`. Tudo completo e sem
   paginação: no máximo 31 dias × 3 maiores + 6 compras + 5 estabelecimentos + 3 meses.
 
 **Uma leitura só.** `db/mes_detalhes.ler` abre a própria conexão a cada chamada. O PR 1 separa
@@ -197,6 +197,10 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   de duas despesas de `1.005` em categorias diferentes (categorias `2.02` × `saiu` `2.01`). O
   motivo hoje é posto pela rota nativa depois do `ler`, não pelo `ler`.
 - Motivos do §4 do plano: banco desatualizado, outra moeda, início do histórico.
+- **Descrição nunca nula nas respostas de gasto.** `descricao` do leitor pode vir `None` (lançamento
+  antigo com `alvo` nulo). Em `maiores`, `ultimas` e no rótulo de estabelecimento, o servidor
+  devolve sempre um texto: a descrição, ou "Sem descrição" (constante do servidor), para tooltip,
+  nome acessível e lista nunca ficarem sem nome. Teste com despesa antiga de `alvo` nulo.
 - **Mês inteiro antes do corte do plano.** O seletor de mês do painel gera seis meses
   (`lib/v2.ts::MESES`), e o usuário de 90 dias pode escolher um que está todo antes de
   `history_earliest_date`. Nesse caso `ler` não devolve linhas e o total pareceria "R$ 0".
@@ -314,7 +318,9 @@ do catálogo); `ultimas` sem a linha interna e sem a de outra moeda na categoria
 corte no meio do mês (inclusive compra de cartão de uma fatura do mês com data anterior ao corte, e
 linha com `posted_at` anterior ao corte: na linha fixa, no total, nunca em dia hachurado): dias antes de `historico_desde` fora da média e dos "dias sem gasto";
 mês passado (comparação do mês inteiro contra o mês anterior inteiro), inclusive fevereiro contra
-janeiro (os dias 29 a 31 de janeiro entram) e, no mês corrente, 31 de março contra fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna; mês inteiro antes do corte do
+janeiro (os dias 29 a 31 de janeiro entram) e, no mês corrente, 31 de março contra fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna; `fora_da_grade` com
+`quantidade` e `valor` nas duas rotas (zeros quando vazio, soma certa quando há saída fora da grade);
+despesa antiga com `alvo` nulo em `maiores`, `ultimas` e estabelecimento ("Sem descrição"); mês inteiro antes do corte do
 plano (`disponivel: false`, sem R$ 0); primeiro acesso com `user_categories` vazia.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
