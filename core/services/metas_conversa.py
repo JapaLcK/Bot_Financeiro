@@ -140,6 +140,11 @@ def para_conversa(d: dict) -> dict:
     itens = []
     for m in metas[:MAX_METAS]:
         resumo = _resumo(m, d["custo_mensal"])
+        # espelha `fraseCusto` do .ts: com custo (valor) o único motivo possível é o de leitura velha;
+        # só onde o resumo fala do alvo (reserva com saldo e alvo)
+        if m["tipo"] == "reserva" and m["alvo"] is not None and m["atual"] is not None and d["custo_mensal"]["valor"] \
+                and "recorrencias_banco_nao_lidas" in d["custo_mensal"]["motivos"]:
+            resumo += f" {FRASE_CUSTO['recorrencias_banco_nao_lidas']} O valor pode estar velho."
         itens.append({"nome": m["nome"], "tipo": m["tipo"], "fonte": m["fonte"]["rotulo"],
                       "resumo": resumo, "avisos": _avisos(m, resumo)})
     sobra = len(metas) - MAX_METAS

@@ -279,3 +279,31 @@ def test_turno_do_chat_le_a_chave_uma_vez_com_list_metas(kn, monkeypatch):
     assert runner.chat(k, "como estão minhas metas", monthly_limit=100) == "Pronto."
     assert len(reg.creates) == 2 and len(lidas) == 1
     assert "sem_metas" in reg.creates[1]["messages"][-1]["content"]  # positivo: a tool rodou como K
+
+
+# ── custo com leitura velha: o alvo da reserva não sai como exato (espelha `fraseCusto` do .ts) ──
+
+VELHO = " Não consegui ler as cobranças do banco agora. O valor pode estar velho."
+CUSTO_VELHO = {"valor": "3000.00", "recorrencias": 5, "motivos": ["recorrencias_banco_nao_lidas"]}
+
+
+def _resumo_e_avisos(nome, custo):
+    (i,) = conversa(meta_de(nome), custo=custo)["metas"]
+    return i["resumo"], i["avisos"]
+
+
+def test_reserva_com_custo_velho_avisa_no_resumo_sem_duplicar_nos_avisos():
+    r, avisos = _resumo_e_avisos("Reserva de emergência", CUSTO_VELHO)
+    assert "faltam R$ 13.500,00." in r and r.endswith("." + VELHO) and r.count("velho") == 1 and avisos == []
+
+
+def test_reserva_com_custo_em_dia_e_meta_comum_nao_avisam():  # positivos: o aviso não vaza
+    assert "velho" not in _resumo_e_avisos("Reserva de emergência", {**CUSTO_VELHO, "motivos": []})[0]
+    assert "velho" not in _resumo_e_avisos("Viagem pro Japão", CUSTO_VELHO)[0]
+
+
+def test_reserva_sem_alvo_segue_com_a_frase_do_custo():
+    custo = {"valor": None, "recorrencias": 0, "motivos": ["recorrencias_banco_nao_lidas"]}
+    m = meta_de("Reserva de emergência", alvo=None, falta=None, por_mes=None, percentual=None)
+    (i,) = conversa(m, custo=custo)["metas"]
+    assert i["resumo"].endswith("Ainda não sei o tamanho da reserva: " + mc.FRASE_CUSTO["recorrencias_banco_nao_lidas"])
