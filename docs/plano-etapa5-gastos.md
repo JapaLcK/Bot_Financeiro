@@ -146,9 +146,10 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   `anterior_ate_corte` (o mês anterior, de 1 até o mesmo `dia_de_corte`; `null` pela decisão 7).
   **`dia_de_corte`** é a regra do corte, no servidor: no mês corrente, o dia de `hoje`; em mês
   passado, o último dia do mês escolhido (comparação do mês inteiro contra o mês anterior
-  inteiro, como o protótipo, que usa 31 fora do mês corrente). O corte do mês anterior é
-  `min(dia_de_corte, último dia do mês anterior)`, por exemplo 31 de março contra fevereiro vira
-  o fim de fevereiro. Mês futuro continua 422, como `resumo-do-mes`.
+  inteiro, como o protótipo, que usa 31 fora do mês corrente). O corte do mês anterior depende do caso: no **mês corrente** é
+  `min(dia_de_corte, último dia do mês anterior)` (hoje 31 de março contra fevereiro vira o fim
+  de fevereiro); em **mês passado** é o último dia REAL do mês anterior, sem `min`, para fevereiro
+  (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
   Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
   descrição, valor e a chave da categoria), `outro_mes` (decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
@@ -186,12 +187,23 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   ele não tem mês nem linhas de gasto, então não conhece a categoria `NULL` nem a que só aparece
   nos lançamentos, e não ganha entrada sintética. O fallback neutro da decisão 4 é aplicado por
   `/gastos` e `/gastos/categoria`, que têm as linhas de gasto: cada categoria que elas devolvem
-  sai com `emoji` e `cor` do catálogo ou, sem linha de catálogo, a constante neutra.
+  sai com `emoji` e `cor` do catálogo ou, sem linha de catálogo, a constante neutra. O catálogo
+  nasce vazio e só é semeado pelo `/categorias` (`ensure_user_categories_seeded`); as duas rotas
+  de gasto chamam a mesma função **antes** de ler o catálogo, para que o primeiro acesso, sem
+  nenhum `/categorias` antes, não dê o fallback neutro a categorias canônicas como alimentação.
+  Teste: primeiro acesso com `user_categories` vazia.
 - Arredondamento: a rota aplica `soma_arredondada_diverge` (`api/nativo/dinheiro.py`, importar
   ou extrair para um lugar comum; nunca copiar) e levanta `arredondamento_por_grupo`, com o caso
   de duas despesas de `1.005` em categorias diferentes (categorias `2.02` × `saiu` `2.01`). O
   motivo hoje é posto pela rota nativa depois do `ler`, não pelo `ler`.
 - Motivos do §4 do plano: banco desatualizado, outra moeda, início do histórico.
+- **Mês inteiro antes do corte do plano.** O seletor de mês do painel gera seis meses
+  (`lib/v2.ts::MESES`), e o usuário de 90 dias pode escolher um que está todo antes de
+  `history_earliest_date`. Nesse caso `ler` não devolve linhas e o total pareceria "R$ 0".
+  As duas rotas devolvem `disponivel: false` (com `inicio_do_historico`), sem categorias nem
+  totais, e a tela mostra "Este mês está fora do seu histórico", nunca zero. Observação fora do
+  escopo: `resumo-do-mes` tem a mesma situação (soma 0 com o motivo, sem distinguir) e a tela do
+  Resumo deve ser conferida pelo mesmo critério em PR próprio.
 - Sem tabela nova, então `db/privacy.py` não muda. Teste de isolamento "B não vê o que é de A".
 
 ### 4.2 Inventário do protótipo: o que cada bloco faz e de onde vem
@@ -296,8 +308,9 @@ comparação não, dia futuro agendado habilitado); categoria com entrada e saí
 compras só de saída, sem interno nem outra moeda); usuário com categoria real "Sem categoria" e linhas `NULL` (um balde, metadado
 do catálogo); `ultimas` sem a linha interna e sem a de outra moeda na categoria; plano de 90 dias com o
 corte no meio do mês: dias antes de `historico_desde` fora da média e dos "dias sem gasto";
-mês passado (comparação do mês inteiro contra o mês anterior inteiro) e mês de 31 dias contra
-fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna.
+mês passado (comparação do mês inteiro contra o mês anterior inteiro), inclusive fevereiro contra
+janeiro (os dias 29 a 31 de janeiro entram) e, no mês corrente, 31 de março contra fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna; mês inteiro antes do corte do
+plano (`disponivel: false`, sem R$ 0); primeiro acesso com `user_categories` vazia.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
