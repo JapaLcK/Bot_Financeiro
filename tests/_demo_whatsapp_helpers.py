@@ -145,11 +145,18 @@ def _demo_limpo(monkeypatch):
     conversa._hist.clear()
 
 
-def _conta_com_telefone(n: str) -> int:
+def _conta_com_telefone(n: str, sem_credencial: bool = False) -> int:
+    """Conta do site com `n` digitado como telefone. `sem_credencial`: a do quiz, a única
+    cujo telefone o bot ainda lê (`precisa_senha`, PR-5); o telefone de conta COM senha
+    não liga nada nem classifica (`no_match`), e o demo atende."""
     uid = cadastro_novo()
     _q("update auth_accounts set phone_e164 = %s, phone_hash = %s where user_id = %s",
        (n, hash_pii(n, kind="phone"), uid))
+    if sem_credencial:
+        _q("update auth_accounts set password_hash = null where user_id = %s", (uid,))
+        _q("delete from auth_identities where user_id = %s", (uid,))
     db_support.invalidate_auth_user_cache(uid)
+    assert db.conta_sem_credencial(uid) == sem_credencial
     return uid
 
 

@@ -70,10 +70,9 @@ from test_wa_botao_velho_no_corte import (  # noqa: F401  (fixtures por import)
 # ÚLTIMA linha (`return True`) por `return False`. **Não** "troque o corpo": há
 # dois imports de `_paywall_gate` no arquivo, e aplicar a instrução no primeiro
 # quebra a coleção com `SyntaxError` — a instrução ambígua fazia o leitor medir
-# outra coisa. VERMELHOS:
-#   `test_cortado_continua_recebendo_AJUDA_mas_a_dele`
-#   `test_cortado_tocando_TUTORIAL_no_menu_de_ajuda_nao_recebe_o_tour`
-#   `test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour`
+# outra coisa. VERMELHO (medido no PR-5, só um): `test_cortado_continua_recebendo_AJUDA_mas_a_dele`.
+# O `TUTORIAL_no_menu` não fica vermelho: o AssertionError dele é engolido pelo `except Exception`
+# do menu (já era assim na main). O do `oi` depois do auto-link saiu no PR-5.
 #
 # Direção das três: o produto convida quem não tem acesso a registrar um gasto,
 # e o registro seguinte é recusado — a pior ordem possível das duas mensagens.
@@ -161,7 +160,7 @@ def test_cortado_continua_recebendo_AJUDA_mas_a_dele(monkeypatch, bancada):
 #   (b) `ajuda tutorial` / `help tutorial` / `ajuda guia` — `classify` os chama
 #       de `help` (regra `^(ajuda|help)\s+\w+`) e `resolve_section` devolve
 #       `"tutorial"`. Decidir pelo CLASSIFICADOR era a pergunta errada;
-#   (c) a SAUDAÇÃO depois do auto-link, acima de tudo no arquivo.
+#   (c) (removida no PR-5) a SAUDAÇÃO depois do auto-link: o vínculo por telefone e o tour que ele dava saíram.
 #
 # O conserto não fecha as três portas: move a decisão para o DESTINO. Se vai
 # renderizar ajuda, o cortado recebe a seção `sem_acesso` — venha ele por onde
@@ -188,28 +187,6 @@ def test_cortado_tocando_TUTORIAL_no_menu_de_ajuda_nao_recebe_o_tour(monkeypatch
         _ for _ in ()).throw(AssertionError("o cortado recebeu a seção do menu")))
 
     _clique(uid, monkeypatch, "help_tutorial")
-
-    assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
-
-
-def test_cortado_dizendo_oi_depois_do_autolink_nao_recebe_o_tour(monkeypatch, bancada):
-    """Porta (c): a saudação, no topo do arquivo, antes de qualquer gate."""
-    respostas, _ = bancada
-    uid = _conta(cortada=True)
-
-    import adapters.whatsapp.wa_runtime as wr
-    monkeypatch.setattr(wr, "send_welcome", lambda *a, **k: (
-        _ for _ in ()).throw(AssertionError("o cortado recebeu o welcome")))
-    monkeypatch.setattr(wr, "attempt_whatsapp_phone_link",
-                        lambda wa_id, current_user_id=None: {"status": "linked",
-                                                             "user_id": uid})
-    monkeypatch.setattr(wr, "get_or_create_canonical_user",
-                        lambda provider, external_id: uid)
-    from adapters.whatsapp.wa_parse import InboundMessage
-    import uuid as _uuid
-    wr.process_message(InboundMessage(
-        wa_id="5511999990000", text="oi", timestamp="1", attachments=[],
-        raw={"id": f"wamid.{_uuid.uuid4().hex[:10]}", "type": "text"}))
 
     assert respostas and "sem plano ativo" in respostas[0].lower(), respostas
 

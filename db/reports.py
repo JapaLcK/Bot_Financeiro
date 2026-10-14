@@ -14,7 +14,6 @@ from .users import (
     ensure_user,
     get_or_create_canonical_user,
     create_link_code,
-    merge_users,
     _hash_password,
     _check_password,
 )
@@ -333,9 +332,9 @@ def attempt_whatsapp_phone_link(wa_id: str, current_user_id: int | None = None) 
         else get_or_create_canonical_user("whatsapp", wa_id)
     )
 
-    # Delega toda a lógica de match/merge ao db_support
+    # Só classifica o número; não liga mais (PR-5, D1(c)): ver o impl.
     result = _db_support.attempt_whatsapp_phone_link_impl(
-        get_conn, merge_users, wa_phone, wa_candidates, current_user_id
+        get_conn, wa_phone, wa_candidates, current_user_id
     )
     # Planos v2 (2026-08-06): o trial não nasce mais no vínculo do WhatsApp — é
     # uma assinatura Stripe com cartão, registrada no webhook do checkout.

@@ -39,7 +39,6 @@ from core.help_text import HELP_TRIGGERS
 from core.intent_classifier import contains_comparative_question
 from core.intent_router import abandona_pergunta_de_valor
 from core.secure_compare import constant_time_eq
-from core.services.email_service import SUPPORT_EMAIL
 from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
@@ -248,7 +247,8 @@ def _ajuda_do_cortado(uid: int, reply_to: str) -> bool:
     anterior gateou o BOTÃO do tutorial e o texto `tutorial`, e sobraram três
     portas medidas: o item "🚀 Tutorial" do MENU (que é uma lista, não um
     `button_reply`, então `get_tutorial_button_id` devolve `None` e ele cai no
-    ramo do menu), a SAUDAÇÃO depois do auto-link, e o menu inteiro — cujas
+    ramo do menu), a SAUDAÇÃO depois do auto-link (porta removida no PR-5: o
+    telefone não liga mais e o vínculo não dá tour), e o menu inteiro — cujas
     outras seções também mandam tentar comando (`credit`, medido).
 
     Fechar porta a porta já falhou três vezes; o que decide aqui é o DESTINO
@@ -513,33 +513,11 @@ def _download_attachments_sync(att_refs: list[InboundAttachmentRef]) -> list[Att
     return out
 
 
-def _is_greeting(text: str) -> bool:
-    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
-    return normalized in {"oi", "ola", "olá", "hello", "hi", "hey", "bom dia", "boa tarde", "boa noite"}
-
-
 # Resposta ao número da conta paga que ainda não criou a senha (status
 # `precisa_senha` do auto-vínculo; texto do dono, PR 4 do funil v3).
 PRECISA_SENHA_WA = (
     "Sua conta PigBank está quase pronta. Para ligar este WhatsApp, crie sua "
     "senha pelo link que enviamos para o seu e-mail."
-)
-
-# #711/#630 (D1(a), textos do dono): o número está digitado numa conta do site, e o
-# auto-vínculo não juntou. `remetente_com_dados` (só-WhatsApp com dados) recebe a
-# saída pelo código; `wa_linked_other_account` (quem já é conta) não recebe o código,
-# porque com login nos dois lados a junção é recusada (`apagaria_login`, #970).
-JA_E_CONTA_WA = (
-    "⚠️ Este número também está cadastrado em outra conta do site, mas não juntei nada: você "
-    "continua usando a sua conta por aqui. Se as duas contas são suas e você quer uni-las, "
-    f"fale com a gente em {SUPPORT_EMAIL}."
-)
-NAO_JUNTEI_WA = (
-    "Encontrei uma conta do site com este número, mas este WhatsApp já tem um histórico "
-    "próprio, então não juntei os dois. Para usar a sua conta do site aqui: entre nela (ou "
-    "crie a sua) em pigbankai.com, gere o código de vínculo e me mande: *vincular 123456*. "
-    "Se essa conta do site não é sua, alguém cadastrou seu número por engano, e nada seu "
-    "foi para lá."
 )
 
 # Mesmo número/conta sem senha, mas quem NUNCA comprou (lead do remarketing, plano
@@ -569,20 +547,6 @@ def _is_link_code_attempt(text: str) -> bool:
     return bool(_LINK_CODE_RE.match(_normalize(text or "")))
 
 
-def _isento_do_gate(message: InboundMessage, uid: int) -> bool:
-    """A mensagem tem isenção do `_paywall_gate` (ajuda, billing ou código)? Mesmo
-    critério do gate (`isencao_do_barrado`), e só para texto, como lá. Erro = False:
-    o remetente recebe o aviso, e nada junta."""
-    if message.attachments:
-        return False
-    try:
-        from core.handle_incoming import isencao_do_barrado
-        return isencao_do_barrado((message.text or "").strip(), uid)[0] is not None
-    except Exception as exc:
-        logger.warning("WA isenção do gate falhou uid=%s: %s", uid, exc)
-        return False
-
-
 def _signup_url() -> str:
     from core.dashboard_links import base_url_publica
     return f"{base_url_publica()}/cadastro"
@@ -599,11 +563,10 @@ def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], use
         reply_to,
         (
             "🐷 Oi! Ainda não tenho uma conta ligada a este número de WhatsApp.\n\n"
-            "Pra eu começar a cuidar do seu dinheiro:\n"
-            f"1️⃣ Crie sua conta grátis: {_signup_url()}\n"
-            "   (use *este mesmo número* de WhatsApp)\n"
-            "2️⃣ Volte aqui e me manda um *oi* — eu vinculo na hora ✅\n\n"
-            "Já tem conta? Gere um código de vínculo no site e me manda: *link 123456*"
+            "Já tem conta no PigBank? Entre no site, toque em *Conectar WhatsApp* e me mande "
+            "o código que aparecer, assim: *vincular 123456*. O código vale 15 minutos.\n\n"
+            f"Ainda não tem? Crie sua conta grátis: {_signup_url()}\n"
+            "Depois, toque em *Conectar WhatsApp* e me mande o código."
         ),
     )
     if not _autolink_warning_already_sent(user_id, "no_match_notice"):
@@ -615,35 +578,6 @@ def _send_no_account_notice(reply_to: str, auto_link_result: dict[str, Any], use
             user_id=user_id,
             details={"wa_id": mask_phone(reply_to), "status": "no_match_notice"},
         )
-
-
-def _build_autolink_warning_message(status: str, auto_link_result: dict[str, Any]) -> str | None:
-    if status == "no_match":
-        return (
-            "⚠️ Não encontrei nenhuma conta cadastrada com este número de WhatsApp.\n"
-            "Crie sua conta no site usando este mesmo número ou use o fluxo de código/link para vincular."
-        )
-    if status == "multiple_accounts":
-        return "⚠️ Encontrei mais de uma conta com este número. Não consegui vincular automaticamente."
-    if status == "wa_linked_other_account":
-        return JA_E_CONTA_WA
-    if status == "account_has_other_whatsapp":
-        return (
-            "⚠️ Sua conta já tem outro WhatsApp vinculado. "
-            f"Este número ({mask_phone(auto_link_result['wa_phone'])}) não foi conectado automaticamente."
-        )
-    if status == "merge_conflict":
-        motivo = auto_link_result.get("motivo")
-        if motivo != "dados_dos_dois_lados":
-            # Os mesmos textos da recusa do `vincular` (D6); o desconhecido cai na colisão.
-            from core.handlers.account import _RECUSA_COLISAO, _RECUSA_POR_MOTIVO
-            return _RECUSA_POR_MOTIVO.get(motivo, _RECUSA_COLISAO)
-        return (
-            "⚠️ Sua conta do site e este WhatsApp já têm dados cada um, então não dá pra juntar "
-            "os dois automaticamente. Por enquanto, o que você mandar aqui fica na conta do WhatsApp.\n"
-            "Pra ter tudo num lugar só, use este número numa conta só."
-        )
-    return None
 
 
 def _autolink_warning_already_sent(user_id: int, status: str) -> bool:
@@ -665,35 +599,6 @@ def _autolink_warning_already_sent(user_id: int, status: str) -> bool:
     except Exception as exc:
         logger.warning("WA autolink warning lookup failed uid=%s status=%s error=%s", user_id, status, exc)
         return False
-
-
-def _maybe_send_autolink_greeting_warning(
-    reply_to: str,
-    message_text: str,
-    status: str,
-    auto_link_result: dict[str, Any],
-    user_id: int,
-) -> bool:
-    if not _is_greeting(message_text):
-        return False
-
-    body = _build_autolink_warning_message(status, auto_link_result)
-    if not body:
-        return False
-
-    if _autolink_warning_already_sent(user_id, status):
-        return False
-
-    _send_reply(reply_to, body)
-    log_system_event_sync(
-        "info",
-        "whatsapp_autolink_greeting_warning_sent",
-        "Aviso de vinculação automática enviado no primeiro greeting do WhatsApp.",
-        source="wa_runtime",
-        user_id=user_id,
-        details={"wa_id": mask_phone(reply_to), "status": status},
-    )
-    return True
 
 
 def _pergunta_da_ia(uid: int):
@@ -911,8 +816,10 @@ def process_message(message: InboundMessage) -> None:
         # criar durante este turno não é deste turno e fica aberta.
         pid, ancora = _pergunta_da_ia(uid)
 
+        # Não liga mais pelo telefone (PR-5, D1(c)): só classifica o número. Quem liga é o
+        # código (`vincular 123456`), no `handle_incoming`.
         auto_link_result = attempt_whatsapp_phone_link(message.wa_id, current_user_id=uid)
-        if auto_link_result["status"] in {"linked", "already_linked"}:
+        if auto_link_result["status"] == "already_linked":
             resolved_uid = int(auto_link_result.get("user_id") or uid)
             if resolved_uid != uid:
                 logger.info(
@@ -923,48 +830,6 @@ def process_message(message: InboundMessage) -> None:
                 )
                 uid = resolved_uid
                 pid, ancora = _pergunta_da_ia(uid)
-            if auto_link_result["status"] == "linked":
-                logger.info(
-                    "WA phone auto-link success wa_id=%s final_user_id=%s",
-                    mask_phone(message.wa_id),
-                    auto_link_result["user_id"],
-                )
-                log_system_event_sync(
-                    "info",
-                    "whatsapp_auto_link_success",
-                    "Conta vinculada automaticamente ao WhatsApp.",
-                    source="wa_runtime",
-                    user_id=uid,
-                    details={"wa_id": mask_phone(message.wa_id)},
-                )
-                # Onboarding: tutorial só pra cliente NOVO. status == "linked"
-                # significa que ele acabou de vincular NESTA primeira mensagem
-                # (quem já mandou mensagem antes cai em "already_linked" e não
-                # vê o tutorial). E só quando essa primeira mensagem é uma
-                # SAUDAÇÃO: se o cliente já abre com um comando ("saldo",
-                # "gastei 50..."), ele já sabe usar — a gente executa o comando
-                # e não interrompe com o tour.
-                if _is_greeting(message.text or ""):
-                    # Ex-assinante que acabou de vincular manda `oi` e recebia o
-                    # tutorial inteiro — medido. É a porta mais alta do arquivo.
-                    if _ajuda_do_cortado(uid, reply_to):
-                        return
-                    try:
-                        send_welcome(reply_to, user_id=uid)
-                    except Exception as e:
-                        logger.warning("WA send_welcome failed, falling back to text: %s", e)
-                        _send_reply(
-                            reply_to,
-                            (
-                                "✅ WhatsApp conectado à sua conta!\n\n"
-                                "Já pode usar:\n"
-                                "• gastei 50 mercado\n"
-                                "• recebi 1000 salario\n"
-                                "• saldo\n"
-                                "• ajuda"
-                            ),
-                        )
-                    return
         elif auto_link_result["status"] == "no_match":
             # Número sem conta alguma. Convida pro cadastro/vínculo e para aqui —
             # EXCETO quando a própria mensagem é o código de vínculo, que precisa
@@ -973,44 +838,16 @@ def process_message(message: InboundMessage) -> None:
                 _send_no_account_notice(reply_to, auto_link_result, user_id=uid)
                 return
         elif auto_link_result["status"] == "precisa_senha":
-            # O número é da conta paga que ainda não criou a senha: não vincula
-            # e não processa (decisão do dono, PR 4 do funil v3). Sem exceção
-            # para o código de vínculo: seguindo, ele pararia no _paywall_gate
-            # do usuário do WhatsApp (sem plano) com a copy de "assine". O opt-out
-            # desliga a conta paga: desde a #721 a atualização só vai a número ligado,
-            # mas o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
-            _barra_sem_senha(auto_link_result["target_user_id"], reply_to, message, uid)
-            return
-        elif (auto_link_result["status"] == "remetente_com_dados"
-              and not conta_sem_credencial(auto_link_result["target_user_id"])):
-            # #711: só-WhatsApp com dados e o número digitado numa conta com login.
-            # Segue na conta dele, que não tem plano: sem esta resposta, o turno
-            # cairia no convite do "/precos". O código de vínculo segue para o
-            # `handle_incoming` (o gate o isenta), e o opt-out (botão ou PARAR digitado)
-            # desliga as duas contas. Ajuda e billing também seguem (T5): o mesmo
-            # critério de isenção do gate, e o turno responde como a qualquer barrado.
+            # O número é da conta paga que ainda não criou a senha: o telefone digitado
+            # não liga nada, e o resto da conversa fica barrado (decisão do dono, PR 4 do
+            # funil v3). O código de vínculo passa: a isenção `codigo` do `_paywall_gate`
+            # o deixa chegar ao `handle_incoming` (#905), e barrá-lo trancaria quem
+            # tem conta própria e o código dela só porque outra conta digitou o número.
+            # O opt-out desliga a conta paga: desde a #721 a atualização só vai a número
+            # ligado, mas o botão das mensagens já entregues ao `phone_e164` dela continua
+            # clicável.
             if not _is_link_code_attempt(message.text or ""):
-                iid = get_interactive_id(message.raw or {})
-                if not iid and _eh_parar(message.text):
-                    iid = WA_PARAR_DIGITADO_ID
-                if _tratar_opt_out(uid, reply_to, iid, auto_link_result["target_user_id"]):
-                    return
-                if iid or not _isento_do_gate(message, uid):
-                    _send_reply(reply_to, NAO_JUNTEI_WA)
-                    return
-        elif auto_link_result["status"] in {
-            "multiple_accounts",
-            "wa_linked_other_account",
-            "account_has_other_whatsapp",
-            "merge_conflict",
-        }:
-            if _maybe_send_autolink_greeting_warning(
-                reply_to,
-                message.text or "",
-                auto_link_result["status"],
-                auto_link_result,
-                user_id=uid,
-            ):
+                _barra_sem_senha(auto_link_result["target_user_id"], reply_to, message, uid)
                 return
 
         # ---------------------------------------------------------------
@@ -1331,8 +1168,8 @@ def process_message(message: InboundMessage) -> None:
                 logger.info("WA undo_launch button clicked wa_id=%s", mask_phone(reply_to))
                 # Injeta "desfazer" para o classificador tratar normalmente
                 message.text = "desfazer"
-            # `target_user_id` (`remetente_com_dados`, `wa_linked_other_account`):
-            # a conta que digitou este número também recebe envios nele.
+            # `target_user_id` (`remetente_com_dados`, `already_linked`): a conta SEM credencial
+            # que digitou este número também recebe envios nele.
             elif _tratar_opt_out(uid, reply_to, interactive_id,
                                  auto_link_result.get("target_user_id")):
                 return
