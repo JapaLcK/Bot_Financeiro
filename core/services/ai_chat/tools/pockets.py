@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 import db
+from utils_text import valor_valido
 from core.observability import _log_falha
 from utils_date import _tz
 
@@ -247,9 +248,14 @@ def _pocket_deposit_summary(args: dict[str, Any]) -> str:
 
 def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     pocket_name = (args.get("pocket_name") or "").strip()
-    amount = float(args.get("amount") or 0)
+    try:
+        amount = float(args.get("amount") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return "🐷 Valor inválido."
     if not pocket_name or amount <= 0:
         return "🐷 Faltou o nome da caixinha ou o valor."
+    if not valor_valido(amount):  # `nan <= 0` é False e o `funding` estourava com NaN
+        return "🐷 Valor inválido."
     from core.services import funding
 
     source = funding.resolve_deterministic(user_id, amount)["source"]
@@ -302,11 +308,16 @@ def _pocket_withdraw_summary(args: dict[str, Any]) -> str:
 def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     pocket_name = (args.get("pocket_name") or "").strip()
     withdraw_all = bool(args.get("withdraw_all"))
-    amount = float(args.get("amount") or 0)
+    try:
+        amount = float(args.get("amount") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return "🐷 Valor inválido."
     if not pocket_name:
         return "🐷 Faltou o nome da caixinha."
     if not withdraw_all and amount <= 0:
         return "🐷 Faltou o valor (ou peça pra 'sacar tudo')."
+    if not withdraw_all and not valor_valido(amount):
+        return "🐷 Valor inválido."
     try:
         # O destino do saque sai de `db.destination_of_lots`, dentro da transação (#282).
         # Este canal não o exibe: a resposta do chat não nomeia banco nem avisa do sync.

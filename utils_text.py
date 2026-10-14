@@ -1242,7 +1242,7 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
     if valor is None:
         return None
     # Arredonda para centavos ANTES de comparar: "0,001" passava no `> 0`.
-    if not isfinite(valor) or round(valor, 2) <= 0:
+    if not isfinite(valor) or valor > VALOR_MAX or round(valor, 2) <= 0:
         return "nao_positivo"
     return None
 

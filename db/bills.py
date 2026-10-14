@@ -15,7 +15,7 @@ from decimal import Decimal
 from math import isfinite
 from typing import Any
 
-from utils_text import valor_valido
+from utils_text import VALOR_MAX, valor_valido
 
 from .connection import get_conn
 
@@ -193,7 +193,7 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     # guarda a reserva grava `paid_amount = Infinity` e a conta fica fechada
     # com valor infinito no dashboard. Arredonda para centavos AQUI, e não em
     # cada porta: "paguei luz 0,001" gravava 0.001 e dizia "R$ 0,00 lançado".
-    if amount is not None and not isfinite(float(amount)):
+    if amount is not None and not (isfinite(float(amount)) and abs(float(amount)) <= VALOR_MAX):
         raise ValueError("VALOR_INVALIDO")
     informado = round(float(amount), 2) if (amount is not None and float(amount) > 0) else None
     valor = informado if (informado is not None or metodo == "banco") else float(bill["amount"] or 0)

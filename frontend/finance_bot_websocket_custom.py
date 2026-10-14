@@ -9426,7 +9426,8 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
 @app.post("/investments/{user_id}/deposit")
 async def deposit_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
     _authorize_dashboard_access(request, user_id)
-    if payload.amount <= 0:
+    from utils_text import valor_valido
+    if payload.amount <= 0 or not valor_valido(payload.amount):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
     # De onde sai o dinheiro. Sem `source` no payload, a regra determinística
     # decide (Carteira quando cobre, senão o banco) — ver core/services/funding.py.
@@ -9469,7 +9470,8 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
 @app.post("/investments/{user_id}/withdraw")
 async def withdraw_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
     _authorize_dashboard_access(request, user_id)
-    if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
+    from utils_text import valor_valido
+    if not payload.withdraw_all and not valor_valido(payload.amount):
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
     # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282):
     # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.

@@ -8,6 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz
+from utils_text import valor_valido
 
 from .connection import get_conn
 from .investments import (
@@ -410,9 +411,9 @@ def pocket_withdraw_to_account(
     if not withdraw_all:
         if amount is None:
             raise ValueError("AMOUNT_INVALID")
-        v = Decimal(str(amount))
-        if v <= 0:
+        if not valor_valido(amount):
             raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
 
@@ -699,9 +700,9 @@ def pocket_deposit_from_account(
     `investment_deposit_from_account` em db/investments.py. `None` = Carteira.
     """
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
+    if not valor_valido(amount):
         raise ValueError("AMOUNT_INVALID")
+    v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
 

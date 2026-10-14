@@ -20,6 +20,7 @@ from db import (
     pocket_withdraw_to_account,
 )
 from frontend.routes import shared
+from utils_text import valor_valido
 
 router = APIRouter()
 
@@ -210,6 +211,8 @@ async def pocket_deposit_route(request: Request, user_id: int, pocket_name: str,
     if not name:
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
+    if payload.amount is not None and not valor_valido(payload.amount):  # NaN quebrava o `funding`
+        raise HTTPException(status_code=400, detail="O valor precisa ser maior que zero.")
     from core.services import funding
 
     source = (await asyncio.to_thread(

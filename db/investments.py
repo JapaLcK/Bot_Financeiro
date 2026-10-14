@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 import psycopg
 
 from utils_date import _tz, is_br_business_day
+from utils_text import valor_valido
 
 from .connection import get_conn
 from .users import ensure_user
@@ -1427,9 +1428,9 @@ def investment_deposit_from_account(
     from core.services.fonte_unica import exigir
     exigir(user_id, "investimento")
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
+    if not valor_valido(amount):
         raise ValueError("AMOUNT_INVALID")
+    v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()
@@ -1573,9 +1574,9 @@ def investment_withdraw_to_account(
     if not withdraw_all:
         if amount is None:
             raise ValueError("AMOUNT_INVALID")
-        v = Decimal(str(amount))
-        if v <= 0:
+        if not valor_valido(amount):
             raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()
