@@ -127,41 +127,85 @@ agrupamento perfeito.
 
 ## 4. O que criar
 
-PR 1 — API (faixa **Completo**: endpoint novo na `/api/v2`, Q21).
-- Rota de gastos do mês que reaproveita `db/mes_detalhes.ler` (a mesma função do app nativo;
-  nenhuma segunda regra do mês). O `ler` sozinho não basta: o motivo
-  `arredondamento_por_grupo` é posto pela ROTA nativa (`api/nativo/mes_detalhes.py`), depois do
-  `ler`, com `soma_arredondada_diverge` (`api/nativo/dinheiro.py`) sobre categorias, dias e
-  origens. A rota v2 aplica a mesma checagem pelo mesmo helper (importar ou extrair para um
-  lugar comum; nunca copiar) e leva o caso de regressão do `/mes-detalhes` (duas despesas de
-  `1.005` em categorias diferentes: categorias `2.02` × `saiu` `2.01`, com o motivo).
-- Do mês anterior, o gasto por categoria **até o mesmo dia** (limitado ao último dia do mês
-  anterior quando ele for mais curto).
-- Por categoria: gasto por dia, série dos últimos meses e estabelecimentos. A origem de cada
-  um está na tabela do §4.1; os estabelecimentos usam a regra do §3.1 e uma consulta própria
-  (o leitor oficial não expõe `raw`), que extrai só `merchant.cnpj` e `paymentData.receiver.name`.
-- `/api/v2/categorias` passa a devolver `emoji` e `cor`.
-- Mesma regra de motivos do §4 do plano: banco desatualizado, outra moeda, início do
-  histórico. Nada de número incerto com cara de exato.
+Este capítulo foi reescrito inteiro na sexta rodada de revisão do Codex, a partir de um
+inventário de **tudo** o que os três blocos do protótipo fazem (§4.2), em vez de acrescentar um
+apontamento por vez. `ler` devolve só agregados do mês (`categorias {categoria, valor,
+quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `motivos`,
+`fora_do_total`) e não devolve linhas; é a partir disso que o desenho abaixo foi feito.
+
+### 4.1 O desenho do PR 1 (API, faixa **Completo**: endpoint novo na `/api/v2`, Q21)
+
+**Duas rotas**, para o cliente pedir só o que mostra e o corpo ter tamanho limitado:
+
+- `GET /api/v2/gastos?mes=AAAA-MM`: a visão do mês. Por categoria: `chave`, `nome`, `emoji`,
+  `cor`, `valor`, `quantidade` e o gasto do mês anterior até o mesmo dia (ou `null`, decisão 7).
+  Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
+  descrição, valor e a chave da categoria), `outro_mes` (decisão B), `hoje` (AAAA-MM-DD no fuso do
+  app: o cliente não usa o relógio dele), `fora_do_total`, `motivos`. Alimenta o bloco
+  Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
+- `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>`: o detalhe de uma categoria.
+  Total, compras, valor médio, os 3 últimos meses (cada um `null` se o corte do plano o toca),
+  os 5 estabelecimentos (regra do §3.1; consulta própria, porque o leitor oficial não expõe
+  `raw`, extraindo só `merchant.cnpj` e `paymentData.receiver.name`) e o calendário só dessa
+  categoria (por dia: total e os 3 maiores). Tudo completo e sem paginação: no máximo 31 dias
+  × 3 maiores + 5 estabelecimentos + 3 meses.
+
+**Uma leitura só.** `db/mes_detalhes.ler` abre a própria conexão a cada chamada. O PR 1 separa
+dele a parte que lê as linhas do mês e tira internos e outra moeda (`listar` + `_em_reais`),
+para que `ler` (rota nativa, comportamento e contrato inalterados, com os testes que já existem)
+e a rota nova agreguem **as mesmas linhas**. A rota lê o mês pedido e os dois anteriores numa
+**única transação repeatable read / read only**, como `ler_periodo` já faz com vários meses:
+a comparação, a série e o total da categoria saem do mesmo snapshot, e o mês escolhido na série é
+o mesmo valor da lista. Teste: uma conexão só para todos os meses. Limite declarado: as duas rotas
+são duas respostas; se um lançamento entrar entre elas, o detalhe e a lista podem diferir por
+um instante, e o aviso de escrita (SSE) refaz as duas.
+
+**Outras mudanças do PR 1**
+- `GET /api/v2/lancamentos` ganha `dia=AAAA-MM-DD` (filtra pelo `dia` devolvido), para o clique
+  no dia do calendário. Teste com o dia de uma compra de cartão de outro mês.
+- `GET /api/v2/categorias` passa a devolver `emoji` e `cor` (com a regra da decisão 4 para a
+  linha sem catálogo).
+- Arredondamento: a rota aplica `soma_arredondada_diverge` (`api/nativo/dinheiro.py`, importar
+  ou extrair para um lugar comum; nunca copiar) e levanta `arredondamento_por_grupo`, com o caso
+  de duas despesas de `1.005` em categorias diferentes (categorias `2.02` × `saiu` `2.01`). O
+  motivo hoje é posto pela rota nativa depois do `ler`, não pelo `ler`.
+- Motivos do §4 do plano: banco desatualizado, outra moeda, início do histórico.
 - Sem tabela nova, então `db/privacy.py` não muda. Teste de isolamento "B não vê o que é de A".
 
-### 4.1 Cada promessa da tela e de onde vem o dado
+### 4.2 Inventário do protótipo: o que cada bloco faz e de onde vem
 
-Fechada de uma vez depois de três rodadas de revisão sobre o mesmo ponto (contrato menos
-preciso que o código). `ler` devolve só agregados do mês: `categorias {categoria, valor,
-quantidade}`, `dias {dia, entrou, saiu}` (sem categoria), `origens`, `guardado`, `motivos`,
-`fora_do_total`. Não devolve linhas.
+**Categorias** (`Categories.tsx`)
+| Comportamento | Fonte e decisão |
+|---|---|
+| uma linha por categoria com gasto, em ordem decrescente | `/gastos`; categoria sem gasto no mês não aparece |
+| "R$ X gastos no mês" | a soma das categorias em reais, não o `saiu`; com `fora_do_total` o bloco avisa quantas linhas ficaram fora |
+| traço e variação % contra o mês anterior no mesmo dia | `anterior_ate_hoje` por categoria; `null` quando o corte do plano toca o mês anterior (decisão 7) e "—" quando o anterior é zero |
+| "Sem categoria" | rótulo `sem categoria`, emoji e cor da constante neutra (decisão 4); filtra com `categoria=sem categoria` (abaixo) |
+| clicar filtra o resto; "Limpar" | estado do cliente |
+| âncoras do guia (`data-guia="categorias.lista"` e `categorias.item`) | o PR 2 as preserva (#728) |
+| nome acessível com valor e variação | derivado dos mesmos campos |
 
-| A tela promete | Fonte hoje | O que o PR 1 acrescenta |
-|---|---|---|
-| gasto por categoria no mês | `ler.categorias` | nada |
-| variação contra o mês anterior até o mesmo dia | não existe (só o total por categoria) | `ler` (aditivo; o contrato nativo não muda) devolve o gasto por categoria **e por dia**; a rota chama `ler` no mês e no mês anterior e soma o anterior até o dia N. Duas leituras, dois snapshots: limite declarado. Se o corte do plano toca o mês anterior (decisão 7), a comparação é `null` com `inicio_do_historico`, como o `anterior` do Resumo |
-| calendário filtrado por categoria | `ler.dias` é agregado, sem categoria | o mesmo gasto por categoria e por dia (`categorias[].dias`, completo, sem paginação: no máximo categorias × 31) |
-| últimos meses de uma categoria | não existe por mês | `ler` dos 3 últimos meses (`categorias[].valor`); o mês que o corte do plano toca (inteiro ou em parte) sai `null`, nunca zero (decisão 7) |
-| onde mais gasta (estabelecimentos) | `ler` não devolve linhas; o leitor oficial não expõe `raw` | consulta própria, só da categoria pedida, top 5, com `merchant.cnpj`/`paymentData.receiver.name` extraídos de `raw` (nunca o `raw`) e a regra do §3.1 |
-| linha "sem categoria" | `ler.categorias[].categoria` é `null`, sem linha em `user_categories` | rótulo `sem categoria`, emoji e cor da constante neutra (decisão 4) |
-| abrir os lançamentos da categoria | `GET /api/v2/lancamentos?categoria=` | ver abaixo |
-| saídas com dia fora do mês | `ler.dias` pode trazer dia anterior ao mês | o campo "outro mês" (decisão B) |
+**Detalhe da categoria** (`CategoryDetail.tsx`)
+| Comportamento | Fonte e decisão |
+|---|---|
+| categoria padrão quando nenhuma foi escolhida ("maior gasto do dia a dia") | sem a marca `variable` (decisão B), vale a **maior categoria do mês**, e o rótulo vira "maior gasto do mês" |
+| No mês / Compras / Valor médio | `valor`, `quantidade` e `valor ÷ quantidade` (`null` sem compras); parcela de cartão conta uma compra por parcela do mês |
+| últimos meses, o corrente "até hoje" | `/gastos/categoria`, 3 meses; o corrente é parcial e vem com `hoje`; mês cortado pelo plano é `null` |
+| onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5 |
+| últimas compras (6, com data, nome, mensagem, origem, valor) | `GET /api/v2/lancamentos?categoria=&mes=&limite=6`, que já existe, ordena do mais novo e traz `mensagem` e `origem` |
+| "Abrir lançamentos" | link para `/lancamentos` com `mes` e `categoria` |
+
+**Calendário** (`Calendar.tsx`)
+| Comportamento | Fonte e decisão |
+|---|---|
+| uma célula por dia do mês, futuro desabilitado, hoje marcado | `hoje` vem do servidor |
+| escala de cor | percentil sobre os dias do mês (decisão B); o cliente a calcula de `dias` |
+| dica e nome acessível com os 3 maiores gastos do dia | `maiores` (3) por dia, em `/gastos` e em `/gastos/categoria` |
+| "média R$ X/dia · N dias sem gasto" | o cliente calcula de `dias` até `hoje`; a API devolve só os dias com gasto e o cliente completa os zeros; o texto "Sem contas fixas" sai (agora conta todo gasto, decisão B) |
+| "Dia mais caro" | o maior `total` de `dias` |
+| clicar no dia filtra os lançamentos do dia | `/lancamentos?dia=` (PR 1) |
+| calendário filtrado por categoria | `/gastos/categoria` devolve os dias só dessa categoria |
+| saída com dia fora do mês | linha "outro mês" (decisão B), fora da grade |
 
 **Filtro de "Sem categoria".** `categoria=None` em `listar` significa "sem filtro", mas o filtro
 compara `cat_key_sql` dos dois lados (`db/connection.py`), que colapsa vazio em
@@ -172,9 +216,11 @@ antigo. **Ainda não provado**: não há teste de `/api/v2/lancamentos?categoria
 PR 1 leva esse teste (linha de cartão do Open Finance com `categoria` NULO, que o
 `cat_key_sql` cita como o caso real) e o de navegação do PR 2.
 
-PR 2 — Tela (faixa **Leve**). Troca o protótipo pelo real nos três blocos, no Resumo e em
-`/gastos`; o Calendário passa a usar os dias reais; filtro por categoria leva aos
-Lançamentos reais; estados de carregando, erro, vazio e dado incerto.
+### 4.3 PR 2 — Tela (faixa **Leve**)
+Troca o protótipo pelo real nos três blocos, no Resumo e em `/gastos`, pelo inventário do §4.2:
+estados de carregando, erro, vazio e dado incerto; âncoras do guia preservadas; teclado e leitor
+de tela com o mesmo conteúdo da dica (os 3 maiores); mobile e desktop conferidos no navegador
+(skill `pigbank-frontend`). Fora: os blocos de exemplo do chat (`topics.tsx`), que são da Etapa 7.
 
 ## 5. Decisões de 2026-10-13 sobre o que estava aberto
 
@@ -221,7 +267,9 @@ outro mês), ambos na linha "outro mês" e nunca num dia errado; gasto por categ
 o gasto da categoria; `/api/v2/lancamentos?categoria=sem categoria` devolvendo só as sem
 categoria; plano de 90 dias com o corte no meio do mês: comparação `null` e mês da série
 `null` (nunca zero), com `inicio_do_historico`; linha sem categoria e categoria fora do
-catálogo com `emoji` e `cor` não nulos.
+catálogo com `emoji` e `cor` não nulos; uma só conexão para todos os meses lidos pela rota; os 3
+maiores gastos do dia (e o desempate); `/lancamentos?dia=` com o dia de uma compra de cartão de
+outro mês.
 Playwright para a tela. Na conta do dono, em produção só leitura: soma das categorias do mês
 contra o Saiu do Resumo e contra o "gastos em outubro" do WhatsApp (#935 alinhou a IA a essa
 regra).
