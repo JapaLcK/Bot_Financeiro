@@ -9,11 +9,14 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, ValidationError
+from core.services.xerife_config import XerifeConfig
+from frontend.routes.xerife import router as xerife_router
 
 from frontend.routes import shared
 
 router = APIRouter()
+router.include_router(xerife_router)
 
 # Catálogo da prateleira. "disponivel": False = card "Em breve" (aparece
 # desabilitado — gate visível, nunca escondido). A arte (SVG) vive no front.
@@ -182,6 +185,11 @@ async def agents_activate_route(request: Request, user_id: int, kind: str, body:
         raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "agents"})
 
     config = (body.config if body else None) or {}
+    if kind == "xerife":
+        try:
+            config = XerifeConfig.model_validate(config).model_dump(exclude_unset=True)
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="Configuração do Xerife inválida.")
     if v2_on:
         from core.services.plan_limits import AGENT_ENERGY_COST, agent_energy_cost
         from core.services.plan_service import agents_energy_budget
@@ -222,7 +230,7 @@ async def agents_pause_route(request: Request, user_id: int, kind: str):
 
 
 class EmailPrefBody(BaseModel):
-    enabled: bool
+    enabled: StrictBool
 
 
 @router.post("/agents/{user_id}/{kind}/email")
@@ -263,7 +271,7 @@ async def agents_feed_seen_route(request: Request, user_id: int):
 
 
 class EsperadoBody(BaseModel):
-    esperado: bool
+    esperado: StrictBool
 
 
 @router.put("/agents/{user_id}/xerife/lancamentos/{launch_id}/esperado")
