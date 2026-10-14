@@ -295,7 +295,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - `GET /api/v2/lancamentos` (`api/v2/lancamentos.py`, regra em `db/lancamentos.py`): só
   leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
-  `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
+  `cartao`, `categoria` (a chave; `sem categoria` pega `NULL`, vazio e a de mesmo nome, também a compra de cartão), `tipo` (`entrada`|`saida`), `dia` (`AAAA-MM-DD`, filtra pelo `data` devolvido; é texto e não `date` porque o gerador de tipos recusa `format: date` em query; inválido como `2026-02-30` = 422; leve sempre junto o `mes` da fatura, que é o que pega a compra de cartão de outro mês), `q`, `cursor`, `limite`
   (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
   **O mês é o de `TOTAIS_SQL`**: mesma janela (`db/resumo_mes.MES_JANELA_SQL`) e mesma regra
   de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
@@ -377,9 +377,52 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
   sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
   gravam dois).
-- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
-  vence entre gêmeas), semeado como o `/categories` do /app.
+  vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
+  /app. Só o catálogo: a categoria que só aparece nos lançamentos e a "sem categoria" não têm entrada aqui
+  (o fallback neutro é do `/gastos`).
+- `GET /api/v2/gastos?mes=AAAA-MM` (`api/v2/gastos.py`, regra em `db/gastos.py`; também em `/api/app/gastos`,
+  porque `criar_app` monta o mesmo router nos dois: rota nova não afeta o app instalado): "Para onde vai",
+  a visão do mês, só leitura (plano em `docs/plano-etapa5-gastos.md`). `mes` como em `resumo-do-mes` (sem
+  ele o corrente; futuro ou fora do formato = 422). Resposta: `mes`, `disponivel`, `hoje` (AAAA-MM-DD no
+  fuso do app), `dia_de_corte`, `historico_desde` (o corte do plano, se cai depois do dia 1 do mês; senão
+  `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
+  `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
+  (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
+  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
+  mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
+  `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
+  `lancamentos.MOTIVOS_ITEM` que faltam + `arredondamento_por_grupo`; nesta ordem: `conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado`, `inicio_do_historico`, `transacao_pendente`, `outra_moeda`, `moeda_presumida`,
+  `arredondamento_por_grupo`). Os `motivos` juntam os das contas que estão em `resumo_mes.MOTIVOS` (`outra_moeda`/`moeda_presumida` de `/contas` não passam), das linhas do mês pedido E das linhas do
+  mês anterior lido: um `transacao_pendente` do mês anterior aparece na resposta do mês pedido (fixado por
+  `test_pendente_do_mes_anterior_levanta_o_motivo_do_mes_pedido`). **Regra**: as MESMAS linhas do `/lancamentos` (`lancamentos.listar`, guardado
+  fora porque é opt-in) por `mes_detalhes._em_reais` (sem interno, sem outra moeda), só `saida`: Σ
+  categorias = `saiu` de `resumo-do-mes` nos meses sem `outra_moeda`. O mês pedido e o anterior saem
+  de UMA transação repeatable read / read only (o seed do catálogo, que escreve e abre conexão própria,
+  roda antes). **Corte por dia**: `valor_ate_corte` e `anterior_ate_corte` somam o dia 1 até
+  `dia_de_corte` (mês corrente: o dia de hoje; mês passado: o último dia do mês); no mês anterior, o
+  mesmo dia (`min` com o último dia dele, 31/03 contra fim de fevereiro) no mês corrente e o mês
+  anterior inteiro no passado (fevereiro contra janeiro conta os dias 29 a 31). Saída com data depois
+  do corte entra em `valor` e não nos dois "até o corte"; data anterior ao mês conta como já ocorrida.
+  `anterior_ate_corte` e `anterior_total_ate_corte` são `null` (nunca zero) quando o corte do plano toca qualquer parte do mês anterior;
+  mês todo antes do corte = `disponivel: false`, `total: null`, listas vazias e `motivos` com
+  `inicio_do_historico` (a tela não mostra "R$ 0"). **Grade**: `[max(dia 1, corte), fim do mês)`; saída
+  com `dia` fora dela (compra de cartão do mês anterior numa fatura do mês, linha antiga do Open Finance
+  com `posted_at` antes do corte) vai para `fora_da_grade`, dentro do `total`. **Moeda**:
+  `saidas_em_outra_moeda` é derivado (saídas não internas − saídas em reais, por chave); entrada ou
+  movimento de caixinha em outra moeda não conta, e `outra_moeda` só sobe com contador > 0. **Sem
+  categoria**: a chave `sem categoria` junta `NULL`, vazio e a categoria de mesmo nome (`cat_key_sql`); o nome,
+  o emoji e a cor são os do catálogo quando há linha dele (o catálogo vence), senão `CAT_NEUTRA_EMOJI`/
+  `CAT_NEUTRA_COR` (`db/connection.py`), que valem também para a categoria que só aparece nos lançamentos; o
+  nome, nesse caso, é a própria chave. `cor` fora de `#RRGGBB` e `emoji` vazio ou só espaços saem como o
+  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`).
+  `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
+  `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  difere do total (`soma_arredondada_diverge`). Falta, do plano: `/gastos/categoria` (PR 1b) e a tela (PR 2).
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
@@ -710,6 +753,40 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
+`code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
+`google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de
+`google/exchange` e `google/complete-signup`. O callback `nat-` grava o challenge em
+`dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`; nulo
+significa sem PKCE (web, iOS antigo, Apple, link do bot). **Igualdade estrita nos dois
+sentidos** (`consume_dashboard_session`, `consume_pending_google_signup`): com
+`code_verifier` só se consome o código/pendente cujo challenge é `S256(verifier)`; sem
+verifier, só o que NÃO tem challenge. Daí: `/d/{code}` e `dashboard-link` (sem verifier)
+não consomem código do app; e código/pendente SEM challenge (injetado por outro app, do
+bot, ou de cookie perdido) não é trocável por quem manda verifier, que é o app novo, então
+a injeção de código não entra. O que não casa recusa antes de qualquer sessão e NÃO queima
+o código nem o pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
+`[A-Za-z0-9_-]` faz o callback falhar fechado. A Apple não tem PKCE: o verifier é ignorado
+no `apple/complete-signup`.
+
+Limites conhecidos:
+- O iOS antigo, sem verifier, continua na janela: seu código sem challenge é trocável por
+  quem o interceptar. Fecha quando o challenge virar obrigatório (app antigo fora de
+  circulação).
+- Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
+  que o app novo, mandando verifier, recusa: falha fechado e a pessoa tenta de novo. A
+  validar no aparelho Android: se o cookie `google_oauth_challenge` sobrevive ao Custom Tab
+  (se não, o login Google do Android falharia sempre).
+- A PKCE não cobre um fluxo iniciado pelo próprio sequestrador do scheme no aparelho (ele
+  abre `/auth/google/start` e usa o próprio par verifier/challenge); a defesa estrutural
+  seria App Links https no Android no lugar do scheme customizado, follow-up da #604.
+- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
+  pressuposto do login CSRF por state, não uma regressão da PKCE.
+
+Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
+devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
+a rota (e o contrato com o app).
+
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
 `CLOUDFLARE_ORIGIN_SECRET` (≥ 32 chars), o `CF-Connecting-IP` só vale quando a regra da
@@ -748,14 +825,31 @@ paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da crede
 `PLANS_V2_ENABLED`, porque é segurança e não cobrança) e `shared.exigir_credencial` nos
 pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
 liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
-mensagem de número já ligado a conta sem credencial; no auto-vínculo, remetente que já
-tem dados financeiros segue na própria conta, sem vínculo nem mescla
-(`remetente_com_dados`); o vazamento da mescla por telefone digitado está na #711.
+mensagem de número já ligado a conta sem credencial.
+**Auto-vínculo por telefone não mescla quem já é conta ou tem dados (#711/#630, D1(a)).**
+O telefone digitado no site não prova de quem é o número. Com outra conta dona do
+telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
+recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
+#607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
+vínculo nem mescla, e a junção é pelo `vincular CODIGO` (com login nos dois lados, recusada:
+`apagaria_login`, até a confirmação explícita da #970). Vale também quando o alvo já tem
+este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
+uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
+lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
+confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
+(`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
+fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
+nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. Os avisos (`wa_runtime.py`): `wa_linked_other_account`
+recebe o `JA_E_CONTA_WA` (sem a instrução do código, que com login nos dois lados terminaria em
+`apagaria_login`; para unir, o suporte) na saudação, uma vez; `remetente_com_dados` recebe o
+`NAO_JUNTEI_WA` (a saída pelo código) em toda mensagem, com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
+como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
+ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
 mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
-preferência da conta sem credencial) e no `remetente_com_dados` (a do remetente e a da
-conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+preferência da conta sem credencial), no `remetente_com_dados` e no
+`wa_linked_other_account` (a do remetente e a da conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
 atualizações" também apaga pendências do remetente (abaixo). O texto digitado
 que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
 `parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
@@ -1475,7 +1569,7 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
 ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`); `vincular 123456` segue o fluxo
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos`); `vincular 123456` segue o fluxo
 normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
