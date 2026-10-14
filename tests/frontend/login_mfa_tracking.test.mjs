@@ -4,8 +4,8 @@
  * `/login` é servida por `html_file(..., pixel=True)`: o servidor injeta GA4 e Meta
  * Pixel no FIM do <head>, e o GA4 lê `location.href` no `gtag('config')`. Um
  * `replaceState` que rode depois (no fim do <body>) deixava `#mfa=<desafio>` no
- * `page_location` do `dataLayer` (medido). Este teste serve o HTML REAL que a rota
- * devolve (o mesmo `html_file`, com os dois IDs ligados) e lê o `dataLayer`.
+ * `page_location` do `dataLayer` (medido). Este teste serve o login.html real com o
+ * tracking injetado onde o servidor o injeta (GA4 e Meta ligados) e lê o `dataLayer`.
  *
  * Controle negativo: tire o `history.replaceState` do <head> do login.html e ponha-o
  * de volta no fim do script do <body> (o conserto antigo) → o teste fica vermelho
@@ -18,21 +18,22 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 let browser, html;
 const ORIGEM = 'http://pb.test';
 before(async () => {
-  html = execFileSync(process.env.PB_PYTHON || 'python3', ['-c', [
-    'import sys',
-    'from pathlib import Path',
-    'from frontend.routes import shared',
-    'shared.GA4_MEASUREMENT_ID = "G-TESTE12345"',
-    'shared.META_PIXEL_ID = "123456789012345"',
-    'sys.stdout.buffer.write(shared.html_file(Path("frontend/login.html")).body)',
-  ].join('\n')], { encoding: 'utf8', env: { ...process.env, PYTHONPATH: '.' } });
-  assert.ok(html.includes('Google Analytics (GA4)') && html.includes('Meta Pixel Code'), 'tracking não injetado');
+  // O CI dos shards de frontend não instala as dependências Python, então nada aqui
+  // chama o servidor. A página é o login.html REAL com o trecho de tracking que
+  // `inject_tracking` põe antes de `</head>` (o mesmo ponto): o trecho mora em
+  // `tracking_snippet_login.html`, e `tests/test_google_web_mfa.py::test_e7` o
+  // compara com a saída de `inject_tracking` para ele não envelhecer.
+  const snippet = readFileSync('tests/frontend/tracking_snippet_login.html', 'utf8');
+  const login = readFileSync('frontend/login.html', 'utf8');
+  const i = login.toLowerCase().indexOf('</head>');
+  assert.ok(i > 0 && snippet.includes('Google Analytics (GA4)') && snippet.includes('Meta Pixel Code'));
+  html = login.slice(0, i) + snippet + login.slice(i);
   browser = await chromium.launch();
 });
 after(async () => { await browser?.close(); });

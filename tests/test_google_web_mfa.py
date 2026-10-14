@@ -412,3 +412,19 @@ def test_e6_login_tira_o_hash_antes_de_qualquer_snippet_de_tracking(monkeypatch)
     for marca in ("Meta Pixel Code", "Google Analytics (GA4)"):
         assert marca in html, f"{marca} não foi injetado: o teste não mediria nada"
         assert limpa < html.index(marca), f"o hash só sai depois de {marca}"
+
+
+def test_e7_o_snippet_do_teste_de_navegador_e_o_que_o_servidor_injeta(monkeypatch):
+    """`tests/frontend/login_mfa_tracking.test.mjs` não roda Python (o CI dos shards de
+    frontend não tem fastapi) e lê o trecho de tracking de um arquivo. Aqui ele é
+    comparado com `inject_tracking` de verdade, para não envelhecer (§0.7).
+    Regenerar: `PYTHONPATH=. .venv/bin/python` com GA4 `G-TESTE12345`, Meta
+    `123456789012345`, gravando `inject_tracking("</head>")` sem o `</head>`."""
+    from frontend.routes import shared
+
+    monkeypatch.setattr(shared, "GA4_MEASUREMENT_ID", "G-TESTE12345")
+    monkeypatch.setattr(shared, "META_PIXEL_ID", "123456789012345")
+    esperado = shared.inject_tracking("</head>")
+    assert esperado.endswith("</head>")
+    arquivo = Path(__file__).resolve().parent / "frontend" / "tracking_snippet_login.html"
+    assert arquivo.read_text(encoding="utf-8") == esperado[: -len("</head>")]
