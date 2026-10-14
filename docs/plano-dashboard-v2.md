@@ -60,7 +60,7 @@ em lugar nenhum).
   importar OFX. O dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**; qualquer
   novo bloqueio de arquivo exige decisão separada.
   **Trava #498** (decisão de 2026-09-18, PR #498 mergeado em 2026-09-19, “Lançamentos manuais
-  exclusivos para dinheiro”): filtro do painel em `frontend/finance_bot_websocket_custom.py:7598-7602`,
+  exclusivos para dinheiro”): filtro do painel em `frontend/finance_bot_websocket_custom.py:7690-7694`,
   rebaixamento auto→ask em `db/open_finance.py:2108-2128` e pendência na ordem inversa em
   `db/open_finance.py:2180`. A ADR 0006 a revê no PR-B.
 - **Q37 — o que já existe de manual fica só para leitura**, como "registro manual antigo",
