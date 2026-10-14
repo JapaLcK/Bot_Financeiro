@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 
 import db
-from _cards_apoio import M, M0, _http, mostrar, mundo  # noqa: F401  (mundo é fixture)
+from _cards_apoio import M, M0, _http, mostrar, mundo, valores_de_b_em  # noqa: F401  (mundo é fixture)
 from _ia_stream_helpers import openai_falso, rodada
 from conftest import usuario_pagante
 from core.services.ai_chat import cards, runner, streaming
@@ -346,8 +346,8 @@ def test_periodo_de_a_nao_tem_nada_de_b(mundo):
     ra, pa = _periodo(a, de=M0, ate=M)
     _, pb = _periodo(b, de=M0, ate=M)
     texto = json.dumps([pa, ra])
-    for marca in ("SEGREDO", "7777", "5555", "888.00"):
-        assert marca not in texto, marca
+    assert "SEGREDO" not in texto
+    assert not valores_de_b_em([pa, ra])  # número exato: "7777" também é trecho de id ("l17777") e de hora
     ids_a = {m["id"] for c in pa["categorias"] for m in c["maiores"]}
     ids_b = {m["id"] for c in pb["categorias"] for m in c["maiores"]}
     assert ids_a and ids_b and not (ids_a & ids_b)  # ids de linha são TEXTO (l123/c45)
@@ -362,7 +362,7 @@ def test_isolamento_pega_leitor_que_le_o_outro_usuario(mundo, monkeypatch):
     monkeypatch.setattr(cards, "registro", lambda: {**real, "periodo": vaza})
     _, p = _periodo(a, de=M0, ate=M)
     with pytest.raises(AssertionError):  # a checagem de marca do teste acima tem de ver o que era de B
-        assert "5555" not in json.dumps(p)
+        assert not valores_de_b_em(p)
 
 
 # ── contrato com o app ─────────────────────────────────────────────────────────

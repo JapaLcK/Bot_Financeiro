@@ -141,6 +141,10 @@ export type TipoValorFalado = "saldo" | "entrada" | "saida";
  */
 export const VALOR_INDISPONIVEL_FALADO = "valor indisponível";
 
+/** Fonte única da máscara de valor oculto: o texto visível e o rótulo lido (`Money`, linha da reserva no card de metas). */
+export const MASCARA_OCULTA = "R$ ••••";
+export const VALOR_OCULTO_FALADO = "Valor oculto";
+
 /**
  * Fala do valor já com o sinal falado ("mais "/"menos ") aplicado — MESMA
  * regra do `Money` (decisão 2 do dono): `entrada`/`saida` falam o sinal do

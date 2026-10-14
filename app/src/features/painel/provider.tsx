@@ -18,7 +18,7 @@ import { Texto } from "@/ui/componentes/Texto";
 import { chaveLayout, mesAtual, mesesAnteriores, sanitizarLayout, type Widget } from "./catalogo";
 import Inicio from "../../../app/(app)/index";
 
-export const schemas = { contas: S.contasSchema, resumo: S.resumoSchema, detalhes: S.detalhesMesSchema, detalhesAnterior: S.detalhesMesSchema, patrimonio: S.patrimonioSchema, rendimento: S.rendimentoSchema, previsao: S.previsaoSchema, assinaturas: S.assinaturasSchema, metas: S.metasSchema, cartoes: S.cartoesSchema, parcelas: S.parcelasSchema, renda: S.rendaSchema, insights: S.insightsSchema, plano: S.planoSchema, categorias: S.categoriasSchema };
+export const schemas = S.schemasRecurso;
 export type Recurso = keyof typeof schemas;
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };

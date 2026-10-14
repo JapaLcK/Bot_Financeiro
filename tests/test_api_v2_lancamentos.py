@@ -30,7 +30,7 @@ from core.services import plan_service
 from db import lancamentos
 from tests._patrimonio_helpers import conexao, conta, q, tx_banco
 from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
-from tests.test_resumo_mes_regra import ENTROU, INICIO, SAIU, _lanc, semeia_a, semeia_b
+from tests.test_resumo_mes_regra import ENTROU, FIM, INICIO, SAIU, _lanc, semeia_a, semeia_b
 from utils_date import _tz
 
 D = Decimal
@@ -267,6 +267,50 @@ def test_categorias_da_chave_e_nome_do_usuario(libera):
     q("insert into user_categories (user_id, name) values (%s, 'Viagem Só Minha') returning id", (a,))
     libera(a, b)
     de_a = pede(a, "/api/v2/categorias").json()["categorias"]
-    assert {"chave": "alimentacao", "nome": "alimentação"} in de_a
-    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha"} in de_a
+    assert {"chave": "alimentacao", "nome": "alimentação", "emoji": "🍔", "cor": "#f59e0b"} in de_a
+    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha", "emoji": "🏷️", "cor": "#7c3aed"} in de_a
     assert not any(c["nome"] == "Viagem Só Minha" for c in pede(b, "/api/v2/categorias").json()["categorias"])
+
+
+def test_categorias_devolvem_emoji_e_cor_do_catalogo(libera):
+    a = usuario_pagante()
+    libera(a)
+    pede(a, "/api/v2/categorias")  # semeia
+    q("update user_categories set emoji = '🥑', color = '#112233' where user_id = %s and name = 'mercado' returning id", (a,))
+    mercado = next(c for c in pede(a, "/api/v2/categorias").json()["categorias"] if c["chave"] == "mercado")
+    assert (mercado["emoji"], mercado["cor"]) == ("🥑", "#112233")
+
+
+def test_dia_filtra_e_o_cartao_so_aparece_na_fatura_do_mes(libera):
+    """Compra de 28 do mês anterior numa fatura que fecha no mês seguinte: só `mes=<da fatura>&dia=<da compra>`
+    a acha. Positivo: sem `dia` a lista é a de antes; inválido é 422."""
+    a = usuario_pagante()
+    compra = INICIO.replace(day=28)
+    cartao = db.create_card(a, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase(a, cartao, 42, "mercado", "do dia 28", compra)
+    _lanc(a, "despesa", 7, 3)
+    libera(a)
+    mes_fatura = f"{FIM:%Y-%m}"
+    assert [D(i["valor"]) for i in todos(a, mes=mes_fatura, dia=compra.isoformat())] == [D(42)]
+    assert todos(a, mes=M, dia=compra.isoformat()) == []
+    assert [D(i["valor"]) for i in todos(a, mes=M, dia=INICIO.replace(day=3).isoformat())] == [D(7)]
+    assert len(todos(a, mes=M)) == 1 and len(todos(a, mes=mes_fatura)) == 1  # sem `dia`: a de antes
+    # só o pattern barra estes: no Python 3.13 o `fromisoformat` aceita o compacto e a semana ISO
+    for dia in ("2026-02-30", "x", "2026-2-3", "20260905", "2026-W36-1"):
+        r = pede(a, mes=M, dia=dia)
+        assert r.status_code == 422 and r.json()["error"]["details"][0]["loc"] == ["query", "dia"], dia
+
+
+def test_categoria_sem_categoria_junta_null_vazio_e_o_nome_e_nao_pega_outra(libera):
+    a = usuario_pagante()
+    _lanc(a, "despesa", 10, 3)                                   # NULL
+    q("update launches set categoria = '' where id = %s returning id", (_lanc(a, "despesa", 20, 4),))
+    q("update launches set categoria = 'Sem Categoria' where id = %s returning id", (_lanc(a, "despesa", 30, 5),))
+    q("update launches set categoria = 'mercado' where id = %s returning id", (_lanc(a, "despesa", 40, 6),))
+    cartao = db.create_card(a, "Nubank", closing_day=10, due_day=17)
+    db.add_credit_purchase(a, cartao, 5, None, "cartão do banco sem categoria", INICIO.replace(day=5))
+    q("update credit_transactions set source = 'open_finance' where user_id = %s returning id", (a,))
+    libera(a)
+    achados = todos(a, mes=M, categoria="sem categoria")
+    assert sorted(D(i["valor"]) for i in achados) == [D(5), D(10), D(20), D(30)]
+    assert any(i["id"].startswith("c") for i in achados)  # a compra do cartão com categoria NULL

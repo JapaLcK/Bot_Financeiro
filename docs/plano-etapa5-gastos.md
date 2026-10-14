@@ -4,6 +4,13 @@ Rascunho de plano, aberto em 2026-10-13. Parte do `docs/plano-dashboard-v2.md` (
 "Para onde vai", API faixa Completo, tela faixa Leve). O plano-base quase não descreve esta
 etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui ainda vale.
 
+**Estado (2026-10-14).** PR 1a feito (#998): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
+e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
+(`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna).
+PR 1b feito (#1002): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
+`db/estabelecimentos.py`). PR 2 (a tela) pendente. Onde o §4.1 e o código divergem, vale o código e o
+contrato em `docs/CLAUDE.md` ("API v2").
+
 ## 1. O que a tela é
 
 Mostra de onde o dinheiro do mês saiu. Hoje é protótipo com dados fictícios
@@ -69,7 +76,7 @@ Escolher uma categoria filtra os outros blocos e leva aos Lançamentos reais
   cada uma. Não separa por mês.
 - `db/lancamentos.listar`: o leitor oficial; cada linha traz `descricao`, `categoria`,
   `origem`, `dia`, `valor`.
-- `GET /api/v2/categorias`: só `{chave, nome}`. **Não devolve emoji nem cor.**
+- `GET /api/v2/categorias`: era só `{chave, nome}`; o PR 1a passa a devolver também `emoji` e `cor`.
 - `GET /api/v2/resumo-do-mes`: Entrou/Saiu pela regra única do mês (Q18).
 - `db/analytics.compute_top_merchants`: agrupa por estabelecimento (`lower(trim(alvo/nota))`),
   mas lê `launches` e `credit_transactions` direto, com regra de mês própria (`criado_em` no
@@ -129,6 +136,22 @@ senão o nome do recebedor do Pix/TED (`paymentData.receiver.name`, normalizado)
 nunca é rótulo. Cobertura em outras contas não foi medida; a tela não deve prometer
 agrupamento perfeito.
 
+**Como ficou no código (PR 1b, `db/estabelecimentos.py`).** (1) CNPJ só vale se for TEXTO com exatamente 14
+dígitos (depois de tirar o que não é dígito) e não todo zero; é a regra de `previsao_recorrencias._doc` sem o
+CPF de 11 dígitos, copiada em duas linhas e não importada (puxaria cashflow/assinaturas para `db/`).
+`merchant`/`cnpj`/`name` de tipo inesperado (objeto, número, lista) contam como ausentes. (2) A normalização
+é `utils_text.merchant_key` ("UBER *TRIP" e "Uber Trip" são `uber trip`; "NETFLIX.COM" é `netflix`). (3) Rótulo
+empatado: a descrição mais recente (a ordem do `listar`). (4) **P1 = (b), decisão do dono:** depois de rotular,
+grupos cujos rótulos têm o mesmo `merchant_key` se JUNTAM numa linha (soma de valor e quantidade; o nome é
+o rótulo mais frequente ENTRE os rótulos dos grupos que a formaram, contado nas linhas deles, empate: a mais
+recente; contar todas as linhas de novo deixava uma descrição solta vencer e repetir o nome): a tela nunca
+repete um nome. Efeito colateral aceito: "Pix enviado" para
+pessoas diferentes vira UMA linha (o nome é o mesmo). Rótulo sem letra nem dígito (`merchant_key` vazio) só junta se o
+nome for igual. (5) A leitura do `raw` é uma consulta em lote por `imported_launch_id`/`imported_credit_tx_id`
+das linhas que já somam o total; o dono da transação vem de conta -> conexão (`open_finance_transactions` não
+tem `user_id`), então uma transação forjada de outro usuário apontando para uma linha daqui não contribui.
+Limite: o ganho medido é pequeno (−10% de grupos no banco, −1% no cartão, numa conta só).
+
 ## 4. O que criar
 
 Este capítulo foi reescrito inteiro na sexta rodada de revisão do Codex, a partir de um
@@ -143,7 +166,10 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
 
 - `GET /api/v2/gastos?mes=AAAA-MM`: a visão do mês. Por categoria: `chave`, `nome`, `emoji`,
   `cor`, `valor` (o mês inteiro), `quantidade`, `valor_ate_corte` (de 1 até `dia_de_corte`) e
-  `anterior_ate_corte` (o mês anterior, de 1 até o mesmo `dia_de_corte`; `null` pela decisão 7).
+  `anterior_ate_corte` (o mês anterior, de 1 até o mesmo `dia_de_corte`; `null` pela decisão 7). No
+  topo, `anterior_total_ate_corte`: a soma de TODAS as saídas do mês anterior até o mesmo corte, inclusive
+  de categoria que só existe lá (que não entra em `categorias`); é o que a variação do total usa, porque
+  Σ `anterior_ate_corte` não o é. `null` quando `anterior_ate_corte` é `null` e quando `!disponivel`.
   **`dia_de_corte`** é a regra do corte, no servidor: no mês corrente, o dia de `hoje`; em mês
   passado, o último dia do mês escolhido (comparação do mês inteiro contra o mês anterior
   inteiro, como o protótipo, que usa 31 fora do mês corrente). O corte do mês anterior depende do caso: no **mês corrente** é
@@ -158,7 +184,9 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>`: o detalhe de uma categoria.
   Total, compras, valor médio, as 6 últimas compras (data, descrição, mensagem, origem, valor, feitas
   das MESMAS linhas que somam o total: sem interno nem outra moeda, só saída, nunca o `raw`),
-  os 3 últimos meses (cada um `null` se o corte do plano o toca),
+  os 3 últimos meses (`serie`, crescente, cada um `null` se o corte do plano o toca; o mês cortado nem é lido;
+  `valor_medio` arredondado HALF_UP a centavos, `null` sem compras; `total` presente; `saidas_em_outra_moeda`
+  conta só a categoria e só o mês pedido),
   os 5 estabelecimentos (regra do §3.1; o ranking é feito sobre **as mesmas linhas que somam o
   total da categoria**, ou seja, saída, não interna, em reais e do mesmo mês/fatura, e só o
   `raw` é lido à parte, por id de linha, para extrair `merchant.cnpj` e
@@ -166,19 +194,21 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   categoria (por dia: total e os 3 maiores), com `fora_da_grade` (`{quantidade, valor}`, o mesmo formato), `hoje` e `historico_desde`. Tudo completo e sem
   paginação: no máximo 31 dias × 3 maiores + 6 compras + 5 estabelecimentos + 3 meses.
 
-**Uma leitura só.** `db/mes_detalhes.ler` abre a própria conexão a cada chamada. O PR 1 separa
-dele a parte que lê as linhas do mês e tira internos e outra moeda (`listar` + `_em_reais`),
-para que `ler` (rota nativa, comportamento e contrato inalterados, com os testes que já existem)
-e a rota nova agreguem **as mesmas linhas**. A rota lê o mês pedido e os dois anteriores numa
-**única transação repeatable read / read only**, como `ler_periodo` já faz com vários meses:
-a comparação, a série e o total da categoria saem do mesmo snapshot, e o mês escolhido na série é
-o mesmo valor da lista (quando o mês escolhido está inteiro disponível; cortado pelo plano, a série
-não tem valor para ele, ver o §4.2). Teste: uma conexão só para todos os meses. Limite declarado: as duas rotas
-são duas respostas; se um lançamento entrar entre elas, o detalhe e a lista podem diferir por
-um instante, e o aviso de escrita (SSE) refaz as duas.
+**Uma leitura só.** Corrigido no PR 1a: **não é preciso separar nada de `ler`/`ler_periodo`**, e eles
+(com `TOTAIS_SQL`, `CATEGORIAS_SQL` e `api/nativo/*`) não mudam. A rota chama `lancamentos.listar(cur,
+uid, desde, fim, limite=None)` (sem `com_guardado`, que é opt-in; guardado e interno nunca entram) mais
+`mes_detalhes._em_reais(linhas, motivos)`, direto, na própria transação (`db/gastos.py`), então
+`ler` e a rota agregam **as mesmas linhas**. O mês pedido e o anterior saem de uma **única transação
+repeatable read / read only**, como `ler_periodo` faz com vários meses; o seed do catálogo
+(`ensure_user_categories_seeded`, conexão própria e escrita) roda antes dela. Teste: uma conexão só.
+`ler` tem um balde duplo de "sem categoria" (a linha `NULL` e a de texto `sem categoria` viram duas
+chaves, `None` e `'sem categoria'`); `/gastos` junta os dois por `categoria or CAT_VAZIA_LABEL`
+(`listar` devolve `NULL` ou `cat_norm`, equivalente ao `cat_key_sql`). Limite declarado: as duas rotas
+são duas respostas; se um lançamento entrar entre elas, o detalhe e a lista podem diferir por um
+instante, e o aviso de escrita (SSE) refaz as duas.
 
 **Outras mudanças do PR 1**
-- `GET /api/v2/lancamentos` ganha `dia=AAAA-MM-DD` (filtra pelo `dia` devolvido), para o clique
+- `GET /api/v2/lancamentos` ganha `dia=AAAA-MM-DD` (filtra pelo `data` devolvido; **texto** com `pattern` e `date.fromisoformat`, não `date`, porque o gerador de tipos recusa `format: date` em query; `2026-02-30` é 422), para o clique
   no dia do calendário. A navegação leva **sempre os dois**: `mes=<mês escolhido>&dia=<dia
   mostrado>`, porque o cartão entra pelo mês da fatura (`period_end`), não pelo dia da compra: a
   compra de 28 de setembro de uma fatura de outubro só aparece com `mes=outubro`. Teste: essa
@@ -209,8 +239,10 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   (entrada inclusa) e o `ler` soma nele os movimentos de caixinha/investimento em outra moeda.
   Para uma tela de GASTO isso diria "saída excluída" de coisa que nunca foi saída. As duas
   rotas devolvem `saidas_em_outra_moeda`, que conta só as saídas que ficaram fora das categorias,
-  e o motivo `outra_moeda` das rotas de gasto só sobe quando esse contador é maior que zero. O
-  extrator compartilhado devolve o contador já separado por tipo. Teste: mês com entrada em
+  e o motivo `outra_moeda` das rotas de gasto só sobe quando esse contador é maior que zero. No PR 1a o
+  contador é **derivado**, sem mexer no extrator: saídas não internas menos saídas válidas (em reais), por
+  chave, num `Counter`; `outra_moeda` sai do conjunto de motivos e volta só se o contador for maior que
+  zero. Teste: mês com entrada em
   outra moeda e movimento de caixinha em outra moeda, sem saída em outra moeda (contador 0, sem
   aviso), e mês com uma saída em outra moeda (contador 1, com aviso).
 - **Descrição nunca nula nas respostas de gasto.** `descricao` do leitor pode vir `None` (lançamento
@@ -266,9 +298,10 @@ compara `cat_key_sql` dos dois lados (`db/connection.py`), que colapsa vazio em
 `CAT_VAZIA_LABEL = "sem categoria"`. A linha "Sem categoria" abre os lançamentos com
 `categoria=sem categoria`, e o contrato diz isso (o cliente não escreve o literal: recebe-o da
 resposta). Uma categoria do usuário chamada "Sem categoria" cai no mesmo balde, como no donut
-antigo. **Ainda não provado**: não há teste de `/api/v2/lancamentos?categoria=sem categoria`; o
-PR 1 leva esse teste (linha de cartão do Open Finance com `categoria` NULO, que o
-`cat_key_sql` cita como o caso real) e o de navegação do PR 2.
+antigo. O teste de `/api/v2/lancamentos?categoria=sem categoria` existe
+(`tests/test_api_v2_lancamentos.py`, `test_categoria_sem_categoria_junta_null_vazio_e_o_nome_e_nao_pega_outra`),
+mas só CARACTERIZA o filtro (passa sem a mudança). Ele já cobre a compra de cartão do Open Finance com
+`categoria` NULO (o caso real que o `cat_key_sql` cita); falta só o teste de navegação do PR 2.
 
 ### 4.3 PR 2 — Tela (faixa **Leve**)
 Troca o protótipo pelo real nos três blocos, no Resumo e em `/gastos`, pelo inventário do §4.2:

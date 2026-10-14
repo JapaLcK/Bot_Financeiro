@@ -116,11 +116,13 @@ async function tentativa<T>(
  * (`entrarComGoogle`) e Apple (`entrarComApple`), e o cadastro dos dois
  * (`completarCadastroSocial`), então um abandono aqui supera a entrada em voo
  * de QUALQUER um deles. Caso real: um verify de cadastro em voo
- * em `/criar-conta`, `/entrar` empilhada por cima (hoje só por link `pigbank://`
- * digitado de fora: nem a volta do Google nem a da Apple passam pelo
- * expo-router — chegam pelo retorno do `openAuthSessionAsync` e do
- * `signInAsync`), login de outra conta que para no MFA e
- * Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
+ * em `/criar-conta`, `/entrar` empilhada por cima (por link `pigbank://` de fora
+ * isso deixou de acontecer: `+native-intent.ts` só deixa passar a volta do Open
+ * Finance (#604); sobra o dev client / `exp://` em `__DEV__`. A volta da Apple
+ * chega pelo `signInAsync`. A do Google chega pelo `openAuthSessionAsync` e, no
+ * Android, o mesmo `pigbank://auth?code=` também chega ao expo-router, onde o
+ * `+native-intent` a descarta; só medido em Jest),
+ * login de outra conta que para no MFA e Voltar — o 200 atrasado do cadastro vira `EntradaSuperada`, a conta já existe
  * no servidor e a sessão dela é descartada sem aviso (recuperação: Entrar com
  * e-mail e senha). O Voltar do cadastro social não chama isto, de propósito.
  * Enumere a máquina (fluxos × eventos que avançam o contador) antes de mexer aqui.
@@ -158,10 +160,11 @@ export async function entrar(email: string, senha: string): Promise<Entrada> {
 
 /**
  * Troca o código de uso único do Google (`pigbank://auth?code=`) pela sessão.
- * O código vai no corpo; conta com dois fatores volta com o desafio, como o login.
+ * O código e o `code_verifier` (PKCE, #604) vão no corpo; conta com dois fatores
+ * volta com o desafio, como o login.
  */
-export async function entrarComGoogle(codigo: string): Promise<Entrada> {
-  return entrarPor("/auth/google/exchange", { code: codigo });
+export async function entrarComGoogle(codigo: string, verificador: string): Promise<Entrada> {
+  return entrarPor("/auth/google/exchange", { code: codigo, code_verifier: verificador });
 }
 
 /**
@@ -196,11 +199,13 @@ export async function completarCadastroSocial(
   token: string,
   nome: string,
   telefone: string,
+  verificador?: string,
 ): Promise<Perfil> {
   return tentativa(async (minhaVez, sinal) => {
     const r = await chamar(`/auth/${provedor}/complete-signup`, loginSchema, {
       metodo: "POST",
-      corpo: { token, name: nome, phone: telefone, accepted_terms: true },
+      // `verificador` só existe no Google (PKCE, #604); `undefined` some do JSON.
+      corpo: { token, name: nome, phone: telefone, accepted_terms: true, code_verifier: verificador },
       semAuth: true,
       sinal,
     });

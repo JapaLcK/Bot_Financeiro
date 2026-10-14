@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Guia, Investido, Metas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -81,7 +81,62 @@
     "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
   },
   "categorias": {
-    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação" }, { "chave": "mercado", "nome": "mercado" }, { "chave": "casa", "nome": "Casa" }] }
+    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" }, { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a" }, { "chave": "casa", "nome": "Casa", "emoji": "🏷️", "cor": "#94A3B8" }] }
+  },
+  "gastos": {
+    "padrao": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "440.00",
+      "categorias": [
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "140.00", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
+      ],
+      "dias": [
+        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }] },
+        { "dia": "2026-10-07", "total": "290.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }, { "descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria" }] },
+        { "dia": "2026-10-20", "total": "50.00", "maiores": [{ "descricao": "Assinatura", "valor": "50.00", "categoria": "sem categoria" }] }
+      ],
+      "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "310.00", "motivos": []
+    },
+    "cortado": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": "2026-10-10", "total": "120.00",
+      "categorias": [
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "120.00", "quantidade": 2, "valor_ate_corte": "120.00", "anterior_ate_corte": null }
+      ],
+      "dias": [
+        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }] }
+      ],
+      "fora_da_grade": { "quantidade": 1, "valor": "50.00" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
+    },
+    "indisponivel": {
+      "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "dia_de_corte": 30, "historico_desde": "2026-10-10", "total": null,
+      "categorias": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
+    }
+  },
+  "gastos_categoria": {
+    "padrao": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "total": "300.00", "compras": 2, "valor_medio": "150.00",
+      "ultimas": [
+        { "data": "2026-10-07", "descricao": "Restaurante", "mensagem": null, "origem": "banco", "valor": "200.00" },
+        { "data": "2026-10-03", "descricao": "Mercado", "mensagem": "gastei 100 no mercado", "origem": "carteira", "valor": "100.00" }
+      ],
+      "serie": [{ "mes": "2026-08", "valor": "180.00" }, { "mes": "2026-09", "valor": "250.00" }, { "mes": "2026-10", "valor": "300.00" }],
+      "estabelecimentos": [{ "nome": "Restaurante", "valor": "200.00", "quantidade": 1 }, { "nome": "Mercado", "valor": "100.00", "quantidade": 1 }],
+      "dias": [
+        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }] },
+        { "dia": "2026-10-07", "total": "200.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }] }
+      ],
+      "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
+    },
+    "indisponivel": {
+      "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "total": null, "compras": null, "valor_medio": null, "ultimas": [],
+      "serie": [{ "mes": "2026-04", "valor": null }, { "mes": "2026-05", "valor": null }, { "mes": "2026-06", "valor": null }],
+      "estabelecimentos": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" },
+      "saidas_em_outra_moeda": 0, "motivos": ["inicio_do_historico"]
+    }
   },
   "guia": {
     "oferecer": {

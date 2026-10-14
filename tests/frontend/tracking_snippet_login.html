@@ -1,0 +1,58 @@
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
+n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+document,'script','https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '123456789012345');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=123456789012345&ev=PageView&noscript=1"/></noscript>
+<!-- End Meta Pixel Code -->
+<!-- Google Analytics (GA4) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-TESTE12345"></script>
+<script>
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());
+var PB_GA_SUJOS = ["token", "sid"];
+function pbLimpaUrl(bruta){
+  if (!bruta) return bruta;
+  try {
+    var u = new URL(bruta);
+    PB_GA_SUJOS.forEach(function(p){ u.searchParams.delete(p); });
+    return u.href;
+  } catch (e) { return null; }
+}
+(function(){
+  var cfg = {};
+  var aqui = pbLimpaUrl(location.href);
+  if (aqui) cfg.page_location = aqui;
+  // O referrer é a OUTRA ponta do mesmo vazamento: sair de
+  // /completar-cadastro?token=… (Cancelar, Termos, Privacidade) manda a
+  // URL de origem inteira no page_view da página seguinte.
+  var veioDe = pbLimpaUrl(document.referrer);
+  if (veioDe) cfg.page_referrer = veioDe;
+  gtag('config', 'G-TESTE12345', cfg);
+})();
+/* Evento seguido de navegação: sem esperar, o `dataLayer` (que é memória
+   da página) morre junto com o documento quando o gtag.js ainda está
+   carregando — e a conversão some justo em quem tem conexão ruim.
+   `depois` roda UMA vez: no callback do gtag, ou no teto de 1s, o que vier
+   primeiro. O teto é o que importa: sem gtag.js carregado, o callback
+   nunca vem, e sem ele o usuário ficaria preso. */
+window.pbTrack = function(nome, params, depois){
+  var fim = function(){ if (depois) { var d = depois; depois = null; d(); } };
+  try {
+    if (!window.gtag) { fim(); return; }
+    var p = {};
+    for (var k in (params || {})) p[k] = params[k];
+    p.event_callback = fim;
+    p.event_timeout = 900;
+    gtag('event', nome, p);
+    setTimeout(fim, 1000);
+  } catch (e) { fim(); }
+};
+</script>
+<!-- End Google Analytics -->

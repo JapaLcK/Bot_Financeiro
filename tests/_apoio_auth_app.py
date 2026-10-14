@@ -177,15 +177,21 @@ def google_de_mentira(monkeypatch, email: str, *, verificado: bool = True) -> No
     })
 
 
-def login_google(app: int, cliente: TestClient | None = None, **query):
+def login_google(
+    app: int, cliente: TestClient | None = None, *, desafio: str | None = None, **query
+):
     """`/auth/google/start?app=N` → `/auth/google/callback` com o state que o
     start gravou no cookie. Devolve (cliente, 302 do callback). `query`
     sobrescreve a URL do callback (`state=` errado, `error=`); `cliente`, o
-    TestClient (peer e cabeçalhos próprios)."""
+    TestClient (peer e cabeçalhos próprios); `desafio`, o `code_challenge` PKCE
+    do start (#604)."""
     from urllib.parse import parse_qs, urlparse
 
     client = cliente or TestClient(dashboard.app)
-    inicio = client.get(f"/auth/google/start?app={app}", follow_redirects=False)
+    inicio = client.get(
+        f"/auth/google/start?app={app}" + (f"&code_challenge={desafio}" if desafio else ""),
+        follow_redirects=False,
+    )
     assert inicio.status_code == 302, inicio.text
     state = parse_qs(urlparse(inicio.headers["location"]).query)["state"][0]
     params = {"code": "code-do-google", "state": state, **query}

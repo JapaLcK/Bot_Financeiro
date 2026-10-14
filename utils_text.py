@@ -857,6 +857,24 @@ def _pt_words_to_int(phrase: str) -> int | None:
     return total if found else None
 
 
+# Limite TÉCNICO, não de negócio (o repo recusa teto de negócio: pagar/lançar R$ 2 bi
+# continua valendo, ver test_bill_amount_pending e test_full_handler_smoke): 10**13 reais
+# são 10**15 centavos, ainda exatos em float64 (< 2**53). Acima disso o centavo se perde,
+# e `numeric` do Postgres grava NaN, Infinity e 1e308 sem reclamar.
+VALOR_MAX = 10**13
+
+
+def valor_valido(v) -> bool:
+    """True se `v` é número finito, > 0 e <= VALOR_MAX. `float("nan") <= 0` é
+    False, então o guard `v <= 0` sozinho deixa NaN passar; `parse_money` devolve
+    `inf` para dígitos enormes."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int de 400 dígitos
+        return False
+    return isfinite(f) and 0 < f <= VALOR_MAX
+
+
 def parse_money(text: str) -> float | None:
     # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
     # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito

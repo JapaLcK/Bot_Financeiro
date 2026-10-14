@@ -114,11 +114,21 @@ def get_password_changed_at(user_id: int):
 # Dashboard short links
 # ──────────────────────────────────────────────────────────────────────────────
 
-def create_dashboard_session(user_id: int, hours: float = 5 / 60) -> str:
-    return _db_support.create_dashboard_session_impl(get_conn, user_id, hours)
+def create_dashboard_session(
+    user_id: int, hours: float = 5 / 60, code_challenge: str | None = None
+) -> str:
+    return _db_support.create_dashboard_session_impl(get_conn, user_id, hours, code_challenge)
 
 
-def consume_dashboard_session(code: str) -> int | None:
+def consume_dashboard_session(code: str, challenge: str | None = None) -> int | None:
+    # PKCE (#604), igualdade estrita nos dois sentidos (`is not distinct from`):
+    # com `challenge` só consome código criado com ESSE challenge; com `None`
+    # (`/d/{code}`, `/auth/dashboard-link`, troca sem verifier) só código SEM
+    # challenge. Logo um código roubado do `pigbank://` não vira sessão por essas
+    # rotas, e um código sem challenge (injetado por outro app, do bot, ou de
+    # cookie perdido) não é trocável por quem manda verifier: o app novo sempre
+    # manda, então a injeção de código não entra. Não casar não queima o código.
+    # Teto: o iOS antigo, sem verifier, segue na janela até sair de circulação.
     # `/d/{code}` é ANÔNIMA: com NUL no path o psycopg
     # estourava antes do DELETE e o 500 virava uma linha em `system_event_logs`
     # por requisição, de graça (#321). "Código com veneno" = "código que não
@@ -133,8 +143,9 @@ def consume_dashboard_session(code: str) -> int | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "delete from dashboard_sessions where code = %s and expires_at > now() returning user_id",
-                (code,),
+                "delete from dashboard_sessions where code = %s and expires_at > now()"
+                " and code_challenge is not distinct from %s returning user_id",
+                (code, challenge),
             )
             row = cur.fetchone()
         conn.commit()
