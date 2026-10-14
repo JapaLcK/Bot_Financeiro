@@ -61,6 +61,7 @@ _PASSOS = {
     "get_open_bill": "Abrindo a fatura",
     "get_investment_summary": "Vendo seus investimentos",
     "list_pockets": "Vendo suas caixinhas",
+    "list_metas": "Vendo suas metas",
     "simulate_purchase": "Simulando a compra",
     "show_card": "Montando o card",
 }
