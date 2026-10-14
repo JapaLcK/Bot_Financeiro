@@ -38,6 +38,7 @@ class Lancamento(BaseModel):
     hora: str | None
     tipo: Literal["entrada", "saida"]
     interno: bool
+    guardado: bool
     valor: Decimal
     moeda: str
     descricao: str | None

@@ -1,0 +1,250 @@
+"""Guardado (P8) em `GET /api/v2/lancamentos`: depósito de caixinha e aporte saem da conta,
+saque e resgate entram, `guardado` e `interno` verdadeiros, fora de TODO total.
+
+Gravado pelos escritores reais (`db.pocket_*`, `db.investment_*`), re-datado para o mês da
+matriz de `test_resumo_mes_regra.py` (os escritores gravam "agora").
+
+- positivo: a soma dos não internos segue sendo o Resumo; `resumo-do-mes` e `mes-detalhes`
+  (entrou, saiu, categorias, dias, origens, fora_do_total) IDÊNTICOS com e sem as linhas; saídas
+  guardado em BRL = `guardado.aportes` e entradas = `guardado.saques` (aporte em USD na mistura,
+  corte do plano no meio do mês); `categoria=` nunca as devolve; B não vê as de A; /editar e
+  /apagar = 409; keyset com limite=1.
+- NEGATIVO (conserto desligado por monkeypatch no SQL, em caso que estava verde): N1 sem
+  `or guardado` no `interno`; N2 resgate mapeado para saída; N3 `guardado` sempre falso (o filtro
+  de categoria perde a exclusão).
+"""
+from __future__ import annotations
+
+from decimal import Decimal
+
+import db
+from conftest import usuario_pagante
+from core.services import plan_service
+from db import lancamentos, mes_detalhes as md
+from db.resumo_mes import resumo_do_mes
+from tests._patrimonio_helpers import q
+from tests.test_api_v2_lancamentos import M, ok, resumo, soma, todos
+from tests.test_api_v2_lancamentos_escrita import codigo, linha, post, saldo
+from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
+from tests.test_bank_movements import _bank
+from tests.test_resumo_mes_regra import ENTROU, INICIO, SAIU, _em, _lanc, semeia_a, semeia_b
+from utils_date import now_tz
+
+D = Decimal
+IGUAIS = ("entrou", "saiu", "categorias", "dias", "origens", "fora_do_total")
+
+
+def guarda(uid: int, caixinha: str = "Viagem", banco: dict | None = None) -> dict[str, int]:
+    """Depósito 120, saque 50, aporte 300, resgate 100 pelos escritores, nos dias 10 a 13 do
+    mês da matriz; `criar_caixinha` e `create_investment` vão junto (têm de ficar fora)."""
+    q("update accounts set balance = 5000 where user_id = %s returning user_id", (uid,))
+    db.create_pocket(uid, caixinha)
+    db.create_investment_db(uid, "CDB", rate=0.10, period="yearly", tax_profile="exempt_ir_iof")
+    ids = {"deposito": db.pocket_deposit_from_account(uid, caixinha, 120, "dep", funding_source=banco)[0],
+           "saque": db.pocket_withdraw_to_account(uid, caixinha, 50)[0],
+           "aporte": db.investment_deposit_from_account(uid, "CDB", 300, "ap", funding_source=banco)[0],
+           "resgate": db.investment_withdraw_to_account(uid, "CDB", 100)[0]}
+    for dia, lid in zip((10, 11, 12, 13), ids.values()):
+        q("update launches set criado_em = %s where id = %s returning id", (_em(dia), lid))
+    q("""update launches set criado_em = %s where user_id = %s
+         and tipo in ('criar_caixinha', 'create_investment') returning id""", (_em(9), uid))
+    return ids
+
+
+def detalhes(uid) -> dict:
+    return md.ler(uid, INICIO.year, INICIO.month, now_tz())
+
+
+def _resumo_db(uid) -> tuple[Decimal, Decimal]:
+    """Sem HTTP: a rota exige a chave (`libera`), que também trava os escritores da semente."""
+    r = resumo_do_mes(uid, INICIO.year, INICIO.month)
+    return r["entrou"], r["saiu"]
+
+
+def corta(monkeypatch, dia: int) -> None:
+    corte = INICIO.replace(day=dia)
+    monkeypatch.setattr(plan_service, "history_earliest_date", lambda uid, now=None: corte)
+    monkeypatch.setattr(md, "history_earliest_date", plan_service.history_earliest_date)
+
+
+def mundo(libera_):
+    """A com a matriz + os 4 movimentos; devolve (a, ids, itens por id, resumo e detalhes de ANTES)."""
+    a = usuario_pagante()
+    semeia_a(a)
+    antes = (_resumo_db(a), detalhes(a))
+    ids = guarda(a)
+    libera_(a)
+    return a, ids, {i["id"]: i for i in todos(a, mes=M)}, antes
+
+
+# ── positivo ────────────────────────────────────────────────────────────────
+
+def test_os_quatro_movimentos_na_lista_fora_de_todo_total(libera):
+    a, ids, itens, (resumo_antes, det_antes) = mundo(libera)
+    esperado = {"deposito": "saida", "aporte": "saida", "saque": "entrada", "resgate": "entrada"}
+    for nome, tipo in esperado.items():
+        i = itens[f"l{ids[nome]}"]
+        bruto = q("select valor from launches where id = %s", (ids[nome],))["valor"]
+        assert (i["tipo"], i["guardado"], i["interno"], i["pode"], i["origem"], i["motivos"]) == (
+            tipo, True, True, [], "registro_antigo", []), nome
+        assert i["conta_id"] is None and D(i["valor"]) == bruto > 0, nome
+    assert {D(itens[f"l{ids[n]}"]["valor"]) for n in esperado} == {D(120), D(50), D(300), D(100)}
+    assert not any(f"l{x['id']}" in itens for x in q(
+        "select id from launches where user_id = %s and tipo in ('criar_caixinha','create_investment')",
+        (a,), fetch=True))
+    assert soma(list(itens.values())) == resumo(a, mes=M) == (ENTROU, SAIU) == resumo_antes
+    assert all(not i["guardado"] for i in itens.values() if not i["interno"])
+    # o Resumo e o Para onde vai não mudam com as linhas (o bloco `guardado` muda por desenho)
+    depois = detalhes(a)
+    assert {k: depois[k] for k in IGUAIS} == {k: det_antes[k] for k in IGUAIS}
+
+
+def test_somas_guardado_batem_com_o_bloco_guardado_usd_e_corte(libera, monkeypatch):
+    a = usuario_pagante()
+    semeia_a(a)
+    ids = guarda(a)
+    usd = _lanc(a, "aporte_investimento", 77, 14, interno=True)
+    q("update launches set currency = 'USD' where id = %s returning id", (usd,))
+    libera(a)
+
+    def confere():
+        itens = [i for i in todos(a, mes=M) if i["guardado"]]
+        brl = [i for i in itens if i["moeda"] == "BRL"]
+        g = detalhes(a)["guardado"]
+        assert sum(D(i["valor"]) for i in brl if i["tipo"] == "saida") == g["aportes"]
+        assert sum(D(i["valor"]) for i in brl if i["tipo"] == "entrada") == g["saques"]
+        return itens
+
+    todas = confere()
+    assert {i["moeda"] for i in todas} == {"BRL", "USD"} and f"l{usd}" in {i["id"] for i in todas}
+    assert next(i for i in todas if i["id"] == f"l{usd}")["tipo"] == "saida"
+    assert detalhes(a)["guardado"]["aportes"] == 200 + 120 + 300  # a semente, o depósito e o aporte
+    corta(monkeypatch, 12)  # corte no meio do mês: fica o aporte (12), o resgate (13) e o USD (14)
+    cortadas = confere()
+    assert {i["id"] for i in cortadas} == {f"l{ids['aporte']}", f"l{ids['resgate']}", f"l{usd}"}
+    assert detalhes(a)["guardado"]["aportes"] == 300 and detalhes(a)["guardado"]["saques"] == 100
+
+
+def test_pago_pelo_banco_tambem_e_guardado(libera):
+    a = usuario_pagante()
+    _, banco = _bank(a)
+    ids = guarda(a, banco=banco)
+    libera(a)
+    itens = {i["id"]: i for i in todos(a, mes=M)}
+    for nome in ("deposito", "aporte"):
+        i = itens[f"l{ids[nome]}"]
+        assert (i["tipo"], i["guardado"], i["interno"], i["pode"]) == ("saida", True, True, [])
+    assert itens[f"l{ids['resgate']}"]["tipo"] == "entrada" and itens[f"l{ids['resgate']}"]["guardado"]
+    assert soma(list(itens.values())) == resumo(a, mes=M)
+
+
+def test_filtro_de_categoria_nunca_devolve_guardado(libera):
+    a = usuario_pagante()
+    ids = guarda(a)
+    sem = _lanc(a, "despesa", 11, 15)  # despesa sem categoria: continua vindo
+    q("update launches set categoria = null where id = %s returning id", (sem,))
+    libera(a)
+    achados = {i["id"] for i in todos(a, mes=M, categoria="sem categoria")}
+    assert f"l{sem}" in achados and not achados & {f"l{x}" for x in ids.values()}
+    assert {f"l{x}" for x in ids.values()} <= {i["id"] for i in todos(a, mes=M)}
+    assert any(i["guardado"] for i in todos(a, mes=M, q="viagem"))  # a descrição é o nome da caixinha
+
+
+def test_isolamento_a_nao_ve_a_caixinha_de_b(libera):
+    a, b = usuario_pagante(), usuario_pagante()
+    semeia_a(a)
+    semeia_b(b)
+    guarda(a)
+    libera(a)  # só A: os escritores de B ainda rodam
+    antes = ([i["id"] for i in todos(a, mes=M)], detalhes(a)["guardado"])
+    ids_b = guarda(b, "ViagemDoB")
+    libera(a, b)
+    lista = todos(a, mes=M)
+    assert [i["id"] for i in lista] == antes[0] and detalhes(a)["guardado"] == antes[1]
+    assert "ViagemDoB" not in str(lista) and todos(a, mes=M, q="ViagemDoB") == []
+    assert {f"l{x}" for x in ids_b.values()} <= {i["id"] for i in todos(b, mes=M)}  # B vê as suas
+
+
+def test_editar_e_apagar_guardado_dao_409_sem_tocar_na_linha(libera):
+    a = usuario_pagante()
+    ids = guarda(a)
+    libera(a)
+    antes = ({n: linha(i) for n, i in ids.items()}, [(p["name"], p["balance"]) for p in db.list_pockets(a)])
+    for lid in ids.values():
+        assert codigo(post(a, "editar", {"id": f"l{lid}", "categoria": "lazer"})) == (409, "nao_editavel")
+        assert codigo(post(a, "apagar", {"id": f"l{lid}"})) == (409, "nao_editavel")
+    assert ({n: linha(i) for n, i in ids.items()},
+            [(p["name"], p["balance"]) for p in db.list_pockets(a)]) == antes
+
+
+def test_guardado_forjado_como_carteira_continua_sem_pode_e_sem_escrita(libera):
+    """Defesa em profundidade: linha guardado com cara de Carteira (manual, `origem`, flag falsa,
+    `delta_conta`) ou de banco (`source='open_finance'`, que sozinho daria `categoria`/`descricao`)
+    não ganha `pode` na lista nem passa na escrita (editar/apagar), com saldo intacto."""
+    a = usuario_pagante()
+    q("update accounts set balance = 5000 where user_id = %s returning user_id", (a,))
+    forjados = {}
+    for source in ("manual", "open_finance"):
+        for dia, (tipo, delta) in enumerate((("deposito_caixinha", -120), ("saque_caixinha", 50),
+                                             ("aporte_investimento", -300), ("resgate_investimento", 100)), 10):
+            forjados[source, tipo] = q("""insert into launches (user_id, tipo, valor, criado_em, is_internal_movement,
+                    source, external_id, origem, efeitos) values (%s, %s, %s, %s, false, %s, %s, 'carteira', %s::jsonb)
+                    returning id""", (a, tipo, abs(delta), _em(dia), source,
+                                      f"forjado-{tipo}" if source == "open_finance" else None,
+                                      f'{{"delta_conta": {delta}}}'))["id"]
+    libera(a)
+    itens = {i["id"]: i for i in todos(a, mes=M)}
+    antes = ({t: linha(i) for t, i in forjados.items()}, saldo(a))
+    for lid in forjados.values():
+        assert itens[f"l{lid}"]["pode"] == [] and itens[f"l{lid}"]["guardado"] is True
+        for corpo in ({"categoria": "lazer"}, {"descricao": "x"}, {"valor": "10"}):
+            assert codigo(post(a, "editar", {"id": f"l{lid}", **corpo})) == (409, "nao_editavel")
+        assert codigo(post(a, "apagar", {"id": f"l{lid}"})) == (409, "nao_editavel")
+    assert ({t: linha(i) for t, i in forjados.items()}, saldo(a)) == antes
+
+
+def test_keyset_com_limite_1_atravessa_o_mes_sem_repetir_nem_pular(libera):
+    a, ids, itens, _ = mundo(libera)
+    um_a_um = [i["id"] for i in todos(a, mes=M, limite=1)]
+    assert um_a_um == [i["id"] for i in todos(a, mes=M, limite=100)]
+    assert len(um_a_um) == len(set(um_a_um)) and {f"l{x}" for x in ids.values()} <= set(um_a_um)
+
+
+# ── NEGATIVOS: o conserto desligado, em caso que estava verde ───────────────────
+
+def _desliga(monkeypatch, velho: str, novo: str) -> None:
+    assert velho in lancamentos._PERNA_LANCAMENTOS
+    monkeypatch.setattr(lancamentos, "_PERNA_LANCAMENTOS", lancamentos._PERNA_LANCAMENTOS.replace(velho, novo))
+
+
+def test_n1_interno_nao_forcado_quebra_a_soma_e_as_categorias(libera, monkeypatch):
+    """Linha `deposito_caixinha` com a flag falsa: sem `or guardado`, entra na soma e nas categorias."""
+    a = usuario_pagante()
+    semeia_a(a)
+    falsa = _lanc(a, "deposito_caixinha", 40, 16, interno=False)
+    libera(a)
+    base = detalhes(a)
+    assert soma(todos(a, mes=M)) == resumo(a, mes=M) == (ENTROU, SAIU)  # com o conserto: verde
+    assert {i["id"]: i for i in todos(a, mes=M)}[f"l{falsa}"]["interno"] is True
+    _desliga(monkeypatch, "l.is_internal_movement or l.guardado as interno", "l.is_internal_movement as interno")
+    assert soma(todos(a, mes=M))[1] != SAIU
+    assert detalhes(a)["categorias"] != base["categorias"]
+
+
+def test_n2_resgate_como_saida_quebra_entradas_igual_saques(libera, monkeypatch):
+    a, ids, _, _ = mundo(libera)
+
+    def entradas():
+        return sum(D(i["valor"]) for i in todos(a, mes=M) if i["guardado"] and i["tipo"] == "entrada")
+    assert entradas() == detalhes(a)["guardado"]["saques"] == 150  # com o conserto: verde
+    _desliga(monkeypatch, f" or l.tipo in {lancamentos._RESGATAR}", "")
+    assert entradas() != detalhes(a)["guardado"]["saques"]
+
+
+def test_n3_sem_guardado_o_filtro_de_categoria_devolve_o_deposito(libera, monkeypatch):
+    a = usuario_pagante()
+    ids = guarda(a)
+    libera(a)
+    assert todos(a, mes=M, categoria="sem categoria") == []  # com o conserto: verde
+    _desliga(monkeypatch, "l.guardado, l.valor", "false as guardado, l.valor")
+    assert f"l{ids['deposito']}" in {i["id"] for i in todos(a, mes=M, categoria="sem categoria")}

@@ -184,3 +184,28 @@ test("chat mantém extrato demonstrativo; abrir lançamentos reais preserva mês
   assert.equal(await page.getByLabel("Buscar", { exact: true }).inputValue(), "");
   await ctx.close();
 });
+
+test("guardado (P8) diz Guardado, some com Registro antigo e não vira Entrada/Saída", async () => {
+  const { ctx, page, ir, erros } = await abrir();
+  const guardado = { ...fixture.itens[0], id: "l902", interno: true, guardado: true, descricao: "Viagem", origem: "registro_antigo", pode: [], motivos: [] };
+  const saque = { ...guardado, id: "l903", tipo: "entrada", descricao: "Saque Viagem" };  // entrada: é onde o verde de ganho vazaria
+  await ctx.route("**/api/v2/lancamentos?*", (r) => r.fulfill({ json: { ...fixture, itens: [guardado, saque, ...fixture.itens], proximo: null } }));
+  await ir("/lancamentos");
+  const linha = page.locator('[data-id="l902"]');
+  await linha.waitFor();
+  const texto = await linha.textContent();
+  assert.ok(texto.includes("Guardado · fora de Entrou/Saiu") && texto.includes("Viagem"), texto);
+  assert.doesNotMatch(texto, /Movimento|Registro antigo|Entrada|Saída/);
+  assert.equal(await linha.locator(".lanc-valor.gain").count(), 0);
+  const entrada = page.locator('[data-id="l903"]');
+  const textoSaque = await entrada.textContent();
+  assert.ok(textoSaque.includes("Guardado") && textoSaque.includes("Saque Viagem"), textoSaque);
+  assert.doesNotMatch(textoSaque, /Movimento|Registro antigo|Entrada|Saída/);
+  assert.equal(await entrada.locator(".lanc-valor.gain").count(), 0);
+  await linha.locator(".lanc-abrir").click();
+  const dialog = page.locator("dialog.lanc-form");
+  assert.ok((await dialog.textContent()).includes("Guardado"));
+  assert.doesNotMatch(await dialog.textContent(), /Movimento|Registro antigo|Apagar|Salvar/);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});

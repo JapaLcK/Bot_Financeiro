@@ -297,16 +297,24 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
   `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
   (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
-  **O mês é o de `TOTAIS_SQL`**, pelas mesmas pernas (`db/resumo_mes.MES_LANCAMENTOS_SQL` e
-  `MES_CARTAO_SQL`): a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
+  **O mês é o de `TOTAIS_SQL`**: mesma janela (`db/resumo_mes.MES_JANELA_SQL`) e mesma regra
+  de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
+  acrescenta os tipos guardado, que nunca entram em total), e a perna `MES_CARTAO_SQL`: a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
   entra pelo mês da fatura com a data da COMPRA; o interno entra com `interno: true`, fora
-  de qualquer soma; tipos que não são despesa/receita (caixinha, aporte) ficam fora, como
-  na soma. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
+  de qualquer soma. **Guardado (P8, #NNN):** depósito de caixinha e aporte entram como
+  `saida`, saque de caixinha e resgate como `entrada`, valor BRUTO, `guardado: true` e
+  `interno: true` (forçado: guardado ⇒ interno), fora de toda soma e agregado (nada de
+  `resumo-do-mes` nem `mes-detalhes` muda; o bloco `guardado` de `mes-detalhes` segue vindo
+  de `launches` pelos mesmos tipos, `lancamentos.GUARDAR`/`RESGATAR`); `categoria=` nunca os
+  devolve; `pode: []`, `conta_id: null`, origem `registro_antigo`. `criar_caixinha` & cia
+  seguem fora. Limites: depósito pago pelo banco gera 2 linhas fora do total (a do banco e a
+  guardado) sem vínculo; `conta=` e `origem=carteira` não pegam guardado; caixinha do banco
+  (Open Finance) não gera guardado. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
   `clausula_busca`, as mesmas do `list_history`) a lista varre a janela inteira do plano em
   vez do mês. Janela do plano cortando = `inicio_do_historico`. Página por KEYSET (cursor
   opaco: base64 de `[dia, instante, tabela, id]`, adulterado = 422), sem contagem total.
   Item: `id` (`l<n>` lançamento, `c<n>` compra no cartão: as tabelas compartilham o espaço de
-  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `valor` (texto),
+  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `guardado`, `valor` (texto),
   `moeda` (a da conta do banco ligada), `descricao`, `mensagem` (a nota do usuário),
   `categoria` (a chave `cat_norm_sql`, a mesma de `GET /api/v2/categorias`), `origem`,
   `fundido` + `instituicao`, `conta_id`, `cartao_id`, `parcela {n, total}`, `fatura`
@@ -315,7 +323,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
   marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
-  (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
+  (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
+  inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
+  guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
   (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
