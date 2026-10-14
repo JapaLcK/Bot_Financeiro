@@ -295,7 +295,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - `GET /api/v2/lancamentos` (`api/v2/lancamentos.py`, regra em `db/lancamentos.py`): só
   leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
-  `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
+  `cartao`, `categoria` (a chave; `sem categoria` pega `NULL`, vazio e a de mesmo nome, também a compra de cartão), `tipo` (`entrada`|`saida`), `dia` (`AAAA-MM-DD`, filtra pelo `data` devolvido; é texto e não `date` porque o gerador de tipos recusa `format: date` em query; inválido como `2026-02-30` = 422; leve sempre junto o `mes` da fatura, que é o que pega a compra de cartão de outro mês), `q`, `cursor`, `limite`
   (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
   **O mês é o de `TOTAIS_SQL`**: mesma janela (`db/resumo_mes.MES_JANELA_SQL`) e mesma regra
   de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
@@ -377,9 +377,52 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
   sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
   gravam dois).
-- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
-  vence entre gêmeas), semeado como o `/categories` do /app.
+  vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
+  /app. Só o catálogo: a categoria que só aparece nos lançamentos e a "sem categoria" não têm entrada aqui
+  (o fallback neutro é do `/gastos`).
+- `GET /api/v2/gastos?mes=AAAA-MM` (`api/v2/gastos.py`, regra em `db/gastos.py`; também em `/api/app/gastos`,
+  porque `criar_app` monta o mesmo router nos dois: rota nova não afeta o app instalado): "Para onde vai",
+  a visão do mês, só leitura (plano em `docs/plano-etapa5-gastos.md`). `mes` como em `resumo-do-mes` (sem
+  ele o corrente; futuro ou fora do formato = 422). Resposta: `mes`, `disponivel`, `hoje` (AAAA-MM-DD no
+  fuso do app), `dia_de_corte`, `historico_desde` (o corte do plano, se cai depois do dia 1 do mês; senão
+  `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
+  `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
+  (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
+  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
+  mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
+  `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
+  `lancamentos.MOTIVOS_ITEM` que faltam + `arredondamento_por_grupo`; nesta ordem: `conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado`, `inicio_do_historico`, `transacao_pendente`, `outra_moeda`, `moeda_presumida`,
+  `arredondamento_por_grupo`). Os `motivos` juntam os das contas que estão em `resumo_mes.MOTIVOS` (`outra_moeda`/`moeda_presumida` de `/contas` não passam), das linhas do mês pedido E das linhas do
+  mês anterior lido: um `transacao_pendente` do mês anterior aparece na resposta do mês pedido (fixado por
+  `test_pendente_do_mes_anterior_levanta_o_motivo_do_mes_pedido`). **Regra**: as MESMAS linhas do `/lancamentos` (`lancamentos.listar`, guardado
+  fora porque é opt-in) por `mes_detalhes._em_reais` (sem interno, sem outra moeda), só `saida`: Σ
+  categorias = `saiu` de `resumo-do-mes` nos meses sem `outra_moeda`. O mês pedido e o anterior saem
+  de UMA transação repeatable read / read only (o seed do catálogo, que escreve e abre conexão própria,
+  roda antes). **Corte por dia**: `valor_ate_corte` e `anterior_ate_corte` somam o dia 1 até
+  `dia_de_corte` (mês corrente: o dia de hoje; mês passado: o último dia do mês); no mês anterior, o
+  mesmo dia (`min` com o último dia dele, 31/03 contra fim de fevereiro) no mês corrente e o mês
+  anterior inteiro no passado (fevereiro contra janeiro conta os dias 29 a 31). Saída com data depois
+  do corte entra em `valor` e não nos dois "até o corte"; data anterior ao mês conta como já ocorrida.
+  `anterior_ate_corte` e `anterior_total_ate_corte` são `null` (nunca zero) quando o corte do plano toca qualquer parte do mês anterior;
+  mês todo antes do corte = `disponivel: false`, `total: null`, listas vazias e `motivos` com
+  `inicio_do_historico` (a tela não mostra "R$ 0"). **Grade**: `[max(dia 1, corte), fim do mês)`; saída
+  com `dia` fora dela (compra de cartão do mês anterior numa fatura do mês, linha antiga do Open Finance
+  com `posted_at` antes do corte) vai para `fora_da_grade`, dentro do `total`. **Moeda**:
+  `saidas_em_outra_moeda` é derivado (saídas não internas − saídas em reais, por chave); entrada ou
+  movimento de caixinha em outra moeda não conta, e `outra_moeda` só sobe com contador > 0. **Sem
+  categoria**: a chave `sem categoria` junta `NULL`, vazio e a categoria de mesmo nome (`cat_key_sql`); o nome,
+  o emoji e a cor são os do catálogo quando há linha dele (o catálogo vence), senão `CAT_NEUTRA_EMOJI`/
+  `CAT_NEUTRA_COR` (`db/connection.py`), que valem também para a categoria que só aparece nos lançamentos; o
+  nome, nesse caso, é a própria chave. `cor` fora de `#RRGGBB` e `emoji` vazio ou só espaços saem como o
+  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`).
+  `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
+  `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  difere do total (`soma_arredondada_diverge`). Falta, do plano: `/gastos/categoria` (PR 1b) e a tela (PR 2).
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
@@ -619,7 +662,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   - **Bloco condicional por usuário (P1-b).** Só quem tem a chave `dashboard_v2_enabled` (`metas_conversa.metas_ligadas`) recebe as metas: o prompt de metas (`SYSTEM_PROMPT_METAS`, `ADENDO_CARDS_METAS`), o schema de `list_metas`, o `show_card` com `metas` e `caixinhas` e a descrição nova do `list_pockets`. Quem não tem a chave recebe `SYSTEM_PROMPT`, `ADENDO_CARDS`, `SCHEMAS` e `SCHEMAS_APP` exatamente como antes das metas (`system_prompt.prompt_do_usuario`, `tools.schemas_para`, montados por turno no `runner`); nele `show_card metas` mostra as caixinhas, com o id `caixinhas` no bloco. A tool `list_metas` sem a chave (só se o modelo imitar o histórico) devolve `use_caixinhas`.
   - **Onde o app lê metas.** `list_metas` fica fora de `SCHEMAS_APP` (`OCULTAS_NO_APP`); no app o prompt de K nem a cita (`SYSTEM_PROMPT_METAS_APP`): metas = `show_card` com `card="metas"` (recurso `metas`, formato de `/api/v2/metas`), caixinhas = `card="caixinhas"` (recurso `caixinhas`, formato legado `{ok, goals}`). Criar, editar e apagar meta pelo chat NÃO existe (é o C4): ao pedido explícito a IA manda para o painel (`ONDE_CRIAR`) e não usa tool de outro recurso; pedido de orientação ela ajuda em conversa (limite 14).
   - **Limites declarados.** (1) O `ai_guard` é cego a percentual, mês ("junho de 2027") e sinal: só confere R$. O sentido (crescendo × diminuindo) é do texto do `resumo`; o modelo que o inverta passa como "sustentado". (2) A visão do modelo traz até `MAX_METAS` (`core/services/metas_conversa.py`) metas e "e mais N no painel"; passando disso, as mais novas ficam fora e a tool não tem argumento de nome. (3) Follow-up sem tool ("e a viagem?") responde do histórico, e o guard fatia por turno: o número do turno anterior não conta como evidência do atual. (4) Nome que é de meta E de caixinha ("Reserva"): "apaga a meta Reserva" não pede qual (não usa nenhuma tool destrutiva); "guardei 100 na reserva" confere `list_pockets` antes. (5) Medido no harness real (`gpt-4o-mini`), não no pytest: o roteamento do modelo. (6) "N idêntico à base" vale para a ENTRADA do modelo (`system` e `tools` de cada turno, comparados execução a execução no PR; `tests/test_ai_chat_metas_extra.py` fixa que o prompt de N é o `_BASE` com o marcador trocado). Qualquer edição futura do texto base do prompt muda N também, por desenho. O que SAI ao app para N mudou em dois pontos, aceitos (ver "Para o E1"). (7) "Guardei 100 na reserva de emergência" com meta e caixinha de nomes parecidos, em K: o modelo tenta `pocket_deposit` com o nome da meta (em todas as execuções do harness) e a confirmação depois falha com "não achei a caixinha", igual à base; nada se perde. (8) "Quanto tem na reserva" pode responder por `list_metas` (chat) ou por `list_pockets` (app) quando há meta e caixinha de nome parecido. (9) "Guardei 100 na meta" em K: o "nada registrado" aparece só em parte das respostas, mas nenhuma tool é chamada (o essencial). (10) O guard é cego a sinal: o ritmo sai em módulo ("diminuindo R$ 250,00") e quem copia "R$ -250,00" cai em 🚨 falso positivo. (11) No WhatsApp, "apaga a meta Casa nova" de K pode cair no handler determinístico de caixinha ("Não achei essa caixinha"): é o C2. (12) **Texto × widget no app antigo (build 26), ACEITO pelo dono até o E1/C3:** o chip "Minha reserva de emergência está no tamanho certo?" de K responde com a META (R$ da meta, via `show_card metas`) e o app antigo desenha embaixo o widget das caixinhas (lê `/goals/{uid}/status`): os dois não coincidem. Não muda o comportamento por causa disso. (13) A chave é lida UMA vez por turno (`_context.METAS_DO_TURNO`/`metas_do_turno`, usada pelo runner, `schemas_para`, `list_metas`, `show_card` e o gate do card); FORA de um turno (chamada direta de `montar`/`get_tool`) ela é lida na hora, com o cache de `get_auth_user` que `dashboard_v2_enabled` usa (`AUTH_USER_CACHE_TTL_SECONDS` em `db_support.py`). (14) A IA de K ajuda em pedido de ORIENTAÇÃO sobre meta ("me ajuda a montar uma meta") e só ao fim manda registrar no painel; a recusa vale para o pedido EXPLÍCITO de criar, editar ou apagar no sistema. Quem decide qual dos dois é o modelo: o harness real mede, o pytest não. (15) Desvios do plano do C1: a chave `reserva_sem_tamanho` não existe (o `resumo` já diz que o tamanho da reserva é desconhecido); o prompt de K manda usar `onde_criar` com `sem_metas`, mas a visão do card `metas` não traz `onde_criar` (no app o `ADENDO_CARDS_METAS` dá a URL do painel).
-  - **Para o E1 (app, build 27; o orquestrador copia isto para a sessão dele).** (i) `caixinhas` é id novo de card de chat: precisa de `cardId` + schema + view legados no app. Como o `periodo`, card só de chat fica FORA do `TITULOS` (o catálogo de widgets, `app/src/features/painel/catalogo.ts`): o `cardId` de `app/src/api/schemas/painel.ts` passa a `["periodo", "caixinhas", ...Object.keys(TITULOS)]`. Sem isso o app descarta calado o bloco `caixinhas` (id desconhecido descarta só aquele evento). (ii) O recurso `metas` do bloco do card `metas` vem agora no formato v2 (`/api/v2/metas`, fixtures em `tests/frontend/api_v2_respostas.json`, chave `"metas"`), mas o provider do app tem `schemas.metas = S.metasSchema` LEGADO (`app/src/features/painel/provider.tsx`): se o E1 reaproveitar `schemas[recurso]`, o card de K falha no parse. O recurso `caixinhas` traz o formato legado `{ok, goals}` (`metasSchema`). (iii) Para quem NÃO tem a chave (N), `show_card` com `card="metas"` agora sai como `card: "caixinhas"` e recurso `caixinhas` (antes: `metas`, `{ok, goals}`): o `passo.previa` vira `caixinhas`, que o app converte em `null` até (i) (o esqueleto some); é decisão aceita (o `cardId` precisa do `caixinhas` de qualquer modo para K). A mensagem de tool oculta de N segue exatamente a de antes (só K cita `metas, caixinhas`). Quando o E1 puser o `caixinhas` no app, `PENDENTE_NO_APP` em `tests/test_ai_chat_cards_ids_app.py` tem de ser esvaziada (o teste falha pedindo).
+  - **O que o E1 (app, build 27) fez.** (i) `caixinhas` entrou no `cardId` de `app/src/api/schemas/painel.ts` (`["periodo", "caixinhas", ...Object.keys(TITULOS)]`, FORA do `TITULOS`, que é o catálogo de widgets: `caixinhas` é só card de chat), com o widget legado `Caixinhas`/`ListaMetas` (`app/src/features/painel/patrimonio.tsx`) lendo o recurso `caixinhas` do bloco (formato legado `{ok, goals}`, `metasSchema`); `PENDENTE_NO_APP` em `tests/test_ai_chat_cards_ids_app.py` está vazia. Quem NÃO tem a chave (N) recebe `show_card` com `card="metas"` como `card: "caixinhas"` (decisão aceita; a mensagem de tool oculta de N segue a de antes). (ii) **Pendente: o card `metas` v2 (K).** O recurso `metas` do bloco vem no formato v2 (`/api/v2/metas`, fixtures em `tests/frontend/api_v2_respostas.json`, chave `"metas"`), mas o provider tem `schemas = S.schemasRecurso` com `metas` LEGADO: não reaproveite `schemas[recurso]` para o card de K. Vai em PR separado, antes do build 27; até lá o bloco `metas` v2 é recusado pelo zod e só o texto da resposta aparece.
   **Ritmo** (`db/metas_ritmo.py`, PR A2): cada meta traz `ritmo {valor, dias_de_historico, parcial, motivos}` e `chega_em` (`AAAA-MM`).
   - `valor` = o crescimento ATUAL da fonte, R$/mês (pode ser negativo), ao lado do `por_mes` (o NECESSÁRIO): (`atual` − valor em D0) ÷ dias × 30. Medido nas fotos POR POSIÇÃO (`open_finance_investment_snapshots`), não em `patrimonio_fotos` (só tem o total). O valor de um dia sai da MESMA regra de `investido.calcular` (`separar_posicoes` + `q_posicao`); a moeda vem do espelho (posição que já saiu dele entra como BRL com `moeda_presumida`); só foto `collection_confirmed`.
   - Pertinência (`_DE`, uma regra para o valor do dia E para o dia-base): as fotos do passado cobrem as MESMAS posições de hoje, por identidade do provedor. A foto PERTENCE à fonte quando a VENCEDORA de hoje da identidade (`POSICOES_BANCO_SQL`, `c.id desc` entre TODAS as conexões do dono) é uma conexão da fonte; a foto pode vir de QUALQUER conexão do dono (identidade que mudou de conexão a → c vale pela foto da antiga a; com foto nas duas no mesmo dia, vale a da mais nova). Vencedora fora da fonte (pausada, outro banco): a foto não entra no passado, como não entra hoje. Identidade fora do espelho vale pela foto de conexão da fonte.
@@ -723,6 +766,40 @@ desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora 
 mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
+`code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
+`google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de
+`google/exchange` e `google/complete-signup`. O callback `nat-` grava o challenge em
+`dashboard_sessions.code_challenge` e `pending_google_signups.code_challenge`; nulo
+significa sem PKCE (web, iOS antigo, Apple, link do bot). **Igualdade estrita nos dois
+sentidos** (`consume_dashboard_session`, `consume_pending_google_signup`): com
+`code_verifier` só se consome o código/pendente cujo challenge é `S256(verifier)`; sem
+verifier, só o que NÃO tem challenge. Daí: `/d/{code}` e `dashboard-link` (sem verifier)
+não consomem código do app; e código/pendente SEM challenge (injetado por outro app, do
+bot, ou de cookie perdido) não é trocável por quem manda verifier, que é o app novo, então
+a injeção de código não entra. O que não casa recusa antes de qualquer sessão e NÃO queima
+o código nem o pendente. Cookie do challenge presente mas que não é um S256 de 43 chars
+`[A-Za-z0-9_-]` faz o callback falhar fechado. A Apple não tem PKCE: o verifier é ignorado
+no `apple/complete-signup`.
+
+Limites conhecidos:
+- O iOS antigo, sem verifier, continua na janela: seu código sem challenge é trocável por
+  quem o interceptar. Fecha quando o challenge virar obrigatório (app antigo fora de
+  circulação).
+- Cookie do challenge AUSENTE no callback (perdido no caminho) gera código sem challenge,
+  que o app novo, mandando verifier, recusa: falha fechado e a pessoa tenta de novo. A
+  validar no aparelho Android: se o cookie `google_oauth_challenge` sobrevive ao Custom Tab
+  (se não, o login Google do Android falharia sempre).
+- A PKCE não cobre um fluxo iniciado pelo próprio sequestrador do scheme no aparelho (ele
+  abre `/auth/google/start` e usa o próprio par verifier/challenge); a defesa estrutural
+  seria App Links https no Android no lugar do scheme customizado, follow-up da #604.
+- Cookie tossing por subdomínio comprometido permite plantar state + challenge: é o mesmo
+  pressuposto do login CSRF por state, não uma regressão da PKCE.
+
+Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
+devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
+a rota (e o contrato com o app).
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com

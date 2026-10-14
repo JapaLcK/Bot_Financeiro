@@ -255,7 +255,7 @@ def ler_cursor(texto: str) -> tuple:
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
            categoria=None, tipo=None, q=None, apos=None, limite=50,
-           com_guardado=False) -> tuple[list[dict], bool]:
+           com_guardado=False, dia=None) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
     `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
@@ -276,7 +276,7 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     if apos is not None:
         filtros.append("(x.dia, x.instante, x.tabela, x.id) < (%s, %s, %s, %s)")
         params += apos
-    for sql, valor in (("x.origem = %s", origem), ("x.tipo = %s", tipo),
+    for sql, valor in (("x.origem = %s", origem), ("x.tipo = %s", tipo), ("x.dia = %s", dia),
                        (f"not x.guardado and {cat_key_sql('x.categoria')} = {cat_key_sql('%s')}", categoria)):
         if valor is not None:
             filtros.append(sql)

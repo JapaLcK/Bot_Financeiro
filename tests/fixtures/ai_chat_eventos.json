@@ -1,6 +1,6 @@
 {
   "passo": {"tipo": "passo", "previa": "contas", "texto": "Montando o card"},
-  "bloco": {"tipo": "bloco", "bloco": {"card": "contas", "abas": [{"mes": null, "recursos": {"contas": {}}}]}},
+  "bloco": {"tipo": "bloco", "bloco": {"card": "contas", "abas": [{"mes": null, "recursos": {"contas": {"total": "9400.25", "motivos": [], "fora_do_total": 0, "carteira": {"saldo": "450.00", "motivos": []}, "contas": [{"id": 1, "instituicao": "Nubank", "nome": "Conta principal", "saldo": "6250.25", "moeda": "BRL", "no_total": true, "conexao": "conectado", "sincronizado_em": "2026-10-06T12:00:00Z", "motivos": []}, {"id": 2, "instituicao": "Itaú", "nome": "Conta corrente", "saldo": "2700.00", "moeda": "BRL", "no_total": true, "conexao": "conectado", "sincronizado_em": "2026-10-06T12:00:00Z", "motivos": []}]}}}]}},
   "delta": {"tipo": "delta", "texto": "Oi"},
   "reinicio": {"tipo": "reinicio"},
   "fim": {"tipo": "fim", "reply": "Oi!", "message_id": 41, "usage": {"used": 3, "limit": 100}, "chips": ["E o mês passado?"]},

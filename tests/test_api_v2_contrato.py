@@ -7,6 +7,7 @@
 """
 import calendar
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from api.v2.assinaturas import Assinaturas
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
+from api.v2.gastos import Gastos
 from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
@@ -337,6 +339,24 @@ def test_fixture_de_lancamentos_segue_o_modelo(nome):
 @pytest.mark.parametrize("nome", sorted(FIXTURES["categorias"]))
 def test_fixture_de_categorias_segue_o_modelo(nome):
     Categorias.model_validate(FIXTURES["categorias"][nome])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["gastos"]))
+def test_fixture_de_gastos_segue_o_modelo_e_fecha_a_conta(nome):
+    f = FIXTURES["gastos"][nome]
+    Gastos.model_validate(f)
+    if not f["disponivel"]:  # fora do histórico: nunca "0"
+        assert f["total"] is None and not f["categorias"] and not f["dias"]
+        return
+    total = Decimal(f["total"])
+    assert sum(Decimal(c["valor"]) for c in f["categorias"]) == total
+    assert sum(Decimal(d["total"]) for d in f["dias"]) + Decimal(f["fora_da_grade"]["valor"]) == total
+    chaves = {c["chave"] for c in f["categorias"]}
+    assert all(m["categoria"] in chaves for d in f["dias"] for m in d["maiores"])
+    if f["anterior_total_ate_corte"] is None:  # mês anterior indisponível: nenhuma comparação sai
+        assert all(c["anterior_ate_corte"] is None for c in f["categorias"])
+    else:  # o total do anterior inclui categoria que não está na lista: nunca menos que Σ
+        assert Decimal(f["anterior_total_ate_corte"]) >= sum(Decimal(c["anterior_ate_corte"]) for c in f["categorias"])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["guia"]))

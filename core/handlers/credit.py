@@ -49,7 +49,7 @@ from db import (
 from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
-    fmt_brl, normalize_text, parse_money, parse_pt_number,
+    fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
     PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
@@ -875,7 +875,7 @@ def add_credit_from_entities(
     # Q36: antes de cartão, sync e limite, que mandariam criar cartão à toa.
     if (recusa := recusa_q36(user_id, "cartao")):
         return recusa
-    if valor is None or float(valor) <= 0:
+    if not valor_valido(valor):
         return "❌ Valor inválido."
 
     if purchased_at is None:
@@ -1565,6 +1565,24 @@ def _ask_credit_limit_or_finish(user_id: int, payload: dict) -> str:
     return "Deseja definir um limite de crédito para este cartão? Ex: **5000** ou **não**."
 
 
+def _cartao_criado_sem_resumo(user_id: int, card_id: int, e: Exception, pending: dict | None = None) -> str:
+    """O cartão JÁ foi commitado e a mensagem/pendência falhou: nunca responde erro.
+
+    Sem nome e sem resumo de propósito (nada que possa ter falhado). `pending` é a
+    pendência lida pelo step: consumida, senão a próxima mensagem seria lida como
+    resposta do step antigo. Sem `com_traceback`: o DETAIL do psycopg traz dado do cliente.
+    Em C/D, falha depois de `set_pending_action(reminder_opt_in)` deixa a pendência de lembrete
+    viva (o consumo condicional devolve False, a linha mudou): 'sim'/'não' entra no lembrete.
+    """
+    _log_falha("create_card_msg", user_id, e, card_id=card_id)
+    if pending is not None:
+        try:
+            consume_pending_action(user_id, pending)
+        except Exception as e2:
+            _log_falha("create_card_msg_pendencia", user_id, e2, card_id=card_id)
+    return "✅ Cartão registrado. Veja seus cartões com: *cartoes*"
+
+
 def _finish_card_setup(user_id: int, card_id: int, ask_primary: bool) -> str:
     # Os dois `clear_pending_action` abaixo são INCONDICIONAIS de propósito, e
     # são os únicos do arquivo. Não há pendência lida aqui, e um dos caminhos
@@ -1630,24 +1648,28 @@ def start_card_create_flow(user_id: int, text: str = "") -> str:
             )
         except PlanLimitExceeded as exc:
             return exc.message
-        first_card = len(existing_cards) == 0
-        if first_card:
-            set_default_card(user_id, card_id)
-        card = get_card_by_id(user_id, card_id)
-        payload = {
-            "step": "reminder_opt_in",
-            "card_name": inferred_name,
-            "card_id": card_id,
-            "closing_day": inferred_closing,
-            "due_day": inferred_due,
-            "existing_count": len(existing_cards),
-        }
-        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
-        return (
-            f"✅ Cartão **{inferred_name}** criado!\n"
-            f"{_card_summary(card)}\n\n"
-            "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
-        )
+        # DEPOIS do commit: o cartão JÁ existe. Falha na mensagem nunca vira "erro".
+        try:
+            first_card = len(existing_cards) == 0
+            if first_card:
+                set_default_card(user_id, card_id)
+            card = get_card_by_id(user_id, card_id)
+            payload = {
+                "step": "reminder_opt_in",
+                "card_name": inferred_name,
+                "card_id": card_id,
+                "closing_day": inferred_closing,
+                "due_day": inferred_due,
+                "existing_count": len(existing_cards),
+            }
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            return (
+                f"✅ Cartão **{inferred_name}** criado!\n"
+                f"{_card_summary(card)}\n\n"
+                "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+            )
+        except Exception as e:
+            return _cartao_criado_sem_resumo(user_id, card_id, e)
 
     payload = {
         "step": "name" if not inferred_name else "closing_day",
@@ -1895,21 +1917,25 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
             except PlanLimitExceeded as exc:
                 consume_pending_action(user_id, pending)
                 return exc.message
-            first_card = int(payload.get("existing_count") or 0) == 0
-            if first_card:
-                set_default_card(user_id, card_id)
-            payload["card_id"] = card_id
-            payload["step"] = "reminder_opt_in"
-            payload["ask_primary"] = not first_card
-            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
-            card = get_card_by_id(user_id, card_id)
-            first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
-            return (
-                f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
-                f"{_card_summary(card)}"
-                f"{first_card_txt}\n\n"
-                "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
-            )
+            # DEPOIS do commit: o cartão JÁ existe. Falha na mensagem nunca vira "erro".
+            try:
+                first_card = int(payload.get("existing_count") or 0) == 0
+                if first_card:
+                    set_default_card(user_id, card_id)
+                payload["card_id"] = card_id
+                payload["step"] = "reminder_opt_in"
+                payload["ask_primary"] = not first_card
+                set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+                card = get_card_by_id(user_id, card_id)
+                first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
+                return (
+                    f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
+                    f"{_card_summary(card)}"
+                    f"{first_card_txt}\n\n"
+                    "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+                )
+            except Exception as e:
+                return _cartao_criado_sem_resumo(user_id, card_id, e, pending)
 
         # Sem dias coletados ainda → continua o fluxo normal
         payload["step"] = "closing_day"
@@ -2020,23 +2046,27 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         except PlanLimitExceeded as exc:
             consume_pending_action(user_id, pending)
             return exc.message
-        payload["card_id"] = card_id
-        first_card = int(payload.get("existing_count") or 0) == 0
-        if first_card:
-            set_default_card(user_id, card_id)
+        # DEPOIS do commit: o cartão JÁ existe. Falha na mensagem nunca vira "erro".
+        try:
+            payload["card_id"] = card_id
+            first_card = int(payload.get("existing_count") or 0) == 0
+            if first_card:
+                set_default_card(user_id, card_id)
 
-        payload["step"] = "reminder_opt_in"
-        payload["ask_primary"] = not first_card
-        set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
+            payload["step"] = "reminder_opt_in"
+            payload["ask_primary"] = not first_card
+            set_pending_action(user_id, "credit_card_setup", payload, minutes=20)
 
-        card = get_card_by_id(user_id, card_id)
-        first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
-        return (
-            f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
-            f"{_card_summary(card)}"
-            f"{first_card_txt}\n\n"
-            "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
-        )
+            card = get_card_by_id(user_id, card_id)
+            first_card_txt = "\nComo este é seu primeiro cartão, ele já foi definido como principal." if first_card else ""
+            return (
+                f"✅ Cartão **{card['name']}** registrado com sucesso! Confira os detalhes:\n"
+                f"{_card_summary(card)}"
+                f"{first_card_txt}\n\n"
+                "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
+            )
+        except Exception as e:
+            return _cartao_criado_sem_resumo(user_id, card_id, e, pending)
 
     if step == "reminder_opt_in":
         card_id = int(payload["card_id"])
@@ -2073,7 +2103,7 @@ def resolve_pending(user_id: int, text: str, pending: dict | None = None) -> str
         if _is_no(answer):
             return _finish_card_setup(user_id, card_id, ask_primary=bool(payload.get("ask_primary")))
         limit_val = parse_money(answer)
-        if limit_val is None or float(limit_val) <= 0:
+        if not valor_valido(limit_val):
             return "Me diga o valor do limite. Ex: **5000** ou responda **não** para pular."
         set_card_limit(user_id, card_id, float(limit_val))
         # O limite já aparece no _card_summary dentro de _finish_card_setup — não precisa prefixar
@@ -2280,6 +2310,11 @@ def handle(user_id: int, text: str) -> str | None:
         name = m.group(1).strip()
         fecha = int(m.group(2))
         vence = int(m.group(3))
+        # `\d{1,2}` aceita 0 e 32..99: o CheckViolation do banco viraria "tenta de novo" (mentira).
+        if not 1 <= fecha <= 31:
+            return "O dia de fechamento precisa ser um número entre **1** e **31**. Manda o comando de novo, ex.: *criar cartao nubank fecha 10 vence 17*"
+        if not 1 <= vence <= 31:
+            return "O dia de vencimento precisa ser um número entre **1** e **31**. Manda o comando de novo, ex.: *criar cartao nubank fecha 10 vence 17*"
 
         # Bloqueia duplicata antes de criar
         if card_name_exists(user_id, name):
@@ -2295,10 +2330,14 @@ def handle(user_id: int, text: str) -> str | None:
 
         try:
             existing_count = len(list_cards(user_id))
-            try:
-                card_id = create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
-            except PlanLimitExceeded as exc:
-                return exc.message
+            card_id = create_card(user_id=user_id, name=name, closing_day=fecha, due_day=vence)
+        except PlanLimitExceeded as exc:
+            return exc.message
+        except Exception as e:
+            _log_falha("create_card", user_id, e)
+            return "❌ Não consegui criar o cartão agora. Tenta de novo em instantes."
+        # DEPOIS do commit: o cartão JÁ existe. Falha na mensagem nunca vira "erro".
+        try:
             if existing_count == 0:
                 set_default_card(user_id, card_id)
             set_pending_action(
@@ -2320,7 +2359,7 @@ def handle(user_id: int, text: str) -> str | None:
                 "Gostaria de receber notificações antes do vencimento da fatura? Responda **sim** ou **não**."
             )
         except Exception as e:
-            return f"❌ Erro criando cartão: {e}"
+            return _cartao_criado_sem_resumo(user_id, card_id, e)
 
     if t_low.startswith("padrao ") or t_low.startswith("padrão "):
         name = re.sub(r"^padr[aã]o\s+", "", t, flags=re.IGNORECASE).strip()
@@ -2435,6 +2474,8 @@ def handle(user_id: int, text: str) -> str | None:
             valor = parse_money(t_low)
         if valor is None:
             return "Use: parcelar 300 em 3x no cartao nubank"
+        if not valor_valido(valor):  # antes de perguntar o nome: `inf` derrubava o fluxo
+            return "❌ Valor inválido."
 
         # ── data ────────────────────────────────────────────────────────────
         dt_evento, rest2 = extract_date_from_text(t)
@@ -2795,7 +2836,7 @@ def handle(user_id: int, text: str) -> str | None:
         raw_val = _limit_set_match.group("val") or ""
         raw_card = (_limit_set_match.group("card") or "").strip()
         amount = parse_money(raw_val)
-        if amount is None or float(amount) <= 0:
+        if not valor_valido(amount):
             return "❌ Valor inválido. Ex: *definir limite nubank 5000*"
 
         card_name_hint = raw_card if raw_card else _find_card_name_in_text(user_id, t)

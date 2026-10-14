@@ -6,6 +6,7 @@ import { ALFA_FUNDO_TOM, raio } from "@/ui/tokens";
 import { ritmoDoMes, textoPct, variacao } from "./acumuladoMes";
 import { Avisos, Linha, RecursoDados, Valor } from "./base";
 import { hojeSP } from "./catalogo";
+import { useBloco } from "./blocoContexto";
 import { usePainel } from "./provider";
 import { TextoPainel as Texto } from "./tipografia";
 
@@ -18,11 +19,11 @@ const alfaHex = (esquema: "light" | "dark") => Math.round(ALFA_FUNDO_TOM[esquema
  * Sem `base` > 0 não há chip de %, mas a frase "vs R$ X mês anterior" fica (é o que dá sentido a "acima").
  */
 export function ResumoMes() {
-  const { oculto, dados } = usePainel(); const { cores, esquema } = useTema();
+  const { oculto, dados } = usePainel(); const { cores, esquema } = useTema(); const bloco = useBloco();
   return <RecursoDados nome="resumo">{(d) => <RecursoDados nome="detalhes">{(m) => {
-    const ant = dados.detalhesAnterior;
-    if (!ant || ant.fase === "carregando") return <ActivityIndicator accessibilityLabel="Carregando dados" />;
-    const r = ritmoDoMes(d, m, ant.fase === "pronto" ? ant.dado : null, hojeSP());
+    const ant = dados.detalhesAnterior; // no chat o bloco não traz o mês anterior (P2): só a curva do mês, sem "vs mês anterior"
+    if (!bloco && (!ant || ant.fase === "carregando")) return <ActivityIndicator accessibilityLabel="Carregando dados" />;
+    const r = ritmoDoMes(d, m, !bloco && ant?.fase === "pronto" ? ant.dado : null, hojeSP());
     const v = r && r.base !== null ? variacao(r.gasto, r.base) : null, tom = v ? TOM[v.sentido] : "ink";
     return <View style={{ gap: 12 }}>
       {r ? <>

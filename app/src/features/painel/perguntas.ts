@@ -1,5 +1,4 @@
 import type { PerfilPainel } from "@/api/schemas/painel";
-import type { Widget } from "./catalogo";
 // Cópia de webapp/src/dashboard/lib/prompts.js (sem `head` e sem os `ask: null`). Teste de paridade: painel_conversa.test.tsx.
 export type Pergunta = { key: string; topic: string; cat?: string; ask: string };
 export const COMMON: Pergunta[] = [
@@ -41,8 +40,3 @@ export const BY_PROFILE: Partial<Record<PerfilPainel, Pergunta[]>> = {
 };
 /** Os 5 chips do estado vazio: perfil primeiro, depois COMMON (igual ao PiggyChat do web). */
 export const sugestoes = (perfil: PerfilPainel) => [...(BY_PROFILE[perfil] ?? []), ...COMMON].slice(0, 5);
-const POR_TOPICO: Record<string, Widget> = { categorias: "categorias", categoria: "categorias", lancamentos: "calendario", metas: "metas", investido: "wealth", investimentos: "rendimento", saldo: "hero", fatura: "fatura", renda: "renda" };
-/** Widget real do app para o assunto do chip; `categoria` de assinaturas abre o widget de assinaturas. */
-export const widgetDoTopico = (p: Pick<Pergunta, "topic" | "cat">): Widget | undefined => p.topic === "categoria" && p.cat === "assinaturas" ? "assinaturas" : POR_TOPICO[p.topic];
-/** Widgets que dependem do mês do painel: só aparecem no mês atual. */
-export const WIDGETS_DO_MES: Widget[] = ["categorias", "calendario"];
