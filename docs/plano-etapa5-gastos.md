@@ -151,7 +151,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   de fevereiro); em **mês passado** é o último dia REAL do mês anterior, sem `min`, para fevereiro
   (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
   Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
-  descrição, valor e a chave da categoria), `outro_mes` (decisão B), `hoje` (AAAA-MM-DD no fuso do
+  descrição, valor e a chave da categoria), `fora_da_grade` (decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `fora_do_total`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
@@ -163,7 +163,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   total da categoria**, ou seja, saída, não interna, em reais e do mesmo mês/fatura, e só o
   `raw` é lido à parte, por id de linha, para extrair `merchant.cnpj` e
   `paymentData.receiver.name`; nunca se parte de `raw` para escolher quem entra) e o calendário só dessa
-  categoria (por dia: total e os 3 maiores), com `outro_mes`, `hoje` e `historico_desde`. Tudo completo e sem
+  categoria (por dia: total e os 3 maiores), com `fora_da_grade`, `hoje` e `historico_desde`. Tudo completo e sem
   paginação: no máximo 31 dias × 3 maiores + 6 compras + 5 estabelecimentos + 3 meses.
 
 **Uma leitura só.** `db/mes_detalhes.ler` abre a própria conexão a cada chamada. O PR 1 separa
@@ -233,13 +233,13 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
 | Comportamento | Fonte e decisão |
 |---|---|
 | uma célula por dia do mês, futuro desabilitado, hoje marcado | `hoje` vem do servidor. Dia futuro SEM gasto fica desabilitado; dia futuro COM lançamento agendado fica habilitado e marcado "agendado", com o total e os maiores |
-| escala de cor | percentil sobre os dias do mês com histórico (decisão B); o cliente a calcula de `dias`. Dia anterior a `historico_desde` fica desabilitado, hachurado e com a legenda "fora do seu histórico", nunca na cor de "sem gasto" |
+| escala de cor | percentil sobre os dias do mês com histórico (decisão B); o cliente a calcula de `dias`. Dia antes de `historico_desde` fica desabilitado, hachurado e com a legenda "fora do seu histórico", nunca na cor de "sem gasto"; saída com dia nessa faixa não vira dia hachurado: vai para a linha fixa "fora do período mostrado" (decisão B) |
 | dica e nome acessível com os 3 maiores gastos do dia | `maiores` (3) por dia, em `/gastos` e em `/gastos/categoria` |
 | "média R$ X/dia · N dias sem gasto" | o cliente calcula de `dias` só de `historico_desde` até `hoje` (dia agendado e dia anterior ao corte do plano não entram, nem como zero); a API devolve só os dias com gasto e o cliente completa os zeros; o texto "Sem contas fixas" sai (agora conta todo gasto, decisão B) |
 | "Dia mais caro" | o maior `total` de `dias` (só dias com histórico) |
 | clicar no dia filtra os lançamentos do dia | `/lancamentos?mes=<escolhido>&dia=` (PR 1; sempre os dois) |
 | calendário filtrado por categoria | `/gastos/categoria` devolve os dias só dessa categoria |
-| saída com dia fora do mês | linha "outro mês" (decisão B), fora da grade |
+| saída com dia fora da grade (outro mês ou antes do corte) | linha fixa "fora do período mostrado" (decisão B), fora da grade, dentro do total |
 
 **Filtro de "Sem categoria".** `categoria=None` em `listar` significa "sem filtro", mas o filtro
 compara `cat_key_sql` dos dois lados (`db/connection.py`), que colapsa vazio em
@@ -268,9 +268,13 @@ decide o mês por uma regra (fatura no cartão; `criado_em` na linha de `launche
 hora usa `posted_at` (`db/lancamentos._PERNA_LANCAMENTOS`; o módulo documenta que esse dia pode
 cair fora do mês). Os testes `test_mes_completo_manual_cartao_parcela_interno_e_conciliacao`
 (cartão) e a regra de `posted_at` (banco) mostram os dois casos. Regra proposta, a confirmar na
-revisão do PR 2: o calendário só desenha dias do próprio mês; **toda saída cujo `dia` cai fora
-do mês** (cartão ou banco) vai para uma linha fixa "N saídas com data de outro mês: R$ X", que
-entra nas categorias e no total mas não na grade de dias. Na comparação "até o mesmo dia do mês
+revisão do PR 2: o calendário só desenha a **grade** `[max(primeiro dia do mês, historico_desde), último dia do
+mês]`; **toda saída cujo `dia` cai fora da grade** (fora do mês, ou antes do corte do plano) vai
+para uma linha fixa "N saídas com data fora do período mostrado: R$ X", que entra nas categorias
+e no total mas não na grade de dias. Isso cobre o caso em que o corte do plano filtra por outra
+regra que o `dia`: a fatura de outubro entra por `period_end` e pode ter uma compra de 5/10 com o
+corte em 15/10; a linha antiga do Open Finance com `posted_at` anterior ao corte idem. Essas saídas
+ficam no total e na linha fixa, nunca escondidas. Na comparação "até o mesmo dia do mês
 anterior" (decisão 2), a saída de data anterior ao mês conta como já ocorrida (dia 1) e a de
 data posterior ao fim do mês conta só no total. Nenhum dia é mostrado no mês errado.
 - **C. Editar categoria:** esta etapa só lê emoji e cor. Criar, renomear, trocar emoji e cor
@@ -297,7 +301,7 @@ número ajustado.
 Pytest com Postgres real para a soma (categorias = Saiu nos meses sem `outra_moeda`;
 categorias = subtotal em reais, com `fora_do_total`, nos meses com ela) e para o isolamento entre
 usuários; dois casos de saída com dia fora do mês, um de cartão e um de banco (`posted_at` de
-outro mês), ambos na linha "outro mês" e nunca num dia errado; gasto por categoria e dia somando
+outro mês), ambos na linha "fora do período mostrado" e nunca num dia errado; gasto por categoria e dia somando
 o gasto da categoria; `/api/v2/lancamentos?categoria=sem categoria` devolvendo só as sem
 categoria; plano de 90 dias com o corte no meio do mês: comparação `null` e mês da série
 `null` (nunca zero), com `inicio_do_historico`; linha sem categoria e categoria fora do
@@ -307,7 +311,8 @@ outro mês; lançamento com data futura no mês corrente (`valor` inclui, `valor
 comparação não, dia futuro agendado habilitado); categoria com entrada e saída (as 6 últimas
 compras só de saída, sem interno nem outra moeda); usuário com categoria real "Sem categoria" e linhas `NULL` (um balde, metadado
 do catálogo); `ultimas` sem a linha interna e sem a de outra moeda na categoria; plano de 90 dias com o
-corte no meio do mês: dias antes de `historico_desde` fora da média e dos "dias sem gasto";
+corte no meio do mês (inclusive compra de cartão de uma fatura do mês com data anterior ao corte, e
+linha com `posted_at` anterior ao corte: na linha fixa, no total, nunca em dia hachurado): dias antes de `historico_desde` fora da média e dos "dias sem gasto";
 mês passado (comparação do mês inteiro contra o mês anterior inteiro), inclusive fevereiro contra
 janeiro (os dias 29 a 31 de janeiro entram) e, no mês corrente, 31 de março contra fevereiro; ranking de estabelecimentos sem a linha em outra moeda nem a interna; mês inteiro antes do corte do
 plano (`disponivel: false`, sem R$ 0); primeiro acesso com `user_categories` vazia.
