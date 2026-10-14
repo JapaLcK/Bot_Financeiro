@@ -15,6 +15,7 @@ import os
 import threading
 import time
 
+from core.services.modelo_openai import completion_options
 from core.services.ai_chat.system_prompt import DICAS_GERAIS, FORMATO_WHATSAPP, PERSONA_PIGGY
 from core.services.demo.dados import PERSONA
 from utils_text import fmt_brl
@@ -116,7 +117,7 @@ def _chamar_modelo(messages: list[dict]) -> str:
         raise RuntimeError("OPENAI_API_KEY ausente")
     client = OpenAI(api_key=api_key, timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
     resp = client.chat.completions.create(
-        model=MODEL, temperature=TEMPERATURE, messages=messages, max_tokens=MAX_TOKENS,
+        **completion_options(MODEL, MAX_TOKENS, TEMPERATURE), messages=messages,
     )
     return (resp.choices[0].message.content or "").strip()
 

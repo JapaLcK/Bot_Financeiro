@@ -4,14 +4,6 @@ import json
 from .agent_chat_errors import ModelResponseError
 
 
-def completion_options(model: str, budget: int, temperature: float, *, with_tools: bool = False) -> dict:
-    if model.startswith("gpt-5.4-mini"):
-        # Na integração qualificada, o provedor exige none quando há ferramentas.
-        return {"model": model, "max_completion_tokens": max(budget, 2048),
-                "reasoning_effort": "none" if with_tools else "low"}
-    return {"model": model, "max_tokens": budget, "temperature": temperature}
-
-
 def routing_format(kinds: list[str]) -> dict:
     return {"type": "json_schema", "json_schema": {"name": "agent_routing", "strict": True,
         "schema": {"type": "object", "additionalProperties": False,

@@ -18,6 +18,7 @@ import unicodedata
 from difflib import get_close_matches
 from dataclasses import dataclass, field
 from typing import Any
+from core.services.modelo_openai import CHAT_MODEL, completion_options
 from utils_text import PT_NUM_ALT_NO_ARTICLE, parse_money
 
 logger = logging.getLogger(__name__)
@@ -1160,11 +1161,9 @@ def _classify_llm_call(user_content: str, user_id: int | None) -> IntentResult:
     try:
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
-        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
         resp = client.chat.completions.create(
-            model=model,
-            temperature=0,
+            **completion_options(CHAT_MODEL, None, 0),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},

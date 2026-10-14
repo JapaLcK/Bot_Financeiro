@@ -297,16 +297,31 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
   `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
   (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
-  **O mês é o de `TOTAIS_SQL`**, pelas mesmas pernas (`db/resumo_mes.MES_LANCAMENTOS_SQL` e
-  `MES_CARTAO_SQL`): a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
+  **O mês é o de `TOTAIS_SQL`**: mesma janela (`db/resumo_mes.MES_JANELA_SQL`) e mesma regra
+  de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
+  acrescenta os tipos guardado, que nunca entram em total), e a perna `MES_CARTAO_SQL`: a soma dos itens não internos é o Entrou/Saiu do Resumo; o cartão
   entra pelo mês da fatura com a data da COMPRA; o interno entra com `interno: true`, fora
-  de qualquer soma; tipos que não são despesa/receita (caixinha, aporte) ficam fora, como
-  na soma. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
+  de qualquer soma. **Guardado (P8, #983) é OPT-IN: só `?guardado=1` o inclui; sem o parâmetro a lista é a de antes
+  da P8** (nenhuma linha guardado), porque `api/nativo/app.py` monta este mesmo router em
+  `/api/app/lancamentos`: o app nativo não conhece o campo e apps instalados não se atualizam
+  com o deploy do backend (o `Extrato` pintaria o depósito de despesa e o saque de receita, e os
+  filtros Entradas/Saídas devolveriam movimento interno). O `/api/app` herda o default e não
+  manda o parâmetro até um PR do app aceitar `guardado`; o `/painel` manda sempre
+  (`lancamentosQuery`, `webapp/src/dashboard/lib/v2.ts`); `mes_detalhes` lê sem ele. Com o
+  parâmetro, depósito de caixinha e aporte entram como
+  `saida`, saque de caixinha e resgate como `entrada`, valor BRUTO, `guardado: true` e
+  `interno: true` (forçado: guardado ⇒ interno), fora de toda soma e agregado (nada de
+  `resumo-do-mes` nem `mes-detalhes` muda; o bloco `guardado` de `mes-detalhes` segue vindo
+  de `launches` pelos mesmos tipos, `lancamentos.GUARDAR`/`RESGATAR`); `categoria=` nunca os
+  devolve; `pode: []`, `conta_id: null`, origem `registro_antigo`. `criar_caixinha` & cia
+  seguem fora. Limites: depósito pago pelo banco gera 2 linhas fora do total (a do banco e a
+  guardado) sem vínculo; `conta=` e `origem=carteira` não pegam guardado; caixinha do banco
+  (Open Finance) não gera guardado. Com `q` (até 6 palavras de 2+ letras, `unaccent`; `db/analytics.termos_busca`/
   `clausula_busca`, as mesmas do `list_history`) a lista varre a janela inteira do plano em
   vez do mês. Janela do plano cortando = `inicio_do_historico`. Página por KEYSET (cursor
   opaco: base64 de `[dia, instante, tabela, id]`, adulterado = 422), sem contagem total.
   Item: `id` (`l<n>` lançamento, `c<n>` compra no cartão: as tabelas compartilham o espaço de
-  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `valor` (texto),
+  ids), `data` (`launch_day`) e `hora` (ou `null`), `tipo`, `interno`, `guardado`, `valor` (texto),
   `moeda` (a da conta do banco ligada), `descricao`, `mensagem` (a nota do usuário),
   `categoria` (a chave `cat_norm_sql`, a mesma de `GET /api/v2/categorias`), `origem`,
   `fundido` + `instituicao`, `conta_id`, `cartao_id`, `parcela {n, total}`, `fatura`
@@ -315,7 +330,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
   marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
-  (`db/lancamentos.PODE_SQL`): antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
+  (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
+  inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
+  guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
   Finance = categoria e descrição (P5); carteira marcada = tudo, menos data e valor se fundida
   ou em par pendente com o banco (P3), só descrição e apagar se ligada ao dinheiro em espécie
   (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
@@ -466,8 +483,45 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   escritores compartilhados: PR próprio, faixa Completo.
   **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
   bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
-  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), despesa e
-  receita, sempre `estimado`/data `presumida`, valor = o último cobrado. Identidade
+  `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), **só despesa**,
+  sempre `estimado`/data `presumida`, valor = o último cobrado. **A receita vem SÓ do extrato
+  (P7 a, PR A)**: `receitas_do_extrato` (regra pura) sobre `db.of_recurring.ler_creditos`
+  (créditos de conta BANK em BRL, conexão viva, últimos 180 dias, calculado na leitura, sem
+  tabela). A chave é **só** o documento do pagador (`paymentData.payer.documentNumber`), e só vale
+  com 11 (CPF) ou 14 (CNPJ) dígitos e não todo zero (`_doc`): crédito sem documento válido fica
+  fora, como o mascarado ou "0", que uniriam pessoas diferentes (a descrição do Pix é genérica,
+  "Pix recebido", e também uniria). A cadeia anda de trás para frente enquanto o intervalo for 30±5 dias e
+  vale com `MINIMO = 2` créditos, todos a ±20% da mediana (com 2 créditos, a mediana é a média:
+  eles podem diferir até 50%); valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
+  documento, data e valor: pendente e efetivado, ou duas conexões do mesmo banco) conta uma vez;
+  créditos do mesmo documento na mesma data **somam** num só (salário + vale; sem a soma o
+  intervalo 0 matava a cadeia); cada parcela somada guarda as contas das suas cópias idênticas
+  (`grupos`) e a receita só entra se TODA parcela tem pelo menos UMA conta na base (parcelas diferentes somam: todas precisam;
+  cópias da mesma, como a mesma conta em duas conexões vivas, bastam por uma), senão fica `incluida=False`
+  com `recorrencia_banco_conta_fora_da_base`.
+  Ficam fora o movimento interno (`assinaturas._interno`), o rendimento (as palavras
+  interest(s)/dividend(s)/dividendo(s)/rendimento(s), inteiras (`\b`: "Interestadual" não casa), na
+  categoria OU na descrição; filtro só da receita), o Pix para si (pagador =
+  recebedor) e a autotransferência (débito de mesmo valor ±R$ 0,05 em OUTRA conta real (`provider_account_id` diferente, não `id`: a mesma conta em duas conexões vivas não conta) BANK em BRL do MESMO
+  usuário em ±1 dia (débito em dólar de mesmo número não conta), com limites sargáveis: com `abs(...)` no `not exists` o índice por
+  conta/data não serve e a consulta degrada com o volume). A recorrência de ENTRADA da Pluggy
+  (`average_amount > 0`) deixou de ser lida (fechava a contagem dupla). Id
+  `extrato#` + `hash_pii(documento)[:16]` (o campo `documentNumber` nunca sai, nem em `origem_id`,
+  motivo, log, `/api/v2/previsao` ou IA: o id é HMAC com pepper; sem `payer.name` o nome cai na
+  descrição, que é dado do próprio usuário). Sem aviso novo de "nenhuma receita
+  detectada".
+  Limites: **receita sem documento do pagador não é detectada** (o Pix de muita gente
+  chega sem ele); 13º/bônus em outro dia do mês, no meio ou depois do último crédito quebra a cadeia por
+  ~2 meses; aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal ou irregular nunca
+  é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
+  diferente entre meses (zeros à esquerda) vira chaves distintas (o filtro de 11/14 dígitos reduz,
+  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo infla o
+  saldo.
+  Receita detectada leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
+  `cashflow.py::_risco` não dá veredito com ela), como já acontecia com a saída detectada.
+  `amount` do espelho é `numeric` e guarda NaN/±Infinity, que no Postgres são `> 0`: `_SQL_CREDITOS`
+  só lê crédito finito (`amount < 'Infinity'`, que tira os dois), senão a Previsão inteira daria 500
+  (mesma classe do `custo_mensal`, `recorrencia_valor_invalido`). Identidade
   `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
   frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
   na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
@@ -475,12 +529,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
   direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
-  saída (a marca não tem direção); positivo no cartão e o movimento interno que
-  `classify_open_finance_launch` reconhece (pagamento de fatura, aplicação e resgate,
-  caixinha, poupança, transferência "same person" da Pluggy) não entram — transferência
-  entre contas próprias com descrição genérica e sem essa categoria entra como recorrência
-  comum (a saída numa conta e, se a outra também estiver conectada, a entrada como receita
-  não garantida), sem casamento entre as duas pontas; duas conexões do mesmo banco
+  saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`
+  reconhece (pagamento de fatura, aplicação e resgate, caixinha, poupança, transferência "same
+  person" da Pluggy) não entra — transferência entre contas próprias com descrição genérica e
+  sem essa categoria entra como recorrência de saída, sem casamento com a outra ponta; duas
+  conexões do mesmo banco
   duplicariam a cadeia. Lista velha ou nunca lida = motivo `recorrencias_banco_nao_lidas`, e a
   previsão em cache vence quando a lista vira velha. Recorrência de conta cujo saldo não está
   na base (saldo ausente, moeda presumida, outra moeda) fica fora, com
@@ -562,6 +615,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   da Previsão); autotransferência genérica entra como recorrência; sem teto de metas por usuário;
   a reconexão só desvia para a conta viva quando a conta antiga está em conexão PAUSED/DELETED (`conexao_pausada`); se a conexão antiga está em erro (`ERROR`/`item_missing`, `LOGIN_ERROR`, `OUTDATED`; o item apagado na Pluggy chega como `item_missing`, `core/services/pluggy_health.py:~248-250`), a meta segue a conta antiga com `banco_desatualizado`, como `/contas` (que soma as duas); decidir se `item_missing` conta como conexão morta é decisão para o sistema inteiro (`/contas` + metas); `atual` de conta não é quantizado (paridade com `/contas`, saldo `numeric` sem escala).
   Consumidor: a página `/painel#/metas` (`widgets/Metas.tsx`, `parts/MetaCartao.tsx`, `parts/MetaForm.tsx`, `metasQuery` em `lib/v2.ts`; a cópia por motivo em `lib/metas-textos.ts`, com mapas exaustivos sobre o enum deste contrato; `DIAS_MINIMOS`/`MESES_PADRAO` ali copiam `RITMO_DIAS_MINIMOS`/`MESES_RESERVA` e `tests/test_metas_textos_constantes.py` compara).
+  Consumidor, a IA (PR C1): a tool `list_metas` (`core/services/ai_chat/tools/metas.py`) e o card `metas` do `show_card` leem `listar` desta rota e devolvem TEXTO pronto com "R$" (nunca float; é o que o `ai_guard` aceita como evidência), de `core/services/metas_conversa.py` (`resumo` + `avisos` por meta; a cópia por motivo `FRASE_RITMO`/`FRASE_CUSTO` espelha o `.ts`, chaves e ordem comparadas em `tests/test_ai_chat_metas.py`). Negativo sai `R$ -250,00` (a forma do `fmt_brl` e do `ai_guard`); o ritmo fala do SALDO da meta, com o sentido em palavra ("está crescendo/diminuindo R$ X por mês"), nunca como o que a pessoa guarda. O dinheiro entra como STRING decimal e nunca passa por float: `metas_conversa.ler` devolve o `model_dump(mode="json")` da rota, a tool e o card (cujo leitor é o mesmo `ler`; o `_py` deixa string intacta) formatam do mesmo texto, então os dois dizem os mesmos R$ mesmo com saldo de conta de muitas casas (0,00499...9 não vira R$ 0,01). Reserva com alvo vindo de custo cuja leitura das recorrências do banco venceu (`recorrencias_banco_nao_lidas`) leva no fim do `resumo` "Não consegui ler as cobranças do banco agora. O valor pode estar velho." (espelha o `avisoCusto` do `MetaCartao.tsx`, que NÃO depende do saldo; sem saldo vem antes "O tamanho da reserva é R$ X.", pois o resumo sem saldo não cita o alvo; o `_avisos` não repete). Reserva sem saldo E sem alvo diz também "E ainda não sei o tamanho da reserva: <frase do custo>" (a tela mostra as duas), sem repetir se as frases forem iguais; reserva com saldo e sem alvo diz, quando o ritmo não tem número, o motivo dele (a tela mostra o `<Ritmo>`). A regra "o texto não omite aviso que a tela mostra" é provada pelo produto de saldo x custo x ritmo x motivo em `tests/test_ai_chat_metas_extra2.py`. Fora dessa regra, de propósito: o alvo, o prazo ("O prazo era X"), o `(N × custo)` e o número do ritmo da reserva sem alvo não saem no resumo de quem não tem saldo/alvo (não são avisos).
+  - **Bloco condicional por usuário (P1-b).** Só quem tem a chave `dashboard_v2_enabled` (`metas_conversa.metas_ligadas`) recebe as metas: o prompt de metas (`SYSTEM_PROMPT_METAS`, `ADENDO_CARDS_METAS`), o schema de `list_metas`, o `show_card` com `metas` e `caixinhas` e a descrição nova do `list_pockets`. Quem não tem a chave recebe `SYSTEM_PROMPT`, `ADENDO_CARDS`, `SCHEMAS` e `SCHEMAS_APP` exatamente como antes das metas (`system_prompt.prompt_do_usuario`, `tools.schemas_para`, montados por turno no `runner`); nele `show_card metas` mostra as caixinhas, com o id `caixinhas` no bloco. A tool `list_metas` sem a chave (só se o modelo imitar o histórico) devolve `use_caixinhas`.
+  - **Onde o app lê metas.** `list_metas` fica fora de `SCHEMAS_APP` (`OCULTAS_NO_APP`); no app o prompt de K nem a cita (`SYSTEM_PROMPT_METAS_APP`): metas = `show_card` com `card="metas"` (recurso `metas`, formato de `/api/v2/metas`), caixinhas = `card="caixinhas"` (recurso `caixinhas`, formato legado `{ok, goals}`). Criar, editar e apagar meta pelo chat NÃO existe (é o C4): ao pedido explícito a IA manda para o painel (`ONDE_CRIAR`) e não usa tool de outro recurso; pedido de orientação ela ajuda em conversa (limite 14).
+  - **Limites declarados.** (1) O `ai_guard` é cego a percentual, mês ("junho de 2027") e sinal: só confere R$. O sentido (crescendo × diminuindo) é do texto do `resumo`; o modelo que o inverta passa como "sustentado". (2) A visão do modelo traz até `MAX_METAS` (`core/services/metas_conversa.py`) metas e "e mais N no painel"; passando disso, as mais novas ficam fora e a tool não tem argumento de nome. (3) Follow-up sem tool ("e a viagem?") responde do histórico, e o guard fatia por turno: o número do turno anterior não conta como evidência do atual. (4) Nome que é de meta E de caixinha ("Reserva"): "apaga a meta Reserva" não pede qual (não usa nenhuma tool destrutiva); "guardei 100 na reserva" confere `list_pockets` antes. (5) Medido no harness real (`gpt-4o-mini`), não no pytest: o roteamento do modelo. (6) "N idêntico à base" vale para a ENTRADA do modelo (`system` e `tools` de cada turno, comparados execução a execução no PR; `tests/test_ai_chat_metas_extra.py` fixa que o prompt de N é o `_BASE` com o marcador trocado). Qualquer edição futura do texto base do prompt muda N também, por desenho. O que SAI ao app para N mudou em dois pontos, aceitos (ver "Para o E1"). (7) "Guardei 100 na reserva de emergência" com meta e caixinha de nomes parecidos, em K: o modelo tenta `pocket_deposit` com o nome da meta (em todas as execuções do harness) e a confirmação depois falha com "não achei a caixinha", igual à base; nada se perde. (8) "Quanto tem na reserva" pode responder por `list_metas` (chat) ou por `list_pockets` (app) quando há meta e caixinha de nome parecido. (9) "Guardei 100 na meta" em K: o "nada registrado" aparece só em parte das respostas, mas nenhuma tool é chamada (o essencial). (10) O guard é cego a sinal: o ritmo sai em módulo ("diminuindo R$ 250,00") e quem copia "R$ -250,00" cai em 🚨 falso positivo. (11) No WhatsApp, "apaga a meta Casa nova" de K pode cair no handler determinístico de caixinha ("Não achei essa caixinha"): é o C2. (12) **Texto × widget no app antigo (build 26), ACEITO pelo dono até o E1/C3:** o chip "Minha reserva de emergência está no tamanho certo?" de K responde com a META (R$ da meta, via `show_card metas`) e o app antigo desenha embaixo o widget das caixinhas (lê `/goals/{uid}/status`): os dois não coincidem. Não muda o comportamento por causa disso. (13) A chave é lida UMA vez por turno (`_context.METAS_DO_TURNO`/`metas_do_turno`, usada pelo runner, `schemas_para`, `list_metas`, `show_card` e o gate do card); FORA de um turno (chamada direta de `montar`/`get_tool`) ela é lida na hora, com o cache de `get_auth_user` que `dashboard_v2_enabled` usa (`AUTH_USER_CACHE_TTL_SECONDS` em `db_support.py`). (14) A IA de K ajuda em pedido de ORIENTAÇÃO sobre meta ("me ajuda a montar uma meta") e só ao fim manda registrar no painel; a recusa vale para o pedido EXPLÍCITO de criar, editar ou apagar no sistema. Quem decide qual dos dois é o modelo: o harness real mede, o pytest não. (15) Desvios do plano do C1: a chave `reserva_sem_tamanho` não existe (o `resumo` já diz que o tamanho da reserva é desconhecido); o prompt de K manda usar `onde_criar` com `sem_metas`, mas a visão do card `metas` não traz `onde_criar` (no app o `ADENDO_CARDS_METAS` dá a URL do painel).
+  - **Para o E1 (app, build 27; o orquestrador copia isto para a sessão dele).** (i) `caixinhas` é id novo de card de chat: precisa de `cardId` + schema + view legados no app. Como o `periodo`, card só de chat fica FORA do `TITULOS` (o catálogo de widgets, `app/src/features/painel/catalogo.ts`): o `cardId` de `app/src/api/schemas/painel.ts` passa a `["periodo", "caixinhas", ...Object.keys(TITULOS)]`. Sem isso o app descarta calado o bloco `caixinhas` (id desconhecido descarta só aquele evento). (ii) O recurso `metas` do bloco do card `metas` vem agora no formato v2 (`/api/v2/metas`, fixtures em `tests/frontend/api_v2_respostas.json`, chave `"metas"`), mas o provider do app tem `schemas.metas = S.metasSchema` LEGADO (`app/src/features/painel/provider.tsx`): se o E1 reaproveitar `schemas[recurso]`, o card de K falha no parse. O recurso `caixinhas` traz o formato legado `{ok, goals}` (`metasSchema`). (iii) Para quem NÃO tem a chave (N), `show_card` com `card="metas"` agora sai como `card: "caixinhas"` e recurso `caixinhas` (antes: `metas`, `{ok, goals}`): o `passo.previa` vira `caixinhas`, que o app converte em `null` até (i) (o esqueleto some); é decisão aceita (o `cardId` precisa do `caixinhas` de qualquer modo para K). A mensagem de tool oculta de N segue exatamente a de antes (só K cita `metas, caixinhas`). Quando o E1 puser o `caixinhas` no app, `PENDENTE_NO_APP` em `tests/test_ai_chat_cards_ids_app.py` tem de ser esvaziada (o teste falha pedindo).
   **Ritmo** (`db/metas_ritmo.py`, PR A2): cada meta traz `ritmo {valor, dias_de_historico, parcial, motivos}` e `chega_em` (`AAAA-MM`).
   - `valor` = o crescimento ATUAL da fonte, R$/mês (pode ser negativo), ao lado do `por_mes` (o NECESSÁRIO): (`atual` − valor em D0) ÷ dias × 30. Medido nas fotos POR POSIÇÃO (`open_finance_investment_snapshots`), não em `patrimonio_fotos` (só tem o total). O valor de um dia sai da MESMA regra de `investido.calcular` (`separar_posicoes` + `q_posicao`); a moeda vem do espelho (posição que já saiu dele entra como BRL com `moeda_presumida`); só foto `collection_confirmed`.
   - Pertinência (`_DE`, uma regra para o valor do dia E para o dia-base): as fotos do passado cobrem as MESMAS posições de hoje, por identidade do provedor. A foto PERTENCE à fonte quando a VENCEDORA de hoje da identidade (`POSICOES_BANCO_SQL`, `c.id desc` entre TODAS as conexões do dono) é uma conexão da fonte; a foto pode vir de QUALQUER conexão do dono (identidade que mudou de conexão a → c vale pela foto da antiga a; com foto nas duas no mesmo dia, vale a da mais nova). Vencedora fora da fonte (pausada, outro banco): a foto não entra no passado, como não entra hoje. Identidade fora do espelho vale pela foto de conexão da fonte.

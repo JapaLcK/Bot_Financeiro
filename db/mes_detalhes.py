@@ -47,14 +47,14 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
         # Não mistura pagamento de fatura/transferência interna com guardar.
         # Estes são os tipos gravados pelos writers de caixinha/investimento;
         # nenhuma variação do saldo bancário é inferida como aporte.
-        cur.execute("""select tipo in ('deposito_caixinha','aporte_investimento') as aporte,
+        cur.execute("""select tipo = any(%s) as aporte,
                               upper(coalesce(currency,'BRL')) as moeda,
                               sum(valor) as total, count(*) as quantidade
                        from launches where user_id=%s and criado_em >= %s and criado_em < %s
-                        and tipo in ('deposito_caixinha','aporte_investimento',
-                                     'saque_caixinha','resgate_investimento')
+                        and tipo = any(%s)
                         group by 1, 2""",
-                    (user_id, desde, fim))
+                    (list(lancamentos.GUARDAR), user_id, desde, fim,
+                     list(lancamentos.GUARDAR + lancamentos.RESGATAR)))
         movimentos = cur.fetchall()
         conn.rollback()
     if corte and corte > inicio:

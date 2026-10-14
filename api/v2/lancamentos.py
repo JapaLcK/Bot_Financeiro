@@ -3,8 +3,9 @@
 
 `mes` como em `resumo-do-mes` (sem ele, o corrente; futuro ou fora de `AAAA-MM` = 422).
 `cursor` é o `proximo` da página anterior, devolvido como veio: adulterado = 422.
-`limite` de 1 a 100 (acima de 100 corta). `conta`/`cartao` de outro usuário dão a lista
-vazia, igual a um id que não existe. Dinheiro é `Decimal` e sai como TEXTO; nada de
+`guardado=1` inclui o guardado (opt-in; sem ele a lista é a de antes, que é o que o app nativo
+recebe em `/api/app`). `limite` de 1 a 100 (acima de 100 corta). `conta`/`cartao` de outro usuário
+dão a lista vazia, igual a um id que não existe. Dinheiro é `Decimal` e sai como TEXTO; nada de
 `provider_*_id`, `raw`, `external_id` ou id da transação do banco.
 """
 from datetime import date, datetime
@@ -38,6 +39,7 @@ class Lancamento(BaseModel):
     hora: str | None
     tipo: Literal["entrada", "saida"]
     interno: bool
+    guardado: bool
     valor: Decimal
     moeda: str
     descricao: str | None
@@ -72,6 +74,7 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
            cartao: int | None = None,
            categoria: str | None = Query(None, max_length=CATEGORY_NAME_MAX_LEN),
            tipo: Literal["entrada", "saida"] | None = None,
+           guardado: bool = False,
            q: str | None = Query(None, max_length=200),
            cursor: str | None = Query(None, max_length=200),
            limite: int = 50,
@@ -86,7 +89,7 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
     try:
         dados = lancamentos.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
                                    origem=origem, conta=conta, cartao=cartao,
-                                   categoria=categoria, tipo=tipo)
+                                   categoria=categoria, tipo=tipo, com_guardado=guardado)
     except lancamentos.CursorInvalido as e:
         raise _recusa("cursor", str(e)) from None
     return Lancamentos(**dados)

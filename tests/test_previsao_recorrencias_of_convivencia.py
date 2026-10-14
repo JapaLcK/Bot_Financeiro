@@ -1,7 +1,7 @@
 """Fase 1a: o fixo/receita manual × a recorrência do Open Finance, a comparação antes ×
 depois nos consumidores do motor (Q18) e a conversa pelo `handle_incoming`.
 
-Casos 15–18 com relógio congelado (`ler_em`). A comparação U1–U6 roda nos consumidores
+Casos 15–18 com relógio congelado (`ler_em`). A comparação U1–U7 roda nos consumidores
 de verdade, que leem `date.today()`: a semeadura é relativa a hoje, com a última
 cobrança há 20–23 dias num dia <= 28, o que dá 1, 2 e 3 ciclos em 30, 60 e 90 dias
 para qualquer data (n-ésimo ciclo = última + n meses: hoje+5..11, +36..42, +66..72,
@@ -117,6 +117,8 @@ def _u(n, uid):
     elif n == 4:
         create_recurring_expense(uid, "Netflix", 39.90, "assinaturas", u.day, "account")
         netflix(uid, ultima=u)
+    elif n == 7:
+        salario(uid, ultima=u)  # só a receita detectada no extrato
     elif n == 5:
         create_recurring_income(uid, "Trabalho", 5000, "salario", u.day)
         salario(uid, valor="6500", ultima=u, desc="EMPRESA X")
@@ -132,10 +134,11 @@ ESPERADO = {
     4: (["960.10", "920.20", "880.30"],) * 2,
     5: (["6000", "11000", "16000"],) * 2,
     6: (["1000", "1000", "1000"],) * 2,
+    7: (["1000", "1000", "1000"], ["6000", "11000", "16000"]),
 }
 
 
-@pytest.mark.parametrize("n", range(1, 7))
+@pytest.mark.parametrize("n", range(1, 8))
 def test_antes_e_depois_por_centavo_em_todos_os_consumidores(n, monkeypatch):
     monkeypatch.delenv("OF_CONSOLIDATED_BALANCE_ENABLED", raising=False)
     uid = usuario_pagante("pro_max")
@@ -158,7 +161,8 @@ def test_antes_e_depois_por_centavo_em_todos_os_consumidores(n, monkeypatch):
 # ── Conversa pelo handle_incoming ────────────────────────────────────────────
 
 # O número é o de 30 dias da tabela ESPERADO: a conversa vê o mesmo motor.
-@pytest.mark.parametrize("n,esperado", [(3, "R$ 5.960,10"), (4, "R$ 960,10")], ids=["U3", "U4"])
+@pytest.mark.parametrize("n,esperado", [(3, "R$ 5.960,10"), (4, "R$ 960,10"), (7, "R$ 6.000,00")],
+                         ids=["U3", "U4", "U7"])
 def test_conversa_gasto_pendente_e_previsao_com_recorrencia(n, esperado, monkeypatch, ia_fora):
     monkeypatch.delenv("OF_CONSOLIDATED_BALANCE_ENABLED", raising=False)
     uid = usuario_pagante("pro_max")
