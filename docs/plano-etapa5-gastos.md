@@ -4,7 +4,7 @@ Rascunho de plano, aberto em 2026-10-13. Parte do `docs/plano-dashboard-v2.md` (
 "Para onde vai", API faixa Completo, tela faixa Leve). O plano-base quase não descreve esta
 etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui ainda vale.
 
-**Estado (2026-10-14).** PR 1a feito (#NNN): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
+**Estado (2026-10-14).** PR 1a feito (#998): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
 e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
 (`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna). PR 1b (`/gastos/categoria`) e PR 2 (a tela) pendentes. Onde o §4.1 e o código
 divergem, vale o código e o contrato em `docs/CLAUDE.md` ("API v2").
