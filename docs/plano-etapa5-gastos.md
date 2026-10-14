@@ -196,7 +196,14 @@ um instante, e o aviso de escrita (SSE) refaz as duas.
   ou extrair para um lugar comum; nunca copiar) e levanta `arredondamento_por_grupo`, com o caso
   de duas despesas de `1.005` em categorias diferentes (categorias `2.02` × `saiu` `2.01`). O
   motivo hoje é posto pela rota nativa depois do `ler`, não pelo `ler`.
-- Motivos do §4 do plano: banco desatualizado, outra moeda, início do histórico.
+- **Motivos: o conjunto inteiro, nada a menos.** As duas rotas devolvem todos os motivos que o
+  `ler` já propaga: os das contas (`conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado`, de `resumo_mes.MOTIVOS`), os das linhas do mês (`conciliacao_pendente`,
+  `transacao_pendente`, `outra_moeda`, `moeda_presumida`), `inicio_do_historico` e o
+  `arredondamento_por_grupo`. Mais os novos (`disponivel: false`). Um mês com par de conciliação
+  pendente ou transação pendente do banco pode ter gasto duplicado ou sujeito a mudança, e a tela
+  não o mostra como exato (§4.3). Testes: um mês com par de conciliação pendente e um com
+  transação `PENDING` do banco, cada um com o motivo na resposta.
 - **Descrição nunca nula nas respostas de gasto.** `descricao` do leitor pode vir `None` (lançamento
   antigo com `alvo` nulo). Em `maiores`, `ultimas` e no rótulo de estabelecimento, o servidor
   devolve sempre um texto: a descrição, ou "Sem descrição" (constante do servidor), para tooltip,
