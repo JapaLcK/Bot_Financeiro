@@ -696,7 +696,8 @@ O telefone digitado no site não prova de quem é o número. Com outra conta don
 telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
 recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
 #607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
-vínculo nem mescla, e a junção é pelo `vincular CODIGO`. Vale também quando o alvo já tem
+vínculo nem mescla, e a junção é pelo `vincular CODIGO` (com login nos dois lados, recusada:
+`apagaria_login`, até a confirmação explícita da #970). Vale também quando o alvo já tem
 este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
 uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
 lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
