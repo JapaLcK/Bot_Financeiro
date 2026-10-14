@@ -330,6 +330,56 @@ describe("Segurança — conta sem senha", () => {
     });
   });
 
+  // Invariante: a geração governa só escritas de estado. A sessão expirada de uma carga ANTIGA (que ainda
+  // esperava a outra chamada do allSettled) chega a `falha()` mesmo com uma carga nova já em curso.
+  describe("carregar — sessão expirada de carga superada", () => {
+    /** Carga 1 (a do foco): status expira na hora, /auth/me fica preso até `soltar()`. Carga 2 = volta do navegador. */
+    async function cargaAntigaExpirada(carga2: { status: () => Response; me: () => Response }) {
+      const preso = segurar();
+      let statusVez = 0;
+      let meVez = 0;
+      await abrir(
+        { valor: false },
+        {
+          "/auth/mfa/status": () => (statusVez++ === 0 ? resposta(401, { detail: "expirado" }) : carga2.status()),
+          "/auth/me": async () => {
+            if (meVez++ === 0) {
+              await preso.promessa;
+              return resposta(200, { user_id: 1, email: "s@x.com", app_access: true, has_password: false });
+            }
+            return carga2.me();
+          },
+          "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }),
+        },
+      );
+      await waitFor(() => expect(statusVez).toBe(1)); // a carga 1 já viu a expiração e espera o /auth/me
+      await appVai("background");
+      await appVai("active"); // carga 2 começa: a geração da carga 1 foi superada
+      return preso;
+    }
+
+    it("a carga nova só tem falha de rede: a expiração da antiga ainda leva a /entrar", async () => {
+      const preso = await cargaAntigaExpirada({ status: () => resposta(500, { detail: "x" }), me: () => resposta(500, { detail: "x" }) });
+      await waitFor(() => expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy()); // a nova pintou o erro
+
+      preso.soltar();
+
+      await waitFor(() => expect(screen).toHavePathname("/entrar"));
+      expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+    });
+
+    it("duas expirações de gerações diferentes: avisa e navega uma vez só", async () => {
+      const preso = await cargaAntigaExpirada({ status: () => resposta(401, { detail: "expirado" }), me: () => resposta(401, { detail: "expirado" }) });
+      await waitFor(() => expect(screen).toHavePathname("/entrar")); // a carga nova expirou primeiro
+
+      preso.soltar(); // e agora a antiga também
+      await act(drenar);
+
+      expect(screen).toHavePathname("/entrar");
+      expect(screen.getAllByText("Sua sessão expirou. Entre de novo.")).toHaveLength(1);
+    });
+  });
+
   // Comportamento registrado, NÃO é defeito a corrigir: a regra "recarga que falha mantém a tela"
   // vale também para o foco de navegação. Se o MFA mudou e a recarga falha por rede, a tela fica com
   // o status velho e sem aviso; a autoridade é o servidor (/auth/mfa/setup responde 409).

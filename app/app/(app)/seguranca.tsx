@@ -58,6 +58,17 @@ export default function Seguranca() {
         setEstado({ fase: "pronto", status: status.value, conta: conta.status === "fulfilled" ? conta.value : null });
       }
     } catch (e) {
+      // Invariantes de `carregar` (três rodadas de revisão neste ponto):
+      //  1. A geração governa só ESCRITAS DE ESTADO da tela (o `setEstado` de pronto/erro).
+      //  2. Sessão expirada é fato global: de QUALQUER geração, chega a `falha(e)`. Uma carga antiga
+      //     que descobre a expiração depois de uma nova ter começado não pode ser descartada, ou a
+      //     tela fica autenticada com controles velhos.
+      //  3. Idempotente: `sessao.expirou` só transiciona de `autenticado` para `anonimo`, então duas
+      //     cargas expiradas (gerações diferentes) avisam e navegam uma vez só.
+      if (e instanceof SessaoExpirada) {
+        falha(e);
+        return;
+      }
       if (minha !== geracao.current) return;
       const texto = falha(e);
       // Recarga que falha com dados na tela (foco, volta do navegador) mantém a tela: trocar por
