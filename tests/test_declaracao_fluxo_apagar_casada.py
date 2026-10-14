@@ -4,7 +4,7 @@ na MESMA transação do apagar (antes ela sumia da lista e dos totais até o pr�
 `delete_launch_and_rollback` é o ponto único: o v2 `apagar`, o `DELETE /launches` do /app, a tool de IA, o
 WhatsApp (singular e em lote) e o "apagar tudo" passam por ele. A sombra é a do import (`_insert_of_shadow`):
 um import depois não duplica. Só fluxo declarado casado; aporte, sem par e dinheiro puro não mudam. O
-"apagar tudo" segue a regra da fundida (`escopo_conta_corrente`: não recria; a transação volta no próximo import).
+"apagar tudo" também recria (a regra da FUNDIDA, de não recriar nele, fica como está e é testada em outros arquivos).
 Controle negativo: sem `devolve_sombra` no apagar, o Resumo cai a 0 e os testes de volta ficam vermelhos.
 """
 from __future__ import annotations
@@ -80,13 +80,42 @@ def test_v2_apagar_devolve_a_sombra(libera):
     assert saiu(uid) == 50 and n_linhas(uid, 50) == 1
 
 
-def test_apagar_tudo_segue_a_regra_da_fundida_e_o_import_devolve():
+def test_apagar_tudo_devolve_a_sombra_da_declarada_casada():
+    """Diferente da fundida (decisão do dono: o "apagar tudo" não recria), aqui sumiria dado real do banco
+    até um import que pode nunca vir (conexão pausada ou desconectada)."""
     uid, _, lid = _casada()
+    assert saiu(uid) == 50
     r = db.delete_all_launches_and_rollback(uid)
-    assert r["deleted"] == 1 and decl(lid) is None
-    assert q("select imported_launch_id i from open_finance_transactions")["i"] is None  # não recria no apagar tudo
-    db.import_open_finance_launches(uid)
+    assert r["deleted"] == 1 and decl(lid) is None and not r["errors"]
+    assert saiu(uid) == 50 and n_linhas(uid, 50) == 1  # a sombra já voltou, na mesma transação
+    t = q("select imported_launch_id i, reconciliation_status s from open_finance_transactions")
+    assert t["i"] == _sombra(uid)["id"] and t["s"] == "imported"
+    db.import_open_finance_launches(uid)  # idempotente
     assert n_linhas(uid, 50) == 1 and saiu(uid) == 50
+
+
+def test_apagar_tudo_so_consulta_a_declaracao_das_linhas_pagas_pelo_banco(monkeypatch):
+    """Volume: mil linhas comuns não fazem consulta de declaração; só a paga pelo banco passa por `devolve_sombra`."""
+    import db.bank_declaracoes as bd
+    uid, _, lid = _casada()
+    for i in range(300):
+        db.add_launch_and_update_balance(uid, "despesa", 1 + i % 7, "x", "y", "mercado")
+    chamadas = []
+    original = bd.devolve_sombra
+    monkeypatch.setattr(bd, "devolve_sombra", lambda *a, **k: chamadas.append(a[2]) or original(*a, **k))
+    r = db.delete_all_launches_and_rollback(uid)
+    assert r["deleted"] == 301 and chamadas == [lid]
+    assert saiu(uid) == 50  # só a sombra do banco sobrou
+
+
+def test_apagar_tudo_com_falha_na_sombra_mantem_a_linha_e_o_vinculo(monkeypatch):
+    import db.open_finance as of
+    uid, _, lid = _casada()
+    monkeypatch.setattr(of, "_insert_of_shadow", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("falha")))
+    r = db.delete_all_launches_and_rollback(uid)
+    assert r["deleted"] == 0 and r["errors"]  # a linha não saiu pela metade
+    assert decl(lid)["matched_transaction_id"] and q("select id from launches where id=%s", (lid,))
+    assert saiu(uid) == 50
 
 
 def test_sem_par_aporte_e_dinheiro_puro_nao_mudam():

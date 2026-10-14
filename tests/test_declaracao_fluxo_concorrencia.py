@@ -33,3 +33,26 @@ def test_declarar_x_sync_um_vinculo_sem_deadlock(user_id, monkeypatch, declara_p
     assert n_linhas(user_id, 50) == 1 and saiu(user_id) == 50
     assert q("select count(*) n from launches where user_id=%s and source='open_finance'", (user_id,))["n"] == 0
     assert db.get_balance(user_id) == 0
+
+
+@pytest.mark.parametrize("apagar_primeiro", [True, False])
+def test_apagar_tudo_x_sync_sem_deadlock_e_com_uma_sombra(user_id, monkeypatch, apagar_primeiro):
+    """"Apagar tudo" devolve a sombra da declarada casada enquanto o sync reenvia a mesma transação: resultado
+    único (uma sombra, Resumo em 50), sem deadlock, nas duas ordens de chegada à trava."""
+    from tests.test_declaracao_fluxo_reconcilia import n_linhas, saiu
+    cid, _ = _bank(user_id)
+    lid = declara(user_id)
+    _sync(cid, 1000, tx())
+    assert decl(lid)["matched_transaction_id"]
+
+    def apagar():
+        return db.delete_all_launches_and_rollback(user_id)
+
+    def sincronizar():
+        _sync(cid, 1000, tx())
+
+    _ordered_pair(monkeypatch, apagar if apagar_primeiro else sincronizar,
+                  sincronizar if apagar_primeiro else apagar, esperar_travado=True)
+    db.import_open_finance_launches(user_id)
+    assert decl(lid) is None and n_linhas(user_id, 50) == 1 and saiu(user_id) == 50
+    assert q("select count(*) n from launches where user_id=%s and source='open_finance'", (user_id,))["n"] == 1

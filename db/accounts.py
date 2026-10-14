@@ -1830,7 +1830,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     Apagar a linha FUNDIDA (`FUNDIDO_SQL`: manual/ofx/recorrente junta com uma
     transação do banco) desfaz a junção na mesma transação (P3, dono): a transação
     volta como sombra `banco` (`reconciliation._desfaz`), exceto no "apagar tudo"
-    (`escopo_conta_corrente`), que não recria nada. Devolve a frase do aviso
+    (`escopo_conta_corrente`), que não recria a da fundida; a declaração de fluxo casada (PR-A) a recria
+    SEMPRE, `devolve_sombra`, inclusive no "apagar tudo". Devolve a frase do aviso
     (`aviso_banco_voltou`) quando desfez, ou None. Ordem de locks: `accounts` →
     X (`for update`) → transação OF (`_locked_tx`).
 
@@ -2358,8 +2359,10 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                                "mudou_durante") from exc
 
-            # Declaração de fluxo casada (PR-A): a transação também volta como sombra, como a fundida.
-            if not escopo_conta_corrente:
+            # Declaração de fluxo casada (PR-A): a transação também volta como sombra, INCLUSIVE no "apagar
+            # tudo" (diferente da fundida, aqui sumiria dado real do banco até um import que pode nunca vir).
+            # Só consulta quando o lançamento diz que foi pago pelo banco (`funding_source`): sem custo nos demais.
+            if isinstance(efeitos.get("funding_source"), dict) and efeitos["funding_source"].get("kind") == "bank":
                 from .bank_declaracoes import devolve_sombra
                 from .reconciliation import ReconciliationConflict
                 try:
