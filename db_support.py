@@ -849,13 +849,16 @@ def trava_email(cur, email_hash: str | None, *, esperar: bool = True) -> bool:
     return esperar or bool(cur.fetchone()["ok"])
 
 
-def telefone_livre(cur, telefone: str | None) -> str | None:
-    """O telefone, ou None se outra conta já o tem: descarte silencioso, sem dizer
-    "em uso" (enumeraria números de WhatsApp). O cadastro segue sem WhatsApp."""
+def telefone_livre(cur, telefone: str | None, exceto_user_id: int | None = None) -> str | None:
+    """O telefone, ou None se outra conta já o tem. Os cadastros descartam em silêncio,
+    sem dizer "em uso" (enumeraria números de WhatsApp), e seguem sem WhatsApp.
+    `exceto_user_id`: a troca de telefone de uma conta existente (Configurações)
+    não colide com o número que já é dela, nem com a variante do nono dígito."""
     if not telefone:
         return None
     hashes = [hash_pii_optional(c, kind="phone") for c in phone_lookup_candidates(telefone) if c]
-    cur.execute("select 1 from auth_accounts where phone_hash = any(%s)", (hashes,))
+    cur.execute("select 1 from auth_accounts where phone_hash = any(%s) and user_id is distinct from %s",
+                (hashes, exceto_user_id))
     return None if cur.fetchone() else telefone
 
 
