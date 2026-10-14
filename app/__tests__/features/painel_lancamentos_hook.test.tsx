@@ -1,8 +1,6 @@
-import { act, render, renderHook, screen } from "@testing-library/react-native";
+import { act, renderHook } from "@testing-library/react-native";
 import { ErroDeApi, RequisicaoSuperada } from "@/api/client";
 import { useLancamentos } from "@/features/painel/extrato";
-import { LancamentosDe } from "@/features/painel/expansao";
-import { TemaProvider } from "@/ui/tema";
 import fixture from "./painel.fixture.json";
 // `useLancamentos` (paginação de /api/app/lancamentos, partilhada por Extrato e cards do chat) isolado: o provider e a rede são falsos, então cada guarda do hook é medida
 // SOZINHA. O `atual()` do falso é sempre true de propósito: no app real o `operacao().atual` repete parte do que `lote` já garante, e aqui o que se mede é o `lote`.
@@ -107,14 +105,3 @@ describe("o que refaz a leitura", () => {
   });
 });
 
-// `LancamentosDe` (laço do dia) usa este hook: quando a lista reinicia, cursor, contagem e parada do laço têm de recomeçar junto.
-it("laço do dia: depois de a lista reiniciar (versao), o dia na pág. 2 ainda é achado — sem 'Pode haver mais'", async () => {
-  const DIA = "2026-10-03", it_ = (id: string, data: string) => ({ ...item(id), data, descricao: `Item ${id}` });
-  mockLer.mockImplementation((u: string) => Promise.resolve(new URL("http://x" + u).searchParams.get("cursor") === "c2"
-    ? { ...BASE, itens: [it_("d1", DIA), it_("o", "2026-10-01")], proximo: null, motivos: [] } : { ...BASE, itens: [it_("a", "2026-10-20")], proximo: "c2", motivos: [] }));
-  const ver = () => <TemaProvider esquema="light"><LancamentosDe consulta="mes=2026-10&limite=100" filtroDia={DIA} /></TemaProvider>;
-  const r = render(ver()); for (let i = 0; i < 4; i++) await act(async () => {});
-  expect(screen.getByText("Item d1")).toBeTruthy(); expect(mockLer).toHaveBeenCalledTimes(2);
-  mockP.versao = 1; r.rerender(ver()); for (let i = 0; i < 6; i++) await act(async () => {});
-  expect(screen.getByText("Item d1")).toBeTruthy(); expect(screen.queryByText(/Pode haver mais/)).toBeNull(); expect(mockLer).toHaveBeenCalledTimes(4);
-});

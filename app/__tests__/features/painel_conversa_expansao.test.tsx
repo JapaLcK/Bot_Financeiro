@@ -41,57 +41,20 @@ it("categoria null: pede `categoria=` vazio (casa 'sem categoria')", async () =>
 
 const DIA = "2026-10-03", MES_DIA = "2026-10";
 const doDia = (id: string) => lanc({ id, data: DIA, descricao: `Do dia ${id}` });
-function duasPaginas() {
-  const dia = (n: number) => `2026-10-${String(6 + (n % 20)).padStart(2, "0")}`; // todas depois do dia pedido
-  const p1 = Array.from({ length: 100 }, (_, i) => lanc({ id: `a${i}`, data: dia(i), descricao: `Depois ${i}` }));
-  lancamentos.resp = (u) => { const c = u.searchParams.get("cursor"); return c === null ? pagina(p1, "c2") : c === "c2" ? pagina([doDia("d1"), doDia("d2"), lanc({ id: "o1", data: "2026-10-01", descricao: "Antigo" })], "c3") : pagina([lanc({ id: "z", data: "2026-09-30", descricao: "Terceira página" })]); };
-}
-it("dia em duas páginas: fica só com os lançamentos do dia, em exatamente 2 requisições", async () => {
-  duasPaginas(); const push = jest.spyOn(router, "push"); comBlocos(bloco("calendario", detalhesDe(MES_DIA), MES_DIA)); await perguntar();
-  fireEvent.press(screen.getByTestId(`calendario-dia-${DIA}`)); expect(push).not.toHaveBeenCalled();
-  await waitFor(() => expect(screen.getByText("Do dia d1")).toBeTruthy());
-  expect(screen.getByText("Do dia d2")).toBeTruthy(); expect(screen.queryByText("Antigo")).toBeNull(); expect(screen.queryByText(/^Depois /)).toBeNull();
-  await act(drenar); expect(chamadasLanc()).toHaveLength(2);
-  expect(consultaLanc(0).get("mes")).toBe(MES_DIA); expect(consultaLanc(0).get("limite")).toBe("100"); expect(consultaLanc(1).get("cursor")).toBe("c2");
+const tocarDia = async () => { comBlocos(bloco("calendario", detalhesDe(MES_DIA), MES_DIA)); await perguntar(); fireEvent.press(screen.getByTestId(`calendario-dia-${DIA}`)); await act(drenar); };
+it("dia: pede `dia=` dentro do mês do bloco (10 por vez), mostra os itens, 'Carregar mais' segue o cursor e nada navega", async () => {
+  // O servidor falso respeita `dia` como o endpoint: sem ele devolveria um lançamento de OUTRO dia, que apareceria na tela.
+  lancamentos.resp = (u) => { const c = u.searchParams.get("cursor"), dia = u.searchParams.get("dia"); return c ? pagina([doDia("d2")]) : pagina(dia === DIA ? [doDia("d1")] : [lanc({ id: "outro", data: "2026-10-20", descricao: "Outro dia" })], "c2"); };
+  const push = jest.spyOn(router, "push"); await tocarDia(); expect(push).not.toHaveBeenCalled();
+  expect(screen.getByText("Do dia d1")).toBeTruthy(); expect(screen.queryByText("Outro dia")).toBeNull();
+  expect([consultaLanc(0).get("mes"), consultaLanc(0).get("dia"), consultaLanc(0).get("limite")]).toEqual([MES_DIA, DIA, "10"]);
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Carregar mais lançamentos" })); await drenar(); });
+  expect(screen.getByText("Do dia d1")).toBeTruthy(); expect(screen.getByText("Do dia d2")).toBeTruthy(); expect(chamadasLanc()).toHaveLength(2);
+  expect([consultaLanc().get("cursor"), consultaLanc().get("dia"), consultaLanc().get("mes")]).toEqual(["c2", DIA, MES_DIA]);
 });
-describe("laço do dia: sempre termina", () => {
-  const depois = (id: string) => lanc({ id, data: "2026-10-20", descricao: `Depois ${id}` }); // posterior ao dia: o laço quer ir mais fundo
-  const tocarDia = async () => { comBlocos(bloco("calendario", detalhesDe(MES_DIA), MES_DIA)); await perguntar(); fireEvent.press(screen.getByTestId(`calendario-dia-${DIA}`)); await act(drenar); };
-  // Cada servidor falso acaba sozinho depois de 40 pedidos (um laço sem parada daria 41 e falharia a asserção, em vez de travar o Jest).
-  const limitado = (f: (u: URL, n: number) => Response | Promise<Response>) => { let n = 0; lancamentos.resp = (u) => (++n > 40 ? resposta(500, { detail: "laço sem fim" }) : f(u, n)); };
-  it("servidor que repete o cursor: para na 2ª requisição e avisa que pode haver mais", async () => {
-    limitado(() => pagina([depois(`r${Math.random()}`)], "mesmo")); await tocarDia();
-    expect(chamadasLanc()).toHaveLength(2); expect(screen.getByText(/Pode haver mais lançamentos deste dia/)).toBeTruthy(); expect(screen.queryByLabelText("Carregando lançamentos")).toBeNull(); expect(screen.queryByText("Nenhum lançamento encontrado.")).toBeNull();
-  });
-  it("cursores sempre novos com páginas vazias: para no teto de 20 páginas (21 requisições)", async () => {
-    limitado((_u, n) => pagina(n === 1 ? [depois("p1")] : [], `c${n}`)); await tocarDia();
-    expect(chamadasLanc()).toHaveLength(21); expect(screen.getByText(/Pode haver mais lançamentos deste dia/)).toBeTruthy(); expect(screen.queryByLabelText("Carregando lançamentos")).toBeNull(); expect(screen.queryByText("Nenhum lançamento encontrado.")).toBeNull();
-  });
-  it("erro no meio do laço: para (2 requisições), mostra o erro e 'Tentar de novo' retoma até achar o fim", async () => {
-    limitado((u, n) => (n === 2 ? resposta(500, { detail: "x" }) : pagina(n === 1 ? [depois("p1")] : [doDia("d1")], n === 1 ? "c2" : null))); await tocarDia();
-    expect(chamadasLanc()).toHaveLength(2); expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy(); expect(screen.queryByText(/Pode haver mais/)).toBeNull();
-    await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Tentar de novo" })); await drenar(); });
-    await waitFor(() => expect(screen.getByText("Do dia d1")).toBeTruthy()); expect(chamadasLanc()).toHaveLength(3); expect(consultaLanc().get("cursor")).toBe("c2");
-  });
-  it("dia que atravessa a fronteira de página (última linha da pág. 1 já é do dia): segue e junta as duas páginas", async () => {
-    lancamentos.resp = (u) => { const c = u.searchParams.get("cursor"); return c === null ? pagina([depois("a"), doDia("d1")], "c2") : c === "c2" ? pagina([doDia("d2"), lanc({ id: "o", data: "2026-10-01" })], "c3") : pagina([]); };
-    await tocarDia();
-    expect(screen.getByText("Do dia d1")).toBeTruthy(); expect(screen.getByText("Do dia d2")).toBeTruthy(); expect(chamadasLanc()).toHaveLength(2);
-  });
-  it("aviso na mesma tela dos itens do dia, e sem 'Carregar mais lançamentos' no modo dia", async () => {
-    limitado((_u, n) => pagina(n === 1 ? [doDia("d1")] : [depois(`r${n}`)], "mesmo")); await tocarDia();
-    expect(screen.getByText("Do dia d1")).toBeTruthy(); expect(screen.getByText(/Pode haver mais lançamentos deste dia/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Carregar mais lançamentos" })).toBeNull();
-  });
-  it("controle positivo: o laço legítimo (3 páginas, cursores novos) NÃO é cortado", async () => {
-    limitado((_u, n) => pagina(n < 3 ? [depois(`p${n}`)] : [doDia("d1")], n < 3 ? `c${n}` : null)); await tocarDia();
-    await waitFor(() => expect(screen.getByText("Do dia d1")).toBeTruthy()); expect(chamadasLanc()).toHaveLength(3); expect(screen.queryByText(/Pode haver mais/)).toBeNull();
-  });
-});
-it("dia sem lançamento na janela: 'Nenhum lançamento encontrado.' e não fica carregando", async () => {
-  lancamentos.resp = () => pagina([lanc({ id: "x", data: "2026-10-01" })]); comBlocos(bloco("calendario", detalhesDe(MES_DIA), MES_DIA)); await perguntar();
-  fireEvent.press(screen.getByTestId(`calendario-dia-${DIA}`));
-  await waitFor(() => expect(screen.getByText("Nenhum lançamento encontrado.")).toBeTruthy()); expect(screen.queryByLabelText("Carregando lançamentos")).toBeNull();
+it("dia sem lançamento: 'Nenhum lançamento encontrado.' e não fica carregando", async () => {
+  lancamentos.resp = () => pagina([]); await tocarDia();
+  expect(screen.getByText("Nenhum lançamento encontrado.")).toBeTruthy(); expect(screen.queryByLabelText("Carregando lançamentos")).toBeNull();
 });
 
 it("controle positivo: no painel (aba Resumo) a conta segue levando a /conexoes", async () => {
