@@ -3,7 +3,7 @@
  * desafio no FRAGMENTO — `/login?next=…#mfa=<desafio>` — e o login.html abre
  * direto o formulário de código e tira o desafio da URL.
  *
- * Controle negativo: tire o `if(mfaHash){…}` do login.html e os casos de hash
+ * Controle negativo: tire o `if(PB_MFA)showMfa(PB_MFA,'')` do login.html e os casos de hash
  * válido ficam vermelhos (o formulário de e-mail e senha aparece no lugar);
  * os de "sem hash"/"hash malformado" seguem verdes e provam o caminho normal.
  *

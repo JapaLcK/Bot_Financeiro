@@ -575,6 +575,10 @@ prendem isso. Aceitos, sem código:
 - `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
   pedir link novo).
 - `/d/` e `mfa/verify-login` não checam exclusão agendada (o callback web recusa). Follow-up.
+- Recarregar o `/login` depois do `replaceState` perde o formulário de código (o desafio saiu da URL);
+  no `/d/` o código do link já foi queimado, então recomeça por senha ou por um link novo.
+- O link do bot COM MFA passa a registrar login e e-mail de novo IP no `verify-login`; o SEM MFA segue
+  sem registro. Assimetria de auditoria conhecida, não decidida.
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
