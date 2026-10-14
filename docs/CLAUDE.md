@@ -295,7 +295,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `window.pbCsrfHeaders` (auth-refresh.js), e o 403 `pro_required` vira o convite.
 - `GET /api/v2/lancamentos` (`api/v2/lancamentos.py`, regra em `db/lancamentos.py`): só
   leitura. Query `mes` (como em `resumo-do-mes`), `origem`, `conta` (o `id` de `/contas`),
-  `cartao`, `categoria` (a chave), `tipo` (`entrada`|`saida`), `q`, `cursor`, `limite`
+  `cartao`, `categoria` (a chave; `sem categoria` pega `NULL`, vazio e a de mesmo nome, também a compra de cartão), `tipo` (`entrada`|`saida`), `dia` (`AAAA-MM-DD`, filtra pelo `data` devolvido; é texto e não `date` porque o gerador de tipos recusa `format: date` em query; inválido como `2026-02-30` = 422; leve sempre junto o `mes` da fatura, que é o que pega a compra de cartão de outro mês), `q`, `cursor`, `limite`
   (padrão 50, acima de 100 corta, abaixo de 1 é 422). Resposta `{mes, itens, proximo, motivos}`.
   **O mês é o de `TOTAIS_SQL`**: mesma janela (`db/resumo_mes.MES_JANELA_SQL`) e mesma regra
   de totais (`TOTAIS_SQL`/`CATEGORIAS_SQL` seguem em `MES_LANCAMENTOS_SQL`; a lista só
@@ -377,9 +377,52 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
   sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
   gravam dois).
-- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome}]}`, o
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
-  vence entre gêmeas), semeado como o `/categories` do /app.
+  vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
+  /app. Só o catálogo: a categoria que só aparece nos lançamentos e a "sem categoria" não têm entrada aqui
+  (o fallback neutro é do `/gastos`).
+- `GET /api/v2/gastos?mes=AAAA-MM` (`api/v2/gastos.py`, regra em `db/gastos.py`; também em `/api/app/gastos`,
+  porque `criar_app` monta o mesmo router nos dois: rota nova não afeta o app instalado): "Para onde vai",
+  a visão do mês, só leitura (plano em `docs/plano-etapa5-gastos.md`). `mes` como em `resumo-do-mes` (sem
+  ele o corrente; futuro ou fora do formato = 422). Resposta: `mes`, `disponivel`, `hoje` (AAAA-MM-DD no
+  fuso do app), `dia_de_corte`, `historico_desde` (o corte do plano, se cai depois do dia 1 do mês; senão
+  `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
+  `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
+  (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
+  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
+  mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
+  `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
+  `lancamentos.MOTIVOS_ITEM` que faltam + `arredondamento_por_grupo`; nesta ordem: `conciliacao_pendente`, `movimentos_pendentes`,
+  `banco_desatualizado`, `inicio_do_historico`, `transacao_pendente`, `outra_moeda`, `moeda_presumida`,
+  `arredondamento_por_grupo`). Os `motivos` juntam os das contas que estão em `resumo_mes.MOTIVOS` (`outra_moeda`/`moeda_presumida` de `/contas` não passam), das linhas do mês pedido E das linhas do
+  mês anterior lido: um `transacao_pendente` do mês anterior aparece na resposta do mês pedido (fixado por
+  `test_pendente_do_mes_anterior_levanta_o_motivo_do_mes_pedido`). **Regra**: as MESMAS linhas do `/lancamentos` (`lancamentos.listar`, guardado
+  fora porque é opt-in) por `mes_detalhes._em_reais` (sem interno, sem outra moeda), só `saida`: Σ
+  categorias = `saiu` de `resumo-do-mes` nos meses sem `outra_moeda`. O mês pedido e o anterior saem
+  de UMA transação repeatable read / read only (o seed do catálogo, que escreve e abre conexão própria,
+  roda antes). **Corte por dia**: `valor_ate_corte` e `anterior_ate_corte` somam o dia 1 até
+  `dia_de_corte` (mês corrente: o dia de hoje; mês passado: o último dia do mês); no mês anterior, o
+  mesmo dia (`min` com o último dia dele, 31/03 contra fim de fevereiro) no mês corrente e o mês
+  anterior inteiro no passado (fevereiro contra janeiro conta os dias 29 a 31). Saída com data depois
+  do corte entra em `valor` e não nos dois "até o corte"; data anterior ao mês conta como já ocorrida.
+  `anterior_ate_corte` e `anterior_total_ate_corte` são `null` (nunca zero) quando o corte do plano toca qualquer parte do mês anterior;
+  mês todo antes do corte = `disponivel: false`, `total: null`, listas vazias e `motivos` com
+  `inicio_do_historico` (a tela não mostra "R$ 0"). **Grade**: `[max(dia 1, corte), fim do mês)`; saída
+  com `dia` fora dela (compra de cartão do mês anterior numa fatura do mês, linha antiga do Open Finance
+  com `posted_at` antes do corte) vai para `fora_da_grade`, dentro do `total`. **Moeda**:
+  `saidas_em_outra_moeda` é derivado (saídas não internas − saídas em reais, por chave); entrada ou
+  movimento de caixinha em outra moeda não conta, e `outra_moeda` só sobe com contador > 0. **Sem
+  categoria**: a chave `sem categoria` junta `NULL`, vazio e a categoria de mesmo nome (`cat_key_sql`); o nome,
+  o emoji e a cor são os do catálogo quando há linha dele (o catálogo vence), senão `CAT_NEUTRA_EMOJI`/
+  `CAT_NEUTRA_COR` (`db/connection.py`), que valem também para a categoria que só aparece nos lançamentos; o
+  nome, nesse caso, é a própria chave. `cor` fora de `#RRGGBB` e `emoji` vazio ou só espaços saem como o
+  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`).
+  `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
+  `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  difere do total (`soma_arredondada_diverge`). Falta, do plano: `/gastos/categoria` (PR 1b) e a tela (PR 2).
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
