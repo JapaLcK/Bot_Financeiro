@@ -21,13 +21,13 @@ export const ERRO_COFRE_SOCIAL: Record<ProvedorSocial, string> = {
  * Voltar. Ganha um `code` no backend quando isso incomodar.
  */
 export async function criarContaSocial(
-  c: { provedor: ProvedorSocial; token: string; email: string; nome: string },
+  c: { provedor: ProvedorSocial; token: string; email: string; nome: string; verificador?: string },
   telefone: string,
   autenticar: () => void,
 ): Promise<EstadoEntrar> {
   const voltaAoC = (aviso?: string): EstadoEntrar => ({ fase: "cadastro-social", ...c, aviso });
   try {
-    await completarCadastroSocial(c.provedor, c.token, c.nome.trim(), telefone.replace(/\D+/g, ""));
+    await completarCadastroSocial(c.provedor, c.token, c.nome.trim(), telefone.replace(/\D+/g, ""), c.verificador);
     autenticar();
     return { fase: "criando-social", provedor: c.provedor, token: c.token, email: c.email };
   } catch (e) {

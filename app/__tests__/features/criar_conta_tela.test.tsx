@@ -38,6 +38,7 @@ describe("(auth)/criar-conta — tela real", () => {
     await waitFor(() => expect(screen).toHavePathname("/boas-vindas"));
   });
 
+  // Exercita o gate de rota (pilha/guarda) com o dublê do `jest.setup.js` para o caminho cru; não prova alcançabilidade por link real (isso é `native_intent_roteador.test.tsx`).
   it("T2 — deep link frio tem /boas-vindas embaixo; 'Já tem conta? Entrar' troca por /entrar, que volta para ela", async () => {
     await abrir();
     expect(router.canGoBack()).toBe(true);
