@@ -17,7 +17,7 @@ from db.cards import MAX_CARD_NAME_LEN, MSG_FATURA_DO_BANCO
 from db.open_finance import merged_wallet_delta_async
 from db.reconciliation import wallet_guard_delta_async
 from core.services.funding import carteira_txt
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 from frontend.routes import shared
 
 router = APIRouter()
@@ -62,6 +62,8 @@ async def create_card_route(request: Request, user_id: int, payload: CardCreateP
         raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
     if payload.credit_limit is not None and payload.credit_limit < 0:
         raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
+    if payload.credit_limit and not valor_valido(payload.credit_limit):  # NaN é truthy; 0 = sem limite
+        raise HTTPException(status_code=400, detail="Limite inválido.")
 
     try:
         card_id = await asyncio.to_thread(
@@ -166,6 +168,8 @@ async def update_card_route(request: Request, user_id: int, card_id: int, payloa
         raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
     if payload.credit_limit is not None and payload.credit_limit < 0:
         raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
+    if payload.credit_limit and not valor_valido(payload.credit_limit):  # NaN é truthy; 0 = sem limite
+        raise HTTPException(status_code=400, detail="Limite inválido.")
 
     try:
         updated = await asyncio.to_thread(

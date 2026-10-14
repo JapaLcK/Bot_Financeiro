@@ -10,12 +10,15 @@ import { sucesso } from "@/ui/haptics";
 import { duracoes, useEntrada, useReduzirMovimento } from "@/ui/motion";
 import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
-import { Bloco } from "./base";
-import { mesAtual, type Widget } from "./catalogo";
+import type { BlocoChat, CardChat } from "@/api/schemas/painel";
+import { Bloco, tituloWidget } from "./base";
+import { BlocoContexto } from "./blocoContexto";
+import { nomeMes } from "./catalogo";
+import { tituloPeriodo } from "./cardPeriodo";
 import { raio, texto as escalas } from "@/ui/tokens";
 import { ChipPainel, TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
-import { sugestoes, widgetDoTopico, WIDGETS_DO_MES, type Pergunta } from "./perguntas";
+import { sugestoes, type Pergunta } from "./perguntas";
 import { useConversa, type Turno } from "./conversaEstado";
 import { WidgetConteudo } from "./widgets";
 export const OCULTA = "Mensagem oculta enquanto os valores estão privados.";
@@ -80,10 +83,20 @@ function Acoes({ turno: t }: { turno: Turno }) {
     {t.messageId !== null && <><BotaoAcao rotulo="Gostei da resposta" icone="ThumbsUp" selecionado={t.feedback === 1} onPress={() => void nota(1)} /><BotaoAcao rotulo="Não gostei da resposta" icone="ThumbsDown" selecionado={t.feedback === -1} onPress={() => void nota(-1)} /></>}
   </View>;
 }
-/** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e, se o chip tinha assunto e a resposta veio, o widget real abaixo. */
-export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (w: Widget) => void }) {
-  const p = usePainel(); const widget = t.assunto && widgetDoTopico(t.assunto);
-  const card = !p.oculto && t.resposta !== undefined && widget && (!WIDGETS_DO_MES.includes(widget) || p.mes === mesAtual()) ? widget : null;
+/** Título do card de UMA aba: o `periodo` pelo intervalo; aba com mês ("Para onde vai · setembro de 2026"); senão o do catálogo (Compromissos com o horizonte do próprio bloco). */
+export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
+  const periodo = aba.recursos.periodo;
+  if (card === "periodo") return periodo ? tituloPeriodo(periodo.inicio, periodo.fim) : "Período";
+  if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
+  return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
+}
+/** Um card por aba do bloco, cada um com os dados embutidos pelo servidor; tocar em qualquer ponto livre abre a Folha com o MESMO bloco/aba. */
+export function CardChat({ bloco, abrir }: { bloco: BlocoChat; abrir: (b: BlocoChat, aba: number) => void }) {
+  return <>{bloco.abas.map((aba, i) => <BlocoContexto.Provider key={i} value={{ recursos: aba.recursos }}><Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)} ir={{ destino: "detalhes", acao: () => abrir(bloco, i) }}><WidgetConteudo id={bloco.card} /></Bloco></BlocoContexto.Provider>)}</>;
+}
+/** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e os cards (`bloco`) que o servidor montou, antes do texto. */
+export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (b: BlocoChat, aba: number) => void }) {
+  const p = usePainel(); const entrada = useEntrada();
   const emVoo = t.resposta === undefined && !t.erro && !t.interrompida, status = emVoo && !t.parcial;
   const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto; enquanto o status os mostra, não duplica
   return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}>
@@ -92,11 +105,11 @@ export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayou
       <FalaPiggy>
         {status && <StatusPiggy passos={t.passos} />}
         {!status && !!passos && <Texto variante="legenda" tom="inkMuted">{passos}</Texto>}
+        {abrir && t.blocos.map((b, i) => <Animated.View key={i} entering={entrada}><CardChat bloco={b} abrir={abrir} /></Animated.View>)}
         {emVoo && t.previa && t.blocos.at(-1)?.card !== t.previa && <Skeleton largura="100%" altura={120} raio={raio.bloco} />}
         {t.erro ? <Texto tom="warning">{t.erro}</Texto> : <Markdown texto={t.resposta ?? t.parcial} />}
         {t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}
         {t.interrompida && t.resposta === undefined && !t.erro && <Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto>}
-        {card && <Bloco id={card} abrir={abrir && (() => abrir(card))}><WidgetConteudo id={card} /></Bloco>}
         {t.resposta !== undefined && <Acoes turno={t} />}
       </FalaPiggy>
     </>}

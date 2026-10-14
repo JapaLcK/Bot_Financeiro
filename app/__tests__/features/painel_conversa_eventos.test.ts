@@ -1,6 +1,8 @@
 import { lerEvento, periodoSchema } from "@/api/schemas/painel";
 import { TITULOS } from "@/features/painel/catalogo";
+import fixture from "./painel.fixture.json";
 import periodoJson from "../../../tests/fixtures/ai_chat_bloco_periodo.json";
+import metasV2 from "../../../tests/frontend/api_v2_respostas.json";
 import exemplos from "../../../tests/fixtures/ai_chat_eventos.json"; // lido também pelo pytest (tests/test_ai_chat_stream.py)
 
 const ex = exemplos as Record<string, Record<string, unknown>>;
@@ -36,4 +38,37 @@ it("`periodoSchema` aceita a fixture compartilhada e recusa a fixture sem `meses
   expect(periodoSchema.safeParse(periodo).success).toBe(true);
   const { meses: _, ...semMeses } = periodo;
   expect(periodoSchema.safeParse(semMeses).success).toBe(false);
+});
+
+// Os recursos embutidos no `bloco` passam pelo schema de cada recurso (os mesmos do provider); fixture do painel.
+const contas = (fixture as Record<string, Record<string, unknown>>)["/api/app/contas"]!;
+const comRecursos = (recursos: Record<string, unknown>) => bloco({ abas: [{ mes: null, recursos }] });
+type Lido = { bloco: { abas: { recursos: Record<string, any> }[] } };
+it("bloco com `contas` válido é aceito, com o dinheiro em centavos", () => {
+  const e = lerEvento(comRecursos({ contas })) as unknown as Lido;
+  expect(e.bloco.abas[0]!.recursos.contas.total).toBe(940025); expect(e.bloco.abas[0]!.recursos.contas.carteira.saldo).toBe(45000);
+});
+it("recurso inválido invalida o evento: `contas: {}`, e `periodo` sem `meses`", () => {
+  expect(lerEvento(comRecursos({ contas: {} }))).toBeNull();
+  const { meses: _, ...semMeses } = periodo; expect(lerEvento(comRecursos({ periodo: semMeses }))).toBeNull();
+});
+it("recurso desconhecido é descartado sem invalidar o bloco (e as chaves herdadas do Object não passam)", () => {
+  const e = lerEvento(comRecursos({ contas, desconhecido: { x: 1 }, toString: "x" })) as unknown as Lido;
+  expect(Object.keys(e.bloco.abas[0]!.recursos)).toEqual(["contas"]);
+});
+
+it("`periodo` com `inicio`/`fim` malformado invalida o bloco (o título do card não pode lançar); válido segue aceito", () => {
+  for (const chave of ["inicio", "fim"]) for (const v of ["", "2026-13", "2026-8", "agosto"]) expect(lerEvento(comRecursos({ periodo: { ...periodo, [chave]: v } }))).toBeNull();
+  expect(lerEvento(comRecursos({ periodo }))?.tipo).toBe("bloco");
+});
+it("`maiores` com mais de 5 lançamentos é aceito (se o servidor subir o teto, o evento não some calado)", () => {
+  const cats = (periodo.categorias as { maiores: unknown[] }[]).map((c) => ({ ...c, maiores: Array(6).fill(c.maiores[0] ?? (periodo.categorias as { maiores: unknown[] }[])[0]!.maiores[0]) }));
+  const e = lerEvento(comRecursos({ periodo: { ...periodo, categorias: cats } })) as unknown as Lido; expect(e.bloco.abas[0]!.recursos.periodo.categorias[0].maiores).toHaveLength(6);
+});
+const v2 = (metasV2 as unknown as { metas: { varios: unknown } }).metas.varios;
+it("`caixinhas` (formato legado {ok, goals}) é aceito; `metas` no formato v2 invalida o evento (o card v2 é outro PR)", () => {
+  const legado = (fixture as Record<string, unknown>)["/goals/1/status"];
+  expect(lerEvento({ tipo: "bloco", bloco: { card: "caixinhas", abas: [{ mes: null, recursos: { caixinhas: legado } }] } })?.tipo).toBe("bloco");
+  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2 } }] } })).toBeNull();
+  expect(lerEvento({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: legado } }] } })?.tipo).toBe("bloco"); // o legado em `metas` ainda passa: não há card v2 para trocar
 });

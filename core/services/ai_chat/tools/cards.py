@@ -27,7 +27,7 @@ from typing import Any
 import db
 from core.observability import _log_falha
 from utils_date import today_tz
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
 from ._base import Tool
@@ -327,10 +327,12 @@ def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
 
     try:
         valor = float(args.get("valor") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor inválido."
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
+    if not valor_valido(valor):  # `nan <= 0` é False; 1e308 também commitava
+        return "🐷 Valor inválido."
 
     parcelas_raw = args.get("parcelas")
     parcelas: int | None = None

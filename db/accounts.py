@@ -134,6 +134,9 @@ def add_launch_and_update_balance(
             raise ValueError("DECLARACAO_CURSOR_EXTERNO")
         apply_delta, origem = False, None
         extra_efeitos = {"funding_source": {"kind": "bank", "of_account_id": None, "account_ambiguous": False}}
+    # Para todo lançamento (a declaração acima já validou o seu, mais estrito): Só finitude: aceita 0 (lançamento zerado) e deixa o teto técnico para as portas de entrada.
+    if not isfinite(float(valor)):
+        raise ValueError("VALOR_INVALIDO")
     ensure_user(user_id)
 
     v = Decimal(str(valor))
