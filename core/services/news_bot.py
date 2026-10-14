@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 from core.observability import log_system_event_sync
+from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ FEEDS: list[tuple[str, str]] = [
     ("Poder360",       "https://www.poder360.com.br/feed/"),
 ]
 
-MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+MODEL = CHAT_MODEL
 CHECK_INTERVAL_HOURS = 12          # frequência do loop
 MAX_ITEMS_PER_FEED   = 8           # quantos itens recentes olhar por feed
 MAX_NEW_PER_RUN      = 10          # teto de notícias novas processadas por ciclo (custo LLM)
@@ -221,8 +222,7 @@ def _summarize(client, item: dict) -> dict | None:
     )
     try:
         resp = client.chat.completions.create(
-            model=MODEL,
-            temperature=0.4,
+            **completion_options(MODEL, None, 0.4),
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},

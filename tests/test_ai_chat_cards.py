@@ -8,7 +8,7 @@ Gates, teto e eventos do stream: `test_ai_chat_cards_turno.py`.
 import json
 from datetime import timedelta
 import re
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import pytest
 
@@ -17,12 +17,13 @@ from _cards_apoio import CASOS, M, M0, _http, mostrar, mundo  # noqa: F401  (mun
 from conftest import usuario_pagante
 from core.services.ai_chat import cards
 from db.mes_detalhes import ler
+from tests._patrimonio_helpers import conexao, posicao
 from tests.test_resumo_mes_regra import INICIO
 from utils_date import now_tz
 
 
-def test_o_registro_cobre_os_17_cards():
-    assert set(CASOS) == set(cards.IDS) == set(cards.registro()) and len(cards.IDS) == 17
+def test_o_registro_cobre_os_18_ids():
+    assert set(CASOS) == set(cards.IDS) == set(cards.registro()) and len(cards.IDS) == 18
 
 
 def _sem_relogio(o):
@@ -50,10 +51,10 @@ def confere_paridade(uid, card):
 def test_paridade_http_x_bloco(mundo, card):
     a, _ = mundo
     _, bloco = confere_paridade(a, card)
-    if card in ("metas", "fatura", "parcelas", "categorias", "contas"):  # a fixture não é vazia
+    if card in ("metas", "caixinhas", "fatura", "parcelas", "categorias", "contas"):  # a fixture não é vazia
         assert any(aba["recursos"] for aba in bloco["abas"])
         dado = json.dumps(bloco)
-        assert {"metas": "viagem", "fatura": "Nubank", "parcelas": "casa", "categorias": "mercado",
+        assert {"metas": "Casa nova", "caixinhas": "viagem", "fatura": "Nubank", "parcelas": "casa", "categorias": "mercado",
                 "contas": "carteira"}[card] in dado
 
 
@@ -87,17 +88,34 @@ def _numeros(o):
     return set().union(*map(_numeros, filhos)) if filhos else set()
 
 
+def _reais(o):
+    """Os `R$ 1.234,56` de todo texto do objeto, como Decimal em módulo."""
+    if isinstance(o, str):
+        return {abs(Decimal(x.replace(".", "").replace(",", "."))) for x in re.findall(r"R\$ (-?[\d.]+,\d\d)", o)}
+    filhos = o.values() if isinstance(o, dict) else o if isinstance(o, list) else []
+    return set().union(*map(_reais, filhos)) if filhos else set()
+
+
 @pytest.mark.parametrize("card", list(CASOS))
 def test_visao_do_modelo_esta_no_bloco(mundo, card):
     a, _ = mundo
+    if card == "metas":  # a meta da fixture não tem banco (`atual` null, sem R$): dá dinheiro a ela
+        posicao(conexao(a, "item-visao-metas", banco="Nubank"), "p1", "1234.567")
     args, _ = CASOS[card]
     r, (bloco,), _ = mostrar(a, card=card, **args)
     assert r["card"] == card and len(r["abas"]) == len(bloco["abas"])
-    # `tendencia` (renda) é derivada das mesmas linhas e sai da conta; o B2 testa a derivação
-    sem_tendencia = [{k: v for k, v in a.items() if k != "tendencia"} for a in r["abas"]]
-    assert _numeros(sem_tendencia) <= _numeros(bloco)
-    assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "rendimento", "piggy"), \
-        "a visão do modelo tem número como número"
+    if card == "metas":
+        # o dinheiro vai como texto pronto com "R$" (o ai_guard só aceita assim), nunca float: então
+        # cada R$ do texto tem de ser, em módulo (o ritmo sai com palavra, sem sinal), um Decimal do bloco
+        reais = _reais(r)
+        do_bloco = {abs(Decimal(str(n))).quantize(Decimal("0.01"), ROUND_HALF_UP) for n in _numeros(bloco)}
+        assert reais and reais <= do_bloco and not any(isinstance(x, float) for x in _numeros(r))
+    else:
+        # `tendencia` (renda) é derivada das mesmas linhas e sai da conta; o B2 testa a derivação
+        sem_tendencia = [{k: v for k, v in a.items() if k != "tendencia"} for a in r["abas"]]
+        assert _numeros(sem_tendencia) <= _numeros(bloco)
+        assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "rendimento", "piggy"), \
+            "a visão do modelo tem número como número"
     json.dumps(r)  # serializa como o runner serializa
 
 
@@ -122,7 +140,7 @@ def confere_isolamento(a, b, card):
     for marca in ("SEGREDO", "7777", "5555", "888.00"):
         assert marca not in texto, (card, marca)
     assert not (_ids(bloco_a) & _ids(bloco_b)), card
-    if card in ("metas", "fatura"):
+    if card in ("metas", "caixinhas", "fatura"):
         assert _ids(bloco_a) and _ids(bloco_b)
 
 
@@ -132,13 +150,25 @@ def test_bloco_de_a_nao_tem_nada_de_b(mundo, card):
 
 
 def test_isolamento_pega_leitor_que_le_o_outro_usuario(mundo, monkeypatch):
-    """Controle negativo: o leitor de `metas` passa a ler as caixinhas de B."""
+    """Controle negativo: o leitor de `caixinhas` passa a ler as caixinhas de B."""
+    a, b = mundo
+    confere_isolamento(a, b, "caixinhas")  # positivo
+    real = cards.registro()
+    from core.services.metas_status import status_metas
+    vaza = cards.Card(lambda uid, args: [(None, {"caixinhas": {"ok": True, "goals": status_metas(b)}})],
+                      real["caixinhas"].visao)
+    monkeypatch.setattr(cards, "registro", lambda: {**real, "caixinhas": vaza})
+    with pytest.raises(AssertionError):
+        confere_isolamento(a, b, "caixinhas")
+
+
+def test_isolamento_pega_leitor_de_metas_que_le_o_outro_usuario(mundo, monkeypatch):
+    """Controle negativo: o leitor de `metas` passa a ler as metas de B."""
     a, b = mundo
     confere_isolamento(a, b, "metas")  # positivo
     real = cards.registro()
-    from core.services.metas_status import status_metas
-    vaza = cards.Card(lambda uid, args: [(None, {"metas": {"ok": True, "goals": status_metas(b)}})],
-                      real["metas"].visao)
+    from api.v2.metas import listar
+    vaza = cards.Card(lambda uid, args: [(None, {"metas": listar(uid=b)})], real["metas"].visao)
     monkeypatch.setattr(cards, "registro", lambda: {**real, "metas": vaza})
     with pytest.raises(AssertionError):
         confere_isolamento(a, b, "metas")

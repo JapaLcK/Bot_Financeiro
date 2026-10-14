@@ -161,22 +161,23 @@ def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dic
     corrente também: a fatura que fecha depois de hoje entra, como na regra), o cartão pela
     fatura e o MESMO corte da janela do plano que `resumo_do_mes` aplica (`extra` leva
     `motivos: [inicio_do_historico]` quando o corte cai no dia 1 do mês pedido ou depois; o "mês
-    anterior cortado" do resumo não tem par em lista). Mês todo cortado: início > fim = lista
+    anterior cortado" do resumo não tem par em lista). `extra` leva `cartao_por` pela regra da janela
+    (meses inteiros: fatura; livre: data da compra); quem soma de outro jeito sobrescreve. Mês todo cortado: início > fim = lista
     vazia, e `extra` devolve as datas do mês pedido (sobrescrevem as da janela). Período livre
     não corta (limite declarado)."""
     if not _meses_inteiros(start, end):
-        return start, end, False, {}
+        return start, end, False, {"cartao_por": "data_da_compra"}
     from core.services.plan_service import history_earliest_date
     from utils_date import now_tz
 
     end = resumo_mes.mes_de(end)[1] - timedelta(days=1)
     corte = history_earliest_date(user_id, now_tz())
     if corte and corte >= start:
-        extra = {"motivos": ["inicio_do_historico"]}
+        extra = {"cartao_por": "fatura", "motivos": ["inicio_do_historico"], "historico_desde": corte.isoformat() if corte > start else None}
         if corte > end:
             extra |= {"start_date": start.isoformat(), "end_date": end.isoformat()}
         return corte, end, True, extra
-    return start, end, True, {}
+    return start, end, True, {"cartao_por": "fatura"}
 
 
 def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
@@ -200,6 +201,7 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
 
             r = ler_periodo(user_id, a, b, now_tz())
             motivos = [m for m in resumo_mes.MOTIVOS if m in r["motivos"]]
+        historico_desde = None  # a mesma semântica do card `periodo`: o corte quando ele cortou, senão None
         if "inicio_do_historico" in motivos:
             # o resumo também levanta o motivo quando o corte cai no mês ANTERIOR (o `anterior` dele
             # sai None); aqui o período pedido está inteiro, então só vale o corte a partir do dia 1 dele
@@ -208,6 +210,8 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
             corte = history_earliest_date(user_id, now_tz())
             if not (corte and corte >= inicio):
                 motivos.remove("inicio_do_historico")
+            elif corte > inicio:
+                historico_desde = corte.isoformat()
         hoje = today_tz()
         futuro = b > (hoje.year, hoje.month)
         nota = (
@@ -217,8 +221,11 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
             ("Mês inteiro" if a == b else "Meses inteiros")
             + ", com as compras no cartão pela fatura que fecha no mês (igual ao painel)."
         )
-        if motivos:
-            nota += f" Número pode estar desatualizado ou incompleto ({', '.join(motivos)}); avise o usuário."
+        if "inicio_do_historico" in motivos:  # limite do plano não é "incompleto": o aviso abaixo é só dos outros motivos
+            nota += (f" Limite do plano (inicio_do_historico){f': histórico a partir de {historico_desde}' if historico_desde else ''};"
+                     " antes disso não é falta de gasto.")
+        if outros := [m for m in motivos if m != "inicio_do_historico"]:
+            nota += f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário."
         if futuro:
             motivos.append("mes_futuro")
         return {
@@ -230,6 +237,7 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
             "cartao_incluido": True,
             "cartao_por": "fatura",
             "motivos": motivos,
+            "historico_desde": historico_desde,
             "nota": nota,
             **limite,
         }
@@ -543,6 +551,7 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "total": total,
         **limite,
         **extra,
+        "cartao_por": "fatura",  # sum_spent_in_category_period soma o cartão sempre pela fatura, até em período livre
     }
 
 
@@ -1165,14 +1174,13 @@ TOOLS: list[Tool] = [
                     "Retorna a tendência mensal (totais de despesa e receita) "
                     "dos últimos N meses, incluindo o atual. JÁ inclui análise "
                     "calculada (média, saldo médio, direção da tendência, "
-                    "variação %). USE SEMPRE QUE O USER PEDIR algo sobre "
-                    "histórico mensal, comparação no tempo ou direção dos "
-                    "gastos. Exemplos: 'tendência últimos 6 meses', 'tendência "
-                    "deste ano', 'como tá evoluindo meus gastos', 'meus gastos "
-                    "estão subindo ou caindo?', 'gastos mês a mês', 'evolução "
-                    "anual', 'meus últimos 3 meses', 'gastos do trimestre'. "
-                    "Pra 'deste ano' use months=12; pra 'trimestre' use "
-                    "months=3. Default é 6."
+                    "variação %). USE QUANDO O USER PEDIR tendência, evolução, "
+                    "direção dos gastos ou média mensal. Exemplos: 'tendência "
+                    "últimos 6 meses', 'como tá evoluindo meus gastos', 'meus "
+                    "gastos estão subindo ou caindo?', 'gastos mês a mês', "
+                    "'média por mês'. O TOTAL de um período ('este ano', 'meus "
+                    "últimos 3 meses', 'trimestre') NÃO é tendência: use "
+                    "a tool de resumo do período. Default é 6."
                 ),
                 "parameters": {
                     "type": "object",

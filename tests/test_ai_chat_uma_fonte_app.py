@@ -21,6 +21,7 @@ from tests._pendencia_credito_helpers import diga
 
 SETE = {"get_balance", "forecast_balance", "get_spending_trend", "get_card_limit_usage",
         "get_total_debt", "forecast_next_bill", "list_installments"}
+OITO = SETE | {"list_metas"}  # o número de metas vem do card; a tool só existe para quem tem a chave
 
 
 def _nomes(schemas):
@@ -38,7 +39,7 @@ def com_emissor(f, *a):
 # ── o mecanismo: schemas e despacho ─────────────────────────────────────────
 
 def test_schemas_app_sem_as_sete_e_com_show_card_e_schemas_intacto():
-    assert OCULTAS_NO_APP == SETE
+    assert OCULTAS_NO_APP == OITO  # `list_metas` é oculta no app, mas fora de SCHEMAS (só `schemas_para`)
     assert SETE <= set(_nomes(SCHEMAS)) and "show_card" not in _nomes(SCHEMAS)
     assert not SETE & set(_nomes(SCHEMAS_APP)) and "show_card" in _nomes(SCHEMAS_APP)
     assert _nomes(SCHEMAS_APP) == [n for n in _nomes(SCHEMAS) if n not in SETE] + ["show_card"]
@@ -217,7 +218,7 @@ def test_list_pockets_apara_o_insight_so_no_app(pro_user_id):
     fora, app = ex(pro_user_id, {}), com_emissor(ex, pro_user_id, {})
     p_fora, p_app = fora["pockets"][0], app["pockets"][0]
     extras = set(p_fora) - set(p_app)
-    assert {"monthly_needed", "progress_pct", "remaining_to_goal", "days_to_target"} <= extras  # o do card metas
+    assert {"monthly_needed", "progress_pct", "remaining_to_goal", "days_to_target"} <= extras  # o do card caixinhas
     assert p_app["target_amount"] == 1000.0 and p_app["target_date"] == "2999-01-01"  # a meta existe
     assert p_app == {k: v for k, v in p_fora.items() if k in p_app}
     assert {"id", "name", "balance", "status"} <= set(p_app)

@@ -14,8 +14,8 @@
 
 | Fase | Situação |
 |---|---|
-| 0. Decisões e medição | P1–P4 e P6 respondidas; **P5 e P7 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
-| 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). Falta o 1a-2 (ignorar receita). |
+| 0. Decisões e medição | P1–P4, P6 e P7 respondidas; **P5 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
+| 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). A receita passou a vir do extrato (P7 a, PR A, em código; falta a medição pós-deploy). Falta o 1a-2 (ignorar receita). |
 | 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2a (`quitar_pelo_banco`: grava `paid_amount` do cartão OF pelo `of_card_bills`, regra por conta; vale para todo usuário com banco conectado, sem flag) em código. PR 2b (recusar o "pagar fatura" manual no cartão do banco, `db.cards.pay_bill_amount` levanta `CartaoDoBanco`; WhatsApp, IA e /app) **entrou no B2 por decisão do dono em 2026-10-11, sem esperar a consulta pós-deploy do 2a**; limite aceito: banco com "regra indefinida" ou N+1 deixa no máximo UMA fatura fechada em aberto até o PR da regra N+1. |
 | 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
@@ -141,7 +141,10 @@ cerca de 30 dias (`core/services/assinaturas.py`), de despesa e de receita.
 positiva. A medição de 2026-10-08 (§9) achou 1 recorrência de entrada em produção, já
 parada. Quando o fixo e a receita manuais saírem (Fases 2 e 3), sobram na Previsão o saldo,
 as faturas dos cartões OF, as recorrências de despesa detectadas e as pendências, **quase
-sempre sem receita nenhuma**. Isto é a P7 (§8).
+sempre sem receita nenhuma**. Isto é a P7 (§8), respondida em 2026-10-13: a receita é detectada
+pelo extrato (`receitas_do_extrato`, regra frouxa de 2 créditos, **só com o documento do pagador**),
+e a recorrência de entrada da Pluggy deixou de ser lida. Renda irregular segue sem receita prevista, e
+receita sem documento do pagador também (a descrição do Pix é genérica e uniria pessoas diferentes).
 
 O que o OF não detecta:
 - Recorrência anual, semanal ou única: IPVA, IPTU, matrícula, anuidade.
@@ -179,7 +182,7 @@ O que o OF não detecta:
 | **Fatura paga** | **Não.** O pagamento no extrato é reconhecido como interno (`db/open_finance.py:1951-1976`), mas **nada grava `credit_bills.paid_amount`**. | Sem o "pagar fatura" manual (#5), toda fatura OF já paga fica a conferir na Previsão. Precisa de detector (Fase 1b). |
 | Investimentos | Sim (`/investments`) | A rentabilidade não chega (medição de 2026-09-29). |
 | Caixinha do banco | Em parte. Nubank: cada aporte vira uma posição, sem nome. Só o CDB da NU FINANCEIRA é reconhecido (`db/open_finance.py:1188-1215`). Cerca de 2/3 do valor vem sem subtipo e não é reconhecido (medição de 2026-10-07 em uma conta; remeça). | Meta presa a "caixinha" herda esse buraco. Meta presa a "investido na instituição" não herda (§6). |
-| Recorrências | Mensais, despesa e receita; entram na Previsão desde o #866 | Receita quase nunca detectada (§3.1, §9). Recorrência no cartão fica fora do cálculo. |
+| Recorrências | Mensais; só a despesa entra na Previsão (desde o #866); a receita da Pluggy não é lida, a receita vem do extrato (P7, §8) | Receita só com o documento do pagador (§3.1, §9). Recorrência no cartão fica fora do cálculo. |
 | Saldo de partida | Sim (bancos) e Carteira | Conta em outra moeda fica fora (decisão "só reais") |
 
 **Sem equivalente no OF hoje** (o que fazer com cada um saiu da P1 e da P4):
@@ -203,7 +206,7 @@ deixa o usuário gravar o que não vê.
 
 ### Fase 0: decisões e medição (só leitura)
 
-**Estado:** respostas no §8 (P5 e P7 abertas). Das medições abaixo, só a das recorrências foi
+**Estado:** respostas no §8 (só a P5 aberta). Das medições abaixo, só a das recorrências foi
 feita (§9).
 
 - **Faz:** colhe as respostas às perguntas do §8. Com autorização do dono e aviso antes,
@@ -710,7 +713,7 @@ pessimista para quase todos; c contradiz a decisão de 2026-10-07 numa peça só
 | P4 | A Previsão passa a ter **só o que o Open Finance detecta** (recorrências + faturas); contas anuais e boletos ficam fora, com aviso. |
 | P5 | De onde vem o progresso da meta: **em aberto** — o dono quer pensar melhor. |
 | P6 | A reserva **vira uma meta**: alvo = N meses de custo mensal, com o custo vindo das recorrências do Open Finance. |
-| P7 | **Em aberto** (pergunta nova de 2026-10-08). |
+| P7 | **Respondida em 2026-10-13: a)** detectar a receita pelo extrato, **só** pelo extrato (a recorrência de entrada da Pluggy deixa de ser lida). Regra **frouxa**, **só com o documento do pagador, de 11 ou 14 dígitos e não todo zero** (sem ele, ou mascarado, o crédito fica fora: a descrição do Pix é genérica e uniria pessoas diferentes): mínimo de 2 créditos, intervalos de 25 a 35 dias, todos os valores a ±20% da mediana (com 2 créditos a mediana é a média, então "±20%" aceita dois valores que diferem até 50%, ex.: 1000 e 1500); valor previsto = o último recebido, dia = o da cadeia; créditos do mesmo documento no mesmo dia somam num só. Sem aviso "nenhuma receita detectada". Fora: movimento interno, rendimento (as palavras interest, dividend, dividendo e rendimento, por palavra inteira, na categoria ou na descrição), Pix para si (pagador = recebedor) e autotransferência entre contas do próprio usuário. Calculado na leitura, sem tabela. O "ignorar receita errada" (1a-2) fica para um PR B, e a medição pós-deploy vem depois. Limites declarados: pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato diferente entre meses vira chaves distintas; aumento acima de 20%, renda quinzenal e bônus depois do último crédito não são detectados; cashback com documento pode entrar. |
 
 ## 9. Medição em produção
 

@@ -1,6 +1,6 @@
 """
-core/services/ai_chat/tools/mostrar_card.py — `show_card`: mostra no app um dos 16
-cards do painel (mais o `periodo`, só do chat), com os mesmos números do widget (`cards.py`).
+core/services/ai_chat/tools/mostrar_card.py — `show_card`: mostra no app um card (os widgets do painel,
+mais `periodo` e `caixinhas`, só do chat), com os mesmos números do widget (`cards.py`).
 
 Fica FORA de `SCHEMAS` (WhatsApp e /ai/chat não a oferecem): só `SCHEMAS_APP`, com
 emissor. `get_tool` a resolve sempre, para o modelo que a imite no histórico
@@ -11,6 +11,7 @@ Ordem: gate, leitores, montagem do bloco e da visão; só então `passo` (com `p
 """
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any
 
@@ -19,7 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from utils_date import now_tz
 
 from .. import streaming
-from .._context import CARDS_DO_TURNO
+from .._context import CARDS_DO_TURNO, metas_do_turno
 from ..cards import IDS, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, CardIndisponivel, montar
 from ._base import Tool
 from .launches import _AVISO_12, _AVISO_FIM
@@ -67,6 +68,8 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     card = args.get("card")
     if card not in IDS:
         return _erro("card_desconhecido", f"card deve ser um de: {', '.join(IDS)}")
+    if card == "metas" and not metas_do_turno(user_id):  # sem a chave `metas` é o de sempre: as caixinhas
+        card = "caixinhas"
     usados = CARDS_DO_TURNO.get()  # só o card que emitiu bloco gasta uma vaga
     if usados is not None and len(usados) >= MAX_POR_TURNO:
         return _erro("limite_de_cards", f"no máximo {MAX_POR_TURNO} cards por resposta; "
@@ -120,7 +123,7 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return _erro(d.get("error") or f"http_{e.status_code}",
                      "O card não está disponível agora. Explique isso e responda em texto, sem inventar números.")
     except CardIndisponivel as e:
-        return _erro("indisponivel", f"{e}. Diga que ainda não estão prontas e siga sem o card.")
+        return _erro("indisponivel", str(e))
     except RequestValidationError:
         return _erro("mes_futuro", _MSG_FUTURO)
     # Só com o bloco pronto: prévia e bloco saem juntos, em sequência. Exceção antes daqui
@@ -155,7 +158,7 @@ SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "card": {"type": "string", "enum": list(IDS)},
+                "card": {"type": "string", "enum": [i for i in IDS if i != "caixinhas"]},
                 "meses": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_MESES,
                           "description": "AAAA-MM, só para resumo/categorias/calendario/simulador. Omita = mês atual."},
                 "dias": {"type": "string", "enum": ["30", "60", "90"],
@@ -169,6 +172,15 @@ SCHEMA = {
         },
     },
 }
+
+
+# Quem tem a chave do /painel novo (`metas_ligadas`): `metas` são as metas e `caixinhas` as caixinhas.
+SCHEMA_METAS = copy.deepcopy(SCHEMA)
+_f = SCHEMA_METAS["function"]
+assert "metas (caixinhas com meta)" in _f["description"]
+_f["description"] = _f["description"].replace(
+    "metas (caixinhas com meta)", "metas (metas e reserva de emergência, sobre o dinheiro do banco), caixinhas (caixinhas e cofrinhos)")
+_f["parameters"]["properties"]["card"]["enum"] = list(IDS)
 
 
 TOOLS: list[Tool] = [Tool(schema=SCHEMA, is_write=False, execute=_show_card)]
