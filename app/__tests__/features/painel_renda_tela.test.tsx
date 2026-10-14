@@ -65,7 +65,7 @@ it("valores ocultos: o gráfico e os valores somem ('Gráfico oculto') e a lista
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ocultar valores" })); });
  expect(screen.queryByTestId("barras-mensais", H)).toBeNull();
  expect(screen.queryByText("R$ 7,2k", H)).toBeNull();
- expect(screen.getAllByText("Gráfico oculto")).toHaveLength(3); // Curva + Resumo do mês + este card (3 → 2 se o texto da Renda sumir)
+ expect(screen.getAllByText("Gráfico oculto")).toHaveLength(4); // Curva da Previsão + Curva do Patrimônio (preset Autônomo, no lugar de metas) + Resumo do mês + este card (4 → 3 se o texto da Renda sumir)
  expect(screen.getAllByText("Saídas")).toHaveLength(6);
  expect(screen.queryByLabelText("7200 reais")).toBeNull();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Mostrar valores" })); });

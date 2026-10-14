@@ -1,14 +1,14 @@
 import type { PerfilPainel } from "@/api/schemas/painel";
 export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas e caixinhas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
 export type Widget = keyof typeof TITULOS;
-export const PADRAO: Widget[] = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "metas", "patrimonio"];
+export const PADRAO: Widget[] = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "patrimonio"];
 export const PERFIS: { id: PerfilPainel; label: string; preset: Widget[] }[] = [
   { id: "padrao", label: "Padrão", preset: PADRAO },
-  { id: "economizar", label: "Economizar", preset: ["contas", "resumo", "metas", "piggy", "categorias", "assinaturas", "simulador", "compromissos"] },
-  { id: "investir", label: "Investir", preset: ["contas", "patrimonio", "rendimento", "wealth", "simulador", "metas", "resumo", "piggy"] },
+  { id: "economizar", label: "Economizar", preset: ["contas", "resumo", "patrimonio", "piggy", "categorias", "assinaturas", "simulador", "compromissos"] },
+  { id: "investir", label: "Investir", preset: ["contas", "patrimonio", "rendimento", "wealth", "simulador", "resumo", "piggy"] },
   { id: "controlar", label: "Controlar gastos", preset: ["contas", "categorias", "calendario", "resumo", "compromissos", "assinaturas", "fatura", "piggy"] },
   { id: "dividas", label: "Sair das dívidas", preset: ["contas", "parcelas", "fatura", "compromissos", "hero", "resumo", "categorias", "piggy"] },
-  { id: "autonomo", label: "Autônomo", preset: ["contas", "renda", "hero", "resumo", "compromissos", "metas", "categorias", "piggy"] },
+  { id: "autonomo", label: "Autônomo", preset: ["contas", "renda", "hero", "resumo", "compromissos", "patrimonio", "categorias", "piggy"] },
 ];
 export const preset = (p: PerfilPainel) => PERFIS.find((x) => x.id === p)!.preset;
 export function sanitizarLayout(raw: unknown, p: PerfilPainel): Widget[] {
