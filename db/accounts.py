@@ -2462,9 +2462,10 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "kept_no_effects": [...], "kept_unsafe": [...],
+    Retorna {"deleted": N, ["restored": R,] "kept_no_effects": [...], "kept_unsafe": [...],
     "errors": [...], "remaining": M | None}, com os ids em `user_seq` (o "#N"
-    que o usuário vê).
+    que o usuário vê). `restored` (só quando > 0) = transações do banco devolvidas como sombra
+    (declaração de fluxo casada): elas entram na recontagem `remaining` sem serem falha.
 
     As três listas são causas DIFERENTES e a mensagem ao usuário precisa
     distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos`;
@@ -2504,12 +2505,13 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     candidatos = [(r["id"], r["user_seq"] or r["id"]) for r in rows]
 
     deleted = 0
+    restored = 0  # transações do banco que voltaram como sombra (declaração casada): entram na recontagem
     kept_no_effects: list = []
     kept_unsafe: list = []
     errors: list = []
     for lid, seq in candidatos:
         try:
-            delete_launch_and_rollback(user_id, lid, escopo_conta_corrente=True)
+            restored += bool(delete_launch_and_rollback(user_id, lid, escopo_conta_corrente=True))  # aviso = voltou
             deleted += 1
         except LaunchNoEffects:
             kept_no_effects.append(seq)
@@ -2562,6 +2564,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
 
     return {
         "deleted": deleted,
+        **({"restored": restored} if restored else {}),  # só quando houve: o retorno de antes fica idêntico
         "kept_no_effects": kept_no_effects,
         "kept_unsafe": kept_unsafe,
         "errors": errors,

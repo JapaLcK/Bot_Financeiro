@@ -901,6 +901,7 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     antigos = result.get("kept_no_effects") or []
     inseguros = result.get("kept_unsafe") or []
     erros = result.get("errors") or []
+    restauradas = int(result.get("restored") or 0)  # sombras do banco devolvidas: contam no `remaining`
     # None = a recontagem falhou ("não conferi"), NÃO "sobrou zero".
     sobraram = result.get("remaining")
 
@@ -916,6 +917,10 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
             f"🗑️ Apaguei {deleted} lançamento{plural} da conta corrente e reverti o "
             f"saldo. Suas caixinhas e investimentos seguem intactos."
         )
+    if restauradas:
+        p = "ões" if restauradas != 1 else "ão"
+        partes.append(f"🏦 {restauradas} transaç{p} do banco continua{'m' if restauradas != 1 else ''} na sua lista, "
+                      "porque aconteceu de verdade.")
     # Frases distintas: "antigo demais pra reverter", "não sei reverter" e
     # "erro técnico" são causas diferentes, e uma queda de banco não pode sair
     # como lançamento antigo.
@@ -947,7 +952,7 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     # listas já disseram, repetir "sobrou N" só duplica a mensagem. Fala apenas
     # quando DISCORDA — que é o caso que a recontagem existe pra pegar (delete
     # casou zero linhas e ninguém levantou). `None` não discorda de nada.
-    esperado = len(antigos) + len(inseguros) + len(erros)
+    esperado = len(antigos) + len(inseguros) + len(erros) + restauradas
     if sobraram is not None and sobraram != esperado:
         p = "s" if sobraram != 1 else ""
         partes.append(

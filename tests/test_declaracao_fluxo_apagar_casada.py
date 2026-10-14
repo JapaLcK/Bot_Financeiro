@@ -132,3 +132,41 @@ def test_sem_par_aporte_e_dinheiro_puro_nao_mudam():
     puro = db.add_launch_and_update_balance(uid, "despesa", 20, "x", "y", "mercado")[0]
     db.delete_launch_and_rollback(uid, puro)
     assert n_linhas(uid, 20) == 0
+
+
+def _apagar_tudo_pela_tool(uid):
+    from core.services.ai_chat.tools.launches import _delete_all_launches_execute
+    return _delete_all_launches_execute(uid, {})
+
+
+def test_apagar_tudo_pela_tool_com_declarada_casada_nao_acusa_conferencia_e_avisa_do_banco():
+    """A sombra restaurada entra no `remaining` mas não é falha: a tool não pode dizer "a conferência não
+    bateu" numa operação 100% bem-sucedida, e informa que a transação do banco continua na lista."""
+    uid, _, lid = _casada()
+    for v in (5, 7):
+        db.add_launch_and_update_balance(uid, "despesa", v, "x", "y", "mercado")
+    msg = _apagar_tudo_pela_tool(uid)
+    assert "conferência não bateu" not in msg, msg
+    assert "Apaguei 3 lançamentos" in msg and "transação do banco" in msg and "continua na sua lista" in msg
+    assert saiu(uid) == 50 and n_linhas(uid, 50) == 1
+
+
+def test_apagar_tudo_pela_tool_sem_declaracao_fica_igual():
+    uid = usuario_pagante()
+    for v in (5, 7):
+        db.add_launch_and_update_balance(uid, "despesa", v, "x", "y", "mercado")
+    msg = _apagar_tudo_pela_tool(uid)
+    assert msg.startswith("🗑️ Apaguei 2 lançamentos") and "banco" not in msg and "conferência" not in msg
+
+
+def test_apagar_tudo_pela_tool_ainda_acusa_exclusao_que_nao_aconteceu(monkeypatch):
+    """Positivo da conferência: se uma exclusão de verdade não acontece, ela continua falhando alto."""
+    uid, _, _ = _casada()
+    for v in (5, 7):
+        db.add_launch_and_update_balance(uid, "despesa", v, "x", "y", "mercado")
+    original = db.delete_launch_and_rollback
+    def finge(user_id, launch_id, **kw):  # "sucesso" sem apagar nada: o caso que a recontagem existe para pegar
+        return None
+    monkeypatch.setattr("db.accounts.delete_launch_and_rollback", finge)
+    msg = _apagar_tudo_pela_tool(uid)
+    assert "conferência não bateu" in msg, msg
