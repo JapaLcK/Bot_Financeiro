@@ -1,14 +1,17 @@
 """P1 do Codex (#968): o casamento AUTOMÁTICO da despesa/receita declarada exige evidência de comércio.
 
 Além de sinal, R$ 0,05, janela de 3 dias, candidato único nos dois sentidos e não interna, o automático só
-liga se a descrição do banco for parecida com o alvo/nota da declaração OU a declaração for genérica (sem
-estabelecimento): o mesmo critério do dinheiro (`open_finance.merchant_evidence`). Sem evidência a transação
-segue candidata da escolha MANUAL (modal), não casa sozinha, a sombra NÃO é apagada e as duas linhas contam
-até a pessoa confirmar. A unicidade nos dois sentidos conta só candidatos que passam também na evidência.
-Revalidar um vínculo feito olha valor/data como antes (descrição do banco mudar não desfaz), e o manual
-nunca exige evidência.
-Controle negativo: sem `tem_evidencia` no grafo de candidatos de `reconcile_bank_movements`, ficam vermelhos
-os de "não casa"; os de "casa" (nome parecido, genérica) são o positivo do conserto restritivo.
+liga se a descrição do banco for parecida com o ALVO da declaração (o estabelecimento que o parser extraiu,
+sem as palavras funcionais) OU a declaração for genérica (sem estabelecimento): `open_finance.merchant_similarity`
+e o conjunto de genéricos do dinheiro. A NOTA (a frase inteira do usuário) não conta, e as palavras funcionais
+do alvo ("com", "para", "loja") também não: eram elas que davam evidência a "AMAZON.COM" e "PIX PARA MARIA".
+Sem evidência a transação segue candidata da escolha MANUAL (modal), não casa sozinha, a sombra NÃO é apagada
+e as duas linhas contam até a pessoa confirmar. A unicidade nos dois sentidos conta só candidatos que passam
+também na evidência. Revalidar um vínculo feito olha valor/data como antes (descrição do banco mudar não
+desfaz), e o manual nunca exige evidência.
+Controles negativos: sem `tem_evidencia` no grafo do reconcile ficam vermelhos os de "não casa"; sem o filtro
+de palavras funcionais, `test_palavras_funcionais_...`; com a nota de volta, `test_a_nota_nao_da_evidencia`.
+Os de "casa" (nome parecido, genérica) são o positivo do conserto restritivo.
 """
 from __future__ import annotations
 
@@ -191,3 +194,55 @@ def test_tem_evidencia_unitario():
     assert not tem_evidencia(base, {"description": "FARMACIA"}) and not tem_evidencia(base, {"description": None})
     assert tem_evidencia({**base, "alvo": None}, {"description": "FARMACIA"})  # genérica
     assert tem_evidencia({**base, "tipo": "aporte_investimento"}, {"description": "FARMACIA"})  # aporte: não se aplica
+
+
+# Mensagens reais do usuário pelo parser de produção; o banco descreve OUTRO comércio.
+FUNCIONAIS = [
+    ("paguei 40 para o pedro", "PIX ENVIADO PARA MARIA SOUZA"),
+    ("paguei 40 para o pedro", "PAGAMENTO PARA CLINICA ODONTO"),
+    ("gastei 30 com o dentista", "AMAZON.COM BR"),
+    ("gastei 30 com o dentista", "RESTAURANTE SABOR COM LTDA"),
+    ("comprei 80 de roupa na loja da maria", "COMPRA NO DEBITO LOJA XYZ"),
+    ("paguei 120 de conta de luz", "CONTA NETFLIX"),
+]
+
+
+@pytest.mark.parametrize("mensagem,banco", FUNCIONAIS)
+def test_palavras_funcionais_nao_dao_evidencia_mas_a_sugestao_aparece(user_id, mensagem, banco):
+    import parsers
+    r = parsers.parse_receita_despesa_natural(user_id, mensagem)
+    valor = int(next(t for t in mensagem.split() if t.isdigit()))
+    cid, _ = _bank(user_id)
+    lid = declara(user_id, valor, alvo=r["alvo"], nota=r["nota"])
+    sincroniza(cid, user_id, tx(-valor, desc=banco))
+    assert decl(lid)["matched_transaction_id"] is None, (r["alvo"], banco)
+    [mov] = movements.list_bank_movements(user_id)
+    assert [c["description"] for c in mov["candidates"]] == [banco]  # segue sugerida no modal
+
+
+def test_nome_no_alvo_com_palavras_funcionais_ainda_casa(user_id):
+    import parsers
+    cid, _ = _bank(user_id)
+    r = parsers.parse_receita_despesa_natural(user_id, "gastei 15 de uber para o trabalho")
+    lid = declara(user_id, 15, alvo=r["alvo"], nota=r["nota"])
+    sincroniza(cid, user_id, tx(-15, desc="UBER *TRIP"))
+    assert decl(lid)["confirmation_method"] == "automatic"
+
+
+def test_a_nota_nao_da_evidencia():
+    d = {"tipo": "despesa", "account_id": None, "alvo": "mercado", "nota": "gastei 50 no mercado para a farmacia"}
+    assert not tem_evidencia(d, {"description": "FARMACIA SAO JOAO"})  # só a nota cita a farmácia
+    assert tem_evidencia(d, {"description": "SUPERMERCADO XYZ"})
+
+
+def test_alvo_so_de_palavras_funcionais_e_generico():
+    d = {"tipo": "despesa", "account_id": None, "alvo": "na loja", "nota": "gastei 50 na loja"}
+    assert tem_evidencia(d, {"description": "QUALQUER COISA"})
+
+
+def test_escritor_recusa_categoria_interna_na_criacao(user_id):
+    for categoria in ("investimento_aporte", "transferencia_interna", "cripto"):
+        with pytest.raises(ValueError, match="DECLARACAO_INTERNA"):
+            db.add_launch_and_update_balance(user_id, "despesa", 10, "x", "y", categoria,
+                                             declaracao_banco=True)
+    assert declara(user_id, 10)  # categoria comum ("mercado") segue

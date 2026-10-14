@@ -13,10 +13,15 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from utils_date import _tz
+from utils_text import STOPWORDS_PT
 
 TIPOS_FLUXO = ("despesa", "receita")
 FLUXO_CONGELA_DIAS = 45  # fluxo já casado há mais que isso sai da conferência (e do lock de leitura)
 MANUAL_TOL_ABS, MANUAL_TOL_PCT = Decimal("5.00"), Decimal("0.10")
+# Palavras que não nomeiam comércio: as stopwords do parser (sem as que são nome de categoria) mais as
+# preposições/palavras de frase que sobram no alvo ("loja", "conta", "pix"...).
+_FUNCIONAIS = (STOPWORDS_PT - {"salario", "reembolso"}) | {"pro", "sem", "que", "ate", "meu", "minha", "loja",
+                                                           "conta", "compra", "pix"}
 
 
 # O mesmo conceito de `e_fluxo` em SQL (um teste compara os dois), sobre `launches` SEM alias: despesa/receita
@@ -89,16 +94,19 @@ def projeta_todas(cur, user_id: int, declarations: list[dict], by_id: dict) -> N
 
 
 def tem_evidencia(declaration: dict, tx: dict) -> bool:
-    """Casamento AUTOMÁTICO do fluxo exige evidência do comércio: descrição do banco parecida com o alvo ou
-    a nota, ou declaração GENÉRICA (sem estabelecimento). Usa os mesmos primitivos do dinheiro
-    (`open_finance.merchant_similarity` e o conjunto de genéricos de `pick_reconciliation_match`), mas
-    compara alvo e nota SEPARADOS: a substring de "mercado" em "SUPERMERCADO XYZ" não sobrevive ao
-    concatenar com a nota. Sem evidência a transação segue candidata da escolha manual. Só o gatilho de
-    CRIAR o vínculo: revalidar um já feito olha valor/data, e o manual nunca exige. Aporte: True."""
-    from .open_finance import _is_generic_merchant, merchant_similarity
-    alvo, nota, desc = declaration.get("alvo"), declaration.get("nota"), tx.get("description")
-    return (not e_fluxo(declaration) or _is_generic_merchant(alvo)
-            or merchant_similarity(desc, alvo) or merchant_similarity(desc, nota))
+    """Casamento AUTOMÁTICO do fluxo exige evidência do comércio: descrição do banco parecida com o ALVO da
+    declaração (o estabelecimento que o parser extraiu) ou declaração genérica (sem estabelecimento). Mesmos
+    primitivos do dinheiro (`open_finance.merchant_similarity` e o conjunto de genéricos). O alvo vem do
+    parser com preposição ("com o dentista", "uber para o trabalho"): palavras funcionais saem antes de
+    comparar, senão "com"/"para" casam qualquer "AMAZON.COM"/"PIX PARA MARIA". A NOTA (a frase inteira)
+    não conta: seus verbos e preposições davam evidência a descrições sem relação. Sem evidência a
+    transação segue candidata da escolha manual. Só o gatilho de CRIAR o vínculo: revalidar um já feito
+    olha valor/data, e o manual nunca exige. Aporte: True."""
+    from .open_finance import _is_generic_merchant, _normalize_merchant, merchant_similarity
+    alvo = declaration.get("alvo")
+    nucleo = " ".join(t for t in _normalize_merchant(alvo).split() if t not in _FUNCIONAIS)
+    return (not e_fluxo(declaration) or _is_generic_merchant(alvo) or not nucleo
+            or merchant_similarity(tx.get("description"), nucleo))
 
 
 def congelada(declaration: dict, hoje: date) -> bool:

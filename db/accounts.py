@@ -124,8 +124,10 @@ def add_launch_and_update_balance(
             raise ValueError(f"DECLARACAO_VALOR_INVALIDO: o valor precisa ser um número maior que zero (recebido: {recebido})")
         if m != d:
             raise ValueError(f"DECLARACAO_VALOR_CASAS: o valor aceita no máximo 2 casas decimais (recebido: {recebido})")
-        if is_internal_movement:
-            raise ValueError("DECLARACAO_INTERNA")
+        from utils_text import is_internal_category
+        if is_internal_movement or is_internal_category(categoria):  # a mesma regra da recusa de edição
+            raise ValueError("DECLARACAO_INTERNA: despesa ou receita declarada pelo banco não pode ser "
+                             "movimentação interna nem ter categoria de investimento, transferência ou fatura")
         if extra_efeitos:
             raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
         if cur is not None:  # tomaria o mutex do usuário dentro da transação do chamador
