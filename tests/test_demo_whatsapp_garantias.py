@@ -17,6 +17,7 @@ Cada grupo tem controle negativo medido numa cópia da árvore (ver o relato do 
 import asyncio
 import json
 import logging
+import secrets
 
 import pytest
 
@@ -365,7 +366,14 @@ def test_numero_tem_conta_espelha_o_auto_vinculo(mundo):
     _liga_por_codigo(por_codigo)
     db.get_or_create_canonical_user("whatsapp", so_wa)
 
-    for n, esperado in ((novo, False), (com_fone, True), (por_codigo, True), (so_wa, False)):
+    # #909: o celular "55119"+L com L em 0-5 não casa com o FIXO "5511"+L digitado
+    # por outra conta, no auto-vínculo nem aqui (`utils_phone.candidatos_simetricos`).
+    local = f"{secrets.randbelow(6)}{secrets.randbelow(10**7):07d}"
+    celular_x_fixo = f"55119{local}"
+    _conta_com_telefone(f"5511{local}")
+
+    for n, esperado in ((novo, False), (com_fone, True), (por_codigo, True), (so_wa, False),
+                        (celular_x_fixo, False)):
         tem = funil.numero_tem_conta(n)  # ANTES: o attempt cria usuário
         status = db.attempt_whatsapp_phone_link(n)["status"]
         assert tem == (status != "no_match"), (n, tem, status)

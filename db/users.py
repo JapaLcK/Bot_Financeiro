@@ -69,11 +69,12 @@ def user_exists(user_id: int) -> bool:
 class MergeRefused(Exception):
     """`merge_users` não junta (#607): dado financeiro dos dois lados, origem
     presa (Open Finance vivo, plano pago ou cliente Stripe), autoindicação de
-    afiliado ou colisão de unique/FK na junção.
+    afiliado, login dos dois lados (o da origem seria apagado, #635) ou colisão
+    de unique/FK na junção.
 
     `motivo` diz qual, para a resposta ao usuário ser verdadeira (D6):
     "dados_dos_dois_lados", "open_finance", "origem_presa" (plano pago ou
-    cliente Stripe), "autoindicacao" ou "colisao"."""
+    cliente Stripe), "autoindicacao", "apagaria_login" ou "colisao"."""
 
     def __init__(self, *args, motivo: str | None = None):
         super().__init__(*args)
@@ -185,7 +186,8 @@ def merge_users(from_user_id: int, to_user_id: int) -> None:
 
     Recusa (`MergeRefused`, nada escrito) quando os dois lados têm dados
     financeiros, quando a origem está presa (`_origem_presa`), quando viraria
-    autoindicação de afiliado (`_viraria_autoindicacao`) ou quando a junção
+    autoindicação de afiliado (`_viraria_autoindicacao`), quando os dois lados têm
+    login (o da origem seria apagado, #635) ou quando a junção
     bate numa unique ou numa FK composta (ex.: `fk_launches_space`, lançamento da
     origem num `financial_spaces` dela). Antes de mover launches, remove duplicatas que colidem na
     unique uq_launches_user_source_external (user_id, source, external_id).
@@ -229,6 +231,14 @@ def _merge_users(from_user_id: int, to_user_id: int) -> None:
                 raise MergeRefused(recusa, motivo="autoindicacao")
             if _tem_dados_financeiros(cur, from_user_id) and _tem_dados_financeiros(cur, to_user_id):
                 raise MergeRefused(recusa, motivo="dados_dos_dois_lados")
+            # #635 (dono, M8): com login nos dois lados, o da origem seria apagado
+            # (o passo 8 só migra quando o destino não tem). Até existir confirmação
+            # explícita, recusa. Origem com login e destino sem login segue juntando.
+            cur.execute("select exists(select 1 from auth_accounts where user_id = %s)"
+                        " and exists(select 1 from auth_accounts where user_id = %s) as tem",
+                        (from_user_id, to_user_id))
+            if cur.fetchone()["tem"]:
+                raise MergeRefused(recusa, motivo="apagaria_login")
 
             # 1) dedupe de launches
             cur.execute(
