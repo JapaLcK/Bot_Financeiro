@@ -2467,6 +2467,37 @@ body.light .ag-toggle-track { background: rgba(15,23,42,.24); }
 }
 
 .ag-feed-title { margin: 26px 0 12px; }
+/* Xerife: controles nativos e lista de esperados, com rolagem dentro do dialog. */
+#xerife-dialog {
+  margin: auto; width: min(680px, calc(100% - 24px)); max-height: calc(100dvh - 32px);
+  padding: 24px; border: 1px solid var(--glass-border); border-radius: 20px;
+  background: var(--bg-page); color: var(--text); overflow-y: auto;
+  font: inherit; overscroll-behavior: contain;
+}
+#xerife-dialog::backdrop { background: rgba(0,0,0,.65); }
+#xerife-dialog .xerife-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#xerife-dialog h2 { font-size: 1.2rem; }
+#xerife-dialog h3 { font-size: 1rem; margin: 12px 0; }
+#xerife-dialog p { color: var(--text-2); font-size: .85rem; line-height: 1.5; margin: 8px 0 12px; overflow-wrap: anywhere; }
+#xerife-dialog #xerife-status { color: var(--text); }
+#xerife-dialog section { margin-top: 24px; border-top: 1px solid var(--glass-border); padding-top: 12px; }
+#xerife-dialog label { display: grid; gap: 8px; font-size: .85rem; margin: 12px 0; }
+#xerife-dialog .xerife-check { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+#xerife-dialog .xerife-check input { width: 20px; height: 20px; accent-color: var(--purple); }
+#xerife-dialog .modal-inp { min-height: 44px; margin: 0; color: var(--text); }
+#xerife-dialog .xerife-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+#xerife-dialog .xerife-fields > label { min-width: 0; }
+#xerife-dialog .xerife-item { padding: 12px 0; border-bottom: 1px solid var(--glass-border); overflow-wrap: anywhere; }
+#xerife-dialog .xerife-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+#xerife-dialog button, #xerife-dialog summary { min-height: 44px; cursor: pointer; }
+#xerife-dialog button:disabled { opacity: .6; cursor: wait; }
+#xerife-dialog .btn-save { background: var(--purple); color: var(--on-purple); }
+#xerife-dialog summary { padding: 12px 0; font-weight: 600; }
+#xerife-dialog :focus-visible { outline: 2px solid var(--purple-ink); outline-offset: 3px; }
+@media (max-width: 480px) {
+  #xerife-dialog { padding: 16px; }
+  #xerife-dialog .xerife-fields { grid-template-columns: 1fr; gap: 0; }
+}
 .ag-feed { display: flex; flex-direction: column; gap: 10px; max-width: 760px; }
 .ag-event {
   display: flex; gap: 12px; align-items: flex-start;

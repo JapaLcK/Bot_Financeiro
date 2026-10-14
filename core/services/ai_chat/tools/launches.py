@@ -7,7 +7,7 @@ Read:
   - get_top_categories: top N categorias de gasto no período (despesas + cartão)
   - get_category_spend: total gasto em UMA categoria específica no período
   - get_largest_expenses: top N gastos INDIVIDUAIS (não agregados) no período
-  - compare_periods: compara totais de receita/despesa entre dois períodos
+  - compare_periods: receita, despesa e categorias entre períodos equivalentes (PL-07)
   - get_spending_trend: tendência mensal (totais dos últimos N meses)
   - forecast_month_end: projeção de fechamento do mês baseado no ritmo atual
 
@@ -185,8 +185,8 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
     `resumo_do_mes`, 2 a 12 no `ler_periodo` (o do card `periodo`). Período livre = `launches` +
     cartão pela data da compra (a regra da lista de `get_top_categories`), avisado em `nota`. Dinheiro
     sai em float (o `ai_guard` só reconhece número JSON como evidência; `Decimal` vira string e a
-    afirmação certa apareceria como "sem evidência"), mas a conta é em Decimal: o saldo e o diff de
-    `compare_periods` não misturam float com Decimal."""
+    afirmação certa apareceria como "sem evidência"), mas a conta é em Decimal: o saldo
+    não mistura float com Decimal."""
     start, end, limite = _limita_periodo(start, end)
     meses = _meses_inteiros(start, end)
     if meses:
@@ -316,48 +316,47 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Compara totais de receita/despesa entre 2 períodos."""
+    """Adaptador de `core.services.comparacao_periodos` (PL-07): `mes` OU as 4 datas."""
+    from core.services import comparacao_periodos as cp
     from core.services.plan_service import plan_gate_ok
+    recusa = {"error": "pro_required", "message": "Comparações entre períodos estão disponíveis nos planos Plus e Pro."}
     if not plan_gate_ok(user_id, "financial_comparison"):
-        return {"error": "pro_required", "message": "Comparações entre períodos estão disponíveis nos planos Plus e Pro."}
+        return recusa
     if erro := _data_invalida(args, "period_a_start", "period_a_end", "period_b_start", "period_b_end"):
         return erro
-    a_start = _parse_iso_date(args.get("period_a_start"))
-    a_end = _parse_iso_date(args.get("period_a_end"))
-    b_start = _parse_iso_date(args.get("period_b_start"))
-    b_end = _parse_iso_date(args.get("period_b_end"))
-
-    if not (a_start and a_end and b_start and b_end):
-        return {"error": "informe period_a_start, period_a_end, period_b_start, period_b_end em ISO (YYYY-MM-DD)."}
-    if a_end < a_start or b_end < b_start:
-        return {"error": "end anterior a start."}
-
-    sum_a = _resumo_periodo(user_id, a_start, a_end)
-    sum_b = _resumo_periodo(user_id, b_start, b_end)
-
-    def lado(sm: dict[str, Any], label: str) -> dict[str, Any]:
-        return {
-            "start": sm["start_date"], "end": sm["end_date"], "label": label,
-            "receita": sm["receita"], "despesa": sm["despesa"],
-            **{k: sm[k] for k in ("cartao_incluido", "cartao_por", "motivos", "nota", "limitado_a_12_meses",
-                                  "pedido", "aviso_limite", "fim_ajustado", "aviso_fim") if k in sm},
-        }
-
-    def diff(k: str) -> float:
-        return float(Decimal(str(sum_b[k])) - Decimal(str(sum_a[k])))
-
-    out = {
-        "period_a": lado(sum_a, args.get("period_a_label") or "Período A"),
-        "period_b": lado(sum_b, args.get("period_b_label") or "Período B"),
-        "diff_despesa": diff("despesa"),
-        "diff_receita": diff("receita"),
-    }
-    if sum_a["cartao_por"] != sum_b["cartao_por"]:
-        out["nota"] = (
-            "Um lado inclui o cartão pela fatura (meses inteiros) e o outro pela data da compra (período "
-            "livre): a diferença mistura regras e pode não ser só variação de gasto. Avise o usuário."
-        )
-    return out
+    a_ini, a_fim, b_ini, b_fim = (_parse_iso_date(args.get(k)) for k in (
+        "period_a_start", "period_a_end", "period_b_start", "period_b_end"))
+    try:
+        if args.get("mes"):
+            try:
+                m = datetime.strptime(str(args["mes"]), "%Y-%m")
+            except ValueError:
+                return {"error": "mes deve vir como AAAA-MM."}
+            r = cp.comparar_mes(user_id, m.year, m.month)
+        elif a_ini and a_fim and b_ini and b_fim:
+            # o mesmo teto de 12 meses e fim ajustado das outras tools; os avisos vão no lado que foi cortado
+            (a_ini, a_fim, ex_a), (b_ini, b_fim, ex_b) = _limita_periodo(a_ini, a_fim), _limita_periodo(b_ini, b_fim)
+            # as duas janelas são meses inteiros (`_meses_inteiros`, como `_resumo_periodo`): cartão pela fatura e o
+            # mês TODO, o corrente também; senão, data da compra nas duas, sem misturar
+            meses = (_meses_inteiros(a_ini, a_fim), _meses_inteiros(b_ini, b_fim))
+            hoje = today_tz()
+            corrente_x_anterior = tuple((m[0] == m[1] == (d.year, d.month)) if m else False for m, d in zip(
+                meses, (hoje.replace(day=1) - timedelta(days=1), hoje)))
+            if all(corrente_x_anterior):  # "outubro contra setembro" = `mes=<corrente>`: os mesmos N dias, o mesmo número
+                r = cp.comparar_mes(user_id, *meses[1][0])
+            else:
+                if all(meses):
+                    (a_ini, a_fim), (b_ini, b_fim) = ((date(*m[0], 1), resumo_mes.mes_de(date(*m[1], 1))[1] - timedelta(days=1))
+                                                     for m in meses)
+                r = cp.comparar_intervalos(user_id, (b_ini, b_fim), (a_ini, a_fim), por_fatura=all(meses))
+            if r:
+                r["anterior"].update(ex_a)
+                r["atual"].update(ex_b)
+        else:
+            return {"error": "informe mes (AAAA-MM) ou period_a_start, period_a_end, period_b_start, period_b_end em ISO (YYYY-MM-DD)."}
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return recusa if r is None else cp.para_json(r)
 
 
 def _tendencia(despesas: list[float]) -> dict[str, Any]:
@@ -1130,24 +1129,27 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "compare_periods",
                 "description": (
-                    "Compara totais de receita/despesa entre 2 períodos. "
-                    "Use pra 'gastei mais em abril ou maio?', 'comparar último "
-                    "mês com este', 'esse mês vs o anterior'. Retorna totais "
-                    "+ diferença pra cada métrica. Lado que é um mês-calendário "
-                    "inteiro inclui o cartão pela fatura; os outros, pela data da compra "
-                    "(`cartao_por` por lado). Cada lado aceita até 12 meses."
+                    "Compara receita, despesa e categorias entre 2 períodos equivalentes. "
+                    "Use pra 'gastei mais em abril ou maio?', 'esse mês vs o anterior', "
+                    "'compara com o mês passado'. Pra mês use `mes` (AAAA-MM; o mês corrente "
+                    "compara os mesmos dias do anterior; datas do mês corrente contra o anterior inteiro dão o mesmo "
+                    "resultado); datas só pra períodos livres ou meses antigos. "
+                    "Cartão: com `mes`, ou com datas que são meses-calendário inteiros dos dois lados, "
+                    "entra pela FATURA (a regra do 'Saiu do mês', igual ao painel); com qualquer período "
+                    "parcial, pela DATA DA COMPRA nos dois lados (parcelado entra inteiro no dia da "
+                    "compra), como as outras consultas de período livre (`base.cartao` diz qual). Cite `escolha` "
+                    "(o que foi comparado e a regra do cartão) e `pct` EXATAMENTE como veio, sem "
+                    "arredondar; estado 'nova' não tem percentual."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "period_a_start": {"type": "string", "description": "Início do período A em ISO (YYYY-MM-DD)."},
+                        "mes": {"type": "string", "description": "Mês a comparar com o anterior, AAAA-MM."},
+                        "period_a_start": {"type": "string", "description": "Início do período A (o mais antigo) em ISO (YYYY-MM-DD)."},
                         "period_a_end":   {"type": "string", "description": "Fim do período A em ISO (YYYY-MM-DD)."},
-                        "period_b_start": {"type": "string", "description": "Início do período B em ISO (YYYY-MM-DD)."},
+                        "period_b_start": {"type": "string", "description": "Início do período B (o atual) em ISO (YYYY-MM-DD)."},
                         "period_b_end":   {"type": "string", "description": "Fim do período B em ISO (YYYY-MM-DD)."},
-                        "period_a_label": {"type": "string", "description": "Nome amigável (ex: 'Abril', 'Mês passado')."},
-                        "period_b_label": {"type": "string", "description": "Nome amigável (ex: 'Maio', 'Este mês')."},
                     },
-                    "required": ["period_a_start", "period_a_end", "period_b_start", "period_b_end"],
                 },
             },
         },
