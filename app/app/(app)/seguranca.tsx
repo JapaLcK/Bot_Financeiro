@@ -37,18 +37,26 @@ export default function Seguranca() {
   const carregar = async () => {
     const minha = ++geracao.current;
     try {
-      // `conta` nula (falha RECUPERÁVEL do /auth/me) = lado permissivo: segue como se tivesse senha, e a
-      // autoridade é o 409 do /auth/mfa/setup (mesma decisão do settings.html). Sessão expirada NÃO é
-      // recuperável: sobe ao catch de baixo, onde `falha(e)` leva ao login (o reset de senha revoga
-      // sessões, então o /auth/me pode descobrir isso antes do /auth/mfa/status).
-      const [status, conta] = await Promise.all([
-        statusMfa(),
-        perfil().catch((e: unknown) => {
-          if (e instanceof SessaoExpirada) throw e;
-          return null;
-        }),
-      ]);
-      if (minha === geracao.current) setEstado({ fase: "pronto", status, conta });
+      // statusMfa × perfil -> ação. A ordem de chegada NÃO conta (allSettled espera as duas), e a
+      // sessão expirada de QUALQUER uma vence (o reset de senha revoga sessões, e uma chamada pode
+      // descobrir isso depois da outra ter falhado por rede):
+      //
+      //   status \ perfil   ok                    sessão expirada   recuperável (rede/5xx)
+      //   ok                pronto(conta)         login             pronto(conta null: permissivo,
+      //                                                              o 409 do setup é a autoridade)
+      //   sessão expirada   login                 login             login
+      //   recuperável       erro + Tentar de      login             erro + Tentar de novo
+      //                     novo; em recarga com                    (em recarga com dados na tela,
+      //                     dados na tela, mantém                   mantém a tela)
+      //
+      // login = `falha(e)` no catch; erro/mantém = o ramo A2 do catch.
+      const [status, conta] = await Promise.allSettled([statusMfa(), perfil()]);
+      const expirada = [status, conta].find((r) => r.status === "rejected" && r.reason instanceof SessaoExpirada);
+      if (expirada?.status === "rejected") throw expirada.reason;
+      if (status.status === "rejected") throw status.reason;
+      if (minha === geracao.current) {
+        setEstado({ fase: "pronto", status: status.value, conta: conta.status === "fulfilled" ? conta.value : null });
+      }
     } catch (e) {
       if (minha !== geracao.current) return;
       const texto = falha(e);

@@ -282,6 +282,54 @@ describe("Segurança — conta sem senha", () => {
     expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
   });
 
+  // Uma linha da tabela de `carregar` (statusMfa x perfil) por caso, na carga inicial. A sessão expirada
+  // de QUALQUER das duas vence, em qualquer ordem de chegada: o `me` é atrasado nos mistos para o status
+  // rejeitar primeiro (é o que o `Promise.all` puro não aguentava).
+  describe("carregar — statusMfa × perfil", () => {
+    const OK_STATUS = () => resposta(200, MFA_DESLIGADO);
+    const SESSAO = () => resposta(401, { detail: "expirado" });
+    const REDE = () => resposta(500, { detail: "x" });
+    const depois = (r: () => Response) => async () => {
+      await new Promise((ok) => setTimeout(ok, 30));
+      return r();
+    };
+    const ME_OK = () => resposta(200, { user_id: 1, email: "s@x.com", display_name: "S", app_access: true, has_password: false });
+
+    it.each([
+      ["status sessão × perfil ok", SESSAO, ME_OK, "login"],
+      ["status sessão × perfil sessão", SESSAO, SESSAO, "login"],
+      ["status sessão × perfil recuperável", SESSAO, REDE, "login"],
+      ["status recuperável × perfil sessão (status rejeita primeiro)", REDE, depois(SESSAO), "login"],
+      ["status ok × perfil sessão (status resolve primeiro)", OK_STATUS, depois(SESSAO), "login"],
+      ["status recuperável × perfil ok", REDE, ME_OK, "erro"],
+      ["status recuperável × perfil recuperável", REDE, REDE, "erro"],
+      ["status ok × perfil recuperável", OK_STATUS, REDE, "pronto"],
+      ["status ok × perfil ok", OK_STATUS, ME_OK, "bloco"],
+    ] as const)("%s -> %s", async (_nome, status, me, esperado) => {
+      await abrir(
+        { valor: false },
+        { "/auth/mfa/status": status, "/auth/me": me, "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }) },
+      );
+
+      if (esperado === "login") {
+        await waitFor(() => expect(screen).toHavePathname("/entrar"));
+        expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+      } else if (esperado === "erro") {
+        await waitFor(() => expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy());
+        expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
+      } else if (esperado === "pronto") {
+        await waitFor(() => expect(screen.getByRole("button", { name: "Ativar" })).toBeTruthy());
+      } else {
+        await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+      }
+      if (esperado === "login") {
+        expect(screen.queryByText("Definir senha")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Ativar" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Tentar de novo" })).toBeNull();
+      }
+    });
+  });
+
   // Comportamento registrado, NÃO é defeito a corrigir: a regra "recarga que falha mantém a tela"
   // vale também para o foco de navegação. Se o MFA mudou e a recarga falha por rede, a tela fica com
   // o status velho e sem aviso; a autoridade é o servidor (/auth/mfa/setup responde 409).
