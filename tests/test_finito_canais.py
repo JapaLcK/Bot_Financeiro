@@ -224,3 +224,14 @@ def test_sync_com_conta_nan_termina_e_grava_as_validas():
         "select provider_account_id, balance from open_finance_accounts where connection_id=%s",
         (cid,), fetch=True)}
     assert saldos == {"a": 10, "b": 0, "c": 20, "d": 0}
+
+
+def test_valor_valido_e_finito_comparam_decimal_exato_sem_passar_por_float():
+    """OFX preserva o Decimal: via float, 10000000000000.0001 vira VALOR_MAX e passaria pela guarda
+    (o CHECK do banco o recusa e a importação já commitada voltaria erro)."""
+    from utils_text import valor_finito, valor_valido
+    justo, alem = Decimal("10000000000000"), Decimal("10000000000000.0001")
+    assert valor_valido(justo) and valor_finito(justo) and valor_finito(-justo)
+    assert not valor_valido(alem) and not valor_finito(alem) and not valor_finito(-alem)
+    assert not valor_valido(Decimal("NaN")) and not valor_finito(Decimal("-Infinity"))
+    assert not valor_finito(Decimal("1e1000000")) and valor_finito(Decimal("0")) and not valor_valido(Decimal("0"))
