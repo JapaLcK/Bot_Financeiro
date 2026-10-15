@@ -21,6 +21,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from utils_text import TETO_ENTRADA, valor_finito
+
 from .connection import (
     get_conn, cat_key_sql, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
@@ -165,12 +167,9 @@ def set_income_override(user_id: int, month: str, amount: Any) -> float:
     (validado aqui; o CHECK do schema é só a última linha de defesa)."""
     ensure_user(user_id)
     month = _validate_month(month)
-    try:
-        value = Decimal(str(amount))
-    except (InvalidOperation, ValueError, TypeError):
+    if not valor_finito(amount, TETO_ENTRADA) or float(amount) < 0:  # 0 é renda válida
         raise ValueError("RENDA_INVALIDA")
-    if value.is_nan() or value < 0:
-        raise ValueError("RENDA_INVALIDA")
+    value = Decimal(str(amount))
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(

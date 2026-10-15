@@ -60,8 +60,19 @@ def _is_variable_amount(text: str, entities: dict) -> bool:
     return any(mk in _norm(text) for mk in _VARIABLE_MARKERS)
 
 
+def recusa(user_id: int, entities: dict) -> str | None:
+    """R2: receita fixa não se cadastra com banco conectado (a do extrato a substitui).
+    O texto da recusa, ou None. Também chamada pelo roteador, antes de perguntar nome/confirmar."""
+    if (entities.get("tipo") or "despesa").strip().lower() in _INCOME_WORDS:
+        from core.services.fonte_unica import recusa_receita
+        return recusa_receita(user_id)
+    return None
+
+
 def add(user_id: int, text: str, entities: dict) -> str:
     """Cadastra um recorrente a partir das entities classificadas pela IA."""
+    if (r := recusa(user_id, entities)):
+        return r
     # Mesmo gate do dashboard: Essencial+; Pro no modo legado.
     try:
         from core.services.plan_service import plan_gate_ok
@@ -145,6 +156,7 @@ def add(user_id: int, text: str, entities: dict) -> str:
         mes = (start_date.month if start_date else date.today().month)
 
     if is_income:
+        from core.services.fonte_unica import FonteUnicaOF
         from db.recurring_income import create_recurring_income
         cat = categoria or "salário"
         name = nome or cat.capitalize() or "Renda fixa"
@@ -153,6 +165,8 @@ def add(user_id: int, text: str, entities: dict) -> str:
                 user_id, name, valor, cat, dia, notes=text, start_date=start_date,
                 frequency=frequency, pay_month=mes,
             )
+        except FonteUnicaOF as exc:  # R2 (corrida: o banco conectou depois da 1ª checagem): texto puro
+            return str(exc)
         except ValueError as exc:
             return _err(str(exc))
         return (
@@ -226,7 +240,7 @@ def _fmt_start(start_iso) -> str:
 
 def _err(code: str) -> str:
     msgs = {
-        "VALOR_INVALIDO": "O valor precisa ser maior que zero.",
+        "VALOR_INVALIDO": "Valor inválido (precisa ser maior que zero).",
         "DIA_INVALIDO": "O dia precisa estar entre 1 e 31.",
         "NOME_INVALIDO": "Preciso saber do que é o recorrente.",
         "DATA_INICIO_INVALIDA": "Não entendi a data de início.",

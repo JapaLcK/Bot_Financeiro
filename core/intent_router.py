@@ -21,9 +21,10 @@ import re
 from dataclasses import replace
 
 import db
-from core.intent_classifier import (IntentResult, classify, contains_comparative_question,
+from core.intent_classifier import (IntentResult, _metas_ligadas, classify, contains_comparative_question,
                                     sem_perguntas_comparativas)
 from core.response_formatter import wrap_wa_markup
+from core.services import metas_conversa
 from core.types import IncomingMessage
 from utils_text import (_MENOS_RE, _TRACOS, contains_word, limpa_pontuacao_final,
                         marcador_de_tudo, normalize_text, valor_perigoso)
@@ -455,6 +456,11 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #   pockets.list         "caixinhas"             1.0
 #   report.monthly       "resumo do mes"         1.0
 #
+# `metas.list` ("minhas metas", PR C2) entrou depois, e SÓ vale onde o `classify` recebe o
+# `user_id` (ele devolve `metas.list` apenas para quem tem a chave do /painel novo): a porta 2
+# (`_clarification_abandonada`), a porta 4 (`wa_runtime`) e as cinco pendências de cartão. As
+# portas 1 e 3 chamam o oráculo sem `user_id` (ou nem o chamam) e seguem como antes das metas.
+#
 # `credit.handle` ficou de FORA **deste conjunto** por medição, não por
 # esquecimento: "fatura" é 1.0 e "132 no cartao" é 0.95 — mesmo intent, e o
 # segundo é uma resposta legítima ("foram 132, no cartão"). O único corte por
@@ -493,7 +499,7 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 # fila não é apagada).
 ABANDONA = {
     "balance.check", "launches.list", "launches.delete",
-    "launches.spend_query", "pockets.list", "report.monthly",
+    "launches.spend_query", "pockets.list", "report.monthly", "metas.list",
 }
 
 # Comandos que NÃO carregam quantidade. Único abandono NOVO do #281, e o único
@@ -519,7 +525,7 @@ COMANDO_SEM_QUANTIDADE = {
 }
 
 
-def abandona_pergunta_de_valor(text: str) -> bool:
+def abandona_pergunta_de_valor(text: str, user_id: int | None = None) -> bool:
     """True quando a resposta a uma pergunta de valor é OUTRO comando.
 
     `allow_ai=False`: só os tiers 1 e 2, que são determinísticos e não fazem
@@ -532,8 +538,11 @@ def abandona_pergunta_de_valor(text: str) -> bool:
       "cinquenta" e "132 todo mes" caem em `out_of_scope 0.0` e "132 no boleto"
       em `out_of_scope 0.4` (tier 2) — nenhum deles está no `ABANDONA`, então
       nunca abandonam nada, que é exatamente o comportamento da `main`.
+
+    `user_id` só serve ao `metas.list` ("minhas metas", C2): sem ele o `classify` não liga essa
+    regra (que lê a conta). Hoje só a porta 4 o passa.
     """
-    return classify((text or "").strip(), allow_ai=False).intent in ABANDONA
+    return classify((text or "").strip(), user_id=user_id, allow_ai=False).intent in ABANDONA
 
 
 # As CINCO pendências de cartão (`credit_card_setup`, `credit_card_set_primary`,
@@ -622,7 +631,7 @@ _ABANDONA_CREDITO = ABANDONA | {
 }
 
 
-def abandona_pergunta_de_credito(text: str) -> bool:
+def abandona_pergunta_de_credito(text: str, user_id: int | None = None) -> bool:
     """True quando a resposta a uma pergunta de cartão é OUTRO comando.
 
     `allow_ai=False` é REQUISITO, não otimização: o `result` que chega ao
@@ -632,11 +641,11 @@ def abandona_pergunta_de_credito(text: str) -> bool:
     `abandona_pergunta_de_valor` acima. Custo ~19 µs, e só quando uma das cinco
     pendências está viva.
 
-    Sem `user_id` de propósito: ele só é usado dentro do `_classify_llm_call`,
-    inalcançável com `allow_ai=False`. O `abandona_pergunta_de_valor` o omite
-    pelo mesmo motivo.
+    `user_id` só serve ao `metas.list` ("minhas metas", C2): sem ele o `classify` não liga essa
+    regra. Dentro do `_classify_llm_call` ele nunca é usado (inalcançável com `allow_ai=False`);
+    o `abandona_pergunta_de_valor` o omite por isso.
     """
-    return classify((text or "").strip(), allow_ai=False).intent in _ABANDONA_CREDITO
+    return classify((text or "").strip(), user_id=user_id, allow_ai=False).intent in _ABANDONA_CREDITO
 
 
 _PENDENCIAS_CARTAO = {"credit_card_setup", "credit_card_set_primary",
@@ -848,6 +857,21 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # permanece separado e conserva seu want_all=False sobre o texto antigo.
     entities = {k: v for k, v in (result.entities or {}).items() if k != "want_all"}
 
+    # R2: receita fixa com banco conectado é recusada ANTES de tudo que lê ou consome pendência
+    # (a pergunta "dinheiro ou banco?", a clarification) e de perguntar nome ou pedir "Confirma?":
+    # a recusa não mexe em estado de OUTROS fluxos. Só consome a clarification do próprio
+    # recurring.add (ex.: "Do que é esse gasto fixo?"): deixada armada, a resposta ("internet")
+    # criaria um gasto fixo com o valor da receita recusada. Confiança baixa segue para a ajuda.
+    if intent == "recurring.add" and confidence >= 0.55 and (r := h_recurring.recusa(user_id, entities)):
+        if not ignora_pendencias and (c := h_pending.get_pending_clarification(user_id)) \
+                and (c.get("payload") or {}).get("intent") == "recurring.add":
+            try:
+                if db.consume_pending_action(user_id, c):
+                    return _AVISO_PERGUNTA_CANCELADA + r
+            except Exception:
+                logger.exception("R2: falha ao consumir a clarification do user %s", user_id)
+        return r
+
     # Desempate do #281 armado no turno anterior. ANTES DE TUDO, inclusive do
     # `infer_help_from_text` logo abaixo: as respostas dele são `1`, `2` e o
     # cancelamento, e nenhuma delas pode ser lida como pedido de ajuda.
@@ -1041,7 +1065,7 @@ def route(result: IntentResult, msg: IncomingMessage, *,
         # a resposta é texto livre — a descrição da compra, o nome do cartão —
         # `None` continua caindo fora sem consumir, porque ali "não reconheci"
         # não distingue resposta de comando.
-        abandona = abandona_pergunta_de_credito(text)
+        abandona = abandona_pergunta_de_credito(text, user_id)
         if not abandona:
             resp = h_credit.resolve_pending(user_id, text, pending)
             if resp is not None:
@@ -1344,6 +1368,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "pockets.list":
         return h_pockets.list_pockets(user_id)
 
+    # --- metas (C2): o classificador só devolve isto com a chave; sem ela (ex.: o LLM do tier 3
+    # inventou) vale o que valia para "minhas metas" antes: a lista de caixinhas ---
+    if intent == "metas.list":
+        return metas_conversa.texto_whatsapp(user_id) if _metas_ligadas(user_id) else h_pockets.list_pockets(user_id)
+
     if intent == "pockets.create":
         name = entities.get("name") or ""
         return h_pockets.create(user_id, name)
@@ -1595,7 +1624,8 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     if _ja_tem_o_valor(payload.get("entities")):
         return "resolve"
 
-    intent_da_resposta = classify((text or "").strip(), allow_ai=False).intent
+    # `user_id`: só liga o `metas.list` ("minhas metas") de quem tem a chave (C2).
+    intent_da_resposta = classify((text or "").strip(), user_id=user_id, allow_ai=False).intent
 
     # As DUAS vias de abandono caem no veto de catálogo abaixo — o bloco não tem
     # `return "abandona"` próprio, ele CAI para lá. Ser disjunto do `ABANDONA`
@@ -1710,6 +1740,8 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
     # guard existe para evitar. Nenhum produtor grava não-str hoje.
     if falta and isinstance(intent, str) and falta == _CHAVE_DO_NOME.get(intent):
         resposta = limpa_pontuacao_final((text or "").strip())
+        # Só o nome EXATO escolhe a caixinha, também para `metas.list` (C2): "metas" é a caixinha;
+        # "listar metas" LISTA e abandona a pergunta, nada é movido (leitura não mexe em dinheiro).
         if _eh_nome_do_catalogo(resposta, _alvos_existentes(user_id, intent)):
             return "resolve"
     return "abandona" if intent_da_resposta in ABANDONA else "abandona_avisa"

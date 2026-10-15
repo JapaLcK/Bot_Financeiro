@@ -20,6 +20,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from core.services.cashflow_contract import somar
+from utils_text import VALOR_MAX
 
 from .connection import get_conn
 from .open_finance import (PENDING_RECONCILIATION_SQL, actionable_pending_params,
@@ -113,7 +114,11 @@ def finito(v) -> bool:
 # só o `raw` diz que o 0 não veio do banco. Vale para conta e posição.
 def sem_saldo(p) -> bool:
     try:
-        return not finito(p["balance"]) or not Decimal(p["raw_balance"]).is_finite()
+        raw = Decimal(p["raw_balance"])
+        # raw fora do domínio (> VALOR_MAX) com a coluna em 0: o sync zerou; é saldo ausente.
+        # Coluna com o valor grande (legado) segue contada, como antes.
+        zerado = p["balance"] == 0 and abs(raw) > VALOR_MAX
+        return not finito(p["balance"]) or not raw.is_finite() or zerado
     except (TypeError, ArithmeticError):  # None ou texto que não é número
         return True
 

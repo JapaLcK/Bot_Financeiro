@@ -857,6 +857,45 @@ def _pt_words_to_int(phrase: str) -> int | None:
     return total if found else None
 
 
+# Limite TÉCNICO (CHECK `finito_*` do banco, sanitizadores de fonte externa): 10**13 reais
+# são 10**15 centavos, ainda exatos em float64 (< 2**53). Acima disso o centavo se perde,
+# e `numeric` do Postgres grava NaN, Infinity e 1e308 sem reclamar.
+VALOR_MAX = 10**13
+# Teto de NEGÓCIO de todo valor digitado pelo usuário (decisão do dono, 2026-10-15): R$ 1 bi.
+# O banco segue em VALOR_MAX; dado antigo acima do teto segue legível, somável, apagável,
+# pagável e editável em campo que não é valor (categoria, nota, data).
+TETO_ENTRADA = 10**9
+# Contagem de UNIDADES (cotas, tokens), não dinheiro: cripto de preço ínfimo passa de 10**13 unidades.
+# Só barra NaN/±Infinity/lixo (10**400): `open_finance_investment_snapshots.quantity`.
+QUANTIDADE_MAX = 10**30
+
+
+def valor_valido(v) -> bool:
+    """True se `v` é número finito, > 0 e <= TETO_ENTRADA. `float("nan") <= 0` é
+    False, então o guard `v <= 0` sozinho deixa NaN passar; `parse_money` devolve
+    `inf` para dígitos enormes. `Decimal` é comparado exato: via float, 1000000000.0000001
+    arredondaria para TETO_ENTRADA e passaria."""
+    if isinstance(v, Decimal):
+        return v.is_finite() and 0 < v <= TETO_ENTRADA
+    try:
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):  # OverflowError: int de 400 dígitos
+        return False
+    return isfinite(f) and 0 < f <= TETO_ENTRADA
+
+
+def valor_finito(v, teto=VALOR_MAX) -> bool:
+    """Como `valor_valido`, mas aceita 0 e negativo: renda, taxa, saldo-alvo. Só barra
+    o que não é número, NaN/inf e o que passa de `teto` em módulo (`Decimal` exato). O padrão é o
+    limite técnico; as portas de valor digitado passam `TETO_ENTRADA`."""
+    if isinstance(v, Decimal):
+        return v.is_finite() and v.copy_abs() <= teto
+    try:
+        return isfinite(f := float(v)) and abs(f) <= teto
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def parse_money(text: str) -> float | None:
     # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
     # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito
@@ -1174,7 +1213,8 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
       finito (`parse_money("1" * 400)` devolve `inf`, que passa no `> 0` e só
       seria recusado lá no `mark_bill_paid`, DEPOIS de a pendência ter sido
       reivindicada, virando "erro interno" para o usuário);
-    - `"nao_entendi"` — o texto fala de um valor mas QUAL valor é ambíguo
+    - `"nao_entendi"` — acima de `TETO_ENTRADA` (valor real demais ou código colado) ou o
+      texto fala de um valor mas QUAL valor é ambíguo
       ("132 50" -> 13.250, "1.23.456" -> 123.456, ",50" -> 50 em vez de 0,50).
       O bot ACABOU de pedir um número, então isso é digitação errada: quem
       chama re-pergunta em vez de abandonar a pergunta.
@@ -1226,6 +1266,8 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
     # Arredonda para centavos ANTES de comparar: "0,001" passava no `> 0`.
     if not isfinite(valor) or round(valor, 2) <= 0:
         return "nao_positivo"
+    if valor > TETO_ENTRADA:  # valor real demais ou código colado: pergunta de novo, não "maior que zero"
+        return "nao_entendi"
     return None
 
 

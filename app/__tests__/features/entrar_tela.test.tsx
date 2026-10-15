@@ -137,6 +137,7 @@ describe("(auth)/entrar — tela real", () => {
     expect(screen.getByRole("button", { name: "Continuar com a Apple" }).props.accessibilityHint).toBeUndefined();
   });
 
+  // Exercita o gate de rota (pilha/guarda) com o dublê do `jest.setup.js` para o caminho cru; não prova alcançabilidade por link real (isso é `native_intent_roteador.test.tsx`).
   it("M1 — deep link frio para /esqueci-senha tem /entrar embaixo na pilha (canGoBack)", async () => {
     renderRouter("./app", { initialUrl: "/esqueci-senha" });
     await waitFor(() => expect(screen).toHavePathname("/esqueci-senha"));

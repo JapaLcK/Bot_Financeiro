@@ -46,7 +46,8 @@ from test_senha_obrigatoria import _com_senha, conta_paga_sem_credencial
 from test_senha_obrigatoria_whatsapp import _dono_do_numero, _gastos, _manda, _q, enviadas  # noqa: F401
 
 VINCULADO = "✅ WhatsApp vinculado"
-MUITAS = "Muitas tentativas de código. Espere 15 minutos e gere um código novo no site."
+MUITAS = ("Muitas tentativas de código. Espere 15 minutos e gere um código novo "
+          "(no site ou com *link* na outra plataforma).")
 
 
 def _numero_novo() -> str:

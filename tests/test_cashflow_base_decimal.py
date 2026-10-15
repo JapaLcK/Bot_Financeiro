@@ -58,7 +58,9 @@ def conferir(uid, esperado, *, bancos, carteira=D(0), incerta=False):
     (['1e150', '.01', '-1e150'], '.01'),
     (['1e100', *['.01'] * 41, '-1e100'], '.41'),
 ], ids=['normal', 'cancelamento-normal', 'magnitude28', 'magnitude100', 'magnitude150', '43-contas'])
-def test_m1_bancos_base_tool_contas_foto(pro_small_uid, monkeypatch, saldos, esperado):
+def test_m1_bancos_base_tool_contas_foto(pro_small_uid, monkeypatch, saldos, esperado, sem_check_finito):
+    if any('e' in s for s in saldos):  # saldo legado acima do limite de propósito: o banco novo o recusaria
+        sem_check_finito('open_finance_accounts', 'balance')
     monkeypatch.setenv('OF_CONSOLIDATED_BALANCE_ENABLED', '1')
     cid = conexao(pro_small_uid, f'm1-{pro_small_uid}')
     for i, saldo in enumerate(saldos):
@@ -70,8 +72,10 @@ def test_m1_bancos_base_tool_contas_foto(pro_small_uid, monkeypatch, saldos, esp
 
 
 @pytest.mark.parametrize('fundida', [False, True], ids=['carteira-banco', 'carteira-fusao-banco'])
-def test_m1_carteira_banco_ajuste_uma_vez(pro_small_uid, monkeypatch, fundida):
+def test_m1_carteira_banco_ajuste_uma_vez(pro_small_uid, monkeypatch, fundida, sem_check_finito):
     uid = pro_small_uid
+    for t in ('open_finance_accounts', 'accounts'):  # saldo legado 1e100 de propósito
+        sem_check_finito(t, 'balance')
     monkeypatch.setenv('OF_CONSOLIDATED_BALANCE_ENABLED', '1')
     cid = conexao(uid, f'm1-wallet-{uid}')
     aid = conta(cid, 'a', D('-1e100'))
@@ -88,8 +92,9 @@ def test_m1_carteira_banco_ajuste_uma_vez(pro_small_uid, monkeypatch, fundida):
     conferir(uid, D('.01'), bancos=bancos, carteira=carteira, incerta=True)
 
 
-def test_m1_patrimonio_preserva_partes_fora_do_caixa(pro_small_uid, monkeypatch):
+def test_m1_patrimonio_preserva_partes_fora_do_caixa(pro_small_uid, monkeypatch, sem_check_finito):
     uid = pro_small_uid
+    sem_check_finito('open_finance_accounts', 'balance')  # saldo legado 1e100 de propósito
     monkeypatch.setenv('OF_CONSOLIDATED_BALANCE_ENABLED', '1')
     cid = conexao(uid, f'm1-assets-{uid}')
     for pid, saldo in [('a', D('1e100')), ('b', D('.01')), ('c', D('-1e100'))]:
@@ -109,8 +114,10 @@ def test_m1_patrimonio_preserva_partes_fora_do_caixa(pro_small_uid, monkeypatch)
     ('NaN', 'Infinity'), ('NaN', '-Infinity'), ('NaN', 'NaN'),
     ('Infinity', '0'), ('-Infinity', '0'),
 ])
-def test_m1_nao_finitos_preservam_indisponivel(pro_small_uid, saldo, bolso):
+def test_m1_nao_finitos_preservam_indisponivel(pro_small_uid, saldo, bolso, sem_check_finito):
     uid = pro_small_uid
+    for t in ('accounts', 'pockets'):  # NaN/Infinity de propósito: o banco novo os recusaria
+        sem_check_finito(t, 'balance')
     q('update accounts set balance=%s::numeric where user_id=%s', (saldo, uid))
     caixinha(uid, 'Observação não finita', D(bolso))
     with db.get_conn() as conn, conn.cursor() as cur:

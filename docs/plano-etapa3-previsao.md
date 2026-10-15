@@ -12,13 +12,15 @@ Mostrar o saldo previsto por data, os compromissos que o explicam e o que ainda 
 ser conferido, usando uma regra única para a `/api/v2`, a previsão atual, o simulador e a
 IA. Previsão é condicionada aos dados e premissas; um número futuro nunca é saldo realizado.
 
-**Aprovado anteriormente:** Q36 (banco pelo Open Finance; manual só dinheiro físico), Q42
+**Aprovado anteriormente:** Q36 (banco pelo Open Finance; manual só dinheiro físico — **a Q36 está em revisão desde 2026-10-09 para investimento manual e cartão manual não sincronizado**), Q42
 (recorrente só prevê e avisa; não lança nem paga), Q18 (a regra nova substitui a antiga no
 mesmo PR, inclusive no WhatsApp), API v2 com usuário da sessão, planos no servidor,
 `Decimal` no cálculo e texto no JSON, isolamento por usuário, SSE depois do commit e
 motivos de incerteza. A matriz direcional do plano da Piggy continua sendo a fonte da
 abstenção: risco também precisa de dados confiáveis; `cabe_nas_premissas` continua desligado
 até validar estimativa variável e seus outros requisitos.
+
+**Nota de 2026-10-09:** a Q36 (coorte da chave do v2) e a Q40 (coorte de quem tem Open Finance conectado; a resposta “banco” passará a gravar como declaração) são regras diferentes e estão em revisão. Ver a [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md); o PR-A dela (#969) foi mergeado em 2026-10-15 e é inerte até o PR-B.
 
 **Decisão vigente do dono em 05/10/2026:** a coorte prevista para o dashboard v2 é de
 usuários novos, que nunca usaram/conectaram o PigBank; não há histórico a revisar. Para

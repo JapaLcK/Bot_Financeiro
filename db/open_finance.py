@@ -9,7 +9,7 @@ from uuid import NAMESPACE_OID, uuid5
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz, add_months, billing_period_for_close_day
-from utils_text import is_internal_category
+from utils_text import VALOR_MAX, is_internal_category
 
 from .cards import (
     add_imported_credit_purchase,
@@ -851,8 +851,12 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
 # lugar do estouro, e NULL aqui é o que o Banqueiro já sabe tratar ("o banco não
 # reportou rendimento"): o `rendimento` só é calculado quando os dois lados
 # existem (core/services/piggy_agents.py). Espera o alias `i` da posição.
+# Acima de `VALOR_MAX` também vira NULL (o `_numero` de db/of_snapshots.py faz o mesmo): o valor
+# iria para `pockets.of_last_seen_profit` e estouraria o CHECK `finito_*` a CADA sync do item.
+# CASE aninhado, e não AND: só o CASE garante que o `::numeric` roda depois do regex.
 _SQL_PROFIT = (r"case when i.raw->>'amountProfit' ~ '^-?[0-9]+(\.[0-9]+)?$' "
-               r"then (i.raw->>'amountProfit')::numeric end")
+               r"then case when abs((i.raw->>'amountProfit')::numeric) <= " + str(VALOR_MAX) + " "
+               r"then (i.raw->>'amountProfit')::numeric end end")
 
 
 def save_open_finance_investments(connection_id: int, investments: list[dict], *,
@@ -1983,6 +1987,8 @@ def _find_manual_candidates(cur, user_id: int, tipo: str, valor, tx_date, propri
           and not exists (
               select 1 from open_finance_transactions o where o.imported_launch_id = launches.id
           )
+          and not exists (select 1 from bank_movement_declarations d
+                           where d.launch_id = launches.id and d.user_id = launches.user_id)
           and not {RESERVA_SQL.format(t="launches", proprio="%s")}
         ) c where %s or not c.interno
         """,
@@ -2230,6 +2236,8 @@ def _propose_manual_reconciliation(user_id: int, launch_id: int) -> dict:
                          join open_finance_connections c on c.id = a.connection_id
                         where c.user_id = %s
                           and (o.imported_launch_id = m.id or o.match_launch_id = m.id))
+                   and not exists (select 1 from bank_movement_declarations d
+                                    where d.launch_id = m.id and d.user_id = m.user_id)
                    and not {RESERVADO_SQL.format(t="m")}
                 """,
                 (launch_id, user_id, user_id),

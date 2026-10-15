@@ -21,6 +21,7 @@ from _billing_grants_helpers import (
     sub_stripe,
 )
 from _dreno_pix_helpers import efeitos, entregar, mundo_externo, nova_cobranca
+from core.dashboard_links import link_whatsapp
 from core.services import email_service as es
 from db.connection import get_conn
 from test_billing_webhook_lifecycle import _post, _setup
@@ -61,7 +62,7 @@ def test_agendado_para_tres_horas_depois(caixa):
 def test_links_e_ordem(caixa):
     es.send_founder_email("a@b.com")
     base = es._public_base_url()
-    wpp = es._whatsapp_link("Oi, Piggy!")
+    wpp = link_whatsapp("Oi, Piggy!", seletor=True)
     for parte in (caixa["html"], caixa["text"]):
         assert base + BANCO in parte
         assert base + "/app" in parte

@@ -199,7 +199,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   chama `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
   `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada; o
   `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
-  `get_top_categories`/`get_category_spend` nessa faixa são recusadas com `periodo_no_card`. **Teto de 12
+  `get_top_categories`/`get_category_spend`/`get_period_summary` nessa faixa são recusadas com `periodo_no_card`
+  (1 mês: `mes_inteiro_no_card`; no resumo a mensagem aponta `resumo` e o saldo = `contas`; a recusa é uma só, em `_recusa_se_for_do_card`, e devolve o dado quando o turno já gastou as 3 vagas de card, quando o card para o qual mandaria já foi mostrado, ou quando o plano corta o mês pedido (só 1 mês: nem o `resumo` nem o `categorias` trazem o `historico_desde`, a tool traz; 2 a 12 meses vão ao `periodo`, que traz); também devolve o dado a conta que não passa em `exigir_acesso_do_app` (sem onboarding de OF, sem plano) e o turno em que o `show_card` do card-alvo falhou (`FALHAS_DE_CARD_DO_TURNO` guarda o id do card; falha de outro card não libera), senão a recusa não deixa saída; o `card_repetido` aponta o caminho de cada card); no app o
+  `get_open_bill` devolve itens e período com `error: total_no_card` (o total é do card `fatura`) enquanto o card puder aparecer (`card_ainda_resolve`, o mesmo teste da recusa acima); quando não pode, devolve o total. **Teto de 12
   meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
@@ -329,7 +331,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
-  marca, manual com delta 0, OFX, compra manual no cartão). **`pode`** é uma regra só
+  marca, manual com delta 0, OFX, compra manual no cartão). **Desde o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) (#969, mergeado em 2026-10-15):** `banco` inclui também a despesa ou receita que o usuário declarou como paga pelo banco (`DECLARADA_SQL`, `db/bank_declaracoes.py`; o resto do “manual com delta 0” continua em `registro_antigo`); `fundido` vale “casada com o extrato”, e a linha sem par tem o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisa tratar `instituicao` nula nessa linha sem par. Nenhum caminho de produção cria essa declaração até o PR-B. **`pode`** é uma regra só
   (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
   inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
   guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
@@ -418,11 +420,45 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   o emoji e a cor são os do catálogo quando há linha dele (o catálogo vence), senão `CAT_NEUTRA_EMOJI`/
   `CAT_NEUTRA_COR` (`db/connection.py`), que valem também para a categoria que só aparece nos lançamentos; o
   nome, nesse caso, é a própria chave. `cor` fora de `#RRGGBB` e `emoji` vazio ou só espaços saem como o
-  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`).
+  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`). **Cor padrão**:
+  `#7c3aed` é o default da coluna e da semente (ninguém o escolheu); `#64748b` também é um swatch do seletor
+  do painel antigo (`dashboard.js`, `CATEGORY_COLOR_OPTIONS`), e quem o escolheu lá passa a ver
+  `CAT_NEUTRA_COR` (`#94A3B8`) por decisão do dono (cinza unificado). Os dois saem assim em `/api/v2/categorias`
+  e `/gastos` (`CAT_COR_PADRAO`, uma regra só, no servidor; o front não reconhece cor); o painel antigo segue
+  com a cor crua (`db/budgets.py` devolve `#7c3aed`).
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
   sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
-  difere do total (`soma_arredondada_diverge`). Falta, do plano: `/gastos/categoria` (PR 1b) e a tela (PR 2).
+  difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
+  `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
+  vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
+  (`moneyText`), categoria e dia escolhidos vão ao Extrato pelo filtro global (`s.filter.category`/`day`).
+- `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
+  `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
+  categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
+  senão 422). A chave é o `cat_key_sql` do parâmetro (no banco, no mesmo snapshot): "Alimentação" casa com `alimentacao` e
+  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, cor}` pelo catálogo (o catálogo vence; senão
+  neutro, nome = chave). Resposta: `mes`, `disponivel`, `hoje`, `historico_desde`, `total` e `compras` (as saídas da
+  chave no mês pedido, as MESMAS linhas do `/gastos`; categoria sem gasto = `0`/`0`, nunca 404), `valor_medio`
+  (`total ÷ compras` HALF_UP a centavos, `null` sem compras), `ultimas` (as 6 primeiras na ordem do `listar`, a mais
+  recente primeiro, com data futura incluída: `{data, descricao, mensagem, origem, valor}`, descrição nunca nula),
+  `serie` (3 meses crescentes `[M-2, M-1, M]`, `{mes, valor}`; `valor` = o mês inteiro da chave, `null` quando o corte
+  do plano toca o mês, inclusive M; mês cortado nem é lido; sem corte em M, `serie[2].valor == total`; mês disponível
+  sem gasto = `0`), `estabelecimentos` (até 5, `{nome, valor, quantidade}`, `(-valor, -quantidade, nome)`), `dias` e
+  `fora_da_grade` (o mesmo cálculo do `/gastos`, só das saídas da chave), `saidas_em_outra_moeda` (só a categoria e só o
+  mês M) e `motivos`: os das CONTAS (∩ `resumo_mes.MOTIVOS`) mais os das linhas dos meses lidos da série (M-2, M-1 e M;
+  mês cortado não é lido), `inicio_do_historico` quando o corte do plano toca QUALQUER mês da série (M-2, M-1 ou M, mesmo
+  com `historico_desde` `null`), `outra_moeda` só com o contador da categoria no mês M > 0 (no `/gastos` o contador é o
+  do mês inteiro; aqui outra categoria com USD não sobe o motivo) e `arredondamento_por_grupo` olhando só os dias mais
+  `fora_da_grade` contra o total (sem a comparação por categoria do `/gastos`). Fixado em
+  `tests/test_api_v2_gastos_categoria.py` linhas 137 (corte em M-2) e 194 (USD em outra categoria). Mês todo antes do corte: `disponivel: false`, `total`/`compras`/`valor_medio` `null`, listas vazias, `serie`
+  toda `null`, `motivos` com `inicio_do_historico`. **Estabelecimento**: parte das linhas que somam o total e lê o `raw`
+  do Open Finance à parte (`merchant.cnpj` de 14 dígitos e não todo zero, senão o nome do recebedor do Pix/TED, senão a
+  descrição; o nome e a descrição passam por `utils_text.merchant_key`, o CNPJ fica só com os 14 dígitos, e a descrição sem letra nem dígito cai em `texto.strip()`), dono pela conta -> conexão do usuário (uma transação forjada de outro
+  não entra); rótulo = a descrição mais frequente; grupos de rótulo com o mesmo `merchant_key` se juntam e o nome da união é o rótulo mais frequente
+  entre os rótulos desses grupos (P1 b: "Pix enviado" para pessoas diferentes é UMA linha; nenhum nome repete). Nunca saem `raw`, CNPJ, nome do recebedor, `businessName`,
+  `provider_*`, `user_id` nem id de linha. Uma transação repeatable read / read only; o seed do catálogo roda antes.
+  Plano: `docs/plano-etapa5-gastos.md` §3.1 e §4.1.
 - `GET`/`POST /api/v2/guia` (`api/v2/guia.py`, estado em `db/guia.py`, tabela `guia_painel`,
   uma linha por usuário): o guia do `/painel` (#728). `PASSOS` em `api/v2/guia.py` é a fonte
   única do roteiro (`id`, `tela`, `ancora`, `acao`, `dado` `real`|`exemplo`, `fala {titulo,
@@ -567,10 +603,32 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (mesma classe do `custo_mensal`, `recorrencia_valor_invalido`). Identidade
   `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
   frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
-  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
-  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
-  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
-  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  na saída; interrompida (40+ dias) fica fora. Convivência com o fixo manual (só a saída):
+  casamento 1:1 (mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com fixo manual
+  sobrando, a saída do banco entra (pessimista, rotulada). **Receita fixa manual (R2,
+  2026-10-14): só para quem NÃO tem banco** (a regra da Q40: conexão fora de PAUSED/DELETED,
+  `forma_pagamento.regra_ativa`; conexão em erro conta como banco). Com banco, `cashflow_snapshot.ler`
+  nem lê a manual (a do extrato a substitui, na mesma leitura repeatable read), então não há
+  casamento de entrada; com o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` ou sem banco vivo ela conta.
+  Criar e editar (inclusive pausar) recusam com `FonteUnicaOF("receita", MSG_RECEITA)` em `db/recurring_income.py`
+  (o texto mora em `fonte_unica.MSG_RECEITA`, fora de `MENSAGENS`; 400 no `/app`, o texto puro no
+  WhatsApp, antes de qualquer pergunta do roteador). Se a recusa do roteador consome a clarification
+  do próprio `recurring.add`, a resposta vem com o aviso "🔕 Cancelei a pergunta anterior."; se o
+  consumo falha, loga e devolve só a recusa. No handler, `FonteUnicaOF` da corrida (banco conectou
+  depois da 1ª checagem) volta como texto puro, sem o "Não consegui criar". Apagar segue livre; o
+  `GET /recurring-incomes` devolve `[]` + `banco_conectado: true` (antes do gate de plano) e a aba
+  "Receitas fixas" do `/app` só aparece com `banco_conectado: false`. O legado fica no banco.
+  **Limites do R2 (declarados, sem código):** (1) o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` só
+  vale para quem lê por `cashflow_snapshot.carregar` (WhatsApp, forecast, simulador);
+  `previsao_v2.ler_previsao` (o `/painel`) chama `ler(..., True)` e ignora o freio (pré-existente),
+  então lá a receita manual de quem tem banco nunca conta. (2) A recusa no WhatsApp depende de o LLM
+  devolver `tipo` de receita; sem `tipo`, "salário" pode virar gasto fixo (pré-existente). (3) Falha
+  na consulta de banco conta como COM banco (`regra_ativa`): quem não tem banco pode ver a aba
+  "Receitas fixas" sumir, ou a recusa, naquele carregamento. A aba também some para quem não tem
+  banco quando o GET falha ou volta 403 de plano (só `banco_conectado === false` a mostra); "Gastos
+  fixos" segue visível com o convite de assinatura. (4) A recusa do roteador do WhatsApp
+  consome a pergunta pendente do próprio `recurring.add`; a de outro fluxo fica intacta.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
   saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`
   reconhece (pagamento de fatura, aplicação e resgate, caixinha, poupança, transferência "same
@@ -662,7 +720,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   - **Bloco condicional por usuário (P1-b).** Só quem tem a chave `dashboard_v2_enabled` (`metas_conversa.metas_ligadas`) recebe as metas: o prompt de metas (`SYSTEM_PROMPT_METAS`, `ADENDO_CARDS_METAS`), o schema de `list_metas`, o `show_card` com `metas` e `caixinhas` e a descrição nova do `list_pockets`. Quem não tem a chave recebe `SYSTEM_PROMPT`, `ADENDO_CARDS`, `SCHEMAS` e `SCHEMAS_APP` exatamente como antes das metas (`system_prompt.prompt_do_usuario`, `tools.schemas_para`, montados por turno no `runner`); nele `show_card metas` mostra as caixinhas, com o id `caixinhas` no bloco. A tool `list_metas` sem a chave (só se o modelo imitar o histórico) devolve `use_caixinhas`.
   - **Onde o app lê metas.** `list_metas` fica fora de `SCHEMAS_APP` (`OCULTAS_NO_APP`); no app o prompt de K nem a cita (`SYSTEM_PROMPT_METAS_APP`): metas = `show_card` com `card="metas"` (recurso `metas`, formato de `/api/v2/metas`), caixinhas = `card="caixinhas"` (recurso `caixinhas`, formato legado `{ok, goals}`). Criar, editar e apagar meta pelo chat NÃO existe (é o C4): ao pedido explícito a IA manda para o painel (`ONDE_CRIAR`) e não usa tool de outro recurso; pedido de orientação ela ajuda em conversa (limite 14).
   - **Limites declarados.** (1) O `ai_guard` é cego a percentual, mês ("junho de 2027") e sinal: só confere R$. O sentido (crescendo × diminuindo) é do texto do `resumo`; o modelo que o inverta passa como "sustentado". (2) A visão do modelo traz até `MAX_METAS` (`core/services/metas_conversa.py`) metas e "e mais N no painel"; passando disso, as mais novas ficam fora e a tool não tem argumento de nome. (3) Follow-up sem tool ("e a viagem?") responde do histórico, e o guard fatia por turno: o número do turno anterior não conta como evidência do atual. (4) Nome que é de meta E de caixinha ("Reserva"): "apaga a meta Reserva" não pede qual (não usa nenhuma tool destrutiva); "guardei 100 na reserva" confere `list_pockets` antes. (5) Medido no harness real (`gpt-4o-mini`), não no pytest: o roteamento do modelo. (6) "N idêntico à base" vale para a ENTRADA do modelo (`system` e `tools` de cada turno, comparados execução a execução no PR; `tests/test_ai_chat_metas_extra.py` fixa que o prompt de N é o `_BASE` com o marcador trocado). Qualquer edição futura do texto base do prompt muda N também, por desenho. O que SAI ao app para N mudou em dois pontos, aceitos (ver "Para o E1"). (7) "Guardei 100 na reserva de emergência" com meta e caixinha de nomes parecidos, em K: o modelo tenta `pocket_deposit` com o nome da meta (em todas as execuções do harness) e a confirmação depois falha com "não achei a caixinha", igual à base; nada se perde. (8) "Quanto tem na reserva" pode responder por `list_metas` (chat) ou por `list_pockets` (app) quando há meta e caixinha de nome parecido. (9) "Guardei 100 na meta" em K: o "nada registrado" aparece só em parte das respostas, mas nenhuma tool é chamada (o essencial). (10) O guard é cego a sinal: o ritmo sai em módulo ("diminuindo R$ 250,00") e quem copia "R$ -250,00" cai em 🚨 falso positivo. (11) No WhatsApp, "apaga a meta Casa nova" de K pode cair no handler determinístico de caixinha ("Não achei essa caixinha"): é o C2. (12) **Texto × widget no app antigo (build 26), ACEITO pelo dono até o E1/C3:** o chip "Minha reserva de emergência está no tamanho certo?" de K responde com a META (R$ da meta, via `show_card metas`) e o app antigo desenha embaixo o widget das caixinhas (lê `/goals/{uid}/status`): os dois não coincidem. Não muda o comportamento por causa disso. (13) A chave é lida UMA vez por turno (`_context.METAS_DO_TURNO`/`metas_do_turno`, usada pelo runner, `schemas_para`, `list_metas`, `show_card` e o gate do card); FORA de um turno (chamada direta de `montar`/`get_tool`) ela é lida na hora, com o cache de `get_auth_user` que `dashboard_v2_enabled` usa (`AUTH_USER_CACHE_TTL_SECONDS` em `db_support.py`). (14) A IA de K ajuda em pedido de ORIENTAÇÃO sobre meta ("me ajuda a montar uma meta") e só ao fim manda registrar no painel; a recusa vale para o pedido EXPLÍCITO de criar, editar ou apagar no sistema. Quem decide qual dos dois é o modelo: o harness real mede, o pytest não. (15) Desvios do plano do C1: a chave `reserva_sem_tamanho` não existe (o `resumo` já diz que o tamanho da reserva é desconhecido); o prompt de K manda usar `onde_criar` com `sem_metas`, mas a visão do card `metas` não traz `onde_criar` (no app o `ADENDO_CARDS_METAS` dá a URL do painel).
-  - **Para o E1 (app, build 27; o orquestrador copia isto para a sessão dele).** (i) `caixinhas` é id novo de card de chat: precisa de `cardId` + schema + view legados no app. Como o `periodo`, card só de chat fica FORA do `TITULOS` (o catálogo de widgets, `app/src/features/painel/catalogo.ts`): o `cardId` de `app/src/api/schemas/painel.ts` passa a `["periodo", "caixinhas", ...Object.keys(TITULOS)]`. Sem isso o app descarta calado o bloco `caixinhas` (id desconhecido descarta só aquele evento). (ii) O recurso `metas` do bloco do card `metas` vem agora no formato v2 (`/api/v2/metas`, fixtures em `tests/frontend/api_v2_respostas.json`, chave `"metas"`), mas o provider do app tem `schemas.metas = S.metasSchema` LEGADO (`app/src/features/painel/provider.tsx`): se o E1 reaproveitar `schemas[recurso]`, o card de K falha no parse. O recurso `caixinhas` traz o formato legado `{ok, goals}` (`metasSchema`). (iii) Para quem NÃO tem a chave (N), `show_card` com `card="metas"` agora sai como `card: "caixinhas"` e recurso `caixinhas` (antes: `metas`, `{ok, goals}`): o `passo.previa` vira `caixinhas`, que o app converte em `null` até (i) (o esqueleto some); é decisão aceita (o `cardId` precisa do `caixinhas` de qualquer modo para K). A mensagem de tool oculta de N segue exatamente a de antes (só K cita `metas, caixinhas`). Quando o E1 puser o `caixinhas` no app, `PENDENTE_NO_APP` em `tests/test_ai_chat_cards_ids_app.py` tem de ser esvaziada (o teste falha pedindo).
+  - **O que o E1 (app, build 27) fez.** (i) `caixinhas` entrou no `cardId` de `app/src/api/schemas/painel.ts` (`["periodo", "caixinhas", ...Object.keys(TITULOS)]`, FORA do `TITULOS`, que é o catálogo de widgets: `caixinhas` é só card de chat), com o widget legado `Caixinhas`/`ListaMetas` (`app/src/features/painel/patrimonio.tsx`) lendo o recurso `caixinhas` do bloco (formato legado `{ok, goals}`, `metasSchema`); `PENDENTE_NO_APP` em `tests/test_ai_chat_cards_ids_app.py` está vazia. Quem NÃO tem a chave (N) recebe `show_card` com `card="metas"` como `card: "caixinhas"` (decisão aceita; a mensagem de tool oculta de N segue a de antes). (ii) **Card `metas` v2 (K), feito (PR separado do E1, antes do build 27).** O recurso `metas` do bloco tem schema próprio, `metasV2Schema` em `app/src/api/schemas/painel.ts` (dinheiro string → centavos com `decimalParaCentavos`; `percentual` 0–100; `chega_em`/`data_alvo` validados), usado SÓ por `schemasBloco`: `schemasRecurso.metas` (provider, `TelaMetas`, `ListaMetas`) segue LEGADO, então não reaproveite `schemas[recurso]` para o card. Quem desenha é `MetasChat` (`app/src/features/painel/metasChat.tsx`), escolhido em `WidgetConteudo` (`id === "metas" && bloco`), só leitura (nenhum botão; o toque é do `Bloco` e abre a Folha com o mesmo bloco) e sem calcular dinheiro: mostra `atual`, `alvo`, `falta`, `por_mes`, `ritmo` e `percentual` como vieram (a barra usa `percentual / 100`; `falta === 0` = meta batida). As frases vêm de `app/src/features/painel/metasTextos.ts`, cópia mínima de `webapp/src/dashboard/lib/metas-textos.ts` (sem os botões `acao` nem `antesDoCartao`); `app/__tests__/features/metas_textos_paridade.test.ts` compara chaves, ordem e textos com o web. DUAS exceções de texto, de propósito (voz só-leitura, iguais ao Python em `core/services/metas_conversa.py`): `FRASE_RITMO.fonte_indisponivel` ("…no painel você edita a meta e escolhe outra.") e `FRASE_CUSTO.plano_sem_custo_mensal` ("…O valor da reserva precisa ser definido no painel."); o teste compara essas duas com o literal do Python. Motivo fora do mapa sai como "Há informações a conferir nesta meta." (nunca cru, nunca some). Título do card no chat: "Metas" (`tituloCard`); `TITULOS.metas` ("Metas e caixinhas") segue o do painel. Fixtures: `tests/frontend/api_v2_respostas.json["metas"]` (`vazio`, `varios`, `estresse`, `sem_custo`). Limites declarados: o app mostra TODAS as metas do bloco (a visão do modelo corta em `MAX_METAS`, o card não); o roteamento do modelo até `show_card metas` só se prova no harness real; layout (duas colunas em 375pt, fonte grande, tema escuro, VoiceOver) só no simulador/aparelho.
+  Consumidor, o WhatsApp (PR C2, leitura): o comando "minhas metas" é determinístico (sem LLM), sem escrita (escrever meta pelo chat é o C4).
+  - **Quem recebe, e o comando.** Só quem tem a chave `dashboard_v2_enabled` (P1-b); quem não tem recebe EXATAMENTE o que recebia antes. O classificador (`core/intent_classifier.py`, `_pede_metas`) devolve `metas.list` 1.0 só com `user_id` E a chave (`metas_ligadas`; sem `user_id`, como nos oráculos de abandono, a regra não existe — é o que mantém N idêntico; `tests/test_wa_minhas_metas.py` prende o resultado de N e do corpus de saque/depósito/caixinha ao da `main`). Só o PLURAL inequívoco: "metas", "minhas metas", "ver (minhas) metas", "listar metas", "lista minhas metas", "como (estão|está|anda|andam|vão) (as) (minhas) metas", "quanto falta pra/pras/para (as) (minhas) metas". "meta" e "reserva" em QUALQUER forma ("minha reserva", "reserva de emergência", "como está a reserva", "como está a meta Casa nova", "quanto falta pra minha meta") ficam FORA e seguem o caminho de antes (tier 3/IA, que para K já responde por `list_metas` com o nome pedido): podem ser nome de caixinha ou de investimento (K sem metas e com a caixinha "Reserva de emergência" ouvia "Você ainda não tem metas"), e o singular pede UMA meta, não a lista inteira (`tests/test_wa_minhas_metas_extra.py`).
+  - **O texto.** `metas_conversa.texto_whatsapp(uid)`: o `resumo` e os `avisos` de `para_conversa` (nada recalculado), nome em `*…*` via `wrap_wa_markup` (nome com `*_~` ou crase sai sem negrito; quebra de linha vira espaço), URL simples do painel (`ONDE_CRIAR`, sem link mágico) e "e mais N no painel"; se passar dos 4096 do WhatsApp (`_wpp_len`, unidade UTF-16) tira metas do FIM (ficam as primeiras) e anuncia; falha de leitura vira texto humano, nunca traceback; a chave que quebra só na 2ª leitura (`_execute`) cai na lista de caixinhas, como no classificador (falha fechada). Sem metas: "Você ainda não tem metas." + onde criar.
+  - **Pendência.** `metas.list` está no `ABANDONA` (e, por herança, no `_ABANDONA_CREDITO`). Enxergam-no a porta 2 (`_clarification_abandonada`), a porta 4 ("✅ Já paguei", `wa_runtime`, `abandona_pergunta_de_valor(texto, uid)`) e as cinco pendências de cartão, que passam o `user_id` ao classificador; as portas 1 e 3 não o consultam com `user_id` e abandonam sozinhas com "minhas metas" (testado). Veto de catálogo (#185): **só o NOME EXATO escolhe a caixinha** (decisão do dono, a mesma igualdade `eh_nome_do_catalogo` de antes das metas: caixa, acento, espaços e pontuação final). Comando de LEITURA não mexe em dinheiro para K: com a caixinha "metas" e "saquei 200" ou "esvaziar caixinha" pendente, "metas" é a caixinha (saca/esvazia), mas "ver minhas metas", "listar metas", "como estão minhas metas", "quanto falta pras metas" LISTAM as metas, abandonam a pergunta e nada é movido (o resolvedor casa o nome por CONTENÇÃO de palavra: sem este recorte, "listar metas" esvaziava a caixinha, R$ 300 -> 0, como a `main` faz para N). Vale SÓ para `metas.list`: para N e para as demais intents do `ABANDONA` o veto é o de antes (`test_n_com_pendencia_comando_de_saldo_ainda_abandona`). Caixinha ou investimento chamado exatamente "minhas metas" + resposta "minhas metas" é o nome exato: escolhe a caixinha. `investment_pick` abandona por qualquer comando confiante, `metas.list` incluso, sem mover dinheiro. `funding_source_choice` de K existe (depósito em CAIXINHA não é bloqueado pela `fonte_unica`; só criar e aportar investimento manual são, então o fluxo `investment_deposit` não é armado por K): a frase de leitura a abandona, nada anda (`test_pendencia_de_origem_do_deposito_em_caixinha_*`). `payment_method_choice` ("dinheiro vivo ou banco?", `core/intent_router.py`, bloco do `desempate`) abandona com "minhas metas" de K: responde "🔕 Cancelei a pergunta anterior." e lista as metas, sem gravar lançamento (`test_forma_de_pagamento_pendente_*`); o guard anti-órfão (confirmação destrutiva pendente, `DESTRUCTIVE_PENDING_TYPES`) também a abandona, sem aviso e sem executar. Os dois são fail-safe e iguais a "minhas caixinhas". `metas.list` NÃO entra em `INCLUSOES_SEM_CAIXA`/`INTENCOES_SEM_CAIXA` (`core/services/cashflow_snapshot.py`): essas listas classificam payload de clarification e `metas.list` nunca vira payload (não pergunta nada). Fora do `_INTENTS_DO_ROTEADOR`: com `WA_IA_PRIMEIRO` a IA responde pela tool `list_metas` (mesmos números). Ajuda, catálogo e tutorial não anunciam o comando (a ajuda é para todos e N não tem metas).
+  - **Limites declarados.** (1) O tier 3 (LLM) NÃO foi ensinado a `metas.list` (mudar o prompt mudaria N): variações fora das frases acima ("quero ver o andamento dos meus objetivos") seguem para o LLM/IA; se o LLM devolver `metas.list` a quem não tem a chave, o roteador mostra a lista de caixinhas. (2) "apaga a meta Casa nova"/"criar meta X" de K pelo caminho determinístico ainda pode virar caixinha (o LLM do tier 3 devolve `pockets.delete`/`pockets.create`): é escrita e fica para o C4. (3) Só o pytest (LLM e envio falsos) cobre isto; a interpretação real e o WhatsApp real ficam para o harness `--allow-real-services` e para depois do deploy. (4) `classify` com `user_id` lê a conta (`get_auth_user`) quando o texto é uma dessas frases; o `isencao_do_barrado` (gate do paywall, "sem DB") não passa o `user_id` por isso (`test_barrado_*`). (5) Uma meta com nome tipo "Posso te ajudar com a casa" faz o texto cair no `_looks_like_help_fallback` (`core/handle_incoming.py`) e a lista é trocada por uma chamada à IA: a mesma exposição de "minhas caixinhas" (nome inventado, não corrigido). (6) `format_for_platform` mexe na marcação do nome depois do `wrap_wa_markup` (crase vira texto, `**x**` vira `*x*`, linha que começa com "* ", "- " ou "> " perde o negrito): cosmético; negrito que atravessa linhas por `*` solto só o cliente real prova. (7) Para K, "metas" (nome exato) com uma caixinha de mesmo nome escolhe a caixinha mesmo que o usuário quisesse a lista: sem pendência de nome aberta ela lista; com uma aberta, vale o nome. (8) Pendências de CARTÃO (`pay_bill_choice`, `credit_delete_card`, ...) não têm veto de catálogo (cartão chamado `Conta` já perde a resposta `conta` na `main`): K com um cartão chamado "Metas" e "metas" como resposta ABANDONA a pergunta com aviso e lista as metas (fail-safe: nada é pago nem apagado; N pagaria), `test_cartao_chamado_metas_k_abandona_em_vez_de_pagar_limite_declarado`. (9) O gate do classificador não olha o canal: um usuário com a chave que escreva "minhas metas" pelo adaptador do Discord (sem uso, `CLAUDE.md` memória do dono 2026-08-26) recebe o mesmo texto, só leitura. Passar `platform` ao `classify` mudaria a assinatura de todos os chamadores por um canal morto. (10) Desvios do plano do C2: o plano pedia as frases "minha reserva", "reserva de emergencia" e "minha reserva de emergencia", o regex com `(metas?|reserva)` (singular incluso) e uma linha `metas.list` no prompt do tier 3. Ficou só o PLURAL de "metas" e o prompt do tier 3 não mudou: K sem metas e com a caixinha "Reserva de emergência" ouvia "Você ainda não tem metas", e o singular pede UMA meta, não a lista. "Reserva" e o singular dependem da IA/LLM (que para K já responde por `list_metas`).
   **Ritmo** (`db/metas_ritmo.py`, PR A2): cada meta traz `ritmo {valor, dias_de_historico, parcial, motivos}` e `chega_em` (`AAAA-MM`).
   - `valor` = o crescimento ATUAL da fonte, R$/mês (pode ser negativo), ao lado do `por_mes` (o NECESSÁRIO): (`atual` − valor em D0) ÷ dias × 30. Medido nas fotos POR POSIÇÃO (`open_finance_investment_snapshots`), não em `patrimonio_fotos` (só tem o total). O valor de um dia sai da MESMA regra de `investido.calcular` (`separar_posicoes` + `q_posicao`); a moeda vem do espelho (posição que já saiu dele entra como BRL com `moeda_presumida`); só foto `collection_confirmed`.
   - Pertinência (`_DE`, uma regra para o valor do dia E para o dia-base): as fotos do passado cobrem as MESMAS posições de hoje, por identidade do provedor. A foto PERTENCE à fonte quando a VENCEDORA de hoje da identidade (`POSICOES_BANCO_SQL`, `c.id desc` entre TODAS as conexões do dono) é uma conexão da fonte; a foto pode vir de QUALQUER conexão do dono (identidade que mudou de conexão a → c vale pela foto da antiga a; com foto nas duas no mesmo dia, vale a da mais nova). Vencedora fora da fonte (pausada, outro banco): a foto não entra no passado, como não entra hoje. Identidade fora do espelho vale pela foto de conexão da fonte.
@@ -700,13 +763,26 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 
   A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
   em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
-  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  em `fonte_unica.MENSAGENS` (a exceção é o da receita, `fonte_unica.MSG_RECEITA`). `/app` = 400 com `detail` em texto; WhatsApp = o texto
   (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
   texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
   confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
   beta, não segurança). O usuário é sempre o da sessão/remetente, nunca o corpo. Escritor
   novo nessas tabelas ou dos importadores de arquivo reprova em
   `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
+- **Nota de revisão de 2026-10-09 (Q36 e Q40, que têm coortes diferentes):** ver
+  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), decidida pelo dono. **O código desta seção continua valendo até os PRs de código (A2, B, B1, C)**; o PR-A (#969, mergeado em 2026-10-15) é inerte (nenhum chamador de produção grava declaração enquanto o PR-B não existir e a flag dele estiver desligada) e por isso não mudou o comportamento; nada
+  desta seção mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
+  **Q40** (`core/handlers/forma_pagamento.py`, citada na tabela acima) vale para quem tem Open
+  Finance conectado (`regra_ativa`), e **não** é parte da Q36 nem depende da chave. O que a ADR
+  prevê: a Q36 deixará de travar investimento manual (PR-C) e compra manual em cartão não
+  sincronizado (PR-B1), e continuará travando extrato OFX/CSV/PDF, fatura OFX e cartão
+  sincronizado. Fora da chave do v2, quem tem banco, é Pro e importa OFX já pode dobrar hoje
+  (risco existente); o dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**, e
+  qualquer novo bloqueio de arquivo exige decisão separada. Na Q40, a resposta “banco” passará a
+  gravar como declaração conferida com o extrato: o PR-B entrega o caminho atrás de uma flag que
+  nasce desligada, e ligá-la é ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. A Q42
+  não muda.
 - A página é `/painel` (`frontend/painel.html` + o artefato `frontend/dashboard-app.*`,
   de `webapp/src/dashboard`): sessão por `auth_token` ou `dashboard_token`
   (`_resolve_page_user_id`), senão `/login?next=/painel`; UA do app ou fora da chave
@@ -753,6 +829,20 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Deep link do WhatsApp: um construtor só, `core/dashboard_links.link_whatsapp(texto)`**
+(Grupo 7, PR-5b). Lê `WHATSAPP_NUMBER` a cada chamada, monta `api.whatsapp.com/send?phone=N&text=...`
+e, sem número, devolve `""` (falha fechada: o `wa.me/?text=` abre o seletor de contatos e o
+código de vínculo, de uso único, iria para quem a pessoa escolhesse). Só texto sem segredo (`/wa`,
+e-mail do fundador) passa `seletor=True` e cai em `wa.me/?text=...`. Um teste (`tests/test_whatsapp_link_unico.py`) falha se `api.whatsapp.com`
+ou `wa.me/` aparecer em outro `.py`/`.js`/`.html`. As rotas que devolvem `whatsapp_link`
+(`link-code`, `login`, `verify-email`, `mfa/verify-login`, `google/complete-signup`) passam
+`vincular <link_code>`: o site pré-preenche o mesmo texto que o parser do bot entende
+(`account.vincular`), e o `/comecar` mostra essa mensagem ao lado do botão. `/wa`, `/teste` e o
+e-mail do fundador passam uma saudação, sem código. **O e-mail de boas-vindas não leva
+código** (vale 15 min e o e-mail é lido depois, e a conta do quiz não tem senha, que o
+`link-code` exige): o botão "Conectar meu WhatsApp" abre `/login?next=%2Fhome`, e lá
+"Conectar WhatsApp" gera o código no clique.
+
 **PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
 `code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
 `google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de
@@ -786,6 +876,28 @@ Limites conhecidos:
 Resíduo próprio, que NÃO fecha com o challenge obrigatório: `GET google/pending/{token}`
 devolve e-mail e nome sem exigir o verifier, porque a rota não o recebe. Fechar pede mudar
 a rota (e o contrato com o app).
+
+**MFA no Google web e no magic link (#605).** Conta com MFA ligado NUNCA ganha sessão só
+pelo Google ou pelo link do bot. O callback web e `GET /d/{code}` (todo código: bot ou app
+antigo) respondem 302 para `/login?next=<destino>#mfa=<desafio>` sem cookie nem
+`auth_sessions`; o desafio vai no fragmento (não chega ao servidor nem ao Referer) e o
+`login.html` abre o formulário de código; a sessão nasce em `mfa/verify-login`, que também
+registra o login (o callback `app-` não registra mais quando há MFA). O desafio vem de
+`_desafio_mfa`, o mesmo de `_concluir_login`. O `next` de `/d/` só chega ao destino se
+estiver na allowlist do `login.html`.
+O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos snippets de
+GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
+`config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
+prendem isso. Aceitos, sem código:
+- `login.html` com sessão viva de OUTRA conta pula o formulário de código ("sessão viva → pula o
+  login"), comportamento herdado do `/login`.
+- `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
+  pedir link novo).
+- `/d/` e `mfa/verify-login` não checam exclusão agendada (o callback web recusa). Follow-up.
+- Recarregar o `/login` depois do `replaceState` perde o formulário de código (o desafio saiu da URL);
+  no `/d/` o código do link já foi queimado, então recomeça por senha ou por um link novo.
+- O link do bot COM MFA passa a registrar login e e-mail de novo IP no `verify-login`; o SEM MFA segue
+  sem registro. Assimetria de auditoria conhecida, não decidida.
 
 **IP do cliente: `core/client_ip.py`** (`client_ip`, `rate_limit_key`; #766). Atrás de
 Cloudflare → Railway, o `request.client.host` é o proxy do Railway (100.64/10). Com
@@ -826,30 +938,35 @@ paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da crede
 pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
 liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
 mensagem de número já ligado a conta sem credencial.
-**Auto-vínculo por telefone não mescla quem já é conta ou tem dados (#711/#630, D1(a)).**
-O telefone digitado no site não prova de quem é o número. Com outra conta dona do
-telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
-recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
-#607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
-vínculo nem mescla, e a junção é pelo `vincular CODIGO` (com login nos dois lados, recusada:
-`apagaria_login`, até a confirmação explícita da #970). Vale também quando o alvo já tem
-este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
-uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
+**O telefone digitado no site não liga o WhatsApp a conta nenhuma: só o código liga (Grupo 7, PR-5, D1(c); fecha #711/#630 e o V3).**
+O site não verifica o telefone (#610), então ele não prova de quem é o número: o V3 era B digitar
+o número de C, C mandar "oi" e o bot ligar C na conta de B. `attempt_whatsapp_phone_link`
+(`db_support.attempt_whatsapp_phone_link_impl`; o nome ficou, renomear toca ~16 testes) agora só
+CLASSIFICA o número: `already_linked` (o remetente já é conta: `auth_accounts` ou identidade que não é
+WhatsApp; o telefone é lido no mesmo SELECT só para devolver o `target_user_id` do opt-out, e não decide o status), `precisa_senha` (o telefone casa, pelos `utils_phone.candidatos_simetricos`
+#909, com conta SEM credencial: a do quiz/lead; é a leitura que decide o status, para o texto dela e o opt-out do
+lead), `remetente_com_dados` (o mesmo, com remetente só-WhatsApp que tem dados: o turno segue na conta dele) e
+`no_match`, que é todo o resto, inclusive o telefone de conta COM senha. Nenhum caminho do telefone grava
+identidade nem mescla; `JA_E_CONTA_WA` e `NAO_JUNTEI_WA` saíram. `no_match` recebe o convite
+(`_send_no_account_notice`: "Conectar WhatsApp" no site e `vincular 123456`) em toda mensagem que
+não é tentativa de código, e a tentativa de código passa também no `precisa_senha` (senão o dono do telefone
+digitado por outra conta ficava trancado). `merge_users` e as recusas (`apagaria_login`, #970) não mudam: o
+código passa por elas. `link_platform_identity` (por onde `link` e `vincular` passam) é agora o ÚNICO
+gravador de `whatsapp_verified_at` e `phone_status='confirmed'`, e só quando o número ligado casa com o
+`phone_hash` da conta: número diferente do digitado liga sem confirmar o telefone. O checklist da Início
+(`whatsapp_linked` do `/auth/dashboard-profile`) lê a identidade, não o marcador. Sucesso do código:
+evento `whatsapp_code_link_success` (só o número mascarado; substitui `whatsapp_auto_link_success`).
+**Resíduo (DP-2):** vínculos feitos pelo auto-vínculo antes do PR-5 continuam valendo: não há como separar o
+legítimo do V3 (o dono e a vítima têm o mesmo registro), e reauditar derrubaria gente legítima. O suporte
+desfaz se a pessoa reclamar.
+**Resíduo conhecido (A2):** `vincular` consome o código de conta sem credencial (a do quiz), que o `/auth/link-code` recusaria; follow-up.
+E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
 lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
-confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
-(`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
-fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
-nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. Os avisos (`wa_runtime.py`): `wa_linked_other_account`
-recebe o `JA_E_CONTA_WA` (sem a instrução do código, que com login nos dois lados terminaria em
-`apagaria_login`; para unir, o suporte) na saudação, uma vez; `remetente_com_dados` recebe o
-`NAO_JUNTEI_WA` (a saída pelo código) em toda mensagem, com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
-como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
-ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
+confirmação explícita; origem com login e destino sem login junta, e o login migra.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
-mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
-preferência da conta sem credencial), no `remetente_com_dados` e no
-`wa_linked_other_account` (a do remetente e a da conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+mensagem, então eles funcionam no número já ligado e no `precisa_senha` (desligam a
+preferência da conta sem credencial). Os botões de relatório gravam só a preferência; o "parar
 atualizações" também apaga pendências do remetente (abaixo). O texto digitado
 que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
 `parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
@@ -1568,8 +1685,8 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 `get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre dados
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
-ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos`); `vincular 123456` segue o fluxo
+ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone de conta sem credencial, que ainda produz `precisa_senha`; `vincular CODIGO` ou outro canal) nunca
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular 123456` segue o fluxo
 normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
@@ -1961,7 +2078,10 @@ das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
 consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
 `db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
-retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
+retry em processo; falha vira WARNING e o próximo boot repara), e o CHECK de valor
+finito em toda coluna numérica (`_tarefa_finito_checks` →
+`db/finito_checks.ensure_finito_checks_once`: mesmo molde, lock de sessão próprio; ver
+"Banco de dados"). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -2032,6 +2152,39 @@ grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | 
 
 Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
+
+**Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
+`finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico do banco; NULL
+passa).** O teto de negócio do valor digitado é `utils_text.TETO_ENTRADA` (R$ 1 bi, decisão do
+dono 2026-10-15), aplicado só nas portas de entrada. Existe porque `nan <= 0` é False:
+NaN/Infinity/1e308 passavam pelas guardas por porta (`valor_valido`/`valor_finito`, que ficam,
+pela mensagem amigável).
+Nasce em `db/finito_checks.py::ensure_finito_checks_once`, na tarefa de fundo (fora do
+`init_db`, para dado sujo nunca travar o boot): pré-scan tudo-ou-nada (coluna suja =>
+nada é adicionado, `logger.error` uma vez por boot só com `tabela.coluna`, para
+entrar no `backend_errors_24h`), `ADD CONSTRAINT ... NOT VALID` com
+`lock_timeout` de 1s (tabela travada vira `falhas` e o próximo boot tenta de novo),
+depois `VALIDATE`. **Coluna numérica nova é coberta no boot seguinte**; só se exclui
+com motivo escrito em `SEM_CHECK_FINITO` (hoje: `pix_unmatched_payments.value/net_value`).
+A violação vira 400 (`valor_finito_violado_handler` no monólito, `erros.valor_finito_erro`
+no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
+`violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
+(`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
+(traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
+COBRE: (0) 1ª linha: `psycopg.Error.__str__` redigido em `db/connection.py` pelo `diag.message_detail` de toda
+violação de constraint (SQLSTATE 23xxx), em qualquer idioma de `lc_messages` (todo `print(exc)`,
+f-string, `logger.*(..., exc)` e traceback, de qualquer conexão; o texto cru fica em `exc.args[0]`);
+(1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
+(stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de
+`system_event_logs` (`log_system_event_sync` e `admin_dashboard.log_system_event`): `message` e
+`details`. NÃO cobre (a 1ª linha pega o que vem de `str(exc)`): logger com `propagate=False` (uvicorn) ou `print` de texto cru, handler fora
+do root, nem outro INSERT em `system_event_logs`, nem a resposta HTTP/WhatsApp (essa é a frase fixa).
+Rota que embrulha `except Exception` em `HTTPException(f"...{exc}")`
+tem de deixar o `CheckViolation` passar antes (`except psycopg.errors.CheckViolation: raise`).
+Em teste: o `conftest` instala as constraints no banco da execução; teste que grava veneno
+DE PROPÓSITO (o espelho legado sujo que a leitura tem de tolerar) usa a fixture
+`sem_check_finito("tabela", "coluna")`, que derruba o CHECK e o recoloca NOT VALID no fim.
+Escritor real do produto que esbarra no CHECK é bug da porta, não motivo para a fixture.
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,

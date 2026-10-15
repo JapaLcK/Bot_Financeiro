@@ -42,6 +42,7 @@ from datetime import date, datetime
 from utils_date import _tz
 
 from .analytics import clausula_busca, termos_busca
+from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
 from .connection import LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
 from .open_finance import ACTIONABLE_PENDING_SQL, actionable_pending_params
 from .open_finance_cash import VINCULADO_SQL
@@ -91,7 +92,9 @@ _ESTADO_SQL = f"""
         select 1 from bill_instances bi where bi.launch_id = launches.id
            and bi.user_id = launches.user_id) as paga_conta,
       {FUNDIDO_SQL} as fundido,
-      coalesce(id in (select id from pendentes), false) as pendente"""
+      coalesce(id in (select id from pendentes), false) as pendente,
+      {DECLARADA_SQL} as declarada,
+      {CASADA_SQL} as casada"""
 
 # Tabela do dono (P2, P3, P5). A ordem dos `when` é a precedência. A 1ª cláusula, `tipo in
 # guardado`, vence TODAS as outras (inclusive P5 e `source='open_finance'`): defesa em
@@ -102,6 +105,7 @@ _ESTADO_SQL = f"""
 PODE_SQL = f"""case
       when tipo in {_GUARDADO} then '{{}}'::text[]
       when source = 'open_finance' then array['categoria','descricao']
+      when declarada then array['categoria','descricao','apagar']
       when not (carteira and marcada) then '{{}}'::text[]
       when especie then array['descricao','apagar']
       when paga_conta and fundido then array['categoria']
@@ -150,15 +154,16 @@ _PERNA_LANCAMENTOS = f"""
            coalesce(upper(a.currency), upper(l.currency), 'BRL') as moeda,
            l.alvo as descricao, l.nota as mensagem, {_chave('l.categoria')} as categoria,
            case when l.source = 'open_finance' then 'banco'
+                when l.declarada then 'banco'
                 when l.carteira and l.marcada then 'carteira' else 'registro_antigo' end as origem,
-           l.fundido, conn.institution_name as instituicao,
+           l.fundido or l.casada as fundido, conn.institution_name as instituicao,
            (select a2.id from open_finance_accounts a2
               join open_finance_connections c2 on c2.id = a2.connection_id and c2.user_id = l.user_id
              where a2.provider_account_id = a.provider_account_id and upper(a2.type) = 'BANK'
              order by c2.id desc limit 1) as conta_id,
            null::bigint as cartao_id, null::int as parcela_n, null::int as parcela_total,
            null::text as fatura, l.pode,
-           {_motivos(("conciliacao_pendente", "l.pendente"),
+           {_motivos(("conciliacao_pendente", "l.pendente or (l.declarada and not l.casada)"),
                      ("transacao_pendente", "t.status_banco = 'PENDING'"), *_moeda("a"))} as motivos
       from (select launches.*, {TIPO_CANON_SQL} as tipo_canon, {LAUNCH_HAS_TIME_SQL} as has_time,
                    case when not ({LAUNCH_HAS_TIME_SQL}) and posted_at is not null then posted_at

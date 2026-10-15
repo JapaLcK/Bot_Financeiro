@@ -1,17 +1,20 @@
 """Declarações bancárias: registrar é diferente de conferir com o extrato."""
 from __future__ import annotations
 
-from datetime import datetime
+from collections import Counter
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from .bank_declaracoes import congelada, desde_da_leitura, e_fluxo, elegivel_fluxo, janela, projeta, projeta_todas, tem_evidencia
 from .connection import get_conn
 from utils_date import _tz
+from utils_text import VALOR_MAX
 
 
 def _amount(value):
     try:
         result = Decimal(str(value))
-        return result if result.is_finite() else None
+        return result if result.is_finite() and result.copy_abs() <= VALOR_MAX else None
     except (InvalidOperation, TypeError, ValueError):
         return None
 
@@ -77,7 +80,7 @@ def _lock_user(cur, user_id):
     cur.execute("select user_id from accounts where user_id=%s for update", (user_id,))
 
 
-def _transactions(cur, user_id, *, lock=False):
+def _transactions(cur, user_id, *, lock=False, desde: date | None = None, ids=()):
     from .open_finance import BANK_ACCOUNTS_SQL, is_credit_card_payment, investment_transfer_kind
     from .open_finance_cash import cash_internal_tx_ids
     cur.execute(
@@ -90,8 +93,9 @@ def _transactions(cur, user_id, *, lock=False):
              where (t.imported_launch_id is null or l.user_id=%s)
                -- saque/depósito em espécie já é da Carteira (db/open_finance_cash.py)
                and not t.id = any(%s)
+               and (%s::date is null or t.transaction_date >= %s::date or t.id = any(%s))
              order by t.transaction_date, t.id""" + (" for update of t" if lock else ""),
-        (user_id, user_id, list(cash_internal_tx_ids(cur, user_id))))
+        (user_id, user_id, list(cash_internal_tx_ids(cur, user_id)), desde, desde, list(ids)))
     rows = []
     for row in cur.fetchall():
         row = dict(row)
@@ -104,7 +108,8 @@ def _transactions(cur, user_id, *, lock=False):
 
 def _declarations(cur, user_id):
     cur.execute(
-        """select d.*, l.alvo, l.tipo, l.efeitos->'funding_source'->>'label' as bank_label
+        """select d.*, l.alvo, l.nota, l.tipo, l.valor as launch_valor, l.criado_em as launch_criado_em,
+                  l.efeitos->'funding_source'->>'label' as bank_label
              from bank_movement_declarations d
              join launches l on l.id=d.launch_id and l.user_id=d.user_id
             where d.user_id=%s order by d.declared_at, d.launch_id""", (user_id,))
@@ -112,6 +117,8 @@ def _declarations(cur, user_id):
 
 
 def _eligible(declaration, tx, *, manual=False):
+    if e_fluxo(declaration):
+        return elegivel_fluxo(declaration, tx, manual=manual)
     from .open_finance import RECON_DATE_WINDOW, classify_open_finance_launch
     amount = _money(declaration.get("amount"))
     if amount is None or _money(tx["amount"]) != amount:
@@ -139,9 +146,10 @@ def _bind(cur, user_id, declaration, tx, method):
     old_id = tx.get("imported_launch_id")
     cur.execute(
         """update bank_movement_declarations
-              set matched_transaction_id=%s, confirmation_method=%s, confirmed_at=now()
+              set matched_transaction_id=%s, confirmation_method=%s, confirmed_at=now(),
+                  requires_review = requires_review and not %s
             where user_id=%s and launch_id=%s""",
-        (tx["id"], method, user_id, declaration["launch_id"]))
+        (tx["id"], method, e_fluxo(declaration), user_id, declaration["launch_id"]))
     cur.execute(
         """update open_finance_transactions t
               set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='bank_movement_confirmed'
@@ -163,13 +171,20 @@ def reconcile_bank_movements(cur, user_id):
     cur.execute(BANK_ACCOUNTS_SQL, (user_id,))
     active_accounts = {row["id"] for row in cur.fetchall()}
     for d in declarations:
-        if d["account_id"] not in active_accounts and not d["account_ambiguous"]:
+        if d["account_id"] not in active_accounts and not d["account_ambiguous"] and not e_fluxo(d):
             cur.execute("update bank_movement_declarations set account_ambiguous=true where launch_id=%s and user_id=%s", (d["launch_id"], user_id))
             d["account_ambiguous"] = True
         if not d["matched_transaction_id"] and d["confirmation_method"]:
             cur.execute("update bank_movement_declarations set confirmation_method=null, confirmed_at=null, requires_review=true where launch_id=%s and user_id=%s", (d["launch_id"], user_id))
             d["requires_review"] = True
-    transactions = _transactions(cur, user_id, lock=True)
+    # Congelada (fluxo casado há muito): não alarga a janela de leitura nem busca par, mas a PRÓPRIA prova
+    # segue revalidada (`ids`): o banco apagar/corrigir a transação desvincula também a antiga.
+    hoje = datetime.now(_tz()).date()
+    congeladas = {d["launch_id"] for d in declarations if congelada(d, hoje)}
+    transactions = _transactions(
+        cur, user_id, lock=True,
+        desde=desde_da_leitura([d for d in declarations if d["launch_id"] not in congeladas]) or date.max,
+        ids=[d["matched_transaction_id"] for d in declarations if d["launch_id"] in congeladas])
     by_id = {t["id"]: t for t in transactions}
     occupied = set()
     for d in declarations:
@@ -194,18 +209,27 @@ def reconcile_bank_movements(cur, user_id):
         d["matched_transaction_id"] = None
         d["requires_review"] = True
     pending = [d for d in declarations if not d["matched_transaction_id"]]
-    graph = {d["launch_id"]: [t for t in transactions if t["id"] not in occupied
-                              and _free(t) and _eligible(d, t)] for d in pending}
+    dates = [t["transaction_date"] for t in transactions]
+    graph = {d["launch_id"]: [t for t in janela(transactions, dates, d) if t["id"] not in occupied
+                              and _free(t) and _eligible(d, t) and tem_evidencia(d, t)] for d in pending}
+    claims = Counter(t["id"] for choices in graph.values() for t in choices)  # candidato único nos DOIS sentidos
     confirmed = 0
     for d in pending:
         candidates = graph[d["launch_id"]]
-        if d["requires_review"] or d["account_ambiguous"] or len(candidates) != 1:
+        # Fluxo: conta NULL = qualquer conta, então a revisão pós-desconexão (que protege a escolha
+        # de conta, ADR 0003) não se aplica; o candidato único nos dois sentidos segue valendo.
+        # Congelada que perdeu a prova NESTA passada leu só a janela das ativas: não escolhe par agora
+        # (voltaria a ligar com unicidade falsa); no próximo reconcile ela já não é congelada.
+        if (d["requires_review"] and not e_fluxo(d)) or d["account_ambiguous"] or len(candidates) != 1 \
+                or d["launch_id"] in congeladas:
             continue
         tx = candidates[0]
-        if sum(any(t["id"] == tx["id"] for t in choices) for choices in graph.values()) != 1:
+        if claims[tx["id"]] != 1:
             continue
         _bind(cur, user_id, d, tx, "automatic")
+        d["matched_transaction_id"] = tx["id"]
         confirmed += 1
+    projeta_todas(cur, user_id, declarations, by_id)  # fluxo: valor/data do lançamento seguem o extrato
     return confirmed
 
 
@@ -265,6 +289,7 @@ def list_bank_movements(user_id):
         declarations = _declarations(cur, user_id)
         transactions = _transactions(cur, user_id)
     used = {d["matched_transaction_id"] for d in declarations if d["matched_transaction_id"]}
+    dates = [t["transaction_date"] for t in transactions]
     result = []
     for d in declarations:
         if d["matched_transaction_id"]:
@@ -275,7 +300,8 @@ def list_bank_movements(user_id):
                        "requires_review": d["requires_review"] or d["account_ambiguous"] or d["account_id"] is None,
                        "candidates": [{"id": t["id"], "description": t["description"], "bank": t["institution_name"],
                                        "amount": float(t["amount"]), "date": t["transaction_date"].isoformat()}
-                                      for t in transactions if t["id"] not in used and _free(t) and _eligible(d,t,manual=True)]})
+                                      for t in janela(transactions, dates, d)
+                                      if t["id"] not in used and _free(t) and _eligible(d,t,manual=True)]})
     return result
 
 
@@ -296,6 +322,7 @@ def confirm_bank_movement(user_id, launch_id, transaction_id):
         if not _free(tx) or not _eligible(d, tx, manual=True):
             raise ValueError("MOVEMENT_INCOMPATIBLE")
         _bind(cur, user_id, d, tx, "manual")
+        projeta(cur, user_id, d, tx)
         conn.commit()
 
 

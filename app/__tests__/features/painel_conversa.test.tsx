@@ -1,12 +1,11 @@
 import { KeyboardAvoidingView, StyleSheet, View } from "react-native";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { claro } from "@/ui/tokens";
-import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { BY_PROFILE, COMMON } from "@/features/painel/perguntas";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, apertar, bela, campo, caminho, delecoes, digitar, enviar, ir, noResumo, ok, posts, reiniciar, srv, trocarParaBela, voltar, type Segurar } from "./conversa_apoio";
-import { router } from "expo-router";
+import { abrir, apertar, bela, campo, caminho, delecoes, digitar, enviar, fim, ir, noResumo, ok, posts, reiniciar, respostaFluxo, srv, trocarParaBela, voltar, type Segurar } from "./conversa_apoio";
+import v2 from "../../../tests/frontend/api_v2_respostas.json";
 // O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
 jest.setTimeout(20_000);
 
@@ -54,9 +53,10 @@ it("POST lento: sair e voltar mostra o turno e o POST não é abortado", async (
  expect(post[1].signal.aborted).toBe(false); expect(screen.getByText("Pergunta lenta")).toBeTruthy(); expect(screen.getByText("Resposta tardia")).toBeTruthy();
 });
 it("privacidade: turno inteiro vira marcador, sem card; campo, chips e cota desligados", async () => {
- await abrir(); await apertar(ASK_META); await waitFor(() => expect(screen.getByText("Metas e caixinhas")).toBeTruthy());
+ srv.chat = () => { srv.uso++; const f = respostaFluxo(); f.empurrar({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2.metas.varios } }] } }); f.empurrar(fim("Resposta do Piggy")); f.fechar(); return f; };
+ await abrir(); await enviar("metas"); await waitFor(() => expect(screen.getByTestId("bloco-metas")).toBeTruthy());
  await apertar("Ocultar valores");
- expect(screen.getAllByText("Mensagem oculta enquanto os valores estão privados.")).toHaveLength(1); expect(screen.queryByText("Metas e caixinhas")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull();
+ expect(screen.getAllByText("Mensagem oculta enquanto os valores estão privados.")).toHaveLength(1); expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull();
  expect(screen.queryByText(/mensagens utilizadas/)).toBeNull(); expect(campo().props.editable).toBe(false); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
  await apertar("Mostrar valores"); expect(screen.getByText("Resposta do Piggy")).toBeTruthy();
 });
@@ -275,37 +275,6 @@ it("Tentar novamente depois de abertura com voo e nova abertura sem voo: o retry
  const g = segurar(); srv.chat = async () => { await g.promessa; return ok("Posso apagar?")(); }; await abrir(); await enviar("apaga"); await noResumo(); await ir("/piggy"); g.soltar(); await act(drenar); await act(drenar); await noResumo();
  srv.statusPendencia = 404; await ir("/piggy"); await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
  srv.statusPendencia = 200; const antes = delecoes().length; await apertar("Tentar novamente"); await act(drenar); expect(delecoes()).toHaveLength(antes + 1);
-});
-
-// ---- cards (Q4/Q9)
-it("chip com assunto conhecido mostra o widget real abaixo da resposta; o mesmo texto digitado não", async () => {
- await abrir(); await apertar(ASK_META); await waitFor(() => expect(screen.getByText("Metas e caixinhas")).toBeTruthy());
- expect(screen.getByText("Resposta do Piggy")).toBeTruthy(); expect(screen.getByText("Viagem")).toBeTruthy();
- await noResumo(); await voltar(); await enviar(ASK_META); await waitFor(() => expect(screen.getAllByText("Resposta do Piggy")).toHaveLength(1));
- expect(screen.queryByText("Metas e caixinhas")).toBeNull();
-});
-it("o card do chat abre na Folha com o título do widget, fecha, e some ao sair da aba", async () => {
- await abrir(); await apertar(ASK_META); await waitFor(() => expect(screen.getByText("Metas e caixinhas")).toBeTruthy());
- expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
- await apertar("Abrir Metas e caixinhas"); expect(screen.getByRole("header", { name: "Metas e caixinhas" })).toBeTruthy();
- await apertar("Fechar"); expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
- await apertar("Abrir Metas e caixinhas"); await noResumo(); await voltar(); expect(screen.queryByRole("header", { name: "Metas e caixinhas" })).toBeNull();
-});
-it("chip com POST que falha não mostra card", async () => {
- srv.chat = () => resposta(500, { detail: "x" }); await abrir(); await apertar(ASK_META);
- await waitFor(() => expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy()); expect(screen.queryByText("Metas e caixinhas")).toBeNull();
-});
-const comOutroMes = async (ask: string) => {
- const g = segurar(); srv.chat = async () => { await g.promessa; return ok("Resposta do mês")(); };
- await abrir(); await apertar(ask); await ir("/gastos"); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
- await apertar(nomeMes(mesAtual()).slice(0, 3)); await apertar(nomeMes(mesesAnteriores(mesAtual())[1]!));
- g.soltar(); await act(drenar); await voltar(); await waitFor(() => expect(screen.getByText("Resposta do mês")).toBeTruthy());
-};
-it("mês do painel diferente do atual: o card de categorias some", async () => { await comOutroMes(ASK_ECONOMIZAR); expect(screen.queryByText("Para onde vai")).toBeNull(); });
-it("mês do painel diferente do atual: o card de metas continua", async () => { await comOutroMes(ASK_META); expect(screen.getByText("Metas e caixinhas")).toBeTruthy(); });
-it("no mês atual o card de categorias aparece e a linha navega para o Extrato sem erro de contexto", async () => {
- const push = jest.spyOn(router, "push"); await abrir(); await apertar(ASK_ECONOMIZAR); await waitFor(() => expect(screen.getByText("Para onde vai")).toBeTruthy());
- await apertar(/Alimentação/); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação" } });
 });
 
 it("estado vazio: 5 chips do perfil primeiro, depois COMMON", async () => {

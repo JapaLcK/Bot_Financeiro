@@ -14,10 +14,11 @@ from decimal import Decimal
 from functools import cache
 from typing import Any, Callable, NamedTuple
 
+from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
-from ._context import metas_do_turno
+from ._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
 
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
@@ -51,6 +52,22 @@ def exigir_acesso_do_app(uid: int) -> None:
     raise_if_account_scheduled_for_deletion(uid)
     _enforce_subscription_gate(Request({"type": "http", "path": "/ai/chat/stream", "headers": []}), uid)
     exigir_onboarding(uid)
+
+
+def card_ainda_resolve(uid: int, alvo: str) -> bool:
+    """O `show_card alvo` ainda pode aparecer neste turno? Não, se o turno gastou as vagas (`MAX_POR_TURNO`),
+    se o alvo já está na tela, se já falhou (`FALHAS_DE_CARD_DO_TURNO`) ou se a conta não tem acesso ao app. A
+    tool que recusaria mandando ao card só recusa quando isto vale: senão o número não sairia por caminho nenhum."""
+    usados = CARDS_DO_TURNO.get()
+    if usados is not None and (len(usados) >= MAX_POR_TURNO or alvo in usados):
+        return False
+    if alvo in (FALHAS_DE_CARD_DO_TURNO.get() or ()):
+        return False
+    try:
+        exigir_acesso_do_app(uid)  # o MESMO gate do show_card (onboarding, plano)
+    except HTTPException:
+        return False
+    return True
 
 
 def _fio(o) -> Any:

@@ -229,8 +229,8 @@ _SEM_CHAVE = object()
 
 _SALDOS_DA_PLUGGY = pytest.mark.parametrize("saldo,ausente,coluna", [
     (_SEM_CHAVE, True, "0"), (None, True, "0"), ("abc", True, "0"),  # o sync grava 0
-    ("NaN", True, "NaN"),               # `_to_decimal` aceita "NaN": a coluna fica NaN
-    ("Infinity", True, "Infinity"), ("-Infinity", True, "-Infinity"),
+    # não finito/absurdo: `_to_decimal` devolve o default (como "abc") e o CHECK `finito_balance` não vê nada
+    ("NaN", True, "0"), ("Infinity", True, "0"), ("-Infinity", True, "0"),
     (0, False, "0"), ("0", False, "0"), (1234.56, False, "1234.56"),
 ])
 
@@ -272,7 +272,8 @@ def test_saldo_ausente_da_conta_pelo_sync_da_pluggy(uid, saldo, ausente, coluna)
 @pytest.mark.parametrize("tabela,bancos,inv", [
     ("open_finance_accounts", "0", "500"), ("open_finance_investments", "100", "0")])
 @pytest.mark.parametrize("valor", ["NaN", "Infinity", "-Infinity"])
-def test_saldo_nao_finito_na_coluna_soma_zero(uid, tabela, bancos, inv, valor):
+def test_saldo_nao_finito_na_coluna_soma_zero(uid, tabela, bancos, inv, valor, sem_check_finito):
+    sem_check_finito(tabela, "balance")  # o espelho sujo é o cenário: o banco novo o recusaria
     c, _ = _limpo(uid)
     posicao(c, "inv-1", "500")  # o `raw` diz 500: só a coluna estragou
     q(f"update {tabela} set balance=%s::numeric where connection_id=%s", (valor, c))

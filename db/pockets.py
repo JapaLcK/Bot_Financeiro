@@ -8,6 +8,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz
+from utils_text import valor_valido
 
 from .connection import get_conn
 from .investments import (
@@ -301,6 +302,8 @@ def update_pocket_meta(
         sets.append("target_date = NULL")
     else:
         if target_amount is not None:
+            if target_amount and not valor_valido(target_amount):  # 0 = sem meta; NaN é truthy
+                raise ValueError("TARGET_INVALIDO")
             sets.append("target_amount = %s")
             params.append(Decimal(str(target_amount)) if target_amount is not None else None)
         if target_date is not None:
@@ -323,7 +326,7 @@ def update_pocket_meta(
         sets.append("interest_enabled = false")
     if interest_rate is not None:
         rate = Decimal(str(interest_rate))
-        if rate <= 0:
+        if not valor_valido(interest_rate):
             raise ValueError("INTEREST_RATE_INVALID")
         sets.append("interest_rate = %s")
         params.append(rate)
@@ -410,9 +413,9 @@ def pocket_withdraw_to_account(
     if not withdraw_all:
         if amount is None:
             raise ValueError("AMOUNT_INVALID")
-        v = Decimal(str(amount))
-        if v <= 0:
+        if not valor_valido(amount):
             raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
 
@@ -631,7 +634,7 @@ def create_pocket(
 
     desc = (description or "").strip() or None
     rate = Decimal(str(interest_rate))
-    if rate <= 0:
+    if not valor_valido(interest_rate):
         raise ValueError("INTEREST_RATE_INVALID")
     criado_em = datetime.now(_tz())
     today = _today()
@@ -699,9 +702,9 @@ def pocket_deposit_from_account(
     `investment_deposit_from_account` em db/investments.py. `None` = Carteira.
     """
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
+    if not valor_valido(amount):
         raise ValueError("AMOUNT_INVALID")
+    v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
 

@@ -7,6 +7,7 @@ import logging
 
 import db
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 from core.response_formatter import wrap_wa_markup
 from utils_text import fmt_brl
 
@@ -224,6 +225,8 @@ def resolve_delete(user_id: int, confirmed: bool) -> str | None:
                        nivel=logging.WARNING, launch_id=launch_id, user_seq=display_id)
             return frase
         except Exception as e:
+            if violacao_finito(e):
+                raise  # idem
             _log_falha("delete_launch", user_id, e, launch_id=launch_id, user_seq=display_id)
             return erro_tecnico
 

@@ -346,6 +346,26 @@ a { color: inherit; text-decoration: none; }
   margin-top: 14px;
 }
 .delete-confirm.show { display: grid; }
+/* Confirmar segurando (frontend/hold-confirm.js). Classe própria: o #export-confirm
+   usa .delete-confirm e não pode herdar nada daqui. */
+.hold-btn {
+  padding: 0 14px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.hold-ring { width: 18px; height: 18px; flex-shrink: 0; transform: rotate(-90deg); fill: none; stroke-width: 2; }
+.hold-ring-bg { stroke: currentColor; opacity: .25; }
+/* 2π·7 = 43.98: o círculo vazio tem o offset igual à circunferência. Sem transição em
+   idle: soltar zera na hora. O enchimento linear é o feedback, vale também em
+   prefers-reduced-motion (o tempo de segurar não muda). */
+.hold-ring-fg { stroke: currentColor; stroke-linecap: round; stroke-dasharray: 44; stroke-dashoffset: 44; }
+.hold-btn[data-hold-state="holding"] .hold-ring-fg,
+.hold-btn[data-hold-state="done"] .hold-ring-fg { stroke-dashoffset: 0; }
+.hold-btn[data-hold-state="holding"] .hold-ring-fg { transition: stroke-dashoffset var(--hold-ms) linear; }
+.hold-aviso { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .privacy-input {
   min-height: 38px;
   border-radius: var(--radius-md);
@@ -1162,6 +1182,7 @@ body.balance-hidden .account-balance {
 <link rel="stylesheet" href="/open-finance-connect.css?v=1" />
 <script src="/static/auth-refresh.js?v=1"></script>
 <script src="/modals.js"></script>
+<script src="/hold-confirm.js?v=1"></script>
 <script src="/open-finance-connect.js?v=1"></script>
 <script src="/of-status-poll.js?v=1"></script>
   <link rel="stylesheet" href="/app-mode.css?v=34" />
@@ -1734,7 +1755,10 @@ body.balance-hidden .account-balance {
               </button>
               <div class="delete-confirm" id="reset-confirm">
                 <input class="privacy-input" id="reset-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
-                <button class="btn-danger" type="button" id="reset-confirm-btn" onclick="requestAccountReset()">Apagar e recomeçar</button>
+                <button class="btn-danger hold-btn" type="button" id="reset-confirm-btn">
+                  <svg class="hold-ring" viewBox="0 0 18 18" aria-hidden="true"><circle class="hold-ring-bg" cx="9" cy="9" r="7"/><circle class="hold-ring-fg" cx="9" cy="9" r="7"/></svg><span class="hold-label">Segure para apagar e recomeçar</span>
+                </button>
+                <span class="hold-aviso" id="reset-hold-aviso" aria-live="polite"></span>
                 <button class="btn-sm" type="button" onclick="hideResetConfirm()">Cancelar</button>
               </div>
             </div>
@@ -1760,7 +1784,10 @@ body.balance-hidden .account-balance {
               </button>
               <div class="delete-confirm" id="delete-confirm">
                 <input class="privacy-input" id="delete-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
-                <button class="btn-danger" type="button" id="delete-confirm-btn" onclick="requestAccountDeletion()">Confirmar exclusão</button>
+                <button class="btn-danger hold-btn" type="button" id="delete-confirm-btn">
+                  <svg class="hold-ring" viewBox="0 0 18 18" aria-hidden="true"><circle class="hold-ring-bg" cx="9" cy="9" r="7"/><circle class="hold-ring-fg" cx="9" cy="9" r="7"/></svg><span class="hold-label">Segure para excluir a conta</span>
+                </button>
+                <span class="hold-aviso" id="delete-hold-aviso" aria-live="polite"></span>
                 <button class="btn-sm" type="button" onclick="hideDeleteConfirm()">Cancelar</button>
               </div>
             </div>
@@ -2823,28 +2850,42 @@ function showResetConfirm() {
 function hideResetConfirm() {
   document.getElementById("reset-confirm").classList.remove("show");
   document.getElementById("reset-password").value = "";
+  holdReset.resetar();
 }
 
-async function requestAccountReset() {
+// Confirmar segurando o botão (hold-confirm.js): o gesto É a confirmação, então o
+// caminho 'segurar' não abre o confirmModal. Só o clique sem gesto físico
+// (origem === 'clique': leitor de tela, switch control) mantém o modal de antes.
+// Default seguro: só origem === 'segurar' (passada pelo helper) pula o modal; qualquer
+// outra chamada, inclusive sem argumento, confirma antes de apagar.
+const HOLD_MS_IRREVERSIVEL = 1200;
+
+function senhaPreenchida(id) {
+  if (document.getElementById(id).value) return true;
+  showToast("Confirme sua senha", "error");
+  return false;
+}
+
+async function requestAccountReset(origem) {
+  if (!senhaPreenchida("reset-password")) return holdReset.resetar();
   const password = document.getElementById("reset-password").value;
-  if (!password) {
-    showToast("Confirme sua senha", "error");
-    return;
+  if (origem !== "segurar") {
+    const ok = await confirmModal(
+      "Todos os seus dados financeiros serão apagados agora, definitivamente. Login, assinatura e segurança são mantidos.",
+      {
+        title: "Recomeçar do zero?",
+        confirmText: "Apagar tudo e recomeçar",
+        destructive: true,
+      },
+    );
+    if (!ok) return;
   }
-  const ok = await confirmModal(
-    "Todos os seus dados financeiros serão apagados agora, definitivamente. Login, assinatura e segurança são mantidos.",
-    {
-      title: "Recomeçar do zero?",
-      confirmText: "Apagar tudo e recomeçar",
-      destructive: true,
-    },
-  );
-  if (!ok) return;
 
   const btn = document.getElementById("reset-confirm-btn");
-  const original = btn.textContent;
+  const rotulo = btn.querySelector(".hold-label");
+  const original = rotulo.textContent;
   btn.disabled = true;
-  btn.textContent = "Apagando...";
+  rotulo.textContent = "Apagando...";
   try {
     const resp = await fetch(`${API}/settings/reset`, {
       method: "POST",
@@ -2867,7 +2908,8 @@ async function requestAccountReset() {
   } catch (err) {
     showToast(err.message || "Erro ao recomeçar do zero", "error");
     btn.disabled = false;
-    btn.textContent = original;
+    rotulo.textContent = original;
+    holdReset.resetar();
   }
 }
 
@@ -2880,28 +2922,29 @@ function showDeleteConfirm() {
 function hideDeleteConfirm() {
   document.getElementById("delete-confirm").classList.remove("show");
   document.getElementById("delete-password").value = "";
+  holdDelete.resetar();
 }
 
-async function requestAccountDeletion() {
+async function requestAccountDeletion(origem) {
+  if (!senhaPreenchida("delete-password")) return holdDelete.resetar();
   const password = document.getElementById("delete-password").value;
-  if (!password) {
-    showToast("Confirme sua senha", "error");
-    return;
+  if (origem !== "segurar") {
+    const ok = await confirmModal(
+      "Sua conta e todos os seus dados serão removidos definitivamente em 7 dias. Você pode cancelar a exclusão fazendo login novamente nesse período.",
+      {
+        title: "Agendar exclusão da conta?",
+        confirmText: "Agendar exclusão",
+        destructive: true,
+      },
+    );
+    if (!ok) return;
   }
-  const ok = await confirmModal(
-    "Sua conta e todos os seus dados serão removidos definitivamente em 7 dias. Você pode cancelar a exclusão fazendo login novamente nesse período.",
-    {
-      title: "Agendar exclusão da conta?",
-      confirmText: "Agendar exclusão",
-      destructive: true,
-    },
-  );
-  if (!ok) return;
 
   const btn = document.getElementById("delete-confirm-btn");
-  const original = btn.textContent;
+  const rotulo = btn.querySelector(".hold-label");
+  const original = rotulo.textContent;
   btn.disabled = true;
-  btn.textContent = "Agendando...";
+  rotulo.textContent = "Agendando...";
   try {
     const resp = await fetch(`${API}/auth/account`, {
       method: "DELETE",
@@ -2919,9 +2962,28 @@ async function requestAccountDeletion() {
     showToast(err.message || "Erro ao agendar exclusão", "error");
   } finally {
     btn.disabled = false;
-    btn.textContent = original;
+    rotulo.textContent = original;
+    holdDelete.resetar();
   }
 }
+
+// Se o hold-confirm.js não carregar, a página segue de pé e o botão confirma pelo clique
+// (o confirmModal de sempre): ninguém fica sem como confirmar.
+function ligarHold(botaoId, avisoId, senhaId, confirmar) {
+  const botao = document.getElementById(botaoId);
+  if (typeof (window.PBHoldConfirm && window.PBHoldConfirm.ligar) !== "function") {
+    botao.addEventListener("click", () => confirmar("clique"));
+    return { resetar() {} };
+  }
+  return PBHoldConfirm.ligar(botao, {
+    ms: HOLD_MS_IRREVERSIVEL,
+    aviso: document.getElementById(avisoId),
+    podeComecar: () => senhaPreenchida(senhaId),
+    confirmar,
+  });
+}
+const holdReset = ligarHold("reset-confirm-btn", "reset-hold-aviso", "reset-password", requestAccountReset);
+const holdDelete = ligarHold("delete-confirm-btn", "delete-hold-aviso", "delete-password", requestAccountDeletion);
 
 /* ── Bank select ─────────────────────────────── */
 /* ── Estado do plano (Open Finance) ──────────── */

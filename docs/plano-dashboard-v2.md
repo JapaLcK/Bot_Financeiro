@@ -49,6 +49,20 @@ em lugar nenhum).
   resgates e saques. **O único lançamento manual é a carteira Piggy, e ela é só dinheiro
   físico.** No v2 não existe investimento manual, e transação do Open Finance não se cria
   nem se apaga à mão.
+  **Revista em 2026-10-09: ver [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md)**
+  (o PR-A dela, #969, mergeado em 2026-10-15, não toca a Q36; o código ainda vale como está até o PR-B1 e o PR-C). O texto acima fica como
+  histórico. A Q36 deixará de ser trava de escritor para investimento (o manual poderá
+  existir e ser vinculado à posição do banco, PR-C) e para compra manual em cartão **não**
+  sincronizado (PR-B1). Continua valendo para importação de extrato (OFX/CSV/PDF), fatura OFX e
+  compra manual em cartão sincronizado pelo Open Finance, porque não há dedupe do OFX contra a
+  sombra do banco. **Coorte:** a Q36 vale hoje só para quem tem a chave do v2
+  (`core/services/fonte_unica.py`); quem está fora dela e tem banco conectado, sendo Pro, já pode
+  importar OFX. O dono decidiu em 2026-10-13 **preservar esse comportamento neste pacote**; qualquer
+  novo bloqueio de arquivo exige decisão separada.
+  **Trava #498** (decisão de 2026-09-18, PR #498 mergeado em 2026-09-19, “Lançamentos manuais
+  exclusivos para dinheiro”): filtro do painel em `frontend/finance_bot_websocket_custom.py:7690-7694`,
+  rebaixamento auto→ask em `db/open_finance.py:2108-2128` e pendência na ordem inversa em
+  `db/open_finance.py:2180`. A ADR 0006 a revê no PR-B.
 - **Q37 — o que já existe de manual fica só para leitura**, como "registro manual antigo",
   com convite para conectar o banco. Na primeira vez no v2, o usuário confirma quanto da
   carteira é dinheiro vivo e revisa o que o sistema lançou sozinho no passado, para o
@@ -74,12 +88,21 @@ em lugar nenhum).
   transação no extrato. Isso vira regra no código (a forma de pagamento é um estado do
   lançamento e só "dinheiro" grava na carteira), não só instrução para a IA. Marcar conta
   como paga segue a mesma regra.
+  **Revista em 2026-10-09: ver [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md)**
+  (o PR-A dela, #969, foi mergeado em 2026-10-15 e é inerte; o código ainda recusa “banco” até o PR-B). O texto acima fica como histórico.
+  A pergunta “dinheiro vivo ou banco?” continua. “Banco” passará a **gravar** como declaração,
+  conferida com o extrato: o PR-B entrega esse caminho atrás de uma flag que nasce desligada, e
+  ligá-la é um ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. **A Q40 tem coorte
+  própria** (quem tem Open Finance conectado, `regra_ativa`), diferente da Q36 (chave do v2).
 - **Q41 — saque e depósito em espécie** que o Open Finance trouxer mexem na carteira
   sozinhos, com um aviso que o usuário pode desfazer. Dinheiro mudando de lugar não é gasto
   nem receita.
 - **Q42 — recorrente só prevê**, para todo mundo: alimenta a Previsão e o aviso de
   vencimento, e deixa de lançar sozinha na carteira (também no painel antigo), antes da
   etapa 0.
+  **Revista em 2026-10-09: ver [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md)** —
+  sem mudança. O cobrador não é restaurado; a Previsão lê as recorrências de despesa do banco (#866), a receita detectada pelo extrato
+  (#981, só com o documento do pagador) e o fixo manual.
 - **Q43 — o manual para de render**: caixinha manual e investimento manual antigo deixam
   de ganhar juro simulado, antes da etapa 0 e também no painel antigo. O ganho já acumulado
   entra no saldo uma última vez. Sem aviso ao usuário: o dono decidiu em 2026-09-26 (#623)
@@ -335,6 +358,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   com teste cruzando as duas telas.
   **Decidido pelo dono: bloquear para quem tem a chave, em todos os canais** — PR D
   da etapa 1 (§8). Esconder os botões no `/app` fica para depois, se o dono pedir.
+  **Nota de 2026-10-09:** a decisão acima vale para a coorte da chave, mas a Q36 está sendo
+  revista para investimento manual e cartão manual não sincronizado; ver a [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md).
 
 **Etapa 7 (chat)**
 - A interface nova do chat sobre a regra da forma de pagamento (a regra em si vem antes,
@@ -783,7 +808,7 @@ o PR C.
 | 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
 | 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
-| 5 e 6 | 5: #998 (PR 1a, API do mês); 6: nenhum PR de etapa. A tela "Para onde vai" (5) segue com dados de demonstração |
+| 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria), #1008 (PR 2, a tela ligada à API); 6: nenhum PR de etapa. A Etapa 5 ainda não está marcada como concluída |
 | 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
 
 - Etapa 4, PR A (#950) e PR A2 (#954): a tabela `metas` e `GET`/`POST /api/v2/metas`

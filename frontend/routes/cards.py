@@ -7,17 +7,19 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 import asyncio
 import pathlib
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 from db import create_card
 from db.cartoes_resumo import resumo_cartoes
 from db.cards import MAX_CARD_NAME_LEN, MSG_FATURA_DO_BANCO
 from db.open_finance import merged_wallet_delta_async
 from db.reconciliation import wallet_guard_delta_async
 from core.services.funding import carteira_txt
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 from frontend.routes import shared
 
 router = APIRouter()
@@ -62,6 +64,8 @@ async def create_card_route(request: Request, user_id: int, payload: CardCreateP
         raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
     if payload.credit_limit is not None and payload.credit_limit < 0:
         raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
+    if payload.credit_limit and not valor_valido(payload.credit_limit):  # NaN é truthy; 0 = sem limite
+        raise HTTPException(status_code=400, detail="Limite inválido.")
 
     try:
         card_id = await asyncio.to_thread(
@@ -166,6 +170,8 @@ async def update_card_route(request: Request, user_id: int, card_id: int, payloa
         raise HTTPException(status_code=400, detail="Dia de vencimento deve estar entre 1 e 31.")
     if payload.credit_limit is not None and payload.credit_limit < 0:
         raise HTTPException(status_code=400, detail="Limite não pode ser negativo.")
+    if payload.credit_limit and not valor_valido(payload.credit_limit):  # NaN é truthy; 0 = sem limite
+        raise HTTPException(status_code=400, detail="Limite inválido.")
 
     try:
         updated = await asyncio.to_thread(
@@ -248,6 +254,8 @@ async def delete_card_route(request: Request, user_id: int, card_id: int):
     except CartaoDoBanco as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # Mesmo buraco de `/installments`, na mesma porta de cartão: sem este
         # `except`, apagar um cartão (e, por CASCADE, faturas e compras)
         # falhava com a frase de sistema do middleware — 500 "Erro interno do
@@ -360,6 +368,8 @@ async def installment_delete_route(request: Request, user_id: int, group_id: str
     except CompraDoBanco as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # Caminho destrutivo: sem este `except` a exclusão de parcelamento
         # falhava com a frase de sistema do `admin_error_logging_middleware`
         # (500, ou 503 em timeout/queda de banco) — que JÁ logava
@@ -666,6 +676,8 @@ async def pay_bill_route(
         )
     except CartaoDoBanco as exc:  # a adoção pelo banco entre a leitura acima e o pagamento
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao pagar fatura: {exc}") from exc
 

@@ -107,6 +107,28 @@ def test_cor_e_emoji_invalidos_do_catalogo_saem_neutros_em_gastos_e_categorias(l
         assert (cats[nome]["emoji"], cats[nome]["cor"]) == visual, ("categorias", nome)
 
 
+def test_cor_padrao_da_coluna_e_do_outros_saem_neutras_em_gastos_e_categorias(libera, corte):
+    """`#7c3aed` (default da coluna; ninguém o escolheu) e `#64748b` (semente do "outros"; também swatch do
+    seletor do painel antigo, decisão do dono: cinza unificado) saem `CAT_NEUTRA_COR`, em qualquer caixa,
+    em `/categorias` e `/gastos`. Uma cor escolhida (`#ABCDEF`) segue intacta (positivo)."""
+    a = usuario_pagante()
+    ensure_user_categories_seeded(a)
+    esperado = {"roxo": CAT_NEUTRA_COR, "ardosia": CAT_NEUTRA_COR, "ardosiamaiuscula": CAT_NEUTRA_COR,
+                "escolhida": "#ABCDEF"}
+    for nome, cor in (("roxo", "#7c3aed"), ("ardosia", "#64748b"), ("ardosiamaiuscula", "#64748B"),
+                      ("escolhida", "#ABCDEF")):
+        q("insert into user_categories (user_id, name, emoji, color) values (%s, %s, '🥑', %s) returning id",
+          (a, nome, cor))
+        _l(a, 10, INICIO.replace(day=3), categoria=nome)
+    libera(a)
+    por = _por_chave(_ler(a))
+    cats = {c["chave"]: c for c in pede(a, "/api/v2/categorias").json()["categorias"]}
+    for nome, cor in esperado.items():
+        assert por[nome]["cor"] == cor, ("gastos", nome)
+        assert cats[nome]["cor"] == cor, ("categorias", nome)
+    assert cats["outros"]["cor"] == CAT_NEUTRA_COR  # a semente do catálogo (#64748b)
+
+
 # ── E: bordas do corte e do calendário ───────────────────────────────────────
 
 def test_corte_no_primeiro_dia_do_mes_seguinte_e_indisponivel_e_no_ultimo_dia_nao(corte):

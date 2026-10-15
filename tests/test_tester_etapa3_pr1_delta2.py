@@ -96,7 +96,8 @@ def test_delta_funding_none_fisico_legitimo(user_id):
     assert 'carteira_nao_confirmada' not in {m.codigo for m in s.motivos}
 
 @pytest.mark.parametrize('total,paid',[('NaN','0'),('100','NaN'),('Infinity','0'),('100','-Infinity')])
-def test_delta_fatura_nao_finita_preserva_observacao(user_id,total,paid):
+def test_delta_fatura_nao_finita_preserva_observacao(user_id,total,paid,sem_check_finito):
+    for c in ('total','paid_amount'): sem_check_finito('credit_bills',c)  # veneno de propósito: o banco novo o recusaria
     card=db.create_card(user_id,'Fatura nao finita',10,17)
     db.add_credit_purchase(user_id,card,100,'outros','Compra',date.today())
     q('update credit_bills set total=%s,paid_amount=%s,status=%s where user_id=%s and card_id=%s',(D(total),D(paid),'paid',user_id,card))
@@ -108,8 +109,9 @@ def test_delta_fatura_nao_finita_preserva_observacao(user_id,total,paid):
     assert q('select total::text,paid_amount::text,status from credit_bills where user_id=%s',(user_id,))==before
 
 @pytest.mark.parametrize("magnitude",["100","1e100"],ids=["legitimo","grande"])
-def test_delta_fatura_total_agregado_preserva_centavo_apos_cancelamento(pro_small_uid,magnitude):
+def test_delta_fatura_total_agregado_preserva_centavo_apos_cancelamento(pro_small_uid,magnitude,sem_check_finito):
     user_id=pro_small_uid
+    sem_check_finito('credit_bills','total')  # 1e100 de propósito: o banco novo o recusaria
     # Total observado inclui crédito a conferir: mesma classe irmã de T2/T5.
     for i,total in enumerate([D(magnitude),D('.01'),D(magnitude).copy_negate()]):
         card=db.create_card(user_id,f'Fatura agregada {i}',10,17)

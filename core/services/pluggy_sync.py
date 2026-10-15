@@ -17,6 +17,7 @@ from typing import Any
 from dateutil import parser as _dateutil_parser
 
 from utils_date import _tz
+from utils_text import VALOR_MAX
 
 from core.services.pluggy import (
     PluggyApiError,
@@ -85,10 +86,14 @@ def item_missing(exc: Exception) -> bool:
 
 
 def _to_decimal(value: Any, default: str = "0") -> Decimal:
+    # NaN/Infinity/absurdo do banco ou da Pluggy caem no `default`, como "abc": o CHECK
+    # `finito_*` (db/finito_checks.py) recusaria a linha e derrubaria o sync inteiro.
     try:
-        return Decimal(str(value))
+        d = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal(default)
+    # `copy_abs`: `abs()` arredonda no contexto e levanta Overflow com expoente/dígitos além de ~10**6
+    return d if d.is_finite() and d.copy_abs() <= VALOR_MAX else Decimal(default)
 
 
 def _parse_date(value: Any) -> date:

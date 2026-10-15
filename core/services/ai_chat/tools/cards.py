@@ -26,10 +26,12 @@ from typing import Any
 
 import db
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 from utils_date import today_tz
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
+from ..cards import card_ainda_resolve
 from ._base import Tool
 
 
@@ -114,9 +116,14 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             for it in items
         ],
     }
-    if streaming.ativo():  # no app o total da fatura é o card fatura
+    if streaming.ativo() and card_ainda_resolve(user_id, "fatura"):  # no app o total da fatura é o card fatura, se ele ainda puder aparecer
         for k in ("total", "paid_amount", "remaining"):
             del out[k]
+        out["error"] = "total_no_card"
+        out["message"] = (
+            "o total, o pago e o restante da fatura vêm do show_card fatura: chame-o e escreva o total a partir dele. "
+            "Os itens abaixo servem só para citar compras; não some os itens."
+        )
     return out
 
 
@@ -327,10 +334,12 @@ def _add_credit_purchase_execute(user_id: int, args: dict[str, Any]) -> str:
 
     try:
         valor = float(args.get("valor") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor inválido."
     if valor <= 0:
         return "🐷 O valor precisa ser maior que zero."
+    if not valor_valido(valor):  # `nan <= 0` é False; 1e308 também commitava
+        return "🐷 Valor inválido."
 
     parcelas_raw = args.get("parcelas")
     parcelas: int | None = None
@@ -421,6 +430,8 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     except db.CartaoDoBanco as e:
         return f"🐷 {e}"
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("pay_credit_card", user_id, e)
         return "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 

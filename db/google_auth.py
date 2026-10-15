@@ -70,6 +70,14 @@ def auth_account_has_password(user_id: int) -> bool:
     return bool(row and row["password_hash"])
 
 
+# Fonte única do "sem credencial" (§0.7), para a linha `auth_accounts a`: usada aqui, no
+# auto-vínculo (`db_support.attempt_whatsapp_phone_link_impl`) e no espelho do demo.
+SEM_CREDENCIAL_SQL = (
+    "(a.password_hash is null or a.password_hash = '') "
+    "and not exists (select 1 from auth_identities i where i.user_id = a.user_id)"
+)
+
+
 def conta_sem_credencial(user_id: int) -> bool:
     """True se a conta não tem senha (`''` conta como sem, igual a
     `auth_account_has_password`) NEM identidade Google/Apple: só entra pelo link
@@ -82,11 +90,7 @@ def conta_sem_credencial(user_id: int) -> bool:
     Erro de banco sobe (é segurança, não UX)."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """
-            select 1 from auth_accounts a
-            where a.user_id = %s and (a.password_hash is null or a.password_hash = '')
-              and not exists (select 1 from auth_identities i where i.user_id = a.user_id)
-            """,
+            f"select 1 from auth_accounts a where a.user_id = %s and {SEM_CREDENCIAL_SQL}",
             (int(user_id),),
         )
         return cur.fetchone() is not None

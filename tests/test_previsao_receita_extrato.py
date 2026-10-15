@@ -176,7 +176,8 @@ def test_detecta_pelo_ler_com_dois_creditos(user_id):
 
 
 @pytest.mark.parametrize("ruim", ["NaN", "Infinity"])
-def test_credito_nao_finito_no_espelho_nao_derruba_a_previsao_e_a_valida_continua(user_id, ruim):
+def test_credito_nao_finito_no_espelho_nao_derruba_a_previsao_e_a_valida_continua(user_id, ruim, sem_check_finito):
+    sem_check_finito("open_finance_transactions", "amount")  # espelho legado sujo de propósito
     """`amount` é `numeric` e guarda NaN/Infinity, que no Postgres são `> 0`: sem o filtro finito do SQL,
     `receitas_do_extrato` levanta `InvalidOperation` e a Previsão inteira dá 500. O não finito não vira receita."""
     ok = mensais("ok", ["5000"] * 2, desc="EMPRESA X", pagador=DOC)
@@ -237,22 +238,28 @@ def test_isolamento_usuario_a_nao_ve_a_receita_de_b_com_o_mesmo_id_de_transacao(
     assert "EMPRESA" not in str(previsao_v2.apresentar(ler_em(a), a, 90, (30, 60, 90), True))
 
 
-def test_receita_manual_casada_conta_so_a_manual(user_id):
+def test_receita_manual_com_banco_lido_e_ignorada_e_a_do_extrato_conta(user_id):
+    """R2: a manual nasce antes do banco (o escritor recusaria depois). Com banco lido a Previsão
+    nem a lê: a do extrato entra sozinha, sem `igual_a_fixo_manual` e sem `receita_recorrente`."""
     db.set_balance(user_id, D(1000))
     create_recurring_income(user_id, "Empresa X", 5000, "salario", 5, start_date=HOJE)
     credito_mensal(user_id)
     s = ler_em(user_id)
-    assert all(not e.incluida and "recorrencia_banco_igual_a_fixo_manual" in codigos(e) for e in entradas(s))
+    assert entradas(s) and all(e.incluida and "recorrencia_banco_igual_a_fixo_manual" not in codigos(e)
+                               for e in entradas(s))
+    assert not [e for e in s.ocorrencias if e.fonte == "receita_recorrente"]
     assert saldo_90(s) == D("16000")
 
 
-def test_receita_manual_nao_casada_nao_soma_a_detectada(user_id):
+def test_receita_manual_de_valor_diferente_tambem_nao_soma_a_detectada(user_id):
     db.set_balance(user_id, D(1000))
     create_recurring_income(user_id, "Freela", 300, "salario", 20, start_date=HOJE)
     credito_mensal(user_id)
     s = ler_em(user_id)
-    assert all(not e.incluida and "recorrencia_banco_pode_repetir_manual" in codigos(e) for e in entradas(s))
-    assert saldo_90(s) == D("1900")  # 1000 + 3 × 300
+    assert entradas(s) and all(e.incluida and "recorrencia_banco_pode_repetir_manual" not in codigos(e)
+                               for e in entradas(s))
+    assert not [e for e in s.ocorrencias if e.fonte == "receita_recorrente"]
+    assert saldo_90(s) == D("16000")  # 1000 + 3 × 5000; os 300 do Freela não contam
 
 
 def test_o_documento_do_pagador_nunca_sai(user_id):

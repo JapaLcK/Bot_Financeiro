@@ -23,7 +23,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config.env import load_app_env
-from core.pg_text import limpa_para_pg
+from core.pg_text import limpa_para_pg, redigir_failing_row
 
 
 load_app_env()
@@ -190,8 +190,8 @@ def log_system_event_sync(
                     VALUES (%s, %s, %s, %s, %s, %s)
                     """,
                     (limpa_para_pg(level), limpa_para_pg(event_type),
-                     limpa_para_pg(message[:1000]), limpa_para_pg(source),
-                     user_id, Jsonb(limpa_para_pg(details or {}))),
+                     limpa_para_pg(redigir_failing_row(message)[:1000]), limpa_para_pg(source),
+                     user_id, Jsonb(limpa_para_pg(redigir_failing_row(details or {})))),
                 )
             conn.commit()
     except Exception as exc:

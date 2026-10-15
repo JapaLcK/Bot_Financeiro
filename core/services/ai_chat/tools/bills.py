@@ -24,6 +24,7 @@ from typing import Any
 
 from ._base import Tool
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 
 _ERRO_PAGAR = "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 
@@ -200,6 +201,8 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         return (f"🐷 O valor da *{nome}* precisa ser maior que zero. "
                 f"Quanto veio este mês?")
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("mark_bill_paid", user_id, e)
         return _ERRO_PAGAR
     if paid is None:
@@ -265,7 +268,7 @@ def _resolve_date(s: Any, days: Any = None) -> date | None:
 
 def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     from db.bills import create_boleto
-    from utils_text import fmt_brl
+    from utils_text import fmt_brl, valor_valido
 
     name = (args.get("name") or "").strip()
     if not name:
@@ -273,16 +276,20 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     amount = args.get("amount")
     try:
         amount = float(amount)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         amount = 0.0
     if amount <= 0:
         return "🐷 Qual o valor do boleto?"
+    if not valor_valido(amount):
+        return "🐷 Valor inválido."
     due = _resolve_date(args.get("due_date"), args.get("days"))
     if due is None:
         return "🐷 Qual o vencimento do boleto? (ex: 15/08)"
     try:
         b = create_boleto(user_id, name, amount, due)
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("add_boleto", user_id, e)
         return "🐷 Não consegui cadastrar o boleto agora. Tenta de novo em instantes."
     d = date.fromisoformat(b["due_date"][:10]) if b.get("due_date") else due

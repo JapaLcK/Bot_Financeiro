@@ -32,6 +32,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
@@ -742,7 +743,7 @@ def isencao_do_barrado(texto: str, uid: int):
     (#711, T5) perguntam aqui. `allow_ai=False`: só as regras determinísticas,
     sem DB e sem rede."""
     from core.services.billing_commands import is_billing_command
-    classificado = classify(texto, user_id=uid, allow_ai=False)
+    classificado = classify(texto, allow_ai=False)  # sem `user_id`: com ele o classificador lê a conta (chave das metas)
     if classificado.intent in ("help", "help.tutorial"):
         return "ajuda", classificado
     if is_billing_command(texto):
@@ -762,9 +763,10 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     sempre — a do convite, ou a da isenção (ajuda/billing), que este gate monta
     ele mesmo. Ver o comentário da isenção lá embaixo.
 
-    Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
-    attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
-    é a conta real do usuário — não corre o risco de barrar quem ia vincular.
+    Não corre o risco de barrar quem ia vincular: o código de vínculo
+    (`vincular 123456`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
+    única coisa que liga um número a uma conta (o telefone digitado não liga mais;
+    `attempt_whatsapp_phone_link` só classifica o número).
 
     Fail-open igual aos outros gates Pro: se a checagem quebrar, deixa passar.
     Trancar quem está pagando é pior do que escapar uma mensagem.
@@ -1316,6 +1318,12 @@ def handle_incoming(msg: IncomingMessage, *,
 
     except Exception as exc:
         pergunta_no_turno.set(MANTEM)
+        if (finito := violacao_finito(exc)) is not None:
+            # CHECK `finito_*` do banco: valor absurdo que passou pela guarda do handler.
+            # Só o nome da constraint no log: `str(exc)` traz "Failing row contains (...)".
+            logger.warning("handle_incoming: valor fora do limite barrado pelo banco "
+                           "(constraint=%s platform=%s)", finito, msg.platform)
+            return [OutgoingMessage(text=format_for_platform(MSG_VALOR_WHATSAPP, msg.platform))]
         tb = traceback.format_exc()
         logger.error(
             "handle_incoming FAILED platform=%s user_id=%s chars=%s error=%s",

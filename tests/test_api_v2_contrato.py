@@ -7,7 +7,7 @@
 """
 import calendar
 import json
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -20,7 +20,7 @@ from api.v2.assinaturas import Assinaturas
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
-from api.v2.gastos import Gastos
+from api.v2.gastos import Gastos, GastosDaCategoria
 from api.v2.guia import DICAS, PASSOS, Guia
 from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
@@ -357,6 +357,27 @@ def test_fixture_de_gastos_segue_o_modelo_e_fecha_a_conta(nome):
         assert all(c["anterior_ate_corte"] is None for c in f["categorias"])
     else:  # o total do anterior inclui categoria que não está na lista: nunca menos que Σ
         assert Decimal(f["anterior_total_ate_corte"]) >= sum(Decimal(c["anterior_ate_corte"]) for c in f["categorias"])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["gastos_categoria"]))
+def test_fixture_de_gastos_categoria_segue_o_modelo_e_fecha_a_conta(nome):
+    f = FIXTURES["gastos_categoria"][nome]
+    GastosDaCategoria.model_validate(f)
+    assert len(f["serie"]) == 3 and f["serie"][-1]["mes"] == f["mes"]
+    if not f["disponivel"]:  # fora do histórico: nunca "0"
+        assert f["total"] is f["compras"] is f["valor_medio"] is None
+        assert not f["ultimas"] and not f["dias"] and not f["estabelecimentos"] and all(s["valor"] is None for s in f["serie"])
+        return
+    total = Decimal(f["total"])
+    assert sum(Decimal(d["total"]) for d in f["dias"]) + Decimal(f["fora_da_grade"]["valor"]) == total
+    assert f["serie"][-1]["valor"] is None or Decimal(f["serie"][-1]["valor"]) == total
+    assert sum(Decimal(e["valor"]) for e in f["estabelecimentos"]) <= total
+    assert sum(e["quantidade"] for e in f["estabelecimentos"]) <= f["compras"] and len(f["ultimas"]) <= min(6, f["compras"])
+    if f["compras"] == 0:  # sem compras não há média: null, nunca 0
+        assert f["valor_medio"] is None and total == 0
+    else:
+        assert Decimal(f["valor_medio"]) == (total / f["compras"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    assert all(m["categoria"] == f["categoria"]["chave"] for d in f["dias"] for m in d["maiores"])
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["guia"]))

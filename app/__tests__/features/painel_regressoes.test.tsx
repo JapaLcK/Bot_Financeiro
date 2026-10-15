@@ -75,6 +75,16 @@ it("indicador tight e prazo da meta têm cópia em português", async () => {
  renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Prazo apertado")).toBeTruthy());
  expect(screen.getByText("03/11/2026")).toBeTruthy(); expect(screen.queryByText("tight")).toBeNull();
 });
+it("valores ocultos na rota Metas: a barra de progresso e os valores da meta somem; voltam ao mostrar", async () => {
+ const impl = fetchFalso.getMockImplementation()!;
+ fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/goals/1/status" ? resposta(200, fixture["/goals/1/status"]) : impl(url, req));
+ const barras = () => screen.UNSAFE_root.findAll((n) => typeof n.type === "string" && n.props.accessibilityRole === "progressbar"); // a barra não é `accessible`: getByRole não a acha
+ renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Caixinha manual")).toBeTruthy());
+ expect(barras()).toHaveLength(1); expect(screen.getByLabelText("6000 reais")).toBeTruthy();
+ await apertar("Ocultar valores");
+ expect(barras()).toHaveLength(0); expect(screen.queryByLabelText("6000 reais")).toBeNull(); expect(screen.getByText("Caixinha manual")).toBeTruthy();
+ await apertar("Mostrar valores"); expect(barras()).toHaveLength(1);
+});
 it("calendário distingue meses de compra e mantém a data civil no drilldown", async () => {
  detalhes = { ...fixture["/api/app/mes-detalhes"], dias: [{ dia: "2026-09-03", entrou: "0.00", saiu: "1.00" }, { dia: "2026-10-03", entrou: "0.00", saiu: "2.00" }] };
  renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByTestId("calendario-dia-2026-09-03")).toBeTruthy());

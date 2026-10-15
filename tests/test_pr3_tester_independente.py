@@ -31,7 +31,9 @@ def test_identidade_unicode_delimitadores_provedor(user_id, kind):
     assert all(r[link] for r in espelho(user_id))
 
 
-@pytest.mark.parametrize('amount', ['0','0.01','-0.01','999999999999999.99','-999999999999999.99'])
+# Extremo = VALOR_MAX (1e13, CHECK finito_*): o domínio não chega mais a 1e15, onde float8 perdia centavo.
+# Este teste mede só o restore exato dos limites do domínio, não precisão de float.
+@pytest.mark.parametrize('amount', ['0','0.01','-0.01','9999999999999.99','-9999999999999.99'])
 def test_limites_bancarios_restaura_exato(user_id, amount):
     cid,lid,txid,original = fundida(user_id)
     before = q('select balance from accounts where user_id=%s',(user_id,),True)
@@ -90,8 +92,9 @@ def test_normalizador_data_real_utc_fronteira(user_id):
 def test_snapshot_numerico_grande_sobrevive_edicao_e_restore(user_id):
     db.add_launch_and_update_balance(user_id,'despesa',100,'Mercado',None,'alimentação',ORIGINAL)
     lid = q('select id from launches where user_id=%s',(user_id,),True)[0]['id']
-    # Valor válido no numeric, ajustado pelo editor antes de criar pendência.
-    value = Decimal('999999999999999.99')
+    # Limite técnico (VALOR_MAX = 1e13, CHECK finito_*); update_launch_fields recusa >2 casas, então o
+    # float8 não é mais exercitado em precisão aqui. Ajustado pelo editor antes de criar pendência.
+    value = Decimal('9999999999999.99')
     db.update_launch_fields(user_id,lid,valor=value,exigir_pode=True)
     before = lancamento(user_id,lid)
     cid = conecta(user_id,f'grande-{user_id}')

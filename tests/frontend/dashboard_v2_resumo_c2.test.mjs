@@ -59,7 +59,7 @@ for (const perfil of ["padrao", "economizar", "controlar", "dividas", "autonomo"
   test(`Para onde vai, ${perfil}: as 8 categorias alcançáveis rolando a lista, o bloco sem transbordar, de 1440 a 712px`, async () => {
     const r = {};
     for (const width of LARGURAS) {
-      const { ctx, page, ir } = await abrir({ width, perfil });
+      const { ctx, page, ir } = await abrir({ width, perfil, gastos: "muitas", espera: "#w-categorias .cats" });
       await ir();
       r[width] = await categorias(page);
       await ctx.close();
@@ -72,7 +72,7 @@ for (const perfil of ["padrao", "economizar", "controlar", "dividas", "autonomo"
 // A lista que rola é alcançável por Tab, com o anel de foco global, e diz o que é.
 for (const width of [1440, 1100, 808]) {
   test(`${width}px: a lista de categorias recebe foco pelo Tab, com foco visível e rótulo`, async () => {
-    const { ctx, page, ir } = await abrir({ width });
+    const { ctx, page, ir } = await abrir({ width, espera: "#w-categorias .cats" });
     await ir();
     await page.locator("#w-categorias .w-open").focus();
     await page.keyboard.press("Tab");
@@ -91,7 +91,7 @@ for (const width of [1440, 1100, 808]) {
 test("positivo: a 1000px, no celular (390) e na /gastos nada rola e as categorias ficam onde estavam", async () => {
   const r = [];
   for (const [width, rota] of [[1000, "/"], [390, "/"], [1440, "/gastos"]]) {
-    const { ctx, page, ir } = await abrir({ width, espera: "#w-categorias" });
+    const { ctx, page, ir } = await abrir({ width, espera: "#w-categorias .cats", gastos: "muitas" });
     await ir(rota);
     await assentar(page);
     r.push(await page.evaluate(() => {
@@ -110,22 +110,22 @@ test("positivo: a 1000px, no celular (390) e na /gastos nada rola e as categoria
   assert.deepEqual(r, [[8, 0, true, "0"], [8, 0, true, "0"], [8, 0, true, null]]);
 });
 
-// A legenda dá o total de todas as categorias (cada valor vem arredondado ao real, então a soma
-// pode diferir em até meio real por categoria).
-const reais = (t) => Number(t.replace(/\D/g, ""));
+// A legenda dá o total das categorias, em centavos inteiros: a soma das linhas é exatamente ele (o cliente não soma
+// dinheiro, o total é o do servidor).
+const centavos = (t) => Number(t.replace(/\D/g, ""));
 const LEGENDA = [1440, 1100, 808];
 test("Para onde vai: o total da legenda é a soma das 8 categorias", async () => {
   const r = {};
   for (const width of LEGENDA) {
-    const { ctx, page, ir } = await abrir({ width });
+    const { ctx, page, ir } = await abrir({ width, gastos: "muitas", espera: "#w-categorias .cats" });
     await ir();
     const { lede, valores } = await page.evaluate(() => {
       const art = document.querySelector("#w-categorias");
       return { lede: art.querySelector(".w-lede").textContent, valores: [...art.querySelectorAll(".cats > li .cat-val")].map((v) => v.textContent) };
     });
     await ctx.close();
-    const soma = valores.reduce((a, v) => a + reais(v), 0);
-    r[width] = [valores.length, Math.abs(reais(lede.split("·")[0]) - soma) <= valores.length / 2];
+    const soma = valores.reduce((a, v) => a + centavos(v), 0);
+    r[width] = [valores.length, centavos(lede.split("·")[0]) === soma];
   }
   assert.deepEqual(r, Object.fromEntries(LEGENDA.map((w) => [w, [8, true]])));
 });

@@ -86,6 +86,7 @@ def add_launch_and_update_balance(
     *,
     origem: str | None = ORIGEM_CARTEIRA,
     cur=None,
+    declaracao_banco: bool = False,
 ):
     """
     Lança em launches e atualiza saldo em accounts na mesma transação.
@@ -107,7 +108,35 @@ def add_launch_and_update_balance(
 
     `origem` grava a marca `launches.origem` (padrão: todo canal marca sem lembrar).
     `None` = só leitura no v2: quem passa é quem grava efeito que o `efeitos` não desfaz.
+
+    `declaracao_banco=True` (despesa/receita "paga pelo banco"): `delta_conta: 0`, `origem=None`,
+    e a declaração (`db/bank_declaracoes.py`) nasce no MESMO cursor/commit do lançamento, que
+    ainda concilia com o extrato. Erros `ValueError` `DECLARACAO_*` antes de abrir a conexão; não aceita `cur` externo.
     """
+    if declaracao_banco:
+        if tipo not in ("despesa", "receita"):
+            raise ValueError("DECLARACAO_TIPO_INVALIDO")
+        from .bank_movements import _amount, _money
+        # Sem arredondar em silêncio: ou é um valor > 0 de até 2 casas, ou a recusa diz qual é o problema.
+        d, recebido = _amount(valor), str(valor)[:40]
+        m = _money(d) if d is not None and d > 0 else None
+        if m is None:
+            raise ValueError(f"DECLARACAO_VALOR_INVALIDO: o valor precisa ser um número maior que zero (recebido: {recebido})")
+        if m != d:
+            raise ValueError(f"DECLARACAO_VALOR_CASAS: o valor aceita no máximo 2 casas decimais (recebido: {recebido})")
+        from utils_text import is_internal_category
+        if is_internal_movement or is_internal_category(categoria):  # a mesma regra da recusa de edição
+            raise ValueError("DECLARACAO_INTERNA: despesa ou receita declarada pelo banco não pode ser "
+                             "movimentação interna nem ter categoria de investimento, transferência ou fatura")
+        if extra_efeitos:
+            raise ValueError("DECLARACAO_ARGS_INCOMPATIVEIS")
+        if cur is not None:  # tomaria o mutex do usuário dentro da transação do chamador
+            raise ValueError("DECLARACAO_CURSOR_EXTERNO")
+        apply_delta, origem = False, None
+        extra_efeitos = {"funding_source": {"kind": "bank", "of_account_id": None, "account_ambiguous": False}}
+    # Para todo lançamento (a declaração acima já validou o seu, mais estrito): Só finitude: aceita 0 (lançamento zerado) e deixa o teto técnico para as portas de entrada.
+    if not isfinite(float(valor)):
+        raise ValueError("VALOR_INVALIDO")
     ensure_user(user_id)
 
     v = Decimal(str(valor))
@@ -148,6 +177,10 @@ def add_launch_and_update_balance(
              Json(efeitos), is_internal_movement, origem),
         )
         row = cur.fetchone()
+        if declaracao_banco:
+            from .bank_movements import record_bank_movement
+            record_bank_movement(cur, user_id, row["id"], extra_efeitos["funding_source"],
+                                 -v if tipo == "despesa" else v)
         return row["id"], row["user_seq"], new_bal
 
     if cur is not None:
@@ -300,6 +333,27 @@ def update_launch_category(user_id: int, launch_id: int, categoria: str | None) 
 class LaunchDateLockedError(ValueError):
     """Tentou editar a data de um lançamento cuja data é do provedor (Open Finance), seja a
     linha dele ou uma fundida com a transação dele."""
+
+
+class LaunchCategoryLockedError(LaunchDateLockedError):
+    """Categoria de movimentação interna (investimento, transferência, fatura...) numa despesa/receita
+    declarada "paga pelo banco": a linha viraria interna e SAIRIA dos totais, enquanto a conciliação
+    segue tratando-a como gasto do banco. Subclasse de propósito: v2 e /app já respondem 409 a ela."""
+
+
+def _recusa_interna_declarada(cur, user_id: int, itens: list[tuple[int, str | None]]) -> None:
+    """`itens` = [(launch_id, categoria nova)]. Recusa se alguma torna interna uma declarada de fluxo."""
+    from utils_text import is_internal_category
+    ids = [i for i, c in itens if is_internal_category(c)]
+    if not ids:
+        return
+    from .bank_declaracoes import DECLARADA_SQL
+    cur.execute(f"select 1 from launches where user_id=%s and id = any(%s) and {DECLARADA_SQL}", (user_id, ids))
+    if cur.fetchone():
+        raise LaunchCategoryLockedError(
+            "Esse lançamento está declarado como pago pelo banco e conta nos seus totais. Uma categoria de "
+            "movimentação interna (investimento, transferência, fatura) o tiraria deles. Escolha outra "
+            "categoria ou apague e lance de novo como aporte ou transferência.")
 
 
 # As condições PERMANENTES de `delete_launch_and_rollback` que o usuário precisa
@@ -456,6 +510,8 @@ def update_launch_fields(
 
     with get_conn() as conn:
         with conn.cursor() as cur:
+            if categoria is not None:
+                _recusa_interna_declarada(cur, user_id, [(launch_id, categoria.strip() or None)])
             delta_novo = None
             if exigir_pode or criado_em is not None or dia is not None:
                 from .bank_movements import _lock_user
@@ -513,9 +569,11 @@ def update_launch_fields(
                 # editáveis: a sync não toca em `nota`/`alvo`; a categoria
                 # editada também sobrevive, por `categoria_editada`.)
                 # A fundida (P3, dono): o banco é dono da data em todo canal.
+                from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
                 from .lancamentos import FUNDIDO_SQL
                 cur.execute(
-                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido "
+                    f"select coalesce(source,'') as source, {FUNDIDO_SQL} as fundido, "
+                    f"{DECLARADA_SQL} as declarada, {CASADA_SQL} as casada "
                     "from launches where user_id=%s and id=%s",
                     (user_id, launch_id),
                 )
@@ -524,6 +582,13 @@ def update_launch_fields(
                     raise LaunchDateLockedError(
                         "A data deste lançamento vem do banco conectado e é "
                         "atualizada por ele. Dá pra editar a descrição e a categoria."
+                    )
+                if row and row["declarada"]:
+                    raise LaunchDateLockedError(
+                        "Esse lançamento está declarado como pago pelo banco e "
+                        + ("confere com o extrato. " if row["casada"] else "ainda não foi conferido com o extrato. ")
+                        + "Dá pra editar descrição e categoria; para corrigir valor ou data, apague e "
+                        "lance de novo."
                     )
                 if row and row["fundido"]:
                     raise LaunchDateLockedError(
@@ -549,6 +614,7 @@ def update_launch_categories_bulk(user_id: int, items: list[tuple[int, str]]) ->
         return 0
     with get_conn() as conn:
         with conn.cursor() as cur:
+            _recusa_interna_declarada(cur, user_id, [(lid, cat) for lid, cat in items])
             cur.executemany(
                 f"update launches set {_SET_CATEGORIA} where user_id=%s and id=%s",
                 [(cat, is_internal_category(cat), cat, user_id, lid) for (lid, cat) in items],
@@ -1764,7 +1830,8 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
     Apagar a linha FUNDIDA (`FUNDIDO_SQL`: manual/ofx/recorrente junta com uma
     transação do banco) desfaz a junção na mesma transação (P3, dono): a transação
     volta como sombra `banco` (`reconciliation._desfaz`), exceto no "apagar tudo"
-    (`escopo_conta_corrente`), que não recria nada. Devolve a frase do aviso
+    (`escopo_conta_corrente`), que não recria a da fundida; a declaração de fluxo casada (PR-A) a recria
+    SEMPRE, `devolve_sombra`, inclusive no "apagar tudo". Devolve a frase do aviso
     (`aviso_banco_voltou`) quando desfez, ou None. Ordem de locks: `accounts` →
     X (`for update`) → transação OF (`_locked_tx`).
 
@@ -2292,6 +2359,18 @@ def delete_launch_and_rollback(user_id: int, launch_id: int, *,
                     raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
                                                "mudou_durante") from exc
 
+            # Declaração de fluxo casada (PR-A): a transação também volta como sombra, INCLUSIVE no "apagar
+            # tudo" (diferente da fundida, aqui sumiria dado real do banco até um import que pode nunca vir).
+            # Só consulta quando o lançamento diz que foi pago pelo banco (`funding_source`): sem custo nos demais.
+            if isinstance(efeitos.get("funding_source"), dict) and efeitos["funding_source"].get("kind") == "bank":
+                from .bank_declaracoes import devolve_sombra
+                from .reconciliation import ReconciliationConflict
+                try:
+                    desfeitas += devolve_sombra(cur, user_id, launch_id, novas)
+                except (ReconciliationConflict, LookupError) as exc:
+                    raise LaunchUnsafeRollback("Lançamento mudou durante a exclusão; tente novamente.",
+                                               "mudou_durante") from exc
+
             # apaga o lançamento
             cur.execute("delete from launches where id=%s and user_id=%s", (launch_id, user_id))
 
@@ -2383,9 +2462,10 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     Ordena por `id desc` (mais novo primeiro) por segurança em reversões
     encadeadas (ex.: múltiplos pagamentos da mesma fatura).
 
-    Retorna {"deleted": N, "kept_no_effects": [...], "kept_unsafe": [...],
+    Retorna {"deleted": N, ["restored": R,] "kept_no_effects": [...], "kept_unsafe": [...],
     "errors": [...], "remaining": M | None}, com os ids em `user_seq` (o "#N"
-    que o usuário vê).
+    que o usuário vê). `restored` (só quando > 0) = transações do banco devolvidas como sombra
+    (declaração de fluxo casada): elas entram na recontagem `remaining` sem serem falha.
 
     As três listas são causas DIFERENTES e a mensagem ao usuário precisa
     distingui-las: `kept_no_effects` são lançamentos antigos sem `efeitos`;
@@ -2425,12 +2505,13 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
     candidatos = [(r["id"], r["user_seq"] or r["id"]) for r in rows]
 
     deleted = 0
+    restored = 0  # transações do banco que voltaram como sombra (declaração casada): entram na recontagem
     kept_no_effects: list = []
     kept_unsafe: list = []
     errors: list = []
     for lid, seq in candidatos:
         try:
-            delete_launch_and_rollback(user_id, lid, escopo_conta_corrente=True)
+            restored += bool(delete_launch_and_rollback(user_id, lid, escopo_conta_corrente=True))  # aviso = voltou
             deleted += 1
         except LaunchNoEffects:
             kept_no_effects.append(seq)
@@ -2483,6 +2564,7 @@ def delete_all_launches_and_rollback(user_id: int) -> dict:
 
     return {
         "deleted": deleted,
+        **({"restored": restored} if restored else {}),  # só quando houve: o retorno de antes fica idêntico
         "kept_no_effects": kept_no_effects,
         "kept_unsafe": kept_unsafe,
         "errors": errors,

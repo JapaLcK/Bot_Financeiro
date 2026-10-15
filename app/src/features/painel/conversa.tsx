@@ -14,16 +14,17 @@ import { usePainel } from "./provider";
 import { BotaoPrivacidade } from "./cabecalho";
 import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
 import { useConversa } from "./conversaEstado";
-import { EstadoVazio, TurnoChat } from "./conversaFalas";
-import { Acao, Folha, tituloWidget } from "./base";
-import type { Widget } from "./catalogo";
+import type { BlocoChat } from "@/api/schemas/painel";
+import { EstadoVazio, TurnoChat, tituloCard } from "./conversaFalas";
+import { Acao, Folha } from "./base";
+import { BlocoContexto } from "./blocoContexto";
 import { WidgetConteudo } from "./widgets";
 /** A aba Piggy é só o chat. Sair da aba limpa a tela (conversaEstado.fechar); o histórico do servidor não é mostrado. */
 export function Conversa() {
   const p = usePainel(); const c = useConversa(); const { cores } = useTema();
   const nav = useNavegarPainel();
   const pai = useRef<View>(null); const [topoJanela, setTopoJanela] = useState(0);
-  const [detalhe, setDetalhe] = useState<Widget | null>(null); const rolagem = useRef<ScrollView>(null); const rolado = useRef(0);
+  const [detalhe, setDetalhe] = useState<{ bloco: BlocoChat; aba: number } | null>(null); const rolagem = useRef<ScrollView>(null); const rolado = useRef(0);
   const reduzir = useReduzirMovimento(), entrada = useEntrada();
   const pos = useRef({ y: 0, h: 0, c: 0 }); const [longe, setLonge] = useState(false); // "voltar ao fim" quando falta mais que `huge` até o fim; o stream não puxa a tela
   const medir = (v: Partial<typeof pos.current>) => { Object.assign(pos.current, v); const { y, h, c } = pos.current; setLonge(c - (y + h) > espaco.huge); };
@@ -44,7 +45,7 @@ export function Conversa() {
         {c.bloqueio === "abrindo" && <ActivityIndicator accessibilityLabel="Preparando a conversa" />}
         {c.bloqueio === "falhou" && <View style={{ gap: 8 }}><Texto tom="warning">Não conseguimos preparar a conversa agora.</Texto><Acao rotulo="Tentar novamente" onPress={c.tentarNovamente} /></View>}
         {!c.turnos.length ? <EstadoVazio desativado={!livre || cheia || c.enviando} escolher={(s) => void c.enviar(s.ask, s)} />
-          : c.turnos.map((t, i) => <TurnoChat key={t.id} turno={t} abrir={setDetalhe} onLayout={i === c.turnos.length - 1 ? (y) => { if (rolado.current !== t.id) { rolado.current = t.id; rolagem.current?.scrollTo({ y, animated: !reduzir }); } } : undefined} />)}
+          : c.turnos.map((t, i) => <TurnoChat key={t.id} turno={t} abrir={(bloco, aba) => setDetalhe({ bloco, aba })} onLayout={i === c.turnos.length - 1 ? (y) => { if (rolado.current !== t.id) { rolado.current = t.id; rolagem.current?.scrollTo({ y, animated: !reduzir }); } } : undefined} />)}
       </ScrollView>
       {longe && <Animated.View entering={FadeIn} exiting={FadeOut} style={{ position: "absolute", bottom: 8, alignSelf: "center" }}><Pressable accessibilityRole="button" accessibilityLabel="Voltar ao fim da conversa" onPress={() => rolagem.current?.scrollToEnd({ animated: !reduzir })} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 36, borderRadius: raio.pilula, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: cores.border, backgroundColor: cores.surfaceRaised }}><Icone nome="ArrowDown" tom="inkMuted" /></View></Pressable></Animated.View>}
       </View>
@@ -56,6 +57,6 @@ export function Conversa() {
       </View>
       {!p.oculto && c.uso && <Texto variante="legenda" tom="inkMuted" style={{ paddingTop: 6 }}>{c.uso.used} de {c.uso.limit} mensagens utilizadas</Texto>}
     </KeyboardAvoidingView>
-    <Folha titulo={detalhe ? tituloWidget(detalhe, p.dados) : "Detalhes"} aberta={!!detalhe} fechar={() => setDetalhe(null)}>{detalhe && <WidgetConteudo id={detalhe} />}</Folha>
+    <Folha titulo={detalhe ? tituloCard(detalhe.bloco.card, detalhe.bloco.abas[detalhe.aba]!) : "Detalhes"} aberta={!!detalhe} fechar={() => setDetalhe(null)}>{detalhe && <BlocoContexto.Provider value={{ recursos: detalhe.bloco.abas[detalhe.aba]!.recursos }}><WidgetConteudo id={detalhe.bloco.card} /></BlocoContexto.Provider>}</Folha>
   </View></Screen></ToastProvider></ContextoNavegacaoPainel.Provider>;
 }

@@ -1,4 +1,4 @@
-"""Fase 1a: o fixo/receita manual × a recorrência do Open Finance, a comparação antes ×
+"""Fase 1a: o fixo manual × a recorrência do Open Finance (a receita manual só conta sem banco, R2), a comparação antes ×
 depois nos consumidores do motor (Q18) e a conversa pelo `handle_incoming`.
 
 Casos 15–18 com relógio congelado (`ler_em`). A comparação U1–U7 roda nos consumidores
@@ -62,36 +62,33 @@ def test_17_dois_manuais_candidatos_nao_casam(user_id):
     assert saldo_90(s) == D("100")  # 1000 − 2 manuais × 3 − o do banco × 3
 
 
-def test_18_receita_ambigua_nunca_soma_as_duas(user_id):
+def test_18_receita_manual_com_banco_lido_nunca_soma_as_duas(user_id):
+    """R2: a manual (criada antes do banco) nem é lida; conta só a do extrato (3 × 6500)."""
     db.set_balance(user_id, D(1000))
     create_recurring_income(user_id, "Trabalho", 5000, "salario", 5, start_date=HOJE)
     salario(user_id, valor="6500", ultima=date(2026, 9, 4))
     s = ler_em(user_id)
     es = do_banco(s)
-    assert es and all(not e.incluida and "recorrencia_banco_pode_repetir_manual" in codigos(e) for e in es)
-    assert saldo_90(s) == D("16000")
+    assert es and all(e.incluida and "recorrencia_banco_pode_repetir_manual" not in codigos(e) for e in es)
+    assert not [e for e in s.ocorrencias if e.fonte == "receita_recorrente"]
+    assert saldo_90(s) == D("20500")
 
 
 # Manual casado que começa no futuro: o 1º ciclo dele é 08/12 (início 06/12, dia 8). O
 # banco (dia 5) conta sozinho em out e nov; em 05/12 já é o ciclo do manual, mesmo
 # antes do início e do dia dele — senão dezembro contaria duas vezes.
-@pytest.mark.parametrize("receita", [False, True], ids=["fixo", "receita"])
-def test_18b_manual_que_comeca_depois_nao_apaga_o_banco_de_antes(user_id, receita):
+def test_18b_manual_que_comeca_depois_nao_apaga_o_banco_de_antes(user_id):
     db.set_balance(user_id, D(1000))
-    if receita:
-        create_recurring_income(user_id, "Trabalho", 5000, "salario", 8, start_date=date(2026, 12, 6))
-        salario(user_id)
-    else:
-        create_recurring_expense(user_id, "Netflix", 39.90, "assinaturas", 8, "account",
-                                 start_date=date(2026, 12, 6))
-        netflix(user_id)
+    create_recurring_expense(user_id, "Netflix", 39.90, "assinaturas", 8, "account",
+                             start_date=date(2026, 12, 6))
+    netflix(user_id)
     s = ler_em(user_id)
     assert [(e.data, e.incluida) for e in do_banco(s)] == [
         (date(2026, 10, 5), True), (date(2026, 11, 5), True), (date(2026, 12, 5), False)]
     assert "recorrencia_banco_igual_a_fixo_manual" in codigos(do_banco(s)[2])
     assert not any({"recorrencia_banco_igual_a_fixo_manual", "recorrencia_banco_pode_repetir_manual"}
                    & codigos(e) for e in do_banco(s)[:2])
-    assert saldo_90(s) == D("16000" if receita else "880.30")  # 3 ciclos, nenhum em dobro
+    assert saldo_90(s) == D("880.30")  # 3 ciclos, nenhum em dobro
 
 
 # ── Antes × depois (Q18) ─────────────────────────────────────────────────────
@@ -132,7 +129,8 @@ ESPERADO = {
     2: (["1000", "1000", "1000"],) * 2,
     3: (["1000", "1000", "1000"], ["5960.10", "10920.20", "15880.30"]),
     4: (["960.10", "920.20", "880.30"],) * 2,
-    5: (["6000", "11000", "16000"],) * 2,
+    # R2: antes (sem banco na base) a manual conta; depois (banco lido) só o extrato, 6500 por ciclo.
+    5: (["6000", "11000", "16000"], ["7500", "14000", "20500"]),
     6: (["1000", "1000", "1000"],) * 2,
     7: (["1000", "1000", "1000"], ["6000", "11000", "16000"]),
 }
