@@ -196,7 +196,7 @@ def test_tarefa_de_fundo_roda_o_ensure_e_loga_o_resumo(caplog):
 # ── Borda da Pluggy / snapshots / extrato ────────────────────────────────────
 
 @pytest.mark.parametrize("v", ["NaN", float("nan"), "Infinity", "-Infinity", 10**400, "1e20", 1e20,
-                               VALOR_MAX + 1, "abc", None])
+                               VALOR_MAX + 1, "abc", None, "1e1000000", pytest.param("1" * 1_100_000, id="um-milhao-de-digitos")])
 def test_to_decimal_e_numero_recusam_nao_finito_e_absurdo(v):
     assert _to_decimal(v) == 0 and _numero(v) is None
     assert _to_decimal(v, "7") == 7  # cai no default, como "abc"
@@ -211,6 +211,7 @@ def test_bank_movements_amount_recusa_acima_do_limite():
     from db.bank_movements import _amount
     assert _amount(VALOR_MAX + 1) is None and _amount("NaN") is None and _amount("1e20") is None
     assert _amount(VALOR_MAX) == VALOR_MAX
+    assert _amount("1e1000000") is None and _amount("1" * 1_100_000) is None  # abs() estouraria Overflow
 
 
 def test_sync_com_conta_nan_termina_e_grava_as_validas():

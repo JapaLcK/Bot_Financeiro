@@ -92,7 +92,8 @@ def _to_decimal(value: Any, default: str = "0") -> Decimal:
         d = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return Decimal(default)
-    return d if d.is_finite() and abs(d) <= VALOR_MAX else Decimal(default)
+    # `copy_abs`: `abs()` arredonda no contexto e levanta Overflow com expoente/dígitos além de ~10**6
+    return d if d.is_finite() and d.copy_abs() <= VALOR_MAX else Decimal(default)
 
 
 def _parse_date(value: Any) -> date:

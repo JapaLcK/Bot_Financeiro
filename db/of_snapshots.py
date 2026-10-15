@@ -31,7 +31,7 @@ def _numero(v, limite=VALOR_MAX) -> Decimal | None:
         d = Decimal(v)
     else:
         return None
-    return d if d is not None and abs(d) <= limite else None
+    return d if d is not None and d.copy_abs() <= limite else None
 
 
 def _quantidade(v) -> Decimal | None:

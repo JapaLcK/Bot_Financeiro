@@ -12,7 +12,7 @@ from utils_text import VALOR_MAX
 def _amount(value):
     try:
         result = Decimal(str(value))
-        return result if result.is_finite() and abs(result) <= VALOR_MAX else None
+        return result if result.is_finite() and result.copy_abs() <= VALOR_MAX else None
     except (InvalidOperation, TypeError, ValueError):
         return None
 
