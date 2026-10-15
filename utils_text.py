@@ -1192,7 +1192,8 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
       finito (`parse_money("1" * 400)` devolve `inf`, que passa no `> 0` e só
       seria recusado lá no `mark_bill_paid`, DEPOIS de a pendência ter sido
       reivindicada, virando "erro interno" para o usuário);
-    - `"nao_entendi"` — o texto fala de um valor mas QUAL valor é ambíguo
+    - `"nao_entendi"` — acima de `VALOR_MAX` (código colado, não valor) ou o
+      texto fala de um valor mas QUAL valor é ambíguo
       ("132 50" -> 13.250, "1.23.456" -> 123.456, ",50" -> 50 em vez de 0,50).
       O bot ACABOU de pedir um número, então isso é digitação errada: quem
       chama re-pergunta em vez de abandonar a pergunta.
@@ -1242,8 +1243,10 @@ def valor_perigoso(texto: str, valor: float | None) -> str | None:
     if valor is None:
         return None
     # Arredonda para centavos ANTES de comparar: "0,001" passava no `> 0`.
-    if not isfinite(valor) or valor > VALOR_MAX or round(valor, 2) <= 0:
+    if not isfinite(valor) or round(valor, 2) <= 0:
         return "nao_positivo"
+    if valor > VALOR_MAX:  # código colado, não valor: pergunta de novo em vez de dizer "maior que zero"
+        return "nao_entendi"
     return None
 
 

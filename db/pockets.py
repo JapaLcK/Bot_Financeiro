@@ -302,6 +302,8 @@ def update_pocket_meta(
         sets.append("target_date = NULL")
     else:
         if target_amount is not None:
+            if target_amount and not valor_valido(target_amount):  # 0 = sem meta; NaN é truthy
+                raise ValueError("TARGET_INVALIDO")
             sets.append("target_amount = %s")
             params.append(Decimal(str(target_amount)) if target_amount is not None else None)
         if target_date is not None:
@@ -324,7 +326,7 @@ def update_pocket_meta(
         sets.append("interest_enabled = false")
     if interest_rate is not None:
         rate = Decimal(str(interest_rate))
-        if rate <= 0:
+        if not valor_valido(interest_rate):
             raise ValueError("INTEREST_RATE_INVALID")
         sets.append("interest_rate = %s")
         params.append(rate)
@@ -632,7 +634,7 @@ def create_pocket(
 
     desc = (description or "").strip() or None
     rate = Decimal(str(interest_rate))
-    if rate <= 0:
+    if not valor_valido(interest_rate):
         raise ValueError("INTEREST_RATE_INVALID")
     criado_em = datetime.now(_tz())
     today = _today()

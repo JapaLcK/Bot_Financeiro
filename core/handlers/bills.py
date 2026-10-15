@@ -15,15 +15,23 @@ from __future__ import annotations
 
 import logging
 import re
+from math import isfinite
 
 from core.financial_targets import texto_da_quantidade
 from core.handlers.conta_por_nome import PAY_RE, escolher_conta
 from core.response_formatter import wrap_wa_markup
-from utils_text import (_ENCHIMENTO, _TRACOS, fmt_brl, limpa_pontuacao_final,
+from utils_text import (_ENCHIMENTO, _TRACOS, VALOR_MAX, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso)
 
 logger = logging.getLogger(__name__)
 
+
+def _valor_invalido(conta: dict) -> str:
+    nome = conta.get("name") or "conta"
+    return (
+        f"O valor da *{nome}* precisa ser maior que zero.\n"
+        f"Manda assim: *paguei {str(nome).lower()} 132,50*"
+    )
 
 
 def pergunta_de_valor_sem_contexto(user_id: int, nome: str) -> str:
@@ -125,6 +133,10 @@ def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = Non
         amount = None
     if amount is not None and amount <= 0:
         amount = None
+    if amount is not None and not (isfinite(amount) and amount <= VALOR_MAX):
+        # Antes de perguntar a forma: a pendência guardaria o valor e o "dinheiro" seguinte
+        # estouraria em "erro interno" em loop (o `mark_bill_paid` recusa acima do limite).
+        return _valor_invalido(best)
 
     declarada = forma_pagamento or fp.detectar(text)
     decisao = fp.decidir(user_id, declarada)
@@ -169,11 +181,7 @@ def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = Non
         # dígitos) ou que arredonda para R$ 0,00 ("paguei luz 0,001"). É
         # digitação, não falha do sistema — sem traduzir aqui, o handler global
         # responde "Ocorreu um erro interno" com stack trace no log.
-        nome = best.get("name") or "conta"
-        return (
-            f"O valor da *{nome}* precisa ser maior que zero.\n"
-            f"Manda assim: *paguei {str(nome).lower()} 132,50*"
-        )
+        return _valor_invalido(best)
     if paid is None:
         return None
     return conta_paga(user_id, paid, paid.get("paid_amount") or paid.get("amount") or 0)

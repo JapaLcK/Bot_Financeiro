@@ -195,7 +195,7 @@ async def delete_pocket_route(request: Request, user_id: int, pocket_name: str):
 def _pocket_move_error(exc: ValueError) -> HTTPException:
     msg = str(exc)
     mapping = {
-        "AMOUNT_INVALID": "O valor precisa ser maior que zero.",
+        "AMOUNT_INVALID": "Valor inválido (precisa ser maior que zero).",
         "INSUFFICIENT_ACCOUNT": "Saldo da conta principal não cobre esse valor.",
         "INSUFFICIENT_POCKET": "A caixinha não tem esse valor disponível.",
         "OF_POCKET_READONLY": "Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco.",
@@ -212,7 +212,7 @@ async def pocket_deposit_route(request: Request, user_id: int, pocket_name: str,
         raise HTTPException(status_code=400, detail="Nome da caixinha é obrigatório.")
     nota = (payload.nota or "").strip() or None
     if payload.amount is not None and not valor_valido(payload.amount):  # NaN quebrava o `funding`
-        raise HTTPException(status_code=400, detail="O valor precisa ser maior que zero.")
+        raise HTTPException(status_code=400, detail="Valor inválido (precisa ser maior que zero).")
     from core.services import funding
 
     source = (await asyncio.to_thread(

@@ -39,7 +39,7 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
     tipo = parsed["tipo"]
     valor = float(parsed["valor"])
     if not valor_valido(valor):  # `1` * 301 dígitos vira 1e300
-        return OutgoingMessage(text="❌ Valor inválido.")
+        return OutgoingMessage(text="🐷 Valor inválido.")
     categoria = parsed.get("categoria")
     category_reason = parsed.get("category_reason")
     alvo = parsed.get("alvo")
