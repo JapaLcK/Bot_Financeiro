@@ -50,7 +50,7 @@ em lugar nenhum).
   físico.** No v2 não existe investimento manual, e transação do Open Finance não se cria
   nem se apaga à mão.
   **Revista em 2026-10-09: ver [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md)**
-  (proposta; o código ainda vale como está até os PRs de código dela). O texto acima fica como
+  (o PR-A dela, #969, mergeado em 2026-10-15, não toca a Q36; o código ainda vale como está até o PR-B1 e o PR-C). O texto acima fica como
   histórico. A Q36 deixará de ser trava de escritor para investimento (o manual poderá
   existir e ser vinculado à posição do banco, PR-C) e para compra manual em cartão **não**
   sincronizado (PR-B1). Continua valendo para importação de extrato (OFX/CSV/PDF), fatura OFX e
