@@ -135,3 +135,38 @@ def test_pagar_conta_mede_o_valor_arredondado_a_centavos_que_sera_gravado():
         B.mark_bill_paid(uid, int(conta["id"]), 1000000000.006, metodo="carteira")
     pago = B.mark_bill_paid(uid, int(conta["id"]), 1000000000.004, metodo="carteira")  # arredonda para 1e9
     assert pago is not None and float(pago["paid_amount"]) == 1e9
+
+
+def _conta_antiga_2bi(uid):
+    from test_bill_amount_pending import _monta_conta_variavel
+    conta = _monta_conta_variavel(uid)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update bill_instances set amount=2000000000 where id=%s", (conta["id"],))
+        conn.commit()
+    return int(conta["id"])
+
+
+def test_conta_antiga_acima_do_teto_paga_pelo_valor_guardado_e_outro_valor_acima_segue_recusado():
+    import db.bills as B
+
+    uid = usuario_pagante()
+    bid = _conta_antiga_2bi(uid)
+    for ruim in (3e9, float("nan"), float("inf")):  # outro valor acima do teto; não finito mesmo "igual"
+        with pytest.raises(ValueError, match="VALOR_INVALIDO"):
+            B.mark_bill_paid(uid, bid, ruim, metodo="carteira")
+    assert B.get_bill(uid, bid)["status"] == "pending"
+
+    pago = B.mark_bill_paid(uid, bid, 2e9, metodo="carteira")  # o que o painel manda: a estimativa guardada
+    assert pago is not None and float(pago["paid_amount"]) == 2e9
+
+
+def test_painel_paga_conta_antiga_acima_do_teto_pelo_valor_guardado_200_e_outro_valor_400():
+    uid = usuario_pagante()
+    c, h = _cliente(uid)
+    bid = _conta_antiga_2bi(uid)
+    url = f"/recurring-bills/{uid}/{bid}/pay"
+
+    assert c.post(url, headers=h, content='{"amount":3000000000,"metodo":"dinheiro"}').status_code == 400
+    r = c.post(url, headers=h, content='{"amount":2000000000,"metodo":"dinheiro"}')
+    assert r.status_code == 200, r.text
+    assert r.json()["bill"]["status"] == "paid"
