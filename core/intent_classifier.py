@@ -895,6 +895,32 @@ def contains_comparative_question(text: str) -> bool:
 # Tier 1 — busca exata
 # ---------------------------------------------------------------------------
 
+# Metas (PR C2). Só o PLURAL inequívoco, e só para quem tem a chave do /painel novo
+# (`metas_conversa.metas_ligadas`): para os outros o classificador devolve o que sempre devolveu,
+# porque a regra nem é consultada. "meta" e "reserva" (qualquer forma: "minha reserva", "reserva de
+# emergência", "como está a meta X") ficam de fora de propósito: podem ser nome de caixinha ou
+# investimento, e o singular pede UMA meta (a lista inteira seria resposta errada); seguem para a IA.
+_METAS_EXATAS = frozenset({
+    "metas", "minhas metas", "ver metas", "ver minhas metas", "listar metas", "lista minhas metas",
+})
+_METAS_PERGUNTA = re.compile(
+    r"^(como (estao|esta|anda|andam|vao) (as )?(minhas )?|quanto falta (pra|pras|para) (as )?(minhas )?)metas$")
+
+
+def _pede_metas(norm: str) -> bool:
+    return norm in _METAS_EXATAS or bool(_METAS_PERGUNTA.match(norm))
+
+
+def _metas_ligadas(user_id: int) -> bool:
+    """Falha fechada: se a chave não puder ser lida, vale o comportamento de antes das metas."""
+    try:
+        from core.services.metas_conversa import metas_ligadas
+        return metas_ligadas(user_id)
+    except Exception:
+        logger.warning("metas_ligadas falhou; classificando como antes das metas", exc_info=True)
+        return False
+
+
 def _try_exact(norm: str) -> IntentResult | None:
     intent = _EXACT.get(norm)
     if intent:
@@ -1235,7 +1261,10 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
     Classifica a intenção do texto em 3 tiers.
     Retorna IntentResult com intent, confidence, entities, etc.
 
-    user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA).
+    user_id: quando fornecido, aplica rate limiting no Tier 3 (chamada à IA) e liga as frases de
+        metas (`metas.list`) para quem tem a chave do /painel novo; sem ele, ou sem a chave, o
+        resultado é o de antes das metas. Custa uma leitura de conta, só quando o texto é uma
+        dessas frases.
     allow_ai=False: só os tiers 1 e 2 (determinísticos). No lugar do tier 3 sai
         o mesmo `out_of_scope 0.0` com que ele já degrada hoje quando não há
         `OPENAI_API_KEY` e quando o usuário não é Pro. Tem um único chamador em
@@ -1272,6 +1301,12 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
         if not allow_ai:
             return IntentResult(intent="out_of_scope", confidence=0.0)
         return _classify_with_ai(text, user_id=user_id)
+
+    # Metas: antes do Tier 1/2 (e do domain-hint), mas SÓ com `user_id` e com a chave. Sem `user_id`
+    # (os oráculos de abandono de pendência, `allow_ai=False`) a regra não existe: é o que mantém
+    # o roteamento de quem não tem a chave idêntico ao de antes.
+    if user_id is not None and _pede_metas(norm) and _metas_ligadas(user_id):
+        return IntentResult(intent="metas.list", confidence=1.0)
 
     # Tier 1
     result = _try_exact(norm)

@@ -2326,8 +2326,8 @@ def test_passo_1_da_porta_4_nao_apaga_pergunta_de_outra_tarefa(monkeypatch):
     nova = {"bill_id": 99, "name": "Internet"}
     real = wr.abandona_pergunta_de_valor
 
-    def com_corrida(texto):
-        decidiu = real(texto)
+    def com_corrida(texto, *a):
+        decidiu = real(texto, *a)
         if decidiu:
             db.set_pending_action(uid, "bill_pay_amount", nova)
         return decidiu
