@@ -30,7 +30,7 @@ from utils_phone import mask_phone
 FONE = "5511987654321"
 FONE_2 = "5511000004321"  # mesma máscara do FONE
 MASCARA = "5511******4321"
-AVISO = "Encontrei mais de uma conta com este número"
+AVISO = "Ainda não tenho uma conta ligada"  # o convite do `no_match`: único aviso que ainda loga
 
 
 def _oi(fone: str, n: int) -> InboundMessage:
@@ -50,19 +50,21 @@ def test_aviso_de_vinculacao_um_por_usuario(user_id, monkeypatch):
     garantir_system_event_logs()
     respostas = _wa(monkeypatch, user_id)
     monkeypatch.setattr(wa_runtime, "attempt_whatsapp_phone_link",
-                        lambda wa_id, current_user_id=None: {"status": "multiple_accounts"})
+                        lambda wa_id, current_user_id=None: {"status": "no_match"})
     monkeypatch.setattr(wa_runtime, "handle_incoming", lambda *a, **k: [])
     uid2 = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(uid2)
     try:
         wa_runtime.process_message(_oi(FONE, 1))
         wa_runtime.process_message(_oi(FONE, 2))
-        assert sum(AVISO in r for r in respostas) == 1, respostas  # dedup
+        # O convite vai em TODA mensagem (nunca some em silêncio); só o LOG dele é um por usuário.
+        assert sum(AVISO in r for r in respostas) == 2, respostas
+        assert len(_linhas_do_aviso((user_id,))) == 1  # dedup do log
 
-        # Outro usuário com a MESMA máscara recebe: a chave não é a máscara nem global.
+        # Outro usuário com a MESMA máscara loga: a chave não é a máscara nem global.
         monkeypatch.setattr(wa_runtime, "get_or_create_canonical_user", lambda p, e: uid2)
         wa_runtime.process_message(_oi(FONE_2, 1))
-        assert sum(AVISO in r for r in respostas) == 2, respostas
+        assert sum(AVISO in r for r in respostas) == 3, respostas
 
         linhas = _linhas_do_aviso((user_id, uid2))
         assert [r["user_id"] for r in linhas] == [user_id, uid2], linhas

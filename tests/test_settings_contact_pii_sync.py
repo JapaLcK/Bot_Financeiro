@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import promote_to_pro
 from core.crypto import hash_pii_optional
-from db import attempt_whatsapp_phone_link
+from db import attempt_whatsapp_phone_link, link_platform_identity
 from db.connection import get_conn
 from tests._helpers_pii import insert_auth_account_pii
 
@@ -68,10 +68,11 @@ def test_patch_contact_phone_resyncs_hash_e_bot_reconhece(user_id):
     assert row["phone_hash"] == hash_pii_optional(new_phone, kind="phone")
     assert row["phone_status"] == "pending"
 
-    # Fim a fim: o bot (auto-link por phone_hash) reconhece o número novo.
-    result = attempt_whatsapp_phone_link(new_phone)
-    assert result["status"] in {"linked", "already_linked"}
-    assert result["user_id"] == user_id
+    # Fim a fim: o telefone não liga mais sozinho (PR-5); o código liga, e só confirma o
+    # telefone se o hash gravado acompanhou o número novo (`link_platform_identity`).
+    assert attempt_whatsapp_phone_link(new_phone)["status"] in {"no_match", "already_linked"}
+    link_platform_identity("whatsapp", new_phone, user_id)
+    assert _auth_row(user_id)["phone_status"] == "confirmed"
 
 
 def test_patch_contact_email_resyncs_hash(user_id):
@@ -94,3 +95,35 @@ def test_patch_contact_email_resyncs_hash(user_id):
     row = _auth_row(user_id)
     assert row["email"] == new_email
     assert row["email_hash"] == hash_pii_optional(new_email, kind="email")
+
+
+# #907 (PR-5): salvar o MESMO telefone nas Configurações apagava a confirmação. O auto-vínculo
+# a regravava a cada mensagem; sem ele, a confirmação sumiria de vez. O número diferente
+# (positivo) continua indo a `pending`.
+def test_patch_contact_mesmo_telefone_mantem_a_confirmacao_e_outro_telefone_zera(user_id):
+    email = f"pii-sync-{uuid.uuid4().hex[:8]}@test.local"
+    phone = "5565988887777"
+    with get_conn() as conn, conn.cursor() as cur:
+        insert_auth_account_pii(cur, user_id, email, phone=phone, phone_status="confirmed")
+        cur.execute("update auth_accounts set whatsapp_verified_at = now() - interval '2 days',"
+                    " phone_confirmed_at = now() - interval '2 days' where user_id = %s", (user_id,))
+        conn.commit()
+    promote_to_pro(user_id)
+    client, csrf_headers = _client_for(user_id, email)
+
+    def patch(telefone):
+        r = client.patch(f"/settings/{user_id}/security/contact", json={"phone": telefone},
+                         headers=csrf_headers)
+        assert r.status_code == 200, r.text
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select phone_status, whatsapp_verified_at, phone_confirmed_at from auth_accounts"
+                        " where user_id = %s", (user_id,))
+            return cur.fetchone()
+
+    antes = patch("+55 65 98888-7777")  # o mesmo número, formatado diferente
+    assert antes["phone_status"] == "confirmed" and antes["whatsapp_verified_at"] is not None
+    assert antes["phone_confirmed_at"] is not None
+
+    depois = patch("+55 65 99908-8732")  # outro número: perde a confirmação
+    assert depois["phone_status"] == "pending"
+    assert depois["whatsapp_verified_at"] is None and depois["phone_confirmed_at"] is None

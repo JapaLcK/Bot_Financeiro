@@ -182,8 +182,8 @@ def test_attempt_whatsapp_phone_link_religa_quando_stale_uid_tem_auth_diferente(
 
         result = attempt_whatsapp_phone_link(wa_phone, current_user_id=stale_wa_uid)
 
-        assert result == {"status": "wa_linked_other_account", "wa_phone": wa_phone,
-                          "target_user_id": user_id}, result
+        # PR-5: a classificação do número não liga nada (o remetente já é conta).
+        assert result["status"] == "already_linked" and result["user_id"] == stale_wa_uid, result
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("select user_id from user_identities where provider = 'whatsapp'"
@@ -236,9 +236,10 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
                 insert_auth_account_pii(cur, user_id, email, phone=phone_without_9)
             conn.commit()
 
-        result = attempt_whatsapp_phone_link(phone_with_9, current_user_id=other_uid)
-
-        assert result["status"] == "linked"
+        # PR-5: o telefone, em qualquer formato, não liga; liga o código (o que `link` e
+        # `vincular` fazem), e o número equivalente ao digitado confirma o telefone.
+        assert attempt_whatsapp_phone_link(phone_with_9, current_user_id=other_uid)["status"] == "no_match"
+        link_platform_identity("whatsapp", phone_with_9, user_id)
 
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -253,6 +254,10 @@ def test_attempt_whatsapp_phone_link_aceita_variacao_com_e_sem_nono_digito(user_
                 row = cur.fetchone()
 
         assert row["user_id"] == user_id
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("select phone_status from auth_accounts where user_id = %s", (user_id,))
+                assert cur.fetchone()["phone_status"] == "confirmed"
     finally:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -283,11 +288,11 @@ def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_me
         add_launch_and_update_balance(new_uid, "despesa", 109, None, "rifa")
 
         # O mesmo número em outro formato não autoriza juntar quem tem dados (dono,
-        # M8): `remetente_com_dados`, as duas contas ficam. A junção é pelo código.
+        # M8): as duas contas ficam. Desde o PR-5 o telefone nem classifica (a conta
+        # do telefone tem credencial): `no_match`. A junção é pelo código.
         result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
 
-        assert result == {"status": "remetente_com_dados", "wa_phone": new_wa,
-                          "target_user_id": user_id}, result
+        assert result == {"status": "no_match", "wa_phone": new_wa}, result
         assert get_balance(user_id) == D("0") and get_balance(new_uid) == D("-109")
 
         with get_conn() as conn:
@@ -311,7 +316,8 @@ def test_attempt_whatsapp_phone_link_aceita_identidade_existente_com_alias_do_me
 
 
 def test_attempt_whatsapp_phone_link_alias_do_mesmo_numero_vazio_junta(user_id):
-    """O alias sem dados nem login segue a regra 4, como qualquer número vazio: junta."""
+    """O alias sem dados nem login segue a regra 4, como qualquer número vazio: junta, mas
+    só pelo código (PR-5). O telefone digitado não junta mais."""
     suffix = f"{6 + uuid.uuid4().int % 4}{uuid.uuid4().int % 10_000_000:07d}"
     old_wa, new_wa = f"5565{suffix}", f"55659{suffix}"
     new_uid = int(uuid.uuid4().int % 10_000_000_000)
@@ -326,8 +332,8 @@ def test_attempt_whatsapp_phone_link_alias_do_mesmo_numero_vazio_junta(user_id):
             conn.commit()
 
         result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
-
-        assert result["status"] == "linked" and result["user_id"] == user_id, result
+        assert result["status"] == "no_match", result  # o telefone não junta
+        link_platform_identity("whatsapp", new_wa, user_id)  # o código junta
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("select user_id from user_identities where provider = 'whatsapp'"
@@ -367,8 +373,7 @@ def test_attempt_whatsapp_phone_link_alias_do_mesmo_numero_com_login_nao_junta(u
 
         result = attempt_whatsapp_phone_link(new_wa, current_user_id=new_uid)
 
-        assert result == {"status": "wa_linked_other_account", "wa_phone": new_wa,
-                          "target_user_id": user_id}, result
+        assert result["status"] == "already_linked" and result["user_id"] == new_uid, result
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("select user_id from user_identities where provider = 'whatsapp'"

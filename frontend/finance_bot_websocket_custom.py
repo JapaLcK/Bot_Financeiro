@@ -3253,6 +3253,16 @@ async def auth_dashboard_profile(request: Request, response: Response):
     from core.services.plan_service import (
         get_user_limits, is_pro, plan_gate_ok,
     )
+    # WhatsApp ligado = tem a identidade, e não o marcador `whatsapp_verified_at`: quem liga por
+    # código com número diferente do digitado no cadastro fica ligado sem telefone confirmado.
+    # EXISTS, sem decifrar o número (a rota do dashboard não pode cair por um `external_id_enc` ruim).
+    def _tem_whatsapp() -> bool:
+        from db.connection import get_conn
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM user_identities"
+                        " WHERE user_id = %s AND provider = 'whatsapp') AS ok", (int(user_id),))
+            return bool(cur.fetchone()["ok"])
+    whatsapp_linked = await asyncio.to_thread(_tem_whatsapp)
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
     _forecast_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "forecast")
@@ -3278,7 +3288,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "email": (auth_user or {}).get("email"),
         "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
-        "whatsapp_linked": bool((auth_user or {}).get("whatsapp_verified_at")),
+        "whatsapp_linked": whatsapp_linked,
         "feature_gates": feature_gates,
     }
 

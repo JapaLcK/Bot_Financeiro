@@ -67,7 +67,7 @@ def test_autolink_com_comando_nao_interrompe_para_boas_vindas(monkeypatch):
     )
     monkeypatch.setattr(
         "adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
-        lambda wa_id, current_user_id=None: {"status": "linked", "user_id": 222, "wa_phone": wa_id},
+        lambda wa_id, current_user_id=None: {"status": "already_linked", "user_id": 222, "wa_phone": wa_id},
     )
     monkeypatch.setattr(
         "adapters.whatsapp.wa_runtime.send_welcome",
@@ -216,7 +216,7 @@ def test_botao_parar_atualizacoes_desliga_updates_do_whatsapp(monkeypatch):
     )
     monkeypatch.setattr(
         "adapters.whatsapp.wa_runtime.attempt_whatsapp_phone_link",
-        lambda wa_id, current_user_id=None: {"status": "linked", "user_id": 222, "wa_phone": wa_id},
+        lambda wa_id, current_user_id=None: {"status": "already_linked", "user_id": 222, "wa_phone": wa_id},
     )
     monkeypatch.setattr("adapters.whatsapp.wa_runtime.log_system_event_sync", lambda *a, **k: None)
     monkeypatch.setattr("adapters.whatsapp.wa_runtime.send_typing_indicator", lambda *a, **k: None)

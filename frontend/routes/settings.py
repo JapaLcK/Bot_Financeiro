@@ -409,12 +409,16 @@ async def update_security_contact_route(
                             phone_confirmed_at = NULL,
                             whatsapp_verified_at = NULL
                         WHERE user_id = %s
+                          AND phone_hash IS DISTINCT FROM %s
                         """,
                         (
                             normalized_phone,
                             hash_pii_optional(normalized_phone, kind="phone"),
                             encrypt_pii_optional(normalized_phone),
                             user_id,
+                            # #907: salvar o MESMO telefone não tira a confirmação. Desde o PR-5
+                            # só o código a regrava, e a mensagem do WhatsApp não a refaz mais.
+                            hash_pii_optional(normalized_phone, kind="phone"),
                         ),
                     )
                 if display_name_provided:
