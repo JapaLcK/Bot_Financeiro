@@ -5581,8 +5581,20 @@ async function _fetchRecurringIncomes({ force = false } = {}) {
       throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
+    if (data.banco_conectado === true) return { banco_conectado: true };
     return data.incomes || [];
   }, { force });
+}
+
+// R2: o banco conectou com a aba "Receitas fixas" aberta (puxão ou revalidação). A receita
+// passa a vir do extrato e o servidor recusa salvar: esconde a aba e volta à Visão geral.
+function _receitasViraramBanco(data) {
+  if (!data || data.banco_conectado !== true) return false;
+  _recurringIncomeCache = null;
+  const aba = document.querySelector('#recurring-tabs [data-rectab="incomes"]');
+  if (aba) aba.style.display = "none";
+  if (_recurringTab === "incomes") setRecurringTab("overview");
+  return true;
 }
 
 // Puxa o total de gastos fixos pra "sobra prevista" quando o user entrou direto
@@ -5615,7 +5627,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
   if (background) {
     const data = await _fetchRecurringIncomes({ force: true });
-    if (data === undefined) return;
+    if (data === undefined || _receitasViraramBanco(data)) return;
     if (data && data.pro_required) { _renderRecurringIncomeProGate(); return; }
     _recurringIncomeCache = data;
     _renderRecurringIncomeView(data);
@@ -5626,6 +5638,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   if (_recurringIncomeCache && !forceFresh) {
     _renderRecurringIncomeView(_recurringIncomeCache);
     _fetchRecurringIncomes().then(fresh => {
+      if (_receitasViraramBanco(fresh)) return;
       if (fresh && !fresh.pro_required) {
         _recurringIncomeCache = fresh;
         _renderRecurringIncomeView(fresh);
@@ -5642,7 +5655,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   `;
   try {
     const data = await _fetchRecurringIncomes({ force: true });
-    if (data === undefined) return;
+    if (data === undefined || _receitasViraramBanco(data)) return;
     if (data && data.pro_required) {
       _renderRecurringIncomeProGate();
       return;

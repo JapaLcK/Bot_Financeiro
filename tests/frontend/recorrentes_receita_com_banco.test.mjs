@@ -134,3 +134,38 @@ test("o GET de receitas falhou: a aba segue escondida e a tela não quebra", asy
   assert.deepEqual(errs, []);
   await page.close();
 });
+
+// O banco conecta com a aba "Receitas fixas" aberta: o puxão (`loadRecurringIncomeView` em
+// background) e a revalidação do cache (voltar à aba) recebem `banco_conectado: true`. Sem a
+// guarda, a aba e o "+ Nova receita fixa" ficavam na tela e todo salvar caía no 400 da recusa.
+// CONTROLE NEGATIVO (medido): tire o `_receitasViraramBanco` de `loadRecurringIncomeView` e os
+// dois casos caem. CONTROLE POSITIVO: o caso "sem banco" acima mostra a aba.
+for (const caminho of ["puxão", "revalidação do cache"]) {
+  test(`banco conecta com a aba Receitas fixas aberta (${caminho}): volta à Visão geral e a aba some`, async () => {
+    const { page, errs } = await abre(VIEWPORTS[1][1], { ok: true, incomes: [], banco_conectado: false });
+    await mostraVisaoGeral(page);
+    await page.evaluate(() => { USER_ID = 7; csrfHeaders = () => ({}); setRecurringTab("incomes"); });  // sessão falsa: about:blank não lê cookie
+    await page.waitForFunction(() => _recurringIncomeCache !== null);
+    assert.notEqual(await aba(page), "none", "premissa: sem banco a aba aparece");
+    await page.evaluate(() => {
+      const anterior = window.fetch;
+      window.fetch = async (url) => String(url).includes("/recurring-incomes/")
+        ? { ok: true, status: 200, json: async () => ({ ok: true, incomes: [], banco_conectado: true }) }
+        : anterior(url);
+    });
+    if (caminho === "puxão") await page.evaluate(() => loadRecurringIncomeView(true, { background: true }));
+    else await page.evaluate(() => setRecurringTab("incomes"));
+    await page.waitForFunction(() => _recurringTab === "overview");
+    const estado = await page.evaluate(() => ({
+      receitas: getComputedStyle(document.getElementById("recurring-incomes-pane")).display,
+      visao: getComputedStyle(document.getElementById("recurring-overview-pane")).display,
+      cache: _recurringIncomeCache,
+    }));
+    assert.equal(estado.receitas, "none");
+    assert.notEqual(estado.visao, "none");
+    assert.equal(estado.cache, null);
+    assert.equal(await aba(page), "none");
+    assert.deepEqual(errs, []);
+    await page.close();
+  });
+}
