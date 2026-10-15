@@ -8,7 +8,7 @@ etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui
 e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
 (`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; o roxo `#7c3aed` e o `#64748b`, defaults, saem como ele).
 PR 1b feito (#1002): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
-`db/estabelecimentos.py`). PR 2 (a tela) feito, `#NNN` (preencher ao abrir o PR). Onde o §4.1 e o código divergem, vale o código e o
+`db/estabelecimentos.py`). PR 2 (a tela) feito, #1008. Onde o §4.1 e o código divergem, vale o código e o
 contrato em `docs/CLAUDE.md` ("API v2").
 
 ## 1. O que a tela é
