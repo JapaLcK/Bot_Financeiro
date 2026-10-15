@@ -2129,7 +2129,7 @@ no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
 `violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
 (`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
 (traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
-COBRE: (1) o filtro `_sem_failing_row` nos handlers do root que `core/observability.py` instala
+COBRE: (1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
 (stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de
 `system_event_logs` (`log_system_event_sync` e `admin_dashboard.log_system_event`): `message` e
 `details`. NÃO cobre: logger com `propagate=False` (uvicorn), `print`/stderr direto, handler fora

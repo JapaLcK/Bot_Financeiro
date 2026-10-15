@@ -209,7 +209,7 @@ def _sem_failing_row(record: logging.LogRecord) -> bool:
     texto e do traceback do log. Um CHECK violado (`finito_*`, db/finito_checks.py) o põe no
     `str(exc)` e no traceback.
 
-    COBRE: records que passam pelos dois handlers que `_configure_root_logger` instala no root
+    COBRE: records que passam peltodo handler do root (os dois que `_configure_root_logger` instala e os que já existiam)
     (stderr, se o root estava sem handler, e `_DashboardHandler`), com `logger.*(..., exc)` ou `exc_info`. A pilha fica: o traceback vira `exc_text` já
     redigido (o Formatter imprime `exc_text`; o `exc_info` é zerado para ninguém reformatá-lo).
     NÃO COBRE: logger com `propagate=False` (uvicorn), `print`/stderr direto e handler fora
@@ -240,7 +240,6 @@ def _configure_root_logger() -> None:
     if not root.handlers:
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setFormatter(logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT))
-        stderr_handler.addFilter(_sem_failing_row)
         root.setLevel(logging.INFO)
         root.addHandler(stderr_handler)
 
@@ -249,8 +248,12 @@ def _configure_root_logger() -> None:
         dash_handler = _DashboardHandler()
         dash_handler.setLevel(logging.WARNING)
         dash_handler.addFilter(_sem_ratelimit_no_banco)
-        dash_handler.addFilter(_sem_failing_row)
         root.addHandler(dash_handler)
+
+    # todo handler do root, inclusive os que o processo instalou antes deste módulo
+    for h in root.handlers:
+        if _sem_failing_row not in h.filters:
+            h.addFilter(_sem_failing_row)
 
     _root_configured = True
 

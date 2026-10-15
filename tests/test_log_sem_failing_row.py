@@ -51,15 +51,16 @@ def test_registro_sem_failing_row_passa_intacto():
     assert rec.getMessage() == "ola mundo"
 
 
-def test_filtro_esta_nos_dois_handlers_do_root(monkeypatch):
+def test_filtro_esta_em_todo_handler_do_root(monkeypatch):
     monkeypatch.setattr(O, "_root_configured", False)
     root = logging.getLogger()
     antes = list(root.handlers)
     try:
         for h in list(root.handlers):
             root.removeHandler(h)
+        root.addHandler(logging.NullHandler())  # handler de root instalado ANTES do módulo
         O._configure_root_logger()
-        assert root.handlers and all(O._sem_failing_row in h.filters for h in root.handlers)
+        assert len(root.handlers) == 2 and all(O._sem_failing_row in h.filters for h in root.handlers)
     finally:
         for h in list(root.handlers):
             root.removeHandler(h)
