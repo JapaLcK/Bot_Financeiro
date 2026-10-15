@@ -8060,6 +8060,8 @@ async def delete_launch_route(
         frase = next(m for c, m in _MSG_DELETE_LAUNCH.items() if isinstance(exc, c))
         raise HTTPException(status_code=400, detail=frase) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # `f"...{exc}"` num caminho DESTRUTIVO vazava o texto do psycopg
         # (`DETAIL: Key (…)=(…)`) pro modal, e não deixava log nenhum. SEM
         # traceback de propósito (medido em duas colunas): na `main` esta rota
@@ -8161,6 +8163,8 @@ async def delete_credit_transaction_route(
     except CompraDoBanco as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
         # middleware deixa passar — nunca houve pilha gravada aqui para manter.
