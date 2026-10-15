@@ -20,7 +20,7 @@ from fastapi.exceptions import RequestValidationError
 from utils_date import now_tz
 
 from .. import streaming
-from .._context import CARDS_DO_TURNO, metas_do_turno
+from .._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
 from ..cards import IDS, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, CardIndisponivel, montar
 from ._base import Tool
 from .launches import _AVISO_12, _AVISO_FIM
@@ -33,6 +33,18 @@ _MSG_FUTURO = ("O card mostra até o mês atual. Explique isso; para o que já e
 
 def _erro(codigo: str, msg: str) -> dict[str, Any]:
     return {"error": codigo, "message": msg}
+
+
+def _registra_falha(card: str) -> None:
+    """O card não saiu por plano, onboarding ou leitura: fica no turno (`FALHAS_DE_CARD_DO_TURNO`)."""
+    falhas = FALHAS_DE_CARD_DO_TURNO.get()
+    if falhas is not None:
+        falhas.append(card)
+
+
+def _falha(card: str, codigo: str, msg: str) -> dict[str, Any]:
+    _registra_falha(card)
+    return _erro(codigo, msg)
 
 
 def _indice(m: str) -> int:
@@ -76,9 +88,11 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
                      "escreva o resto em texto, a partir do que já leu")
 
     if usados is not None and card in usados:
-        como = ("faixas, use compare_periods" if card == "periodo"
-                else "meses, chame show_card uma vez só com meses=[...]")
-        return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. Para comparar {como}")
+        como = ("Para comparar faixas, use compare_periods" if card == "periodo"
+                else "Para comparar meses, chame show_card uma vez só com meses=[...]" if card == "categorias"
+                else "Para comparar meses, use show_card periodo com de/ate, ou categorias com meses=[...] (esse card mostra 1 mês)"
+                if card in _COM_MES else "Escreva a partir do resultado anterior")
+        return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. {como}")
 
     meses = args.get("meses")
     if meses is None:  # ausente ou null (o modelo manda null em opcional): o mês atual
@@ -116,16 +130,19 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     except HTTPException as e:
         d = e.detail if isinstance(e.detail, dict) else {}
         if e.status_code == 402:  # conta sem plano ativo: o app a recusa também
-            return _erro("sem_plano_ativo", "A conta não tem plano ativo. Oriente a escolher um plano "
-                         "em pigbankai.com/precos, sem citar números.")
+            return _falha(card, "sem_plano_ativo", "A conta não tem plano ativo. Oriente a escolher um plano "
+                          "em pigbankai.com/precos, sem citar números.")
         if d.get("error") == "pro_required":
-            return _erro("pro_required", "Esse card faz parte de um plano superior. Ofereça o upgrade com jeitinho, sem números.")
-        return _erro(d.get("error") or f"http_{e.status_code}",
-                     "O card não está disponível agora. Explique isso e responda em texto, sem inventar números.")
+            return _falha(card, "pro_required", "Esse card faz parte de um plano superior. Ofereça o upgrade com jeitinho, sem números.")
+        return _falha(card, d.get("error") or f"http_{e.status_code}",
+                      "O card não está disponível agora. Explique isso e responda em texto, sem inventar números.")
     except CardIndisponivel as e:
-        return _erro("indisponivel", str(e))
+        return _falha(card, "indisponivel", str(e))
     except RequestValidationError:
         return _erro("mes_futuro", _MSG_FUTURO)
+    except Exception:  # RuntimeError, KeyError, o assert do `_casa`: o runner devolve `falha_interna` e loga; aqui só registra
+        _registra_falha(card)
+        raise
     # Só com o bloco pronto: prévia e bloco saem juntos, em sequência. Exceção antes daqui
     # (gate, leitor, serialização) não deixa o app com esqueleto sem bloco.
     if usados is not None:
@@ -147,7 +164,7 @@ SCHEMA = {
         "description": (
             f"Mostra no app um card do painel com os números do usuário. Chame UMA vez por card, "
             f"no máximo {MAX_POR_TURNO} por resposta, e escreva os números a partir do resultado desta tool. "
-            "Cards: contas (saldo por conta), hero (previsão de saldo), compromissos (próximos "
+            "Cards: contas (saldo total e por conta: 'meu saldo'), hero (previsão de saldo), compromissos (próximos "
             "pagamentos), resumo (entrou/saiu do mês), categorias (gastos por categoria; aceita "
             "até 3 meses lado a lado), calendario (gastos por dia), simulador (Pro), patrimonio, "
             "wealth (distribuição do patrimônio), rendimento (taxas contratadas), assinaturas, "

@@ -137,6 +137,18 @@ export const resumoMesQuery = (mes: string) => ({
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/resumo-do-mes", signal, { mes }),
   ...vivo,
 });
+// "Para onde vai" (`GET /api/v2/gastos`): o Resumo e a /gastos leem a mesma chave, uma requisição só.
+export const gastosQuery = (mes: string) => queryOptions({
+  queryKey: ["gastos", mes],
+  queryFn: ({ signal }) => apiGet("/gastos", signal, { mes }),
+  ...vivo,
+});
+// O detalhe de uma categoria do mês (`/gastos/categoria`), também o calendário dela.
+export const gastosCategoriaQuery = (mes: string, categoria: string) => queryOptions({
+  queryKey: ["gastos", mes, categoria],
+  queryFn: ({ signal }) => apiGet("/gastos/categoria", signal, { mes, categoria }),
+  ...vivo,
+});
 
 // Só dentro da árvore que o portão (parts/Entrada.tsx) libera: lá o /me já chegou.
 export const usePlan = () => useQuery(meQuery).data!.plan_tier;

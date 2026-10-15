@@ -156,13 +156,19 @@ CAT_VAZIA_LABEL = "sem categoria"
 # catálogo `user_categories`: "sem categoria" e a categoria que só aparece nos lançamentos.
 CAT_NEUTRA_EMOJI = "🏷️"
 CAT_NEUTRA_COR = "#94A3B8"
+# Cores tratadas como "sem cor": `#7c3aed`, o default da coluna `user_categories.color` (WhatsApp, IA e
+# cartões criam a categoria assim; o seletor do /app não o oferece, então ninguém o escolheu), e `#64748b`,
+# a semente do "outros". `#64748b` TAMBÉM é um swatch do seletor do painel antigo (dashboard.js,
+# CATEGORY_COLOR_OPTIONS): quem o escolheu lá passa a ver `CAT_NEUTRA_COR` na API v2, por decisão do dono
+# (cinza unificado). Saem neutras, no lugar de pintar de roxo tudo que o usuário não coloriu.
+CAT_COR_PADRAO = {"#7c3aed", "#64748b"}
 
 
 def cat_visual(emoji, cor) -> dict:
     """`{emoji, cor}` de uma linha do catálogo, nunca vazio nem inválido: o writer só faz `strip()`."""
     emoji = (emoji or "").strip()
-    return {"emoji": emoji or CAT_NEUTRA_EMOJI,
-            "cor": cor if cor and re.fullmatch(r"#[0-9a-fA-F]{6}", cor) else CAT_NEUTRA_COR}
+    valida = bool(cor) and re.fullmatch(r"#[0-9a-fA-F]{6}", cor) and cor.lower() not in CAT_COR_PADRAO
+    return {"emoji": emoji or CAT_NEUTRA_EMOJI, "cor": cor if valida else CAT_NEUTRA_COR}
 
 
 def cat_key_sql(expr: str) -> str:

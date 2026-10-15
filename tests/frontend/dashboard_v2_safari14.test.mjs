@@ -79,8 +79,13 @@ test("/painel sem as APIs do Safari 15+: monta, o plano da API vale, zero erro d
     await page.locator("#board-profile").waitFor();
     const r = await page.evaluate(() => [typeof [].at, typeof structuredClone, typeof Object.hasOwn,
       [...document.querySelectorAll("[data-widget-id]")].map((w) => w.dataset.widgetId).filter((id) => ["hero", "piggy", "simulador"].includes(id))]);
+    // "Para onde vai" real (Etapa 5): os três blocos (categorias, calendário, detalhe) montam sem as APIs que faltam
+    await page.evaluate(() => { location.hash = "#/gastos"; });
+    await page.locator("#w-cat-detalhe .detail-facts").waitFor();
+    const gastos = [await page.locator("#w-categorias .cat").count(), await page.locator("#w-calendario .cal-day").count()];
     await ctx.close();
     assert.deepEqual(r, ["undefined", "undefined", "undefined", []]);
+    assert.deepEqual(gastos, [2, 31]);
     assert.deepEqual(erros, []);
   } finally {
     await browser.close();

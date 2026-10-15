@@ -43,7 +43,7 @@ from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
 from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
-from ..cards import MAX_MESES_PERIODO
+from ..cards import MAX_MESES_PERIODO, card_ainda_resolve
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -142,18 +142,46 @@ def _meses_inteiros(start: date, end: date) -> tuple[tuple[int, int], tuple[int,
     return None
 
 
-def _recusa_se_for_do_card(start: date, end: date, extra: dict[str, Any]) -> dict[str, Any] | None:
-    """No app, meses inteiros (passados ou o corrente) são cards: 1 mês = `categorias`, 2 a 12 =
-    `periodo` (`mes_detalhes`). Mês futuro o `show_card` recusa (`mes_pedido`): esse segue pela
-    tool, senão não tem saída. `extra` é o de `_limita_periodo`: o período pedido passou de 12 meses."""
+_MSG_1_MES = {
+    "categorias": 'use show_card categorias com meses=["{mes}"]',
+    "resumo": (
+        'use show_card resumo com meses=["{mes}"]. Vários meses (mês a mês, comparar) = UMA chamada: '
+        "show_card periodo com de/ate, ou categorias com meses=[...] (até 3). "
+        'Saldo ("meu saldo", "quanto tenho") = show_card contas.'
+    ),
+}
+
+
+def _recusa_se_for_do_card(
+    user_id: int, start: date, end: date, extra: dict[str, Any], card_1_mes: str = "categorias",
+) -> dict[str, Any] | None:
+    """No app, meses inteiros (passados ou o corrente) são cards: 1 mês = `card_1_mes` (`categorias` ou
+    `resumo`, com a mensagem de `_MSG_1_MES`), 2 a 12 = `periodo` (`mes_detalhes`). Mês futuro o `show_card`
+    recusa (`mes_pedido`): esse segue pela tool, senão não tem saída. `extra` é o de `_limita_periodo`: o
+    período pedido passou de 12 meses. Sem saída pelo card = o dado: o turno já gastou as vagas de card
+    (`MAX_POR_TURNO`) ou já mostrou o card para o qual a recusa mandaria (`card_repetido`). E 1 mês que o
+    plano corta (`history_earliest_date` depois do dia 1): o card não traz o `historico_desde`, o dado sim
+    (2 a 12 meses vão ao `periodo`, que traz). Também devolve o dado a conta sem acesso ao app
+    (`exigir_acesso_do_app`) e o turno em que o `show_card` do card-alvo já falhou (`FALHAS_DE_CARD_DO_TURNO`): o card
+    responderia erro, e a recusa não deixaria saída."""
     meses = _meses_inteiros(start, end)
     hoje = today_tz()
     if not (streaming.ativo() and meses and meses[1] <= (hoje.year, hoje.month)):
         return None
-    if meses[0] == meses[1]:
-        return {"error": "mes_inteiro_no_card", "message": "use show_card categorias"}
+    um = meses[0] == meses[1]
+    alvo = card_1_mes if um else "periodo"
+    if not card_ainda_resolve(user_id, alvo):
+        return None
+    avisos = "".join(f". Depois, {extra[k]}" for k in ("aviso_limite", "aviso_fim") if k in extra)
+    if um:
+        from core.services.plan_service import history_earliest_date
+
+        corte = history_earliest_date(user_id, now_tz())
+        if corte and corte > start:
+            return None
+        return {"error": "mes_inteiro_no_card", "message": _MSG_1_MES[card_1_mes].format(mes="{:04d}-{:02d}".format(*meses[0])) + avisos}
     msg = "use show_card periodo com de={:04d}-{:02d} e ate={:04d}-{:02d}".format(*meses[0], *meses[1])
-    return {"error": "periodo_no_card", "message": msg + "".join(f". Depois, {extra[k]}" for k in ("aviso_limite", "aviso_fim") if k in extra)}
+    return {"error": "periodo_no_card", "message": msg + avisos}
 
 
 def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dict[str, Any]]:
@@ -189,6 +217,8 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
     afirmação certa apareceria como "sem evidência"), mas a conta é em Decimal: o saldo
     não mistura float com Decimal."""
     start, end, limite = _limita_periodo(start, end)
+    if erro := _recusa_se_for_do_card(user_id, start, end, limite, "resumo"):
+        return erro
     meses = _meses_inteiros(start, end)
     if meses:
         a, b = meses
@@ -509,7 +539,7 @@ def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     limit = max(1, min(limit, 20))
 
     start, end, limite = _limita_periodo(start, end)
-    if erro := _recusa_se_for_do_card(start, end, limite):
+    if erro := _recusa_se_for_do_card(user_id, start, end, limite):
         return erro
 
     start, end, por_fatura, extra = _janela(user_id, start, end)
@@ -539,7 +569,7 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "categoria obrigatória"}
 
     start, end, limite = _limita_periodo(start, end)
-    if erro := _recusa_se_for_do_card(start, end, limite):
+    if erro := _recusa_se_for_do_card(user_id, start, end, limite):
         return erro
 
     start, end, _, extra = _janela(user_id, start, end)  # o cartão já é pela fatura; muda a janela
@@ -986,19 +1016,20 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_period_summary",
-                "description": "Retorna o resumo financeiro de um período: total de receitas e despesas reais (NÃO inclui aportes de investimento — pra aportes, use `get_investment_contributions`). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Sem datas, retorna o mês corrente (inteiro, com o cartão). Aceita até 12 meses (mais que isso vem cortado nos 12 mais recentes, com `limitado_a_12_meses`: explique o limite). Meses-calendário inteiros (dia 1 até o último dia, ou até hoje no mês corrente; um mês ou vários) = a regra do painel: cartão pela fatura de cada mês (`cartao_por: fatura`). Outro período (um dia, uma semana, 10/03 a 25/04) é período livre: o cartão entra pela data da compra (`cartao_por: data_da_compra`) e a `nota` pede que você avise o usuário.",
+                "description": "Retorna o resumo financeiro de um período: total de receitas e despesas reais (NÃO inclui aportes de investimento — pra aportes, use `get_investment_contributions`). Use pra 'quanto gastei esse mês?', 'meu resumo de abril', 'quanto recebi em maio'. Aceita até 12 meses (mais que isso vem cortado nos 12 mais recentes, com `limitado_a_12_meses`: explique o limite). Meses-calendário inteiros (dia 1 até o último dia, ou até hoje no mês corrente; um mês ou vários) = a regra do painel: cartão pela fatura de cada mês (`cartao_por: fatura`). Outro período (um dia, uma semana, 10/03 a 25/04) é período livre: o cartão entra pela data da compra (`cartao_por: data_da_compra`) e a `nota` pede que você avise o usuário.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "start_date": {
                             "type": "string",
-                            "description": "Data inicial em ISO 8601 (YYYY-MM-DD). Se omitido, usa o primeiro dia do mês corrente.",
+                            "description": "Data inicial AAAA-MM-DD. Sempre passe ('este ano' = 1º de janeiro até hoje; 'esse mês' = dia 1 até hoje).",
                         },
                         "end_date": {
                             "type": "string",
-                            "description": "Data final em ISO 8601 (YYYY-MM-DD), inclusiva. Se omitida, usa a data de hoje.",
+                            "description": "Data final AAAA-MM-DD, inclusiva. Sempre passe.",
                         },
                     },
+                    "required": ["start_date", "end_date"],
                 },
             },
         },
@@ -1016,7 +1047,7 @@ TOOLS: list[Tool] = [
                     "movimentações internas e reembolsos). Use pra 'onde "
                     "gastei mais?', 'quais minhas maiores categorias?', "
                     "'em que torrei mais dinheiro?', 'top 3 categorias do "
-                    "mês'. Sem datas, usa o mês corrente. Período de meses "
+                    "mês'. Período de meses "
                     "inteiros conta o mês todo com o cartão pela fatura (igual ao painel). Até 12 meses."
                 ),
                 "parameters": {
@@ -1024,11 +1055,11 @@ TOOLS: list[Tool] = [
                     "properties": {
                         "start_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD). Omita pra usar o primeiro dia do mês corrente.",
+                            "description": "Data inicial AAAA-MM-DD. Sempre passe ('este ano' = 1º de janeiro até hoje; 'esse mês' = dia 1 até hoje).",
                         },
                         "end_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD), inclusivo. Omita pra usar hoje.",
+                            "description": "Data final AAAA-MM-DD, inclusiva. Sempre passe.",
                         },
                         "limit": {
                             "type": "integer",
@@ -1038,6 +1069,7 @@ TOOLS: list[Tool] = [
                             "description": "Top N categorias (1 a 20, padrão 5).",
                         },
                     },
+                    "required": ["start_date", "end_date"],
                 },
             },
         },
@@ -1056,8 +1088,7 @@ TOOLS: list[Tool] = [
                     "user nomeia a categoria: 'quanto gastei na categoria "
                     "outros esta semana?', 'quanto torrei em mercado em julho?', "
                     "'gastei quanto com transporte esse mês?'. Pra ranking de "
-                    "várias categorias use `get_top_categories`. Sem datas, usa "
-                    "o mês corrente. Período que é um mês inteiro conta o mês "
+                    "várias categorias use `get_top_categories`. Período que é um mês inteiro conta o mês "
                     "todo com o cartão pela fatura (igual ao painel)."
                 ),
                 "parameters": {
@@ -1069,14 +1100,14 @@ TOOLS: list[Tool] = [
                         },
                         "start_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD). Omita pra usar o primeiro dia do mês corrente.",
+                            "description": "Data inicial AAAA-MM-DD. Sempre passe ('este ano' = 1º de janeiro até hoje; 'esse mês' = dia 1 até hoje).",
                         },
                         "end_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD), inclusivo. Omita pra usar hoje.",
+                            "description": "Data final AAAA-MM-DD, inclusiva. Sempre passe.",
                         },
                     },
-                    "required": ["categoria"],
+                    "required": ["categoria", "start_date", "end_date"],
                 },
             },
         },
@@ -1096,7 +1127,7 @@ TOOLS: list[Tool] = [
                     "mês', 'top 3 compras', 'em que gastei mais de uma vez "
                     "só'. Passe `categoria` pra restringir a uma categoria "
                     "('meus maiores gastos em mercado'). Inclui despesas reais "
-                    "+ compras no cartão. Sem datas, usa o mês corrente; período que é um "
+                    "+ compras no cartão. Período que é um "
                     "mês inteiro conta o mês todo com o cartão pela fatura (igual ao painel). "
                     "Cada item traz `categoria`, `instituicao` (banco ou cartão), "
                     "`data` e `valor`. Quando houver `parcelamento`, copie esse "
@@ -1110,11 +1141,11 @@ TOOLS: list[Tool] = [
                     "properties": {
                         "start_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD). Omita pra usar o primeiro dia do mês corrente.",
+                            "description": "Data inicial AAAA-MM-DD. Sempre passe ('este ano' = 1º de janeiro até hoje; 'esse mês' = dia 1 até hoje).",
                         },
                         "end_date": {
                             "type": "string",
-                            "description": "ISO 8601 (YYYY-MM-DD), inclusivo. Omita pra usar hoje.",
+                            "description": "Data final AAAA-MM-DD, inclusiva. Sempre passe.",
                         },
                         "limit": {
                             "type": "integer",
@@ -1128,6 +1159,7 @@ TOOLS: list[Tool] = [
                             "description": "Opcional. Restringe os maiores gastos a essa categoria (ex: 'outros', 'mercado').",
                         },
                     },
+                    "required": ["start_date", "end_date"],
                 },
             },
         },

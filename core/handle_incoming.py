@@ -743,7 +743,7 @@ def isencao_do_barrado(texto: str, uid: int):
     (#711, T5) perguntam aqui. `allow_ai=False`: só as regras determinísticas,
     sem DB e sem rede."""
     from core.services.billing_commands import is_billing_command
-    classificado = classify(texto, user_id=uid, allow_ai=False)
+    classificado = classify(texto, allow_ai=False)  # sem `user_id`: com ele o classificador lê a conta (chave das metas)
     if classificado.intent in ("help", "help.tutorial"):
         return "ajuda", classificado
     if is_billing_command(texto):

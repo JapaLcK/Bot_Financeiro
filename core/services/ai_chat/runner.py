@@ -42,10 +42,13 @@ from typing import Any
 import db
 from db.ai_turno import trava_do_turno
 from db.finito_checks import MSG_VALOR_WHATSAPP, violacao_finito
+from utils_date import today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from . import streaming
-from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, METAS_DO_TURNO, metas_do_turno
+from ._context import (
+    CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, METAS_DO_TURNO, metas_do_turno,
+)
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
@@ -256,10 +259,12 @@ def chat_detalhado(
         token_estado = _ESTADO.set(estado)
         cards: list[str] = []
         token_cards = CARDS_DO_TURNO.set(cards)
+        token_falhas = FALHAS_DE_CARD_DO_TURNO.set([])
         try:
             reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
                                 ia_primeiro=ia_primeiro)
         finally:
+            FALHAS_DE_CARD_DO_TURNO.reset(token_falhas)
             CARDS_DO_TURNO.reset(token_cards)
             _ESTADO.reset(token_estado)
             CURRENT_USER_MESSAGE.reset(token_msg)
@@ -382,10 +387,10 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             if m.get("role") == "assistant" and isinstance(m.get("content"), str):
                 m["content"] = strip_markdown_headers(m["content"])
 
-        today_str = date.today().strftime("%d/%m/%Y")
+        hoje = today_tz()
         metas = metas_do_turno(user_id)
         METAS_DO_TURNO.set(metas)
-        system_with_date = prompt_do_usuario(metas, streaming.ativo()) + f"\n\nData de hoje: {today_str}."
+        system_with_date = prompt_do_usuario(metas, streaming.ativo(), hoje) + "\n\n" + _linha_de_data(hoje)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
@@ -424,6 +429,28 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
         # Erro após escrita pode ter sido pós-commit: não devolve essa vaga.
         if (not completed or final_text == ERROR_MSG) and not attempted_write:
             refund_usage(user_id, reservation)
+
+
+def _linha_de_data(hoje: date) -> str:
+    """A data e o mês atual, com o exemplo calculado: o modelo errava a conta de "últimos N meses"
+    (esquecia que inclui o mês atual) e dava 01..09 em outubro."""
+    i = hoje.year * 12 + hoje.month - 1
+    return (f"Data de hoje: {hoje.strftime('%d/%m/%Y')}. Mês atual: {hoje:%Y-%m}; "
+            f'"últimos 3 meses" = {(i - 2) // 12}-{(i - 2) % 12 + 1:02d} a {hoje:%Y-%m}.')
+
+
+def _json_cru(texto: str) -> bool:
+    """Resposta que é um JSON inteiro (objeto, lista, `null`, `true` ou `false`): o modelo despejou argumento de
+    tool como texto. Número sozinho ("50") é texto."""
+    if texto in ("null", "true", "false"):
+        return True
+    if not texto.startswith(("{", "[")):
+        return False
+    try:
+        json.loads(texto)
+    except ValueError:
+        return False
+    return True
 
 
 def _cancela_pendencia_do_turno(user_id: int) -> None:
@@ -586,6 +613,9 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
+            if _json_cru(final):  # vale como resposta vazia: ERROR_MSG, nada gravado, cota devolvida
+                logger.warning("ai_chat: resposta final em JSON cru pra user %s", user_id)
+                final = ""
             _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
             if not final:
                 _cancela_pendencia_do_turno(user_id)

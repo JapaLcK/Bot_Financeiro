@@ -16,6 +16,9 @@ import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
 import { Categories } from "./widgets/Categories";
 import { CategoryDetail } from "./widgets/CategoryDetail";
+import { GastosCalendario } from "./widgets/GastosCalendario";
+import { GastosCategorias } from "./widgets/GastosCategorias";
+import { GastosDetalhe } from "./widgets/GastosDetalhe";
 import { Goals } from "./widgets/Goals";
 import { GoalsTimeline } from "./widgets/GoalsTimeline";
 import { Hero } from "./widgets/Hero";
@@ -67,13 +70,14 @@ function Forecast({ s }: { s: DashState }) {
 }
 
 function Spending({ s }: { s: DashState }) {
+  const [Cats, Cal, Detail] = DEMO ? [Categories, Calendar, CategoryDetail] : [GastosCategorias, GastosCalendario, GastosDetalhe];
   return (
     <Page path="/gastos" lede="Escolha uma categoria para ver de onde vem o gasto; o calendário e o extrato seguem a escolha.">
       <div className="span-5 stack">
-        <div className="panel"><Categories s={s} /></div>
-        <div className="panel"><Calendar s={s} /></div>
+        <div className="panel"><Cats s={s} /></div>
+        <div className="panel"><Cal s={s} /></div>
       </div>
-      <Panel span={7}><CategoryDetail s={s} /></Panel>
+      <Panel span={7}><Detail s={s} /></Panel>
     </Page>
   );
 }

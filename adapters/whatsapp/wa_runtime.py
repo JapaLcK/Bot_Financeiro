@@ -1403,7 +1403,7 @@ def process_message(message: InboundMessage) -> None:
             # pagaria a conta com R$ 42,00.
             if (pending_recat
                     and pending_recat.get("action_type") == "bill_pay_amount"
-                    and abandona_pergunta_de_valor(message.text or "")):
+                    and abandona_pergunta_de_valor(message.text or "", uid)):
                 try:
                     # CAS, não clear: `pending_actions` é uma linha por usuário
                     # e outra tarefa pode ter posto uma pergunta nova aqui entre

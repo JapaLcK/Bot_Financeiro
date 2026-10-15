@@ -1,8 +1,8 @@
 """`GET`/`POST /api/v2/guia`: o guia do /painel (#728), estado em `db/guia.py`.
 
 `PASSOS` é a fonte única do roteiro (falas, âncoras, ações, `dado`): o cliente desenha
-o selo "exemplo" a partir de `dado`. Passo 1 depende do Saiu real (`motivo_resumo`); 2 e
-3 são sobre blocos de exemplo e estão sempre disponíveis. Estado, na ordem:
+o selo "exemplo" a partir de `dado`. Passo 1 depende do Saiu real (`motivo_resumo`); 2 (categorias,
+dado real) e 3 (Piggy, exemplo) estão sempre disponíveis: o servidor não olha se há categoria. Estado, na ordem:
 `concluido` (todos os passos feitos) > `dispensado` > `em_andamento` (já oferecido, pelo
 convite ou pela Ajuda, ou já fez algum: o cliente não mostra o convite sozinho, só retoma
 pela Ajuda) > `oferecer` (nada feito, nunca oferecido, passo 1 disponível) > `indisponivel`. `motivo` do topo = o do passo 1 quando ele está indisponível, só nos dois
@@ -38,10 +38,9 @@ PASSOS = (
               "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.",
               "texto": "Toca aqui pra comparar com o mês passado."}},
     {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta",
-     "dado": "exemplo", "avanca": "cliente",
+     "dado": "real", "avanca": "cliente",
      "fala": {"titulo": "Pra onde foi o dinheiro",
-              "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. "
-                           "Estes números ainda são de exemplo.",
+              "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.",
               "texto": "Toca numa categoria pra ver de onde vem o total."}},
     {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou",
      "dado": "exemplo", "avanca": "cliente",

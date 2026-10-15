@@ -268,7 +268,7 @@ def test_categorias_da_chave_e_nome_do_usuario(libera):
     libera(a, b)
     de_a = pede(a, "/api/v2/categorias").json()["categorias"]
     assert {"chave": "alimentacao", "nome": "alimentação", "emoji": "🍔", "cor": "#f59e0b"} in de_a
-    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha", "emoji": "🏷️", "cor": "#7c3aed"} in de_a
+    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha", "emoji": "🏷️", "cor": "#94A3B8"} in de_a  # o default da coluna sai neutro
     assert not any(c["nome"] == "Viagem Só Minha" for c in pede(b, "/api/v2/categorias").json()["categorias"])
 
 
