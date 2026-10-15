@@ -157,6 +157,24 @@ test("o detalhe leva a categoria aos lançamentos sem `tipo`; 'Sem categoria' (f
   assert.deepEqual(r, ["?mes=2026-10&categoria=sem+categoria&guardado=true", "sem categoria", "Sem categoria"]);
 });
 
+test("catálogo de categorias fora do ar com categoria já escolhida: o select segue usável e 'Todas as categorias' limpa o filtro", async () => {
+  const { ctx, page, ir } = await abrir({ ...COM_DADO });
+  await ctx.route((u) => u.pathname === "/api/v2/categorias", (r) => r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }));
+  const lanc = pedidos(page, "/api/v2/lancamentos");
+  await ir("/gastos");
+  await page.locator("#w-categorias .cat", { hasText: "sem categoria" }).click();
+  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
+  await page.getByText("Não foi possível carregar as categorias.").waitFor();
+  const sel = page.getByRole("combobox", { name: /^Categoria/ });
+  const habilitado = await sel.isEnabled();
+  await sel.selectOption("");
+  await page.waitForFunction(() => !document.querySelector(".ledger-chips") && document.querySelector("select.field").value === "");
+  await page.locator(".lanc-linha").first().waitFor();
+  const r = [habilitado, lanc.at(-1)];
+  await ctx.close();
+  assert.deepEqual(r, [true, "?mes=2026-10&guardado=true"]);
+});
+
 test("erro: o 500 da /gastos mostra 'Não deu para carregar.' nos três blocos e 'Tentar de novo' (44px) recupera", async () => {
   const { ctx, page, ir } = await abrir();
   let falha = true;
