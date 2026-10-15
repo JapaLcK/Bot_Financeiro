@@ -29,6 +29,8 @@ dois. A escolha real é gravar saneado ou não gravar nada.
 
 import re
 
+import psycopg
+
 _FFFD = "�"
 
 
@@ -251,3 +253,24 @@ def tem_veneno(valor) -> bool:
     então `limpa_para_pg(v) != v` dá sempre False (medido).
     """
     return isinstance(valor, str) and _limpa_str(valor) != valor
+
+
+# ── CHECK de valor finito (db/finito_checks.py) ──────────────────────────────
+# Mora aqui, e não em `db/`, porque quem só precisa RECONHECER o erro ou mostrar a frase (adapters,
+# handlers, o harness que substitui o pacote `db`) não deve importar a camada de banco.
+PREFIXO_FINITO = "finito_"
+MSG_VALOR_API = "Valor inválido: confira o número."
+MSG_VALOR_WHATSAPP = "⚠️ Não consegui registrar esse valor. Confere o número e manda de novo."
+
+
+def violacao_finito(exc: BaseException | None) -> str | None:
+    """Nome da constraint `finito_*` se `exc` (ou sua causa/contexto, até 5 níveis) é um
+    CheckViolation dela; senão None. Nunca use `str(exc)`: traz 'Failing row contains (...)'."""
+    for _ in range(5):
+        if exc is None:
+            return None
+        if isinstance(exc, psycopg.errors.CheckViolation):
+            nome = getattr(exc.diag, "constraint_name", None) or ""
+            return nome if nome.startswith(PREFIXO_FINITO) else None
+        exc = exc.__cause__ or exc.__context__
+    return None

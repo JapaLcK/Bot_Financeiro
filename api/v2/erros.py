@@ -18,7 +18,7 @@ from starlette.requests import ClientDisconnect
 
 from core.admin_dashboard import log_system_event, status_do_erro
 from core.pg_text import limpa_para_pg
-from db.finito_checks import MSG_VALOR_API, violacao_finito
+from core.pg_text import MSG_VALOR_API, violacao_finito
 
 _CODIGOS = {
     401: "unauthenticated",

@@ -41,7 +41,7 @@ from typing import Any
 
 import db
 from db.ai_turno import trava_do_turno
-from db.finito_checks import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from utils_date import today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 

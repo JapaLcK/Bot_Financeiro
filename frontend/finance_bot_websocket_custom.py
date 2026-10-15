@@ -81,7 +81,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
-from db.finito_checks import MSG_VALOR_API, violacao_finito
+from core.pg_text import MSG_VALOR_API, violacao_finito
 from db.rate_limits import RATE_LIMIT_UPSERT_SQL
 from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (

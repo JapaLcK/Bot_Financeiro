@@ -26,7 +26,7 @@ from typing import Any
 
 import db
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from utils_date import today_tz
 from utils_text import fmt_brl, valor_valido
 

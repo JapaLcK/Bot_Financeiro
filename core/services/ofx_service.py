@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Any
 from ofx_import import import_ofx_bytes
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from core.services.fonte_unica import exigir
 try:
     from utils_text import fmt_brl

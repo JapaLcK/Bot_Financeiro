@@ -37,7 +37,7 @@ from db import resumo_mes
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
 # porta e não pela outra.
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
 from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl, valor_valido

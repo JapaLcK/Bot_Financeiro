@@ -44,7 +44,7 @@ from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
-from db.finito_checks import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,

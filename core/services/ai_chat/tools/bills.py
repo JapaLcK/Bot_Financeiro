@@ -24,7 +24,7 @@ from typing import Any
 
 from ._base import Tool
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 
 _ERRO_PAGAR = "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 

@@ -19,7 +19,7 @@ from typing import Any
 import db
 from utils_text import valor_valido
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from utils_date import _tz
 
 from .. import streaming

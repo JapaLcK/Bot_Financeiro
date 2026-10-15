@@ -13,7 +13,7 @@ from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.fonte_unica import FonteUnicaOF, recusa as recusa_q36
 from core.services.plan_limits import PlanLimitExceeded
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,

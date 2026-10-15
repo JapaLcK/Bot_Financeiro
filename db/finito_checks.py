@@ -25,14 +25,13 @@ from psycopg import sql
 
 from utils_text import QUANTIDADE_MAX, VALOR_MAX
 
+from core.pg_text import MSG_VALOR_API, MSG_VALOR_WHATSAPP, PREFIXO_FINITO, violacao_finito  # noqa: F401 (reexport)
+
 from .connection import get_conn
 
 logger = logging.getLogger(__name__)
 
-PREFIXO_FINITO = "finito_"
 # Frases ao usuário quando o CHECK barra o valor (fonte única: API/monólito e conversa).
-MSG_VALOR_API = "Valor inválido: confira o número."
-MSG_VALOR_WHATSAPP = "⚠️ Não consegui registrar esse valor. Confere o número e manda de novo."
 FINITO_LOCK = 728_531_006  # lock de SESSÃO próprio (mesmo molde do FK_INDEXES_LOCK)
 
 # Colunas sem o CHECK, com o motivo. Só entra aqui com motivo escrito.
@@ -188,17 +187,3 @@ def ensure_finito_checks_once() -> dict | None:
                     cur.execute("select pg_advisory_unlock(%s)", (FINITO_LOCK,))
         finally:
             conn.autocommit = False
-
-
-def violacao_finito(exc: BaseException | None) -> str | None:
-    """Nome da constraint `finito_*` se `exc` (ou sua causa/contexto, até 5 níveis) é um
-    CheckViolation dela; senão None. Nunca use `str(exc)`: traz 'Failing row contains (...)'."""
-    for _ in range(5):
-        if exc is None:
-            return None
-        if isinstance(exc, psycopg.errors.CheckViolation):
-            nome = getattr(exc.diag, "constraint_name", None) or ""
-            return nome if nome.startswith(PREFIXO_FINITO) else None
-        exc = exc.__cause__ or exc.__context__
-    return None
-

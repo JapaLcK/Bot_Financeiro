@@ -27,7 +27,7 @@ from utils_text import valor_valido
 from core.services import fonte_unica
 from db import investido
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 
 from ._base import Tool
 from .launches import _limita_periodo

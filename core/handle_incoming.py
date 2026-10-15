@@ -32,7 +32,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
-from db.finito_checks import MSG_VALOR_WHATSAPP, violacao_finito
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno

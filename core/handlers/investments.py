@@ -6,7 +6,7 @@ from core.dashboard_links import build_dashboard_link
 from core.handlers import pending as h_pending
 from core.services import fonte_unica
 from core.services.plan_limits import PlanLimitExceeded
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 import logging
 
 logger = logging.getLogger(__name__)

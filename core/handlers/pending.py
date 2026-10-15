@@ -7,7 +7,7 @@ import logging
 
 import db
 from core.observability import _log_falha
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from core.response_formatter import wrap_wa_markup
 from utils_text import fmt_brl
 

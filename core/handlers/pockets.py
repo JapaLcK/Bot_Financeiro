@@ -4,7 +4,7 @@ import logging
 import re
 import db
 from core.handlers import pending as h_pending
-from db.finito_checks import violacao_finito
+from core.pg_text import violacao_finito
 from utils_text import fmt_brl, parse_pocket_deposit_natural
 
 logger = logging.getLogger(__name__)
