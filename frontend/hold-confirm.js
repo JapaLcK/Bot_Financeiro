@@ -14,7 +14,7 @@
  *
  *   idle    --aperta--> holding (se não disabled e podeComecar() !== false)
  *   holding --solta---> idle ('Cancelado')
- *   holding --aborta--> idle (pointerleave/pointercancel/touchcancel/blur/Esc/aba oculta)
+ *   holding --aborta--> idle (pointerleave/pointercancel/touchcancel/blur/blur da janela/Esc/aba oculta)
  *   holding --ms------> done ('Confirmado', confirmar('segurar'))
  *   holding --ms, botão não alcançável (alcancavel() falso)--> idle, em silêncio, sem confirmar
  *   done    --resetar-> idle        (done ignora tudo até lá)
@@ -178,6 +178,7 @@
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) abortar();
     });
+    window.addEventListener("blur", abortar);   // Cmd-Tab com o botão sem foco (Safari)
 
     return { resetar: m.resetar };
   }

@@ -103,6 +103,24 @@ for (const a of ACOES) {
     } finally { await ctx.close(); }
   });
 
+  test(`${a.nome}: blur da JANELA (botão sem foco, como no Safari) aos 600 ms cancela o hold — 0 requisições`, async () => {
+    const { page, ctx, reqs } = await abre(a);
+    try {
+      // Safari não foca o botão no clique de mouse: o mousedown sem foco imita isso.
+      await page.evaluate((id) => document.getElementById(id).addEventListener("mousedown", (e) => e.preventDefault()), a.botao);
+      await aperta(page, a);
+      assert.equal(await page.evaluate((id) => document.activeElement.id === id, a.botao), false, "o botão não pode ter foco");
+      await page.clock.runFor(600);
+      assert.equal(await estado(page, a), "holding");
+      await page.evaluate(() => window.dispatchEvent(new Event("blur")));   // Cmd-Tab: só a janela perde o foco
+      assert.equal(await estado(page, a), "idle", "o blur da janela tinha que cancelar");
+      await page.clock.runFor(1000);
+      await assenta();
+      assert.equal(reqs.length, 0);
+      await page.mouse.up();
+    } finally { await ctx.close(); }
+  });
+
   test(`${a.nome}: aviso aria-live fora do botão — o nome do botão é só o rótulo, e o aviso diz Cancelado/Confirmado`, async () => {
     const preso = new Promise(() => {});   // o fetch nunca volta: o botão fica em done
     const { page, ctx, reqs } = await abre(a, { resposta: () => preso });
