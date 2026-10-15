@@ -841,7 +841,7 @@ PT_MULT = _PT_MULT
 PT_VALUE = (
     rf"(?:r\$\s*)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
     rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
-    r"(?:(?<=\d)\s+bi\b)?"  # "bi" curto só colado em dígito: "100 bi" sim, "cem bi"/"de bi" não
+    r"(?:(?<=\d)\s*bi\b)?"  # "bi" curto só colado em dígito: "100 bi"/"2bi" sim, "cem bi"/"de bi" não
 )
 
 
@@ -936,7 +936,8 @@ def parse_money(text: str) -> float | None:
         if not mm.group(1) and mult > 10**6:
             # bi/bilhão/trilhão sem número não é valor (hipérbole)
             continue
-        base = float(mm.group(1).strip().replace(".", "").replace(",", ".")) if mm.group(1) else 1.0
+        # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
+        base = parse_money(mm.group(1)) if mm.group(1) else 1.0
         total = base * mult
         if mm.group(3):
             total += float(mm.group(3))

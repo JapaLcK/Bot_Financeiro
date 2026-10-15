@@ -36,6 +36,9 @@ LANC = "select valor::text v, alvo from launches where user_id=%s"
     ("gastei 1 mil e 500", 1500), ("gastei 2 milhões", 2e6), ("gastei 2,5 mil", 2500),
     ("gastei 1.000 no mercado", 1000), ("gastei 50 no bilhar", 50), ("gastei 30 no bilhete unico", 30),
     ("gastei 50 na trilha", 50), ("gastei 50 bicicleta", 50), ("1 tri", 1),
+    # base decimal com ponto: mesma regra do número comum ("1.5" decimal, "1.500" milhar)
+    ("gastei 0.5 bilhão", 5e8), ("gastei 1.5 mil", 1500), ("gastei 2.5 milhões", 2500000),
+    ("gastei 1.000 mil", 1e6), ("gastei 1.500 milhões", 1.5e9),
 ])
 def test_parse_money(texto, esperado):
     assert parse_money(texto) == esperado
@@ -51,6 +54,13 @@ def test_parse_pt_number(texto, esperado):
 @pytest.mark.parametrize("texto,alvo", [
     ("gastei 1 bilhão no mercado", "mercado"), ("gastei 2 bi no mercado", "mercado"),
     ("paguei bi 50", "bi 50"), ("gastei 10 mil reais no mercado", "mercado"),
+    # valor por extenso + multiplicador também sai da descrição
+    ("gastei um bilhão no mercado", "mercado"), ("gastei dois milhões no mercado", "mercado"),
+    ("gastei dez mil no mercado", "mercado"), ("gastei cento e cinquenta mil no mercado", "mercado"),
+    ("gastei dez mil e quinhentos no mercado", "mercado"),
+    # controles: sem multiplicador (ou "bi" curto por extenso) o número é parte da descrição
+    ("gastei dois cafés", "dois cafés"), ("gastei um bi no mercado", "um bi no mercado"),
+    ("gastei um bilhete", "um bilhete"),
 ])
 def test_descricao_nao_carrega_o_multiplicador(texto, alvo):
     assert _extract_target_after_amount(texto) == alvo
@@ -72,11 +82,21 @@ def test_conversa_acima_do_teto_nao_grava_e_a_conversa_segue(texto):
     _grava_50(uid, 0)
 
 
-def test_conversa_um_bilhao_e_a_borda_e_registra_com_descricao():
+@pytest.mark.parametrize("texto,valor", [
+    ("gastei 1 bilhão no mercado", 1e9), ("gastei um bilhão no mercado", 1e9),
+    ("gastei dez mil no mercado", 10000.0),
+])
+def test_conversa_um_bilhao_e_a_borda_e_registra_com_descricao(texto, valor):
     uid = usuario_pagante()
-    assert "Despesa registrada" in _diga(uid, "gastei 1 bilhão no mercado")
+    assert "Despesa registrada" in _diga(uid, texto)
     [r] = _conta(LANC, uid)
-    assert float(r["v"]) == 1e9 and r["alvo"] == "mercado"
+    assert float(r["v"]) == valor and r["alvo"] == "mercado"
+
+
+def test_conversa_ponto_decimal_na_base_do_bilhao():
+    uid = usuario_pagante()
+    assert "Despesa registrada" in _diga(uid, "gastei 0.5 bilhão no mercado")
+    assert [float(r["v"]) for r in _conta(LANC, uid)] == [5e8]  # não 5 bi (o ponto não é milhar)
 
 
 def test_conversa_10_mil_grava_10000():
@@ -97,9 +117,19 @@ def test_conversa_cartao_acima_do_teto_nao_grava(texto):
     _grava_50(uid, 0)
 
 
-def test_conversa_cartao_bicicleta_nao_e_lida_como_bi():
+def test_conversa_cartao_2bi_colado_e_recusado():
+    uid, _ = _usuario_com_cartao()  # sem espaço, "2bi" é 2 bi (parse_money já lia): não R$ 2 em 10x
+    assert "Valor inválido" in _diga(uid, "parcelei 10x de 2bi no cartão nubank")
+    assert _compras(uid) == []
+    _grava_50(uid, 0)
+
+
+@pytest.mark.parametrize("texto", [
+    "parcelei 3x de 100 bicicleta no cartão nubank", "parcelei 3x de 100bicicleta no cartão nubank",
+])
+def test_conversa_cartao_bicicleta_nao_e_lida_como_bi(texto):
     uid, _ = _usuario_com_cartao()
-    _diga(uid, "parcelei 3x de 100 bicicleta no cartão nubank")
+    _diga(uid, texto)
     assert len(_compras(uid)) == 3  # 3 parcelas de R$ 100, não "100 bi"
 
 

@@ -1,5 +1,5 @@
 import re
-from utils_text import normalize_text, is_internal_category, parse_money, PT_MULT
+from utils_text import normalize_text, is_internal_category, parse_money, PT_MULT, PT_PHRASE
 from utils_date import extract_date_from_text
 from core.services.category_service import infer_category, learn_from_explicit_category
 
@@ -146,8 +146,12 @@ def _extract_target_after_amount(text_base: str) -> str:
 
     t = re.sub(r"^\s*(gastei|gasto|paguei|pagar|comprei|debitei|mandei|enviei|pixei|recebi|receita|ganhei|entrou|caiu|pingou|pinguei|embolsei|adicionar|adicione|adiciona|adicionei|adicionou|somar|soma|some|somei)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*r\$\s*", "", t, flags=re.IGNORECASE).strip()
-    # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56").
-    t = re.sub(rf"^\s*\d[\d.,]*(?:\s*(?:{PT_MULT})\b)?", "", t, count=1, flags=re.IGNORECASE).strip()
+    # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56"),
+    # ou por extenso + multiplicador obrigatório ("dez mil", "um bilhão e 500"); "bi" curto nunca por extenso
+    t = re.sub(
+        rf"^\s*(?:\d[\d.,]*(?:\s*(?:{PT_MULT})\b)?"
+        rf"|(?:{PT_PHRASE})\s+(?!bi\b)(?:{PT_MULT})\b(?:\s+e\s+(?:{PT_PHRASE}|\d+))?)",
+        "", t, count=1, flags=re.IGNORECASE).strip()
     # multiplicador sem dígito antes ("mil reais" → "reais"); com dígito a linha acima já consome
     t = re.sub(rf"^\s*(?!bi\b)(?:{PT_MULT})\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
