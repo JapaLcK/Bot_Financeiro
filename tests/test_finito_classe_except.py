@@ -15,7 +15,7 @@ from conftest import usuario_pagante
 from db.finito_checks import MSG_VALOR_WHATSAPP
 from core.response_formatter import format_for_platform
 from tests._patrimonio_helpers import q
-from test_finito_ataque import NOVE, _diga, _linhas
+from test_finito_ataque import PERTO, TETO, _diga, _linhas
 
 CC = "select 1 from credit_transactions where user_id=%s"
 WA = format_for_platform(MSG_VALOR_WHATSAPP, "whatsapp")
@@ -27,23 +27,23 @@ def _cartao(uid):
     return cid
 
 
-# ── WhatsApp: duas portas do cartão (a fatura passa de VALOR_MAX na 3ª compra) ───────────────
+# ── WhatsApp: duas portas do cartão (a fatura semeada em PERTO passa de VALOR_MAX com 1 bi legal) ─────
 
-@pytest.mark.parametrize("frase,n,boas", [("gastei {} no crédito nubank", 1, 1), ("parcelei {} em 2x celular", 2, 2)],
+@pytest.mark.parametrize("frase,n", [("gastei {} no crédito nubank", 1), ("parcelei {} em 2x celular", 2)],
                          ids=["a_vista", "parcelada"])
-def test_whatsapp_compra_no_credito_cuja_fatura_passa_do_teto(frase, n, boas):
-    """`boas` = quantas compras de 9e12 cabem antes de credit_bills.total passar de 1e13."""
+def test_whatsapp_compra_no_credito_cuja_fatura_passa_do_teto(frase, n):
+    """A fatura é semeada por SQL em PERTO; a compra de TETO_ENTRADA (legal na porta) cruza 1e13."""
     uid = usuario_pagante()
     _cartao(uid)
     # positivo: o caminho legítimo continua registrando
     assert _diga(uid, frase.format(100)) != WA
     antes = len(_linhas(CC, uid))
     assert antes == n, antes
-    respostas = [_diga(uid, frase.format(NOVE)) for _ in range(3)]
-    assert respostas[boas - 1] != WA, respostas
-    assert respostas[boas] == WA and "Tenta de novo" not in respostas[boas], respostas
+    q("update credit_bills set total=%s where user_id=%s", (PERTO, uid))
+    resposta = _diga(uid, frase.format(TETO))
+    assert resposta == WA and "Tenta de novo" not in resposta, resposta
     # a compra que estourou não deixou linha solta
-    assert len(_linhas(CC, uid)) == antes + n * boas
+    assert len(_linhas(CC, uid)) == antes
 
 
 def test_whatsapp_pagar_fatura_com_check_sobe_ao_tratador_central(monkeypatch):

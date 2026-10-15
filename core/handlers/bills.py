@@ -19,7 +19,7 @@ import re
 from core.financial_targets import texto_da_quantidade
 from core.handlers.conta_por_nome import PAY_RE, escolher_conta
 from core.response_formatter import wrap_wa_markup
-from utils_text import (_ENCHIMENTO, _TRACOS, VALOR_MAX, fmt_brl, limpa_pontuacao_final,
+from utils_text import (_ENCHIMENTO, _TRACOS, TETO_ENTRADA, fmt_brl, limpa_pontuacao_final,
                         normalize_text, parse_money, valor_perigoso, valor_valido)
 
 logger = logging.getLogger(__name__)
@@ -133,8 +133,8 @@ def try_pay_from_text(user_id: int, text: str, forma_pagamento: str | None = Non
     if amount is not None and not valor_valido(round(amount, 2)):
         # Antes de perguntar a forma: a pendência guardaria o valor e o "dinheiro" seguinte
         # estouraria em "erro interno" em loop (o `mark_bill_paid` recusa inf, centavo
-        # invisível e o que passa do limite). Acima do limite é código colado, não valor.
-        return _valor_invalido(best, entendi=amount > VALOR_MAX and amount != float("inf"))
+        # invisível e o que passa do limite). Acima do teto: valor real demais ou código colado.
+        return _valor_invalido(best, entendi=amount > TETO_ENTRADA and amount != float("inf"))
 
     declarada = forma_pagamento or fp.detectar(text)
     decisao = fp.decidir(user_id, declarada)

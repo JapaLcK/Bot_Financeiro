@@ -2150,9 +2150,11 @@ Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
 
 **Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
-`finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico, nunca teto
-de negócio; NULL passa).** Existe porque `nan <= 0` é False: NaN/Infinity/1e308 passavam
-pelas guardas por porta (`valor_valido`/`valor_finito`, que ficam, pela mensagem amigável).
+`finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico do banco; NULL
+passa).** O teto de negócio do valor digitado é `utils_text.TETO_ENTRADA` (R$ 1 bi, decisão do
+dono 2026-10-15), aplicado só nas portas de entrada. Existe porque `nan <= 0` é False:
+NaN/Infinity/1e308 passavam pelas guardas por porta (`valor_valido`/`valor_finito`, que ficam,
+pela mensagem amigável).
 Nasce em `db/finito_checks.py::ensure_finito_checks_once`, na tarefa de fundo (fora do
 `init_db`, para dado sujo nunca travar o boot): pré-scan tudo-ou-nada (coluna suja =>
 nada é adicionado, `logger.error` uma vez por boot só com `tabela.coluna`, para

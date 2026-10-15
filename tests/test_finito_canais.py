@@ -228,10 +228,16 @@ def test_sync_com_conta_nan_termina_e_grava_as_validas():
 
 def test_valor_valido_e_finito_comparam_decimal_exato_sem_passar_por_float():
     """OFX preserva o Decimal: via float, 10000000000000.0001 vira VALOR_MAX e passaria pela guarda
-    (o CHECK do banco o recusa e a importação já commitada voltaria erro)."""
-    from utils_text import valor_finito, valor_valido
+    técnica (o CHECK do banco o recusa e a importação já commitada voltaria erro). `valor_valido`
+    (porta de valor digitado) é medido no TETO_ENTRADA, `valor_finito` por padrão no VALOR_MAX."""
+    from utils_text import TETO_ENTRADA, valor_finito, valor_valido
     justo, alem = Decimal("10000000000000"), Decimal("10000000000000.0001")
-    assert valor_valido(justo) and valor_finito(justo) and valor_finito(-justo)
-    assert not valor_valido(alem) and not valor_finito(alem) and not valor_finito(-alem)
+    assert valor_finito(justo) and valor_finito(-justo)
+    assert not valor_finito(alem) and not valor_finito(-alem)
+    assert not valor_valido(justo)  # a porta de entrada é mais baixa que o banco
+    teto, acima = Decimal("1000000000"), Decimal("1000000000.0001")
+    assert valor_valido(teto) and not valor_valido(acima)
+    assert valor_finito(teto, TETO_ENTRADA) and valor_finito(-teto, TETO_ENTRADA)
+    assert not valor_finito(acima, TETO_ENTRADA) and not valor_finito(-acima, TETO_ENTRADA)
     assert not valor_valido(Decimal("NaN")) and not valor_finito(Decimal("-Infinity"))
     assert not valor_finito(Decimal("1e1000000")) and valor_finito(Decimal("0")) and not valor_valido(Decimal("0"))

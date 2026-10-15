@@ -1,5 +1,6 @@
 """ATAQUE do Tester ao CHECK `finito_*` (db/finito_checks.py), mantido como regressão.
-Guarda da porta ligada (valor <= VALOR_MAX passa): ataca a SOMA que cruza 1e13 e o que os handlers fazem."""
+Porta de entrada = TETO_ENTRADA (1e9), banco = VALOR_MAX (1e13): o agregado é semeado por SQL perto de 1e13
+e cruzado por uma entrada legal de 1e9, para o CHECK continuar sendo o que se mede."""
 import logging
 from decimal import Decimal
 
@@ -11,7 +12,8 @@ from db import get_conn
 from db.finito_checks import MSG_VALOR_WHATSAPP
 from tests._patrimonio_helpers import q
 
-NOVE = "9000000000000"  # 9e12: passa em valor_valido (<= 1e13), a soma de dois não
+TETO = "1000000000"  # TETO_ENTRADA: passa em valor_valido; somado a PERTO cruza o VALOR_MAX do banco
+PERTO = 10**13 - 10**8  # agregado semeado por SQL: nenhuma porta de usuário chega aqui sozinha
 
 
 def _sem_linha(texto):
@@ -65,9 +67,9 @@ def test_wa_retirar_da_caixinha_devolve_failing_row_ao_usuario(caplog):
     """`return f"Erro ao retirar: {e}"` (core/handlers/pockets.py) levava o texto do psycopg ao WhatsApp."""
     uid = usuario_pagante()
     _l, pid, _n = db.create_pocket(uid, "viagem")
-    q("update pockets set balance=9000000000000 where id=%s", (pid,))
-    db.set_balance(uid, Decimal("9000000000000"))
-    resp = _diga(uid, f"retirei {NOVE} da caixinha viagem")
+    q("update pockets set balance=%s where id=%s", (PERTO, pid))
+    db.set_balance(uid, Decimal(PERTO))
+    resp = _diga(uid, f"retirei {TETO} da caixinha viagem")
     assert "Failing row" not in resp and "violates check" not in resp, resp[:300]
 
 
@@ -195,30 +197,33 @@ def test_saldo_absurdo_da_pluggy_vira_zero_sem_saldo_ausente():
 
 
 def test_rota_credito_soma_cruza_limite_vira_400_sem_failing_row():
-    """Guarda da porta LIGADA; a 2a compra de 9e12 estoura `credit_bills.total` (1.8e13)."""
+    """Guarda da porta LIGADA; a fatura semeada em PERTO + 1 bi legal estoura `credit_bills.total`."""
     from test_valor_nao_finito_painel import _cliente
     uid = usuario_pagante()
     cid = db.create_card(uid, "Nubank", closing_day=10, due_day=17)
     c, h = _cliente(uid)
-    corpo = f'{{"tipo":"credito","valor":{NOVE},"alvo":"x","nota":"x","card_id":{cid}}}'
+    corpo = f'{{"tipo":"credito","valor":{TETO},"alvo":"x","nota":"x","card_id":{cid}}}'
     r1 = c.post(f"/launches/{uid}", headers=h, content=corpo)
+    q("update credit_bills set total=%s where user_id=%s", (PERTO, uid))
     r2 = c.post(f"/launches/{uid}", headers=h, content=corpo)
     assert r1.status_code == 200
     assert r2.status_code == 400 and "Failing row" not in r2.text, r2.text[:200]
 
 
 def test_rota_credito_parcelado_estoura_check_e_nao_loga_failing_row(caplog):
-    """Terceiro parcelado de 9e12 (4,5e12 por fatura) passa de 1e13 em `credit_bills.total`."""
+    """Parcelado de 1 bi (5e8 por fatura) sobre faturas semeadas em PERTO passa de 1e13 em `credit_bills.total`."""
     from test_valor_nao_finito_painel import _cliente
     uid = usuario_pagante()
     cid = db.create_card(uid, "Nubank", closing_day=10, due_day=17)
     c, h = _cliente(uid)
     c.raise_server_exceptions = False
-    corpo = f'{{"tipo":"credito","valor":{NOVE},"alvo":"x","nota":"x","card_id":{cid},"parcelas":2}}'
+    corpo = f'{{"tipo":"credito","valor":{TETO},"alvo":"x","nota":"x","card_id":{cid},"parcelas":2}}'
     with caplog.at_level(logging.DEBUG):
-        resp = [c.post(f"/launches/{uid}", headers=h, content=corpo) for _ in range(3)]
-    assert [r.status_code for r in resp] == [200, 200, 400], [r.status_code for r in resp]
-    assert resp[2].json()["detail"] == "Valor inválido: confira o número."
+        resp = [c.post(f"/launches/{uid}", headers=h, content=corpo)]
+        q("update credit_bills set total=%s where user_id=%s", (PERTO, uid))
+        resp.append(c.post(f"/launches/{uid}", headers=h, content=corpo))
+    assert [r.status_code for r in resp] == [200, 400], [r.status_code for r in resp]
+    assert resp[1].json()["detail"] == "Valor inválido: confira o número."
     assert _sem_linha(caplog.text)
 
 
@@ -237,9 +242,9 @@ def test_rota_investimento_com_check_vira_400_sem_failing_row(monkeypatch):
 def test_ia_pendencia_confirmada_estoura_check_e_loga_failing_row(caplog):
     from core.services.ai_chat import runner
     uid = usuario_pagante()
-    db.set_balance(uid, Decimal("-9000000000000"))
+    db.set_balance(uid, Decimal(-PERTO))
     pend = {"tool_name": "add_launch", "tool_args": {
-        "tipo": "despesa", "valor": 9e12, "alvo": "x", "forma_pagamento": "dinheiro"}}
+        "tipo": "despesa", "valor": 1e9, "alvo": "x", "forma_pagamento": "dinheiro"}}
     with caplog.at_level(logging.DEBUG):
         msg = runner._execute_pending(uid, pend)
     assert _lancs(uid) == 0

@@ -8861,8 +8861,8 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     Se delta == 0, não cria nada (idempotente).
     """
     _authorize_dashboard_access(request, user_id)
-    from utils_text import VALOR_MAX
-    if not abs(payload.target_balance) <= VALOR_MAX:  # NaN e inf também falham a comparação
+    from utils_text import TETO_ENTRADA
+    if not abs(payload.target_balance) <= TETO_ENTRADA:  # NaN e inf também falham a comparação
         raise HTTPException(status_code=400, detail="Saldo inválido.")
     from db.accounts import add_launch_and_update_balance, carteira_exibida
     from db import get_consolidated_balance

@@ -385,7 +385,8 @@ def test_valor_perigoso_acima_do_limite_pergunta_de_novo_e_inf_segue_nao_positiv
 
     assert valor_perigoso("1" * 14, 1.1e13) == "nao_entendi"      # código colado
     assert valor_perigoso("1" * 400, float("inf")) == "nao_positivo"
-    assert valor_perigoso("2000000000", 2e9) is None             # R$ 2 bi segue valendo
+    assert valor_perigoso("2000000000", 2e9) == "nao_entendi"    # acima do TETO_ENTRADA (R$ 1 bi)
+    assert valor_perigoso("1000000000", 1e9) is None             # exatamente o teto vale
 
 
 # ── terceira rodada: banco de orçamento, conta com banco conectado, saldo, WhatsApp ──
