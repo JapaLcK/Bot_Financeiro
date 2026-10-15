@@ -1,4 +1,5 @@
-"""Metas em texto de conversa: a tool `list_metas` da IA e o card `metas` do chat do app.
+"""Metas em texto de conversa: a tool `list_metas` da IA, o card `metas` do chat do app e o
+"minhas metas" do WhatsApp (`texto_whatsapp`).
 
 Uma fonte de verdade para o NÚMERO: `api.v2.metas.listar` (regra em `db/metas.py` e
 `db/metas_ritmo.py`); aqui só se escreve a frase. Dinheiro entra como string (o JSON da rota) e sai
@@ -9,11 +10,15 @@ chaves e a ordem), na voz da conversa. O nome da meta é texto do usuário: só 
 """
 from __future__ import annotations
 
+import logging
 from decimal import ROUND_HALF_UP, Decimal
 
+from core.response_formatter import wrap_wa_markup
 from core.services.piggy_agents import MESES_PT
 from db.metas_ritmo import MOTIVOS_RITMO as SO_DO_RITMO, RITMO_DIAS_MINIMOS as DIAS_MINIMOS
 from utils_text import fmt_brl
+
+logger = logging.getLogger(__name__)
 
 MAX_METAS = 10
 ONDE_CRIAR = "Crie e edite suas metas no painel: pigbankai.com/painel (seção Metas). Pelo chat ainda não dá."
@@ -157,3 +162,32 @@ def para_conversa(d: dict) -> dict:
                       "resumo": resumo, "avisos": _avisos(m, resumo)})
     sobra = len(metas) - MAX_METAS
     return {"metas": itens, "sem_metas": not metas, "mais": f"e mais {sobra} no painel" if sobra > 0 else None}
+
+
+def texto_whatsapp(uid: int) -> str:
+    """O "minhas metas" do WhatsApp (leitura; escrita é o C4): o `resumo` e os `avisos` de
+    `para_conversa`, sem recalcular nada. Sem link mágico: o painel vai como URL simples. Cabe nos 4096
+    do WhatsApp (com folga para o aviso que alguns caminhos põem antes): se não couber, tira metas do fim e anuncia ("e mais N no painel"). Nunca lança."""
+    from core.handlers.launches import _WPP_MAX_CHARS, _wpp_len  # tardio: handler pesado, só aqui
+
+    def bloco(m: dict) -> str:
+        nome = wrap_wa_markup(" ".join(m["nome"].replace("\x00", "").split()))  # uma linha só; nome com `*_~` sai sem negrito
+        return "\n".join([nome, m["resumo"], *m["avisos"]])
+
+    try:
+        d = ler(uid)
+        c = para_conversa(d)
+        blocos, total = [bloco(m) for m in c["metas"]], len(d["metas"])
+    except Exception:
+        logger.exception("minhas metas falhou uid=%s", uid)
+        return "Não consegui ler suas metas agora. Tenta de novo daqui a pouco."
+    if c["sem_metas"]:
+        return f"Você ainda não tem metas. {ONDE_CRIAR}"
+
+    teto = _WPP_MAX_CHARS - 100  # folga: "🔕 Cancelei a pergunta anterior." (e o aviso do cartão) vão NA FRENTE desta mensagem
+    while True:
+        mais = f"e mais {total - len(blocos)} no painel" if total > len(blocos) else None
+        texto = "\n\n".join(["🎯 *Suas metas*", *blocos, *([mais] if mais else []), ONDE_CRIAR])
+        if len(blocos) == 1 or _wpp_len(texto) <= teto:
+            return texto
+        blocos.pop()
