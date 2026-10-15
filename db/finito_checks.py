@@ -3,8 +3,9 @@
 `nan <= 0` é False, então `NaN`/`Infinity`/`1e308` passavam pelas guardas por porta
 (`utils_text.valor_valido`/`valor_finito`) e entravam em coluna `numeric`. Estas
 constraints são o piso no BANCO: `finito_<coluna> CHECK (abs(col) <= VALOR_MAX)`.
-`VALOR_MAX` é limite técnico (nunca teto de negócio); NULL passa; NaN e ±Infinity não
-(no Postgres NaN é maior que todo numérico finito, então `abs(NaN) <= N` é false).
+`VALOR_MAX` é o limite técnico do banco (o teto de negócio da entrada é `TETO_ENTRADA`);
+NULL passa; NaN e ±Infinity não (no Postgres NaN é maior que todo numérico finito, então
+`abs(NaN) <= N` é false).
 
 Não roda no `init_db`: nasce em tarefa de fundo (`ensure_finito_checks_once`), como os
 índices de FK (`db/schema_repairs.py`). Coluna numérica nova é coberta no boot seguinte.

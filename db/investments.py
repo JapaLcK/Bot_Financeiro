@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 import psycopg
 
 from utils_date import _tz, is_br_business_day
-from utils_text import valor_finito, valor_valido
+from utils_text import TETO_ENTRADA, valor_finito, valor_valido
 
 from .connection import get_conn
 from .users import ensure_user
@@ -1123,7 +1123,7 @@ def create_investment_db(
         purchase_date = date.fromisoformat(purchase_date)
     if isinstance(maturity_date, str) and maturity_date:
         maturity_date = date.fromisoformat(maturity_date)
-    if not valor_finito(initial_amount or 0):
+    if not valor_finito(initial_amount or 0, TETO_ENTRADA):
         raise ValueError("INITIAL_AMOUNT_INVALID")
     initial = Decimal(str(initial_amount or 0))
     if initial < 0:
