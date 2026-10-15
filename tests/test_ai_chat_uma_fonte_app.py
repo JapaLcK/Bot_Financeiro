@@ -181,7 +181,8 @@ def test_mes_inteiro_recusado_so_se_o_card_o_mostra(gastos, dia_2, nome, args, p
     assert "error" not in fora
     if recusa:
         # o mês REAL pedido, não o molde nem o mês atual do card sem `meses`
-        assert app == {"error": "mes_inteiro_no_card", "message": f'use show_card categorias com meses=["{periodo[0][:7]}"]'}
+        cat = ' e categoria="alimentação"' if nome == "get_category_spend" else ""  # F3b: a categoria vai ao card
+        assert app == {"error": "mes_inteiro_no_card", "message": f'use show_card categorias com meses=["{periodo[0][:7]}"]{cat}'}
     else:
         assert app == fora
 
@@ -271,7 +272,7 @@ def test_get_open_bill_apara_total_e_deixa_periodo_e_itens(pro_user_id):
     assert {"total", "paid_amount", "remaining"} <= set(fora) and fora["total"] == 100.0
     assert "error" not in fora  # sem emissor: o dado de sempre
     assert set(fora) - set(app) == {"total", "paid_amount", "remaining"}
-    assert set(app) - set(fora) == {"error", "message"} and app["error"] == "total_no_card"  # F3: aponta o card
-    assert "show_card fatura" in app["message"]
-    assert {k: v for k, v in app.items() if k not in ("error", "message")} == {k: v for k, v in fora.items() if k in app}
+    assert set(app) - set(fora) == {"error", "message", "itens_total"} and app["error"] == "total_no_card"  # F3: aponta o card
+    assert "show_card fatura" in app["message"] and app["itens_total"] == 1
+    assert {k: v for k, v in app.items() if k not in ("error", "message", "itens_total")} == {k: v for k, v in fora.items() if k in app}
     assert app["items"] and app["period_start"] and app["period_end"]

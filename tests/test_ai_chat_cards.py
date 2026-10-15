@@ -89,9 +89,11 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
         do_bloco = {abs(Decimal(str(n))).quantize(Decimal("0.01"), ROUND_HALF_UP) for n in _numeros(bloco)}
         assert reais and reais <= do_bloco and not any(isinstance(x, float) for x in _numeros(r))
     else:
-        # `tendencia` (renda) é derivada das mesmas linhas e sai da conta; o B2 testa a derivação
-        sem_tendencia = [{k: v for k, v in a.items() if k != "tendencia"} for a in r["abas"]]
-        assert _numeros(sem_tendencia) <= _numeros(bloco)
+        # o resumo (F3b) traz derivados das mesmas linhas do bloco; `tests/test_ai_chat_f3b.py` testa cada derivação
+        derivados = {"renda": {"tendencia", "entrou", "saiu", "saldo"}, "categorias": {"saldo", "categorias_total"},
+                     "periodo": {"categorias_total"}}.get(card, set())
+        sem_derivados = [{k: v for k, v in a.items() if k not in derivados} for a in r["abas"]]
+        assert _numeros(sem_derivados) <= _numeros(bloco)
         assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "rendimento", "piggy"), \
             "a visão do modelo tem número como número"
     json.dumps(r)  # serializa como o runner serializa
@@ -223,10 +225,9 @@ def test_visao_arredonda_como_o_bloco(mundo):
     assert cards._fio(o)["cartao"] == "10.01" and cards._py(o)["cartao"] == 10.01
     a, _ = mundo
     db.add_launch_and_update_balance(a, "despesa", Decimal("10.005"), "x", None, categoria="arred_teste")
-    r, (bloco,), _ = mostrar(a, card="categorias")
+    r, (bloco,), _ = mostrar(a, card="categorias", categoria="arred_teste")  # fora do top 3 da visão: vem em `categoria_pedida`
     (cat_b,) = [c for c in bloco["abas"][0]["recursos"]["detalhes"]["categorias"] if c["categoria"] == "arred_teste"]
-    (cat_m,) = [c for c in r["abas"][0]["categorias"] if c["categoria"] == "arred_teste"]
-    assert cat_b["valor"] == "10.01" and cat_m["valor"] == 10.01
+    assert cat_b["valor"] == "10.01" and r["abas"][0]["categoria_pedida"]["valor"] == 10.01
 
 
 _DINHEIRO = {"valor", "total", "saiu", "entrou", "saldo", "aportes", "saques", "liquido"}
@@ -260,7 +261,7 @@ def test_visao_mantem_cada_valor_na_linha_certa(mundo):
     cats = bloco["abas"][0]["recursos"]["detalhes"]["categorias"]
     assert len({c["valor"] for c in cats}) >= 3
     assert [(c["categoria"], c["valor"]) for c in r["abas"][0]["categorias"]] == \
-        [(c["categoria"], float(c["valor"])) for c in cats]
+        [(c["categoria"], float(c["valor"])) for c in cats[:3]]  # a visão é o resumo: as 3 maiores
 
 
 def test_casa_falha_alto_quando_visao_e_bloco_divergem():

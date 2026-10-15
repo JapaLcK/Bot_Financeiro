@@ -25,6 +25,7 @@ Write (PEDE confirmação — destrutivo):
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -32,6 +33,7 @@ from typing import Any
 
 import db
 from db import resumo_mes
+from db.connection import cat_key
 # Helper único das portas destrutivas, com o nível por parâmetro (a docstring
 # dele lista quais portas e explica o critério). Cópia local logava ERROR onde o
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
@@ -43,8 +45,8 @@ from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
-from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
-from ..cards import MAX_MESES_PERIODO, card_ainda_resolve
+from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, JANELAS_DO_TURNO
+from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -155,6 +157,7 @@ _MSG_1_MES = {
 
 def _recusa_se_for_do_card(
     user_id: int, start: date, end: date, extra: dict[str, Any], card_1_mes: str = "categorias",
+    categoria: str | None = None,
 ) -> dict[str, Any] | None:
     """No app, meses inteiros (passados ou o corrente) são cards: 1 mês = `card_1_mes` (`categorias` ou
     `resumo`, com a mensagem de `_MSG_1_MES`), 2 a 12 = `periodo` (`mes_detalhes`). Mês futuro o `show_card`
@@ -164,25 +167,56 @@ def _recusa_se_for_do_card(
     plano corta (`history_earliest_date` depois do dia 1): o card não traz o `historico_desde`, o dado sim
     (2 a 12 meses vão ao `periodo`, que traz). Também devolve o dado a conta sem acesso ao app
     (`exigir_acesso_do_app`) e o turno em que o `show_card` do card-alvo já falhou (`FALHAS_DE_CARD_DO_TURNO`): o card
-    responderia erro, e a recusa não deixaria saída."""
+    responderia erro, e a recusa não deixaria saída. `categoria` (só `get_category_spend`) vai na mensagem: o `show_card`
+    a devolve em `categoria_pedida`; mas se o `show_card` deste turno já respondeu `encontrada=false` para essa
+    `categoria` (`CATEGORIAS_NAO_ACHADAS_DO_TURNO`, comparada pela `cat_key`), devolve o dado: o número sai em texto, sem um 2º
+    card. Qualquer outra categoria, ou nenhuma `encontrada=false`, segue a regra normal (a janela pode ser outra). A janela
+    mandada ao `periodo` fica em `JANELAS_DO_TURNO` (`mostrar_card._da_recusa`)."""
     meses = _meses_inteiros(start, end)
     hoje = today_tz()
     if not (streaming.ativo() and meses and meses[1] <= (hoje.year, hoje.month)):
+        return None
+    if categoria and len(categoria) > MAX_CATEGORIA:  # o `show_card` a recusaria (`categoria_invalida`): o dado é a saída
+        return None
+    if categoria and cat_key(categoria) in map(cat_key, CATEGORIAS_NAO_ACHADAS_DO_TURNO.get() or ()):  # o card já disse que não a tem: o dado
         return None
     um = meses[0] == meses[1]
     alvo = card_1_mes if um else "periodo"
     if not card_ainda_resolve(user_id, alvo):
         return None
     avisos = "".join(f". Depois, {extra[k]}" for k in ("aviso_limite", "aviso_fim") if k in extra)
+    cat = f" e categoria={json.dumps(categoria, ensure_ascii=False)}" if categoria else ""
     if um:
         from core.services.plan_service import history_earliest_date
 
         corte = history_earliest_date(user_id, now_tz())
         if corte and corte > start:
             return None
-        return {"error": "mes_inteiro_no_card", "message": _MSG_1_MES[card_1_mes].format(mes="{:04d}-{:02d}".format(*meses[0])) + avisos}
-    msg = "use show_card periodo com de={:04d}-{:02d} e ate={:04d}-{:02d}".format(*meses[0], *meses[1])
-    return {"error": "periodo_no_card", "message": msg + avisos}
+        return {"error": "mes_inteiro_no_card", "message": _MSG_1_MES[card_1_mes].format(mes="{:04d}-{:02d}".format(*meses[0])) + cat + avisos}
+    de, ate = ("{:04d}-{:02d}".format(*m) for m in meses)
+    if (janelas := JANELAS_DO_TURNO.get()) is not None:
+        janelas.append({"de": de, "ate": ate, "extra": extra})
+    return {"error": "periodo_no_card", "message": f"use show_card periodo com de={de} e ate={ate}{cat}{avisos}"}
+
+
+def _recusa_comparar(user_id: int, ma, mb) -> dict[str, Any] | None:
+    """No app, `compare_periods` de DOIS meses inteiros, diferentes e passados (`ma`/`mb` = `_meses_inteiros` de cada
+    lado) vira o card `categorias` com `meses=[...]` (o card lado a lado é a comparação). Fora disso o dado, como
+    antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (os mesmos dias,
+    F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
+    (o card não traz o `historico_desde`). Vem DEPOIS do `plan_gate_ok`: quem não tem a comparação não a ganha pelo card."""
+    hoje = today_tz()
+    if not (streaming.ativo() and ma and mb and ma[0] == ma[1] and mb[0] == mb[1] and ma != mb
+            and max(ma[0], mb[0]) < (hoje.year, hoje.month) and card_ainda_resolve(user_id, "categorias")):
+        return None
+    from core.services.plan_service import history_earliest_date
+
+    meses = sorted((ma[0], mb[0]))
+    corte = history_earliest_date(user_id, now_tz())
+    if corte and corte > date(*meses[0], 1):
+        return None
+    lista = json.dumps(["{:04d}-{:02d}".format(*m) for m in meses], separators=(",", ":"))
+    return {"error": "comparar_no_card", "message": f"use show_card categorias com meses={lista}"}
 
 
 def _janela(user_id: int, start: date, end: date) -> tuple[date, date, bool, dict[str, Any]]:
@@ -371,6 +405,9 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
                 m = datetime.strptime(str(args["mes"]), "%Y-%m")
             except ValueError:
                 return {"error": "mes deve vir como AAAA-MM."}
+            i = m.year * 12 + m.month - 1  # M e o anterior, os dois lados do `comparar_mes`
+            if erro := _recusa_comparar(user_id, *(((j // 12, j % 12 + 1),) * 2 for j in (i, i - 1))):
+                return erro
             r = cp.comparar_mes(user_id, m.year, m.month)
         elif a_ini and a_fim and b_ini and b_fim:
             # o mesmo teto de 12 meses e fim ajustado das outras tools; os avisos vão no lado que foi cortado
@@ -378,6 +415,8 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             # as duas janelas são meses inteiros (`_meses_inteiros`, como `_resumo_periodo`): cartão pela fatura e o
             # mês TODO, o corrente também; senão, data da compra nas duas, sem misturar
             meses = (_meses_inteiros(a_ini, a_fim), _meses_inteiros(b_ini, b_fim))
+            if erro := _recusa_comparar(user_id, *meses):
+                return erro
             hoje = today_tz()
             corrente_x_anterior = tuple((m[0] == m[1] == (d.year, d.month)) if m else False for m, d in zip(
                 meses, (hoje.replace(day=1) - timedelta(days=1), hoje)))
@@ -570,7 +609,7 @@ def _get_category_spend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         return {"error": "categoria obrigatória"}
 
     start, end, limite = _limita_periodo(start, end)
-    if erro := _recusa_se_for_do_card(user_id, start, end, limite):
+    if erro := _recusa_se_for_do_card(user_id, start, end, limite, categoria=categoria):
         return erro
 
     start, end, _, extra = _janela(user_id, start, end)  # o cartão já é pela fatura; muda a janela

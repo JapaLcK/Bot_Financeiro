@@ -212,6 +212,14 @@ def cat_key_sql(expr: str) -> str:
     return cat_norm_sql(f"coalesce(nullif({expr}, ''), '{CAT_VAZIA_LABEL}')")
 
 
+_CAT_TABELA = str.maketrans(_CAT_ACCENTS_FROM, _CAT_ACCENTS_TO)
+
+
+def cat_key(valor: str | None) -> str:
+    """`cat_key_sql` em Python: a mesma chave de casamento (minúsculas, sem acento, vazio = `CAT_VAZIA_LABEL`)."""
+    return (valor or CAT_VAZIA_LABEL).lower().translate(_CAT_TABELA)
+
+
 # ── `tipo` de `launches`: a forma legada conta junto ──────────────────────────
 # Nenhum escritor de hoje grava 'saida'/'entrada' (ver o comentário de
 # `_TIPO_ALIASES`, db/accounts.py), mas muito read path ainda trata esses valores
