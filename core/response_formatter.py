@@ -8,6 +8,18 @@ from __future__ import annotations
 import re
 
 
+# Limite {1,2000} na URL: sem ele `"[a](https://"*5000` era quadrático (1,3 s)
+_LINK_MD = re.compile(r"\[([^\[\]\n]{1,300})\]\((https?://[^)\s]{1,2000})\)")
+
+
+def _link_wa(m: re.Match) -> str:
+    """`[rótulo](url)` -> só a URL se o rótulo for a própria URL, senão `rótulo: url`."""
+    def nu(s: str) -> str:
+        return re.sub(r"^https?://", "", s).rstrip("/")
+    rotulo, url = m.groups()
+    return url if nu(rotulo) == nu(url) else f"{rotulo}: {url}"
+
+
 def format_for_platform(text: str, platform: str) -> str:
     """
     Converte **bold** (padrão Discord) para o formato correto de cada canal.
@@ -17,6 +29,8 @@ def format_for_platform(text: str, platform: str) -> str:
         text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
         # Remove blocos de código inline (WhatsApp não renderiza `code`)
         text = re.sub(r"`(.+?)`", r"\1", text)
+        # WhatsApp não renderiza [rótulo](url): sai com a URL repetida
+        text = _LINK_MD.sub(_link_wa, text)
 
     elif platform == "discord":
         # Discord já usa **bold** — nada a fazer
