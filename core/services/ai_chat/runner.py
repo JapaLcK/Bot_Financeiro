@@ -41,6 +41,7 @@ from typing import Any
 
 import db
 from db.ai_turno import trava_do_turno
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from utils_date import today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
@@ -488,7 +489,7 @@ def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:
         return tool.execute(user_id, args)
     except Exception as e:
         logger.error("erro ao executar pending %s: %s", name, e)
-        return ERROR_MSG
+        return MSG_VALOR_WHATSAPP if violacao_finito(e) else ERROR_MSG
 
 
 def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, Any]]) -> None:
@@ -894,12 +895,12 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         _TURN_WRITE_ATTEMPTED.set(True)
         try:
             user_msg = tool.execute(user_id, args)
-        except Exception:
+        except Exception as e:
             # O texto da exceção não vai ao histórico (nem ao modelo): fica só no log.
             logger.exception("erro em auto-write %s", name)
             return (
                 json.dumps({"error": "falha_interna"}, ensure_ascii=False),
-                ERROR_MSG,
+                MSG_VALOR_WHATSAPP if violacao_finito(e) else ERROR_MSG,
             )
         history = json.dumps(
             {"status": "done", "message": user_msg}, ensure_ascii=False, default=str

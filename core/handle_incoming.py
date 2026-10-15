@@ -32,6 +32,7 @@ from core.services.media_service import (
     analyze_image,
 )
 from core.observability import log_system_event_sync
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
 from core.services.fonte_unica import FonteUnicaOF
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.ai_chat_commands import MANTEM, ENCERRA, aviso_de_cota, pergunta_no_turno
@@ -1316,6 +1317,12 @@ def handle_incoming(msg: IncomingMessage, *,
 
     except Exception as exc:
         pergunta_no_turno.set(MANTEM)
+        if (finito := violacao_finito(exc)) is not None:
+            # CHECK `finito_*` do banco: valor absurdo que passou pela guarda do handler.
+            # Só o nome da constraint no log: `str(exc)` traz "Failing row contains (...)".
+            logger.warning("handle_incoming: valor fora do limite barrado pelo banco "
+                           "(constraint=%s platform=%s)", finito, msg.platform)
+            return [OutgoingMessage(text=format_for_platform(MSG_VALOR_WHATSAPP, msg.platform))]
         tb = traceback.format_exc()
         logger.error(
             "handle_incoming FAILED platform=%s user_id=%s chars=%s error=%s",

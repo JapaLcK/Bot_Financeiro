@@ -4,6 +4,7 @@ import logging
 import re
 import db
 from core.handlers import pending as h_pending
+from core.pg_text import violacao_finito
 from utils_text import fmt_brl, parse_pocket_deposit_natural
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
                 return f"A caixinha **{pocket_name}** já está zerada."
             return "Não consegui sacar."
         except Exception as e:
+            if violacao_finito(e):
+                raise  # tratador central do handle_incoming: `{e}` traz "Failing row contains (...)"
             return f"Erro ao retirar: {e}"
         sacado = float(taxes.get("gross", 0)) if taxes else 0.0
         return _format_withdraw_reply(user_id, canon, sacado, new_acc, new_pocket, taxes,
@@ -286,6 +289,8 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
             return f"Saldo insuficiente na caixinha **{pocket_name}**."
         return "Valor inválido."
     except Exception as e:
+        if violacao_finito(e):
+            raise  # idem
         return f"Erro ao retirar: {e}"
     # o backend pode sacar um pouco mais que o pedido (tolerância de zeragem)
     sacado = float(taxes.get("gross", amount)) if taxes else float(amount)

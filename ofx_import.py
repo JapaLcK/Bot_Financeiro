@@ -8,7 +8,7 @@ from ofxparse import OfxParser
 from utils_date import _tz
 from db import set_balance, import_ofx_launches_bulk, get_last_ofx_import_end_date
 from db import list_user_category_rules, resolve_category_input, user_category_display_map
-from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES, keyword_blocked
+from utils_text import normalize_text, contains_word, LOCAL_RULES, INTERNAL_MOVEMENT_CATEGORIES, keyword_blocked, valor_finito
 
 # Hard cap defensivo: parser OFX vira DoS se receber arquivo gigante (memória
 # + CPU do regex/SGML). O mesmo teto do endpoint HTTP (fonte única) — handlers
@@ -255,10 +255,11 @@ def import_ofx_bytes(user_id: int, ofx_bytes: bytes, filename: str | None = None
         last_dt_end = get_last_ofx_import_end_date(user_id)
 
         # Só reconcilia se:
-        # 1) tiver saldo no OFX
+        # 1) tiver saldo no OFX, dentro do domínio (o bulk já commitou: o CHECK do banco
+        #    recusaria o `set_balance` e o usuário veria erro com os lançamentos gravados)
         # 2) tiver dt_end do arquivo
         # 3) esse OFX for o mais recente já importado
-        if ledger_balance is not None and dt_end is not None:
+        if valor_finito(ledger_balance) and dt_end is not None:
             if last_dt_end is None or dt_end >= last_dt_end:
                 can_reconcile = True
     except Exception:

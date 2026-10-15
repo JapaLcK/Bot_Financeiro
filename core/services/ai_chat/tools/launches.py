@@ -37,6 +37,7 @@ from db import resumo_mes
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
 # porta e não pela outra.
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 from core.services.wa_ia_primeiro import armaria_q40, ativo, precisa_confirmar_lancamento
 from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl, valor_valido
@@ -854,6 +855,8 @@ def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
                     f"apagar o aporte."
                 )
             except Exception as e:
+                if violacao_finito(e):
+                    raise  # runner responde MSG_VALOR_WHATSAPP
                 _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
                 return _ERRO_APAGAR
 
@@ -924,6 +927,8 @@ def _delete_all_launches_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         result = db.delete_all_launches_and_rollback(user_id)
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("delete_all_launches", user_id, e)
         return _ERRO_APAGAR
 

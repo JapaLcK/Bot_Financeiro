@@ -176,7 +176,8 @@ def test_detecta_pelo_ler_com_dois_creditos(user_id):
 
 
 @pytest.mark.parametrize("ruim", ["NaN", "Infinity"])
-def test_credito_nao_finito_no_espelho_nao_derruba_a_previsao_e_a_valida_continua(user_id, ruim):
+def test_credito_nao_finito_no_espelho_nao_derruba_a_previsao_e_a_valida_continua(user_id, ruim, sem_check_finito):
+    sem_check_finito("open_finance_transactions", "amount")  # espelho legado sujo de propósito
     """`amount` é `numeric` e guarda NaN/Infinity, que no Postgres são `> 0`: sem o filtro finito do SQL,
     `receitas_do_extrato` levanta `InvalidOperation` e a Previsão inteira dá 500. O não finito não vira receita."""
     ok = mensais("ok", ["5000"] * 2, desc="EMPRESA X", pagador=DOC)

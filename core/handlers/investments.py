@@ -6,6 +6,7 @@ from core.dashboard_links import build_dashboard_link
 from core.handlers import pending as h_pending
 from core.services import fonte_unica
 from core.services.plan_limits import PlanLimitExceeded
+from core.pg_text import violacao_finito
 import logging
 
 logger = logging.getLogger(__name__)
@@ -531,7 +532,9 @@ def withdraw(user_id: int, text: str, entities: dict) -> str:
         return "Não consegui registrar esse resgate. Confira o valor e tente de novo."
     except PlanLimitExceeded:
         raise  # handle_incoming responde com a mensagem amigável de upgrade
-    except Exception:
+    except Exception as e:
+        if violacao_finito(e):
+            raise  # idem
         logger.exception("withdraw falhou user=%s inv=%s", user_id, investment_name)
         return "Não consegui registrar esse resgate agora. Tente de novo em instantes."
 

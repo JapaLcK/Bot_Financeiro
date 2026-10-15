@@ -19,6 +19,7 @@ from typing import Any
 import db
 from utils_text import valor_valido
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 from utils_date import _tz
 
 from .. import streaming
@@ -270,6 +271,8 @@ def _pocket_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     except LookupError:
         return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         if "OF_POCKET_READONLY" in str(e):
             return "🐷 Essa caixinha é sincronizada com seu banco — mova o dinheiro pelo app do banco."
         if "INSUFFICIENT_ACCOUNT" in str(e):
@@ -337,6 +340,8 @@ def _pocket_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except LookupError:
         return f'🐷 Não achei a caixinha "{pocket_name}".'
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("withdraw_from_pocket", user_id, e)
         return "🐷 Não consegui sacar agora. Tenta de novo em instantes."
 

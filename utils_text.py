@@ -862,12 +862,18 @@ def _pt_words_to_int(phrase: str) -> int | None:
 # são 10**15 centavos, ainda exatos em float64 (< 2**53). Acima disso o centavo se perde,
 # e `numeric` do Postgres grava NaN, Infinity e 1e308 sem reclamar.
 VALOR_MAX = 10**13
+# Contagem de UNIDADES (cotas, tokens), não dinheiro: cripto de preço ínfimo passa de 10**13 unidades.
+# Só barra NaN/±Infinity/lixo (10**400): `open_finance_investment_snapshots.quantity`.
+QUANTIDADE_MAX = 10**30
 
 
 def valor_valido(v) -> bool:
     """True se `v` é número finito, > 0 e <= VALOR_MAX. `float("nan") <= 0` é
     False, então o guard `v <= 0` sozinho deixa NaN passar; `parse_money` devolve
-    `inf` para dígitos enormes."""
+    `inf` para dígitos enormes. `Decimal` é comparado exato: via float, 10000000000000.0001
+    arredondaria para VALOR_MAX e passaria, e o CHECK do banco o recusa."""
+    if isinstance(v, Decimal):
+        return v.is_finite() and 0 < v <= VALOR_MAX
     try:
         f = float(v)
     except (TypeError, ValueError, OverflowError):  # OverflowError: int de 400 dígitos
@@ -877,7 +883,9 @@ def valor_valido(v) -> bool:
 
 def valor_finito(v) -> bool:
     """Como `valor_valido`, mas aceita 0 e negativo: renda, taxa, saldo-alvo. Só barra
-    o que não é número, NaN/inf e o que passa de `VALOR_MAX` em módulo."""
+    o que não é número, NaN/inf e o que passa de `VALOR_MAX` em módulo (`Decimal` exato)."""
+    if isinstance(v, Decimal):
+        return v.is_finite() and v.copy_abs() <= VALOR_MAX
     try:
         return isfinite(f := float(v)) and abs(f) <= VALOR_MAX
     except (TypeError, ValueError, OverflowError):

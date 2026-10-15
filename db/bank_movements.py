@@ -6,12 +6,13 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from .connection import get_conn
 from utils_date import _tz
+from utils_text import VALOR_MAX
 
 
 def _amount(value):
     try:
         result = Decimal(str(value))
-        return result if result.is_finite() else None
+        return result if result.is_finite() and result.copy_abs() <= VALOR_MAX else None
     except (InvalidOperation, TypeError, ValueError):
         return None
 

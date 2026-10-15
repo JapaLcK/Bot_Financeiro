@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import traceback
 from typing import Any
 
 # Reexportação de FACHADA, de propósito — não é import morto nem sobra de
@@ -17,6 +18,7 @@ from typing import Any
 # — ele é o módulo sem `logging`, justamente para não reentrar no handler).
 # `load_app_env()` sai junto: quem o chama agora é o módulo importado abaixo,
 # então o efeito colateral de import continua acontecendo.
+from core.pg_text import redigir_failing_row
 from core.system_event_log import log_system_event_sync, recent_event_exists
 
 # ── Logger centralizado ───────────────────────────────────────────────────────
@@ -75,13 +77,14 @@ class _DashboardHandler(logging.Handler):
         # inclui traceback no campo details se disponível
         details: dict[str, Any] = {"logger": record.name}
         if record.exc_info:
-            import traceback as _tb
             # `[-2000:]` é o mesmo teto do `admin_error_logging_middleware`
             # (`core/admin_dashboard.py:1383`), o caminho que este PR restaura;
             # sem ele um traceback fundo cresce sem limite dentro do JSONB.
             # `"".join(...)`: a lista virava `"['Traceback…', …]"` no
             # `esc(row.details.traceback)` do `admin-dashboard.html:1308`.
-            details["traceback"] = "".join(_tb.format_exception(*record.exc_info))[-2000:]
+            details["traceback"] = "".join(traceback.format_exception(*record.exc_info))[-2000:]
+        elif record.exc_text:  # o filtro `_sem_failing_row` já redigiu e zerou o exc_info
+            details["traceback"] = record.exc_text[-2000:]
 
         # chama de forma síncrona — handler roda em thread do bot
         log_system_event_sync(
@@ -201,6 +204,35 @@ def _sem_ratelimit_no_banco(record: logging.LogRecord) -> bool:
     return not (record.name == "slowapi" and record.levelno == logging.WARNING)
 
 
+def _sem_failing_row(record: logging.LogRecord) -> bool:
+    """Tira o DETAIL `Failing row contains (...)` do Postgres (linha inteira do usuário) do
+    texto e do traceback do log. Um CHECK violado (`finito_*`, db/finito_checks.py) o põe no
+    `str(exc)` e no traceback.
+
+    COBRE: records que passam por todo handler do root (os dois que `_configure_root_logger` instala e os que já existiam)
+    (stderr, se o root estava sem handler, e `_DashboardHandler`), com `logger.*(..., exc)` ou `exc_info`. A pilha fica: o traceback vira `exc_text` já
+    redigido (o Formatter imprime `exc_text`; o `exc_info` é zerado para ninguém reformatá-lo).
+    2ª linha de defesa: a 1ª é `psycopg.Error.__str__` redigido em `db/connection.py`, que já tira
+    a linha de `print(exc)`, f-string, log e traceback de qualquer conexão. Este filtro cobre texto
+    cru que não passou por ele. NÃO COBRE: logger com `propagate=False` (uvicorn), `print` de
+    texto cru e handler fora do root. As gravações diretas em `system_event_logs` são cobertas à parte, pelos
+    gravadores (`core.pg_text.redigir_failing_row`, a mesma regra).
+
+    Nunca levanta: filtro roda fora do `handleError`, e uma chamada de log com args que não
+    batem ou `__str__` que falha não pode virar exceção no chamador.
+    """
+    try:
+        ei = record.exc_info
+        tb = record.exc_text or ("".join(traceback.format_exception(*ei)) if ei and ei[1] is not None else "")
+        msg = record.getMessage()
+        if "Failing row contains" in msg or "Failing row contains" in tb:
+            record.msg, record.args = redigir_failing_row(msg), None
+            record.exc_text, record.exc_info = redigir_failing_row(tb) or None, None
+    except Exception:  # noqa: BLE001
+        pass
+    return True
+
+
 def _configure_root_logger() -> None:
     global _root_configured
     if _root_configured:
@@ -219,6 +251,11 @@ def _configure_root_logger() -> None:
         dash_handler.setLevel(logging.WARNING)
         dash_handler.addFilter(_sem_ratelimit_no_banco)
         root.addHandler(dash_handler)
+
+    # todo handler do root, inclusive os que o processo instalou antes deste módulo
+    for h in root.handlers:
+        if _sem_failing_row not in h.filters:
+            h.addFilter(_sem_failing_row)
 
     _root_configured = True
 

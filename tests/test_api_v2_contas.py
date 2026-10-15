@@ -135,8 +135,13 @@ CASOS = {
 }
 
 
+VENENOS = {"nan", "infinity", "menos_infinity"}  # gravam o saldo não finito direto na coluna
+
+
 @pytest.mark.parametrize("caso", CASOS)
-def test_um_caso_por_estado_com_paridade(uid, caso):
+def test_um_caso_por_estado_com_paridade(uid, caso, sem_check_finito):
+    if caso in VENENOS:  # espelho legado sujo de propósito: o banco novo o recusaria
+        sem_check_finito("open_finance_accounts", "balance")
     montar, total, carteira, mot_carteira, esperadas, consolidado = CASOS[caso]
     montar(uid)
     r = get(uid)

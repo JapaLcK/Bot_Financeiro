@@ -267,7 +267,9 @@ def _some(cid, aid):
     (_usd, None, ["outra_moeda"]),
     (_some, None, ["fonte_indisponivel"]),
 ])
-def test_estados_da_conta(uid, mexe, atual, motivos):
+def test_estados_da_conta(uid, mexe, atual, motivos, sem_check_finito):
+    if mexe is _sem_saldo:  # grava NaN de propósito: o banco novo o recusaria
+        sem_check_finito("open_finance_accounts", "balance")
     cid = conta_do_banco(uid, "acc-1", "300")
     mid = cria(uid, fonte=fonte_conta(uid))
     aid = q("select id from open_finance_accounts where connection_id = %s", (cid,))["id"]
@@ -356,9 +358,11 @@ def test_custo_sem_banco_e_lista_velha(uid):
 
 
 @pytest.mark.parametrize("ruim", ["NaN", "Infinity", "-Infinity"])
-def test_valor_nao_finito_no_espelho_nao_derruba_e_o_custo_vira_desconhecido(uid, ruim):
+def test_valor_nao_finito_no_espelho_nao_derruba_e_o_custo_vira_desconhecido(uid, ruim, sem_check_finito):
     """`open_finance_transactions.amount` é `numeric` sem restrição e guarda NaN/±Infinity: a cadeia
-    suja tira o custo do ar (`None` + motivo), nunca 500 nem um custo menor com cara de exato."""
+    suja tira o custo do ar (`None` + motivo), nunca 500 nem um custo menor com cara de exato.
+    (Banco novo: o CHECK `finito_amount` recusa; a fixture o tira porque o espelho legado pode ter.)"""
+    sem_check_finito("open_finance_transactions", "amount")
     hoje = today_tz()
     ok = ap.mensais("ok", ["-39.90"] * 3, ultima=hoje - timedelta(days=10), desc="NETFLIX.COM")
     mau = ap.mensais("mau", ["-10", "-10", ruim], ultima=hoje - timedelta(days=12), desc="ACADEMIA XYZ")

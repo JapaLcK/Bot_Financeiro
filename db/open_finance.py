@@ -9,7 +9,7 @@ from uuid import NAMESPACE_OID, uuid5
 from psycopg.types.json import Jsonb
 
 from utils_date import _tz, add_months, billing_period_for_close_day
-from utils_text import is_internal_category
+from utils_text import VALOR_MAX, is_internal_category
 
 from .cards import (
     add_imported_credit_purchase,
@@ -851,8 +851,12 @@ def update_pluggy_open_finance_item_status(provider_item_id: str, status: str, r
 # lugar do estouro, e NULL aqui é o que o Banqueiro já sabe tratar ("o banco não
 # reportou rendimento"): o `rendimento` só é calculado quando os dois lados
 # existem (core/services/piggy_agents.py). Espera o alias `i` da posição.
+# Acima de `VALOR_MAX` também vira NULL (o `_numero` de db/of_snapshots.py faz o mesmo): o valor
+# iria para `pockets.of_last_seen_profit` e estouraria o CHECK `finito_*` a CADA sync do item.
+# CASE aninhado, e não AND: só o CASE garante que o `::numeric` roda depois do regex.
 _SQL_PROFIT = (r"case when i.raw->>'amountProfit' ~ '^-?[0-9]+(\.[0-9]+)?$' "
-               r"then (i.raw->>'amountProfit')::numeric end")
+               r"then case when abs((i.raw->>'amountProfit')::numeric) <= " + str(VALOR_MAX) + " "
+               r"then (i.raw->>'amountProfit')::numeric end end")
 
 
 def save_open_finance_investments(connection_id: int, investments: list[dict], *,
