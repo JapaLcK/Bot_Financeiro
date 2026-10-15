@@ -21,6 +21,7 @@ from core.services.ai_chat.tools import SCHEMAS, SCHEMAS_APP, get_tool, schemas_
 from core.services.ai_chat.tools.metas import schemas_com_metas
 from test_ai_chat_metas import conversa, dois, lista, meta_de  # noqa: F401  (dois é fixture)
 from test_api_app_sessao import completo
+from utils_date import today_tz
 
 
 def txt(**campos):
@@ -77,7 +78,8 @@ def test_controle_negativo_chave_sempre_ligada_deixa_o_teste_vermelho(kn, monkey
 
 def test_prompt_por_usuario():
     for p in (sp.SYSTEM_PROMPT, sp.SYSTEM_PROMPT_METAS, sp.SYSTEM_PROMPT_METAS_APP, sp.ADENDO_CARDS, sp.ADENDO_CARDS_METAS):
-        assert "@@" not in p  # marcador de troca que vazou
+        assert "@@" not in p.replace("@@ANO@@", "")  # marcador de troca que vazou (o do ano só se troca em `prompt_do_usuario`)
+    assert all("@@" not in sp.prompt_do_usuario(m, a) for m in (False, True) for a in (False, True))
     sem = sp.prompt_do_usuario(False, True)
     assert "list_metas" not in sem and "metas (caixinhas com meta)" in sem  # N: o de antes das metas
     assert sp.prompt_do_usuario(False, False) == sp.SYSTEM_PROMPT
@@ -153,7 +155,7 @@ def test_o_texto_de_n_e_a_base_com_o_marcador_trocado_pela_caixinha():
     """N: nenhum byte de metas. Sem hash de texto: o prompt é o `_BASE` com o marcador trocado, e só."""
     base = sp._BASE.replace("@@CAIXINHAS@@\n", sp._CAIXINHAS)
     assert sp.prompt_do_usuario(False, False) == base
-    assert sp.prompt_do_usuario(False, True) == base + sp.ADENDO_CARDS
+    assert sp.prompt_do_usuario(False, True) == (base + sp.ADENDO_CARDS).replace("@@ANO@@", str(today_tz().year))
     assert "list_metas" not in base + sp.ADENDO_CARDS
 
 

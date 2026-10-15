@@ -46,8 +46,8 @@ def _conhecidos(fontes) -> set[str]:
                         valores = v.elts if isinstance(v, (ast.List, ast.Tuple)) else [v]
                         if chave in ("error", "status", "enum"):
                             achados |= {s for s in map(_str, valores) if s}
-            elif isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")).endswith("_erro") and n.args:
-                achados.add(_str(n.args[0]))
+            elif isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")).endswith(("_erro", "_falha")) and n.args:
+                achados.add(_str(n.args[1 if getattr(n.func, "id", getattr(n.func, "attr", "")) == "_falha" else 0]))  # `_falha(card, codigo, msg)`
             elif isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Store):
                 achados.add(_str(n.slice))
             elif isinstance(n, (ast.Assign, ast.AnnAssign)):
