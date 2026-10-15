@@ -333,7 +333,10 @@ describe("Segurança — conta sem senha", () => {
   // Invariante: a geração governa só escritas de estado. A sessão expirada de uma carga ANTIGA (que ainda
   // esperava a outra chamada do allSettled) chega a `falha()` mesmo com uma carga nova já em curso.
   describe("carregar — sessão expirada de carga superada", () => {
-    /** Carga 1 (a do foco): status expira na hora, /auth/me fica preso até `soltar()`. Carga 2 = volta do navegador. */
+    /**
+     * Carga 1 (a do foco): status falha por rede na hora e o /auth/me fica preso até `soltar()`, quando
+     * descobre a sessão revogada (401 + refresh 401). Carga 2 = volta do navegador, já em curso nessa hora.
+     */
     async function cargaAntigaExpirada(carga2: { status: () => Response; me: () => Response }) {
       const preso = segurar();
       let statusVez = 0;
@@ -341,18 +344,18 @@ describe("Segurança — conta sem senha", () => {
       await abrir(
         { valor: false },
         {
-          "/auth/mfa/status": () => (statusVez++ === 0 ? resposta(401, { detail: "expirado" }) : carga2.status()),
+          "/auth/mfa/status": () => (statusVez++ === 0 ? resposta(500, { detail: "x" }) : carga2.status()),
           "/auth/me": async () => {
             if (meVez++ === 0) {
               await preso.promessa;
-              return resposta(200, { user_id: 1, email: "s@x.com", app_access: true, has_password: false });
+              return resposta(401, { detail: "expirado" });
             }
             return carga2.me();
           },
           "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }),
         },
       );
-      await waitFor(() => expect(statusVez).toBe(1)); // a carga 1 já viu a expiração e espera o /auth/me
+      await waitFor(() => expect(statusVez).toBe(1)); // a carga 1 já tem a falha de rede e espera o /auth/me
       await appVai("background");
       await appVai("active"); // carga 2 começa: a geração da carga 1 foi superada
       return preso;
@@ -377,6 +380,41 @@ describe("Segurança — conta sem senha", () => {
 
       expect(screen).toHavePathname("/entrar");
       expect(screen.getAllByText("Sua sessão expirou. Entre de novo.")).toHaveLength(1);
+    });
+  });
+
+  // Invariante 4: evento terminal de sessão propaga na hora, sem esperar a irmã. O /auth/me nunca resolve
+  // (o limite do cliente é de 15 s) e o teste termina muito antes disso: o `waitFor` espera ~1 s.
+  // O caso inverso (falha rápida só recuperável, irmã com SessaoExpirada depois) é a linha
+  // "status recuperável × perfil sessão" da tabela, acima.
+  describe("carregar — sessão expirada não espera a chamada irmã", () => {
+    const PENDURADO = () => new Promise<Response>(() => undefined);
+    const EXPIRADO = { "/auth/refresh": () => resposta(401, { detail: "invalid_refresh_token" }) };
+
+    it("carga inicial: status expira e o /auth/me pendura -> /entrar sem esperar o limite", async () => {
+      await abrir({ valor: false }, { ...EXPIRADO, "/auth/mfa/status": () => resposta(401, { detail: "expirado" }), "/auth/me": PENDURADO });
+      await waitFor(() => expect(screen).toHavePathname("/entrar"));
+      expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+    });
+
+    it("recarga em foreground com a tela em pronto: status expira e o /auth/me pendura -> /entrar", async () => {
+      let revogada = false;
+      await abrir(
+        { valor: false },
+        {
+          ...EXPIRADO,
+          "/auth/mfa/status": () => (revogada ? resposta(401, { detail: "expirado" }) : resposta(200, MFA_DESLIGADO)),
+          "/auth/me": () => (revogada ? PENDURADO() : resposta(200, { user_id: 1, email: "s@x.com", app_access: true, has_password: false })),
+        },
+      );
+      await waitFor(() => expect(screen.getByText("Definir senha")).toBeTruthy());
+
+      revogada = true;
+      await appVai("background");
+      await appVai("active");
+
+      await waitFor(() => expect(screen).toHavePathname("/entrar"));
+      expect(screen.queryByText("Definir senha")).toBeNull();
     });
   });
 

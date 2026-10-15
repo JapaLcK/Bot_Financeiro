@@ -50,7 +50,14 @@ export default function Seguranca() {
       //                     dados na tela, mantém                   mantém a tela)
       //
       // login = `falha(e)` no catch; erro/mantém = o ramo A2 do catch.
-      const [status, conta] = await Promise.allSettled([statusMfa(), perfil()]);
+      // Cada chamada avisa a sessão NA HORA em que rejeita com `SessaoExpirada`; o allSettled só
+      // espera a irmã para decidir a ESCRITA de estado (invariante 4 abaixo).
+      const avisando = <T,>(p: Promise<T>) =>
+        p.catch((e: unknown) => {
+          if (e instanceof SessaoExpirada) falha(e);
+          throw e;
+        });
+      const [status, conta] = await Promise.allSettled([avisando(statusMfa()), avisando(perfil())]);
       const expirada = [status, conta].find((r) => r.status === "rejected" && r.reason instanceof SessaoExpirada);
       if (expirada?.status === "rejected") throw expirada.reason;
       if (status.status === "rejected") throw status.reason;
@@ -58,13 +65,16 @@ export default function Seguranca() {
         setEstado({ fase: "pronto", status: status.value, conta: conta.status === "fulfilled" ? conta.value : null });
       }
     } catch (e) {
-      // Invariantes de `carregar` (três rodadas de revisão neste ponto):
+      // Invariantes de `carregar` (quatro rodadas de revisão neste ponto):
       //  1. A geração governa só ESCRITAS DE ESTADO da tela (o `setEstado` de pronto/erro).
       //  2. Sessão expirada é fato global: de QUALQUER geração, chega a `falha(e)`. Uma carga antiga
       //     que descobre a expiração depois de uma nova ter começado não pode ser descartada, ou a
       //     tela fica autenticada com controles velhos.
       //  3. Idempotente: `sessao.expirou` só transiciona de `autenticado` para `anonimo`, então duas
-      //     cargas expiradas (gerações diferentes) avisam e navegam uma vez só.
+      //     cargas expiradas (gerações diferentes) avisam e navegam uma vez só. É por isso que o
+      //     `falha(e)` abaixo, repetido para um evento já avisado pelo `avisando`, é seguro.
+      //  4. Evento terminal de sessão propaga NA HORA, sem esperar a chamada irmã (que pode ficar
+      //     pendurada até o limite de 15 s do cliente); só a ESCRITA de estado espera as duas.
       if (e instanceof SessaoExpirada) {
         falha(e);
         return;
