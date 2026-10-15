@@ -814,8 +814,13 @@ _PT_NUM_WORDS: dict[str, int] = {
 _PT_NUM_ALT = "|".join(sorted(map(re.escape, _PT_NUM_WORDS), key=len, reverse=True))
 # Uma frase = palavra-número, opcionalmente encadeada com "e" ("vinte e cinco").
 _PT_PHRASE = rf"(?:{_PT_NUM_ALT})(?:\s+e\s+(?:{_PT_NUM_ALT})|\s+(?:{_PT_NUM_ALT}))*"
+# "mil" por último: sem \b depois (PT_VALUE), a alternância casaria "mil" dentro de "milhões".
+_PT_MULT_LONGO = r"milh[oõ]es|milh[aã]o|bilh[oõ]es|bilh[aã]o|trilh[oõ]es|trilh[aã]o|mil"
+# "bi" curto só vale depois de dígito ("2 bi"); por extenso "um bi" é artigo + gíria.
+_PT_MULT = rf"{_PT_MULT_LONGO}|bi\b"
+_PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(
-    rf"\b({_PT_PHRASE})\s+(mil|milh[oõ]es|milhao|milhão)\b"
+    rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b"
     rf"(?:\s*e\s+({_PT_PHRASE}|\d+(?:[.,]\d+)?))?",
     re.IGNORECASE,
 )
@@ -830,12 +835,13 @@ PT_NUM_ALT_NO_ARTICLE = "|".join(
     sorted((re.escape(w) for w in _PT_NUM_WORDS if w not in ("um", "uma")),
            key=len, reverse=True)
 )
-_PT_MULT = r"mil|milh[oõ]es|milhao|milhão"
-# Um "valor" = dígitos OU número por extenso, com "mil/milhão" opcional e
+PT_MULT = _PT_MULT
+# Um "valor" = dígitos OU número por extenso, com "mil/milhão/bilhão/trilhão" opcional e
 # encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
 PT_VALUE = (
-    rf"(?:r\$\s*)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT})"
-    rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT}))*"
+    rf"(?:r\$\s*)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
+    rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
+    r"(?:(?<=\d)\s+bi\b)?"  # "bi" curto só colado em dígito: "100 bi" sim, "cem bi"/"de bi" não
 )
 
 
@@ -905,7 +911,7 @@ def parse_money(text: str) -> float | None:
     if sm:
         base = _pt_words_to_int(sm.group(1))
         if base is not None:
-            mult = 1_000_000 if sm.group(2).lower().startswith("milh") else 1_000
+            mult = _PT_MULT_VALOR[sm.group(2).lower()[:4]]
             total = float(base * mult)
             resto = sm.group(3)
             if resto:
@@ -917,22 +923,24 @@ def parse_money(text: str) -> float | None:
                         total += r
             return total
 
-    # multiplicador "mil"/"milhão": "10 mil" → 10000, "1 mil e 500" → 1500.
-    # O dígito antes é OPCIONAL: "mil reais" (sem número) = 1000 e "um milhão" =
+    # multiplicador "mil"/"milhão"/"bi": "10 mil" → 10000, "1 mil e 500" → 1500.
+    # O dígito antes é OPCIONAL até milhão: "mil reais" (sem número) = 1000 e "um milhão" =
     # 1000000 — senão cairia no número contínuo abaixo e pegaria um valor errado
     # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
     # Precisa vir antes do número contínuo.
-    mm = re.search(
-        r'\b(\d+(?:[.,]\d+)?\s*)?(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?',
+    for mm in re.finditer(
+        rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b(?:\s*e\s*(\d+))?',
         text or "", re.IGNORECASE,
-    )
-    if mm:
+    ):
+        mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
+        if not mm.group(1) and mult > 10**6:
+            # bi/bilhão/trilhão sem número não é valor (hipérbole)
+            continue
         base = float(mm.group(1).strip().replace(".", "").replace(",", ".")) if mm.group(1) else 1.0
-        mult = 1_000_000 if mm.group(2).lower().startswith("milh") else 1_000
         total = base * mult
         if mm.group(3):
             total += float(mm.group(3))
-        return total
+        return round(total, 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)
     m = re.search(r'(\d[\d.,\s]*)', text)
@@ -1287,8 +1295,8 @@ def parse_pt_number(text: str) -> float | None:
     t = str(text).strip().lower()
     if not t:
         return None
-    # dígitos ou multiplicador mil/milhão → parse_money já cobre
-    if re.search(r"\d", t) or re.search(r"mil|milh", t):
+    # dígitos ou multiplicador mil/milhão/bilhão/trilhão → parse_money já cobre
+    if re.search(r"\d", t) or re.search(r"mil|bilh|trilh", t):
         return parse_money(t)
     # por extenso puro (< 1000): 'cem', 'cento e vinte', 'doze'
     t = re.sub(r"\b(reais|real|r\$)\b", " ", t)

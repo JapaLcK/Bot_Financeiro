@@ -51,7 +51,7 @@ from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
-    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    PT_PHRASE, PT_VALUE, PT_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
 
@@ -2552,7 +2552,7 @@ def handle(user_id: int, text: str) -> str | None:
         # remove multiplicadores/unidades monetárias que sobraram quando o valor
         # foi escrito por extenso ("mil reais em 10 vezes" → não vira descrição).
         desc_clean = re.sub(
-            r"\b(mil|milh[oõ]es|milhao|milh[aã]o|reais|real|r\$|vezes?|parcelas?)\b",
+            rf"\b((?!bi\b)(?:{PT_MULT})|reais|real|r\$|vezes?|parcelas?)\b",
             "", desc_clean, flags=re.IGNORECASE,
         )
         # sobras de números por extenso ("dez", "doze", "cem"...) que faziam
