@@ -23,7 +23,7 @@ from collections import defaultdict
 import psycopg
 from psycopg import sql
 
-from utils_text import VALOR_MAX
+from utils_text import QUANTIDADE_MAX, VALOR_MAX
 
 from .connection import get_conn
 
@@ -53,8 +53,16 @@ def nome_check(coluna: str) -> str:
     return nome.encode()[:54].decode(errors="ignore") + "_" + hashlib.md5(coluna.encode()).hexdigest()[:8]
 
 
-def expr_finito(coluna: str) -> sql.Composed:
-    return sql.SQL("abs({}) <= {}").format(sql.Identifier(coluna), sql.SQL(str(VALOR_MAX)))
+# Coluna que não é dinheiro e tem limite próprio (default: VALOR_MAX). Contagem de unidades.
+LIMITE_DA_COLUNA: dict[tuple[str, str], int] = {("open_finance_investment_snapshots", "quantity"): QUANTIDADE_MAX}
+
+
+def limite_da_coluna(tabela: str, coluna: str) -> int:
+    return LIMITE_DA_COLUNA.get((tabela, coluna), VALOR_MAX)
+
+
+def expr_finito(coluna: str, limite: int = VALOR_MAX) -> sql.Composed:
+    return sql.SQL("abs({}) <= {}").format(sql.Identifier(coluna), sql.SQL(str(limite)))
 
 
 def colunas_alvo(cur) -> list[tuple[str, str]]:
@@ -85,7 +93,7 @@ def colunas_fora_do_limite(cur, colunas) -> list[str]:
     sujas: list[str] = []
     for t, cols in por_tabela.items():
         itens = sql.SQL(", ").join(
-            sql.SQL("bool_or(not ({})) as {}").format(expr_finito(c), sql.Identifier(f"c{i}"))
+            sql.SQL("bool_or(not ({})) as {}").format(expr_finito(c, limite_da_coluna(t, c)), sql.Identifier(f"c{i}"))
             for i, c in enumerate(cols))
         cur.execute(sql.SQL("select {} from {}").format(itens, sql.Identifier(t)))
         linha = cur.fetchone()
@@ -126,7 +134,7 @@ def ensure_finito_checks(cur) -> dict:
             for t, cols in por_tabela.items():
                 adds = sql.SQL(", ").join(
                     sql.SQL("add constraint {} check ({}) not valid").format(
-                        sql.Identifier(nome_check(c)), expr_finito(c)) for c in cols)
+                        sql.Identifier(nome_check(c)), expr_finito(c, limite_da_coluna(t, c))) for c in cols)
                 try:
                     cur.execute(sql.SQL("alter table {} {}").format(sql.Identifier(t), adds))
                     out["criadas"] += [f"{t}.{c}" for c in cols]

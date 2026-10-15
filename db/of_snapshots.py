@@ -10,7 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from utils_date import _tz
-from utils_text import VALOR_MAX
+from utils_text import QUANTIDADE_MAX, VALOR_MAX
 
 # A MESMA gramática do `_SQL_PROFIT` (db/open_finance.py). `fullmatch`, e não
 # `$`: em Python `$` aceita um `\n` no fim, no Postgres não.
@@ -18,7 +18,7 @@ from utils_text import VALOR_MAX
 _NUMERO = re.compile(r"-?[0-9]+(\.[0-9]+)?")
 
 
-def _numero(v) -> Decimal | None:
+def _numero(v, limite=VALOR_MAX) -> Decimal | None:
     """Número do banco, ou None (inclusive acima de `VALOR_MAX`, que o CHECK `finito_*`
     recusaria). Nunca 0 no lugar do que não se leu."""
     if isinstance(v, bool):
@@ -31,7 +31,12 @@ def _numero(v) -> Decimal | None:
         d = Decimal(v)
     else:
         return None
-    return d if d is not None and abs(d) <= VALOR_MAX else None
+    return d if d is not None and abs(d) <= limite else None
+
+
+def _quantidade(v) -> Decimal | None:
+    """Unidades (cotas/tokens): o limite é o de `QUANTIDADE_MAX`, não o do dinheiro."""
+    return _numero(v, QUANTIDADE_MAX)
 
 
 def _texto(v) -> str | None:
@@ -57,7 +62,7 @@ _CAMPOS = (
     ("balance", "balance", _numero),
     ("amount", "amount", _numero),
     ("amount_original", "amountOriginal", _numero),
-    ("quantity", "quantity", _numero),
+    ("quantity", "quantity", _quantidade),
     ("contract_rate", "rate", _numero),
     ("contract_rate_type", "rateType", _texto),
     ("last_month_rate", "lastMonthRate", _numero),

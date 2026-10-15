@@ -862,6 +862,9 @@ def _pt_words_to_int(phrase: str) -> int | None:
 # são 10**15 centavos, ainda exatos em float64 (< 2**53). Acima disso o centavo se perde,
 # e `numeric` do Postgres grava NaN, Infinity e 1e308 sem reclamar.
 VALOR_MAX = 10**13
+# Contagem de UNIDADES (cotas, tokens), não dinheiro: cripto de preço ínfimo passa de 10**13 unidades.
+# Só barra NaN/±Infinity/lixo (10**400): `open_finance_investment_snapshots.quantity`.
+QUANTIDADE_MAX = 10**30
 
 
 def valor_valido(v) -> bool:

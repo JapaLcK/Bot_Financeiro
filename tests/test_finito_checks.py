@@ -53,7 +53,7 @@ def _lacunas(cur) -> list[str]:
         cur.execute("select pg_get_constraintdef(oid) as d from pg_constraint where conname = %s "
                     "and conrelid = to_regclass(%s)", (nome, f"public.{t}"))
         d = cur.fetchone()
-        if not d or f"abs({c})" not in d["d"] or str(VALOR_MAX) not in d["d"] or "<=" not in d["d"]:
+        if not d or f"abs({c})" not in d["d"] or str(F.limite_da_coluna(t, c)) not in d["d"] or "<=" not in d["d"]:
             out.append(f"{t}.{c}")
     return out
 
@@ -281,6 +281,29 @@ def test_check_pendente_de_boot_interrompido_entra_no_prescan(user_id, sem_check
     assert r["sujas"] == ["launches.valor"] and r["criadas"] == [], r
     with get_conn() as conn, conn.cursor() as cur:
         assert F.nome_check("amount") not in {n for (_t, n) in F._constraints(cur) if _t == "bank_movement_declarations"}
+
+
+def test_quantidade_de_unidades_tem_limite_proprio_nao_o_do_dinheiro():
+    """Cripto de preço ínfimo passa de 10**13 UNIDADES; só NaN/Infinity/lixo (> 10**30) é barrado."""
+    from decimal import Decimal
+    from db.of_snapshots import _numero, _quantidade
+    tab, col = "open_finance_investment_snapshots", "quantity"
+    assert F.limite_da_coluna(tab, col) == 10**30 and F.limite_da_coluna(tab, "balance") == VALOR_MAX
+    assert _quantidade(10**20) == Decimal(10**20) and _numero(10**20) is None  # o dinheiro segue em 1e13
+    assert _quantidade(10**31) is None and _quantidade("NaN") is None and _quantidade(float("inf")) is None
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select pg_get_constraintdef(oid) as d from pg_constraint where conname = %s "
+                    "and conrelid = to_regclass(%s)", (F.nome_check(col), f"public.{tab}"))
+        assert str(10**30) in cur.fetchone()["d"]  # a constraint REAL da coluna, não só a função
+    _q("create table zz_finito_qtd (q numeric)")
+    try:
+        _q(f"alter table zz_finito_qtd add constraint c check ({F.expr_finito('q', 10**30).as_string()})")
+        _q("insert into zz_finito_qtd values (1e20), (null)")  # aceita unidades enormes
+        for ruim in ("'NaN'", "'Infinity'", "1e31"):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                _q(f"insert into zz_finito_qtd values ({ruim})")
+    finally:
+        _q("drop table if exists zz_finito_qtd")
 
 
 # ── (5) lock ─────────────────────────────────────────────────────────────────

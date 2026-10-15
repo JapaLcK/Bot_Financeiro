@@ -270,7 +270,7 @@ def sem_check_finito():
     é NOT VALID porque o teste pode ter deixado a linha suja). Escritor REAL do produto que
     esbarra no CHECK é bug a corrigir na porta, não motivo para usar esta fixture."""
     from psycopg import sql
-    from db.finito_checks import expr_finito, nome_check
+    from db.finito_checks import expr_finito, limite_da_coluna, nome_check
     derrubadas = []
 
     def _derruba(tabela, coluna):
@@ -285,7 +285,8 @@ def sem_check_finito():
             conn.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
                 sql.Identifier(tabela), sql.Identifier(nome_check(coluna))))
             conn.execute(sql.SQL("alter table {} add constraint {} check ({}) not valid").format(
-                sql.Identifier(tabela), sql.Identifier(nome_check(coluna)), expr_finito(coluna)))
+                sql.Identifier(tabela), sql.Identifier(nome_check(coluna)),
+                expr_finito(coluna, limite_da_coluna(tabela, coluna))))
 
 
 @pytest.fixture(autouse=True)
