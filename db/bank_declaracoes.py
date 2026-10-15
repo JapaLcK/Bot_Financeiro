@@ -5,6 +5,31 @@ valor quase exato (R$ 0,05), janela de 3 dias e `account_id` NULL = "qualquer co
 Fluxo = launch despesa/receita COM `account_id` NULL; o NULL fica mesmo depois de casar (preenchê-lo
 jogaria a declaração no caminho do aporte, que exige categoria de aplicação).
 O vínculo é aditivo: sem par a declaração segue "a conferir" e não expira (ADR 0003).
+
+INVARIANTES x ESCRITORES (a classe de achados do #969: cada invariante tem um escritor por porta, e quem
+checa e escreve precisa fazer os dois sob o MESMO mutex do usuário, `bank_movements._lock_user`, a linha de
+`accounts`, sempre o primeiro lock). Invariantes: I1 não é interna; I2 valor/data = projeção (declarado
+sem par, extrato com par); I3 uma sombra por transação; I4 par automático único nos dois sentidos; I5
+`delta_conta` 0, Carteira intocada; I6 tudo filtrado por `user_id`.
+  criar (`add_launch_and_update_balance`)  I1 recusa argumento; I5; I6   mutex = o `update accounts`, e o
+                                           reconcile na mesma transação (cursor externo é recusado)
+  editar categoria / lote                  I1 recusa categoria interna   SEM mutex, de propósito: a
+                                           declaração nasce com o lançamento e só some com ele (propriedade
+                                           imutável); v2 toma o mutex pelo `pode`
+  editar valor/data                        I2 recusa pelo `pode` + `LaunchDateLockedError`   mutex (pode/data)
+  renomear/mesclar categoria (cascata)     I1 recusa nome interno com declaração   mutex SÓ no nome interno
+                                           (era o buraco da corrida com a criação); fundir_categorias idem
+  regras automáticas de categoria          só na criação de lançamento; não escrevem em declarada
+  migração do boot (`schema.py`)           I1 não marca a declarada (marca `funding_source`)   SCHEMA_INIT_LOCK;
+                                           a marca é imutável, então não corre com o escritor
+  apagar um/lote/tudo                      I3 devolve a sombra, I6   mutex (`uses_bank_movement_lock`)
+  sync/import/reconcile/desconexão         I2 projeção, I3, I4   mutex, checa e escreve na transação
+  confirmar manual / rejeitar par          I2, I4   mutex (`confirm_bank_movement`, `_locked_tx`)
+  desfazer fusão vizinha (`_desfaz`)       só FUSED_STATUSES; não alcança `bank_movement_confirmed`   mutex
+  merge de contas / reset / exclusão       I6 (a declaração muda de dono ou cai junto)   locks próprios de
+                                           `users.py`/`privacy.py`, fora desta tabela
+Célula check-then-write SEM mutex que sobra: nenhuma sobre propriedade mutável (as duas "SEM mutex" acima
+checam propriedade imutável da linha).
 """
 from __future__ import annotations
 

@@ -526,7 +526,12 @@ def cascata_nome_categoria(cur, user_id: int, antigo: str, novo: str) -> dict[st
     n: dict[str, int] = {}
     from utils_text import is_internal_category
     if is_internal_category(novo):  # o nome interno tiraria dos totais a despesa/receita declarada pelo banco
+        # O mutex do usuário ANTES de checar e cascatear, o mesmo do escritor da declaração (a ordem de lock é a de
+        # `bank_movements._lock_user`: accounts primeiro): sem ele a declaração commita na categoria antiga entre o
+        # check e o update. Só aqui, para não serializar renomes comuns.
         from .bank_declaracoes import DECLARADA_SQL
+        from .bank_movements import _lock_user
+        _lock_user(cur, user_id)
         cur.execute(f"select 1 from launches where user_id=%s and lower(categoria)=lower(%s) and {DECLARADA_SQL} limit 1",
                     (user_id, antigo))
         if cur.fetchone():
