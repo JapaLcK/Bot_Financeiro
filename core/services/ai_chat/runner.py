@@ -47,7 +47,8 @@ from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from . import streaming
 from ._context import (
-    CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, METAS_DO_TURNO, metas_do_turno,
+    CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, METAS_DO_TURNO,
+    metas_do_turno,
 )
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
@@ -260,10 +261,14 @@ def chat_detalhado(
         cards: list[str] = []
         token_cards = CARDS_DO_TURNO.set(cards)
         token_falhas = FALHAS_DE_CARD_DO_TURNO.set([])
+        token_janelas = JANELAS_DO_TURNO.set([])
+        token_nao_achadas = CATEGORIAS_NAO_ACHADAS_DO_TURNO.set([])
         try:
             reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
                                 ia_primeiro=ia_primeiro)
         finally:
+            CATEGORIAS_NAO_ACHADAS_DO_TURNO.reset(token_nao_achadas)
+            JANELAS_DO_TURNO.reset(token_janelas)
             FALHAS_DE_CARD_DO_TURNO.reset(token_falhas)
             CARDS_DO_TURNO.reset(token_cards)
             _ESTADO.reset(token_estado)
