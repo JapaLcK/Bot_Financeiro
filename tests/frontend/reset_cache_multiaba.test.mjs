@@ -251,9 +251,9 @@ test("settings: sucesso do reset grava o marker e limpa os snapshots da aba", as
       localStorage.removeItem("finbot_reset_at");
       sessionStorage.setItem("pb_snap_1_2026_01", "{}");
       sessionStorage.setItem("pb_home_1", "{}");
-      window.confirmModal = async () => true;   // pula o modal destrutivo
+      // origem 'segurar' (passada pelo helper): não passa pelo confirmModal
       document.getElementById("reset-password").value = "senha";
-      requestAccountReset();                    // POST stubado (200) → marker → /onboarding
+      requestAccountReset("segurar");                // POST stubado (200) → marker → /onboarding
     });
     await waitFor(() => avaliaTolerandoNavegacao(page, () => location.pathname === "/onboarding"),
                   "redirect pro /onboarding");
