@@ -117,15 +117,17 @@ test("falha de carregar mais mantém itens e cursor; nova tentativa recupera seg
   await ctx.close();
 });
 
-test("fronteiras reais de exemplos: CTA categoria não transfere filtros; Cmd-K omite resultados fictícios", async () => {
+test("fronteiras reais de exemplos: o CTA da categoria leva a escolha (sem tipo) aos lançamentos; Cmd-K omite resultados fictícios", async () => {
   const { ctx, page, ir } = await abrir({ espera: "#page-title" });
   const urls = [];
   page.on("request", (r) => { if (r.url().includes("/api/v2/lancamentos?")) urls.push(new URL(r.url())); });
   await ir("/gastos");
-  await page.locator(".cats .cat", { hasText: "Delivery" }).click();
-  await page.getByRole("button", { name: "Abrir lançamentos reais" }).click();
+  await page.locator(".cats .cat", { hasText: "alimentação" }).click();
+  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
   await page.locator(".lanc-linha").first().waitFor();
-  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10", guardado: "true" });
+  // Decisão do dono: a ida é por filtro global, SEM `tipo` (a lista do extrato mostra entradas e saídas; a contagem pode passar a de "Compras").
+  assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10", categoria: "alimentacao", guardado: "true" });
+  assert.equal(await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), "alimentacao");
   await page.keyboard.press("Control+k");
   assert.equal(await page.locator(".cmdk input").getAttribute("placeholder"), "Buscar página ou ação…");
   await page.locator(".cmdk input").fill("Aluguel");

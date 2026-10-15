@@ -89,7 +89,7 @@ def install_runtime_boundaries(
         send_commands_section=lambda *_a, **_k: None,
     )
     modules.install("core.help_text", HELP_TRIGGERS=set())
-    modules.install("core.intent_router", abandona_pergunta_de_valor=lambda _text: False)
+    modules.install("core.intent_router", abandona_pergunta_de_valor=lambda _text, _uid=None: False)
     def log_system_event_sync(*_args: Any, **_kwargs: Any) -> None:
         if event_log_error:
             raise RuntimeError("falha sintética da observabilidade")

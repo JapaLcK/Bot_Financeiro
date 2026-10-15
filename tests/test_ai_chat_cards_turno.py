@@ -225,7 +225,7 @@ def test_card_repetido_no_turno_e_recusado_sem_gastar_vaga(mundo):
     try:
         assert "error" not in mostrar(a, card="contas")[0]
         r, blocos, ev = mostrar(a, card="contas")
-        assert r["error"] == "card_repetido" and "meses" in r["message"] and not blocos and not ev
+        assert r["error"] == "card_repetido" and "resultado anterior" in r["message"] and not blocos and not ev
         # não gastou vaga: ainda cabem 2 cards diferentes (total 3) e só então o teto
         for card in ("metas", "fatura"):
             assert "error" not in mostrar(a, card=card)[0], card

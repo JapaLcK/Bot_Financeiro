@@ -237,8 +237,8 @@ test("selo de demonstração: em todo bloco inventado do Resumo, e não em Conta
     return { blocos, stats, etiqueta: document.body.innerText.includes("Dados de demonstração") };
   });
   await ctx.close();
-  // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a)
-  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: true, calendario: true, simulador: true, compromissos: true, piggy: true, patrimonio: true });
+  // "Saldo previsto" é a /api/v2/previsao desde a Etapa 3 PR3 (decisão do dono, Q1 = a); "Para onde vai" e "Dia a dia", a /api/v2/gastos (Etapa 5 PR 2)
+  assert.deepEqual(r.blocos, { contas: false, hero: false, resumo: false, categorias: false, calendario: false, simulador: true, compromissos: true, piggy: true, patrimonio: true });
   assert.deepEqual(r.stats, [null, null, "demonstração"]);
   assert.equal(r.etiqueta, false);
 });
@@ -340,7 +340,7 @@ test("seletor: 6 meses reais; voltar pede o mês escolhido e os blocos de exempl
   await ctx.close();
   assert.deepEqual(setembro, ["Setembro 2026", "Resumo de setembro"]);
   assert.deepEqual([...new Set(meses)], ["2026-10", "2026-09", "2026-08", "2026-07", "2026-06", "2026-05"]);
-  assert.deepEqual(r, [true, 0, 1]); // o Saldo previsto é real (Q1 = a): sem selo; o calendário segue de exemplo
+  assert.deepEqual(r, [true, 0, 0]); // o Saldo previsto (Q1 = a) e o calendário (Etapa 5) são reais: sem selo
   assert.deepEqual(erros, []);
 });
 

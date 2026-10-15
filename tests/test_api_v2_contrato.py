@@ -373,7 +373,10 @@ def test_fixture_de_gastos_categoria_segue_o_modelo_e_fecha_a_conta(nome):
     assert f["serie"][-1]["valor"] is None or Decimal(f["serie"][-1]["valor"]) == total
     assert sum(Decimal(e["valor"]) for e in f["estabelecimentos"]) <= total
     assert sum(e["quantidade"] for e in f["estabelecimentos"]) <= f["compras"] and len(f["ultimas"]) <= min(6, f["compras"])
-    assert Decimal(f["valor_medio"]) == (total / f["compras"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
+    if f["compras"] == 0:  # sem compras não há média: null, nunca 0
+        assert f["valor_medio"] is None and total == 0
+    else:
+        assert Decimal(f["valor_medio"]) == (total / f["compras"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
     assert all(m["categoria"] == f["categoria"]["chave"] for d in f["dias"] for m in d["maiores"])
 
 

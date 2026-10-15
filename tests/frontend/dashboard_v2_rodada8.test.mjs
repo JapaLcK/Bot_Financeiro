@@ -16,7 +16,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -25,13 +25,13 @@ before(async () => {
 });
 after(() => browser?.close());
 
-async function abrir(hash = "#/") {
+async function abrir(hash = "#/", demo = false) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: "reduce" });
-  await servir(ctx);
+  await servir(ctx, demo ? RAIZ : undefined);
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
-  await page.goto(`${PAINEL}${hash}`);
+  await page.goto(`${demo ? PROTOTIPO : PAINEL}${hash}`);
   await page.locator("[data-widget-id], .months").first().waitFor();
   return { ctx, page };
 }
@@ -110,8 +110,9 @@ test("Piggy: 'Simular delivery −30%' mantém o ajuste feito à mão em outra a
 
 const rotulos = (page) => page.locator(".months li .faint").allTextContents();
 
-test("Detalhe da categoria: com agosto selecionado, setembro segue 'até 23' (e setembro selecionado também)", async () => {
-  const { ctx, page } = await abrir("#/gastos");
+// No protótipo: com backend o Detalhe é widgets/GastosDetalhe.tsx ("mês em andamento", tests/frontend/dashboard_v2_gastos.test.mjs).
+test("Detalhe da categoria (protótipo): com agosto selecionado, setembro segue 'até 23' (e setembro selecionado também)", async () => {
+  const { ctx, page } = await abrir("#/gastos", true);
   const setembro = await rotulos(page);
   await page.locator('.month-switch button[aria-label="Mês anterior"]:visible').click();
   const agosto = await rotulos(page);
