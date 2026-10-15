@@ -129,6 +129,8 @@ test("conferência página 2, GET falho/cache antigo e filtros: só confirmaçã
     assert.equal(state.posts.length, 1);
   } finally { await ctx.close(); }
 });
+const habilitado = (page) => page.waitForFunction(() => [...document.querySelectorAll("button")]
+  .find((b) => b.textContent.trim() === "Conferi os lançamentos")?.disabled === false);
 test("conferência pronta: categoria ou dia escolhidos depois (filtro global) travam 'Conferi os lançamentos' até saírem", async () => {
   const { ctx, page } = await preparado();
   try {
@@ -140,8 +142,7 @@ test("conferência pronta: categoria ou dia escolhidos depois (filtro global) tr
     await page.getByText("Nenhum lançamento encontrado.").waitFor(); // a lista já assentou com o filtro
     assert.equal(await conferi.isDisabled(), true, "categoria");
     await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("");
-    await page.locator('[data-id="l999"]').waitFor();
-    assert.equal(await conferi.isEnabled(), true);
+    await habilitado(page); // a lista do cache aparece antes do refetch assentar
     // o dia vem do calendário de /gastos (filtro global); a conferência sobrevive à ida e volta
     await page.evaluate(() => { location.hash = "#/gastos"; });
     await page.locator("#w-calendario .cal-day", { hasText: /^7$/ }).click();
@@ -151,8 +152,7 @@ test("conferência pronta: categoria ou dia escolhidos depois (filtro global) tr
     assert.equal(await conferi.isDisabled(), true, "dia");
     await page.locator(".ledger-chips .chip").click();
     await page.waitForFunction(() => !document.querySelector(".ledger-chips"));
-    await page.locator('[data-id="l999"]').waitFor();
-    assert.equal(await conferi.isEnabled(), true);
+    await habilitado(page);
   } finally { await ctx.close(); }
 });
 test("conferência persiste se remount ocorre antes do erro e após GET/SSE", async () => {
