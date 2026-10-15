@@ -15,7 +15,8 @@ _LINK_MD = re.compile(r"\[([^\[\]\n]{1,300})\]\((https?://[^)\s]{1,2000})\)", re
 def _link_wa(m: re.Match) -> str:
     """`[rótulo](url)` -> só a URL se o rótulo for a própria URL, senão `rótulo: url`."""
     def nu(s: str) -> str:
-        return re.sub(r"^https?://", "", s, flags=re.I).rstrip("/")
+        s = re.sub(r"^https?://", "", s, flags=re.I)
+        return s if re.search(r"[?#]", s) else s.rstrip("/")  # "/" final de query é dado
     rotulo, url = m.groups()
     return url if nu(rotulo) == nu(url) else f"{rotulo}: {url}"
 
