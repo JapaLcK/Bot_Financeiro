@@ -6,15 +6,15 @@ etapa; este documento é o que ele não tem. Cada PR confere se o que está aqui
 
 **Estado (2026-10-14).** PR 1a feito (#998): `GET /api/v2/gastos?mes=`, `emoji`/`cor` em `/categorias`
 e `dia` em `/lancamentos`, com a constante neutra `CAT_NEUTRA_EMOJI`/`CAT_NEUTRA_COR`
-(`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; não o roxo `#7c3aed` que é o default da coluna).
+(`db/connection.py`: `🏷️` e `#94A3B8`, cinza-ardósia neutro; o roxo `#7c3aed` e o `#64748b`, defaults, saem como ele).
 PR 1b feito (#1002): `GET /api/v2/gastos/categoria?mes=&categoria=` (`db/gastos.py::ler_categoria`,
-`db/estabelecimentos.py`). PR 2 (a tela) pendente. Onde o §4.1 e o código divergem, vale o código e o
+`db/estabelecimentos.py`). PR 2 (a tela) feito, `#NNN` (preencher ao abrir o PR). Onde o §4.1 e o código divergem, vale o código e o
 contrato em `docs/CLAUDE.md` ("API v2").
 
 ## 1. O que a tela é
 
-Mostra de onde o dinheiro do mês saiu. Hoje é protótipo com dados fictícios
-(`webapp/src/dashboard/pages.tsx`, função `Spending`), em três blocos:
+Mostra de onde o dinheiro do mês saiu. Neste PR a tela (`webapp/src/dashboard/pages.tsx`) passa a
+ler a API real (`/api/v2/gastos`, `/gastos/categoria`), em três blocos:
 
 - **Categorias** (`widgets/Categories.tsx`): gasto do mês por categoria, com barra e a
   variação contra o mês anterior **no mesmo dia do mês**. O mesmo bloco aparece no Resumo.
@@ -279,7 +279,7 @@ instante, e o aviso de escrita (SSE) refaz as duas.
 | últimos meses | `/gastos/categoria`, 3 meses, cada valor é o mês inteiro (o do mês corrente é o mesmo `valor` da lista, inclusive lançamento com data futura); o corrente é rotulado "mês em andamento", não "até hoje". Mês tocado pelo corte do plano é `null`, **inclusive o mês escolhido**: a igualdade série = `valor` da lista vale só quando o mês escolhido está inteiro disponível; cortado, a lista mostra o `valor` parcial com `inicio_do_historico` (rotulado "parcial") e a série não tem barra para ele |
 | onde mais gasta, com contagem e barra | estabelecimentos (§3.1), top 5, sobre as mesmas linhas do total da categoria (a `compute_top_merchants` existente não serve: não exclui outra moeda) |
 | últimas compras (6, com data, nome, mensagem, origem, valor) | `/gastos/categoria`, `ultimas`: as mesmas linhas que somam o total da categoria. O `/lancamentos` não serve aqui: ele devolve também interno e outra moeda, que o total exclui, e entradas |
-| "Abrir lançamentos" | link para `/lancamentos` com `mes`, `categoria` e `tipo=saida`. A tela de Lançamentos é a lista completa (mostra também o interno, marcado, e outra moeda), então a contagem dela pode ser maior que a de "Compras"; isso é declarado, não escondido |
+| "Abrir lançamentos" | link para `/lancamentos` com `mes` e `categoria` (filtro global, decisão do dono) e **sem** `tipo`: o código leva o mês, a categoria e `guardado`. A tela de Lançamentos é a lista completa (mostra também o interno, marcado, e outra moeda), então a contagem dela pode ser maior que a de "Compras"; isso é declarado, não escondido |
 
 **Calendário** (`Calendar.tsx`)
 | Comportamento | Fonte e decisão |

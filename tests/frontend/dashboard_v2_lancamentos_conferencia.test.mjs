@@ -129,6 +129,32 @@ test("conferência página 2, GET falho/cache antigo e filtros: só confirmaçã
     assert.equal(state.posts.length, 1);
   } finally { await ctx.close(); }
 });
+test("conferência pronta: categoria ou dia escolhidos depois (filtro global) travam 'Conferi os lançamentos' até saírem", async () => {
+  const { ctx, page } = await preparado();
+  try {
+    await novo(page); await save(page).click(); await page.locator(".lanc-conferir").waitFor();
+    await recuperar(page);
+    const conferi = page.getByRole("button", { name: "Conferi os lançamentos", exact: true });
+    assert.equal(await conferi.isEnabled(), true, "sem filtro a conferência fecha");
+    await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("alimentacao");
+    await page.getByText("Nenhum lançamento encontrado.").waitFor(); // a lista já assentou com o filtro
+    assert.equal(await conferi.isDisabled(), true, "categoria");
+    await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("");
+    await page.locator('[data-id="l999"]').waitFor();
+    assert.equal(await conferi.isEnabled(), true);
+    // o dia vem do calendário de /gastos (filtro global); a conferência sobrevive à ida e volta
+    await page.evaluate(() => { location.hash = "#/gastos"; });
+    await page.locator("#w-calendario .cal-day", { hasText: /^7$/ }).click();
+    await page.locator(".ledger-chips .chip").waitFor();
+    await page.getByText("Nenhum lançamento encontrado.").or(page.locator(".lanc-dia").first()).waitFor();
+    await page.waitForTimeout(150);
+    assert.equal(await conferi.isDisabled(), true, "dia");
+    await page.locator(".ledger-chips .chip").click();
+    await page.waitForFunction(() => !document.querySelector(".ledger-chips"));
+    await page.locator('[data-id="l999"]').waitFor();
+    assert.equal(await conferi.isEnabled(), true);
+  } finally { await ctx.close(); }
+});
 test("conferência persiste se remount ocorre antes do erro e após GET/SSE", async () => {
   const { ctx, page, state } = await preparado({ sse: true });
   try {

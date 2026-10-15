@@ -61,6 +61,7 @@
   },
   "resumo_do_mes": {
     "exato": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
+    "centavos": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "1040.00", "saiu": "440.00", "anterior": { "mes": "2026-09", "entrou": "5200.00", "saiu": "3980.55" }, "motivos": [] },
     "todos_os_motivos": { "mes": "2026-07", "ate": "2026-07-31", "entrou": "0", "saiu": "310.00", "anterior": null, "motivos": ["conciliacao_pendente", "movimentos_pendentes", "banco_desatualizado", "inicio_do_historico"] },
     "sem_dados": { "mes": "2026-10", "ate": "2026-10-31", "entrou": "0", "saiu": "0", "anterior": { "mes": "2026-09", "entrou": "0", "saiu": "0" }, "motivos": [] }
   },
@@ -107,6 +108,81 @@
       ],
       "fora_da_grade": { "quantidade": 1, "valor": "50.00" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
     },
+    "centavos": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "440.00",
+      "categorias": [
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.50", "quantidade": 2, "valor_ate_corte": "300.50", "anterior_ate_corte": "250.25" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "139.50", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
+      ],
+      "dias": [
+        {"dia": "2026-10-03", "total": "100.50", "maiores": [{"descricao": "Mercado", "valor": "100.50", "categoria": "alimentacao"}]},
+        {"dia": "2026-10-07", "total": "290.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}, {"descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria"}]},
+        {"dia": "2026-10-20", "total": "49.50", "maiores": [{"descricao": "Assinatura", "valor": "49.50", "categoria": "sem categoria"}]}
+      ],
+      "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "310.25", "motivos": []
+    },
+    "outra_moeda": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "340.00",
+      "categorias": [
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "40.00", "quantidade": 1, "valor_ate_corte": "40.00", "anterior_ate_corte": "0" }
+      ],
+      "dias": [
+        {"dia": "2026-10-03", "total": "100.00", "maiores": [{"descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao"}]},
+        {"dia": "2026-10-07", "total": "200.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}]},
+        {"dia": "2026-10-09", "total": "40.00", "maiores": [{"descricao": "Café", "valor": "40.00", "categoria": "sem categoria"}]}
+      ],
+      "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 1, "anterior_total_ate_corte": "250.00", "motivos": ["outra_moeda"]
+    },
+    "muitas": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "2723.89",
+      "categorias": [
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "900.00", "quantidade": 1, "valor_ate_corte": "900.00", "anterior_ate_corte": "720.00" },
+        { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a", "valor": "620.40", "quantidade": 1, "valor_ate_corte": "620.40", "anterior_ate_corte": "496.32" },
+        { "chave": "transporte", "nome": "transporte", "emoji": "🚕", "cor": "#2FA0C8", "valor": "410.00", "quantidade": 1, "valor_ate_corte": "410.00", "anterior_ate_corte": "328.00" },
+        { "chave": "lazer", "nome": "lazer", "emoji": "🍺", "cor": "#C98500", "valor": "300.00", "quantidade": 1, "valor_ate_corte": "300.00", "anterior_ate_corte": "240.00" },
+        { "chave": "saude", "nome": "saúde", "emoji": "💊", "cor": "#E66767", "valor": "210.99", "quantidade": 1, "valor_ate_corte": "210.99", "anterior_ate_corte": "168.79" },
+        { "chave": "educacao", "nome": "educação", "emoji": "📚", "cor": "#9085E9", "valor": "150.00", "quantidade": 1, "valor_ate_corte": "150.00", "anterior_ate_corte": "120.00" },
+        { "chave": "casa", "nome": "Casa", "emoji": "🏠", "cor": "#7C8391", "valor": "120.00", "quantidade": 1, "valor_ate_corte": "120.00", "anterior_ate_corte": "96.00" },
+        { "chave": "despesas gerais da casa e do condominio do predio novo", "nome": "Despesas gerais da casa e do condomínio do prédio novo", "emoji": "🏷️", "cor": "#94A3B8", "valor": "12.50", "quantidade": 1, "valor_ate_corte": "12.50", "anterior_ate_corte": "10.00" }
+      ],
+      "dias": [
+        {"dia": "2026-10-01", "total": "900.00", "maiores": [{"descricao": "Compra 1", "valor": "900.00", "categoria": "alimentacao"}]},
+        {"dia": "2026-10-02", "total": "620.40", "maiores": [{"descricao": "Compra 2", "valor": "620.40", "categoria": "mercado"}]},
+        {"dia": "2026-10-03", "total": "410.00", "maiores": [{"descricao": "Compra 3", "valor": "410.00", "categoria": "transporte"}]},
+        {"dia": "2026-10-04", "total": "300.00", "maiores": [{"descricao": "Compra 4", "valor": "300.00", "categoria": "lazer"}]},
+        {"dia": "2026-10-05", "total": "210.99", "maiores": [{"descricao": "Compra 5", "valor": "210.99", "categoria": "saude"}]},
+        {"dia": "2026-10-06", "total": "150.00", "maiores": [{"descricao": "Compra 6", "valor": "150.00", "categoria": "educacao"}]},
+        {"dia": "2026-10-07", "total": "120.00", "maiores": [{"descricao": "Compra 7", "valor": "120.00", "categoria": "casa"}]},
+        {"dia": "2026-10-10", "total": "12.50", "maiores": [{"descricao": "Compra 10", "valor": "12.50", "categoria": "despesas gerais da casa e do condominio do predio novo"}]}
+      ],
+      "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "2179.11", "motivos": []
+    },
+    "vazio": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "0.00",
+      "categorias": [
+
+      ],
+      "dias": [
+
+      ],
+      "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "0.00", "motivos": []
+    },
+    "todas_outra_moeda": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "0.00",
+      "categorias": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 3, "anterior_total_ate_corte": "0.00", "motivos": ["outra_moeda"]
+    },
+    "maximo": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "999999999.99",
+      "categorias": [
+        { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "cor": "#16a34a", "valor": "999999990.00", "quantidade": 1, "valor_ate_corte": "999999990.00", "anterior_ate_corte": "10000.00" },
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "9.99", "quantidade": 1, "valor_ate_corte": "9.99", "anterior_ate_corte": "9.00" }
+      ],
+      "dias": [
+        { "dia": "2026-10-07", "total": "999999999.99", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }] }
+      ],
+      "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "10009.00", "motivos": []
+    },
     "indisponivel": {
       "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "dia_de_corte": 30, "historico_desde": "2026-10-10", "total": null,
       "categorias": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
@@ -129,6 +205,38 @@
       ],
       "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
     },
+    "cortado": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "total": "120.00", "compras": 2, "valor_medio": "60.00",
+      "ultimas": [
+        { "data": "2026-10-12", "descricao": "Mercado", "mensagem": null, "origem": "banco", "valor": "70.00" },
+        { "data": "2026-10-05", "descricao": "Fatura antiga", "mensagem": null, "origem": "cartao", "valor": "50.00" }
+      ],
+      "serie": [{ "mes": "2026-08", "valor": "180.00" }, { "mes": "2026-09", "valor": "250.00" }, { "mes": "2026-10", "valor": null }],
+      "estabelecimentos": [{ "nome": "Mercado", "valor": "70.00", "quantidade": 1 }, { "nome": "Fatura antiga", "valor": "50.00", "quantidade": 1 }],
+      "dias": [
+        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }] }
+      ],
+      "fora_da_grade": { "quantidade": 1, "valor": "50.00" }, "saidas_em_outra_moeda": 0, "motivos": ["inicio_do_historico"]
+    },
+    "zero": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
+      "categoria": { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8" },
+      "total": "0.00", "compras": 0, "valor_medio": null, "ultimas": [],
+      "serie": [{ "mes": "2026-08", "valor": "0.00" }, { "mes": "2026-09", "valor": "0.00" }, { "mes": "2026-10", "valor": "0.00" }],
+      "estabelecimentos": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
+    },
+    "maximo": {
+      "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
+      "categoria": { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "cor": "#16a34a" },
+      "total": "999999990.00", "compras": 1, "valor_medio": "999999990.00",
+      "ultimas": [{ "data": "2026-10-07", "descricao": "Mercado e padaria do bairro novo do centro", "mensagem": null, "origem": "banco", "valor": "999999990.00" }],
+      "serie": [{ "mes": "2026-08", "valor": "999999990.00" }, { "mes": "2026-09", "valor": "999999990.00" }, { "mes": "2026-10", "valor": "999999990.00" }],
+      "estabelecimentos": [{ "nome": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "quantidade": 1 }],
+      "dias": [{ "dia": "2026-10-07", "total": "999999990.00", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }] }],
+      "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
+    },
     "indisponivel": {
       "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
       "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
@@ -144,7 +252,7 @@
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": false},
-        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
       "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
@@ -154,7 +262,7 @@
       "motivo": "sem_dados",
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sem_dados", "feito": false},
-        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
       "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
@@ -164,7 +272,7 @@
       "motivo": "sincronizando",
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": false, "motivo": "sincronizando", "feito": false},
-        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
         {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
       ],
       "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
@@ -174,7 +282,7 @@
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": true},
         {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": true}
       ],
       "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]
@@ -184,7 +292,7 @@
       "motivo": null,
       "passos": [
         {"id": "resumo.saiu", "tela": "resumo", "ancora": "resumo.saiu", "acao": "mes.trocado", "dado": "real", "avanca": "cliente", "fala": {"titulo": "O que saiu este mês", "apresenta": "Esse é o que saiu da sua conta este mês, direto do seu banco.", "texto": "Toca aqui pra comparar com o mês passado."}, "disponivel": true, "motivo": null, "feito": true},
-        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês. Estes números ainda são de exemplo.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
+        {"id": "gastos.categoria", "tela": "gastos", "ancora": "categorias.lista", "acao": "categoria.aberta", "dado": "real", "avanca": "cliente", "fala": {"titulo": "Pra onde foi o dinheiro", "apresenta": "Aqui ficam suas categorias: pra onde foi cada real do mês.", "texto": "Toca numa categoria pra ver de onde vem o total."}, "disponivel": true, "motivo": null, "feito": false},
         {"id": "piggy.pergunta", "tela": "piggy", "ancora": "piggy.pergunta", "acao": "piggy.perguntou", "dado": "exemplo", "avanca": "cliente", "fala": {"titulo": "Pergunta pro Piggy", "apresenta": "Aqui você conversa comigo. As respostas ainda são de exemplo; a conversa de verdade chega em breve.", "texto": "Toca numa pergunta pronta e me vê responder."}, "disponivel": true, "motivo": null, "feito": false}
       ],
       "dicas": [{"id": "assinaturas.marcas", "tela": "assinaturas", "titulo": "Como eu acho suas assinaturas", "texto": "Eu acho essas cobranças no extrato que chega do seu banco pelo Open Finance. “Ignorar” e “É assinatura” só me ensinam o que é o quê: nada é cancelado aqui.", "vista": true}]

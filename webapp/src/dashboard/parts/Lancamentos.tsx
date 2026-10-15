@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { Lancamento, NovoLancamento, QueryGet } from "../lib/api-v2.gen";
 import type { DashState } from "../lib/types";
+import { useActions } from "../lib/actions";
 import { escolherMes, mesDe } from "../lib/store.js";
 import { categoriasQuery, contasQuery, lancamentosQuery } from "../lib/v2";
 import { isoDay, longDate } from "../lib/format.js";
@@ -11,7 +12,8 @@ import { LancamentoLinha, ORIGENS } from "./LancamentoLinha";
 import { LancamentoForm } from "./LancamentoForm";
 import { useLancamentoMutation } from "./useLancamentoMutation";
 
-type Filtros = Omit<QueryGet["/lancamentos"], "cursor" | "mes">;
+// Categoria e dia são a escolha global (`s.filter`): "Para onde vai" e o calendário escrevem lá e abrem esta tela.
+type Filtros = Omit<QueryGet["/lancamentos"], "cursor" | "mes" | "categoria" | "dia">;
 export function Lancamentos({ s }: { s: DashState }) {
   const [filtros, setFiltros] = useState<Filtros>({});
   const [busca, setBusca] = useState("");
@@ -21,10 +23,15 @@ export function Lancamentos({ s }: { s: DashState }) {
   const avisoRef = useRef<HTMLParagraphElement>(null);
   const voltar = useRef<HTMLElement | null>(null);
   const mes = mesDe(s);
+  const { setFilter } = useActions();
+  const categoria = s.filter.category;
+  // O dia é de um mês: no outro ele esvaziaria a lista (e a fatura do cartão entra pelo mês dela).
+  const dia = s.filter.day?.startsWith(mes) ? s.filter.day : null;
   useEffect(() => { const t = window.setTimeout(() => setQ(busca.trim()), 250); return () => window.clearTimeout(t); }, [busca]);
   const curta = !!q && !q.split(/\s+/).some((t) => t.length >= 2);
   const historico = !curta && !!q;
-  const lista = useInfiniteQuery(lancamentosQuery({ mes, ...filtros, q: historico ? q : undefined }));
+  // `undefined`, não `null`: sem escolha a chave é a de `lancamentosQuery({ mes })`, que a conferência (useLancamentoMutation) refaz.
+  const lista = useInfiniteQuery(lancamentosQuery({ mes, ...filtros, categoria: categoria ?? undefined, dia: dia ?? undefined, q: historico ? q : undefined }));
   const cats = useQuery(categoriasQuery);
   const contas = useQuery(contasQuery);
   const escrita = useLancamentoMutation();
@@ -37,11 +44,11 @@ export function Lancamentos({ s }: { s: DashState }) {
     window.setTimeout(() => { if (voltar.current?.isConnected) voltar.current.focus(); else avisoRef.current?.focus(); }, 0);
   };
   const c = escrita.conferencia;
-  const visaoConferivel = !!c && c.fase === "pronta" && c.alvo === mes && !busca && !q && !Object.values(filtros).some(Boolean) && !!lista.data && !lista.isFetching && !lista.isError;
+  const visaoConferivel = !!c && c.fase === "pronta" && c.alvo === mes && !busca && !q && !categoria && !dia && !Object.values(filtros).some(Boolean) && !!lista.data && !lista.isFetching && !lista.isError;
   const conferir = async (alvo?: string) => {
     const resultado = await escrita.atualizar(alvo);
     if (typeof resultado !== "string") return;
-    setBusca(""); setQ(""); setFiltros({}); escolherMes(resultado); setForm(null);
+    setBusca(""); setQ(""); setFiltros({}); setFilter({ category: null, day: null }); escolherMes(resultado); setForm(null);
     window.setTimeout(() => avisoRef.current?.focus(), 0);
   };
   // Depois de 409 a resposta atual governa os campos sem apagar o rascunho.
@@ -68,9 +75,10 @@ export function Lancamentos({ s }: { s: DashState }) {
       <label className="lanc-busca">Buscar<input className="field" type="search" maxLength={200} value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Descrição ou nota" /></label>
       <label>Origem<select className="field" value={filtros.origem ?? ""} onChange={(e) => filtro("origem", e.target.value as Filtros["origem"])}><option value="">Todas as origens</option>{Object.entries(ORIGENS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label>Tipo<select className="field" value={filtros.tipo ?? ""} onChange={(e) => filtro("tipo", e.target.value as Filtros["tipo"])}><option value="">Entradas e saídas</option><option value="entrada">Entrada</option><option value="saida">Saída</option></select></label>
-      <label>Categoria<select className="field" disabled={!cats.data} value={filtros.categoria ?? ""} onChange={(e) => filtro("categoria", e.target.value)}><option value="">Todas as categorias</option>{cats.data?.categorias.map((c) => <option key={c.chave} value={c.chave}>{c.nome}</option>)}</select></label>
+      <label>Categoria<select className="field" disabled={!cats.data} value={categoria ?? ""} onChange={(e) => setFilter({ category: e.target.value || null })}><option value="">Todas as categorias</option>{categoria && cats.data && !cats.data.categorias.some((c) => c.chave === categoria) && <option value={categoria}>{categoria[0].toUpperCase() + categoria.slice(1)}</option>}{cats.data?.categorias.map((c) => <option key={c.chave} value={c.chave}>{c.nome}</option>)}</select></label>
       <label>Conta<select className="field" disabled={!contas.data} value={filtros.conta ?? ""} onChange={(e) => filtro("conta", e.target.value ? Number(e.target.value) : undefined)}><option value="">Todas as contas</option>{contas.data?.contas.map((c) => <option key={c.id} value={c.id}>{c.instituicao ?? "Banco"}{c.nome ? ` · ${c.nome}` : ""}</option>)}</select></label>
     </div>
+    {dia && <div className="ledger-chips"><button type="button" className="chip" aria-pressed="true" onClick={() => setFilter({ day: null })}>dia {Number(dia.slice(8))}<i className="ph ph-x x" aria-hidden="true" /><span className="sr-only">remover filtro</span></button></div>}
     {cats.isError && <p role="alert">Não foi possível carregar as categorias. <button className="btn btn-quiet" onClick={() => cats.refetch()}>Tentar categorias novamente</button></p>}
     {contas.isError && <p role="alert">Não foi possível carregar as contas. <button className="btn btn-quiet" onClick={() => contas.refetch()}>Tentar contas novamente</button></p>}
     {curta ? <p role="status">Use pelo menos uma palavra de 2 ou mais caracteres para buscar.</p> : q && <p className="w-lede">Busca no histórico disponível: “{q}”.</p>}

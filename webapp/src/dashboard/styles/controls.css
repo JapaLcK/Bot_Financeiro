@@ -42,7 +42,7 @@
   color: var(--ink-2);
   font-size: 11px; font-weight: 500; letter-spacing: 0; white-space: nowrap;
 }
-/* Etiqueta neutra que o Hero ("Mês fechado") e o Calendar (categoria escolhida) ainda usam.
+/* Etiqueta neutra que o Hero ("Mês fechado"), o Calendar e o GastosCalendario (categoria escolhida) usam.
    Não é o selo "demonstração": sem align-self/flex, para não mudar o alinhamento deles. */
 .tag-demo {
   height: 22px; padding: 0 8px;

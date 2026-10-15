@@ -418,11 +418,19 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   o emoji e a cor são os do catálogo quando há linha dele (o catálogo vence), senão `CAT_NEUTRA_EMOJI`/
   `CAT_NEUTRA_COR` (`db/connection.py`), que valem também para a categoria que só aparece nos lançamentos; o
   nome, nesse caso, é a própria chave. `cor` fora de `#RRGGBB` e `emoji` vazio ou só espaços saem como o
-  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`).
+  neutro (`CAT_NEUTRA_COR`/`CAT_NEUTRA_EMOJI`), em `/categorias` e em `/gastos` (`cat_visual`). **Cor padrão**:
+  `#7c3aed` é o default da coluna e da semente (ninguém o escolheu); `#64748b` também é um swatch do seletor
+  do painel antigo (`dashboard.js`, `CATEGORY_COLOR_OPTIONS`), e quem o escolheu lá passa a ver
+  `CAT_NEUTRA_COR` (`#94A3B8`) por decisão do dono (cinza unificado). Os dois saem assim em `/api/v2/categorias`
+  e `/gastos` (`CAT_COR_PADRAO`, uma regra só, no servidor; o front não reconhece cor); o painel antigo segue
+  com a cor crua (`db/budgets.py` devolve `#7c3aed`).
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
   sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
-  difere do total (`soma_arredondada_diverge`). Falta, do plano: a tela (PR 2).
+  difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
+  `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
+  vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
+  (`moneyText`), categoria e dia escolhidos vão ao Extrato pelo filtro global (`s.filter.category`/`day`).
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
