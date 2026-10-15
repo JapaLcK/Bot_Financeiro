@@ -2129,10 +2129,12 @@ no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
 `violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
 (`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
 (traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
-COBRE: (1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
+COBRE: (0) 1ª linha: `psycopg.Error.__str__` redigido em `db/connection.py` (todo `print(exc)`,
+f-string, `logger.*(..., exc)` e traceback, de qualquer conexão; o texto cru fica em `exc.args[0]`);
+(1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
 (stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de
 `system_event_logs` (`log_system_event_sync` e `admin_dashboard.log_system_event`): `message` e
-`details`. NÃO cobre: logger com `propagate=False` (uvicorn), `print`/stderr direto, handler fora
+`details`. NÃO cobre (a 1ª linha pega o que vem de `str(exc)`): logger com `propagate=False` (uvicorn) ou `print` de texto cru, handler fora
 do root, nem outro INSERT em `system_event_logs`, nem a resposta HTTP/WhatsApp (essa é a frase fixa).
 Rota que embrulha `except Exception` em `HTTPException(f"...{exc}")`
 tem de deixar o `CheckViolation` passar antes (`except psycopg.errors.CheckViolation: raise`).

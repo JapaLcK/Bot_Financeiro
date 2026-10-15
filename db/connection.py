@@ -18,6 +18,22 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from core.pg_text import redigir_failing_row
+
+# O psycopg monta o texto do erro com o DETAIL do Postgres; num CHECK violado (`finito_*`,
+# db/finito_checks.py) ele é `Failing row contains (<a linha inteira do usuário>)`. Redigir no
+# `__str__` cobre de uma vez TODO `print(exc)`, `f"{exc}"`, `logger.*(..., exc)` e traceback, de
+# qualquer conexão (pool ou `psycopg.connect` direto), sem cada site lembrar. O dado bruto segue
+# em `exc.args[0]`/`exc.diag` para quem precisa dele de propósito.
+if not getattr(psycopg.Error.__str__, "_sem_failing_row", False):
+    _str_do_psycopg = psycopg.Error.__str__
+
+    def _str_sem_linha(self) -> str:
+        return redigir_failing_row(_str_do_psycopg(self))
+
+    _str_sem_linha._sem_failing_row = True
+    psycopg.Error.__str__ = _str_sem_linha
+
 
 _pool: ConnectionPool | None = None
 _pool_lock = threading.Lock()

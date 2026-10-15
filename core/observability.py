@@ -209,11 +209,13 @@ def _sem_failing_row(record: logging.LogRecord) -> bool:
     texto e do traceback do log. Um CHECK violado (`finito_*`, db/finito_checks.py) o põe no
     `str(exc)` e no traceback.
 
-    COBRE: records que passam peltodo handler do root (os dois que `_configure_root_logger` instala e os que já existiam)
+    COBRE: records que passam por todo handler do root (os dois que `_configure_root_logger` instala e os que já existiam)
     (stderr, se o root estava sem handler, e `_DashboardHandler`), com `logger.*(..., exc)` ou `exc_info`. A pilha fica: o traceback vira `exc_text` já
     redigido (o Formatter imprime `exc_text`; o `exc_info` é zerado para ninguém reformatá-lo).
-    NÃO COBRE: logger com `propagate=False` (uvicorn), `print`/stderr direto e handler fora
-    do root. As gravações diretas em `system_event_logs` são cobertas à parte, pelos
+    2ª linha de defesa: a 1ª é `psycopg.Error.__str__` redigido em `db/connection.py`, que já tira
+    a linha de `print(exc)`, f-string, log e traceback de qualquer conexão. Este filtro cobre texto
+    cru que não passou por ele. NÃO COBRE: logger com `propagate=False` (uvicorn), `print` de
+    texto cru e handler fora do root. As gravações diretas em `system_event_logs` são cobertas à parte, pelos
     gravadores (`core.pg_text.redigir_failing_row`, a mesma regra).
 
     Nunca levanta: filtro roda fora do `handleError`, e uma chamada de log com args que não

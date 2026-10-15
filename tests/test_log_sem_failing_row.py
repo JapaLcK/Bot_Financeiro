@@ -25,19 +25,36 @@ def _violacao():
     raise AssertionError("o banco aceitou 1e20: o CHECK finito não está instalado")
 
 
+def _cru(exc):
+    """Texto CRU do Postgres (com a linha do usuário): `str(exc)` já sai redigido (db/connection.py),
+    mas o filtro e os gravadores protegem também o que não passou por ele (outro tipo de exceção,
+    texto montado à mão, conexão fora do módulo)."""
+    return exc.args[0]
+
+
 def _registro(exc, com_traceback):
+    import sys
+    cru = _cru(exc)
     try:
-        raise exc
-    except psycopg.errors.CheckViolation:
-        import sys
-        return logging.LogRecord("t", logging.ERROR, __file__, 1, "falhou: %s", (exc,),
+        raise RuntimeError(cru)
+    except RuntimeError:
+        return logging.LogRecord("t", logging.ERROR, __file__, 1, "falhou: %s", (cru,),
                                  sys.exc_info() if com_traceback else None)
+
+
+def test_str_do_psycopg_ja_sai_sem_a_linha_do_usuario():
+    """db/connection.py redige o `__str__` do psycopg.Error: print/f-string/log/traceback de TODO site."""
+    import traceback
+    exc = _violacao()
+    assert "Failing row contains (" in _cru(exc) and "100000000000000000000" in _cru(exc), "premissa: o args[0] guarda o texto cru"
+    for texto in (str(exc), f"{exc}", "".join(traceback.format_exception(exc))):
+        assert "Failing row contains (omitido)" in texto and "100000000000000000000" not in texto, texto
 
 
 @pytest.mark.parametrize("com_traceback", [False, True])
 def test_filtro_tira_failing_row_da_mensagem_e_do_traceback(com_traceback):
     exc = _violacao()
-    assert "Failing row contains" in str(exc), "premissa: o psycopg traz a linha no str(exc)"
+    assert "Failing row contains (" in _cru(exc) and "100000000000000000000" in _cru(exc), "premissa: o psycopg traz a linha no texto cru"
     rec = _registro(exc, com_traceback)
     assert O._sem_failing_row(rec) is True
     saida = logging.Formatter("%(message)s").format(rec)
@@ -95,13 +112,13 @@ def test_pilha_continua_no_formatado_e_no_details_do_dashboard(monkeypatch):
     rec = _registro(exc, True)
     O._sem_failing_row(rec)
     saida = logging.Formatter("%(message)s").format(rec)
-    assert "_violacao" in saida and "Traceback" in saida, saida  # a pilha continua lá
+    assert "_registro" in saida and "Traceback" in saida, saida  # a pilha continua lá
     assert "Failing row contains (omitido)" in saida and "100000000000000000000" not in saida, saida
     gravado = {}
     monkeypatch.setattr(O, "log_system_event_sync", lambda *a, **k: gravado.update(k, msg=a))
     O._DashboardHandler().emit(rec)
     tb = gravado["details"]["traceback"]
-    assert "_violacao" in tb and "100000000000000000000" not in tb and "Failing row contains (omitido)" in tb, tb
+    assert "_registro" in tb and "100000000000000000000" not in tb and "Failing row contains (omitido)" in tb, tb
     assert "100000000000000000000" not in gravado["message"]
 
 
@@ -114,12 +131,16 @@ def test_gravadores_diretos_nao_persistem_a_linha_do_usuario():
     from core.admin_dashboard import ensure_admin_tables, log_system_event
     asyncio.run(ensure_admin_tables())
     exc = _violacao()
-    tb = "".join(traceback.format_exception(exc))
-    assert "Failing row contains (" in tb and "Failing row contains (" in str(exc)
+    cru = _cru(exc)
+    try:
+        raise RuntimeError(cru)
+    except RuntimeError as e:
+        tb = "".join(traceback.format_exception(e))
+    assert "Failing row contains (" in tb and "100000000000000000000" in cru
     sync, assinc = "teste_failing_row_sync", "teste_failing_row_async"
     try:
-        O.log_system_event_sync("error", sync, str(exc), details={"traceback": tb, "x": [str(exc)]})
-        asyncio.run(log_system_event("error", assinc, str(exc), details={"traceback": tb}))
+        O.log_system_event_sync("error", sync, cru, details={"traceback": tb, "x": [cru]})
+        asyncio.run(log_system_event("error", assinc, cru, details={"traceback": tb}))
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("select event_type, message || details::text as t from system_event_logs "
                         "where event_type in (%s, %s)", (sync, assinc))
