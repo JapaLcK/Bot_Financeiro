@@ -625,7 +625,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   então lá a receita manual de quem tem banco nunca conta. (2) A recusa no WhatsApp depende de o LLM
   devolver `tipo` de receita; sem `tipo`, "salário" pode virar gasto fixo (pré-existente). (3) Falha
   na consulta de banco conta como COM banco (`regra_ativa`): quem não tem banco pode ver a aba
-  "Receitas fixas" sumir, ou a recusa, naquele carregamento. (4) A recusa do roteador do WhatsApp
+  "Receitas fixas" sumir, ou a recusa, naquele carregamento. A aba também some para quem não tem
+  banco quando o GET falha ou volta 403 de plano (só `banco_conectado === false` a mostra); "Gastos
+  fixos" segue visível com o convite de assinatura. (4) A recusa do roteador do WhatsApp
   consome a pergunta pendente do próprio `recurring.add`; a de outro fluxo fica intacta.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
   saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`

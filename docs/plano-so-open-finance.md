@@ -149,7 +149,7 @@ de escrever a lista de arquivos.
 
 ### 3.1 Previsão: o que sobra sem o manual
 
-> **Superado em 2026-10-09** (ADR 0006): a parte que supõe a saída do fixo e da receita manuais (Fases 2 e 3). Os fixos e as receitas manuais continuam na Previsão (ADR 0006, D5). A receita detectada pelo extrato (#981) vale. Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): a parte que supõe a saída do fixo e da receita manuais (Fases 2 e 3). Os fixos e as receitas manuais continuam na Previsão (ADR 0006, D5). A receita detectada pelo extrato (#981) vale. **Revisto em 2026-10-14 (R2, decisão separada do dono, ADR 0006 decisão 4):** para quem tem banco conectado (a regra da Q40), a receita manual sai da Previsão e o cadastro é recusado; a do extrato (#981) a substitui. Sem banco, segue valendo o que está acima. Texto original abaixo, mantido.
 
 Na base deste inventário, os compromissos do motor vinham **todos** de tabela manual: os
 fixos (#9), as receitas fixas (#10) e os boletos e contas a pagar (#11–13). A exceção era a
@@ -412,7 +412,7 @@ a ler a recorrência do OF ou saem (P4). Faixa Leve, e Completo se mexer no moto
 
 ### Fase 2: parar de ACEITAR, por canal (reaproveita a trava da Q36)
 
-> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d), **com uma exceção**: a recusa do "pagar fatura" manual no cartão do banco (item #5 do 2a), decisão do dono de 2026-10-11 já implementada (B2), segue válida. A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d), **com uma exceção**: a recusa do "pagar fatura" manual no cartão do banco (item #5 do 2a), decisão do dono de 2026-10-11 já implementada (B2), segue válida. A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). A receita fixa manual de quem tem banco conectado é um desses bloqueios, decidido em 2026-10-14 (R2): a linha "Receita recorrente" da matriz abaixo vale. Texto original abaixo, mantido.
 
 A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`, presa por
 `tests/test_fonte_unica_q36.py:351`, que reprova escritor novo sem classificação). A fase
@@ -740,7 +740,7 @@ reserva do `/painel`.
 
 **P7 (nova, 2026-10-08). De onde vem a receita da Previsão sem o cadastro manual?**
 
-> **Superado em 2026-10-09** (ADR 0006): parcial: vale a detecção da receita pelo extrato (#981); não vale a ideia de que a receita manual sai da Previsão. Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): parcial: vale a detecção da receita pelo extrato (#981); não vale a ideia de que a receita manual sai da Previsão. **Revisto em 2026-10-14 (R2, decisão separada do dono, ADR 0006 decisão 4):** para quem tem banco conectado (a regra da Q40), a receita manual sai da Previsão e o cadastro é recusado; a do extrato (#981) a substitui. Sem banco, segue valendo o que está acima. Texto original abaixo, mantido.
 
 A P4 supunha que o salário viria como recorrência do OF. A medição do §9 mostrou que quase
 nunca vem.
