@@ -3,7 +3,8 @@
  * página /gastos e nos blocos "Para onde vai" e "Dia a dia" do Resumo.
  *
  *   · critério do dono: o Saiu do Resumo, a lede do bloco e a soma das linhas, em centavos inteiros;
- *   · escolher categoria pede o detalhe dela; escolher o dia leva aos Lançamentos com `mes` e `dia`;
+ *   · escolher categoria pede o detalhe dela; escolher o dia abre o card de compras do dia na própria /gastos (o card em si,
+ *     os números e o layout: dashboard_v2_gastos_dia.test.mjs); só 'Ver em Lançamentos' leva ao extrato, com `mes` e `dia`;
  *   · estados: erro com "Tentar de novo", mês fora do histórico, corte do plano, mês sem gasto, categoria sem gasto;
  *   · nenhum selo de demonstração nem texto do protótipo; layout em 1440 e 390.
  *
@@ -99,8 +100,8 @@ test("escolher categoria pede o detalhe e o calendário dela (uma requisição);
   assert.deepEqual(urls, ["?mes=2026-10&categoria=alimentacao", "?mes=2026-10&categoria=sem+categoria", "?mes=2026-10&categoria=alimentacao"]);
 });
 
-test("calendário: hoje, dia agendado, dia futuro, escala por percentil, nome acessível com os maiores; clicar no dia filtra os lançamentos (mes e dia)", async () => {
-  const { ctx, page, ir } = await abrir({ ...COM_DADO });
+test("calendário: hoje, dia agendado, dia futuro, escala por percentil, nome acessível com os maiores; clicar no dia abre o card de compras na mesma tela (mes e dia)", async () => {
+  const { ctx, page, ir } = await abrir({ ...COM_DADO, lancamentos: "dia_7" });
   const lanc = pedidos(page, "/api/v2/lancamentos");
   await ir("/gastos");
   const dia = (n) => page.locator("#w-calendario .cal-day", { hasText: new RegExp(`^${n}$`) });
@@ -112,24 +113,33 @@ test("calendário: hoje, dia agendado, dia futuro, escala por percentil, nome ac
   const lede = await texto(page, "#w-calendario .w-lede");
   const caro = await texto(page, "#w-calendario .cal-foot .link");
   await dia(7).click();
-  await page.waitForFunction(() => location.hash === "#/lancamentos");
-  await page.locator(".lanc-linha").first().waitFor();
-  const chip = await texto(page, ".ledger-chips .chip");
+  await page.locator("#gastos-compras .lanc-linha").first().waitFor();
+  const card = await page.evaluate(() => ({ hash: location.hash, titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent.replace(/\s/g, " "),
+    chips: document.querySelectorAll(".ledger-chips").length }));
   const ultimo = lanc.at(-1);
   await ctx.close();
   assert.deepEqual(r, { 3: ["3", null, null, false], 7: ["6", null, null, false], 14: ["0", "true", null, false], 20: ["0", null, "true", false], 21: ["0", null, null, true] });
   assert.equal(label, "qua, 7 de outubro: R$ 290,00. Maiores: Restaurante R$ 200,00, Sem descrição R$ 90,00");
   assert.equal(lede, "média R$ 27,86/dia · 12 dias sem gasto"); // (100 + 290) / 14 dias, só até hoje: o dia 20 (agendado) fica fora
   assert.equal(caro, "7 · R$ 290,00");
-  assert.equal(ultimo, "?mes=2026-10&dia=2026-10-07&guardado=true");
-  assert.equal(chip, "dia 7remover filtro");
+  assert.equal(ultimo, "?mes=2026-10&dia=2026-10-07&tipo=saida&guardado=true");
+  assert.deepEqual(card, { hash: "#/gastos", titulo: "qua, 7 de outubro", lede: "Gasto no dia · R$ 290,00", chips: 0 }); // não saiu da tela, e o filtro global não ganhou o dia
 });
 
-test("o dia é de um mês: no outro a lista não leva `dia` nem chip; voltar ao mês traz o dia; o chip limpa", async () => {
-  const { ctx, page, ir } = await abrir({ ...COM_DADO });
+test("o dia é de um mês: trocar o mês fecha o card; o chip só chega por 'Ver em Lançamentos' e, no outro mês, a lista não leva `dia` nem chip; voltar traz o dia; o chip limpa", async () => {
+  const { ctx, page, ir } = await abrir({ ...COM_DADO, lancamentos: "dia_7" });
   const lanc = pedidos(page, "/api/v2/lancamentos");
   await ir("/gastos");
-  await page.locator("#w-calendario .cal-day", { hasText: /^7$/ }).click();
+  const dia7 = () => page.locator("#w-calendario .cal-day", { hasText: /^7$/ });
+  await dia7().click();
+  await page.locator("#gastos-compras").waitFor();
+  await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".month-title").textContent === "Setembro 2026" && !document.querySelector("#gastos-compras"));
+  await page.getByRole("button", { name: "Próximo mês", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector(".month-title").textContent === "Outubro 2026");
+  const fechado = await page.locator("#gastos-compras").count(); // voltar ao mês não reabre
+  await dia7().click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.locator(".ledger-chips .chip").waitFor();
   const noMes = lanc.at(-1);
   await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
@@ -142,15 +152,18 @@ test("o dia é de um mês: no outro a lista não leva `dia` nem chip; voltar ao 
   await page.waitForFunction(() => !document.querySelector(".ledger-chips"));
   const limpo = lanc.at(-1);
   await ctx.close();
+  assert.equal(fechado, 0);
   assert.deepEqual([noMes, outro, limpo], ["?mes=2026-10&dia=2026-10-07&guardado=true", "?mes=2026-09&guardado=true", "?mes=2026-10&guardado=true"]);
 });
 
-test("o detalhe leva a categoria aos lançamentos sem `tipo`; 'Sem categoria' (fora do catálogo) entra no select", async () => {
+test("'Ver compras' e 'Ver em Lançamentos' do detalhe levam a categoria aos lançamentos sem `tipo`; 'Sem categoria' (fora do catálogo) entra no select", async () => {
   const { ctx, page, ir } = await abrir({ ...COM_DADO, categorias: "padrao" });
   const lanc = pedidos(page, "/api/v2/lancamentos");
   await ir("/gastos");
   await page.locator("#w-categorias .cat", { hasText: "sem categoria" }).click();
-  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
+  await page.getByRole("button", { name: "Ver compras" }).click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
+  await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
   const r = [lanc.at(-1), await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), await page.locator('select option[value="sem categoria"]').textContent()];
   await ctx.close();
@@ -163,7 +176,8 @@ test("catálogo de categorias fora do ar com categoria já escolhida: o select s
   const lanc = pedidos(page, "/api/v2/lancamentos");
   await ir("/gastos");
   await page.locator("#w-categorias .cat", { hasText: "sem categoria" }).click();
-  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
+  await page.getByRole("button", { name: "Ver compras" }).click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.getByText("Não foi possível carregar as categorias.").waitFor();
   const sel = page.getByRole("combobox", { name: /^Categoria/ });
   const habilitado = await sel.isEnabled();
@@ -292,14 +306,17 @@ test("selo 'soma arredondada' (arredondamento_por_grupo) aparece em Para onde va
   assert.deepEqual(selos, ["soma arredondada"]);
 });
 
-test("'Abrir lançamentos' do detalhe larga o dia que estava escolhido: a lista abre sem `dia` e sem chip", async () => {
+test("'Ver em Lançamentos' do detalhe larga o dia que estava escolhido: a lista abre sem `dia` e sem chip", async () => {
   const { ctx, page, ir } = await abrir({ ...COM_DADO });
   const lanc = pedidos(page, "/api/v2/lancamentos");
   await ir("/gastos");
   await page.locator("#w-calendario .cal-day", { hasText: /^7$/ }).click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.locator(".ledger-chips .chip").waitFor(); // parte de um dia escolhido
   await page.evaluate(() => { location.hash = "#/gastos"; });
-  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
+  await page.getByRole("button", { name: "Ver compras" }).click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
+  await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
   const r = [lanc.at(-1), await page.locator(".ledger-chips .chip").count()];
   await ctx.close();
@@ -365,7 +382,7 @@ for (const width of [1440, 390]) {
 }
 
 for (const width of [1440, 390]) {
-  test(`${width}px, valor máximo e nome de 42 caracteres: nada passa da largura (página, linhas de categoria, lugares, últimas compras); título do detalhe com reticência e 'Abrir lançamentos' à vista`, async () => {
+  test(`${width}px, valor máximo e nome de 42 caracteres: nada passa da largura (página, linhas de categoria, lugares, últimas compras); título do detalhe com reticência e 'Ver compras' à vista`, async () => {
     const { ctx, page, ir } = await abrir({ width, gastos: "maximo", gastosCategoria: "maximo" });
     const medidas = {};
     for (const rota of ["/gastos", "/"]) {
@@ -375,7 +392,7 @@ for (const width of [1440, 390]) {
       medidas[rota] = await page.evaluate(() => {
         const e = document.scrollingElement;
         const nome = document.querySelector("#w-cat-detalhe .detail-nome");
-        const abrir = [...document.querySelectorAll("#w-cat-detalhe .link")].find((b) => b.textContent.includes("Abrir lançamentos"))?.getBoundingClientRect();
+        const abrir = [...document.querySelectorAll("#w-cat-detalhe .link")].find((b) => b.textContent.includes("Ver compras"))?.getBoundingClientRect();
         return {
           lateral: e.scrollWidth - e.clientWidth,
           estouram: [...document.querySelectorAll(".cat, .places li, .detail-recent .inv-list li")].filter((x) => x.scrollWidth > x.clientWidth).map((x) => `${x.className || x.tagName}:${x.scrollWidth}>${x.clientWidth}`),
@@ -394,7 +411,8 @@ for (const width of [1440, 390]) {
     console.log(`# ${width}px máximo:`, JSON.stringify(medidas));
     for (const m of Object.values(medidas)) assert.deepEqual([m.lateral, m.estouram, m.cruzam, m.valores], [0, [], 0, "R$ 999.999.990,00"]);
     const g = medidas["/gastos"];
-    assert.deepEqual(g.titulo, { reticencia: true, cortado: true }); // 42 caracteres não cabem nem em 1440 (o bloco é uma coluna): terminam em reticência
+    // 42 caracteres não cabem no celular (terminam em reticência); em 1440 cabem desde que o botão virou "Ver compras" (era "Abrir lançamentos →")
+    assert.deepEqual(g.titulo, { reticencia: true, cortado: width === 390 });
     assert.deepEqual(g.abrir, [true, true]);
   });
 }

@@ -432,7 +432,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
-  (`moneyText`), categoria e dia escolhidos vão ao Extrato pelo filtro global (`s.filter.category`/`day`).
+  (`moneyText`). Tocar num dia do calendário ou em "Ver compras" do detalhe abre o card de compras na própria tela
+  (`GastosCompras`, estado `gastosAberto` na store). A consulta do card tem duas formas: modo dia
+  `/lancamentos?mes&dia&tipo=saida&guardado=true` (mais `categoria` quando uma foi escolhida) e modo categoria
+  `/lancamentos?mes&tipo=saida&categoria&guardado=true`. Só o "Ver em Lançamentos" grava `s.filter.day` e leva ao Extrato;
+  a escolha de categoria em "Para onde vai" (`GastosCategorias`) é que grava `s.filter.category`.
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,

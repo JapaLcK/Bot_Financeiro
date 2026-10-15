@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import DraggableWidgetGrid, { type WidgetItem } from "@/components/ui/draggable-widget-grid";
 import type { NovoPerfil, Perfil } from "../lib/api-v2.gen";
@@ -6,6 +6,7 @@ import { TODAY } from "../lib/api";
 import { PROFILES, locked, readLayout, saveLayout, saveProfile } from "../lib/profiles.js";
 import { set } from "../lib/store.js";
 import { DEMO, ErroApi, FUSO, apiPut, perfilQuery, usePlan } from "../lib/v2";
+import { useMedia } from "../useMedia";
 import type { Path } from "../router";
 import { FrameLink } from "./Frame";
 import { CRIAR_SENHA } from "./Entrada";
@@ -78,17 +79,7 @@ const presetOf = (p: string): string[] => PROFILES.find((x) => x.id === p)?.pres
 const layoutOf = (p: string, plan: string): string[] => readLayout(p, presetOf(p), KNOWN, plan);
 const shownPreset = (p: string, plan: string) => presetOf(p).filter((id) => KNOWN.includes(id) && !locked(id, plan));
 
-function useColumns() {
-  const query = "(max-width: 640px)";
-  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const on = () => setNarrow(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return narrow ? 1 : 4;
-}
+const useColumns = () => (useMedia("(max-width: 640px)") ? 1 : 4);
 
 type Escolha = NovoPerfil["perfil"];
 // Conta paga sem senha (nem Google/Apple) leva 403 `password_required` no PUT: o mesmo

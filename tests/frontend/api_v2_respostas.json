@@ -79,7 +79,18 @@
       "motivos": ["conciliacao_pendente"]
     },
     "segunda": {"mes": "2026-10", "itens": [{"id": "l55", "data": "2026-09-20", "hora": null, "tipo": "saida", "interno": false, "guardado": false, "valor": "0.01", "moeda": "BRL", "descricao": "Segunda página", "mensagem": "gastei 42,90 no mercado", "categoria": "mercado", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": []}], "proximo": null, "motivos": []},
-    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
+    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] },
+    "dia_7": {
+      "mes": "2026-10",
+      "itens": [
+        { "id": "l710", "data": "2026-10-07", "hora": "12:30", "tipo": "saida", "interno": false, "guardado": false, "valor": "200.00", "moeda": "BRL", "descricao": "Restaurante", "mensagem": null, "categoria": "alimentacao", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": [] },
+        { "id": "l711", "data": "2026-10-07", "hora": null, "tipo": "saida", "interno": false, "guardado": false, "valor": "90.00", "moeda": "BRL", "descricao": null, "mensagem": null, "categoria": "sem categoria", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": [] },
+        { "id": "l712", "data": "2026-10-07", "hora": "09:00", "tipo": "saida", "interno": true, "guardado": false, "valor": "150.00", "moeda": "BRL", "descricao": "Transferência entre contas", "mensagem": null, "categoria": "transferencia", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "l713", "data": "2026-10-07", "hora": "20:15", "tipo": "saida", "interno": false, "guardado": false, "valor": "30.00", "moeda": "USD", "descricao": "Apple.com/bill", "mensagem": null, "categoria": "assinaturas", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": ["outra_moeda"] }
+      ],
+      "proximo": null,
+      "motivos": []
+    }
   },
   "categorias": {
     "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" }, { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a" }, { "chave": "casa", "nome": "Casa", "emoji": "🏷️", "cor": "#94A3B8" }] }
