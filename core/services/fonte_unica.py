@@ -6,6 +6,9 @@ importação de extrato (OFX/CSV/PDF), importação de fatura OFX e compra manua
 no cartão. Resgatar e apagar investimento, caixinha e carteira seguem livres.
 A tabela do que é bloqueado e liberado está em `docs/CLAUDE.md`.
 
+A recusa da receita fixa (`recusa_receita`) é de outra natureza: vale por banco
+conectado (a regra da Q40, `forma_pagamento.regra_ativa`), não pela chave do v2.
+
 Os textos moram SÓ aqui. A exceção carrega o código `FONTE_UNICA_OF` e o texto
 do caso em `str()`, como a `PlanLimitExceeded`: é `ValueError` para as rotas do
 `/app` que já fazem `except ValueError → 400 str(exc)` responderem o texto certo
@@ -40,8 +43,8 @@ MENSAGENS = {
 class FonteUnicaOF(ValueError):
     codigo = CODIGO
 
-    def __init__(self, caso: str):
-        super().__init__(MENSAGENS[caso])
+    def __init__(self, caso: str, texto: str | None = None):
+        super().__init__(texto or MENSAGENS[caso])
         self.caso = caso
 
 
@@ -64,3 +67,20 @@ def exigir(user_id: int, caso: str) -> None:
     """Levanta `FonteUnicaOF` se `user_id` tem a chave do v2."""
     if recusa(user_id, caso):
         raise FonteUnicaOF(caso)
+
+
+# Fora de `MENSAGENS` de propósito: os genéricos `recusa`/`exigir` leem essa tabela pela chave do v2
+# e são fail-open; a receita vale por banco conectado e é fail-closed (`recusa_receita`).
+MSG_RECEITA = (
+    "Receita fixa não se cadastra mais: o Piggy prevê o que entra pelo extrato do seu banco "
+    "no Open Finance, quando o mesmo pagador deposita todo mês (o salário, por exemplo)."
+)
+
+
+def recusa_receita(user_id: int) -> str | None:
+    """O texto da recusa se `user_id` tem banco conectado (regra da Q40, a mesma do motor da
+    Previsão: conexão fora de PAUSED/DELETED); senão None. Quem não tem banco segue cadastrando.
+    Falha na consulta conta como banco conectado (`regra_ativa`): recusar é o lado seguro, porque
+    com banco a Previsão ignora a receita manual de qualquer jeito."""
+    from core.handlers.forma_pagamento import regra_ativa
+    return MSG_RECEITA if regra_ativa(user_id) else None

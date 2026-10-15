@@ -4,11 +4,12 @@ estimadas do motor (saídas). A receita vem SÓ do extrato (P7 a): `receitas_do_
 acha o crédito que se repete todo mês; a recorrência de entrada da Pluggy não é lida.
 Chamado por `cashflow_snapshot.ler`, só com os bancos na base.
 
-O fixo e a receita manuais continuam contando. Quando um deles e uma cadeia do
-banco parecem a mesma coisa (casamento 1:1, nunca guloso), conta o manual e a do
-banco fica fora do cálculo, visível, do 1º ciclo do manual em diante (antes dele, a
-do banco segue como sem casamento). Sem casamento, a saída do banco entra
-(pessimista e rotulada) e a entrada fica fora (receita em dobro seria otimista).
+O fixo manual continua contando. Quando ele e uma cadeia do banco parecem a mesma
+coisa (casamento 1:1, nunca guloso), conta o manual e a do banco fica fora do
+cálculo, visível, do 1º ciclo do manual em diante (antes dele, a do banco segue como
+sem casamento). Sem casamento, a saída do banco entra (pessimista e rotulada).
+A receita fixa manual só conta para quem não tem banco lido: com ele, o snapshot nem
+a lê (a do extrato a substitui), então aqui não há casamento de entrada.
 """
 from __future__ import annotations
 
@@ -54,10 +55,9 @@ def _perto(a: int, b: int) -> bool:
 
 
 def _candidato(m: dict, c: dict) -> bool:
-    entrada = c['direcao'] == 'entrada'
-    dia = m.get('pay_day' if entrada else 'due_day')
+    dia = m.get('due_day')
     valor = dinheiro(m.get('amount'))
-    meio_ok = entrada or (m.get('payment_type') == 'credit_card') == c['cartao']
+    meio_ok = (m.get('payment_type') == 'credit_card') == c['cartao']
     return (meio_ok and m.get('is_active') and m.get('frequency') == 'monthly'
             and isinstance(dia, int) and _perto(dia, c['dia'])
             and (merchant_similarity(m.get('name'), c['nome'])
@@ -65,12 +65,12 @@ def _candidato(m: dict, c: dict) -> bool:
                  or valor is not None and abs(valor - c['valor']) <= RECON_AMOUNT_TOL))
 
 
-def _inicio(m: dict, entrada: bool) -> date | None:
+def _inicio(m: dict) -> date | None:
     """1ª data em que o manual gera ocorrência no motor (o mesmo cálculo do `_datas`)."""
     start = _data(m.get('start_date'))
     if start is None:
         return None  # calendário desconhecido: o casamento cobre tudo, como antes
-    return _recurring_occurrence_dates(m['pay_day' if entrada else 'due_day'], 'monthly', None, start,
+    return _recurring_occurrence_dates(m['due_day'], 'monthly', None, start,
                                        start - timedelta(days=1), start + timedelta(days=31))[0]
 
 
@@ -80,7 +80,7 @@ def _casar(manuais: list[dict], cs: list[dict]) -> dict[int, date | None]:
     casadas = {}
     for i, j in pares:
         if sum(p[0] == i for p in pares) == 1 and sum(p[1] == j for p in pares) == 1:
-            casadas[j] = _inicio(manuais[i], cs[j]['direcao'] == 'entrada')
+            casadas[j] = _inicio(manuais[i])
             manuais[i]['_casado'] = True
     return casadas
 
@@ -183,8 +183,7 @@ def custo_mensal(cur, user_id: int, hoje: date) -> dict:
     return {'valor': total or None, 'recorrencias': len(ativas) if total else 0, 'motivos': motivos}
 
 
-def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instancias: list,
-           contas_na_base: set) -> None:
+def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, contas_na_base: set) -> None:
     """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
     hoje = s.hoje
     conexoes = ler_frescor(cur, user_id)
@@ -202,15 +201,11 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
         ler_creditos(cur, user_id, hoje - timedelta(days=JANELA_EXTRATO)))
 
     fixos = [dict(r) for r in recs if r['is_active']]
-    rendas = [dict(r) for r in receitas if r['is_active']]
-    casadas = {}
-    for direcao, manuais in (('saida', fixos), ('entrada', rendas)):
-        idx = [j for j, c in enumerate(cs) if c['direcao'] == direcao]
-        casadas |= {idx[j]: ini for j, ini in _casar(manuais, [cs[j] for j in idx]).items()}
-    sobra = {'saida': any(not m.get('_casado') for m in fixos) or any(
-                 b['status'] == 'pending' and (_data(b['due_date']) is None or _data(b['due_date']) <= until)
-                 for b in instancias),
-             'entrada': any(not m.get('_casado') for m in rendas)}
+    idx = [j for j, c in enumerate(cs) if c['direcao'] == 'saida']
+    casadas = {idx[j]: ini for j, ini in _casar(fixos, [cs[j] for j in idx]).items()}
+    sobra = any(not m.get('_casado') for m in fixos) or any(
+        b['status'] == 'pending' and (_data(b['due_date']) is None or _data(b['due_date']) <= until)
+        for b in instancias)
 
     for j, c in enumerate(cs):
         saida = c['direcao'] == 'saida'
@@ -243,8 +238,7 @@ def anexar(cur, s, user_id: int, until: date, recs: list, receitas: list, instan
                 incluida = False
                 motivos.append(_motivo(s, 'recorrencia_banco_igual_a_fixo_manual',
                                        'so_melhora' if saida else 'so_piora', c['id']))
-            elif sobra[c['direcao']]:
-                incluida = incluida and saida
+            elif saida and sobra:
                 motivos.append(_motivo(s, 'recorrencia_banco_pode_repetir_manual', 'so_piora', c['id']))
             s.ocorrencias.append(Ocorrencia(
                 'recorrencia_banco', c['id'], d.isoformat(), d, 'gasto_fixo' if saida else 'receita',

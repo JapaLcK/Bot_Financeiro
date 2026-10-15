@@ -857,6 +857,21 @@ def route(result: IntentResult, msg: IncomingMessage, *,
     # permanece separado e conserva seu want_all=False sobre o texto antigo.
     entities = {k: v for k, v in (result.entities or {}).items() if k != "want_all"}
 
+    # R2: receita fixa com banco conectado é recusada ANTES de tudo que lê ou consome pendência
+    # (a pergunta "dinheiro ou banco?", a clarification) e de perguntar nome ou pedir "Confirma?":
+    # a recusa não mexe em estado de OUTROS fluxos. Só consome a clarification do próprio
+    # recurring.add (ex.: "Do que é esse gasto fixo?"): deixada armada, a resposta ("internet")
+    # criaria um gasto fixo com o valor da receita recusada. Confiança baixa segue para a ajuda.
+    if intent == "recurring.add" and confidence >= 0.55 and (r := h_recurring.recusa(user_id, entities)):
+        if not ignora_pendencias and (c := h_pending.get_pending_clarification(user_id)) \
+                and (c.get("payload") or {}).get("intent") == "recurring.add":
+            try:
+                if db.consume_pending_action(user_id, c):
+                    return _AVISO_PERGUNTA_CANCELADA + r
+            except Exception:
+                logger.exception("R2: falha ao consumir a clarification do user %s", user_id)
+        return r
+
     # Desempate do #281 armado no turno anterior. ANTES DE TUDO, inclusive do
     # `infer_help_from_text` logo abaixo: as respostas dele são `1`, `2` e o
     # cancelamento, e nenhuma delas pode ser lida como pedido de ajuda.
