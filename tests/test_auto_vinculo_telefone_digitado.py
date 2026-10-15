@@ -474,14 +474,20 @@ def test_sucesso_do_vincular_ensina_exemplos_e_registra_o_evento(enviadas):
     assert wr.mask_phone(n) == linha["details"]["wa_id"]
 
 
-# A3: o texto do código inválido fala de "Conectar WhatsApp" só no WhatsApp; no Discord é neutro.
+# A3 + Codex P2 (#1006): o código pode vir do site OU do `link` da outra plataforma (que não exige
+# conta no site). O texto de código inválido orienta os dois caminhos; no Discord não cita WhatsApp.
+@pytest.mark.parametrize("plataforma", ["whatsapp", "discord"])
 @pytest.mark.parametrize("verbo", ["link", "vincular"])
-def test_codigo_invalido_no_discord_nao_fala_de_whatsapp(verbo):
+def test_codigo_invalido_orienta_site_e_link_na_outra_plataforma(verbo, plataforma):
     from core.handlers import account
-    texto = getattr(account, verbo)("discord", f"d{secrets.randbelow(10**12)}", "000000")
+    ext = _numero_novo() if plataforma == "whatsapp" else f"d{secrets.randbelow(10**12)}"
+    texto = getattr(account, verbo)(plataforma, ext, "000000")
     assert texto.startswith("❌ Código inválido"), texto
-    assert "WhatsApp" not in texto and "vincular 123456" not in texto, texto
-    assert "Conectar WhatsApp" in account.vincular("whatsapp", _numero_novo(), "000000")
+    assert "envie *link* nela" in texto and "site" in texto, texto  # o caminho de quem não tem conta no site
+    if plataforma == "discord":
+        assert "WhatsApp" not in texto and "vincular 123456" not in texto, texto
+    else:
+        assert "Conectar WhatsApp" in texto and "*vincular 123456*" in texto, texto
 
 
 # A5: o marcador é auxiliar. Se ele explode DEPOIS do merge e do bind, o vínculo segue como

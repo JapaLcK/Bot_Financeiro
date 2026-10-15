@@ -7,13 +7,16 @@ from core.services.email_service import SUPPORT_EMAIL
 from db.rate_limits import rate_limit_estourado
 from utils_phone import mask_phone
 
-# Uma só para `link` e `vincular`, por plataforma. O código vem do site, então "envie *link* para
-# gerar um novo" não ajudava (o `link` sem código gera um código do lado do bot, que o site não vale).
+# Uma só para `link` e `vincular`, por plataforma. O código pode vir do site OU do `link` sem código
+# na outra plataforma (que não exige conta no site), então o texto cobre os dois caminhos.
 _CODIGO_INVALIDO_WHATSAPP = (
-    "❌ Código inválido ou expirado. Gere um novo no site, em *Conectar WhatsApp*, "
-    "e me mande: *vincular 123456*."
+    "❌ Código inválido ou expirado. Gere um novo e me mande: *vincular 123456*. "
+    "Se a conta é do site, toque em *Conectar WhatsApp* lá; se veio de outra plataforma, envie *link* nela."
 )
-_CODIGO_INVALIDO = "❌ Código inválido ou expirado. Gere um novo no site e tente novamente."
+_CODIGO_INVALIDO = (
+    "❌ Código inválido ou expirado. Gere um novo e me mande: *link 123456*. "
+    "Se a conta é do site, gere o código lá; se veio de outra plataforma, envie *link* nela."
+)
 
 
 def _codigo_invalido(platform: str) -> str:
@@ -58,7 +61,7 @@ _RECUSA_POR_MOTIVO = {
 # consumo, sem segundo passo. Quem tem o código certo acerta na 1ª.
 # ponytail: teto por número; quem troca de número a cada 5 escapa. Teto global depois.
 _TETO_CODIGO = (5, 15 * 60)
-_MUITAS_TENTATIVAS = "Muitas tentativas de código. Espere 15 minutos e gere um código novo no site."
+_MUITAS_TENTATIVAS = "Muitas tentativas de código. Espere 15 minutos e gere um código novo (no site ou com *link* na outra plataforma)."
 
 
 def _tentativas_estouradas(platform: str, external_id: str) -> bool:
