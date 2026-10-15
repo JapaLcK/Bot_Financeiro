@@ -20,7 +20,7 @@ motivos de incerteza. A matriz direcional do plano da Piggy continua sendo a fon
 abstenção: risco também precisa de dados confiáveis; `cabe_nas_premissas` continua desligado
 até validar estimativa variável e seus outros requisitos.
 
-**Nota de 2026-10-09:** a Q36 (coorte da chave do v2) e a Q40 (coorte de quem tem Open Finance conectado; a resposta “banco” passará a gravar como declaração) são regras diferentes e estão em revisão. Ver a [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), proposta sem código.
+**Nota de 2026-10-09:** a Q36 (coorte da chave do v2) e a Q40 (coorte de quem tem Open Finance conectado; a resposta “banco” passará a gravar como declaração) são regras diferentes e estão em revisão. Ver a [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md); o PR-A dela (#969) foi mergeado em 2026-10-15 e é inerte até o PR-B.
 
 **Decisão vigente do dono em 05/10/2026:** a coorte prevista para o dashboard v2 é de
 usuários novos, que nunca usaram/conectaram o PigBank; não há histórico a revisar. Para

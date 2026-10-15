@@ -331,7 +331,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
-  marca, manual com delta 0, OFX, compra manual no cartão). **Nota de 2026-10-13 (condicional, nada disto está na `main`):** se o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) for mergeado, `banco` passará a incluir também a despesa ou receita que o usuário declarou como paga pelo banco (hoje, “manual com delta 0” cai em `registro_antigo`); `fundido` passará a valer “casada com o extrato”, e a linha sem par terá o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisará tratar `instituicao` nula nessa linha sem par. **`pode`** é uma regra só
+  marca, manual com delta 0, OFX, compra manual no cartão). **Desde o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) (#969, mergeado em 2026-10-15):** `banco` inclui também a despesa ou receita que o usuário declarou como paga pelo banco (`DECLARADA_SQL`, `db/bank_declaracoes.py`; o resto do “manual com delta 0” continua em `registro_antigo`); `fundido` vale “casada com o extrato”, e a linha sem par tem o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisa tratar `instituicao` nula nessa linha sem par. Nenhum caminho de produção cria essa declaração até o PR-B. **`pode`** é uma regra só
   (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
   inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
   guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
@@ -771,9 +771,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   novo nessas tabelas ou dos importadores de arquivo reprova em
   `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - **Nota de revisão de 2026-10-09 (Q36 e Q40, que têm coortes diferentes):** ver
-  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), proposta decidida pelo dono, sem
-  código ainda. **O código desta seção continua valendo até os PRs de código (A, A2, B, B1, C)**; o PR-A é inerte (grava declaração sem que ninguém a use enquanto a flag do PR-B estiver desligada) e por isso não muda o comportamento; nada
-  disto mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
+  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), decidida pelo dono. **O código desta seção continua valendo até os PRs de código (A2, B, B1, C)**; o PR-A (#969, mergeado em 2026-10-15) é inerte (nenhum chamador de produção grava declaração enquanto o PR-B não existir e a flag dele estiver desligada) e por isso não mudou o comportamento; nada
+  desta seção mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
   **Q40** (`core/handlers/forma_pagamento.py`, citada na tabela acima) vale para quem tem Open
   Finance conectado (`regra_ativa`), e **não** é parte da Q36 nem depende da chave. O que a ADR
   prevê: a Q36 deixará de travar investimento manual (PR-C) e compra manual em cartão não
