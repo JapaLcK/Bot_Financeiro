@@ -13,6 +13,7 @@ from core.observability import _log_falha
 from core.services.category_service import infer_category, learn_from_inference
 from core.services.fonte_unica import FonteUnicaOF, recusa as recusa_q36
 from core.services.plan_limits import PlanLimitExceeded
+from db.finito_checks import violacao_finito
 from db import (
     add_credit_purchase,
     add_credit_purchase_installments,
@@ -137,6 +138,8 @@ def _execute_pay_bill(user_id: int, bill_row: dict, amount: float | None) -> str
     except CartaoDoBanco as e:
         return f"🏦 {e}"
     except Exception as e:
+        if violacao_finito(e):
+            raise  # tratador central do handle_incoming responde MSG_VALOR_WHATSAPP
         _log_falha("pay_bill", user_id, e, bill_id=bill_id)
         return "❌ Não consegui registrar o pagamento da fatura agora. Tenta de novo em instantes."
 
@@ -952,6 +955,8 @@ def add_credit_from_entities(
     except FonteUnicaOF as e:
         return str(e)
     except Exception as e:
+        if violacao_finito(e):
+            raise  # idem
         _log_falha("add_credit_purchase", user_id, e, card_id=card_id)
         return "❌ Não consegui registrar a compra no crédito agora. Tenta de novo em instantes."
 
@@ -1081,6 +1086,8 @@ def _create_installments(
     except FonteUnicaOF as e:
         return str(e)
     except Exception as e:
+        if violacao_finito(e):
+            raise  # idem
         _log_falha("add_credit_purchase_installments", user_id, e, card_id=card_id)
         return "❌ Não consegui registrar a compra no crédito agora. Tenta de novo em instantes."
 
@@ -2921,6 +2928,8 @@ def handle(user_id: int, text: str) -> str | None:
         except CartaoDoBanco as e:
             return f"🏦 {e}"
         except Exception as e:
+            if violacao_finito(e):
+                raise  # idem
             _log_falha("pay_bill_saldo", user_id, e, card_id=card_id)
             return "❌ Não consegui registrar o pagamento da fatura agora. Tenta de novo em instantes."
 

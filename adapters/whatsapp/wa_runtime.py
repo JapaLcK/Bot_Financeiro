@@ -44,6 +44,7 @@ from core.handlers import report as h_report
 from core.observability import log_system_event_sync
 from core.response_formatter import wrap_wa_markup
 from core.types import IncomingMessage
+from db.finito_checks import MSG_VALOR_WHATSAPP, violacao_finito
 from db import (
     attempt_whatsapp_phone_link,
     claim_pending_action,
@@ -1316,7 +1317,8 @@ def process_message(message: InboundMessage) -> None:
                     _, paid = fp.quitar(uid, bill_id, None, fp.DESCONHECIDA)
                 except Exception as exc:
                     logger.exception("WA bill_paid failed bill=%s: %s", bill_id, exc)
-                    _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                    _send_reply(reply_to, MSG_VALOR_WHATSAPP if violacao_finito(exc)
+                                else "Não consegui registrar o pagamento agora. Tente em instantes.")
                     return
                 if paid is None:
                     _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")
@@ -1504,7 +1506,8 @@ def process_message(message: InboundMessage) -> None:
                                 return
                     except Exception as exc:
                         logger.exception("WA bill_pay_amount mark failed bill=%s: %s", bill_id, exc)
-                        _send_reply(reply_to, "Não consegui registrar o pagamento agora. Tente em instantes.")
+                        _send_reply(reply_to, MSG_VALOR_WHATSAPP if violacao_finito(exc)
+                                    else "Não consegui registrar o pagamento agora. Tente em instantes.")
                         return
                     if paid is None:
                         _send_reply(reply_to, "Essa conta já estava paga (ou não achei mais). 👍")

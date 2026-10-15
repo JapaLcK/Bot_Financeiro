@@ -26,6 +26,7 @@ from typing import Any
 
 import db
 from core.observability import _log_falha
+from db.finito_checks import violacao_finito
 from utils_date import today_tz
 from utils_text import fmt_brl, valor_valido
 
@@ -429,6 +430,8 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
     except db.CartaoDoBanco as e:
         return f"🐷 {e}"
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("pay_credit_card", user_id, e)
         return "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 

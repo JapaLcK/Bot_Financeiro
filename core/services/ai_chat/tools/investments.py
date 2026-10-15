@@ -27,6 +27,7 @@ from utils_text import valor_valido
 from core.services import fonte_unica
 from db import investido
 from core.observability import _log_falha
+from db.finito_checks import violacao_finito
 
 from ._base import Tool
 from .launches import _limita_periodo
@@ -136,6 +137,8 @@ def _create_investment_execute(user_id: int, args: dict[str, Any]) -> str:
             return f'ℹ️ O investimento "{canon}" já existe.'
         return f'✅ Investimento "{canon}" criado.'
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         if isinstance(e, fonte_unica.FonteUnicaOF):
             return f"🐷 {e}"
         _log_falha("create_investment", user_id, e)
@@ -185,6 +188,8 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
             return "🐷 " + funding.msg_insuficiente(user_id, amount)
         return "🐷 Valor inválido pra aporte."
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         from core.services.plan_limits import PlanLimitExceeded
         if isinstance(e, PlanLimitExceeded):
             return e.message
@@ -236,6 +241,8 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     except LookupError:
         return f'🐷 Não achei o investimento "{name}".'
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("redeem_investment", user_id, e)
         return "🐷 Não consegui resgatar agora. Tenta de novo em instantes."
 
