@@ -686,6 +686,18 @@ async def serve_modals_js():
     return FileResponse(FRONTEND_DIR / "modals.js", media_type="application/javascript")
 
 
+@router.get("/hold-confirm.js")
+async def serve_hold_confirm_js():
+    """Confirmar ação irreversível segurando o botão (PBHoldConfirm). no-cache
+    como o /site.css e o /precos-app.js (o /modals.js não manda Cache-Control): o
+    `?v=` é carimbado com o hash do arquivo."""
+    return FileResponse(
+        FRONTEND_DIR / "hold-confirm.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/app-mode.js")
 async def serve_app_mode_js():
     """Modo app (WebView iOS): seta html.pb-app e monta a tab bar inferior.

@@ -248,8 +248,6 @@
       "openActivityModal",
       "openMfaRegenerateModal",
       "refreshOpenFinance",
-      "requestAccountDeletion",
-      "requestAccountReset",
       "requestDataExport",
       "revokeOtherSessions",
       "revokeSingleSession",
