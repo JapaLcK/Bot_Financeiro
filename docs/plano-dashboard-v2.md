@@ -89,7 +89,7 @@ em lugar nenhum).
   lançamento e só "dinheiro" grava na carteira), não só instrução para a IA. Marcar conta
   como paga segue a mesma regra.
   **Revista em 2026-10-09: ver [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md)**
-  (proposta; o código ainda recusa até os PRs de código dela). O texto acima fica como histórico.
+  (o PR-A dela, #969, foi mergeado em 2026-10-15 e é inerte; o código ainda recusa “banco” até o PR-B). O texto acima fica como histórico.
   A pergunta “dinheiro vivo ou banco?” continua. “Banco” passará a **gravar** como declaração,
   conferida com o extrato: o PR-B entrega esse caminho atrás de uma flag que nasce desligada, e
   ligá-la é um ato operacional separado. A conciliação (PR-A) e o lembrete de 7 dias (PR-A2; “foi em dinheiro” só age por ação e confirmação do usuário, e o PR-A2 inclui “trocar o par” e “desfazer a confirmação”, pela decisão do dono de 2026-10-13) vêm antes (ordem decidida pelo dono); o PR-A2 é pré-condição para ligar a flag, por decisão do dono. **A Q40 tem coorte
