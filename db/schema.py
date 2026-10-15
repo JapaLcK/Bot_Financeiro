@@ -374,6 +374,10 @@ def init_db():
             'bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol'
           )
         )
+        -- a despesa/receita declarada "paga pelo banco" (funding_source bank) não vira interna pelo nome da
+        -- categoria: sairia dos totais enquanto a conciliação a trata como gasto do banco (a tabela de
+        -- declarações é criada mais abaixo, então a marca é a do próprio lançamento)
+        and not (tipo in ('despesa', 'receita') and coalesce(efeitos -> 'funding_source' ->> 'kind', '') = 'bank')
         and is_internal_movement = false
         """,
         # ──────────────────────────────────────────────────────────────────

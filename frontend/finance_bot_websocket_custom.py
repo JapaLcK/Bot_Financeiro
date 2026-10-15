@@ -8732,6 +8732,10 @@ async def categories_update_route(
             raise HTTPException(status_code=409, detail="Já existe uma categoria com esse nome.")
         if code == "CATEGORIA_INVALIDA":
             raise HTTPException(status_code=400, detail="Nome de categoria inválido.")
+        if code == "CATEGORIA_DECLARADA_INTERNA":
+            raise HTTPException(status_code=409, detail=(
+                "Essa categoria tem lançamentos declarados como pagos pelo banco, e um nome de movimentação "
+                "interna (investimento, transferência, fatura) os tiraria dos seus totais. Escolha outro nome."))
         raise HTTPException(status_code=400, detail=code)
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "category": cat}
