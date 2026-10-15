@@ -9380,7 +9380,8 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
         raise HTTPException(status_code=400, detail="Nome do investimento é obrigatório.")
     if period not in {"daily", "monthly", "yearly", "cdi", "cdi_spread", "ipca_spread", "selic_spread"}:
         raise HTTPException(status_code=400, detail="Indexador inválido.")
-    if payload.rate <= 0 and period != "selic_spread":
+    from utils_text import valor_finito
+    if not valor_finito(payload.rate) or (payload.rate <= 0 and period != "selic_spread"):
         raise HTTPException(status_code=400, detail="Taxa deve ser maior que zero.")
 
     try:

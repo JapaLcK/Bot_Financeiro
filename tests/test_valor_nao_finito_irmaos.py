@@ -210,7 +210,7 @@ def test_whatsapp_pagar_conta_com_numero_absurdo_nao_da_erro_interno():
     uid = usuario_pagante()
     _monta_conta_variavel(uid)
     resposta = _diga(uid, f"paguei a luz {HUGE}")
-    assert "maior que zero" in resposta and "erro interno" not in resposta.lower(), resposta
+    assert "Não entendi o valor" in resposta and "erro interno" not in resposta.lower(), resposta
     assert _saldo(uid) == 0.0
     assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
 
@@ -409,9 +409,10 @@ def test_whatsapp_pagar_conta_com_banco_conectado_e_numero_absurdo_recusa_sem_pe
     _connect_fake_bank(uid)
     _monta_conta_variavel(uid)
 
-    for numero in (HUGE, "9" * 14):
+    for numero, trecho in ((HUGE, "Não entendi o valor"), ("9" * 14, "Não entendi o valor"),
+                           ("1" * 400, "maior que zero"), ("0,001", "maior que zero")):
         resposta = _diga(uid, f"paguei a luz {numero}")
-        assert "maior que zero" in resposta and "erro interno" not in resposta.lower(), resposta
+        assert trecho in resposta and "erro interno" not in resposta.lower(), (numero, resposta)
         assert not (db.get_pending_action(uid) or {}).get("action_type"), numero
     assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
 
@@ -452,3 +453,51 @@ def test_whatsapp_gasto_fixo_e_receita_fixa_recusam_valor_nao_finito(valor, vari
     assert "inválido" in gasto and "inválido" in receita, (gasto, receita)
     assert _linhas("select 1 from recurring_expenses where user_id=%s", uid) == []
     assert _linhas("select 1 from recurring_incomes where user_id=%s", uid) == []
+
+
+# ── quarta rodada: investimento (taxa, aporte inicial), renda do orçamento da casa ──
+
+@pytest.mark.parametrize("bruto", BRUTOS)
+def test_painel_investimento_recusa_taxa_nao_finita_ao_criar_e_ao_aportar(bruto):
+    uid = _com_saldo()
+    db.create_investment(uid, "cdb", 1.0, "monthly")
+    c, h = _cliente(uid)
+
+    criar = c.post(f"/investments/{uid}", headers=h, content='{"name":"lci","rate":%s,"period":"monthly"}' % bruto)
+    aportar = c.post(f"/investments/{uid}/deposit", headers=h, content='{"name":"cdb","amount":100,"rate":%s}' % bruto)
+
+    assert criar.status_code == 400 and aportar.status_code == 400, (criar.text, aportar.text)
+    assert len(_linhas("select 1 from investments where user_id=%s", uid)) == 1  # só o cdb
+    assert _saldo(uid) == 1000.0
+
+
+@pytest.mark.parametrize("v", [float("nan"), float("inf"), 1e308])
+def test_banco_investimento_recusa_taxa_e_aporte_inicial_nao_finitos(v):
+    uid = _com_saldo()
+    with pytest.raises(ValueError, match="BAD_RATE"):
+        db.create_investment(uid, "cdb", v, "monthly")
+    with pytest.raises(ValueError, match="INITIAL_AMOUNT_INVALID"):
+        db.create_investment_db(uid, "lci", 1.0, "monthly", initial_amount=v)
+    assert _linhas("select 1 from investments where user_id=%s", uid) == []
+
+
+def test_painel_investimento_taxa_normal_e_selic_spread_negativo_seguem_iguais():
+    uid = _com_saldo()
+    c, h = _cliente(uid)
+
+    ok = c.post(f"/investments/{uid}", headers=h, content='{"name":"lci","rate":0.9,"period":"monthly"}')
+    selic = c.post(f"/investments/{uid}", headers=h, content='{"name":"tesouro","rate":-0.1,"period":"selic_spread"}')
+
+    assert ok.status_code == 200 and selic.status_code == 200, (ok.text, selic.text)
+
+
+@pytest.mark.parametrize("bruto", BRUTOS)
+def test_painel_renda_do_orcamento_da_casa_recusa_valor_nao_finito(bruto):
+    uid = usuario_pagante()
+    c, h = _cliente(uid)
+
+    r = c.put(f"/household-budget/{uid}/income", headers=h, content='{"amount":%s,"month":"2026-10"}' % bruto)
+
+    assert r.status_code == 400, r.text
+    assert _linhas("select 1 from household_budget_income where user_id=%s", uid) == []
+    assert c.get(f"/household-budget/{uid}/status?month=2026-10").status_code == 200

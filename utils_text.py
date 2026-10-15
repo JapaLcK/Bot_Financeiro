@@ -875,6 +875,15 @@ def valor_valido(v) -> bool:
     return isfinite(f) and 0 < f <= VALOR_MAX
 
 
+def valor_finito(v) -> bool:
+    """Como `valor_valido`, mas aceita 0 e negativo: renda, taxa, saldo-alvo. Só barra
+    o que não é número, NaN/inf e o que passa de `VALOR_MAX` em módulo."""
+    try:
+        return isfinite(f := float(v)) and abs(f) <= VALOR_MAX
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def parse_money(text: str) -> float | None:
     # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
     # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito
