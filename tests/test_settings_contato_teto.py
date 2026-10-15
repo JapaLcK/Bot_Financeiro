@@ -208,12 +208,15 @@ def test_variante_do_proprio_numero_da_200(user_id, com_nove):
 
 def test_depois_do_409_o_numero_de_b_segue_ligando_na_conta_de_b(user_id, enviadas):
     """A conversa: sem o critério das variantes, A gravava a variante do número de
-    B e a mensagem do próprio B caía em `multiple_accounts`."""
+    B e a mensagem do próprio B caía em `multiple_accounts`. Desde o PR-5 o telefone não
+    liga sozinho: B liga o número dele pelo código, e a conversa segue na conta de B."""
+    import db
     tel_b = _com_nove()
     uid_b, _, _, _ = _outra_conta(phone=tel_b)
     patch, _, _ = _conta(user_id, phone=_telefone())
     resp = patch(phone=_sem_nove(tel_b))
 
+    _manda(tel_b, f"vincular {db.create_link_code(uid_b)}")
     _manda(tel_b, "oi")
     _manda(tel_b, "Gastei R$ 50 no mercado")
     assert _dono_do_numero(tel_b) == uid_b, enviadas

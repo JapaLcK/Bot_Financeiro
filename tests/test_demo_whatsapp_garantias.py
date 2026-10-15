@@ -361,8 +361,9 @@ def _liga_whatsapp(n, uid):
 
 
 def test_numero_tem_conta_espelha_o_auto_vinculo(mundo):
-    novo, com_fone, por_codigo, so_wa = _numero(), _numero(), _numero(), _numero()
-    _conta_com_telefone(com_fone)
+    novo, com_fone, sem_senha_com_fone, por_codigo, so_wa = (_numero() for _ in range(5))
+    _conta_com_telefone(com_fone)  # PR-5 (V3): telefone de conta COM senha não conta
+    _conta_com_telefone(sem_senha_com_fone, sem_credencial=True)  # o que ainda dá `precisa_senha`
     _liga_por_codigo(por_codigo)
     db.get_or_create_canonical_user("whatsapp", so_wa)
 
@@ -370,10 +371,10 @@ def test_numero_tem_conta_espelha_o_auto_vinculo(mundo):
     # por outra conta, no auto-vínculo nem aqui (`utils_phone.candidatos_simetricos`).
     local = f"{secrets.randbelow(6)}{secrets.randbelow(10**7):07d}"
     celular_x_fixo = f"55119{local}"
-    _conta_com_telefone(f"5511{local}")
+    _conta_com_telefone(f"5511{local}", sem_credencial=True)
 
-    for n, esperado in ((novo, False), (com_fone, True), (por_codigo, True), (so_wa, False),
-                        (celular_x_fixo, False)):
+    for n, esperado in ((novo, False), (com_fone, False), (sem_senha_com_fone, True),
+                        (por_codigo, True), (so_wa, False), (celular_x_fixo, False)):
         tem = funil.numero_tem_conta(n)  # ANTES: o attempt cria usuário
         status = db.attempt_whatsapp_phone_link(n)["status"]
         assert tem == (status != "no_match"), (n, tem, status)

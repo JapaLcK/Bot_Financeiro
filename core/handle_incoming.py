@@ -763,9 +763,10 @@ def _paywall_gate(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] 
     sempre — a do convite, ou a da isenção (ajuda/billing), que este gate monta
     ele mesmo. Ver o comentário da isenção lá embaixo.
 
-    Roda DEPOIS da auto-vinculação por telefone (wa_runtime chama
-    attempt_whatsapp_phone_link antes de handle_incoming), então o uid aqui já
-    é a conta real do usuário — não corre o risco de barrar quem ia vincular.
+    Não corre o risco de barrar quem ia vincular: o código de vínculo
+    (`vincular 123456`) tem isenção própria (`isencao_do_barrado`, "codigo"), e é a
+    única coisa que liga um número a uma conta (o telefone digitado não liga mais;
+    `attempt_whatsapp_phone_link` só classifica o número).
 
     Fail-open igual aos outros gates Pro: se a checagem quebrar, deixa passar.
     Trancar quem está pagando é pior do que escapar uma mensagem.

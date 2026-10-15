@@ -1763,6 +1763,26 @@ def get_open_bill_summary(user_id: int, card_id: int, as_of: date | None = None)
     return bill, items
 
 
+def get_bill_items_overview(user_id: int, bill_id: int, top: int = 3):
+    """(total de COMPRAS da fatura, as `top` maiores por valor), da fatura INTEIRA: a lista de `get_open_bill_summary`
+    para nas 50 mais recentes. As mesmas colunas dela. Só compras (`is_refund = false`): o estorno do OFX é gravado
+    POSITIVO (só `add_credit_refund` e o Pluggy gravam negativo), então sem o filtro ele entraria entre as maiores."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from credit_transactions "
+                        "where user_id=%s and bill_id=%s and not is_refund", (user_id, bill_id))
+            n = int(cur.fetchone()["n"])
+            cur.execute(
+                "select id, valor, categoria, nota, purchased_at, "
+                "installment_no, installments_total, group_id, is_refund "
+                "from credit_transactions "
+                "where user_id=%s and bill_id=%s and not is_refund "
+                "order by valor desc, id desc limit %s",
+                (user_id, bill_id, top),
+            )
+            return n, cur.fetchall()
+
+
 def pay_bill_amount(
     user_id: int,
     card_id: int,

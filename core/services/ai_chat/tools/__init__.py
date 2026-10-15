@@ -5,7 +5,7 @@ Cada módulo neste pacote exporta uma lista `TOOLS: list[Tool]` (ver `_base.py`)
 Este `__init__` agrega todas e expõe utilitários comuns:
 
   SCHEMAS         — list[dict] no formato OpenAI, passada em tools=[]
-  SCHEMAS_APP     — SCHEMAS sem OCULTAS_NO_APP + show_card (só o stream do app)
+  SCHEMAS_APP     — SCHEMAS sem OCULTAS_NO_APP + show_card, e o `get_open_bill` com `todos_os_itens` (só o stream do app)
   schemas_para    — o de cima, mais as metas para quem tem a chave (`list_metas` etc.)
   WRITE_TOOL_NAMES — set de nomes de tools que precisam de pending action
   get_tool(name)   — lookup; retorna Tool ou None
@@ -15,6 +15,7 @@ importar abaixo e estender `_ALL_TOOLS`. Nada mais.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Optional
 
 from . import balance, bills, budgets, cards, categories, investments, launches, meta, metas, mostrar_card, pockets, reports, simulator
@@ -52,8 +53,18 @@ OCULTAS_NO_APP = frozenset({
     "get_total_debt", "forecast_next_bill", "list_installments", "list_metas",
 })
 
+
+def _para_o_app(s: dict[str, Any]) -> dict[str, Any]:
+    """O schema do app, com os parâmetros que o WhatsApp não tem (`get_open_bill`: `todos_os_itens`)."""
+    if s["function"]["name"] != "get_open_bill":
+        return s
+    s = copy.deepcopy(s)
+    s["function"]["parameters"]["properties"].update(cards.PARAMS_APP_OPEN_BILL)
+    return s
+
+
 SCHEMAS_APP: list[dict[str, Any]] = [
-    *(s for s in SCHEMAS if s["function"]["name"] not in OCULTAS_NO_APP),
+    *(_para_o_app(s) for s in SCHEMAS if s["function"]["name"] not in OCULTAS_NO_APP),
     *(t.schema for t in mostrar_card.TOOLS),
 ]
 

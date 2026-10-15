@@ -26,6 +26,7 @@ from core.services.demo.dados import ALFABETO, CODIGO_PADRAO, LIMITE_MSGS
 from utils_phone import candidatos_simetricos, normalize_phone_e164
 
 from .connection import get_conn
+from .google_auth import SEM_CREDENCIAL_SQL
 
 _log = logging.getLogger(__name__)
 
@@ -219,19 +220,22 @@ def numero_tem_conta(wa_id: str) -> bool:
     """True se o número já pertence a uma conta (qualquer caminho). Erro -> True
     (fail-closed: na dúvida vai pro fluxo normal, nunca pro demo).
 
-    Espelha attempt_whatsapp_phone_link_impl (db_support.py): telefone que casa
-    com auth_accounts pelos MESMOS candidatos (`candidatos_simetricos`), OU identidade de WhatsApp cujo usuário tem conta web /
-    outro canal (cobre `vincular CODIGO`, que liga sem olhar o telefone). Só-
-    WhatsApp (usuário criado por mensagem anterior, sem conta) dá False e PODE
-    usar o demo. O teste de paridade (tests/test_demo_whatsapp.py) compara os
-    dois (§0.7)."""
+    Espelha attempt_whatsapp_phone_link_impl (db_support.py), que desde o PR-5 não liga
+    mais pelo telefone: o telefone só conta quando casa (pelos MESMOS candidatos,
+    `candidatos_simetricos`) com conta SEM credencial, a que ainda produz `precisa_senha`
+    (o PARAR do lead não pode cair no demo); conta com senha/Google não conta, é o V3. OU
+    identidade de WhatsApp cujo usuário tem conta web / outro canal (cobre
+    `vincular CODIGO`, que liga sem olhar o telefone). Só-WhatsApp (usuário criado por
+    mensagem anterior, sem conta) dá False e PODE usar o demo. O teste de paridade
+    (tests/test_demo_whatsapp_garantias.py) compara os dois (§0.7)."""
     try:
         fones = [hash_pii_optional(c, kind="phone") for c in candidatos_simetricos(wa_id)]
         ext = hash_pii_optional(wa_id, kind="external_id")
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "select exists (select 1 from auth_accounts where phone_hash = any(%(fones)s)) "
+                    "select exists (select 1 from auth_accounts a where a.phone_hash = any(%(fones)s) "
+                    f"                 and {SEM_CREDENCIAL_SQL}) "
                     "or exists (select 1 from user_identities ui "
                     "           where ui.provider = 'whatsapp' and ui.external_id_hash = %(ext)s "
                     "             and (exists (select 1 from auth_accounts a where a.user_id = ui.user_id) "
