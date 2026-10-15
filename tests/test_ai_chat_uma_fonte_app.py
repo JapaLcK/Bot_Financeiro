@@ -140,6 +140,8 @@ def test_tendencia_do_card_com_poucos_meses_e_a_do_get_spending_trend(n, atras):
 
 @pytest.fixture
 def gastos(pro_user_id):
+    """Conta com acesso ao app (onboarding de OF feito): sem ele o card recusa e a tool devolve o dado."""
+    completo(pro_user_id)
     db.add_launch_and_update_balance(pro_user_id, "despesa", 50.0, "mercado", "gastei 50", categoria="alimentação")
     return pro_user_id
 
@@ -178,7 +180,8 @@ def test_mes_inteiro_recusado_so_se_o_card_o_mostra(gastos, dia_2, nome, args, p
     fora, app = ex(gastos, a), com_emissor(ex, gastos, a)
     assert "error" not in fora
     if recusa:
-        assert app == {"error": "mes_inteiro_no_card", "message": "use show_card categorias"}
+        # o mês REAL pedido, não o molde nem o mês atual do card sem `meses`
+        assert app == {"error": "mes_inteiro_no_card", "message": f'use show_card categorias com meses=["{periodo[0][:7]}"]'}
     else:
         assert app == fora
 
@@ -187,6 +190,39 @@ def test_mes_inteiro_recusado_so_se_o_card_o_mostra(gastos, dia_2, nome, args, p
 def test_sem_datas_no_dia_2_e_mes_corrente_inteiro(gastos, dia_2, nome, args):
     assert com_emissor(get_tool(nome).execute, gastos, args)["error"] == "mes_inteiro_no_card"
     assert "error" not in get_tool(nome).execute(gastos, args)
+
+
+@pytest.mark.parametrize("periodo,erro", [
+    (("2026-09-01", "2026-09-30"), "mes_inteiro_no_card"),   # mês passado inteiro: o card resumo o mostra
+    (("2026-10-01", "2026-10-02"), "mes_inteiro_no_card"),   # o corrente, do dia 1 até hoje
+    ((None, None), "mes_inteiro_no_card"),                   # sem datas = o mês corrente
+    (("2026-07-01", "2026-09-30"), "periodo_no_card"),       # 3 meses: o card periodo
+    (("2025-08-01", "2026-09-30"), "periodo_no_card"),       # 14 meses: periodo com o aviso dos 12
+    (("2026-01-01", "2026-12-31"), "periodo_no_card"),       # "este ano": o fim futuro é cortado em hoje ANTES da recusa
+    (("2026-09-01", "2026-09-15"), None),                    # período livre passado
+    (("2026-11-01", "2026-11-30"), None),                    # mês futuro: o show_card recusa, a tool segue
+    (("2026-10-01", "2026-10-01"), None),                    # 1 dia no mês corrente, antes de hoje
+])
+def test_resumo_recusado_so_se_o_card_o_mostra(gastos, dia_2, periodo, erro):
+    """F3: `get_period_summary` entra na mesma recusa de `get_top_categories`; sem emissor, o número de sempre.
+    (A conta com corte de histórico é outro teste, em `test_ai_chat_f3.py`.)"""
+    ex = get_tool("get_period_summary").execute
+    a = {"start_date": periodo[0], "end_date": periodo[1]} if periodo[0] else {}
+    fora, app = ex(gastos, a), com_emissor(ex, gastos, a)
+    assert "error" not in fora and "despesa" in fora  # positivo: WhatsApp e /ai/chat recebem o dado
+    if erro is None:
+        assert app == fora
+        return
+    assert app["error"] == erro
+    if erro == "mes_inteiro_no_card":
+        assert "show_card resumo" in app["message"] and "show_card contas" in app["message"]
+        mes = (periodo[0] or "2026-10-01")[:7]  # o mês REAL pedido, não o molde "AAAA-MM"
+        assert f'meses=["{mes}"]' in app["message"] and "AAAA" not in app["message"]
+    else:
+        assert "use show_card periodo com de=" in app["message"]
+        assert ("12 meses" in app["message"]) == (periodo[0] == "2025-08-01")
+        if periodo[1] == "2026-12-31":
+            assert "de=2026-01 e ate=2026-10" in app["message"] and "fim do mês atual" in app["message"]
 
 
 def test_whatsapp_por_categoria_esse_mes_igual_antes_e_depois(uid_pro, monkeypatch):
@@ -231,6 +267,9 @@ def test_get_open_bill_apara_total_e_deixa_periodo_e_itens(pro_user_id):
     ex, args = get_tool("get_open_bill").execute, {"card_name": "Nubank"}
     fora, app = ex(pro_user_id, args), com_emissor(ex, pro_user_id, args)
     assert {"total", "paid_amount", "remaining"} <= set(fora) and fora["total"] == 100.0
+    assert "error" not in fora  # sem emissor: o dado de sempre
     assert set(fora) - set(app) == {"total", "paid_amount", "remaining"}
-    assert app == {k: v for k, v in fora.items() if k in app}
+    assert set(app) - set(fora) == {"error", "message"} and app["error"] == "total_no_card"  # F3: aponta o card
+    assert "show_card fatura" in app["message"]
+    assert {k: v for k, v in app.items() if k not in ("error", "message")} == {k: v for k, v in fora.items() if k in app}
     assert app["items"] and app["period_start"] and app["period_end"]

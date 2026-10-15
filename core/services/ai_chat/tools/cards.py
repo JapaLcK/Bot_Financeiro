@@ -117,6 +117,11 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if streaming.ativo():  # no app o total da fatura é o card fatura
         for k in ("total", "paid_amount", "remaining"):
             del out[k]
+        out["error"] = "total_no_card"
+        out["message"] = (
+            "o total, o pago e o restante da fatura vêm do show_card fatura: chame-o e escreva o total a partir dele. "
+            "Os itens abaixo servem só para citar compras; não some os itens."
+        )
     return out
 
 

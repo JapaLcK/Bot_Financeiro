@@ -28,6 +28,13 @@ CARDS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVa
 """Cards que o `show_card` já MOSTROU neste turno (emitiu bloco; chamada recusada não
 entra). O teto vale por turno. Setada pelo runner; None fora dele = sem teto."""
 
+FALHAS_DE_CARD_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "ai_chat_falhas_de_card_do_turno", default=None
+)
+"""Ids dos cards cujo `show_card` NÃO saiu neste turno por plano, onboarding ou leitura (`montar`).
+A tool que recusaria mandando a ESSE card devolve o dado (`_recusa_se_for_do_card`): ele já mostrou que não
+resolve. Falha de outro card não libera. Setada pelo runner; None fora dele."""
+
 METAS_DO_TURNO: contextvars.ContextVar[bool | None] = contextvars.ContextVar(
     "ai_chat_metas_do_turno", default=None
 )
