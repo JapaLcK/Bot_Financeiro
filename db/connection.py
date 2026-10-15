@@ -29,7 +29,17 @@ if not getattr(psycopg.Error.__str__, "_sem_failing_row", False):
     _str_do_psycopg = psycopg.Error.__str__
 
     def _str_sem_linha(self) -> str:
-        return redigir_failing_row(_str_do_psycopg(self))
+        texto = _str_do_psycopg(self)
+        # Estrutural, não pelo idioma: violação de constraint (SQLSTATE classe 23: CHECK, NOT NULL,
+        # UNIQUE, FK) leva no DETAIL a linha/chave do usuário, e o Postgres o LOCALIZA (`lc_messages`).
+        # `diag.message_detail` é esse trecho em qualquer idioma; a regex em inglês fica de 2ª rede.
+        try:
+            detalhe = self.diag.message_detail
+            if detalhe and (self.sqlstate or "").startswith("23"):
+                texto = texto.replace(detalhe, "(omitido)")
+        except Exception:  # noqa: BLE001 - redigir nunca pode levantar de dentro de str(exc)
+            pass
+        return redigir_failing_row(texto)
 
     _str_sem_linha._sem_failing_row = True
     psycopg.Error.__str__ = _str_sem_linha

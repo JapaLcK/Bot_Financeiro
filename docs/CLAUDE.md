@@ -2129,7 +2129,8 @@ no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
 `violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
 (`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
 (traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
-COBRE: (0) 1ª linha: `psycopg.Error.__str__` redigido em `db/connection.py` (todo `print(exc)`,
+COBRE: (0) 1ª linha: `psycopg.Error.__str__` redigido em `db/connection.py` pelo `diag.message_detail` de toda
+violação de constraint (SQLSTATE 23xxx), em qualquer idioma de `lc_messages` (todo `print(exc)`,
 f-string, `logger.*(..., exc)` e traceback, de qualquer conexão; o texto cru fica em `exc.args[0]`);
 (1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
 (stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de

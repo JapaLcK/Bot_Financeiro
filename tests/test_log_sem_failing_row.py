@@ -48,7 +48,7 @@ def test_str_do_psycopg_ja_sai_sem_a_linha_do_usuario():
     exc = _violacao()
     assert "Failing row contains (" in _cru(exc) and "100000000000000000000" in _cru(exc), "premissa: o args[0] guarda o texto cru"
     for texto in (str(exc), f"{exc}", "".join(traceback.format_exception(exc))):
-        assert "Failing row contains (omitido)" in texto and "100000000000000000000" not in texto, texto
+        assert "(omitido)" in texto and "100000000000000000000" not in texto, texto
 
 
 @pytest.mark.parametrize("com_traceback", [False, True])
@@ -60,6 +60,18 @@ def test_filtro_tira_failing_row_da_mensagem_e_do_traceback(com_traceback):
     saida = logging.Formatter("%(message)s").format(rec)
     assert "Failing row contains (omitido)" in saida
     assert "1e+20" not in saida and "100000000000000000000" not in saida, saida
+
+
+def test_str_redige_o_detail_localizado_pelo_diag_sem_depender_do_idioma(monkeypatch):
+    """`lc_messages` não inglês: o DETAIL sai localizado e a regex em inglês não o acharia."""
+    import psycopg.errors
+    exc = _violacao()
+    local = "A linha com falha contém (794730409, 100000000000000000000)."
+    exc.args = (exc.args[0].split("DETAIL:")[0] + "DETAIL:  " + local,)
+    monkeypatch.setattr(type(exc.diag), "message_detail", property(lambda self: local))
+    assert "100000000000000000000" in exc.args[0] and "Failing row" not in exc.args[0]
+    assert "100000000000000000000" not in str(exc) and "(omitido)" in str(exc), str(exc)
+    assert "finito_balance" in str(exc)  # a mensagem primária (com o nome da constraint) fica
 
 
 def test_registro_sem_failing_row_passa_intacto():
