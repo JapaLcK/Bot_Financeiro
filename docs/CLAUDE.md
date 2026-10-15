@@ -201,7 +201,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
   `get_top_categories`/`get_category_spend`/`get_period_summary` nessa faixa são recusadas com `periodo_no_card`
   (1 mês: `mes_inteiro_no_card`; no resumo a mensagem aponta `resumo` e o saldo = `contas`; a recusa é uma só, em `_recusa_se_for_do_card`, e devolve o dado quando o turno já gastou as 3 vagas de card, quando o card para o qual mandaria já foi mostrado, ou quando o plano corta o mês pedido (só 1 mês: nem o `resumo` nem o `categorias` trazem o `historico_desde`, a tool traz; 2 a 12 meses vão ao `periodo`, que traz); também devolve o dado a conta que não passa em `exigir_acesso_do_app` (sem onboarding de OF, sem plano) e o turno em que o `show_card` do card-alvo falhou (`FALHAS_DE_CARD_DO_TURNO` guarda o id do card; falha de outro card não libera), senão a recusa não deixa saída; o `card_repetido` aponta o caminho de cada card); no app o
-  `get_open_bill` devolve itens e período com `error: total_no_card` (o total é do card `fatura`). **Teto de 12
+  `get_open_bill` devolve itens e período com `error: total_no_card` (o total é do card `fatura`) enquanto o card puder aparecer (`card_ainda_resolve`, o mesmo teste da recusa acima); quando não pode, devolve o total. **Teto de 12
   meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no

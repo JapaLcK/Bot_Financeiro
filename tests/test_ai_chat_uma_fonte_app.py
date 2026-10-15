@@ -246,6 +246,7 @@ def test_whatsapp_por_categoria_esse_mes_igual_antes_e_depois(uid_pro, monkeypat
 # ── aparas ──────────────────────────────────────────────────────────────────
 
 def test_list_pockets_apara_o_insight_so_no_app(pro_user_id):
+    pro_user_id = completo(pro_user_id)  # com acesso ao app: sem onboarding o card não resolve e a tool devolve o insight (test_ai_chat_f3)
     db.add_launch_and_update_balance(pro_user_id, "receita", 1000.0, None, "seed")
     db.create_pocket(pro_user_id, "viagem")
     update_pocket_meta(pro_user_id, db.list_pockets(pro_user_id)[0]["id"],
@@ -262,10 +263,11 @@ def test_list_pockets_apara_o_insight_so_no_app(pro_user_id):
 
 
 def test_get_open_bill_apara_total_e_deixa_periodo_e_itens(pro_user_id):
-    cid = db.create_card(pro_user_id, "Nubank", 10, 17)
-    db.add_credit_purchase(pro_user_id, cid, 100, "lazer", "show", date.today())
+    uid = completo(pro_user_id)  # com acesso ao app: sem onboarding o card não resolve e a tool devolve o total (test_ai_chat_f3)
+    cid = db.create_card(uid, "Nubank", 10, 17)
+    db.add_credit_purchase(uid, cid, 100, "lazer", "show", date.today())
     ex, args = get_tool("get_open_bill").execute, {"card_name": "Nubank"}
-    fora, app = ex(pro_user_id, args), com_emissor(ex, pro_user_id, args)
+    fora, app = ex(uid, args), com_emissor(ex, uid, args)
     assert {"total", "paid_amount", "remaining"} <= set(fora) and fora["total"] == 100.0
     assert "error" not in fora  # sem emissor: o dado de sempre
     assert set(fora) - set(app) == {"total", "paid_amount", "remaining"}

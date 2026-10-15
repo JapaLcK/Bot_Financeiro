@@ -22,6 +22,8 @@ from core.observability import _log_falha
 from utils_date import _tz
 
 from .. import streaming
+from .._context import metas_do_turno
+from ..cards import card_ainda_resolve
 from ._base import Tool
 
 
@@ -90,6 +92,9 @@ def _pocket_goal_insight(balance: float, target_amount, target_date, today: date
 def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) -> dict[str, Any]:
     rows = db.list_pockets(user_id) if accrue else db.list_pockets(user_id, accrue=False)
     today = datetime.now(_tz()).date()
+    # no app o progresso e o ritmo são do card (o id do `show_card` já remapeado: `metas` com a chave, senão `caixinhas`),
+    # se ele ainda puder aparecer; senão o insight inteiro, ou o número não sairia por caminho nenhum
+    so_a_meta = streaming.ativo() and card_ainda_resolve(user_id, "metas" if metas_do_turno(user_id) else "caixinhas")
     pockets = []
     for r in rows:
         balance = float(r["balance"] or 0)
@@ -107,8 +112,7 @@ def _list_pockets(user_id: int, args: dict[str, Any], *, accrue: bool = True) ->
                 "interest_rate": float(r.get("interest_rate") or 1),
                 "interest_period": r.get("interest_period") or "cdi",
                 **({"last_interest_date": r.get("last_interest_date")} if not accrue else {}),
-                # no app a meta (alvo e prazo) fica; progresso e ritmo são do card caixinhas (`show_card metas` para quem não tem a chave)
-                **({k: insight[k] for k in ("target_amount", "target_date")} if streaming.ativo() else insight),
+                **({k: insight[k] for k in ("target_amount", "target_date")} if so_a_meta else insight),
             }
         )
     result = {"pockets": pockets}

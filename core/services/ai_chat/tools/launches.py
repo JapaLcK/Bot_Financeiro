@@ -32,7 +32,6 @@ from typing import Any
 
 import db
 from db import resumo_mes
-from fastapi import HTTPException
 # Helper único das portas destrutivas, com o nível por parâmetro (a docstring
 # dele lista quais portas e explica o critério). Cópia local logava ERROR onde o
 # WhatsApp logava WARNING — a mesma condição contava como erro no admin por uma
@@ -43,8 +42,8 @@ from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
-from .._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO
-from ..cards import MAX_MESES_PERIODO, MAX_POR_TURNO, exigir_acesso_do_app
+from .._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
+from ..cards import MAX_MESES_PERIODO, card_ainda_resolve
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -171,14 +170,7 @@ def _recusa_se_for_do_card(
         return None
     um = meses[0] == meses[1]
     alvo = card_1_mes if um else "periodo"
-    usados = CARDS_DO_TURNO.get()
-    if usados is not None and (len(usados) >= MAX_POR_TURNO or alvo in usados):
-        return None
-    if alvo in (FALHAS_DE_CARD_DO_TURNO.get() or ()):  # o show_card desse card já falhou neste turno (plano, leitura)
-        return None
-    try:
-        exigir_acesso_do_app(user_id)  # o MESMO gate do show_card: sem acesso ao app, o card recusa (onboarding, plano)
-    except HTTPException:
+    if not card_ainda_resolve(user_id, alvo):
         return None
     avisos = "".join(f". Depois, {extra[k]}" for k in ("aviso_limite", "aviso_fim") if k in extra)
     if um:

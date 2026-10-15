@@ -17,6 +17,7 @@ from core.services.ai_chat.cards import CardIndisponivel
 from core.services.ai_chat import system_prompt as sp
 from core.services.ai_chat._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO
 from core.services.ai_chat.tools import SCHEMAS, get_tool
+from db.pockets import update_pocket_meta
 from test_ai_chat_periodo import INICIO, PRIMEIRO_M0, ULTIMO, _mes
 from test_ai_chat_uma_fonte_app import com_emissor
 from utils_date import now_tz, today_tz
@@ -360,6 +361,108 @@ def test_falha_do_periodo_libera_o_resumo_de_varios_meses_e_nao_o_de_1_mes(mundo
         assert _chama("get_period_summary", a, "um", [])["error"] == "mes_inteiro_no_card"
     finally:
         FALHAS_DE_CARD_DO_TURNO.reset(t)
+
+
+# ── a fatura só perde o total quando o `show_card fatura` ainda pode aparecer ────────────────────
+
+def _ids(*cards):
+    return [("show_card", {"card": c}) for c in cards]
+
+
+@pytest.mark.parametrize("antes,exc,onboarding,total", [
+    ((), None, True, False),                                              # positivo: acesso, vaga e card livres = aponta o card
+    ((), None, False, True),                                              # sem onboarding o card recusa
+    (("fatura",), CardIndisponivel("ainda não"), True, True),             # o show_card fatura falhou no turno
+    (("fatura",), RuntimeError("boom"), True, True),
+    (("fatura",), None, True, True),                                      # o card fatura já está na tela
+    (("contas", "parcelas", "patrimonio"), None, True, True),             # as 3 vagas gastas (e não pela fatura)
+    (("contas",), None, True, False),                                     # outro card na tela não libera
+])
+def test_conversa_get_open_bill_so_tira_o_total_se_o_card_fatura_resolve(mundo, monkeypatch, antes, exc, onboarding, total):
+    from core.services.ai_chat.tools import mostrar_card
+    a, _ = mundo
+    uid = a
+    if not onboarding:
+        uid = usuario_pagante(plan="pro_max")  # sem `completo`: o gate do app recusa
+        db.add_credit_purchase(uid, db.create_card(uid, "Nubank", 10, 17), 100, "lazer", "show", today_tz())
+    if exc:
+        monkeypatch.setattr(mostrar_card, "montar", _montar_que_levanta(exc))
+    openai_falso(monkeypatch,
+                 *([rodada(None, *_ids(*antes))] if antes else []),
+                 rodada(None, ("get_open_bill", {"card_name": "Nubank"})),
+                 rodada("Pronto."))
+    executar(uid, "quanto está minha fatura do Nubank?")
+    fatura = _tool_msgs(uid)[-1]
+    if total:
+        assert "error" not in fatura and fatura["total"] > 0 and {"paid_amount", "remaining"} <= set(fatura)
+    else:
+        assert fatura["error"] == "total_no_card" and not {"total", "paid_amount", "remaining"} & set(fatura)
+
+
+def test_get_open_bill_no_whatsapp_segue_devolvendo_o_total(mundo, monkeypatch):
+    a, _ = mundo
+    vistas = []
+
+    def modelo(messages):
+        vistas.append([json.loads(m["content"]) for m in messages if m["role"] == "tool"][-1])
+        return texto("🐷 Foi isso.")
+
+    falso_whatsapp(monkeypatch, com_tools(chamada("get_open_bill", {"card_name": "Nubank"})), modelo)
+    diga(a, "piggy quanto está minha fatura do Nubank?")
+    assert "error" not in vistas[-1] and vistas[-1]["total"] > 0
+
+
+# ── as caixinhas só perdem o progresso quando o card (`metas` com a chave, senão `caixinhas`) ainda pode aparecer ──
+
+def _conta_com_meta(monkeypatch, chave, onboarding=True):
+    uid = usuario_pagante(plan="pro_max")
+    uid = completo(uid) if onboarding else uid
+    db.add_launch_and_update_balance(uid, "receita", 1000.0, None, "seed")
+    db.create_pocket(uid, "viagem")
+    update_pocket_meta(uid, db.list_pockets(uid)[0]["id"], target_amount=1000.0, target_date="2999-01-01")
+    monkeypatch.setenv("OF_CASH_ENABLED", "1")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
+    monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", str(uid) if chave else "")  # depois de semear (a chave recusa escrita manual)
+    return uid
+
+
+@pytest.mark.parametrize("chave,antes,exc,onboarding,aparado", [
+    (False, (), None, True, True),                                  # positivo: sem a chave, card `caixinhas` livre
+    (True, (), None, True, True),                                   # positivo: com a chave, card `metas` livre
+    (False, (), None, False, False),                                # sem onboarding o card recusa
+    (False, ("caixinhas",), CardIndisponivel("ainda não"), True, False),   # o card falhou no turno
+    (True, ("metas",), RuntimeError("boom"), True, False),
+    (False, ("caixinhas",), None, True, False),                     # o card já está na tela
+    (False, ("metas",), None, True, False),                         # sem a chave o `metas` vira `caixinhas`: o id remapeado é o que vale
+    (True, ("metas",), None, True, False),
+    (True, ("caixinhas",), None, True, True),                       # com a chave o card é `metas`: `caixinhas` na tela não libera
+])
+def test_conversa_list_pockets_so_tira_o_progresso_se_o_card_resolve(monkeypatch, chave, antes, exc, onboarding, aparado):
+    from core.services.ai_chat.tools import mostrar_card
+    uid = _conta_com_meta(monkeypatch, chave, onboarding)
+    if exc:
+        monkeypatch.setattr(mostrar_card, "montar", _montar_que_levanta(exc))
+    openai_falso(monkeypatch,
+                 *([rodada(None, *_ids(*antes))] if antes else []),
+                 rodada(None, ("list_pockets", {})),
+                 rodada("Pronto."))
+    executar(uid, "como está minha caixinha da viagem?")
+    (p,) = _tool_msgs(uid)[-1]["pockets"]
+    assert p["target_amount"] == 1000.0
+    assert ("progress_pct" not in p) == aparado and ("monthly_needed" not in p) == aparado
+
+
+def test_list_pockets_no_whatsapp_segue_com_o_insight(monkeypatch):
+    uid = _conta_com_meta(monkeypatch, chave=False)
+    vistas = []
+
+    def modelo(messages):
+        vistas.append([json.loads(m["content"]) for m in messages if m["role"] == "tool"][-1])
+        return texto("🐷 Foi isso.")
+
+    falso_whatsapp(monkeypatch, com_tools(chamada("list_pockets", {})), modelo)
+    diga(uid, "piggy como está minha caixinha da viagem?")
+    assert "progress_pct" in vistas[-1]["pockets"][0]
 
 
 # ── mensagem do card_repetido certa por card ─────────────────────────────────────────────────────

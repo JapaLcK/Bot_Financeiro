@@ -30,6 +30,7 @@ from utils_date import today_tz
 from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
+from ..cards import card_ainda_resolve
 from ._base import Tool
 
 
@@ -114,7 +115,7 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             for it in items
         ],
     }
-    if streaming.ativo():  # no app o total da fatura é o card fatura
+    if streaming.ativo() and card_ainda_resolve(user_id, "fatura"):  # no app o total da fatura é o card fatura, se ele ainda puder aparecer
         for k in ("total", "paid_amount", "remaining"):
             del out[k]
         out["error"] = "total_no_card"
