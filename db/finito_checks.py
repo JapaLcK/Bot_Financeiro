@@ -16,6 +16,7 @@ ERROR com `tabela.coluna` e nunca o dado) -> `ADD ... NOT VALID` (só lock curto
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections import defaultdict
 
@@ -44,7 +45,12 @@ _NUMERICOS = ("numeric", "float8", "float4")
 
 
 def nome_check(coluna: str) -> str:
-    return PREFIXO_FINITO + coluna
+    """`finito_<coluna>`; acima de 63 bytes o Postgres trunca calado (a busca pelo nome nunca
+    acharia e duas colunas de mesmo prefixo colidiriam): corta e põe um hash estável da coluna."""
+    nome = PREFIXO_FINITO + coluna
+    if len(nome.encode()) <= 63:
+        return nome
+    return nome.encode()[:54].decode(errors="ignore") + "_" + hashlib.md5(coluna.encode()).hexdigest()[:8]
 
 
 def expr_finito(coluna: str) -> sql.Composed:
@@ -96,15 +102,19 @@ def ensure_finito_checks(cur) -> dict:
     """Idempotente. Exige AUTOCOMMIT. Devolve {'faltando', 'criadas', 'sujas', 'falhas'}:
     listas de 'tabela.coluna' (as `falhas` são nomes de tabela)."""
     existentes = _constraints(cur)
-    faltando = [(t, c) for t, c in colunas_alvo(cur) if (t, nome_check(c)) not in existentes]
+    alvo = colunas_alvo(cur)
+    faltando = [(t, c) for t, c in alvo if (t, nome_check(c)) not in existentes]
+    # sobra de boot interrompido (ADD commitado, VALIDATE não): entra no pré-scan, senão a linha suja
+    # só aparece no VALIDATE e as constraints recém-criadas ficariam sem o tudo-ou-nada
+    pendentes = [(t, c) for t, c in alvo if existentes.get((t, nome_check(c))) is False]
     out = {"faltando": [f"{t}.{c}" for t, c in faltando], "criadas": [], "sujas": [], "falhas": []}
     cur.execute("select current_setting('lock_timeout') as v")
     antigo = cur.fetchone()["v"]
     cur.execute("select set_config('lock_timeout', '1s', false)")
     novas: list[tuple[str, str]] = []  # criadas NESTA rodada (para desfazer se o VALIDATE achar linha suja)
     try:
-        if faltando:
-            out["sujas"] = colunas_fora_do_limite(cur, faltando)
+        if faltando or pendentes:
+            out["sujas"] = colunas_fora_do_limite(cur, faltando + pendentes)
             if out["sujas"]:  # tudo-ou-nada: com dado sujo o VALIDATE falharia e deixaria o resto pela metade
                 # ERROR (1x por boot): entra no `backend_errors_24h`; só `tabela.coluna`, nunca o dado
                 logger.error("[finito_checks] valor fora do limite em %s; NADA adicionado até "

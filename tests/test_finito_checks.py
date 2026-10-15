@@ -252,6 +252,37 @@ def test_linha_suja_que_aparece_entre_o_prescan_e_o_add_desfaz_a_rodada(
     assert sorted(r["criadas"]) == ["bank_movement_declarations.amount", "launches.valor"]
 
 
+def test_nome_longo_cabe_em_63_bytes_e_o_ensure_continua_idempotente():
+    comum = "a" * 58
+    n1, n2 = F.nome_check(comum + "x"), F.nome_check(comum + "y")
+    assert len(n1.encode()) <= 63 and len(n2.encode()) <= 63 and n1 != n2
+    assert n1 == F.nome_check(comum + "x") and F.nome_check("valor") == "finito_valor"
+    _q(f"create table zz_finito_longo (id serial primary key, {comum}x numeric, {comum}y numeric)")
+    try:
+        _ensure()
+        r = _ensure()  # 2ª rodada: nada faltando (o nome truncado pelo Postgres ainda é achado)
+        assert r["faltando"] == [] and r["falhas"] == [] and r["criadas"] == [], r
+    finally:
+        _q("drop table if exists zz_finito_longo")
+
+
+def test_check_pendente_de_boot_interrompido_entra_no_prescan(user_id, sem_check_finito):
+    """ADD NOT VALID commitado e VALIDATE não rodou; linha suja sob ele + outra constraint faltando:
+    o pré-scan acha a suja e NADA novo é criado."""
+    _ensure()
+    sem_check_finito("launches", "valor")  # NOT VALID ao fim do teste; aqui, ausente
+    _q("alter table launches add constraint finito_valor check (abs(valor) <= 10000000000000) not valid")
+    _q("insert into launches (user_id, tipo, valor, criado_em) values (%s, 'despesa', 1, now())", (user_id,))
+    _q("alter table launches drop constraint finito_valor")  # solta p/ plantar o sujo sem violar
+    _q("insert into launches (user_id, tipo, valor, criado_em) values (%s, 'despesa', 1e20, now())", (user_id,))
+    _q("alter table launches add constraint finito_valor check (abs(valor) <= 10000000000000) not valid")
+    sem_check_finito("bank_movement_declarations", "amount")
+    r = _ensure()
+    assert r["sujas"] == ["launches.valor"] and r["criadas"] == [], r
+    with get_conn() as conn, conn.cursor() as cur:
+        assert F.nome_check("amount") not in {n for (_t, n) in F._constraints(cur) if _t == "bank_movement_declarations"}
+
+
 # ── (5) lock ─────────────────────────────────────────────────────────────────
 
 def test_tabela_travada_vira_falha_sem_travar_as_outras(sem_check_finito):
