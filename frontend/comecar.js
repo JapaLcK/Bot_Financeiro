@@ -136,11 +136,10 @@
   /**
    * O WhatsApp está vinculado?
    *
-   * NÃO usar `whatsapp_linked` do /auth/dashboard-profile: ele é
-   * `bool(whatsapp_verified_at)`, e essa coluna só é escrita pelo auto-link por
-   * telefone (db_support.py:926). Quem vinculou pelo código — `link 123456` →
-   * link_platform_identity (db/users.py) — nunca ganha o carimbo, e a
-   * confirmação nunca apareceria pra ele. `identities` cobre os dois caminhos.
+   * Lê `identities` (as identidades da conta, `/settings/{id}/security`): a
+   * fonte única de "este WhatsApp está ligado a esta conta", seja qual for o
+   * caminho que o ligou (`vincular 123456` → link_platform_identity, em
+   * db/users.py). Não depende do carimbo `whatsapp_verified_at`.
    */
   function isWhatsAppLinked(security) {
     const list = (security && security.identities) || [];
@@ -689,10 +688,9 @@
   }
 
   function renderWaCode() {
-    // O bot só vincula com "link 123456" (wa_runtime.py:389) e o deeplink de
-    // hoje leva texto fixo "Olá" — por isso a mensagem inteira aparece aqui,
-    // pronta pra copiar, em vez de só o número.
-    text(el("wa-code"), state.waCode ? "link " + state.waCode : "—");
+    // O bot só vincula com "vincular 123456" (o deeplink já leva essa mesma
+    // mensagem); ela aparece inteira aqui, pronta pra copiar, em vez de só o número.
+    text(el("wa-code"), state.waCode ? "vincular " + state.waCode : "—");
     const link = el("wa-link");
     if (link && state.waLink) {
       link.href = state.waLink;

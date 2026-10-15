@@ -830,6 +830,20 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Deep link do WhatsApp: um construtor só, `core/dashboard_links.link_whatsapp(texto)`**
+(Grupo 7, PR-5b). Lê `WHATSAPP_NUMBER` a cada chamada, monta `api.whatsapp.com/send?phone=N&text=...`
+e, sem número, devolve `""` (falha fechada: o `wa.me/?text=` abre o seletor de contatos e o
+código de vínculo, de uso único, iria para quem a pessoa escolhesse). Só texto sem segredo (`/wa`,
+e-mail do fundador) passa `seletor=True` e cai em `wa.me/?text=...`. Um teste (`tests/test_whatsapp_link_unico.py`) falha se `api.whatsapp.com`
+ou `wa.me/` aparecer em outro `.py`/`.js`/`.html`. As rotas que devolvem `whatsapp_link`
+(`link-code`, `login`, `verify-email`, `mfa/verify-login`, `google/complete-signup`) passam
+`vincular <link_code>`: o site pré-preenche o mesmo texto que o parser do bot entende
+(`account.vincular`), e o `/comecar` mostra essa mensagem ao lado do botão. `/wa`, `/teste` e o
+e-mail do fundador passam uma saudação, sem código. **O e-mail de boas-vindas não leva
+código** (vale 15 min e o e-mail é lido depois, e a conta do quiz não tem senha, que o
+`link-code` exige): o botão "Conectar meu WhatsApp" abre `/login?next=%2Fhome`, e lá
+"Conectar WhatsApp" gera o código no clique.
+
 **PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
 `code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
 `google_oauth_challenge` (nunca no `state` do Google), e o `code_verifier` no CORPO de

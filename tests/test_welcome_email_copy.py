@@ -37,7 +37,7 @@ def _capturar(monkeypatch) -> dict:
 def test_boas_vindas_leva_ao_precos_antes_do_whatsapp(monkeypatch):
     enviado = _capturar(monkeypatch)
     base = email_service._public_base_url()
-    link_wpp = email_service._whatsapp_link()
+    link_wpp = f"{base}/login?next=%2Fhome"
 
     for campo in ("html_body", "text_body"):
         corpo = enviado[campo]
@@ -54,6 +54,9 @@ def test_boas_vindas_leva_ao_precos_antes_do_whatsapp(monkeypatch):
 def test_boas_vindas_nao_promete_bot_liberado_no_cadastro(monkeypatch):
     enviado = _capturar(monkeypatch)
     corpos = enviado["html_body"] + "\n" + enviado["text_body"] + "\n" + enviado["subject"]
+    # o e-mail NÃO leva o código de vínculo (DP-4): `_capturar` passa "123456" como link_code
+    for campo in ("html_body", "text_body"):
+        assert "123456" not in enviado[campo], f"{campo} levou o código de vínculo"
 
     for proibido in (
         "Sem código, sem prazo",          # dizia que não havia nada entre o cadastro e o bot
@@ -61,14 +64,25 @@ def test_boas_vindas_nao_promete_bot_liberado_no_cadastro(monkeypatch):
         "Abrir Dashboard",                # o gate redireciona o dashboard pro /precos
         "Primeiros comandos",             # comandos como se já funcionassem
         "vincule o bot e comece agora",   # assunto antigo
+        "reconhece o seu número automaticamente",  # auto-vínculo por telefone, desligado (Grupo 7, PR-5)
+        "reconhece seu número automaticamente",
+        "Mande um oi",                    # só o código liga; "oi" recebe o convite
+        "api.whatsapp.com",               # sem código no e-mail (DP-4): o link nasce no site
+        "wa.me/",
     ):
         assert proibido not in corpos, f"a copy órfã ainda está no e-mail: {proibido!r}"
 
 
 def test_controle_positivo_o_caminho_do_whatsapp_continua_no_email(monkeypatch):
     enviado = _capturar(monkeypatch)
-    assert email_service._whatsapp_link() in enviado["html_body"]
-    assert "WhatsApp" in enviado["text_body"]
+    base = email_service._public_base_url()
+    assert f'href="{base}/login?next=%2Fhome"' in enviado["html_body"]
+    assert "Conectar meu WhatsApp" in enviado["html_body"]
+    for campo in ("html_body", "text_body"):
+        corpo = " ".join(enviado[campo].split())
+        assert "Conectar WhatsApp" in corpo, campo
+        assert "a mensagem já abre pronta com o seu código" in corpo, campo
+    assert f"{base}/login?next=%2Fhome" in enviado["text_body"]
     assert "gastei 50 mercado" in enviado["html_body"]
 
 
