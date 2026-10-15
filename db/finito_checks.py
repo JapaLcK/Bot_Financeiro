@@ -101,6 +101,7 @@ def ensure_finito_checks(cur) -> dict:
     cur.execute("select current_setting('lock_timeout') as v")
     antigo = cur.fetchone()["v"]
     cur.execute("select set_config('lock_timeout', '1s', false)")
+    novas: list[tuple[str, str]] = []  # criadas NESTA rodada (para desfazer se o VALIDATE achar linha suja)
     try:
         if faltando:
             out["sujas"] = colunas_fora_do_limite(cur, faltando)
@@ -119,9 +120,11 @@ def ensure_finito_checks(cur) -> dict:
                 try:
                     cur.execute(sql.SQL("alter table {} {}").format(sql.Identifier(t), adds))
                     out["criadas"] += [f"{t}.{c}" for c in cols]
+                    novas += [(t, nome_check(c)) for c in cols]
                 except psycopg.Error as exc:
                     _aviso(t, exc)
                     out["falhas"].append(t)
+        suja_depois: list[str] = []
         for (t, nome), validada in _constraints(cur).items():
             if validada:
                 continue
@@ -130,8 +133,22 @@ def ensure_finito_checks(cur) -> dict:
                     sql.Identifier(t), sql.Identifier(nome)))
             except psycopg.Error as exc:
                 _aviso(t, exc)
-                if t not in out["falhas"]:
+                if getattr(exc, "sqlstate", None) == "23514" and (t, nome) in novas:
+                    suja_depois.append(f"{t}.{nome.removeprefix(PREFIXO_FINITO)}")  # escrita entre o pré-scan e o ADD
+                elif t not in out["falhas"]:
                     out["falhas"].append(t)
+        if suja_depois:  # tudo-ou-nada vale também aqui: desfaz o que esta rodada criou; o próximo boot refaz o pré-scan
+            for t, nome in novas:
+                try:
+                    cur.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
+                        sql.Identifier(t), sql.Identifier(nome)))
+                except psycopg.Error as exc:
+                    _aviso(t, exc)
+                    if t not in out["falhas"]:
+                        out["falhas"].append(t)
+            out["sujas"], out["criadas"] = suja_depois, []
+            logger.error("[finito_checks] valor fora do limite em %s apareceu durante a instalação; "
+                         "constraints desta rodada desfeitas", ", ".join(suja_depois))
     finally:
         cur.execute("select set_config('lock_timeout', %s, false)", (antigo,))
     return out

@@ -216,8 +216,9 @@ def test_rota_credito_parcelado_estoura_check_e_nao_loga_failing_row(caplog):
     c.raise_server_exceptions = False
     corpo = f'{{"tipo":"credito","valor":{NOVE},"alvo":"x","nota":"x","card_id":{cid},"parcelas":2}}'
     with caplog.at_level(logging.DEBUG):
-        codigos = [c.post(f"/launches/{uid}", headers=h, content=corpo).status_code for _ in range(3)]
-    assert codigos[:2] == [200, 200] and codigos[2] >= 400 and "registrar_parcelamento" in caplog.text
+        resp = [c.post(f"/launches/{uid}", headers=h, content=corpo) for _ in range(3)]
+    assert [r.status_code for r in resp] == [200, 200, 400], [r.status_code for r in resp]
+    assert resp[2].json()["detail"] == "Valor inválido: confira o número."
     assert _sem_linha(caplog.text)
 
 

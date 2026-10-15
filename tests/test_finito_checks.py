@@ -222,6 +222,36 @@ def test_sujo_numa_tabela_nao_derruba_o_init_db(user_id, sem_check_finito):
     init_db()  # o piso é em tarefa de fundo: dado sujo nunca trava o boot
 
 
+def test_linha_suja_que_aparece_entre_o_prescan_e_o_add_desfaz_a_rodada(
+        user_id, sem_check_finito, monkeypatch, caplog):
+    """Corrida: o pré-scan achou tudo limpo, uma escrita legítima cruza 1e13 antes do ADD (soma
+    agregada). O VALIDATE acha a linha: o que esta rodada criou é desfeito (tudo-ou-nada)."""
+    _ensure()
+    sem_check_finito("launches", "valor")
+    sem_check_finito("bank_movement_declarations", "amount")
+    original = F.colunas_fora_do_limite
+
+    def prescan_e_depois_escrita(cur, colunas):
+        achadas = original(cur, colunas)
+        assert achadas == []
+        _q("insert into launches (user_id, tipo, valor, criado_em) values (%s, 'despesa', 1e20, now())",
+           (user_id,))
+        return achadas
+
+    monkeypatch.setattr(F, "colunas_fora_do_limite", prescan_e_depois_escrita)
+    with caplog.at_level(logging.WARNING, logger="db.finito_checks"):
+        r = _ensure()
+    assert r["sujas"] == ["launches.valor"] and r["criadas"] == [], r
+    with get_conn() as conn, conn.cursor() as cur:  # nem a tabela limpa ficou com a constraint
+        assert sorted(_lacunas(cur)) == ["bank_movement_declarations.amount", "launches.valor"]
+    assert "100000000000000000000" not in caplog.text
+    # positivo: limpo, o próximo ensure instala as duas
+    monkeypatch.setattr(F, "colunas_fora_do_limite", original)
+    _q("update launches set valor = 1 where user_id = %s", (user_id,))
+    r = _ensure()
+    assert sorted(r["criadas"]) == ["bank_movement_declarations.amount", "launches.valor"]
+
+
 # ── (5) lock ─────────────────────────────────────────────────────────────────
 
 def test_tabela_travada_vira_falha_sem_travar_as_outras(sem_check_finito):

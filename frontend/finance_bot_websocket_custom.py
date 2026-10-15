@@ -7819,6 +7819,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+            except psycopg.errors.CheckViolation:
+                raise
             except Exception as exc:
                 logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
