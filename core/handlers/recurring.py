@@ -226,7 +226,7 @@ def _fmt_start(start_iso) -> str:
 
 def _err(code: str) -> str:
     msgs = {
-        "VALOR_INVALIDO": "O valor precisa ser maior que zero.",
+        "VALOR_INVALIDO": "Valor inválido (precisa ser maior que zero).",
         "DIA_INVALIDO": "O dia precisa estar entre 1 e 31.",
         "NOME_INVALIDO": "Preciso saber do que é o recorrente.",
         "DATA_INICIO_INVALIDA": "Não entendi a data de início.",

@@ -18,6 +18,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from utils_text import valor_valido
+
 from .categories import ensure_user_category, resolve_category_for_write
 from .connection import get_conn
 from .recurring import _parse_start_date, validate_frequency
@@ -125,7 +127,7 @@ def create_recurring_income(
     name = (name or "").strip()
     if not name:
         raise ValueError("NOME_INVALIDO")
-    if amount is None or float(amount) <= 0:
+    if not valor_valido(amount):
         raise ValueError("VALOR_INVALIDO")
     if pay_day < 1 or pay_day > 31:
         raise ValueError("DIA_INVALIDO")
@@ -192,7 +194,7 @@ def update_recurring_income(
         sets.append("name = %s")
         params.append(v)
     if amount is not None:
-        if float(amount) <= 0:
+        if not valor_valido(amount):
             raise ValueError("VALOR_INVALIDO")
         if abs(float(amount) - float(current["amount"])) > 0.005:
             # Reajuste detectado: guarda valor anterior + timestamp

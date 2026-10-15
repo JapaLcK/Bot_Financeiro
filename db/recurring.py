@@ -14,6 +14,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from utils_text import valor_valido
+
 from .categories import ensure_user_category, resolve_category_for_write
 from .connection import get_conn, TIPO_DESPESA_SQL
 from .users import ensure_user
@@ -187,7 +189,7 @@ def create_recurring_expense(
     # Nos demais casos o valor é obrigatório (> 0).
     if variable_amount and (amount is None or float(amount) <= 0):
         amount = 0
-    elif amount is None or float(amount) <= 0:
+    elif not valor_valido(amount):
         raise ValueError("VALOR_INVALIDO")
     freq, month = validate_frequency(frequency, due_month)
     mode = (payment_mode or "autopay").strip().lower()
@@ -287,7 +289,7 @@ def update_recurring_expense(
         sets.append("name = %s")
         params.append(v)
     if amount is not None:
-        if float(amount) <= 0:
+        if not valor_valido(amount):
             raise ValueError("VALOR_INVALIDO")
         if abs(float(amount) - float(current["amount"])) > 0.005:
             # Reajuste detectado: guarda valor anterior + timestamp

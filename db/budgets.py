@@ -22,6 +22,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from utils_text import valor_valido
+
 from .connection import (
     get_conn, cat_key_sql, CAT_META_SQL, CAT_CANON_ORDER, TIPO_DESPESA_SQL,
 )
@@ -92,7 +94,7 @@ def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, boo
     cat = (categoria or "").strip()
     if not cat:
         raise ValueError("CATEGORIA_INVALIDA")
-    if budget is None or float(budget) <= 0:
+    if not valor_valido(budget):
         raise ValueError("BUDGET_INVALIDO")
 
     with get_conn() as conn:

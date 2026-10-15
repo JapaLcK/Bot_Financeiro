@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 import psycopg
 
 from utils_date import _tz, is_br_business_day
+from utils_text import valor_finito, valor_valido
 
 from .connection import get_conn
 from .users import ensure_user
@@ -1013,6 +1014,8 @@ def create_investment(user_id: int, name: str, rate: float, period: str, nota: s
     if period not in ("daily", "monthly", "yearly"):
         raise ValueError("BAD_PERIOD")
 
+    if not valor_finito(rate):
+        raise ValueError("BAD_RATE")
     r = Decimal(str(rate))
     if r <= 0:
         raise ValueError("BAD_RATE")
@@ -1101,6 +1104,8 @@ def create_investment_db(
     if period not in VALID_INVESTMENT_PERIODS:
         raise ValueError("INVALID_PERIOD")
 
+    if not valor_finito(rate):
+        raise ValueError("INVALID_RATE")
     r = Decimal(str(rate))
     if r <= 0 and period != "selic_spread":
         raise ValueError("INVALID_RATE")
@@ -1118,6 +1123,8 @@ def create_investment_db(
         purchase_date = date.fromisoformat(purchase_date)
     if isinstance(maturity_date, str) and maturity_date:
         maturity_date = date.fromisoformat(maturity_date)
+    if not valor_finito(initial_amount or 0):
+        raise ValueError("INITIAL_AMOUNT_INVALID")
     initial = Decimal(str(initial_amount or 0))
     if initial < 0:
         raise ValueError("INITIAL_AMOUNT_INVALID")
@@ -1427,9 +1434,11 @@ def investment_deposit_from_account(
     from core.services.fonte_unica import exigir
     exigir(user_id, "investimento")
     ensure_user(user_id)
-    v = Decimal(str(amount))
-    if v <= 0:
+    if not valor_valido(amount):
         raise ValueError("AMOUNT_INVALID")
+    if rate is not None and not valor_finito(rate):  # a taxa do lote vai para todo accrual
+        raise ValueError("INVALID_RATE")
+    v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()
@@ -1573,9 +1582,9 @@ def investment_withdraw_to_account(
     if not withdraw_all:
         if amount is None:
             raise ValueError("AMOUNT_INVALID")
-        v = Decimal(str(amount))
-        if v <= 0:
+        if not valor_valido(amount):
             raise ValueError("AMOUNT_INVALID")
+        v = Decimal(str(amount))
 
     criado_em = datetime.now(_tz())
     today = datetime.now(_tz()).date()

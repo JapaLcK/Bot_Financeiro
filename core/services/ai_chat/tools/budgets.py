@@ -24,6 +24,7 @@ import unicodedata
 from typing import Any
 
 import db
+from utils_text import valor_valido
 from core.observability import _log_falha
 
 from ._base import OUTRO_PEDIDO, Tool
@@ -173,10 +174,12 @@ def _set_budget_execute(user_id: int, args: dict[str, Any]) -> str:
     """
     try:
         budget = float(args.get("budget") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor do orçamento inválido."
     if budget <= 0:
         return "🐷 O orçamento precisa ser maior que zero."
+    if not valor_valido(budget):  # `nan <= 0` é False
+        return "🐷 Valor do orçamento inválido."
 
     force_new = bool(args.get("force_new"))
     confirmed = bool(args.get("_confirmed"))
