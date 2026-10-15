@@ -143,6 +143,18 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
 
+/* Card de compras de /gastos (widgets/GastosCompras.tsx): grid, não flex, no rodapé (Safari 14.0 ignora flex gap). */
+.compras-lista { list-style: none; margin: 0; padding: 0; }
+.compras-lista .lanc-linha:last-child { border-bottom: 0; }
+.compras-nota { font-size: 12.5px; }
+#gastos-compras .selo { white-space: normal; height: auto; min-height: 22px; }
+#gastos-compras .btn { min-height: 44px; align-self: start; }
+.compras-pe { display: grid; grid-auto-flow: column; justify-content: start; column-gap: 20px; }
+.compras-pe .link { min-height: 44px; }
+/* O scrollIntoView do card alinha a base dele à da janela e ignora a barra fixa: a margem é a do padding-bottom da .page (chat.css, shell.css), a mesma que "o conteúdo termina acima da barra". */
+#gastos-compras { scroll-margin-block-end: 120px; }
+@media (max-width: 760px) { #gastos-compras { scroll-margin-block-end: calc(96px + env(safe-area-inset-bottom)); } }
+
 .detail-auto { font-size: 12px; font-weight: 400; margin-left: 4px; }
 .detail-recent { padding-top: 16px; border-top: 1px solid var(--rule); }
 .detail-recent .inv-list li { grid-template-columns: 46px minmax(0, 1fr) auto minmax(84px, auto); }
