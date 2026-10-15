@@ -352,6 +352,28 @@ def test_rollback_que_nao_sai_nao_declara_sucesso_e_o_proximo_boot_desfaz(user_i
                     and k[1] in ("finito_valor", "finito_amount") and not F._constraints(cur)[k]]
 
 
+def test_sujas_da_corrida_usam_o_nome_real_da_coluna_mesmo_com_constraint_hasheada(user_id, monkeypatch):
+    comum = "b" * 58
+    col = comum + "z"
+    assert F.nome_check(col) != F.PREFIXO_FINITO + col  # nome longo: truncado + hash
+    _q(f"create table zz_finito_longo2 (id serial primary key, {col} numeric)")
+    original = F.colunas_fora_do_limite
+
+    def prescan_e_depois_escrita(cur, colunas):
+        achadas = original(cur, colunas)
+        _q(f"insert into zz_finito_longo2 ({col}) values (1e20)")
+        return achadas
+
+    monkeypatch.setattr(F, "colunas_fora_do_limite", prescan_e_depois_escrita)
+    try:
+        r = _ensure()
+        assert r["sujas"] == [f"zz_finito_longo2.{col}"], r  # a coluna de verdade, não o nome da constraint
+    finally:
+        monkeypatch.setattr(F, "colunas_fora_do_limite", original)
+        _q("drop table if exists zz_finito_longo2")
+        _ensure()
+
+
 # ── (5) lock ─────────────────────────────────────────────────────────────────
 
 def test_tabela_travada_vira_falha_sem_travar_as_outras(sem_check_finito):
