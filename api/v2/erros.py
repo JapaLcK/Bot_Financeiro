@@ -8,6 +8,7 @@ import sys
 import traceback
 from http.client import responses
 
+import psycopg
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -17,6 +18,7 @@ from starlette.requests import ClientDisconnect
 
 from core.admin_dashboard import log_system_event, status_do_erro
 from core.pg_text import limpa_para_pg
+from db.finito_checks import MSG_VALOR_API, violacao_finito
 
 _CODIGOS = {
     401: "unauthenticated",
@@ -78,6 +80,18 @@ async def validacao_erro(request: Request, exc: RequestValidationError) -> JSONR
         for e in exc.errors()
     ])
     return _envelope(422, "validation_error", "Dados inválidos.", details)
+
+
+async def valor_finito_erro(request: Request, exc: psycopg.errors.CheckViolation) -> JSONResponse:
+    # CHECK `finito_*` do banco (db/finito_checks.py): NaN/Infinity/absurdo que passou
+    # pela guarda da rota. Outro CheckViolation segue para o 500. Sem `str(exc)`: o
+    # texto traz 'Failing row contains (...)'.
+    nome = violacao_finito(exc)
+    if nome is None:
+        raise exc
+    await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
+                           source=f"{request.method} {request.url.path}", details={"constraint": nome})
+    return _envelope(400, "valor_invalido", MSG_VALOR_API)
 
 
 def sem_reraise(app):

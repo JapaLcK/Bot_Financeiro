@@ -10,6 +10,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from utils_date import _tz
+from utils_text import VALOR_MAX
 
 # A MESMA gramática do `_SQL_PROFIT` (db/open_finance.py). `fullmatch`, e não
 # `$`: em Python `$` aceita um `\n` no fim, no Postgres não.
@@ -18,16 +19,19 @@ _NUMERO = re.compile(r"-?[0-9]+(\.[0-9]+)?")
 
 
 def _numero(v) -> Decimal | None:
-    """Número do banco, ou None. Nunca 0 no lugar do que não se leu."""
+    """Número do banco, ou None (inclusive acima de `VALOR_MAX`, que o CHECK `finito_*`
+    recusaria). Nunca 0 no lugar do que não se leu."""
     if isinstance(v, bool):
         return None
     if isinstance(v, int):
-        return Decimal(v)  # sem passar por float: 10**400 estouraria o isfinite
-    if isinstance(v, float):
-        return Decimal(str(v)) if math.isfinite(v) else None
-    if isinstance(v, str) and _NUMERO.fullmatch(v):
-        return Decimal(v)
-    return None
+        d = Decimal(v)  # sem passar por float: 10**400 estouraria o isfinite
+    elif isinstance(v, float):
+        d = Decimal(str(v)) if math.isfinite(v) else None
+    elif isinstance(v, str) and _NUMERO.fullmatch(v):
+        d = Decimal(v)
+    else:
+        return None
+    return d if d is not None and abs(d) <= VALOR_MAX else None
 
 
 def _texto(v) -> str | None:

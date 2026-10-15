@@ -7,6 +7,7 @@ finance_bot_websocket_custom.py sem mudança de comportamento.
 import asyncio
 import pathlib
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
@@ -670,6 +671,8 @@ async def pay_bill_route(
         )
     except CartaoDoBanco as exc:  # a adoção pelo banco entre a leitura acima e o pagamento
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao pagar fatura: {exc}") from exc
 

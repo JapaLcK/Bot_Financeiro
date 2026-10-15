@@ -27,6 +27,8 @@ manda o usuário reconectar o banco.
 dois. A escolha real é gravar saneado ou não gravar nada.
 """
 
+import re
+
 _FFFD = "�"
 
 
@@ -190,6 +192,25 @@ def detalhe_seguro(exc: Exception) -> str:
     `except` alcançam.
     """
     return _ERRO_DE_CODIFICACAO if isinstance(exc, UnicodeError) else str(exc)
+
+
+_FAILING_ROW = re.compile(r"Failing row contains \(.*", re.S)
+
+
+def redigir_failing_row(valor):
+    """Troca o DETAIL `Failing row contains (...)` do Postgres (a linha inteira do usuário:
+    valor, descrição, user_id) por `Failing row contains (omitido)`, até o fim do texto.
+    `str`, e `dict`/`list` (valores) devolvidos como cópia; o resto volta como veio.
+    Fonte única da regra: o filtro de log (`core/observability.py`) e os dois gravadores de
+    `system_event_logs` (`log_system_event_sync`, `admin_dashboard.log_system_event`) a usam.
+    Recursão simples: `details` é JSON raso montado pelo nosso código, não corpo de cliente."""
+    if isinstance(valor, str):
+        return _FAILING_ROW.sub("Failing row contains (omitido)", valor)
+    if isinstance(valor, dict):
+        return {k: redigir_failing_row(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [redigir_failing_row(v) for v in valor]
+    return valor
 
 
 if __name__ == "__main__":  # pragma: no cover - autocheck

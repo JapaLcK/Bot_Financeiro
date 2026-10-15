@@ -2023,7 +2023,10 @@ das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
 consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
 `db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
-retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
+retry em processo; falha vira WARNING e o próximo boot repara), e o CHECK de valor
+finito em toda coluna numérica (`_tarefa_finito_checks` →
+`db/finito_checks.ensure_finito_checks_once`: mesmo molde, lock de sessão próprio; ver
+"Banco de dados"). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -2094,6 +2097,34 @@ grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | 
 
 Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
+
+**Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
+`finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico, nunca teto
+de negócio; NULL passa).** Existe porque `nan <= 0` é False: NaN/Infinity/1e308 passavam
+pelas guardas por porta (`valor_valido`/`valor_finito`, que ficam, pela mensagem amigável).
+Nasce em `db/finito_checks.py::ensure_finito_checks_once`, na tarefa de fundo (fora do
+`init_db`, para dado sujo nunca travar o boot): pré-scan tudo-ou-nada (coluna suja =>
+nada é adicionado, `logger.error` uma vez por boot só com `tabela.coluna`, para
+entrar no `backend_errors_24h`), `ADD CONSTRAINT ... NOT VALID` com
+`lock_timeout` de 1s (tabela travada vira `falhas` e o próximo boot tenta de novo),
+depois `VALIDATE`. **Coluna numérica nova é coberta no boot seguinte**; só se exclui
+com motivo escrito em `SEM_CHECK_FINITO` (hoje: `pix_unmatched_payments.value/net_value`).
+A violação vira 400 (`valor_finito_violado_handler` no monólito, `erros.valor_finito_erro`
+no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
+`violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
+(`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
+(traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
+COBRE: (1) o filtro `_sem_failing_row` nos handlers do root que `core/observability.py` instala
+(stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de
+`system_event_logs` (`log_system_event_sync` e `admin_dashboard.log_system_event`): `message` e
+`details`. NÃO cobre: logger com `propagate=False` (uvicorn), `print`/stderr direto, handler fora
+do root, nem outro INSERT em `system_event_logs`, nem a resposta HTTP/WhatsApp (essa é a frase fixa).
+Rota que embrulha `except Exception` em `HTTPException(f"...{exc}")`
+tem de deixar o `CheckViolation` passar antes (`except psycopg.errors.CheckViolation: raise`).
+Em teste: o `conftest` instala as constraints no banco da execução; teste que grava veneno
+DE PROPÓSITO (o espelho legado sujo que a leitura tem de tolerar) usa a fixture
+`sem_check_finito("tabela", "coluna")`, que derruba o CHECK e o recoloca NOT VALID no fim.
+Escritor real do produto que esbarra no CHECK é bug da porta, não motivo para a fixture.
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,

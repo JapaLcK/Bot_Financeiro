@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any
 from ofx_import import import_ofx_bytes
+from db.finito_checks import violacao_finito
 from core.services.fonte_unica import exigir
 try:
     from utils_text import fmt_brl
@@ -190,4 +191,6 @@ def handle_credit_ofx_import(user_id: str, attachment_bytes: bytes, filename: st
         rep = import_credit_ofx_bytes(uid, card["id"], attachment_bytes, filename)
         return format_credit_ofx_report(rep, card["name"])
     except Exception as e:
+        if violacao_finito(e):
+            raise  # tratador central (rota/handle_incoming): `{e}` traz "Failing row contains (...)"
         return f"❌ Erro ao importar fatura do {card['name']}: {e}"

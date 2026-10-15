@@ -176,6 +176,7 @@ def test_regra_do_numero_e_a_mesma_do_sql_profit():
             cur.execute(f"select {_SQL_PROFIT} as v from (select %s::jsonb as raw) i",
                         (Jsonb({"amountProfit": v}),))
             sql = cur.fetchone()["v"]
+            # Os dois recusam também o que o CHECK `finito_*` recusaria (> VALOR_MAX).
             assert _numero(v) == sql, f"divergem em {v!r}: python={_numero(v)!r} sql={sql!r}"
         c.commit()
     for v in (float("nan"), float("inf"), float("-inf")):

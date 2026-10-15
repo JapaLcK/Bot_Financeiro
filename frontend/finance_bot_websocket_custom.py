@@ -40,6 +40,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import psycopg
 import uvicorn
 from pydantic import BaseModel, Field, model_validator
 from slowapi.errors import RateLimitExceeded
@@ -80,6 +81,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
+from db.finito_checks import MSG_VALOR_API, violacao_finito
 from db.rate_limits import RATE_LIMIT_UPSERT_SQL
 from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (
@@ -1829,6 +1831,25 @@ async def _tarefa_fk_indexes():
                     getattr(exc, "sqlstate", None))
 
 
+async def _tarefa_finito_checks():
+    # CHECK de valor finito em toda coluna numérica (db/finito_checks.py): pré-scan,
+    # ADD NOT VALID e VALIDATE, fora do init_db. Uma vez por boot; falha vira WARNING e o
+    # próximo boot repara. Logger e não print, como `_tarefa_fk_indexes`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.finito_checks import ensure_finito_checks_once  # noqa: PLC0415
+        t0 = _startup_time.monotonic()
+        r = await asyncio.to_thread(ensure_finito_checks_once)
+        if r is None:
+            log.info("[finito_checks] outro processo está rodando; nada a fazer aqui")
+        else:
+            log.info("[finito_checks] %.1fs: criadas=%d sujas=%s falhas=%s", _startup_time.monotonic() - t0,
+                     len(r["criadas"]), r["sujas"] or "nenhuma", r["falhas"] or "nenhuma")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[finito_checks] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2253,6 +2274,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
+                asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
             ]
         )
     else:
@@ -2759,10 +2781,25 @@ async def unhandled_exception_page_handler(request: Request, exc: Exception):
     )
 
 
+async def valor_finito_violado_handler(request: Request, exc: psycopg.errors.CheckViolation):
+    """CHECK `finito_*` do banco (db/finito_checks.py) recusou NaN/Infinity/absurdo que
+    passou pelas guardas da porta: 400 em vez de 500. Outro CheckViolation segue para o 500.
+    NUNCA `str(exc)`: traz 'Failing row contains (...)' (dado do usuário)."""
+    nome = violacao_finito(exc)
+    if nome is None:
+        raise exc
+    await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
+                           source=f"{request.method} {request.url.path}",
+                           details={"constraint": nome})
+    return vary_accept(JSONResponse(status_code=400,
+                                    content={"detail": MSG_VALOR_API}))
+
+
 # StarletteHTTPException (não a do FastAPI): o 404/405 automático do router
 # levanta a do Starlette — registrar só a subclasse deixaria o caso principal fora.
 app.add_exception_handler(StarletteHTTPException, http_exception_page_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_page_handler)
+app.add_exception_handler(psycopg.errors.CheckViolation, valor_finito_violado_handler)
 # Exception (não 500): o Starlette tira esta chave do ExceptionMiddleware e a usa
 # como handler do ServerErrorMiddleware (applications.py:85-95).
 app.add_exception_handler(Exception, unhandled_exception_page_handler)
@@ -7823,6 +7860,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+        except psycopg.errors.CheckViolation:
+            raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
 
@@ -7848,6 +7887,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         feito = await asyncio.to_thread(lancar, int(user_id), tipo, valor, alvo, nota_in, explicit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
     launch_id, user_seq, new_balance = feito["launch_id"], feito["user_seq"], feito["new_balance"]
@@ -9412,6 +9453,8 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
             initial_note=initial_note,
             funding_source=_funding.to_db_arg(_src) if payload.initial_amount else None,
         )
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `str(exc)` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         message = (_funding.msg_insuficiente(user_id, payload.initial_amount or 0,
                                              acao="aporte inicial", plain=True)
