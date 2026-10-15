@@ -4939,6 +4939,12 @@ async function loadRecurringOverview({ background = false } = {}) {
   const totalGastos = gastos.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
   const receitas = ((inc && inc.incomes) || []).filter(r => r.is_active);
   const totalReceitas = receitas.reduce((s, r) => s + _recMonthlyEquiv(r), 0);
+  // R2: com banco conectado a receita vem do extrato (o servidor devolve a lista vazia e
+  // `banco_conectado: true`): sem aba, sem entradas, sem resultado. A aba "Receitas fixas"
+  // nasce escondida no HTML e só aparece quando o GET diz `banco_conectado: false`.
+  const comBanco = !!(inc && inc.banco_conectado === true);
+  const abaReceitas = document.querySelector('#recurring-tabs [data-rectab="incomes"]');
+  if (abaReceitas) abaReceitas.style.display = inc && inc.banco_conectado === false ? "" : "none";
   const pend = ((bills && bills.bills) || []).filter(b => b.status === "pending");
   const totalPend = pend.reduce((s, b) => s + (b.amount || 0), 0);
 
@@ -4975,11 +4981,12 @@ async function loadRecurringOverview({ background = false } = {}) {
   const head = `
     <div style="margin-bottom:14px">
       <h2 style="margin:0 0 2px;font-size:1.5rem">Previsão mensal</h2>
-      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente o que entra, o que sai e o que vence primeiro, só do que é recorrente.</div>
+      <div style="font-size:.86rem;color:var(--text-3)">Veja rapidamente ${comBanco ? "o que sai e o que vence primeiro" : "o que entra, o que sai e o que vence primeiro"}, só do que é recorrente.</div>
     </div>`;
 
   // ── Alerta (déficit ou no azul) ──
-  const alerta = positivo
+  const alerta = comBanco ? ""
+    : positivo
     ? `<div class="mock-card" style="border:1px solid rgba(34,197,94,.35);margin-bottom:14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div style="font-size:1.5rem"><i class="ph ph-check-circle" aria-hidden="true"></i></div>
         <div style="flex:1;min-width:220px">
@@ -5016,11 +5023,11 @@ async function loadRecurringOverview({ background = false } = {}) {
   // `\bph-([a-z0-9-]+)` e não distingue comentário de marcação, então citá-lo
   // reprova `tests/test_phosphor_subset.py` — foi o que derrubou o CI deste PR.
   const statsRow = `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
-    ${statCard(_toneMoney(entradas), "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), _toneMoney(entradas),
+    ${comBanco ? "" : statCard(_toneMoney(entradas), "rgba(34,197,94,.15)", '<i class="ph ph-chart-line-up" aria-hidden="true"></i>', "Entradas previstas", _fmtBRL(entradas), _toneMoney(entradas),
       `${receitas.length} receita${plural(receitas.length)} fixa${plural(receitas.length)}`)}
     ${statCard(_toneMoney(-saidas), "rgba(251,113,133,.15)", '<i class="ph ph-chart-line-down" aria-hidden="true"></i>', "Saídas previstas", _fmtBRL(saidas), _toneMoney(-saidas),
       `${gastos.length} gasto${plural(gastos.length)} fixo${plural(gastos.length)} + ${pend.length} boleto${plural(pend.length)}`)}
-    ${statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", _toneClass(resultado, '<i class="ph ph-plus" aria-hidden="true"></i>', '<i class="ph ph-minus" aria-hidden="true"></i>') || '<i class="ph ph-circle" aria-hidden="true"></i>', "Resultado previsto",
+    ${comBanco ? "" : statCard(resColor, positivo ? "rgba(34,197,94,.15)" : "rgba(255,45,45,.15)", _toneClass(resultado, '<i class="ph ph-plus" aria-hidden="true"></i>', '<i class="ph ph-minus" aria-hidden="true"></i>') || '<i class="ph ph-circle" aria-hidden="true"></i>', "Resultado previsto",
       (positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado)), resColor, "Projeção até o fim do mês")}
   </div>`;
 
@@ -5052,15 +5059,15 @@ async function loadRecurringOverview({ background = false } = {}) {
   const resumoCard = `
     <div class="mock-card">
       <h3><i class="ph ph-chart-bar" aria-hidden="true"></i> Resumo rápido</h3>
-      ${resumoRow("Receitas fixas", _fmtBRL(totalReceitas), _toneMoney(totalReceitas))}
+      ${comBanco ? "" : resumoRow("Receitas fixas", _fmtBRL(totalReceitas), _toneMoney(totalReceitas))}
       ${resumoRow("Gastos fixos", _toneClass(-totalGastos, "+ ", "- ") + _fmtBRL(totalGastos), _toneMoney(-totalGastos))}
       ${resumoRow("Boletos / contas", _toneClass(-totalPend, "+ ", "- ") + _fmtBRL(totalPend), _toneMoney(-totalPend))}
-      <div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
-        <span>Resultado do mês</span><span style="color:${resColor}">${(positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado))}</span></div>
+      ${comBanco ? "" : `<div style="border-top:1px solid rgba(128,128,128,.2);margin:6px 0;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
+        <span>Resultado do mês</span><span style="color:${resColor}">${(positivo ? "" : "- ") + _fmtBRL(Math.abs(resultado))}</span></div>`}
     </div>`;
 
   let acaoMsg, acaoTab, acaoCta;
-  if (entradas === 0 && saidas === 0) { acaoMsg = "Cadastre suas receitas e gastos fixos pra ver a previsão do mês."; acaoTab = "expenses"; acaoCta = "Começar"; }
+  if (entradas === 0 && saidas === 0) { acaoMsg = comBanco ? "Cadastre seus gastos fixos pra ver a previsão do mês." : "Cadastre suas receitas e gastos fixos pra ver a previsão do mês."; acaoTab = "expenses"; acaoCta = "Começar"; }
   else if (positivo) { acaoMsg = "Você está no azul este mês. Que tal adiantar um boleto?"; acaoTab = "bills"; acaoCta = "Ver boletos"; }
   else if (totalPend >= totalGastos) { acaoMsg = "O maior peso está em boletos e contas a pagar."; acaoTab = "bills"; acaoCta = "Ver contas"; }
   else { acaoMsg = "O maior peso está nos gastos fixos."; acaoTab = "expenses"; acaoCta = "Ver gastos fixos"; }
@@ -5574,8 +5581,20 @@ async function _fetchRecurringIncomes({ force = false } = {}) {
       throw _erroHttp(resp.status, detail);
     }
     const data = await resp.json();
+    if (data.banco_conectado === true) return { banco_conectado: true };
     return data.incomes || [];
   }, { force });
+}
+
+// R2: o banco conectou com a aba "Receitas fixas" aberta (puxão ou revalidação). A receita
+// passa a vir do extrato e o servidor recusa salvar: esconde a aba e volta à Visão geral.
+function _receitasViraramBanco(data) {
+  if (!data || data.banco_conectado !== true) return false;
+  _recurringIncomeCache = null;
+  const aba = document.querySelector('#recurring-tabs [data-rectab="incomes"]');
+  if (aba) aba.style.display = "none";
+  if (_recurringTab === "incomes") setRecurringTab("overview");
+  return true;
 }
 
 // Puxa o total de gastos fixos pra "sobra prevista" quando o user entrou direto
@@ -5608,7 +5627,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   // Puxão: sem skeleton, fetch antes de render, falha real rejeita sem tocar DOM.
   if (background) {
     const data = await _fetchRecurringIncomes({ force: true });
-    if (data === undefined) return;
+    if (data === undefined || _receitasViraramBanco(data)) return;
     if (data && data.pro_required) { _renderRecurringIncomeProGate(); return; }
     _recurringIncomeCache = data;
     _renderRecurringIncomeView(data);
@@ -5619,6 +5638,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   if (_recurringIncomeCache && !forceFresh) {
     _renderRecurringIncomeView(_recurringIncomeCache);
     _fetchRecurringIncomes().then(fresh => {
+      if (_receitasViraramBanco(fresh)) return;
       if (fresh && !fresh.pro_required) {
         _recurringIncomeCache = fresh;
         _renderRecurringIncomeView(fresh);
@@ -5635,7 +5655,7 @@ async function loadRecurringIncomeView(forceFresh = false, { background = false 
   `;
   try {
     const data = await _fetchRecurringIncomes({ force: true });
-    if (data === undefined) return;
+    if (data === undefined || _receitasViraramBanco(data)) return;
     if (data && data.pro_required) {
       _renderRecurringIncomeProGate();
       return;

@@ -150,7 +150,10 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
     rec_by_id = {r['id']: r for r in recs}
     instances = ler_instancias(cur, user_id)
     by_cycle = {(b['recurring_id'], _data(b['due_date'])): b for b in instances if b['recurring_id']}
-    receitas = ler_receitas(cur, user_id)
+    # Com banco lido, a receita vem do extrato (`anexar`) e a manual não conta: uma fonte só
+    # (R2). Mesma regra de `has_open_finance_connections` (`ler_frescor` usa `_TERMINAL`).
+    from db.of_recurring import ler_frescor
+    receitas = [] if bancos_permitidos and ler_frescor(cur, user_id) else ler_receitas(cur, user_id)
     for income, rows in ((True, receitas), (False, recs)):
         for r in rows:
             if not r['is_active']:
@@ -216,7 +219,7 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
 
     if bancos_permitidos:  # sem os bancos na base, despesa deles seria incoerente
         from core.services.previsao_recorrencias import anexar
-        anexar(cur, s, user_id, until, recs, receitas, instances, {c['id'] for c in banks})
+        anexar(cur, s, user_id, until, recs, instances, {c['id'] for c in banks})
 
     for b in ler_faturas(cur, user_id):
         total, paid, remaining, invalid_value = valores_fatura(b)

@@ -32,7 +32,7 @@
 | Fase | Situação |
 |---|---|
 | 0. Decisões e medição | P1–P4, P6 e P7 respondidas; **P5 em aberto** (§8). Medição das recorrências feita em 2026-10-08 (§9); o resto da medição do §4 não foi feito. |
-| 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). A receita passou a vir do extrato (P7 a, PR A, em código; falta a medição pós-deploy). Falta o 1a-2 (ignorar receita). |
+| 1a. Previsão lê as recorrências do OF | **Feita** no #866 (§4). A receita passou a vir do extrato (P7 a, PR A, em código; falta a medição pós-deploy). Falta o 1a-2 (ignorar receita). **R2 (2026-10-14):** com banco conectado a Previsão ignora a receita manual e o cadastro é recusado; sem banco, a manual segue valendo. |
 | 1b. Fatura OF paga pelo extrato | PR 1: ingestão do `/bills` em `of_card_bills` (nenhuma tela lê). PR 2a (`quitar_pelo_banco`: grava `paid_amount` do cartão OF pelo `of_card_bills`, regra por conta; vale para todo usuário com banco conectado, sem flag) em código. PR 2b (recusar o "pagar fatura" manual no cartão do banco, `db.cards.pay_bill_amount` levanta `CartaoDoBanco`; WhatsApp, IA e /app) **entrou no B2 por decisão do dono em 2026-10-11, sem esperar a consulta pós-deploy do 2a**; limite aceito: banco com "regra indefinida" ou N+1 deixa no máximo UMA fatura fechada em aberto até o PR da regra N+1. |
 | 1c. Custo mensal do OF | A fazer. A parte de avisos e a parada do cobrador vêm antes da 2a; o custo, junto da Fase 4. |
 | 2. Parar de aceitar | A fazer. Depende da 1b (para o #5) e da P7 (para o #10 e o #19). |
@@ -98,7 +98,7 @@ inventário.
 | 7 | **Importar fatura OFX** | WA `core/handle_incoming.py:999`, `:1009`; /app `mono:8121` → `:8164` | `core/services/ofx_service.py:154` → `db/cards.py:2151` | Só para quem tem a chave |
 | 8 | **Importar extrato OFX/CSV/PDF**. É input manual: é arquivo, não OF. | WA `handle_incoming.py:998`, `:1013`, `:1058`; /app `mono:8166` | `ofx_service.py:74`, `statement_service.py:95` → `db/accounts.py:2453` (`launches`) + `set_balance` (`ofx_import.py:266`, `statement_import.py:714`) | Só para quem tem a chave |
 | 9 | **Gasto fixo / recorrente manual** (autopay e "conta a pagar" `payment_mode='manual'`) | WA `core/handlers/recurring.py:63` → `:178`; WA, aceitar sugestão de fixo `core/handlers/pending.py:159` (a oferta nasce em `launches.py:1044`); /app `mono:8934`, `:8956`, `:9006` | `db/recurring.py:159`, `:255`, `:378` → `recurring_expenses` | Não |
-| 10 | **Receita fixa manual** | WA `recurring.py:152`; /app `mono:9078`, `:9101`, `:9149` | `db/recurring_income.py:106`, `:163`, `:258` → `recurring_incomes` | Não |
+| 10 | **Receita fixa manual** | WA `recurring.py:152`; /app `mono:9078`, `:9101`, `:9149` | `db/recurring_income.py:106`, `:163`, `:258` → `recurring_incomes` | **Só com banco conectado (R2, 2026-10-14)**: criar e editar recusam; apagar livre; o legado fica |
 | 11 | **Boleto / conta avulsa** | IA `add_boleto` (`tools/bills.py:407`, `:279`); /app `mono:8874`, `:8890`, `:8909` | `db/bills.py:93`, `:118`, `:148` → `bill_instances` | Não |
 | 12 | **Instância de conta a pagar gerada sozinha** (o próximo ciclo do #9 manual) | job `core/services/recurring_charger.py:135` | `db/bills.py:161` → `bill_instances` | Não (deriva do #9) |
 | 13 | **Marcar conta como paga** | WA `core/handlers/bills.py:99` → `forma_pagamento.py:198`/`:207`; IA `mark_bill_paid` (`tools/bills.py:372`); /app `mono:8797`; WA botões `adapters/whatsapp/wa_runtime.py:1155`, `:1326` | `db/bills.py:176` → `bill_instances` + `launches` (Carteira se for dinheiro) | Não (some junto com o #9 e o #11) |
@@ -149,7 +149,7 @@ de escrever a lista de arquivos.
 
 ### 3.1 Previsão: o que sobra sem o manual
 
-> **Superado em 2026-10-09** (ADR 0006): a parte que supõe a saída do fixo e da receita manuais (Fases 2 e 3). Os fixos e as receitas manuais continuam na Previsão (ADR 0006, D5). A receita detectada pelo extrato (#981) vale. Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): a parte que supõe a saída do fixo e da receita manuais (Fases 2 e 3). Os fixos e as receitas manuais continuam na Previsão (ADR 0006, D5). A receita detectada pelo extrato (#981) vale. **Revisto em 2026-10-14 (R2, decisão separada do dono, ADR 0006 decisão 4):** para quem tem banco conectado (a regra da Q40), a receita manual sai da Previsão e o cadastro é recusado; a do extrato (#981) a substitui. Sem banco, segue valendo o que está acima. Texto original abaixo, mantido.
 
 Na base deste inventário, os compromissos do motor vinham **todos** de tabela manual: os
 fixos (#9), as receitas fixas (#10) e os boletos e contas a pagar (#11–13). A exceção era a
@@ -412,7 +412,7 @@ a ler a recorrência do OF ou saem (P4). Faixa Leve, e Completo se mexer no moto
 
 ### Fase 2: parar de ACEITAR, por canal (reaproveita a trava da Q36)
 
-> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d), **com uma exceção**: a recusa do "pagar fatura" manual no cartão do banco (item #5 do 2a), decisão do dono de 2026-10-11 já implementada (B2), segue válida. A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): a Fase 2 não será executada (2a, 2b, 2d), **com uma exceção**: a recusa do "pagar fatura" manual no cartão do banco (item #5 do 2a), decisão do dono de 2026-10-11 já implementada (B2), segue válida. A 2c ("apagar tudo" não apaga dado do OF) segue como proteção. Qualquer novo bloqueio precisa de decisão separada (ADR 0006, decisão 4). A receita fixa manual de quem tem banco conectado é um desses bloqueios, decidido em 2026-10-14 (R2): a linha "Receita recorrente" da matriz abaixo vale. Texto original abaixo, mantido.
 
 A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`, presa por
 `tests/test_fonte_unica_q36.py:351`, que reprova escritor novo sem classificação). A fase
@@ -453,7 +453,7 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   | Cartão manual | trava | dias e limite: trava; nome, cor, bandeira, final e ordem (`reorder_cards`): livres | — | trava | pagar fatura: trava | trava | — |
   | Compra e parcela do cartão manual | trava | trava | — | trava (grupo) | antecipar: trava | trava | — |
   | Fixo (despesa recorrente) | trava | trava | livre até o cobrador parar | trava | — | — | cobrador e avisos param **antes** da 2a |
-  | Receita recorrente | espera P7 | espera P7 | espera P7 | espera P7 | — | — | — |
+  | Receita recorrente | trava **só com banco conectado** (R2) | trava só com banco (pausar incluso) | trava só com banco | apagar: livre (o legado fica) | — | — | — |
   | Conta e boleto manuais | trava | trava | — | trava | marcar paga: trava | trava | — |
   | Caixinha manual | trava | alvo e data: livres até a Fase 4; o resto trava | — | trava | depositar e retirar: trava | trava | rendimento (`accrue_all_pockets`): para antes da 2a, no job **e** nas leituras que o chamam |
   | Investimento manual | trava (Q36) | trava | — | trava | aportar (Q36) e resgatar: trava | trava | rendimento (`accrue_all_investments`): para antes da 2a, no job **e** nas leituras que o chamam |
@@ -480,9 +480,10 @@ A trava já mora nos escritores que todos os canais chamam (`fonte_unica.exigir`
   carona. Cada um entra na última coluna da matriz. O controle negativo da 2a roda esses
   caminhos depois da trava: o legado não pode mudar.
 - O escopo deixa de ser "tem a chave" e passa a ser a regra da P2.
-- Toda mutação da receita recorrente manual (criar, editar, pausar e apagar) espera a P7. Na
-  opção c da P7 (receita manual como exceção), ela não trava.
-  Até lá o caso `recorrente` trava só a despesa.
+- Receita recorrente manual (R2, decisão do dono de 2026-10-14): criar, editar e pausar travam
+  **só para quem tem banco conectado** (a regra da Q40, `regra_ativa`); quem não tem segue
+  cadastrando, e a Previsão dele conta a manual. Apagar fica livre e o legado nunca é apagado (P3).
+  O caso `recorrente` da trava de despesa segue como estava.
 - Os textos da IA (`system_prompt.py`) e o `validate` das tools recusam antes de pedir
   confirmação, como já fazem em `tools/investments.py:130`.
 - **Não faz:** esconder, apagar, mexer em leitura.
@@ -739,7 +740,7 @@ reserva do `/painel`.
 
 **P7 (nova, 2026-10-08). De onde vem a receita da Previsão sem o cadastro manual?**
 
-> **Superado em 2026-10-09** (ADR 0006): parcial: vale a detecção da receita pelo extrato (#981); não vale a ideia de que a receita manual sai da Previsão. Texto original abaixo, mantido.
+> **Superado em 2026-10-09** (ADR 0006): parcial: vale a detecção da receita pelo extrato (#981); não vale a ideia de que a receita manual sai da Previsão. **Revisto em 2026-10-14 (R2, decisão separada do dono, ADR 0006 decisão 4):** para quem tem banco conectado (a regra da Q40), a receita manual sai da Previsão e o cadastro é recusado; a do extrato (#981) a substitui. Sem banco, segue valendo o que está acima. Texto original abaixo, mantido.
 
 A P4 supunha que o salário viria como recorrência do OF. A medição do §9 mostrou que quase
 nunca vem.
@@ -762,7 +763,7 @@ pessimista para quase todos; c contradiz a decisão de 2026-10-07 numa peça só
 | P4 | A Previsão passa a ter **só o que o Open Finance detecta** (recorrências + faturas); contas anuais e boletos ficam fora, com aviso. |
 | P5 | De onde vem o progresso da meta: **em aberto** — o dono quer pensar melhor. |
 | P6 | A reserva **vira uma meta**: alvo = N meses de custo mensal, com o custo vindo das recorrências do Open Finance. |
-| P7 | **Respondida em 2026-10-13: a)** detectar a receita pelo extrato, **só** pelo extrato (a recorrência de entrada da Pluggy deixa de ser lida). Regra **frouxa**, **só com o documento do pagador, de 11 ou 14 dígitos e não todo zero** (sem ele, ou mascarado, o crédito fica fora: a descrição do Pix é genérica e uniria pessoas diferentes): mínimo de 2 créditos, intervalos de 25 a 35 dias, todos os valores a ±20% da mediana (com 2 créditos a mediana é a média, então "±20%" aceita dois valores que diferem até 50%, ex.: 1000 e 1500); valor previsto = o último recebido, dia = o da cadeia; créditos do mesmo documento no mesmo dia somam num só. Sem aviso "nenhuma receita detectada". Fora: movimento interno, rendimento (as palavras interest, dividend, dividendo e rendimento, por palavra inteira, na categoria ou na descrição), Pix para si (pagador = recebedor) e autotransferência entre contas do próprio usuário. Calculado na leitura, sem tabela. O "ignorar receita errada" (1a-2) fica para um PR B, e a medição pós-deploy vem depois. Limites declarados: pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato diferente entre meses vira chaves distintas; aumento acima de 20%, renda quinzenal e bônus depois do último crédito não são detectados; cashback com documento pode entrar. |
+| P7 | **Respondida em 2026-10-13: a)** detectar a receita pelo extrato, **só** pelo extrato (a recorrência de entrada da Pluggy deixa de ser lida). Regra **frouxa**, **só com o documento do pagador, de 11 ou 14 dígitos e não todo zero** (sem ele, ou mascarado, o crédito fica fora: a descrição do Pix é genérica e uniria pessoas diferentes): mínimo de 2 créditos, intervalos de 25 a 35 dias, todos os valores a ±20% da mediana (com 2 créditos a mediana é a média, então "±20%" aceita dois valores que diferem até 50%, ex.: 1000 e 1500); valor previsto = o último recebido, dia = o da cadeia; créditos do mesmo documento no mesmo dia somam num só. Sem aviso "nenhuma receita detectada". Fora: movimento interno, rendimento (as palavras interest, dividend, dividendo e rendimento, por palavra inteira, na categoria ou na descrição), Pix para si (pagador = recebedor) e autotransferência entre contas do próprio usuário. Calculado na leitura, sem tabela. O "ignorar receita errada" (1a-2) fica para um PR B, e a medição pós-deploy vem depois. Limites declarados: pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato diferente entre meses vira chaves distintas; aumento acima de 20%, renda quinzenal e bônus depois do último crédito não são detectados; cashback com documento pode entrar. **Complemento (R2, 2026-10-14):** a recusa da receita manual vale só com banco conectado (a regra da Q40); sem banco a manual segue cadastrável e a Previsão a conta; o legado fica (P3). Limites do R2, sem código: o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` só vale para quem lê por `cashflow_snapshot.carregar` (WhatsApp, forecast, simulador); `previsao_v2.ler_previsao` (o `/painel`) chama `ler(..., True)` e ignora o freio (pré-existente). A recusa no WhatsApp depende de o LLM devolver `tipo` de receita (sem `tipo`, "salário" pode virar gasto fixo; pré-existente). Falha na consulta de banco conta como COM banco: quem não tem banco pode ver a aba sumir naquele carregamento. |
 
 ## 9. Medição em produção
 

@@ -9270,14 +9270,22 @@ def _recurring_income_value_error(code: str) -> HTTPException:
 
 @app.get("/recurring-incomes/{user_id}")
 async def recurring_income_list_route(request: Request, user_id: int, include_inactive: bool = False):
-    """Lista as receitas recorrentes do user. Pro-only."""
+    """Lista as receitas recorrentes do user. Pro-only.
+
+    R2: com banco conectado a lista vem vazia (a Previsão ignora a receita manual e a tela
+    a esconde) e `banco_conectado` é True; antes do gate de plano, para quem não tem plano
+    também receber a Visão geral sem receita."""
     _authorize_dashboard_access(request, user_id)
+    from core.services.fonte_unica import recusa_receita
+
+    if await asyncio.to_thread(recusa_receita, user_id):
+        return {"ok": True, "incomes": [], "banco_conectado": True}
     _require_pro(user_id, "recurring_expenses")
 
     from db.recurring_income import list_recurring_incomes
 
     items = await asyncio.to_thread(list_recurring_incomes, user_id, include_inactive)
-    return {"ok": True, "incomes": items}
+    return {"ok": True, "incomes": items, "banco_conectado": False}
 
 
 @app.post("/recurring-incomes/{user_id}")

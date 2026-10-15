@@ -603,10 +603,32 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (mesma classe do `custo_mensal`, `recorrencia_valor_invalido`). Identidade
   `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
   frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
-  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
-  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
-  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
-  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  na saída; interrompida (40+ dias) fica fora. Convivência com o fixo manual (só a saída):
+  casamento 1:1 (mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com fixo manual
+  sobrando, a saída do banco entra (pessimista, rotulada). **Receita fixa manual (R2,
+  2026-10-14): só para quem NÃO tem banco** (a regra da Q40: conexão fora de PAUSED/DELETED,
+  `forma_pagamento.regra_ativa`; conexão em erro conta como banco). Com banco, `cashflow_snapshot.ler`
+  nem lê a manual (a do extrato a substitui, na mesma leitura repeatable read), então não há
+  casamento de entrada; com o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` ou sem banco vivo ela conta.
+  Criar e editar (inclusive pausar) recusam com `FonteUnicaOF("receita", MSG_RECEITA)` em `db/recurring_income.py`
+  (o texto mora em `fonte_unica.MSG_RECEITA`, fora de `MENSAGENS`; 400 no `/app`, o texto puro no
+  WhatsApp, antes de qualquer pergunta do roteador). Se a recusa do roteador consome a clarification
+  do próprio `recurring.add`, a resposta vem com o aviso "🔕 Cancelei a pergunta anterior."; se o
+  consumo falha, loga e devolve só a recusa. No handler, `FonteUnicaOF` da corrida (banco conectou
+  depois da 1ª checagem) volta como texto puro, sem o "Não consegui criar". Apagar segue livre; o
+  `GET /recurring-incomes` devolve `[]` + `banco_conectado: true` (antes do gate de plano) e a aba
+  "Receitas fixas" do `/app` só aparece com `banco_conectado: false`. O legado fica no banco.
+  **Limites do R2 (declarados, sem código):** (1) o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` só
+  vale para quem lê por `cashflow_snapshot.carregar` (WhatsApp, forecast, simulador);
+  `previsao_v2.ler_previsao` (o `/painel`) chama `ler(..., True)` e ignora o freio (pré-existente),
+  então lá a receita manual de quem tem banco nunca conta. (2) A recusa no WhatsApp depende de o LLM
+  devolver `tipo` de receita; sem `tipo`, "salário" pode virar gasto fixo (pré-existente). (3) Falha
+  na consulta de banco conta como COM banco (`regra_ativa`): quem não tem banco pode ver a aba
+  "Receitas fixas" sumir, ou a recusa, naquele carregamento. A aba também some para quem não tem
+  banco quando o GET falha ou volta 403 de plano (só `banco_conectado === false` a mostra); "Gastos
+  fixos" segue visível com o convite de assinatura. (4) A recusa do roteador do WhatsApp
+  consome a pergunta pendente do próprio `recurring.add`; a de outro fluxo fica intacta.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
   saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`
   reconhece (pagamento de fatura, aplicação e resgate, caixinha, poupança, transferência "same
@@ -741,7 +763,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 
   A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
   em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
-  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  em `fonte_unica.MENSAGENS` (a exceção é o da receita, `fonte_unica.MSG_RECEITA`). `/app` = 400 com `detail` em texto; WhatsApp = o texto
   (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
   texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
   confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
