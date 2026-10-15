@@ -306,6 +306,52 @@ def test_quantidade_de_unidades_tem_limite_proprio_nao_o_do_dinheiro():
         _q("drop table if exists zz_finito_qtd")
 
 
+class _CurFalho:
+    """Cursor cujo `execute` levanta as primeiras `falhas` vezes (como o lock_timeout estourando)."""
+    def __init__(self, falhas):
+        self.falhas, self.chamadas = falhas, 0
+
+    def execute(self, _q):
+        self.chamadas += 1
+        if self.chamadas <= self.falhas:
+            raise psycopg.errors.LockNotAvailable("lock_timeout")
+
+
+def test_desfaz_tenta_3_vezes_e_devolve_o_que_nao_saiu():
+    assert F._desfaz(_CurFalho(2), [("launches", "finito_valor")]) == []        # perde 2 locks, o 3º passa
+    cur = _CurFalho(99)
+    assert F._desfaz(cur, [("launches", "finito_valor")]) == [("launches", "finito_valor")]
+    assert cur.chamadas == 3
+
+
+def test_rollback_que_nao_sai_nao_declara_sucesso_e_o_proximo_boot_desfaz(user_id, sem_check_finito, monkeypatch, caplog):
+    """Corrida suja o ADD; o DROP perde o lock: `criadas`/log não mentem e o boot seguinte remove a sobra."""
+    _ensure()
+    sem_check_finito("launches", "valor")
+    sem_check_finito("bank_movement_declarations", "amount")
+    original, real_desfaz = F.colunas_fora_do_limite, F._desfaz
+
+    def prescan_e_depois_escrita(cur, colunas):
+        achadas = original(cur, colunas)
+        _q("insert into launches (user_id, tipo, valor, criado_em) values (%s, 'despesa', 1e20, now())", (user_id,))
+        return achadas
+
+    monkeypatch.setattr(F, "colunas_fora_do_limite", prescan_e_depois_escrita)
+    monkeypatch.setattr(F, "_desfaz", lambda cur, cs: list(cs))  # nenhum DROP saiu
+    with caplog.at_level(logging.WARNING, logger="db.finito_checks"):
+        r = _ensure()
+    assert r["sujas"] == ["launches.valor"] and sorted(r["criadas"]) == [
+        "bank_movement_declarations.amount", "launches.valor"], r
+    assert "NÃO desfeitas" in caplog.text
+    monkeypatch.setattr(F, "colunas_fora_do_limite", original)
+    monkeypatch.setattr(F, "_desfaz", real_desfaz)
+    r = _ensure()  # a sobra agora é `pendente` e há linha suja: o pré-scan a remove
+    assert r["sujas"] == ["launches.valor"], r
+    with get_conn() as conn, conn.cursor() as cur:
+        assert not [k for k in F._constraints(cur) if k[0] in ("launches", "bank_movement_declarations")
+                    and k[1] in ("finito_valor", "finito_amount") and not F._constraints(cur)[k]]
+
+
 # ── (5) lock ─────────────────────────────────────────────────────────────────
 
 def test_tabela_travada_vira_falha_sem_travar_as_outras(sem_check_finito):

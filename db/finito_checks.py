@@ -105,6 +105,23 @@ def _aviso(tabela: str, exc: psycopg.Error) -> None:  # sqlstate, nunca o texto:
                    tabela, getattr(exc, "sqlstate", None))
 
 
+def _desfaz(cur, constraints: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """`drop constraint if exists` de cada (tabela, nome), até 3 tentativas (o `lock_timeout` de 1s
+    pode perder para uma transação longa). Devolve as que NÃO saíram."""
+    restantes = []
+    for t, nome in constraints:
+        for _ in range(3):
+            try:
+                cur.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
+                    sql.Identifier(t), sql.Identifier(nome)))
+                break
+            except psycopg.Error as exc:
+                _aviso(t, exc)
+        else:
+            restantes.append((t, nome))
+    return restantes
+
+
 def ensure_finito_checks(cur) -> dict:
     """Idempotente. Exige AUTOCOMMIT. Devolve {'faltando', 'criadas', 'sujas', 'falhas'}:
     listas de 'tabela.coluna' (as `falhas` são nomes de tabela)."""
@@ -126,6 +143,10 @@ def ensure_finito_checks(cur) -> dict:
                 # ERROR (1x por boot): entra no `backend_errors_24h`; só `tabela.coluna`, nunca o dado
                 logger.error("[finito_checks] valor fora do limite em %s; NADA adicionado até "
                              "alguém limpar essas colunas", ", ".join(out["sujas"]))
+                # sobra de boot interrompido também sai (estado parcial); falhou = tenta no próximo boot
+                for t, _n in _desfaz(cur, [(t, nome_check(c)) for t, c in pendentes]):
+                    if t not in out["falhas"]:
+                        out["falhas"].append(t)
                 return out
             por_tabela: dict[str, list[str]] = defaultdict(list)
             for t, c in faltando:
@@ -155,17 +176,15 @@ def ensure_finito_checks(cur) -> dict:
                 elif t not in out["falhas"]:
                     out["falhas"].append(t)
         if suja_depois:  # tudo-ou-nada vale também aqui: desfaz o que esta rodada criou; o próximo boot refaz o pré-scan
-            for t, nome in novas:
-                try:
-                    cur.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
-                        sql.Identifier(t), sql.Identifier(nome)))
-                except psycopg.Error as exc:
-                    _aviso(t, exc)
-                    if t not in out["falhas"]:
-                        out["falhas"].append(t)
-            out["sujas"], out["criadas"] = suja_depois, []
+            restantes = _desfaz(cur, novas)
+            out["sujas"] = suja_depois
+            out["criadas"] = [f"{t}.{nome.removeprefix(PREFIXO_FINITO)}" for t, nome in restantes]
+            for t, _n in restantes:  # não saiu: fica `pendente` e o próximo boot (pré-scan sujo) tenta de novo
+                if t not in out["falhas"]:
+                    out["falhas"].append(t)
             logger.error("[finito_checks] valor fora do limite em %s apareceu durante a instalação; "
-                         "constraints desta rodada desfeitas", ", ".join(suja_depois))
+                         "constraints desta rodada %s", ", ".join(suja_depois),
+                         "desfeitas" if not restantes else "NÃO desfeitas: " + ", ".join(f"{t}.{n}" for t, n in restantes))
     finally:
         cur.execute("select set_config('lock_timeout', %s, false)", (antigo,))
     return out
