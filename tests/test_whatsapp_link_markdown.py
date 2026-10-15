@@ -44,6 +44,16 @@ def test_link_http_sem_s_tambem_converte():
     assert wa("[x](http://a.com)") == "x: http://a.com"
 
 
+def test_esquema_em_maiuscula_converte_e_a_url_sai_como_veio():
+    assert wa("[pigbankai.com/painel](HTTPS://pigbankai.com/painel)") == "HTTPS://pigbankai.com/painel"
+    assert wa("[HTTPS://pigbankai.com/painel](https://pigbankai.com/painel)") == U
+    assert wa("[x](Http://a.com)") == "x: Http://a.com"
+
+
+def test_caminho_tem_caixa_exata():
+    assert wa("[pigbankai.com/Painel](https://pigbankai.com/painel)") == f"pigbankai.com/Painel: {U}"
+
+
 def test_colchete_aberto_antes_do_link_converte_o_link():
     assert wa("[a [b](https://u.com)") == "[a b: https://u.com"
 

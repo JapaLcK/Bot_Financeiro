@@ -9,13 +9,13 @@ import re
 
 
 # Limite {1,2000} na URL: sem ele `"[a](https://"*5000` era quadrático (1,3 s)
-_LINK_MD = re.compile(r"\[([^\[\]\n]{1,300})\]\((https?://[^)\s]{1,2000})\)")
+_LINK_MD = re.compile(r"\[([^\[\]\n]{1,300})\]\((https?://[^)\s]{1,2000})\)", re.I)  # re.I: só o esquema tem caixa (HTTPS://)
 
 
 def _link_wa(m: re.Match) -> str:
     """`[rótulo](url)` -> só a URL se o rótulo for a própria URL, senão `rótulo: url`."""
     def nu(s: str) -> str:
-        return re.sub(r"^https?://", "", s).rstrip("/")
+        return re.sub(r"^https?://", "", s, flags=re.I).rstrip("/")
     rotulo, url = m.groups()
     return url if nu(rotulo) == nu(url) else f"{rotulo}: {url}"
 
