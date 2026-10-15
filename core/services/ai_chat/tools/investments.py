@@ -23,6 +23,7 @@ from datetime import date
 from typing import Any
 
 import db
+from utils_text import valor_valido
 from core.services import fonte_unica
 from db import investido
 from core.observability import _log_falha
@@ -155,10 +156,12 @@ def _investment_deposit_execute(user_id: int, args: dict[str, Any]) -> str:
     name = (args.get("name") or "").strip()
     try:
         amount = float(args.get("amount") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor inválido."
     if not name or amount <= 0:
         return "🐷 Faltou o nome do investimento ou o valor."
+    if not valor_valido(amount):
+        return "🐷 Valor inválido."
     try:
         # Origem determinística: em tool de escrita o retorno de `execute` É a
         # resposta final (contrato em tools/_base.py), então não há como perguntar
@@ -212,12 +215,14 @@ def _investment_withdraw_execute(user_id: int, args: dict[str, Any]) -> str:
     withdraw_all = bool(args.get("withdraw_all"))
     try:
         amount = float(args.get("amount") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return "🐷 Valor inválido."
     if not name:
         return "🐷 Faltou o nome do investimento."
     if not withdraw_all and amount <= 0:
         return "🐷 Faltou o valor (ou peça pra 'resgatar tudo')."
+    if not withdraw_all and not valor_valido(amount):
+        return "🐷 Valor inválido."
     try:
         # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282).
         # Este canal não o exibe: a resposta do chat não nomeia banco nem avisa do sync.

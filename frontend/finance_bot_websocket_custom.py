@@ -8462,8 +8462,9 @@ FREE_BUDGETS_LIMIT = 3
 @app.post("/budgets/{user_id}")
 async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     _authorize_dashboard_access(request, user_id)
-    if payload.budget <= 0:
-        raise HTTPException(status_code=400, detail="budget must be > 0")
+    from utils_text import valor_valido
+    if payload.budget <= 0 or not valor_valido(payload.budget):  # `nan <= 0` é False
+        raise HTTPException(status_code=400, detail="budget must be > 0 and finite")
 
     from core.services.plan_service import plan_gate_ok
 
@@ -8780,6 +8781,9 @@ async def set_initial_balance_route(request: Request, user_id: int, payload: Ini
     _authorize_dashboard_access(request, user_id)
     if payload.amount < 0:
         raise HTTPException(status_code=400, detail="Saldo não pode ser negativo.")
+    from utils_text import valor_valido
+    if payload.amount and not valor_valido(payload.amount):  # 0 = não faz nada; NaN é truthy
+        raise HTTPException(status_code=400, detail="Saldo inválido.")
 
     from db.accounts import get_balance, add_launch_and_update_balance
 
@@ -8816,6 +8820,9 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     Se delta == 0, não cria nada (idempotente).
     """
     _authorize_dashboard_access(request, user_id)
+    from utils_text import VALOR_MAX
+    if not abs(payload.target_balance) <= VALOR_MAX:  # NaN e inf também falham a comparação
+        raise HTTPException(status_code=400, detail="Saldo inválido.")
     from db.accounts import add_launch_and_update_balance, carteira_exibida
     from db import get_consolidated_balance
 
@@ -8887,7 +8894,7 @@ class RecurringUpdatePayload(BaseModel):
 def _recurring_value_error(code: str) -> HTTPException:
     msg = {
         "NOME_INVALIDO": "Nome inválido.",
-        "VALOR_INVALIDO": "Valor deve ser maior que zero.",
+        "VALOR_INVALIDO": "Valor inválido (precisa ser maior que zero).",
         "DIA_INVALIDO": "Dia do vencimento deve estar entre 1 e 31.",
         "FORMA_PAGAMENTO_INVALIDA": "Forma de pagamento inválida (use 'account' ou 'credit_card').",
         "CARTAO_OBRIGATORIO": "Cartão é obrigatório quando a forma de pagamento é cartão de crédito.",
@@ -9204,7 +9211,7 @@ class RecurringIncomeUpdatePayload(BaseModel):
 def _recurring_income_value_error(code: str) -> HTTPException:
     msg = {
         "NOME_INVALIDO": "Nome inválido.",
-        "VALOR_INVALIDO": "Valor deve ser maior que zero.",
+        "VALOR_INVALIDO": "Valor inválido (precisa ser maior que zero).",
         "DIA_INVALIDO": "Dia do recebimento deve estar entre 1 e 31.",
         "RECEITA_NAO_ENCONTRADA": "Receita recorrente não encontrada.",
         "DATA_INICIO_INVALIDA": "Data de início inválida.",
@@ -9373,7 +9380,8 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
         raise HTTPException(status_code=400, detail="Nome do investimento é obrigatório.")
     if period not in {"daily", "monthly", "yearly", "cdi", "cdi_spread", "ipca_spread", "selic_spread"}:
         raise HTTPException(status_code=400, detail="Indexador inválido.")
-    if payload.rate <= 0 and period != "selic_spread":
+    from utils_text import valor_finito
+    if not valor_finito(payload.rate) or (payload.rate <= 0 and period != "selic_spread"):
         raise HTTPException(status_code=400, detail="Taxa deve ser maior que zero.")
 
     try:
@@ -9426,8 +9434,9 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
 @app.post("/investments/{user_id}/deposit")
 async def deposit_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
     _authorize_dashboard_access(request, user_id)
-    if payload.amount <= 0:
-        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    from utils_text import valor_valido
+    if not valor_valido(payload.amount):  # cobre None, <= 0, NaN, inf e acima do limite
+        raise HTTPException(status_code=400, detail="Valor inválido (precisa ser maior que zero).")
     # De onde sai o dinheiro. Sem `source` no payload, a regra determinística
     # decide (Carteira quando cobre, senão o banco) — ver core/services/funding.py.
     # A resposta devolve a origem usada, para a tela poder mostrar.
@@ -9469,8 +9478,9 @@ async def deposit_investment_route(request: Request, user_id: int, payload: Inve
 @app.post("/investments/{user_id}/withdraw")
 async def withdraw_investment_route(request: Request, user_id: int, payload: InvestmentMovementPayload):
     _authorize_dashboard_access(request, user_id)
-    if not payload.withdraw_all and (payload.amount is None or payload.amount <= 0):
-        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero.")
+    from utils_text import valor_valido
+    if not payload.withdraw_all and not valor_valido(payload.amount):
+        raise HTTPException(status_code=400, detail="Valor inválido (precisa ser maior que zero).")
     # O destino do resgate sai de `db.destination_of_lots`, dentro da transação (#282):
     # é ele que sabe quais lotes o PEPS consumiu de fato, depois do accrual.
     _nome_inv = payload.name.strip()

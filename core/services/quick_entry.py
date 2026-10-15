@@ -4,7 +4,7 @@ from db import (
     ensure_user, add_launch_and_update_balance, has_open_finance_connections,
     propose_manual_reconciliation,
 )
-from utils_text import fmt_brl
+from utils_text import fmt_brl, valor_valido
 from core.services.category_service import learn_from_inference
 
 
@@ -38,6 +38,8 @@ def handle_quick_entry(user_id: int, text: str) -> OutgoingMessage | None:
 
     tipo = parsed["tipo"]
     valor = float(parsed["valor"])
+    if not valor_valido(valor):  # `1` * 301 dígitos vira 1e300
+        return OutgoingMessage(text="🐷 Valor inválido.")
     categoria = parsed.get("categoria")
     category_reason = parsed.get("category_reason")
     alvo = parsed.get("alvo")
