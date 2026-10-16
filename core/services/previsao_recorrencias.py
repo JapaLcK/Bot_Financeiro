@@ -1,7 +1,8 @@
 """Recorrências do Open Finance na Previsão (Fase 1a): as cadeias mensais de
 `of_recurring_payments`, na seleção da tela de Assinaturas, viram ocorrências
 estimadas do motor (saídas). A receita vem SÓ do extrato (P7 a): `receitas_do_extrato`
-acha o crédito que se repete todo mês; a recorrência de entrada da Pluggy não é lida.
+acha o crédito que se repete todo mês, mas só como CANDIDATA: entra na conta a que o usuário
+confirmou (`CONFIRMADA`, marca em `subscription_marks`); a recorrência de entrada da Pluggy não é lida.
 Chamado por `cashflow_snapshot.ler`, só com os bancos na base.
 
 O fixo manual continua contando. Quando ele e uma cadeia do banco parecem a mesma
@@ -23,6 +24,7 @@ from core.crypto import hash_pii
 from core.services.assinaturas import DIAS_ATIVA, _interno, _merchant, cadeias, dia_da_cadeia
 from core.services.cashflow import _recurring_occurrence_dates
 from core.services.cashflow_contract import Ocorrencia, dinheiro
+from core.services.cashflow_forecast import HORIZONS
 from core.services.cashflow_snapshot import _data, _motivo
 from db.of_recurring import ler_creditos, ler_frescor, ler_marcas, ler_ocorrencias
 from db.open_finance import RECON_AMOUNT_TOL, merchant_similarity
@@ -34,7 +36,9 @@ MEIO_CICLO = 15  # cobrança a menos de 15 dias do dia esperado cobre aquele cic
 TOLERANCIA_DIA = 5  # a da Pluggy (30±5 dias)
 JANELA_EXTRATO = 180  # dias de extrato lidos para achar receita
 MINIMO = 2  # créditos seguidos (30±5 dias, valores a ±20% da mediana) para valer como receita
+MINIMO_PULANDO = 3  # cadeia que pula crédito avulso do mesmo pagador (decisão do dono, 2026-10-16)
 TOLERANCIA_VALOR = Decimal('0.2')
+CONFIRMADA, NEGADA = 'assinatura', 'ignorar'  # `subscription_marks.status` da receita do extrato (a chave é o id `extrato#…`): NÃO é assinatura
 _RENDIMENTO = re.compile(r'\b(interests?|dividends?|dividendos?|rendimentos?)\b', re.I)  # palavra inteira: juro e dividendo mensais não são renda
 PREMISSA = ('Do banco, só entram cobranças e receitas que se repetem todo mês; '
             'contas anuais e boletos ainda não pagos não aparecem.')
@@ -85,10 +89,10 @@ def _casar(manuais: list[dict], cs: list[dict]) -> dict[int, date | None]:
     return casadas
 
 
-def cadeias_do_banco(cur, user_id: int) -> list[dict]:
+def cadeias_do_banco(cur, user_id: int, marcas: dict | None = None) -> list[dict]:
     """As cadeias mensais de SAÍDA do banco, na seleção de Assinaturas (a mesma da Previsão e do
-    custo da reserva): `ignorar` já aplicado, cartão incluído."""
-    marcas = ler_marcas(cur, user_id)
+    custo da reserva): `ignorar` já aplicado, cartão incluído. `marcas`: as de `ler_marcas`, se já lidas."""
+    marcas = ler_marcas(cur, user_id) if marcas is None else marcas
     cs = []
     for chave, lista in cadeias(ler_ocorrencias(cur, user_id)).items():
         for k, ls in enumerate(lista):
@@ -111,6 +115,40 @@ def _doc(v: str | None) -> str:
     return d if len(d) in (11, 14) and d.strip('0') else ''
 
 
+def _ciclo(a: dict, b: dict) -> bool:
+    """`b` vem 30±`TOLERANCIA_DIA` dias depois de `a`."""
+    return abs((b['transaction_date'] - a['transaction_date']).days - 30) <= TOLERANCIA_DIA
+
+
+def _na_faixa(seq: list[dict]) -> bool:
+    med = median(r['amount'] for r in seq)
+    return not any(abs(r['amount'] - med) > med * TOLERANCIA_VALOR for r in seq)
+
+
+def _pulando(ls: list[dict]):
+    """Cadeias que pulam avulsos, da âncora mais recente para a mais antiga. Âncora: crédito até
+    30+`TOLERANCIA_DIA` dias antes do último do documento e sem crédito 30±`TOLERANCIA_DIA` dias depois
+    dela (esse seria o próximo mês com outro valor: aumento ou fim). Do elo atual, volta ao crédito
+    30±`TOLERANCIA_DIA` dias antes, de valor a ±`TOLERANCIA_VALOR` da âncora, o mais perto de 30 dias
+    (empate: o valor mais perto da âncora; depois, o mais antigo). Vale com `MINIMO_PULANDO` elos a ±`TOLERANCIA_VALOR`
+    da mediana. Pagador frequente de valores variados fecha cadeia de 3 por acaso (simulação de 2026-10-16: 24% de 20
+    Pix de R$ 50–300 em 6 meses): a defesa não é o valor, é a confirmação do usuário (candidata não entra na conta).
+    ponytail: O(âncoras × elos × n), n ≤ 181 datas por documento (janela de 180 dias)."""
+    for fim in range(len(ls) - 1, -1, -1):
+        anc = ls[fim]
+        if (ls[-1]['transaction_date'] - anc['transaction_date']).days > 30 + TOLERANCIA_DIA:
+            break
+        if any(_ciclo(anc, r) for r in ls[fim + 1:]):
+            continue
+        seq = [anc]
+        while cands := [r for r in ls[:fim] if _ciclo(r, seq[0])
+                        and abs(r['amount'] - anc['amount']) <= anc['amount'] * TOLERANCIA_VALOR]:
+            seq.insert(0, min(cands, key=lambda r: (abs((seq[0]['transaction_date'] - r['transaction_date']).days - 30),
+                                                    abs(r['amount'] - anc['amount']))))
+        if len(seq) >= MINIMO_PULANDO and _na_faixa(seq):
+            yield seq
+
+
 def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
     """Receitas mensais achadas nos créditos de `ler_creditos`, no formato de `cadeias_do_banco`.
     Chave = documento do pagador (`_doc`: 11 ou 14 dígitos): crédito sem ele, ou com documento
@@ -124,10 +162,14 @@ def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
     base (parcelas diferentes somam, então todas precisam; cópias da mesma parcela, como a mesma conta
     em duas conexões, bastam por uma).
     Cadeia = de trás para frente enquanto o intervalo for 30±`TOLERANCIA_DIA`; vale com `MINIMO`
-    créditos e todos a ±20% da mediana. Valor = o último. O id é um hash com pepper: o documento
-    nunca sai daqui.
-    ponytail: 13º/bônus no meio ou depois do último quebra a cadeia, aumento > 20%, quinzenal e receita
-    sem documento do pagador não são detectados; pendente em D × efetivado em D+1 quebra a cadeia; o
+    créditos e todos a ±20% da mediana. Se ela não fecha, ou se uma que pula créditos avulsos do mesmo
+    pagador (`_pulando`, também a ±20%) é mais longa, vale a mais longa, que exige `MINIMO_PULANDO`.
+    Valor = o último. É só CANDIDATA: `anexar` conta apenas a que o usuário confirmou.
+    O id é um hash com pepper: o documento nunca sai daqui.
+    ponytail: com 2 créditos, avulso no meio ou depois ainda quebra; uma receita por pagador (a cadeia
+    mais longa); aumento > 20% e receita sem documento do pagador não são detectados; quinzenal de valor igual com 3+
+    meses vira receita MENSAL (um dos dois créditos do mês; o valor previsto subestima a renda); o avulso do mesmo
+    pagador 25–35 dias depois do último elo apaga a receita até o próximo crédito (a regra antiga também); pendente em D × efetivado em D+1 quebra a cadeia; o
     mesmo documento com formato diferente entre meses (zeros à esquerda) vira chaves distintas; cashback
     com documento pode entrar."""
     por_doc = defaultdict(lambda: defaultdict(dict))
@@ -142,11 +184,11 @@ def receitas_do_extrato(linhas: list[dict]) -> list[dict]:
         ls = [{**max(rs.values(), key=lambda r: r['amount']), 'amount': sum(rs),
                'grupos': [r['grupo'] for r in rs.values()]} for _, rs in sorted(por_data.items())]
         i = len(ls) - 1
-        while i > 0 and abs((ls[i]['transaction_date'] - ls[i - 1]['transaction_date']).days - 30) <= TOLERANCIA_DIA:
+        while i > 0 and _ciclo(ls[i - 1], ls[i]):
             i -= 1
-        seq = ls[i:]
-        med = median(r['amount'] for r in seq)
-        if len(seq) < MINIMO or any(abs(r['amount'] - med) > med * TOLERANCIA_VALOR for r in seq):
+        consecutiva = [ls[i:]] if len(ls) - i >= MINIMO and _na_faixa(ls[i:]) else []
+        seq = max(consecutiva + list(_pulando(ls)), key=len, default=None)  # empate: a consecutiva, depois a âncora mais recente
+        if seq is None:
             continue
         ult = seq[-1]
         cs.append({'id': 'extrato#' + hash_pii(doc)[:16], 'direcao': 'entrada',
@@ -183,6 +225,31 @@ def custo_mensal(cur, user_id: int, hoje: date) -> dict:
     return {'valor': total or None, 'recorrencias': len(ativas) if total else 0, 'motivos': motivos}
 
 
+def _interrompida(c, hoje) -> bool:
+    return (hoje - c['ultima']).days > DIAS_ATIVA
+
+
+def _fora_da_base(c, contas_na_base: set) -> bool:
+    """O saldo de alguma parcela não está na base: a conta ficaria pela metade."""
+    return not c['cartao'] and not all(g & contas_na_base for g in c.get('grupos') or [{c['conta']}])
+
+
+def _datas_banco(c, hoje, until) -> tuple[list[date], bool, bool]:
+    """As datas que `anexar` gera para a cadeia `c` até `until`, e se ela está interrompida/atrasada."""
+    esperada = _esperada(c['ultima'], c['dia'])
+    interrompida = _interrompida(c, hoje)
+    atrasada = not interrompida and esperada < hoje
+    return _recurring_occurrence_dates(c['dia'], 'monthly', None, esperada,
+                                       (esperada if atrasada else hoje) - timedelta(days=1), until), interrompida, atrasada
+
+
+def _sim_muda_a_conta(r, hoje, contas_na_base) -> bool:
+    """Receita confirmada teria pelo menos uma ocorrência INCLUÍDA até o menor horizonte do produto
+    (`HORIZONS[0]`, o único do Plus): as mesmas datas e os mesmos cortes do laço de `anexar`."""
+    datas, interrompida, atrasada = _datas_banco(r, hoje, hoje + timedelta(days=HORIZONS[0]))
+    return not (interrompida or _fora_da_base(r, contas_na_base)) and any(not (atrasada and d < hoje) for d in datas)
+
+
 def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, contas_na_base: set) -> None:
     """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
     hoje = s.hoje
@@ -197,8 +264,17 @@ def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, cont
         if c['recurring_fetched_at'] is not None and c['recurring_fetched_at'] >= velho:
             s.valido_ate = min(s.valido_ate, c['recurring_fetched_at'] + BANCO_VELHO)
 
-    cs = cadeias_do_banco(cur, user_id) + receitas_do_extrato(
-        ler_creditos(cur, user_id, hoje - timedelta(days=JANELA_EXTRATO)))
+    marcas = ler_marcas(cur, user_id)
+    receitas = receitas_do_extrato(ler_creditos(cur, user_id, hoje - timedelta(days=JANELA_EXTRATO)))
+    status = {r['id']: {CONFIRMADA: 'confirmada', NEGADA: 'negada'}.get(marcas.get(r['id'], (None,))[0], 'pendente')
+              for r in receitas}
+    # Pendente só se o Sim incluiria uma ocorrência até 30 dias (`_sim_muda_a_conta`); confirmada/negada ficam, para desfazer.
+    s.receitas_do_banco = sorted(
+        ({'chave': r['id'], 'nome': r['nome'], 'valor': r['valor'], 'dia': r['dia'], 'status': status[r['id']]}
+         for r in receitas if status[r['id']] != 'pendente'
+         or _sim_muda_a_conta(r, hoje, contas_na_base)), key=lambda r: (r['status'] != 'pendente', -r['valor'], r['chave']))
+    # Candidata fica fora da conta até o Sim (decisão do dono, 2026-10-16): a defesa contra receita falsa é a confirmação.
+    cs = cadeias_do_banco(cur, user_id, marcas) + [r for r in receitas if status[r['id']] == 'confirmada']
 
     fixos = [dict(r) for r in recs if r['is_active']]
     idx = [j for j, c in enumerate(cs) if c['direcao'] == 'saida']
@@ -209,11 +285,7 @@ def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, cont
 
     for j, c in enumerate(cs):
         saida = c['direcao'] == 'saida'
-        esperada = _esperada(c['ultima'], c['dia'])
-        interrompida = (hoje - c['ultima']).days > DIAS_ATIVA
-        atrasada = not interrompida and esperada < hoje
-        datas = _recurring_occurrence_dates(c['dia'], 'monthly', None, esperada,
-                                            (esperada if atrasada else hoje) - timedelta(days=1), until)
+        datas, interrompida, atrasada = _datas_banco(c, hoje, until)
         for d in datas:
             motivos = [_motivo(s, 'recorrencia_banco_estimada', 'ambos', c['id'])]
             incluida = True
@@ -225,8 +297,8 @@ def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, cont
             if atrasada and d < hoje:
                 incluida = incluida and saida
                 motivos.append(_motivo(s, 'recorrencia_banco_atrasada', 'so_piora', c['id']))
-            if not c['cartao'] and not all(g & contas_na_base for g in c.get('grupos') or [{c['conta']}]):
-                incluida = False  # o saldo dessa parcela não está na base: seria conta pela metade
+            if _fora_da_base(c, contas_na_base):
+                incluida = False
                 motivos.append(_motivo(s, 'recorrencia_banco_conta_fora_da_base',
                                        'so_melhora' if saida else 'so_piora', c['id']))
             if interrompida:

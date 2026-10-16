@@ -143,9 +143,10 @@ test("conferência pronta: categoria ou dia escolhidos depois (filtro global) tr
     assert.equal(await conferi.isDisabled(), true, "categoria");
     await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("");
     await habilitado(page); // a lista do cache aparece antes do refetch assentar
-    // o dia vem do calendário de /gastos (filtro global); a conferência sobrevive à ida e volta
+    // o dia chega ao filtro global por "Ver em Lançamentos" do card do dia (/gastos); a conferência sobrevive à ida e volta
     await page.evaluate(() => { location.hash = "#/gastos"; });
     await page.locator("#w-calendario .cal-day", { hasText: /^7$/ }).click();
+    await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
     await page.locator(".ledger-chips .chip").waitFor();
     await page.getByText("Nenhum lançamento encontrado.").or(page.locator(".lanc-dia").first()).waitFor();
     await page.waitForTimeout(150);

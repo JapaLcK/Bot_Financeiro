@@ -10,9 +10,10 @@ diff ruim no PR e facilita iteração.
 
 `ERROR_MSG` mora aqui: o template 9 o cita, e o runner o importa daqui.
 """
+import re
 from datetime import date
 
-from utils_date import today_tz
+from utils_date import ano_do_mes, today_tz
 
 from .cards import MAX_POR_TURNO
 
@@ -202,10 +203,10 @@ CARDS NO APP (tool `show_card`). Vale por cima do ROTEAMENTO DE INTENT, do templ
 - SEMPRE que a resposta cita um número que um card mostra, chame `show_card` desse card direto (sem a tool de texto que calcula o mesmo número), UMA vez por card, no máximo {MAX_POR_TURNO} por resposta. Os números do texto vêm só do resultado do `show_card`. Assunto sem card (gastos individuais, lançamentos, orçamentos, aportes, `simulate_purchase`, `forecast_month_end`, regras de categoria, escritas, período livre, saudação) responde em texto: nunca force card.
 - Pedidos comuns → card: "meu saldo"/"quanto tenho" = contas · "minha fatura" = fatura · "minhas metas"/"minhas caixinhas" = metas · "mês a mês"/"evolução" = renda (até hoje) ou periodo (janela que já acabou), numa chamada só · "compara março com agosto" (meses inteiros) = categorias com meses=["@@ANO@@-03","@@ANO@@-08"] · "quanto gastei este ano"/"de março a agosto" = periodo.
 - Quando usar: contas (saldo por conta) · hero (previsão do saldo; `dias` 30/60/90) · compromissos (o que vence nos próximos dias) · resumo (entrou e saiu de 1 mês) · categorias (gastos por categoria de 1 mês, ou até 3 meses lado a lado com `meses`) · periodo (2 a 12 meses inteiros com `de`/`ate` AAAA-MM; total, barras por mês e categorias somadas) · calendario (gasto dia a dia) · simulador (Pro: e se eu cortar categorias) · patrimonio (total e evolução) · wealth (distribuição do patrimônio) · rendimento (taxa contratada dos investimentos) · assinaturas (cobranças recorrentes) · metas (caixinhas com meta) · fatura (cartões, fatura aberta e limite) · parcelas (parcelamentos) · renda (entrou × saiu mês a mês até o mês atual; `quantidade_meses` até 12) · piggy (o que o Piggy notou).
-- Total ou categorias de 2 a 12 meses inteiros = periodo (inclusive "mercado de março a agosto": sai de `categorias`). "Mês a mês" até hoje = renda; numa janela que já acabou = periodo. Período livre (semana passada, 10/03 a 25/04, últimos 30 dias) não tem card: texto com `get_period_summary`/`get_top_categories`, dizendo a regra do `cartao_por` (regra 10).
-- TEXTO junto do card (sempre escreva; o card sozinho não é resposta): 1ª linha = o que o card mostra, o período do RESULTADO (no periodo: `inicio` a `fim`; com `historico_desde`, a partir dele, por limite do plano) e, nos cards de gasto (resumo, categorias, periodo, calendario, renda), a fonte ("contas e cartões, cartão pela fatura de cada mês"). Depois, 1 a 3 linhas do que olhar: o total, o que lidera, o que mudou (no periodo: `saldo` e o `percentual` da categoria que lidera). Nunca repita a tabela do card. Transação não vem no card: se pedirem, `get_largest_expenses` no mesmo período.
+- Total ou categorias de 2 a 12 meses inteiros = periodo (inclusive "mercado de março a agosto": passe categoria="mercado" e o valor sai de `categoria_pedida`). "Mês a mês" até hoje = renda; numa janela que já acabou = periodo. Período livre (semana passada, 10/03 a 25/04, últimos 30 dias) não tem card: texto com `get_period_summary`/`get_top_categories`, dizendo a regra do `cartao_por` (regra 10).
+- TEXTO junto do card (sempre escreva; o card sozinho não é resposta): 1ª linha = o que o card mostra, o período do RESULTADO (no periodo: `inicio` a `fim`; com `historico_desde`, a partir dele, por limite do plano) e, nos cards de gasto (resumo, categorias, periodo, calendario, renda), a fonte ("contas e cartões, cartão pela fatura de cada mês"). Depois, 1 a 3 linhas do que olhar: o total, o que lidera, o que mudou (no periodo: `saldo` e o `percentual` da categoria que lidera). Nunca repita a tabela do card. Transação não vem no card: se pedirem, `get_largest_expenses` no mesmo período. Nos cards de gasto periodo, categorias, renda e calendario o resultado traz só o resumo (total, saldo, as 3 maiores categorias, maior e menor mês; no categorias com mais de um mês, só a maior categoria de cada mês); a tabela está na tela: não liste meses, dias nem outras categorias. Categoria que o usuário citou: passe categoria="…" e use categoria_pedida; com encontrada=false o card não tem essa categoria com esse nome: não diga que é zero, chame `get_category_spend` com essa categoria: ele devolve o número em texto, sem abrir outro card.
 - No app NÃO existem `get_balance`, `forecast_balance`, `get_spending_trend`, `get_card_limit_usage`, `get_total_debt`, `forecast_next_bill` nem `list_installments` (ignore-as nas regras acima): saldo = contas, previsão = hero, tendência/evolução = renda, cartão/limite/dívida/próxima fatura = fatura, parcelamentos = parcelas.
-- No app, `list_pockets` traz só `target_amount` e `target_date` (a descrição da tool cita progresso e ritmo, que NÃO vêm): progresso, ritmo e quanto falta = card `metas`. Se o card não puder aparecer (sem vaga, já na tela, já falhou, sem acesso), o `list_pockets` traz o progresso e o ritmo. `get_open_bill` traz só o período e os itens, com `error: total_no_card` (sem total, pago, restante): o total da fatura = card `fatura`, e você não soma os itens. Quando o card não pode aparecer (sem vaga, já na tela, já falhou, sem acesso), o `get_open_bill` devolve total, pago e restante, sem o `error: total_no_card`."""
+- No app, `list_pockets` traz só `target_amount` e `target_date` (a descrição da tool cita progresso e ritmo, que NÃO vêm): progresso, ritmo e quanto falta = card `metas`. Se o card não puder aparecer (sem vaga, já na tela, já falhou, sem acesso), o `list_pockets` traz o progresso e o ritmo. `get_open_bill` traz só o período e os itens, com `error: total_no_card` (sem total, pago, restante): o total da fatura = card `fatura`, e você não soma os itens, e eles vêm só as maiores compras: siga a `message` (ela diz se há "e mais" e quantas); a lista completa só se o usuário pedir as compras (`todos_os_itens=true`). Quando o card não pode aparecer (sem vaga, já na tela, já falhou, sem acesso), o `get_open_bill` devolve total, pago e restante, sem o `error: total_no_card`."""
 
 
 # O trecho de caixinha que `_BASE` marca com @@CAIXINHAS@@, como era antes das metas (roteamento + insights + ritmo).
@@ -258,9 +259,10 @@ ADENDO_CARDS_METAS = _troca(_troca(_troca(_troca(ADENDO_CARDS,
 
 def prompt_do_usuario(metas: bool, app: bool, hoje: date | None = None) -> str:
     """O prompt do turno: `metas` = `metas_conversa.metas_ligadas(uid)`; `app` = stream do app. `hoje` é o do
-    runner (o da linha de data): o `@@ANO@@` do exemplo de comparar meses vira o ano dele."""
+    runner (o da linha de data): o `@@ANO@@-MM` do exemplo de comparar meses vira o ano daquele mês (`ano_do_mes`)."""
     if not metas:
         texto = SYSTEM_PROMPT + (ADENDO_CARDS if app else "")
     else:
         texto = (SYSTEM_PROMPT_METAS_APP + ADENDO_CARDS_METAS) if app else SYSTEM_PROMPT_METAS
-    return texto.replace("@@ANO@@", str((hoje or today_tz()).year))
+    hoje = hoje or today_tz()
+    return re.sub(r"@@ANO@@-(\d\d)", lambda m: f"{ano_do_mes(hoje, int(m[1]))}-{m[1]}", texto)

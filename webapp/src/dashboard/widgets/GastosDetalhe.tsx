@@ -12,7 +12,7 @@ import { ORIGENS } from "../parts/LancamentoLinha";
 import { Selos } from "../parts/Selos";
 
 export function GastosDetalhe({ s }: { s: DashState }) {
-  const { setFilter, go } = useActions();
+  const { set } = useActions();
   const mes = mesDe(s);
   const escolhida = s.filter.category;
   const geral = useQuery({ ...gastosQuery(mes), enabled: !escolhida && !DEMO }); // só para achar a maior do mês
@@ -24,13 +24,14 @@ export function GastosDetalhe({ s }: { s: DashState }) {
 
   const c = d.categoria;
   const parcial = d.historico_desde !== null; // o corte do plano cai dentro do mês escolhido
+  const aberto = !!s.gastosAberto && "categoria" in s.gastosAberto && s.gastosAberto.categoria === chave; // o card de compras é o desta categoria
   const corrente = d.hoje.slice(0, 7);
   const pico = Math.max(...d.serie.map((x) => Number(x.valor ?? 0)), 1);
   const picoLoja = Math.max(...d.estabelecimentos.map((p) => Number(p.valor)), 1);
   return (
     <Frame id="cat-detalhe" real
       title={<span className="detail-title"><span aria-hidden="true">{c.emoji}</span><span className="detail-nome">{c.nome}</span>{!escolhida && <span className="faint detail-auto">maior gasto do mês</span>}</span>}
-      aside={<button type="button" className="link" onClick={() => { setFilter({ category: chave, day: null }); go("/lancamentos"); }}>Abrir lançamentos<i className="ph ph-arrow-right" aria-hidden="true" /></button>}>
+      aside={<button type="button" className="link" aria-expanded={aberto} aria-controls={aberto ? "gastos-compras" : undefined} onClick={() => set({ gastosAberto: aberto ? null : { categoria: chave } })}>Ver compras</button>}>
       <dl className="detail-facts">
         <div><dt>No mês{parcial && <span className="faint"> · parcial</span>}</dt><dd className="num">{moneyText(d.total) ?? "—"}</dd></div>
         <div><dt>Compras</dt><dd className="num">{d.compras ?? "—"}</dd></div>

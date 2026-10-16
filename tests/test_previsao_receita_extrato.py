@@ -14,9 +14,11 @@ from _apoio_assinaturas import HOJE, conta, mensais, rp, semeia, tx
 from conftest import usuario_pagante
 from core.services import previsao_v2
 from core.services.ai_chat.tools.bills import _check_cashflow
-from core.services.previsao_recorrencias import MINIMO, receitas_do_extrato
+from core.services.previsao_recorrencias import CONFIRMADA, JANELA_EXTRATO, MINIMO, MINIMO_PULANDO, receitas_do_extrato
+from db.of_recurring import ler_creditos, marcar
 from db.recurring_income import create_recurring_income
-from tests.test_previsao_recorrencias_of import codigos, do_banco, ler_em, q
+from tests.test_previsao_recorrencias_of import codigos, do_banco, q
+from tests.test_previsao_recorrencias_of import ler_em as ler_cru
 from tests.test_previsao_recorrencias_of_convivencia import saldo_90
 
 MESES = [date(2026, 7, 5), date(2026, 8, 5), date(2026, 9, 5)]
@@ -29,6 +31,17 @@ def L(dia, valor="1000", desc="EMPRESA X", *, category=None, doc=DOC, eu=None, n
             "account_id": conta_, "pagador_doc": doc, "recebedor_doc": eu, "pagador_nome": nome}
 
 
+def ler_em(uid, hoje=HOJE, **kw):
+    """A leitura de quem já disse Sim a toda receita detectada: sem o Sim ela é só candidata e fica fora da conta
+    (o que acontece sem ele está em `tests/test_receita_confirmada.py`). A marca vem da detecção, não da lista:
+    a candidata interrompida ou de conta fora da base não é pergunta, mas pode ter sido confirmada antes."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        detectadas = receitas_do_extrato(ler_creditos(cur, uid, hoje - timedelta(days=JANELA_EXTRATO)))
+    for r in detectadas:
+        marcar(uid, r["id"], CONFIRMADA)
+    return ler_cru(uid, hoje, **kw)
+
+
 def entradas(s, nome=None):
     return [e for e in do_banco(s, nome) if e.direcao == "entrada"]
 
@@ -36,7 +49,7 @@ def entradas(s, nome=None):
 # ── Regra pura ───────────────────────────────────────────────────────────────
 
 def test_minimo_e_a_regra_frouxa():
-    assert MINIMO == 2
+    assert (MINIMO, MINIMO_PULANDO) == (2, 3)
 
 
 def test_dois_creditos_mensais_detectam_com_valor_do_ultimo_e_dia_da_cadeia():
@@ -51,10 +64,77 @@ def test_dois_creditos_mensais_detectam_com_valor_do_ultimo_e_dia_da_cadeia():
     [L(date(2026, 9, 1)), L(date(2026, 9, 21))],                    # intervalo de 20 dias
     [L(date(2026, 8, 1)), L(date(2026, 9, 10))],                    # 40 dias
     [L(MESES[0], "100"), L(MESES[1], "100"), L(MESES[2], "125")],   # +25% da mediana
-    [L(MESES[0]), L(MESES[1]), L(MESES[2]), L(date(2026, 9, 20))],  # 13º/bônus depois do último: limite declarado
-], ids=["uma", "20_dias", "40_dias", "mais_25pct", "extra_no_fim"])
+], ids=["uma", "20_dias", "40_dias", "mais_25pct"])
 def test_nao_detecta(linhas):
     assert receitas_do_extrato(linhas) == []
+
+
+def d(m, dia):
+    return date(2026, m, dia)
+
+
+SAL = [L(d(5, 4), "4000"), L(d(6, 2), "4000"), L(d(7, 2), "4000"), L(d(8, 4), "4000"), L(d(9, 1), "4000"), L(d(10, 5), "4000")]
+AV = [L(d(*md), v) for md, v in (((6, 9), "600"), ((7, 20), "5000"), ((8, 11), "835"), ((8, 14), "584"), ((8, 16), "3500"),
+                                  ((8, 21), "1800"), ((9, 9), "500"), ((9, 17), "3500"), ((9, 21), "1000"))]
+M3 = [L(d(7, 5)), L(d(8, 5)), L(d(9, 5))]
+
+
+def valores(linhas):
+    return sorted((c["valor"], c["ultima"]) for c in receitas_do_extrato(linhas))
+
+
+def test_salario_com_pix_avulsos_do_mesmo_pagador_detecta_pulando_os_avulsos():
+    """O caso do dono: 6 salários de 4000 entre 9 Pix avulsos; o `dia` é a moda empatada (2 e 4), a regra de `dia_da_cadeia`."""
+    (c,) = receitas_do_extrato(SAL + AV)
+    assert (c["valor"], c["ultima"], c["dia"]) == (D("4000"), d(10, 5), 4)
+
+
+def test_cadeia_mais_longa_vence_a_de_avulsos_mais_recente():
+    """8/14 584 → 9/9 500 → 10/12 500 é uma cadeia válida de 3 (±20%), mas a do salário tem 5."""
+    (c,) = receitas_do_extrato(SAL + AV + [L(d(10, 12), "500")])
+    assert (c["valor"], c["ultima"]) == (D("4000"), d(10, 5))
+
+
+@pytest.mark.parametrize("linhas,esperado", [
+    (M3 + [L(d(9, 20), "300")], [(D("1000"), d(9, 5))]),                                 # avulso depois do último elo
+    ([L(d(7, 5)), L(d(8, 5)), L(d(9, 5)), L(d(9, 20))], [(D("1000"), d(9, 5))]),         # o antigo extra_no_fim
+    ([L(d(6, 20), "300")] + M3, [(D("1000"), d(9, 5))]),                                  # avulso antes do primeiro
+    ([L(d(8, 5)), L(d(8, 20), "300"), L(d(9, 5))], []),                                  # 2 elos com avulso no meio: não pula
+    (M3 + [L(d(8, 20), "900")], [(D("1000"), d(9, 5))]),                                  # avulso ±20% fora da janela 30±5
+    ([L(d(7, 5)), L(d(8, 1)), L(d(9, 5)), L(d(8, 6), "300")], [(D("1000"), d(9, 5))]),   # avulso mais perto de 30 dias, outro valor
+    ([L(d(5, 5)), L(d(6, 5)), L(d(7, 5)), L(d(9, 5))], []),                              # buraco no fim
+    ([L(d(5, 5)), L(d(6, 5)), L(d(7, 5)), L(d(9, 5)), L(d(9, 20), "300")], []),          # buraco com avulso no fim
+    (M3 + [L(d(10, 5), "1300")], []),                                                     # aumento > 20% no último mês
+    ([L(d(7, 5)), L(d(8, 5)), L(d(8, 20), "300"), L(d(9, 5)), L(d(9, 5), "150")], [(D("1150"), d(9, 5))]),  # extra no mesmo dia soma (até 20% do salário)
+    ([L(d(6, 5), "500")] + [L(x) for x in (d(7, 5), d(8, 5), d(9, 5))], [(D("1000"), d(9, 5))]),  # 500 antes de 3 de 1000
+], ids=["avulso_depois", "extra_no_fim", "avulso_antes", "dois_elos_com_avulso", "avulso_parecido_fora_da_janela",
+        "filtro_de_valor", "buraco_no_fim", "buraco_com_avulso", "aumento", "bonus_no_mesmo_dia", "valor_fora_antes"])
+def test_pulando_avulsos(linhas, esperado):
+    assert valores(linhas) == esperado
+
+
+@pytest.mark.parametrize("linhas,esperado", [
+    # M05: empate de tamanho (3 × 3) vai para a consecutiva (5/20, 6/14, 7/11 → dia 11), não para a que pula (5/14 → dia 14)
+    ([L(d(5, 14), "1020"), L(d(5, 20), "1080"), L(d(6, 14)), L(d(7, 11), "1040")], (D("1040"), d(7, 11), 11)),
+    # M11: 6/2 e 6/4 estão a 1 dia de 30 do último; fica o de valor mais perto da âncora (6/4, 1020 × 1040) → dia 4
+    ([L(d(5, 4), "1020"), L(d(6, 2), "1040"), L(d(6, 4), "1020"), L(d(7, 3))], (D("1000"), d(7, 3), 4)),
+    # M12: 6/7 está a 31 dias do último (7/8) e 6/13 a 25: vale o mais perto de 30, que leva a 5/7 (a 6/13 só chega a consecutiva de 2)
+    ([L(d(5, 7)), L(d(6, 7)), L(d(6, 13)), L(d(7, 8))], (D("1000"), d(7, 8), 7)),
+], ids=["empate_de_tamanho", "desempate_pelo_valor", "mais_perto_de_30_dias"])
+def test_desempates_da_cadeia_que_pula(linhas, esperado):
+    (c,) = receitas_do_extrato(linhas)
+    assert (c["valor"], c["ultima"], c["dia"]) == esperado
+
+
+@pytest.mark.parametrize("antigo,esperado", [("1200", [(D("1000"), d(7, 17))]), ("1400", [])], ids=["na_borda_de_20pct", "40pct_da_ancora"])
+def test_valor_do_elo_se_compara_a_ancora_nao_ao_vizinho(antigo, esperado):
+    """M13: 1400 está a 17,6% do vizinho (1190) mas a 40% da âncora (1000): só a âncora o recusa. 1200 está a 20% da âncora."""
+    assert valores([L(d(5, 12), antigo), L(d(6, 15), "1190"), L(d(7, 2), "1100"), L(d(7, 17), "1000")]) == esperado
+
+
+def test_dois_pagadores_cada_um_com_a_sua_receita():
+    outro = [L(x, "700", doc="11122233344") for x in (d(7, 5), d(8, 5), d(9, 5))]
+    assert [v for v, _ in valores(SAL + AV + outro)] == [D("700"), D("4000")]
 
 
 def test_vinte_por_cento_da_mediana_ainda_vale():
@@ -173,6 +253,16 @@ def test_detecta_pelo_ler_com_dois_creditos(user_id):
     assert all(e.incluida and e.fonte == "recorrencia_banco" and e.origem_id.startswith("extrato#") for e in es)
     assert "receita_nao_garantida" in codigos(es[0])
     assert saldo_90(s) == D("16000")
+
+
+def test_salario_com_pix_avulso_do_mesmo_pagador_detecta_pelo_ler(user_id):
+    db.set_balance(user_id, D(1000))
+    sal = mensais("sal", ["5000"] * 3, desc="EMPRESA X", pagador=DOC)
+    semeia(user_id, [conta("acc-sal", sal + [tx("pix", "600", date(2026, 9, 20), desc="PIX", pagador=DOC)])], [])
+    s = ler_em(user_id)
+    es = entradas(s)
+    assert [e.data for e in es] == [date(2026, 10, 5), date(2026, 11, 5), date(2026, 12, 5)]
+    assert all(e.incluida for e in es) and saldo_90(s) == D("16000")
 
 
 @pytest.mark.parametrize("ruim", ["NaN", "Infinity"])

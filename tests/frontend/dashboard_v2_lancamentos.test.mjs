@@ -123,7 +123,9 @@ test("fronteiras reais de exemplos: o CTA da categoria leva a escolha (sem tipo)
   page.on("request", (r) => { if (r.url().includes("/api/v2/lancamentos?")) urls.push(new URL(r.url())); });
   await ir("/gastos");
   await page.locator(".cats .cat", { hasText: "alimentação" }).click();
-  await page.getByRole("button", { name: "Abrir lançamentos" }).click();
+  await page.getByRole("button", { name: "Ver compras" }).click();
+  await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
+  await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
   // Decisão do dono: a ida é por filtro global, SEM `tipo` (a lista do extrato mostra entradas e saídas; a contagem pode passar a de "Compras").
   assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10", categoria: "alimentacao", guardado: "true" });

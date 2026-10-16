@@ -20,13 +20,14 @@ from fastapi.exceptions import RequestValidationError
 from utils_date import now_tz
 
 from .. import streaming
-from .._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
-from ..cards import IDS, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, CardIndisponivel, montar
+from .._context import CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, metas_do_turno
+from ..cards import IDS, MAX_CATEGORIA, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, TOOLS_DE_TEXTO, CardIndisponivel, montar
 from ._base import Tool
 from .launches import _AVISO_12, _AVISO_FIM
 
 _MES = re.compile(r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])$")  # = api.v2.resumo_mes.PADRAO_MES
 _COM_MES = ("resumo", "categorias", "calendario", "simulador")
+_COM_CATEGORIA = ("periodo", "categorias")
 _MSG_FUTURO = ("O card mostra até o mês atual. Explique isso; para o que já está lançado no futuro "
                "(parcelas, datas futuras) use get_period_summary.")
 
@@ -76,6 +77,15 @@ def _periodo(args: dict[str, Any]):
     return (de, ate), ({"pedido": pedido, "meses": cortado, "fim": fim} if cortado or fim else None), None
 
 
+def _da_recusa(args: dict[str, Any]) -> dict[str, Any] | None:
+    """A janela que a recusa do turno mandou ao `periodo` (`JANELAS_DO_TURNO`): a que o modelo repetiu em `de`/`ate` (traz
+    os avisos dela) ou, se ele divergiu, a última CORTADA por 12 meses (a do modelo daria o card de outro período; o
+    pedido legítimo no passado só é trocado num turno que já teve recusa cortada). None = os args do modelo."""
+    janelas = (JANELAS_DO_TURNO.get() or [])[::-1]
+    return (next((j for j in janelas if (j["de"], j["ate"]) == (args.get("de"), args.get("ate"))), None)
+            or next((j for j in janelas if "limitado_a_12_meses" in j["extra"]), None))
+
+
 def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     card = args.get("card")
     if card not in IDS:
@@ -85,11 +95,11 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     usados = CARDS_DO_TURNO.get()  # só o card que emitiu bloco gasta uma vaga
     if usados is not None and len(usados) >= MAX_POR_TURNO:
         return _erro("limite_de_cards", f"no máximo {MAX_POR_TURNO} cards por resposta; "
-                     "escreva o resto em texto, a partir do que já leu")
+                     f"o que faltar vem das tools de texto ({TOOLS_DE_TEXTO}...)")
 
     if usados is not None and card in usados:
         como = ("Para comparar faixas, use compare_periods" if card == "periodo"
-                else "Para comparar meses, chame show_card uma vez só com meses=[...]" if card == "categorias"
+                else "Para comparar meses, o outro mês vem de get_top_categories (ou get_category_spend, de uma categoria) com start_date/end_date, em texto" if card == "categorias"
                 else "Para comparar meses, use show_card periodo com de/ate, ou categorias com meses=[...] (esse card mostra 1 mês)"
                 if card in _COM_MES else "Escreva a partir do resultado anterior")
         return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. {como}")
@@ -111,22 +121,31 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     qtd = args.get("quantidade_meses")
     if qtd is not None and (type(qtd) is not int or qtd < 1):
         return _erro("quantidade_invalida", "quantidade_meses: inteiro de 1 a 12. Corrija e chame de novo.")
+    categoria = args.get("categoria")
+    if categoria is not None and (not isinstance(categoria, str) or len(categoria.strip()) > MAX_CATEGORIA):
+        return _erro("categoria_invalida", f"categoria: texto de até {MAX_CATEGORIA} caracteres. Corrija e chame de novo.")
+    categoria = (categoria or "").strip() or None if card in _COM_CATEGORIA else None
     limitado, fim_cortado, extra = False, False, {}
     if card == "renda" and qtd is not None and qtd > MAX_MESES_PERIODO:
         limitado, extra, qtd = True, {"quantidade_meses": qtd}, MAX_MESES_PERIODO
     de_ate = {}
     if card == "periodo":
-        ajustado, pedido, erro = _periodo(args)
+        janela = _da_recusa(args)
+        ajustado, pedido, erro = _periodo({**args, "de": janela["de"], "ate": janela["ate"]} if janela else args)
         if erro:
             return erro
         de_ate = dict(zip(("de", "ate"), ajustado))
-        if pedido:
+        if janela:  # os cortes e avisos da recusa; o `pedido` é o da tool que recusou
+            p = janela["extra"].get("pedido")
+            limitado, fim_cortado = "limitado_a_12_meses" in janela["extra"], "fim_ajustado" in janela["extra"]
+            extra = {"de": p["start_date"][:7], "ate": p["end_date"][:7]} if p else {}
+        elif pedido:
             limitado, fim_cortado, extra = pedido["meses"], pedido["fim"], pedido["pedido"]
 
     try:
         bloco, visao = montar(card, user_id, {"meses": meses if card in _COM_MES else [],
                                               "dias": None if dias is None else str(dias),
-                                              "quantidade_meses": qtd, **de_ate})
+                                              "quantidade_meses": qtd, **de_ate, "categoria": categoria})
     except HTTPException as e:
         d = e.detail if isinstance(e.detail, dict) else {}
         if e.status_code == 402:  # conta sem plano ativo: o app a recusa também
@@ -147,6 +166,9 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     # (gate, leitor, serialização) não deixa o app com esqueleto sem bloco.
     if usados is not None:
         usados.append(card)
+    if categoria and (nao := CATEGORIAS_NAO_ACHADAS_DO_TURNO.get()) is not None and any(
+            a.get("categoria_pedida", {}).get("encontrada") is False for a in visao.get("abas", [])):
+        nao.append(categoria)  # o `get_category_spend` dela devolve o dado, não manda a um 2º card
     streaming.passo("show_card", False, card)
     streaming.emitir({"tipo": "bloco", "bloco": bloco})
     if limitado:  # só na visão: o bloco é o JSON do endpoint
@@ -184,6 +206,8 @@ SCHEMA = {
                                      "description": "Só para renda. Até 12; acima disso vem cortado com aviso. Padrão 6."},
                 "de": {"type": "string", "description": "AAAA-MM do 1º mês, só para periodo (obrigatório)."},
                 "ate": {"type": "string", "description": "AAAA-MM do último mês, só para periodo (obrigatório)."},
+                "categoria": {"type": "string", "description": "categoria: só para periodo/categorias — a categoria que o "
+                              "usuário citou ('mercado'); o resultado traz o valor dela em categoria_pedida."},
             },
             "required": ["card"],
         },

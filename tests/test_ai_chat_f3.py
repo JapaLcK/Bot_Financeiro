@@ -161,9 +161,9 @@ def test_as_quatro_tools_de_data_pedem_as_duas_datas():
 
 
 @pytest.mark.parametrize("hoje,esperado", [
-    (date(2026, 10, 14), 'Data de hoje: 14/10/2026. Mês atual: 2026-10; "últimos 3 meses" = 2026-08 a 2026-10.'),
-    (date(2026, 1, 5), 'Data de hoje: 05/01/2026. Mês atual: 2026-01; "últimos 3 meses" = 2025-11 a 2026-01.'),
-    (date(2026, 2, 28), 'Data de hoje: 28/02/2026. Mês atual: 2026-02; "últimos 3 meses" = 2025-12 a 2026-02.'),
+    (date(2026, 10, 14), 'Data de hoje: 14/10/2026. Mês atual: 2026-10; "últimos 3 meses" = 2026-08 a 2026-10; mês sem ano = o último que já começou ("novembro" = 2025-11).'),
+    (date(2026, 1, 5), 'Data de hoje: 05/01/2026. Mês atual: 2026-01; "últimos 3 meses" = 2025-11 a 2026-01; mês sem ano = o último que já começou ("fevereiro" = 2025-02).'),
+    (date(2026, 2, 28), 'Data de hoje: 28/02/2026. Mês atual: 2026-02; "últimos 3 meses" = 2025-12 a 2026-02; mês sem ano = o último que já começou ("março" = 2025-03).'),
 ])
 def test_linha_de_data_leva_o_mes_atual_e_o_exemplo(hoje, esperado):
     assert runner._linha_de_data(hoje) == esperado
@@ -187,7 +187,7 @@ LINHA_PEDIDOS = "Pedidos comuns → card"
 
 @pytest.mark.parametrize("ano", [2026, 2027])
 def test_exemplo_de_comparar_meses_leva_o_ano_do_hoje_do_turno(ano):
-    esperado = f'categorias com meses=["{ano}-03","{ano}-08"]'
+    esperado = f'categorias com meses=["{ano - 1}-03","{ano - 1}-08"]'  # em janeiro nenhum dos dois meses começou: ano anterior
     for metas in (False, True):
         p = sp.prompt_do_usuario(metas, True, date(ano, 1, 15))
         assert esperado in p and "@@ANO@@" not in p
@@ -200,7 +200,7 @@ def test_system_enviado_a_openai_leva_o_ano_do_relogio_do_app(monkeypatch, pro_u
     reg = openai_falso(monkeypatch, rodada("Oi!"))
     executar(pro_user_id, "oi")
     system = reg.creates[0]["messages"][0]["content"]
-    assert 'meses=["2027-03","2027-08"]' in system and "2026-03" not in system
+    assert 'meses=["2026-03","2026-08"]' in system and "2027-03" not in system
     assert system.endswith(runner._linha_de_data(date(2027, 1, 5)))
 
 
@@ -471,7 +471,7 @@ def test_list_pockets_no_whatsapp_segue_com_o_insight(monkeypatch):
     ("resumo", {}, ("show_card periodo", "categorias com meses=["), ()),             # os de 1 mês
     ("calendario", {}, ("show_card periodo", "categorias com meses=["), ()),
     ("simulador", {"meses": [M]}, ("show_card periodo", "categorias com meses=["), ()),  # Pro: a conta do `mundo` é pro_max
-    ("categorias", {}, ("uma vez só com meses=[...]",), ("show_card periodo",)),
+    ("categorias", {}, ("get_top_categories",), ("show_card periodo", "meses=[...]")),  # o outro mês: tool de texto
     ("periodo", {"de": M0, "ate": M}, ("compare_periods",), ("meses=[",)),
     ("contas", {}, ("resultado anterior",), ("meses", "show_card", "periodo")),      # os demais
     ("fatura", {}, ("resultado anterior",), ("meses", "show_card", "periodo")),

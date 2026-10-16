@@ -137,7 +137,7 @@ def test_reserva_e_atomica_sob_concorrencia():
 def test_conta_real_nao_entra_no_demo(mundo, como):
     n = _numero()
     if como == "telefone":
-        _conta_com_telefone(n)
+        _conta_com_telefone(n, sem_credencial=True)  # PR-5: só o telefone dela ainda é lido
     else:
         _liga_por_codigo(n)
         mundo.saida.clear()
@@ -154,7 +154,7 @@ def test_negativo_sem_a_guarda_o_demo_atende_quem_tem_conta(mundo, monkeypatch):
     """Mede o teste de cima: sem `numero_tem_conta` o demo abre sessão para a conta."""
     monkeypatch.setattr(funil, "numero_tem_conta", lambda wa_id: False)
     n = _numero()
-    _conta_com_telefone(n)
+    _conta_com_telefone(n, sem_credencial=True)
     _manda(n, GATILHO)
     assert _sessao(n) is not None and mundo.demo()
 
@@ -164,11 +164,21 @@ def test_conta_criada_depois_da_sessao_vai_ao_fluxo_normal(mundo):
     _abre(n)
     _manda(n, "primeira pergunta")
     assert len(mundo.chamadas) == 1
-    _conta_com_telefone(n)  # a pessoa se cadastrou com este número no meio do teste
+    _conta_com_telefone(n, sem_credencial=True)  # a pessoa se cadastrou com este número no meio do teste
 
     _manda(n, "segunda pergunta")
     assert len(mundo.chamadas) == 1, "a conta nova não pode continuar no demo"
     assert _sessao(n)["msgs_used"] == 1
+
+
+def test_telefone_de_conta_com_senha_nao_tira_o_numero_do_demo(mundo):
+    """PR-5 (V3): o telefone digitado por outra conta (com senha) não liga nada, então o
+    número não tem conta: o bot responderia o convite, e o demo o atende."""
+    n = _numero()
+    _conta_com_telefone(n)
+    assert db.attempt_whatsapp_phone_link(n)["status"] == "no_match"
+    _manda(n, GATILHO)
+    assert _sessao(n) is not None and mundo.demo()
 
 
 def test_so_whatsapp_sem_conta_usa_o_demo(mundo):
@@ -409,7 +419,7 @@ def test_textos_do_demo_nunca_dizem_que_nao_guardamos_nada():
     assert "não é salvo no PigBank, só vai para a IA que responde" in wa_demo.BOAS_VINDAS
     assert "fica salvo" not in wa_demo.BOAS_VINDAS
     assert "não é salvo no PigBank, só vai para a IA que responde" in conversa.PROMPT
-    assert "link 123456" in wa_demo.FIM and "link 123456" in wa_demo.LOTOU
+    assert "vincular 123456" in wa_demo.FIM and "vincular 123456" in wa_demo.LOTOU
     assert "amanhã" not in wa_demo.LOTOU, "o teto é janela móvel de 24h, não calendário"
     # coladas à resposta do modelo (que já abre com 🐷): sem emoji duplicado
     assert not wa_demo.FIM.startswith("🐷") and not wa_demo.ULTIMA.startswith("🐷")

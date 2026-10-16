@@ -79,7 +79,18 @@
       "motivos": ["conciliacao_pendente"]
     },
     "segunda": {"mes": "2026-10", "itens": [{"id": "l55", "data": "2026-09-20", "hora": null, "tipo": "saida", "interno": false, "guardado": false, "valor": "0.01", "moeda": "BRL", "descricao": "Segunda página", "mensagem": "gastei 42,90 no mercado", "categoria": "mercado", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": []}], "proximo": null, "motivos": []},
-    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] }
+    "vazia": { "mes": "2026-07", "itens": [], "proximo": null, "motivos": ["inicio_do_historico"] },
+    "dia_7": {
+      "mes": "2026-10",
+      "itens": [
+        { "id": "l710", "data": "2026-10-07", "hora": "12:30", "tipo": "saida", "interno": false, "guardado": false, "valor": "200.00", "moeda": "BRL", "descricao": "Restaurante", "mensagem": null, "categoria": "alimentacao", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": [] },
+        { "id": "l711", "data": "2026-10-07", "hora": null, "tipo": "saida", "interno": false, "guardado": false, "valor": "90.00", "moeda": "BRL", "descricao": null, "mensagem": null, "categoria": "sem categoria", "origem": "carteira", "fundido": false, "instituicao": null, "conta_id": null, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao", "data", "valor", "apagar"], "motivos": [] },
+        { "id": "l712", "data": "2026-10-07", "hora": "09:00", "tipo": "saida", "interno": true, "guardado": false, "valor": "150.00", "moeda": "BRL", "descricao": "Transferência entre contas", "mensagem": null, "categoria": "transferencia", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": [], "motivos": [] },
+        { "id": "l713", "data": "2026-10-07", "hora": "20:15", "tipo": "saida", "interno": false, "guardado": false, "valor": "30.00", "moeda": "USD", "descricao": "Apple.com/bill", "mensagem": null, "categoria": "assinaturas", "origem": "banco", "fundido": false, "instituicao": "Nubank", "conta_id": 7, "cartao_id": null, "parcela": null, "fatura": null, "pode": ["categoria", "descricao"], "motivos": ["outra_moeda"] }
+      ],
+      "proximo": null,
+      "motivos": []
+    }
   },
   "categorias": {
     "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" }, { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a" }, { "chave": "casa", "nome": "Casa", "emoji": "🏷️", "cor": "#94A3B8" }] }
@@ -92,9 +103,9 @@
         { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "140.00", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
-        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }] },
-        { "dia": "2026-10-07", "total": "290.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }, { "descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria" }] },
-        { "dia": "2026-10-20", "total": "50.00", "maiores": [{ "descricao": "Assinatura", "valor": "50.00", "categoria": "sem categoria" }] }
+        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "100.00" }] },
+        { "dia": "2026-10-07", "total": "290.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }, { "descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria" }], "quantidade": 2, "categorias": [{ "chave": "alimentacao", "valor": "200.00" }, { "chave": "sem categoria", "valor": "90.00" }] },
+        { "dia": "2026-10-20", "total": "50.00", "maiores": [{ "descricao": "Assinatura", "valor": "50.00", "categoria": "sem categoria" }], "quantidade": 1, "categorias": [{ "chave": "sem categoria", "valor": "50.00" }] }
       ],
       "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "310.00", "motivos": []
     },
@@ -104,7 +115,7 @@
         { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "120.00", "quantidade": 2, "valor_ate_corte": "120.00", "anterior_ate_corte": null }
       ],
       "dias": [
-        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }] }
+        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "70.00" }] }
       ],
       "fora_da_grade": { "quantidade": 1, "valor": "50.00" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": null, "motivos": ["inicio_do_historico"]
     },
@@ -115,9 +126,9 @@
         { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "139.50", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
-        {"dia": "2026-10-03", "total": "100.50", "maiores": [{"descricao": "Mercado", "valor": "100.50", "categoria": "alimentacao"}]},
-        {"dia": "2026-10-07", "total": "290.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}, {"descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria"}]},
-        {"dia": "2026-10-20", "total": "49.50", "maiores": [{"descricao": "Assinatura", "valor": "49.50", "categoria": "sem categoria"}]}
+        {"dia": "2026-10-03", "total": "100.50", "maiores": [{"descricao": "Mercado", "valor": "100.50", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "100.50"}]},
+        {"dia": "2026-10-07", "total": "290.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}, {"descricao": "Sem descrição", "valor": "90.00", "categoria": "sem categoria"}], "quantidade": 2, "categorias": [{"chave": "alimentacao", "valor": "200.00"}, {"chave": "sem categoria", "valor": "90.00"}]},
+        {"dia": "2026-10-20", "total": "49.50", "maiores": [{"descricao": "Assinatura", "valor": "49.50", "categoria": "sem categoria"}], "quantidade": 1, "categorias": [{"chave": "sem categoria", "valor": "49.50"}]}
       ],
       "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "310.25", "motivos": []
     },
@@ -128,9 +139,9 @@
         { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "40.00", "quantidade": 1, "valor_ate_corte": "40.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
-        {"dia": "2026-10-03", "total": "100.00", "maiores": [{"descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao"}]},
-        {"dia": "2026-10-07", "total": "200.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}]},
-        {"dia": "2026-10-09", "total": "40.00", "maiores": [{"descricao": "Café", "valor": "40.00", "categoria": "sem categoria"}]}
+        {"dia": "2026-10-03", "total": "100.00", "maiores": [{"descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "100.00"}]},
+        {"dia": "2026-10-07", "total": "200.00", "maiores": [{"descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "200.00"}]},
+        {"dia": "2026-10-09", "total": "40.00", "maiores": [{"descricao": "Café", "valor": "40.00", "categoria": "sem categoria"}], "quantidade": 1, "categorias": [{"chave": "sem categoria", "valor": "40.00"}]}
       ],
       "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 1, "anterior_total_ate_corte": "250.00", "motivos": ["outra_moeda"]
     },
@@ -147,14 +158,14 @@
         { "chave": "despesas gerais da casa e do condominio do predio novo", "nome": "Despesas gerais da casa e do condomínio do prédio novo", "emoji": "🏷️", "cor": "#94A3B8", "valor": "12.50", "quantidade": 1, "valor_ate_corte": "12.50", "anterior_ate_corte": "10.00" }
       ],
       "dias": [
-        {"dia": "2026-10-01", "total": "900.00", "maiores": [{"descricao": "Compra 1", "valor": "900.00", "categoria": "alimentacao"}]},
-        {"dia": "2026-10-02", "total": "620.40", "maiores": [{"descricao": "Compra 2", "valor": "620.40", "categoria": "mercado"}]},
-        {"dia": "2026-10-03", "total": "410.00", "maiores": [{"descricao": "Compra 3", "valor": "410.00", "categoria": "transporte"}]},
-        {"dia": "2026-10-04", "total": "300.00", "maiores": [{"descricao": "Compra 4", "valor": "300.00", "categoria": "lazer"}]},
-        {"dia": "2026-10-05", "total": "210.99", "maiores": [{"descricao": "Compra 5", "valor": "210.99", "categoria": "saude"}]},
-        {"dia": "2026-10-06", "total": "150.00", "maiores": [{"descricao": "Compra 6", "valor": "150.00", "categoria": "educacao"}]},
-        {"dia": "2026-10-07", "total": "120.00", "maiores": [{"descricao": "Compra 7", "valor": "120.00", "categoria": "casa"}]},
-        {"dia": "2026-10-10", "total": "12.50", "maiores": [{"descricao": "Compra 10", "valor": "12.50", "categoria": "despesas gerais da casa e do condominio do predio novo"}]}
+        {"dia": "2026-10-01", "total": "900.00", "maiores": [{"descricao": "Compra 1", "valor": "900.00", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "900.00"}]},
+        {"dia": "2026-10-02", "total": "620.40", "maiores": [{"descricao": "Compra 2", "valor": "620.40", "categoria": "mercado"}], "quantidade": 1, "categorias": [{"chave": "mercado", "valor": "620.40"}]},
+        {"dia": "2026-10-03", "total": "410.00", "maiores": [{"descricao": "Compra 3", "valor": "410.00", "categoria": "transporte"}], "quantidade": 1, "categorias": [{"chave": "transporte", "valor": "410.00"}]},
+        {"dia": "2026-10-04", "total": "300.00", "maiores": [{"descricao": "Compra 4", "valor": "300.00", "categoria": "lazer"}], "quantidade": 1, "categorias": [{"chave": "lazer", "valor": "300.00"}]},
+        {"dia": "2026-10-05", "total": "210.99", "maiores": [{"descricao": "Compra 5", "valor": "210.99", "categoria": "saude"}], "quantidade": 1, "categorias": [{"chave": "saude", "valor": "210.99"}]},
+        {"dia": "2026-10-06", "total": "150.00", "maiores": [{"descricao": "Compra 6", "valor": "150.00", "categoria": "educacao"}], "quantidade": 1, "categorias": [{"chave": "educacao", "valor": "150.00"}]},
+        {"dia": "2026-10-07", "total": "120.00", "maiores": [{"descricao": "Compra 7", "valor": "120.00", "categoria": "casa"}], "quantidade": 1, "categorias": [{"chave": "casa", "valor": "120.00"}]},
+        {"dia": "2026-10-10", "total": "12.50", "maiores": [{"descricao": "Compra 10", "valor": "12.50", "categoria": "despesas gerais da casa e do condominio do predio novo"}], "quantidade": 1, "categorias": [{"chave": "despesas gerais da casa e do condominio do predio novo", "valor": "12.50"}]}
       ],
       "fora_da_grade": {"quantidade": 0, "valor": "0"}, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "2179.11", "motivos": []
     },
@@ -179,7 +190,7 @@
         { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "9.99", "quantidade": 1, "valor_ate_corte": "9.99", "anterior_ate_corte": "9.00" }
       ],
       "dias": [
-        { "dia": "2026-10-07", "total": "999999999.99", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }] }
+        { "dia": "2026-10-07", "total": "999999999.99", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }, { "descricao": "Padaria", "valor": "9.99", "categoria": "alimentacao" }], "quantidade": 2, "categorias": [{ "chave": "mercado-longo", "valor": "999999990.00" }, { "chave": "alimentacao", "valor": "9.99" }] }
       ],
       "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "anterior_total_ate_corte": "10009.00", "motivos": []
     },
@@ -200,8 +211,8 @@
       "serie": [{ "mes": "2026-08", "valor": "180.00" }, { "mes": "2026-09", "valor": "250.00" }, { "mes": "2026-10", "valor": "300.00" }],
       "estabelecimentos": [{ "nome": "Restaurante", "valor": "200.00", "quantidade": 1 }, { "nome": "Mercado", "valor": "100.00", "quantidade": 1 }],
       "dias": [
-        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }] },
-        { "dia": "2026-10-07", "total": "200.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }] }
+        { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "100.00" }] },
+        { "dia": "2026-10-07", "total": "200.00", "maiores": [{ "descricao": "Restaurante", "valor": "200.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "200.00" }] }
       ],
       "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
     },
@@ -216,7 +227,7 @@
       "serie": [{ "mes": "2026-08", "valor": "180.00" }, { "mes": "2026-09", "valor": "250.00" }, { "mes": "2026-10", "valor": null }],
       "estabelecimentos": [{ "nome": "Mercado", "valor": "70.00", "quantidade": 1 }, { "nome": "Fatura antiga", "valor": "50.00", "quantidade": 1 }],
       "dias": [
-        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }] }
+        { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "70.00" }] }
       ],
       "fora_da_grade": { "quantidade": 1, "valor": "50.00" }, "saidas_em_outra_moeda": 0, "motivos": ["inicio_do_historico"]
     },
@@ -234,7 +245,7 @@
       "ultimas": [{ "data": "2026-10-07", "descricao": "Mercado e padaria do bairro novo do centro", "mensagem": null, "origem": "banco", "valor": "999999990.00" }],
       "serie": [{ "mes": "2026-08", "valor": "999999990.00" }, { "mes": "2026-09", "valor": "999999990.00" }, { "mes": "2026-10", "valor": "999999990.00" }],
       "estabelecimentos": [{ "nome": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "quantidade": 1 }],
-      "dias": [{ "dia": "2026-10-07", "total": "999999990.00", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }] }],
+      "dias": [{ "dia": "2026-10-07", "total": "999999990.00", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }], "quantidade": 1, "categorias": [{ "chave": "mercado-longo", "valor": "999999990.00" }] }],
       "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
     },
     "indisponivel": {
@@ -459,6 +470,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -509,6 +521,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -778,6 +791,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -1202,6 +1216,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -1781,6 +1796,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -1993,6 +2009,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2248,6 +2265,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2524,6 +2542,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2817,6 +2836,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3202,6 +3222,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3521,6 +3542,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3760,6 +3782,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -4367,6 +4390,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -4475,6 +4499,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,

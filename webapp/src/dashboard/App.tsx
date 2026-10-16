@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { monthTitle } from "./lib/format.js";
-import { escolherMes, mesDe } from "./lib/store.js";
+import { escolherMes, mesDe, set } from "./lib/store.js";
 import type { DashState } from "./lib/types";
 import { useDash } from "./useDash";
 import { AskBar } from "./parts/AskBar";
@@ -64,9 +64,13 @@ export function App() {
   const path = useRoute();
   const Page = PAGES[path];
   const first = useRef(true);
+  const anterior = useRef(path);
 
   // A cada troca de página: título da aba e foco no h1 (leitor de tela anuncia a página nova).
   useEffect(() => {
+    // O card de compras de /gastos não sobrevive à saída da tela (voltar pelo menu reabriria e roubaria o foco); a ida do Resumo, que o abre, não passa por aqui.
+    if (anterior.current === "/gastos" && path !== "/gastos") set({ gastosAberto: null });
+    anterior.current = path;
     document.title = `PigBank · ${route(path).label}`;
     if (first.current) { first.current = false; return; }
     document.getElementById("page-title")?.focus({ preventScroll: true });

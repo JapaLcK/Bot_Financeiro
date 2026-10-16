@@ -176,6 +176,12 @@ def today_tz() -> date:
     return now_tz().date()
 
 
+def ano_do_mes(hoje: date, mes: int) -> int:
+    """O ano de um mês dito sem ano: o do último que já começou (mês <= atual é deste ano, o resto é do anterior).
+    O parser de período, a linha de data da IA e o `@@ANO@@` do prompt usam esta, a mesma regra."""
+    return hoje.year - (mes > hoje.month)
+
+
 def day_tz(dt):
     """Dia de PAREDE de um instante, no fuso do app.
 
@@ -486,10 +492,7 @@ def parse_period_from_text(text: str) -> tuple[date, date, str] | None:
     # --- nome de mês ("julho", "em julho") ---
     for name, num in _MONTHS_PT.items():
         if re.search(rf"\b{name}\b", t):
-            year = today.year
-            # se o mês ainda não chegou neste ano, assume o ano passado
-            if num > today.month:
-                year -= 1
+            year = ano_do_mes(today, num)  # mês que ainda não chegou neste ano: o do ano passado
             last_day = calendar.monthrange(year, num)[1]
             # mês-calendário cheio (mesmo o corrente): o dashboard conta cartão
             # pelo mês da fatura, então parcelas que fecham depois de hoje mas

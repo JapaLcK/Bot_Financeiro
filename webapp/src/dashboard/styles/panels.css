@@ -74,7 +74,7 @@
 .cal-day[data-fora] { background: repeating-linear-gradient(135deg, var(--heat-0) 0 3px, var(--rule) 3px 4px); color: var(--ink-4); cursor: default; }
 .cal-day[data-agendado] { color: var(--ink-3); }
 .cal-day[data-agendado]::after { content: ""; grid-area: 1 / 1; align-self: end; justify-self: center; margin-bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3); }
-.cal-day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px #fff; }
+.cal-day[aria-pressed="true"], .cal-day[aria-expanded="true"] { box-shadow: inset 0 0 0 2px #fff; } /* aria-pressed: o Calendar do protótipo; aria-expanded: GastosCalendario */
 @media (hover: hover) and (pointer: fine) { .cal-day:not(:disabled):hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5); } }
 .cal-foot { margin-top: auto; display: grid; gap: 10px; }
 .ramp { display: flex; align-items: center; gap: 3px; font-size: 11px; }

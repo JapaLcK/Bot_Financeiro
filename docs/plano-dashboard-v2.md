@@ -795,9 +795,9 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     foi tentado, mas a CLI recusou o modelo configurado e não produziu parecer.
     Produção, WhatsApp real e aparelho não verificados; sem deploy/TestFlight/reset.
 - Guia do `/painel` (#728) em 2 PRs: A `GET`/`POST /api/v2/guia` + tabela `guia_painel` (contrato e consulta de medição em `docs/CLAUDE.md`, "API v2") · B a tela (Piggy, balão, Ajuda).
-- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [ ] 5 · [ ] 6 · [ ] 7
+- [x] Etapa 0 · [x] 1 · [x] 2 · [ ] 3 · [ ] 4 · [x] 5 · [ ] 6 · [ ] 7
 
-Situação em 2026-10-13, conferida contra os PRs mergeados. Ficam abertas: a 3, porque
+Situação em 2026-10-13, conferida contra os PRs mergeados (a 5 foi marcada concluída em 2026-10-15). Ficam abertas: a 3, porque
 simulador v2 e estimativa variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta
 o PR C.
 
@@ -808,7 +808,7 @@ o PR C.
 | 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
 | 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
-| 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria), #1008 (PR 2, a tela ligada à API); 6: nenhum PR de etapa. A Etapa 5 ainda não está marcada como concluída |
+| 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria), #1008 (PR 2, a tela ligada à API), #1019 (o card de compras na mesma tela); 6: nenhum PR de etapa. A Etapa 5 está concluída: o dono conferiu o Saiu em produção em 2026-10-15 (ele respondeu "Bateu" na sessão) |
 | 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
 
 - Etapa 4, PR A (#950) e PR A2 (#954): a tabela `metas` e `GET`/`POST /api/v2/metas`

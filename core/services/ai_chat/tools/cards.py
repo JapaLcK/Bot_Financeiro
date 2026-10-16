@@ -80,6 +80,27 @@ def _resolve_card_id(user_id: int, card_name: str | None) -> int | None:
     return db.get_default_card_id(user_id)
 
 
+# O parâmetro só existe no schema do app (`tools/__init__.py`): o WhatsApp devolve a lista de sempre.
+PARAMS_APP_OPEN_BILL = {"todos_os_itens": {
+    "type": "boolean", "description": "A lista completa de compras (as mais recentes), só quando o usuário pedir as compras da fatura."}}
+
+
+def _item_da_fatura(it: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": it["id"],
+        "valor": float(it["valor"] or 0),
+        "categoria": it.get("categoria"),
+        "nota": it.get("nota"),
+        "purchased_at": it["purchased_at"].isoformat() if it.get("purchased_at") else None,
+        "installment": (
+            f"{it.get('installment_no')}/{it.get('installments_total')}"
+            if it.get("installments_total") and int(it.get("installments_total") or 0) > 1
+            else None
+        ),
+        "is_refund": bool(it.get("is_refund")),
+    }
+
+
 def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     card_id = _resolve_card_id(user_id, args.get("card_name"))
     if not card_id:
@@ -99,30 +120,25 @@ def _get_open_bill(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "paid_amount": float(bill["paid_amount"] or 0),
         "remaining": float((bill["total"] or 0) - (bill["paid_amount"] or 0)),
         "status": bill["status"],
-        "items": [
-            {
-                "id": it["id"],
-                "valor": float(it["valor"] or 0),
-                "categoria": it.get("categoria"),
-                "nota": it.get("nota"),
-                "purchased_at": it["purchased_at"].isoformat() if it.get("purchased_at") else None,
-                "installment": (
-                    f"{it.get('installment_no')}/{it.get('installments_total')}"
-                    if it.get("installments_total") and int(it.get("installments_total") or 0) > 1
-                    else None
-                ),
-                "is_refund": bool(it.get("is_refund")),
-            }
-            for it in items
-        ],
+        "items": [_item_da_fatura(it) for it in items],
     }
     if streaming.ativo() and card_ainda_resolve(user_id, "fatura"):  # no app o total da fatura é o card fatura, se ele ainda puder aparecer
         for k in ("total", "paid_amount", "remaining"):
             del out[k]
         out["error"] = "total_no_card"
+        todos = args.get("todos_os_itens") is True
+        # as compras estão no card: ao texto, as 3 maiores da fatura INTEIRA (a lista de cima para nas 50 mais recentes)
+        out["itens_total"], maiores = db.get_bill_items_overview(user_id, bill["id"])
+        if not todos:
+            out["items"] = [_item_da_fatura(it) for it in maiores]
+        n, de = sum(not i["is_refund"] for i in out["items"]), out["itens_total"]  # compras, como o `itens_total`
+        corte = ("" if n >= de else
+                 f" Vêm as {n} compras mais recentes de {de} (limite da lista): diga que há mais." if todos else
+                 f" Vêm só as {n} maiores compras de {de}: cite-as e diga 'e mais {de - n}'; a lista completa só se o usuário "
+                 "pedir as compras (chame de novo com todos_os_itens=true).")
         out["message"] = (
             "o total, o pago e o restante da fatura vêm do show_card fatura: chame-o e escreva o total a partir dele. "
-            "Os itens abaixo servem só para citar compras; não some os itens."
+            "Os itens abaixo servem só para citar compras; não some os itens." + corte
         )
     return out
 

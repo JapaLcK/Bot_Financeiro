@@ -1089,184 +1089,54 @@ def confirm_email_verification_impl(
 
 def attempt_whatsapp_phone_link_impl(
     get_conn,
-    merge_users,
     wa_phone: str,
     wa_candidates: list[str],
     current_user_id: int,
 ) -> dict:
-    # `wa_candidates` vem de `utils_phone.candidatos_simetricos` (#909): só a forma que
-    # reconhece este número de volta. Vale para a busca do telefone e para o alias abaixo.
+    """Classifica o número que escreve. NÃO LIGA MAIS NADA (Grupo 7, PR-5, D1(c)): o
+    telefone digitado no site não prova que o número é de quem digitou (V3: B digita o
+    número de C, C manda "oi" e virava B). Só o código (`vincular 123456`) liga.
+
+    O telefone continua LIDO, e só para uma coisa: reconhecer a conta paga que ainda não
+    criou a senha (`precisa_senha`), cujo número tem de receber o texto dela e o opt-out
+    do lead (`PARAR`). `wa_candidates` vem de `utils_phone.candidatos_simetricos` (#909).
+
+    Status: `already_linked` (o remetente já é conta), `precisa_senha`,
+    `remetente_com_dados` (só-WhatsApp com dados; o turno segue na conta dele) e `no_match`.
+    `target_user_id` (nos três primeiros, quando existe): a conta sem credencial que digitou
+    este número. O opt-out do número desliga também ela (#716, #721)."""
+    from db.google_auth import SEM_CREDENCIAL_SQL  # tardio: db/ importa este módulo
+    from db.users import _tem_dados_financeiros
+
+    wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates if c]
     with get_conn() as conn:
         with conn.cursor() as cur:
-            wa_hashes = [hash_pii_optional(c, kind="phone") for c in wa_candidates if c]
+            # Uma ida ao banco. `ligado`: o remetente já é conta, web ou outro canal; é o que
+            # separa isso do só-WhatsApp (que `get_or_create_canonical_user` cria com a
+            # identidade do número). `alvo`: a conta SEM credencial dona do telefone digitado
+            # (a do quiz, que ainda não provou o e-mail): o número foi digitado por quem pagou.
             cur.execute(
-                """
-                select user_id, phone_e164
-                from auth_accounts
-                where phone_hash = any(%s)
-                """,
-                (wa_hashes,),
-            )
-            matches = cur.fetchall() or []
-
-            cur.execute(
-                """
-                select external_id
-                from user_identities
-                where provider = 'whatsapp' and user_id = %s
-                limit 1
-                """,
-                (current_user_id,),
-            )
-            existing_current_wa = cur.fetchone()
-
-            # O remetente já é conta: conta web ou outro canal ligado. O que separa
-            # isso do só-WhatsApp (que `get_or_create_canonical_user` cria com a
-            # identidade do número). Vale para os dois ramos abaixo: sem telefone
-            # que case (o `vincular CODIGO` liga sem olhar o telefone digitado) e
-            # com telefone de outra conta (#711: não mescla). O número já ligado à
-            # conta do telefone (o caso de toda mensagem) não paga a consulta.
-            ja_em_conta = False
-            if not matches or int(matches[0]["user_id"]) != int(current_user_id):
-                cur.execute(
-                    """
-                    select exists (select 1 from auth_accounts where user_id = %s)
+                f"""
+                select (exists (select 1 from auth_accounts where user_id = %(uid)s)
                         or exists (select 1 from user_identities
-                                   where user_id = %s and provider <> 'whatsapp') as ligado
-                    """,
-                    (current_user_id, current_user_id),
-                )
-                ja_em_conta = bool(cur.fetchone()["ligado"])
-
-    if not matches:
-        if ja_em_conta:
-            return {"status": "already_linked", "user_id": int(current_user_id), "wa_phone": wa_phone}
-        return {"status": "no_match", "wa_phone": wa_phone}
-
-    if len(matches) > 1:
-        return {"status": "multiple_accounts", "wa_phone": wa_phone}
-
-    target_user_id = int(matches[0]["user_id"])
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                select external_id, external_id_enc
-                from user_identities
-                where provider = 'whatsapp' and user_id = %s
-                limit 1
+                                   where user_id = %(uid)s and provider <> 'whatsapp')) as ligado,
+                       (select a.user_id from auth_accounts a
+                         where a.phone_hash = any(%(hashes)s) and {SEM_CREDENCIAL_SQL}
+                         limit 1) as alvo
                 """,
-                (target_user_id,),
+                {"uid": current_user_id, "hashes": wa_hashes},
             )
-            target_wa = cur.fetchone()
-
-            if target_wa:
-                if target_wa.get("external_id_enc"):
-                    target_wa_id = decrypt_pii_optional(
-                        target_wa["external_id_enc"],
-                        ctx=PiiAccessContext(
-                            purpose="whatsapp_link_check",
-                            actor="system:whatsapp_link",
-                            subject_user_id=target_user_id,
-                            field="whatsapp_id",
-                        ),
-                    )
-                else:
-                    target_wa_id = target_wa["external_id"]
-            else:
-                target_wa_id = None
-            same_phone_alias = False
-            if target_wa_id:
-                try:
-                    target_candidates = set(phone_lookup_candidates(target_wa_id))
-                except ValueError:
-                    target_candidates = {target_wa_id}
-                # Nos dois sentidos: `phone_lookup_candidates` tira o 9 de todo celular,
-                # e "55119"+L e "5511"+L com L em 2-5 são celular e FIXO, donos diferentes.
-                same_phone_alias = wa_phone in target_candidates and target_wa_id in wa_candidates
-
-            if target_wa and target_wa_id != wa_phone and not same_phone_alias:
-                return {
-                    "status": "account_has_other_whatsapp",
-                    "wa_phone": wa_phone,
-                }
-
-    final_user_id = target_user_id
-    if int(current_user_id) != target_user_id:
-        from db.google_auth import conta_sem_credencial  # tardio: db/ importa este módulo
-        from db.users import MergeRefused, _tem_dados_financeiros
-
-        # #711/#630 (D1(a)): o telefone digitado no site não prova que o número é
-        # de quem digitou. Remetente que já é conta, ou que tem dados (critério do
-        # merge, #607), segue na conta dele, sem mesclar e sem gravar identidade;
-        # a junção legítima é pelo código. `target_user_id`: a conta que digitou
-        # o número recebe envios nele, e o opt-out daqui tem de desligá-la (#716).
-        # Vale também quando o alvo já tem este número em outro formato (alias): o
-        # número ser o mesmo não autoriza apagar uma conta (dono, M8). Remetente
-        # vazio segue para o merge, como qualquer outro.
-        if ja_em_conta:
-            return {"status": "wa_linked_other_account", "wa_phone": wa_phone,
-                    "target_user_id": target_user_id}
-        with get_conn() as conn, conn.cursor() as cur:
-            if _tem_dados_financeiros(cur, int(current_user_id)):
-                return {"status": "remetente_com_dados", "wa_phone": wa_phone,
-                        "target_user_id": target_user_id}
-
-        # Conta sem senha nem Google/Apple (a do quiz) não se liga pelo telefone:
-        # o número foi digitado por quem pagou, e o e-mail ainda não foi provado.
-        # Sem mesclar e sem gravar user_identities (PR 4 do funil v3). Número já
-        # ligado a ela (current == target) não passa aqui: o `process_message`
-        # barra antes de chamar o auto-vínculo.
-        if conta_sem_credencial(target_user_id):
-            # `target_user_id`: o clique de opt-out deste número tem de desligar a
-            # preferência dela. Desde a #721 a atualização só vai a número ligado, mas
-            # o botão das mensagens já entregues ao `phone_e164` dela continua clicável.
-            return {"status": "precisa_senha", "wa_phone": wa_phone,
-                    "target_user_id": target_user_id}
-
-        try:
-            merge_users(int(current_user_id), target_user_id)
-        except MergeRefused as exc:
-            # Só sobra remetente só-WhatsApp sem dados; a recusa vem, por exemplo,
-            # de corrida (dado gravado depois da checagem acima), autoindicação ou colisão.
-            # O número segue na conta do WhatsApp, e o aviso diz o motivo.
-            return {"status": "merge_conflict", "wa_phone": wa_phone, "motivo": exc.motivo}
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                insert into user_identities (provider, external_id, user_id,
-                                              external_id_hash, external_id_enc)
-                values ('whatsapp', %s, %s, %s, %s)
-                on conflict (provider, external_id)
-                do update set user_id = excluded.user_id,
-                              external_id_hash = coalesce(excluded.external_id_hash, user_identities.external_id_hash),
-                              external_id_enc = coalesce(excluded.external_id_enc, user_identities.external_id_enc)
-                """,
-                (wa_phone, target_user_id,
-                 hash_pii_optional(wa_phone, kind="external_id"),
-                 encrypt_pii_optional(wa_phone)),
-            )
-            cur.execute(
-                """
-                update auth_accounts
-                set phone_status = 'confirmed',
-                    phone_confirmed_at = coalesce(phone_confirmed_at, now()),
-                    whatsapp_verified_at = now()
-                where user_id = %s
-                """,
-                (target_user_id,),
-            )
-        conn.commit()
-    invalidate_auth_user_cache(target_user_id)
-
-    return {
-        "status": "already_linked" if current_user_id == target_user_id and existing_current_wa else "linked",
-        "user_id": int(final_user_id),
-        "wa_phone": wa_phone,
-    }
+            linha = cur.fetchone()
+            alvo = linha["alvo"] if linha["alvo"] != current_user_id else None  # o número dela mesma
+            resposta = {"wa_phone": wa_phone}
+            if alvo is not None:
+                resposta["target_user_id"] = int(alvo)
+            if linha["ligado"]:
+                return {"status": "already_linked", "user_id": int(current_user_id), **resposta}
+            if alvo is None:
+                return {"status": "no_match", **resposta}
+            dados = _tem_dados_financeiros(cur, int(current_user_id))
+    return {"status": "remetente_com_dados" if dados else "precisa_senha", **resposta}
 
 
 def create_password_reset_token_impl(get_conn, email: str, minutes_valid: int = 30) -> str | None:
