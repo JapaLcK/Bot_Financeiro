@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_assinaturas import conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
+from _apoio_assinaturas import HOJE, conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
 from _apoio_auth_app import csrf, sessao_de as sessao
 from conftest import promote_to_pro
 from db import ensure_user
@@ -19,6 +19,18 @@ from db.privacy import build_user_export_zip
 
 GET = "/api/v2/assinaturas"
 POST = "/api/v2/assinaturas/marca"
+
+
+@pytest.fixture(autouse=True)
+def _relogio(monkeypatch):
+    """As transações semeadas têm data fixa (a última de 2026-09-05, ativa até `DIAS_ATIVA`
+    dias depois); com o relógio real a rota as dá por canceladas a partir de 2026-10-16."""
+    class _Hoje(date):
+        @classmethod
+        def today(cls):
+            return HOJE
+
+    monkeypatch.setattr("api.v2.assinaturas.date", _Hoje)
 
 
 @pytest.fixture

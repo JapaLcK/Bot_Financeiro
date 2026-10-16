@@ -2,7 +2,7 @@
 Cobre as tools Tier 2 da E2 (analítics que respondem perguntas como
 'onde gastei mais?', 'gastei mais em abril ou maio?', etc).
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import db
@@ -399,8 +399,13 @@ def _parcelas_of(uid, card, n=3, grupo="g", valor=200, nota="TV LOJA", total=Non
                 (bill, uid, card, valor, nota, d, g, i + 1, total or n))
 
 
+def _fim_do_mes(d):
+    return _mes(d, 1).replace(day=1) - timedelta(days=1)
+
+
 def _janela(uid, meses):
-    rows = db.get_largest_expenses(uid, date.today().replace(day=1), _mes(date.today(), meses - 1),
+    # Termina no ÚLTIMO dia do mês: `_mes` fixa o dia 15, e a compra de hoje (dia > 15) ficaria fora.
+    rows = db.get_largest_expenses(uid, date.today().replace(day=1), _fim_do_mes(_mes(date.today(), meses - 1)),
                                    limit=20, juntar_parcelas=True)
     return [(r["valor"], r.get("parcelas"), r["parcela"], r["data"]) for r in rows]
 
@@ -687,9 +692,13 @@ def test_top_categories_exclui_reembolso_cartao(user_id):
 
 
 def _tool_janela(uid, meses):
-    with _periodo_livre():
+    # Janela do dia 1 ao dia 1 do mês seguinte (inclui a compra e o lançamento de HOJE, qualquer que seja o
+    # dia) com "hoje" no dia 28 desse mês seguinte: o fim não é fim de mês nem >= hoje, então nunca vira
+    # "meses inteiros" (que lê o cartão pela fatura). `_mes` fixa o dia 15 e deixava hoje (dia > 15) de fora.
+    fim = _fim_do_mes(_mes(date.today(), meses - 1)) + timedelta(days=1)
+    with patch.object(tools_launches, "today_tz", lambda: fim.replace(day=28)):
         return _get_largest_expenses(uid, {"start_date": date.today().replace(day=1).isoformat(),
-                                           "end_date": _mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
+                                           "end_date": fim.isoformat(), "limit": 20})["expenses"]
 
 
 def test_parcelamento_manual_compra_inteira(user_id):
