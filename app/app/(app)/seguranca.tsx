@@ -36,6 +36,8 @@ export default function Seguranca() {
 
   const carregar = async () => {
     const minha = ++geracao.current;
+    // A expiração desta carga já foi notificada à sessão? (ver invariante 3)
+    let avisada = false;
     try {
       // statusMfa × perfil -> ação. A ordem de chegada NÃO conta (allSettled espera as duas), e a
       // sessão expirada de QUALQUER uma vence (o reset de senha revoga sessões, e uma chamada pode
@@ -54,7 +56,10 @@ export default function Seguranca() {
       // espera a irmã para decidir a ESCRITA de estado (invariante 4 abaixo).
       const avisando = <T,>(p: Promise<T>) =>
         p.catch((e: unknown) => {
-          if (e instanceof SessaoExpirada) falha(e);
+          if (e instanceof SessaoExpirada) {
+            avisada = true;
+            falha(e);
+          }
           throw e;
         });
       const [status, conta] = await Promise.allSettled([avisando(statusMfa()), avisando(perfil())]);
@@ -65,18 +70,20 @@ export default function Seguranca() {
         setEstado({ fase: "pronto", status: status.value, conta: conta.status === "fulfilled" ? conta.value : null });
       }
     } catch (e) {
-      // Invariantes de `carregar` (quatro rodadas de revisão neste ponto):
+      // Invariantes de `carregar` (cinco rodadas de revisão neste ponto):
       //  1. A geração governa só ESCRITAS DE ESTADO da tela (o `setEstado` de pronto/erro).
       //  2. Sessão expirada é fato global: de QUALQUER geração, chega a `falha(e)`. Uma carga antiga
       //     que descobre a expiração depois de uma nova ter começado não pode ser descartada, ou a
       //     tela fica autenticada com controles velhos.
-      //  3. Idempotente: `sessao.expirou` só transiciona de `autenticado` para `anonimo`, então duas
-      //     cargas expiradas (gerações diferentes) avisam e navegam uma vez só. É por isso que o
-      //     `falha(e)` abaixo, repetido para um evento já avisado pelo `avisando`, é seguro.
+      //  3. Cada expiração é notificada UMA ÚNICA VEZ por chamada, no instante em que ocorre (`avisando`),
+      //     e nunca se repete: `sessao.expirou` só é idempotente enquanto o provider está anônimo. Se a
+      //     pessoa reentrar antes de a chamada irmã terminar, um segundo `falha(e)` tardio encontraria
+      //     o provider `autenticado` de novo e derrubaria a sessão NOVA. Por isso o catch só notifica
+      //     uma expiração que não passou pelo `avisando` (`avisada` falso).
       //  4. Evento terminal de sessão propaga NA HORA, sem esperar a chamada irmã (que pode ficar
       //     pendurada até o limite de 15 s do cliente); só a ESCRITA de estado espera as duas.
       if (e instanceof SessaoExpirada) {
-        falha(e);
+        if (!avisada) falha(e);
         return;
       }
       if (minha !== geracao.current) return;
