@@ -51,7 +51,7 @@ from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
-    PT_PHRASE, PT_VALUE, PT_MULT, PT_VALOR_COM_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    PT_PHRASE, PT_VALUE, PT_VALOR_COM_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
 
@@ -2547,12 +2547,18 @@ def handle(user_id: int, text: str) -> str | None:
             rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+{PT_VALUE}",
             "", desc_clean, flags=re.IGNORECASE,
         )
-        desc_clean = re.sub(r"\b\d+[\.,]?\d*(?:\s*bi\b|\b)", "", desc_clean, flags=re.IGNORECASE)  # "1 bi"/"1bi" é o total; "pro bi" fica
+        # O multiplicador pertence ao segmento do VALOR ("1 bilhão", "um bilhão", "1 bi", "1bi"), não à
+        # descrição: só some junto do valor; "clube do bilhão" fica. Dígito sem multiplicador segue abaixo.
+        desc_clean = re.sub(
+            PT_VALOR_COM_MULT, lambda m: m.group(0) if re.fullmatch(r"\d[\d.,]*", m.group(0)) else "",
+            desc_clean, flags=re.IGNORECASE,
+        )
+        desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)
         # remove multiplicadores/unidades monetárias que sobraram quando o valor
         # foi escrito por extenso ("mil reais em 10 vezes" → não vira descrição).
         desc_clean = re.sub(
-            rf"\b((?!bi\b)(?:{PT_MULT})|reais|real|r\$|vezes?|parcelas?)\b",
+            r"\b(mil|milh[oõ]es|milhao|milh[aã]o|reais|real|r\$|vezes?|parcelas?)\b",
             "", desc_clean, flags=re.IGNORECASE,
         )
         # sobras de números por extenso ("dez", "doze", "cem"...) que faziam

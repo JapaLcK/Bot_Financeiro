@@ -61,6 +61,9 @@ def test_parse_pt_number(texto, esperado):
     # controles: sem multiplicador (ou "bi" curto por extenso) o número é parte da descrição
     ("gastei dois cafés", "dois cafés"), ("gastei um bi no mercado", "um bi no mercado"),
     ("gastei um bilhete", "um bilhete"),
+    # bilhão/trilhão SEM valor antes é palavra da descrição (parse_money também não o lê como valor)
+    ("gastei bilhão de coisas 50", "bilhão de coisas 50"), ("gastei trilhão de coisas 50", "trilhão de coisas 50"),
+    ("gastei 50 no clube do bilhão", "clube do bilhão"),
 ])
 def test_descricao_nao_carrega_o_multiplicador(texto, alvo):
     assert _extract_target_after_amount(texto) == alvo
@@ -206,6 +209,11 @@ def _notas(uid):
 @pytest.mark.parametrize("texto,nota", [
     ("parcelar 1 bi em 2x carro", "carro"), ("parcelar 1bi em 2x carro", "carro"),
     ("parcelar 1 bilhão em 2x carro", "carro"), ("parcelei 600 em 3x pro bi", "pro bi"),
+    ("parcelar um bilhão em 2x carro", "carro"), ("parcelar em 3x 1 bilhão carro", "carro"),
+    # o multiplicador é do valor, não da descrição: "bilhão"/"trilhão" solto fica na nota (controle positivo)
+    ("parcelar 600 em 3x clube do bilhão", "clube do bilhão"), ("parcelar 600 em 3x clube do trilhão", "clube do trilhão"),
+    ("parcelar 600 em 3x bilhão de coisas", "bilhão de coisas"),
+    ("parcelei 3x de 100 bicicleta", "bicicleta"), ("parcelei 2 milhões em 10x carro", "carro"),
 ])
 def test_conversa_parcelar_total_com_bi_nao_vaza_na_nota(texto, nota):
     uid, _ = _usuario_com_cartao()

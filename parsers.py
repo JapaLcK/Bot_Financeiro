@@ -1,5 +1,5 @@
 import re
-from utils_text import normalize_text, is_internal_category, parse_money, PT_MULT, PT_VALOR_COM_MULT
+from utils_text import normalize_text, is_internal_category, parse_money, PT_VALOR_COM_MULT
 from utils_date import extract_date_from_text
 from core.services.category_service import infer_category, learn_from_explicit_category
 
@@ -149,8 +149,8 @@ def _extract_target_after_amount(text_base: str) -> str:
     # Consome o valor inteiro, incl. separador de milhar + decimal ("1.234,56"),
     # ou por extenso + multiplicador obrigatório ("dez mil", "um bilhão e 500"); "bi" curto nunca por extenso
     t = re.sub(rf"^\s*(?:{PT_VALOR_COM_MULT})", "", t, count=1, flags=re.IGNORECASE).strip()
-    # multiplicador sem dígito antes ("mil reais" → "reais"); com dígito a linha acima já consome
-    t = re.sub(rf"^\s*(?!bi\b)(?:{PT_MULT})\b", "", t, flags=re.IGNORECASE).strip()
+    # "mil"/"milhão" sem valor antes ("mil reais" → "reais"); bilhão/trilhão solto não é valor, fica na nota
+    t = re.sub(r"^\s*(mil|milh[oõ]es|milhao|milhão)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*reais?\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"^\s*(de|do|da|dos|das|no|na|nos|nas|em|pra|para|ao|aos|a)\b", "", t, flags=re.IGNORECASE).strip()
     t = re.sub(r"\s+", " ", t).strip(" -:;,.")
