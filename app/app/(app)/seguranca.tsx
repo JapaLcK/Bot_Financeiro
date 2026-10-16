@@ -51,7 +51,7 @@ export default function Seguranca() {
       //                     novo; em recarga com                    (em recarga com dados na tela,
       //                     dados na tela, mantém                   mantém a tela)
       //
-      // login = `falha(e)` no catch; erro/mantém = o ramo A2 do catch.
+      // login = `falha(e)` na hora, pelo `avisando`; erro/mantém = o ramo A2 do catch.
       // Cada chamada avisa a sessão NA HORA em que rejeita com `SessaoExpirada`; o allSettled só
       // espera a irmã para decidir a ESCRITA de estado (invariante 4 abaixo).
       const avisando = <T,>(p: Promise<T>) =>
