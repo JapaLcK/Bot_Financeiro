@@ -575,7 +575,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   fora, como o mascarado ou "0", que uniriam pessoas diferentes (a descrição do Pix é genérica,
   "Pix recebido", e também uniria). A cadeia anda de trás para frente enquanto o intervalo for 30±5 dias e
   vale com `MINIMO = 2` créditos, todos a ±20% da mediana (com 2 créditos, a mediana é a média:
-  eles podem diferir até 50%); valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
+  eles podem diferir até 50%); se ela não fecha, ou se uma cadeia que pula créditos avulsos do mesmo
+  pagador (`_pulando`) é mais longa, vale a mais longa, com `MINIMO_PULANDO = 3` elos e valores a ±20% da
+  âncora e da mediana, como a consecutiva (2026-10-16; decisão do dono: a defesa contra receita falsa de pagador
+  frequente não é o valor, é a confirmação do usuário, abaixo; em simulação, 24% de 20 Pix de R$ 50–300 em 6 meses
+  fecham cadeia de 3 por acaso, contra 2% da regra antiga); uma receita por pagador; valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
   documento, data e valor: pendente e efetivado, ou duas conexões do mesmo banco) conta uma vez;
   créditos do mesmo documento na mesma data **somam** num só (salário + vale; sem a soma o
   intervalo 0 matava a cadeia); cada parcela somada guarda as contas das suas cópias idênticas
@@ -593,14 +597,43 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   motivo, log, `/api/v2/previsao` ou IA: o id é HMAC com pepper; sem `payer.name` o nome cai na
   descrição, que é dado do próprio usuário). Sem aviso novo de "nenhuma receita
   detectada".
+  **A detectada é só CANDIDATA; entra na conta a que o usuário confirmou (2026-10-16, decisão do dono).** A
+  resposta mora em `subscription_marks` (sem migração), com `merchant_key` = o id `extrato#…` da receita:
+  `status 'assinatura'` = confirmada (`CONFIRMADA`), `'ignorar'` = negada (`NEGADA`; os nomes são do status
+  da assinatura, e aqui NÃO significam assinatura), sem linha = pendente; desfazer = `marcar(uid, chave, 'nenhuma')`.
+  O id é por pagador, então aumento de salário mantém a confirmação, e `merchant_key` da Pluggy passa por
+  `normalize_text` (o `#` vira espaço), então as duas famílias de chave não colidem. `anexar` lê as marcas uma vez,
+  só vira `Ocorrencia` a confirmada (valor e dia seguem o extrato, a cada leitura; o pagador que para fica
+  `interrompida` e sai sozinho, e se volta, volta confirmada sem nova pergunta), e vão para
+  `Snapshot.receitas_do_banco` as confirmadas, as negadas e a pendente cujo Sim incluiria pelo menos uma ocorrência até `HORIZONS[0]` (30 dias, o único
+  horizonte do Plus; `_sim_muda_a_conta`, com as mesmas datas e cortes do laço de `anexar` via `_datas_banco`): fica fora a interrompida
+  (sem crédito há mais de `DIAS_ATIVA` dias), a de conta fora da base e a cuja próxima data esperada cai a 31+ dias (salário que
+  caiu hoje, mês de 31 dias: a pergunta volta no dia seguinte; com o último crédito adiantado ela fica escondida
+  até cerca de `TOLERANCIA_DIA`+1 dias, medido: 5). A lista não depende do `dias` pedido; `sim`/`nao` numa pendente escondida dá 404 (`chave`, `nome`, `valor`, `dia`, `status` `pendente|confirmada|negada`, pendentes
+  primeiro, depois por valor). Como toda leitura passa por `anexar`, a candidata fica fora da CONTA do `/painel`, do app,
+  do WhatsApp, da IA, do forecast e do simulador; a lista só vai ao cliente (API) para a tela perguntar, e a visão do modelo
+  do card `hero` da IA a omite (`core/services/ai_chat/cards.py`; teste `test_visao_do_modelo_no_hero_*`): o único consumidor
+  de `Previsao` da IA é esse card, e `compromissos` usa `_so` com chaves explícitas. A lista é devolvida em `receitas_do_banco` de `GET /api/v2/previsao`
+  (e `/api/app/previsao`), também no Plus (fora do `detalhes`); a receita que deixa de ser detectada (confirmada ou não) some da lista.
+  `POST /api/v2/previsao/receita` (`api/v2/previsao.py`; também em `/api/app/previsao/receita`), corpo
+  `{chave, resposta: "sim"|"nao"|"desfazer"}`, mesmo gate `forecast` da leitura e CSRF do pai: a chave tem de estar em
+  `receitas_do_banco` do PRÓPRIO usuário, senão 404 `not_found` e nada é gravado (resposta fora das três = 422); só o `desfazer`
+  também vale para a marca `extrato#…` do próprio usuário que saiu da lista (consulta por `user_id`; chave de outro usuário segue 404);
+  devolve a `Previsao` do menor horizonte permitido, com os detalhes do plano. Sem tela ainda (PR 2a, `/painel`; 2b, app;
+  3, WhatsApp); sem o Sim ninguém confirma, mas hoje a regra acha receita só no dono. Limites: uma receita por pagador;
+  a receita confirmada ou negada que deixa de ser detectada some da lista (sem valor nem nome a mostrar) e a marca fica na tabela (hash, sem documento; sai com a conta e na exportação de privacidade, em `marcacoes_assinaturas`), mas o `desfazer` por chave continua funcionando;
+  **a confirmação é por PAGADOR, não por valor**: confirmar o salário de um CPF faz qualquer cadeia futura desse CPF (ex.: 3 reembolsos de R$ 50) entrar sem perguntar, até o usuário desfazer;
+  **`nome` vem do pagador (`payer.name`) ou da descrição, texto livre de terceiro: a tela (PR 2a, 2b, 3) tem de escapar**; o POST lê o snapshot duas vezes (validação e resposta), aceito.
   Limites: **receita sem documento do pagador não é detectada** (o Pix de muita gente
-  chega sem ele); 13º/bônus em outro dia do mês, no meio ou depois do último crédito quebra a cadeia por
-  ~2 meses; aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal ou irregular nunca
-  é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
+  chega sem ele); com só 2 créditos, 13º/bônus em outro dia do mês, no meio ou depois do último, quebra a cadeia
+  (com 3+ a cadeia pula o avulso, desde que ele NÃO caia 30±5 dias depois do último elo: um Pix avulso do
+  mesmo pagador 25–35 dias depois do último salário faz a receita sumir da Previsão até o próximo salário
+  chegar; a regra antiga também dava vazio); extra no mesmo dia que some mais de 20% ao salário tira o crédito da cadeia; uma receita por pagador (a cadeia mais longa); aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal
+  de valor igual, com 3+ meses, vira receita MENSAL (um dos dois créditos do mês; o valor previsto subestima a renda) e a irregular não é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
   diferente entre meses (zeros à esquerda) vira chaves distintas (o filtro de 11/14 dígitos reduz,
-  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo infla o
-  saldo.
-  Receita detectada leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
+  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo só infla o
+  saldo se o usuário o confirmar.
+  Receita CONFIRMADA (a pendente fica fora da conta) leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
   `cashflow.py::_risco` não dá veredito com ela), como já acontecia com a saída detectada.
   `amount` do espelho é `numeric` e guarda NaN/±Infinity, que no Postgres são `> 0`: `_SQL_CREDITOS`
   só lê crédito finito (`amount < 'Infinity'`, que tira os dois), senão a Previsão inteira daria 500
@@ -1502,7 +1535,7 @@ transação do delete pelo disconnect e pelo reset.
 Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 `of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
-usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+usuário por `merchant_key` (vale para todos os itens da chave; com a chave `extrato#…`, a resposta sobre a receita detectada, ver Previsão), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,

@@ -264,8 +264,9 @@ def registro() -> dict[str, Card]:
     todo = lambda rec: (lambda r: r[rec])  # noqa: E731
     return {
         "contas": Card(lambda uid, a: [(None, {"contas": contas(uid=uid)})], todo("contas")),
+        # `receitas_do_banco` fica fora: candidata pendente/negada não é evidência até o Sim do dono
         "hero": Card(prev, lambda r: {k: v for k, v in r["previsao"].items()
-                                      if k not in ("trajetoria", "compromissos")}, gate_prev),
+                                      if k not in ("trajetoria", "compromissos", "receitas_do_banco")}, gate_prev),
         "compromissos": Card(prev, _so("previsao", "hoje", "dias", "compromissos", "motivos"), gate_prev),
         "resumo": Card(lambda uid, a: _mes(uid, a, resumo=resumo, detalhes=mes_detalhes),
                        lambda r: {"resumo": r["resumo"],

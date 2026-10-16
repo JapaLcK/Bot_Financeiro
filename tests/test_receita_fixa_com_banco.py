@@ -40,7 +40,7 @@ from db.recurring_income import (count_active_recurring_incomes, create_recurrin
                                  delete_recurring_income, get_recurring_income,
                                  list_recurring_incomes, update_recurring_income)
 from tests.test_manual_launches_carteira_piggy import _connect_fake_bank
-from tests.test_previsao_recorrencias_of import ler_em
+from tests.test_previsao_recorrencias_of import confirma, ler_em
 from tests.test_previsao_recorrencias_of_convivencia import saldo_90
 
 RECUSA = MSG_RECEITA
@@ -60,6 +60,7 @@ def _com_banco(uid, status="UPDATED", valor="6500") -> int:
     """Salário no extrato (3 créditos do mesmo pagador) em conexão com o `status` dado."""
     txs = mensais("sal", [valor] * 3, ultima=date(2026, 9, 5), desc="EMPRESA X", pagador=DOC)
     cid = semeia(uid, [conta("acc-sal", txs)], [])
+    confirma(uid, DOC)  # o Sim do usuário: sem ele a receita do extrato é só candidata e fica fora da conta
     _status(cid, status)
     return cid
 

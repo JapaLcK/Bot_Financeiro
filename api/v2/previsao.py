@@ -8,7 +8,9 @@ from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
 from core.services.plan_service import forecast_horizons_for, plan_gate_ok
+from core.services.previsao_recorrencias import CONFIRMADA, NEGADA
 from core.services.previsao_v2 import ler_previsao
+from db.of_recurring import marcar, marcas
 
 router = APIRouter()
 FontePrevisao = Literal["receita_recorrente", "gasto_recorrente", "instancia", "fatura", "recorrencia_banco"]
@@ -87,6 +89,19 @@ class CoberturaPrevisao(BaseModel):
     inclui_estimativa_variavel: bool
 
 
+class ReceitaDoBanco(BaseModel):
+    chave: str
+    nome: str
+    valor: Decimal
+    dia: int
+    status: Literal["pendente", "confirmada", "negada"]
+
+
+class RespostaReceitaIn(BaseModel):
+    chave: str
+    resposta: Literal["sim", "nao", "desfazer"]
+
+
 class Previsao(BaseModel):
     hoje: str
     calculado_em: datetime
@@ -106,6 +121,7 @@ class Previsao(BaseModel):
     trajetoria: list[PontoPrevisao] | None
     pior_dia: PiorDiaPrevisao | None
     compromissos: list[GrupoCompromissos] | None
+    receitas_do_banco: list[ReceitaDoBanco]
 
 
 def _assinante(uid: int = Depends(usuario_atual)) -> int:
@@ -123,3 +139,20 @@ def previsao(dias: Literal["30", "60", "90"] | None = Query(None),
         raise HTTPException(status_code=403, detail={"error": "forecast_horizon_not_allowed"})
     detalhes = plan_gate_ok(uid, "cashflow")
     return Previsao(**ler_previsao(uid, efetivos, permitidos, detalhes))
+
+
+_MARCA = {"sim": CONFIRMADA, "nao": NEGADA, "desfazer": "nenhuma"}
+
+
+@router.post("/previsao/receita", response_model=Previsao)
+def responder_receita(corpo: RespostaReceitaIn, uid: int = Depends(_assinante)) -> Previsao:
+    """O usuário confirma (sim), nega (nao) ou desfaz a resposta sobre uma receita detectada no extrato.
+    A chave tem de estar na lista do PRÓPRIO usuário; senão 404 e nada é gravado. Só o `desfazer` também
+    vale para a marca de receita do próprio usuário que saiu da lista (a receita deixou de ser detectada)."""
+    permitidos = forecast_horizons_for(uid)
+    dias = min(permitidos)
+    orfa = corpo.resposta == "desfazer" and corpo.chave.startswith("extrato#") and corpo.chave in marcas(uid)
+    if not orfa and corpo.chave not in {r["chave"] for r in ler_previsao(uid, dias, permitidos, False)["receitas_do_banco"]}:
+        raise HTTPException(status_code=404, detail={"error": "not_found"})
+    marcar(uid, corpo.chave, _MARCA[corpo.resposta])
+    return Previsao(**ler_previsao(uid, dias, permitidos, plan_gate_ok(uid, "cashflow")))
