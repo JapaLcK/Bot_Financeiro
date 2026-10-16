@@ -273,6 +273,8 @@ def test_conversa_cartao_milhoes_nao_para_em_mil(texto, valor):
     ("dois mil e um bi", 2001), ("dois mil e um bilhete", 2001),
     # limites declarados, fora de escopo: "e meio" e a soma sem "e"
     ("um bilhão e meio", 1e9), ("1 bilhão 500 milhões", 1e9),
+    # a vírgula/ponto final da frase não é parte do resto
+    ("1 mil e 500, no mercado", 1500), ("dois mil e 500, no mercado", 2500),
 ])
 def test_parse_money_resto_composto(texto, esperado):
     assert parse_money(texto) == esperado
@@ -297,6 +299,10 @@ FORMAS = [  # (trecho do valor, valor lido)
     ("1 mil e 500", 1500), ("1 mil e 2,5", 1002.5), ("dois bilhões e quinhentos milhões", 2.5e9),
     ("um milhão e 0.5 milhão", 1.5e6), ("dois mil e 500", 2500), ("1 bi e 0,5 bi", 1.5e9),
     ("1 bilhão e 300 milhões e 5 mil", 1300005000), ("2 bilhões e 0,5 bi", 2.5e9),
+    # o numeral do resto é o completo do número comum (milhar E decimal), em qualquer ramo
+    ("0,5 bilhão e 1.234,56 mil", 501234560), ("1 bi e 1.234,56 mil", 1001234560), ("1 mil e 1.234,56", 2234.56),
+    ("dois mil e 1.234,56", 3234.56), ("um milhão e 1.234,56 mil", 2234560), ("1 mil e 1.5", 1001.5),
+    ("1 bilhão e 300 milhões e 1.234,56 mil", 1301234560), ("dois bilhões e 1.234,56 mil", 2001234560),
 ]
 
 
@@ -323,6 +329,14 @@ def test_recortes_param_onde_o_valor_acaba(texto, nota_consome, parcela_consome)
     assert (m.group(0) if m else None) == nota_consome
     p = re.search(PARCELA_DE_VALOR, f"parcelei 2x de {texto}", re.IGNORECASE)
     assert (p.group(1) if p else None) == parcela_consome
+
+
+@pytest.mark.parametrize("texto,nota_consome", [
+    ("1 mil e 500.", "1 mil e 500"), ("1 mil e 500, no mercado", "1 mil e 500"),
+    ("dois mil e 500, no mercado", "dois mil e 500"), ("0,5 bi e 1.234,56 mil, no mercado", "0,5 bi e 1.234,56 mil"),
+])
+def test_nota_nao_engole_a_pontuacao_final_do_resto(texto, nota_consome):
+    assert re.match(PT_VALOR_COM_MULT, texto, re.IGNORECASE).group(0) == nota_consome
 
 
 def test_parse_money_bi_com_hifen_nao_e_bi():
@@ -356,6 +370,7 @@ def test_conversa_parcelei_composto_dentro_do_teto_registra_e_a_nota_fica_limpa(
     ("gastei 0,5 bi e 100 milhões no cartão nubank mercado", 6e8, "mercado"),
     ("gastei 1 mil e 500 no cartão nubank mercado", 1500, "mercado"),
     ("gastei dois mil e 500 no cartão nubank mercado", 2500, "mercado"),
+    ("gastei 0,5 bilhão e 1.234,56 mil no cartão nubank mercado", 501234560, "mercado"),
 ])
 def test_conversa_cartao_natural_composto_nota_sem_o_resto_do_valor(texto, valor, nota):
     uid, _ = _usuario_com_cartao()

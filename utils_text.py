@@ -821,9 +821,12 @@ _PT_BI = r"bi\b(?!-)"  # "bi-cicleta" (hífen) não é "bi"
 _PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}"
 _PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b", re.IGNORECASE)
+# Numeral completo do RESTO ("1.234,56", "1.500", "0.5", "500"): termina em dígito, então o ponto/vírgula
+# final de frase ("1 mil e 500." / "1 mil e 500, no mercado") fica de fora. O valor passa por `parse_money`.
+_PT_NUM = r"\d(?:[\d.,]*\d)?"
 # Cada "e <resto>" depois da base: dígito (+ multiplicador) ou, só se a base é por extenso, frase (+ mult longo).
 _PT_RESTO_RE = re.compile(
-    rf"\s*e(?:\s*(\d+(?:[.,]\d+)?)(?:\s*({_PT_MULT})\b)?|\s+({_PT_PHRASE})(?:\s+({_PT_MULT_LONGO})\b)?)",
+    rf"\s*e(?:\s*({_PT_NUM})(?:\s*({_PT_MULT})\b)?|\s+({_PT_PHRASE})(?:\s+({_PT_MULT_LONGO})\b)?)",
     re.IGNORECASE,
 )
 
@@ -847,8 +850,8 @@ PT_VALUE = (
     rf"(?:\s+(?:e\s+)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
 )
 # O valor que abre/está numa frase de descrição, para tirá-lo dela. NÃO é o mesmo regex do
-# `_PT_RESTO_RE` (o do `parse_money`): este exige `\s+e\s+` e usa `\d[\d.,]*`; aquele aceita `\s*e\s*` e
-# `\d+(?:[.,]\d+)?`. Divergência conhecida: "1 mil e500 carro" → parse_money = 1500, mas a nota fica
+# `_PT_RESTO_RE` (o do `parse_money`): este exige `\s+e\s+`; aquele aceita `\s*e\s*`. O numeral do resto
+# é o mesmo nos dois (`_PT_NUM`). Divergência conhecida: "1 mil e500 carro" → parse_money = 1500, mas a nota fica
 # "e500 carro". Os dois são conferidos pela tabela de
 # `test_cada_forma_e_lida_e_recortada_inteira_pelos_tres_leitores` (tests/test_parse_money_bilhao.py).
 # Forma: uma base COM multiplicador (dígito +
@@ -859,8 +862,8 @@ PT_VALUE = (
 _PT_C_DIG = rf"{_PT_DIG}\s*(?:{_PT_MULT})\b"
 _PT_C_EXT = rf"(?:{_PT_PHRASE})\s+(?:{_PT_MULT_LONGO})\b"
 PT_VALOR_COM_MULT = (
-    rf"{_PT_C_DIG}(?:\s+e\s+{_PT_C_DIG})*(?:\s+e\s+{_PT_DIG})?"
-    rf"|{_PT_C_EXT}(?:\s+e\s+(?:{_PT_C_DIG}|{_PT_C_EXT}))*(?:\s+e\s+(?:{_PT_DIG}|{_PT_PHRASE}))?"
+    rf"{_PT_C_DIG}(?:\s+e\s+{_PT_C_DIG})*(?:\s+e\s+{_PT_NUM})?"
+    rf"|{_PT_C_EXT}(?:\s+e\s+(?:{_PT_C_DIG}|{_PT_C_EXT}))*(?:\s+e\s+(?:{_PT_NUM}|{_PT_PHRASE}))?"
     rf"|{_PT_DIG}"
 )
 
