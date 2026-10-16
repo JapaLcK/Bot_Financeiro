@@ -179,8 +179,10 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   `min(dia_de_corte, último dia do mês anterior)` (hoje 31 de março contra fevereiro vira o fim
   de fevereiro); em **mês passado** é o último dia REAL do mês anterior, sem `min`, para fevereiro
   (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
-  Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
-  descrição, valor e a chave da categoria), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
+  Mais: o calendário de todas as categorias (por dia: total, os 3 maiores gastos do dia, com
+  descrição, valor e a chave da categoria, `quantidade` de saídas do dia e `categorias` `[{chave, valor}]` com Σ = `total`,
+  em `(-valor, chave)`, das mesmas linhas do `total`; o card do dia (PR B, #NNN) usa os dois e não soma dinheiro no
+  cliente; em `/gastos/categoria` a lista tem só a própria categoria; o cliente trata fatia ≤ 0 (estorno ou zero inseridos direto no banco: a barra de divisão não pode quebrar) e não compara o texto de `total` com o de `categorias[].valor`, porque a escala pode diferir ("91.010" vs "1.005"); Σ em centavos que não fecha dia a dia levanta `arredondamento_por_grupo`), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `saidas_em_outra_moeda`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).

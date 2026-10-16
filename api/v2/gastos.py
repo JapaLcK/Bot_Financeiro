@@ -43,10 +43,17 @@ class GastoMaior(BaseModel):
     categoria: str
 
 
+class GastoDiaCategoria(BaseModel):
+    chave: str
+    valor: Decimal
+
+
 class GastoDia(BaseModel):
     dia: str
     total: Decimal
     maiores: list[GastoMaior]
+    quantidade: int  # as saídas do dia (as que somam `total`); `maiores` é só o topo
+    categorias: list[GastoDiaCategoria]  # Σ valor = `total`; maior primeiro, empate pela chave
 
 
 class ForaDaGrade(BaseModel):
@@ -69,6 +76,11 @@ class Gastos(BaseModel):
     motivos: list[Literal[gastos.MOTIVOS_GASTOS]]
 
 
+def _dia_diverge(dias) -> bool:
+    """O card do dia mostra `categorias` em centavos ao lado de `total`: a soma exibida tem de fechar, dia a dia."""
+    return any(soma_arredondada_diverge([c["valor"] for c in x["categorias"]], x["total"]) for x in dias)
+
+
 @router.get("/gastos", response_model=Gastos)
 def gastos_do_mes(mes: str | None = Query(None, pattern=PADRAO_MES),
                   uid: int = Depends(usuario_atual)) -> Gastos:
@@ -76,7 +88,8 @@ def gastos_do_mes(mes: str | None = Query(None, pattern=PADRAO_MES),
     if d["total"] is not None and (
             soma_arredondada_diverge([c["valor"] for c in d["categorias"]], d["total"])
             or soma_arredondada_diverge([x["total"] for x in d["dias"]] + [d["fora_da_grade"]["valor"]],
-                                        d["total"])):
+                                        d["total"])
+            or _dia_diverge(d["dias"])):
         d["motivos"] = [m for m in gastos.MOTIVOS_GASTOS if m in {*d["motivos"], "arredondamento_por_grupo"}]
     return Gastos(**d)
 
