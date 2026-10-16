@@ -181,7 +181,7 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
   Mais: o calendário de todas as categorias (por dia: total, os 3 maiores gastos do dia, com
   descrição, valor e a chave da categoria, `quantidade` de saídas do dia e `categorias` `[{chave, valor}]` com Σ = `total`,
-  em `(-valor, chave)`, das mesmas linhas do `total`; o card do dia (PR B, #NNN) usa os dois e não soma dinheiro no
+  em `(-valor, chave)`, das mesmas linhas do `total`; o card do dia (PR B, #1029) usa os dois e não soma dinheiro no
   cliente; em `/gastos/categoria` a lista tem só a própria categoria; o cliente trata fatia ≤ 0 (estorno ou zero inseridos direto no banco: a barra de divisão não pode quebrar) e não compara o texto de `total` com o de `categorias[].valor`, porque a escala pode diferir ("91.010" vs "1.005"); Σ em centavos que não fecha dia a dia levanta `arredondamento_por_grupo`), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `saidas_em_outra_moeda`, `motivos`. Alimenta o bloco
@@ -326,7 +326,7 @@ outra categoria; no modo dia ele segue a categoria escolhida, como o calendário
   juntos, pela fatura do cartão), só saídas; interno, guardado e outra moeda saem **marcados** e fora do total, e a nota
   que o diz só aparece quando há linha marcada. `tests/test_api_v2_gastos_card.py` prova a igualdade soma das não marcadas
   = total.
-- **"Seu dia" (PR B, #NNN, só frontend; PR A, #1024, trouxe `quantidade` e `categorias[]` em cada `dias[]`).** Pedido do dono:
+- **"Seu dia" (PR B, #1029, só frontend; PR A, #1024, trouxe `quantidade` e `categorias[]` em cada `dias[]`).** Pedido do dono:
   o card do dia estava "cru, sem informações e sem personalidade"; o TOTAL do dia é o alvo e a lista vira parte secundária.
   Modo dia, de cima para baixo (`parts/GastosDiaTopo.tsx`, `widgets/GastosCompras.tsx`; título "Seu dia"): (1) setas ‹ › com a
   data longa no meio, alvo de 44px, ±1 dia dentro do MESMO mês e só se o vizinho se abre (`diaAbrivel`: dentro do histórico;
