@@ -21,7 +21,7 @@ from utils_date import now_tz
 
 from .. import streaming
 from .._context import CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, metas_do_turno
-from ..cards import IDS, MAX_CATEGORIA, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, CardIndisponivel, montar
+from ..cards import IDS, MAX_CATEGORIA, MAX_MESES, MAX_MESES_PERIODO, MAX_POR_TURNO, TOOLS_DE_TEXTO, CardIndisponivel, montar
 from ._base import Tool
 from .launches import _AVISO_12, _AVISO_FIM
 
@@ -95,11 +95,11 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     usados = CARDS_DO_TURNO.get()  # só o card que emitiu bloco gasta uma vaga
     if usados is not None and len(usados) >= MAX_POR_TURNO:
         return _erro("limite_de_cards", f"no máximo {MAX_POR_TURNO} cards por resposta; "
-                     "escreva o resto em texto, a partir do que já leu")
+                     f"o que faltar vem das tools de texto ({TOOLS_DE_TEXTO}...)")
 
     if usados is not None and card in usados:
         como = ("Para comparar faixas, use compare_periods" if card == "periodo"
-                else "Para comparar meses, chame show_card uma vez só com meses=[...]" if card == "categorias"
+                else "Para comparar meses, o outro mês vem de get_top_categories (ou get_category_spend, de uma categoria) com start_date/end_date, em texto" if card == "categorias"
                 else "Para comparar meses, use show_card periodo com de/ate, ou categorias com meses=[...] (esse card mostra 1 mês)"
                 if card in _COM_MES else "Escreva a partir do resultado anterior")
         return _erro("card_repetido", f"o card {card} já foi mostrado nesta resposta. {como}")

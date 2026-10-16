@@ -86,9 +86,9 @@ def test_categorias_resume_a_aba_com_saldo_e_sem_as_origens(mundo):
     r, (bloco,), _ = mostrar(a, card="categorias", meses=[M0, M])
     for aba, bl in zip(r["abas"], bloco["abas"]):
         d = bl["recursos"]["detalhes"]
-        assert len(aba["categorias"]) == min(3, len(d["categorias"])) and aba["categorias_total"] == len(d["categorias"])
+        assert len(aba["categorias"]) == min(1, len(d["categorias"])) and aba["categorias_total"] == len(d["categorias"])  # 2 abas: a maior (F3c)
         assert aba["saldo"] == float(Decimal(d["entrou"]) - Decimal(d["saiu"])) and "origens" not in aba
-        assert [c["valor"] for c in aba["categorias"]] == [float(c["valor"]) for c in d["categorias"][:3]]
+        assert [c["valor"] for c in aba["categorias"]] == [float(c["valor"]) for c in d["categorias"][:1]]
 
 
 def test_renda_resume_pela_soma_das_linhas_do_bloco_e_o_calendario_so_traz_o_maior_dia(mundo):
