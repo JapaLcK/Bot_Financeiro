@@ -31,6 +31,8 @@ export const perfilSchema = z.object({
   of_banks_max: z.number().int().nullable().optional(),
   cobranca_em_atraso: z.boolean().optional(),
   precisa_criar_senha: z.boolean().optional(),
+  /** Só `false` conta (conta do Google/Apple sem senha); ausente = permissivo, como o settings.html. */
+  has_password: z.boolean().optional(),
 });
 
 /**

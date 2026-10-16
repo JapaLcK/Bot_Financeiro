@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { View } from "react-native";
 import { z } from "zod";
 
-import { chamar, comLimite } from "@/api/client";
+import { ErroDeApi, chamar, comLimite } from "@/api/client";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
@@ -12,6 +12,11 @@ import { espaco } from "@/ui/tokens";
 
 const MENSAGEM_NEUTRA =
   "Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.";
+
+// Modo `emailFixo`: o reset revoga as outras sessões (`/auth/reset-password`), então a volta do
+// navegador cai no login. A copy avisa, em vez de prometer "volte e continue logado".
+const DEPOIS_DO_LINK = "Abra o link no navegador, crie a senha e volte ao app: você vai precisar entrar de novo.";
+const ENVIADO_DEFINIR = `Enviamos um link para definir sua senha, se o e-mail for válido. ${DEPOIS_DO_LINK}`;
 
 /**
  * `/auth/forgot-password` SEMPRE responde 200 com uma mensagem neutra (o
@@ -23,8 +28,14 @@ const MENSAGEM_NEUTRA =
  */
 type Estado = { fase: "formulario" } | { fase: "enviando" } | { fase: "enviado" } | { fase: "erro"; mensagem: string };
 
-export function EsqueciSenha() {
-  const [email, setEmail] = useState("");
+/**
+ * `emailFixo`: modo "definir senha" da Segurança (conta do Google/Apple sem
+ * senha). Sem campo — o link vai para o e-mail da própria conta — e o resto do
+ * fluxo (POST, guarda, texto neutro) é este mesmo.
+ */
+export function EsqueciSenha({ emailFixo }: { emailFixo?: string } = {}) {
+  const [digitado, setEmail] = useState("");
+  const email = emailFixo ?? digitado;
   const [estado, setEstado] = useState<Estado>({ fase: "formulario" });
   // Guarda por `ref`, mesmo padrão do `saindoEmVoo` de `sessao.tsx`: dois
   // toques no MESMO frame chamam `enviar()` duas vezes antes de o
@@ -52,7 +63,8 @@ export function EsqueciSenha() {
       // temer.
     } catch (e) {
       emVoo.current = false;
-      setEstado({ fase: "erro", mensagem: textoDaFalha(e) });
+      const limite = emailFixo !== undefined && e instanceof ErroDeApi && e.status === 429;
+      setEstado({ fase: "erro", mensagem: limite ? "Você já pediu o link várias vezes. Tente de novo em 1 hora." : textoDaFalha(e) });
     }
   };
 
@@ -61,7 +73,7 @@ export function EsqueciSenha() {
       <View style={{ gap: espaco.lg }}>
         <Texto variante="secao">Verifique seu e-mail</Texto>
         <Texto variante="corpo" tom="inkMuted">
-          {MENSAGEM_NEUTRA}
+          {emailFixo === undefined ? MENSAGEM_NEUTRA : ENVIADO_DEFINIR}
         </Texto>
       </View>
     );
@@ -70,25 +82,29 @@ export function EsqueciSenha() {
   const enviando = estado.fase === "enviando";
   return (
     <View style={{ gap: espaco.lg }}>
-      <Texto variante="secao">Esqueci a senha</Texto>
+      <Texto variante="secao">{emailFixo === undefined ? "Esqueci a senha" : "Definir senha"}</Texto>
       <Texto variante="corpo" tom="inkMuted">
-        Digite seu e-mail: se ele estiver cadastrado, enviamos um link para redefinir a senha.
+        {emailFixo === undefined
+          ? "Digite seu e-mail: se ele estiver cadastrado, enviamos um link para redefinir a senha."
+          : `Sua conta ainda não tem senha. Vamos enviar um link para ${emailFixo}. ${DEPOIS_DO_LINK}`}
       </Texto>
-      <Input
-        rotulo="E-mail"
-        icone="Envelope"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-        autoComplete="email"
-        textContentType="username"
-        desativado={enviando}
-        testID="esqueci-email"
-      />
+      {emailFixo === undefined && (
+        <Input
+          rotulo="E-mail"
+          icone="Envelope"
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          autoComplete="email"
+          textContentType="username"
+          desativado={enviando}
+          testID="esqueci-email"
+        />
+      )}
       {estado.fase === "erro" ? <Banner tom="danger" mensagem={estado.mensagem} /> : null}
-      <Button rotulo="Enviar" onPress={() => void enviar()} desativado={!email.trim() || enviando} carregando={enviando} />
+      <Button rotulo={emailFixo === undefined ? "Enviar" : "Enviar link"} onPress={() => void enviar()} desativado={!email.trim() || enviando} carregando={enviando} />
     </View>
   );
 }
