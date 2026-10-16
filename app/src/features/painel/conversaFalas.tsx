@@ -5,6 +5,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { useIsFocused } from "expo-router";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { useToast } from "@/ui/componentes/Toast";
+import { SegmentedControl } from "@/ui/componentes/SegmentedControl";
 import { Skeleton } from "@/ui/componentes/Skeleton";
 import { sucesso } from "@/ui/haptics";
 import { duracoes, useEntrada, useReduzirMovimento } from "@/ui/motion";
@@ -13,7 +14,7 @@ import { useTema } from "@/ui/tema";
 import type { BlocoChat, CardChat } from "@/api/schemas/painel";
 import { Bloco, tituloWidget } from "./base";
 import { BlocoContexto } from "./blocoContexto";
-import { nomeMes } from "./catalogo";
+import { mesAbrev, mesCurto, nomeMes } from "./catalogo";
 import { tituloPeriodo } from "./cardPeriodo";
 import { raio, texto as escalas } from "@/ui/tokens";
 import { ChipPainel, TextoPainel as Texto } from "./tipografia";
@@ -91,9 +92,15 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
-/** Um card por aba do bloco, cada um com os dados embutidos pelo servidor; tocar em qualquer ponto livre abre a Folha com o MESMO bloco/aba. */
+/** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tocar em qualquer ponto livre abre a Folha com o MESMO bloco e a aba selecionada. */
 export function CardChat({ bloco, abrir }: { bloco: BlocoChat; abrir: (b: BlocoChat, aba: number) => void }) {
-  return <>{bloco.abas.map((aba, i) => <BlocoContexto.Provider key={i} value={{ recursos: aba.recursos }}><Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)} ir={{ destino: "detalhes", acao: () => abrir(bloco, i) }}><WidgetConteudo id={bloco.card} /></Bloco></BlocoContexto.Provider>)}</>;
+  const [selecionada, setSel] = useState(0); const { abas } = bloco, sel = Math.min(selecionada, abas.length - 1), aba = abas[sel]!;
+  // Rótulo único (é a identidade no `SegmentedControl`): "out" se todas são do mesmo ano, senão "out/2026".
+  const mesmoAno = abas.every((a) => a.mes?.slice(0, 4) === abas[0]!.mes?.slice(0, 4)), rotulos = abas.map((a, i) => a.mes ? (mesmoAno ? mesAbrev(a.mes) : mesCurto(a.mes)) : String(i + 1));
+  return <Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)} ir={{ destino: "detalhes", acao: () => abrir(bloco, sel) }}>
+    {abas.length > 1 && <SegmentedControl opcoes={rotulos} acessiveis={abas.map((a, i) => a.mes ? nomeMes(a.mes) : rotulos[i]!)} valor={rotulos[sel]!} onChange={(v) => setSel(rotulos.indexOf(v))} />}
+    <BlocoContexto.Provider key={sel} value={{ recursos: aba.recursos }}><WidgetConteudo id={bloco.card} /></BlocoContexto.Provider>
+  </Bloco>;
 }
 /** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e os cards (`bloco`) que o servidor montou, antes do texto. */
 export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (b: BlocoChat, aba: number) => void }) {

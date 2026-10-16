@@ -72,21 +72,6 @@ it("compromissos: o título usa o horizonte do bloco (60), não o do provider (3
   expect(screen.queryByText("Próximos 30 dias")).toBeNull();
 });
 
-it("categorias com 2 abas: um card por aba, com o mês no título", async () => {
-  const aba = (mes: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10"), aba("2026-09")] }); await perguntar();
-  expect(screen.getAllByTestId("bloco-categorias")).toHaveLength(2);
-  expect(screen.getByText("Para onde vai · outubro de 2026")).toBeTruthy(); expect(screen.getByText("Para onde vai · setembro de 2026")).toBeTruthy();
-});
-
-it("categorias com 3 abas: tocar o 2º ou o 3º card abre a Folha DAQUELA aba (título e dados)", async () => {
-  const aba = (mes: string, categoria: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes, categorias: [{ categoria, valor: "100.00", quantidade: 1 }] } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10", "Casa"), aba("2026-09", "Lazer"), aba("2026-08", "Viagem")] }); await perguntar();
-  fireEvent.press(screen.getAllByTestId("bloco-categorias")[1]!); expect(screen.getByRole("header", { name: "Para onde vai · setembro de 2026" })).toBeTruthy();
-  expect(screen.getAllByText("Lazer")).toHaveLength(2); expect(screen.getAllByText("Casa")).toHaveLength(1); expect(screen.getAllByText("Viagem")).toHaveLength(1); // card + Folha só da aba 2
-  await apertar("Fechar"); fireEvent.press(screen.getAllByTestId("bloco-categorias")[2]!);
-  expect(screen.getByRole("header", { name: "Para onde vai · agosto de 2026" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2); expect(screen.getAllByText("Lazer")).toHaveLength(1);
-});
 it("sem bloco, o chip com assunto não monta card (o card legado do assunto saiu)", async () => {
   await abrir(); await apertar("Quanto falta pra minha próxima meta e quando eu chego lá?");
   await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
