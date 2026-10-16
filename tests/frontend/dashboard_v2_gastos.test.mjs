@@ -114,7 +114,8 @@ test("calendário: hoje, dia agendado, dia futuro, escala por percentil, nome ac
   const caro = await texto(page, "#w-calendario .cal-foot .link");
   await dia(7).click();
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
-  const card = await page.evaluate(() => ({ hash: location.hash, titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent.replace(/\s/g, " "),
+  const card = await page.evaluate(() => ({ hash: location.hash, titulo: document.querySelector("#w-compras-h").textContent, data: document.querySelector("#gastos-compras .dia-data").textContent,
+    lede: `${document.querySelector("#gastos-compras .dia-rotulo").textContent} · ${document.querySelector("#gastos-compras .dia-total").textContent}`,
     chips: document.querySelectorAll(".ledger-chips").length }));
   const ultimo = lanc.at(-1);
   await ctx.close();
@@ -123,7 +124,7 @@ test("calendário: hoje, dia agendado, dia futuro, escala por percentil, nome ac
   assert.equal(lede, "média R$ 27,86/dia · 12 dias sem gasto"); // (100 + 290) / 14 dias, só até hoje: o dia 20 (agendado) fica fora
   assert.equal(caro, "7 · R$ 290,00");
   assert.equal(ultimo, "?mes=2026-10&dia=2026-10-07&tipo=saida&guardado=true");
-  assert.deepEqual(card, { hash: "#/gastos", titulo: "qua, 7 de outubro", lede: "Gasto no dia · R$ 290,00", chips: 0 }); // não saiu da tela, e o filtro global não ganhou o dia
+  assert.deepEqual(card, { hash: "#/gastos", titulo: "Seu dia", data: "qua, 7 de outubro", lede: "Gasto no dia · R$ 290,00", chips: 0 }); // não saiu da tela, e o filtro global não ganhou o dia
 });
 
 test("o dia é de um mês: trocar o mês fecha o card; o chip só chega por 'Ver em Lançamentos' e, no outro mês, a lista não leva `dia` nem chip; voltar traz o dia; o chip limpa", async () => {

@@ -436,7 +436,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
   (`moneyText`). Tocar num dia do calendário ou em "Ver compras" do detalhe abre o card de compras na própria tela
-  (`GastosCompras`, estado `gastosAberto` na store). A consulta do card tem duas formas: modo dia
+  (`GastosCompras`, estado `gastosAberto` na store; no modo dia o topo é `parts/GastosDiaTopo.tsx`: setas de dia, o total do dia em destaque, a pílula contra a média do mês, os fatos e a barra por categoria, tudo do `quantidade`/`maiores`/`categorias[]` do dia e da média de `lib/gastos-dia.ts`, que o calendário também lê; PR B, #NNN; o modo categoria é uma linha "R$ … · N compras"). A consulta do card tem duas formas: modo dia
   `/lancamentos?mes&dia&tipo=saida&guardado=true` (mais `categoria` quando uma foi escolhida) e modo categoria
   `/lancamentos?mes&tipo=saida&categoria&guardado=true`. Só o "Ver em Lançamentos" grava `s.filter.day` e leva ao Extrato;
   a escolha de categoria em "Para onde vai" (`GastosCategorias`) é que grava `s.filter.category`.
