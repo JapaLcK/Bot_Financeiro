@@ -75,7 +75,7 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const nome = daCat.data?.categoria.nome;
   const [y, m] = mes.split("-").map(Number);
   const entrada = dia && d ? d.dias.find((x) => x.dia === dia) : undefined;
-  const titulo = dia ? longDate(isoDay(dia)) : nome ? `${nome} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
+  const titulo = dia ? longDate(isoDay(dia)) : nome ? `${nome[0].toUpperCase()}${nome.slice(1)} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
   const rotulo = dia ? (dia > (d?.hoje ?? "") ? "Agendado para o dia" : "Gasto no dia") : "Gasto no mês";
   const total = dia ? entrada?.total : daCat.data?.total;
   const comTotal = dia ? !!entrada : Number(daCat.data?.compras) > 0;
