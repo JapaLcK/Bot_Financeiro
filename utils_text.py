@@ -821,7 +821,7 @@ _PT_MULT = rf"{_PT_MULT_LONGO}|bi\b"
 _PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
 _PT_SPELLED_MULT_RE = re.compile(
     rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b"
-    rf"(?:\s*e\s+({_PT_PHRASE}|\d+(?:[.,]\d+)?))?",
+    rf"(?:\s*e\s+({_PT_PHRASE}|\d+(?:[.,]\d+)?)(?:\s+({_PT_MULT_LONGO})\b)?)?",
     re.IGNORECASE,
 )
 
@@ -915,12 +915,14 @@ def parse_money(text: str) -> float | None:
             total = float(base * mult)
             resto = sm.group(3)
             if resto:
+                # o resto leva o próprio multiplicador: "dois bilhões e quinhentos milhões"
+                mr = _PT_MULT_VALOR[sm.group(4).lower()[:4]] if sm.group(4) else 1
                 if resto[0].isdigit():
-                    total += float(resto.replace(".", "").replace(",", "."))
+                    total += float(resto.replace(".", "").replace(",", ".")) * mr
                 else:
                     r = _pt_words_to_int(resto)
                     if r is not None:
-                        total += r
+                        total += r * mr
             return total
 
     # multiplicador "mil"/"milhão"/"bi": "10 mil" → 10000, "1 mil e 500" → 1500.
@@ -929,7 +931,7 @@ def parse_money(text: str) -> float | None:
     # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
     # Precisa vir antes do número contínuo.
     for mm in re.finditer(
-        rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b(?:\s*e\s*(\d+))?',
+        rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b(?:\s*e\s*(\d+(?:[.,]\d+)?(?:\s*(?:{_PT_MULT})\b)?))?',
         text or "", re.IGNORECASE,
     ):
         mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
@@ -940,7 +942,7 @@ def parse_money(text: str) -> float | None:
         base = parse_money(mm.group(1)) if mm.group(1) else 1.0
         total = base * mult
         if mm.group(3):
-            total += float(mm.group(3))
+            total += parse_money(mm.group(3))  # o resto leva o próprio multiplicador: "0,8 bilhão e 300 milhões"
         return round(total, 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)

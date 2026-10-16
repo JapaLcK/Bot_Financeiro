@@ -209,3 +209,32 @@ def test_conversa_cartao_milhoes_nao_para_em_mil(texto, valor):
     _diga(uid, texto)
     rows = _conta("select valor::text v, nota n from credit_transactions where user_id=%s", uid)
     assert [(r["v"], r["n"]) for r in rows] == [(valor, "iate")] * 10
+
+
+# O resto depois do " e " leva o PRÓPRIO multiplicador (antes era somado como reais crus:
+# "0,8 bilhão e 300 milhões" = 800.000.300 e furava o teto de R$ 1 bi). Controles: o que não muda.
+@pytest.mark.parametrize("texto,esperado", [
+    ("0,8 bilhão e 300 milhões", 1.1e9), ("1 bilhão e 500 milhões", 1.5e9), ("1 bilhão e 1", 1000000001),
+    ("dois bilhões e quinhentos milhões", 2.5e9), ("dois bilhões e 500 mil", 2000500000),
+    # resto decimal no ramo dígito (o grupo 3 era só \d+ e somava 0)
+    ("1 bilhão e 0,5 bilhão", 1.5e9), ("0,9 bilhão e 0,2 bilhão", 1.1e9), ("1 bi e 0,5 bi", 1.5e9),
+    ("1 mil e 2,5", 1002.5), ("1 mil e 500.", 1500),  # o ponto final de frase não é decimal
+    # mudança vs main (mesma classe, mil/milhão): era 2000300 / 1000300
+    ("2 milhões e 300 mil", 2300000), ("dois milhões e trezentos mil", 2300000), ("1 milhão e 300 mil", 1300000),
+    # controles: resto sem multiplicador continua em reais
+    ("10 mil e 500", 10500), ("1 mil e 500 reais", 1500), ("1 mil e 2 bicicletas", 1002),
+    ("dez mil e quinhentos", 10500), ("dois mil e 500", 2500), ("cento e cinquenta mil e duzentos", 150200),
+    # "bi" curto por extenso nunca vale (artigo + gíria), nem como resto; "bilhete" não é multiplicador
+    ("dois mil e um bi", 2001), ("dois mil e um bilhete", 2001),
+    # limites declarados, fora de escopo: "e meio" e a soma sem "e"
+    ("um bilhão e meio", 1e9), ("1 bilhão 500 milhões", 1e9),
+])
+def test_parse_money_resto_composto(texto, esperado):
+    assert parse_money(texto) == esperado
+
+
+def test_conversa_cartao_composto_acima_do_teto_e_recusado():
+    uid, _ = _usuario_com_cartao()
+    assert "Valor inválido" in _diga(uid, "credito 0,8 bilhão e 300 milhões carro")  # 1,1 bi, não 800.000.300
+    assert _compras(uid) == []
+    _grava_50(uid, 0)
