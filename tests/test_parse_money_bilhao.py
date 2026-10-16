@@ -3,14 +3,17 @@
 Antes: "gastei 2 bilhões no mercado" == 2.0 e gravava R$ 2 em silêncio."""
 from decimal import Decimal
 
+import re
+
 import pytest
 
 import db
 from conftest import usuario_pagante
+from core.handlers.credit import PARCELA_DE_VALOR
 from parsers import _extract_target_after_amount
 from test_bill_amount_pending import _monta_conta_variavel
 from test_valor_nao_finito_dinheiro import _compras, _conta, _diga, _usuario_com_cartao
-from utils_text import parse_money, parse_pt_number
+from utils_text import PT_VALOR_COM_MULT, parse_money, parse_pt_number
 
 LANC = "select valor::text v, alvo from launches where user_id=%s"
 
@@ -278,5 +281,91 @@ def test_parse_money_resto_composto(texto, esperado):
 def test_conversa_cartao_composto_acima_do_teto_e_recusado():
     uid, _ = _usuario_com_cartao()
     assert "Valor inválido" in _diga(uid, "credito 0,8 bilhão e 300 milhões carro")  # 1,1 bi, não 800.000.300
+    assert _compras(uid) == []
+    _grava_50(uid, 0)
+
+
+# ── Consistência dos recortes do valor ──────────────────────────────────────────────────────────────
+# Três leitores do MESMO trecho: `parse_money` (o valor), `PT_VALOR_COM_MULT` (o que sai da NOTA) e
+# `PT_VALUE` (o valor do "Nx de Y" no parcelamento). Cada forma tem de ser lida e recortada inteira pelos três.
+
+FORMAS = [  # (trecho do valor, valor lido)
+    ("500", 500), ("1.234,56", 1234.56), ("0.5", 0.5),  # 1: dígito sozinho
+    ("10 mil", 1e4), ("0,5 bilhão", 5e8), ("1 bi", 1e9), ("1bi", 1e9), ("2 milhões", 2e6), ("1,5 trilhão", 1.5e12),  # 2
+    ("dois mil", 2000), ("um bilhão", 1e9), ("cento e cinquenta mil", 150000), ("dois milhões e quinhentos", 2000500),  # 3
+    ("0,8 bilhão e 300 milhões", 1.1e9), ("0,5 bi e 100 milhões", 6e8), ("1 bilhão e 0,5 bilhão", 1.5e9),  # 4: composto
+    ("1 mil e 500", 1500), ("1 mil e 2,5", 1002.5), ("dois bilhões e quinhentos milhões", 2.5e9),
+    ("um milhão e 0.5 milhão", 1.5e6), ("dois mil e 500", 2500), ("1 bi e 0,5 bi", 1.5e9),
+    ("1 bilhão e 300 milhões e 5 mil", 1300005000), ("2 bilhões e 0,5 bi", 2.5e9),
+]
+
+
+@pytest.mark.parametrize("valor,esperado", FORMAS)
+def test_cada_forma_e_lida_e_recortada_inteira_pelos_tres_leitores(valor, esperado):
+    assert parse_money(valor) == esperado
+    assert re.fullmatch(PT_VALOR_COM_MULT, valor, re.IGNORECASE)  # a nota
+    assert re.search(PARCELA_DE_VALOR, f"parcelei 2x de {valor} carro", re.IGNORECASE).group(1) == valor  # o parcelamento
+    assert _extract_target_after_amount(f"gastei {valor} mercado") == "mercado"
+
+
+# Onde o valor ACABA: o que vem depois fica na nota. (valor, o que cada recorte consome)
+@pytest.mark.parametrize("texto,nota_consome,parcela_consome", [
+    ("1 mil e carro", "1 mil", "1 mil"), ("1 mil e 2 bicicletas", "1 mil e 2", "1 mil e 2"),  # parse_money lê 1002
+    ("100 bicicleta", "100", "100"), ("100 bi-cicleta", "100", "100"),
+    ("1 bilhão e 300 milhões e 5 mil carro", "1 bilhão e 300 milhões e 5 mil", "1 bilhão e 300 milhões e 5 mil"),
+    ("10 mil e dois cafés", "10 mil", "10 mil e dois"),  # base em dígito: o parse_money não lê o "e dois" (o encadeamento do PT_VALUE, da main, o come)
+    ("50 e 30", "50", "50 e 30"),  # dígito sozinho não abre composto na nota; o encadeamento do PT_VALUE é anterior
+    ("dois cafés", None, "dois"),
+    ("paguei bi 50", None, None), ("pro bi", None, None), ("clube do bilhão", None, None), ("um bi no mercado", None, "um"),
+])
+def test_recortes_param_onde_o_valor_acaba(texto, nota_consome, parcela_consome):
+    m = re.match(PT_VALOR_COM_MULT, texto, re.IGNORECASE)
+    assert (m.group(0) if m else None) == nota_consome
+    p = re.search(PARCELA_DE_VALOR, f"parcelei 2x de {texto}", re.IGNORECASE)
+    assert (p.group(1) if p else None) == parcela_consome
+
+
+def test_parse_money_bi_com_hifen_nao_e_bi():
+    assert parse_money("gastei 100 bi-cicleta") == 100
+
+
+# Conversa: os dois recortes, com estado real. Total do parcelamento = parcela x N.
+def test_conversa_parcelei_composto_acima_do_teto_e_recusado():
+    uid, _ = _usuario_com_cartao()
+    # 0,5 bi e 100 milhões = 600 mi por parcela; x2 = R$ 1,2 bi (antes: só "0,5 bi" -> R$ 1 bi, aceito)
+    assert "Valor inválido" in _diga(uid, "parcelei 2x de 0,5 bi e 100 milhões carro")
+    assert _compras(uid) == []
+    _grava_50(uid, 0)
+
+
+@pytest.mark.parametrize("texto,total,nota", [
+    ("parcelei 2x de 0,2 bi e 100 milhões carro", "600000000.00", "carro"),  # 300 mi x 2 (dentro do teto)
+    ("parcelei 2x de 1 mil e 500 carro", "3000.00", "carro"),
+    ("parcelei 2x de 0,2 bilhão e 100 milhões carro", "600000000.00", "carro"),
+])
+def test_conversa_parcelei_composto_dentro_do_teto_registra_e_a_nota_fica_limpa(texto, total, nota):
+    uid, _ = _usuario_com_cartao()
+    _diga(uid, texto)
+    rows = _conta("select valor::text v, nota n from credit_transactions where user_id=%s", uid)
+    assert [r["n"] for r in rows] == [nota] * 2, rows
+    assert round(sum(float(r["v"]) for r in rows), 2) == float(total)
+
+
+@pytest.mark.parametrize("texto,valor,nota", [
+    ("gastei 0,5 bilhão e 300 milhões no cartão nubank mercado", 8e8, "mercado"),  # antes: "e 300 milhoes mercado"
+    ("gastei 0,5 bi e 100 milhões no cartão nubank mercado", 6e8, "mercado"),
+    ("gastei 1 mil e 500 no cartão nubank mercado", 1500, "mercado"),
+    ("gastei dois mil e 500 no cartão nubank mercado", 2500, "mercado"),
+])
+def test_conversa_cartao_natural_composto_nota_sem_o_resto_do_valor(texto, valor, nota):
+    uid, _ = _usuario_com_cartao()
+    _diga(uid, texto)
+    rows = _conta("select valor::text v, nota n from credit_transactions where user_id=%s", uid)
+    assert [(float(r["v"]), r["n"]) for r in rows] == [(valor, nota)]
+
+
+def test_conversa_cartao_natural_composto_acima_do_teto_e_recusado():
+    uid, _ = _usuario_com_cartao()
+    _diga(uid, "gastei 0,8 bilhão e 300 milhões no cartão nubank mercado")  # 1,1 bi
     assert _compras(uid) == []
     _grava_50(uid, 0)
