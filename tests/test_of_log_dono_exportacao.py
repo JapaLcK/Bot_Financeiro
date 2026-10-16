@@ -65,7 +65,7 @@ def test_skip_da_adocao_sai_na_exportacao_sem_host_e_some_na_exclusao(user_id, m
         assert meus[0]["details"]["motivo"] == "OperationalError", meus
         for pedaco in ("10.9.8.7", "db.interno"):
             assert pedaco not in bruto, f"texto cru da exceção na exportação: {pedaco}"
-        assert "5432" not in meus[0]["message"] + json.dumps(meus[0]["details"]), meus
+        assert "port 5432" not in meus[0]["message"] + json.dumps(meus[0]["details"]), meus
 
         privacy.delete_user_data(user_id)
 

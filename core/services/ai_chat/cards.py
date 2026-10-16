@@ -30,6 +30,7 @@ IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "
 MAX_MESES = 3
 MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
 MAX_POR_TURNO = 3
+TOOLS_DE_TEXTO = "get_open_bill, list_pockets, get_period_summary, get_top_categories"  # o dado sem card
 MAX_CATEGORIA = 80  # teto do parâmetro `categoria` do `show_card`; a recusa de `get_category_spend` só a repassa até aqui
 
 
@@ -59,14 +60,22 @@ def exigir_acesso_do_app(uid: int) -> None:
     exigir_onboarding(uid)
 
 
-def card_ainda_resolve(uid: int, alvo: str) -> bool:
-    """O `show_card alvo` ainda pode aparecer neste turno? Não, se o turno gastou as vagas (`MAX_POR_TURNO`),
-    se o alvo já está na tela, se já falhou (`FALHAS_DE_CARD_DO_TURNO`) ou se a conta não tem acesso ao app. A
-    tool que recusaria mandando ao card só recusa quando isto vale: senão o número não sairia por caminho nenhum."""
+def cards_livres(uid: int, ids) -> list[str]:
+    """Dos `ids`, os que ainda cabem neste turno: nenhum se as vagas (`MAX_POR_TURNO`) acabaram; fora os já na tela
+    (`CARDS_DO_TURNO`) e os que falharam (`FALHAS_DE_CARD_DO_TURNO`). Pelo card EFETIVO (o `show_card` grava o efetivo): sem a
+    chave das metas, `metas` é `caixinhas`. Fonte única do enum que o runner oferece e de `card_ainda_resolve`."""
     usados = CARDS_DO_TURNO.get()
-    if usados is not None and (len(usados) >= MAX_POR_TURNO or alvo in usados):
-        return False
-    if alvo in (FALHAS_DE_CARD_DO_TURNO.get() or ()):
+    if usados is not None and len(usados) >= MAX_POR_TURNO:
+        return []
+    fora = (*(usados or ()), *(FALHAS_DE_CARD_DO_TURNO.get() or ()))
+    return [i for i in ids if ("caixinhas" if i == "metas" and not metas_do_turno(uid) else i) not in fora]
+
+
+def card_ainda_resolve(uid: int, alvo: str) -> bool:
+    """O `show_card alvo` ainda pode aparecer neste turno? Não, se `cards_livres` o tira (sem vaga, já na tela, já
+    falhou) ou se a conta não tem acesso ao app. A tool que recusaria mandando ao card só recusa quando isto vale:
+    senão o número não sairia por caminho nenhum."""
+    if not cards_livres(uid, (alvo,)):
         return False
     try:
         exigir_acesso_do_app(uid)  # o MESMO gate do show_card (onboarding, plano)
@@ -121,8 +130,9 @@ def _extremos(linhas) -> dict:
 
 
 def _top3(v: dict, categoria: str | None) -> dict:
-    """As 3 maiores categorias, o total delas e, se o usuário citou uma, o valor dela (`categoria_pedida`). Casa pela
-    MESMA chave do `get_category_spend` (`cat_key`: caixa e acento, vazio = `CAT_VAZIA_LABEL`); sem ela, pelo
+    """As 3 maiores categorias (o `montar` as corta para 1 por aba ao comparar meses), o total delas e, se o usuário
+    citou uma, o valor dela (`categoria_pedida`). Casa pela MESMA chave do `get_category_spend` (`cat_key`: caixa e
+    acento, vazio = `CAT_VAZIA_LABEL`); sem ela, pelo
     `normalize_text` (pontuação fora: "e commerce" = "e-commerce") só se der um candidato único. Achou:
     `{categoria, valor}`; não (ou ambíguo): `encontrada: False`, sem número."""
     cats = v["categorias"]  # o leitor já as ordena por valor, da maior (`db/mes_detalhes.py`)
@@ -305,4 +315,7 @@ def montar(card: str, uid: int, a: dict) -> tuple[dict, dict]:
         abas.append({"mes": mes, "recursos": rec})
         v = c.visao({n: _py(o) for n, o in objs.items()})
         visao.append(({"mes": mes} if mes else {}) | _RESUMOS.get(card, lambda v, _: v)(v, a.get("categoria")))
+    if card == "categorias" and len(visao) > 1:  # comparando meses: por mês, só a maior (o texto listava as 3 de cada)
+        for v in visao:
+            v["categorias"] = v["categorias"][:1]
     return {"card": card, "abas": abas}, {"card": card, "abas": visao}
