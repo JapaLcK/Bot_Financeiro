@@ -32,8 +32,8 @@ def test_saque_da_carteira_nao_confirma_declaracao(caixa):
     q("update bank_movement_declarations set declared_at=%s where launch_id=%s", (dia(10), lid))
 
     with pytest.raises(LookupError):
-        db.bank_movements.confirm_bank_movement(uid, lid, s1["id"])
-    db.bank_movements.confirm_bank_movement(uid, lid, o1["id"])  # positivo: a outra serve
+        db.bank_conferencia.confirm_bank_movement(uid, lid, s1["id"])
+    db.bank_conferencia.confirm_bank_movement(uid, lid, o1["id"])  # positivo: a outra serve
 
 
 def test_desfeito_que_o_banco_diz_transferencia_confirma_declaracao(caixa):
@@ -50,8 +50,8 @@ def test_desfeito_que_o_banco_diz_transferencia_confirma_declaracao(caixa):
     lid = _declara(uid, s1["account_id"])
     q("update bank_movement_declarations set declared_at=%s where launch_id=%s", (dia(10), lid))
     with pytest.raises(LookupError):
-        db.bank_movements.confirm_bank_movement(uid, lid, s1["id"])
+        db.bank_conferencia.confirm_bank_movement(uid, lid, s1["id"])
 
     sync(c, uid, [tx("s1", -200, dia(10), op="TRANSFERENCIA", desc="Transf", category="Same person transfer")])
-    db.bank_movements.confirm_bank_movement(uid, lid, s1["id"])
+    db.bank_conferencia.confirm_bank_movement(uid, lid, s1["id"])
     assert links(uid)[0]["status"] == "desfeito"

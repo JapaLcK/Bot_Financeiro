@@ -4,7 +4,8 @@ from decimal import Decimal
 
 import pytest
 import db
-from db.bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement
+from db.bank_movements import bank_movement_summary
+from db.bank_conferencia import list_bank_movements, confirm_bank_movement
 from db.open_finance import pause_open_finance_connection, update_pluggy_open_finance_item_status
 from tests.test_bank_movements import _bank, _sync, _tx, _deposit
 from utils_date import _tz
