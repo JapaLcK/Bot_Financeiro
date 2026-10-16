@@ -17,14 +17,25 @@
  * Rodar:  npm run test:frontend   (abre o artefato commitado: mudou webapp/src, rode
  *         `npm --prefix webapp run build`)
  */
+import { readFileSync } from "node:fs";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, PROTOTIPO, RAIZ, RESPOSTAS, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 import { WIDGET_FEATURE } from "../../webapp/src/dashboard/lib/profiles.js";
 
-const PAGOS = Object.keys(WIDGET_FEATURE); // hero, piggy, simulador
+// Os blocos de parts/Board.tsx, lidos do fonte (o TSX não importa no node): `DEFAULT` é o layout
+// padrão, `EXTRA` só entra pelo Organizar. Os pagos do padrão são medidos na tela; os pagos de
+// fora dele, no catálogo do Organizar (teste abaixo). Pago que não está em nenhum dos dois reprova.
+const BOARD = readFileSync(new URL("../../webapp/src/dashboard/parts/Board.tsx", import.meta.url), "utf8");
+const lista = (nome) => [...BOARD.match(new RegExp(`const ${nome}: WidgetItem\\[\\] = \\[([\\s\\S]*?)\\n\\];`))[1]
+  .matchAll(/\{ id: "(\w+)", size: "\w+", label: "([^"]+)" \}/g)].map((m) => ({ id: m[1], label: m[2] }));
+const PADRAO = lista("DEFAULT").map((w) => w.id);
+const EXTRA = lista("EXTRA");
+const PAGOS = Object.keys(WIDGET_FEATURE).filter((id) => PADRAO.includes(id));
+const PAGOS_FORA = EXTRA.filter((w) => w.id in WIDGET_FEATURE);
 const ERRO = "Não deu para carregar o painel";
+assert.deepEqual([...PAGOS, ...PAGOS_FORA.map((w) => w.id)].sort(), Object.keys(WIDGET_FEATURE).sort(), "bloco pago fora do DEFAULT e do EXTRA");
 const ALERTA = `${ERRO}Recarregue a página ou volte ao painel antigo.`;
 
 let browser;
@@ -82,6 +93,25 @@ test("o plano vem da API, não da URL", async () => {
 
   assert.deepEqual(essencial, []);
   assert.deepEqual(pro, [...PAGOS].sort());
+});
+
+test("os pagos de fora do padrão: no Organizar, com cadeado no Essencial e livres no Pro", async () => {
+  const vistos = {};
+  for (const plano of ["essencial", "pro"]) {
+    const ctx = await contexto({ plano });
+    const { page } = await abrir(ctx);
+    await montado(page);
+    await page.getByRole("button", { name: "Organizar" }).click();
+    await page.locator("#board-add").click();
+    vistos[plano] = [];
+    for (const w of PAGOS_FORA) {
+      const item = page.locator("#board-catalog .catalog-item", { hasText: w.label });
+      vistos[plano].push([w.id, await item.count(), await item.getAttribute("aria-disabled")]);
+    }
+    await ctx.close();
+  }
+  assert.ok(PAGOS_FORA.length > 0);
+  assert.deepEqual(vistos, { essencial: PAGOS_FORA.map((w) => [w.id, 1, "true"]), pro: PAGOS_FORA.map((w) => [w.id, 1, null]) });
 });
 
 for (const [nome, me] of [["free", RESPOSTAS.me.free], ["desconhecido", { plan_tier: "gold" }]]) {

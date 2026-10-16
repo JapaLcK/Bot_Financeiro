@@ -163,7 +163,7 @@ def test_analytics_preserva_basico_e_bloqueia_comparacao(tier, client, user_id):
     assert _get_spending_trend(user_id, {})["error"] == "pro_required"
     tier("plus")
     kpis = client.get(f"/analytics/{user_id}/kpis").json()["kpis"]
-    assert "prev" in kpis and "delta_pct" in kpis
+    assert "delta_pct" in kpis and "delta_escolha" in kpis and "prev" not in kpis
     assert client.get(f"/analytics/{user_id}/evolution").status_code == 200
     assert "data" in _get_spending_trend(user_id, {})
 

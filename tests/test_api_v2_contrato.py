@@ -18,6 +18,7 @@ import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
 from api.v2.categorias import Categorias
+from api.v2.comparacao import Comparacao
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
 from api.v2.gastos import Gastos, GastosDaCategoria
@@ -339,6 +340,17 @@ def test_fixture_de_lancamentos_segue_o_modelo(nome):
 @pytest.mark.parametrize("nome", sorted(FIXTURES["categorias"]))
 def test_fixture_de_categorias_segue_o_modelo(nome):
     Categorias.model_validate(FIXTURES["categorias"][nome])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["comparacao"]))
+def test_fixture_de_comparacao_segue_o_modelo(nome):
+    """Saídas reais do endpoint (geradas do `semeia` do PR A): dinheiro e `pct` são texto."""
+    f = FIXTURES["comparacao"][nome]
+    assert Comparacao.model_validate(f).model_dump(mode="json") == f
+    linhas = [f[k] for k in ("despesa", "receita", "resultado") if f[k]] + f["categorias"]
+    assert all(isinstance(x[c], str) for x in linhas for c in ("total_atual", "total_anterior", "total_delta"))
+    assert all(x["pct"] is None or isinstance(x["pct"], str) for x in linhas)
+    assert (f["despesa"] is None) == (f["motivo"] == "inicio_do_historico")
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["gastos"]))

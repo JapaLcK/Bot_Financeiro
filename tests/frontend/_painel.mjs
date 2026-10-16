@@ -52,11 +52,13 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`. O GET `/gastos` e o
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
  * `mes` do pedido não as reescreve). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
- * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar).
+ * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O GET
+ * `/comparacao` responde a fixture de nome `comparacao` (padrão `aberto`) no Plus e no Pro e, como o
+ * servidor (`financial_comparison`), o 403 `pro_required` nos outros.
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", comparacao = "aberto" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -84,6 +86,10 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     // As fixtures de `gastos`/`gastos_categoria` são de um mês só: o `mes` do pedido não as reescreve.
     if (url.pathname === "/api/v2/gastos") return r.fulfill({ json: RESPOSTAS.gastos[gastos] });
     if (url.pathname === "/api/v2/gastos/categoria") return r.fulfill({ json: RESPOSTAS.gastos_categoria[gastosCategoria] });
+    if (url.pathname === "/api/v2/comparacao") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.comparacao[comparacao] }) : r.fulfill({ status: e.status, json: e.body });
+    }
     if (url.pathname === "/api/v2/contas") return r.fulfill({ json: RESPOSTAS.contas[contas] });
     if (url.pathname === "/api/v2/resumo-do-mes") return r.fulfill({ json: RESPOSTAS.resumo_do_mes[resumo] });
     if (url.pathname === "/api/v2/guia" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.guia[guia] });

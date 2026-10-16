@@ -1,7 +1,8 @@
 """Comparação de períodos equivalentes (PL-07, Plus/Pro): a regra única de "mês passado".
 
-Quem decide a janela e o delta é este módulo; os consumidores (hoje a tool `compare_periods`
-da IA) só mostram. Dois caminhos, um formato de saída; só a base do cartão muda (`base.cartao`):
+Quem decide a janela e o delta é este módulo; os consumidores (a tool `compare_periods` da IA,
+`GET /api/v2/comparacao` e o KPI das Análises, com `meses=N`) só mostram. Dois caminhos, um formato
+de saída; só a base do cartão muda (`base.cartao`):
 - `mes` (aberto ou fechado): os números do "Entrou/Saiu do mês" (`db/resumo_mes`), cartão pela
   FATURA; a janela parcial soma as faturas que fecham dentro dela.
 - datas informadas: se as DUAS janelas são meses-calendário inteiros (critério `_meses_inteiros` da tool), é o mesmo
@@ -66,26 +67,35 @@ def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, encurtado: bo
             "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": encurtado}
 
 
-def escolher_janelas(hoje: date, ano: int, mes: int) -> dict:
-    """Janelas (inclusivas) do mês `ano`-`mes` contra o anterior. `ValueError` em mês inválido ou futuro."""
-    if not (all(type(v) is int for v in (ano, mes)) and 1 <= mes <= 12 and 2000 <= ano <= 9998):
+def escolher_janelas(hoje: date, ano: int, mes: int, meses: int = 1) -> dict:
+    """Janelas (inclusivas) dos `meses` meses que terminam em `ano`-`mes` contra os `meses` meses antes deles
+    (1 = o mês contra o anterior; mais de 1 = o KPI das Análises). `ValueError` em mês inválido ou futuro."""
+    if not (all(type(v) is int for v in (ano, mes, meses)) and 1 <= mes <= 12 and 2000 <= ano <= 9998 and meses >= 1):
         raise ValueError("mês inválido; use AAAA-MM.")
     idx, idx_hoje = ano * 12 + mes - 1, hoje.year * 12 + hoje.month - 1
     if idx > idx_hoje:
         raise ValueError(f"mês no futuro; o mês corrente é {hoje.year:04d}-{hoje.month:02d}.")
-    ini, fim = _mes(idx)
-    ant_ini, ant_fim = _mes(idx - 1)
+    um = meses == 1
+    ini, fim = _mes(idx - meses + 1)[0], _mes(idx)[1]
+    (ant_ini, _), (ult_ini, ant_fim) = _mes(idx - 2 * meses + 1), _mes(idx - meses)
     if idx < idx_hoje:
         a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
         return _janelas("mes_fechado", f"{_nome(ini).capitalize()} inteiro ({a['dias']} dias) contra "
-                        f"{_nome(ant_ini)} inteiro ({p['dias']} dias).", a, p)
+                        f"{_nome(ant_ini)} inteiro ({p['dias']} dias)." if um else
+                        f"{_nome(ini).capitalize()} a {_nome(fim)}, meses inteiros ({a['dias']} dias), contra "
+                        f"{_nome(ant_ini)} a {_nome(ant_fim)} ({p['dias']} dias).", a, p)
     n = hoje.day
+    dia = "1º" if n == 1 else str(n)  # só no texto de N meses; o de um mês é do PR A
+    de = f"Dias 1 a {n} de {_nome(ini)}" if um else f"De 1º de {_nome(ini)} a {dia} de {_nome(hoje)}"
     if n > ant_fim.day:
         a, p = _janela(ini, hoje), _janela(ant_ini, ant_fim)
-        return _janelas("mes_aberto", f"Dias 1 a {n} de {_nome(ini)} contra {_nome(ant_ini)} inteiro, "
-                        f"que tem só {p['dias']} dias.", a, p, encurtado=True)
-    a, p = _janela(ini, hoje), _janela(ant_ini, ant_ini + timedelta(days=n - 1))
-    return _janelas("mes_aberto", f"Dias 1 a {n} de {_nome(ini)} contra os mesmos {n} dias de {_nome(ant_ini)}.", a, p)
+        return _janelas("mes_aberto", f"{de} contra {_nome(ant_ini)} inteiro, que tem só {p['dias']} dias." if um else
+                        f"{de} contra o mesmo trecho {meses} meses antes, de 1º de {_nome(ant_ini)} até o fim de "
+                        f"{_nome(ant_fim)}, que tem só {ant_fim.day} dias.", a, p, encurtado=True)
+    a, p = _janela(ini, hoje), _janela(ant_ini, ult_ini + timedelta(days=n - 1))
+    return _janelas("mes_aberto", f"{de} contra os mesmos {n} dias de {_nome(ant_ini)}." if um else
+                    f"{de} contra os mesmos dias {meses} meses antes: de 1º de {_nome(ant_ini)} "
+                    f"a {dia} de {_nome(ult_ini)}.", a, p)
 
 
 def _intervalos(hoje: date, atual: tuple[date, date], anterior: tuple[date, date], por_fatura: bool = False) -> dict:
@@ -219,12 +229,13 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     return out
 
 
-def comparar_mes(user_id: int, ano: int, mes: int, agora: datetime | None = None) -> dict | None:
-    """O mês `ano`-`mes` contra o anterior equivalente. `None` = o plano não permite (nada foi lido)."""
+def comparar_mes(user_id: int, ano: int, mes: int, agora: datetime | None = None, meses: int = 1) -> dict | None:
+    """O mês `ano`-`mes` (ou os `meses` meses até ele) contra o anterior equivalente. `None` = o plano não
+    permite (nada foi lido)."""
     if not plan_gate_ok(user_id, "financial_comparison"):
         return None
     agora = agora or now_tz()
-    return _comparar(user_id, escolher_janelas(day_tz(agora), ano, mes), agora)
+    return _comparar(user_id, escolher_janelas(day_tz(agora), ano, mes, meses), agora)
 
 
 def comparar_intervalos(user_id: int, atual: tuple[date, date], anterior: tuple[date, date],

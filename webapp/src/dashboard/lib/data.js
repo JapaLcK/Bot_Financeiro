@@ -166,3 +166,107 @@ export const NET_WORTH = (() => {
   last.investimentos = round2(INVESTMENTS.reduce((s, x) => s + x.amount, 0));
   return rows;
 })();
+
+// A comparação do protótipo (/api/v2/comparacao): a resposta REAL do endpoint para o `semeia` do
+// PR A, a mesma `comparacao.aberto` de tests/frontend/api_v2_respostas.json (o teste
+// dashboard_v2_comparacao compara as duas; tests/test_api_v2_contrato.py valida a fixture pelo modelo).
+// O mesmo exemplo para todo mês do seletor: o bloco leva o selo "demonstração".
+export const COMPARACAO_EXEMPLO = {
+  "modo": "mes_aberto",
+  "escolha": "Dias 1 a 12 de outubro de 2026 contra os mesmos 12 dias de setembro de 2026. Cartão pela fatura (igual ao painel do mês).",
+  "atual": {
+    "inicio": "2026-10-01",
+    "fim": "2026-10-12",
+    "dias": 12
+  },
+  "anterior": {
+    "inicio": "2026-09-01",
+    "fim": "2026-09-12",
+    "dias": 12
+  },
+  "mesmo_tamanho": true,
+  "anterior_encurtado": false,
+  "base": {
+    "regra": "entrou_e_saiu_do_mes",
+    "cartao": "fatura",
+    "origem": "lançamentos + faturas de cartão",
+    "cartao_lancamentos": {
+      "atual": 2,
+      "anterior": 2
+    }
+  },
+  "despesa": {
+    "total_atual": "1235.00",
+    "total_anterior": "1550.00",
+    "total_delta": "-315.00",
+    "pct": "-20.3",
+    "estado": "variou"
+  },
+  "receita": {
+    "total_atual": "3000.00",
+    "total_anterior": "2500.00",
+    "total_delta": "500.00",
+    "pct": "20.0",
+    "estado": "variou"
+  },
+  "resultado": {
+    "total_atual": "1765.00",
+    "total_anterior": "950.00",
+    "total_delta": "815.00",
+    "pct": null,
+    "estado": "variou"
+  },
+  "categorias": [
+    {
+      "total_atual": "0.00",
+      "total_anterior": "200.00",
+      "total_delta": "-200.00",
+      "pct": "-100.0",
+      "estado": "sem_gasto",
+      "categoria": "Lazer"
+    },
+    {
+      "total_atual": "0.00",
+      "total_anterior": "150.00",
+      "total_delta": "-150.00",
+      "pct": "-100.0",
+      "estado": "sem_gasto",
+      "categoria": "Saúde"
+    },
+    {
+      "total_atual": "45.00",
+      "total_anterior": "0.00",
+      "total_delta": "45.00",
+      "pct": null,
+      "estado": "nova",
+      "categoria": "Streaming"
+    },
+    {
+      "total_atual": "970.00",
+      "total_anterior": "1000.00",
+      "total_delta": "-30.00",
+      "pct": "-3.0",
+      "estado": "variou",
+      "categoria": "Alimentação"
+    },
+    {
+      "total_atual": "20.00",
+      "total_anterior": "0.00",
+      "total_delta": "20.00",
+      "pct": null,
+      "estado": "nova",
+      "categoria": "sem categoria"
+    },
+    {
+      "total_atual": "200.00",
+      "total_anterior": "200.00",
+      "total_delta": "0.00",
+      "pct": "0.0",
+      "estado": "igual",
+      "categoria": "Transporte"
+    }
+  ],
+  "categorias_omitidas": 0,
+  "motivo": null,
+  "motivos": []
+};
