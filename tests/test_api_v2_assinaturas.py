@@ -10,7 +10,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_assinaturas import conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
+from api.v2 import assinaturas as rota
+from _apoio_assinaturas import HOJE, conta, dez_e_vinte_centavos, mensais, netflix_no_cartao, rp, semeia, tx
 from _apoio_auth_app import csrf, sessao_de as sessao
 from conftest import promote_to_pro
 from db import ensure_user
@@ -19,6 +20,18 @@ from db.privacy import build_user_export_zip
 
 GET = "/api/v2/assinaturas"
 POST = "/api/v2/assinaturas/marca"
+
+
+@pytest.fixture(autouse=True)
+def _relogio_do_teste(monkeypatch):
+    """A rota lê `date.today()`; as semeaduras têm datas fixas (HOJE − 26 dias etc.) e a janela de
+    "ativa" é de 40 dias. Sem o relógio preso, o teste envelhece e fica vermelho sozinho."""
+    class _Hoje(date):
+        @classmethod
+        def today(cls):
+            return HOJE
+
+    monkeypatch.setattr(rota, "date", _Hoje)
 
 
 @pytest.fixture

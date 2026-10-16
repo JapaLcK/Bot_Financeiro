@@ -39,6 +39,10 @@ def estado(uid):
     }
 
 
+# "17/10" fixo vira o ano que vem depois de 17/10 e estoura o teto de 30 dias do plano: o alvo é
+# sempre daqui a 10 dias (dd/mm sem ano, como o usuário digita).
+ALVO = (date.today() + timedelta(days=10)).strftime('%d/%m')
+
 VALIDAS = [
     ('tô tranquilo até 17/10 com meus boletos?', {'date': '17/10'}),
     ('previsão de saldo de 30 dias', {'days': 30}),
@@ -166,7 +170,7 @@ def test_contrato_prefixos_e_pending_de_valor(prefixo, monkeypatch, ia_fora):
 
 
 @pytest.mark.parametrize('tipo', ['bill_amount_expected', 'payment_method_choice', 'confirm_media_launch'])
-@pytest.mark.parametrize('texto', ['tô tranquilo até 17/10 com meus boletos?', 'aguento esse prazo?'])
+@pytest.mark.parametrize('texto', [f'tô tranquilo até {ALVO} com meus boletos?', 'aguento esse prazo?'])
 def test_contrato_tres_estados_preservados(tipo, texto, monkeypatch, ia_fora):
     _conversa_previsao_preserva_pendencia('', tipo, texto, monkeypatch, ia_fora, recusada='aguento' in texto)
 
@@ -206,11 +210,11 @@ def abre_recategorizacao(uid, monkeypatch, launch_id):
 
 
 @pytest.mark.parametrize('texto', [
-    'tô tranquilo até 17/10 com meus boletos?', 'previsão de saldo de 30 dias',
+    f'tô tranquilo até {ALVO} com meus boletos?', 'previsão de saldo de 30 dias',
     'tô tranquilo até dia 17?', 'qual meu saldo daqui 30 dias?',
     'aguento esse prazo?', 'previsão de saldo dia 32?',
     'previsão de saldo nos próximos 30 dias',
-    'tô tranquilo até 17/10 com boletos?',
+    f'tô tranquilo até {ALVO} com boletos?',
     'previsão de saldo em 30 dias com contas a pagar?',
 ])
 @pytest.mark.parametrize('porta', ['bill_pay_amount', 'recategorize_launch_text'])
@@ -233,7 +237,7 @@ def test_contrato_adapter_consulta_nao_paga_nem_consume(porta, texto, pro_small_
     assert respostas and ('Saldo previsto condicional' in respostas[-1] or 'não consegui interpretar' in respostas[-1].lower()), respostas
     assert len(chamadas) == (0 if 'aguento' in texto or '32' in texto else 1) and not ia_fora
     if 'próximos' in texto or 'com boletos' in texto or 'com contas a pagar' in texto:
-        args = {'date': '17/10'} if '17/10' in texto else {'days': 30}
+        args = {'date': ALVO} if ALVO in texto else {'days': 30}
         assert chamadas == [('_check_cashflow', args)]
         esperado = _check_cashflow(uid, args)
         assert esperado['target'] in respostas[-1] and fmt_brl(esperado['projetado']) in respostas[-1]
@@ -328,7 +332,7 @@ def test_contrato_proximos_preserva_estado_completo(tipo, monkeypatch, ia_fora, 
 
 
 @pytest.mark.parametrize('texto,args', [
-    ('tô tranquilo até 17/10 com boletos?', {'date': '17/10'}),
+    (f'tô tranquilo até {ALVO} com boletos?', {'date': ALVO}),
     ('previsão de saldo em 30 dias com contas a pagar?', {'days': 30}),
 ])
 def test_contrato_plural_sem_artigo_preserva_estado_completo(texto, args, monkeypatch, ia_fora, chamadas):

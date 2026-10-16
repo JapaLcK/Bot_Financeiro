@@ -2,7 +2,8 @@
 Cobre as tools Tier 2 da E2 (analítics que respondem perguntas como
 'onde gastei mais?', 'gastei mais em abril ou maio?', etc).
 """
-from datetime import date, datetime
+import calendar
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 
 import db
@@ -383,6 +384,12 @@ def _mes(d, k):
     return d.replace(year=d.year + m // 12, month=m % 12 + 1, day=15)
 
 
+def _fim_mes(d, k):
+    """Último dia do mês k à frente: a janela precisa conter a compra de hoje em qualquer dia do mês."""
+    m = _mes(d, k)
+    return m.replace(day=calendar.monthrange(m.year, m.month)[1])
+
+
 def _parcelas_of(uid, card, n=3, grupo="g", valor=200, nota="TV LOJA", total=None, so=None):
     """Formato Open Finance/OFX: 1 linha por parcela, data do mês dela, mesmo group_id."""
     import uuid
@@ -400,7 +407,7 @@ def _parcelas_of(uid, card, n=3, grupo="g", valor=200, nota="TV LOJA", total=Non
 
 
 def _janela(uid, meses):
-    rows = db.get_largest_expenses(uid, date.today().replace(day=1), _mes(date.today(), meses - 1),
+    rows = db.get_largest_expenses(uid, date.today().replace(day=1), _fim_mes(date.today(), meses - 1),
                                    limit=20, juntar_parcelas=True)
     return [(r["valor"], r.get("parcelas"), r["parcela"], r["data"]) for r in rows]
 
@@ -687,9 +694,12 @@ def test_top_categories_exclui_reembolso_cartao(user_id):
 
 
 def _tool_janela(uid, meses):
+    # início = último dia do mês anterior (não é dia 1): continua período livre mesmo com o fim no
+    # último dia do mês, que cobre a compra de hoje em qualquer dia
+    ini = date.today().replace(day=1) - timedelta(days=1)
     with _periodo_livre():
-        return _get_largest_expenses(uid, {"start_date": date.today().replace(day=1).isoformat(),
-                                           "end_date": _mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
+        return _get_largest_expenses(uid, {"start_date": ini.isoformat(),
+                                           "end_date": _fim_mes(date.today(), meses - 1).isoformat(), "limit": 20})["expenses"]
 
 
 def test_parcelamento_manual_compra_inteira(user_id):
