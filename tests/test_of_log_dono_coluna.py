@@ -45,7 +45,8 @@ from test_open_finance_disconnect_route import _semeia_conexao_pluggy
 from test_open_finance_proactive_dedupe import _CASOS, _armar, _espiao, _event_logs  # noqa: F401
 
 HOST = 'connection to server at "db.interno" (10.9.8.7), port 5432 failed'
-_PEDACOS_DO_HOST = ("db.interno", "10.9.8.7", "5432")
+# "port 5432", não "5432": o id do item tem dígitos aleatórios e "5432" solto colidia (flake do CI).
+_PEDACOS_DO_HOST = ("db.interno", "10.9.8.7", "port 5432")
 
 
 def _host_fora(*textos) -> None:
