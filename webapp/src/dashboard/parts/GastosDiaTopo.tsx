@@ -8,7 +8,7 @@ import { Selos } from "./Selos";
 
 const Seta = ({ k, nome, icone, ir }: { k: string | null; nome: string; icone: string; ir: (k: string) => void }) => (
   <button type="button" className="dia-seta" disabled={!k} aria-label={k ? `${nome}, ${longDate(isoDay(k))}` : nome} onClick={() => k && ir(k)}>
-    <i className={`ph ph-${icone}`} aria-hidden="true" />
+    <i className={icone} aria-hidden="true" />
   </button>
 );
 
@@ -41,9 +41,9 @@ export function GastosDiaTopo({ d, dia, catalogo, porCategoria, ir }: {
   return (
     <>
       <div className="dia-nav">
-        <Seta k={vizinho(dia, -1, d)} nome="Dia anterior" icone="arrow-left" ir={ir} />
+        <Seta k={vizinho(dia, -1, d)} nome="Dia anterior" icone="ph ph-arrow-left" ir={ir} />
         <span className="dia-data" id="w-compras-data"><i className="ph ph-calendar-dots" aria-hidden="true" />{longDate(isoDay(dia))}</span>
-        <Seta k={vizinho(dia, 1, d)} nome="Próximo dia" icone="arrow-right" ir={ir} />
+        <Seta k={vizinho(dia, 1, d)} nome="Próximo dia" icone="ph ph-arrow-right" ir={ir} />
         <span className="sr-only" role="status">{longDate(isoDay(dia))}. {total ? `${rotulo}: ${total}` : "Nenhum gasto neste dia."}</span>
       </div>
       {entrada ? (
