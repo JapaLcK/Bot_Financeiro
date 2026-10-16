@@ -24,6 +24,7 @@ from typing import Any
 
 from ._base import Tool
 from core.observability import _log_falha
+from core.pg_text import violacao_finito
 
 _ERRO_PAGAR = "🐷 Não consegui registrar o pagamento agora. Tenta de novo em instantes."
 
@@ -200,6 +201,8 @@ def _pay_bill_execute(user_id: int, args: dict[str, Any]) -> str:
         return (f"🐷 O valor da *{nome}* precisa ser maior que zero. "
                 f"Quanto veio este mês?")
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("mark_bill_paid", user_id, e)
         return _ERRO_PAGAR
     if paid is None:
@@ -285,6 +288,8 @@ def _add_boleto_execute(user_id: int, args: dict[str, Any]) -> str:
     try:
         b = create_boleto(user_id, name, amount, due)
     except Exception as e:
+        if violacao_finito(e):
+            raise  # runner responde MSG_VALOR_WHATSAPP
         _log_falha("add_boleto", user_id, e)
         return "🐷 Não consegui cadastrar o boleto agora. Tenta de novo em instantes."
     d = date.fromisoformat(b["due_date"][:10]) if b.get("due_date") else due

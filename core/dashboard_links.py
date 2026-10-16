@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import urllib.parse
 
 DEFAULT_DASHBOARD_BASE_URL = "http://localhost:8000"
 
@@ -18,6 +19,22 @@ def base_url_publica() -> str:
     de produção. Usada nos links que vão para fora do app (WhatsApp)."""
     base = get_dashboard_base_url()
     return base if base.startswith("https://") else "https://pigbankai.com"
+
+
+def link_whatsapp(texto: str, *, seletor: bool = False) -> str:
+    """Deep link do chat com o Piggy, com `texto` pré-preenchido. É o ÚNICO
+    construtor: site, e-mail, /wa e /teste passam por aqui. O número real fica no
+    servidor (WHATSAPP_NUMBER, lido a cada chamada).
+
+    Sem número devolve "" (falha fechada): o `wa.me/?text=` abre o seletor de
+    contatos, e um texto com o código de vínculo (uso único) iria para quem a
+    pessoa escolhesse. `seletor=True` é só para texto SEM segredo (saudação):
+    aí cai no seletor genérico, degradado mas sem quebrar a página nem o e-mail."""
+    number = "".join(ch for ch in os.getenv("WHATSAPP_NUMBER", "") if ch.isascii() and ch.isdigit())
+    text = urllib.parse.quote(texto)
+    if number:
+        return f"https://api.whatsapp.com/send?phone={number}&text={text}"
+    return f"https://wa.me/?text={text}" if seletor else ""
 
 
 logger = logging.getLogger(__name__)

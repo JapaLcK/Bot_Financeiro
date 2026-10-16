@@ -41,10 +41,15 @@ from typing import Any
 
 import db
 from db.ai_turno import trava_do_turno
+from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
+from utils_date import today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from . import streaming
-from ._context import CARDS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, METAS_DO_TURNO, metas_do_turno
+from ._context import (
+    CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, METAS_DO_TURNO,
+    metas_do_turno,
+)
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
@@ -255,10 +260,16 @@ def chat_detalhado(
         token_estado = _ESTADO.set(estado)
         cards: list[str] = []
         token_cards = CARDS_DO_TURNO.set(cards)
+        token_falhas = FALHAS_DE_CARD_DO_TURNO.set([])
+        token_janelas = JANELAS_DO_TURNO.set([])
+        token_nao_achadas = CATEGORIAS_NAO_ACHADAS_DO_TURNO.set([])
         try:
             reply = _chat_inner(user_id, user_text, monthly_limit=monthly_limit,
                                 ia_primeiro=ia_primeiro)
         finally:
+            CATEGORIAS_NAO_ACHADAS_DO_TURNO.reset(token_nao_achadas)
+            JANELAS_DO_TURNO.reset(token_janelas)
+            FALHAS_DE_CARD_DO_TURNO.reset(token_falhas)
             CARDS_DO_TURNO.reset(token_cards)
             _ESTADO.reset(token_estado)
             CURRENT_USER_MESSAGE.reset(token_msg)
@@ -381,10 +392,10 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             if m.get("role") == "assistant" and isinstance(m.get("content"), str):
                 m["content"] = strip_markdown_headers(m["content"])
 
-        today_str = date.today().strftime("%d/%m/%Y")
+        hoje = today_tz()
         metas = metas_do_turno(user_id)
         METAS_DO_TURNO.set(metas)
-        system_with_date = prompt_do_usuario(metas, streaming.ativo()) + f"\n\nData de hoje: {today_str}."
+        system_with_date = prompt_do_usuario(metas, streaming.ativo(), hoje) + "\n\n" + _linha_de_data(hoje)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_with_date}] + history
 
@@ -425,6 +436,28 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
             refund_usage(user_id, reservation)
 
 
+def _linha_de_data(hoje: date) -> str:
+    """A data e o mês atual, com o exemplo calculado: o modelo errava a conta de "últimos N meses"
+    (esquecia que inclui o mês atual) e dava 01..09 em outubro."""
+    i = hoje.year * 12 + hoje.month - 1
+    return (f"Data de hoje: {hoje.strftime('%d/%m/%Y')}. Mês atual: {hoje:%Y-%m}; "
+            f'"últimos 3 meses" = {(i - 2) // 12}-{(i - 2) % 12 + 1:02d} a {hoje:%Y-%m}.')
+
+
+def _json_cru(texto: str) -> bool:
+    """Resposta que é um JSON inteiro (objeto, lista, `null`, `true` ou `false`): o modelo despejou argumento de
+    tool como texto. Número sozinho ("50") é texto."""
+    if texto in ("null", "true", "false"):
+        return True
+    if not texto.startswith(("{", "[")):
+        return False
+    try:
+        json.loads(texto)
+    except ValueError:
+        return False
+    return True
+
+
 def _cancela_pendencia_do_turno(user_id: int) -> None:
     """Cancela a pendência armada neste turno, se ainda for ela (CAS do
     `ai_consume_pending_action`). A de turno anterior não é tocada."""
@@ -461,7 +494,7 @@ def _execute_pending(user_id: int, pending: dict[str, Any]) -> str:
         return tool.execute(user_id, args)
     except Exception as e:
         logger.error("erro ao executar pending %s: %s", name, e)
-        return ERROR_MSG
+        return MSG_VALOR_WHATSAPP if violacao_finito(e) else ERROR_MSG
 
 
 def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, Any]]) -> None:
@@ -585,6 +618,9 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
 
         if not tool_calls:
             final = strip_markdown_headers((msg.content or "").strip())
+            if _json_cru(final):  # vale como resposta vazia: ERROR_MSG, nada gravado, cota devolvida
+                logger.warning("ai_chat: resposta final em JSON cru pra user %s", user_id)
+                final = ""
             _log_unsupported_claims(user_id, final, messages[inicio_do_turno:])
             if not final:
                 _cancela_pendencia_do_turno(user_id)
@@ -864,12 +900,12 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
         _TURN_WRITE_ATTEMPTED.set(True)
         try:
             user_msg = tool.execute(user_id, args)
-        except Exception:
+        except Exception as e:
             # O texto da exceção não vai ao histórico (nem ao modelo): fica só no log.
             logger.exception("erro em auto-write %s", name)
             return (
                 json.dumps({"error": "falha_interna"}, ensure_ascii=False),
-                ERROR_MSG,
+                MSG_VALOR_WHATSAPP if violacao_finito(e) else ERROR_MSG,
             )
         history = json.dumps(
             {"status": "done", "message": user_msg}, ensure_ascii=False, default=str

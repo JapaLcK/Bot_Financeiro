@@ -12,7 +12,7 @@ import pytest
 
 import db
 from conftest import usuario_pagante
-from utils_text import VALOR_MAX, valor_valido
+from utils_text import TETO_ENTRADA, valor_valido
 
 HUGE = "1" * 400          # parse_money -> inf
 GRANDE = "1" * 301        # parse_money -> 1e300, finito mas absurdo
@@ -50,10 +50,10 @@ def _usuario_com_cartao():
 
 
 @pytest.mark.parametrize("v,ok", [
-    (50, True), (0.01, True), ("44.90", True), (VALOR_MAX, True),
+    (50, True), (0.01, True), ("44.90", True), (TETO_ENTRADA, True),
     (0, False), (-1, False), (None, False), ("abc", False),
     (float("nan"), False), (float("inf"), False), (float("-inf"), False),
-    ("nan", False), ("Infinity", False), (1e308, False), (VALOR_MAX + 1, False),
+    ("nan", False), ("Infinity", False), (1e308, False), (TETO_ENTRADA + 0.01, False),
 ])
 def test_valor_valido(v, ok):
     assert valor_valido(v) is ok
@@ -61,7 +61,7 @@ def test_valor_valido(v, ok):
 
 # ── tool da IA: add_credit_purchase ────────────────────────────────────────
 
-@pytest.mark.parametrize("v", [float("nan"), float("inf"), "nan", "Infinity", 1e308, VALOR_MAX + 1])
+@pytest.mark.parametrize("v", [float("nan"), float("inf"), "nan", "Infinity", 1e308, TETO_ENTRADA + 0.01])
 def test_tool_compra_no_cartao_recusa_valor_nao_finito(v):
     from core.services.ai_chat.tools.cards import _add_credit_purchase_execute
 
@@ -127,15 +127,18 @@ def test_whatsapp_limite_do_cartao_legitimo_grava():
     assert float(db.get_card_by_id(uid, cid)["credit_limit"]) == 5000.0
 
 
-def test_tool_compra_grande_e_legitima_passa():
-    """Sem teto de negócio: R$ 2 bi segue valendo (o repo decidiu isso); se `VALOR_MAX` baixar, volta a ser recusado."""
+def test_tool_compra_no_teto_passa_e_acima_do_teto_e_recusada():
+    """`TETO_ENTRADA` (R$ 1 bi, decisão do dono 2026-10-15): 2 bi é recusado, 1 bi passa."""
     from core.services.ai_chat.tools.cards import _add_credit_purchase_execute
 
     uid, _ = _usuario_com_cartao()
-    msg = _add_credit_purchase_execute(uid, {"valor": 2_000_000_000, "descricao": "imovel"})
+    recusa = _add_credit_purchase_execute(uid, {"valor": 2_000_000_000, "descricao": "imovel"})
+    assert "Compra no Crédito Registrada" not in recusa and _faturas(uid) == []
+
+    msg = _add_credit_purchase_execute(uid, {"valor": 1_000_000_000, "descricao": "imovel"})
 
     assert "Compra no Crédito Registrada" in msg
-    assert [float(t) for t in _faturas(uid)] == [2_000_000_000.0]
+    assert [float(t) for t in _faturas(uid)] == [1_000_000_000.0]
 
 
 # ── camada do banco (rotas que não passam pelo handler) ────────────────────

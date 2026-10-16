@@ -256,7 +256,8 @@ def test_posicao_sem_espelho_entra_como_real_com_moeda_presumida(uid, hoje):
     assert (r["valor"], r["dias_de_historico"], r["motivos"]) == ("0.00", 30, ["moeda_presumida"])
 
 
-def test_saldo_nao_finito_na_foto_nao_vira_zero_com_cara_de_exato(uid, hoje):
+def test_saldo_nao_finito_na_foto_nao_vira_zero_com_cara_de_exato(uid, hoje, sem_check_finito):
+    sem_check_finito("open_finance_investment_snapshots", "balance")  # espelho legado sujo de propósito
     cid = banco(uid)
     posicao(cid, "inv-1", "1300")
     foto(cid, "inv-1", hoje - timedelta(days=30), D("NaN"))
@@ -441,7 +442,8 @@ def test_ritmo_que_arredonda_para_zero_negativo_sai_0_00(uid, hoje):
     assert ritmo(uid, cria(uid))["valor"] == "0.00"  # -0.0033/mês: era "-0.00"
 
 
-def test_saldo_gigante_na_foto_e_ilegivel_e_nao_derruba_as_metas(uid, hoje):
+def test_saldo_gigante_na_foto_e_ilegivel_e_nao_derruba_as_metas(uid, hoje, sem_check_finito):
+    sem_check_finito("open_finance_investment_snapshots", "balance")  # espelho legado sujo de propósito
     cid = simples(uid, hoje, 30)
     foto(cid, "inv-2", hoje - timedelta(days=30), "1" + "0" * 40)
     mid = cria(uid)
@@ -509,7 +511,9 @@ def test_empate_arredonda_para_cima(uid, hoje):
     assert ritmo(uid, cria(uid))["valor"] == "0.05"
 
 
-def test_ritmo_fora_de_28_digitos_nao_derruba_a_listagem(uid, hoje):
+def test_ritmo_fora_de_28_digitos_nao_derruba_a_listagem(uid, hoje, sem_check_finito):
+    sem_check_finito("open_finance_investment_snapshots", "balance")  # espelho legado sujo de propósito
+    sem_check_finito("open_finance_investments", "balance")
     grande = "5" + "0" * 25  # < 1e26: a posição e a foto passam pelo `q_posicao`, o ritmo não cabe no quantize
     cid = simples(uid, hoje, 7, antes=grande, agora="1300")
     m = meta(uid, cria(uid, alvo="2000"))
@@ -522,7 +526,8 @@ def test_ritmo_fora_de_28_digitos_nao_derruba_a_listagem(uid, hoje):
     assert (m["ritmo"]["valor"], m["ritmo"]["motivos"], m["chega_em"]) == (None, ["saldo_ausente"], None)
 
 
-def test_percentual_com_saldo_enorme_e_alvo_infimo_nao_derruba_a_listagem(uid, hoje):
+def test_percentual_com_saldo_enorme_e_alvo_infimo_nao_derruba_a_listagem(uid, hoje, sem_check_finito):
+    sem_check_finito("open_finance_investments", "balance")
     posicao(banco(uid), "inv-1", "5" + "0" * 25)
     assert meta(uid, cria(uid, alvo="0.01"))["percentual"] == 100  # 5e27 ÷ 0.01 passa de 28 dígitos
 

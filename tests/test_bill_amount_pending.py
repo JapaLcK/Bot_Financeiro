@@ -823,22 +823,22 @@ def test_valor_absurdo_e_recusado_antes_da_reserva(valor):
     assert db.list_launches(uid, limit=5) == []
 
 
-def test_valor_gigante_finito_ainda_paga():
-    """Controle do teste acima: a guarda de finitude não pode virar teto.
-
-    Um teto de R$ 1 bi chegou a existir neste branch e transformava
-    "paguei luz 2000000000" — que a `main` pagava — em "erro interno" com a
-    conta ainda pendente. Regra de negócio nova disfarçada de validação.
-    """
+def test_valor_no_teto_paga_e_acima_do_teto_recusa():
+    """Controle do teste acima: R$ 1 bi (TETO_ENTRADA, decisão do dono 2026-10-15) paga;
+    R$ 2 bi levanta `VALOR_INVALIDO` e a conta segue pendente."""
     import uuid
     import db.bills as B
 
     uid = int(uuid.uuid4().int % 1_000_000_000)
     conta = _monta_conta_variavel(uid)
 
-    pago = B.mark_bill_paid(uid, int(conta["id"]), 2_000_000_000.0, metodo="carteira")
+    with pytest.raises(ValueError, match="VALOR_INVALIDO"):
+        B.mark_bill_paid(uid, int(conta["id"]), 2_000_000_000.0, metodo="carteira")
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+    pago = B.mark_bill_paid(uid, int(conta["id"]), 1_000_000_000.0, metodo="carteira")
     assert pago is not None and pago["status"] == "paid"
-    assert float(pago["paid_amount"]) == 2_000_000_000.0
+    assert float(pago["paid_amount"]) == 1_000_000_000.0
 
 
 def test_numero_gigante_pela_conversa_nao_fecha_a_conta(ia_espia):
@@ -1106,9 +1106,9 @@ def test_centavo_invisivel_direto_no_mark_bill_paid_nao_reserva():
     assert db.list_launches(uid, limit=5) == []
 
 
-def test_valor_gigante_finito_pela_conversa_paga_como_na_main(ia_espia):
-    """C3: o teto de R$ 1 bi transformava isto em "erro interno" e a conta
-    ficava pendente. Na `main` paga; tem que continuar pagando."""
+def test_valor_no_teto_paga_e_acima_do_teto_pergunta_de_novo_pela_conversa(ia_espia):
+    """TETO_ENTRADA = R$ 1 bi: 2 bi vira "Não entendi o valor" (nunca "erro interno") com a
+    conta ainda pendente; 1 bi paga."""
     import db.bills as B
 
     uid = usuario_pagante()
@@ -1116,10 +1116,15 @@ def test_valor_gigante_finito_pela_conversa_paga_como_na_main(ia_espia):
 
     r = _diga(uid, "paguei luz 2000000000")
 
-    assert "Conta paga" in r, r
+    assert "Não entendi o valor" in r, r
     assert "erro interno" not in r.lower()
+    assert B.list_bills(uid, include_paid=True)[0]["status"] == "pending"
+
+    r = _diga(uid, "paguei luz 1000000000")
+
+    assert "Conta paga" in r, r
     conta = B.list_bills(uid, include_paid=True)[0]
-    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 2_000_000_000.0
+    assert conta["status"] == "paid" and float(conta["paid_amount"]) == 1_000_000_000.0
 
 
 # ── C2: o botão "✅ Já paguei" também disputa a linha única de pendências ────
@@ -2081,7 +2086,7 @@ def test_porta_1_nao_precisa_do_passo_1_alfabeto_inteiro_do_valor_re():
 
 @pytest.mark.parametrize("resposta,esperado", [
     ("132", 132.0), ("132,50", 132.5), ("uns 132", 132.0),
-    ("132 reais", 132.0), ("50 pila", 50.0), ("2000000000", 2_000_000_000.0),
+    ("132 reais", 132.0), ("50 pila", 50.0), ("1000000000", 1_000_000_000.0),
 ])
 def test_porta_da_conta_continua_pagando_pelo_handle_incoming(resposta, esperado):
     r"""Coluna 1 da porta 1, pela conversa inteira.

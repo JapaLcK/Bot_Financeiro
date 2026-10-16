@@ -15,14 +15,16 @@ export function LancamentoContexto({ item, contas = [] }: { item: Lancamento; co
     <Selos motivos={item.motivos} />
   </>;
 }
-export function LancamentoLinha({ item, categorias, contas, abrir, historico = false }: { item: Lancamento; historico?: boolean; categorias: Categoria[]; contas: Conta[]; abrir: () => void }) {
+export function LancamentoLinha({ item, categorias, contas, abrir, historico = false }: { item: Lancamento; historico?: boolean; categorias: Categoria[]; contas: Conta[]; abrir?: () => void }) {
   const nome = categorias.find((c) => c.chave === item.categoria)?.nome ?? item.categoria ?? "Sem categoria";
+  const miolo = <>
+    <b>{item.descricao ?? "Sem descrição"}</b>
+    <span className="faint">{dayMonth(isoDay(item.data))}{historico && ` ${item.data.slice(0, 4)}`}{item.hora && ` · ${item.hora}`} · {nome}</span>
+  </>;
   return <li className="lanc-linha" data-id={item.id}>
     <div className="lanc-principal">
-      <button type="button" className="lanc-abrir" onClick={abrir} aria-label={`Detalhes: ${item.descricao ?? "Sem descrição"}`}>
-        <b>{item.descricao ?? "Sem descrição"}</b>
-        <span className="faint">{dayMonth(isoDay(item.data))}{historico && ` ${item.data.slice(0, 4)}`}{item.hora && ` · ${item.hora}`} · {nome}</span>
-      </button>
+      {/* Sem `abrir` (o card de compras de /gastos) a linha só mostra: nada de botão que não faz nada. */}
+      {abrir ? <button type="button" className="lanc-abrir" onClick={abrir} aria-label={`Detalhes: ${item.descricao ?? "Sem descrição"}`}>{miolo}</button> : <div className="lanc-abrir">{miolo}</div>}
       <span className={`lanc-valor num ${!item.interno && item.tipo === "entrada" ? "gain" : ""}`}>
         <span>{item.guardado ? "Guardado" : item.interno ? "Movimento" : item.tipo === "entrada" ? "Entrada" : "Saída"}</span>{moneyIn(Number(item.valor), item.moeda)}
       </span>

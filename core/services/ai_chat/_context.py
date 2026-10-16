@@ -28,6 +28,27 @@ CARDS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVa
 """Cards que o `show_card` já MOSTROU neste turno (emitiu bloco; chamada recusada não
 entra). O teto vale por turno. Setada pelo runner; None fora dele = sem teto."""
 
+FALHAS_DE_CARD_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "ai_chat_falhas_de_card_do_turno", default=None
+)
+"""Ids dos cards cujo `show_card` NÃO saiu neste turno por plano, onboarding ou leitura (`montar`).
+A tool que recusaria mandando a ESSE card devolve o dado (`_recusa_se_for_do_card`): ele já mostrou que não
+resolve. Falha de outro card não libera. Setada pelo runner; None fora dele."""
+
+JANELAS_DO_TURNO: contextvars.ContextVar[list[dict] | None] = contextvars.ContextVar(
+    "ai_chat_janelas_do_turno", default=None
+)
+"""Janelas que `_recusa_se_for_do_card` mandou ao `show_card periodo` neste turno: `{"de", "ate", "extra"}` (AAAA-MM
+e o `extra` de `_limita_periodo`, com os cortes). O `show_card` usa a janela da recusa quando o modelo diverge dela e
+ela foi cortada por 12 meses (`mostrar_card._da_recusa`). Setada pelo runner; None fora dele."""
+
+CATEGORIAS_NAO_ACHADAS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "ai_chat_categorias_nao_achadas_do_turno", default=None
+)
+"""Categorias que o `show_card` recebeu neste turno e o card NÃO achou (`categoria_pedida.encontrada=false`). O
+`get_category_spend` dessa categoria devolve o dado em vez de mandar a um 2º card (`_recusa_se_for_do_card`). Setada
+pelo runner; None fora dele."""
+
 METAS_DO_TURNO: contextvars.ContextVar[bool | None] = contextvars.ContextVar(
     "ai_chat_metas_do_turno", default=None
 )

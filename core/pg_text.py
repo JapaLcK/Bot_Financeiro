@@ -27,6 +27,10 @@ manda o usuário reconectar o banco.
 dois. A escolha real é gravar saneado ou não gravar nada.
 """
 
+import re
+
+import psycopg
+
 _FFFD = "�"
 
 
@@ -192,6 +196,25 @@ def detalhe_seguro(exc: Exception) -> str:
     return _ERRO_DE_CODIFICACAO if isinstance(exc, UnicodeError) else str(exc)
 
 
+_FAILING_ROW = re.compile(r"Failing row contains \(.*", re.S)
+
+
+def redigir_failing_row(valor):
+    """Troca o DETAIL `Failing row contains (...)` do Postgres (a linha inteira do usuário:
+    valor, descrição, user_id) por `Failing row contains (omitido)`, até o fim do texto.
+    `str`, e `dict`/`list` (valores) devolvidos como cópia; o resto volta como veio.
+    Fonte única da regra: o filtro de log (`core/observability.py`) e os dois gravadores de
+    `system_event_logs` (`log_system_event_sync`, `admin_dashboard.log_system_event`) a usam.
+    Recursão simples: `details` é JSON raso montado pelo nosso código, não corpo de cliente."""
+    if isinstance(valor, str):
+        return _FAILING_ROW.sub("Failing row contains (omitido)", valor)
+    if isinstance(valor, dict):
+        return {k: redigir_failing_row(v) for k, v in valor.items()}
+    if isinstance(valor, list):
+        return [redigir_failing_row(v) for v in valor]
+    return valor
+
+
 if __name__ == "__main__":  # pragma: no cover - autocheck
     try:
         "cofre\ud800x".encode("utf-8")
@@ -230,3 +253,24 @@ def tem_veneno(valor) -> bool:
     então `limpa_para_pg(v) != v` dá sempre False (medido).
     """
     return isinstance(valor, str) and _limpa_str(valor) != valor
+
+
+# ── CHECK de valor finito (db/finito_checks.py) ──────────────────────────────
+# Mora aqui, e não em `db/`, porque quem só precisa RECONHECER o erro ou mostrar a frase (adapters,
+# handlers, o harness que substitui o pacote `db`) não deve importar a camada de banco.
+PREFIXO_FINITO = "finito_"
+MSG_VALOR_API = "Valor inválido: confira o número."
+MSG_VALOR_WHATSAPP = "⚠️ Não consegui registrar esse valor. Confere o número e manda de novo."
+
+
+def violacao_finito(exc: BaseException | None) -> str | None:
+    """Nome da constraint `finito_*` se `exc` (ou sua causa/contexto, até 5 níveis) é um
+    CheckViolation dela; senão None. Nunca use `str(exc)`: traz 'Failing row contains (...)'."""
+    for _ in range(5):
+        if exc is None:
+            return None
+        if isinstance(exc, psycopg.errors.CheckViolation):
+            nome = getattr(exc.diag, "constraint_name", None) or ""
+            return nome if nome.startswith(PREFIXO_FINITO) else None
+        exc = exc.__cause__ or exc.__context__
+    return None

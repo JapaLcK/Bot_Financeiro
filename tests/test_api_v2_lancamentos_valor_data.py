@@ -291,6 +291,7 @@ ESCRITORES = {
     ("db/accounts.py", "update_launch_fields"): "v2 (pode) e /app; data da fundida e do OF travada",
     ("db/open_finance.py", "sync_imported_open_finance_updates"): "sync do OF, preservando delta original da fundida",
     ("db/open_finance_cash_revisao.py", "_corrige"): "Q41: o banco corrigiu o saque/depósito automático",
+    ("db/bank_declaracoes.py", "projeta"): "despesa/receita declarada segue o extrato; original em bank_movement_declarations, delta 0",
 }
 
 

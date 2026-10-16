@@ -245,9 +245,10 @@ def test_clarification_pontuacao_nao_infla_o_valor(pro_uid, spy_ai, resposta, es
 @pytest.mark.parametrize("resposta", [
     "132 50",     # antes: 13.250,00
     "1.23.456",   # antes: 123.456,00 quando o provável era 1.234,56
+    "1000000000,01",  # acima do teto: um centavo acima do TETO_ENTRADA
 ])
 def test_clarification_valor_ambiguo_recusado_pergunta_viva(pro_uid, spy_ai, resposta):
-    """T4 (metade que RECUSA) — ambíguo re-pergunta em vez de inflar."""
+    """T4 (metade que RECUSA) — ambíguo ou acima do teto re-pergunta em vez de inflar."""
     uid = pro_uid
     import db
     _pergunta_de_valor(uid)
@@ -265,7 +266,7 @@ def test_clarification_valor_ambiguo_recusado_pergunta_viva(pro_uid, spy_ai, res
     ("132", 132.0),
     ("uns 132", 132.0),           # enchimento falado
     ("cinquenta", 50.0),          # por extenso: o Whisper escreve assim
-    ("2000000000", 2_000_000_000.0),  # sem teto inventado
+    ("1000000000", 1e9),  # exatamente o TETO_ENTRADA vale
     # As formas COM UNIDADE — o buraco da rodada 1. Faltavam aqui, e por isso a
     # escotilha por confiança (uma blacklist sobre o classificador inteiro)
     # passou verde sequestrando todas elas. Com o `ABANDONA` fechado, nenhuma
@@ -278,7 +279,7 @@ def test_clarification_valor_ambiguo_recusado_pergunta_viva(pro_uid, spy_ai, res
     ("132 reais.", 132.0),
 ])
 def test_clarification_positivo_o_aperto_nao_recusa_tudo(pro_uid, spy_ai, resposta, esperado):
-    """T5 — controle positivo do grupo: pega teto inventado e recusa-tudo.
+    """T5 — controle positivo do grupo: pega teto errado (R$ 1 bi vale) e recusa-tudo.
 
     Assere DESCRIÇÃO e CATEGORIA, não só o valor: com a escotilha invertida,
     "50 pila" ainda registrava R$ 50,00 — mas com descrição "50 pila" e

@@ -246,6 +246,47 @@ def _init_schema():
     # `init_db`; o banco de teste precisa deles para a auditoria de tests/test_fk_indexes.py.
     from db.schema_repairs import ensure_fk_indexes_once
     assert ensure_fk_indexes_once() == []
+    # CHECK finito em toda coluna numérica (db/finito_checks.py): também sai do `lifespan`,
+    # não do `init_db`. Banco de teste recém-criado: nada sujo, nada travado.
+    from db.finito_checks import ensure_finito_checks_once
+    r = ensure_finito_checks_once()
+    assert r is not None and r["sujas"] == [] and r["falhas"] == [], r
+
+
+@pytest.fixture(autouse=True)
+def _caplog_com_filtro_de_producao(caplog):
+    """O `caplog` é um handler do root sem o filtro que os handlers de produção carregam
+    (`core.observability._sem_failing_row`); com ele, o texto capturado é o que a produção grava."""
+    from core.observability import _sem_failing_row
+    caplog.handler.addFilter(_sem_failing_row)
+    yield
+
+
+@pytest.fixture
+def sem_check_finito():
+    """Para o teste que grava NaN/Infinity/absurdo DE PROPÓSITO (o espelho sujo que a leitura
+    tem de tolerar): `sem_check_finito("tabela", "coluna")` derruba o CHECK `finito_<coluna>`
+    e, no teardown, o recoloca NOT VALID (o VALIDATE fica para a próxima `ensure_finito_checks`;
+    é NOT VALID porque o teste pode ter deixado a linha suja). Escritor REAL do produto que
+    esbarra no CHECK é bug a corrigir na porta, não motivo para usar esta fixture."""
+    from psycopg import sql
+    from db.finito_checks import expr_finito, limite_da_coluna, nome_check
+    derrubadas = []
+
+    def _derruba(tabela, coluna):
+        with get_conn() as conn:
+            conn.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
+                sql.Identifier(tabela), sql.Identifier(nome_check(coluna))))
+        derrubadas.append((tabela, coluna))
+
+    yield _derruba
+    with get_conn() as conn:
+        for tabela, coluna in derrubadas:  # o teste pode já ter deixado o `ensure` recriá-la
+            conn.execute(sql.SQL("alter table {} drop constraint if exists {}").format(
+                sql.Identifier(tabela), sql.Identifier(nome_check(coluna))))
+            conn.execute(sql.SQL("alter table {} add constraint {} check ({}) not valid").format(
+                sql.Identifier(tabela), sql.Identifier(nome_check(coluna)),
+                expr_finito(coluna, limite_da_coluna(tabela, coluna))))
 
 
 @pytest.fixture(autouse=True)

@@ -219,7 +219,9 @@ def test_get_nao_escreve_repara_expira_ou_emite_sse(uid, monkeypatch):
 
 
 @pytest.mark.parametrize("saldo", [None, "0"])
-def test_indisponivel_e_zero_sao_distintos_uid(uid, saldo):
+def test_indisponivel_e_zero_sao_distintos_uid(uid, saldo, sem_check_finito):
+    if saldo is None:  # NaN de propósito: o banco novo o recusaria
+        sem_check_finito("accounts", "balance")
     q("update accounts set balance=%s::numeric where user_id=%s", ("NaN" if saldo is None else saldo, uid))
     recorrente(uid, "Conhecido", 2)
     c = ok(uid)
@@ -263,8 +265,10 @@ def test_erro_db_estrutural_vira_envelope_503(uid, monkeypatch):
 
 @pytest.mark.parametrize("caso", ["fresca", "outra_moeda", "conexao_pausada", "saldo_ausente_no_sync",
                                   "nan", "sync_velho_49h", "moeda_presumida", "conciliacao_pendente"])
-def test_recorte_bancario_preserva_cobertura_e_diferenca_explicada(uid, caso):
-    from tests.test_api_v2_contas import CASOS
+def test_recorte_bancario_preserva_cobertura_e_diferenca_explicada(uid, caso, sem_check_finito):
+    from tests.test_api_v2_contas import CASOS, VENENOS
+    if caso in VENENOS:
+        sem_check_finito("open_finance_accounts", "balance")
     db.set_balance(uid, D(100))
     montar, total, *_ = CASOS[caso]
     montar(uid)
@@ -394,7 +398,9 @@ def test_inclusao_variavel_sem_valor_com_data_e_obrigacoes_validas(uid):
     ("receita_recorrente", "NaN", "valor_recorrente_desconhecido"),
     ("fatura", "-1", "valor_fatura_a_conferir"),
 ])
-def test_inclusao_irmaos_sem_valor_utilizavel_com_data(uid, monkeypatch, fonte, valor, motivo):
+def test_inclusao_irmaos_sem_valor_utilizavel_com_data(uid, monkeypatch, fonte, valor, motivo, sem_check_finito):
+    if valor == "NaN":  # NaN de propósito: o banco novo o recusaria
+        sem_check_finito("bill_instances" if fonte == "instancia" else "recurring_incomes", "amount")
     from db.recurring_income import create_recurring_income
     from tests.test_cashflow_prazo_fatura import fatura
     due = now_tz().date() + timedelta(days=1)

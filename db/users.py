@@ -545,12 +545,47 @@ def link_platform_identity(provider: str, external_id: str, target_user_id: int)
     O target_user_id é SEMPRE o primário.
     """
     current_user_id = get_or_create_canonical_user(provider, external_id)
-    if current_user_id == target_user_id:
-        return target_user_id
-
-    merge_users(current_user_id, target_user_id)
-    bind_identity(provider, external_id, target_user_id)
+    if current_user_id != target_user_id:
+        merge_users(current_user_id, target_user_id)
+        bind_identity(provider, external_id, target_user_id)
+    if provider == "whatsapp":
+        # O vínculo já foi feito e o código consumido: o marcador é auxiliar, e a falha dele não
+        # pode virar erro para quem acabou de ligar (a resposta seria o paywall, sem o ✅).
+        try:
+            _confirmar_telefone_do_whatsapp(external_id, target_user_id)
+        except Exception as exc:
+            logger.warning("link_platform_identity: marcador do telefone falhou user_id=%s (%s)",
+                           target_user_id, type(exc).__name__)
     return target_user_id
+
+
+def _confirmar_telefone_do_whatsapp(wa_id: str, user_id: int) -> None:
+    """Quem tem o código da conta mandou mensagem DESTE número: é a única prova de posse
+    que o site tem (#610), e por isso o único gravador de `phone_status='confirmed'` e
+    `whatsapp_verified_at` (o auto-vínculo por telefone, que gravava sem prova, não liga
+    mais). Só marca quando o número casa com o telefone digitado na conta: número
+    diferente liga, mas não confirma o telefone que a pessoa digitou."""
+    from db_support import invalidate_auth_user_cache  # tardio: db_support importa db
+    from utils_phone import candidatos_simetricos
+
+    try:
+        hashes = [hash_pii_optional(c, kind="phone") for c in candidatos_simetricos(wa_id)]
+    except ValueError:  # id que não é telefone
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                update auth_accounts
+                set phone_status = 'confirmed',
+                    phone_confirmed_at = coalesce(phone_confirmed_at, now()),
+                    whatsapp_verified_at = now()
+                where user_id = %s and phone_hash = any(%s)
+                """,
+                (user_id, hashes),
+            )
+        conn.commit()
+    invalidate_auth_user_cache(user_id)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -388,7 +388,8 @@ def test_fatura_parcial_negativa_ou_paid_com_divida_sem_reparo(user_id,total,pai
     assert q('select total,paid_amount,status from credit_bills where user_id=%s and id=%s',(user_id,bid))==before
 
 
-def test_base_nan_nao_gera_curva_zero_e_homonimos_sao_distintos(user_id):
+def test_base_nan_nao_gera_curva_zero_e_homonimos_sao_distintos(user_id, sem_check_finito):
+    sem_check_finito('accounts','balance')  # NaN de propósito: o banco novo o recusaria
     due=date.today()+timedelta(days=1)
     create_bill(user_id,'Mesmo nome',due,10)
     create_bill(user_id,'Mesmo nome',due,20)

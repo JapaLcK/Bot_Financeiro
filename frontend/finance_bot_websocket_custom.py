@@ -40,6 +40,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.utils import is_body_allowed_for_status_code
 from starlette.exceptions import HTTPException as StarletteHTTPException
+import psycopg
 import uvicorn
 from pydantic import BaseModel, Field, model_validator
 from slowapi.errors import RateLimitExceeded
@@ -80,6 +81,7 @@ from db.connection import (
 from db.open_finance import (
     BANK_ACCOUNTS_SQL, MERGED_WALLET_DELTA_SQL, merged_wallet_delta_params,
 )
+from core.pg_text import MSG_VALOR_API, violacao_finito
 from db.rate_limits import RATE_LIMIT_UPSERT_SQL
 from db.resumo_mes import TOTAIS_SQL, totais_params
 from db import (
@@ -119,6 +121,7 @@ from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
 from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_veneno
+from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
 from core.services.pkce import challenge_valido, s256 as pkce_s256
@@ -208,7 +211,6 @@ DASHBOARD_USER_ID = os.getenv("DASHBOARD_USER_ID")
 # de auth iriam sem o Secure em produção).
 _APP_ENV = (os.getenv("APP_ENV") or "").strip().lower()
 COOKIE_SECURE = DASHBOARD_URL.startswith("https://") or _APP_ENV in ("prod", "production")
-WHATSAPP_NUMBER         = os.getenv("WHATSAPP_NUMBER", "")
 STRIPE_SECRET_KEY       = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_PRICE_ID_PRO     = os.getenv("STRIPE_PRICE_ID_PRO", "")            # legacy: usado como fallback do mensal
@@ -1829,6 +1831,25 @@ async def _tarefa_fk_indexes():
                     getattr(exc, "sqlstate", None))
 
 
+async def _tarefa_finito_checks():
+    # CHECK de valor finito em toda coluna numérica (db/finito_checks.py): pré-scan,
+    # ADD NOT VALID e VALIDATE, fora do init_db. Uma vez por boot; falha vira WARNING e o
+    # próximo boot repara. Logger e não print, como `_tarefa_fk_indexes`.
+    log = logging.getLogger(__name__)
+    try:
+        from db.finito_checks import ensure_finito_checks_once  # noqa: PLC0415
+        t0 = _startup_time.monotonic()
+        r = await asyncio.to_thread(ensure_finito_checks_once)
+        if r is None:
+            log.info("[finito_checks] outro processo está rodando; nada a fazer aqui")
+        else:
+            log.info("[finito_checks] %.1fs: criadas=%d sujas=%s falhas=%s", _startup_time.monotonic() - t0,
+                     len(r["criadas"]), r["sujas"] or "nenhuma", r["falhas"] or "nenhuma")
+    except Exception as exc:  # nunca derruba o app; só tipo e sqlstate (o texto pode trazer dado)
+        log.warning("[finito_checks] erro: %s sqlstate=%s", type(exc).__name__,
+                    getattr(exc, "sqlstate", None))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _t0 = _startup_time.monotonic()
@@ -2253,6 +2274,7 @@ async def lifespan(app: FastAPI):
                 asyncio.create_task(_ebook_worker(), name="ebook_worker"),
                 asyncio.create_task(_stripe_email_worker(), name="stripe_email_worker"),
                 asyncio.create_task(_tarefa_fk_indexes(), name="fk_indexes"),
+                asyncio.create_task(_tarefa_finito_checks(), name="finito_checks"),
             ]
         )
     else:
@@ -2759,10 +2781,25 @@ async def unhandled_exception_page_handler(request: Request, exc: Exception):
     )
 
 
+async def valor_finito_violado_handler(request: Request, exc: psycopg.errors.CheckViolation):
+    """CHECK `finito_*` do banco (db/finito_checks.py) recusou NaN/Infinity/absurdo que
+    passou pelas guardas da porta: 400 em vez de 500. Outro CheckViolation segue para o 500.
+    NUNCA `str(exc)`: traz 'Failing row contains (...)' (dado do usuário)."""
+    nome = violacao_finito(exc)
+    if nome is None:
+        raise exc
+    await log_system_event("warning", "valor_nao_finito_no_banco", f"constraint {nome}",
+                           source=f"{request.method} {request.url.path}",
+                           details={"constraint": nome})
+    return vary_accept(JSONResponse(status_code=400,
+                                    content={"detail": MSG_VALOR_API}))
+
+
 # StarletteHTTPException (não a do FastAPI): o 404/405 automático do router
 # levanta a do Starlette — registrar só a subclasse deixaria o caso principal fora.
 app.add_exception_handler(StarletteHTTPException, http_exception_page_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_page_handler)
+app.add_exception_handler(psycopg.errors.CheckViolation, valor_finito_violado_handler)
 # Exception (não 500): o Starlette tira esta chave do ExceptionMiddleware e a usa
 # como handler do ServerErrorMiddleware (applications.py:85-95).
 app.add_exception_handler(Exception, unhandled_exception_page_handler)
@@ -3026,16 +3063,6 @@ def _post_login_url(user_id: int | None = None) -> str:
     return _dashboard_url("/home")
 
 
-def _build_whatsapp_onboarding_link(user_id: int, minutes_valid: int = 15) -> str:
-    if not WHATSAPP_NUMBER:
-        return ""
-    safe_number = "".join(ch for ch in WHATSAPP_NUMBER if ch.isdigit())
-    if not safe_number:
-        return ""
-    text = urllib.parse.quote("Olá")
-    return f"https://api.whatsapp.com/send?phone={safe_number}&text={text}"
-
-
 async def _get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -3226,6 +3253,16 @@ async def auth_dashboard_profile(request: Request, response: Response):
     from core.services.plan_service import (
         get_user_limits, is_pro, plan_gate_ok,
     )
+    # WhatsApp ligado = tem a identidade, e não o marcador `whatsapp_verified_at`: quem liga por
+    # código com número diferente do digitado no cadastro fica ligado sem telefone confirmado.
+    # EXISTS, sem decifrar o número (a rota do dashboard não pode cair por um `external_id_enc` ruim).
+    def _tem_whatsapp() -> bool:
+        from db.connection import get_conn
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM user_identities"
+                        " WHERE user_id = %s AND provider = 'whatsapp') AS ok", (int(user_id),))
+            return bool(cur.fetchone()["ok"])
+    whatsapp_linked = await asyncio.to_thread(_tem_whatsapp)
     limits = await asyncio.to_thread(get_user_limits, int(user_id))
     _is_pro = await asyncio.to_thread(is_pro, int(user_id))
     _forecast_ok = await asyncio.to_thread(plan_gate_ok, int(user_id), "forecast")
@@ -3251,7 +3288,7 @@ async def auth_dashboard_profile(request: Request, response: Response):
         "email": (auth_user or {}).get("email"),
         "display_name": (auth_user or {}).get("display_name"),
         "plan": (auth_user or {}).get("plan"),
-        "whatsapp_linked": bool((auth_user or {}).get("whatsapp_verified_at")),
+        "whatsapp_linked": whatsapp_linked,
         "feature_gates": feature_gates,
     }
 
@@ -3476,7 +3513,7 @@ async def auth_verify_email(request: Request, response: Response, body: VerifyEm
         email=body.email.strip().lower(), origem_url=f"{DASHBOARD_URL}/cadastro",
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "user_id": user_id,
@@ -3601,7 +3638,7 @@ async def _concluir_login(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "user_id": user_id,
@@ -3899,7 +3936,7 @@ async def auth_new_link_code(request: Request, user_id: int = Depends(_get_curre
     from db import create_link_code
 
     link_code = create_link_code(user_id, minutes_valid=15)
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
 
     return {
         "link_code": link_code,
@@ -4272,7 +4309,7 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {link_code}")
     return {
         "user_id": user_id,
         "email": user["email"],
@@ -4969,7 +5006,7 @@ async def _completar_cadastro_social(
         user_agent=request.headers.get("user-agent"),
     )
 
-    wa_link = _build_whatsapp_onboarding_link(user_id)
+    wa_link = link_whatsapp(f"vincular {result['link_code']}")
 
     return {
         "user_id": user_id,
@@ -7782,6 +7819,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+            except psycopg.errors.CheckViolation:
+                raise
             except Exception as exc:
                 logging.getLogger(__name__).error("registrar_parcelamento user=%s: %s", user_id, exc)
                 raise HTTPException(status_code=500, detail="Erro ao registrar parcelamento. Tente novamente.") from exc
@@ -7823,6 +7862,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+        except psycopg.errors.CheckViolation:
+            raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Erro ao registrar compra no crédito: {exc}") from exc
 
@@ -7848,6 +7889,8 @@ async def create_launch_route(request: Request, user_id: int, payload: LaunchCre
         feito = await asyncio.to_thread(lancar, int(user_id), tipo, valor, alvo, nota_in, explicit)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `{exc}` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erro ao registrar lançamento: {exc}") from exc
     launch_id, user_seq, new_balance = feito["launch_id"], feito["user_seq"], feito["new_balance"]
@@ -8017,6 +8060,8 @@ async def delete_launch_route(
         frase = next(m for c, m in _MSG_DELETE_LAUNCH.items() if isinstance(exc, c))
         raise HTTPException(status_code=400, detail=frase) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # `f"...{exc}"` num caminho DESTRUTIVO vazava o texto do psycopg
         # (`DETAIL: Key (…)=(…)`) pro modal, e não deixava log nenhum. SEM
         # traceback de propósito (medido em duas colunas): na `main` esta rota
@@ -8118,6 +8163,8 @@ async def delete_credit_transaction_route(
     except CompraDoBanco as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        if violacao_finito(exc):
+            raise  # `valor_finito_violado_handler`: 400 com a frase do valor, não "tente de novo" (repetir não resolve)
         # Sem traceback, mesma medição da `/launches` acima: na `main` esta rota
         # também era `HTTPException(500, f"Erro ao apagar compra: {exc}")`, que o
         # middleware deixa passar — nunca houve pilha gravada aqui para manter.
@@ -8685,6 +8732,10 @@ async def categories_update_route(
             raise HTTPException(status_code=409, detail="Já existe uma categoria com esse nome.")
         if code == "CATEGORIA_INVALIDA":
             raise HTTPException(status_code=400, detail="Nome de categoria inválido.")
+        if code == "CATEGORIA_DECLARADA_INTERNA":
+            raise HTTPException(status_code=409, detail=(
+                "Essa categoria tem lançamentos declarados como pagos pelo banco, e um nome de movimentação "
+                "interna (investimento, transferência, fatura) os tiraria dos seus totais. Escolha outro nome."))
         raise HTTPException(status_code=400, detail=code)
     _invalidate_dashboard_current_cache(user_id)
     return {"ok": True, "category": cat}
@@ -8820,8 +8871,8 @@ async def adjust_balance_route(request: Request, user_id: int, payload: AdjustBa
     Se delta == 0, não cria nada (idempotente).
     """
     _authorize_dashboard_access(request, user_id)
-    from utils_text import VALOR_MAX
-    if not abs(payload.target_balance) <= VALOR_MAX:  # NaN e inf também falham a comparação
+    from utils_text import TETO_ENTRADA
+    if not abs(payload.target_balance) <= TETO_ENTRADA:  # NaN e inf também falham a comparação
         raise HTTPException(status_code=400, detail="Saldo inválido.")
     from db.accounts import add_launch_and_update_balance, carteira_exibida
     from db import get_consolidated_balance
@@ -9223,14 +9274,22 @@ def _recurring_income_value_error(code: str) -> HTTPException:
 
 @app.get("/recurring-incomes/{user_id}")
 async def recurring_income_list_route(request: Request, user_id: int, include_inactive: bool = False):
-    """Lista as receitas recorrentes do user. Pro-only."""
+    """Lista as receitas recorrentes do user. Pro-only.
+
+    R2: com banco conectado a lista vem vazia (a Previsão ignora a receita manual e a tela
+    a esconde) e `banco_conectado` é True; antes do gate de plano, para quem não tem plano
+    também receber a Visão geral sem receita."""
     _authorize_dashboard_access(request, user_id)
+    from core.services.fonte_unica import recusa_receita
+
+    if await asyncio.to_thread(recusa_receita, user_id):
+        return {"ok": True, "incomes": [], "banco_conectado": True}
     _require_pro(user_id, "recurring_expenses")
 
     from db.recurring_income import list_recurring_incomes
 
     items = await asyncio.to_thread(list_recurring_incomes, user_id, include_inactive)
-    return {"ok": True, "incomes": items}
+    return {"ok": True, "incomes": items, "banco_conectado": False}
 
 
 @app.post("/recurring-incomes/{user_id}")
@@ -9412,6 +9471,8 @@ async def create_investment_route(request: Request, user_id: int, payload: Inves
             initial_note=initial_note,
             funding_source=_funding.to_db_arg(_src) if payload.initial_amount else None,
         )
+    except psycopg.errors.CheckViolation:
+        raise  # `valor_finito_violado_handler`: o `str(exc)` abaixo traz "Failing row contains (...)"
     except Exception as exc:
         message = (_funding.msg_insuficiente(user_id, payload.initial_amount or 0,
                                              acao="aporte inicial", plain=True)

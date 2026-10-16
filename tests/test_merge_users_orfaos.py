@@ -14,7 +14,7 @@ import pytest
 import db
 from adapters.whatsapp import wa_runtime as wr
 from adapters.whatsapp.wa_parse import InboundMessage
-from db import attempt_whatsapp_phone_link, get_conn
+from db import get_conn
 from db.ai_chat import append_message, set_pending_action
 from db.privacy import delete_user_data
 from db.users import _DESTINO_VENCE, _MOVIDAS, _OUTRAS_COLUNAS, get_or_create_canonical_user
@@ -92,8 +92,7 @@ def _origem_do_whatsapp(destino):
 
 def _junta(fone, destino):
     """`merge_users` pelo caminho do código (`vincular`/`link`): None quando junta,
-    o `motivo` quando recusa. Desde a #711 o auto-vínculo por telefone não mescla
-    origem com dados financeiros; sem eles, ele continua sendo o veículo."""
+    o `motivo` quando recusa. É o ÚNICO caminho que junta: desde o PR-5 o telefone não liga."""
     try:
         db.link_platform_identity("whatsapp", fone, destino)
     except db.MergeRefused as exc:
@@ -220,7 +219,7 @@ def test_dinheiro_pix_e_grant_vao_para_o_destino(user_id):
     nova_cobranca(origem)
     _grant_vencido(origem)
 
-    assert attempt_whatsapp_phone_link(fone, current_user_id=origem)["status"] == "linked"
+    assert _junta(fone, user_id) is None
 
     assert _n("pix_charges where user_id = %s and status = 'pending'", (user_id,)) == 1
     assert _n("plan_grants where user_id = %s", (user_id,)) == 1
@@ -251,7 +250,7 @@ def test_comissao_de_afiliado_da_origem_passa_ao_destino(user_id):
         _sql("insert into affiliate_commissions(affiliate_id, referred_user_id, stripe_invoice_id,"
              " invoice_amount_cents, amount_cents, available_at) values (%s, %s, %s, 1000, 100, now())", (af, origem, uuid.uuid4().hex))
 
-        assert attempt_whatsapp_phone_link(fone, current_user_id=origem)["status"] == "linked"
+        assert _junta(fone, user_id) is None
 
         assert _n("affiliate_commissions where affiliate_id = %s and referred_user_id = %s", (af, user_id)) == 1
         assert _n("affiliate_referrals where affiliate_id = %s and referred_user_id = %s", (af, user_id)) == 1
@@ -269,9 +268,7 @@ def test_afiliado_de_um_lado_indicou_o_outro_recusa_e_nada_muda(user_id, dono_e_
               (dono, uuid.uuid4().hex[:10]))[0]["id"]
     _sql("insert into affiliate_referrals(affiliate_id, referred_user_id) values (%s, %s)", (af, indicado))
 
-    r = attempt_whatsapp_phone_link(fone, current_user_id=origem)
-
-    assert r == {"status": "merge_conflict", "wa_phone": fone, "motivo": "autoindicacao"}
+    assert _junta(fone, user_id) == "autoindicacao"
     assert _n("users where id = %s", (origem,)) == 1
     assert _n("affiliates where id = %s and user_id = %s", (af, dono)) == 1
     assert _n("affiliate_referrals where affiliate_id = %s and referred_user_id = %s", (af, indicado)) == 1
@@ -297,7 +294,8 @@ def test_login_da_origem_vai_inteiro_quando_o_destino_nao_tem(user_id):
 
 
 def test_conversa_gastei_e_saldo_com_juncao_no_turno(monkeypatch):
-    """O auto-link REAL, pelo `process_message`: a junção acontece no 1º turno.
+    """A conversa REAL, pelo `process_message`: o telefone não junta (PR-5, convite nos dois
+    primeiros turnos), o código junta e os turnos seguintes já rodam como o destino.
 
     O plano pago é do DESTINO: na origem, `_origem_presa` recusaria a junção.
     O destino pago passa o paywall porque o turno já roda como ele. O destino
@@ -313,11 +311,23 @@ def test_conversa_gastei_e_saldo_com_juncao_no_turno(monkeypatch):
     monkeypatch.setattr(wr, "send_typing_indicator", lambda *a, **k: None)
     monkeypatch.setattr(wr, "send_welcome", lambda *a, **k: enviadas.append("WELCOME"))
 
-    for texto in ("gastei 50 no mercado", "saldo"):
+    def manda(texto):
         n = len(enviadas)
         wr.process_message(InboundMessage(wa_id=fone, text=texto, timestamp="1", attachments=[],
                                           raw={"id": f"wamid.{uuid.uuid4().hex}", "type": "text"}))
         assert len(enviadas) > n, f"{texto!r} ficou sem resposta"
+
+    for texto in ("gastei 50 no mercado", "saldo"):  # antes do código: só o convite, nada junta
+        manda(texto)
+    assert all("Ainda não tenho uma conta ligada" in m for m in enviadas), enviadas
+    assert _n("launches where user_id = %s", (user_id,)) == 0
+    assert _n("users where id = %s", (origem,)) == 1
+
+    enviadas.clear()
+    manda(f"vincular {db.create_link_code(user_id)}")
+    assert enviadas[0].startswith("✅ WhatsApp vinculado"), enviadas
+    for texto in ("gastei 50 no mercado", "saldo"):
+        manda(texto)
 
     assert not any(wr._PROCESSING_FAILURE_MESSAGE in m for m in enviadas), enviadas
     assert _n("launches where user_id = %s", (user_id,)) == 1

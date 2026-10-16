@@ -367,7 +367,7 @@ def _mock_wa_boot(monkeypatch, replies: list, *, uid: int) -> None:
     monkeypatch.setattr(wa_runtime, "get_or_create_canonical_user",
                         lambda provider, external_id: uid)
     monkeypatch.setattr(wa_runtime, "attempt_whatsapp_phone_link",
-                        lambda wa_id, current_user_id=None: {"status": "linked", "user_id": uid})
+                        lambda wa_id, current_user_id=None: {"status": "already_linked", "user_id": uid})
     monkeypatch.setattr(wa_runtime, "log_system_event_sync", lambda *a, **k: None)
     monkeypatch.setattr(wa_runtime, "send_typing_indicator", lambda *a, **k: None)
     monkeypatch.setattr(wa_runtime, "_seen_recent", lambda message_id: False)

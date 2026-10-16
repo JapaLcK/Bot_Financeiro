@@ -71,7 +71,8 @@ def test_motivo_do_bloco_de_contas_sobe_na_categoria(corte):
 
 # ── valor médio com total gigante ────────────────────────────────────────────
 
-def test_valor_medio_com_total_acima_de_1e27_nao_estoura_o_contexto_decimal():
+def test_valor_medio_com_total_acima_de_1e27_nao_estoura_o_contexto_decimal(sem_check_finito):
+    sem_check_finito('launches', 'valor')  # legado acima do limite de propósito: o banco novo o recusaria
     # Direto no `ler_categoria`: a serialização (`api/nativo/dinheiro.py::em_centavos`) tem o mesmo teto e é
     # outro conserto; aqui só o valor médio. A coluna `numeric` aceita o valor, só outro escritor chegaria lá.
     a = usuario_pagante()

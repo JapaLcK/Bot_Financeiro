@@ -123,6 +123,9 @@ def create_recurring_income(
     `frequency` = 'monthly' (todo mês no pay_day) ou 'annual' (1x/ano no
     `pay_month`/pay_day).
     """
+    from core.services.fonte_unica import MSG_RECEITA, FonteUnicaOF, recusa_receita
+    if recusa_receita(user_id):  # R2: com banco conectado a receita vem do extrato
+        raise FonteUnicaOF("receita", MSG_RECEITA)
     ensure_user(user_id)
     name = (name or "").strip()
     if not name:
@@ -179,6 +182,9 @@ def update_recurring_income(
 ) -> dict[str, Any]:
     """PATCH. Quando amount muda, registra `last_amount` + timestamp (detector de reajuste).
     `frequency` vazia ou só espaços mantém a atual (na criação, vazio vira mensal)."""
+    from core.services.fonte_unica import MSG_RECEITA, FonteUnicaOF, recusa_receita
+    if recusa_receita(user_id):  # R2: com banco conectado a receita vem do extrato
+        raise FonteUnicaOF("receita", MSG_RECEITA)
     ensure_user(user_id)
     current = get_recurring_income(user_id, inc_id)
     if not current:

@@ -31,7 +31,7 @@ from datetime import datetime, date, time
 from decimal import Decimal, InvalidOperation
 
 from utils_date import _tz
-from utils_text import normalize_text, INTERNAL_MOVEMENT_CATEGORIES
+from utils_text import normalize_text, INTERNAL_MOVEMENT_CATEGORIES, valor_finito
 
 # Mesmo cap defensivo do OFX (ver nota em ofx_import.py) — alinhado com o
 # limite prático dos canais (WhatsApp/Discord) e evita DoS de parser.
@@ -698,7 +698,7 @@ def import_statement_bytes(
         from db import set_balance, get_last_ofx_import_end_date
 
         last_dt_end = get_last_ofx_import_end_date(user_id)
-        if ledger_balance is not None and max_d is not None:
+        if valor_finito(ledger_balance) and max_d is not None:  # fora do domínio: o CHECK recusaria depois do commit
             if last_dt_end is None or max_d >= last_dt_end:
                 can_reconcile = True
     except Exception:

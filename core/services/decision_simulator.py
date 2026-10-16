@@ -19,9 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from core.services import cashflow
 from core.services.cashflow_snapshot import carregar, Ocorrencia, centavos, legado
 from core.services.cashflow_forecast import _trajectory
+from utils_text import TETO_ENTRADA
 
 # strict: `true` e "180000" não passam por número; int continua valendo em float.
-_DINHEIRO = dict(ge=0, le=1_000_000_000, allow_inf_nan=False, strict=True)
+_DINHEIRO = dict(ge=0, le=TETO_ENTRADA, allow_inf_nan=False, strict=True)
 
 
 def _installments_decimal(principal: Decimal, monthly_rate: Decimal, n: int) -> list[Decimal]:
@@ -75,7 +76,7 @@ class _Corpo(BaseModel):
 
 class Cenario(_Corpo):
     nome: str = Field(min_length=1, max_length=60)
-    preco: float = Field(gt=0, le=1_000_000_000, allow_inf_nan=False, strict=True)
+    preco: float = Field(gt=0, le=TETO_ENTRADA, allow_inf_nan=False, strict=True)
     entrada: float = Field(0.0, **_DINHEIRO)
     # `None` ou 1 = à vista (valor cheio na data da compra). Parcelar é `parcelas > 1`.
     parcelas: Optional[int] = Field(None, ge=1, le=420, strict=True)

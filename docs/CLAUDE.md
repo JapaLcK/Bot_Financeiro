@@ -199,7 +199,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   chama `db.mes_detalhes.ler_periodo` (a MESMA função do card `periodo` do chat, `api/nativo/mes_detalhes.py`:
   `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada; o
   `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
-  `get_top_categories`/`get_category_spend` nessa faixa são recusadas com `periodo_no_card`. **Teto de 12
+  `get_top_categories`/`get_category_spend`/`get_period_summary` nessa faixa são recusadas com `periodo_no_card`
+  (1 mês: `mes_inteiro_no_card`; no resumo a mensagem aponta `resumo` e o saldo = `contas`; a recusa é uma só, em `_recusa_se_for_do_card`, e devolve o dado quando o turno já gastou as 3 vagas de card, quando o card para o qual mandaria já foi mostrado, quando o `get_category_spend` leva uma `categoria` que o `show_card` deste turno já devolveu com `encontrada=false` (`CATEGORIAS_NAO_ACHADAS_DO_TURNO`, comparada pela `cat_key`, zerada a cada turno pelo runner; o número sai em texto, sem 2º card; outra categoria, ou uma que o card achou, segue a recusa normal), ou quando o plano corta o mês pedido (só 1 mês: nem o `resumo` nem o `categorias` trazem o `historico_desde`, a tool traz; 2 a 12 meses vão ao `periodo`, que traz); também devolve o dado a conta que não passa em `exigir_acesso_do_app` (sem onboarding de OF, sem plano) e o turno em que o `show_card` do card-alvo falhou (`FALHAS_DE_CARD_DO_TURNO` guarda o id do card; falha de outro card não libera), senão a recusa não deixa saída; o `card_repetido` aponta o caminho de cada card); no app, `compare_periods` de DOIS meses inteiros, diferentes e passados devolve `comparar_no_card` (`show_card categorias com meses=[A,B]`, `_recusa_comparar`; mês corrente, lado de mais de um mês, corte do plano e card que não resolve seguem em texto); a recusa do `periodo` grava a janela em `JANELAS_DO_TURNO` e o `show_card periodo` usa a janela cortada por 12 meses quando o modelo diverge dela (`mostrar_card._da_recusa`); a visão que o modelo recebe dos cards `periodo`/`categorias`/`renda`/`calendario` é o RESUMO (total, saldo, 3 maiores categorias, `categorias_total`, maior e menor mês ou `maior_dia`; o bloco do app segue inteiro, `cards._RESUMOS`) e a categoria que o usuário citou vem em `categoria_pedida` pelo parâmetro `categoria` do `show_card`; no app o
+  `get_open_bill` devolve período e as 3 maiores compras (`itens_total` = quantas são; `todos_os_itens: true` dá a lista) com `error: total_no_card` (o total é do card `fatura`) enquanto o card puder aparecer (`card_ainda_resolve`, o mesmo teste da recusa acima); quando não pode, devolve o total. **Teto de 12
   meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
@@ -329,7 +331,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   diz PENDING, `outra_moeda`, `moeda_presumida`). **`origem`**: `carteira` (manual com
   `delta_conta` ≠ 0 e com a marca `launches.origem`), `banco` (sombra do Open Finance),
   `cartao` (compra do cartão do Open Finance) e `registro_antigo` (o resto: manual sem a
-  marca, manual com delta 0, OFX, compra manual no cartão). **Nota de 2026-10-13 (condicional, nada disto está na `main`):** se o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) for mergeado, `banco` passará a incluir também a despesa ou receita que o usuário declarou como paga pelo banco (hoje, “manual com delta 0” cai em `registro_antigo`); `fundido` passará a valer “casada com o extrato”, e a linha sem par terá o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisará tratar `instituicao` nula nessa linha sem par. **`pode`** é uma regra só
+  marca, manual com delta 0, OFX, compra manual no cartão). **Desde o PR-A da [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md) (#969, mergeado em 2026-10-15):** `banco` inclui também a despesa ou receita que o usuário declarou como paga pelo banco (`DECLARADA_SQL`, `db/bank_declaracoes.py`; o resto do “manual com delta 0” continua em `registro_antigo`); `fundido` vale “casada com o extrato”, e a linha sem par tem o motivo `conciliacao_pendente` e `pode = [categoria, descricao, apagar]`. A tela precisa tratar `instituicao` nula nessa linha sem par. Nenhum caminho de produção cria essa declaração até o PR-B. **`pode`** é uma regra só
   (`db/lancamentos.PODE_SQL`): guardado = `[]` sempre (1ª cláusula, vence todas as outras,
   inclusive P5 e `source='open_finance'`; editar/apagar dão 409 `nao_editavel`, e essa é a
   guarda de escrita, `pode_da_linha`); antigo = `[]` (P2: só leitura no v2); banco e cartão do Open
@@ -430,7 +432,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
-  (`moneyText`), categoria e dia escolhidos vão ao Extrato pelo filtro global (`s.filter.category`/`day`).
+  (`moneyText`). Tocar num dia do calendário ou em "Ver compras" do detalhe abre o card de compras na própria tela
+  (`GastosCompras`, estado `gastosAberto` na store). A consulta do card tem duas formas: modo dia
+  `/lancamentos?mes&dia&tipo=saida&guardado=true` (mais `categoria` quando uma foi escolhida) e modo categoria
+  `/lancamentos?mes&tipo=saida&categoria&guardado=true`. Só o "Ver em Lançamentos" grava `s.filter.day` e leva ao Extrato;
+  a escolha de categoria em "Para onde vai" (`GastosCategorias`) é que grava `s.filter.category`.
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
@@ -601,10 +607,32 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (mesma classe do `custo_mensal`, `recorrencia_valor_invalido`). Identidade
   `merchant_key#k` (nunca o id da tabela, que muda a cada sync). Datas: a 1ª no dia mais
   frequente a 15+ dias da última cobrança; atrasada (até 40 dias) entra como a conferir só
-  na saída; interrompida (40+ dias) fica fora. Convivência com o manual: casamento 1:1
-  (mesma direção, mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
-  conta o manual e a do banco fica fora com aviso; sem casamento e com manual da mesma
-  direção sobrando, a saída do banco entra (pessimista, rotulada) e a entrada fica fora.
+  na saída; interrompida (40+ dias) fica fora. Convivência com o fixo manual (só a saída):
+  casamento 1:1 (mesmo meio, dia ±5 circular e nome parecido ou valor ±R$ 0,05); casado,
+  conta o manual e a do banco fica fora com aviso; sem casamento e com fixo manual
+  sobrando, a saída do banco entra (pessimista, rotulada). **Receita fixa manual (R2,
+  2026-10-14): só para quem NÃO tem banco** (a regra da Q40: conexão fora de PAUSED/DELETED,
+  `forma_pagamento.regra_ativa`; conexão em erro conta como banco). Com banco, `cashflow_snapshot.ler`
+  nem lê a manual (a do extrato a substitui, na mesma leitura repeatable read), então não há
+  casamento de entrada; com o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` ou sem banco vivo ela conta.
+  Criar e editar (inclusive pausar) recusam com `FonteUnicaOF("receita", MSG_RECEITA)` em `db/recurring_income.py`
+  (o texto mora em `fonte_unica.MSG_RECEITA`, fora de `MENSAGENS`; 400 no `/app`, o texto puro no
+  WhatsApp, antes de qualquer pergunta do roteador). Se a recusa do roteador consome a clarification
+  do próprio `recurring.add`, a resposta vem com o aviso "🔕 Cancelei a pergunta anterior."; se o
+  consumo falha, loga e devolve só a recusa. No handler, `FonteUnicaOF` da corrida (banco conectou
+  depois da 1ª checagem) volta como texto puro, sem o "Não consegui criar". Apagar segue livre; o
+  `GET /recurring-incomes` devolve `[]` + `banco_conectado: true` (antes do gate de plano) e a aba
+  "Receitas fixas" do `/app` só aparece com `banco_conectado: false`. O legado fica no banco.
+  **Limites do R2 (declarados, sem código):** (1) o freio `OF_CONSOLIDATED_BALANCE_ENABLED=0` só
+  vale para quem lê por `cashflow_snapshot.carregar` (WhatsApp, forecast, simulador);
+  `previsao_v2.ler_previsao` (o `/painel`) chama `ler(..., True)` e ignora o freio (pré-existente),
+  então lá a receita manual de quem tem banco nunca conta. (2) A recusa no WhatsApp depende de o LLM
+  devolver `tipo` de receita; sem `tipo`, "salário" pode virar gasto fixo (pré-existente). (3) Falha
+  na consulta de banco conta como COM banco (`regra_ativa`): quem não tem banco pode ver a aba
+  "Receitas fixas" sumir, ou a recusa, naquele carregamento. A aba também some para quem não tem
+  banco quando o GET falha ou volta 403 de plano (só `banco_conectado === false` a mostra); "Gastos
+  fixos" segue visível com o convite de assinatura. (4) A recusa do roteador do WhatsApp
+  consome a pergunta pendente do próprio `recurring.add`; a de outro fluxo fica intacta.
   Limites: recorrência no cartão fica fora (não projeta na fatura); `ignorar` vale só para
   saída (a marca não tem direção); o movimento interno que `classify_open_finance_launch`
   reconhece (pagamento de fatura, aplicação e resgate, caixinha, poupança, transferência "same
@@ -739,7 +767,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 
   A exceção é `FonteUnicaOF` (`ValueError`, `codigo = "FONTE_UNICA_OF"`, o texto do caso
   em `str()`, como a `PlanLimitExceeded`); os textos (investimento, extrato, cartão) moram
-  só em `fonte_unica.MENSAGENS`. `/app` = 400 com `detail` em texto; WhatsApp = o texto
+  em `fonte_unica.MENSAGENS` (a exceção é o da receita, `fonte_unica.MSG_RECEITA`). `/app` = 400 com `detail` em texto; WhatsApp = o texto
   (`handle_incoming` traduz o que sobe, os handlers de cartão e de aporte devolvem); IA = o
   texto, e o `validate` de `create_investment`/`investment_deposit` recusa antes de pedir
   confirmação. A checagem da chave que falha **libera** (fail-open: é trava de produto num
@@ -747,9 +775,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   novo nessas tabelas ou dos importadores de arquivo reprova em
   `tests/test_fonte_unica_q36.py` até ser classificado (trava ou motivo de ficar livre).
 - **Nota de revisão de 2026-10-09 (Q36 e Q40, que têm coortes diferentes):** ver
-  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), proposta decidida pelo dono, sem
-  código ainda. **O código desta seção continua valendo até os PRs de código (A, A2, B, B1, C)**; o PR-A é inerte (grava declaração sem que ninguém a use enquanto a flag do PR-B estiver desligada) e por isso não muda o comportamento; nada
-  disto mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
+  [ADR 0006](adr/0006-declaracao-bancaria-despesa-receita.md), decidida pelo dono. **O código desta seção continua valendo até os PRs de código (A2, B, B1, C)**; o PR-A (#969, mergeado em 2026-10-15) é inerte (nenhum chamador de produção grava declaração enquanto o PR-B não existir e a flag dele estiver desligada) e por isso não mudou o comportamento; nada
+  desta seção mudou na `main`. A **Q36** (esta seção) vale só para a chave `dashboard_v2_enabled`. A
   **Q40** (`core/handlers/forma_pagamento.py`, citada na tabela acima) vale para quem tem Open
   Finance conectado (`regra_ativa`), e **não** é parte da Q36 nem depende da chave. O que a ADR
   prevê: a Q36 deixará de travar investimento manual (PR-C) e compra manual em cartão não
@@ -805,6 +832,20 @@ desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora 
 mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**Deep link do WhatsApp: um construtor só, `core/dashboard_links.link_whatsapp(texto)`**
+(Grupo 7, PR-5b). Lê `WHATSAPP_NUMBER` a cada chamada, monta `api.whatsapp.com/send?phone=N&text=...`
+e, sem número, devolve `""` (falha fechada: o `wa.me/?text=` abre o seletor de contatos e o
+código de vínculo, de uso único, iria para quem a pessoa escolhesse). Só texto sem segredo (`/wa`,
+e-mail do fundador) passa `seletor=True` e cai em `wa.me/?text=...`. Um teste (`tests/test_whatsapp_link_unico.py`) falha se `api.whatsapp.com`
+ou `wa.me/` aparecer em outro `.py`/`.js`/`.html`. As rotas que devolvem `whatsapp_link`
+(`link-code`, `login`, `verify-email`, `mfa/verify-login`, `google/complete-signup`) passam
+`vincular <link_code>`: o site pré-preenche o mesmo texto que o parser do bot entende
+(`account.vincular`), e o `/comecar` mostra essa mensagem ao lado do botão. `/wa`, `/teste` e o
+e-mail do fundador passam uma saudação, sem código. **O e-mail de boas-vindas não leva
+código** (vale 15 min e o e-mail é lido depois, e a conta do quiz não tem senha, que o
+`link-code` exige): o botão "Conectar meu WhatsApp" abre `/login?next=%2Fhome`, e lá
+"Conectar WhatsApp" gera o código no clique.
 
 **PKCE no Google do app nativo** (#604, `core/services/pkce.py`; só S256). O app manda
 `code_challenge` em `google/start?app=2` (inválido → 400), que o guarda no cookie
@@ -901,30 +942,35 @@ paga, até criar a senha pelo link do e-mail. Vale no servidor: a perna da crede
 pontos fora dele; o `/ws` fecha com 4403, o `/conta` manda para a `/home`, e o bot não
 liga o número pelo telefone (responde com o texto fixo). O bot também barra toda
 mensagem de número já ligado a conta sem credencial.
-**Auto-vínculo por telefone não mescla quem já é conta ou tem dados (#711/#630, D1(a)).**
-O telefone digitado no site não prova de quem é o número. Com outra conta dona do
-telefone, o remetente que já é conta (`auth_accounts` ou identidade que não é WhatsApp)
-recebe `wa_linked_other_account`, e o só-WhatsApp com dados financeiros (critério do
-#607) recebe `remetente_com_dados`, para qualquer alvo: segue na própria conta, sem
-vínculo nem mescla, e a junção é pelo `vincular CODIGO` (com login nos dois lados, recusada:
-`apagaria_login`, até a confirmação explícita da #970). Vale também quando o alvo já tem
-este número em outro formato (com ou sem o nono dígito): o número ser o mesmo não autoriza apagar
-uma conta (dono). E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
+**O telefone digitado no site não liga o WhatsApp a conta nenhuma: só o código liga (Grupo 7, PR-5, D1(c); fecha #711/#630 e o V3).**
+O site não verifica o telefone (#610), então ele não prova de quem é o número: o V3 era B digitar
+o número de C, C mandar "oi" e o bot ligar C na conta de B. `attempt_whatsapp_phone_link`
+(`db_support.attempt_whatsapp_phone_link_impl`; o nome ficou, renomear toca ~16 testes) agora só
+CLASSIFICA o número: `already_linked` (o remetente já é conta: `auth_accounts` ou identidade que não é
+WhatsApp; o telefone é lido no mesmo SELECT só para devolver o `target_user_id` do opt-out, e não decide o status), `precisa_senha` (o telefone casa, pelos `utils_phone.candidatos_simetricos`
+#909, com conta SEM credencial: a do quiz/lead; é a leitura que decide o status, para o texto dela e o opt-out do
+lead), `remetente_com_dados` (o mesmo, com remetente só-WhatsApp que tem dados: o turno segue na conta dele) e
+`no_match`, que é todo o resto, inclusive o telefone de conta COM senha. Nenhum caminho do telefone grava
+identidade nem mescla; `JA_E_CONTA_WA` e `NAO_JUNTEI_WA` saíram. `no_match` recebe o convite
+(`_send_no_account_notice`: "Conectar WhatsApp" no site e `vincular 123456`) em toda mensagem que
+não é tentativa de código, e a tentativa de código passa também no `precisa_senha` (senão o dono do telefone
+digitado por outra conta ficava trancado). `merge_users` e as recusas (`apagaria_login`, #970) não mudam: o
+código passa por elas. `link_platform_identity` (por onde `link` e `vincular` passam) é agora o ÚNICO
+gravador de `whatsapp_verified_at` e `phone_status='confirmed'`, e só quando o número ligado casa com o
+`phone_hash` da conta: número diferente do digitado liga sem confirmar o telefone. O checklist da Início
+(`whatsapp_linked` do `/auth/dashboard-profile`) lê a identidade, não o marcador. Sucesso do código:
+evento `whatsapp_code_link_success` (só o número mascarado; substitui `whatsapp_auto_link_success`).
+**Resíduo (DP-2):** vínculos feitos pelo auto-vínculo antes do PR-5 continuam valendo: não há como separar o
+legítimo do V3 (o dono e a vítima têm o mesmo registro), e reauditar derrubaria gente legítima. O suporte
+desfaz se a pessoa reclamar.
+**Resíduo conhecido (A2):** `vincular` consome o código de conta sem credencial (a do quiz), que o `/auth/link-code` recusaria; follow-up.
+E o próprio `merge_users` recusa (`apagaria_login`) a junção com login nos dois
 lados, para todo chamador: ela apagaria o login da origem (#635), e fica bloqueada até existir
-confirmação explícita; origem com login e destino sem login junta, e o login migra. A busca pelo telefone usa só os candidatos que reconhecem o número de volta
-(`utils_phone.candidatos_simetricos`, #909): o celular `55119`+L com L de 0 a 5 não casa com o
-fixo `5511`+L digitado por outra conta. A contrapartida: quem gravou o próprio celular sem o 9
-nessa faixa não liga mais sozinho, recebe o convite de cadastro e liga por código. Os avisos (`wa_runtime.py`): `wa_linked_other_account`
-recebe o `JA_E_CONTA_WA` (sem a instrução do código, que com login nos dois lados terminaria em
-`apagaria_login`; para unir, o suporte) na saudação, uma vez; `remetente_com_dados` recebe o
-`NAO_JUNTEI_WA` (a saída pelo código) em toda mensagem, com alvo com credencial (sem plano, o turno cairia no "/precos"); ali, ajuda e billing seguem
-como para qualquer barrado, pelo mesmo critério do `_paywall_gate` (`isencao_do_barrado`). Só o só-WhatsApp vazio
-ainda liga sozinho, e o `merge_conflict` que sobra diz o motivo do `MergeRefused`.
+confirmação explícita; origem com login e destino sem login junta, e o login migra.
 A exceção do bot são os botões de opt-out de `_WA_INTERACTIVE_ISENTOS` (relatórios diário,
 semanal e mensal, e atualizações): quem não pode usar tem de conseguir parar de receber
-mensagem, então eles funcionam no número já ligado, no `precisa_senha` (desligam a
-preferência da conta sem credencial), no `remetente_com_dados` e no
-`wa_linked_other_account` (a do remetente e a da conta que digitou o número). Os botões de relatório gravam só a preferência; o "parar
+mensagem, então eles funcionam no número já ligado e no `precisa_senha` (desligam a
+preferência da conta sem credencial). Os botões de relatório gravam só a preferência; o "parar
 atualizações" também apaga pendências do remetente (abaixo). O texto digitado
 que for, inteiro e normalizado (sem caixa, acento nem pontuação), `parar`, `stop`, `sair`,
 `parar mensagens`, `parar de receber` ou `nao quero mais receber` (`wa_runtime.WA_PARAR_TEXTOS`,
@@ -1643,8 +1689,8 @@ grava o clique em `demo_sessions` (utms) e abre o WhatsApp com "Quero testar o P
 `get_or_create_canonical_user`: 8 perguntas (`LIMITE_MSGS` em `core/services/demo/dados.py`) sobre dados
 fictícios de exemplo (`core/services/demo/`), sem ferramentas; o Piggy fala em 2ª pessoa ("seu saldo"), nunca em 3ª nem com nome de persona, e se perguntarem da conta real esclarece que é exemplo. O demo não grava conta, lançamento nem texto; o único rastro é `demo_sessions`
 (contador, carimbos e hash do número por 30 dias): não toca em users / user_identities / launches /
-ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone casado, `vincular CODIGO` ou outro canal) nunca
-entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos`); `vincular 123456` segue o fluxo
+ai_messages, e a tabela é anônima (sem `user_id`; toda query filtra por `code` ou `wa_hash`). Número com conta (telefone de conta sem credencial, que ainda produz `precisa_senha`; `vincular CODIGO` ou outro canal) nunca
+entra (`numero_tem_conta`, espelho de `attempt_whatsapp_phone_link`, com os mesmos `candidatos_simetricos` e o mesmo `db.google_auth.SEM_CREDENCIAL_SQL`; telefone de conta com senha não conta, o telefone não liga mais); `vincular 123456` segue o fluxo
 normal. Ao fim, o link `/t/{code}` carimba `checkout_at` e manda para `/precos?origem=teste` (destino fixo,
 `Cache-Control: no-store`, `shared_limit`). Interruptor e teto: `DEMO_DAILY_MAX` (padrão 0 = desligado; sessões
 abertas por 24h; `<= 0` desliga, lida a cada chamada). Retenção: 1 teste por número a cada 30 dias e o
@@ -2036,7 +2082,10 @@ das 18h do fuso do app, uma por usuário com acesso por dia em `patrimonio_fotos
 `PATRIMONIO_FOTO_ENABLED`, desligada por padrão e lida a cada volta — desligada, não
 consulta nada), e os índices das FKs (`_tarefa_fk_indexes` →
 `db/schema_repairs.ensure_fk_indexes_once`: uma vez por boot, 1 conexão do pool, sem
-retry em processo; falha vira WARNING e o próximo boot repara). Ficam desligadas só onde
+retry em processo; falha vira WARNING e o próximo boot repara), e o CHECK de valor
+finito em toda coluna numérica (`_tarefa_finito_checks` →
+`db/finito_checks.ensure_finito_checks_once`: mesmo molde, lock de sessão próprio; ver
+"Banco de dados"). Ficam desligadas só onde
 `RUN_BACKGROUND_TASKS=0` é forçado: `dashboard_dev.py` e
 `scripts/whatsapp_qa_vault_harness.py`. O `tests/conftest.py` **não** força, então
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
@@ -2107,6 +2156,39 @@ grep -ohiE "create table if not exists ([a-z_]+)" db/*.py | awk '{print $NF}' | 
 
 Exceção: os índices de FK nascem em `db/schema_repairs.py::ensure_fk_indexes_once`,
 fora do `init_db` (que segue a fonte do resto do DDL) — ver "Tarefas de fundo".
+
+**Toda coluna `numeric`/`double precision`/`real` do schema `public` tem um CHECK
+`finito_<coluna>` = `abs(col) <= utils_text.VALOR_MAX` (10**13, limite técnico do banco; NULL
+passa).** O teto de negócio do valor digitado é `utils_text.TETO_ENTRADA` (R$ 1 bi, decisão do
+dono 2026-10-15), aplicado só nas portas de entrada. Existe porque `nan <= 0` é False:
+NaN/Infinity/1e308 passavam pelas guardas por porta (`valor_valido`/`valor_finito`, que ficam,
+pela mensagem amigável).
+Nasce em `db/finito_checks.py::ensure_finito_checks_once`, na tarefa de fundo (fora do
+`init_db`, para dado sujo nunca travar o boot): pré-scan tudo-ou-nada (coluna suja =>
+nada é adicionado, `logger.error` uma vez por boot só com `tabela.coluna`, para
+entrar no `backend_errors_24h`), `ADD CONSTRAINT ... NOT VALID` com
+`lock_timeout` de 1s (tabela travada vira `falhas` e o próximo boot tenta de novo),
+depois `VALIDATE`. **Coluna numérica nova é coberta no boot seguinte**; só se exclui
+com motivo escrito em `SEM_CHECK_FINITO` (hoje: `pix_unmatched_payments.value/net_value`).
+A violação vira 400 (`valor_finito_violado_handler` no monólito, `erros.valor_finito_erro`
+no `/api/v2` e `/api/app`, texto fixo no `handle_incoming`), reconhecida por
+`violacao_finito(exc)`; as frases ao usuário são `MSG_VALOR_API` e `MSG_VALOR_WHATSAPP`
+(`db/finito_checks.py`, também no chat de IA). Nunca devolver `str(exc)` do CheckViolation
+(traz "Failing row contains (...)"). O que a redação do DETAIL (`core.pg_text.redigir_failing_row`)
+COBRE: (0) 1ª linha: `psycopg.Error.__str__` redigido em `db/connection.py` pelo `diag.message_detail` de toda
+violação de constraint (SQLSTATE 23xxx), em qualquer idioma de `lc_messages` (todo `print(exc)`,
+f-string, `logger.*(..., exc)` e traceback, de qualquer conexão; o texto cru fica em `exc.args[0]`);
+(1) o filtro `_sem_failing_row` em todo handler do root (`_configure_root_logger` o anexa também aos que já existiam)
+(stderr e `_DashboardHandler`): texto e traceback, a pilha fica; (2) os dois gravadores de
+`system_event_logs` (`log_system_event_sync` e `admin_dashboard.log_system_event`): `message` e
+`details`. NÃO cobre (a 1ª linha pega o que vem de `str(exc)`): logger com `propagate=False` (uvicorn) ou `print` de texto cru, handler fora
+do root, nem outro INSERT em `system_event_logs`, nem a resposta HTTP/WhatsApp (essa é a frase fixa).
+Rota que embrulha `except Exception` em `HTTPException(f"...{exc}")`
+tem de deixar o `CheckViolation` passar antes (`except psycopg.errors.CheckViolation: raise`).
+Em teste: o `conftest` instala as constraints no banco da execução; teste que grava veneno
+DE PROPÓSITO (o espelho legado sujo que a leitura tem de tolerar) usa a fixture
+`sem_check_finito("tabela", "coluna")`, que derruba o CHECK e o recoloca NOT VALID no fim.
+Escritor real do produto que esbarra no CHECK é bug da porta, não motivo para a fixture.
 
 Os agrupamentos, para orientar a busca: **core** (`users`, `accounts`, `launches`) ·
 **auth** (`auth_accounts`, `auth_identities`, `auth_sessions`, `auth_refresh_tokens`,

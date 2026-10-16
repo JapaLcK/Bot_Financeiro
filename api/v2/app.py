@@ -4,6 +4,7 @@ Sub-app e não `include_router` para os tratadores de erro serem os DELE (o
 envelope de `erros.py`) sem tocar nos globais do monólito. Rota nova vai num
 router por assunto neste pacote, incluído aqui.
 """
+import psycopg
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -29,6 +30,7 @@ def criar_app(prefixo: str, *, com_eventos: bool = True) -> FastAPI:
     # Inclui o 404/405 do router, que é a exceção do Starlette.
     sub.add_exception_handler(StarletteHTTPException, erros.http_erro)
     sub.add_exception_handler(RequestValidationError, erros.validacao_erro)
+    sub.add_exception_handler(psycopg.errors.CheckViolation, erros.valor_finito_erro)
     sub.add_exception_handler(Exception, erros.erro_interno)
     for modulo in (me, eventos, perfil, contas, assinaturas, resumo_mes, lancamentos,
                    categorias, gastos, guia, previsao, investido, metas):

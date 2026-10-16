@@ -114,6 +114,9 @@ MARCAS_PERMITIDAS: dict[str, tuple[str, ...]] = {
     # serviço (total, conferência no Asaas, oferta e seleção do checkout). Só o nome
     # da tabela — no serviço, dentro de `db.pix_charges_saga` (`buscar_ativa`).
     "db/pix_extras.py": ("pix_charges",),
+    # O CHECK de valor finito (PR #1012) NOMEIA `pix_unmatched_payments` só para EXCLUÍ-LO
+    # (`SEM_CHECK_FINITO`: fila de conciliação, numeric(12,2)). Nenhum acesso, host ou env.
+    "db/finito_checks.py": ("pix_unmatched_payments",),
     "core/services/pix_extras.py": ("pix_charges",),
     # A guarda da cobrança dupla Pix × cartão: só o import de `db.pix_charges_saga`
     # (`paga_cobrindo_agora`, leitura por dono). Sem host, sem env do Asaas.

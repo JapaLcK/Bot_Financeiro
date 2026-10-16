@@ -382,6 +382,21 @@ def test_assets_estaticos():
         assert resp.headers["content-type"].startswith(content_type), path
 
 
+def test_hold_confirm_js_tem_rota_e_o_settings_o_carrega():
+    """O node serve `frontend/` por http.server estático, sem esta rota: renomear o
+    decorator deixava a suíte inteira verde e o /settings sem o `hold-confirm.js` em
+    produção (o 404 só aparece no navegador)."""
+    resp = client.get("/hold-confirm.js")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/javascript")
+    assert resp.headers["cache-control"] == "no-cache"
+    assert "PBHoldConfirm" in resp.text
+    html = client.get("/settings").text
+    m = re.search(r'<script src="(/hold-confirm\.js\?v=[0-9a-f]+)"', html)
+    assert m, "o /settings tem de carregar o /hold-confirm.js com o ?v= carimbado"
+    assert client.get(m.group(1)).status_code == 200
+
+
 def test_rotas_que_encerram_sessao_estao_no_auth_refresh():
     """§0.7: o JS não importa Python, então um teste compara as duas listas.
 

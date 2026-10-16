@@ -45,7 +45,8 @@ from test_open_finance_disconnect_route import _semeia_conexao_pluggy
 from test_open_finance_proactive_dedupe import _CASOS, _armar, _espiao, _event_logs  # noqa: F401
 
 HOST = 'connection to server at "db.interno" (10.9.8.7), port 5432 failed'
-_PEDACOS_DO_HOST = ("db.interno", "10.9.8.7", "5432")
+# "port 5432", não "5432": o id do item tem dígitos aleatórios e "5432" solto colidia (flake do CI).
+_PEDACOS_DO_HOST = ("db.interno", "10.9.8.7", "port 5432")
 
 
 def _host_fora(*textos) -> None:
@@ -169,7 +170,10 @@ def test_sync_que_cai_em_fk_real_nao_grava_uid_com_coluna_nula(monkeypatch):
             c.execute("insert into pockets (user_id, name) values (%s, 'x')", (alheio,))
         except psycopg.errors.ForeignKeyViolation as e:
             c.rollback()
-            fk = e
+            real = e
+    # `str()` do erro REAL já sai redigido (db/connection.py); este teste mede o saneamento do próprio
+    # caminho do Open Finance, então parte do texto CRU (args[0]) numa exceção sem `diag`.
+    fk = psycopg.errors.ForeignKeyViolation(real.args[0])
     assert str(alheio) in str(fk), "pré-condição: o texto cru traz o uid"
     monkeypatch.setattr(of_routes, "sync_pluggy_item", _levanta(fk))
 

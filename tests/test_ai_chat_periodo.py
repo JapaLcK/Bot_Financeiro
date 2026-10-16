@@ -270,7 +270,7 @@ def test_recusa_no_app_de_varios_meses_inteiros_com_a_lista(mundo):
     r = _com_emissor(lambda: _tool("get_top_categories", a, start_date=INICIO.isoformat(), end_date=fim))
     assert r["error"] == "mes_inteiro_no_card"  # 1 mês segue indo para `categorias`
     r = _com_emissor(lambda: _tool("get_period_summary", a, start_date=ini, end_date=fim))
-    assert "error" not in r  # o resumo dá o mesmo número do card: não é recusado
+    assert r["error"] == "periodo_no_card" and f"de={M0} e ate={M}" in r["message"]  # F3: o resumo também vai ao card
     r = _com_emissor(lambda: _tool("get_top_categories", a, start_date=_mes(-14) + "-01", end_date=date.today().isoformat()))
     assert r["error"] == "periodo_no_card" and "12 meses" in r["message"]  # passou de 12: o modelo explica o limite
 

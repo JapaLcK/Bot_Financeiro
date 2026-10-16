@@ -15,7 +15,7 @@ from decimal import Decimal
 from math import isfinite
 from typing import Any
 
-from utils_text import VALOR_MAX, valor_valido
+from utils_text import TETO_ENTRADA, valor_valido
 
 from .connection import get_conn
 
@@ -189,11 +189,11 @@ def mark_bill_paid(user_id: int, bill_id: int, amount: float | None = None, *,
     if not bill or bill["status"] == "paid":
         return None
 
-    # Valida ANTES da reserva. `parse_money("1"*400)` devolve `inf`: sem esta
-    # guarda a reserva grava `paid_amount = Infinity` e a conta fica fechada
-    # com valor infinito no dashboard. Arredonda para centavos AQUI, e não em
-    # cada porta: "paguei luz 0,001" gravava 0.001 e dizia "R$ 0,00 lançado".
-    if amount is not None and not (isfinite(float(amount)) and abs(float(amount)) <= VALOR_MAX):
+    # Valida ANTES da reserva (`parse_money("1"*400)` = `inf` gravaria `paid_amount =
+    # Infinity`). Arredonda para centavos AQUI, não em cada porta ("paguei luz 0,001"
+    # gravava 0.001 e dizia "R$ 0,00 lançado"). O teto só vale para valor DIFERENTE do
+    # guardado: conta antiga acima dele continua pagável pelo valor que já tem.
+    if amount is not None and (not isfinite(a := round(float(amount), 2)) or (abs(a) > TETO_ENTRADA and a != round(bill["amount"] or 0, 2))):
         raise ValueError("VALOR_INVALIDO")
     informado = round(float(amount), 2) if (amount is not None and float(amount) > 0) else None
     valor = informado if (informado is not None or metodo == "banco") else float(bill["amount"] or 0)

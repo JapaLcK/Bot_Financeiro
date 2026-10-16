@@ -101,7 +101,10 @@ def test_teste_limpa_e_corta_os_utms():
     assert linha["utm_source"] == "igdroptable" and linha["utm_campaign"] == "a" * 64
 
 
-@pytest.mark.parametrize("env,valor", [("DEMO_DAILY_MAX", "0"), ("WHATSAPP_NUMBER", "")])
+# "abc" e dígitos não-ASCII: número não vazio que NÃO gera link. O demo tem de ficar desligado
+# (mesmo critério do `link_whatsapp`), senão o /teste gravava o clique e redirecionava para "".
+@pytest.mark.parametrize("env,valor", [("DEMO_DAILY_MAX", "0"), ("WHATSAPP_NUMBER", ""),
+                                       ("WHATSAPP_NUMBER", "abc"), ("WHATSAPP_NUMBER", "٥٥١١٩٩٩٩٩٩٩٩٩")])
 def test_teste_desligado_volta_para_os_precos_sem_gravar(monkeypatch, env, valor):
     monkeypatch.setenv(env, valor)
     antes = _linhas()
