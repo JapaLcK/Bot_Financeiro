@@ -392,7 +392,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
   `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
   (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
-  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  recente primeiro no empate, `{descricao, valor, categoria}`; `quantidade` = quantas saídas somam o `total` do dia
+  e `categorias` = `[{chave, valor}]` do dia, Σ `valor` = `total`, em `(-valor, chave)`, das MESMAS linhas do `total`:
+  para o card do dia (PR B, #NNN) mostrar "Compras N", a categoria principal e a barra sem somar dinheiro
+  no cliente; a saída de `fora_da_grade` não entra), `fora_da_grade {quantidade, valor}` (sempre
   presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
   mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
   `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
@@ -428,7 +431,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   com a cor crua (`db/budgets.py` devolve `#7c3aed`).
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
-  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`, ou, dia a dia, as `categorias` do dia contra o `total` do dia)
   difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
