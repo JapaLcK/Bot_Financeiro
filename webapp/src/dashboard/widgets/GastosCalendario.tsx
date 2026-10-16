@@ -1,11 +1,12 @@
 // "Dia a dia" com backend: os `dias` de /gastos (ou de /gastos/categoria, com uma categoria
-// escolhida). Só a média e a escala de cor são calculadas aqui; o resto é o que o servidor mandou.
+// escolhida). Só a escala de cor é calculada aqui (a média e o dia aberto moram em lib/gastos-dia.ts); o resto é o que o servidor mandou.
 // Tocar num dia abre o card de compras do dia (GastosCompras) na própria /gastos; no Resumo, que não tem lugar para ele, leva à /gastos com o card aberto.
 import { useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { PointerEvent } from "react";
 import { isoDay, longDate, money, moneyText } from "../lib/format.js";
 import { useActions } from "../lib/actions";
+import { diaAbrivel, mediaDoPeriodo } from "../lib/gastos-dia";
 import { mesDe } from "../lib/store.js";
 import { DEMO, gastosCategoriaQuery, gastosQuery } from "../lib/v2";
 import type { DashState } from "../lib/types";
@@ -34,14 +35,8 @@ export function GastosCalendario({ s }: { s: DashState }) {
 
   const [y, m] = d.mes.split("-").map(Number);
   const dias = new Date(y, m, 0).getDate();
-  const fim = `${d.mes}-${pad(dias)}`;
-  const desde = d.historico_desde; // antes dele o dia é desconhecido, não zero
-  const de = desde && desde > `${d.mes}-01` ? desde : `${d.mes}-01`;
-  const ate = d.hoje < fim ? d.hoje : fim;
+  const { de, vividos, nDias, media } = mediaDoPeriodo(d);
   const porDia = new Map(d.dias.map((g) => [g.dia, g]));
-  // Média, "dias sem gasto" e escala só contam de `de` até `ate`: dia agendado e dia fora do histórico não entram, nem como zero.
-  const vividos = d.dias.filter((g) => g.dia >= de && g.dia <= ate && Number(g.total) > 0);
-  const nDias = Number(ate.slice(8)) - Number(de.slice(8)) + 1;
   const totais = vividos.map((g) => Number(g.total));
   const passo = (t: number) => Math.ceil((totais.filter((v) => v <= t).length / totais.length) * STEPS); // percentil: 1 a 6
   const caro = vividos.reduce<typeof vividos[number] | null>((a, g) => (!a || Number(g.total) > Number(a.total) ? g : a), null);
@@ -62,7 +57,7 @@ export function GastosCalendario({ s }: { s: DashState }) {
       const g = porDia.get(k);
       const antes = k < de;
       const futuro = k > d.hoje;
-      const off = antes || (futuro && !g);
+      const off = !diaAbrivel(k, d);
       const step = !off && !futuro && g && Number(g.total) > 0 ? passo(Number(g.total)) : 0;
       const on = !resumo && aberto === k;
       // Tooltip e nome acessível leem a mesma lista: teclado e leitor de tela não têm hover.
@@ -82,7 +77,7 @@ export function GastosCalendario({ s }: { s: DashState }) {
 
   return (
     <Frame id="calendario" title="Dia a dia" real aside={aside}>
-      {nDias > 0 && <p className="w-lede">{cat ? "Só esta categoria · " : ""}média <span className="num">{money(totais.reduce((a, t) => a + t, 0) / nDias)}</span>/dia · {nDias - vividos.length} {nDias - vividos.length === 1 ? "dia" : "dias"} sem gasto</p>}
+      {media !== null && <p className="w-lede">{cat ? "Só esta categoria · " : ""}média <span className="num">{money(media)}</span>/dia · {nDias - vividos.length} {nDias - vividos.length === 1 ? "dia" : "dias"} sem gasto</p>}
       <Selos motivos={d.motivos} />
       <div className="cal" role="group" aria-label="Gasto por dia do mês">
         {WEEK.map((w, i) => <span key={i} className="cal-wd" aria-hidden="true">{w}</span>)}
