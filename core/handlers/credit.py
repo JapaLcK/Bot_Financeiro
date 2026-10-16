@@ -51,7 +51,7 @@ from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
-    PT_PHRASE, PT_VALUE, PT_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    PT_PHRASE, PT_VALUE, PT_MULT, PT_VALOR_COM_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
 
@@ -837,7 +837,7 @@ def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str |
 def _clean_credit_purchase_description(text: str, card_name: str | None) -> str:
     desc = text.strip()
     desc = re.sub(r"^\s*(gastei|paguei|comprei|debitei|gasto)\b", "", desc, flags=re.IGNORECASE).strip()
-    desc = re.sub(r"\d+(?:[.,]\d+)?", "", desc, count=1).strip()
+    desc = re.sub(PT_VALOR_COM_MULT, "", desc, count=1, flags=re.IGNORECASE).strip()
     desc = re.sub(r"^\s*reais?\b", "", desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r"\b(?:no|na|em|com)\s+cr[eé]dito\b", "", desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r"\b(?:no|na|em|com)\s+cart[aã]o\s+(?:principal|padr[aã]o)\b", "", desc, flags=re.IGNORECASE).strip()
@@ -2547,7 +2547,7 @@ def handle(user_id: int, text: str) -> str | None:
             rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+{PT_VALUE}",
             "", desc_clean, flags=re.IGNORECASE,
         )
-        desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
+        desc_clean = re.sub(r"\b\d+[\.,]?\d*(?:\s*bi\b|\b)", "", desc_clean, flags=re.IGNORECASE)  # "1 bi"/"1bi" é o total; "pro bi" fica
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)
         # remove multiplicadores/unidades monetárias que sobraram quando o valor
         # foi escrito por extenso ("mil reais em 10 vezes" → não vira descrição).

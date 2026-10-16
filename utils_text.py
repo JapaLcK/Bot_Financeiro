@@ -843,6 +843,12 @@ PT_VALUE = (
     rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
     r"(?:(?<=\d)\s*bi\b)?"  # "bi" curto só colado em dígito: "100 bi"/"2bi" sim, "cem bi"/"de bi" não
 )
+# O valor que abre/está numa frase de descrição, para tirá-lo dela: dígito + multiplicador opcional, ou
+# por extenso + multiplicador OBRIGATÓRIO ("dez mil", "um bilhão e 500"; "dois cafés" fica). "bi" curto só após dígito.
+PT_VALOR_COM_MULT = (
+    rf"\d[\d.,]*(?:\s*(?:{PT_MULT})\b)?"
+    rf"|(?:{_PT_PHRASE})\s+(?!bi\b)(?:{PT_MULT})\b(?:\s+e\s+(?:{_PT_PHRASE}|\d+))?"
+)
 
 
 def _pt_words_to_int(phrase: str) -> int | None:

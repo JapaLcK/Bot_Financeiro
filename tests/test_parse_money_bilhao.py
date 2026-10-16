@@ -198,6 +198,37 @@ def test_conversa_cartao_descricao_preserva_o_bi(texto, nota):
     assert len(notas) == 3 and all(nota in n.lower() for n in notas), notas
 
 
+def _notas(uid):
+    return [r["n"] for r in _conta("select nota n from credit_transactions where user_id=%s", uid)]
+
+
+# O total do parcelamento ("1 bi", a borda do teto) sai da nota; "pro bi" solto fica (controle positivo).
+@pytest.mark.parametrize("texto,nota", [
+    ("parcelar 1 bi em 2x carro", "carro"), ("parcelar 1bi em 2x carro", "carro"),
+    ("parcelar 1 bilhão em 2x carro", "carro"), ("parcelei 600 em 3x pro bi", "pro bi"),
+])
+def test_conversa_parcelar_total_com_bi_nao_vaza_na_nota(texto, nota):
+    uid, _ = _usuario_com_cartao()
+    _diga(uid, texto)
+    assert _notas(uid) and set(_notas(uid)) == {nota}, _notas(uid)
+
+
+# Compra natural no cartão: o valor sai da nota INTEIRO (dígito + multiplicador, ou extenso + multiplicador).
+@pytest.mark.parametrize("texto,nota", [
+    ("gastei 1 bilhão no cartão nubank mercado", "mercado"), ("gastei 1 bi no cartão nubank mercado", "mercado"),
+    ("gastei 1bi no cartão nubank mercado", "mercado"), ("gastei um bilhão no cartão nubank mercado", "mercado"),
+    ("gastei 2 milhões no cartão nubank iate", "iate"), ("gastei dez mil e quinhentos no cartão nubank mercado", "mercado"),
+    ("gastei 1.234,56 no cartão nubank mercado", "mercado"),  # antes sobrava "56 mercado" (mesma classe, sem multiplicador)
+    # controles: sem multiplicador (ou "bi" curto solto) o texto é descrição
+    ("gastei 50 no cartão nubank pro bi", "pro bi"), ("gastei 50 no cartão nubank com um bilhete", "um bilhete"),
+    ("gastei dois cafés no cartão nubank 30", "dois cafes"),
+])
+def test_conversa_cartao_natural_nota_sem_o_multiplicador(texto, nota):
+    uid, _ = _usuario_com_cartao()
+    _diga(uid, texto)
+    assert _notas(uid) == [nota], _notas(uid)
+
+
 # "mil" antes de "milhões" na alternância do PT_VALUE (sem \b) cortava em "mil": 10x de 2 milhões virava 10x de 2.000 e a descrição "hões".
 @pytest.mark.parametrize("texto,valor", [
     ("parcelei 10x de dois milhões iate no cartão nubank", "2000000.00"),
