@@ -114,6 +114,7 @@ class Snapshot:
         'Não reconstrói realização passada nem desloca datas por feriados.',
     ])
     valido_ate: datetime | None = None
+    receitas_do_banco: list = field(default_factory=list)  # candidatas do extrato e a resposta do usuário; fora de `qualidade()`
 
     def qualidade(self):
         return {'estado': 'indisponivel' if self.base['saldo'] is None else

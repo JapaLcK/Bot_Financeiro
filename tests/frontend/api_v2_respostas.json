@@ -470,6 +470,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -520,6 +521,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -789,6 +791,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -1213,6 +1216,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -1792,6 +1796,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2004,6 +2009,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2259,6 +2265,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2535,6 +2542,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -2828,6 +2836,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3213,6 +3222,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3532,6 +3542,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -3771,6 +3782,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -4378,6 +4390,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
@@ -4486,6 +4499,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "receitas_do_banco": [],
       "marcos": [
         {
           "dias": 30,
