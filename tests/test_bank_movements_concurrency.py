@@ -5,6 +5,7 @@ from threading import Event, current_thread
 import psycopg
 import pytest
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 import db.investments as investments_db
 from tests._espera_lock import _esperar_backend_travado
@@ -57,7 +58,7 @@ def test_conferir_e_excluir_sombra_sem_deadlock(user_id, monkeypatch, delete_fir
         cur.execute("select id,imported_launch_id from open_finance_transactions where account_id=%s", (source["of_account_id"],))
         tx = cur.fetchone()
     def confirm():
-        return movements.confirm_bank_movement(user_id, lid, tx["id"])
+        return conferencia.confirm_bank_movement(user_id, lid, tx["id"])
     def delete():
         try:
             return db.delete_launch_and_rollback(user_id, tx["imported_launch_id"])

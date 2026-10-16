@@ -634,7 +634,8 @@ __all__ = [
     "listar_candidatos_xerife", "marcar_lancamento_esperado",
 ]
 
-from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement
+from .bank_movements import bank_movement_summary
+from .bank_conferencia import list_bank_movements, confirm_bank_movement
 from .reconciliation import (
     confirm_reconciliation, reject_reconciliation, undo_reconciliation,
     list_reconciliations, reconciliation_summary,

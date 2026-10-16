@@ -134,7 +134,7 @@ def test_movimento_declarado_preserva_prova_ao_desconectar_alias_novo(user_id):
     ciclo(uid, new, [a])
     # A conferência manual já existe no banco. A desconexão não apaga sua prova.
     current = espelho(uid)[-1]
-    from db.bank_movements import confirm_bank_movement
+    from db.bank_conferencia import confirm_bank_movement
     confirm_bank_movement(uid, lid, current['id'])
     before = q('select * from bank_movement_declarations where user_id=%s', (uid,), True)[0]
     assert before['matched_transaction_id'] == current['id']
