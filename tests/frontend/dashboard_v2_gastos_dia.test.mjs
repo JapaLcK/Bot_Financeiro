@@ -160,7 +160,7 @@ test("categoria: 'Ver compras' abre o card do mês da categoria e alterna; outra
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
   const aberto = await page.evaluate(() => ({ titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent,
     foco: document.activeElement.id, exp: document.querySelector('[aria-controls="gastos-compras"]').textContent }));
-  assert.deepEqual(aberto, { titulo: "alimentação · outubro", lede: "Gasto no mês · R$ 300,00", foco: "gastos-compras", exp: "Ver compras" });
+  assert.deepEqual(aberto, { titulo: "Alimentação · outubro", lede: "Gasto no mês · R$ 300,00", foco: "gastos-compras", exp: "Ver compras" });
   assert.equal(lanc.at(-1), "?mes=2026-10&tipo=saida&categoria=alimentacao&guardado=true");
   await page.keyboard.press("Escape");
   await page.locator("#gastos-compras").waitFor({ state: "detached" });
