@@ -1846,6 +1846,8 @@ def add(user_id: int, text: str, entities: dict, platform: str = "whatsapp", *,
     parsed = parse_receita_despesa_natural(user_id, text)
 
     if parsed:
+        if not valor_valido(parsed["valor"]):
+            return "❌ Valor inválido."
         if pergunta:
             return _pergunta(parsed["tipo"], float(parsed["valor"]))
         if not (parsed.get("alvo") or "").strip():
