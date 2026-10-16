@@ -1,4 +1,4 @@
-"""Q41 × declarações bancárias (db/bank_movements.py): a transação que virou
+"""Q41 × declarações bancárias (db/bank_movements.py e db/bank_conferencia.py): a transação que virou
 saque da Carteira não pode ser também a prova de uma declaração (conta em dobro)."""
 import pytest
 
