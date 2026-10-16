@@ -201,6 +201,7 @@ from .cards import (
     update_installment_group_meta,
     resolve_installment_group_id,
     get_open_bill_summary,
+    get_bill_items_overview,
     pay_bill_amount,
     list_open_bills,
     list_bills_with_debt,
@@ -527,7 +528,7 @@ __all__ = [
     "get_installment_group_delete_impact", "anticipate_installment",
     "list_installment_groups_detailed", "update_installment_group_meta",
     "resolve_installment_group_id",
-    "get_open_bill_summary", "pay_bill_amount",
+    "get_open_bill_summary", "get_bill_items_overview", "pay_bill_amount",
     "list_open_bills", "list_bills_with_debt",
     "list_credit_card_due_reminders", "list_installment_groups",
     "import_credit_ofx_bulk", "consolidate_duplicate_bills",
@@ -633,7 +634,8 @@ __all__ = [
     "listar_candidatos_xerife", "marcar_lancamento_esperado",
 ]
 
-from .bank_movements import bank_movement_summary, list_bank_movements, confirm_bank_movement
+from .bank_movements import bank_movement_summary
+from .bank_conferencia import list_bank_movements, confirm_bank_movement
 from .reconciliation import (
     confirm_reconciliation, reject_reconciliation, undo_reconciliation,
     list_reconciliations, reconciliation_summary,

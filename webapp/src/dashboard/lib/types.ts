@@ -51,5 +51,6 @@ export interface DashState {
   sim: Sim;
   filter: { category: string | null; day: string | null; query: string; source: NonNullable<Launch["source"]> | "todos" };
   highlight: string | null;
+  gastosAberto: { dia: string } | { categoria: string } | null;
   editing: boolean;
 }

@@ -200,8 +200,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `meses[]`, `entrou`/`saiu` = Σ dos meses, categorias somadas e as 5 `maiores` linhas de cada; o
   `compare_periods` NÃO usa esta função: lê `resumo_mes.totais`/`categorias`, ver PL-07); no app,
   `get_top_categories`/`get_category_spend`/`get_period_summary` nessa faixa são recusadas com `periodo_no_card`
-  (1 mês: `mes_inteiro_no_card`; no resumo a mensagem aponta `resumo` e o saldo = `contas`; a recusa é uma só, em `_recusa_se_for_do_card`, e devolve o dado quando o turno já gastou as 3 vagas de card, quando o card para o qual mandaria já foi mostrado, ou quando o plano corta o mês pedido (só 1 mês: nem o `resumo` nem o `categorias` trazem o `historico_desde`, a tool traz; 2 a 12 meses vão ao `periodo`, que traz); também devolve o dado a conta que não passa em `exigir_acesso_do_app` (sem onboarding de OF, sem plano) e o turno em que o `show_card` do card-alvo falhou (`FALHAS_DE_CARD_DO_TURNO` guarda o id do card; falha de outro card não libera), senão a recusa não deixa saída; o `card_repetido` aponta o caminho de cada card); no app o
-  `get_open_bill` devolve itens e período com `error: total_no_card` (o total é do card `fatura`) enquanto o card puder aparecer (`card_ainda_resolve`, o mesmo teste da recusa acima); quando não pode, devolve o total. **Teto de 12
+  (1 mês: `mes_inteiro_no_card`; no resumo a mensagem aponta `resumo` e o saldo = `contas`; a recusa é uma só, em `_recusa_se_for_do_card`, e devolve o dado quando o turno já gastou as 3 vagas de card, quando o card para o qual mandaria já foi mostrado, quando o `get_category_spend` leva uma `categoria` que o `show_card` deste turno já devolveu com `encontrada=false` (`CATEGORIAS_NAO_ACHADAS_DO_TURNO`, comparada pela `cat_key`, zerada a cada turno pelo runner; o número sai em texto, sem 2º card; outra categoria, ou uma que o card achou, segue a recusa normal), ou quando o plano corta o mês pedido (só 1 mês: nem o `resumo` nem o `categorias` trazem o `historico_desde`, a tool traz; 2 a 12 meses vão ao `periodo`, que traz); também devolve o dado a conta que não passa em `exigir_acesso_do_app` (sem onboarding de OF, sem plano) e o turno em que o `show_card` do card-alvo falhou (`FALHAS_DE_CARD_DO_TURNO` guarda o id do card; falha de outro card não libera), senão a recusa não deixa saída; o `card_repetido` aponta o caminho de cada card); no app, `compare_periods` de DOIS meses inteiros, diferentes e passados devolve `comparar_no_card` (`show_card categorias com meses=[A,B]`, `_recusa_comparar`; mês corrente, lado de mais de um mês, corte do plano e card que não resolve seguem em texto); a recusa do `periodo` grava a janela em `JANELAS_DO_TURNO` e o `show_card periodo` usa a janela cortada por 12 meses quando o modelo diverge dela (`mostrar_card._da_recusa`); a visão que o modelo recebe dos cards `periodo`/`categorias`/`renda`/`calendario` é o RESUMO (total, saldo, 3 maiores categorias, `categorias_total`, maior e menor mês ou `maior_dia`; o bloco do app segue inteiro, `cards._RESUMOS`) e a categoria que o usuário citou vem em `categoria_pedida` pelo parâmetro `categoria` do `show_card`; no app o
+  `get_open_bill` devolve período e as 3 maiores compras (`itens_total` = quantas são; `todos_os_itens: true` dá a lista) com `error: total_no_card` (o total é do card `fatura`) enquanto o card puder aparecer (`card_ainda_resolve`, o mesmo teste da recusa acima); quando não pode, devolve o total. **Teto de 12
   meses** (`MAX_MESES_PERIODO` em `cards.py`, uma constante para o `periodo`, o `renda`, o `get_spending_trend`
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
@@ -406,7 +406,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
   `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
   (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
-  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  recente primeiro no empate, `{descricao, valor, categoria}`; `quantidade` = quantas saídas somam o `total` do dia
+  e `categorias` = `[{chave, valor}]` do dia, Σ `valor` = `total`, em `(-valor, chave)`, das MESMAS linhas do `total`:
+  para o card do dia (PR B, #1029) mostrar "Compras N", a categoria principal e a barra sem somar dinheiro
+  no cliente; a saída de `fora_da_grade` não entra), `fora_da_grade {quantidade, valor}` (sempre
   presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
   mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
   `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
@@ -442,11 +445,15 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   com a cor crua (`db/budgets.py` devolve `#7c3aed`).
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
-  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`, ou, dia a dia, as `categorias` do dia contra o `total` do dia)
   difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
-  (`moneyText`), categoria e dia escolhidos vão ao Extrato pelo filtro global (`s.filter.category`/`day`).
+  (`moneyText`). Tocar num dia do calendário ou em "Ver compras" do detalhe abre o card de compras na própria tela
+  (`GastosCompras`, estado `gastosAberto` na store; no modo dia o topo é `parts/GastosDiaTopo.tsx`: setas de dia, o total do dia em destaque, a pílula contra a média do mês, os fatos e a barra por categoria, tudo do `quantidade`/`maiores`/`categorias[]` do dia e da média de `lib/gastos-dia.ts`, que o calendário também lê; PR B, #1029; o modo categoria é uma linha "R$ … · N compras"). A consulta do card tem duas formas: modo dia
+  `/lancamentos?mes&dia&tipo=saida&guardado=true` (mais `categoria` quando uma foi escolhida) e modo categoria
+  `/lancamentos?mes&tipo=saida&categoria&guardado=true`. Só o "Ver em Lançamentos" grava `s.filter.day` e leva ao Extrato;
+  a escolha de categoria em "Para onde vai" (`GastosCategorias`) é que grava `s.filter.category`.
 - `GET /api/v2/gastos/categoria?mes=AAAA-MM&categoria=<chave>` (`api/v2/gastos.py`, regra em
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
@@ -585,7 +592,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   fora, como o mascarado ou "0", que uniriam pessoas diferentes (a descrição do Pix é genérica,
   "Pix recebido", e também uniria). A cadeia anda de trás para frente enquanto o intervalo for 30±5 dias e
   vale com `MINIMO = 2` créditos, todos a ±20% da mediana (com 2 créditos, a mediana é a média:
-  eles podem diferir até 50%); valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
+  eles podem diferir até 50%); se ela não fecha, ou se uma cadeia que pula créditos avulsos do mesmo
+  pagador (`_pulando`) é mais longa, vale a mais longa, com `MINIMO_PULANDO = 3` elos e valores a ±20% da
+  âncora e da mediana, como a consecutiva (2026-10-16; decisão do dono: a defesa contra receita falsa de pagador
+  frequente não é o valor, é a confirmação do usuário, abaixo; em simulação, 24% de 20 Pix de R$ 50–300 em 6 meses
+  fecham cadeia de 3 por acaso, contra 2% da regra antiga); uma receita por pagador; valor = o último, dia = `dia_da_cadeia`. Crédito idêntico (mesmo
   documento, data e valor: pendente e efetivado, ou duas conexões do mesmo banco) conta uma vez;
   créditos do mesmo documento na mesma data **somam** num só (salário + vale; sem a soma o
   intervalo 0 matava a cadeia); cada parcela somada guarda as contas das suas cópias idênticas
@@ -603,14 +614,43 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   motivo, log, `/api/v2/previsao` ou IA: o id é HMAC com pepper; sem `payer.name` o nome cai na
   descrição, que é dado do próprio usuário). Sem aviso novo de "nenhuma receita
   detectada".
+  **A detectada é só CANDIDATA; entra na conta a que o usuário confirmou (2026-10-16, decisão do dono).** A
+  resposta mora em `subscription_marks` (sem migração), com `merchant_key` = o id `extrato#…` da receita:
+  `status 'assinatura'` = confirmada (`CONFIRMADA`), `'ignorar'` = negada (`NEGADA`; os nomes são do status
+  da assinatura, e aqui NÃO significam assinatura), sem linha = pendente; desfazer = `marcar(uid, chave, 'nenhuma')`.
+  O id é por pagador, então aumento de salário mantém a confirmação, e `merchant_key` da Pluggy passa por
+  `normalize_text` (o `#` vira espaço), então as duas famílias de chave não colidem. `anexar` lê as marcas uma vez,
+  só vira `Ocorrencia` a confirmada (valor e dia seguem o extrato, a cada leitura; o pagador que para fica
+  `interrompida` e sai sozinho, e se volta, volta confirmada sem nova pergunta), e vão para
+  `Snapshot.receitas_do_banco` as confirmadas, as negadas e a pendente cujo Sim incluiria pelo menos uma ocorrência até `HORIZONS[0]` (30 dias, o único
+  horizonte do Plus; `_sim_muda_a_conta`, com as mesmas datas e cortes do laço de `anexar` via `_datas_banco`): fica fora a interrompida
+  (sem crédito há mais de `DIAS_ATIVA` dias), a de conta fora da base e a cuja próxima data esperada cai a 31+ dias (salário que
+  caiu hoje, mês de 31 dias: a pergunta volta no dia seguinte; com o último crédito adiantado ela fica escondida
+  até cerca de `TOLERANCIA_DIA`+1 dias, medido: 5). A lista não depende do `dias` pedido; `sim`/`nao` numa pendente escondida dá 404 (`chave`, `nome`, `valor`, `dia`, `status` `pendente|confirmada|negada`, pendentes
+  primeiro, depois por valor). Como toda leitura passa por `anexar`, a candidata fica fora da CONTA do `/painel`, do app,
+  do WhatsApp, da IA, do forecast e do simulador; a lista só vai ao cliente (API) para a tela perguntar, e a visão do modelo
+  do card `hero` da IA a omite (`core/services/ai_chat/cards.py`; teste `test_visao_do_modelo_no_hero_*`): o único consumidor
+  de `Previsao` da IA é esse card, e `compromissos` usa `_so` com chaves explícitas. A lista é devolvida em `receitas_do_banco` de `GET /api/v2/previsao`
+  (e `/api/app/previsao`), também no Plus (fora do `detalhes`); a receita que deixa de ser detectada (confirmada ou não) some da lista.
+  `POST /api/v2/previsao/receita` (`api/v2/previsao.py`; também em `/api/app/previsao/receita`), corpo
+  `{chave, resposta: "sim"|"nao"|"desfazer"}`, mesmo gate `forecast` da leitura e CSRF do pai: a chave tem de estar em
+  `receitas_do_banco` do PRÓPRIO usuário, senão 404 `not_found` e nada é gravado (resposta fora das três = 422); só o `desfazer`
+  também vale para a marca `extrato#…` do próprio usuário que saiu da lista (consulta por `user_id`; chave de outro usuário segue 404);
+  devolve a `Previsao` do menor horizonte permitido, com os detalhes do plano. Sem tela ainda (PR 2a, `/painel`; 2b, app;
+  3, WhatsApp); sem o Sim ninguém confirma, mas hoje a regra acha receita só no dono. Limites: uma receita por pagador;
+  a receita confirmada ou negada que deixa de ser detectada some da lista (sem valor nem nome a mostrar) e a marca fica na tabela (hash, sem documento; sai com a conta e na exportação de privacidade, em `marcacoes_assinaturas`), mas o `desfazer` por chave continua funcionando;
+  **a confirmação é por PAGADOR, não por valor**: confirmar o salário de um CPF faz qualquer cadeia futura desse CPF (ex.: 3 reembolsos de R$ 50) entrar sem perguntar, até o usuário desfazer;
+  **`nome` vem do pagador (`payer.name`) ou da descrição, texto livre de terceiro: a tela (PR 2a, 2b, 3) tem de escapar**; o POST lê o snapshot duas vezes (validação e resposta), aceito.
   Limites: **receita sem documento do pagador não é detectada** (o Pix de muita gente
-  chega sem ele); 13º/bônus em outro dia do mês, no meio ou depois do último crédito quebra a cadeia por
-  ~2 meses; aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal ou irregular nunca
-  é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
+  chega sem ele); com só 2 créditos, 13º/bônus em outro dia do mês, no meio ou depois do último, quebra a cadeia
+  (com 3+ a cadeia pula o avulso, desde que ele NÃO caia 30±5 dias depois do último elo: um Pix avulso do
+  mesmo pagador 25–35 dias depois do último salário faz a receita sumir da Previsão até o próximo salário
+  chegar; a regra antiga também dava vazio); extra no mesmo dia que some mais de 20% ao salário tira o crédito da cadeia; uma receita por pagador (a cadeia mais longa); aumento acima de 20% da mediana rejeita a cadeia; renda quinzenal
+  de valor igual, com 3+ meses, vira receita MENSAL (um dos dois créditos do mês; o valor previsto subestima a renda) e a irregular não é detectada; pendente em D × efetivado em D+1 quebra a cadeia; o mesmo documento com formato
   diferente entre meses (zeros à esquerda) vira chaves distintas (o filtro de 11/14 dígitos reduz,
-  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo infla o
-  saldo.
-  Receita detectada leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
+  não elimina); cashback mensal com documento pode entrar (rendimento não). Falso positivo só infla o
+  saldo se o usuário o confirmar.
+  Receita CONFIRMADA (a pendente fica fora da conta) leva o `_risco` a `abster` (`recorrencia_banco_estimada` é `ambos`:
   `cashflow.py::_risco` não dá veredito com ela), como já acontecia com a saída detectada.
   `amount` do espelho é `numeric` e guarda NaN/±Infinity, que no Postgres são `> 0`: `_SQL_CREDITOS`
   só lê crédito finito (`amount < 'Infinity'`, que tira os dois), senão a Previsão inteira daria 500
@@ -1512,7 +1552,7 @@ transação do delete pelo disconnect e pelo reset.
 Assinaturas vêm do **Recurring Payments** da Pluggy (`db/of_recurring.py`):
 `of_recurring_payments` guarda o resultado por conexão, substituído inteiro a cada
 sync — falha na Pluggy mantém o anterior; `subscription_marks` guarda a marcação do
-usuário por `merchant_key` (vale para todos os itens da chave), e `assinatura_antes` a
+usuário por `merchant_key` (vale para todos os itens da chave; com a chave `extrato#…`, a resposta sobre a receita detectada, ver Previsão), e `assinatura_antes` a
 marca `assinatura` que o `ignorar` substituiu (linhas ignoradas antes da coluna nascem `false`).
 A Previsão também lê essa lista (fonte `recorrencia_banco`, ver `/api/v2/previsao`).
 `of_card_bills` (`db/of_card_bills.py`) guarda as faturas que o banco fechou (`/bills` da Pluggy,

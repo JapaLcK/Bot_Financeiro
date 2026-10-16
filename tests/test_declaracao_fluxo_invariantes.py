@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 from conftest import usuario_pagante
 from db.bank_declaracoes import DECLARADA_SQL, e_fluxo
@@ -46,7 +47,7 @@ def test_transacoes_do_outro_usuario_nao_tornam_o_candidato_ambiguo():
     la = declara(a)
     sincroniza(ca, a, tx(txid="a1"))
     assert decl(la)["matched_transaction_id"]  # candidato ÚNICO do A, apesar de 2 iguais no B
-    assert [m for m in movements.list_bank_movements(b)] == []  # B não declarou nada
+    assert [m for m in conferencia.list_bank_movements(b)] == []  # B não declarou nada
 
 
 def test_transactions_vem_ordenada_por_data_e_id():

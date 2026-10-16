@@ -143,6 +143,46 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 @keyframes vt-out { to { opacity: 0; } }
 @keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
 
+/* Card de compras de /gastos (widgets/GastosCompras.tsx): grid, não flex, no rodapé (Safari 14.0 ignora flex gap). */
+/* Topo do modo dia (parts/GastosDiaTopo.tsx): setas e data em grid, a faixa com o total em rosa (.hero-value), a pílula em
+   fluxo inline (quebra sem flex gap) e os fatos em grid. */
+.dia-nav { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; column-gap: 8px; }
+.dia-seta {
+  width: 44px; height: 44px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--rule-strong); border-radius: var(--r-ctrl); background: var(--plane-2); color: var(--ink); font-size: 16px;
+}
+.dia-seta:disabled { opacity: 0.35; }
+@media (hover: hover) and (pointer: fine) { .dia-seta:not(:disabled):hover { background: var(--plane-3); } }
+.dia-data { text-align: center; font-size: 14px; font-weight: 600; }
+.dia-data i { margin-right: 6px; color: var(--ink-3); vertical-align: -2px; }
+.dia-faixa { padding: 14px 16px 16px; border-radius: var(--r-ctrl); background: var(--pink-wash); box-shadow: inset 0 0 0 1px var(--pink-line); }
+.dia-rotulo { margin: 0 0 6px; font-size: 12.5px; color: var(--ink-2); }
+.dia-total { margin: 0; color: var(--pink); font-weight: 700; overflow-wrap: break-word; }
+.dia-media { margin: 10px 0 0; font-size: 12.5px; line-height: 26px; }
+.dia-media .faint { white-space: nowrap; }
+.dia-pilula { display: inline-block; margin-right: 10px; padding: 0 10px; border-radius: 999px; background: var(--rule-strong); color: var(--ink); font-weight: 600; line-height: 24px; }
+.dia-pilula[data-tom="gain"] { background: var(--gain-wash); color: var(--gain); }
+.dia-pilula[data-tom="warn"] { background: var(--warn-wash); color: var(--warn); }
+.dia-facts > div { min-width: 0; }
+.dia-facts dd { overflow-wrap: break-word; word-break: break-word; } /* nome longo sem espaço: quebra na coluna (o anywhere não existe no Safari 14) */
+.dia-facts.hero-facts { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(110px, max-content)); gap: 10px 28px; }
+.dia-legend { font-size: 13px; }
+.dia-legend li { min-width: 0; max-width: 100%; }
+.dia-legend .key { flex: none; }
+.dia-leg-nome { min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+.dia-legend b { white-space: nowrap; }
+.dia-lista-t { margin: 4px 0 0; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.compras-lista { list-style: none; margin: 0; padding: 0; }
+.compras-lista .lanc-linha:last-child { border-bottom: 0; }
+.compras-nota { font-size: 12.5px; }
+#gastos-compras .selo { white-space: normal; height: auto; min-height: 22px; }
+#gastos-compras .btn { min-height: 44px; align-self: start; }
+.compras-pe { display: grid; grid-auto-flow: column; justify-content: start; column-gap: 20px; }
+.compras-pe .link { min-height: 44px; }
+/* O scrollIntoView do card alinha a base dele à da janela e ignora a barra fixa: a margem é a do padding-bottom da .page (chat.css, shell.css), a mesma que "o conteúdo termina acima da barra". */
+#gastos-compras { scroll-margin-block-end: 120px; }
+@media (max-width: 760px) { #gastos-compras { scroll-margin-block-end: calc(96px + env(safe-area-inset-bottom)); } }
+
 .detail-auto { font-size: 12px; font-weight: 400; margin-left: 4px; }
 .detail-recent { padding-top: 16px; border-top: 1px solid var(--rule); }
 .detail-recent .inv-list li { grid-template-columns: 46px minmax(0, 1fr) auto minmax(84px, auto); }

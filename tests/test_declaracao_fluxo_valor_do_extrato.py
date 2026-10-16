@@ -15,6 +15,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 from conftest import usuario_pagante
 from db.bank_declaracoes import projeta
@@ -57,8 +58,8 @@ def test_exemplo_do_codex_confirmacao_manual_traz_valor_e_data_do_extrato(user_i
     lid = declara(user_id, 1000, criado_em=em(dia_decl))
     sincroniza(cid, user_id, t(-1100, dia_tx))
     assert decl(lid)["matched_transaction_id"] is None  # 100 de diferença: só pelo modal
-    [mov] = movements.list_bank_movements(user_id)
-    movements.confirm_bank_movement(user_id, lid, mov["candidates"][0]["id"])
+    [mov] = conferencia.list_bank_movements(user_id)
+    conferencia.confirm_bank_movement(user_id, lid, mov["candidates"][0]["id"])
     l = lanc(lid)
     assert l["valor"] == 1100 and local(l["criado_em"]).date() == dia_tx
     assert local(l["criado_em"]).time().replace(second=0, microsecond=0) == time(23, 50)
@@ -125,7 +126,7 @@ def test_manual_corrigido_dentro_dos_dez_por_cento_acompanha_e_fora_restaura(use
     declarado = em(dia_decl)
     lid = declara(user_id, 1000, criado_em=declarado)
     sincroniza(cid, user_id, t(-1100, dia_tx))
-    movements.confirm_bank_movement(user_id, lid, movements.list_bank_movements(user_id)[0]["candidates"][0]["id"])
+    conferencia.confirm_bank_movement(user_id, lid, conferencia.list_bank_movements(user_id)[0]["candidates"][0]["id"])
     sincroniza(cid, user_id, t(-1090, dia_tx))
     assert lanc(lid)["valor"] == 1090 and decl(lid)["matched_transaction_id"]
     sincroniza(cid, user_id, t(-1200, dia_tx))

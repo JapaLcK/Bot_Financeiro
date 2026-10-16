@@ -8,7 +8,8 @@ Controle: voltar a checar `requires_review` para fluxo deixa vermelhos os dois d
 transações é o positivo da regra restritiva.
 """
 import db
-from db.bank_movements import bank_movement_summary, list_bank_movements
+from db.bank_movements import bank_movement_summary
+from db.bank_conferencia import list_bank_movements
 from db.open_finance import pause_open_finance_connection
 from tests._patrimonio_helpers import q
 from tests.test_bank_movements import _bank, _deposit, _sync, _tx

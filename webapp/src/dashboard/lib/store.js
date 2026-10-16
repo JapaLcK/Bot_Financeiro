@@ -10,6 +10,7 @@ let state = {
   sim: { cuts: {}, extra: 0, goal: "intercambio" },
   filter: { category: null, day: null, query: "", source: "todos" },
   highlight: null, // dia (yyyy-mm-dd) em foco, compartilhado entre gráfico e listas
+  gastosAberto: null, // o card de compras de /gastos: { dia } (um dia do calendário) ou { categoria } (o detalhe), ou fechado
   editing: false,
 };
 
@@ -28,6 +29,12 @@ export function apply(prev, patch) {
   // A origem fica: vale em qualquer mês enquanto o extrato está aberto (o Ledger a
   // zera ao desmontar).
   if (next.month !== prev.month) next.filter = { ...next.filter, day: null };
+  // O card de compras de /gastos fecha no mês novo e, no modo categoria, quando a escolha vai para outra categoria
+  // (no modo dia ele segue a categoria escolhida, como o calendário). Quem escreve `gastosAberto` no mesmo patch decide.
+  const g = next.gastosAberto;
+  if (g && !("gastosAberto" in patch)
+    && (next.month !== prev.month || next.mes !== prev.mes
+      || ("categoria" in g && next.filter.category !== prev.filter.category && next.filter.category !== g.categoria))) next.gastosAberto = null;
   return next;
 }
 

@@ -51,11 +51,15 @@ from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
     fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
-    PT_PHRASE, PT_VALUE, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
+    PT_PHRASE, PT_VALUE, PT_VALOR_COM_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
 
 logger = logging.getLogger(__name__)
+
+# "12x de 79,90" / "doze parcelas de cem": grupo 1 = o valor da parcela. Lido pelo teste de
+# consistência dos recortes (tests/test_parse_money_bilhao.py), que importa esta constante.
+PARCELA_DE_VALOR = rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+({PT_VALUE})"
 
 _CARD_CREATE_VERBS = (
     "criar",
@@ -837,7 +841,7 @@ def _extract_card_reference_for_purchase(user_id: int, text: str) -> tuple[str |
 def _clean_credit_purchase_description(text: str, card_name: str | None) -> str:
     desc = text.strip()
     desc = re.sub(r"^\s*(gastei|paguei|comprei|debitei|gasto)\b", "", desc, flags=re.IGNORECASE).strip()
-    desc = re.sub(r"\d+(?:[.,]\d+)?", "", desc, count=1).strip()
+    desc = re.sub(PT_VALOR_COM_MULT, "", desc, count=1, flags=re.IGNORECASE).strip()
     desc = re.sub(r"^\s*reais?\b", "", desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r"\b(?:no|na|em|com)\s+cr[eé]dito\b", "", desc, flags=re.IGNORECASE).strip()
     desc = re.sub(r"\b(?:no|na|em|com)\s+cart[aã]o\s+(?:principal|padr[aã]o)\b", "", desc, flags=re.IGNORECASE).strip()
@@ -2469,10 +2473,7 @@ def handle(user_id: int, text: str) -> str | None:
         valor = None
         # Contagem e valor podem vir em dígito OU por extenso: "12 parcelas de
         # 100", "12x de 79,90", "doze parcelas de cem", "12 parcelas de mil".
-        parc_m = re.search(
-            rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+({PT_VALUE})",
-            t_low, re.IGNORECASE,
-        )
+        parc_m = re.search(PARCELA_DE_VALOR, t_low, re.IGNORECASE)
         if parc_m and n > 1:
             parcela_valor = parse_pt_number(parc_m.group(1))
             if parcela_valor is not None:
@@ -2538,14 +2539,17 @@ def handle(user_id: int, text: str) -> str | None:
         # ANTES da remoção genérica de números — senão o "de" sobra solto na
         # descrição ("parcelei 12x de 79,90 celular" → "de celular").
         desc_clean = re.sub(
-            r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?\d[\d.,]*",
+            rf"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?(?:{PT_VALOR_COM_MULT})",
             "", desc_clean, flags=re.IGNORECASE,
         )
         # idem pro bloco "Nx de Y" por extenso: "doze parcelas de cem",
         # "12 parcelas de mil" — remove contagem+valor de uma vez.
+        desc_clean = re.sub(PARCELA_DE_VALOR, "", desc_clean, flags=re.IGNORECASE)
+        # O multiplicador pertence ao segmento do VALOR ("1 bilhão", "um bilhão", "1 bi", "1bi"), não à
+        # descrição: só some junto do valor; "clube do bilhão" fica. Dígito sem multiplicador segue abaixo.
         desc_clean = re.sub(
-            rf"\b(?:\d+|{PT_PHRASE})\s*(?:x|vezes?|parcelas?)\s+de\s+{PT_VALUE}",
-            "", desc_clean, flags=re.IGNORECASE,
+            PT_VALOR_COM_MULT, lambda m: m.group(0) if re.fullmatch(r"\d[\d.,]*", m.group(0)) else "",
+            desc_clean, flags=re.IGNORECASE,
         )
         desc_clean = re.sub(r"\b\d+[\.,]?\d*\b", "", desc_clean)
         desc_clean = re.sub(r"\b\d+\s*x\b", "", desc_clean, flags=re.IGNORECASE)

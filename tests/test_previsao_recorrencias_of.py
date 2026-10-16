@@ -14,11 +14,13 @@ import db
 from _apoio_assinaturas import HOJE, conta, mensais, netflix_no_cartao, rp, semeia, tx
 from api.v2.previsao import Previsao
 from conftest import usuario_pagante
+from core.crypto import hash_pii
 from core.services import previsao_v2
 from core.services.assinaturas import listar_assinaturas
 from core.services.cashflow import _projection
 from core.services.cashflow_forecast import _trajectory
 from core.services.cashflow_snapshot import ler
+from core.services.previsao_recorrencias import CONFIRMADA
 from db.of_recurring import marcar
 from tests.test_cashflow_snapshot import q
 
@@ -45,10 +47,19 @@ def netflix(uid, valores=("-39.90",) * 3, ultima=date(2026, 9, 5), prefixo="nf",
     return semeia(uid, [conta(f"acc-{prefixo}", txs, tipo=tipo)], [rp("NETFLIX.COM", float(valores[-1]), txs)])
 
 
-def salario(uid, valor="5000", ultima=date(2026, 9, 5), prefixo="sal", desc="SALARIO EMPRESA X"):
-    """Só os créditos no extrato, com o documento do pagador: a receita vem do extrato (P7 a), nunca do `rp` de entrada."""
+def confirma(uid, doc="11122233344"):
+    """O Sim do usuário: a receita do extrato só entra na conta depois dele (a chave é o `extrato#` do documento do pagador)."""
+    marcar(uid, "extrato#" + hash_pii(doc)[:16], CONFIRMADA)
+
+
+def salario(uid, valor="5000", ultima=date(2026, 9, 5), prefixo="sal", desc="SALARIO EMPRESA X", confirmada=True):
+    """Só os créditos no extrato, com o documento do pagador: a receita vem do extrato (P7 a), nunca do `rp` de entrada.
+    Por padrão o usuário já disse Sim (`confirma`); sem isso ela é só candidata e fica fora da conta."""
     txs = mensais(prefixo, [valor] * 3, ultima=ultima, desc=desc, pagador="11122233344")
-    return semeia(uid, [conta(f"acc-{prefixo}", txs)], [])
+    cid = semeia(uid, [conta(f"acc-{prefixo}", txs)], [])
+    if confirmada:
+        confirma(uid)
+    return cid
 
 
 def test_1_saida_mensal_simples_e_valor_exato_na_v2(user_id):
@@ -129,12 +140,13 @@ def test_8_receita_entra_como_nao_garantida(user_id):
     assert (m.direcao_do_erro, m.efeito_quantificado) == ("so_melhora", D("5000"))
 
 
-def test_9_ignorar_vale_para_a_saida_e_a_receita_do_extrato_nao_le_marcas(user_id):
-    # A saída (rp) termina antes da entrada (só no extrato) começar. A receita do extrato não lê marcas
-    # (o "ignorar receita" é o PR B), então marcar a saída não a toca: este teste mede só isso.
+def test_9_ignorar_vale_para_a_saida_e_nao_toca_a_receita_do_extrato(user_id):
+    # A saída (rp) termina antes da entrada (só no extrato) começar. A marca da receita é pelo `extrato#…`
+    # (e só a confirmada entra), então `ignorar` na chave da saída não a toca: este teste mede só isso.
     out = mensais("tj-out", ["-100"] * 3, ultima=date(2026, 6, 5), desc="TRANSF JOAO")
     inn = mensais("tj-in", ["300"] * 3, ultima=date(2026, 9, 6), desc="TRANSF JOAO", pagador="11122233344")
     semeia(user_id, [conta("acc-tj", out + inn)], [rp("TRANSF JOAO", -100, out)])
+    confirma(user_id)
     assert {e.direcao for e in do_banco(ler_em(user_id))} == {"entrada", "saida"}
     marcar(user_id, "transf joao", "ignorar")
     es = do_banco(ler_em(user_id))
@@ -253,6 +265,7 @@ def test_23_todas_as_contas_fora_da_base_nao_descontam_a_base_manual(user_id):
     sal = mensais("sal", ["5000"] * 3, desc="SALARIO EMPRESA X", pagador="11122233344")
     semeia(user_id, [conta("acc-nf", nf, saldo=None), conta("acc-sal", sal, saldo=None)],
            [rp("NETFLIX.COM", -39.9, nf)])
+    confirma(user_id)
     s = ler_em(user_id)
     es = do_banco(s)
     assert s.base["balance_source"] == "manual" and len(es) == 6 and not any(e.incluida for e in es)

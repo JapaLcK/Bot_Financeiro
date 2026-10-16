@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goalsTotal, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { mesDe, simActive } from "./lib/store.js";
@@ -11,6 +11,7 @@ import { Ledger } from "./parts/Ledger";
 import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
 import { DEMO } from "./lib/v2";
+import { useMedia } from "./useMedia";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
 import { Calendar } from "./widgets/Calendar";
@@ -18,6 +19,7 @@ import { Categories } from "./widgets/Categories";
 import { CategoryDetail } from "./widgets/CategoryDetail";
 import { GastosCalendario } from "./widgets/GastosCalendario";
 import { GastosCategorias } from "./widgets/GastosCategorias";
+import { GastosCompras } from "./widgets/GastosCompras";
 import { GastosDetalhe } from "./widgets/GastosDetalhe";
 import { Goals } from "./widgets/Goals";
 import { GoalsTimeline } from "./widgets/GoalsTimeline";
@@ -71,13 +73,25 @@ function Forecast({ s }: { s: DashState }) {
 
 function Spending({ s }: { s: DashState }) {
   const [Cats, Cal, Detail] = DEMO ? [Categories, Calendar, CategoryDetail] : [GastosCategorias, GastosCalendario, GastosDetalhe];
+  // Acima de 1100px (o @media de pages.css, 1100px + 1) o card de compras ocupa o vão sob o Detalhe, na coluna da direita.
+  // Em coluna única ele vem logo depois do que o abriu: o calendário (dia) ou o Detalhe (categoria). A ordem do DOM
+  // é a ordem visual, para o Tab seguir a leitura.
+  const largo = useMedia("(min-width: 1101px)");
+  const g = DEMO ? null : s.gastosAberto;
+  const chegada = useRef(!!s.gastosAberto); // o card já estava aberto quando a página montou: veio do Resumo (sair de /gastos fecha o card: só a ida pelo Resumo monta a página com ele aberto)
+  const card = g && <GastosCompras s={s} chegada={chegada} />;
+  const doDia = g && "dia" in g;
   return (
     <Page path="/gastos" lede="Escolha uma categoria para ver de onde vem o gasto; o calendário e o extrato seguem a escolha.">
       <div className="span-5 stack">
         <div className="panel"><Cats s={s} /></div>
         <div className="panel"><Cal s={s} /></div>
+        {!largo && doDia && card}
       </div>
-      <Panel span={7}><Detail s={s} /></Panel>
+      <div className="span-7 stack">
+        <div className="panel"><Detail s={s} /></div>
+        {(largo || !doDia) && card}
+      </div>
     </Page>
   );
 }

@@ -31,6 +31,7 @@ from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
 from db import investido
+from db.gastos import MAIORES_POR_DIA
 from db.lancamentos import ler_cursor
 from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
@@ -353,6 +354,16 @@ def test_fixture_de_comparacao_segue_o_modelo(nome):
     assert (f["despesa"] is None) == (f["motivo"] == "inicio_do_historico")
 
 
+def _dias_fecham(dias, chaves):
+    """O card do dia não soma dinheiro no cliente: `categorias` fecha com `total`, e `quantidade` com `maiores`."""
+    for d in dias:
+        cats = d["categorias"]
+        assert sum(Decimal(c["valor"]) for c in cats) == Decimal(d["total"])
+        assert {c["chave"] for c in cats} <= chaves and len({c["chave"] for c in cats}) == len(cats)
+        assert cats == sorted(cats, key=lambda c: (-Decimal(c["valor"]), c["chave"]))
+        assert len(d["maiores"]) == min(MAIORES_POR_DIA, d["quantidade"]) and d["quantidade"] >= len(cats)
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["gastos"]))
 def test_fixture_de_gastos_segue_o_modelo_e_fecha_a_conta(nome):
     f = FIXTURES["gastos"][nome]
@@ -365,6 +376,9 @@ def test_fixture_de_gastos_segue_o_modelo_e_fecha_a_conta(nome):
     assert sum(Decimal(d["total"]) for d in f["dias"]) + Decimal(f["fora_da_grade"]["valor"]) == total
     chaves = {c["chave"] for c in f["categorias"]}
     assert all(m["categoria"] in chaves for d in f["dias"] for m in d["maiores"])
+    _dias_fecham(f["dias"], chaves)
+    assert sum(d["quantidade"] for d in f["dias"]) + f["fora_da_grade"]["quantidade"] == sum(
+        c["quantidade"] for c in f["categorias"])
     if f["anterior_total_ate_corte"] is None:  # mês anterior indisponível: nenhuma comparação sai
         assert all(c["anterior_ate_corte"] is None for c in f["categorias"])
     else:  # o total do anterior inclui categoria que não está na lista: nunca menos que Σ
@@ -390,6 +404,8 @@ def test_fixture_de_gastos_categoria_segue_o_modelo_e_fecha_a_conta(nome):
     else:
         assert Decimal(f["valor_medio"]) == (total / f["compras"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
     assert all(m["categoria"] == f["categoria"]["chave"] for d in f["dias"] for m in d["maiores"])
+    _dias_fecham(f["dias"], {f["categoria"]["chave"]})
+    assert all([c["chave"] for c in d["categorias"]] == [f["categoria"]["chave"]] for d in f["dias"])  # uma só
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["guia"]))

@@ -814,9 +814,19 @@ _PT_NUM_WORDS: dict[str, int] = {
 _PT_NUM_ALT = "|".join(sorted(map(re.escape, _PT_NUM_WORDS), key=len, reverse=True))
 # Uma frase = palavra-número, opcionalmente encadeada com "e" ("vinte e cinco").
 _PT_PHRASE = rf"(?:{_PT_NUM_ALT})(?:\s+e\s+(?:{_PT_NUM_ALT})|\s+(?:{_PT_NUM_ALT}))*"
-_PT_SPELLED_MULT_RE = re.compile(
-    rf"\b({_PT_PHRASE})\s+(mil|milh[oõ]es|milhao|milhão)\b"
-    rf"(?:\s*e\s+({_PT_PHRASE}|\d+(?:[.,]\d+)?))?",
+# "mil" por último: sem \b depois (PT_VALUE), a alternância casaria "mil" dentro de "milhões".
+_PT_MULT_LONGO = r"milh[oõ]es|milh[aã]o|bilh[oõ]es|bilh[aã]o|trilh[oõ]es|trilh[aã]o|mil"
+# "bi" curto só vale depois de dígito ("2 bi"); por extenso "um bi" é artigo + gíria.
+_PT_BI = r"bi\b(?!-)"  # "bi-cicleta" (hífen) não é "bi"
+_PT_MULT = rf"{_PT_MULT_LONGO}|{_PT_BI}"
+_PT_MULT_VALOR = {"mil": 10**3, "milh": 10**6, "bi": 10**9, "bilh": 10**9, "tril": 10**12}
+_PT_SPELLED_MULT_RE = re.compile(rf"\b({_PT_PHRASE})\s+({_PT_MULT_LONGO})\b", re.IGNORECASE)
+# Numeral completo do RESTO ("1.234,56", "1.500", "0.5", "500"): termina em dígito, então o ponto/vírgula
+# final de frase ("1 mil e 500." / "1 mil e 500, no mercado") fica de fora. O valor passa por `parse_money`.
+_PT_NUM = r"\d(?:[\d.,]*\d)?"
+# Cada "e <resto>" depois da base: dígito (+ multiplicador) ou, só se a base é por extenso, frase (+ mult longo).
+_PT_RESTO_RE = re.compile(
+    rf"\s*e(?:\s*({_PT_NUM})(?:\s*({_PT_MULT})\b)?|\s+({_PT_PHRASE})(?:\s+({_PT_MULT_LONGO})\b)?)",
     re.IGNORECASE,
 )
 
@@ -830,12 +840,31 @@ PT_NUM_ALT_NO_ARTICLE = "|".join(
     sorted((re.escape(w) for w in _PT_NUM_WORDS if w not in ("um", "uma")),
            key=len, reverse=True)
 )
-_PT_MULT = r"mil|milh[oõ]es|milhao|milhão"
-# Um "valor" = dígitos OU número por extenso, com "mil/milhão" opcional e
+# Um "valor" = dígitos OU número por extenso, com "mil/milhão/bilhão/trilhão" opcional e
 # encadeamento por "e" ("cento e vinte", "dez mil", "cem mil e quinhentos").
+# "bi" curto só colado em dígito ("100 bi", "0,5 bi e 100 milhões"); "cem bi"/"de bi" não.
+_PT_DIG = r"\d[\d.,]*"
+_PT_DIG_BI = rf"{_PT_DIG}(?:\s*{_PT_BI})?"
 PT_VALUE = (
-    rf"(?:r\$\s*)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT})"
-    rf"(?:\s+(?:e\s+)?(?:\d[\d.,]*|{_PT_NUM_ALT}|{_PT_MULT}))*"
+    rf"(?:r\$\s*)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO})"
+    rf"(?:\s+(?:e\s+)?(?:{_PT_DIG_BI}|{_PT_NUM_ALT}|{_PT_MULT_LONGO}))*"
+)
+# O valor que abre/está numa frase de descrição, para tirá-lo dela. NÃO é o mesmo regex do
+# `_PT_RESTO_RE` (o do `parse_money`): este exige `\s+e\s+`; aquele aceita `\s*e\s*`. O numeral do resto
+# é o mesmo nos dois (`_PT_NUM`). Divergência conhecida: "1 mil e500 carro" → parse_money = 1500, mas a nota fica
+# "e500 carro". Os dois são conferidos pela tabela de
+# `test_cada_forma_e_lida_e_recortada_inteira_pelos_tres_leitores` (tests/test_parse_money_bilhao.py).
+# Forma: uma base COM multiplicador (dígito +
+# mult, ou extenso + mult longo; "bi" curto só após dígito), mais zero ou mais "e <componente com mult>"
+# e, por fim, um resto sem multiplicador ("1 mil e 500", "dez mil e quinhentos"). Dígito sozinho vale,
+# mas não abre composto ("50 e 30"), e extenso sem multiplicador ("dois cafés") fica na descrição.
+# Base em dígito só continua com dígito (o `parse_money` não lê "10 mil e dois").
+_PT_C_DIG = rf"{_PT_DIG}\s*(?:{_PT_MULT})\b"
+_PT_C_EXT = rf"(?:{_PT_PHRASE})\s+(?:{_PT_MULT_LONGO})\b"
+PT_VALOR_COM_MULT = (
+    rf"{_PT_C_DIG}(?:\s+e\s+{_PT_C_DIG})*(?:\s+e\s+{_PT_NUM})?"
+    rf"|{_PT_C_EXT}(?:\s+e\s+(?:{_PT_C_DIG}|{_PT_C_EXT}))*(?:\s+e\s+(?:{_PT_NUM}|{_PT_PHRASE}))?"
+    rf"|{_PT_DIG}"
 )
 
 
@@ -896,6 +925,23 @@ def valor_finito(v, teto=VALOR_MAX) -> bool:
         return False
 
 
+def _soma_restos(text: str, pos: int, extenso: bool) -> float:
+    """Soma os "e <resto>" que seguem a base em `pos`; cada resto leva o PRÓPRIO multiplicador
+    ("0,8 bilhão e 300 milhões e 5 mil"). Resto sem multiplicador é o último; frase só se a base é por extenso."""
+    total = 0.0
+    while (r := _PT_RESTO_RE.match(text, pos)):
+        if r.group(1):
+            total += parse_money(r.group(1)) * (_PT_MULT_VALOR[r.group(2).lower()[:4]] if r.group(2) else 1)
+        elif extenso and (n := _pt_words_to_int(r.group(3))) is not None:
+            total += n * (_PT_MULT_VALOR[r.group(4).lower()[:4]] if r.group(4) else 1)
+        else:
+            break
+        if not r.group(2) and not r.group(4):
+            break
+        pos = r.end()
+    return total
+
+
 def parse_money(text: str) -> float | None:
     # multiplicador por extenso composto: "dez mil" → 10000, "cento e cinquenta
     # mil" → 150000, "dois milhões" → 2000000. Vem ANTES da regra de dígito
@@ -905,34 +951,21 @@ def parse_money(text: str) -> float | None:
     if sm:
         base = _pt_words_to_int(sm.group(1))
         if base is not None:
-            mult = 1_000_000 if sm.group(2).lower().startswith("milh") else 1_000
-            total = float(base * mult)
-            resto = sm.group(3)
-            if resto:
-                if resto[0].isdigit():
-                    total += float(resto.replace(".", "").replace(",", "."))
-                else:
-                    r = _pt_words_to_int(resto)
-                    if r is not None:
-                        total += r
-            return total
+            return round(base * _PT_MULT_VALOR[sm.group(2).lower()[:4]] + _soma_restos(text, sm.end(), True), 2)
 
-    # multiplicador "mil"/"milhão": "10 mil" → 10000, "1 mil e 500" → 1500.
-    # O dígito antes é OPCIONAL: "mil reais" (sem número) = 1000 e "um milhão" =
+    # multiplicador "mil"/"milhão"/"bi": "10 mil" → 10000, "1 mil e 500" → 1500.
+    # O dígito antes é OPCIONAL até milhão: "mil reais" (sem número) = 1000 e "um milhão" =
     # 1000000 — senão cairia no número contínuo abaixo e pegaria um valor errado
     # (ex.: "parcelei mil reais em 10 vezes" pegaria o "10" de "10 vezes").
     # Precisa vir antes do número contínuo.
-    mm = re.search(
-        r'\b(\d+(?:[.,]\d+)?\s*)?(mil|milh[oõ]es|milhao|milhão)\b(?:\s*e\s*(\d+))?',
-        text or "", re.IGNORECASE,
-    )
-    if mm:
-        base = float(mm.group(1).strip().replace(".", "").replace(",", ".")) if mm.group(1) else 1.0
-        mult = 1_000_000 if mm.group(2).lower().startswith("milh") else 1_000
-        total = base * mult
-        if mm.group(3):
-            total += float(mm.group(3))
-        return total
+    for mm in re.finditer(rf'\b(\d+(?:[.,]\d+)?\s*)?({_PT_MULT})\b', text or "", re.IGNORECASE):
+        mult = _PT_MULT_VALOR[mm.group(2).lower()[:4]]
+        if not mm.group(1) and mult > 10**6:
+            # bi/bilhão/trilhão sem número não é valor (hipérbole)
+            continue
+        # mesma regra do número comum abaixo: "1.5 mil" = 1500, "1.500 mil" = 1.500.000
+        base = parse_money(mm.group(1)) if mm.group(1) else 1.0
+        return round(base * mult + _soma_restos(text, mm.end(), False), 2)  # 0,067 * 1e9 = 67000000.00000001
 
     # pega o primeiro número contínuo (com possíveis separadores)
     m = re.search(r'(\d[\d.,\s]*)', text)
@@ -1287,8 +1320,8 @@ def parse_pt_number(text: str) -> float | None:
     t = str(text).strip().lower()
     if not t:
         return None
-    # dígitos ou multiplicador mil/milhão → parse_money já cobre
-    if re.search(r"\d", t) or re.search(r"mil|milh", t):
+    # dígitos ou multiplicador mil/milhão/bilhão/trilhão → parse_money já cobre
+    if re.search(r"\d", t) or re.search(r"mil|bilh|trilh", t):
         return parse_money(t)
     # por extenso puro (< 1000): 'cem', 'cento e vinte', 'doze'
     t = re.sub(r"\b(reais|real|r\$)\b", " ", t)
