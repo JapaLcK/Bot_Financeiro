@@ -29,6 +29,7 @@ estão em módulos próprios. Este arquivo só orquestra.
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -41,8 +42,9 @@ from typing import Any
 
 import db
 from db.ai_turno import trava_do_turno
+from core.services.comparacao_periodos import MESES
 from core.pg_text import MSG_VALOR_WHATSAPP, violacao_finito
-from utils_date import today_tz
+from utils_date import ano_do_mes, today_tz
 from core.services.modelo_openai import CHAT_MODEL, completion_options
 
 from . import streaming
@@ -50,6 +52,7 @@ from ._context import (
     CARDS_DO_TURNO, CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO, METAS_DO_TURNO,
     metas_do_turno,
 )
+from .cards import TOOLS_DE_TEXTO, cards_livres
 from .confirmations import is_cancel, is_confirm
 from .history import trim_history_for_openai
 from .sanitizer import detect_trend_window, strip_markdown_headers
@@ -438,10 +441,12 @@ def _chat_inner(user_id: int, user_text: str, *, monthly_limit: int,
 
 def _linha_de_data(hoje: date) -> str:
     """A data e o mês atual, com o exemplo calculado: o modelo errava a conta de "últimos N meses"
-    (esquecia que inclui o mês atual) e dava 01..09 em outubro."""
+    (esquecia que inclui o mês atual) e dava 01..09 em outubro, e lia "dezembro" de outubro como o do ano que vem."""
     i = hoje.year * 12 + hoje.month - 1
+    m = hoje.month % 12 + 1  # o seguinte ao atual: do ano anterior (em dezembro, janeiro, deste ano)
     return (f"Data de hoje: {hoje.strftime('%d/%m/%Y')}. Mês atual: {hoje:%Y-%m}; "
-            f'"últimos 3 meses" = {(i - 2) // 12}-{(i - 2) % 12 + 1:02d} a {hoje:%Y-%m}.')
+            f'"últimos 3 meses" = {(i - 2) // 12}-{(i - 2) % 12 + 1:02d} a {hoje:%Y-%m}; '
+            f'mês sem ano = o último que já começou ("{MESES[m - 1]}" = {ano_do_mes(hoje, m)}-{m:02d}).')
 
 
 def _json_cru(texto: str) -> bool:
@@ -560,6 +565,28 @@ def _log_unsupported_claims(user_id: int, reply: str, messages: list[dict[str, A
         logger.debug("guarda de afirmações falhou — ignorado", exc_info=True)
 
 
+_CARDS_DAS_OCULTAS = ("contas", "hero", "fatura", "parcelas", "renda")  # onde está o dado das tools de OCULTAS_NO_APP
+
+
+def _tools_do_turno(user_id: int) -> list[dict[str, Any]]:
+    """Os `tools` desta volta: o `show_card` só oferece os cards que ainda cabem (`cards_livres`: sem os já mostrados nem os
+    que falharam) e sai se não sobra nenhum ou se as vagas acabaram; o dado vem das tools de texto. Sem filtro, a lista
+    de `schemas_para` como é; com filtro, cópia do schema (o global não muda)."""
+    tools = schemas_para(user_id, streaming.ativo())
+    i = next((i for i, t in enumerate(tools) if t["function"]["name"] == "show_card"), None)
+    if i is None:
+        return tools
+    enum = tools[i]["function"]["parameters"]["properties"]["card"]["enum"]
+    livres = cards_livres(user_id, enum)
+    if len(livres) == len(enum):
+        return tools
+    if not livres:
+        return [*tools[:i], *tools[i + 1:]]
+    schema = copy.deepcopy(tools[i])
+    schema["function"]["parameters"]["properties"]["card"]["enum"] = livres
+    return [*tools[:i], schema, *tools[i + 1:]]
+
+
 def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                    ia_primeiro: bool = False) -> str | None:
     # None só no modo ia_primeiro: prazo do turno estourado, ou mais de um
@@ -590,7 +617,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 client,
                 **completion_options(MODEL, MAX_TOKENS, TEMPERATURE, with_tools=True),
                 messages=messages,
-                tools=schemas_para(user_id, streaming.ativo()),
+                tools=_tools_do_turno(user_id),
                 # Última volta: sem tool, o modelo responde com o que já leu em vez de ERROR_MSG.
                 **({"tool_choice": "none"} if volta == MAX_TOOL_LOOPS - 1 else {}),
                 **por_requisicao,
@@ -815,10 +842,10 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             None,
         )
     if name in OCULTAS_NO_APP and streaming.ativo():  # o modelo imitou o histórico do WhatsApp
+        onde = cards_livres(user_id, (*_CARDS_DAS_OCULTAS, *(("metas", "caixinhas") if metas_do_turno(user_id) else ())))
         return (
-            json.dumps({"error": "indisponivel_no_app",
-                        "message": "Não existe no app. Use show_card (contas, hero, fatura, parcelas, renda"
-                                   + (", metas, caixinhas)." if metas_do_turno(user_id) else ").")},
+            json.dumps({"error": "indisponivel_no_app", "message": "Não existe no app. " + (
+                f"Use show_card ({', '.join(onde)})." if onde else f"O dado vem das tools de texto ({TOOLS_DE_TEXTO}...).")},
                        ensure_ascii=False),
             None,
         )

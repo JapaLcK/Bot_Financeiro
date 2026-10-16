@@ -6,6 +6,7 @@ metas; só quem a tem (K) vê `list_metas`, o card `metas` novo e o prompt de me
 prova o roteamento do modelo (isso é o harness real, no relato do PR): prova quem recebe o quê.
 """
 import json
+import re
 from decimal import Decimal
 
 import pytest
@@ -155,7 +156,7 @@ def test_o_texto_de_n_e_a_base_com_o_marcador_trocado_pela_caixinha():
     """N: nenhum byte de metas. Sem hash de texto: o prompt é o `_BASE` com o marcador trocado, e só."""
     base = sp._BASE.replace("@@CAIXINHAS@@\n", sp._CAIXINHAS)
     assert sp.prompt_do_usuario(False, False) == base
-    assert sp.prompt_do_usuario(False, True) == (base + sp.ADENDO_CARDS).replace("@@ANO@@", str(today_tz().year))
+    assert sp.prompt_do_usuario(False, True) == re.sub(r"@@ANO@@-(\d\d)", lambda m: f"{sp.ano_do_mes(today_tz(), int(m[1]))}-{m[1]}", base + sp.ADENDO_CARDS)
     assert "list_metas" not in base + sp.ADENDO_CARDS
 
 
