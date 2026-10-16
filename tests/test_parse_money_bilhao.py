@@ -224,6 +224,9 @@ def test_conversa_cartao_milhoes_nao_para_em_mil(texto, valor):
     # controles: resto sem multiplicador continua em reais
     ("10 mil e 500", 10500), ("1 mil e 500 reais", 1500), ("1 mil e 2 bicicletas", 1002),
     ("dez mil e quinhentos", 10500), ("dois mil e 500", 2500), ("cento e cinquenta mil e duzentos", 150200),
+    # ramo por extenso: o ponto do resto segue a regra do número comum (0.5 = meio, 1.500 = mil e quinhentos)
+    ("um milhão e 0.5 milhão", 1.5e6), ("um milhão e 0,5 milhão", 1.5e6), ("dois bilhões e 0.5 bilhão", 2.5e9),
+    ("dois mil e 1.500", 3500), ("um milhão e 1.5", 1000001.5), ("dois mil e 2.", 2002),
     # "bi" curto por extenso nunca vale (artigo + gíria), nem como resto; "bilhete" não é multiplicador
     ("dois mil e um bi", 2001), ("dois mil e um bilhete", 2001),
     # limites declarados, fora de escopo: "e meio" e a soma sem "e"

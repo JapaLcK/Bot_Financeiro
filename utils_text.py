@@ -918,7 +918,7 @@ def parse_money(text: str) -> float | None:
                 # o resto leva o próprio multiplicador: "dois bilhões e quinhentos milhões"
                 mr = _PT_MULT_VALOR[sm.group(4).lower()[:4]] if sm.group(4) else 1
                 if resto[0].isdigit():
-                    total += float(resto.replace(".", "").replace(",", ".")) * mr
+                    total += parse_money(resto) * mr  # mesma regra de ponto/vírgula do número comum
                 else:
                     r = _pt_words_to_int(resto)
                     if r is not None:
