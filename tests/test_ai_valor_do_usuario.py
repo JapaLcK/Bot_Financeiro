@@ -122,6 +122,13 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("gastei 2 no mercado", {200}, set()),
     ("1.200", {120000}, set()),                          # milhar, não multiplicador
     ("5k", {500}, set()),                                # limite conhecido, não muda
+    # extenso antes de marcador de tempo (não é substantivo contado)
+    ("gastei cinquenta ontem", {5000}, set()),
+    ("gastei vinte hoje", {2000}, set()),
+    ("paguei trinta anteontem", {3000}, set()),
+    ("gastei dez agora", {1000}, set()),
+    ("gastei quarenta amanhã", {4000}, set()),
+    ("comprei duas tvs", set(), {200}),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -203,6 +210,7 @@ def test_regra_da_ancora(uid_pro):
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 3000, "parcelas": 60}, "comprei 50 no nubank")[1] == "recusa_parcelas"
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "600 em 12x")[1] is None
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 300, "parcelas": 3}, "3 vezes de 100")[1] is None
+    assert _ancora(uid_pro, "add_credit_purchase", {"valor": 100, "parcelas": 3}, "3 vezes de 100")[1] == "recusa"  # 100 é a parcela
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "12 parcelas de 50")[1] is None
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 650, "parcelas": 13}, "12x de 50")[1] == "recusa_parcelas"
     # campo opcional sem âncora: descartado; obrigatório: recusa
@@ -619,9 +627,40 @@ def test_q3_12x_de_50_grava_12(uid_pro, monkeypatch):
     assert _credito(uid_pro) == 12
 
 
-def test_q4_valor_da_parcela_e_contagem_escritos_grava_3(uid_pro, monkeypatch):
-    _cartao_diz(uid_pro, monkeypatch, "comprei em 3x de 100 no nubank", 100, parcelas=3)
+def test_q4_total_derivado_de_3x_de_100_grava_3(uid_pro, monkeypatch):
+    _cartao_diz(uid_pro, monkeypatch, "comprei em 3x de 100 no nubank", 300, parcelas=3)
     assert _credito(uid_pro) == 3
+
+
+def test_q4b_valor_da_parcela_como_total_recusa_e_nao_grava(uid_pro, monkeypatch):  # P1 do Codex: 12 × 50 viraria R$ 50
+    r = _cartao_diz(uid_pro, monkeypatch, "geladeira 12x de 50 no nubank", 50, parcelas=12)
+    assert RECUSA in r and _credito(uid_pro) == 0, r   # texto de "valor": a contagem está escrita, o total não
+
+
+@pytest.mark.parametrize("fala,valor,parcelas,ancora", [
+    ("12x de 50", 50, 12, False),            # 50 é a parcela
+    ("12x de 50", 600, 12, True),            # 12 × 50
+    ("12 x de R$ 50", 50, 12, False),
+    ("12 vezes de 50", 50, 12, False),
+    ("em 12x de 50,90", 50.9, 12, False),
+    ("em 12x de 50,90", 610.8, 12, True),
+    ("12x de R$ 1.234,56", 1234.56, 12, False),
+    ("10x de 2 mil", 2000, 10, False),
+    ("10x de 2 mil", 20000, 10, True),
+    ("comprei 600 em 12x", 600, 12, True),   # total explícito
+    ("600 em 12x de 50", 600, 12, True),     # total e parcela juntos: os dois ancoram
+    ("600 em 12x de 50", 50, 12, False),
+    ("12x de 50 total 600", 600, 12, True),
+    ("12x de 50", 50, 1, True),              # sem parcelas>1 não há o que desfazer
+    ("12x de 50", 50, None, True),
+])
+def test_q8_valor_de_parcela_nao_ancora_o_total(uid_pro, fala, valor, parcelas, ancora):
+    args = {"valor": valor} | ({"parcelas": parcelas} if parcelas else {})
+    assert (_ancora(uid_pro, "add_credit_purchase", args, fala)[1] is None) is ancora
+
+
+def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
+    assert _ancora(uid_pro, "add_launch", {"valor": 50, "parcelas": 12}, "12x de 50")[1] is None
 
 
 def test_q5_contagem_diferente_da_escrita_recusa(uid_pro, monkeypatch):

@@ -89,7 +89,7 @@ _REAIS = ("real", "reais", "conto", "contos", "pila", "pilas")
 _CENTAVOS = ("centavo", "centavos")
 _CONECTORES = frozenset(
     "de do da dos das no na nos nas num numa em pra pro para por pelo pela pelos pelas com sem e ou a ao aos "
-    "à às até ate só so mais menos".split())
+    "à às até ate só so mais menos ontem anteontem hoje amanhã amanha agora já ja depois antes".split())
 _ADMITE = frozenset(_REAIS + _CENTAVOS) | _CONECTORES
 
 
@@ -109,6 +109,14 @@ _MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
 # multiplicador grava 1000x menos. "1.200" (milhar) e "5k" não casam. ponytail: "2 mil e 500" mantém o 500 como
 # R$ 500 (já ancorava); o composto 2.500 vem do `_extract_valor`.
 _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b", re.IGNORECASE)
+
+
+# "12x de 50": o valor depois do "de" é da PARCELA e o `valor` das tools de cartão é o TOTAL. Esse trecho
+# não ancora o total sozinho (só `parcelas × valor lido` ancora). ponytail: só contagem em dígitos
+# ("doze vezes de 50" por extenso segue ancorando o 50 sozinho).
+_PARCELA_RE = re.compile(
+    r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?\d[\d.,]*"
+    r"(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?", re.IGNORECASE)
 
 
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
@@ -196,7 +204,9 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     lidos = _centavos_lidos(textos)
     tem_parcelas = "parcelas" in tool.schema["function"]["parameters"].get("properties", {})
     p, escrita = _parcelas(args.get("parcelas") if tem_parcelas else None, textos)
-    if escrita and (v in lidos or (p > 1 and any(v == c * p for c in lidos))):
+    # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total
+    fora = _centavos_lidos([_PARCELA_RE.sub(" ", t) for t in textos]) if p > 1 else lidos
+    if escrita and (v in fora or (p > 1 and any(v == c * p for c in lidos))):
         return args, None
     acao = "recusa" if campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",
