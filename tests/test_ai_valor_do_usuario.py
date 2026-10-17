@@ -401,7 +401,11 @@ def test_texto_sem_valor_nao_le_nada(texto):
     ("boleto de 150 para 20.10", {15000}, {2010}), ("paguei 10 reais para 20.10", {1000}, {2010}),
     ("gastei 12.10 no mercado", {1210}, set()), ("paguei 49.90", {4990}, set()), ("para 49.90 reais", {4990}, set()),
     ("para 12.10 reais", {1210}, set()), ("para 12.10 conto", {1210}, set()),
-    ("para 20.100", {2010000}, set()), ("para 32.10", {3210}, set()), ("para 20.13", {2013}, set()),   # dia/mês fora do calendário ou milhar
+    ("para 20.100", {2010000}, set()), ("para 32.10", {3210}, set()), ("para 20.13", {2013}, set()),   # dia/mês fora do calendário ou milhar    # unidades métricas comuns (Codex): peso, comprimento, bateria, ângulo; o \b poupa "gratis"/"cmpra"; o dinheiro ao lado segue lido
+    ("cabo de 50 cm", set(), {5000}), ("500gr de queijo", set(), {50000}), ("500 gramas", set(), {50000}), ("2 quilos", set(), {200}),
+    ("bateria 5000 mAh", set(), {500000}), ("50 graus", set(), {5000}), ("100 mg", set(), {10000}), ("40 cm2", set(), {4000, 200}),
+    ("motor de 150 cv", set(), {15000}), ("tela de 5 mm", set(), {500}), ("2 kilos", set(), {200}),
+    ("paguei 50 gratis", {5000}, set()), ("gastei 30 cmpra", {3000}, set()), ("boleto de 150 cabo de 50 cm", {15000}, {5000}),
 ])
 def test_quantidade_duracao_medida_nao_ancora(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -1184,6 +1188,12 @@ def test_q20b_mensagens_separadas_mesma_regra(uid_pro, valor, parcelas, ancora):
     ("12x de 50, sem juros", "50,"), ("12x de 50 cada", "50"), ("12x de 50 no cartão", "50"),
     ("12 parcelas de 50 hamburguer", "50"), ("12x de 50 dia 10", "50"), ("12x de 2 mil", "2 mil"),
     ("12x de 30 reais e 50 centavos", "30 reais e 50 centavos"),
+    # medida métrica comum (Codex): "12x de 50 cm" é quantidade
+    ("12x de 50 cm", None), ("12x de 500 gr", None), ("12x de 2 quilos", None), ("12x de 5000 mAh", None),
+    # taxa (Codex): o número depois de "juros de"/"de" e seguido de %, "por cento" ou "ao mês/ano" é juros, não parcela
+    ("12x com juros de 5%", None), ("12x com juros de 5 por cento", None), ("12x de 2,5 ao mês", None), ("12x com juros de 2,5 a.m.", None),
+    ("12x de 3 ao ano", None), ("12x com juros de 12,5 a.a.", None), ("12x de 50 pct", None),
+    ("12x de 50 sem juros, juros de 5%", "50"), ("12x de 50 no cartão", "50"),
 ])
 def test_q21_valor_de_parcela_com_medida_nao_e_parcela(fala, captura):
     assert [v for _, v in _capturas_parcela(fala)] == ([captura] if captura else [])
@@ -1195,6 +1205,25 @@ def test_q21_valor_de_parcela_com_medida_nao_e_parcela(fala, captura):
 ])
 def test_q21b_total_derivado_nao_atravessa_medida(uid_pro, fala, valor, ancora):
     assert (_ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": 12}, fala)[1] is None) is ancora
+
+
+@pytest.mark.parametrize("fala,valor,ancora", [   # Codex: "juros de 5%" não é a parcela (valor=60 = 12 × 5 passava)
+    ("comprei a TV em 12x com juros de 5%", 60, False), ("comprei a TV em 12x com juros de 5 por cento", 60, False),
+    ("comprei a TV em 12x com juros de 2,5 ao mês", 30, False),
+    ("comprei a TV em 12x de 50 com juros de 5%", 600, True), ("comprei a TV em 12x de 50 com juros de 5%", 60, False),
+])
+def test_q21c_taxa_nao_deriva_o_total(uid_pro, fala, valor, ancora):
+    assert (_ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": 12}, fala)[1] is None) is ancora
+
+
+def test_q21d_conversa_taxa_nao_grava(uid_pro, monkeypatch):
+    r = _cartao_diz(uid_pro, monkeypatch, "comprei a TV em 12x com juros de 5% no nubank", 60, parcelas=12)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+
+
+def test_q21e_conversa_medida_metrica_nao_grava(uid_pro, monkeypatch):
+    r = _cartao_diz(uid_pro, monkeypatch, "comprei um cabo de 50 cm no nubank", 50)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
 
 
 def test_q21c_conversa_12x_de_50ml_nao_grava_600(uid_pro, monkeypatch):   # Codex

@@ -43,9 +43,10 @@ _MENSAGENS = 3
 _MES = (r"\b(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro"
         r"|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b")
 _ANO = r"(?:\s+de\s+\d{2,4}\b|\s+20\d\d\b)"
+_TAXA = r"(?:%|por\s*cent(?:o)?\b|pct\b)"  # taxa: o número antes dela não é valor (nem de parcela: "12x com juros de 5%")
 _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também ignora ("em 12/10" é data; "em 12 meses" segue sendo 12x)
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
-    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*(?:%|por\s*cent(?:o)?\b|pct\b)"
+    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*" + _TAXA +
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
     # ano primeiro com barra/ponto só com 20dd ("2026/10/20", "2026.10.20"): o dd/mm acima casaria o rabo "10/20" e sobraria o ano
     r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,/-])20\d\d[/.]\d{1,2}[/.]\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
@@ -77,6 +78,8 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
 _MEDIDA_PREFIXO = r"(?<![\d.,])\d+(?:[.,]\d+)*\s*"
 _MEDIDA = (r"dias?|semanas?|anos?|horas?|hrs?|hs|h|minutos?|min|km|kg|g|ml|l|litros?"
            r"|metros?|m2|m²|unidades?|un|pessoas?"
+           # peso/comprimento/bateria/potência: "cabo de 50 cm", "500gr de queijo", "2000 mAh"; o \b poupa "50 gratis"
+           r"|[cm]m[2²]?|mg|grs?|gramas?|quilos?|kilos?|mah|graus?|cv"
            # armazenamento/velocidade/frequência/tela: "SSD de 500 GB", "internet 600 Mbps", "plano de 600 mega", "TV de 55 polegadas". ponytail: "100 mega sena" mascara (fail-closed)
            r"|[kmg]bps|[kmgt]b|[mg]hz|hz|megas?|gigas?|teras?|watts?|polegadas?|pol")
 _NAO_VALOR_RE = re.compile(
@@ -169,7 +172,9 @@ _PARCELA_RE = re.compile(
     # `(?![\d.,])` (sem recuar para "5" de "50ml") e o lookahead final: "12x de 50ml de perfume" / "12x de 3 kg" é quantidade, não valor de parcela
     # ("50 reais"/"50 centavos"/"50 no cartão" seguem). Mesmo `(?!\s*\d)` do _NAO_VALOR_RE: "12x de 50 dia 10" é parcela + data.
     rf"(\d[\d.,]*(?![\d.,])(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*(?:\d+|{PT_PHRASE})\s*centavos?\b)?)"
-    rf"(?!\s*(?:{_MEDIDA}|m[eê]s|meses)\b(?!\s*\d))", re.IGNORECASE)
+    rf"(?!\s*(?:{_MEDIDA}|m[eê]s|meses)\b(?!\s*\d))"
+    # taxa: "12x com juros de 5%", "12x de 2,5 ao mês" é juros, não parcela. ponytail: "12x de 50 ao mês" também sem captura (fail-closed)
+    rf"(?!\s*(?:{_TAXA}|ao\s+m[eê]s\b|ao\s+ano\b|a\.m\.|a\.a\.))", re.IGNORECASE)
 
 
 def _capturas_parcela(t: str):
