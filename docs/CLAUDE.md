@@ -1736,6 +1736,8 @@ que resolve a pendência antes da cota. Sem IA no plano (v1 sem Pro, downgrade),
 de sempre: pendência descartada e mensagem de upgrade. Qualquer outro texto com a cota
 zerada também segue como antes: aviso de cota e pendência descartada.
 
+**Feedback 👍/👎 do chat do app (`POST /ai/messages/{id}/feedback`).** Colunas em `ai_messages`: `feedback` (1/-1/NULL), `feedback_motivo` e `feedback_texto` (nulas, sem CHECK: a borda valida). Corpo: `{nota, motivo?, texto?}`; `motivo` é uma chave de `MOTIVOS` (`db/ai_feedback.py`, fonte única; o `Literal` do `FeedbackBody` é derivado dele), só com `nota == -1`; `texto` só com `motivo == "outro"`, strip, vazio vira NULL, NUL/surrogate saneados por `limpa_para_pg`, mais de 500 caracteres é 422 (não trunca). Violação = 422 sem gravar (o handler único de 422 não ecoa o corpo). `set_feedback` grava o ESTADO INTEIRO (`feedback`, motivo e texto no mesmo UPDATE): 👍, `null` ou 👎 sem motivo zeram motivo e texto. O build 31 do app manda só `{nota}` e segue valendo (200). Isolamento como antes: `WHERE id AND user_id AND role='assistant'`, o mesmo 404 para os três casos.
+
 **Xerife, alerta de anomalia explicado (PL-04 PR A).** A regra, a amostra e o texto moram em
 `core/services/anomalia.py` (puro, Decimal; `AMOSTRA_MINIMA` é a única constante da regra de amostra:
 hoje 5 lançamentos, `dias=0`) e o SQL em `db/anomalias.py` (`listar_candidatos_xerife`). Compara UM
