@@ -22,7 +22,7 @@ import db
 from core.observability import log_system_event_sync
 from core.services.ai_guard import _MASCARA_NAO_MONETARIA_RE, _NAO_MONETARIO_DO_USUARIO_RE, collect_evidence
 from parsers import _extract_valor, _words_to_number
-from utils_text import extract_parcelas
+from utils_text import PT_PHRASE, extract_parcelas
 
 from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 
@@ -41,7 +41,11 @@ _MENSAGENS = 3
 _NAO_VALOR_RE = re.compile(
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
-    r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}",
+    r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}"
+    # quantidade/duração/medida: "daqui 10 dias", "5 km", "3 pessoas". Nunca mil/milhão ("2 mil") nem real/conto/centavo.
+    # Sem outro dígito logo depois: "paguei 300 dia 20" é dinheiro + data. ponytail: "1500 mês" (sem "por/ao") mascara.
+    r"|(?<![\d.,])\d+(?:[.,]\d+)*\s*(?:dias?|semanas?|m[eê]s|meses|anos?|horas?|h|minutos?|min|km|kg|g|ml|l|litros?"
+    r"|metros?|m2|m²|unidades?|un|pessoas?)\b(?!\s*\d)",
     re.IGNORECASE,
 )
 
@@ -111,12 +115,14 @@ _MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
 _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b", re.IGNORECASE)
 
 
-# "12x de 50": o valor depois do "de" é da PARCELA e o `valor` das tools de cartão é o TOTAL. Esse trecho
-# não ancora o total sozinho (só `parcelas × valor lido` ancora). ponytail: só contagem em dígitos
-# ("doze vezes de 50" por extenso segue ancorando o 50 sozinho).
+# "12x de 50" / "doze vezes de cinquenta": o valor depois do "de" é da PARCELA e o `valor` das tools de cartão é o
+# TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora (um
+# produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). Contagem e valor em
+# dígito ou por extenso; o grupo 1 é o valor. ponytail: "dez vezes de 2 mil e quinhentos" (dígito + "e <extenso>") não compõe.
+_MULT_PT = r"(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)"
 _PARCELA_RE = re.compile(
-    r"\b\d+\s*(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?\d[\d.,]*"
-    r"(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?", re.IGNORECASE)
+    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?"
+    rf"(\d[\d.,]*(?:\s*{_MULT_PT}\b)?|(?:{PT_PHRASE})(?:\s+{_MULT_PT}\b(?:\s+e\s+(?:{PT_PHRASE}))?)?)", re.IGNORECASE)
 
 
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
@@ -204,9 +210,12 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     lidos = _centavos_lidos(textos)
     tem_parcelas = "parcelas" in tool.schema["function"]["parameters"].get("properties", {})
     p, escrita = _parcelas(args.get("parcelas") if tem_parcelas else None, textos)
-    # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total
-    fora = _centavos_lidos([_PARCELA_RE.sub(" ", t) for t in textos]) if p > 1 else lidos
-    if escrita and (v in fora or (p > 1 and any(v == c * p for c in lidos))):
+    # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total; só `parcelas × esse valor` é
+    fora, de_parcela = lidos, set()
+    if p > 1:
+        fora = _centavos_lidos([_PARCELA_RE.sub(" ", t) for t in textos])
+        de_parcela = _centavos_lidos([m[1].rstrip(".,") for t in textos for m in _PARCELA_RE.finditer(t)])
+    if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None
     acao = "recusa" if campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",

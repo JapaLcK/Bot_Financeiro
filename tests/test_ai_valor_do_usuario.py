@@ -188,6 +188,57 @@ def test_texto_sem_valor_nao_le_nada(texto):
     assert _centavos_lidos([texto]) == set()
 
 
+# Classe "número que é quantidade/duração/medida, não dinheiro": não ancora; o valor ao lado segue lido.
+@pytest.mark.parametrize("texto,tem,nao_tem", [
+    ("daqui 10 dias", set(), {1000}),
+    ("em 1 dia", set(), {100}),
+    ("daqui 2 semanas", set(), {200}),
+    ("daqui a 3 meses", set(), {300}),
+    ("daqui 3 mes", set(), {300}),
+    ("há 2 anos", set(), {200}),
+    ("daqui 5 horas", set(), {500}),
+    ("em 2h", set(), {200}),
+    ("30 minutos", set(), {3000}),
+    ("45 min", set(), {4500}),
+    ("rodei 12 km", set(), {1200}),
+    ("rodei 12,5 km", set(), {1250, 1200}),
+    ("comprei 2 kg", set(), {200}),
+    ("500 g de arroz", set(), {50000}),
+    ("250 ml", set(), {25000}),
+    ("10 l de gasolina", set(), {1000}),
+    ("2,5 litros", set(), {250}),
+    ("3 metros", set(), {300}),
+    ("40 m2", set(), {4000}),
+    ("40 m²", set(), {4000}),
+    ("2 unidades", set(), {200}),
+    ("3 un", set(), {300}),
+    ("para 4 pessoas", set(), {400}),
+    ("1.500 km", set(), {150000, 500}),
+    # o dinheiro ao lado segue ancorando
+    ("boleto de 150 para daqui 10 dias", {15000}, {1000}),
+    ("gastei 80 em 4 pessoas", {8000}, {400}),
+    ("gastei 30 de gasolina, 10 l", {3000}, {1000}),
+    ("paguei 300 dia 20", {30000}, {2000}),
+    # o que NÃO pode sumir
+    ("50 mercado", {5000}, set()),
+    ("77,90 mercado", {7790}, set()),
+    ("gastei 2 mil", {200000}, set()),
+    ("gastei 2 milhões", {200000000}, set()),
+    ("gastei 10 na farmácia", {1000}, set()),
+    ("gastei 10 reais", {1000}, set()),
+    ("gastei 10 conto", {1000}, set()),
+    ("gastei 10 pila", {1000}, set()),
+    ("gastei 50 centavos", {50}, {5000}),
+    ("gastei 100 gasolina", {10000}, set()),     # "g" só vale como palavra inteira
+    ("gastei 100 lanche", {10000}, set()),       # idem "l"
+    ("gastei 100 mercado", {10000}, set()),      # idem "m"
+    ("gastei 100 hamburguer", {10000}, set()),   # idem "h"
+])
+def test_quantidade_duracao_medida_nao_ancora(texto, tem, nao_tem):
+    lidos = _centavos_lidos([texto])
+    assert tem <= lidos and not (nao_tem & lidos), lidos
+
+
 def _ancora(uid, nome, args, fala):
     tok = CURRENT_USER_MESSAGE.set(fala)
     try:
@@ -474,6 +525,21 @@ def test_n5_conta_variavel_amount_inventado_vira_pergunta(uid_pro, monkeypatch):
     assert db.get_pending_action(uid_pro)["action_type"] == "bill_amount_expected"
 
 
+def _boletos(uid) -> int:
+    return len(db.bills.list_bills(uid, include_paid=False))
+
+
+def test_n8_boleto_daqui_10_dias_nao_grava_10_reais(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 10, "days": 10})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "days": 10})))
+    r = runner.chat(uid_pro, "anota um boleto da internet para daqui 10 dias", platform="whatsapp")   # o 10 são dias
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet de 150 para daqui 10 dias", platform="whatsapp")          # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 # ── (3) P: o caminho legítimo continua gravando ─────────────────────────────
 
 def test_p1_gastei_50_no_mercado(uid_pro, monkeypatch):
@@ -663,6 +729,53 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     assert _ancora(uid_pro, "add_launch", {"valor": 50, "parcelas": 12}, "12x de 50")[1] is None
 
 
+# Classe "valor por parcela × total": `valor` é o TOTAL. Só `parcelas × valor-de-parcela escrito` o deriva;
+# contagem e valor em dígito ou por extenso. (ancora = a âncora aceita o `valor`.)
+@pytest.mark.parametrize("fala,valor,parcelas,ancora", [
+    ("comprei por 50 em 12x", 50, 12, True),        # o 50 era o total
+    ("comprei por 50 em 12x", 600, 12, False),      # 12 × 50 inventado: 50 não é valor de parcela
+    ("parcelei 50 em 12", 600, 12, False),
+    ("comprei 600 em 12x", 600, 12, True),
+    ("600 em 12x de 50", 600, 12, True),
+    ("600 em 12x de 50", 50, 12, False),
+    ("doze vezes de cinquenta", 600, 12, True),     # contagem e valor por extenso
+    ("doze vezes de cinquenta", 50, 12, False),     # antes aceitava e gravava R$ 50 em vez de 600
+    ("comprei tv em doze vezes de 50", 50, 12, False),   # era R1 caso 4 (aceito); agora recusado
+    ("comprei tv em doze vezes de 50", 600, 12, True),
+    ("12 vezes de cinquenta", 600, 12, True),       # contagem em dígito, valor por extenso
+    ("12 vezes de cinquenta", 50, 12, False),
+    ("doze vezes de 50", 600, 12, True),            # contagem por extenso, valor em dígito
+    ("em doze parcelas de cinquenta e cinco", 660, 12, True),
+    ("em doze parcelas de cinquenta e cinco", 55, 12, False),
+    ("10x de dois mil", 20000, 10, True),
+    ("10x de dois mil", 2000, 10, False),
+    ("dez vezes de dois milhões", 20000000, 10, True),
+    ("dez vezes de dois milhões", 2000000, 10, False),
+    ("12x de 50.", 600, 12, True),                  # ponto final de frase
+    ("12x de 50.", 50, 12, False),
+    ("12x de 50 reais", 50, 12, False),
+])
+def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
+    args = {"valor": valor, "parcelas": parcelas}
+    assert (_ancora(uid_pro, "add_credit_purchase", args, fala)[1] is None) is ancora
+
+
+@pytest.mark.parametrize("fala,inventado,escrito", [
+    ("comprei por 50 em 12x no nubank", 600, 50),          # 50 é o total
+    ("geladeira doze vezes de cinquenta no nubank", 50, 600),   # 50 é a parcela: o total é 12 × 50
+])
+def test_q9b_conversa_total_ou_parcela(uid_pro, monkeypatch, fala, inventado, escrito):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(inventado, parcelas=12), _compra_cartao(escrito, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)   # a janela da conversa não ancora o 2º envio
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
 def test_q5_contagem_diferente_da_escrita_recusa(uid_pro, monkeypatch):
     r = _cartao_diz(uid_pro, monkeypatch, "comprei 50 em 12x no nubank", 50, parcelas=6)
     assert RECUSA_PARCELAS in r and _credito(uid_pro) == 0, r
@@ -677,8 +790,7 @@ def test_q6_parcelas_lixo_no_cartao_nao_estoura(uid_pro, monkeypatch, lixo):
 @pytest.mark.parametrize("valor,parcelas,fala", [
     (600, 12, "parcelei 600 em 12"),
     (1200, 10, "tv 1200 parcelado em 10"),
-    (600, 12, "comprei tv em doze vezes de 50"),
-    (50, 12, "comprei tv em doze vezes de 50"),
+    (600, 12, "comprei tv em doze vezes de 50"),   # (50 aqui era aceito; o limite caiu: ver test_q9)
 ])
 def test_r1_contagem_escrita_sem_unidade_ou_por_extenso_ancora(uid_pro, valor, parcelas, fala):  # B1 do Manager
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": parcelas}, fala)[1] is None
