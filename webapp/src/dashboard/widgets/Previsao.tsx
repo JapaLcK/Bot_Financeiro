@@ -12,6 +12,7 @@ import { Frame } from "../parts/Frame";
 import { Seg } from "../parts/Seg";
 import { MotivosPrevisao, Selos } from "../parts/Selos";
 import { Compromissos, ConvitePro, ddmm, valorOc } from "./Compromissos";
+import { ReceitasDoBanco } from "./ReceitasDoBanco";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Dias = 30 | 60 | 90;
@@ -176,6 +177,7 @@ export function PrevisaoPainel() {
   const d = p.d;
   return (
     <>
+      {d && <ReceitasDoBanco lista={d.receitas_do_banco ?? []} />}
       <div className="panel span-12"><PrevisaoHero p={p} id="previsao" /></div>
       {d && (
         <>

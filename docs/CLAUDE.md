@@ -567,6 +567,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
+  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (topo; não no card do Resumo), lê
+  `receitas_do_banco` e faz Sim/Não/Desfazer em `POST /api/v2/previsao/receita`. Sem atualização otimista: a mutação só termina
+  (e destrava os botões) depois de reler toda `["previsao", …]` ativa, porque a resposta do POST é a do menor horizonte. Resposta
+  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Se o Desfazer esvazia a lista, a caixa fica com
+  "Nenhuma receita a confirmar." para o anúncio e o foco. Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
+  retries a lista fica a de antes do POST, com Sim/Não ativos e o aviso de previsão antiga; (b) POST falha e a releitura não
+  mostra a marca: alerta "Não deu para salvar", nada anunciado. Só conta como gravado quem volta na lista com o status esperado:
+  resposta perdida de uma linha que sumiu da lista (ou lista vazia, p.ex. banco fora do ar) mostra "Não deu para salvar" mesmo que
+  tenha gravado, e nenhum dado se perde (falso erro é menos grave que falso sucesso). Também aceitos: (c) erro numa caixa sem linha
+  para tentar de novo (pendente única que some, 404 e releitura vazia: a caixa fica com o alerta, sem botões); (d) trocar o
+  horizonte com o POST no ar desmonta a caixa e o erro não aparece, mas a lista volta com Sim/Não ativos; (e) em lista longa,
+  `preventScroll` deixa o foco no título fora da vista, e o anúncio sai pela região viva; GET de releitura pendurado mantém os
+  botões travados até o navegador cortar a conexão; sem rede a mutação falha na hora (`networkMode: "always"`). O mesmo padrão de
+  `useMutation` em `Subscriptions.tsx` (sem `networkMode`, foco movido sem checar onde o usuário está) não foi tocado. Servidor
+  sem o campo (deploy fora de ordem): a caixa não aparece.
   **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
   bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
   `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), **só despesa**,
@@ -622,8 +637,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `{chave, resposta: "sim"|"nao"|"desfazer"}`, mesmo gate `forecast` da leitura e CSRF do pai: a chave tem de estar em
   `receitas_do_banco` do PRÓPRIO usuário, senão 404 `not_found` e nada é gravado (resposta fora das três = 422); só o `desfazer`
   também vale para a marca `extrato#…` do próprio usuário que saiu da lista (consulta por `user_id`; chave de outro usuário segue 404);
-  devolve a `Previsao` do menor horizonte permitido, com os detalhes do plano. Sem tela ainda (PR 2a, `/painel`; 2b, app;
-  3, WhatsApp); sem o Sim ninguém confirma, mas hoje a regra acha receita só no dono. Limites: uma receita por pagador;
+  devolve a `Previsao` do menor horizonte permitido, com os detalhes do plano. Tela no `/painel` (PR 2a, `ReceitasDoBanco.tsx`);
+  sem tela ainda no app (2b) e no WhatsApp (3); sem o Sim ninguém confirma, mas hoje a regra acha receita só no dono. Limites: uma receita por pagador;
   a receita confirmada ou negada que deixa de ser detectada some da lista (sem valor nem nome a mostrar) e a marca fica na tabela (hash, sem documento; sai com a conta e na exportação de privacidade, em `marcacoes_assinaturas`), mas o `desfazer` por chave continua funcionando;
   **a confirmação é por PAGADOR, não por valor**: confirmar o salário de um CPF faz qualquer cadeia futura desse CPF (ex.: 3 reembolsos de R$ 50) entrar sem perguntar, até o usuário desfazer;
   **`nome` vem do pagador (`payer.name`) ou da descrição, texto livre de terceiro: a tela (PR 2a, 2b, 3) tem de escapar**; o POST lê o snapshot duas vezes (validação e resposta), aceito.
