@@ -13,8 +13,10 @@ Cobre:
 """
 from __future__ import annotations
 
+import asyncio
 import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +27,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
+from frontend.routes import shared
 
 
 _CSRF_TOKEN = "test-csrf-token-billing"
@@ -600,11 +603,44 @@ def test_checkout_concorrente_reutiliza_uma_unica_sessao(user_id, monkeypatch, c
     monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_abc")
     fake = _patch_stripe(monkeypatch)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        responses = list(executor.map(
-            lambda client: client.post("/billing/create-checkout", json=corpo, headers=_CSRF_HEADERS),
-            (client_a, client_b),
-        ))
+    # O teste só discrimina o `_billing_user_lock` com 2 conexões no pool e uma janela de corrida.
+    # Um pool aquecido por `asyncio.run(_get_db_pool())` simples fica com 1 conexão (min_size=1) e
+    # serializa os pedidos ANTES do lock, deixando verde até um lock que segura a conexão. Por isso
+    # cresce o pool (2 simultâneas, loop vivo) e o `Session.list` dorme 0,3 s depois de olhar (#829).
+    lista = fake.checkout.Session.list  # foto ANTES de dormir: o pedido que chega 0,3 s depois ainda vê vazio
+
+    def lista_lenta(**kw):
+        r = lista(**kw)
+        time.sleep(0.3)
+        return r
+    fake.checkout.Session.list = staticmethod(lista_lenta)
+    shared.reset_db_pool()  # pool de teste anterior (loop morto) não cresce; recomeça num loop vivo
+
+    async def _aquece():
+        pool = await shared._get_db_pool()
+        async with pool.connection(), pool.connection():  # 2 simultâneas: o pool cresce
+            pass
+    asyncio.run(_aquece())
+
+    responses = [None, None]
+    erros = []
+
+    def _pede(i, client):
+        try:
+            responses[i] = client.post("/billing/create-checkout", json=corpo, headers=_CSRF_HEADERS)
+        except BaseException as exc:  # a causa real (inclui SystemExit/CancelledError), em vez de AttributeError sobre None
+            erros.append(exc)
+    # Threads daemon com `join(timeout)`: pendurar vira falha em 30 s, e não um pytest preso
+    # até o timeout do job (o `with ThreadPoolExecutor` esperaria a thread presa para sempre).
+    threads = [threading.Thread(target=_pede, args=(i, c), daemon=True)
+               for i, c in enumerate((client_a, client_b))]
+    for t in threads:
+        t.start()
+    prazo = time.monotonic() + 30
+    for t in threads:
+        t.join(timeout=max(0, prazo - time.monotonic()))
+    assert not any(t.is_alive() for t in threads), "pendurou: sem resposta em 30 s (suspeita: lock do pool, #829)"
+    assert not erros, f"client.post lançou na thread: {erros!r}"
 
     assert [response.status_code for response in responses] == [200, 200]
     assert responses[0].json()[chave] == responses[1].json()[chave]
