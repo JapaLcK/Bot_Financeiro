@@ -121,6 +121,9 @@ NOT_UNDERSTOOD_MSG = (
     "Ou digite *ajuda* pra ver tudo que eu faço."
 )
 
+_ESCRITA_DE_META_MSG = ("Pra criar, mudar ou apagar meta é comigo pela IA ou no painel: "
+                        "pigbankai.com/painel (seção Metas). Me manda o pedido de novo.")
+
 _UNAMBIGUOUS_INVESTMENT_ASSET_PATTERN = (
     r"(?:investimento|investimentos|bitcoin|bitcoins|"
     r"ethereum|ether|solana|cardano|dogecoin|litecoin|"
@@ -456,8 +459,8 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 #   pockets.list         "caixinhas"             1.0
 #   report.monthly       "resumo do mes"         1.0
 #
-# `metas.list` ("minhas metas", PR C2) entrou depois, e SÓ vale onde o `classify` recebe o
-# `user_id` (ele devolve `metas.list` apenas para quem tem a chave do /painel novo): a porta 2
+# `metas.list` ("minhas metas", PR C2) e `metas.escrita` ("apaga a meta X", PR C4) entraram depois, e SÓ valem onde o `classify` recebe o
+# `user_id` (ele devolve `metas.*` apenas para quem tem a chave do /painel novo): a porta 2
 # (`_clarification_abandonada`), a porta 4 (`wa_runtime`) e as cinco pendências de cartão. As
 # portas 1 e 3 chamam o oráculo sem `user_id` (ou nem o chamam) e seguem como antes das metas.
 #
@@ -499,7 +502,7 @@ def _should_redirect_launches_list_to_help(text: str) -> bool:
 # fila não é apagada).
 ABANDONA = {
     "balance.check", "launches.list", "launches.delete",
-    "launches.spend_query", "pockets.list", "report.monthly", "metas.list",
+    "launches.spend_query", "pockets.list", "report.monthly", "metas.list", "metas.escrita",
 }
 
 # Comandos que NÃO carregam quantidade. Único abandono NOVO do #281, e o único
@@ -539,7 +542,7 @@ def abandona_pergunta_de_valor(text: str, user_id: int | None = None) -> bool:
       em `out_of_scope 0.4` (tier 2) — nenhum deles está no `ABANDONA`, então
       nunca abandonam nada, que é exatamente o comportamento da `main`.
 
-    `user_id` só serve ao `metas.list` ("minhas metas", C2): sem ele o `classify` não liga essa
+    `user_id` só serve ao `metas.list` ("minhas metas", C2) e ao `metas.escrita` (C4): sem ele o `classify` não liga essa
     regra (que lê a conta). Hoje só a porta 4 o passa.
     """
     return classify((text or "").strip(), user_id=user_id, allow_ai=False).intent in ABANDONA
@@ -641,7 +644,7 @@ def abandona_pergunta_de_credito(text: str, user_id: int | None = None) -> bool:
     `abandona_pergunta_de_valor` acima. Custo ~19 µs, e só quando uma das cinco
     pendências está viva.
 
-    `user_id` só serve ao `metas.list` ("minhas metas", C2): sem ele o `classify` não liga essa
+    `user_id` só serve ao `metas.list` ("minhas metas", C2) e ao `metas.escrita` (C4): sem ele o `classify` não liga essa
     regra. Dentro do `_classify_llm_call` ele nunca é usado (inalcançável com `allow_ai=False`);
     o `abandona_pergunta_de_valor` o omite por isso.
     """
@@ -1373,6 +1376,11 @@ def _execute(intent: str, user_id: int, text: str, entities: dict, platform: str
     if intent == "metas.list":
         return metas_conversa.texto_whatsapp(user_id) if _metas_ligadas(user_id) else h_pockets.list_pockets(user_id)
 
+    # --- escrita de meta (C4): quem escreve é a IA (`create_meta`/`edit_meta`/`delete_meta`). Aqui só se
+    # chega quando ela não atendeu (sem IA/cota) ou a frase abandonou uma pendência: nada é movido ---
+    if intent == "metas.escrita":
+        return _ESCRITA_DE_META_MSG if _metas_ligadas(user_id) else NOT_UNDERSTOOD_MSG
+
     if intent == "pockets.create":
         name = entities.get("name") or ""
         return h_pockets.create(user_id, name)
@@ -1744,7 +1752,9 @@ def _clarification_abandonada(clarif: dict, text: str, user_id: int) -> str:
         # "listar metas" LISTA e abandona a pergunta, nada é movido (leitura não mexe em dinheiro).
         if _eh_nome_do_catalogo(resposta, _alvos_existentes(user_id, intent)):
             return "resolve"
-    return "abandona" if intent_da_resposta in ABANDONA else "abandona_avisa"
+    # `metas.escrita` protege a pergunta (está no ABANDONA) mas ANUNCIA que a descartou: é um pedido de escrita,
+    # e a pergunta que morre estava na tela; o `metas.list` e os de leitura seguem calados.
+    return "abandona" if intent_da_resposta in ABANDONA and intent_da_resposta != "metas.escrita" else "abandona_avisa"
 
 
 _SO_NUMERO_RE = re.compile(r"[\d.,\s]+")

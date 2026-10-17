@@ -3,7 +3,7 @@ core/services/ai_chat/tools/metas.py — `list_metas`: as metas e a reserva de e
 
 Meta é objetivo sobre o dinheiro do BANCO (Open Finance); não guarda dinheiro e não é caixinha
 (`pockets.py`, o cofrinho antigo). Só quem tem a chave do /painel novo (`metas_ligadas`, P1-b)
-lê metas: para os demais NADA daqui chega ao modelo, nem o schema (`schemas_com_metas`), e
+lê e escreve metas (`metas_escrita.py`): para os demais NADA daqui chega ao modelo, nem o schema (`schemas_com_metas`), e
 o prompt, o `list_pockets` e o `show_card` ficam como eram, com as caixinhas. O texto sai de
 `metas_conversa` (o mesmo do card `metas` do app). `meta.py` é telemetria: outra coisa.
 """
@@ -14,6 +14,7 @@ from typing import Any
 from core.services import metas_conversa as mc
 
 from .._context import metas_do_turno
+from . import metas_escrita
 from ._base import Tool
 
 
@@ -43,7 +44,8 @@ def schemas_com_metas(schemas: list[dict[str, Any]], app: bool) -> list[dict[str
             s = {**s, "function": {**f, "description": f["description"].replace(
                 _QUEM_E_META, f". Metas e reserva de emergência NÃO são caixinhas: use {ler}.")}}
         out.append(s)
-    return out if app else [*out, TOOLS[0].schema]
+    # criar/editar/apagar vão ao WhatsApp e ao app (o nome da meta vem do card, no app)
+    return [*out, *(() if app else (TOOLS[0].schema,)), *(t.schema for t in metas_escrita.TOOLS)]
 
 
 TOOLS: list[Tool] = [
@@ -59,4 +61,5 @@ TOOLS: list[Tool] = [
         is_write=False,
         execute=_list_metas,
     ),
+    *metas_escrita.TOOLS,
 ]

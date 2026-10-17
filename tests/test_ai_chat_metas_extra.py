@@ -58,9 +58,10 @@ def confere_quem_recebe_o_que(k, n):
     enum, desc = card_de(SCHEMAS_APP)
     assert "caixinhas" not in enum and "metas (caixinhas com meta)" in desc
     assert "tô no ritmo?" in descricao(SCHEMAS, "list_pockets")
-    # K: wa e /ai/chat ganham `list_metas`; o app não (o número vem do card)
-    assert nomes(schemas_para(k, False)) == nomes(SCHEMAS) + ["list_metas"]
-    assert nomes(schemas_para(k, True)) == nomes(SCHEMAS_APP)
+    # K: wa e /ai/chat ganham `list_metas`; o app não (o número vem do card). Criar/editar/apagar (C4): os dois canais
+    escrita = ["create_meta", "edit_meta", "delete_meta"]
+    assert nomes(schemas_para(k, False)) == nomes(SCHEMAS) + ["list_metas", *escrita]
+    assert nomes(schemas_para(k, True)) == nomes(SCHEMAS_APP) + escrita
     enum, desc = card_de(schemas_para(k, True))
     assert enum == list(cards.IDS) and "caixinhas (caixinhas e cofrinhos)" in desc
     assert "tô no ritmo?" not in descricao(schemas_para(k, False), "list_pockets")
@@ -240,7 +241,7 @@ def test_mata_m04_m24_adendo_do_app_de_K_troca_o_que_a_base_diz_de_metas():
     k_app = sp.prompt_do_usuario(True, True)
     assert "metas (caixinhas com meta)" not in k_app and "progresso, ritmo e quanto falta = card `metas`." not in k_app
     assert "metas (metas e reserva de emergência) · caixinhas (caixinhas e cofrinhos)" in k_app
-    assert "Pedido explícito de criar, editar ou apagar meta no sistema: só no painel" in k_app and "nem `list_metas`" in k_app
+    assert "Criar meta: `create_meta` grava na hora" in k_app and "nem `list_metas`" in k_app
     assert sp.ADENDO_CARDS_METAS != sp.ADENDO_CARDS
 
 
