@@ -1460,7 +1460,7 @@ concorrente feita com senha. O botão Salvar do `settings.html` também fica
 travado enquanto o PATCH está em voo. As outras sessões NÃO são encerradas, e o e-mail NOVO não
 é confirmado (quem troca para o e-mail de outra pessoa é assunto da issue própria, via
 auto-vínculo Google/Apple). Sobra: conta com 2 linhas em `auth_accounts` (o `user_id` não é
-unique) segue em 409 na troca, como antes; o "antigo" do aviso é o da primeira linha lida. Resend lento atrasa a resposta do PATCH (o aviso é `await` depois do commit, sem lock e sem timeout próprio), e o e-mail antigo vai ao `system_event_logs`, como os outros avisos.
+unique) segue em 409 na troca, como antes; o "antigo" do aviso é o da primeira linha lida. Resend lento atrasa a resposta do PATCH (o aviso é `await` depois do commit, sem lock e sem timeout próprio), e o e-mail antigo vai ao `system_event_logs`, como os outros avisos. O teto de 5/h conta a tentativa antes da senha e do lock, sem estorno: 5 PATCH concorrentes com o mesmo e-mail novo (só API direta ou várias abas; o botão trava em voo) gastam as 5 e o próximo update leva 429 até a hora virar. Declarado de propósito: estornar enfraqueceria o limite de brute-force da senha.
 
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
