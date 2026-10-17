@@ -50,7 +50,7 @@ from db import (
 from db.cards import MAX_CARD_NAME_LEN
 from utils_date import extract_date_from_text, fmt_br, now_tz, today_tz
 from utils_text import (
-    fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
+    extract_parcelas, fmt_brl, normalize_text, parse_money, parse_pt_number, valor_valido,
     PT_PHRASE, PT_VALUE, PT_VALOR_COM_MULT, PT_NUM_ALT_NO_ARTICLE, PT_NUM_ALT,
     MEMORY_STOP_TOKENS,
 )
@@ -2434,33 +2434,7 @@ def handle(user_id: int, text: str) -> str | None:
         if (recusa := recusa_q36(user_id, "cartao")):
             return recusa  # antes de perguntar cartão ou nome da compra
         # ── número de parcelas ──────────────────────────────────────────────
-        # Aceita variações: "em 3x", "em 3 vezes", "em 3", "3x" — usuário fala
-        # de várias formas. Tenta "em N" primeiro (mais específico, evita
-        # capturar o valor da compra como número de parcelas), depois "Nx"
-        # como fallback pra quem digita "300 3x".
-        n = 1
-        mx = re.search(r"\bem\s+(\d+)\s*(?:x|vezes?|parcelas?)?\b", t_low)
-        if mx is None:
-            # sem "em": aceita "3x", "3 vezes", "3 parcelas" (a unidade explícita
-            # garante que é a contagem, não o valor da compra).
-            mx = re.search(r"(\d+)\s*(?:x|vezes?|parcelas?)\b", t_low)
-        if mx:
-            try:
-                n = int(mx.group(1))
-            except Exception:
-                n = 1
-        else:
-            # contagem por extenso: "em doze vezes", "doze parcelas". Exige a
-            # unidade (vezes/parcelas/x) — número por extenso solto é ambíguo
-            # demais pra assumir que é a contagem.
-            smx = (
-                re.search(rf"\bem\s+({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE)
-                or re.search(rf"\b({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE)
-            )
-            if smx:
-                c = parse_pt_number(smx.group(1))
-                if c and c >= 1:
-                    n = int(c)
+        n = extract_parcelas(t_low)  # utils_text: "em 3x", "em 3", "3x", "doze vezes"
 
         # ── valor: total financiado OU valor da parcela ─────────────────────
         # Dois jeitos naturais de informar o dinheiro:

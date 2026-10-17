@@ -35,26 +35,31 @@ def test_c1_coerente_grava_direto_com_botoes(uid_pro, monkeypatch):
     assert _pend(uid_pro) == "recategorize_launch_offer"
 
 
-@pytest.mark.parametrize("resposta,esperado", [
-    ("sim", [{"tipo": "despesa", "valor": 500.0}]),
-    ("não", []),
-])
-def test_c2_valor_divergente_confirma(uid_pro, monkeypatch, resposta, esperado):
+def test_c2_valor_divergente_recusa(uid_pro, monkeypatch):
+    """500 que o usuário nunca escreveu: a âncora de valor recusa antes de perguntar
+    (não vira "Só confirmando R$ 500" sobre um valor que o modelo inventou)."""
     liga_flag(monkeypatch)
     openai_falso(monkeypatch, lancamento(500))
     r = diga(uid_pro, "gastei 50 no mercado")
-    assert "Só confirmando" in r and "R$ 500,00" in r, r
+    assert "Não anotei nada" in r and "Só confirmando" not in r, r
     assert lancamentos(uid_pro) == []
-    assert db.ai_get_pending_action(uid_pro)["tool_name"] == "add_launch"
-    diga(uid_pro, resposta)
-    assert lancamentos(uid_pro) == esperado
+    assert db.ai_get_pending_action(uid_pro) is None
 
 
 def test_c3_dois_numeros_confirma(uid_pro, monkeypatch):
     liga_flag(monkeypatch)
-    openai_falso(monkeypatch, lancamento(16, alvo="café"))
+    openai_falso(monkeypatch, lancamento(8, alvo="café"))
     r = diga(uid_pro, "paguei 2 cafés de 8")
     assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_c3_total_derivado_pergunta_o_valor(uid_pro, monkeypatch):
+    """16 = 2×8 não está escrito: valor derivado = recusa, sempre pergunta."""
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(16, alvo="café"))
+    r = diga(uid_pro, "paguei 2 cafés de 8")
+    assert "Não anotei nada" in r, r
     assert lancamentos(uid_pro) == []
 
 
@@ -71,16 +76,16 @@ def test_c4_alvo_sem_regra_confirma_e_com_regra_grava(uid_pro, monkeypatch):
 
 def test_c5_flag_desligada_executa_direto_como_hoje(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
-    openai_falso(monkeypatch, lancamento(500))
-    diga(uid_pro, "piggy gastei 50 no mercado")
-    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 500.0}]
+    openai_falso(monkeypatch, lancamento(40, alvo="zé"))   # alvo sem regra: com a flag, confirmaria
+    diga(uid_pro, "piggy gastei 40 no zé")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 40.0}]
 
 
 def test_c6_flag_ligada_no_dashboard_executa_direto(uid_pro, monkeypatch):
     liga_flag(monkeypatch)
-    openai_falso(monkeypatch, lancamento(500))
-    runner.chat(uid_pro, "gastei 50 no mercado", platform="dashboard")
-    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 500.0}]
+    openai_falso(monkeypatch, lancamento(40, alvo="zé"))
+    runner.chat(uid_pro, "gastei 40 no zé", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 40.0}]
 
 
 def test_c7_com_of_pergunta_a_forma_ao_usuario(uid_pro, monkeypatch):
@@ -159,7 +164,7 @@ def test_varios_add_launch_com_um_incerto_nao_grava_nada_fora_do_ia_primeiro(uid
 def test_varios_add_launch_flag_desligada_grava_como_hoje(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
     openai_falso(monkeypatch, _dois_lancamentos())
-    diga(uid_pro, "piggy gastei 50 no mercado")
+    diga(uid_pro, "piggy gastei 50 no mercado e 40 no zé")
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0},
                                     {"tipo": "despesa", "valor": 40.0}]
 
@@ -238,8 +243,8 @@ def _arma_com_a_ultima_cota(uid, monkeypatch):
     from core.services.plan_service import ai_chat_allowed
     liga_flag(monkeypatch)
     _na_ultima_cota(uid)
-    openai_falso(monkeypatch, lancamento(500))
-    assert "Só confirmando" in diga(uid, "gastei 50 no mercado")
+    openai_falso(monkeypatch, lancamento(500, alvo="zé"))   # alvo sem regra: confirma
+    assert "Só confirmando" in diga(uid, "gastei 500 no zé")
     assert not ai_chat_allowed(uid), "a cota devia ter acabado nesta mensagem"
 
 
@@ -261,8 +266,8 @@ def test_downgrade_para_free_sim_nao_executa(uid_pro, monkeypatch):
     from tests.conftest import promote_to_pro
     from core.services.ai_chat_commands import aviso_de_cota
     liga_flag(monkeypatch)
-    openai_falso(monkeypatch, lancamento(500))
-    assert "Só confirmando" in diga(uid_pro, "gastei 50 no mercado")
+    openai_falso(monkeypatch, lancamento(500, alvo="zé"))
+    assert "Só confirmando" in diga(uid_pro, "gastei 500 no zé")
     # Sem IA no plano só existe no v1 (`ai_chat_allowed` = is_pro): no v2 todo
     # tier tem IA e só a cota barra (`aviso_de_cota` com texto).
     monkeypatch.setenv("PLANS_V2_ENABLED", "0")
@@ -528,8 +533,9 @@ def test_hashtag_com_caixa_resumo_mostra_o_que_grava(uid_pro, monkeypatch):
 def test_resumo_mostra_a_categoria_efetiva_e_o_sim_grava_a_mesma(uid_pro, monkeypatch):
     liga_flag(monkeypatch)
     db.add_category_rule(uid_pro, "posto", "transporte")
-    openai_falso(monkeypatch, lancamento(500, alvo="posto", categoria="lazer"))
-    r = diga(uid_pro, "gastei 50 no posto")           # valor divergente: confirma
+    _connect_fake_bank(uid_pro)
+    openai_falso(monkeypatch, lancamento(50, alvo="posto", categoria="lazer", forma_pagamento="dinheiro"))
+    r = diga(uid_pro, "gastei 50 no posto")           # forma "dinheiro" sem apoio no texto: confirma
     assert "Só confirmando" in r and "#transporte" in r and "#lazer" not in r, r
     diga(uid_pro, "sim")
     assert _categorias(uid_pro) == ["transporte"]
@@ -545,8 +551,9 @@ def test_sim_grava_com_o_motivo_da_categoria_resolvida(uid_pro, monkeypatch):
     real = hl.learn_from_inference
     monkeypatch.setattr(hl, "learn_from_inference",
                         lambda *a, **kw: (motivos.append(kw.get("reason")), real(*a, **kw))[1])
-    openai_falso(monkeypatch, lancamento(500, alvo="posto", categoria="lazer"))
-    diga(uid_pro, "gastei 50 no posto")
+    _connect_fake_bank(uid_pro)
+    openai_falso(monkeypatch, lancamento(50, alvo="posto", categoria="lazer", forma_pagamento="dinheiro"))
+    diga(uid_pro, "gastei 50 no posto")               # forma "dinheiro" sem apoio no texto: confirma
     diga(uid_pro, "sim")
     assert motivos == ["user_rule"], motivos
     assert _categorias(uid_pro) == ["transporte"]
@@ -566,10 +573,10 @@ def test_confirma_nao_aparece_se_outra_janela_armou_no_meio(uid_pro, monkeypatch
 
     def outra_janela(messages):
         db.ai_set_pending_action(uid_pro, "add_launch", _DA_OUTRA, "despesa de R$ 77,00 em padaria")
-        return lancamento(500)
+        return lancamento(500, alvo="zé")
 
     openai_falso(monkeypatch, outra_janela)
-    r = diga(uid_pro, "gastei 50 no mercado")
+    r = diga(uid_pro, "gastei 500 no zé")
     assert runner._OUTRO_PEDIDO in r and "Só confirmando" not in r, r
     pend = db.ai_get_pending_action(uid_pro)
     assert (pend["tool_name"], pend["tool_args"]) == ("add_launch", _DA_OUTRA)
@@ -591,8 +598,8 @@ def test_depois_da_releitura_a_outra_janela_nao_sobrescreve(uid_pro, monkeypatch
         return ok
 
     monkeypatch.setattr(runner, "_ainda_e_a_mesma", releitura_e_corrida)
-    openai_falso(monkeypatch, lancamento(500))
-    r = diga(uid_pro, "gastei 50 no mercado")
+    openai_falso(monkeypatch, lancamento(500, alvo="zé"))
+    r = diga(uid_pro, "gastei 500 no zé")
     assert "Só confirmando" in r and "R$ 500,00" in r, r
     assert tentativas == [None]
     diga(uid_pro, "sim")
@@ -663,19 +670,28 @@ def test_negacao_ou_pergunta_confirma(uid_pro, monkeypatch, frase):
 # ── Valor e tipo por lista positiva ─────────────────────────────────────────
 
 @pytest.mark.parametrize("frase,args", [
-    ("gastei cinquenta reais no mercado com dois amigos", lancamento(52)),
     ("gastei 50 no mercado com dois amigos", lancamento(50)),   # 1 dígito + 1 extenso
     ("o mercado me devolveu 50 reais", lancamento(50)),
     ("o mercado me devolveu 50 reais", lancamento(50, tipo="receita")),
     ("reembolso mercado 50", lancamento(50, alvo="reembolso mercado")),
     ("uber aeroporto 23", lancamento(23, alvo="uber aeroporto")),
-], ids=["extenso-soma-52", "digito-e-extenso", "devolveu-despesa", "devolveu-receita",
+], ids=["digito-e-extenso", "devolveu-despesa", "devolveu-receita",
          "reembolso", "uber-aeroporto"])
 def test_valor_ou_tipo_sem_apoio_confirma(uid_pro, monkeypatch, frase, args):
     liga_flag(monkeypatch)
     openai_falso(monkeypatch, args)
     r = diga(uid_pro, frase)
     assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_extenso_somado_52_e_recusado_pela_ancora(uid_pro, monkeypatch):
+    """"cinquenta reais ... com dois amigos" → modelo manda 52 (soma): a âncora lê cada número
+    por trecho (50 e 2), 52 não está escrito, então recusa antes da confirmação."""
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(52))
+    r = diga(uid_pro, "gastei cinquenta reais no mercado com dois amigos")
+    assert "não achei esse valor" in r, r
     assert lancamentos(uid_pro) == []
 
 
@@ -738,8 +754,8 @@ def test_sim_depois_da_meia_noite_grava_o_dia_mostrado(uid_pro, monkeypatch, dat
     monkeypatch.setattr(utils_date, "now_tz", lambda: relogio["agora"])
     liga_flag(monkeypatch)
     extra = {"data": data_ia} if data_ia else {}
-    openai_falso(monkeypatch, lancamento(500, **extra))     # usuário disse 50: confirma
-    r = diga(uid_pro, "gastei 50 no mercado")
+    openai_falso(monkeypatch, lancamento(500, alvo="zé", **extra))     # alvo sem regra: confirma
+    r = diga(uid_pro, "gastei 500 no zé")
     assert "Só confirmando" in r and "hoje" in r, r
     assert db.ai_get_pending_action(uid_pro)["tool_args"]["data"] == "2026-10-08"
     relogio["agora"] = datetime(2026, 10, 9, 0, 3, tzinfo=tz)
