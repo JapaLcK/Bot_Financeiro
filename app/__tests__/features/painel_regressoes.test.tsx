@@ -119,7 +119,7 @@ it("refresh do painel NÃO aborta o POST do chat: a resposta e a cota chegam dep
  uso = 0; const atraso = segurar();
  const impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; uso = 5; return fluxoFim("Resposta que sobrevive ao refresh", 5); }
+  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; uso = 85; return fluxoFim("Resposta que sobrevive ao refresh", 85); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
@@ -131,5 +131,5 @@ it("refresh do painel NÃO aborta o POST do chat: a resposta e a cota chegam dep
  expect(post[1].signal.aborted).toBe(false);
  atraso.soltar(); await act(async () => { await drenar(); });
  await act(async () => { router.navigate("/piggy"); await drenar(); });
- await waitFor(() => expect(screen.getByText("Resposta que sobrevive ao refresh")).toBeTruthy()); await waitFor(() => expect(screen.getByText("5 de 100 mensagens utilizadas")).toBeTruthy());
+ await waitFor(() => expect(screen.getByText("Resposta que sobrevive ao refresh")).toBeTruthy()); await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
 });

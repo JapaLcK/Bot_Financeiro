@@ -1,6 +1,6 @@
 import { StyleSheet } from "react-native";
 import { render } from "@testing-library/react-native";
-import { fireEvent, screen, within } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
 import { metasV2Schema } from "@/api/schemas/painel";
 import { BlocoContexto } from "@/features/painel/blocoContexto";
 import { MetasChat } from "@/features/painel/metasChat";
@@ -8,11 +8,11 @@ import * as provider from "@/features/painel/provider";
 import { falado } from "@/ui/dinheiro";
 import { TemaProvider } from "@/ui/tema";
 import { claro } from "@/ui/tokens";
-import { prepararCaso } from "./auth_apoio";
-import { desligarTrava } from "./open_finance_volta_rota_apoio";
-import { reiniciar } from "./conversa_apoio";
+import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { prepararCaso, resposta, segurar } from "./auth_apoio";
+import { apertar, enviar, ok, posts, reiniciar, srv } from "./conversa_apoio";
 import { V2, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
-// O card `metas` do chat (formato v2 de `/api/v2/metas`, fixtures reais), só leitura: pílulas com ícone, % e barra (blocos na reserva), sem frases; as frases vivem só no rótulo do VoiceOver.
+// O card `metas` do chat (formato v2 de `/api/v2/metas`, fixtures reais): pílulas com ícone, % e barra (blocos na reserva), sem frases; as frases vivem só no rótulo do VoiceOver.
 jest.setTimeout(30_000);
 // Os ícones viram `View testID="icone-<nome>"`: é assim que o teste sabe qual ícone a pílula desenha (mesmo recurso de painel_curva_tela).
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- a fábrica do jest.mock não importa módulos de fora (hoisting)
@@ -151,9 +151,9 @@ describe("muitas metas: +N", () => {
     expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); expect(c.queryByText("+2")).toBeNull(); expect(c.getByText("Mostrar menos")).toBeTruthy();
     fireEvent.press(c.getByRole("button", { name: "Mostrar menos metas" })); expect(idsNaTela()).toHaveLength(5);
   });
-  it("O5: sem reserva, 'Monte no painel' ocupa a vaga dela: com 6 metas, 5 linhas (a de 'Monte no painel' + 4) e '+2'", async () => {
+  it("O5: sem reserva, 'Montar reserva' ocupa a vaga dela: com 6 metas, 5 linhas (a de 'Montar reserva' + 4) e '+2'", async () => {
     const c = await mostrarIds([2, 3, 4, 5, 6, 7]);
-    expect(c.getByText("Monte no painel")).toBeTruthy(); expect(idsNaTela()).toHaveLength(4); expect(c.getByText("+2")).toBeTruthy();
+    expect(c.getByText("Montar reserva")).toBeTruthy(); expect(idsNaTela()).toHaveLength(4); expect(c.getByText("+2")).toBeTruthy();
     fireEvent.press(c.getByTestId("meta-mais")); expect(idsNaTela()).toHaveLength(6);
   });
   it("de volta a 5 depois de 'Mostrar menos'", async () => {
@@ -197,14 +197,55 @@ describe("avisos, ressalvas e fallbacks", () => {
   });
 });
 describe("outros casos da fixture", () => {
-  it("vazio: 'Crie sua primeira meta no painel.' e a linha da reserva com 6 blocos vazios e 'Monte no painel'", async () => {
+  it("vazio: o botão 'Criar meta' e a linha da reserva com 6 blocos vazios e 'Montar reserva'; nada manda ao painel", async () => {
     const c = await mostrar("vazio");
-    expect(c.getByText("Crie sua primeira meta no painel.")).toBeTruthy(); expect(c.getByText("Monte no painel")).toBeTruthy();
-    expect(vazios(c)).toHaveLength(6); expect(cheios(c)).toHaveLength(0); expect(c.getByTestId("icone-PiggyBank")).toBeTruthy(); expect(c.queryAllByRole("button")).toHaveLength(0);
+    expect(c.getByText("Criar meta")).toBeTruthy(); expect(c.getByText("Montar reserva")).toBeTruthy(); expect(c.queryByText(/painel/)).toBeNull();
+    expect(vazios(c)).toHaveLength(6); expect(cheios(c)).toHaveLength(0); expect(c.getByTestId("icone-PiggyBank")).toBeTruthy(); expect(c.getAllByRole("button").map((b) => b.props.accessibilityLabel)).toEqual([expect.stringContaining("Montar reserva"), "Criar meta"]);
   });
-  it("sem_custo: já tem reserva (sem a linha 'Monte no painel'); a meta sem saldo tem aviso e o plano no rótulo", async () => {
+  // O card pede AO CHAT (como se o usuário tivesse digitado): a mensagem sai pelo POST de sempre, sem navegar nem abrir folha.
+  it("'Criar meta' envia 'Quero criar uma meta' no próprio chat; 'Montar reserva' envia o pedido da reserva", async () => {
+    await mostrar("vazio"); const antes = posts().length;
+    await apertar("Criar meta"); expect(posts()).toHaveLength(antes + 1); expect(JSON.parse(String(posts().at(-1)![1].body))).toEqual({ message: "Quero criar uma meta" });
+    await waitFor(() => expect(screen.getAllByText("Resposta do Piggy").length).toBeGreaterThan(0)); // a conversa segue no mesmo chat: a pergunta vira bolha
+    expect(screen.getByText("Quero criar uma meta")).toBeTruthy();
+    await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: /Montar reserva/ }).at(-1)!); await drenar(); }); expect(JSON.parse(String(posts().at(-1)![1].body))).toEqual({ message: "Quero montar minha reserva de emergência" });
+  });
+  it("cota cheia depois da resposta: os botões do card (no chat de verdade) ficam desativados, como a entrada", async () => {
+    srv.uso = 99; const c = await mostrar("vazio"); // a resposta com o card grava 100 de 100
+    expect(screen.getByText("100 de 100 mensagens utilizadas")).toBeTruthy(); expect(c.getByRole("button", { name: "Criar meta" })).toBeDisabled(); expect(c.getByRole("button", { name: /Montar reserva/ })).toBeDisabled();
+  });
+  it("turno seguinte em voo: os botões do card do turno anterior ficam desativados e não enviam; ao terminar, voltam", async () => {
+    await mostrar("vazio"); const g = segurar(); srv.chat = async () => { await g.promessa; return ok("Segunda resposta")(); };
+    await enviar("outra pergunta"); const antes = posts().length; expect(antes).toBe(2);
+    for (const nome of ["Criar meta", /Montar reserva/]) { const b = screen.getByRole("button", { name: nome }); expect(b).toBeDisabled(); await act(async () => { fireEvent.press(b); await drenar(); }); }
+    expect(posts()).toHaveLength(antes);
+    g.soltar(); await waitFor(() => expect(screen.getByText("Segunda resposta")).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Criar meta" })).toBeEnabled(); // positivo: sem voo, o card volta a pedir
+  });
+  it("conversa não pronta (bloqueio 'falhou' ao reabrir depois de um erro): os botões do card ficam desativados e não enviam", async () => {
+    await mostrar("vazio"); const card = srv.chat; srv.chat = (n) => n === 1 ? card(n) : resposta(500, { detail: "x" });
+    await enviar("pergunta que falha"); await waitFor(() => expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy());
+    srv.statusPendencia = 404; await apertar("Enviar mensagem"); expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy();
+    const antes = posts().length;
+    for (const nome of ["Criar meta", /Montar reserva/]) { const b = screen.getByRole("button", { name: nome }); expect(b).toBeDisabled(); await act(async () => { fireEvent.press(b); await drenar(); }); }
+    expect(posts()).toHaveLength(antes);
+  });
+  it("valores ocultos ou entrada desligada: 'Criar meta' e 'Montar reserva' ficam desativados e não enviam", () => {
+    const enviar = jest.fn(); jest.spyOn(provider, "usePainel").mockImplementation(() => ({ oculto: true }) as never);
+    const recursos = { metas: metasV2Schema.parse({ ...V2.metas.vazio }) } as never;
+    render(<TemaProvider esquema="light"><BlocoContexto.Provider value={{ recursos, pedir: { enviar, desativado: true } }}><MetasChat /></BlocoContexto.Provider></TemaProvider>);
+    for (const nome of ["Criar meta", /Montar reserva/]) { const b = screen.getByRole("button", { name: nome, disabled: true }); fireEvent.press(b); expect(b).toBeDisabled(); }
+    expect(enviar).not.toHaveBeenCalled();
+  });
+  it("positivo do mesmo contexto, ligado: o toque chama `pedir.enviar` com o texto", () => {
+    const enviar = jest.fn(); jest.spyOn(provider, "usePainel").mockImplementation(() => ({ oculto: false }) as never);
+    const recursos = { metas: metasV2Schema.parse({ ...V2.metas.vazio }) } as never;
+    render(<TemaProvider esquema="light"><BlocoContexto.Provider value={{ recursos, pedir: { enviar, desativado: false } }}><MetasChat /></BlocoContexto.Provider></TemaProvider>);
+    fireEvent.press(screen.getByRole("button", { name: "Criar meta" })); expect(enviar).toHaveBeenCalledWith("Quero criar uma meta");
+  });
+  it("sem_custo: já tem reserva (sem a linha 'Montar reserva'); a meta sem saldo tem aviso e o plano no rótulo", async () => {
     const c = await mostrar("sem_custo");
-    expect(c.queryByText(/Monte no painel/)).toBeNull(); expect(meta(2).getByTestId("icone-WarningCircle")).toBeTruthy(); expect(barras(meta(2))).toEqual([]);
+    expect(c.queryByText(/Montar reserva/)).toBeNull(); expect(meta(2).getByTestId("icone-WarningCircle")).toBeTruthy(); expect(barras(meta(2))).toEqual([]);
     expect(rotulo(2)).toContain("Seu plano atual não inclui investimentos."); expect(rotulo(1)).toContain(R(80000));
   });
   it("estresse: 24 blocos da reserva, nome longo sem lançar, e o alvo de R$ 24 bi sai por inteiro no rótulo", async () => {
