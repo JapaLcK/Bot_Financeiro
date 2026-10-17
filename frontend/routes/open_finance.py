@@ -2692,7 +2692,7 @@ class BankMovementConfirmation(BaseModel):
 @shared.limiter.limit("60/minute")
 async def bank_movements_route(request: Request, user_id: int):
     shared.authorize_dashboard_access(request, user_id)
-    from db.bank_movements import list_bank_movements
+    from db.bank_conferencia import list_bank_movements
     rows = await asyncio.to_thread(list_bank_movements, user_id)
     return {"ok": True, "movements": rows}
 
@@ -2701,7 +2701,7 @@ async def bank_movements_route(request: Request, user_id: int):
 @shared.limiter.limit("30/minute")
 async def bank_movement_confirm_route(request: Request, user_id: int, body: BankMovementConfirmation):
     shared.authorize_dashboard_access(request, user_id)
-    from db.bank_movements import confirm_bank_movement
+    from db.bank_conferencia import confirm_bank_movement
     try:
         await asyncio.to_thread(confirm_bank_movement, user_id, body.launch_id, body.transaction_id)
     except LookupError as exc:

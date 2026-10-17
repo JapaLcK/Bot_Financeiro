@@ -3209,7 +3209,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                     print(stmt)
                     raise
 
-            from .bank_movements import migrate_legacy_bank_movements
+            from .bank_conferencia import migrate_legacy_bank_movements
             migrate_legacy_bank_movements(cur)
 
             # Corrige FKs em users(id) que ficaram com on_delete errado

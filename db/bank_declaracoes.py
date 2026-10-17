@@ -1,6 +1,7 @@
 """Declaração de despesa/receita "paga pelo banco": elegibilidade contra a transação do extrato.
 
-Mesma tabela e mesma rotina de conferência do aporte (`db/bank_movements.py`), regras próprias:
+Mesma tabela e mesma rotina de conferência do aporte (`db/bank_movements.py`; a manual em
+`db/bank_conferencia.py`), regras próprias:
 valor quase exato (R$ 0,05), janela de 3 dias e `account_id` NULL = "qualquer conta BANK ativa".
 Fluxo = launch despesa/receita COM `account_id` NULL; o NULL fica mesmo depois de casar (preenchê-lo
 jogaria a declaração no caminho do aporte, que exige categoria de aplicação).
@@ -24,7 +25,8 @@ sem par, extrato com par); I3 uma sombra por transação; I4 par automático ún
                                            a marca é imutável, então não corre com o escritor
   apagar um/lote/tudo                      I3 devolve a sombra, I6   mutex (`uses_bank_movement_lock`)
   sync/import/reconcile/desconexão         I2 projeção, I3, I4   mutex, checa e escreve na transação
-  confirmar manual / rejeitar par          I2, I4   mutex (`confirm_bank_movement`, `_locked_tx`)
+  confirmar manual / rejeitar par          I2, I4   mutex (`bank_conferencia.confirm_bank_movement`,
+                                                    `_locked_tx`)
   desfazer fusão vizinha (`_desfaz`)       só FUSED_STATUSES; não alcança `bank_movement_confirmed`   mutex
   merge de contas / reset / exclusão       I6 (a declaração muda de dono ou cai junto)   locks próprios de
                                            `users.py`/`privacy.py`, fora desta tabela

@@ -392,7 +392,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
   `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
   (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
-  recente primeiro no empate, `{descricao, valor, categoria}`), `fora_da_grade {quantidade, valor}` (sempre
+  recente primeiro no empate, `{descricao, valor, categoria}`; `quantidade` = quantas saídas somam o `total` do dia
+  e `categorias` = `[{chave, valor}]` do dia, Σ `valor` = `total`, em `(-valor, chave)`, das MESMAS linhas do `total`:
+  para o card do dia (PR B, #1029) mostrar "Compras N", a categoria principal e a barra sem somar dinheiro
+  no cliente; a saída de `fora_da_grade` não entra), `fora_da_grade {quantidade, valor}` (sempre
   presente), `saidas_em_outra_moeda`, `anterior_total_ate_corte` (todas as saídas do mês anterior até o
   mesmo corte, também de categoria que só existe lá e não é listada; `null` com `anterior_ate_corte`
   `null` ou `!disponivel`: é o total certo para a variação) e `motivos` (`MOTIVOS_GASTOS`, derivada de `resumo_mes.MOTIVOS` + os de
@@ -428,12 +431,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   com a cor crua (`db/budgets.py` devolve `#7c3aed`).
   `categorias[]` vêm por `valor` decrescente, empate pela `chave`; `maiores[].categoria` é a `chave`.
   `descricao` nunca nula (`SEM_DESCRICAO`). `arredondamento_por_grupo`
-  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`)
+  sobe quando a soma dos valores exibidos em centavos das categorias (ou dos dias mais `fora_da_grade`, ou, dia a dia, as `categorias` do dia contra o `total` do dia)
   difere do total (`soma_arredondada_diverge`). Consumidores (PR 2): os widgets `GastosCategorias`,
   `GastosCalendario` e `GastosDetalhe` (`webapp/src/dashboard/widgets/`), em `/gastos` e nos blocos "Para onde
   vai" e "Dia a dia" do Resumo, via `gastosQuery`/`gastosCategoriaQuery` (`lib/v2.ts`); valores com centavos
   (`moneyText`). Tocar num dia do calendário ou em "Ver compras" do detalhe abre o card de compras na própria tela
-  (`GastosCompras`, estado `gastosAberto` na store). A consulta do card tem duas formas: modo dia
+  (`GastosCompras`, estado `gastosAberto` na store; no modo dia o topo é `parts/GastosDiaTopo.tsx`: setas de dia, o total do dia em destaque, a pílula contra a média do mês, os fatos e a barra por categoria, tudo do `quantidade`/`maiores`/`categorias[]` do dia e da média de `lib/gastos-dia.ts`, que o calendário também lê; PR B, #1029; o modo categoria é uma linha "R$ … · N compras"). A consulta do card tem duas formas: modo dia
   `/lancamentos?mes&dia&tipo=saida&guardado=true` (mais `categoria` quando uma foi escolhida) e modo categoria
   `/lancamentos?mes&tipo=saida&categoria&guardado=true`. Só o "Ver em Lançamentos" grava `s.filter.day` e leva ao Extrato;
   a escolha de categoria em "Para onde vai" (`GastosCategorias`) é que grava `s.filter.category`.

@@ -179,8 +179,10 @@ quantidade}`, `dias {dia, entrou, saiu}` sem categoria, `origens`, `guardado`, `
   `min(dia_de_corte, último dia do mês anterior)` (hoje 31 de março contra fevereiro vira o fim
   de fevereiro); em **mês passado** é o último dia REAL do mês anterior, sem `min`, para fevereiro
   (28 dias) contra janeiro contar os 31 dias de janeiro. Mês futuro continua 422, como `resumo-do-mes`.
-  Mais: o calendário de todas as categorias (por dia: total e os 3 maiores gastos do dia, com
-  descrição, valor e a chave da categoria), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
+  Mais: o calendário de todas as categorias (por dia: total, os 3 maiores gastos do dia, com
+  descrição, valor e a chave da categoria, `quantidade` de saídas do dia e `categorias` `[{chave, valor}]` com Σ = `total`,
+  em `(-valor, chave)`, das mesmas linhas do `total`; o card do dia (PR B, #1029) usa os dois e não soma dinheiro no
+  cliente; em `/gastos/categoria` a lista tem só a própria categoria; o cliente trata fatia ≤ 0 (estorno ou zero inseridos direto no banco: a barra de divisão não pode quebrar) e não compara o texto de `total` com o de `categorias[].valor`, porque a escala pode diferir ("91.010" vs "1.005"); Σ em centavos que não fecha dia a dia levanta `arredondamento_por_grupo`), `fora_da_grade` (`{quantidade, valor}`, sempre presente, zeros quando não há; decisão B), `hoje` (AAAA-MM-DD no fuso do
   app: o cliente não usa o relógio dele; em mês passado todos os dias já aconteceram), `historico_desde` (AAAA-MM-DD ou `null`: o primeiro dia
   que o plano deixa ver; o dia anterior a ele é desconhecido, não zero), `saidas_em_outra_moeda`, `motivos`. Alimenta o bloco
   Categorias e o Calendário, e o Resumo usa a mesma consulta (mesma chave de cache).
@@ -324,6 +326,28 @@ outra categoria; no modo dia ele segue a categoria escolhida, como o calendário
   juntos, pela fatura do cartão), só saídas; interno, guardado e outra moeda saem **marcados** e fora do total, e a nota
   que o diz só aparece quando há linha marcada. `tests/test_api_v2_gastos_card.py` prova a igualdade soma das não marcadas
   = total.
+- **"Seu dia" (PR B, #1029, só frontend; PR A, #1024, trouxe `quantidade` e `categorias[]` em cada `dias[]`).** Pedido do dono:
+  o card do dia estava "cru, sem informações e sem personalidade"; o TOTAL do dia é o alvo e a lista vira parte secundária.
+  Modo dia, de cima para baixo (`parts/GastosDiaTopo.tsx`, `widgets/GastosCompras.tsx`; título "Seu dia"): (1) setas ‹ › com a
+  data longa no meio, alvo de 44px, ±1 dia dentro do MESMO mês e só se o vizinho se abre (`diaAbrivel`: dentro do histórico;
+  futuro só com gasto agendado), senão o botão fica `disabled`; (2) faixa com o total grande em `--pink` (rótulo "Gasto no
+  dia", ou "Agendado para o dia"; o painel não tem tema claro, e o teste mede o contraste do rosa sobre a faixa); (3) pílula
+  contra a média do mês, texto + seta, sempre na ordem pct = round((total/média − 1)·100): 0 "na média" (cinza), ≤ −5 verde
+  "↓ N% abaixo da média", ≥ +15 âmbar "↑ N% acima da média", no meio cinza; sem pílula no dia em curso, no agendado e sem média
+  (≤ 0); ao lado "média do mês: R$ Y/dia" (o mesmo número do calendário, de `lib/gastos-dia.ts`); (4) fatos "Compras N",
+  "Maior compra" e "Mais em <emoji nome>" (só o que tem dado); (5) barra por categoria só com ≥ 2 fatias > 0 (a fatia ≤ 0 que o
+  servidor pode mandar não desenha), largura = o próprio valor (`flex-grow`, apresentação), legenda "emoji nome · R$ valor"; (6)
+  "Compras do dia" e a lista de sempre; (7) o pé, com ícone no "Ver em Lançamentos". Dia sem gasto: setas, data e "Nenhum gasto
+  neste dia.", sem faixa, pílula, fatos nem barra. **Com categoria escolhida** o card segue a categoria (tag "Só …"), sem
+  barra nem "Mais em" (o dia só tem uma); a pílula fica e compara com a média da categoria, a mesma do "Só esta categoria ·
+  média" do calendário (mesma consulta). **Modo categoria é compacto:** "🍔 Alimentação · outubro" e "R$ 300,00 · 12
+  compras", sem setas, faixa, pílula, fatos nem barra. Nenhum dinheiro é somado no cliente além da média do calendário; a
+  média e a regra do dia aberto moram em `lib/gastos-dia.ts` e o calendário lê de lá (uma fonte, §0.7). Foco: a mudança de
+  dia pelas setas deixa o foco no botão apertado; se ele desabilitou (o limite), o foco vai ao card; o dia vindo do calendário
+  continua focando o card. A troca é anunciada por uma região `role="status"` (polida, `.sr-only`) com a data e o total, sem
+  mover o foco. Trocar de dia pelas setas não rola a página (num card mais alto que a janela o "nearest" alinharia o topo e a seta
+  fugiria do dedo; o dia vindo do calendário rola como antes); o nome da região é "Seu dia" + a data. Sem pílula e sem "Compras N" no
+  dia de R$ 0,00 sem compra. Nome de categoria longo sem espaço quebra dentro do card. Provas: `tests/frontend/dashboard_v2_gastos_dia_topo.test.mjs`.
 - Sem editar nem apagar no card. Foco: abrir leva o foco ao card; Esc e "Fechar" fecham e devolvem o foco a quem abriu
   (a célula do dia ou o "Ver compras"), EXCETO quando quem abriu foi o "Dia mais caro" (o foco volta à célula do dia) ou
   quando a origem está desabilitada (volta ao primeiro `.cal-day` habilitado). `aria-expanded`/`aria-controls="gastos-compras"`
@@ -335,7 +359,7 @@ outra categoria; no modo dia ele segue a categoria escolhida, como o calendário
 - O corte de 1100px mora em dois lugares que precisam andar juntos (o `@media` de `pages.css` e o `useMedia` de
   `pages.tsx`); `tests/frontend/dashboard_v2_gastos_dia.test.mjs` compara os dois.
 - Limites declarados: a página remonta ao cruzar 1100px com o card aberto; `aria-expanded=true` fica numa célula desabilitada
-  quando o dia some na categoria escolhida; em janelas baixas (ex. 1440×720) os botões ficam abaixo da dobra;
+  quando o dia some na categoria escolhida; em janelas baixas (altura ≤ ~900px, inclusive 390×844) os botões do pé ficam abaixo da dobra, e com o topo do dia (faixa, fatos e barra) o card de 4 linhas passa da janela (1114px a 390×844 no teste): decisão do dono, aceita; a `tag-demo` "Só {nome}" com nome de categoria de 70 caracteres sem espaço gera rolagem lateral (97px a 320px), já antes deste PR e também só com o calendário aberto (vem do `aside` do `Frame`), fora do escopo;
   `env(safe-area-inset-bottom)` não foi medido (vale 0 no headless); o VoiceOver pode não disparar `touchstart`/`keydown`,
   então o realinhamento da chegada pode não terminar (não medido).
 

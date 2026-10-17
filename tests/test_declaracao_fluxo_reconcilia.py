@@ -17,6 +17,7 @@ from decimal import Decimal
 import pytest
 
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 from db.bank_declaracoes import congelada, desde_da_leitura, elegivel_fluxo
 from db.resumo_mes import totais_do_mes
@@ -97,7 +98,7 @@ def test_dois_candidatos_nao_casa_e_o_modal_oferece_os_dois(user_id):
     sincroniza(cid, user_id, tx(txid="a"), tx(txid="b"))
     assert decl(lid)["matched_transaction_id"] is None
     assert n_linhas(user_id, 50) == 3 and saiu(user_id) == 150  # D + S1 + S2 até a escolha
-    [mov] = movements.list_bank_movements(user_id)
+    [mov] = conferencia.list_bank_movements(user_id)
     assert len(mov["candidates"]) == 2
 
 

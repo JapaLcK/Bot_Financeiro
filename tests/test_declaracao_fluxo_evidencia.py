@@ -21,6 +21,7 @@ from decimal import Decimal
 import pytest
 
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 from db.bank_declaracoes import tem_evidencia
 from db.resumo_mes import totais_do_mes
@@ -46,9 +47,9 @@ def test_exemplo_do_codex_farmacia_nao_casa_com_mercado_e_a_escolha_manual_casa(
     sincroniza(cid, user_id, tx(desc="FARMÁCIA SÃO JOÃO"))
     assert decl(lid)["matched_transaction_id"] is None
     assert n_linhas(user_id, 50) == 2 and saiu(user_id) == 100  # declaração + sombra da farmácia
-    [mov] = movements.list_bank_movements(user_id)
+    [mov] = conferencia.list_bank_movements(user_id)
     assert [c["description"] for c in mov["candidates"]] == ["FARMÁCIA SÃO JOÃO"]  # segue candidata manual
-    movements.confirm_bank_movement(user_id, lid, mov["candidates"][0]["id"])
+    conferencia.confirm_bank_movement(user_id, lid, mov["candidates"][0]["id"])
     d = decl(lid)
     assert d["matched_transaction_id"] and d["confirmation_method"] == "manual"
     assert n_linhas(user_id, 50) == 1 and saiu(user_id) == 50
@@ -83,7 +84,7 @@ def test_descricao_do_banco_vazia_nao_e_evidencia_para_declaracao_com_nome(user_
     lid = declara(user_id, alvo="mercado")
     sincroniza(cid, user_id, tx(desc=""))
     assert decl(lid)["matched_transaction_id"] is None
-    assert len(movements.list_bank_movements(user_id)[0]["candidates"]) == 1
+    assert len(conferencia.list_bank_movements(user_id)[0]["candidates"]) == 1
 
 
 def test_dois_candidatos_so_um_com_nome_parecido_casa_com_o_parecido(user_id):
@@ -149,7 +150,7 @@ def test_vinculo_manual_nunca_exige_evidencia_nem_cai_por_descricao(user_id):
     cid, _ = _bank(user_id)
     lid = declara(user_id, alvo="mercado")
     sincroniza(cid, user_id, tx(desc="FARMACIA"))
-    movements.confirm_bank_movement(user_id, lid, movements.list_bank_movements(user_id)[0]["candidates"][0]["id"])
+    conferencia.confirm_bank_movement(user_id, lid, conferencia.list_bank_movements(user_id)[0]["candidates"][0]["id"])
     for _ in range(2):
         with db.get_conn() as conn, conn.cursor() as cur:
             movements.reconcile_bank_movements(cur, user_id)
@@ -216,7 +217,7 @@ def test_palavras_funcionais_nao_dao_evidencia_mas_a_sugestao_aparece(user_id, m
     lid = declara(user_id, valor, alvo=r["alvo"], nota=r["nota"])
     sincroniza(cid, user_id, tx(-valor, desc=banco))
     assert decl(lid)["matched_transaction_id"] is None, (r["alvo"], banco)
-    [mov] = movements.list_bank_movements(user_id)
+    [mov] = conferencia.list_bank_movements(user_id)
     assert [c["description"] for c in mov["candidates"]] == [banco]  # segue sugerida no modal
 
 
