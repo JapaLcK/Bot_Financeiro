@@ -224,7 +224,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   única (um GROUP BY por mês); `tests/test_resumo_mes_regra.py` compara as duas por mês.
   `credit_bills.user_id` é NOT NULL (backfill pelo dono do cartão, #772): a fatura só entra
   se for do usuário (`b.user_id = %s`), em cada perna do cartão.
-  **Divergência conhecida:** relatório diário e semanal, projeção de fechamento
+  **Divergência conhecida:** relatório diário e semanal
   (`get_summary_by_period`) e o Repórter (`piggy_agents._month_stats`) seguem só em `launches`,
   sem o cartão. Das tools da IA em período livre (não são meses inteiros), `get_period_summary`
   soma `launches` + cartão pela DATA DA COMPRA (Σ de `get_top_expense_categories`,

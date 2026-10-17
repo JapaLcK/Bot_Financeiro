@@ -289,8 +289,7 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
         if "inicio_do_historico" in motivos:  # limite do plano não é "incompleto": o aviso abaixo é só dos outros motivos
             nota += (f" Limite do plano (inicio_do_historico){f': histórico a partir de {historico_desde}' if historico_desde else ''};"
                      " antes disso não é falta de gasto.")
-        if outros := [m for m in motivos if m != "inicio_do_historico"]:
-            nota += f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário."
+        nota += _aviso_motivos(motivos)
         if futuro:
             motivos.append("mes_futuro")
         return {
@@ -493,72 +492,67 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _aviso_motivos(motivos) -> str:
+    """O aviso de número incompleto: o limite do plano (`inicio_do_historico`) não conta, tem nota própria."""
+    outros = [m for m in motivos if m != "inicio_do_historico"]
+    return f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário." if outros else ""
+
+
 def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Projeção do fim do mês corrente.
-
-    Modelo:
-      - Despesa real → escala pelo ritmo diário (gastos do dia-a-dia).
-      - Aportes → trata como CONSTANTE (eventos pontuais, não fluxo).
-        Soma só o que já foi feito; não projeta novos aportes futuros.
-      - Receita → assume mesma (pontual, recibos não acontecem em ritmo).
-
-    Saídas totais = despesa real projetada + aportes já feitos.
-    `fluxo_do_mes` (parcial) = receita - despesa - aportes do MÊS CORRENTE
-    (não confundir com saldo da conta corrente, que reflete meses
-    anteriores também).
-    """
+    """Projeção do fim do mês corrente, lendo o mês pelo MESMO leitor do card `categorias`
+    (`mes_detalhes.ler`): receita e despesa até agora são as do painel (pagamento de fatura, transferência
+    e guardar ficam fora). Só o cartão do Open Finance entra como está na fatura (`origens["cartao"]`); o
+    resto, inclusive cartão manual, é extrapolado pelo ritmo diário, salvo o lançamento com data futura
+    (`despesa_agendada`, constante); a receita não é projetada. Conta em
+    Decimal, sai float. As chaves seguem o padrão `receita`/`despesa*`/`saldo*` porque é o que o `ai_guard`
+    (`_CHAVE_MONETARIA_RE`) reconhece como dinheiro."""
     from calendar import monthrange
     from core.services.plan_service import plans_v2_enabled, plan_gate_ok
     if plans_v2_enabled() and not plan_gate_ok(user_id, "forecast"):
         return {"error": "pro_required", "message": "A projeção de fechamento está disponível nos planos Plus e Pro."}
 
-    today = date.today()
-    month_start = today.replace(day=1)
-    days_in_month = monthrange(today.year, today.month)[1]
-    days_elapsed = today.day
+    from db.mes_detalhes import ler
 
-    sum_current = db.get_summary_by_period(user_id, month_start, today)
-    despesa_real_atual = float(sum_current.get("despesa") or 0)
-    receita_atual = float(sum_current.get("receita") or 0)
-    aportes_atual = float(db.get_internal_movement_total(user_id, month_start, today))
-
-    saidas_atual = despesa_real_atual + aportes_atual
-
-    # Projeção: SÓ despesa escala por ritmo. Aportes ficam constantes
-    # (eventos pontuais, não fluxo contínuo).
-    if days_elapsed <= 0:
-        despesa_projetada = despesa_real_atual
-    else:
-        ritmo_diario = despesa_real_atual / days_elapsed
-        despesa_projetada = ritmo_diario * days_in_month
-
-    saidas_projetadas = despesa_projetada + aportes_atual
-
+    agora = now_tz()
+    hoje = agora.date()
+    m = ler(user_id, hoje.year, hoje.month, agora)
+    dias_no_mes = monthrange(hoje.year, hoje.month)[1]
+    dias_corridos = hoje.day
+    entrou, saiu, saiu_cartao = m["entrou"], m["saiu"], m["origens"]["cartao"]
+    # Lançamento fora do cartão com data depois de hoje é valor conhecido: entra uma vez, não esticado pelo
+    # ritmo (como a fatura). O leitor soma só as linhas que já alimentam `saiu`, sem o cartão.
+    saiu_agendado = m["saiu_agendado"]
+    saiu_no_ritmo = saiu - saiu_cartao - saiu_agendado
+    saiu_projetado = saiu_no_ritmo * dias_no_mes / dias_corridos + saiu_cartao + saiu_agendado
+    saldo_projetado = round(entrou - saiu_projetado, 2) + 0  # `+ 0` tira o -0.0 (Decimal('-0.00') + 0 = 0.00)
+    nota = (
+        "`receita` e `despesa` são as do painel do mês (pagamento de fatura, transferência e guardar ficam "
+        "fora). Só as compras do cartão conectado pelo Open Finance entram como estão na fatura que fecha no "
+        "mês (`despesa_cartao`); o resto do gasto até hoje, inclusive cartão lançado à mão, é projetado pelo ritmo "
+        "diário (`despesa_no_ritmo`); lançamento fora do cartão com data depois de hoje, no mês, também entra "
+        "como está (`despesa_agendada`), sem esticar; receita com data futura no mês já está em `receita`, "
+        "como no painel, e não é projetada."
+    )
+    nota += _aviso_motivos(m["motivos"])
+    d = lambda x: float(round(x, 2))  # noqa: E731
     return {
-        "today": today.isoformat(),
-        "month_start": month_start.isoformat(),
-        "days_elapsed": days_elapsed,
-        "days_in_month": days_in_month,
-        "despesa_real_atual": round(despesa_real_atual, 2),
-        "aportes_atual": round(aportes_atual, 2),
-        "saidas_atual": round(saidas_atual, 2),
-        "receita_atual": round(receita_atual, 2),
-        # Fluxo do mês = receita - saidas DO MÊS CORRENTE.
-        # NÃO é saldo da conta (que reflete histórico anterior tb).
-        "fluxo_do_mes": round(receita_atual - saidas_atual, 2),
-        "despesa_projetada_fim_do_mes": round(despesa_projetada, 2),
-        "aportes_projetados_fim_do_mes": round(aportes_atual, 2),  # constante
-        "saidas_projetadas_fim_do_mes": round(saidas_projetadas, 2),
-        "saldo_projetado": round(receita_atual - saidas_projetadas, 2),
-        "vai_fechar_negativo": (receita_atual - saidas_projetadas) < 0,
-        "cartao_incluido": False,
-        "nota_metodologia": (
-            "Projeção SEM as compras no cartão de crédito. "
-            "Despesa projetada por ritmo (extrapola dia-a-dia). "
-            "Aportes são eventos pontuais — somados como constante, "
-            "não projetados. `fluxo_do_mes` é o saldo do MÊS, não o "
-            "saldo da conta corrente."
-        ),
+        "mes": m["mes"],
+        "hoje": hoje.isoformat(),
+        "dias_corridos": dias_corridos,
+        "dias_no_mes": dias_no_mes,
+        "receita": d(entrou),
+        "despesa": d(saiu),
+        "saldo_ate_agora": d(entrou - saiu),
+        "despesa_cartao": d(saiu_cartao),
+        "despesa_agendada": d(saiu_agendado),
+        "despesa_no_ritmo": d(saiu_no_ritmo),
+        "despesa_projetada": d(saiu_projetado),
+        "saldo_projetado": d(saldo_projetado),
+        "vai_fechar_negativo": saldo_projetado < 0,  # sobre o valor já arredondado: nunca -0.0 com True
+        "cartao_incluido": True,
+        "cartao_por": "fatura",
+        "motivos": m["motivos"],
+        "nota_metodologia": nota,
     }
 
 
@@ -1289,12 +1283,17 @@ TOOLS: list[Tool] = [
                 "description": (
                     "Projeta como o mês corrente vai fechar. Use pra 'no ritmo "
                     "atual vou fechar no negativo?', 'projeção do mês', 'vou "
-                    "estourar?'. Retorna despesa real, aportes, receita, "
-                    "fluxo do mês atual e projeções. IMPORTANTE pra mensagem: "
-                    "(1) `fluxo_do_mes` é o saldo do mês corrente, NÃO o saldo "
-                    "da conta corrente (que tem histórico). (2) Despesa é "
-                    "projetada por ritmo diário; aportes são CONSTANTES (eventos "
-                    "pontuais já feitos, não escalados). Mostra ambos separado."
+                    "estourar?'. Os números até agora (`receita`, `despesa`) são os "
+                    "do painel do mês. IMPORTANTE pra mensagem: (1) "
+                    "`saldo_ate_agora` é receita menos despesa no mês corrente, "
+                    "NÃO o saldo da conta. (2) Só as compras do cartão conectado "
+                    "pelo Open Finance (`despesa_cartao`) entram como estão na "
+                    "fatura; o resto do gasto até hoje, inclusive cartão lançado à mão, é "
+                    "projetado pelo ritmo diário (`despesa_no_ritmo`). Lançamento "
+                    "fora do cartão com data depois de hoje, no mês, entra como "
+                    "está (`despesa_agendada`), sem esticar. Receita com data "
+                    "futura no mês já está em `receita`, como no painel; a "
+                    "receita não é projetada."
                 ),
                 "parameters": {"type": "object", "properties": {}},
             },
