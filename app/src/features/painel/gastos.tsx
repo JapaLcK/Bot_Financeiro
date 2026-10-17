@@ -1,5 +1,5 @@
 import { irAoExtrato, useNavegacaoPainel } from "./navegacao";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import Slider from "@react-native-community/slider";
 import { useTema } from "@/ui/tema";
@@ -10,6 +10,7 @@ import { usePainel } from "./provider";
 import { RecursoDados, Anel, Linha, Avisos, Acao, Vazio, Valor, SeteDias } from "./base";
 import { useBloco } from "./blocoContexto";
 import { LancamentosDe, LinhaExpansivel } from "./expansao";
+import { FolhaDia, abreFolha } from "./folhaDia";
 import { CORES_CATEGORIA, raio } from "@/ui/tokens";
 import { somarCentavos, percentualEmCentavos } from "./decimal";
 // Barra da cor da fatia no donut, logo abaixo do nome (linha + barra = 44pt). Decorativa: o valor já está na linha. `fracao` é 0–1.
@@ -24,7 +25,8 @@ export function Categorias() { const { navegar } = useNavegacaoPainel(); const p
 // Uma linha por dia, mais recente primeiro. Sem `accessibilityLabel` no botão: o VoiceOver lê data e valores dos filhos.
 // As barras são `View` decorativa (não `ProgressBar`, que seria anunciada duas vezes por dia) e somem com valores ocultos.
 export function Calendario() {
- const { navegar } = useNavegacaoPainel(); const { ampliado } = useTipografiaPainel(); const p = usePainel(); const { cores } = useTema(); const bloco = useBloco(); const [aberto, setAberto] = useState<string | null>(null);
+ const { navegar } = useNavegacaoPainel(); const { ampliado } = useTipografiaPainel(); const p = usePainel(); const { cores } = useTema(); const bloco = useBloco(); const [aberto, setAberto] = useState<string | null>(null), [diaFolha, setDiaFolha] = useState<string | null>(null);
+ useEffect(() => setDiaFolha(null), [p.mes]); // a folha é do mês exibido
  return <RecursoDados nome="detalhes">{(d) => { const dias = [...d.dias].sort((a, b) => b.dia.localeCompare(a.dia)), maximo = Math.max(1, ...dias.map((x) => Math.max(x.entrou, x.saiu))), barras = !ampliado && !p.oculto;
   // A compra parcelada conserva o dia original (db/mes_detalhes.py): dia de outro ano leva o ano, senão dois "03/10" se confundem.
   const outroAno = (dia: string) => dia.slice(0, 4) !== d.mes.slice(0, 4), largura = dias.some((x) => outroAno(x.dia)) ? 68 : 44;
@@ -32,7 +34,7 @@ export function Calendario() {
   return <View style={{ gap: 8 }}>{dias.length ? <View style={{ gap: 4 }}><SeteDias itens={dias}>{(dia) => { const conteudo = <View style={{ flex: 1, minWidth: 0, flexDirection: ampliado ? "column" : "row", alignItems: ampliado ? "flex-start" : "center", gap: ampliado ? 2 : 12 }}><Texto variante="rotulo" style={ampliado ? undefined : { width: largura }}>{diaMes(dia.dia, d.mes)}</Texto>{barras && <View accessibilityElementsHidden importantForAccessibility="no" style={{ flex: 1, gap: 4 }}>{barra(dia.entrou, cores.positive)}{barra(dia.saiu, cores.alert)}</View>}<View style={{ alignItems: ampliado ? "flex-start" : "flex-end", flex: barras || ampliado ? undefined : 1 }}>{dia.entrou !== 0 && <Valor valor={dia.entrou} tipo="entrada" pequeno />}{dia.saiu !== 0 && <Valor valor={dia.saiu} tipo="saida" pequeno />}{!dia.entrou && !dia.saiu && <Valor valor={0} pequeno />}</View></View>;
    // No chat o dia expande os lançamentos dele (`?dia=` do endpoint, dentro do mês do bloco: a parcela de outro ano também casa), 10 por vez.
    return bloco ? <LinhaExpansivel key={dia.dia} testID={`calendario-dia-${dia.dia}`} linha={conteudo} aberta={aberto === dia.dia} alternar={() => setAberto(aberto === dia.dia ? null : dia.dia)}><LancamentosDe consulta={new URLSearchParams({ mes: d.mes, dia: dia.dia, limite: "10" }).toString()} /></LinhaExpansivel>
-    : <Pressable key={dia.dia} testID={`calendario-dia-${dia.dia}`} accessibilityRole="button" onPress={() => irAoExtrato(navegar, { dia: dia.dia })} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 }}>{conteudo}<Icone nome="CaretRight" tamanho={20} /></Pressable>; }}</SeteDias></View> : <Vazio texto="Ainda não há movimentos neste período." />}<Avisos motivos={d.motivos} /></View>; }}</RecursoDados>;
+    : <Pressable key={dia.dia} testID={`calendario-dia-${dia.dia}`} accessibilityRole="button" onPress={() => abreFolha(dia.dia, d.mes, p.usuario.history_earliest_date) ? setDiaFolha(dia.dia) : irAoExtrato(navegar, { dia: dia.dia })} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 }}>{conteudo}<Icone nome="CaretRight" tamanho={20} /></Pressable>; }}</SeteDias></View> : <Vazio texto="Ainda não há movimentos neste período." />}<Avisos motivos={d.motivos} />{!bloco && <FolhaDia dia={diaFolha} mudar={setDiaFolha} />}</View>; }}</RecursoDados>;
 }
 // Slider nativo (UISlider): ajustável no VoiceOver sem código. O valor chega como `number` qualquer e
 // `percentualEmCentavos` lança com percentual não inteiro, daí o arredondamento ao passo antes do estado.
