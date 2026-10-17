@@ -195,12 +195,12 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 
 | # | Item | Por que nessa posição |
 |---|---|---|
-| 1 | **A1 "Seu dia" e calendário real**, depois **A15 Para onde vai** (mesmo schema `/gastos`) | É o único com plano fechado e decisões do dono tomadas (2026-10-16), servidor pronto, só Leve, e a dependência (#1031) já está na `main`. Foi o gatilho da regra. |
+| 1 | **A1 "Seu dia" e calendário real**, depois **A15 Para onde vai** (mesmo schema `/gastos`) | É o único com plano fechado e decisões do dono tomadas (2026-10-16), servidor pronto e a dependência (#1031) já está na `main`. **É Completo, não Leve**, porque o cliente calcula dinheiro (A1: a pílula contra a média; A15: variação e soma), embora o servidor não mude. Foi o gatilho da regra. |
 | 2 | **A2 Metas v2 (leitura)** | É barato (o formato e os textos já estão no app por causa do E1) e **corrige um risco que existe hoje**: o app mostra a meta por uma regra e o web, a IA e o WhatsApp por outra. Vem antes da escrita. |
 | 3 | **A5 Receitas do extrato + A6** | Já era trabalho prometido (P7 2b); fecha uma função de dinheiro que o web já oferece. |
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
 | 5 | **A4 Escrita na Carteira**, com o PR de servidor (idempotência) **antes** | Contesto "escrita primeiro": é o item mais caro (Completo, G), o servidor não protege contra repetição de POST e o produto já reduziu a escrita manual a uma só (Carteira). Vale começar o PR de servidor cedo, em paralelo, porque ele não depende de build. |
-| 6 | A7, A8, A13, A14, A16, A20; **A19**, **A18**, **A21** e **A22** à parte | Pequenos: A8 espera o #1033; A13 é uma chamada com prazo próprio e um link; A14 é um filtro. A19 (M) leva um campo aditivo no servidor e anda junto do W13 do web. A21 só sobe depois do W4 do web, que cria o contrato; A22 só existe se o W10 escolher o layout no servidor e sobe depois dele. A18 (Completo, M) não depende da A2 e pode subir quando o dono confirmar se o app mostra caixinha por caixinha. |
+| 6 | A7, A8, A13, A14, A16, A20; **A19**, **A18**, **A21** e **A22** à parte | Pequenos no tamanho, nem todos na faixa (A13, A16 e A20 são Completo; A7, A14 e A8, se só exibir, Leve): A8 espera o #1033; A13 é uma chamada com prazo próprio e um link; A14 é um filtro. A19 (M) leva um campo aditivo no servidor e anda junto do W13 do web. A21 só sobe depois do W4 do web, que cria o contrato; A22 só existe se o W10 escolher o layout no servidor e sobe depois dele. A18 (Completo, M) não depende da A2 e pode subir quando o dono confirmar se o app mostra caixinha por caixinha. |
 | 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11, A17 | A10 já decidido (P3, sim); A11 depende do web; A17 espera a decisão do W3. |
 
