@@ -40,19 +40,19 @@ const maioresGastosSchema = z.object({
 const fimDoMesSchema = z.object({ mes: mesAAAAMM, dias_corridos: z.number().int(), dias_no_mes: z.number().int(), receita: legado, despesa: legado, despesa_projetada: legado, saldo_projetado: legado, vai_fechar_negativo: z.boolean(), motivos });
 const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema };
 export const CARDS_DA_TOOL = Object.keys(schemasDaTool) as (keyof typeof schemasDaTool)[];
-/** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
+/** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS` (ids e títulos de widget). O catálogo de "Adicionar blocos" e `lerLayout` é `BLOCOS_HOME` (`catalogo.ts`), que também deixa o `metas` de fora. */
 export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas" | (typeof CARDS_DA_TOOL)[number];
 const cardId = z.enum(["periodo", "caixinhas", ...Object.keys(TITULOS), ...CARDS_DA_TOOL] as [CardChat, ...CardChat[]]);
 /** O recurso `periodo` do card (`api/nativo/mes_detalhes.py`), uma aba com `mes: null`. Fixture: `tests/fixtures/ai_chat_bloco_periodo.json`. */
 export const periodoSchema = z.object({ inicio: mesAAAAMM, fim: mesAAAAMM, ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
-/** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
-export const schemasRecurso = { contas: contasSchema, resumo: resumoSchema, detalhes: detalhesMesSchema, detalhesAnterior: detalhesMesSchema, patrimonio: patrimonioSchema, rendimento: rendimentoSchema, previsao: previsaoSchema, assinaturas: assinaturasSchema, metas: metasSchema, cartoes: cartoesSchema, parcelas: parcelasSchema, renda: rendaSchema, insights: insightsSchema, plano: planoSchema, categorias: categoriasSchema };
-/** O recurso `metas` do card do chat: a forma de `GET /api/v2/metas` (`api/v2/metas.py`). Fixture: `tests/frontend/api_v2_respostas.json["metas"]`. O app só mostra: nada de `falta`/`percentual` derivado aqui. */
+/** O recurso `metas`: a aba Metas (provider, `/api/app/metas`) e o card do chat (bloco): a forma de `GET /api/v2/metas` (`api/v2/metas.py`). Fixture: `tests/frontend/api_v2_respostas.json["metas"]`. O app só mostra: nada de `falta`/`percentual` derivado aqui. */
 export const metasV2Schema = z.object({
   metas: z.array(z.object({ id: z.number().int(), nome: z.string(), tipo: z.enum(["meta", "reserva"]), meses: z.number().int().nullable(), data_alvo: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/).nullable(), atual: dinheiro.nullable(), alvo: dinheiro.nullable(), falta: dinheiro.nullable(), percentual: z.number().int().min(0).max(100).nullable(), por_mes: dinheiro.nullable(), prazo_passou: z.boolean(), ritmo: z.object({ valor: dinheiro.nullable(), dias_de_historico: z.number().int().nullable(), parcial: z.boolean(), motivos }), chega_em: mesAAAAMM.nullable(), motivos, fonte: z.object({ tipo: z.string(), rotulo: texto }) })),
   custo_mensal: z.object({ valor: dinheiro.nullable(), recorrencias: z.number().int(), motivos }),
 });
 export type MetasV2 = z.output<typeof metasV2Schema>;
+/** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
+export const schemasRecurso = { contas: contasSchema, resumo: resumoSchema, detalhes: detalhesMesSchema, detalhesAnterior: detalhesMesSchema, patrimonio: patrimonioSchema, rendimento: rendimentoSchema, previsao: previsaoSchema, assinaturas: assinaturasSchema, metas: metasV2Schema, cartoes: cartoesSchema, parcelas: parcelasSchema, renda: rendaSchema, insights: insightsSchema, plano: planoSchema, categorias: categoriasSchema };
 /** Dinheiro em que o app também DECIDE (média, % do dia, fatia da barra): centavos para exibir e o texto decimal bruto para decidir, como o web (`Number(raw)`); arredondar antes muda o resultado (`gastosDia.ts`). */
 const dinheiroBruto = z.string().transform((v, ctx) => { try { return { centavos: decimalParaCentavos(v), bruto: v }; } catch { ctx.addIssue({ code: "custom", message: "Dinheiro inválido" }); return z.NEVER; } });
 /** `GET /api/app/gastos?mes=` (`api/v2/gastos.py`), SÓ o que a folha do dia lê (campo a mais é ignorado; a cor da categoria vem de `CORES_CATEGORIA` por posição). Campos lidos versionados em `tests/fixtures/app_gastos_campos_lidos.json` e fixture em `tests/fixtures/app_gastos.json`, ambas conferidas contra o Pydantic por `tests/test_api_v2_gastos.py`. */
@@ -63,8 +63,8 @@ export const gastosSchema = z.object({
   motivos,
 });
 export type Gastos = z.output<typeof gastosSchema>;
-/** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; o `metas` do chat vem no formato v2 (`metasV2Schema`, desenhado por `MetasChat`). Só o BLOCO troca: `schemasRecurso.metas` (provider, `TelaMetas`) segue legado, então não reaproveite `schemas[recurso]` para o card. */
-const schemasBloco = { ...schemasRecurso, metas: metasV2Schema, periodo: periodoSchema, caixinhas: metasSchema, ...schemasDaTool };
+/** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; o `metas` (aba e chat) é o v2 (`metasV2Schema`, desenhado por `MetasChat`). */
+const schemasBloco = { ...schemasRecurso, periodo: periodoSchema, caixinhas: metasSchema, ...schemasDaTool };
 export type RecursosBloco = { [K in keyof typeof schemasBloco]?: z.output<(typeof schemasBloco)[K]> };
 /** Chave desconhecida é descartada; recurso que não passa no schema do app invalida o bloco (quem lê descarta SÓ o evento). Dinheiro chega em centavos. */
 const recursosBloco = z.record(z.string(), z.unknown()).transform((bruto, ctx): RecursosBloco => {

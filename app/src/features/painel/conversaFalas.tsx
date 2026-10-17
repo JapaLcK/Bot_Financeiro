@@ -93,7 +93,6 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
   if (card === "maiores_gastos") return tituloMaiores(aba.recursos.maiores_gastos);
   if (card === "fim_do_mes") return tituloFimDoMes(aba.recursos.fim_do_mes);
-  if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
 /** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tudo acontece dentro do card, no chat: não há folha nem toque que abra outra tela. */
