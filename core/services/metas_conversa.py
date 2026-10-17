@@ -21,7 +21,7 @@ from utils_text import fmt_brl
 logger = logging.getLogger(__name__)
 
 MAX_METAS = 10
-ONDE_CRIAR = "Crie e edite suas metas no painel: pigbankai.com/painel (seção Metas). Pelo chat ainda não dá."
+ONDE_CRIAR = "Crie e edite suas metas no painel: pigbankai.com/painel (seção Metas), ou me peça aqui."
 # Explicam o alvo da reserva, não o saldo da fonte: a frase do custo cobre.
 DO_ALVO = ("custo_desconhecido", "plano_sem_custo_mensal")
 
@@ -165,7 +165,7 @@ def para_conversa(d: dict) -> dict:
 
 
 def texto_whatsapp(uid: int) -> str:
-    """O "minhas metas" do WhatsApp (leitura; escrita é o C4): o `resumo` e os `avisos` de
+    """O "minhas metas" do WhatsApp (leitura; a escrita é da IA, `ai_chat/tools/metas_escrita.py`): o `resumo` e os `avisos` de
     `para_conversa`, sem recalcular nada. Sem link mágico: o painel vai como URL simples. Cabe nos 4096
     do WhatsApp (com folga para o aviso que alguns caminhos põem antes): se não couber, tira metas do fim e anuncia ("e mais N no painel"). Nunca lança."""
     from core.handlers.launches import _WPP_MAX_CHARS, _wpp_len  # tardio: handler pesado, só aqui
