@@ -1032,6 +1032,46 @@ def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, a
     assert (_ancora(uid_pro, "add_credit_purchase", args, fala)[1] is None) is ancora
 
 
+# Cada "Nx de V" só deriva o total com a SUA contagem: dois produtos (10x de 50, 12x de 60) não cruzam (60 × 10 = 600 nunca foi dito).
+_DOIS = "TV 10x de 50 e fogão 12x de 60"
+
+
+@pytest.mark.parametrize("fala,valor,parcelas,ancora", [
+    (_DOIS, 500, 10, True), (_DOIS, 720, 12, True),
+    (_DOIS, 600, 10, False), (_DOIS, 600, 12, False), (_DOIS, 500, 12, False), (_DOIS, 720, 10, False),
+    (_DOIS, 50, 10, False), (_DOIS, 60, 12, False),
+    ("12x de 50", 600, 12, True),                                # regressão
+    ("doze vezes de 50", 600, 12, True),                         # contagem por extenso
+    ("vinte e quatro vezes de 50", 1200, 24, True),
+    ("TV dez vezes de 50 e fogão doze vezes de 60", 720, 12, True),
+    ("TV dez vezes de 50 e fogão doze vezes de 60", 600, 10, False),
+    ("12x de 30 reais e 50 centavos", 366, 12, True),
+    ("2 TVs: 10x de 50 e 10x de 60", 500, 10, True),             # mesma contagem, valores diferentes: os dois gravam
+    ("2 TVs: 10x de 50 e 10x de 60", 600, 10, True),
+    ("2 TVs: 10x de 50 e 10x de 60", 550, 10, False),
+])
+def test_q20_cada_captura_so_multiplica_a_propria_contagem(uid_pro, fala, valor, parcelas, ancora):
+    args = {"valor": valor, "parcelas": parcelas}
+    assert (_ancora(uid_pro, "add_credit_purchase", args, fala)[1] is None) is ancora
+
+
+@pytest.mark.parametrize("valor,parcelas,ancora", [(500, 10, True), (720, 12, True), (600, 10, False), (600, 12, False), (500, 12, False)])
+def test_q20b_mensagens_separadas_mesma_regra(uid_pro, valor, parcelas, ancora):
+    db.ai_append_message(uid_pro, "user", "TV 10x de 50")
+    db.ai_append_message(uid_pro, "user", "fogão 12x de 60")
+    r = _ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": parcelas}, "no nubank")[1]
+    assert (r is None) is ancora
+
+
+def test_q20c_conversa_total_cruzado_nao_grava(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(600, parcelas=10))
+    r = runner.chat(uid_pro, _DOIS + " no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+
+
 @pytest.mark.parametrize("fala,inventado,escrito", [
     ("comprei por 50 em 12x no nubank", 600, 50),          # 50 é o total
     ("geladeira doze vezes de 50 no nubank", 50, 600),   # 50 é a parcela: o total é 12 × 50 (contagem por extenso, valor em dígito)

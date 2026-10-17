@@ -134,14 +134,20 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # "12x de 50" / "12x R$ 50" / "12 parcelas a 50" / "12 prestações de 50": o valor depois do "de"/"a"/"R$" é da PARCELA e o `valor` das tools de
 # cartão é o TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora
 # (um produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). A contagem pode vir
-# por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$/"cada") é
-# ambíguo e fica fora: o 50 segue ancorando como total. "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
+# por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 3). "12x 50" (solto, sem de/a/R$/"cada") é
+# ambíguo e fica fora: o 50 segue ancorando como total. Grupos: 1/2 = contagem (dígito/extenso), 3 = valor; cada captura só
+# deriva o total com a SUA contagem (== `parcelas` do modelo): "TV 10x de 50 e fogão 12x de 60" não ancora 600 (60 × 10). "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
-    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:\s*[,:]\s*|\s+)"
+    rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:\s*[,:]\s*|\s+)"
     # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
     r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
     r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
+
+
+def _capturas_parcela(t: str):
+    """(contagem, valor-de-parcela) de cada "Nx de V". Contagem não resolvida vira 1: nunca casa um `parcelas` > 1 (fail-closed)."""
+    return [(int(m[1]) if m[1] else extract_parcelas(f"{m[2].lower()} vezes"), m[3]) for m in _PARCELA_RE.finditer(t)]
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -200,11 +206,12 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
         # o "em 12" nu ("comprei a TV em 12") é a contagem, não R$ 12 (depois do _PARCELA_RE: "em 12x de 50" é dele).
         # " ; " e não " ": "600 em 12 vezes" não pode virar "600 vezes" (quantidade), que o collect_evidence descartaria
         fora = _centavos_lidos([re.sub(rf"\bem\s+{p}\b(?![.,]\d)", " ; ", _PARCELA_RE.sub(" ", t)) for t in textos])
-        de_parcela = set()
         for t in textos:
-            for m in _PARCELA_RE.finditer(t):
-                de_parcela |= _centavos_lidos([m[1].rstrip(".,")])  # "30 reais e 50 centavos" = só 3050
-    if escrita and (v in fora or v in {c * p for c in de_parcela}):
+            for cnt, bruto in _capturas_parcela(t):
+                if cnt == p:  # o valor de "12x de 60" não multiplica a contagem "10" do outro produto
+                    escrita = True  # "TV 10x de 50 e fogão 12x de 60": o extract_parcelas só vê a primeira contagem
+                    de_parcela |= {c * p for c in _centavos_lidos([bruto.rstrip(".,")])}  # "30 reais e 50 centavos" = só 3050
+    if escrita and (v in fora or v in de_parcela):
         return args, None
     # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
     acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
