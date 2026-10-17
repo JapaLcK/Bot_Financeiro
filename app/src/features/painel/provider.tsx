@@ -23,7 +23,7 @@ export type Recurso = keyof typeof schemas;
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };
 type Resultados = { [K in Recurso]?: Resultado<Dados[K]> };
-type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
+type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; relerPrevisao: () => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
 const Contexto = createContext<Painel | null>(null);
 export function useEstadoPainel() { const p = useContext(Contexto); if (!p) throw new Error("Painel indisponível"); return p; }
 export function usePainel() { const p = useEstadoPainel(); if (!p.usuario || p.gate !== "liberado") throw new Error("Painel não autorizado"); return { ...p, usuario: p.usuario }; }
@@ -55,6 +55,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [dias, setDias] = useState<number>();
   const [versao, setVersao] = useState(0);
+  const [releitura, setReleitura] = useState(0);
   const [atualizando, setAtualizando] = useState(false);
   const geracao = useRef(0);
   const geracaoAcesso = useRef(0);
@@ -62,7 +63,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const dono = useRef<number | null>(null);
   const controladores = useRef(new Set<AbortController>());
   const leituras = useRef(new Map<Recurso, AbortController>());
-  const ultimaCarga = useRef<{ uid: number; versao: number; mes: string; dias?: number; geracao: number } | null>(null);
+  const ultimaCarga = useRef<{ uid: number; versao: number; mes: string; dias?: number; releitura: number; geracao: number } | null>(null);
   const emVoo = useRef(false);
   const leituraPerfil = useRef<AbortController | null>(null);
   const layouts = useRef(new Map<S.PerfilPainel, Widget[]>());
@@ -103,12 +104,12 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const completa = !anterior || anterior.uid !== uid || anterior.versao !== versao || anterior.geracao !== geracao.current;
     const recursos: Recurso[] = completa ? Object.keys(schemas) as Recurso[] : [
       ...(anterior.mes !== mes ? ["resumo", "detalhes", "detalhesAnterior"] as const : []),
-      ...(anterior.dias !== dias ? ["previsao"] as const : []),
+      ...(anterior.dias !== dias || anterior.releitura !== releitura ? ["previsao"] as const : []), // UMA condição: dois spreads pediriam a previsão duas vezes
     ];
     // Não cancela aqui (#849): o efeito do pai roda depois do dos filhos e mataria a página recém-pedida. Quem pede a recarga cancela antes (atualizar, cleanup do portão); o setVersao do finally de mudarPerfil pode vir sem cancelar (limite de 15s do PUT), e por isso as leituras se superam por recurso e a de perfil pela mais nova.
     if (completa) setDados({});
     const g = geracao.current;
-    ultimaCarga.current = { uid, versao, mes, dias, geracao: g };
+    ultimaCarga.current = { uid, versao, mes, dias, releitura, geracao: g };
     if (!recursos.length) return;
     setAtualizando(true);
     if (!completa) setDados((d) => ({ ...d, ...Object.fromEntries(recursos.map((k) => [k, { fase: "carregando" }])) }));
@@ -142,7 +143,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       const atual = () => !c.signal.aborted && g === geracao.current && dono.current === uid && leituraPerfil.current === c;
       void lerRecurso("/api/app/perfil", S.perfilPainelSchema, c).then((p) => { if (atual() && !emVoo.current) { setPerfil(p.perfil ?? "padrao"); setEscolhendo(p.perfil === null); } }).catch((e: unknown) => { if (atual() && !(e instanceof RequisicaoSuperada)) { falhou(e); setAviso("Não conseguimos carregar seu perfil. Tente atualizar."); } }).finally(() => { controladores.current.delete(c); if (leituraPerfil.current === c) leituraPerfil.current = null; });
     }
-  }, [gate, usuario, mes, dias, versao, ativo, travado, cancelar, falhou]);
+  }, [gate, usuario, mes, dias, releitura, versao, ativo, travado, cancelar, falhou]);
   useEffect(() => {
     if (!usuario) return;
     const uid = usuario.user_id; let cancelado = false;
@@ -176,7 +177,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
   // atualizar cancela no pedido, não no efeito: o efeito do pai roda depois do dos filhos e mataria a página recém-pedida (#849).
-  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); setVersao((v) => v + 1); }, atualizando, dias, mudarDias: setDias, versao, operacao, falhou }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: setMes, oculto, alternarPrivacidade: () => setOculto((v) => !v), perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); setVersao((v) => v + 1); }, atualizando, dias, mudarDias: setDias, relerPrevisao: () => setReleitura((v) => v + 1), versao, operacao, falhou }}>{children}</Contexto.Provider>;
 }
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {
