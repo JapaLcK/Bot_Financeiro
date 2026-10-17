@@ -603,10 +603,24 @@ def test_checkout_concorrente_reutiliza_uma_unica_sessao(user_id, monkeypatch, c
     monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_abc")
     fake = _patch_stripe(monkeypatch)
 
-    # Aquece o pool async ANTES da corrida (mesmo padrão de tests/test_checkout_bump.py): com
-    # `_db_pool` nulo, os dois loops (um por TestClient) disputam o `_db_pool_lock` e um nunca
-    # sai (#829). Sem criar sessão: `session_create_calls == 1` precisa vir da corrida.
-    asyncio.run(shared._get_db_pool())
+    # O teste só discrimina o `_billing_user_lock` com 2 conexões no pool e uma janela de corrida.
+    # Um pool aquecido por `asyncio.run(_get_db_pool())` simples fica com 1 conexão (min_size=1) e
+    # serializa os pedidos ANTES do lock, deixando verde até um lock que segura a conexão. Por isso
+    # cresce o pool (2 simultâneas, loop vivo) e o `Session.list` dorme 0,3 s depois de olhar (#829).
+    lista = fake.checkout.Session.list  # foto ANTES de dormir: o pedido que chega 0,3 s depois ainda vê vazio
+
+    def lista_lenta(**kw):
+        r = lista(**kw)
+        time.sleep(0.3)
+        return r
+    fake.checkout.Session.list = staticmethod(lista_lenta)
+    shared.reset_db_pool()  # pool de teste anterior (loop morto) não cresce; recomeça num loop vivo
+
+    async def _aquece():
+        pool = await shared._get_db_pool()
+        async with pool.connection(), pool.connection():  # 2 simultâneas: o pool cresce
+            pass
+    asyncio.run(_aquece())
 
     responses = [None, None]
     erros = []
