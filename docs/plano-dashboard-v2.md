@@ -916,6 +916,7 @@ o 409).
 
 - [x] Matriz de paridade `/painel` × app nativo levantada e a regra do dono registrada, **só em plano** (nenhum código):
   `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W7).
-- [ ] Decisões do dono pendentes (§10 do plano do app): ordem, texto da regra no `CLAUDE.md`, guia no app, data da
-  App Store, privacidade no `/painel`, Guardado líquido no Resumo.
+- [x] Decisões do dono (§10 do plano do app, 2026-10-16): ordem aprovada, texto da regra aprovado para o `CLAUDE.md`
+  (em PR próprio), guia existe no app, sem data de App Store. Seguem abertas: modo privacidade no `/painel` (W6) e
+  Guardado líquido no Resumo (W5).
 - [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W3, depois W2 e W4).

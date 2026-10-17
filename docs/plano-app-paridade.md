@@ -106,7 +106,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 30 | Guia do Piggy e dicas de primeiro uso | `GET/POST /guia`, `POST /guia/dica` (`Guia.tsx`, `Dica.tsx`) | Não há | O guia do web aponta para elementos da tela (`data-guia`); o equivalente nativo é outro desenho | **pergunta ao dono (P3)** |
+| 30 | Guia do Piggy e dicas de primeiro uso | `GET/POST /guia`, `POST /guia/dica` (`Guia.tsx`, `Dica.tsx`) | Não há | O guia do web aponta para elementos da tela (`data-guia`); o equivalente nativo é outro desenho | **app atrás (A10)**, decidido em P3 |
 | 31 | Ajuda e atalhos (Cmd-K, Menu) | `Command.tsx`, `Ajuda.tsx`, `MenuTelas.tsx` | A barra de abas e a Folha | Atalho de teclado não tem par em toque | plataforma |
 
 ### 3.8 Conta, segurança e sistema
@@ -148,7 +148,7 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A7 | `guardado=1` no Extrato, com o rótulo "Guardado" | 0 | mandar o parâmetro, rótulo e sinal conforme #983 | Leve | P | Um build novo (apps antigos continuam sem) |
 | A8 | Comparação de períodos | 0 (#1033 monta `/api/app/comparacao`) | card de comparação, Plus+ | Leve | P | Esperar o #1033 mergear |
 | A9 | Excluir conta, exportar dados, definir senha | **a verificar**: se as rotas do site aceitam Bearer; senão acrescentar | telas nativas | **Completo** (auth, sessão, destrutivo) | G | Decisão do dono sobre a data de submissão à App Store (§10, P4) |
-| A10 | Guia e dicas | 0 (`/api/app/guia*` montado) | depende da decisão (§10, P3) | Leve | M | P3 |
+| A10 | Guia e dicas, adaptados ao nativo (P3: sim) | 0 (`/api/app/guia*` montado) | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto, `dado` real/exemplo do roteiro | Leve | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
 O que o app **deve migrar do legado** (`/goals`, `/cards`, `/installments`, `/analytics`, `/insights`) para contratos v2
@@ -159,9 +159,9 @@ antigo lê).
 ## 5. Específico da plataforma (proposta, aguardando o dono)
 
 Não entram na matriz como dívida: SSE × foco e foreground (38), atalhos de teclado (31), biometria e tampa (37),
-Compras Apple × cobrança do site (36), conexão de banco por navegador × widget (32). **O dono decide** (§10, P2) se o
-guia (30) e o modo privacidade (5) também são específicos; a recomendação deste plano é que o modo privacidade **não** seja
-(o painel antigo já o tem) e que o guia seja uma pergunta aberta.
+Compras Apple × cobrança do site (36), conexão de banco por navegador × widget (32). O dono decidiu (§10, P3) que o
+guia **não** é específico: existe no app, adaptado ao nativo (A10). Segue aberta a pergunta do modo privacidade (5), cuja
+recomendação é **não** ser específico (o painel antigo já o tem).
 
 ## 6. Ordem recomendada e por quê
 
@@ -176,8 +176,8 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
 | 5 | **A4 Escrita na Carteira**, com o PR de servidor (idempotência) **antes** | Contesto "escrita primeiro": é o item mais caro (Completo, G), o servidor não protege contra repetição de POST e o produto já reduziu a escrita manual a uma só (Carteira). Vale começar o PR de servidor cedo, em paralelo, porque ele não depende de build. |
 | 6 | A7, A8 | Pequenos; A8 espera o #1033. |
-| 7 | **A9** | Sobe de posição no dia em que o dono marcar uma submissão à App Store (§10, P4). Hoje a conta é de TestFlight. |
-| 8 | A10, A11 | A10 depende de P3; A11 depende do web. |
+| 7 | **A9** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
+| 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
 Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais) e W5 (Saldo e Guardado líquido)
 só precisam **montar no namespace v2** rotas que já existem; W2 (chat real) é a Etapa 7; W3 (Simulador) é
@@ -186,7 +186,7 @@ cliente puro; W4 (Fatura, Parcelas, Renda, "Piggy notou") precisa de contrato no
 
 ## 7. Regra operacional daqui para a frente
 
-Proposta (nada foi editado no `CLAUDE.md` raiz; a pergunta ao dono está no §10, P1).
+Aprovada pelo dono em 2026-10-16 (§10, P1). **Este PR não edita o `CLAUDE.md` raiz**: a edição e o template vão em PR próprio.
 
 **7.1 No PR.** Todo PR de feature de qualquer dos dois lados traz no corpo uma linha:
 
@@ -244,13 +244,19 @@ lado; se as rotas de excluir conta e exportar dados aceitam Bearer; se há "cria
 catálogo de blocos tem exatamente os mesmos itens por perfil; a regra da App Store (5.1.1(v)) é conhecimento da
 política, não verificada nesta sessão.
 
-## 10. Perguntas que dependem do dono
+## 10. Decisões do dono (2026-10-16) e perguntas que seguem abertas
 
-1. **P1.** Aprova o texto do §7.2 no `CLAUDE.md` raiz (e o `.github/pull_request_template.md` do §7.1)?
-2. **P2.** Prioridade: aceita a ordem do §6 no lugar da sugestão inicial?
-3. **P3.** O guia do Piggy (e as dicas de primeiro uso) deve existir no app, ou é específico da plataforma?
-4. **P4.** Há data para o app ir à App Store? Se sim, A9 (excluir conta, exportar dados, definir senha) sobe na ordem.
-5. **P5.** O modo privacidade no `/painel` é paridade (recomendado) ou específico do app?
+Decididas:
+
+1. **P1, aprovada.** O texto do §7.2 entra no `CLAUDE.md` raiz (§4) e o `.github/pull_request_template.md` do §7.1 é criado,
+   **em PR próprio** (Direto, depois deste). O teste de manifesto do §7.3 vira item Leve separado.
+2. **P2, aprovada.** Vale a ordem do §6 (no lugar da sugestão inicial).
+3. **P3, sim.** O guia existe no app, **adaptado ao nativo** (A10, Leve, M, depois dos itens de dinheiro; mínimo de texto).
+4. **P4, não há data.** Só TestFlight por ora: A9 fica na posição 7 do §6. Se uma data aparecer, A9 sobe.
+
+Abertas (não bloqueiam este PR):
+
+5. **P5.** O modo privacidade no `/painel` é paridade (recomendado, W6) ou específico do app?
 6. **P6.** O Resumo do `/painel` deve voltar a mostrar Saldo do mês e Guardado líquido, agora com a fonte real
    (`mes-detalhes`)? O dono tirou o "Guardado no mês" do Resumo por ser dado inventado (plano do dashboard §8, Etapa 4 PR B);
    a versão real é uma decisão nova, não uma volta automática (W5).
