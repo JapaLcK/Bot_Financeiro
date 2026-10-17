@@ -284,7 +284,7 @@ Cada item acima que o app ainda não tem entra na **A21** (`docs/plano-app-parid
 | Salvar que falha (rede cai no meio, 5xx) | **volta ao último layout confirmado**, avisa que não salvou e deixa o salvar repetível; nada fica só no cache |
 | Sem rede desde o começo | "Organizar" fica desligado; sem fila de gravações pendentes, salvo pedido do dono |
 | Restaurar o padrão | grava o registro com o padrão **explícito**, que conta como reivindicado: nenhum aparelho com layout antigo o ressuscita |
-| Id de bloco que o escritor não mostra (desconhecido, ou escondido pelo plano) | preservado em toda gravação, com a posição relativa que tinha; o merge é do servidor contra o layout mais recente |
+| Id de bloco que o escritor não mostra (desconhecido, ou escondido pelo plano) | preservado em toda gravação; o merge é do servidor contra o layout mais recente, com **âncora determinística**: o id escondido vai junto do bloco visível que o **precede** no layout mais recente (se não houver, fica no início) e acompanha esse bloco quando a ordem visível muda. Exemplo: no servidor `[A, metas, B]`, o web, que só vê `[A, B]`, salva `[B, A]`, e o resultado é `[B, A, metas]`; teste desse cruzamento |
 
 Testes: migração concorrente, padrão que não ganha, reset entre aparelhos, gravação com falha de rede, duas gravações concorrentes com id desconhecido. A **A22** cumpre esta tabela no app.
 
