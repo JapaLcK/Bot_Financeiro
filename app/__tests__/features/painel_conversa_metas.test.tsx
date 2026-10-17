@@ -3,11 +3,11 @@ import { render } from "@testing-library/react-native";
 import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
 import { metasV2Schema } from "@/api/schemas/painel";
 import { BlocoContexto } from "@/features/painel/blocoContexto";
-import { MetasChat } from "@/features/painel/metasChat";
+import { MetasChat, serieDaMeta } from "@/features/painel/metasChat";
 import * as provider from "@/features/painel/provider";
 import { falado } from "@/ui/dinheiro";
 import { TemaProvider } from "@/ui/tema";
-import { claro } from "@/ui/tokens";
+import { ALFA_WASH_SERIE, claro, escuro, SERIE_META } from "@/ui/tokens";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { prepararCaso, resposta, segurar } from "./auth_apoio";
 import { apertar, enviar, ok, posts, reiniciar, srv } from "./conversa_apoio";
@@ -15,8 +15,9 @@ import { V2, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards
 // O card `metas` do chat (formato v2 de `/api/v2/metas`, fixtures reais): pílulas com ícone, % e barra (blocos na reserva), sem frases; as frases vivem só no rótulo do VoiceOver.
 jest.setTimeout(30_000);
 // Os ícones viram `View testID="icone-<nome>"`: é assim que o teste sabe qual ícone a pílula desenha (mesmo recurso de painel_curva_tela).
+// `cor` e `tom` seguem como props do host para o teste ler a cor do ícone.
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- a fábrica do jest.mock não importa módulos de fora (hoisting)
-jest.mock("@/ui/componentes/Icone", () => ({ Icone: ({ nome }: { nome: string }) => require("react").createElement(require("react-native").View, { testID: `icone-${nome}` }) }));
+jest.mock("@/ui/componentes/Icone", () => ({ Icone: ({ nome, cor, tom }: { nome: string; cor?: string; tom?: string }) => require("react").createElement(require("react-native").View, { testID: `icone-${nome}`, cor, tom }) }));
 beforeEach(async () => { prepararCaso(); desligarTrava(); await reiniciar(); instalarCards(); });
 afterEach(() => { jest.restoreAllMocks(); });
 const mostrar = async (caso: string) => { comBlocos(bloco("metas", { metas: V2.metas[caso] })); await perguntar(); return within(screen.getByTestId("bloco-metas")); };
@@ -34,6 +35,13 @@ const cheios = (c: ReturnType<typeof within>) => c.queryAllByTestId("bloco-cheio
 /** O `now` das barras do trecho. O `ProgressBar` é `View` com `accessibilityRole` mas sem `accessible`: o `getByRole` não o acha, então busca-se o host pela prop. */
 type Consulta = { UNSAFE_queryAllByProps: (p: { [x: string]: unknown }) => { type: unknown; props: { [x: string]: any } }[] };
 const barras = (c: Consulta): number[] => c.UNSAFE_queryAllByProps({ accessibilityRole: "progressbar" }).filter((b) => typeof b.type === "string").map((b) => b.props.accessibilityValue.now);
+/** Cor do ícone de tipo (PiggyBank/Target) da pílula `id`; o ✓ e o ⚠ têm `tom`, não `cor`. */
+const corIcone = (id: number) => (meta(id).getByTestId(/^icone-(PiggyBank|Target)$/).props as { cor: string }).cor;
+/** Fundo do círculo do ícone: o primeiro ancestral host do ícone com `backgroundColor`. */
+const circulo = (id: number): string => { let e: any = meta(id).getByTestId(/^icone-(PiggyBank|Target)$/); while (e && !(typeof e.type === "string" && StyleSheet.flatten(e.props.style)?.backgroundColor)) e = e.parent; return cor(e); };
+/** Cor de preenchimento da barra de `id` (o filho do trilho com `accessibilityRole="progressbar"`). */
+const corBarra = (id: number): string => cor(meta(id).UNSAFE_queryAllByProps({ accessibilityRole: "progressbar" }).filter((b) => typeof b.type === "string")[0]!.children[0] as never);
+const wash = (hex: string) => `${hex}${Math.round(ALFA_WASH_SERIE * 255).toString(16).padStart(2, "0")}`;
 const R = (centavos: number) => falado(centavos)!;
 const SEM_FRASES = /Falta|Precisa|[Rr]itmo|medido em|Seu ritmo|inclui rendimento|a conferir|Meta batida/;
 
@@ -252,6 +260,38 @@ describe("outros casos da fixture", () => {
     const c = await mostrar("estresse");
     expect(idsNaTela()).toEqual(["meta-3", "meta-1", "meta-2"]); expect(meta(3).queryAllByTestId(/^bloco-/)).toHaveLength(24); expect(cheios(meta(3))).toHaveLength(1); // 999999999,99 de 23999999999,76 = exatamente 1 de 24 meses (4% truncado: o % daria 0)
     expect(rotulo(3)).toContain(R(2399999999976)); expect(c.queryByText("—")).toBeNull();
+  });
+});
+describe("cor de série (paridade com a web, #1065)", () => {
+  it("metas 2 a 5 do `varios` (série 2,3,0,1): barra, ícone e círculo na cor da série; as 4 distintas e nenhuma é o brand", async () => {
+    await mostrar("varios"); const ids = [2, 3, 4, 5], esperado = ids.map((id) => SERIE_META.light[serieDaMeta(id)]!);
+    expect(esperado).toEqual([SERIE_META.light[2], SERIE_META.light[3], SERIE_META.light[0], SERIE_META.light[1]]);
+    expect(ids.map(corIcone)).toEqual(esperado); expect(ids.map(circulo)).toEqual(esperado.map(wash)); expect(ids.map(corBarra)).toEqual(esperado);
+    expect(new Set(esperado).size).toBe(4); expect(esperado).not.toContain(claro.brand);
+  });
+  it("reserva (id 1): ícone brand, círculo brandSoft e blocos brand, mesmo com a série do id 1 (controle positivo: não pintou a reserva)", async () => {
+    await mostrar("varios"); expect(serieDaMeta(1)).toBe(1);
+    expect(corIcone(1)).toBe(claro.brand); expect(circulo(1)).toBe(claro.brandSoft); expect(cor(cheios(meta(1))[0]!)).toBe(claro.brand);
+  });
+  it("batida (id 9): barra em positive, ícone e círculo seguem na série, ✓ presente", async () => {
+    const c = await mostrar("varios"); fireEvent.press(c.getByTestId("meta-mais")); const s = SERIE_META.light[serieDaMeta(9)]!;
+    expect(corBarra(9)).toBe(claro.positive); expect(corIcone(9)).toBe(s); expect(circulo(9)).toBe(wash(s)); expect(meta(9).getByTestId("icone-CheckCircle").props.tom).toBe("positive");
+  });
+  it("⚠ (meta 10, sem saldo) continua neutro (inkMuted), com o ícone na série e sem barra", async () => {
+    const c = await mostrar("varios"); fireEvent.press(c.getByTestId("meta-mais")); const s = SERIE_META.light[serieDaMeta(10)]!;
+    expect(meta(10).getByTestId("icone-WarningCircle").props.tom).toBe("inkMuted"); expect(corIcone(10)).toBe(s); expect(barras(meta(10))).toEqual([]);
+  });
+  it("a cor segue o id, não a posição: [2,3] e depois [3,2] dão a mesma cor por meta", async () => {
+    await mostrarIds([2, 3]); const antes = { 2: corBarra(2), 3: corBarra(3) };
+    await mostrarIds([3, 2]); expect(idsNaTela()).toEqual(["meta-3", "meta-2"]); expect({ 2: corBarra(2), 3: corBarra(3) }).toEqual(antes);
+    expect(antes[2]).not.toBe(antes[3]);
+  });
+  it("tema escuro: os hex da web (id 2 = azul #60A5FA) e a reserva no brand do escuro; wash a 12%", () => {
+    jest.spyOn(provider, "usePainel").mockImplementation(() => ({ oculto: false }) as never);
+    const recursos = { metas: metasV2Schema.parse({ ...V2.metas.varios, metas: [1, 2].map(base) }) } as never;
+    render(<TemaProvider esquema="dark"><BlocoContexto.Provider value={{ recursos }}><MetasChat /></BlocoContexto.Provider></TemaProvider>);
+    expect(SERIE_META.dark[serieDaMeta(2)]).toBe("#60A5FA");
+    expect(corIcone(2)).toBe("#60A5FA"); expect(corBarra(2)).toBe("#60A5FA"); expect(circulo(2)).toBe(wash("#60A5FA")); expect(circulo(1)).toBe(escuro.brandSoft); expect(corIcone(1)).toBe(escuro.brand);
   });
 });
 describe("valores ocultos", () => {
