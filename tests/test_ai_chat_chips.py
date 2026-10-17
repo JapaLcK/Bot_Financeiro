@@ -174,7 +174,7 @@ def test_caminhos_sem_chips(monkeypatch, caso):
     if caso == "ocupado":
         with runner.trava_do_turno(uid, 1):
             r, _, _ = executar(uid, "oi")
-        assert r.reply == runner._OCUPADO
+        assert r.reply == runner._OCUPADO.removeprefix("🐷 ")  # o stream não leva o 🐷
     else:
         r, _, _ = executar(uid, "sim" if caso == "sim" else "não" if caso == "nao" else "oi")
     assert reg.chips == [] and r.chips == []

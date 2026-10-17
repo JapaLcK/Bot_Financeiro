@@ -206,6 +206,17 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
   futuro termina no fim do mês corrente, com `fim_ajustado` e `aviso_fim`.
+  **Card junto da tool (PR 3A).** No app, `get_largest_expenses` (card `maiores_gastos`) e `forecast_month_end`
+  (`fim_do_mes`) mostram o próprio card, sem `show_card` (`cards.mostrar_da_tool`; `cards.DA_TOOL` fica FORA de
+  `cards.IDS`). O bloco é o resultado que a tool calculou, uma conta só (`fim_do_mes` sem `nota_metodologia` e
+  `cartao_incluido`; traz `dias_corridos` e `dias_no_mes`); gasta uma vaga do turno e respeita o repetido e o
+  `card_ainda_resolve`. Só sai se o corpo do `/ai/chat/stream` declarar o card em `cards` (`AIChatBody.cards`,
+  `_context.CARDS_DO_APP`): o build 31 não manda o campo e recebe o dado de sempre. Com o card, o modelo recebe
+  `card_na_tela: true` (`maiores_gastos`: resumo, sem `expenses`, com `total_dos_itens` (soma só dos itens listados, não o gasto do período), `maior`, `categorias`; `fim_do_mes`:
+  o resultado inteiro). Sem emissor (WhatsApp, `/ai/chat`) a saída é byte a byte a de antes. No stream só o 🐷 do começo
+  da resposta sai (`streaming.executar`/`completar`); o histórico gravado mantém o 🐷. O texto curto junto do card é só
+  um pedido no prompt (`prompt_do_usuario(app=True)`), sem código que o imponha: quem mede é o staging. Tool de leitura sem card: `tests/test_ai_chat_tool_card.py` (`AUDITORIA`) lista uma a uma. Web: o /painel
+  ainda não chama o stream (C3).
   Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
   hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
   mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado

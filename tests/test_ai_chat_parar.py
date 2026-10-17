@@ -89,7 +89,7 @@ def test_parar_depois_da_openai_nao_devolve_a_vaga_e_erro_devolve(monkeypatch, p
 
     openai_falso(monkeypatch, rodada(erro=RuntimeError("openai fora")))
     r, _, _ = executar(pro_user_id, "oi de novo")
-    assert r.reply == runner.ERROR_MSG and not r.sugerivel
+    assert r.reply == runner.ERROR_MSG.removeprefix("🐷 ") and not r.sugerivel
     assert db.ai_get_usage_this_month(pro_user_id) == 1, "o erro devia devolver a vaga"
 
 
