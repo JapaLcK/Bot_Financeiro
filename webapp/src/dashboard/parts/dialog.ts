@@ -51,7 +51,8 @@ export const hide = (d: HTMLDialogElement | null) => {
 // fecharia na hora; o clique no fundo só vale passada esta janela.
 const JANELA_DO_FUNDO = 400;
 export const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex="-1"]';
-export function useDialogo(fechar: () => void) {
+// `travado`: enquanto devolver true, Esc, Cancelar, Fechar e clique no fundo não fecham (uma escrita em voo).
+export function useDialogo(fechar: () => void, travado?: () => boolean) {
   const dlg = useRef<HTMLDialogElement>(null);
   const abertoEm = useRef(0);
   useEffect(() => {
@@ -60,12 +61,12 @@ export function useDialogo(fechar: () => void) {
     show(d, FOCUS);
     d?.querySelector<HTMLElement>(FOCUS)?.focus();
     const esc = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape" && !NATIVE && isOpen(d)) { e.preventDefault(); hide(d); fechar(); }
+      if (e.key === "Escape" && !NATIVE && isOpen(d)) { e.preventDefault(); if (!travado?.()) { hide(d); fechar(); } }
     };
     window.addEventListener("keydown", esc);
     return () => { window.removeEventListener("keydown", esc); if (isOpen(d)) hide(d); else untrap(); };
   }, []);
-  const fecharDialog = () => { hide(dlg.current); fechar(); };
+  const fecharDialog = () => { if (travado?.()) return; hide(dlg.current); fechar(); };
   const fundo = () => { if (performance.now() - abertoEm.current > JANELA_DO_FUNDO) fecharDialog(); };
   const props = {
     ref: dlg,
@@ -78,6 +79,13 @@ export function useDialogo(fechar: () => void) {
       if ((e.shiftKey && at === 0) || (!e.shiftKey && at === all.length - 1)) { e.preventDefault(); all[e.shiftKey ? all.length - 1 : 0]?.focus(); }
     },
     onCancel: (e: { preventDefault: () => void }) => { e.preventDefault(); fecharDialog(); },
+    // O Chromium só deixa o `cancel` ser vetado 2 vezes sem gesto do usuário; o 3º Esc fecha o <dialog> à força, com a
+    // escrita em voo: aqui ele reabre (o React segue com o formulário montado) ou, fechado fora de voo, o estado acompanha.
+    onClose: () => {
+      const d = dlg.current;
+      if (!travado || !d || d.open) return;
+      if (travado()) d.showModal(); else fechar();
+    },
     onClick: (e: { target: EventTarget }) => { if (e.target === dlg.current) fundo(); },
   };
   return { dlg, fecharDialog, fundo, props };

@@ -7,7 +7,6 @@ import { Faturas, Parcelas, Renda, Assinaturas, Notou } from "./complementos";
 import { CardPeriodo } from "./cardPeriodo";
 import { CardGastos } from "./cardGastos";
 import { CardFimDoMes, CardMaiores } from "./cardMaiores";
-import { MetasChat } from "./metasChat";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
 import { Vazio } from "./base";
@@ -19,6 +18,5 @@ export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel()
  if (id === "maiores_gastos") return <CardMaiores />;
  if (id === "fim_do_mes") return <CardFimDoMes />;
  if (id === "categorias" && bloco) return <CardGastos />; // card do chat; o painel segue com `Categorias`
- if (id === "metas" && bloco) return <MetasChat />; // v2 (`/api/v2/metas`); fora do chat, `Metas` lê o provider (legado)
  if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
  const Componente = VIEWS[id]; return <Componente />; }

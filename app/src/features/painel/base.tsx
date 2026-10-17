@@ -1,4 +1,4 @@
-import type { Href } from "expo-router";
+import { useIsFocused, type Href } from "expo-router";
 import { useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -96,9 +96,10 @@ export function Avisos({ motivos }: { motivos: string[] }) {
  return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }
 export function Vazio({ texto }: { texto: string }) { return <Texto variante="rotulo" tom="inkMuted">{texto}</Texto>; }
-export function Folha({ titulo, aberta, fechar, children }: { titulo: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
-  const { cores } = useTema(); const reduzir = useReduzirMovimento();
-  return <Modal visible={aberta} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
+/** `rotulo`: o que o VoiceOver lê no lugar do título (data curta → longa). `aberta && focado`: o `Modal` do RN cobre a aba de destino, então a folha some com a aba (e reaparece ao voltar: o estado segue "aberta"). */
+export function Folha({ titulo, rotulo, aberta, fechar, children }: { titulo: string; rotulo?: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
+  const { cores } = useTema(); const reduzir = useReduzirMovimento(); const focado = useIsFocused();
+  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" accessibilityLabel={rotulo} style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
 }
 export function Curva({ valores }: { valores: (number | null)[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();

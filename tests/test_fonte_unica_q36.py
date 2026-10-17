@@ -20,6 +20,7 @@ import db
 import frontend.finance_bot_websocket_custom as dashboard
 from conftest import usuario_pagante
 from core.services.ai_chat import runner
+from core.services.ai_chat._context import CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import get_tool
 from core.services.fonte_unica import MENSAGENS
 from core.types import Attachment, IncomingMessage
@@ -99,7 +100,12 @@ def _wa_anexo(uid, nome, corpo, tipo):
 def _ia(uid, tool, args):
     """Pelo despacho do runner: `validate` e confirmação; e, se a IA pediu
     confirmação, o "sim" (`_execute_pending`)."""
-    _hist, terminal = runner._dispatch_tool(uid, tool, args)
+    # o usuário "escreveu" os números dos args: a âncora de valor lê o texto dele
+    tok = CURRENT_USER_MESSAGE.set(" ".join(str(v) for v in args.values() if isinstance(v, (int, float))))
+    try:
+        _hist, terminal = runner._dispatch_tool(uid, tool, args)
+    finally:
+        CURRENT_USER_MESSAGE.reset(tok)
     if terminal is not None:
         return terminal
     return runner._execute_pending(uid, {"tool_name": tool, "tool_args": args})

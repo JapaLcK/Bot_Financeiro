@@ -35,7 +35,7 @@ export const perguntar = async () => { await abrir(); await enviar("oi"); await 
 export const lancamentos = { resp: (_u: URL, _r: RequestInit): Response | Promise<Response> => resposta(200, F["/api/app/lancamentos"]) };
 export const chamadasLanc = () => fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/api/app/lancamentos");
 export const consultaLanc = (n = -1) => new URL(String(chamadasLanc().at(n)![0])).searchParams;
-const WIDGETS = /^\/api\/app\/(contas|resumo-do-mes|mes-detalhes|patrimonio|rendimento|previsao|assinaturas|categorias|me)$|^\/(goals|cards|installments|analytics|insights)\//;
+const WIDGETS = /^\/api\/app\/(contas|resumo-do-mes|mes-detalhes|patrimonio|rendimento|previsao|assinaturas|categorias|metas|me)$|^\/(goals|cards|installments|analytics|insights)\//;
 /** Depois de `reiniciar()`: provider "vazio" (500 nas rotas dos widgets) e `lancamentos.resp` no lugar do `/api/app/lancamentos`. `provedor: true` deixa o provider normal (fixture). */
 export function instalarCards(provedor = false) {
   const atual = fetchFalso.getMockImplementation()! as ((u: string, r: RequestInit) => unknown) & { base?: (u: string, r: RequestInit) => unknown }, impl = atual.base ?? atual; // idempotente: chamar de novo troca o modo, não empilha

@@ -1,9 +1,11 @@
 import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
+import { metasSchema } from "@/api/schemas/painel";
 import { faladoComSinal } from "@/ui/dinheiro";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
+import metasBanco from "./painel_metas_banco.fixture.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
 jest.setTimeout(30_000);
@@ -70,7 +72,7 @@ it("compromissos: o título usa o horizonte do bloco (60), não o do provider (3
 it("sem bloco, o chip com assunto não monta card (o card legado do assunto saiu)", async () => {
   await abrir(); await apertar("Quanto falta pra minha próxima meta e quando eu chego lá?");
   await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
-  expect(screen.queryByText("Metas e caixinhas")).toBeNull(); expect(screen.queryByTestId("bloco-metas")).toBeNull();
+  expect(screen.queryByTestId("bloco-metas")).toBeNull();
 });
 it("bloco de recursos vazios: 'Dado indisponível neste card.', sem tela de erro", async () => {
   comBlocos({ card: "categorias", abas: [{ mes: null, recursos: {} }] }); await perguntar();
@@ -81,6 +83,23 @@ describe("`caixinhas` e `metas` v2 no chat", () => {
   it("`caixinhas` (formato legado): a mesma lista de metas, com o título do card", async () => {
     comBlocos(bloco("caixinhas")); await perguntar();
     expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Caixinhas")).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
+  });
+  // Portados de `painel_regressoes`: a aba Metas já não mostra caixinhas, o card `caixinhas` (`ListaMetas`) é quem as desenha.
+  it("`caixinhas` com saldo bancário 500.005 é aceito e apresentado", async () => {
+    expect(metasSchema.parse(metasBanco).goals[0]!.balance).toBe(50001);
+    comBlocos(bloco("caixinhas", { caixinhas: metasBanco })); await perguntar();
+    const c = within(screen.getByTestId("bloco-caixinhas")); expect(c.getByText("Espelhada")).toBeTruthy(); expect(c.getByLabelText("500 reais e 1 centavo")).toBeTruthy();
+  });
+  it("`caixinhas`: indicador tight e prazo da meta têm cópia em português", async () => {
+    comBlocos(bloco("caixinhas", { caixinhas: { ...metasBanco, goals: [{ ...metasBanco.goals[0], is_goal: true, indicator: "tight", target_date: "2026-11-03" }] } })); await perguntar();
+    const c = within(screen.getByTestId("bloco-caixinhas")); expect(c.getByText("Prazo apertado")).toBeTruthy(); expect(c.getByText("03/11/2026")).toBeTruthy(); expect(c.queryByText("tight")).toBeNull();
+  });
+  it("`caixinhas` com valores ocultos: o chat troca o turno por um marcador (o card some inteiro, sem a barra nem o valor); volta ao mostrar", async () => {
+    comBlocos(bloco("caixinhas")); await perguntar();
+    const barras = () => screen.UNSAFE_root.findAll((n) => typeof n.type === "string" && n.props.accessibilityRole === "progressbar"); // a barra não é `accessible`: getByRole não a acha
+    expect(barras()).toHaveLength(1); expect(within(screen.getByTestId("bloco-caixinhas")).getByLabelText("6000 reais")).toBeTruthy();
+    await apertar("Ocultar valores"); expect(screen.queryByTestId("bloco-caixinhas")).toBeNull(); expect(barras()).toHaveLength(0); expect(screen.queryByLabelText("6000 reais")).toBeNull();
+    await apertar("Mostrar valores"); expect(barras()).toHaveLength(1);
   });
   // O recurso `metas` do chat vem no formato v2 (`/api/v2/metas`); o legado `{ok, goals}` já não vale para o bloco `metas` (é do `caixinhas`).
   const metasV2 = (v2 as unknown as { metas: { varios: Record<string, any> } }).metas.varios;

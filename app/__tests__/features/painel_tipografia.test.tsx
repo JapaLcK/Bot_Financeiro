@@ -34,22 +34,27 @@ beforeEach(async () => { prepararCaso(); desligarTrava(); await fonte(1); await 
 afterEach(async () => { await act(async () => { Dimensions.set({ window: janelaOriginal }); }); jest.restoreAllMocks(); });
 it.each([1, 2])("cold start fontScale %s mantém teto e compõe label/valor conforme espaço", async (escala) => {
  await fonte(escala); renderRouter("./app", { initialUrl: "/metas" });
- await waitFor(() => expect(screen.getByText("Ritmo mensal necessário")).toBeTruthy());
- const label = screen.getByText("Ritmo mensal necessário"), valor = screen.getByLabelText("900 reais");
+ await waitFor(() => expect(screen.getByText("Carteira")).toBeTruthy());
+ const label = screen.getByText("Carteira"), valor = screen.getByLabelText("450 reais");
  expect(label.props.maxFontSizeMultiplier).toBe(1.3); expect(valor.props.maxFontSizeMultiplier).toBe(1.3);
  if (escala > 1) expect(paiVisual(label)).toBe(paiVisual(valor));
  else expect(paiVisual(label)).not.toBe(paiVisual(valor));
  expect(screen.getByText("PigBank")).toBeTruthy();
 });
+it.each([[1, 1], [2, undefined]])("pílula da meta com fontScale %s: nome com numberOfLines %s (sem corte quando ampliado)", async (escala, linhas) => {
+ await fonte(escala); renderRouter("./app", { initialUrl: "/metas" });
+ await waitFor(() => expect(screen.getByText("Viagem")).toBeTruthy());
+ expect(screen.getByText("Viagem").props.numberOfLines).toBe(linhas);
+});
 it("mudança live remede texto e dinheiro sem remontar providers ou requisitar dados", async () => {
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Ritmo mensal necessário")).toBeTruthy());
- const antes = screen.getByText("PigBank"), dinheiroAntes = screen.getByLabelText("900 reais");
+ renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Carteira")).toBeTruthy());
+ const antes = screen.getByText("PigBank"), dinheiroAntes = screen.getByLabelText("450 reais");
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
- expect(screen.getByText("PigBank")).not.toBe(antes); expect(screen.getByLabelText("900 reais")).not.toBe(dinheiroAntes);
- expect(paiVisual(screen.getByText("Ritmo mensal necessário"))).toBe(paiVisual(screen.getByLabelText("900 reais")));
+ expect(screen.getByText("PigBank")).not.toBe(antes); expect(screen.getByLabelText("450 reais")).not.toBe(dinheiroAntes);
+ expect(paiVisual(screen.getByText("Carteira"))).toBe(paiVisual(screen.getByLabelText("450 reais")));
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
- await fonte(1); expect(paiVisual(screen.getByText("Ritmo mensal necessário"))).not.toBe(paiVisual(screen.getByLabelText("900 reais")));
+ await fonte(1); expect(paiVisual(screen.getByText("Carteira"))).not.toBe(paiVisual(screen.getByLabelText("450 reais")));
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
 it("filtros refluem na troca live sem perder seleção, busca ou instância do campo", async () => {
