@@ -278,6 +278,17 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("2 mil e 500 no mercado e 3 mil no uber", {250000, 50000, 300000}, {300}),   # o 500 solto segue ancorando (limite declarado)
     ("1 milhão e 2 mil", {100000000, 200000}, {100, 200}),
     ("2,5 mil e 3 mil", {250000, 300000}, {300}),
+    # linha digitável / código de barras: nada dela é valor (nem o dígito verificador, nem o valor embutido); o "150" escrito antes segue lido (Codex)
+    ("34191.79001 01043.510047 91020.150008 5 84410000002000", set(), {500, 200000, 2000}),
+    ("boleto 23793.38128 60000.000003 00000.000400 1 84340000012345", set(), {100, 40000, 1234500}),
+    ("84640000001-4 49000000000-8 00000000000-0 00000000000-0", set(), {400, 800}),
+    ("34191790010104351004791020150008584410000002000", set(), set()),
+    ("boleto de 150 34191.79001 01043.510047 91020.150008 5 84410000002000", {15000}, {500, 200000}),
+    ("paguei 1.234,50", {123450}, set()), ("boleto de 1.234.567,89", {123456789}, set()),
+    # ano-mês: o mês não é valor; "2026,50" e "2026.5"/"2026.50" seguem dinheiro (Codex)
+    ("boleto vence em 2026-10", set(), {1000, 202600}), ("vence em 2026/10", set(), {1000}), ("para 2026-1", set(), {100, 202600}),
+    ("boleto de 150 vence em 2026-10", {15000}, {1000}), ("vence 2026.12", set(), {1200}),
+    ("paguei 2026,50", {202650}, set()), ("gastei 2026.5", {202650}, set()), ("gastei 2026.50", {202650}, set()),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -1299,6 +1310,31 @@ def test_n22_boleto_para_20_ponto_10_nao_grava_20_10(uid_pro, monkeypatch):   # 
     _usa_ia(cli)
     assert RECUSA in r and _boletos(uid_pro) == 0, r
     runner.chat(uid_pro, "boleto da internet de 150 para 20.10", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+_LINHA = "34191.79001 01043.510047 91020.150008 5 84410000002000"
+
+
+def test_n23_boleto_linha_digitavel_nao_grava_o_digito_verificador(uid_pro, monkeypatch):   # Codex: o "5" isolado virava R$ 5
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 5, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, f"anota o boleto da internet {_LINHA}", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, f"boleto da internet de 150 {_LINHA}", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n24_boleto_vence_ano_mes_nao_grava_o_mes(uid_pro, monkeypatch):   # Codex: o "-10" de "2026-10" virava R$ 10
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 10, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet vence em 2026-10", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet de 150 vence em 2026-10", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
 
 

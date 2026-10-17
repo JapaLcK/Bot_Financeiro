@@ -50,10 +50,15 @@ _ANO = r"(?:(?:\s*[,(\-–/]\s*|\s+)(?:de\s+\d{2,4}|20\d\d)\b" + _FIM_ANO + ")"
 _ANO_DD_MM = r"(?:\s*[,(\-–]\s*20\d\d\b" + _FIM_ANO + ")?"
 _TAXA = r"(?:%|por\s*cent(?:o)?\b|pct\b)"  # taxa: o número antes dela não é valor (nem de parcela: "12x com juros de 5%")
 _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também ignora ("em 12/10" é data; "em 12 meses" segue sendo 12x)
-    r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
+    # linha digitável / código de barras de boleto (44-48 dígitos, com ou sem `. - espaço`): o dígito verificador e os pedaços não são valor, nem o valor embutido
+    # (o usuário é perguntado). Começa com 5 dígitos colados: o "150" de "boleto de 150 34191.79001 ..." fica de fora. ponytail: código colado + " 150" ainda engole o 150 (fail-closed)
+    r"(?<![\d.,])\d{5}(?:[ .\-]?\d){35,43}(?!\d)"
+    r"|\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b" + _ANO_DD_MM + r"|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*" + _TAXA +
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
     # ano primeiro com barra/ponto só com 20dd ("2026/10/20", "2026.10.20"): o dd/mm acima casaria o rabo "10/20" e sobraria o ano
+    # ano-mês ("2026-10", "2026/10", "2026.12"): só 20dd e sem dígito depois; ponto só com mês de 2 dígitos 01-12 ("2026.5" e "2026.50" seguem dinheiro)
+    r"|\b20\d\d(?:[-/](?:0?[1-9]|1[0-2])|\.(?:0[1-9]|1[0-2]))\b(?![-/.]?\d)"
     r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,/-])20\d\d[/.]\d{1,2}[/.]\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]", "15 out 2026"): só "N [de] MÊS", nunca "50 em março".
     # Ano sem "de" só com 20dd: "15 out 150" mantém o 150 como dinheiro
