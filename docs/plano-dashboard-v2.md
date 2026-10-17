@@ -237,6 +237,41 @@ arquivar e apagar), hoje só no painel antigo: a Etapa 5 só lê emoji e cor, e 
 existir o editar abre o painel antigo com o aviso discreto (Q1/Q15). Decisão do dono,
 2026-10-13; detalhes em `docs/plano-etapa5-gastos.md`.
 
+### Paridade com o app
+
+Regra do dono, 2026-10-16: o `/painel` e o app nativo **andam juntos, nos dois sentidos**, com as mesmas características e
+funções, adaptadas à plataforma. A matriz completa (cada função e tela, rota, profundidade, veredito) mora em
+**`docs/plano-app-paridade.md`** (uma fonte só, §0.7); aqui ficam o resumo do que **este lado** deve, a ordem e a regra.
+Medido em 2026-10-16 na `main` `b7c8232d`, por leitura estática e grep; os comandos para remedir estão no §2 daquele
+documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #1050) e não é repetido.
+
+**O que o web ainda deve ao app** (o app já faz, o web mostra dado de exemplo ou não tem):
+
+| ID | O que falta no `/painel` | O que o servidor pede | Faixa | Esforço |
+|---|---|---|---|---|
+| W1 | **Patrimônio, "Onde está o dinheiro" e Rendimento reais** (a Etapa 6): hoje `NetWorth`, `Wealth` e `Yield` leem `lib/api.ts` sem rede e saem como exemplo | `patrimonio` e `rendimento` só existem em `api/nativo/`: montar também no namespace v2, como o #1033 faz com `comparacao` (`api/v2/app.py`); regenerar `api-v2.gen.ts` | Completo (dinheiro) | M |
+| W2 | **Chat real** (a Etapa 7): `CHAT_REAL = false`, só o assunto `investido` é real | `/ai/chat/stream` já existe e o app o consome | Completo | G |
+| W3 | **Simulador real**: `widgets/Simulator.tsx` e a página são de exemplo; o do app calcula no cliente sobre gastos observados | nenhum (lê `/gastos`) | Leve | M |
+| W4 | **Fatura, Parcelas futuras, Renda mês a mês e "Piggy notou" reais**: o app já os lê, mas pelo legado (`/cards/{uid}/summary`, `/installments/{uid}/list`, `/analytics/{uid}/evolution`, `/insights/{uid}/current`) | contrato novo em `/api/v2`, montado nos dois namespaces; depende das fontes do plano "só Open Finance" (a fatura manual saiu) | Completo | G |
+| W5 | **Saldo do mês e Guardado líquido reais** no Resumo do mês (hoje só Entrou e Saiu são reais; "Guardado no mês" saiu por ser inventado) | `mes-detalhes` só no app: montar no v2 | Completo (rota), Leve (tela) | P |
+| W6 | **Modo privacidade** (esconder valores): o app o tem em todo lugar e o painel antigo também (`toggleHideBalance`); o `/painel` não | nenhum | Leve | P |
+| W7 | Compromissos do **Resumo** (`compromissos: Bills`) ainda de exemplo, embora a versão real exista na página `/previsao` (`Compromissos.tsx`) | nenhum | Leve | P |
+
+**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A11): Para onde vai v2 e "Seu dia", Metas v2
+(leitura e escrita), escrita na Carteira, receitas do extrato, premissas e grupos da Previsão, `guardado=1`, comparação,
+conta (excluir, exportar, definir senha), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
+
+**Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
+risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5** e
+**W6**, pequenos; **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
+decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
+escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
+
+**Regra daqui para a frente** (proposta; o texto para o `CLAUDE.md` raiz está no §7.2 do plano do app, aguardando o dono):
+todo PR de feature de um lado declara no corpo `Par no outro lado: já existe | plano/issue #N | específico da plataforma
+porque …`; rota nova de dado nasce em `api/v2` e é montada nos dois namespaces (`api/nativo/` só para o que for do app
+de verdade, com a razão escrita); o servidor só **acrescenta** campo, porque app instalado não atualiza com o deploy.
+
 ## 7. O que cada etapa vai ter de resolver
 
 Pontos levantados na revisão deste plano (Codex, PR #586). São perguntas para o plano do
@@ -876,3 +911,11 @@ do app nativo é outra coisa e não muda). O protótipo e o chat do Piggy (PR C)
 Limite declarado: sem idempotência no POST, duas metas iguais são possíveis (a reserva tem
 o 409).
 
+
+### Paridade com o app (2026-10-16)
+
+- [x] Matriz de paridade `/painel` × app nativo levantada e a regra do dono registrada, **só em plano** (nenhum código):
+  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W7).
+- [ ] Decisões do dono pendentes (§10 do plano do app): ordem, texto da regra no `CLAUDE.md`, guia no app, data da
+  App Store, privacidade no `/painel`, Guardado líquido no Resumo.
+- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W3, depois W2 e W4).
