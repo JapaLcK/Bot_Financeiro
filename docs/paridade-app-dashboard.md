@@ -12,7 +12,7 @@ Medido na `main` em 53681b4e (2026-10-17). Paridade plena existe em várias fun�
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
 | Blocos e perfis da home | `Board.tsx`; esconde bloco que o plano não cobre (`locked`); ordem guardada sem o id do usuário (`pigbank.dashboard.layout.v1.<perfil>`) | `catalogo.ts`; oferece todos os blocos; ordem guardada por usuário e perfil | Plano filtra bloco só no web; chave sem usuário só no web; o app tem o bloco "Metas e caixinhas", que o web não tem | App (filtro por plano) e web (chave) | a discutir com o dono |
-| Contas | Nome, saldo e selos | Soma a hora da última sincronização e uma barra de composição (os lançamentos do mês de cada conta só aparecem nos cards do chat, não na home) | O contrato do web já traz `sincronizado_em`, mas a tela não mostra | Web | a discutir com o dono |
+| Contas | Nome, saldo e selos | Soma a data da última sincronização ("Atualizado dd/mm") e uma barra de composição (os lançamentos do mês de cada conta só aparecem nos cards do chat, não na home) | O contrato do web já traz `sincronizado_em`, mas a tela não mostra | Web | a discutir com o dono |
 | Resumo do mês | Compara com o mês anterior inteiro, sem porcentagem (comentário "decisão N4" em `Stats.tsx`); o card "Fatura" é de exemplo | Compara no mesmo ponto do mês, com variação em % e curva | Duas comparações diferentes | Não está claro; pode ser decisão | a discutir com o dono |
 | Saldo do mês e Guardado líquido | Não há | Topo da aba Gastos (`numerosMes.tsx`), de `mes-detalhes` | O dado só existe no namespace do app (`api/nativo/mes_detalhes.py`) | Web | a discutir com o dono |
 | Esconder valores (modo privacidade) | Não há no `/painel` | Botão e `oculto` em todo o app | — | Web | a discutir com o dono |
@@ -61,7 +61,7 @@ Medido na `main` em 53681b4e (2026-10-17). Paridade plena existe em várias fun�
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
 | Conversa | De exemplo (`CHAT_REAL = false`); só o assunto `investido` é real | Real (`/ai/chat/stream`, feedback, cancelar pendência) | — | Web | a discutir com o dono |
-| Cards no chat | Não renderiza | Renderiza (período, caixinhas, metas, gastos e os blocos do catálogo) | — | Web | a discutir com o dono |
+| Cards no chat | Renderiza cards de exemplo montados no cliente (`lib/topics.tsx`), não os que o servidor manda | Renderiza os cards reais que o servidor manda (período, caixinhas, metas, gastos e os blocos do catálogo) | O web não lê os cards do servidor | Web | a discutir com o dono |
 | Guia do Piggy e dicas | `Guia.tsx`, `Dica.tsx` | Não há | — | App | a discutir com o dono |
 
 ## Conta, segurança e sistema
