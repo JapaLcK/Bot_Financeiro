@@ -69,6 +69,21 @@ describe("Screen", () => {
     expect(c.UNSAFE_getByType(RefreshControl).props.progressViewOffset).toBe(0);
   });
 
+  // Numa aba, a tab bar já cobre a área segura de baixo: somar `insets.bottom` dava um vão (~34pt) sob o conteúdo.
+  it("sobAbas zera o padding de baixo nos dois ramos; sem ele, soma; o topo não muda", () => {
+    const pad = (el: React.ReactElement) => {
+      const { claro: c } = renderComAreaSegura(el);
+      const tela = c.getByTestId("tela");
+      return StyleSheet.flatten([tela.props.style, tela.props.contentContainerStyle]);
+    };
+    const { top, bottom } = METRICAS_DE_TESTE.insets;
+    expect(bottom).toBeGreaterThan(0); // sem inset de teste o zero não prova nada
+    expect(pad(<Screen rolar={false}><Text>x</Text></Screen>).paddingBottom).toBe(bottom);
+    expect(pad(<Screen><Text>x</Text></Screen>).paddingBottom).toBe(bottom);
+    expect(pad(<Screen sobAbas rolar={false}><Text>x</Text></Screen>)).toMatchObject({ paddingBottom: 0, paddingTop: top });
+    expect(pad(<Screen sobAbas><Text>x</Text></Screen>)).toMatchObject({ paddingBottom: 0, paddingTop: top });
+  });
+
   // Conteúdo rolado não pode aparecer sob o relógio: faixa fixa do fundo do
   // tema na altura da área segura, só onde o Screen é dono do topo.
   it("faixa de fundo atrás da barra de status só no ramo que rola e é dono do topo", () => {

@@ -25,8 +25,8 @@ it("delta mostra o texto antes do fim; reinicio zera; o fim troca pelo reply", a
   expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); // voltou ao botão de enviar (campo vazio)
 });
 it("fim duplicado: vale o 1º reply e a 1ª cota", async () => {
-  await abrir(); await enviar("oi"); await empurrar(fim("Primeira", { usage: { used: 3, limit: 100 } }), fim("Segunda", { usage: { used: 50, limit: 100 } }));
-  expect(texto("Primeira")).toBeTruthy(); expect(texto("Segunda")).toBeNull(); expect(screen.getByText("3 de 100 mensagens utilizadas")).toBeTruthy();
+  await abrir(); await enviar("oi"); await empurrar(fim("Primeira", { usage: { used: 81, limit: 100 } }), fim("Segunda", { usage: { used: 90, limit: 100 } }));
+  expect(texto("Primeira")).toBeTruthy(); expect(texto("Segunda")).toBeNull(); expect(screen.getByText("81 de 100 mensagens utilizadas")).toBeTruthy();
 });
 it("evento desconhecido e bloco inválido no meio não quebram o turno", async () => {
   await abrir(); await enviar("oi");

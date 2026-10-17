@@ -133,7 +133,7 @@ it("POST do Piggy em voo não é cancelado pela seleção de mês e conserva sua
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
- await waitFor(() => expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy());
+ await waitFor(() => expect(screen.getByRole("button", { name: /Onde eu consigo economizar/ })).toBeEnabled());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta em voo"); }); await apertar("Enviar mensagem");
  const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat/stream")!;
  await act(async () => { router.navigate("/gastos"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
