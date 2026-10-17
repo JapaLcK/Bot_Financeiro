@@ -47,7 +47,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web `/painel` | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 1 | Home em blocos, perfis e ordem | `Board` (`parts/Board.tsx`): blocos, Organizar, perfil via `GET/PUT /perfil` | Home nativa (`app/(app)/index.tsx`, `catalogo.ts`): blocos, seis perfis, perfil via `GET/PUT /api/app/perfil`, ordem no SecureStore por usuário e perfil | Catálogos quase iguais; o web tirou "Metas e caixinhas" do Resumo (decisão do dono, plano §8), o app ainda tem o bloco `metas`. Onde fica a ordem salva no web `?` | paridade (a conferir o catálogo) |
+| 1 | Home em blocos, perfis e ordem | `Board` (`parts/Board.tsx`): blocos, Organizar, perfil via `GET/PUT /perfil` | Home nativa (`app/(app)/index.tsx`, `catalogo.ts`): blocos, seis perfis, perfil via `GET/PUT /api/app/perfil`, ordem no SecureStore por usuário e perfil | Catálogos quase iguais; o web tirou "Metas e caixinhas" do Resumo (decisão do dono, plano §8), o app ainda tem o bloco `metas`. A ordem salva no web fica no `localStorage` por **perfil** (`lib/profiles.js`, `pigbank.dashboard.layout.v1.<perfil>`), sem o `user_id`; o app usa uid e perfil. Duas contas no mesmo navegador herdam e sobrescrevem a ordem uma da outra (só ids de bloco, não valores) | paridade no recurso; **web atrás (W10)** no escopo por usuário (a conferir o catálogo) |
 | 2 | Contas (saldo por conta) | `GET /contas` (`widgets/Contas.tsx`, real) | `GET /api/app/contas` (`contasResumo.tsx`) | — | paridade |
 | 3 | Resumo do mês: Entrou e Saiu | `GET /resumo-do-mes` (`Stats.tsx`, real): o valor do mês e, ao lado, o do mês anterior inteiro, **sem porcentagem (decisão N4)**; **Fatura é de exemplo** | `GET /api/app/resumo-do-mes` (`resumoMes.tsx`): compara o mesmo ponto do mês com o anterior, com variação e curvas | Os dois comparam; a diferença (porcentagem, mesmo ponto do mês, curva) é do app e a ausência de porcentagem no web é decisão do dono. A comparação de períodos mais rica no web é o #1033 (aberto) | paridade (a riqueza da comparação é diferença deliberada; reabrir só se o dono pedir) |
 | 4 | Saldo do mês e **Guardado líquido** | Não há. "Guardado no mês" saiu do Resumo por ser dado inventado (plano §8, Etapa 4 PR B) | Topo da aba Gastos (`numerosMes.tsx`): Entrou, Saiu, Saldo, Guardado líquido, de `GET /api/app/mes-detalhes` | O número do app é real (`guardado` de `mes-detalhes`); `mes-detalhes` só existe no namespace do app (`api/nativo/`) | web atrás |
@@ -57,7 +57,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 6 | Para onde vai (categorias) | `GET /gastos`: estabelecimentos por categoria, série de 3 meses, detalhe (`GET /gastos/categoria`) | `Categorias` lê `mes-detalhes`; **não consome `/gastos`** | Sem estabelecimentos nem série; o servidor já serve `/api/app/gastos` (`tests/test_rotas_senha_obrigatoria.py:148`) | **app atrás (A1)** |
+| 6 | Para onde vai (categorias) | `GET /gastos`: estabelecimentos por categoria, série de 3 meses, detalhe (`GET /gastos/categoria`) | `Categorias` lê `mes-detalhes`; **não consome `/gastos`** | Sem estabelecimentos nem série, e `Categorias` abre o extrato filtrado em vez de um detalhe; o servidor já serve `/api/app/gastos` (`tests/test_rotas_senha_obrigatoria.py:148`). O plano do Seu dia **não cobre** este bloco (só calendário e folha do dia) | **app atrás (A15)** |
 | 7 | Calendário "Dia a dia" | `GastosCalendario` sobre `/gastos`: grade real, quantidade e categorias por dia | `Calendario` sobre `mes-detalhes`: `{dia, entrou, saiu}`; toque leva ao extrato | Sem quantidade, categoria ou maiores | **app atrás (A1)** |
 | 8 | Card "Seu dia" (#1029) | Setas de dia, total, pílula contra a média, fatos, barra, compras | Não há | Plano pronto em `docs/plano-seu-dia-app.md` (#1050): folha ao tocar no dia, sem frase | **app atrás (A1)** |
 | 9 | Simulador | **De exemplo** (`widgets/Simulator.tsx`, `pages.tsx` `Simulate`) | Real: economia hipotética sobre gastos observados (`gastos.tsx`, `Simulador`), com gate de plano | O app calcula no cliente a partir de dados que o web também lê (`/gastos`) | web atrás |
@@ -136,7 +136,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
-Resumo, para não perder: linhas 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
+Resumo, para não perder: linhas 1 (ordem salva por usuário), 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
 (Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) 50 (Suporte, Conta e Sair no shell) e 51 (tema claro). Dentro dos "específicos da
 plataforma" o app ainda tem biometria, tampa de privacidade e Compras Apple (linhas 36 e 37).
 Isso é **mais** do que a regra do dono previa ao dizer "o app está atrás": **o web também está atrás**, e por dívida
@@ -162,6 +162,7 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A12 | Sessões ativas e atividade recente, preferências de notificação, editar e-mail, nome e telefone, trocar senha, recomeçar do zero (linhas 41 a 44 e 46) | **a verificar**: as rotas `/settings/{user_id}/...` aceitam Bearer? Se não, acrescentar equivalentes sem `user_id` no caminho | telas nativas na Segurança e em Configurações, mínimo de texto | **Completo** (auth e sessão) | G | A9 (mesma área); o PR #1035 (login com MFA e exclusão agendada) pode mexer no mesmo código |
 | A13 | **Atualizar agora** do Open Finance (linha 32) e link da **Política de Privacidade** em Configurações (linha 49) | 0 para o link; **a verificar** para o refresh: `POST /open-finance/{user_id}/refresh` é rota legada que o app já usa para ler (`/open-finance/{uid}`), então tende a aceitar Bearer, mas `wait` e o limite de frequência não foram lidos | uma chamada em `services/openFinance.ts`, trocar "Conferir de novo" e o puxar-para-atualizar de `conexoes.tsx` para pedir a sincronização; `ListRow` "Política de Privacidade" abrindo `/privacy` (mesmo padrão do Suporte) | Leve (**Completo** se o refresh exigir mudar o servidor) | P | Nenhuma; refresh toca fornecedor externo, então confirmar o limite antes |
 | A14 | **Extrato: filtro por conta** (linha 25); o `dia` no servidor não é daqui, vem com a A1 | 0 (`/api/app/lancamentos?conta=` e `/api/app/contas` já montados) | um `Chip`/seletor de conta em `extrato.tsx`, lista vinda do que `contasResumo` já lê; decidir `registro_antigo` e `cartao` | Leve | P | Nenhuma; a mesma lista de contas serve à escolha de fonte da meta (A3) |
+| A15 | **Para onde vai nativo** (linha 6): estabelecimentos por categoria, série de 3 meses e detalhe da categoria (`GET /gastos/categoria`) | 0 (`/gastos` e `/gastos/categoria` são do mesmo router `api/v2/gastos.py`, que `criar_app` monta nos dois namespaces; falta só conferir por teste de contrato, como o plano do Seu dia §6 faz para `/gastos`) | tela de detalhe e série no lugar do extrato filtrado de `Categorias`; reaproveita o schema `/gastos` do A1 | Leve | M | A1 (schema e `gastosDia.ts`); o plano do Seu dia não inclui este bloco |
 | A10 | Guia e dicas, adaptados ao nativo (P3: sim) | **Muda o contrato, só por acréscimo**: o roteiro `PASSOS` (`api/v2/guia.py`) é do web (âncoras e ações do DOM; o passo `piggy.pergunta` é `exemplo` e a fala diz que o chat real "chega em breve", o que é falso no app, onde o chat é real). Decidir no plano do A10: (a) roteiro por plataforma no servidor, sem mudar o que o web lê, ou (b) mapeamento nativo no cliente que ignora `ancora`/`acao` e troca a fala. Não reaproveitar a fala do web como está | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto | Leve (cliente) + servidor aditivo, a classificar no plano do A10 | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
@@ -184,7 +185,7 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 
 | # | Item | Por que nessa posição |
 |---|---|---|
-| 1 | **A1 Para onde vai + "Seu dia"** | É o único com plano fechado e decisões do dono tomadas (2026-10-16), servidor pronto, só Leve, e a dependência (#1031) já está na `main`. Foi o gatilho da regra. |
+| 1 | **A1 "Seu dia" e calendário real**, depois **A15 Para onde vai** (mesmo schema `/gastos`) | É o único com plano fechado e decisões do dono tomadas (2026-10-16), servidor pronto, só Leve, e a dependência (#1031) já está na `main`. Foi o gatilho da regra. |
 | 2 | **A2 Metas v2 (leitura)** | É barato (o formato e os textos já estão no app por causa do E1) e **corrige um risco que existe hoje**: o app mostra a meta por uma regra e o web, a IA e o WhatsApp por outra. Vem antes da escrita. |
 | 3 | **A5 Receitas do extrato + A6** | Já era trabalho prometido (P7 2b); fecha uma função de dinheiro que o web já oferece. |
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
@@ -241,7 +242,7 @@ conferida, não inferência.
 - **Build do app:** pelo Xcode, com `PATH=/usr/bin` primeiro no `export` (o app não tem projeto EAS). O `buildNumber: "15"`
   em `app/app.config.ts` é velho de propósito (o Xcode escolhe o próximo livre no App Store Connect). O último
   número registrado é o 30 (2026-10-12, segundo `docs/plano-seu-dia-app.md` §7); o próximo quem confirma é o dono, que vê o App Store Connect.
-- **Quase todo item de cliente (A1 a A8, A13 e A14) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
+- **Quase todo item de cliente (A1 a A8, A13, A14 e A15) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
   próprio por terem teste de aparelho.
 - **PRs abertos relacionados:** #1050 (plano do Seu dia), #1033 (comparação; condiciona A8), #1051 (IA cria metas;
   mesma regra do servidor de A3), #1035 (login com MFA e exclusão agendada; pode condicionar A9, a conferir).

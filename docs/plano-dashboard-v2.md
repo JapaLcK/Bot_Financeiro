@@ -258,11 +258,12 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 | W7 | Compromissos do **Resumo** (`compromissos: Bills`) ainda de exemplo, embora a versão real exista na página `/previsao` (`Compromissos.tsx`) | nenhum | Leve | P |
 | W8 | **Conta no shell do `/painel`**: links para Configurações (`/settings`) e Suporte (`/suporte`) e o **Sair**; hoje o shell só monta o bundle e não tem nenhum dos três (matriz do plano do app, linha 50) | nenhum para os links; o Sair reutiliza `/auth/logout` e a limpeza central do `auth-refresh` | links **Leve**, Sair **Completo** (sessão) | P |
 | W9 | **Tema claro** (e seguir a preferência do sistema): o `/painel` fixa `color-scheme: dark` (`webapp/src/dashboard/styles/base.css`); o app escolhe a paleta clara ou escura pelo sistema (`app/app/_layout.tsx`). Já está em "Depois" (§6, "tema claro"); entra aqui só para a paridade não ser dada por completa com o web escuro | tokens de cor claros em `base.css` e revisão de cada bloco; nenhum servidor | Leve | G |
+| W10 | **Layout da Home por usuário**: `lib/profiles.js` guarda perfil e ordem no `localStorage` por perfil, sem o `user_id`; duas contas no mesmo navegador herdam e sobrescrevem a ordem uma da outra (só ids de bloco). Escopar a chave por `user_id` (como o app) e decidir o destino das chaves antigas (matriz do plano do app, linha 1) | nenhum | Leve (isolamento por usuário, mas sem dado financeiro) | P |
 
-**O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A14), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
+**O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A15), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
-risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5**, **W6**, **W7** e **W8**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
+risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5**, **W6**, **W7**, **W8** e **W10**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
 decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
@@ -914,8 +915,8 @@ o 409).
 ### Paridade com o app (2026-10-16)
 
 - [x] Matriz de paridade `/painel` × app nativo levantada e a regra do dono registrada, **só em plano** (nenhum código):
-  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W9).
+  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W10).
 - [x] Decisões do dono (§10 do plano do app, 2026-10-16): ordem aprovada, texto da regra aprovado para o `CLAUDE.md`
   (em PR próprio), guia existe no app, sem data de App Store. Seguem abertas: modo privacidade no `/painel` (W6) e
   Guardado líquido no Resumo (W5).
-- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W7 e W8, depois W3, W2 e W4, e por último W9).
+- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W7, W8 e W10, depois W3, W2 e W4, e por último W9).
