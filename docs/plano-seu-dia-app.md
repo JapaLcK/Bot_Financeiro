@@ -197,8 +197,11 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
   o contexto de navegação ganha um registro de "fechadores" (`ContextoNavegacaoPainel`/`useNavegarPainel`, onde o `aoSair` já vive), a folha do dia e o `TelaResumo` registram o seu, e o `navegar`
   roda todos antes do `router.push`. Teste: nas duas origens (aba Gastos e Resumo) nenhuma folha fica visível depois do toque e o Extrato está montado com o `dia` pedido.
 - **Zerar os filtros do Extrato ao entrar pelo dia (achado do Codex no #1050).** O `Extrato` guarda `q`, `busca`, `origem` e `tipo` em `useState` local (`extrato.tsx:40`) e as abas do
-  `expo-router` ficam montadas (provável; **não verificado**), então "Entradas" escolhido antes combinaria com o dia e a tela diria "vazio". Ao chegar com `dia` (a mudança de `params.dia`)
-  o `Extrato` zera os quatro filtros; o PR 2 inclui isso. Teste: escolher "Entradas", voltar a Gastos, abrir um dia com saídas pelo botão: o extrato mostra as saídas do dia.
+  `expo-router` ficam montadas (provável; **não verificado**), então "Entradas" escolhido antes combinaria com o dia e a tela diria "vazio". **A cada entrada
+  pelo dia**, não só quando `params.dia` muda: reentrar no mesmo dia D mantém o mesmo `params.dia`, e um efeito preso a ele não rodaria (achado do Codex, 2ª rodada). Por isso o `navegar` do botão
+  manda também um `entrada` (contador crescente, ex.: `Date.now()`) em `params`, e o `Extrato` zera os quatro filtros quando `params.entrada` muda (ou quando a tela ganha foco com `dia`, via
+  `useFocusEffect`; o PR 2 escolhe o que o `expo-router` permitir, sem filtro nenhum guardado de uma visita à outra). O PR 2 inclui isso. Teste: escolher "Entradas", voltar a Gastos, abrir um dia com
+  saídas pelo botão: o extrato mostra as saídas do dia; **repetir com o mesmo dia D de novo** (D → "Entradas" → Gastos → D): continua mostrando as saídas.
 - **`Extrato` com `dia` na consulta (achado do Codex no #1050; já é um defeito de hoje).** `extrato.tsx:42-47` pede só `mes` e `limite=50` e filtra `params.dia` **no aparelho**
   sobre a 1ª página. Num mês com mais de 50 lançamentos, o dia que cai depois da 1ª página aparece vazio ("Nenhum resultado nesta página.") ou parcial, e o botão da folha
   prometeria o extrato completo do dia. `/api/app/lancamentos` já aceita `dia` (`api/v2/lancamentos.py:79`, sempre junto do `mes`, que é o da fatura), então a correção é **só do
