@@ -47,7 +47,11 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]"): só "N de MÊS", nunca "50 em março"
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
     r"|(?<![\d.,])\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
-    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?",
+    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?"
+    # rótulo de dia, com ou sem dois-pontos: "dia: 18", "vencimento dia: 18", "venc. 18". O dia (1-2 dígitos) nunca é valor;
+    # sem o lookahead "vence 18/10" mascararia o 18 e deixaria "/10" para ser lido. ponytail: "vence 50 reais" mascara o 50 (fail-closed)
+    r"|\bdia\s*:?\s*\d{1,2}\b(?![/.:,-]\d)"
+    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?\d{1,2}\b(?![/.:,-]\d)",
     re.IGNORECASE,
 )
 _NAO_VALOR_RE = re.compile(
@@ -93,9 +97,13 @@ def _textos_do_usuario(user_id: int) -> list[str]:
     return textos[:_MENSAGENS] + [atual]
 
 
-# "50 centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
+# "50 centavos" / "50centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
 # O lookbehind exige dígito antes de "reais e": "trinta reais e 50 centavos" (extenso) lê o 50 como centavos.
-_CENTAVOS_RE = re.compile(r"(?<!\d reais e )(?<!\d real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
+_CENTAVOS_RE = re.compile(r"(?<!\d reais e )(?<!\d real e )\b(\d{1,9})\s*centavos?\b", re.IGNORECASE)
+# O "N centavos" depois de "<dígito> real(is) e" é parte do total, não R$ N: sai da leitura em reais (não da do `_extract_valor`).
+_CENTAVOS_DO_TOTAL_RE = re.compile(r"(?:(?<=\d reais e )|(?<=\d real e ))\d{1,9}\s*centavos?\b", re.IGNORECASE)
+# "1 real e 50 centavos" = 150 (o `_extract_valor` só compõe o plural). Só o "1" em dígito: "um real e 50 centavos" segue misto (só os 50 centavos).
+_UM_REAL_E_CENTAVOS_RE = re.compile(r"(?<![\d.,])1\s+real\s+e\s+(\d{1,2})\s*centavos?\b", re.IGNORECASE)
 
 
 # "gastei 49.90" é 49,90: o `collect_evidence` lê todo ponto como milhar (499000) e abriria a porta
@@ -118,14 +126,15 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # ambíguo e fica fora: o 50 segue ancorando como total. "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
     rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
-    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s+centavos?\b|\s*reais?\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
+    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
     textos = [_PONTO_DECIMAL_RE.sub(r"\1,\2", _NAO_VALOR_RE.sub(" ", t)) for t in textos]
     lidos = {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
+    lidos |= {100 + int(c) for t in textos for c in _UM_REAL_E_CENTAVOS_RE.findall(t)}
     textos = [_CENTAVOS_RE.sub(" ", t) for t in textos]  # "50 centavos" não vira também "R$ 50"
-    lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", t) for t in textos))[0])
+    lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", _CENTAVOS_DO_TOTAL_RE.sub(" ", t)) for t in textos))[0])
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
         # sem dígito o `_extract_valor` cairia no extenso da mensagem inteira: só dígito ancora
@@ -173,7 +182,7 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
             for m in _PARCELA_RE.finditer(t):
                 s = m[1].rstrip(".,")
                 # "30 reais e 50 centavos" é 3050; o 30 e o 50 soltos (que o `_centavos_lidos` também lê) não são a parcela
-                mc = re.fullmatch(r"(.+?)\s*reais?\s*e\s*(\d+)\s*centavos?", s, re.I)
+                mc = re.fullmatch(r"(.+?)\s*(?:reais|real)\s*e\s*(\d+)\s*centavos?", s, re.I)
                 de_parcela |= {r + int(mc[2]) for r in _centavos_lidos([mc[1]])} if mc else _centavos_lidos([s])
     if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None

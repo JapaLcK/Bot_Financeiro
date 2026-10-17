@@ -149,6 +149,28 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("vence 10.12.26", set(), {10122600}),
     ("boleto de 150 vence 10.12.2026", {15000}, {1012202600}),
     ("paguei 1.500 em 2026-10-20", {150000}, {202600}),
+    # centavos colado ao número, e "1 real e N centavos" compõe o total (o 50 não é R$ 50)
+    ("gastei 50centavos", {50}, {5000}),
+    ("gastei 50 centavos", {50}, {5000}),
+    ("1 real e 50 centavos", {100, 150}, {5000, 50}),
+    ("1 real e 50centavos", {100, 150}, {5000, 50}),
+    ("30 reais e 50 centavos", {3000, 3050}, {5000, 50}),
+    ("um real e 50 centavos", {50}, {5000, 150}),          # "um" por extenso não ancora o real; mistura como "trinta reais e 50 centavos"
+    ("21 real e 50 centavos", set(), {2150}),               # o "1" tem de ser o número inteiro
+    # rótulo de dia com dois-pontos: o dia não é valor; o dinheiro ao lado segue lido
+    ("anota o boleto da internet, vencimento dia: 18", set(), {1800}),
+    ("boleto de 150, vencimento dia: 18", {15000}, {1800}),
+    ("boleto de 150 vencimento dia 18", {15000}, {1800}),
+    ("boleto de 150 venc. dia 18", {15000}, {1800}),
+    ("boleto de 150 vcto 18", {15000}, {1800}),
+    ("vence dia:5 pago 300", {30000}, {500}),
+    ("vence 20 e paguei 300", {30000}, {2000}),
+    ("paguei a conta 1200 dia 20", {120000}, {2000}),
+    ("vencimento: 18/10", set(), {1800, 1000}),             # data: o lookahead deixa a regra de data mascarar inteira
+    ("dia 12/10 paguei 300", {30000}, {1200, 1000}),
+    ("vence 18:30 paguei 300", {30000}, {1800, 3000}),
+    ("diária 150", {15000}, set()),                         # "dia" dentro de palavra não mascara
+    ("vence 150", {15000}, set()),                          # 3 dígitos não são dia
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -575,6 +597,26 @@ def test_n9_boleto_para_12_de_outubro_nao_grava_12_reais(uid_pro, monkeypatch): 
     assert _boletos(uid_pro) == 1
 
 
+def test_n10_boleto_vencimento_dia_dois_pontos_nao_grava_o_dia(uid_pro, monkeypatch):   # o 18 de "dia: 18" é o dia
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 18, "due_date": "18"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "18"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet, vencimento dia: 18", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto de 150, vencimento dia: 18", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n11_cinquenta_centavos_colado_grava_meio_real_e_nao_50(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(50), lancamento(0.5))
+    r = runner.chat(uid_pro, "gastei 50centavos", platform="dashboard")   # R$ 50 inventado: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    runner.chat(uid_pro, "gastei 50centavos", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
+
+
 # ── (3) P: o caminho legítimo continua gravando ─────────────────────────────
 
 def test_p1_gastei_50_no_mercado(uid_pro, monkeypatch):
@@ -844,6 +886,11 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("TV de 1200 em 12", 12, 12, False),
     ("comprei por 50 em 12x", 50, 12, True),
     ("comprei por 50 em 12x", 600, 12, False),
+    # centavos colado e "1 real e N centavos" na parcela
+    ("12x de 50centavos", 6, 12, True),
+    ("12x de 50centavos", 600, 12, False),
+    ("12x de 1 real e 50 centavos", 18, 12, True),
+    ("12x de 1 real e 50 centavos", 600, 12, False),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
