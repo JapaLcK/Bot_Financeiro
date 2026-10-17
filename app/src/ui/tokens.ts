@@ -118,6 +118,8 @@ export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8,
  * `contraste.test.ts`). No claro o texto escuro já está a ~4,6:1 do fundo e qualquer tinta o rebaixa (12% dava 4,24 a 4,44; 8%, 4,49): 6%.
  */
 export const ALFA_FUNDO_TOM = { light: 0.06, dark: 0.14 } as const;
+/** `cor` (hex de 6 dígitos) com o alfa de `ALFA_FUNDO_TOM`: o fundo tingido do chip e dos avisos da pilha. */
+export const tingir = (cor: string, esquema: "light" | "dark") => `${cor}${Math.round(ALFA_FUNDO_TOM[esquema] * 255).toString(16).padStart(2, "0")}`;
 
 // `fontFamily`, não `fontWeight`: peso + família custom cai de volta no
 // sistema no Android (RN não faz "negrito sintético" de uma TTF nomeada).

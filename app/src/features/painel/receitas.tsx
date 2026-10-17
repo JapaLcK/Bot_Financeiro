@@ -1,22 +1,26 @@
-import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { View } from "react-native";
 import { ErroDeApi, SessaoExpirada } from "@/api/client";
 import { responderReceita } from "@/services/painel";
 import { Banner } from "@/ui/componentes/Banner";
 import { Card } from "@/ui/componentes/Card";
+import { useToast } from "@/ui/componentes/Toast";
 import { aviso as vibrarAviso, sucesso } from "@/ui/haptics";
 import { Acao, Linha } from "./base";
 import { LinhaExpansivel } from "./expansao";
+import type { AvisoDaPilha } from "./pilhaAvisos";
 import { usePainel, type Dados } from "./provider";
-import { TextoPainel as Texto } from "./tipografia";
+import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 type Receita = Dados["previsao"]["receitas_do_banco"][number];
 type Resposta = "sim" | "nao" | "desfazer";
 type Espera = { chave: string; nome: string; resposta: Resposta; postOk: boolean; antes: unknown };
 // Mesmos status e falas da web (`widgets/ReceitasDoBanco.tsx`): o que a lista passa a ter quando o POST pegou, e o que o leitor de tela ouve.
 const ESPERADO: Record<Resposta, Receita["status"]> = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
 const DITO: Record<Resposta, string> = { sim: "confirmada.", nao: "recusada.", desfazer: "resposta desfeita." };
+/** O que a caixa devolve a quem a hospeda (`TelaPainel`): as pendentes como avisos da pilha, o "Não deu para salvar" (feedback, fica FORA da pilha) e a linha das respondidas (abaixo da pilha). */
+export type Apresentacao = { itens: AvisoDaPilha[]; erro: ReactNode; respondidas: ReactNode };
 /** `key` pelo usuário: zera trava, aviso, espera e lista (nada da conta A aparece na B). Defesa de custo zero: o `PortaoPainel` já desmonta tudo na troca de conta, então tirar o `key` não deixa teste vermelho. */
-export const ReceitasDoBanco = () => <Caixa key={usePainel().usuario.user_id} />;
+export const ReceitasDoBanco = ({ children }: { children: (r: Apresentacao) => ReactNode }) => <Caixa key={usePainel().usuario.user_id}>{children}</Caixa>;
 /**
  * Receitas que o servidor achou no extrato (`receitas_do_banco` da Previsão): só a que o usuário confirma entra na conta.
  * Sem atualização otimista: a lista é sempre a última leitura do servidor, e os botões só destravam depois da releitura da previsão
@@ -24,8 +28,8 @@ export const ReceitasDoBanco = () => <Caixa key={usePainel().usuario.user_id} />
  * esperado; chave ausente, releitura que falhou ou status antigo viram erro (falso erro é melhor que falso sucesso).
  * Nome, chave e valor são do pagador: nada disso vai para analytics ou Sentry.
  */
-function Caixa() {
-  const p = usePainel(); const r = p.dados.previsao;
+function Caixa({ children }: { children: (r: Apresentacao) => ReactNode }) {
+  const p = usePainel(); const r = p.dados.previsao; const toast = useToast(); const { ampliado } = useTipografiaPainel();
   const [ocupado, setOcupado] = useState(false); const [falhou, setFalhou] = useState(false); const [espera, setEspera] = useState<Espera | null>(null); const [abertas, setAbertas] = useState(false);
   const voo = useRef<symbol | null>(null); const viu = useRef(false); const ultima = useRef<Receita[]>([]); const atual = useRef(r); atual.current = r;
   const pronto = r?.fase === "pronto" ? r.dado.receitas_do_banco : null;
@@ -42,9 +46,10 @@ function Caixa() {
     if (!r || (r.fase === "carregando" && r !== espera.antes)) { viu.current = true; return; }
     if (!viu.current || r.fase === "carregando") return;
     const pegou = r.fase === "pronto" && r.dado.receitas_do_banco.some((x) => x.chave === espera.chave && x.status === ESPERADO[espera.resposta]);
-    if (espera.postOk || pegou) { AccessibilityInfo.announceForAccessibility(`${espera.nome}: ${DITO[espera.resposta]}`); sucesso(); } else { setFalhou(true); vibrarAviso(); }
+    // O Toast já anuncia ao leitor de tela: anunciar aqui também falaria duas vezes.
+    if (espera.postOk || pegou) { toast.mostrar({ mensagem: `${espera.nome}: ${DITO[espera.resposta]}`, tom: "sucesso" }); sucesso(); } else { setFalhou(true); vibrarAviso(); }
     setEspera(null); voo.current = null; setOcupado(false);
-  }, [r, espera]);
+  }, [r, espera, toast]);
   const responder = async (rec: Receita, resposta: Resposta) => {
     if (voo.current) return;
     const token = Symbol(); voo.current = token; setOcupado(true); setFalhou(false);
@@ -55,21 +60,21 @@ function Caixa() {
     if (erro) { p.falhou(erro); if (erro instanceof SessaoExpirada || (erro instanceof ErroDeApi && erro.status === 402)) return soltar(); }
     viu.current = false; setEspera({ chave: rec.chave, nome: rec.nome, resposta, postOk: !erro, antes: atual.current }); p.relerPrevisao();
   };
-  if (!r || r.fase === "negado" || (!lista.length && !falhou)) return null; // negado (plano sem Previsão, p.ex. caiu para Essencial com o app aberto): nem caixa nem aviso; `erro` mantém o aviso, que o "Tentar novamente" do card apaga
+  if (!r || r.fase === "negado" || (!lista.length && !falhou)) return <>{children({ itens: [], erro: null, respondidas: null })}</>; // negado (plano sem Previsão, p.ex. caiu para Essencial com o app aberto): nem aviso nem erro; `erro` mantém o aviso, que o "Tentar novamente" do card apaga
   const pendentes = lista.filter((x) => x.status === "pendente"), respondidas = lista.filter((x) => x.status !== "pendente");
-  return <View testID="receitas-do-extrato"><Card><View style={{ gap: 8 }}>
-    <Texto variante="rotulo" tom="inkMuted" accessibilityRole="header">Receitas do extrato</Texto>
-    {falhou && <Banner tom="danger" mensagem="Não deu para salvar. Tente de novo." />}
-    {pendentes.map((x) => <Linha key={x.chave} titulo={x.nome} valor={x.valor} detalhe={`todo dia ${x.dia}. É sua receita fixa?`}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        <Acao texto="Sim" rotulo={`Sim, é receita fixa: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "sim")} />
-        <Acao texto="Não" rotulo={`Não é receita fixa: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "nao")} />
-      </View>
-    </Linha>)}
-    {respondidas.length > 0 && <LinhaExpansivel aberta={abertas} alternar={() => setAbertas((a) => !a)} linha={<Texto variante="rotulo">{`Já respondidas (${respondidas.length})`}</Texto>}>
+  const itens: AvisoDaPilha[] = pendentes.map((x) => ({ id: `receita:${x.chave}`, tom: "decisao", icone: "Wallet", titulo: "Receitas do extrato", corpo: <Linha titulo={x.nome} valor={x.valor} detalhe={`todo dia ${x.dia}. É sua receita fixa?`}>
+    <View style={{ flexDirection: ampliado ? "column" : "row", flexWrap: "wrap", alignItems: "flex-start", gap: 8 }}>
+      <Acao texto="Sim" rotulo={`Sim, é receita fixa: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "sim")} />
+      <Acao texto="Não" rotulo={`Não é receita fixa: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "nao")} />
+    </View>
+  </Linha> }));
+  return <>{children({
+    itens,
+    erro: falhou ? <Banner tom="danger" mensagem="Não deu para salvar. Tente de novo." /> : null,
+    respondidas: respondidas.length > 0 ? <View testID="receitas-respondidas"><Card><LinhaExpansivel aberta={abertas} alternar={() => setAbertas((a) => !a)} linha={<Texto variante="rotulo">{`Já respondidas (${respondidas.length})`}</Texto>}>
       {respondidas.map((x) => <Linha key={x.chave} titulo={x.nome} valor={x.valor} detalhe={`${x.status === "confirmada" ? "Confirmada" : "Recusada"} · todo dia ${x.dia}`}>
         <Acao texto="Desfazer" rotulo={`Desfazer resposta: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "desfazer")} />
       </Linha>)}
-    </LinhaExpansivel>}
-  </View></Card></View>;
+    </LinhaExpansivel></Card></View> : null,
+  })}</>;
 }

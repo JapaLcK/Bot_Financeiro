@@ -1,5 +1,5 @@
 import { contraste, PARES } from "@/ui/contraste";
-import { ALFA_FUNDO_TOM, claro, escuro, acessoClaro, acessoEscuro } from "@/ui/tokens";
+import { ALFA_FUNDO_TOM, claro, escuro, acessoClaro, acessoEscuro, tingir } from "@/ui/tokens";
 
 describe("contraste", () => {
   // Referência do plano: prova a fórmula contra dois valores medidos à mão,
@@ -78,6 +78,23 @@ describe("contraste", () => {
         expect(contraste(paleta[tom], sobre(paleta[tom], paleta[fundo], alfa))).toBeGreaterThanOrEqual(4.5);
       }
     }
+  });
+  // Pilha de avisos (`pilhaAvisos.tsx`): fundo = a cor da borda (`fio`) em ALFA_FUNDO_TOM; ícone e pontos em `tinta` e a borda em `fio` (não-texto, mínimo 3:1); título e corpo em ink/inkMuted (texto, 4,5:1).
+  // O aviso fica direto sobre o fundo da tela (`bg`), nunca dentro de um card: a borda rosa sobre o tingido de `surface` dá 2,99 no claro (medido em 2026-10-17), abaixo dos 3.
+  it.each([
+    ["claro", claro, ALFA_FUNDO_TOM.light],
+    ["escuro", escuro, ALFA_FUNDO_TOM.dark],
+  ])("aviso da pilha (decisão rosa e alerta âmbar) alcança o mínimo no tema %s, sobre o fundo da tela", (_nome, paleta, alfa) => {
+    for (const [fio, tinta] of [["brand", "brandInk"], ["warning", "warning"]] as const) {
+      const tingido = sobre(paleta[fio], paleta.bg, alfa);
+      expect(contraste(paleta[tinta], tingido)).toBeGreaterThanOrEqual(3);
+      expect(contraste(paleta[fio], tingido)).toBeGreaterThanOrEqual(3);
+      expect(contraste(paleta.ink, tingido)).toBeGreaterThanOrEqual(4.5);
+      expect(contraste(paleta.inkMuted, tingido)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+  it("tingir grava o mesmo alfa de 8 bits que o teste compõe (06 no claro, 24 no escuro)", () => {
+    expect(tingir(claro.warning, "light")).toBe(`${claro.warning}0f`); expect(tingir(escuro.warning, "dark")).toBe(`${escuro.warning}24`);
   });
   it("controle: 12% no claro reprovava (é por isso que o alfa do claro é menor)", () => {
     expect(contraste(claro.warning, sobre(claro.warning, claro.surface, 0.12))).toBeLessThan(4.5);
