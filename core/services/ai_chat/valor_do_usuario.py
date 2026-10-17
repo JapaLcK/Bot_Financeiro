@@ -64,7 +64,10 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"|\b\d{1,2}\s*h(?:rs?|s)?\s*\d{2}\b"
     # hora solta com crase ("às 18", "ás 9"): só com acento, "as 18" é artigo + número. Não quando o número é dinheiro
     # ("às 18 reais", "às 18,50"); "às 18:30", "às 18 h 30" e "às 18/10" ficam com as alternativas acima. ponytail: "as 18" sem acento segue lido como valor (pode ancorar 18)
-    r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)",
+    r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)"
+    # ano solto depois de preposição ("é para 2027", "vence em 2027", "até 2027", "desde 2026", "no ano de 2027"): só 20dd e não quando é dinheiro
+    # ("para 2027 reais", "para 2027,50") nem data ISO ("2026-10-20", que a regra de data lê inteira). ponytail: "transferi para 2000" (sem "reais") mascara o 2000 (fail-closed).
+    r"|\b(?:para|em|at[ée]|desde|ano(?:\s+de)?)\s+20\d\d\b(?!\s*(?:real|reais|conto|pila|centavo)|[.,/-]\d)",
     re.IGNORECASE,
 )
 _MEDIDA_PREFIXO = r"(?<![\d.,])\d+(?:[.,]\d+)*\s*"
@@ -147,8 +150,9 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # deriva o total com a SUA contagem (== `parcelas` do modelo): "TV 10x de 50 e fogão 12x de 60" não ancora 600 (60 × 10). "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 # Até 2 modificadores de uma lista FECHADA entre a unidade e o "de": "12x sem juros de 50", "10 vezes no cartão de 80". Sem `.*?`:
 # "12x sem juros, o frete é de 50" não casa (depois da vírgula tem que vir o "de/a/R$" ou o valor, não "o frete").
-_MOD_PARCELA = (r"(?:\s+(?:sem|com)\s+(?:juros|acr[ée]scimos?)|\s+no\s+(?:cart[ãa]o(?:\s+de\s+cr[ée]dito)?|cr[ée]dito|boleto|d[ée]bito)"
-                r"|\s+(?:iguais|fixas?|mensais|sucessivas))")
+# Vírgula opcional antes de cada um ("12x, sem juros, de R$ 50"); o separador depois dos modificadores já aceita vírgula.
+_MOD_PARCELA = (r"(?:\s*,?\s+(?:(?:sem|com)\s+(?:juros|acr[ée]scimos?)|no\s+(?:cart[ãa]o(?:\s+de\s+cr[ée]dito)?|cr[ée]dito|boleto|d[ée]bito)"
+                r"|iguais|fixas?|mensais|sucessivas))")
 _PARCELA_RE = re.compile(
     rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:{_MOD_PARCELA}){{0,2}}(?:\s*[,:]\s*|\s+)"
     # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada

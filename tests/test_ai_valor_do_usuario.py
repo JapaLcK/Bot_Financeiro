@@ -170,6 +170,12 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("boleto de 150 para outubro 2026", {15000}, {202600}),
     ("boleto de 150 dia 15 de outubro 150", {15000}, {1500}),   # 150 sem "de" não é ano: segue dinheiro
     ("gastei 50 em março de 2026", {5000}, set()),
+    # ano solto depois de preposição não é valor, mas dinheiro ao lado (ou o próprio número com "reais") segue (Codex)
+    ("é para 2027", set(), {202700}), ("vence em 2027", set(), {202700}), ("até 2027", set(), {202700}),
+    ("desde 2026", set(), {202600}), ("no ano de 2027", set(), {202700}),
+    ("boleto de 150 para 2027", {15000}, {202700}),
+    ("transferi para 2027 reais", {202700}, set()),
+    ("paguei 2500 para o João", {250000}, set()),               # 4 dígitos que não são 20dd
     # centavos por extenso / "e meio": o composto inteiro sai e nada ancora (N19 do Codex)
     ("paguei 30 reais e cinquenta centavos", set(), {3000, 3050, 5000, 50}),
     ("30 reais e vinte e cinco centavos no mercado", set(), {3000, 3025, 2500}),
@@ -1099,6 +1105,19 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("12x sem juros e o frete é de 50", 600, 12, False),
     ("comprei por 600 em 12x sem juros", 600, 12, True),          # regressão: total explícito
     ("comprei por 600 em 12x sem juros", 7200, 12, False),
+    # vírgula antes do modificador (Codex): o 50 é a parcela
+    ("comprei uma TV em 12x, sem juros, de R$ 50", 50, 12, False),
+    ("comprei uma TV em 12x, sem juros, de R$ 50", 600, 12, True),
+    ("12x , sem juros de 50", 600, 12, True),
+    ("12x , sem juros de 50", 50, 12, False),
+    ("12 parcelas, fixas, sem juros, de 50", 600, 12, True),
+    ("12 parcelas, fixas, sem juros, de 50", 50, 12, False),
+    ("12x sem juros, o frete é de 50", 50, 12, True),            # negativos: o 50 é avulso, não parcela
+    ("12x sem juros, o frete é de 50", 600, 12, False),
+    ("12x, o frete é de 50", 50, 12, True),
+    ("12x, o frete é de 50", 600, 12, False),
+    ("12x, sem juros e o frete é de 50", 50, 12, True),
+    ("12x, sem juros e o frete é de 50", 600, 12, False),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -1182,6 +1201,19 @@ def test_q12b_conversa_sem_juros_antes_do_de(uid_pro, monkeypatch):   # Codex: "
     desliga_flag(monkeypatch)
     db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
     fala = "comprei uma TV em 12x sem juros de R$ 50 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
+def test_q12c_conversa_virgula_antes_do_modificador(uid_pro, monkeypatch):   # Codex: "12x, sem juros, de R$ 50" gravava 50 em 12x
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei uma TV em 12x, sem juros, de R$ 50 no nubank"
     cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
     r = runner.chat(uid_pro, fala, platform="whatsapp")
     _usa_ia(cli)
@@ -1381,6 +1413,18 @@ def test_n18_boleto_dia_15_de_outubro_2026_nao_grava_o_ano_como_valor(uid_pro, m
         assert RECUSA in r and _boletos(uid_pro) == 0, r
     _usa_ia(cli)
     runner.chat(uid_pro, "boleto da internet de 150 dia 15 de outubro de 2026", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n18b_boleto_para_2027_nao_grava_o_ano_como_valor(uid_pro, monkeypatch):   # Codex: "é para 2027" lido como R$ 2.027
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2027, "due_date": "10/12"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "10/12"})))
+    db.ai_append_message(uid_pro, "user", "anota o boleto da internet, vence em 10/12")
+    r = runner.chat(uid_pro, "é para 2027", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto de 150 para 2027", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
 
 
