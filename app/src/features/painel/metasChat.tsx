@@ -5,7 +5,7 @@ import { falado, VALOR_INDISPONIVEL_FALADO, VALOR_OCULTO_FALADO } from "@/ui/din
 import { selecao } from "@/ui/haptics";
 import { ProgressBar } from "@/ui/componentes/ProgressBar";
 import { useTema } from "@/ui/tema";
-import { raio } from "@/ui/tokens";
+import { ALFA_WASH_SERIE, raio, SERIE_META } from "@/ui/tokens";
 import { nomeMes } from "./catalogo";
 import { Vazio } from "./base";
 import { useBloco } from "./blocoContexto";
@@ -14,6 +14,9 @@ import { usePainel } from "./provider";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import type { MetasV2 } from "@/api/schemas/painel";
 const VISIVEIS = 5, POR_LINHA = 12, LADO = 20; // metas à mostra (reserva incluída); blocos por linha; largura do bloco
+const WASH = Math.round(ALFA_WASH_SERIE * 255).toString(16).padStart(2, "0"); // alfa do wash em 2 dígitos hex (#RRGGBBAA), como `resumoMes.tsx`
+/** Série (0..3) da meta pelo `id`, não pela posição: mesma cor depois de reordenar. A mesma regra de `MetaPilula.tsx` da web (`data-serie`); o teste `metas_serie_paridade` compara. */
+export const serieDaMeta = (id: number) => Math.abs(id) % SERIE_META.dark.length;
 /** Um bloco por mês da reserva: cheio em `tom`, vazio em `border`. Quebra de linha a cada `POR_LINHA` (largura máxima da linha). */
 function Blocos({ n, cheios, tom }: { n: number; cheios: number; tom: "brand" | "positive" }) {
   const { cores } = useTema();
@@ -40,20 +43,21 @@ function rotulo(m: MetaV2, custo: MetasV2["custo_mensal"], oculto: boolean, chei
   ].filter(Boolean).join(", ");
 }
 function Pilula({ m, custo }: { m: MetaV2; custo: MetasV2["custo_mensal"] }) {
-  const { cores } = useTema(); const { oculto } = usePainel(); const { ampliado } = useTipografiaPainel();
+  const { cores, esquema } = useTema(); const { oculto } = usePainel(); const { ampliado } = useTipografiaPainel();
   const reserva = m.tipo === "reserva", batida = m.falta === 0, semAtual = m.atual === null, semAlvo = reserva && m.alvo === null;
+  const serie = reserva ? null : SERIE_META[esquema][serieDaMeta(m.id)]!, cor = serie ?? cores.brand; // a reserva é sempre o rosa; as outras, a série
   const conferir = m.atual === 0 && m.motivos.some((c) => !DO_ALVO.includes(c));
   const meses = m.meses ?? MESES_PADRAO, cheios = oculto || semAlvo || semAtual ? 0 : blocosCheios(m, meses); // não batida (falta ≥ 1 centavo) nunca fecha todos os blocos
   const aviso = semAtual || semAlvo || conferir || avisos(m).length > 0 || (reserva && !!fraseCusto(custo)), icone: NomeIcone = reserva ? "PiggyBank" : "Target";
   return <View testID={`meta-${m.id}`} accessible accessibilityLabel={rotulo(m, custo, oculto, cheios, meses)} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-      <View style={{ width: 32, height: 32, borderRadius: raio.pilula, backgroundColor: cores.brandSoft, alignItems: "center", justifyContent: "center" }}><Icone nome={icone} tamanho={20} tom="brand" /></View>
+      <View style={{ width: 32, height: 32, borderRadius: raio.pilula, backgroundColor: serie ? `${serie}${WASH}` : cores.brandSoft, alignItems: "center", justifyContent: "center" }}><Icone nome={icone} tamanho={20} cor={cor} /></View>
       <Texto variante="rotulo" numberOfLines={ampliado ? undefined : 1} style={{ flex: 1, minWidth: 0 }}>{m.nome}</Texto>
       {batida ? <Icone nome="CheckCircle" tamanho={20} tom="positive" /> : !oculto && !semAtual && m.percentual !== null && <Texto variante="rotulo">{m.percentual}%</Texto>}
       {aviso && <Icone nome="WarningCircle" tamanho={20} tom="inkMuted" />}
     </View>
     {reserva ? <Blocos n={meses} cheios={cheios} tom={batida ? "positive" : "brand"} />
-      : !oculto && !semAtual && m.percentual !== null && <ProgressBar valor={m.percentual / 100} tom={batida ? "positive" : "brand"} />}
+      : !oculto && !semAtual && m.percentual !== null && <ProgressBar valor={m.percentual / 100} cor={batida ? cores.positive : cor} />}
   </View>;
 }
 /** Linha-botão que pede algo AO CHAT (`pedir.enviar`, como se o usuário tivesse digitado): nada navega nem abre folha. Sem `pedir` (card fora da conversa) ou com a entrada do chat desligada, fica desativada. */

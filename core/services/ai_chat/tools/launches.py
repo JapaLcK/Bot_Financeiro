@@ -46,7 +46,7 @@ from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
 from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, JANELAS_DO_TURNO
-from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve
+from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -201,7 +201,7 @@ def _recusa_se_for_do_card(
 
 def _recusa_comparar(user_id: int, ma, mb) -> dict[str, Any] | None:
     """No app, `compare_periods` de DOIS meses inteiros, diferentes e passados (`ma`/`mb` = `_meses_inteiros` de cada
-    lado) vira o card `categorias` com `meses=[...]` (o card lado a lado é a comparação). Fora disso o dado, como
+    lado) vira o card `categorias` com `meses=[...]` (o card com uma aba por mês é a comparação). Fora disso o dado, como
     antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (os mesmos dias,
     F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
     (o card não traz o `historico_desde`). Vem DEPOIS do `plan_gate_ok`: quem não tem a comparação não a ganha pelo card."""
@@ -376,7 +376,7 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         # só o texto pronto vai à IA: os campos crus foram mal lidos ("parcelado em 3x" numa parcela OF)
         r.pop("parcela", None)
         r.pop("parcelas", None)
-    return {
+    resultado = {
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "categoria": categoria,
@@ -384,6 +384,23 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "count": len(rows),
         **limite,
         **extra,
+    }
+    if rows and mostrar_da_tool(user_id, "maiores_gastos", resultado):  # o card é este mesmo resultado
+        return _resumo_maiores(resultado)
+    return resultado
+
+
+def _resumo_maiores(r: dict[str, Any]) -> dict[str, Any]:
+    """O que o MODELO vê quando o card `maiores_gastos` está na tela: a lista está lá, e o modelo que a vê inteira a copia
+    (como `cards._RESUMOS`). Dinheiro em float sob chave `total_*`/`valor*` (o `_CHAVE_MONETARIA_RE` do `ai_guard` casa `^total_`)."""
+    rows = r["expenses"]
+    return {
+        **{k: v for k, v in r.items() if k != "expenses"},
+        # soma só dos `count` itens listados, NÃO o gasto do período (chave `total_*`: o `ai_guard` a reconhece como dinheiro)
+        "total_dos_itens": float(sum((Decimal(str(x["valor"])) for x in rows), Decimal(0))),
+        "maior": max(rows, key=lambda x: x["valor"]),
+        "categorias": list(dict.fromkeys(x["categoria"] for x in rows if x.get("categoria")))[:3],
+        "card_na_tela": True,
     }
 
 
@@ -498,6 +515,29 @@ def _aviso_motivos(motivos) -> str:
     return f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário." if outros else ""
 
 
+def _projetar_mes(m: dict[str, Any], dias_corridos: int, dias_no_mes: int) -> dict[str, Any]:
+    """A conta do fim do mês, pura: `m` é o `mes_detalhes.ler` do mês corrente. Decimal por dentro, float na saída."""
+    entrou, saiu, saiu_cartao = m["entrou"], m["saiu"], m["origens"]["cartao"]
+    # Lançamento fora do cartão com data depois de hoje é valor conhecido: entra uma vez, não esticado pelo
+    # ritmo (como a fatura). O leitor soma só as linhas que já alimentam `saiu`, sem o cartão.
+    saiu_agendado = m["saiu_agendado"]
+    saiu_no_ritmo = saiu - saiu_cartao - saiu_agendado
+    saiu_projetado = saiu_no_ritmo * dias_no_mes / dias_corridos + saiu_cartao + saiu_agendado
+    saldo_projetado = round(entrou - saiu_projetado, 2) + 0  # `+ 0` tira o -0.0 (Decimal('-0.00') + 0 = 0.00)
+    d = lambda x: float(round(x, 2))  # noqa: E731
+    return {
+        "receita": d(entrou),
+        "despesa": d(saiu),
+        "saldo_ate_agora": d(entrou - saiu),
+        "despesa_cartao": d(saiu_cartao),
+        "despesa_agendada": d(saiu_agendado),
+        "despesa_no_ritmo": d(saiu_no_ritmo),
+        "despesa_projetada": d(saiu_projetado),
+        "saldo_projetado": d(saldo_projetado),
+        "vai_fechar_negativo": saldo_projetado < 0,  # sobre o valor já arredondado: nunca -0.0 com True
+    }
+
+
 def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     """Projeção do fim do mês corrente, lendo o mês pelo MESMO leitor do card `categorias`
     (`mes_detalhes.ler`): receita e despesa até agora são as do painel (pagamento de fatura, transferência
@@ -517,14 +557,6 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     hoje = agora.date()
     m = ler(user_id, hoje.year, hoje.month, agora)
     dias_no_mes = monthrange(hoje.year, hoje.month)[1]
-    dias_corridos = hoje.day
-    entrou, saiu, saiu_cartao = m["entrou"], m["saiu"], m["origens"]["cartao"]
-    # Lançamento fora do cartão com data depois de hoje é valor conhecido: entra uma vez, não esticado pelo
-    # ritmo (como a fatura). O leitor soma só as linhas que já alimentam `saiu`, sem o cartão.
-    saiu_agendado = m["saiu_agendado"]
-    saiu_no_ritmo = saiu - saiu_cartao - saiu_agendado
-    saiu_projetado = saiu_no_ritmo * dias_no_mes / dias_corridos + saiu_cartao + saiu_agendado
-    saldo_projetado = round(entrou - saiu_projetado, 2) + 0  # `+ 0` tira o -0.0 (Decimal('-0.00') + 0 = 0.00)
     nota = (
         "`receita` e `despesa` são as do painel do mês (pagamento de fatura, transferência e guardar ficam "
         "fora). Só as compras do cartão conectado pelo Open Finance entram como estão na fatura que fecha no "
@@ -534,26 +566,23 @@ def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         "como no painel, e não é projetada."
     )
     nota += _aviso_motivos(m["motivos"])
-    d = lambda x: float(round(x, 2))  # noqa: E731
-    return {
+    resultado = {
         "mes": m["mes"],
         "hoje": hoje.isoformat(),
-        "dias_corridos": dias_corridos,
+        "dias_corridos": hoje.day,
         "dias_no_mes": dias_no_mes,
-        "receita": d(entrou),
-        "despesa": d(saiu),
-        "saldo_ate_agora": d(entrou - saiu),
-        "despesa_cartao": d(saiu_cartao),
-        "despesa_agendada": d(saiu_agendado),
-        "despesa_no_ritmo": d(saiu_no_ritmo),
-        "despesa_projetada": d(saiu_projetado),
-        "saldo_projetado": d(saldo_projetado),
-        "vai_fechar_negativo": saldo_projetado < 0,  # sobre o valor já arredondado: nunca -0.0 com True
+        **_projetar_mes(m, hoje.day, dias_no_mes),
         "cartao_incluido": True,
         "cartao_por": "fatura",
         "motivos": m["motivos"],
         "nota_metodologia": nota,
     }
+    # O card é este mesmo resultado (uma só conta); a nota é para o modelo, não para a tela.
+    # Mês sem lançamento nenhum: tudo zerado não vira card (cara de sucesso); o modelo recebe o resultado normal.
+    if (resultado["receita"] or resultado["despesa"]) and mostrar_da_tool(
+            user_id, "fim_do_mes", {k: v for k, v in resultado.items() if k not in ("nota_metodologia", "cartao_incluido")}):
+        resultado["card_na_tela"] = True
+    return resultado
 
 
 def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:

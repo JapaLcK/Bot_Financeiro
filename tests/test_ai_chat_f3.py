@@ -93,7 +93,7 @@ def test_json_cru_vira_erro_padrao_sem_gravar_e_com_a_cota_de_volta(monkeypatch,
     openai_falso(monkeypatch, rodada(JSON_CRU))
     if canal == "app":
         r, _, _ = executar(pro_user_id, "gastei 50 no mercado")
-        assert r.reply == runner.ERROR_MSG and r.message_id is None and not r.sugerivel
+        assert r.reply == runner.ERROR_MSG.removeprefix("🐷 ") and r.message_id is None and not r.sugerivel
     else:
         assert runner.chat(pro_user_id, "gastei 50 no mercado", monthly_limit=100) == runner.ERROR_MSG
     assert db.count_launches(pro_user_id) == antes
@@ -115,9 +115,11 @@ def test_json_cru_cancela_a_pendencia_que_o_turno_armou(monkeypatch, pro_user_id
     openai_falso(monkeypatch, rodada(None, ("delete_all_launches", {})), rodada('{"x": 1}'))
     if canal == "app":
         reply = executar(pro_user_id, "apaga tudo")[0].reply
+        assert reply == runner.ERROR_MSG.removeprefix("🐷 ")
     else:
         reply = runner.chat(pro_user_id, "apaga tudo", monthly_limit=100)
-    assert reply == runner.ERROR_MSG and db.ai_get_pending_action(pro_user_id) is None
+        assert reply == runner.ERROR_MSG
+    assert db.ai_get_pending_action(pro_user_id) is None
     assert db.count_launches(pro_user_id) == 1
 
 

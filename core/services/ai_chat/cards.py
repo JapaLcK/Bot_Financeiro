@@ -23,13 +23,15 @@ from pydantic import BaseModel
 from db.connection import CAT_VAZIA_LABEL, cat_key
 from utils_text import normalize_text
 
-from ._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
+from . import streaming
+from ._context import CARDS_DO_APP, CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
 
 logger = logging.getLogger(__name__)
 
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
        "renda", "piggy", "periodo")
+DA_TOOL = ("maiores_gastos", "fim_do_mes")  # a PRÓPRIA tool os emite (`mostrar_da_tool`): fora de `IDS`, senão entram no enum do `show_card`
 MAX_MESES = 3
 MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
 MAX_POR_TURNO = 3
@@ -84,6 +86,19 @@ def card_ainda_resolve(uid: int, alvo: str) -> bool:
         exigir_acesso_do_app(uid)  # o MESMO gate do show_card (onboarding, plano)
     except HTTPException:
         return False
+    return True
+
+
+def mostrar_da_tool(uid: int, card: str, recurso: dict) -> bool:
+    """A tool de leitura mostra o seu card: emite o MESMO `recurso` que ela calculou (sem segunda leitura) e gasta uma
+    vaga. False, sem emitir, sem emissor, se o app não declarou o card (`CARDS_DO_APP`) ou se `card_ainda_resolve`
+    recusa (vagas, repetido, acesso): a tool devolve o dado."""
+    if not (streaming.ativo() and card in CARDS_DO_APP.get() and card_ainda_resolve(uid, card)):
+        return False
+    if (usados := CARDS_DO_TURNO.get()) is not None:
+        usados.append(card)
+    streaming.emitir({"tipo": "bloco", "bloco": {"card": card, "abas": [
+        {"mes": None, "recursos": {card: jsonable_encoder(recurso)}}]}})
     return True
 
 

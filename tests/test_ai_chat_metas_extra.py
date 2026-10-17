@@ -157,7 +157,8 @@ def test_o_texto_de_n_e_a_base_com_o_marcador_trocado_pela_caixinha():
     """N: nenhum byte de metas. Sem hash de texto: o prompt é o `_BASE` com o marcador trocado, e só."""
     base = sp._BASE.replace("@@CAIXINHAS@@\n", sp._CAIXINHAS)
     assert sp.prompt_do_usuario(False, False) == base
-    assert sp.prompt_do_usuario(False, True) == re.sub(r"@@ANO@@-(\d\d)", lambda m: f"{sp.ano_do_mes(today_tz(), int(m[1]))}-{m[1]}", base + sp.ADENDO_CARDS)
+    app = re.sub(r"@@ANO@@-(\d\d)", lambda m: f"{sp.ano_do_mes(today_tz(), int(m[1]))}-{m[1]}", base + sp.ADENDO_CARDS)
+    assert sp.prompt_do_usuario(False, True) == app.replace("1 emoji só (🐷 no início). Não abuse.", "Sem emoji.").replace("🐷 ", "").replace(" 🎉", "")  # o app não mostra o 🐷 nem o 🎉
     assert "list_metas" not in base + sp.ADENDO_CARDS
 
 

@@ -113,7 +113,7 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if len(meses) > (MAX_MESES if card == "categorias" else 1):
         if card == "periodo":
             return _erro("meses_demais", "periodo não usa meses: passe só de e ate (AAAA-MM)")
-        return _erro("meses_demais", f"categorias compara até {MAX_MESES} meses lado a lado; para mais "
+        return _erro("meses_demais", f"categorias compara até {MAX_MESES} meses (uma aba por mês); para mais "
                      "meses use show_card periodo com de/ate (até 12). resumo/calendario/simulador mostram 1 mês")
     dias = args.get("dias")
     if dias is not None and str(dias) not in ("30", "60", "90"):
@@ -188,7 +188,7 @@ SCHEMA = {
             f"no máximo {MAX_POR_TURNO} por resposta, e escreva os números a partir do resultado desta tool. "
             "Cards: contas (saldo total e por conta: 'meu saldo'), hero (previsão de saldo), compromissos (próximos "
             "pagamentos), resumo (entrou/saiu do mês), categorias (gastos por categoria; aceita "
-            "até 3 meses lado a lado), calendario (gastos por dia), simulador (Pro), patrimonio, "
+            "até 3 meses, uma aba por mês), calendario (gastos por dia), simulador (Pro), patrimonio, "
             "wealth (distribuição do patrimônio), rendimento (taxas contratadas), assinaturas, "
             "metas (caixinhas com meta), fatura (cartões e limite), parcelas, renda (evolução "
             "mensal, até 12 meses), piggy (insights), periodo (2 a 12 meses inteiros, 'março a agosto', "

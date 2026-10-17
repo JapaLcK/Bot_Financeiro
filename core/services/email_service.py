@@ -889,6 +889,33 @@ def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = ""
     return send_email(to=to, subject="🐷 Você já tem conta no PigBank", html_body=html, text_body=text)
 
 
+def send_email_changed_notice(to: str, novo_mascarado: str) -> bool:
+    """Aviso ao e-mail ANTIGO de que o e-mail de acesso foi trocado (B0a). Só o novo
+    MASCARADO (`n•••@dominio`, `mascarar_email`): sem IP, sem horário."""
+    novo = _esc(novo_mascarado)
+    content = f"""
+      <p>Olá!</p>
+      <p>O e-mail de acesso da sua conta no <strong>PigBank</strong> foi trocado para <strong>{novo}</strong>.</p>
+      <p><strong>Foi você?</strong> Pode ignorar este aviso.</p>
+      <p><strong>Não foi você?</strong> Escreva agora para <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+      <p class="warn">A partir de agora, o login e a recuperação de senha usam o e-mail novo.</p>
+    """
+    html = _base_html("🔔 O e-mail da sua conta PigBank foi alterado", content)
+    text = (
+        "Olá! O e-mail de acesso da sua conta no PigBank foi trocado para "
+        f"{novo_mascarado}.\n\n"
+        "Foi você? Pode ignorar este aviso.\n"
+        f"Não foi você? Escreva agora para {SUPPORT_EMAIL}.\n\n"
+        "A partir de agora, o login e a recuperação de senha usam o e-mail novo."
+    )
+    return send_email(
+        to=to,
+        subject="🔔 O e-mail da sua conta PigBank foi alterado",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_data_export_link_email(
     to: str,
     download_url: str,

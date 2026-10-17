@@ -13,7 +13,7 @@ export async function lerRecurso<T>(rota: string, schema: z.ZodType<T>, pai: Abo
 export const salvarPerfil = (perfil: S.PerfilPainel, pai: AbortController) => chamar("/api/app/perfil", S.perfilPainelSchema, { metodo: "PUT", corpo: { perfil }, sinal: comLimite(undefined, pai) });
 /** O turno do chat pode passar dos 15 s padrão (LLM + ferramentas no servidor). */
 export const LIMITE_CHAT_MS = 60_000;
-export const conversarFluxo = (message: string, pai: AbortController, aoEvento: (bruto: unknown) => void) => chamarFluxo("/ai/chat/stream", { metodo: "POST", corpo: { message }, sinal: comLimite(LIMITE_CHAT_MS, pai) }, aoEvento); // os 60 s valem para o total, chips incluídos
+export const conversarFluxo = (message: string, pai: AbortController, aoEvento: (bruto: unknown) => void) => chamarFluxo("/ai/chat/stream", { metodo: "POST", corpo: { message, cards: S.CARDS_DA_TOOL }, sinal: comLimite(LIMITE_CHAT_MS, pai) }, aoEvento); // os 60 s valem para o total, chips incluídos
 export const avaliarResposta = (id: number, nota: 1 | -1 | null, pai: AbortController) => chamar(`/ai/messages/${id}/feedback`, S.feedbackSchema, { metodo: "POST", corpo: { nota }, sinal: comLimite(undefined, pai) });
 export const cancelarPendencia = (pai: AbortController) => chamar("/ai/pending", S.cancelamentoSchema, { metodo: "DELETE", sinal: comLimite(undefined, pai) });
 export const marcarAssinatura = (chave: string, status: "assinatura" | "ignorar" | "nenhuma", pai: AbortController) => chamar("/api/app/assinaturas/marca", S.assinaturasSchema, { metodo: "POST", corpo: { chave, status }, sinal: comLimite(undefined, pai) });

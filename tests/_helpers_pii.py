@@ -12,7 +12,14 @@ direto no banco (sem ir pelo signup real).
 """
 from __future__ import annotations
 
+import bcrypt
+
 from core.crypto import encrypt_pii_optional, hash_pii_optional
+
+# Senha real (bcrypt, 4 rounds: barato) para teste que passa pela re-autenticação por
+# senha, como a troca de e-mail. O default "hash" de baixo NÃO é bcrypt e nunca confere.
+SENHA = "Senha-de-teste-1"
+HASH_SENHA = bcrypt.hashpw(SENHA.encode(), bcrypt.gensalt(rounds=4)).decode()
 
 
 def insert_auth_account_pii(

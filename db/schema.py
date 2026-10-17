@@ -1855,6 +1855,10 @@ def init_db():
         # (`Literal[-1, 1] | None`), e uma constraint num ALTER em tabela cheia
         # varre tudo no boot.
         "alter table ai_messages add column if not exists feedback smallint",
+        # Motivo do 👎 (chave de `db.ai_feedback.MOTIVOS`) e comentário livre (só com
+        # "outro", ≤ 500). Nulas e sem CHECK, pelo mesmo motivo de `feedback`.
+        "alter table ai_messages add column if not exists feedback_motivo text",
+        "alter table ai_messages add column if not exists feedback_texto text",
 
         # Pending action: write proposto pela IA aguardando confirmação do user.
         # Quando o user manda "sim" / "confirma", a ação é executada e a linha
