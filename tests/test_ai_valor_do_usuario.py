@@ -817,6 +817,33 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("12x de 50 centavos", 6, 12, True),
     ("12x de 50 centavos", 600, 12, False),
     ("12x de 50 centavos", 0.5, 12, False),
+    # reais e centavos na parcela: "12x de 30 reais e 50 centavos" = 12 × 30,50 = 366; o 30 e o 50 soltos não são a parcela
+    ("12x de 30 reais e 50 centavos", 366, 12, True),
+    ("12x de 30 reais e 50 centavos", 360, 12, False),
+    ("12x de 30 reais e 50 centavos", 600, 12, False),
+    ("12x de 30 reais e 50 centavos", 30.5, 1, True),    # sem parcelas, o valor lido ancora como antes
+    ("12x de 30 reais e 50 centavos", 30.5, 12, False),
+    ("12x de 30,50", 366, 12, True),
+    ("12x de 30,50", 30.5, 12, False),
+    # "em 12/10" é data, não contagem; contagem/duração/extenso seguem valendo
+    ("comprei a TV por 600 em 12/10", 600, 12, False),
+    ("comprei a TV por 600 em 12/10", 600, 1, True),
+    ("comprei a TV por 600 dia 12/10 em 3x", 600, 3, True),
+    ("comprei a TV por 600 em 12-10", 600, 12, False),
+    ("comprei a TV por 600 em 12 de outubro", 600, 12, False),
+    ("comprei a TV por 600 em 12x", 600, 12, True),
+    ("em 12 vezes comprei a TV por 600", 600, 12, True),
+    ("comprei a TV por 600 em doze vezes", 600, 12, True),
+    ("em 12 meses comprei a TV por 600", 600, 12, True),
+    # a contagem nua sai sem deixar "600 vezes/meses/parcelas" colado (quantidade, que o 600 não ancoraria)
+    ("comprei a TV por 600 em 12 vezes", 600, 12, True),
+    ("comprei a TV por 600 em 12 vezes", 12, 12, False),
+    ("comprei por 600 em 12 meses", 600, 12, True),
+    ("comprei por 600 em 12 parcelas", 600, 12, True),
+    ("TV de 1200 em 12", 1200, 12, True),
+    ("TV de 1200 em 12", 12, 12, False),
+    ("comprei por 50 em 12x", 50, 12, True),
+    ("comprei por 50 em 12x", 600, 12, False),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -842,6 +869,7 @@ def test_q9b_conversa_total_ou_parcela(uid_pro, monkeypatch, fala, inventado, es
 @pytest.mark.parametrize("fala,inventado,escrito", [
     ("comprei a TV de 1200 em 12 no nubank", 12, 1200),   # o 12 é a contagem, não R$ 12
     ("compra de 12x de 50 centavos no nubank", 600, 6),   # 50 centavos × 12 = R$ 6, não R$ 600
+    ("compra de 12x de 30 reais e 50 centavos no nubank", 360, 366),   # 12 × 30,50 = 366, não 12 × 30
 ])
 def test_q10_conversa_contagem_nua_e_parcela_em_centavos(uid_pro, monkeypatch, fala, inventado, escrito):
     desliga_flag(monkeypatch)
@@ -853,6 +881,28 @@ def test_q10_conversa_contagem_nua_e_parcela_em_centavos(uid_pro, monkeypatch, f
     db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
     runner.chat(uid_pro, fala, platform="whatsapp")
     assert _credito(uid_pro) == 12
+
+
+def test_q10b_conversa_total_antes_de_em_12_vezes(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(600, parcelas=12))
+    runner.chat(uid_pro, "comprei a TV por 600 em 12 vezes no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert _credito(uid_pro) == 12
+
+
+def test_q11_conversa_data_nao_e_contagem(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei a TV por 600 em 12/10 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(600, parcelas=12), _compra_cartao(600))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA_PARCELAS in r and _credito(uid_pro) == 0, r   # o 12 é o dia: parcelas inventadas
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 1                                # sem parcelas, o 600 grava
 
 
 def test_q5_contagem_diferente_da_escrita_recusa(uid_pro, monkeypatch):

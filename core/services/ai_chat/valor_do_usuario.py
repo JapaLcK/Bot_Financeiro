@@ -39,7 +39,7 @@ _MENSAGENS = 3
 # `_MASCARA_NAO_MONETARIA_RE` do ai_guard alimenta a guarda de afirmações. Os dígitos
 # depois da palavra pedem 4+. `conta`/`cartão`/`final` sozinhos NÃO mascaram: vêm antes de
 # dinheiro ("paguei a conta 1200", "valor final 1500"); só "cartão final"/"conta final" 1234.
-_NAO_VALOR_RE = re.compile(
+_DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também ignora ("em 12/10" é data; "em 12 meses" segue sendo 12x)
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
@@ -47,7 +47,11 @@ _NAO_VALOR_RE = re.compile(
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]"): só "N de MÊS", nunca "50 em março"
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
     r"|(?<![\d.,])\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
-    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?"
+    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?",
+    re.IGNORECASE,
+)
+_NAO_VALOR_RE = re.compile(
+    _DATA_RE.pattern +
     r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}"
     # quantidade/duração/medida: "daqui 10 dias", "5 km", "3 pessoas". Nunca mil/milhão ("2 mil") nem real/conto/centavo.
     # Sem outro dígito logo depois: "paguei 300 dia 20" é dinheiro + data. ponytail: "1500 mês" (sem "por/ao") mascara.
@@ -111,10 +115,10 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # cartão é o TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora
 # (um produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). A contagem pode vir
 # por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$) é
-# ambíguo e fica fora: o 50 segue ancorando como total. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
+# ambíguo e fica fora: o 50 segue ancorando como total. "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
     rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
-    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s+centavos?\b)?)", re.IGNORECASE)
+    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s+centavos?\b|\s*reais?\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -139,7 +143,7 @@ def _parcelas(bruto, textos: list[str]) -> tuple[int, bool]:
         p = int(bruto or 1)
     except (TypeError, ValueError, OverflowError):
         return 1, True
-    return p, p <= 1 or p in {extract_parcelas(t.lower()) for t in textos}
+    return p, p <= 1 or p in {extract_parcelas(_DATA_RE.sub(" ", t.lower())) for t in textos}  # "em 12/10" é data, não 12x
 
 
 def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
@@ -161,9 +165,16 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total; só `parcelas × esse valor` é
     fora, de_parcela = lidos, set()
     if p > 1:
-        # o "em 12" nu ("comprei a TV em 12") é a contagem, não R$ 12 (depois do _PARCELA_RE: "em 12x de 50" é dele)
-        fora = _centavos_lidos([re.sub(rf"\bem\s+{p}\b(?![.,]\d)", " ", _PARCELA_RE.sub(" ", t)) for t in textos])
-        de_parcela = _centavos_lidos([m[1].rstrip(".,") for t in textos for m in _PARCELA_RE.finditer(t)])
+        # o "em 12" nu ("comprei a TV em 12") é a contagem, não R$ 12 (depois do _PARCELA_RE: "em 12x de 50" é dele).
+        # " ; " e não " ": "600 em 12 vezes" não pode virar "600 vezes" (quantidade), que o collect_evidence descartaria
+        fora = _centavos_lidos([re.sub(rf"\bem\s+{p}\b(?![.,]\d)", " ; ", _PARCELA_RE.sub(" ", t)) for t in textos])
+        de_parcela = set()
+        for t in textos:
+            for m in _PARCELA_RE.finditer(t):
+                s = m[1].rstrip(".,")
+                # "30 reais e 50 centavos" é 3050; o 30 e o 50 soltos (que o `_centavos_lidos` também lê) não são a parcela
+                mc = re.fullmatch(r"(.+?)\s*reais?\s*e\s*(\d+)\s*centavos?", s, re.I)
+                de_parcela |= {r + int(mc[2]) for r in _centavos_lidos([mc[1]])} if mc else _centavos_lidos([s])
     if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None
     acao = "recusa" if campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
