@@ -147,8 +147,9 @@ Texto visível na folha: **a data (título), o total, "N%", N, 3 descrições e 
 ### 4.1 Contrato lido e schema
 - O zod do app lê **só**: `hoje`, `disponivel`, `historico_desde`, `dias[{dia, total, quantidade, maiores[{descricao, valor, categoria}], categorias[{chave, valor}]}]`,
   `categorias[{chave, emoji, cor?}]` (para a posição/cor e o emoji da fatia) e `motivos`. Dinheiro com o `dinheiro` do `painel.ts`
-  (texto decimal → **centavos inteiros** por `decimalParaCentavos`, HALF_UP). Campo a mais é ignorado (sem `.strict()`).
-- `total` do dia, o que a folha mostra, vem de `dias[].total`. **O app não soma saída nenhuma.**
+  (texto decimal → **centavos inteiros** por `decimalParaCentavos`, HALF_UP) **só para exibir**. Para a média e o `pct` (§4.2) o schema guarda também o **texto decimal bruto** de
+  `dias[].total` (o servidor devolve `Decimal` sem arredondar, "1.137" existe): arredondar para centavos antes de calcular muda o resultado (§4.2). Campo a mais é ignorado (sem `.strict()`).
+- `total` do dia, o que a folha mostra, vem de `dias[].total`. **O app não soma saída nenhuma** além da média do §4.2.
 
 ### 4.2 A única conta nova no cliente: a média do calendário
 É a mesma conta de `lib/gastos-dia.ts`: média = (Σ `total` dos dias com `total > 0`, de `max(dia 1, historico_desde)` até `min(hoje, fim do mês)`) ÷ nº de dias
@@ -156,14 +157,18 @@ desse intervalo (dia agendado e dia antes do corte **não entram, nem como zero*
 sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `diaAbrivel`/`vizinho`.
 
 **Fonte de verdade (§0.7).** O app não importa o web (projetos npm separados; é o precedente do `metasTextos.ts`). Duas implementações, **uma tabela**:
-- `app/src/features/painel/gastosDia.ts` reimplementa `mediaDoPeriodo`, `diaAbrivel`, `vizinho` e `contraMedia` **em centavos inteiros**
-  (média e `pct` em aritmética inteira, com a regra do `Math.round` do web: meio para +∞; sem float no dinheiro);
-- **tabela dourada** `tests/fixtures/gastos_dia_casos.json` (entrada: `mes`, `hoje`, `historico_desde`, `dias` com `total` em texto de 2 casas;
+- `app/src/features/painel/gastosDia.ts` reimplementa `mediaDoPeriodo`, `diaAbrivel`, `vizinho` e `contraMedia` com **decimal exato** (achado do Codex no #1050):
+  cada `total` bruto vira inteiro escalado (`BigInt`, escala = o maior número de casas entre os totais do mês), a média e o `pct` saem de aritmética racional inteira, com a regra do
+  `Math.round` do web (meio para +∞), **sem float** e **sem arredondar a centavos antes da conta**. Só o valor exibido (o total do dia) é arredondado a centavos (HALF_UP). **A autoridade é o web**
+  (já entregue, #1029, e `Number(raw)` é quase exato): o app tem de dar o mesmo `pct` e o mesmo tom;
+- **tabela dourada** `tests/fixtures/gastos_dia_casos.json` (entrada: `mes`, `hoje`, `historico_desde`, `dias` com `total` em texto, **inclusive com 3 ou mais casas**;
   saída: `media`, `nDias`, `pct`, `tom`, `diaAbrivel` por dia, `vizinho`) lida pelo `jest` do app **e** pelo teste web existente
   `tests/frontend/dashboard_v2_gastos_dia_topo.test.mjs` (que já importa o `.ts` direto, linha 18; só ganha um caso que lê a tabela: não toca no código do painel).
   A tabela entra em `paths` do `.github/workflows/app.yml` (precedente: `tests/fixtures/ai_chat_eventos.json`). A mesma ideia já vive no
   #1031 (`tests/fixtures/percentual_categorias.json`, Python × TS).
-- Divergência declarada: o web calcula em `float`; o app, em centavos. Podem diferir no `pct` **só** em empate exato no meio (.5). A tabela inclui o empate e fixa a regra do app.
+- **Casos que a tabela precisa ter (sub-centavo):** dois dias decorridos com `"1.040"` e `"1.137"`: média 1,0885; o primeiro dia dá −4% (neutro) no web; **arredondando a centavos antes**
+  (104 e 114, média 109) daria −5% (positivo). É o controle negativo da paridade: a implementação "centavos primeiro" tem de ficar vermelha. Mais: `"91.010"` × `"1.005"` (escalas diferentes no mesmo mês),
+  total com 6 casas, e o empate exato no meio (.5), onde o web em `float` e o decimal exato podem divergir; a tabela fixa o resultado do web e, se o `float` errar o meio, o caso fica documentado como exceção conhecida.
 - **Não verificado:** se o `jest` do app consegue importar o `.ts` do web direto (`jest.config.js` não define `roots`; não testei). Se der, o teste de paridade importa o web em vez de usar tabela.
 
 ### 4.3 O resto
@@ -178,6 +183,12 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 ## 5. Interação com o resto do app
 - `Calendario` (provider): toque no dia → abre a folha **se** o dia está na grade de `/gastos` e o mês está `disponivel`; senão, o `navegar({pathname:"/extrato", params:{dia}})` de hoje.
   O destino existente do botão da folha é o mesmo.
+- **Fechar toda folha antes de abrir o Extrato (achado do Codex no #1050).** `/extrato` é navegação entre abas irmãs: a tela de origem segue montada e o `Modal` do RN pode ficar por cima do
+  destino. O `navegar` do painel só roda o `aoSair` do `TelaPainel` (`setFolha(null)`, `cabecalho.tsx`), que fecha **as folhas do cabeçalho** (perfil, mês, organizar, conta); ele não limpa o dia
+  aberto dentro do `Calendario` **nem a folha de detalhe do `TelaResumo`** (`telas.tsx`, estado `detalhe` próprio) quando o calendário está dentro dela. (O toque no dia dentro dessa folha do Resumo, que
+  hoje já navega, tem o mesmo risco: **não verificado** no simulador.) O PR 2 faz o botão "Ver extrato do dia" fechar a folha do dia **e** a folha que a contém antes de navegar:
+  o contexto de navegação ganha um registro de "fechadores" (`ContextoNavegacaoPainel`/`useNavegarPainel`, onde o `aoSair` já vive), a folha do dia e o `TelaResumo` registram o seu, e o `navegar`
+  roda todos antes do `router.push`. Teste: nas duas origens (aba Gastos e Resumo) nenhuma folha fica visível depois do toque e o Extrato está montado com o `dia` pedido.
 - **`Extrato` com `dia` na consulta (achado do Codex no #1050; já é um defeito de hoje).** `extrato.tsx:42-47` pede só `mes` e `limite=50` e filtra `params.dia` **no aparelho**
   sobre a 1ª página. Num mês com mais de 50 lançamentos, o dia que cai depois da 1ª página aparece vazio ("Nenhum resultado nesta página.") ou parcial, e o botão da folha
   prometeria o extrato completo do dia. `/api/app/lancamentos` já aceita `dia` (`api/v2/lancamentos.py:79`, sempre junto do `mes`, que é o da fatura), então a correção é **só do
@@ -198,6 +209,7 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 - a folha pelo `renderRouter` (molde de `painel_numeros_gastos.test.tsx`): toque abre; setas e limites (`disabled` no 1º/último dia aberto); estados da §3.3
   (carregando, erro com "Tentar novamente", dia sem saída, hoje, agendado, dia fora da grade navega, `disponivel:false` navega, `oculto` sem pílula/barra/valores no label **nem no anúncio da troca de dia**);
   fatia ≤ 0 fora da barra; `"91.010"` × `"1.005"` sem erro; `fontScale` ampliado; `accessibilityLabel` com data, total e sentido;
+- fechamento: depois de "Ver extrato do dia" (aba Gastos e Resumo) nenhuma folha fica visível e o Extrato está montado; controle negativo: sem o registro de fechadores o `Modal` do Resumo continua visível;
 - `Extrato` com `dia`: mês com > 50 lançamentos e o dia fora da 1ª página mostra as compras do dia (hoje mostra vazio); a consulta leva `mes` e `dia` juntos;
 - o negativo do conserto de grade: com o fallback desligado, a linha fora da grade abre a folha com R$ 0,00 → o teste fica **vermelho**;
 - **servidor, só teste** (`tests/test_api_app_gastos.py`, sem mudar o código do servidor): usuário **sem** chave beta lê `/api/app/gastos` (200) e a fixture do app valida contra o
@@ -225,8 +237,8 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 
 | # | Conteúdo | Faixa | Deixa pronto |
 |---|---|---|---|
-| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (centavos) + tabela dourada + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
-| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
+| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (decimal exato) + tabela dourada com casos sub-centavo + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
+| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** e as folhas se fecham antes de navegar (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
 | **3** | **O dia em contexto.** Pílula ↓↑ %, barra com emojis e os 3 maiores. | **Leve** | paridade visual com o web na versão sem texto; o jest dos tons e da barra |
 | — | **Build** pelo Xcode (dono) e validação no iPhone. Não é PR. | — | fecha o que só o aparelho prova |
 
@@ -236,7 +248,7 @@ O dono escolheu a opção (a) (§9), então o 2 e o 3 ficam separados como na ta
 1. **Grade diferente entre `detalhes` e `/gastos`** (§2.2.3): mitigado pelo fallback para o extrato, pelo teste `saiu == total` e pelo negativo que religa o bug.
 2. **`Folha` dentro de `Folha` no Resumo** (o `Calendario` do Resumo já abre numa folha): não há precedente no repo; **não verificado**. Plano B: dentro da folha o toque segue navegando ao extrato; plano C: trocar o conteúdo da própria folha.
 3. **Conflito com o #1031** nos mesmos arquivos: esperar o merge.
-4. **Média em centavos × float do web:** divergência só no meio exato; tabela dourada.
+4. **Média: decimal exato no app × `float` do web:** só o empate exato no meio pode divergir; tabela dourada com casos sub-centavo (o app nunca arredonda a centavos antes da conta).
 5. **Leitura sob demanda:** a 1ª abertura de cada mês mostra o carregando; `versao` e troca de conta reiniciam (o `useLancamentos` já trata); resposta pequena (≤ 31 dias × 3 maiores + categorias).
 6. **O servidor mudar um campo lido:** o build novo quebra com "dados incompatíveis"; o teste de contrato do PR 1 pega no CI do backend.
 7. **Privacidade:** pílula e barra revelam proporção; somem em `oculto` (como `LinhaCategoria` já faz).
