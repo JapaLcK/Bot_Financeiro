@@ -179,6 +179,21 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("vence 18:30 paguei 300", {30000}, {1800, 3000}),
     ("diária 150", {15000}, set()),                         # "dia" dentro de palavra não mascara
     ("vence 150", {15000}, set()),                          # 3 dígitos não são dia
+    # sufixo ordinal no dia: o \b não casava antes de "º" e o 1 virava R$ 1 (P1 do Codex)
+    ("anota o boleto da internet para o dia 1º", set(), {100}),
+    ("dia 1º", set(), {100}),
+    ("vence 15º", set(), {1500}),
+    ("dia 2ª", set(), {200}),
+    ("dia 1o", set(), {100}),
+    ("vence dia 1o", set(), {100}),
+    ("1º de outubro", set(), {100}),
+    ("1° de outubro", set(), {100}),
+    ("1o de outubro", set(), {100}),
+    ("boleto de 150 dia 1º", {15000}, {100}),
+    ("boleto de 150 para o dia 1º", {15000}, {100}),
+    ("dia 50a", {5000}, set()),                             # letra colada a 2 dígitos não é ordinal
+    ("gastei 50a março", {5000}, set()),
+    ("paguei o 1º lugar 50", {5000}, set()),                # ordinal solto (sem dia/mês) não mascara: como antes, o 1 segue lido
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -1080,6 +1095,19 @@ def test_n13_boleto_as_18h30_nao_grava_hora_como_valor(uid_pro, monkeypatch):
         assert RECUSA in r and _boletos(uid_pro) == 0, r
     _usa_ia(cli)
     runner.chat(uid_pro, "boleto da internet de 150 às 18h30", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n14_boleto_para_o_dia_1o_nao_grava_o_dia_como_valor(uid_pro, monkeypatch):   # P1 do Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 30, "due_date": "01/11"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 1, "due_date": "01/11"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "01/11"})))
+    for _ in range(2):
+        r = runner.chat(uid_pro, "anota o boleto da internet para o dia 1º", platform="whatsapp")
+        assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto de 150 para o dia 1º", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
 
 

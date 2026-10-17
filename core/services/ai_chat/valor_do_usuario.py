@@ -47,12 +47,13 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]", "15 out 2026"): só "N [de] MÊS", nunca "50 em março".
     # Ano sem "de" só com 20dd: "15 out 150" mantém o 150 como dinheiro
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
-    r"|(?<![\d.,])\d{1,2}\s+(?:de\s+)?(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
+    r"|(?<![\d.,])(?:\d{1,2}[ºª°]?|\d[oa])\s+(?:de\s+)?(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
     r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4}|\s+20\d\d\b)?"
     # rótulo de dia, com ou sem dois-pontos: "dia: 18", "vencimento dia: 18", "venc. 18". O dia (1-2 dígitos) nunca é valor;
     # sem o lookahead "vence 18/10" mascararia o 18 e deixaria "/10" para ser lido. ponytail: "vence 50 reais" mascara o 50 (fail-closed)
-    r"|\bdia\s*:?\s*\d{1,2}\b(?![/.:,-]\d)"
-    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?\d{1,2}\b(?![/.:,-]\d)"
+    # Sufixo ordinal opcional ("dia 1º", "1o"): o \b pós-dígito não casa antes de "º"/"ª". "o"/"a" colados só após 1 dígito: "50a" segue sem mascarar.
+    r"|\bdia\s*:?\s*(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
+    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
     # hora compacta "18h30" / "18 h 30"; "18h" nua já é a unidade `h` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
     r"|\b\d{1,2}\s*h\s*\d{2}\b",
     re.IGNORECASE,
