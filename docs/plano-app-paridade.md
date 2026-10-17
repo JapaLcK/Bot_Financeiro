@@ -132,11 +132,12 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 | 48 | Vincular caixinha do banco a uma meta | `POST /open-finance/{user_id}/caixinhas/bind`, card "Caixinhas & metas"; **beta, só para allowlist** (404 fora dela) | Não há | Beta no web; vira linha de lacuna quando sair da allowlist | web beta; **a decidir com o dono quando abrir** |
 | 49 | Política de Privacidade | Seção "Privacidade e documentos" em Configurações (`/privacy`, `settings.html`) | Só no cadastro (`features/auth/Termos.tsx`); Configurações tem Suporte e Sair, sem o link | Quem já tem conta não alcança a política pelo app | **app atrás (A13)** |
 | 50 | Atalhos de conta no shell: **Configurações/Conta**, **Suporte** e **Sair** | **Não há no `/painel`**: `frontend/painel.html` só monta o bundle e `webapp/src/dashboard` não tem link para `/suporte`, `/settings` (só "Conectar banco" → `?view=open-finance`) nem logout (`git grep` 2026-10-16). O painel antigo (`dashboard.html`) tem os três | `configuracoes.tsx`: Bancos conectados, Segurança, Suporte (`/suporte` no navegador) e Sair | Sair toca a sessão: a limpeza de logout é central (`auth-refresh`), o `/painel` não pode inventar outro caminho | **web atrás (W8)** |
+| 51 | Tema claro e escuro | **Só escuro**: `color-scheme: dark` em `webapp/src/dashboard/styles/base.css`; "tema claro" está em "Depois" no plano do web (§6) | Segue o sistema (`app/app/_layout.tsx`, paletas `claro` e `escuro`) | Dívida já conhecida do web, só faltava na matriz | **web atrás (W9)** |
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
 Resumo, para não perder: linhas 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
-(Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) e 50 (Suporte, Conta e Sair no shell). Dentro dos "específicos da
+(Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) 50 (Suporte, Conta e Sair no shell) e 51 (tema claro). Dentro dos "específicos da
 plataforma" o app ainda tem biometria, tampa de privacidade e Compras Apple (linhas 36 e 37).
 Isso é **mais** do que a regra do dono previa ao dizer "o app está atrás": **o web também está atrás**, e por dívida
 grande (§6).
@@ -195,7 +196,7 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais), W5 (Saldo e Guardado líquido)
 só precisam **montar no namespace v2** rotas que já existem; W7 e W8 são de cliente puro (W8 com o Sair, que é Completo); W2 (chat real) é a Etapa 7; W3 (Simulador) é
 cliente puro; W4 (Fatura, Parcelas, Renda, "Piggy notou") precisa de contrato novo e de decisão sobre as fontes
-(plano "só Open Finance").
+(plano "só Open Finance"). W6 (modo privacidade) espera a decisão P5; W9 (tema claro) é grande, já estava em "Depois" e fica por último.
 
 ## 7. Regra operacional daqui para a frente
 
