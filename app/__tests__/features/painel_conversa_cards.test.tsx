@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-lib
 import { faladoComSinal } from "@/ui/dinheiro";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv, voltar } from "./conversa_apoio";
+import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
@@ -23,24 +23,19 @@ it.each(CARDS)("%s: o card do chat desenha o bloco, sem ler o provider", async (
 });
 
 const contasCom = (total: string) => ({ contas: { ...F["/api/app/contas"], total } });
-it("o número do chat é o do bloco e a Folha mostra o MESMO bloco, não o provider", async () => {
+it("o número do chat é o do bloco, não o do provider", async () => {
   instalarCards(true); comBlocos(bloco("contas", contasCom("4321.09"))); await perguntar();
   const bloco4321 = faladoComSinal(432109), provider9400 = faladoComSinal(940025);
   expect(screen.getAllByLabelText(bloco4321)).toHaveLength(1);
-  fireEvent.press(screen.getByTestId("bloco-contas"));
-  expect(screen.getByRole("header", { name: "Contas" })).toBeTruthy();
-  expect(screen.getAllByLabelText(bloco4321)).toHaveLength(2); // card + Folha
   expect(screen.queryByLabelText(provider9400)).toBeNull(); // o provider responde 9.400,25
 });
 
-it("card inteiro: o toque abre a Folha do mesmo bloco; o título é o botão; Fechar fecha; sair da aba fecha", async () => {
+it("o card é 100% do chat: sem botão de abrir, e tocar nele não abre folha nem modal", async () => {
   comBlocos(bloco("metas")); await perguntar();
-  expect(screen.getByRole("button", { name: "Metas, abrir detalhes" })).toBeTruthy();
-  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
-  fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.getByRole("header", { name: "Metas" })).toBeTruthy();
-  await apertar("Fechar"); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
-  fireEvent.press(screen.getByTestId("bloco-metas")); await noResumo(); await voltar();
-  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /abrir detalhes/ })).toBeNull(); expect(within(screen.getByTestId("bloco-metas")).queryAllByRole("button")).toHaveLength(0);
+  fireEvent.press(screen.getByTestId("bloco-metas")); fireEvent.press(within(screen.getByTestId("bloco-metas")).getByText("Metas"));
+  expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); // só a Folha tem "Fechar" e o header
+  expect(screen.getByTestId("bloco-metas")).toBeTruthy(); expect(screen.getByText("Resposta do Piggy")).toBeTruthy(); // o card segue no chat
 });
 
 describe("só leitura no chat; as abas do painel seguem como eram", () => {
@@ -72,21 +67,6 @@ it("compromissos: o título usa o horizonte do bloco (60), não o do provider (3
   expect(screen.queryByText("Próximos 30 dias")).toBeNull();
 });
 
-it("categorias com 2 abas: um card por aba, com o mês no título", async () => {
-  const aba = (mes: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10"), aba("2026-09")] }); await perguntar();
-  expect(screen.getAllByTestId("bloco-categorias")).toHaveLength(2);
-  expect(screen.getByText("Para onde vai · outubro de 2026")).toBeTruthy(); expect(screen.getByText("Para onde vai · setembro de 2026")).toBeTruthy();
-});
-
-it("categorias com 3 abas: tocar o 2º ou o 3º card abre a Folha DAQUELA aba (título e dados)", async () => {
-  const aba = (mes: string, categoria: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes, categorias: [{ categoria, valor: "100.00", quantidade: 1 }] } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10", "Casa"), aba("2026-09", "Lazer"), aba("2026-08", "Viagem")] }); await perguntar();
-  fireEvent.press(screen.getAllByTestId("bloco-categorias")[1]!); expect(screen.getByRole("header", { name: "Para onde vai · setembro de 2026" })).toBeTruthy();
-  expect(screen.getAllByText("Lazer")).toHaveLength(2); expect(screen.getAllByText("Casa")).toHaveLength(1); expect(screen.getAllByText("Viagem")).toHaveLength(1); // card + Folha só da aba 2
-  await apertar("Fechar"); fireEvent.press(screen.getAllByTestId("bloco-categorias")[2]!);
-  expect(screen.getByRole("header", { name: "Para onde vai · agosto de 2026" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2); expect(screen.getAllByText("Lazer")).toHaveLength(1);
-});
 it("sem bloco, o chip com assunto não monta card (o card legado do assunto saiu)", async () => {
   await abrir(); await apertar("Quanto falta pra minha próxima meta e quando eu chego lá?");
   await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
@@ -98,10 +78,9 @@ it("bloco de recursos vazios: 'Dado indisponível neste card.', sem tela de erro
 });
 
 describe("`caixinhas` e `metas` v2 no chat", () => {
-  it("`caixinhas` (formato legado): a mesma lista de metas, com o título do card; a Folha abre o mesmo bloco", async () => {
+  it("`caixinhas` (formato legado): a mesma lista de metas, com o título do card", async () => {
     comBlocos(bloco("caixinhas")); await perguntar();
-    expect(screen.getByRole("button", { name: "Caixinhas, abrir detalhes" })).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
-    fireEvent.press(screen.getByTestId("bloco-caixinhas")); expect(screen.getByRole("header", { name: "Caixinhas" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2);
+    expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Caixinhas")).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
   });
   // O recurso `metas` do chat vem no formato v2 (`/api/v2/metas`); o legado `{ok, goals}` já não vale para o bloco `metas` (é do `caixinhas`).
   const metasV2 = (v2 as unknown as { metas: { varios: Record<string, any> } }).metas.varios;

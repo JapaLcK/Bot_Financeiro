@@ -1,0 +1,7 @@
+[
+  {"valores": ["995.00", "5.00"], "percentuais": [100, 1]},
+  {"valores": ["25.00", "975.00"], "percentuais": [3, 98]},
+  {"valores": ["-1.00", "201.00"], "percentuais": [-1, 101]},
+  {"valores": ["0.00", "0.00"], "percentuais": [0, 0]},
+  {"valores": ["1.00", "1.00", "1.00"], "percentuais": [33, 33, 33]}
+]

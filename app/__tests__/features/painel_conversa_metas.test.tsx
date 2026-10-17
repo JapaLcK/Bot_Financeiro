@@ -23,7 +23,6 @@ describe("varios", () => {
   it("reserva primeiro, depois as outras na ordem do servidor; título 'Metas'", async () => {
     const c = await mostrar("varios");
     expect(c.getAllByRole("header").map((h) => h.props.children)).toEqual(V2.metas.varios.metas.map((m: { nome: string }) => m.nome));
-    expect(screen.getByRole("button", { name: "Metas, abrir detalhes" })).toBeTruthy();
   });
   it("a reserva sobe ao topo mesmo se o servidor a mandar por último; o resto fica na ordem do servidor", async () => {
     const [reserva, ...resto] = V2.metas.varios.metas; comBlocos(bloco("metas", { metas: { ...V2.metas.varios, metas: [...resto, reserva] } })); await perguntar();
@@ -74,11 +73,11 @@ describe("varios", () => {
     expect(meta(11).getByText("a conferir")).toBeTruthy(); expect(meta(11).getAllByText("A conexão com o banco está pausada. Reconecte pra eu voltar a ler.")).toHaveLength(1);
     expect(screen.getAllByText("a conferir")).toHaveLength(1);
   });
-  it("nenhum botão dentro do card; o toque abre a Folha com o mesmo bloco", async () => {
+  it("nenhum botão dentro do card, e o toque nele não abre folha", async () => {
     const c = await mostrar("varios");
-    expect(c.getAllByRole("button")).toHaveLength(1); // só o título do Bloco
-    fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.getByRole("header", { name: "Metas" })).toBeTruthy();
-    expect(screen.getAllByText("Viagem pro Japão")).toHaveLength(2);
+    expect(c.queryAllByRole("button")).toHaveLength(0);
+    fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull();
+    expect(screen.getAllByText("Viagem pro Japão")).toHaveLength(1);
   });
 });
 describe("avisos, ressalvas e fallbacks", () => {
@@ -126,19 +125,19 @@ describe("outros casos da fixture", () => {
   });
 });
 describe("valores ocultos", () => {
-  it("a linha da reserva no card: o custo vira máscara, sem dígito de dinheiro (controle: antes, R$ 3.000,00)", async () => {
+  it("a linha da reserva no card: ao ocultar, o card some do chat e nenhum dígito de dinheiro fica (controle: antes, R$ 3.000,00)", async () => {
     const c = await mostrar("varios"); const linha = "Reserva de emergência · 6 meses das suas contas fixas";
     expect(c.getByText(`${linha} (6 × R$ 3.000,00) · Tudo que tenho investido`)).toBeTruthy();
     expect(c.getByLabelText(`${linha} (6 × ${falado(300000)}) · Tudo que tenho investido`)).toBeTruthy(); // o VoiceOver lê o custo falado, não "R$ 3.000,00"
-    fireEvent.press(screen.getByTestId("bloco-metas")); fireEvent.press(screen.getByRole("button", { name: "Ocultar valores", hidden: true })); // o botão mora na Folha; o card do chat segue atrás
-    expect(screen.getAllByText(`${linha} (6 × R$ ••••) · Tudo que tenho investido`, { hidden: true }).length).toBeGreaterThan(0); expect(screen.queryAllByText(/\(6 × R\$ 3/, { hidden: true })).toEqual([]); expect(screen.queryAllByText(/3\.000/, { hidden: true })).toEqual([]);
-    expect(screen.getAllByLabelText(`${linha} (6 × Valor oculto) · Tudo que tenho investido`, { hidden: true }).length).toBeGreaterThan(0); expect(screen.queryAllByLabelText(/3000 reais/, { hidden: true })).toEqual([]);
+    fireEvent.press(screen.getByRole("button", { name: "Ocultar valores" }));
+    expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryAllByText(/\(6 × R\$ 3/, { hidden: true })).toEqual([]); expect(screen.queryAllByText(/3\.000/, { hidden: true })).toEqual([]);
+    expect(screen.queryAllByLabelText(/3000 reais/, { hidden: true })).toEqual([]);
   });
-  it("a Folha aberta quando se oculta: nenhuma barra e nenhum dígito de dinheiro; antes, a barra com 60 (controle)", async () => {
-    await mostrar("varios"); fireEvent.press(screen.getByTestId("bloco-metas"));
+  it("ocultar valores no chat: o card some, sem barra nem dígito de dinheiro; antes, a barra com 60 (controle)", async () => {
+    await mostrar("varios");
     expect(barras(screen)).toContain(60); expect(screen.queryAllByLabelText(R(1200000), { hidden: true }).length).toBeGreaterThan(0);
     fireEvent.press(screen.getByRole("button", { name: "Ocultar valores", hidden: true }));
     expect(barras(screen)).toEqual([]); expect(screen.queryAllByText(/R\$ \d/, { hidden: true })).toEqual([]); expect(screen.queryAllByLabelText(/ reais?\b| centavos?\b/, { hidden: true })).toEqual([]);
-    expect(screen.queryAllByLabelText("Valor oculto", { hidden: true }).length).toBeGreaterThan(0); expect(screen.getAllByText("Viagem pro Japão", { hidden: true }).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("bloco-metas")).toBeNull();
   });
 });

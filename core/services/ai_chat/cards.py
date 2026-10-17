@@ -11,6 +11,7 @@ como número (o `ai_guard` não reconhece texto como evidência). Nos cards de g
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from functools import cache
 from typing import Any, Callable, NamedTuple
@@ -23,6 +24,8 @@ from db.connection import CAT_VAZIA_LABEL, cat_key
 from utils_text import normalize_text
 
 from ._context import CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
+
+logger = logging.getLogger(__name__)
 
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
@@ -260,6 +263,17 @@ def registro() -> dict[str, Card]:
         return {**{k: p[k] for k in ("total", "partes", "motivos", "historico_desde")},
                 "historico": p["historico"][-7:]}
 
+    def categorias_e_contas(uid, a):
+        """`contas` vai só no bloco (o app mostra a sincronização mais antiga); a visão lê só `detalhes`.
+        Enfeite: se `contas` falhar o card sai sem ele; a falha de `mes_detalhes` segue propagando."""
+        abas = _mes(uid, a, detalhes=mes_detalhes)
+        try:
+            c = contas(uid=uid)
+        except Exception:
+            logger.warning("card categorias: contas indisponível pra user %s, sai sem a sincronização", uid, exc_info=True)
+            return abas
+        return [(m, r | {"contas": c}) for m, r in abas]
+
     det = lambda *ks: _so("detalhes", *ks)  # noqa: E731
     todo = lambda rec: (lambda r: r[rec])  # noqa: E731
     return {
@@ -271,8 +285,7 @@ def registro() -> dict[str, Card]:
         "resumo": Card(lambda uid, a: _mes(uid, a, resumo=resumo, detalhes=mes_detalhes),
                        lambda r: {"resumo": r["resumo"],
                                   "detalhes": {k: r["detalhes"][k] for k in ("guardado", "motivos")}}, gate_mes),
-        "categorias": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
-                           det("mes", "ate", "entrou", "saiu", "categorias", "motivos"), gate_mes),
+        "categorias": Card(categorias_e_contas, det("mes", "ate", "entrou", "saiu", "categorias", "motivos"), gate_mes),
         "calendario": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
                            det("mes", "ate", "entrou", "saiu", "dias", "motivos"), gate_mes),
         "simulador": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
