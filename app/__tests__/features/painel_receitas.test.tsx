@@ -268,6 +268,18 @@ it("C: aviso visível (POST 500, releitura 200) e puxar para atualizar com a rel
  await act(async () => { g.soltar(); await drenar(); await drenar(); });
  await waitFor(() => expect(pendentes()).toBe(2)); expect(screen.queryByText(ERRO)).toBeNull(); expect(erros()).toBe(1);
 });
+it("leitura de horizonte VELHA que cai no mesmo tique da resposta perdida não é julgada: vale a releitura que o POST pediu", async () => {
+ await abrir(); const g60 = segurar(), post = segurar(); let seguraGet = false;
+ sem = (path, req) => {
+  if (path === PREVISAO && seguraGet) { seguraGet = false; const velha = previsao(60); return g60.promessa.then(() => resposta(200, velha)); } // dado de ANTES do POST
+  if (path === POST) return post.promessa.then(() => { marcas[corpo(req).chave] = "confirmada"; throw new TypeError("Network request failed"); }); // o servidor gravou e a conexão caiu
+  return undefined;
+ };
+ seguraGet = true; await apertar("60 dias"); await act(async () => { fireEvent.press(botao("Sim, é receita fixa: Salário Acme")); await drenar(); });
+ await act(async () => { g60.soltar(); post.soltar(); await drenar(); await drenar(); await drenar(); });
+ await waitFor(() => expect(pendentes()).toBe(1)); expect(screen.queryByText(ERRO)).toBeNull(); expect(erros()).toBe(0); anunciou("Salário Acme: confirmada.");
+ expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
+});
 it("só respondidas: caixa com 'Já respondidas', sem pergunta e sem Sim/Não", async () => {
  marcas = { "extrato#alu": "confirmada", "extrato#tio": "negada" }; await abrir();
  expect(pendentes()).toBe(0); expect(screen.getByText("Já respondidas (2)")).toBeTruthy(); expect(screen.queryByRole("button", { name: /^Sim|^Não/ })).toBeNull();

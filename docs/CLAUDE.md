@@ -594,7 +594,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   se apaga quando chega uma leitura `pronto` da previsão (troca de horizonte concluída, "Tentar novamente", recarga) e quando começa uma
   recarga completa (puxar para atualizar: previsão `undefined`, a caixa some enquanto relê). Assim o Banner, que anuncia ao montar, não
   remonta com aviso velho nem repete o anúncio. Mantêm o aviso: a troca de horizonte em curso (`carregando`) e a previsão `erro`. A releitura
-  que acompanha a própria falha não o apaga. `negado` esconde caixa e aviso e só se sai dele por uma recarga (passa por `undefined`).
+  que acompanha a própria falha não o apaga. A avaliação do resultado só olha a leitura que a PRÓPRIA resposta pediu (começa num `carregando`
+  novo ou numa recarga completa): leitura de horizonte que cai antes é dado de antes do POST e é ignorada. `negado` esconde caixa e aviso e só se sai dele por uma recarga (passa por `undefined`).
   Limites declarados: (a) POST 2xx anuncia sucesso mesmo que a releitura venha velha (réplica atrasada), como na web; (b) o
   deslocamento de layout quando a linha muda de grupo, e o foco do VoiceOver quando o botão tocado desmonta, só se medem no aparelho.
   **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os

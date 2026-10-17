@@ -27,7 +27,7 @@ export const ReceitasDoBanco = () => <Caixa key={usePainel().usuario.user_id} />
 function Caixa() {
   const p = usePainel(); const r = p.dados.previsao;
   const [ocupado, setOcupado] = useState(false); const [falhou, setFalhou] = useState(false); const [espera, setEspera] = useState<Espera | null>(null); const [abertas, setAbertas] = useState(false);
-  const voo = useRef<symbol | null>(null); const ultima = useRef<Receita[]>([]); const atual = useRef(r); atual.current = r;
+  const voo = useRef<symbol | null>(null); const viu = useRef(false); const ultima = useRef<Receita[]>([]); const atual = useRef(r); atual.current = r;
   const pronto = r?.fase === "pronto" ? r.dado.receitas_do_banco : null;
   if (pronto) ultima.current = pronto;
   // Durante qualquer releitura parcial (a deste POST, a troca de horizonte) a lista anterior fica na tela, em vez de a caixa piscar.
@@ -37,7 +37,10 @@ function Caixa() {
   // DECLARADO ANTES do efeito abaixo de propósito: a releitura que acompanha a falha chega no mesmo passe, e é o de baixo que acende o aviso depois deste apagar.
   useEffect(() => { if (!r || r.fase === "pronto") setFalhou(false); }, [r]);
   useEffect(() => {
-    if (!espera || !r || r === espera.antes || r.fase === "carregando") return;
+    if (!espera) return;
+    // Só julga a leitura que ESTA resposta pediu: ela começa num `carregando` NOVO (ou `undefined`, recarga completa). Leitura que já estava no ar (horizonte) pode cair antes e é dado de antes do POST.
+    if (!r || (r.fase === "carregando" && r !== espera.antes)) { viu.current = true; return; }
+    if (!viu.current || r.fase === "carregando") return;
     const pegou = r.fase === "pronto" && r.dado.receitas_do_banco.some((x) => x.chave === espera.chave && x.status === ESPERADO[espera.resposta]);
     if (espera.postOk || pegou) { AccessibilityInfo.announceForAccessibility(`${espera.nome}: ${DITO[espera.resposta]}`); sucesso(); } else { setFalhou(true); vibrarAviso(); }
     setEspera(null); voo.current = null; setOcupado(false);
@@ -50,7 +53,7 @@ function Caixa() {
     try { await responderReceita(rec.chave, resposta, op.controlador); } catch (e) { erro = e; }
     if (!op.atual()) return soltar(); // segundo plano, trava, puxar para atualizar ou troca de conta: sem aviso, a recarga completa mostra a verdade
     if (erro) { p.falhou(erro); if (erro instanceof SessaoExpirada || (erro instanceof ErroDeApi && erro.status === 402)) return soltar(); }
-    setEspera({ chave: rec.chave, nome: rec.nome, resposta, postOk: !erro, antes: atual.current }); p.relerPrevisao();
+    viu.current = false; setEspera({ chave: rec.chave, nome: rec.nome, resposta, postOk: !erro, antes: atual.current }); p.relerPrevisao();
   };
   if (!r || r.fase === "negado" || (!lista.length && !falhou)) return null; // negado (plano sem Previsão, p.ex. caiu para Essencial com o app aberto): nem caixa nem aviso; `erro` mantém o aviso, que o "Tentar novamente" do card apaga
   const pendentes = lista.filter((x) => x.status === "pendente"), respondidas = lista.filter((x) => x.status !== "pendente");
