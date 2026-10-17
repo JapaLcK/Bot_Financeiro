@@ -875,7 +875,10 @@ def get_largest_expenses(
                       and criado_em >= %s and criado_em < %s
                     union all
                     {credit_branch}
-                    order by 3 desc
+                    -- desempate estável: sem ele, gastos de mesmo valor saíam em ordem (e, no
+                    -- limite, seleção) que variava entre duas chamadas iguais. `fonte` antes de
+                    -- `id` porque launches e credit_transactions têm sequências próprias.
+                    order by valor desc, dt desc, fonte, id
                     limit %s
                 ) agg
                 -- mesmo critério do lateral de db/lancamentos.py (_PERNA_LANCAMENTO): dono = conexão do user
@@ -889,7 +892,7 @@ def get_largest_expenses(
                      order by t.id desc limit 1) oi on true
                 left join credit_cards cc
                   on cc.id = agg.card_id and cc.user_id = agg.user_id
-                order by agg.valor desc
+                order by agg.valor desc, agg.dt desc, agg.fonte, agg.id
                 """,
                 (
                     *cte_params,

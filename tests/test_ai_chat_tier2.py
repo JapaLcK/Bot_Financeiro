@@ -173,6 +173,31 @@ def test_largest_expenses_respeita_limit(user_id):
     assert len(result["expenses"]) == 3
 
 
+def test_largest_expenses_empate_de_valor_tem_ordem_estavel(user_id):
+    """Empate em R$ 30 (lançamentos e cartão, dois no mesmo dia) sai pela data mais recente,
+    depois `fonte` e `id` — antes saía em ordem que variava entre duas chamadas iguais, e no
+    `limit` o empate decidia QUAL gasto entrava (flake do CI em test_ia_resumo_do_mes)."""
+    d = date.today() - timedelta(days=10)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
+
+    def lanc(alvo, dia):  # inseridos fora da ordem esperada: o scan cru não acerta por acaso
+        db.add_launch_and_update_balance(user_id, "despesa", 30, alvo, None, categoria="outros",
+                                         criado_em=datetime.combine(dia, datetime.min.time().replace(hour=12)))
+
+    lanc("velho", d - timedelta(days=2))
+    lanc("novo_a", d)
+    lanc("novo_b", d)
+    db.add_credit_purchase(user_id, card_id, 30, "outros", "cartao", d - timedelta(days=1))
+    db.add_launch_and_update_balance(user_id, "despesa", 100, "topo", None, categoria="outros",
+                                     criado_em=datetime.combine(d, datetime.min.time().replace(hour=12)))
+    periodo = {"start_date": (d - timedelta(days=3)).isoformat(), "end_date": (d + timedelta(days=1)).isoformat()}
+
+    todos = [e["descricao"] for e in _get_largest_expenses(user_id, {**periodo, "limit": 20})["expenses"]]
+    assert todos == ["topo", "novo_a", "novo_b", "cartao", "velho"]
+    for n in (2, 3, 4):  # o empate na borda do `limit` (antes do join) escolhe o mesmo prefixo
+        assert [e["descricao"] for e in _get_largest_expenses(user_id, {**periodo, "limit": n})["expenses"]] == todos[:n]
+
+
 def test_largest_expenses_end_anterior_a_start(user_id):
     result = _get_largest_expenses(user_id, {"start_date": "2026-05-01", "end_date": "2026-04-01"})
     assert "error" in result
