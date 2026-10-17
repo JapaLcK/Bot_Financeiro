@@ -110,7 +110,7 @@ do card que muda; a aba já é longa; o card ocupa a tela inteira o tempo todo, 
 | Fato "Mais em \<categoria\>" | **corta** | é a 1ª fatia da barra, com o emoji dela |
 | Barra de divisão + legenda "emoji nome · R$" | **traduz**: `BarraComposicao` + **só os emojis** das fatias (até 4; "+N" se houver mais); nome e valor só no `accessibilityLabel` | forma e ícone no lugar de texto; só com ≥ 2 fatias > 0 |
 | "Compras do dia" (lista completa do `/lancamentos`) | **corta**; fica **os 3 maiores** (`maiores`, já no payload), descrição + valor | a lista completa é o extrato; zero requisição extra |
-| "Ver em Lançamentos" | **traduz** para "Ver extrato do dia" → `/extrato?dia=` (rota existente) | a instrução indispensável; o app chama a tela de **Extrato** |
+| "Ver em Lançamentos" | **traduz** para "Ver extrato do dia" → `/extrato?dia=` (rota existente; **o `Extrato` passa a mandar `dia` na consulta**, §5) | a instrução indispensável; o app chama a tela de **Extrato** |
 | Região `role="status"` ao trocar o dia | `AccessibilityInfo.announceForAccessibility` (data + total) | equivalente nativo |
 | Tag "Só \<categoria\>" / modo categoria | **fora**: o app não tem o filtro de categoria no calendário nem o modo categoria | não existe no app hoje |
 
@@ -178,6 +178,11 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 ## 5. Interação com o resto do app
 - `Calendario` (provider): toque no dia → abre a folha **se** o dia está na grade de `/gastos` e o mês está `disponivel`; senão, o `navegar({pathname:"/extrato", params:{dia}})` de hoje.
   O destino existente do botão da folha é o mesmo.
+- **`Extrato` com `dia` na consulta (achado do Codex no #1050; já é um defeito de hoje).** `extrato.tsx:42-47` pede só `mes` e `limite=50` e filtra `params.dia` **no aparelho**
+  sobre a 1ª página. Num mês com mais de 50 lançamentos, o dia que cai depois da 1ª página aparece vazio ("Nenhum resultado nesta página.") ou parcial, e o botão da folha
+  prometeria o extrato completo do dia. `/api/app/lancamentos` já aceita `dia` (`api/v2/lancamentos.py:79`, sempre junto do `mes`, que é o da fatura), então a correção é **só do
+  app**: o PR 2 acrescenta `dia` à `URLSearchParams` do `Extrato` e passa a usar o `dia` como parte da consulta (o filtro no aparelho deixa de ser necessário, e o `chave` extra do
+  `useLancamentos` também). Servidor igual, app instalado não muda. Teste: mês com > 50 lançamentos e o dia na 2ª página (vermelho antes, verde depois).
 - `Calendario` (chat, `bloco`): **inalterado**.
 - `mudarMes`/`atualizar`/`versao`: a leitura do mês reinicia por esses gatilhos (molde do `useLancamentos`), e fecha a folha se o mês muda.
 
@@ -189,6 +194,7 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 - a folha pelo `renderRouter` (molde de `painel_numeros_gastos.test.tsx`): toque abre; setas e limites (`disabled` no 1º/último dia aberto); estados da §3.3
   (carregando, erro com "Tentar novamente", dia sem saída, hoje, agendado, dia fora da grade navega, `disponivel:false` navega, `oculto` sem pílula/barra/valores no label);
   fatia ≤ 0 fora da barra; `"91.010"` × `"1.005"` sem erro; `fontScale` ampliado; `accessibilityLabel` com data, total e sentido;
+- `Extrato` com `dia`: mês com > 50 lançamentos e o dia fora da 1ª página mostra as compras do dia (hoje mostra vazio); a consulta leva `mes` e `dia` juntos;
 - o negativo do conserto de grade: com o fallback desligado, a linha fora da grade abre a folha com R$ 0,00 → o teste fica **vermelho**;
 - **servidor, só teste** (`tests/test_api_app_gastos.py`, sem mudar o código do servidor): usuário **sem** chave beta lê `/api/app/gastos` (200) e a fixture do app valida contra o
   `Gastos` do Pydantic; onboarding do OF incompleto dá 403 `open_finance_onboarding_required`; outro usuário não vê dado alheio; e `dias[].total` de `/gastos` **bate com** `dias[].saiu`
@@ -216,7 +222,7 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 | # | Conteúdo | Faixa | Deixa pronto |
 |---|---|---|---|
 | **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (centavos) + tabela dourada + caso no teste web; `useGastosMes`; `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
-| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio. Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
+| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
 | **3** | **O dia em contexto.** Pílula ↓↑ %, barra com emojis e os 3 maiores. | **Leve** | paridade visual com o web na versão sem texto; o jest dos tons e da barra |
 | — | **Build** pelo Xcode (dono) e validação no iPhone. Não é PR. | — | fecha o que só o aparelho prova |
 
