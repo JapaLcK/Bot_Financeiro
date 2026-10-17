@@ -273,6 +273,21 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 
 Cada item acima que o app ainda não tem entra na **A21** (`docs/plano-app-paridade.md`), e cada um que o web ainda não tem entra no W4.
 
+**Layout da Home no servidor (W10 opção (a) e A22): a máquina de estados inteira, num lugar só.** Fechada de uma vez porque várias rodadas seguidas bateram nesse subsistema (CLAUDE.md §4). O servidor guarda, **por usuário e por perfil**, um registro `reivindicado` com o layout e uma `versão`. O cliente guarda um cache local (SecureStore ou `localStorage`) que **só se lê**.
+
+| Situação | Regra |
+|---|---|
+| Leitura, servidor sem registro, cache local **personalizado** | sobe o layout com gravação "só se ainda não houver registro"; quem ganha a corrida vale, quem perde adota o do servidor |
+| Leitura, servidor sem registro, cache **vazio ou padrão** (por exemplo depois do logout do web) | **não grava nada**: o perfil continua sem registro, e um aparelho com layout personalizado que ler depois é quem o reivindica; um padrão nunca ganha a migração |
+| Leitura, servidor com registro | o servidor vale; o cache local é reescrito com ele |
+| Salvar (online) | grava sobre a `versão` que o cliente leu; o cliente só **confirma na tela depois do ack**; conflito de versão faz reler, mesclar contra o layout mais recente e tentar de novo uma vez |
+| Salvar que falha (rede cai no meio, 5xx) | **volta ao último layout confirmado**, avisa que não salvou e deixa o salvar repetível; nada fica só no cache |
+| Sem rede desde o começo | "Organizar" fica desligado; sem fila de gravações pendentes, salvo pedido do dono |
+| Restaurar o padrão | grava o registro com o padrão **explícito**, que conta como reivindicado: nenhum aparelho com layout antigo o ressuscita |
+| Id de bloco que o escritor não mostra (desconhecido, ou escondido pelo plano) | preservado em toda gravação, com a posição relativa que tinha; o merge é do servidor contra o layout mais recente |
+
+Testes: migração concorrente, padrão que não ganha, reset entre aparelhos, gravação com falha de rede, duas gravações concorrentes com id desconhecido. A **A22** cumpre esta tabela no app.
+
 **O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A22), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (fonte única da ordem; o §6 do plano do app e o checklist do §8 apontam para cá, não a repetem; justificada no §6 do plano do app). 1) **W1**: a Etapa 6 é a de menor risco, porque as rotas, a foto diária e a regra única já existem. 2) **W11**: sem ele o web não recupera uma conexão que pede reautorização (a frequência disso em produção não foi medida; Completo, Open Finance). 3) Os pequenos: **W5**, **W6** (espera a decisão P5 do plano do app), **W7** (só troca o exemplo pelo `Compromissos` real da `/previsao`), **W8** (o Sair é Completo), **W12**, **W13** e **W14**. 4) **W10**, Completo: a ordem da Home se perde a cada logout; decidir o caminho (recomendado: layout no servidor, junto de `/perfil`) antes de codar. 5) **W3**, cliente puro. 6) **W2** (Etapa 7) e **W4**, os grandes e Completos; W4 depende de decisão do dono sobre as fontes. 7) **W9** (tema claro), por último: é grande e já estava em "Depois". **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
