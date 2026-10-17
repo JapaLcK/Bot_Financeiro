@@ -72,7 +72,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   useEffect(() => cancelar, [cancelar]);
   const falhou = useCallback((e: unknown) => {
     if (e instanceof SessaoExpirada) sessaoRef.current.expirou(e.detalhe);
-    else if (e instanceof ErroDeApi && e.status === 402) { cancelar(); setDados({}); setGate("negado"); }
+    else if (e instanceof ErroDeApi && (e.status === 402 || (e.status === 403 && typeof e.corpo === "object" && e.corpo && JSON.stringify(e.corpo).includes("open_finance_onboarding_required")))) { cancelar(); setDados({}); setGate("negado"); } // 402 e 403 do onboarding: o portão, para toda chamada que passa por aqui (leituras e escritas: recursos, Extrato, chat, perfil, assinaturas, leitura sob demanda)
   }, [cancelar]);
   useFocusEffect(useCallback(() => {
     if (!ativo || travado) { cancelar(); return; }
@@ -128,7 +128,6 @@ export function PainelProvider({ children }: { children: ReactNode }) {
         if (!atual() || e instanceof RequisicaoSuperada) return;
         falhou(e);
         if (!atual()) return;
-        if (e instanceof ErroDeApi && e.status === 403 && typeof e.corpo === "object" && e.corpo && JSON.stringify(e.corpo).includes("open_finance_onboarding_required")) { cancelar(); setGate("negado"); setDados({}); return; }
         setDados((d) => ({ ...d, [k]: { fase: e instanceof ErroDeApi && e.status === 403 ? "negado" : "erro", mensagem: mensagemRecurso(e) } }));
       } finally {
         controladores.current.delete(c);
