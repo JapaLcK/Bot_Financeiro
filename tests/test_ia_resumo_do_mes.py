@@ -577,8 +577,6 @@ def test_usuario_b_com_cartao_e_fatura_no_mesmo_mes_nao_mexe_nas_listas_de_a():
     assert antes[2]["total"] == 80.0  # só a compra à vista de A no cartão; nada dos 888 de B
 
 
-# No FIM do arquivo: o `get_largest_expenses` do teste do usuário B empata em 100.0 (lançamento x parcela) e a
-# ordem do empate muda com o volume de linhas que os testes anteriores deixam; estes não podem vir antes dele.
 def test_compare_traz_o_aviso_de_dado_incompleto_da_regra_do_mes():
     a, _ = _par()  # o par de conciliação pendente do semeia_a
     r = _tool("compare_periods", a, mes=f"{INICIO:%Y-%m}")
