@@ -446,6 +446,8 @@ do push, não depois do apontamento — é a diferença entre revisar e terceiri
 E **nunca sugira pular a revisão**. Parece economia de tempo; o efeito real é parar de
 olhar para nada ser encontrado.
 
+**Paridade app × /painel.** Toda feature de um lado declara no corpo do PR o par no outro: `Par no outro lado: já existe | plano/issue #N | específico da plataforma porque …`. Feature que muda dado ou rota nasce em `api/v2` e é montada nos dois namespaces; rota só do app (`api/nativo`) exige a razão. O servidor só acrescenta campo: app instalado não atualiza com o deploy. A matriz vive em `docs/plano-app-paridade.md`; o PR que muda uma linha dela a atualiza no mesmo PR.
+
 **Todo PR que você abrir, você acompanha até o fim — e pode mergear (autorização
 permanente do dono, desde 2026-10-01).** Ao abrir o PR: peça `@codex review` e fique de
 olho no Codex e no CI. Apontamento ou check vermelho: trate como acima (hipótese a
