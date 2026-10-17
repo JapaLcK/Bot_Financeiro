@@ -260,11 +260,12 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 | W9 | **Tema claro** (e seguir a preferência do sistema): o `/painel` fixa `color-scheme: dark` (`webapp/src/dashboard/styles/base.css`); o app escolhe a paleta clara ou escura pelo sistema (`app/app/_layout.tsx`). Já está em "Depois" (§6, "tema claro"); entra aqui só para a paridade não ser dada por completa com o web escuro | tokens de cor claros em `base.css` e revisão de cada bloco; nenhum servidor | Leve | G |
 | W10 | **Layout da Home por usuário**: `lib/profiles.js` guarda perfil e ordem no `localStorage` por perfil, sem o `user_id`; duas contas no mesmo navegador herdam e sobrescrevem a ordem uma da outra (só ids de bloco). Escopar a chave por `user_id` (como o app) e decidir o destino das chaves antigas (matriz do plano do app, linha 1) | nenhum | Leve (isolamento por usuário, mas sem dado financeiro) | P |
 | W11 | **Reconectar banco e desconectar um banco só** no `/settings?view=open-finance`: hoje o widget conecta (sempre com `connect-token` de corpo vazio) mas não reconecta (o servidor já aceita `item_id` e a Pluggy recusa o banco repetido sem ele), e só há "desconectar todos" (matriz do plano do app, linha 32; o app já tem os dois) | nenhum: `connect-token` já aceita `item_id` e `DELETE /open-finance/{user_id}/connections/{id}` existe | **Completo** (Open Finance) | M |
+| W12 | **Seletor de mês até o início do histórico do plano**: `MESES` fixa os 6 últimos meses; o app enumera até `history_earliest_date`. O `/api/v2/me` não traz o campo: acrescentá-lo (**só acréscimo**, o app já lê o mesmo nome em `/auth`) e gerar o seletor a partir dele; as telas de mês que o web já tem passam a abrir meses antigos (matriz do plano do app, linha 52) | `history_earliest_date` em `/api/v2/me` (campo novo, opcional) | Leve (o servidor só lê o plano; as consultas já cortam pelo plano em `lancamentos.py` e `patrimonio.py`) | P |
 
 **O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A16), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
-risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W11** (sem ele o web não recupera uma conexão que pede reautorização; a frequência disso em produção não foi medida), **W5**, **W6**, **W7**, **W8** e **W10**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
+risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W11** (sem ele o web não recupera uma conexão que pede reautorização; a frequência disso em produção não foi medida), **W5**, **W6**, **W7**, **W8**, **W10** e **W12**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
 decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
@@ -916,8 +917,8 @@ o 409).
 ### Paridade com o app (2026-10-16)
 
 - [x] Matriz de paridade `/painel` × app nativo levantada e a regra do dono registrada, **só em plano** (nenhum código):
-  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W11).
+  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W12).
 - [x] Decisões do dono (§10 do plano do app, 2026-10-16): ordem aprovada, texto da regra aprovado para o `CLAUDE.md`
   (em PR próprio), guia existe no app, sem data de App Store. Seguem abertas: modo privacidade no `/painel` (W6) e
   Guardado líquido no Resumo (W5).
-- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W11, W5, W6, W7, W8 e W10, depois W3, W2 e W4, e por último W9).
+- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W11, W5, W6, W7, W8, W10 e W12, depois W3, W2 e W4, e por último W9).

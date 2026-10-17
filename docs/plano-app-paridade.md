@@ -52,6 +52,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 | 3 | Resumo do mês: Entrou e Saiu | `GET /resumo-do-mes` (`Stats.tsx`, real): o valor do mês e, ao lado, o do mês anterior inteiro, **sem porcentagem (decisão N4)**; **Fatura é de exemplo** | `GET /api/app/resumo-do-mes` (`resumoMes.tsx`): compara o mesmo ponto do mês com o anterior, com variação e curvas | Os dois comparam; a diferença (porcentagem, mesmo ponto do mês, curva) é do app e a ausência de porcentagem no web é decisão do dono. A comparação de períodos mais rica no web é o #1033 (aberto) | paridade (a riqueza da comparação é diferença deliberada; reabrir só se o dono pedir) |
 | 4 | Saldo do mês e **Guardado líquido** | Não há. "Guardado no mês" saiu do Resumo por ser dado inventado (plano §8, Etapa 4 PR B) | Topo da aba Gastos (`numerosMes.tsx`): Entrou, Saiu, Saldo, Guardado líquido, de `GET /api/app/mes-detalhes` | O número do app é real (`guardado` de `mes-detalhes`); `mes-detalhes` só existe no namespace do app (`api/nativo/`) | web atrás |
 | 5 | Modo privacidade (esconder valores) | Não há no `/painel`; existe no painel antigo (`frontend/dashboard.js`, `toggleHideBalance`) | `oculto` em todo o app (`Valor`, `Anel`, cards) | Barato e só cliente | web atrás |
+| 52 | Seletor de mês e a janela de histórico do plano | `MESES` em `lib/v2.ts`: **só os 6 últimos meses**, fixos; `/api/v2/me` não traz `history_earliest_date` (grep em `api/v2/me.py`) | `mesesDoHistorico(mesAtual(), usuario.history_earliest_date, …)` (`cabecalho.tsx`): todos os meses até o início do histórico do plano (mês atual Free, 90 dias Essencial, 365 Plus, 730 Pro; `core/services/plan_service.py`) | Quem é Plus ou Pro abre no app resumo, gastos e extrato de meses que o web não deixa escolher | **web atrás (W12)** |
 
 ### 3.2 Gastos
 
@@ -136,7 +137,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
-Resumo, para não perder: linhas 1 (ordem salva por usuário), 32 (reconectar e desconectar um banco), 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
+Resumo, para não perder: linhas 1 (ordem salva por usuário), 52 (meses do seletor), 32 (reconectar e desconectar um banco), 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
 (Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) 50 (Suporte, Conta e Sair no shell) e 51 (tema claro). Dentro dos "específicos da
 plataforma" o app ainda tem biometria, tampa de privacidade e Compras Apple (linhas 36 e 37).
 Isso é **mais** do que a regra do dono previa ao dizer "o app está atrás": **o web também está atrás**, e por dívida
