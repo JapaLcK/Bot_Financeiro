@@ -31,18 +31,23 @@ export class ErroApi extends Error {
   status: number;
   code: string;
   details?: ErroV2["error"]["details"];
-  constructor(status: number, code: string, details?: ErroV2["error"]["details"]) {
+  // O `{"detail": "<texto PT>"}` das rotas antigas (/settings, /auth), já escrito para a tela. Fica de fora
+  // no 401 que carrega WWW-Authenticate: esse é o 401 de SESSÃO, e quem o recebe não pode confundi-lo com
+  // "Senha incorreta." (que não carrega).
+  detalhe?: string;
+  constructor(status: number, code: string, details?: ErroV2["error"]["details"], detalhe?: string) {
     super(code);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.detalhe = detalhe;
   }
 }
 
-async function chamar<T>(path: string, init: RequestInit): Promise<T> {
+export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((path.startsWith("/auth/") ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
@@ -54,7 +59,9 @@ async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   if (!r.ok && erro && typeof erro.code === "string") {
     throw new ErroApi(r.status, erro.code, erro.details);
   }
-  throw new ErroApi(r.status, `http_${r.status}`);
+  const d = (body as { detail?: unknown } | undefined)?.detail;
+  const sessao = r.status === 401 && !!r.headers.get("WWW-Authenticate");
+  throw new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined);
 }
 
 type Query<P> = P extends keyof QueryGet ? QueryGet[P] : never;
@@ -64,9 +71,9 @@ export function apiGet<P extends keyof RotasGet>(path: P, signal?: AbortSignal, 
 }
 
 // Escrita: o x-csrf-token sai do cookie `csrf_token` pelo helper do auth-refresh.js.
-function escrever<T>(method: "POST" | "PUT", path: string, corpo: unknown) {
+export function escrever<T>(method: "POST" | "PUT" | "PATCH", path: string, corpo: unknown, signal?: AbortSignal) {
   const json = { Accept: "application/json", "Content-Type": "application/json" };
-  return chamar<T>(path, { method, body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json });
+  return chamar<T>(path, { method, body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
 }
 export const apiPost = <P extends keyof RotasPost>(path: P, corpo: RotasPost[P]["corpo"]) =>
   escrever<RotasPost[P]["resposta"]>("POST", path, corpo);
@@ -98,7 +105,7 @@ export const assinaturasQuery = {
 // Nome e e-mail da conta (`GET /auth/dashboard-profile`, fora da /api/v2): só em memória, nunca em localStorage.
 export const contaQuery = {
   queryKey: ["conta"],
-  queryFn: ({ signal }: { signal: AbortSignal }) => chamar<{ display_name: string | null; email: string | null }>("/auth/dashboard-profile", { headers: { Accept: "application/json" }, signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => chamar<{ display_name: string | null; email: string | null; user_id: number; whatsapp_linked: boolean }>("/auth/dashboard-profile", { headers: { Accept: "application/json" }, signal }),
   staleTime: 0,
   refetchOnWindowFocus: false,
   networkMode: "always" as const,
@@ -175,7 +182,7 @@ export const categoriasQuery = {
 // abandonada tem o fetch abortado.
 // Reconsulta quando a resposta deixa de valer (`valido_ate`), medido no relógio do servidor.
 // ponytail: piso de 60 s contra laço; o teto é o do setTimeout (2³¹−1 ms).
-const instante = (s: string) => Date.parse(s.replace(/(\.\d{3})\d+/, "$1")); // 6 casas: NaN no Safari 14
+export const instante = (s: unknown) => typeof s === "string" ? Date.parse(s.replace(/(\.\d{3})\d+/, "$1")) : NaN; // 6 casas: NaN no Safari 14
 export const previsaoQuery = (dias: 30 | 60 | 90 | null) => queryOptions({
   queryKey: ["previsao", dias],
   queryFn: ({ signal }) => apiGet("/previsao", signal, dias ? { dias: String(dias) as "30" | "60" | "90" } : undefined),

@@ -15,7 +15,7 @@ export const ROUTES = [
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },
-  // A seção "Conta" da barra lateral (fora do RAIL): páginas-ponte para as telas antigas (conta/).
+  // A seção "Conta" da barra lateral (fora do RAIL): o Perfil já é página de verdade (conta/Perfil.tsx); Cobrança e Configurações seguem páginas-ponte para as telas antigas (conta/).
   { path: "/conta/perfil", label: "Perfil", short: "Perfil", icon: "ph-user", title: "Perfil" },
   { path: "/conta/cobranca", label: "Cobrança", short: "Cobrança", icon: "ph-credit-card", title: "Cobrança" },
   { path: "/conta/configuracoes", label: "Configurações", short: "Configurações", icon: "ph-gear", title: "Configurações" },
