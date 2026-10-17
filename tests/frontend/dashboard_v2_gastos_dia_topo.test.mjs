@@ -2,6 +2,7 @@
  * /painel /gastos, o topo do card "Seu dia" (docs/plano-etapa5-gastos.md §4.4, parts/GastosDiaTopo.tsx):
  *
  *   · lib/gastos-dia.ts: `mediaDoPeriodo`, `diaAbrivel`, `vizinho`, `contraMedia` (unidade) e o calendário lendo a MESMA regra;
+ *   · a tabela dourada `tests/fixtures/gastos_dia_casos.json` (a que o app confere) é a saída atual dessa lib;
  *   · pílula contra a média: cada estado (abaixo, na média, acima neutro, acima âmbar, as bordas −5 e +15) e a AUSÊNCIA no
  *     dia em curso, no agendado, no dia sem gasto e sem média;
  *   · fatos e barra por categoria: fatia ≤ 0 descartada, a barra some com uma fatia e com categoria escolhida;
@@ -13,7 +14,9 @@
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
+import { tabela } from "../../scripts/gerar_gastos_dia_casos.mjs";
 import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 import { contraMedia, diaAbrivel, mediaDoPeriodo, vizinho } from "../../webapp/src/dashboard/lib/gastos-dia.ts";
 
@@ -96,6 +99,11 @@ test("lib contraMedia: pct inteiro, tom nas bordas (−5 verde, +15 âmbar), 0 �
     [[0, ""], [-5, "gain"], [-4, ""], [14, ""], [15, "warn"], [-60, "gain"], [80, "warn"]]);
   assert.equal(Object.is(c(99.6).pct, 0), true); // −0,4% arredonda a 0 e não vira −0
   assert.deepEqual([c(10, null), c(10, 0), c(10, -3), c(NaN)], [null, null, null, null]);
+});
+
+test("lib: a tabela dourada commitada (tests/fixtures/gastos_dia_casos.json, lida pelo jest do app) é a saída ATUAL do web; mudou o web, `node scripts/gerar_gastos_dia_casos.mjs`", () => {
+  const commitada = JSON.parse(readFileSync(new URL("../fixtures/gastos_dia_casos.json", import.meta.url), "utf8"));
+  assert.deepEqual(commitada, JSON.parse(JSON.stringify(tabela())));
 });
 
 // --- pílula --------------------------------------------------------------------------------------------------

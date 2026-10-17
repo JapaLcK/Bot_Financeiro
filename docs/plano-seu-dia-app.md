@@ -187,7 +187,7 @@ sem comparação com média ≤ 0 ou nula. **[rev]** O "total ilegível" do web 
 ### 4.3 O resto
 - **Fatia ≤ 0 é descartada** antes da barra (estorno ou zero inseridos direto no banco podem vir do servidor); a barra só desenha com ≥ 2 fatias > 0.
   `BarraComposicao` já exige `valor > 0`; o filtro fica no chamador.
-- **Positividade e proporção da barra usam o decimal bruto, não os centavos (achado do Codex no #1050).** O schema guarda o texto de `categorias[].valor` (e de `maiores[].valor`) como guarda o de `total`;
+- **Positividade e proporção da barra usam o decimal bruto, não os centavos (achado do Codex no #1050).** O schema guarda o texto de `categorias[].valor` como guarda o de `total` (o de `maiores[].valor` não: §4.1);
   o filtro "> 0" e o `valor` de cada `Segmento` saem de `Number(raw)`, como o `flex-grow` do web. Com `"0.004"` e `"0.006"` a barra é 40/60 (em centavos seria 0 e 1, a 1ª fatia sumiria e a barra
   também). Centavos só no que se **exibe** (o `accessibilityLabel`, as maiores compras). Regra geral: **toda decisão** (positivo, zero, ≤ 0, tom da pílula, "dia sem gasto") usa o bruto, como o web;
   centavos só para mostrar. Teste: categorias sub-centavo `"0.004"` + `"0.006"` desenham 2 segmentos 40/60; `"0.004"` sozinha não desenha barra.
@@ -199,12 +199,11 @@ sem comparação com média ≤ 0 ou nula. **[rev]** O "total ilegível" do web 
 
 ## 5. Interação com o resto do app
 - `Calendario` (provider): toque no dia → **regra síncrona da §3.3** (mês exibido e depois do corte; o dia tocado já tem lançamento): abre a folha; senão, o `navegar` ao extrato de hoje. O botão da folha vai ao mesmo destino.
-- **Toda navegação para `/extrato` com `dia` ou `categoria` passa por um só helper (`irAoExtrato`) que acrescenta `entrada` (contador crescente, `Date.now()`) a `params` [rev].** São as três: o toque do dia que
+- **Toda navegação para `/extrato` com `dia` ou `categoria` passa por um só helper (`irAoExtrato`) que acrescenta `entrada` (contador crescente; o PR 2a usou um contador de módulo, não `Date.now()`, porque dois toques no mesmo milissegundo colidiriam; `useLocalSearchParams` devolve a `entrada` como string e a comparação entre toques funciona) a `params` [rev].** São as três: o toque do dia que
   navega (`gastos.tsx:35`), o botão da folha e a linha de `Categorias` (`gastos.tsx:23`, `/extrato?categoria`). O `Extrato` guarda `q`, `busca`, `origem` e `tipo` em `useState` local (`extrato.tsx:40`) e as abas do `expo-router`
   ficam montadas (**provável**: o layout de `(painel)` não define `unmountOnBlur` nem `lazy`, mas é leitura de config, **não verificado** em execução), então "Entradas" escolhido antes combinaria com o dia e a tela diria "vazio".
   O `Extrato` zera os quatro filtros **quando `params.entrada` muda** (e não quando `params.dia` muda: reentrar no mesmo dia D mantém o mesmo `params.dia` e um efeito preso a ele não rodaria, achado do Codex na 2ª rodada).
-  O mecanismo está **fechado: `entrada`**; o `useFocusEffect` fica descartado. Risco vizinho, **não verificado**: depois de entrar por um dia, tocar na aba Extrato provavelmente mantém o `dia` (as abas preservam parâmetros) e
-  `extrato.tsx:48` só mostra o rótulo, sem como limpar; a folha aumenta a frequência disso, então o PR 2a mede no simulador e decide se o rótulo ganha um "limpar".
+  O mecanismo está **fechado: `entrada`**; o `useFocusEffect` fica descartado. Risco vizinho, **medido no jest no PR 2a** (não no simulador): depois de entrar por um dia, tocar na aba Extrato (`tabBarAccessibilityLabel`) mantém o `dia` e o rótulo, e a tela não tem como limpá-lo; `router.navigate("/extrato")` sem params limpa, e entrar por `categoria` troca os params (sem vazamento do `dia`). Não é regressão (a `main` fazia igual); a folha aumenta a frequência disso, então a decisão de dar ou não um "limpar" ao rótulo **fica para o PR 2b**, com o simulador na mão.
   Teste: escolher "Entradas", voltar a Gastos, abrir um dia com saídas pelo botão, pela linha sem folha e por `Categorias`: o extrato mostra o esperado; **repetir com o mesmo dia D de novo** (D → "Entradas" → Gastos → D).
 - **Fechar toda folha antes de abrir o Extrato (achado do Codex no #1050).** `/extrato` é navegação entre abas irmãs: a tela de origem segue montada e o `Modal` do RN pode ficar por cima do destino. O `navegar` do painel só roda
   o `aoSair` do `TelaPainel` (`setFolha(null)`, `cabecalho.tsx:28`), que fecha as folhas do cabeçalho; ele não limpa o `detalhe` do `TelaResumo` (`telas.tsx:10`) **nem o dia aberto no `Calendario`**. O defeito já existe hoje para todo
@@ -238,6 +237,7 @@ sem comparação com média ≤ 0 ou nula. **[rev]** O "total ilegível" do web 
   fatia ≤ 0 fora da barra; `"91.010"` × `"1.005"` sem erro; `fontScale` ampliado; `accessibilityLabel` com data, total e sentido;
 - (PR 2b) fechamento: depois de "Ver extrato do dia" (aba Gastos, Resumo em linha e Resumo na folha) nenhuma folha fica visível e o Extrato está montado; controle negativo: sem `&& focado` na `Folha` o `Modal` do Resumo continua visível;
 - (PR 2a) filtros: "Entradas" escolhido antes, voltar a Gastos e abrir um dia com saídas mostra as saídas do dia, inclusive reentrando no mesmo dia (hoje combinaria com o filtro e ficaria vazio);
+- (PR 3) pílula: aparece só com `dia < hoje` **e** `Number(bruto) > 0` (a regra de `GastosDiaTopo.tsx:28`, que mora no componente do web e não na lib: a tabela dourada dá `pct`/`tom` também para hoje, dia agendado e total `"0.000"`, onde o web não mostra pílula). O PR 3 traduz os tons do web (`gain`/`warn`/`""`, `gastosDia.ts`) para `positive`/`warning`/`inkMuted` e testa essa regra, com controle negativo (hoje e dia agendado sem pílula).
 - (PR 3) barra: categorias `"0.004"` + `"0.006"` dão 2 segmentos 40/60 e `"0.004"` sozinha não desenha barra;
 - (PR 2a) `Extrato` com `dia`: mês com > 50 lançamentos e o dia fora da 1ª página mostra as compras do dia (hoje mostra vazio); a consulta leva `mes` e `dia` juntos;
 - (PR 2b) o negativo do conserto de grade: com a regra síncrona desligada, a linha fora da grade abre a folha com R$ 0,00 → o teste fica **vermelho**; e o dia só com entrada, dentro do intervalo, abre com R$ 0,00;
@@ -300,6 +300,6 @@ O dono escolheu a opção (a) (§9), então a folha (2b) e o contexto (3) ficam 
 3. Número do próximo build e se alguém mexeu no app depois da 30: só o dono vê no App Store Connect.
 
 **[rev] Decisões de desenho que o plano tomou pela opção recomendada pelo Arquiteto e o dono ainda confirma** (cada uma antes do PR indicado):
-- **A.** Cor da categoria na barra: `CORES_CATEGORIA` por posição, não a `cor` do servidor (§2.1). PR 1 (schema).
+- **A.** Cor da categoria na barra: `CORES_CATEGORIA` por posição, não a `cor` do servidor (§2.1). PR 1 (schema). **Confirmada pelo dono em 2026-10-17** ("pode abrir" o PR 1, depois da pergunta sobre A, B e C); o PR 1 a implementa. Voltar atrás é barato: o schema passa a ler `cor`.
 - **B.** Setas ‹ › no corpo da folha, com a data como título da `Folha`, em vez de uma prop nova na `Folha` (§3.1). PR 2b.
 - **C.** `visible={aberta && focado}` na `Folha` em vez do registro de fechadores; custo: a folha reaparece ao voltar à aba (§5). PR 2b.

@@ -33,3 +33,20 @@ it("nomeCategoria usa a grafia do catálogo, cai na chave capitalizada e nomeia 
  expect(nomeCategoria("transferencias", catalogo)).toBe("Transferências"); expect(nomeCategoria("compras", catalogo)).toBe("Compras"); expect(nomeCategoria("compras")).toBe("Compras");
  expect(nomeCategoria("lazer", [{ chave: "lazer", nome: "" }])).toBe("Lazer");
 });
+describe("receitas_do_banco na Previsão (PR 2b)", () => {
+ const prev = fixture["/api/app/previsao"], item = { chave: "extrato#a", nome: "Salário", valor: "5000.00", dia: 5, status: "pendente" };
+ it("item válido chega com o valor em centavos", () => expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: [item] }).receitas_do_banco).toEqual([{ ...item, valor: 500000 }]));
+ it.each([["campo ausente (servidor velho)", prev], ["status novo", { ...prev, receitas_do_banco: [{ ...item, status: "x" }] }], ["valor inválido", { ...prev, receitas_do_banco: [{ ...item, valor: "abc" }] }]])("%s: lista vazia e o resto da Previsão parseia", (_, bruto) => {
+  const r = S.previsaoSchema.safeParse(bruto); expect(r.success).toBe(true); expect(r.success && r.data.receitas_do_banco).toEqual([]); expect(r.success && r.data.dias).toBe(prev.dias);
+ });
+ it("tolerância por item: o inválido sai e os válidos ficam, em qualquer posição; campo que não é array dá []", () => {
+  const ok = { ...item, chave: "extrato#ok" }, ruim = { ...item, chave: "extrato#ruim", status: "expirada" };
+  for (const lista of [[ok, ruim], [ruim, ok], [ruim, { ...ok, valor: "abc" }, ok], [ok, null, "x", 3]]) expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: lista }).receitas_do_banco).toEqual([{ ...ok, valor: 500000 }]);
+  for (const bruto of ["x", null, {}, 3]) expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: bruto }).receitas_do_banco).toEqual([]);
+ });
+ it("bloco hero do chat com a lista (ou com item malformado) continua válido", () => {
+  for (const lista of [[item], [{ ...item, status: "x" }]]) {
+   const e = S.lerEvento({ tipo: "bloco", bloco: { card: "hero", abas: [{ mes: null, recursos: { previsao: { ...prev, receitas_do_banco: lista } } }] } }); expect(e?.tipo).toBe("bloco");
+  }
+ });
+});

@@ -15,9 +15,10 @@ import { usePainel } from "./provider";
 import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
 import { Acao, Folha, MOTIVOS_BANCO, RecursoDados, temMotivoBanco } from "./base";
 import { PERFIS, TITULOS, nomeMes, mesesDoHistorico, dataPtBr, mesAtual, type Widget } from "./catalogo";
-export function BotaoPrivacidade() {
+export const nomeDe = (u: { display_name?: string | null; email?: string | null }) => u.display_name?.trim() || u.email?.split("@")[0] || "Você";
+export function BotaoPrivacidade({ tamanho }: { tamanho?: 20 | 24 }) {
  const p = usePainel();
- return <Pressable testID="painel-privacidade" accessibilityRole="button" accessibilityLabel={p.oculto ? "Mostrar valores" : "Ocultar valores"} onPress={p.alternarPrivacidade} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome={p.oculto ? "EyeSlash" : "Eye"} /></Pressable>;
+ return <Pressable testID="painel-privacidade" accessibilityRole="button" accessibilityLabel={p.oculto ? "Mostrar valores" : "Ocultar valores"} onPress={p.alternarPrivacidade} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome={p.oculto ? "EyeSlash" : "Eye"} tamanho={tamanho} /></Pressable>;
 }
 export function TelaPainel({ titulo, children }: { titulo: string; children: ReactNode }) {
  const { ampliado } = useTipografiaPainel();
@@ -26,7 +27,7 @@ export function TelaPainel({ titulo, children }: { titulo: string; children: Rea
  const [erroSaida, setErroSaida] = useState<string | null>(null); const [saindo, setSaindo] = useState(false);
  const [quantidadeMeses, setQuantidadeMeses] = useState(12);
  const { navegar, entrando, aviso: avisoNavegacao, emVoo: entradaEmVoo } = useNavegarPainel(() => setFolha(null));
- const nome = p.usuario.display_name?.trim() || p.usuario.email?.split("@")[0] || "Você";
+ const nome = nomeDe(p.usuario);
  const label = PERFIS.find((x) => x.id === p.perfil)!.label;
  // O sinal vem de QUALQUER recurso carregado (contas pode ter falhado ou não ter a conexão); os nomes, de quem os traz.
  const { contas, rendimento } = p.dados, comBanco = (x: { motivos: string[] }) => x.motivos.some((m) => MOTIVOS_BANCO.has(m));
