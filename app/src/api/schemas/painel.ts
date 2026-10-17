@@ -42,6 +42,16 @@ export const metasV2Schema = z.object({
   custo_mensal: z.object({ valor: dinheiro.nullable(), recorrencias: z.number().int(), motivos }),
 });
 export type MetasV2 = z.output<typeof metasV2Schema>;
+/** Dinheiro em que o app também DECIDE (média, % do dia, fatia da barra): centavos para exibir e o texto decimal bruto para decidir, como o web (`Number(raw)`); arredondar antes muda o resultado (`gastosDia.ts`). */
+const dinheiroBruto = z.string().transform((v, ctx) => { try { return { centavos: decimalParaCentavos(v), bruto: v }; } catch { ctx.addIssue({ code: "custom", message: "Dinheiro inválido" }); return z.NEVER; } });
+/** `GET /api/app/gastos?mes=` (`api/v2/gastos.py`), SÓ o que a folha do dia lê (campo a mais é ignorado; a cor da categoria vem de `CORES_CATEGORIA` por posição). Campos lidos versionados em `tests/fixtures/app_gastos_campos_lidos.json` e fixture em `tests/fixtures/app_gastos.json`, ambas conferidas contra o Pydantic por `tests/test_api_v2_gastos.py`. */
+export const gastosSchema = z.object({
+  hoje: z.string(), disponivel: z.boolean(), historico_desde: texto,
+  dias: z.array(z.object({ dia: z.string(), total: dinheiroBruto, quantidade: z.number().int(), maiores: z.array(z.object({ descricao: z.string(), valor: dinheiro, categoria: z.string() })), categorias: z.array(z.object({ chave: z.string(), valor: dinheiroBruto })) })),
+  categorias: z.array(z.object({ chave: z.string(), nome: z.string(), emoji: z.string() })),
+  motivos,
+});
+export type Gastos = z.output<typeof gastosSchema>;
 /** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; o `metas` do chat vem no formato v2 (`metasV2Schema`, desenhado por `MetasChat`). Só o BLOCO troca: `schemasRecurso.metas` (provider, `TelaMetas`) segue legado, então não reaproveite `schemas[recurso]` para o card. */
 const schemasBloco = { ...schemasRecurso, metas: metasV2Schema, periodo: periodoSchema, caixinhas: metasSchema };
 export type RecursosBloco = { [K in keyof typeof schemasBloco]?: z.output<(typeof schemasBloco)[K]> };
