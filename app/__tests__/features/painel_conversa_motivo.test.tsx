@@ -47,7 +47,7 @@ it("trocar de pílula manda o motivo novo e marca só ela", async () => {
 it("Outro grava na hora e põe a caixa principal em modo comentário (sem campo novo); ↑ manda o texto aparado como feedback, não à IA", async () => {
   await comDownvote(); await digitar("rascunho do chat"); const antes = posts().length; await apertar("Outro");
   expect(corpos()[1]).toEqual({ nota: -1, motivo: "outro" }); expect(marcada("Outro")).toBe(true);
-  const c = comentario()!; expect(c.props.maxLength).toBe(500); expect(c.props.placeholder).toBe("Conte o que houve (opcional)");
+  const c = comentario()!; expect(c.props.maxLength).toBe(1000); // teto nativo em unidades UTF-16; o corte por code point é do `mudar` expect(c.props.placeholder).toBe("Conte o que houve (opcional)");
   expect(c.props.value).toBe(""); expect(screen.queryByLabelText("Mensagem para o Piggy")).toBeNull(); expect(screen.UNSAFE_getAllByType(TextInput)).toHaveLength(1); // a mesma caixa, não uma segunda
   expect(screen.getByRole("button", { name: "Enviar comentário" })).toBeDisabled(); // vazio: nada a enviar
   await escrever("   "); expect(screen.getByRole("button", { name: "Enviar comentário" })).toBeDisabled();
@@ -55,6 +55,13 @@ it("Outro grava na hora e põe a caixa principal em modo comentário (sem campo 
   expect(corpos()[2]).toEqual({ nota: -1, motivo: "outro", texto: "o saldo está errado" }); expect(posts()).toHaveLength(antes);
   await waitFor(() => expect(screen.getByText("Obrigado pelo retorno")).toBeTruthy()); expect(comentario()).toBeNull(); expect(marcada("Outro")).toBe(true);
   expect(caixa().props.value).toBe("rascunho do chat"); // o rascunho do chat voltou intacto
+});
+it("o teto do comentário conta code points como o servidor: 500 🐷 cabem e são enviados; o 501º é cortado sem quebrar o par substituto", async () => {
+  await comDownvote(); await apertar("Outro");
+  await escrever("🐷".repeat(500)); expect(Array.from(comentario()!.props.value)).toHaveLength(500); await apertar("Enviar comentário");
+  const a = corpos()[2].texto as string; expect(Array.from(a)).toHaveLength(500); expect(a).toBe("🐷".repeat(500));
+  await apertar("Outro"); await apertar("Outro"); await escrever("🐷".repeat(501)); await apertar("Enviar comentário");
+  const b = corpos().at(-1).texto as string; expect(Array.from(b)).toHaveLength(500); expect(b).toBe("🐷".repeat(500)); expect(b.endsWith("\uD83D")).toBe(false);
 });
 it("tocar de novo em Outro desmarca: manda {nota:-1}, sai do modo e o texto do comentário não vira rascunho do chat", async () => {
   await comDownvote(); await apertar("Outro"); await escrever("comentário");

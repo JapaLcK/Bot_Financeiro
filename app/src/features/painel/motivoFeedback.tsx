@@ -35,5 +35,6 @@ export function useComentario() {
     if (!ok) return; // descartada (toque duplo): o POST em voo decide
     c.comentar(null); Keyboard.dismiss(); /* o teclado cobriria o toast */ toast.mostrar({ mensagem: "Obrigado pelo retorno", tom: "sucesso" });
   };
-  return { ativo, texto, pode: ativo && !!texto.trim() && !c.avaliando, mudar: (x: string) => ult && c.comentar({ turno: ult.id, texto: x }), enviar };
+  // `mudar` corta por code point (o servidor conta assim; um 🐷 = 2 unidades UTF-16): o `maxLength` nativo da caixa é só um teto largo.
+  return { ativo, texto, pode: ativo && !!texto.trim() && !c.avaliando, mudar: (x: string) => ult && c.comentar({ turno: ult.id, texto: Array.from(x).slice(0, TEXTO_MAX).join("") }), enviar };
 }
