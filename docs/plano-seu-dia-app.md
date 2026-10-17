@@ -85,7 +85,7 @@ no build novo. O risco inverso (o servidor mudar um campo que o build novo lê) 
 ```
 O toque que hoje navega para o extrato passa a abrir a `Folha` (já existente) com o dia. O extrato continua a um toque, dentro da folha.
 **[rev]** A `Folha` (`base.tsx:98`) só aceita `titulo: string` e o ✕: o título é a **data curta** (muda ao trocar de dia) e as setas ‹ › ficam **no corpo**, uma de cada lado do total,
-sem mexer num componente compartilhado por 5 usos. **[decisão pendente do dono]** (a alternativa é uma prop opcional na `Folha` para pôr as setas na linha do título).
+sem mexer num componente compartilhado por 5 usos. **Confirmada pelo dono em 2026-10-17** (a alternativa, descartada, era uma prop opcional na `Folha` para pôr as setas na linha do título). *Desvio declarado no PR 2b:* a `Folha` ganhou, por causa da decisão C, a prop opcional `rotulo` (accessibilityLabel do título, para o VoiceOver ler a data longa), e o ‹ usa o ícone `CaretLeft` (no subset) em vez do `CaretRight` girado.
 Prós: reaproveita a `Folha` (decisão do dono), o toque no dia **já existe** (troca só o destino), sem rota nova, sem mexer em
 `native-intent`/portão, o dia fica no contexto da lista de dias. Contras: um modal sobre a aba; dentro do Resumo o `Calendario` já mora
 numa `Folha` (§8, risco 2).
@@ -203,13 +203,13 @@ sem comparação com média ≤ 0 ou nula. **[rev]** O "total ilegível" do web 
   navega (`gastos.tsx:35`), o botão da folha e a linha de `Categorias` (`gastos.tsx:23`, `/extrato?categoria`). O `Extrato` guarda `q`, `busca`, `origem` e `tipo` em `useState` local (`extrato.tsx:40`) e as abas do `expo-router`
   ficam montadas (**provável**: o layout de `(painel)` não define `unmountOnBlur` nem `lazy`, mas é leitura de config, **não verificado** em execução), então "Entradas" escolhido antes combinaria com o dia e a tela diria "vazio".
   O `Extrato` zera os quatro filtros **quando `params.entrada` muda** (e não quando `params.dia` muda: reentrar no mesmo dia D mantém o mesmo `params.dia` e um efeito preso a ele não rodaria, achado do Codex na 2ª rodada).
-  O mecanismo está **fechado: `entrada`**; o `useFocusEffect` fica descartado. Risco vizinho, **medido no jest no PR 2a** (não no simulador): depois de entrar por um dia, tocar na aba Extrato (`tabBarAccessibilityLabel`) mantém o `dia` e o rótulo, e a tela não tem como limpá-lo; `router.navigate("/extrato")` sem params limpa, e entrar por `categoria` troca os params (sem vazamento do `dia`). Não é regressão (a `main` fazia igual); a folha aumenta a frequência disso, então a decisão de dar ou não um "limpar" ao rótulo **fica para o PR 2b**, com o simulador na mão.
+  O mecanismo está **fechado: `entrada`**; o `useFocusEffect` fica descartado. Risco vizinho, **medido no jest no PR 2a** (não no simulador): depois de entrar por um dia, tocar na aba Extrato (`tabBarAccessibilityLabel`) mantém o `dia` e o rótulo, e a tela não tem como limpá-lo; `router.navigate("/extrato")` sem params limpa, e entrar por `categoria` troca os params (sem vazamento do `dia`). Não é regressão (a `main` fazia igual); a folha aumenta a frequência disso, então a decisão de dar ou não um "limpar" ao rótulo ficou para o 2b, com o simulador na mão. **O 2b não a tomou** (sem simulador na sessão): segue aberta, para o dono decidir depois de ver no aparelho.
   Teste: escolher "Entradas", voltar a Gastos, abrir um dia com saídas pelo botão, pela linha sem folha e por `Categorias`: o extrato mostra o esperado; **repetir com o mesmo dia D de novo** (D → "Entradas" → Gastos → D).
 - **Fechar toda folha antes de abrir o Extrato (achado do Codex no #1050).** `/extrato` é navegação entre abas irmãs: a tela de origem segue montada e o `Modal` do RN pode ficar por cima do destino. O `navegar` do painel só roda
   o `aoSair` do `TelaPainel` (`setFolha(null)`, `cabecalho.tsx:28`), que fecha as folhas do cabeçalho; ele não limpa o `detalhe` do `TelaResumo` (`telas.tsx:10`) **nem o dia aberto no `Calendario`**. O defeito já existe hoje para todo
   `navegar` de dentro da folha de detalhe (`Categorias`, `Contas` → `/conexoes`, `Calendario`). **[rev] São três origens, não duas:** aba Gastos, Resumo em linha (o `Bloco` renderiza `WidgetConteudo` no card e na folha, `calendario` está em
   `PADRAO`, `catalogo.ts:4`) e Resumo na folha.
-  **[rev][decisão pendente do dono]** Recomendado pelo Arquiteto: **uma linha na `Folha`**, `visible={aberta && focado}` com `useIsFocused` (já usado em `conversaFalas.tsx`): fecha a classe inteira (todas as folhas passam por `Folha`,
+  **[rev] Confirmada pelo dono em 2026-10-17.** Recomendado pelo Arquiteto: **uma linha na `Folha`**, `visible={aberta && focado}` com `useIsFocused` (já usado em `conversaFalas.tsx`): fecha a classe inteira (todas as folhas passam por `Folha`,
   `base.tsx:98`) sem API nova em `navegacao.ts`. O **registro de "fechadores"** que a versão anterior propunha é camada nova e fica **descartado**, salvo se o dono não aceitar o custo: o estado continua "aberta", então ao voltar à aba a folha
   **reaparece** (comportamento visível). Teste, nas três origens: depois do toque nenhuma folha fica visível e o Extrato está montado com o `dia` pedido; **controle negativo**: sem `&& focado` o `Modal` do Resumo continua visível.
 - **`Extrato` com `dia` na consulta (achado do Codex no #1050; já é um defeito de hoje).** `extrato.tsx:42-47` pede só `mes` e `limite=50` e filtra `params.dia` **no aparelho**
@@ -299,7 +299,7 @@ O dono escolheu a opção (a) (§9), então a folha (2b) e o contexto (3) ficam 
    numa mini-barra do dia (forma no lugar de frase); não entra sem pedido.
 3. Número do próximo build e se alguém mexeu no app depois da 30: só o dono vê no App Store Connect.
 
-**[rev] Decisões de desenho que o plano tomou pela opção recomendada pelo Arquiteto e o dono ainda confirma** (cada uma antes do PR indicado):
+**[rev] Decisões de desenho que o plano tomou pela opção recomendada pelo Arquiteto** (A, B e C já confirmadas pelo dono):
 - **A.** Cor da categoria na barra: `CORES_CATEGORIA` por posição, não a `cor` do servidor (§2.1). PR 1 (schema). **Confirmada pelo dono em 2026-10-17** ("pode abrir" o PR 1, depois da pergunta sobre A, B e C); o PR 1 a implementa. Voltar atrás é barato: o schema passa a ler `cor`.
-- **B.** Setas ‹ › no corpo da folha, com a data como título da `Folha`, em vez de uma prop nova na `Folha` (§3.1). PR 2b.
-- **C.** `visible={aberta && focado}` na `Folha` em vez do registro de fechadores; custo: a folha reaparece ao voltar à aba (§5). PR 2b.
+- **B.** Setas ‹ › no corpo da folha, com a data como título da `Folha`, em vez de uma prop nova na `Folha` (§3.1). PR 2b. **Confirmada pelo dono em 2026-10-17.**
+- **C.** `visible={aberta && focado}` na `Folha` em vez do registro de fechadores; custo: a folha reaparece ao voltar à aba (§5). PR 2b. **Confirmada pelo dono em 2026-10-17.**

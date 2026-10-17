@@ -10,6 +10,7 @@ import type { Paleta } from "@/ui/tokens";
  */
 export type NomeIcone =
   | "CaretRight"
+  | "CaretLeft"
   | "Wallet"
   | "Bell"
   | "CheckCircle"
@@ -107,6 +108,7 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   Bank: resolver(require("phosphor-react-native/src/icons/Bank"), "BankIcon"),
   ClockCounterClockwise: resolver(require("phosphor-react-native/src/icons/ClockCounterClockwise"), "ClockCounterClockwiseIcon"),
 
+  CaretLeft: resolver(require("phosphor-react-native/src/icons/CaretLeft"), "CaretLeftIcon"),
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
   Wallet: resolver(require("phosphor-react-native/src/icons/Wallet"), "WalletIcon"),
   Bell: resolver(require("phosphor-react-native/src/icons/Bell"), "BellIcon"),
