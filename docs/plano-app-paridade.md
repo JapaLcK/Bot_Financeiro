@@ -115,13 +115,18 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 |---|---|---|---|---|---|
 | 32 | Conectar e reconectar banco (Open Finance) | Fora do shell v2: `/settings?view=open-finance` (`frontend/settings.html`) | `conectar-banco`, `conexoes`, `open-finance-volta` (OAuth no navegador, ADR 0005) | Superfícies diferentes pela plataforma. Limites e reconexão de cada lado `?` | paridade (a conferir os limites) |
 | 33 | MFA e segurança | `settings.html` | `seguranca`, `mfa-ativar`, `mfa-desativar`, `mfa-novos-codigos` | — | paridade |
-| 34 | Definir senha | `settings.html` ("Definir senha", #976) | Só `esqueci-senha` (`EsqueciSenha.tsx`) | Conta social sem senha: no app não há "criar senha" (`?`) | app atrás (**A9**, a confirmar) |
+| 34 | Definir senha (conta Google/Apple sem senha) | `settings.html` ("Definir senha", #976) | Segurança do app (`seguranca.tsx`): `EsqueciSenha` em modo `emailFixo`, rotulado "Definir senha", pede o link de reset | Mesmo efeito por caminhos próprios | paridade |
 | 35 | **Excluir conta** e **exportar meus dados** | `settings.html` | Não há | Destrutivo e LGPD. **Provável exigência da App Store** para app com cadastro (diretriz 5.1.1(v), a confirmar antes da submissão; hoje só TestFlight) | **app atrás (A9)** |
 | 36 | Plano e cobrança | Stripe/Asaas no site | Compras Apple são "entrega separada" (`app/README.md`) | Regra da loja | plataforma |
 | 37 | Trava biométrica, tampa de privacidade | n/a | `features/bloqueio`, `expo-local-authentication` | Só existe em aparelho | plataforma |
 | 38 | Tempo real | SSE `GET /eventos` (`lib/eventos.ts`) | Foco e foreground; `com_eventos=False` no namespace do app (`api/nativo/app.py`) | Deliberado e documentado (`docs/api-app-painel.md`) | plataforma |
 | 39 | Push | Não há | **Não há**: `expo-notifications` não está no `app/package.json` | O orquestrador listou "push" como algo que o app tem; não tem | nenhum dos dois |
 | 40 | Categorias: criar, renomear, emoji, cor, arquivar, apagar, fundir | Só no painel antigo; o v2 só lê (`GET /categorias`) | Só lê (`/api/app/categorias`) | Plano §6 "Depois": o web faz primeiro | **ambos atrás** |
+| 41 | Sessões ativas: listar e encerrar; atividade recente | `settings.html` (`GET /settings/{user_id}/sessions`, `DELETE .../sessions/{jti}` e `.../sessions`) | Não há: `seguranca.tsx` diz que sessões "entram como seção irmã" | Segurança de conta; as rotas legadas de `/settings` levam `user_id` no caminho e **aceitar Bearer do app não foi verificado** | **app atrás (A12)** |
+| 42 | Preferências de notificação (relatórios, avisos) | `GET/PATCH /settings/{user_id}/notifications` | Não há | Hoje o app não tem push (linha 39); a preferência existe para WhatsApp e e-mail | **app atrás (A12)** |
+| 43 | E-mail de contato (trocar) | `PATCH /settings/{user_id}/security/contact` | Não há | Troca de e-mail alcança o Stripe (`stripe_email_pendente`); é auth | **app atrás (A12)** |
+| 44 | **Recomeçar do zero** (apagar os dados financeiros e recomeçar) | `settings.html`, `POST /settings/reset` (#217) | Não há | Destrutivo; já emite o aviso SSE para o web; a confirmação do app tem de ser nativa | **app atrás (A12)** |
+| 45 | Funções que só existem no painel antigo (`/app`): orçamentos por categoria, contas a pagar recorrentes, investimentos e caixinhas manuais, cartões (CRUD), agentes, afiliados | `/app` (`dashboard.js`), rotas `/budgets`, `/recurring-bills`, `/investments`, `/pockets`, `/cards`, `/agents`; no v2 a página Ferramentas mostra algumas como "Em breve" (`pages.tsx` `TOOLS`) | Não levantado: o app só lê cartões, parcelas e caixinhas (pelo legado) | Fora do escopo `/painel` × app deste levantamento; cada uma vira linha quando entrar no v2 (plano §6, "as demais telas") | **ambos atrás do v2; a levantar** |
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
@@ -147,7 +152,8 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A6 | Previsão: premissas, cobertura e grupos de compromissos | 0 | telas só de leitura sobre campos que já chegam | Leve | P | A5 (mesma tela) |
 | A7 | `guardado=1` no Extrato, com o rótulo "Guardado" | 0 | mandar o parâmetro, rótulo e sinal conforme #983 | Leve | P | Um build novo (apps antigos continuam sem) |
 | A8 | Comparação de períodos | 0 (#1033 monta `/api/app/comparacao`) | card de comparação, Plus+ | Leve | P | Esperar o #1033 mergear |
-| A9 | Excluir conta, exportar dados, definir senha | **a verificar**: se as rotas do site aceitam Bearer; senão acrescentar | telas nativas | **Completo** (auth, sessão, destrutivo) | G | Decisão do dono sobre a data de submissão à App Store (§10, P4) |
+| A9 | Excluir conta e exportar dados | **a verificar**: se `DELETE /auth/account` e `account/export` aceitam Bearer; senão acrescentar | telas nativas | **Completo** (auth, sessão, destrutivo) | G | Sem data de submissão (§10, P4) |
+| A12 | Sessões ativas e atividade recente, preferências de notificação, trocar e-mail de contato, recomeçar do zero (linhas 41 a 44) | **a verificar**: as rotas `/settings/{user_id}/...` aceitam Bearer? Se não, acrescentar equivalentes sem `user_id` no caminho | telas nativas na Segurança e em Configurações, mínimo de texto | **Completo** (auth e sessão) | G | A9 (mesma área); o PR #1035 (login com MFA e exclusão agendada) pode mexer no mesmo código |
 | A10 | Guia e dicas, adaptados ao nativo (P3: sim) | 0 (`/api/app/guia*` montado) | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto, `dado` real/exemplo do roteiro | Leve | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
@@ -176,7 +182,7 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
 | 5 | **A4 Escrita na Carteira**, com o PR de servidor (idempotência) **antes** | Contesto "escrita primeiro": é o item mais caro (Completo, G), o servidor não protege contra repetição de POST e o produto já reduziu a escrita manual a uma só (Carteira). Vale começar o PR de servidor cedo, em paralelo, porque ele não depende de build. |
 | 6 | A7, A8 | Pequenos; A8 espera o #1033. |
-| 7 | **A9** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
+| 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
 Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais) e W5 (Saldo e Guardado líquido)
@@ -238,9 +244,11 @@ Medido, por leitura estática e grep, em 2026-10-16: rotas dos dois sub-apps, co
 `TITULOS` e perfis do app, `Frame` com e sem `real`, `CHAT_REAL`, schema da previsão (campos que o app lê e usa),
 `MetaFonte` e `investidoQuery`, filtros do `/lancamentos`, rotas legadas que o app usa, o `app.config.ts`, os PRs abertos.
 
+**Não levantado (escopo):** as funções que só existem no painel antigo `/app` (linha 45) e o inventário completo de `frontend/settings.html` além do que a matriz cita (o Codex achou a lacuna das linhas 41 a 44 no 1º parecer; o varrido agora é `frontend/routes/settings.py`: reset, security, contact, password-reset, activity, sessions, notifications).
+
 **Não medido:** nenhum jest, nenhum teste web, nenhuma chamada ao servidor nem a produção, nada aberto em aparelho
 ou simulador. Os `?` da matriz: onde fica a ordem salva da Home no web; limites e reconexão do Open Finance em cada
-lado; se as rotas de excluir conta e exportar dados aceitam Bearer; se há "criar senha" para conta social no app; se o
+lado; se as rotas de excluir conta e exportar dados aceitam Bearer; se o
 catálogo de blocos tem exatamente os mesmos itens por perfil; a regra da App Store (5.1.1(v)) é conhecimento da
 política, não verificada nesta sessão.
 
