@@ -950,8 +950,10 @@ O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos s
 GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
 `config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
 prendem isso. Aceitos, sem código:
-- `login.html` com sessão viva de OUTRA conta pula o formulário de código ("sessão viva → pula o
-  login"), comportamento herdado do `/login`.
+- Com `#mfa=` na URL o `login.html` não consulta mais a sessão viva (#991), então o formulário abre
+  mesmo com a sessão de outra conta. Resíduo (A5, anterior ao #991): depois do `replaceState` que tira
+  o `#mfa=` da URL, RECARREGAR o `/login` com sessão viva de outra conta roda o `/auth/validate`
+  normal e pula o formulário (não vaza dado, só perde o formulário).
 - `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
   pedir link novo).
 - Recarregar o `/login` depois do `replaceState` perde o formulário de código (o desafio saiu da URL);
