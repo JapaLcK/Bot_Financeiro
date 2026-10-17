@@ -1275,6 +1275,68 @@ def test_q12c_conversa_virgula_antes_do_modificador(uid_pro, monkeypatch):   # C
     assert _credito(uid_pro) == 12
 
 
+@pytest.mark.parametrize("fala,captura", [   # Codex: "cada uma de R$ 50" depois da contagem é a parcela
+    ("comprei em 12 parcelas, cada uma de R$ 50", "50"), ("12x cada parcela de 50", "50"), ("12 prestações, cada prestação a 50 reais", "50"),
+    ("12 parcelas, sendo cada uma de R$ 50", "50"), ("em 12 parcelas iguais, cada uma de R$ 50", "50"), ("12x sem juros, cada uma de 50", "50"),
+    ("12 vezes, cada de 50", "50"), ("12 vezes cada R$ 50", "50"), ("12x, cada uma R$ 50", "50"),
+    # negativos: sem valor depois do "cada [uma] de/a/R$" não é parcela
+    ("12 parcelas, cada uma em um cartão", None), ("12x, cada qual com seu frete de 50", None), ("12 parcelas cada 3 dias", None),
+    ("12 parcelas, cada uma 50", None), ("12x, cada uma de 3 kg", None),
+    # as formas antigas seguem
+    ("12 parcelas, 50 reais cada", "50"), ("12x de 50", "50"),
+])
+def test_q22_cada_uma_de_captura_o_valor_da_parcela(fala, captura):
+    assert [v for _, v in _capturas_parcela(fala)] == ([captura] if captura else [])
+
+
+@pytest.mark.parametrize("fala,valor,ancora", [
+    ("comprei em 12 parcelas, cada uma de R$ 50", 50, False), ("comprei em 12 parcelas, cada uma de R$ 50", 600, True),
+    ("12 parcelas, sendo cada uma de R$ 50", 50, False), ("12 parcelas, sendo cada uma de R$ 50", 600, True),
+    ("em 12 parcelas iguais, cada uma de R$ 50", 50, False), ("em 12 parcelas iguais, cada uma de R$ 50", 600, True),
+    ("comprei por 600 em 12 parcelas, cada uma em um cartão", 600, True),   # sem valor de parcela: o 600 é o total
+    ("comprei por 600 em 12 parcelas, cada uma em um cartão", 7200, False),
+])
+def test_q22b_cada_uma_de_so_deriva_o_total(uid_pro, fala, valor, ancora):
+    assert (_ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": 12}, fala)[1] is None) is ancora
+
+
+def test_q22c_conversa_cada_uma_de_nao_grava_a_parcela(uid_pro, monkeypatch):   # Codex: valor=50/p=12 passava e o 600 certo era recusado
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei uma TV em 12 parcelas, cada uma de R$ 50 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
+@pytest.mark.parametrize("fala,valor,parcelas,acao", [   # Codex P2: nem o valor nem a contagem ancoram = recusa de VALOR
+    ("comprei a TV por 600", 500, 12, "recusa"),
+    ("comprei a TV por 600", 600, 12, "recusa_parcelas"),          # valor ok, contagem inventada
+    ("comprei a TV por 600", 7200, 12, "recusa_parcelas"),         # o modelo multiplicou 600 × 12
+    ("comprei 50 no nubank", 3000, 60, "recusa_parcelas"),
+    ("comprei 50 no nubank", 3001, 60, "recusa"),
+    ("comprei tv em dez vezes de 60", 600, 12, "recusa_parcelas"),  # 10 × 60: o valor é do que ele disse
+    ("comprei tv em dez vezes de 60", 700, 12, "recusa"),
+    ("12x de 50", 650, 13, "recusa_parcelas"),
+    ("12x de 50", 700, 13, "recusa"),
+    ("parcelei 600 em 6", 500, 12, "recusa"),
+    ("parcelei 600 em 6", 600, 12, "recusa_parcelas"),
+])
+def test_q23_recusa_de_parcelas_so_quando_o_valor_esta_ancorado(uid_pro, fala, valor, parcelas, acao):
+    assert _ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": parcelas}, fala)[1] == acao
+
+
+@pytest.mark.parametrize("valor,esperado", [(500, RECUSA), (600, RECUSA_PARCELAS)])
+def test_q23b_conversa_texto_terminal_segue_o_motivo(uid_pro, monkeypatch, valor, esperado):
+    r = _cartao_diz(uid_pro, monkeypatch, "comprei a TV por 600 no nubank", valor, parcelas=12)
+    assert esperado in r and _credito(uid_pro) == 0, r
+    assert (RECUSA_PARCELAS in r) is (esperado is RECUSA_PARCELAS) and (RECUSA in r) is (esperado is RECUSA)
+
+
 def test_q12_conversa_prestacoes(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
     db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)

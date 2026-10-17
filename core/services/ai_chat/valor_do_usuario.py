@@ -156,8 +156,10 @@ _MOD_PARCELA = (r"(?:\s*,?\s+(?:(?:sem|com)\s+(?:juros|acr[ée]scimos?)|no\s+(?:
                 r"|iguais|fixas?|mensais|sucessivas))")
 _PARCELA_RE = re.compile(
     rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:{_MOD_PARCELA}){{0,2}}(?:\s*[,:]\s*|\s+)"
-    # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
-    r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
+    # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":", "[sendo] cada [uma|parcela|prestação] de/a/R$" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
+    r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?"
+    r"|(?:sendo\s+)?cada\s+(?:(?:uma|parcela|presta[çc][ãa]o)\s+)?(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"  # "cada uma em um cartão" / "cada 3 dias" não casam
+    r"|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
     # `(?![\d.,])` (sem recuar para "5" de "50ml") e o lookahead final: "12x de 50ml de perfume" / "12x de 3 kg" é quantidade, não valor de parcela
     # ("50 reais"/"50 centavos"/"50 no cartão" seguem). Mesmo `(?!\s*\d)` do _NAO_VALOR_RE: "12x de 50 dia 10" é parcela + data.
@@ -224,12 +226,14 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     p, escrita = _parcelas(args.get("parcelas") if tem_parcelas else None, textos)
     # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total; só `parcelas × esse valor` é
     fora, de_parcela = lidos, set()
+    quase = {l * p for l in lidos} if p > 1 else set()  # totais que só falham pela contagem: "comprei 50" + 3000 em 60x
     if p > 1:
         # o "em 12" nu ("comprei a TV em 12") é a contagem, não R$ 12 (depois do _PARCELA_RE: "em 12x de 50" é dele).
         # " ; " e não " ": "600 em 12 vezes" não pode virar "600 vezes" (quantidade), que o collect_evidence descartaria
         fora = _centavos_lidos([re.sub(rf"\bem\s+{p}\b(?![.,]\d)", " ; ", _PARCELA_RE.sub(" ", t)) for t in textos])
         for t in textos:
             for cnt, bruto in _capturas_parcela(t):
+                quase |= {c * cnt for c in _centavos_lidos([bruto.rstrip(".,")])}  # "dez vezes de 60" + 600 em 12x: o total é de 10x
                 if cnt == p:  # o valor de "12x de 60" não multiplica a contagem "10" do outro produto
                     escrita = True  # "TV 10x de 50 e fogão 12x de 60": o extract_parcelas só vê a primeira contagem
                     de_parcela |= {c * p for c in _centavos_lidos([bruto.rstrip(".,")])}  # "30 reais e 50 centavos" = só 3050
@@ -237,10 +241,12 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
         return args, None
     # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
     acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
+    # "em quantas parcelas?" só quando o VALOR está no texto e falta a contagem; valor também sem âncora é "não achei esse valor"
+    so_contagem = not escrita and (v in fora or v in quase)
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",
                           source="ai_chat/valor_do_usuario", user_id=user_id,
-                          details={"tool": tool.name, "acao": acao, "motivo": "valor" if escrita else "parcelas",
+                          details={"tool": tool.name, "acao": acao, "motivo": "parcelas" if so_contagem else "valor",
                                    "plataforma": CURRENT_PLATFORM.get(), "texto_tem_numero": bool(lidos)})
-    if acao == "recusa" and not escrita:
+    if acao == "recusa" and so_contagem:
         acao = "recusa_parcelas"  # só o retorno: o log acima segue "recusa" + motivo
     return ({k: x for k, x in args.items() if k != campo} if acao == "descarta" else args), acao
