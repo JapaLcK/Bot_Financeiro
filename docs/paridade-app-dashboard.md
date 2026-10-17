@@ -3,7 +3,7 @@
 Regra do dono (2026-10-16): app (`app/`, Expo/React Native) e `/painel` (`webapp/src/dashboard`, `api/v2/`) **andam juntos, nos dois sentidos**, com as mesmas funções adaptadas à plataforma. No app valem "visual, mínimo de texto, quanto mais nativo melhor".
 Este documento **só lista as diferenças**. Não propõe solução, ordem nem prazo: cada linha vira uma conversa própria com o dono, uma por vez. Por isso toda linha termina em "a discutir".
 O plano do card "Seu dia" no app (`docs/plano-seu-dia-app.md`) não é repetido aqui, só citado.
-Medido na `main` em 53681b4e (2026-10-17). Paridade plena existe em várias funções (por exemplo MFA, receitas do extrato, Sair) e não aparece nas tabelas.
+Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do Piggy do app também lê e escreve (lançamentos, metas), e isso é dito nas linhas em que muda o quadro. Paridade plena existe em várias funções (por exemplo MFA, receitas do extrato, Sair) e não aparece nas tabelas.
 
 "Exemplo" no Web quer dizer que o bloco desenha dado de demonstração (`lib/api.ts`, sem rede), não o do usuário.
 
@@ -41,8 +41,8 @@ Medido na `main` em 53681b4e (2026-10-17). Paridade plena existe em várias fun�
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Metas: ler | `GET /metas` | `GET /goals/{uid}/status` (rota legada) | Duas fontes diferentes para a mesma meta | App | a discutir com o dono |
-| Metas: criar, editar, apagar | Sim (`MetaForm.tsx`) | Não há | — | App | a discutir com o dono |
+| Metas: ler | `GET /metas` | Tela de Metas: `GET /goals/{uid}/status` (rota legada); o card de metas do chat usa o formato novo | Duas fontes diferentes para a mesma meta | App | a discutir com o dono |
+| Metas: criar, editar, apagar | Formulário (`MetaForm.tsx`) | Só pelo chat do Piggy (a IA cria, edita e apaga; o card oferece "Criar meta" como pedido ao chat); sem formulário | Fluxos diferentes | App | a discutir com o dono |
 | Patrimônio e "Onde está o dinheiro" | Exemplo | Real (`/api/app/patrimonio`) | A rota só existe no namespace do app | Web | a discutir com o dono |
 | Rendimento | Exemplo ("Rendimento × CDI") | Real (taxa contratada, `/api/app/rendimento`) | Idem | Web | a discutir com o dono |
 | Fatura do cartão, parcelas futuras, renda mês a mês, "Piggy notou" | Exemplo | Reais, por rotas legadas com `user_id` no caminho (`/cards`, `/installments`, `/analytics`, `/insights`) | Web sem dado real; app preso a rota legada | Web (e o app, na rota) | a discutir com o dono |
@@ -51,10 +51,10 @@ Medido na `main` em 53681b4e (2026-10-17). Paridade plena existe em várias fun�
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Filtros | Busca, origem, tipo, categoria, dia e **conta** | Os mesmos, menos conta (o `dia` vai ao servidor desde o PR #1061) | Falta o filtro por conta | App | a discutir com o dono |
+| Filtros | Busca, origem (inclui `registro_antigo`), tipo, categoria, dia e **conta** | Os mesmos, menos conta e menos a origem `registro_antigo` (o `dia` vai ao servidor desde o PR #1061) | Faltam o filtro por conta e o de registro antigo | App | a discutir com o dono |
 | Busca curta | Bloqueia termo só de 1 letra e avisa | Manda o termo, o servidor o ignora e a tela diz "Buscando em todo o histórico" | Mensagem enganosa no app | App | a discutir com o dono |
 | Aportes e saques (`guardado`) | Pede `guardado: true` | Não pede | Linhas de guardado não aparecem no app | App | a discutir com o dono |
-| Lançar, editar e apagar na Carteira | Sim | Só lê | — | App | a discutir com o dono |
+| Lançar, editar e apagar na Carteira | Formulário no Extrato | O Extrato só lê; pelo chat do Piggy a IA registra, apaga e recategoriza lançamentos | Sem formulário no Extrato; o chat não cobre toda edição (data e valor, por exemplo) | App | a discutir com o dono |
 
 ## Chat do Piggy e guia
 
