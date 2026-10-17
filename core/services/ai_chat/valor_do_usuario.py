@@ -68,12 +68,17 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)"
     # ano solto depois de preposição ("é para 2027", "vence em 2027", "até 2027", "desde 2026", "no ano de 2027"): só 20dd e não quando é dinheiro
     # ("para 2027 reais", "para 2027,50") nem data ISO ("2026-10-20", que a regra de data lê inteira). ponytail: "transferi para 2000" (sem "reais") mascara o 2000 (fail-closed).
-    r"|\b(?:para|em|at[ée]|desde|ano(?:\s+de)?)\s+20\d\d\b(?!\s*(?:real|reais|conto|pila|centavo)|[.,/-]\d)",
+    r"|\b(?:para|em|at[ée]|desde|ano(?:\s+de)?)\s+20\d\d\b(?!\s*(?:real|reais|conto|pila|centavo)|[.,/-]\d)"
+    # data pontuada curta ("para 20.10", "vence 5.11", "até 31.12"): ambígua com decimal ("gastei 12.10" é R$ 12,10), então só depois de palavra de data,
+    # com dia 1-31 e mês 1-12 e sem terceiro componente; seguida de real/reais/conto/pila é dinheiro ("para 12.10 reais"). ponytail: "transferi para 12.10" (sem "reais") mascara (fail-closed)
+    r"|\b(?:para|pro|dia|vence|vencimento|venc\.?|vcto|at[ée]|no\s+dia)\s+(?:dia\s+)?(?:0?[1-9]|[12]\d|3[01])\.(?:0?[1-9]|1[0-2])\b(?![.,]?\d)(?!\s*(?:real|reais|conto|pila|centavo))",
     re.IGNORECASE,
 )
 _MEDIDA_PREFIXO = r"(?<![\d.,])\d+(?:[.,]\d+)*\s*"
 _MEDIDA = (r"dias?|semanas?|anos?|horas?|hrs?|hs|h|minutos?|min|km|kg|g|ml|l|litros?"
-           r"|metros?|m2|m²|unidades?|un|pessoas?")
+           r"|metros?|m2|m²|unidades?|un|pessoas?"
+           # armazenamento/velocidade/frequência/tela: "SSD de 500 GB", "internet 600 Mbps", "plano de 600 mega", "TV de 55 polegadas". ponytail: "100 mega sena" mascara (fail-closed)
+           r"|[kmg]bps|[kmgt]b|[mg]hz|hz|megas?|gigas?|teras?|watts?|polegadas?|pol")
 _NAO_VALOR_RE = re.compile(
     _DATA_RE.pattern +
     r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}"

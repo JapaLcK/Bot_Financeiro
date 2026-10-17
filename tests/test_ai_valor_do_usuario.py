@@ -389,6 +389,19 @@ def test_texto_sem_valor_nao_le_nada(texto):
     ("paguei às 18,50", {1850}, set()),
     ("paguei às 18 conto", {1800}, set()),
     ("mas 18", {1800}, set()),   # "mas" não é "às"
+    # armazenamento/velocidade/frequência/tela não são dinheiro (Codex); "\b" poupa "500 gabriel"; o dinheiro ao lado segue lido
+    ("comprei SSD de 500 GB no cartão", set(), {50000}), ("internet 600 Mbps", set(), {60000}), ("plano de 600 mega", set(), {60000}),
+    ("TV de 55 polegadas", set(), {5500}), ("notebook 16 gb ram e ssd de 1 tb", set(), {1600, 100}), ("5 mbps", set(), {500}),
+    ("processador 3,5 ghz", set(), {350}), ("fonte de 600 watts", set(), {60000}), ("TV de 55 pol", set(), {5500}),
+    ("boleto de 150 internet 600 Mbps", {15000}, {60000}), ("paguei 500 gabriel", {50000}, set()),
+    ("gastei 500 reais em 5 GB", {50000}, {500}),
+    # data pontuada curta SÓ depois de palavra de data (Codex): "20.10" é o dia 20/10, não R$ 20,10; "12.10" solto é decimal
+    ("anota o boleto para 20.10", set(), {2010}), ("vence 5.11", set(), {511}), ("dia 31.12", set(), {3112, 1200}),
+    ("até 20.10", set(), {2010}), ("no dia 20.10", set(), {2010, 1000}), ("vcto 20.10", set(), {2010}), ("pro dia 05.10", set(), {510}),
+    ("boleto de 150 para 20.10", {15000}, {2010}), ("paguei 10 reais para 20.10", {1000}, {2010}),
+    ("gastei 12.10 no mercado", {1210}, set()), ("paguei 49.90", {4990}, set()), ("para 49.90 reais", {4990}, set()),
+    ("para 12.10 reais", {1210}, set()), ("para 12.10 conto", {1210}, set()),
+    ("para 20.100", {2010000}, set()), ("para 32.10", {3210}, set()), ("para 20.13", {2013}, set()),   # dia/mês fora do calendário ou milhar
 ])
 def test_quantidade_duracao_medida_nao_ancora(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -1165,7 +1178,7 @@ def test_q20b_mensagens_separadas_mesma_regra(uid_pro, valor, parcelas, ancora):
 @pytest.mark.parametrize("fala,captura", [
     # valor de parcela seguido de medida/quantidade é quantidade, não parcela (Codex): sem captura, nada deriva o total
     ("comprei 12x de 50ml de perfume", None), ("12x de 50 ml", None), ("12x de 3 kg de arroz", None),
-    ("12x de 50,5 ml", None), ("12x de 50 dias", None), ("12x de 50 un", None),
+    ("12x de 50,5 ml", None), ("12x de 50 dias", None), ("12x de 50 un", None), ("12x de 500 GB", None), ("12x de 600 Mbps", None),
     # positivos: reais/centavos/mil/cartão/cada/hamburguer não são medida; "dia 10" depois é data, não "50 dia(s)"
     ("12x de 50", "50"), ("12x de 50 reais", "50"), ("12x de 50 centavos, sem juros", "50 centavos"),
     ("12x de 50, sem juros", "50,"), ("12x de 50 cada", "50"), ("12x de 50 no cartão", "50"),
@@ -1204,6 +1217,41 @@ def test_n20_boleto_para_data_ano_primeiro_com_barra_nao_grava_o_ano(uid_pro, mo
     _usa_ia(cli)
     assert RECUSA in r and _boletos(uid_pro) == 0, r
     runner.chat(uid_pro, "boleto da internet de 150 para 2026/10/20", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n21_ssd_500_gb_nao_grava_500_reais(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(500), _compra_cartao(500))
+    r = runner.chat(uid_pro, "comprei SSD de 500 GB no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    openai_falso(monkeypatch, _compra_cartao(300))
+    runner.chat(uid_pro, "comprei SSD de 500 GB por 300 no nubank", platform="whatsapp")   # 300 escrito: grava
+    assert _credito(uid_pro) == 1
+
+
+def test_n21_boleto_internet_600_mbps_nao_grava_600(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 600, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet 600 Mbps para 20/10", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet 600 Mbps de 150 para 20/10", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n22_boleto_para_20_ponto_10_nao_grava_20_10(uid_pro, monkeypatch):   # Codex: "20.10" é a data, não R$ 20,10
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 20.1, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto para 20.10", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet de 150 para 20.10", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
 
 
