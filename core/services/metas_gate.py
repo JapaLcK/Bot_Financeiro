@@ -15,12 +15,14 @@ NOME antes do valor é 1 palavra e só vale com `chamada|pra|pro|para` na frente
 é "uns 5000", "ficticia de 5000"). "registra" só com "uma meta"/"meta chamada" (senão pode ser depósito). Fora de
 propósito: "abre" (abrir = ver), "faça", "me cria", "da pra/podia criar" (pergunta sem "?").
 Com `args` (o que o modelo pôs na tool) o gate confere o que a FRASE disse: valor, tipo (meta × reserva), nome, prazo
-(`data_alvo` só com "até"), meses e `fonte` (nunca vem na frase: a padrão sai por código). Divergiu: pergunta.
+(`data_alvo` só com "até", e exatamente a data dita: dia, ou fim do mês, ou 31/12), meses e `fonte` (nunca vem na frase: a padrão sai por código). Divergiu: pergunta.
 """
 from __future__ import annotations
 
+import calendar
 import re
 import unicodedata
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 _N = r"(?!0+\b)(?:\d{1,3}(?:\.\d{3}){1,2}|\d{1,9})"
@@ -75,17 +77,25 @@ def _valor(t: str) -> Decimal | None:
 
 
 def _prazo_confere(dt: str | None, iso: object) -> bool:
-    """Sem "até" na frase, sem `data_alvo`. Com "até", o ANO (e o MÊS e o DIA, quando a frase diz) são os da `data_alvo` ISO."""
+    """Sem "até" na frase, sem `data_alvo`. Com "até", a `data_alvo` é EXATAMENTE a data que a frase diz: o dia dito;
+    só mês = último dia do mês (o contrato da tool); só ano = 31/12. Data impossível ("31/02") pergunta."""
     if dt is None:
         return iso is None
     if not (isinstance(iso, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", iso[:10])):
         return False
+    ano = int(dt[-4:])
     nome = re.search(_MES, dt, re.I)
     num = re.search(r"(\d{1,2})/\d{4}$", dt)
     mes = _MES.split("|").index(nome.group(0).lower()) + 1 if nome else (int(num.group(1)) if num else None)
     dia = re.match(r" ate (?:dia )?(\d{1,2})(?: de |/\d{1,2}/)", dt)  # "até 10 de dezembro", "até 10/12/2027"
-    return (int(dt[-4:]) == int(iso[:4]) and mes in (None, int(iso[5:7]))
-            and (dia is None or int(dia.group(1)) == int(iso[8:10])))
+    try:
+        if mes is None:
+            esperado = date(ano, 12, 31)
+        else:
+            esperado = date(ano, mes, int(dia.group(1)) if dia else calendar.monthrange(ano, mes)[1])
+    except ValueError:
+        return False
+    return iso[:10] == esperado.isoformat()
 
 
 def _confere(m: re.Match, args: dict) -> bool:

@@ -130,8 +130,8 @@ def test_residuo_conhecido_hedge_desconhecido_no_nome_grava_direto_e_esta_declar
     ("cria uma meta de 5000 pra viagem até dezembro de 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2031-01-31"}, False),
     ("cria uma meta de 5000 pra viagem até dezembro de 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-11-30"}, False),
     ("cria uma meta de 5000 pra viagem até dezembro de 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "amanhã"}, False),
-    ("cria uma meta de 5000 pra viagem até 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-06-30"}, True),
-    ("cria uma meta de 5000 pra viagem até 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2028-06-30"}, False),
+    ("cria uma meta de 5000 pra viagem até 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-31"}, True),
+    ("cria uma meta de 5000 pra viagem até 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2028-12-31"}, False),
     ("cria uma meta de 5000 pra viagem até 12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-31"}, True),
     ("cria uma meta de 5000 pra viagem até 12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-11-01"}, False),
     ("cria uma meta de 5000 pra viagem até 31/12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-31"}, True),
@@ -144,6 +144,13 @@ def test_residuo_conhecido_hedge_desconhecido_no_nome_grava_direto_e_esta_declar
     ("cria uma meta de 5000 pra viagem até 10/12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-10"}, True),
     ("cria uma meta de 5000 pra viagem até 10/12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-31"}, False),
     ("cria uma meta de 5000 pra viagem até 5 de março de 2029", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2029-03-31"}, False),
+    # Codex P1 #2 (#1051): mês sem dia = ÚLTIMO dia do mês; ano sem mês = 31/12; data impossível pergunta
+    ("cria uma meta de 5000 pra viagem até dezembro de 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-01"}, False),
+    ("cria uma meta de 5000 pra viagem até fevereiro de 2028", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2028-02-29"}, True),
+    ("cria uma meta de 5000 pra viagem até fevereiro de 2028", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2028-02-28"}, False),
+    ("cria uma meta de 5000 pra viagem até 12/2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-12-15"}, False),
+    ("cria uma meta de 5000 pra viagem até 2027", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2027-01-01"}, False),
+    ("cria uma meta de 5000 pra viagem até 31/02/2028", {"nome": "Viagem", "tipo": "meta", "alvo": 5000, "data_alvo": "2028-02-29"}, False),
     ("cria uma meta de 5000", {"nome": "Meta de 5000", "tipo": "meta", "alvo": 5000}, False)])  # nome inventado
 def test_a_tool_tem_de_dizer_o_que_a_frase_disse(frase, args, esperado):
     assert gate(frase, args) is esperado, (frase, args)
