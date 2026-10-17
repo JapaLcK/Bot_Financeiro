@@ -54,15 +54,15 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     # Sufixo ordinal opcional ("dia 1º", "1o"): o \b pós-dígito não casa antes de "º"/"ª". "o"/"a" colados só após 1 dígito: "50a" segue sem mascarar.
     r"|\bdia\s*:?\s*(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
     r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
-    # hora compacta "18h30" / "18 h 30"; "18h" nua já é a unidade `h` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
-    r"|\b\d{1,2}\s*h\s*\d{2}\b"
+    # hora compacta "18h30" / "18 h 30" / "18hs30" / "18hrs30"; "18h"/"18hs" nua já é a unidade `h|hs|hrs?` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
+    r"|\b\d{1,2}\s*h(?:rs?|s)?\s*\d{2}\b"
     # hora solta com crase ("às 18", "ás 9"): só com acento, "as 18" é artigo + número. Não quando o número é dinheiro
     # ("às 18 reais", "às 18,50"); "às 18:30", "às 18 h 30" e "às 18/10" ficam com as alternativas acima. ponytail: "as 18" sem acento segue lido como valor (pode ancorar 18)
     r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)",
     re.IGNORECASE,
 )
 _MEDIDA_PREFIXO = r"(?<![\d.,])\d+(?:[.,]\d+)*\s*"
-_MEDIDA = (r"dias?|semanas?|anos?|horas?|h|minutos?|min|km|kg|g|ml|l|litros?"
+_MEDIDA = (r"dias?|semanas?|anos?|horas?|hrs?|hs|h|minutos?|min|km|kg|g|ml|l|litros?"
            r"|metros?|m2|m²|unidades?|un|pessoas?")
 _NAO_VALOR_RE = re.compile(
     _DATA_RE.pattern +
@@ -167,9 +167,11 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
         # sem dígito o `_extract_valor` cairia no extenso da mensagem inteira: só dígito ancora
-        v = _extract_valor(limpo) if re.search(r"\d", limpo) else None
-        if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
-            lidos.add(round(v * 100))
+        # além do primeiro valor do texto, cada multiplicador ("2 mil ... e 3 mil") é uma leitura própria
+        vs = [_extract_valor(limpo), *(_extract_valor(m[0]) for m in _MULT_DIGITOS_RE.finditer(limpo))] if re.search(r"\d", limpo) else []
+        for v in vs:
+            if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
+                lidos.add(round(v * 100))
     return lidos
 
 

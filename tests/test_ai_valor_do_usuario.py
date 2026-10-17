@@ -197,6 +197,19 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("dia 50a", {5000}, set()),                             # letra colada a 2 dígitos não é ordinal
     ("gastei 50a março", {5000}, set()),
     ("paguei o 1º lugar 50", {5000}, set()),                # ordinal solto (sem dia/mês) não mascara: como antes, o 1 segue lido
+    # hora com abreviação (hs/hrs/hr): não é valor; "100 hamburguer" segue lido (P1 do Codex)
+    ("anota o boleto da internet para amanhã 18hs", set(), {1800}),
+    ("18hrs", set(), {1800}), ("18 hs", set(), {1800}), ("18hr", set(), {1800}), ("às 18hs", set(), {1800}),
+    ("18hs30", set(), {1800, 3000}), ("18hrs30", set(), {1800, 3000}),
+    ("boleto de 150 18hs", {15000}, {1800, 1501800}),
+    ("100 hamburguer", {10000}, set()), ("100 hsbc", {10000}, set()),
+    # cada multiplicador "N mil" é leitura própria, não só o primeiro do texto (P2 do Codex)
+    ("gastei 2 mil no mercado e 3 mil no uber", {200000, 300000}, {200, 300, 3000}),
+    ("2 mil", {200000}, {200}), ("R$ 2 mil", {200000}, {200}),
+    ("2 mil, 3 mil e 4 mil", {200000, 300000, 400000}, {200, 300, 400}),
+    ("2 mil e 500 no mercado e 3 mil no uber", {250000, 50000, 300000}, {300}),   # o 500 solto segue ancorando (limite declarado)
+    ("1 milhão e 2 mil", {100000000, 200000}, {100, 200}),
+    ("2,5 mil e 3 mil", {250000, 300000}, {300}),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -1272,6 +1285,26 @@ def test_n15_boleto_as_18_sem_h_nao_grava_hora_como_valor(uid_pro, monkeypatch):
     _usa_ia(cli)
     runner.chat(uid_pro, "boleto de 150 às 18", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
+
+
+def test_n16_boleto_amanha_18hs_nao_grava_hora_como_valor(uid_pro, monkeypatch):   # P1 do Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 18, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para amanhã 18hs", platform="whatsapp")
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto de 150 para amanhã 18hs", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n17_dois_multiplicadores_na_mesma_frase_gravam_os_dois(uid_pro, monkeypatch):   # P2 do Codex
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, _duas(2000, 3000), lancamento(30))
+    runner.chat(uid_pro, "gastei 2 mil no mercado e 3 mil no uber", platform="whatsapp")
+    assert sorted(l["valor"] for l in lancamentos(uid_pro)) == [2000.0, 3000.0]
+    runner.chat(uid_pro, "gastei 2 mil no mercado e 3 mil no uber", platform="whatsapp")   # 30 não está escrito: recusa
+    assert len(lancamentos(uid_pro)) == 2
 
 
 def test_p5_conta_variavel_com_valor_dito_paga(uid_pro, monkeypatch):
