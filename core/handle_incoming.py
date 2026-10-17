@@ -1259,6 +1259,7 @@ def handle_incoming(msg: IncomingMessage, *,
             and (
                 intent_result.intent == "out_of_scope"
                 or intent_result.confidence < 0.55
+                or intent_result.intent == "metas.escrita"  # C4: a IA escreve a meta; 1.0 serve ao abandono
                 or responde_a_ia
             )
         )

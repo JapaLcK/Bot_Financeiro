@@ -911,6 +911,28 @@ def _pede_metas(norm: str) -> bool:
     return norm in _METAS_EXATAS or bool(_METAS_PERGUNTA.match(norm))
 
 
+# Escrita de meta (PR C4): verbo de escrita no IMPERATIVO/infinitivo NO COMEÇO (ou um desejo "queria uma
+# meta") + a palavra "meta(s)" + nenhuma palavra de outro assunto ("criar caixinha meta 2028" é caixinha;
+# "meta de gastos" é orçamento; "registra um depósito na meta" é depósito). Passado e narração ("criei",
+# "apaguei", "minha amiga criou") ficam de fora. Não há parser de valor aqui: a regra só existe para o
+# roteador proteger a pendência e mandar a frase à IA (`metas.escrita`).
+_VERBO_ESCRITA = (r"(?:(?:cri|cadastr|registr|apag|delet|remov|mud|alter|edit|troc|aument|atualiz)(?:a|e|ar|er|ue)|"
+                  r"faz(?:er)?|nov[ao]|abr(?:e|a|ir)|exclu(?:i|a|ir)|diminu(?:i|a|ir)|renome(?:ia|ie|ar))")
+_ESCRITA_META = re.compile(rf"^(?:(?:quero|queria|preciso|pode|podia|da pra|me ajuda a) )?{_VERBO_ESCRITA} ")
+_DESEJO_META = re.compile(
+    r"^(?:acho que )?(?:quero|queria|preciso de|precisava de|gostaria de) (?:uma |um |outra )?(?:nova )?metas?\b")
+_META_PALAVRA = re.compile(r"\bmetas?\b")
+_OUTRO_ASSUNTO = re.compile(
+    r"\b(?:caixinhas?|cofrinhos?|investimentos?|orcamentos?|categorias?|cartao|cartoes|gastos?|gastar|despesas?|"
+    r"faturas?|pagament\w*|deposit\w*|resgat\w*|receitas?|lancament\w*|saldo|relat\w*|pix|aporte\w*|"
+    r"transferenc\w*|guard\w*)\b")
+
+
+def _pede_escrita_de_meta(norm: str) -> bool:
+    return bool((_ESCRITA_META.match(norm) or _DESEJO_META.match(norm))
+                and _META_PALAVRA.search(norm) and not _OUTRO_ASSUNTO.search(norm))
+
+
 def _metas_ligadas(user_id: int) -> bool:
     """Falha fechada: se a chave não puder ser lida, vale o comportamento de antes das metas."""
     try:
@@ -1292,6 +1314,11 @@ def classify(text: str, user_id: int | None = None, *, allow_ai: bool = True) ->
     # da recorrência: "recebi mais que 5 mil todo mes?" não é recurring.add.
     if is_comparative_question(text):
         return IntentResult(intent="out_of_scope", confidence=0.4)
+
+    # Escrita de meta (K: `user_id` + chave) ANTES do marcador de recorrência: "cria uma meta de 2000 por mes"
+    # é meta, não caixinha/recorrente do tier 3. Sem chave a regra não existe e o marcador segue como na `main`.
+    if user_id is not None and _pede_escrita_de_meta(norm) and _metas_ligadas(user_id):
+        return IntentResult(intent="metas.escrita", confidence=1.0)
 
     # Recorrência (valor + "todo mes"/"mensal"/"recorrente"/"gasto fixo"/"anual"…)
     # vai DIRETO pra IA (Tier 3), que classifica recurring.add. Precede os atalhos
