@@ -23,7 +23,7 @@ import db
 from core.observability import log_system_event_sync
 from core.services.ai_guard import _MASCARA_NAO_MONETARIA_RE, _NAO_MONETARIO_DO_USUARIO_RE, collect_evidence
 from parsers import _extract_valor
-from utils_text import PT_PHRASE, extract_parcelas
+from utils_text import _PT_NUM_WORDS, PT_PHRASE, extract_parcelas
 
 from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 
@@ -164,8 +164,8 @@ _MOD_PARCELA = (r"(?:\s*,?\s+(?:(?:sem|com)\s+(?:juros|acr[ée]scimos?)|no\s+(?:
                 r"|iguais|fixas?|mensais|sucessivas))")
 _PARCELA_RE = re.compile(
     rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:{_MOD_PARCELA}){{0,2}}(?:\s*[,:]\s*|\s+)"
-    # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":", "[sendo] cada [uma|parcela|prestação] de/a/R$" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
-    r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?"
+    # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [unitário|da parcela|de cada [uma|parcela]|por parcela] [de|:] [R$]", ":", "[sendo] cada [uma|parcela|prestação] de/a/R$" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
+    r"(?:(?:(?:(?:no|com)\s+)?valor(?:\s+(?:unit[áa]rio|da\s+parcela|de\s+cada(?:\s+(?:uma|parcela))?|por\s+parcela))?\s*(?:de\s+|:\s*)?|(?:parcela|presta[çc][ãa]o)\s+(?:de|a)\s+|de\s+|a\s+|:\s*)(?:r\$\s*)?"
     r"|(?:sendo\s+)?cada\s+(?:(?:uma|parcela|presta[çc][ãa]o)\s+)?(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"  # "cada uma em um cartão" / "cada 3 dias" não casam
     r"|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
@@ -180,6 +180,14 @@ _PARCELA_RE = re.compile(
 def _capturas_parcela(t: str):
     """(contagem, valor-de-parcela) de cada "Nx de V". Contagem não resolvida vira 1: nunca casa um `parcelas` > 1 (fail-closed)."""
     return [(int(m[1]) if m[1] else extract_parcelas(f"{m[2].lower()} vezes"), m[3]) for m in _PARCELA_RE.finditer(t)]
+
+
+# Sinal de pagamento PARCIAL escrito sem dígito de valor ("cinquenta", "metade", "50%"): o `amount` do modelo é o pedido, não o
+# cadastrado, então descartá-lo pagaria a conta cheia. Número por extenso só de dezena para cima e "mil": "uma conta de luz" não é sinal.
+# ponytail: "paguei a luz de dez dias atrás" também pergunta o valor (fail-closed).
+_SINAL_PARCIAL_RE = re.compile(
+    rf"\b(?:{'|'.join(sorted((w for w, n in _PT_NUM_WORDS.items() if n >= 10), key=len, reverse=True))}|mil"
+    r"|metade|meio|meia|parte|parcial|um\s+pouco|resto|restante|por\s*cent\w*)\b|\d\s*%", re.IGNORECASE)
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -250,7 +258,9 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     if escrita and (v in fora or v in de_parcela):
         return args, None
     # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
-    acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
+    # sinal de valor parcial sem dígito ("paguei cinquenta/metade/50%"): descartar o amount pagaria o cadastrado cheio
+    acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) \
+        or any(_SINAL_PARCIAL_RE.search(t) for t in textos) else "descarta"
     # "em quantas parcelas?" só quando o VALOR está no texto e falta a contagem; valor também sem âncora é "não achei esse valor"
     so_contagem = not escrita and (v in fora or v in quase)
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",

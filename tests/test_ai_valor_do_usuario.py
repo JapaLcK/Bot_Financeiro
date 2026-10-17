@@ -1691,3 +1691,61 @@ def test_meta_alvo_igual_ao_da_frase_grava_direto(chave, monkeypatch):
     openai_falso(monkeypatch, com_tools(chamada("create_meta", {"nome": "Viagem", "tipo": "meta", "alvo": 3000})))
     runner.chat(u, "cria uma meta Viagem de 3000", platform="whatsapp")
     assert [m["alvo"] for m in metas_gravadas(u)] == [3000] and db.ai_get_pending_action(u) is None
+
+
+# ── Codex P1 (A): amount opcional com valor parcial escrito SEM dígito não é descartado (pagaria a conta cheia) ──
+@pytest.mark.parametrize("fala,amount,acao", [
+    ("paguei cinquenta da luz", 50, "recusa"), ("paguei metade da luz", 60, "recusa"), ("paguei 50% da luz", 60, "recusa"),
+    ("paguei vinte e cinco da luz", 25, "recusa"), ("paguei mil da luz", 1000, "recusa"), ("paguei um pouco da luz", 30, "recusa"),
+    ("paguei o resto da luz", 30, "recusa"), ("paguei parte da luz", 30, "recusa"), ("paguei 50 por cento da luz", 60, "recusa"),
+    # positivos: pagamento total (sem sinal de valor parcial) segue descartando o amount do modelo
+    ("paguei a luz", 120, "descarta"), ("paguei uma conta de luz", 120, "descarta"), ("paguei a conta de luz de ontem", 120, "descarta"),
+    ("paguei duas contas de luz", 120, "descarta"), ("paguei a luz do dia 20", 120, "descarta"),
+    ("paguei 50 da luz", 50, None),
+])
+def test_amount_opcional_com_valor_parcial_sem_digito_recusa(uid_pro, fala, amount, acao):
+    args, a = _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": amount}, fala)
+    assert a == acao and (("amount" not in args) is (acao == "descarta"))
+
+
+def test_conversa_pagar_cinquenta_da_luz_nao_paga_o_cadastrado(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    conta = _conta_fixa(uid_pro)
+    cli = openai_falso(monkeypatch, _paga_luz(50))
+    r = runner.chat(uid_pro, "paguei cinquenta da luz", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "pending"
+
+
+def test_conversa_pagar_a_luz_paga_o_cadastrado_cheio(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    conta = _conta_fixa(uid_pro)
+    openai_falso(monkeypatch, _paga_luz(120))
+    runner.chat(uid_pro, "paguei a luz", platform="whatsapp")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 120.0}]
+    assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "paid"
+
+
+# ── Codex P1 (B): rótulo de valor da parcela ("valor unitário de", "valor da parcela", "parcela de") ──
+@pytest.mark.parametrize("fala,captura", [
+    ("comprei em 12 parcelas com valor unitário de R$ 50", "50"), ("12x valor da parcela R$ 50", "50"),
+    ("12x com valor de cada parcela: 50", "50"), ("12 parcelas valor por parcela de 50", "50"),
+    ("12 parcelas, parcela de R$ 50", "50"), ("12x, valor de cada uma de 50", "50"),
+    ("12x sem juros, valor do frete 50", None), ("12x, valor total 600", None), ("12 parcelas, parcela 3 de 12", None),
+])
+def test_q23_rotulo_de_valor_da_parcela(fala, captura):
+    assert [v for _, v in _capturas_parcela(fala)] == ([captura] if captura else [])
+
+
+def test_q23b_conversa_valor_unitario_nao_grava_a_parcela(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei uma TV em 12 parcelas com valor unitário de R$ 50 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
