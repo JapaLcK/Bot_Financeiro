@@ -2,7 +2,7 @@
 
 Rascunho de plano, aberto em 2026-10-16. **Só plano: nenhum código do app, do painel web ou do servidor muda neste PR.**
 Parte do `docs/plano-etapa5-gastos.md` §4.4 (o card "Seu dia" do `/painel`, servidor em #1024 e cliente web em #1029).
-Cada PR de código abaixo confere se o que está aqui ainda vale (a `main` anda: o #1031 mexe na mesma área, §7).
+Cada PR de código abaixo confere se o que está aqui ainda vale (a `main` anda; o #1031 já entrou e reescreveu a área, §7).
 
 **Faixa: Leve.** É só cliente do app (`app/`) lendo uma rota que já existe. O servidor não muda, então não há dinheiro novo,
 sessão nem schema. Se algum PR passar a tocar o servidor (por exemplo, devolver a média pronta), aquele PR vira **Completo**.
@@ -28,7 +28,7 @@ Este plano leva a **mesma ideia** ao app, na tradução que as decisões do dono
 |---|---|---|
 | A rota `GET /api/app/gastos?mes=` | `api/v2/app.py:36` (`criar_app` monta `gastos`); `api/nativo/app.py:30-34` troca a dependência por `usuario_do_app` | **Já está no ar** e já traz `dias[].quantidade` e `dias[].categorias[{chave, valor}]` (#1024). Sem chave beta do v2 (a do `/painel`); exige o onboarding do Open Finance, como as outras rotas do app. Matriz de senha: `tests/test_rotas_senha_obrigatoria.py:148`. |
 | Quem lê hoje | `rota()` em `app/src/features/painel/provider.tsx:36-39` | **Nenhum recurso `gastos`.** `grep -rn "gastos" app/src` só acha nome de aba/tela (`TelaGastos`, `telas.tsx`). O app **não consome** `/api/app/gastos`. |
-| O dia no calendário nativo | `Calendario`, `gastos.tsx:24-34`; `detalhes` = `/api/app/mes-detalhes` | `dias: [{dia, entrou, saiu}]` (`painel.ts:18`; `api/nativo/mes_detalhes.py` `Dia`). **Sem quantidade, sem categoria, sem os maiores.** Uma linha por dia, mais recente primeiro, 7 + "Mostrar todos". Toque → `/extrato?dia=` (`gastos.tsx:33`). No chat (bloco), a linha expande `LancamentosDe` e nunca navega. |
+| O dia no calendário nativo | `Calendario`, `gastos.tsx:26-37`; `detalhes` = `/api/app/mes-detalhes` | `dias: [{dia, entrou, saiu}]` (`painel.ts:18`; `api/nativo/mes_detalhes.py` `Dia`). **Sem quantidade, sem categoria, sem os maiores.** Uma linha por dia, mais recente primeiro, 7 + "Mostrar todos". Toque → `/extrato?dia=` (`gastos.tsx:33`). No chat (bloco), a linha expande `LancamentosDe` e nunca navega. |
 | Folha | `Folha`, `base.tsx:98` | `Modal` com `presentationStyle="pageSheet"` (nativo do iOS). **Decisão do dono (#889): a Folha continua Modal pageSheet, sem alça.** O `Sheet` do expo-router (`ui/componentes/Sheet.tsx`) só serve à rota `_ds`. |
 | Dinheiro | `Valor` (`base.tsx:27`), `Money`, `decimalParaCentavos` (`decimal.ts`), `somarCentavos` | Tudo em **centavos inteiros**; `oculto` (modo privacidade) já é tratado em `Valor`, `LinhaCategoria` e `Anel`. |
 | Barra de divisão | `BarraComposicao` (`ui/componentes/BarraComposicao.tsx`) | Barra empilhada de 10pt, largura proporcional ao `valor` (> 0), decorativa (some do VoiceOver). Serve como está. |
@@ -45,7 +45,7 @@ Este plano leva a **mesma ideia** ao app, na tradução que as decisões do dono
 2. **A regra do dia do web** (`webapp/src/dashboard/lib/gastos-dia.ts`: `mediaDoPeriodo`, `diaAbrivel`, `vizinho`,
    `contraMedia`) não existe no app.
 3. **Os dois calendários não têm a mesma grade.** `mes_detalhes.ler` soma `dias` por qualquer `dia` das linhas válidas, **inclusive
-   fora do mês** (a compra parcelada conserva o dia original; o comentário de `gastos.tsx:27` e a largura de 68 para "outro ano"
+   fora do mês** (a compra parcelada conserva o dia original; o comentário de `gastos.tsx:29` e a largura de 68 para "outro ano"
    existem por isso). `/gastos` põe essa saída em `fora_da_grade` (`db/gastos.py::_calendario`) e só devolve dias da grade
    `[max(dia 1, corte), fim do mês)`. **Há linha no calendário nativo que não tem dia em `/gastos`.** O desenho trata isso (§3.3, estados).
 4. **Um recurso de leitura do mês em `/api/app/gastos`**, com zod, fixture e teste de contrato.
@@ -241,8 +241,9 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 - Build novo do app pelo Xcode (`export` com `PATH=/usr/bin` primeiro; o app não tem projeto EAS). O `buildNumber: "15"` de `app.config.ts:66` é velho **de propósito**: o Xcode usa
   `manageAppVersionAndBuildNumber` e escolhe o próximo livre no App Store Connect. **O último número registrado é o 30 (2026-10-12)**; pode ter havido builds depois, então o próximo
   é "o que o ASC der" e quem confirma é o dono (a sessão não acessa o ASC).
-- **Depende de outro PR?** Do **#1031 (E2, card de gastos do chat; aberto)**: toca `gastos.tsx`, `painel.ts`, `decimal.ts` e `Icone.tsx`, os mesmos arquivos dos PRs 1 e 2. **Os PRs de código partem
-  da `main` depois do merge do #1031** (ou rebaseiam sobre ele). **Não depende** de E1 (caixinhas, build 27, já feito) nem de metas/C4. Nenhum PR de servidor.
+- **Depende de outro PR?** Do **#1031 (E2, card de gastos do chat), já mergeado na `main` em 2026-10-17**: ele tocou `gastos.tsx`, `painel.ts`, `decimal.ts` e `Icone.tsx`, os mesmos arquivos dos PRs 1 e 2.
+  Os números de linha acima foram conferidos na `main` depois do merge; **cada PR de código parte da `main` atual e reconfere as referências**. No chat, o `Calendario` com `bloco` agora expande os
+  lançamentos do dia (`?dia=` do endpoint, `gastos.tsx:29`): isso fica como está, a folha do plano só vale fora do chat. **Não depende** de E1 (caixinhas, build 27, já feito) nem de metas/C4. Nenhum PR de servidor.
 - O PR 1 e o 2 não dependem do web nem mexem nele (só um caso novo no teste web existente).
 
 ## 8. PRs (cada um verificável sozinho)
@@ -259,7 +260,7 @@ O dono escolheu a opção (a) (§9), então o 2 e o 3 ficam separados como na ta
 ### Riscos
 1. **Grade diferente entre `detalhes` e `/gastos`** (§2.2.3): mitigado pelo fallback para o extrato, pelo teste `saiu == total` e pelo negativo que religa o bug.
 2. **`Folha` dentro de `Folha` no Resumo** (o `Calendario` do Resumo já abre numa folha): não há precedente no repo; **não verificado**. Plano B: dentro da folha o toque segue navegando ao extrato; plano C: trocar o conteúdo da própria folha.
-3. **Conflito com o #1031** nos mesmos arquivos: esperar o merge.
+3. **Conflito com o #1031**: resolvido, ele já está na `main`. Resta o risco de a `main` andar de novo em `gastos.tsx`: cada PR de código rebaseia e reconfere as linhas citadas.
 4. **Média e %: o app emula a aritmética `double` do web** (tom idêntico, inclusive nos empates do meio); tabela dourada com casos sub-centavo e de empate, gerada pelo próprio web.
 5. **Leitura sob demanda:** a 1ª abertura de cada mês mostra o carregando; `versao` e troca de conta reiniciam (o `useLancamentos` já trata); resposta pequena (≤ 31 dias × 3 maiores + categorias).
 6. **O servidor mudar um campo lido:** o build novo quebra com "dados incompatíveis"; o teste de contrato do PR 1 pega no CI do backend.
