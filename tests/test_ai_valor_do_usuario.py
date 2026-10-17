@@ -95,6 +95,42 @@ def test_centavos_lidos(texto, tem, nao_tem):
     assert tem <= lidos and not (nao_tem & lidos), lidos
 
 
+# Extenso só ancora se a próxima palavra for dinheiro, conector ou o fim; substantivo = contagem de coisa.
+@pytest.mark.parametrize("texto,tem,nao_tem", [
+    # número + substantivo: contagem, não valor
+    ("comprei duas TVs no Nubank", set(), {200}),
+    ("dois amigos", set(), {200}),
+    ("três pizzas", set(), {300}),
+    ("comprei um carro", set(), {100}),
+    ("comprei uma tv", set(), {100}),
+    ("paguei uma pizza de 40", {4000}, {100}),
+    ("gastei cinquenta reais no mercado com dois amigos", {5000}, {200}),
+    # número + preposição/conector/fim/pontuação
+    ("gastei cinquenta no mercado", {5000}, set()),
+    ("paguei vinte na farmácia", {2000}, set()),
+    ("paguei trinta pelo uber", {3000}, set()),
+    ("gastei dois", {200}, set()),
+    ("gastei dois, ontem", {200}, set()),
+    ("gastei cinquenta e vinte", {5000, 2000}, {7000}),
+    # número + dinheiro
+    ("paguei um real", {100}, set()),
+    ("paguei dois reais", {200}, set()),
+    ("torrei oitenta conto", {8000}, set()),
+    ("achei vinte pilas", {2000}, set()),
+    ("gastei cinquenta centavos", {50}, {5000}),
+    # reais + centavos: componentes e total, nas três grafias
+    ("paguei trinta reais e cinquenta centavos", {3000, 50, 3050}, set()),
+    ("trinta reais e 50 centavos", {3000, 3050}, {50}),
+    ("30 reais e 50 centavos", {3000, 3050}, {50}),
+    ("um real e vinte e cinco centavos", {100, 25, 125}, set()),
+    ("trinta reais e cinquenta pizzas", {3000}, {3050, 50}),   # só centavos compõem o total
+    ("trinta reais e cinquenta", {3000, 5000}, {3050}),
+])
+def test_extenso_so_ancora_antes_de_dinheiro_conector_ou_fim(texto, tem, nao_tem):
+    lidos = _centavos_lidos([texto])
+    assert tem <= lidos and not (nao_tem & lidos), lidos
+
+
 @pytest.mark.parametrize("digitos", [33, 100, 308, 400])
 def test_numero_gigante_nao_estoura_nem_anula_o_resto(digitos):  # float("9"*308) é inf; round(inf) estoura
     lixo = "9" * digitos
@@ -436,6 +472,22 @@ def test_p9_artigo_um_nao_ancora_valor_1(uid_pro, monkeypatch):
     r = runner.chat(uid_pro, "comprei uma tv no nubank", platform="whatsapp")
     _usa_ia(cli)
     assert RECUSA in r and _credito(uid_pro) == 0, r
+
+
+def test_p10_duas_tvs_nao_ancora_valor_2(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(2))   # "duas tvs": o 2 é contagem, inventado como valor
+    r = runner.chat(uid_pro, "comprei duas tvs no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+
+
+def test_p11_reais_e_centavos_por_extenso_gravam_o_total(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(30.5))
+    runner.chat(uid_pro, "paguei trinta reais e cinquenta centavos", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.5}]
 
 
 def test_p7_dois_extensos_na_mesma_frase_gravam_os_dois_e_a_soma_nao(uid_pro, monkeypatch):

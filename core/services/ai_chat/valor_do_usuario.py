@@ -83,7 +83,14 @@ def _textos_do_usuario(user_id: int) -> list[str]:
 _CENTAVOS_RE = re.compile(r"(?<!reais e )(?<!real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
 
 
-_DEPOIS_DE_UM = ("real", "reais", "conto", "contos", "pila", "pilas", "centavo", "centavos")
+# Extenso só é valor se a PRÓXIMA palavra for dinheiro, conector ou o fim: "dois amigos", "duas tvs",
+# "uma pizza" são contagem de coisa. Lista fechada de propósito (sem substantivo).
+_REAIS = ("real", "reais", "conto", "contos", "pila", "pilas")
+_CENTAVOS = ("centavo", "centavos")
+_CONECTORES = frozenset(
+    "de do da dos das no na nos nas num numa em pra pro para por pelo pela pelos pelas com sem e ou a ao aos "
+    "à às até ate só so mais menos".split())
+_ADMITE = frozenset(_REAIS + _CENTAVOS) | _CONECTORES
 
 
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
@@ -91,16 +98,17 @@ def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
 
 
 def _extensos(t: str) -> list[tuple[float | None, str]]:
-    """Um número por extenso por trecho, com a palavra que vem depois dele:
-    "cinquenta no mercado e vinte no uber" → [(50, "no"), (20, "no")], não 70.
+    """Um número por extenso por trecho, com a palavra que vem depois dele, só os que passam em
+    `_ADMITE`: "cinquenta no mercado e vinte no uber" → [(50, "no"), (20, "no")], não 70.
     O "e" só junta enquanto o nível desce ("cinquenta e cinco", "cento e vinte", "mil e duzentos");
-    "cinquenta e vinte" são dois."""
-    toks = re.findall(r"\w+", t)
+    "cinquenta e vinte" são dois. "<reais> reais e <centavos> centavos" também devolve o total
+    ("trinta reais e cinquenta centavos" → (30.5, "reais"))."""
+    toks = re.findall(r"\w+|[^\w\s]", t.lower())  # pontuação é token: "gastei dois, ontem" termina o trecho
     runs, prev = [], None
     for i, tok in enumerate(toks):
         v = _words_to_number(tok)
         if v is None:
-            prev = prev if tok.lower() == "e" else None
+            prev = prev if tok == "e" else None
             continue
         n = _nivel(v)
         if prev is not None and (n < prev or n == 4 > prev):
@@ -108,7 +116,16 @@ def _extensos(t: str) -> list[tuple[float | None, str]]:
         else:
             runs.append([i, i + 1])
         prev = n
-    return [(_words_to_number(" ".join(toks[a:b])), toks[b].lower() if b < len(toks) else "") for a, b in runs]
+    vs = [(_words_to_number(" ".join(toks[a:b])), toks[b] if b < len(toks) else "", a, b) for a, b in runs]
+    out = [(v, d) for v, d, _, _ in vs if not d or not d[0].isalnum() or d in _ADMITE]
+    for v, d, _, b in vs:
+        if d not in _REAIS or toks[b + 1:b + 2] != ["e"]:
+            continue
+        cent = [c for c, d2, a2, _ in vs if a2 == b + 2 and d2 in _CENTAVOS]  # extenso: "e cinquenta centavos"
+        if not cent and toks[b + 2:b + 3] and toks[b + 2].isdigit() and toks[b + 3:b + 4] and toks[b + 3] in _CENTAVOS:
+            cent = [int(toks[b + 2])]  # misto: "e 50 centavos"
+        out += [(v + c / 100, "reais") for c in cent if c < 100]
+    return out
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -121,8 +138,6 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
         # sem dígito o `_extract_valor` cai no extenso da mensagem inteira (soma): os `_extensos` leem por trecho
         vs = [_extract_valor(limpo) if re.search(r"\d", limpo) else None]
         for v, depois in _extensos(limpo):
-            if v == 1 and depois not in _DEPOIS_DE_UM:  # "um"/"uma" soltos são artigo ("comprei uma tv")
-                continue
             vs.append(v / 100 if depois.startswith("centavo") else v)   # "cinquenta centavos" são 50, não R$ 50
         for v in vs:
             if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
