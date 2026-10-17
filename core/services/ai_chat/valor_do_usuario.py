@@ -93,6 +93,17 @@ _CONECTORES = frozenset(
 _ADMITE = frozenset(_REAIS + _CENTAVOS) | _CONECTORES
 
 
+# "gastei 49.90" é 49,90: o `collect_evidence` lê todo ponto como milhar (499000) e abriria a porta
+# para o modelo gravar R$ 4.990. Ponto + 1-2 dígitos, sem mais dígito nem ".dígito" depois, é decimal;
+# 3 dígitos ("1.200", "12.345", "1.000.000") seguem milhar e data ("10.12.2026") fica como está.
+# ponytail: "1,234.56" (formato US) não é normalizado; a leitura de hoje é mantida.
+_PONTO_DECIMAL_RE = re.compile(r"(?<![\d.,])(\d+)\.(\d{1,2})(?!\d|\.\d|,\d)")
+
+# "dois milhões": o extenso por trecho multiplica; "e meio" / "e trezentos mil" ficam de fora.
+_MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
+         "bilhão": 1e9, "bilhao": 1e9, "bilhões": 1e9, "bilhoes": 1e9}
+
+
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
     return 4 if v >= 1000 else 3 if v >= 100 else 2 if v >= 20 else 1
 
@@ -116,7 +127,13 @@ def _extensos(t: str) -> list[tuple[float | None, str]]:
         else:
             runs.append([i, i + 1])
         prev = n
-    vs = [(_words_to_number(" ".join(toks[a:b])), toks[b] if b < len(toks) else "", a, b) for a, b in runs]
+    vs = []
+    for a, b in runs:
+        v, d = _words_to_number(" ".join(toks[a:b])), toks[b] if b < len(toks) else ""
+        if d in _MULT:  # a palavra seguinte ao multiplicador é que passa em `_ADMITE`
+            v, b = v * _MULT[d], b + 1
+            d = toks[b] if b < len(toks) else ""
+        vs.append((v, d, a, b))
     out = [(v, d) for v, d, _, _ in vs if not d or not d[0].isalnum() or d in _ADMITE]
     for v, d, _, b in vs:
         if d not in _REAIS or toks[b + 1:b + 2] != ["e"]:
@@ -129,7 +146,7 @@ def _extensos(t: str) -> list[tuple[float | None, str]]:
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
-    textos = [_NAO_VALOR_RE.sub(" ", t) for t in textos]
+    textos = [_PONTO_DECIMAL_RE.sub(r"\1,\2", _NAO_VALOR_RE.sub(" ", t)) for t in textos]
     lidos = {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
     textos = [_CENTAVOS_RE.sub(" ", t) for t in textos]  # "50 centavos" não vira também "R$ 50"
     lidos |= set(collect_evidence([], "\n".join(textos))[0])

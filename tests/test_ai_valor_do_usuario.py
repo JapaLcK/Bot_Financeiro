@@ -89,6 +89,25 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("dois mil e trezentos e cinquenta", {235000}, set()),
     ("cento e vinte mil e quinhentos", {12050000}, set()),
     ("cinquenta e vinte", {5000, 2000}, {7000}),   # "e" só junta quando o nível desce
+    # ponto + 1-2 dígitos é decimal (o ai_guard lê ponto como milhar: 49.90 virava 499000)
+    ("gastei 49.90", {4990}, {499000}),
+    ("gastei 49.9", {4990}, {49900, 499000}),   # 1 casa decimal também é decimal
+    ("0.50", {50}, {5000}),
+    ("gastei 2.5", {250}, {2500}),
+    # ponto + 3 dígitos segue milhar; vírgula decimal e data não mudam
+    ("1.200", {120000}, {120}),
+    ("1.200,50", {120050}, set()),
+    ("12.345", {1234500}, {1234}),
+    ("1.000.000", {100000000}, set()),
+    ("49,90", {4990}, {499000}),
+    ("10.12.2026", set(), {1012, 101200}),
+    # multiplicador por extenso: n×milhão/bilhão (reais → centavos); "e meio" fica de fora
+    ("meu orçamento é dois milhões", {200000000}, {200, 20000}),
+    ("um milhão", {100000000}, {100}),
+    ("três bilhões", {300000000000}, set()),
+    ("dois milhões de reais", {200000000}, set()),
+    ("dois milhões e meio", {200000000}, {250000000}),
+    ("duzentos mil", {20000000}, set()),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -125,6 +144,10 @@ def test_centavos_lidos(texto, tem, nao_tem):
     ("um real e vinte e cinco centavos", {100, 25, 125}, set()),
     ("trinta reais e cinquenta pizzas", {3000}, {3050, 50}),   # só centavos compõem o total
     ("trinta reais e cinquenta", {3000, 5000}, {3050}),
+    # multiplicador: a palavra depois dele passa na mesma lista; contagem de coisa não é valor
+    ("comprei dois milhões de pizzas", {200000000}, set()),   # "de" é conector (mesmo limite de "dois de ...")
+    ("dois milhões pizzas", set(), {200000000}),
+    ("um milhão no mercado", {100000000}, set()),
 ])
 def test_extenso_so_ancora_antes_de_dinheiro_conector_ou_fim(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -454,6 +477,22 @@ def test_p6_n_centavos_grava_meio_real_e_nao_50_reais(uid_pro, monkeypatch):
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
     r = runner.chat(uid_pro, "gastei 50 centavos", platform="dashboard")   # R$ 50 inventado: recusa
     assert RECUSA in r and lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}], r
+
+
+def test_p12_ponto_decimal_grava_49_90_e_nao_4990(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(4990), lancamento(49.9))
+    r = runner.chat(uid_pro, "gastei 49.90", platform="dashboard")   # R$ 4.990 inventado: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    runner.chat(uid_pro, "gastei 49.90", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 49.9}]
+
+
+def test_p13_orcamento_de_dois_milhoes_grava(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, com_tools(chamada("set_budget", {"categoria": "Lazer", "budget": 2000000})))
+    runner.chat(uid_pro, "meu orçamento de lazer é dois milhões", platform="dashboard")
+    assert db.get_budget(uid_pro, "Lazer")["budget"] == 2000000
 
 
 def test_p8_cinquenta_centavos_por_extenso_grava_meio_real_e_nao_50(uid_pro, monkeypatch):
