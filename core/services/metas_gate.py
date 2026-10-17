@@ -75,7 +75,7 @@ def _valor(t: str) -> Decimal | None:
 
 
 def _prazo_confere(dt: str | None, iso: object) -> bool:
-    """Sem "até" na frase, sem `data_alvo`. Com "até", o ANO (e o MÊS, quando a frase diz) são os da `data_alvo` ISO."""
+    """Sem "até" na frase, sem `data_alvo`. Com "até", o ANO (e o MÊS e o DIA, quando a frase diz) são os da `data_alvo` ISO."""
     if dt is None:
         return iso is None
     if not (isinstance(iso, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", iso[:10])):
@@ -83,7 +83,9 @@ def _prazo_confere(dt: str | None, iso: object) -> bool:
     nome = re.search(_MES, dt, re.I)
     num = re.search(r"(\d{1,2})/\d{4}$", dt)
     mes = _MES.split("|").index(nome.group(0).lower()) + 1 if nome else (int(num.group(1)) if num else None)
-    return int(dt[-4:]) == int(iso[:4]) and mes in (None, int(iso[5:7]))
+    dia = re.match(r" ate (?:dia )?(\d{1,2})(?: de |/\d{1,2}/)", dt)  # "até 10 de dezembro", "até 10/12/2027"
+    return (int(dt[-4:]) == int(iso[:4]) and mes in (None, int(iso[5:7]))
+            and (dia is None or int(dia.group(1)) == int(iso[8:10])))
 
 
 def _confere(m: re.Match, args: dict) -> bool:
