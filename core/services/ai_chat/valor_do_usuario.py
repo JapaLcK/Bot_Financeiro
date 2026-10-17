@@ -137,8 +137,12 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 3). "12x 50" (solto, sem de/a/R$/"cada") é
 # ambíguo e fica fora: o 50 segue ancorando como total. Grupos: 1/2 = contagem (dígito/extenso), 3 = valor; cada captura só
 # deriva o total com a SUA contagem (== `parcelas` do modelo): "TV 10x de 50 e fogão 12x de 60" não ancora 600 (60 × 10). "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
+# Até 2 modificadores de uma lista FECHADA entre a unidade e o "de": "12x sem juros de 50", "10 vezes no cartão de 80". Sem `.*?`:
+# "12x sem juros, o frete é de 50" não casa (depois da vírgula tem que vir o "de/a/R$" ou o valor, não "o frete").
+_MOD_PARCELA = (r"(?:\s+(?:sem|com)\s+(?:juros|acr[ée]scimos?)|\s+no\s+(?:cart[ãa]o(?:\s+de\s+cr[ée]dito)?|cr[ée]dito|boleto|d[ée]bito)"
+                r"|\s+(?:iguais|fixas?|mensais|sucessivas))")
 _PARCELA_RE = re.compile(
-    rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:\s*[,:]\s*|\s+)"
+    rf"\b(?:(\d+)\s*|({PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:{_MOD_PARCELA}){{0,2}}(?:\s*[,:]\s*|\s+)"
     # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
     r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"

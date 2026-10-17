@@ -1039,6 +1039,29 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("50 em 10 vezes", 50, 10, True),
     ("50 em 10 vezes", 500, 10, False),
     ("comprei por 600 em 12 vezes, entrega amanhã", 600, 12, True),
+    # modificadores entre a unidade e o "de" (lista fechada, até 2): o 50 é a parcela, o total é 12 × 50
+    ("comprei uma TV em 12x sem juros de R$ 50", 50, 12, False),
+    ("comprei uma TV em 12x sem juros de R$ 50", 600, 12, True),
+    ("12 parcelas sem juros de 50", 50, 12, False),
+    ("12 parcelas sem juros de 50", 600, 12, True),
+    ("12x com juros de 50 reais", 50, 12, False),
+    ("12x com juros de 50 reais", 600, 12, True),
+    ("12x iguais de 50", 50, 12, False),
+    ("12x iguais de 50", 600, 12, True),
+    ("10 vezes no cartão de R$ 80", 80, 10, False),
+    ("10 vezes no cartão de R$ 80", 800, 10, True),
+    ("10 vezes no cartão de crédito a 80", 800, 10, True),
+    ("12x sem juros no valor de R$ 50 cada", 50, 12, False),
+    ("12x sem juros no valor de R$ 50 cada", 600, 12, True),
+    ("12 vezes fixas sem juros de 50", 600, 12, True),            # dois modificadores encadeados
+    ("12 vezes fixas sem juros de 50", 50, 12, False),
+    ("12x sem juros, 50 cada", 600, 12, True),
+    # negativos: o modificador não atravessa a frase. O 50 do frete é valor avulso (ancora como antes), não parcela
+    ("12x sem juros, o frete é de 50", 600, 12, False),
+    ("12x sem juros, o frete é de 50", 50, 12, True),
+    ("12x sem juros e o frete é de 50", 600, 12, False),
+    ("comprei por 600 em 12x sem juros", 600, 12, True),          # regressão: total explícito
+    ("comprei por 600 em 12x sem juros", 7200, 12, False),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -1110,6 +1133,19 @@ def test_q10_conversa_contagem_nua_e_parcela_em_centavos(uid_pro, monkeypatch, f
     desliga_flag(monkeypatch)
     db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
     cli = openai_falso(monkeypatch, _compra_cartao(inventado, parcelas=12), _compra_cartao(escrito, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
+def test_q12b_conversa_sem_juros_antes_do_de(uid_pro, monkeypatch):   # Codex: "12x sem juros de R$ 50" gravava 50 em 12x
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei uma TV em 12x sem juros de R$ 50 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
     r = runner.chat(uid_pro, fala, platform="whatsapp")
     _usa_ia(cli)
     assert RECUSA in r and _credito(uid_pro) == 0, r
