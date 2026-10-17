@@ -140,6 +140,17 @@ export const texto = {
  */
 export const CORES_CATEGORIA = ["#3987E5", "#D95926", "#2FA0C8", "#C98500", "#9085E9", "#E66767", "#7C8391", "#5A5F6A"] as const;
 
+/**
+ * Cor de série das pílulas do card `metas` (ciano, lilás, azul, fúcsia claro), também paleta de dado fora de `Paleta`. O escuro
+ * é o `--serie-1..4` de `webapp/src/dashboard/styles/metas.css` (o teste `metas_serie_paridade` compara); o claro tem paleta
+ * própria, mesmo matiz e mais escura, porque as da web somem (1,5 a 2,3:1) sobre `surfaceControl` claro. Wash = a cor a `ALFA_WASH_SERIE`.
+ */
+export const SERIE_META = {
+  light: ["#0E7490", "#9333EA", "#2563EB", "#C026D3"],
+  dark: ["#22D3EE", "#C084FC", "#60A5FA", "#F0ABFC"],
+} as const;
+export const ALFA_WASH_SERIE = 0.12;
+
 /** Paleta das telas de acesso: mantém o fundo da tampa biométrica nativa. */
 export const acessoClaro: Paleta = {
   ...claro, surface: "#F0F0F5", surfaceRaised: "#F6F6FA",

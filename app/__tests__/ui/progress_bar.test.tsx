@@ -61,6 +61,13 @@ describe("ProgressBar", () => {
     expect(e.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(escuro.border);
   });
 
+  it("`cor` (série de dado) vence o `tom` no preenchimento; sem `cor`, o `tom` segue valendo (controle: teste abaixo)", () => {
+    const { claro: c, escuro: e } = renderNosDoisTemas(<ProgressBar valor={0.5} tom="warning" cor="#0E7490" />);
+    expect(c.UNSAFE_getAllByType(View)[1]!.props.style.backgroundColor).toBe("#0E7490");
+    expect(e.UNSAFE_getAllByType(View)[1]!.props.style.backgroundColor).toBe("#0E7490");
+    expect(c.UNSAFE_getAllByType(View)[0]!.props.style.backgroundColor).toBe(claro.border); // a trilha não muda
+  });
+
   it("tom customizado (positive/warning/danger) pinta o preenchimento", () => {
     const { claro: c } = renderNosDoisTemas(<ProgressBar valor={0.5} tom="warning" />);
     expect(c.UNSAFE_getAllByType(View)[1]!.props.style.backgroundColor).toBe(claro.warning);

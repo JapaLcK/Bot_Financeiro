@@ -11,6 +11,8 @@ interface Props {
   /** 0..1. Fora da faixa é clampado; não-finito (NaN) vira 0. */
   valor: number;
   tom?: Tom;
+  /** Cor de série de dado (pílula de meta); vence o `tom`. Só para cor de dado (série da pílula, verde da batida); o resto usa `tom`. */
+  cor?: string;
 }
 
 /**
@@ -24,7 +26,7 @@ interface Props {
  * `width`) por performance: o RN 0.86 tem `transformOrigin` para escalar a
  * partir da esquerda sem cálculo manual de translação.
  */
-export function ProgressBar({ valor, tom = "brand" }: Props) {
+export function ProgressBar({ valor, tom = "brand", cor }: Props) {
   const { cores } = useTema();
   // NaN primeiro (não é finito nem clampável); Infinity/-Infinity passam pelo
   // clamp normal (Math.min/Math.max) e caem em 1/0 — a ordem antiga
@@ -44,7 +46,7 @@ export function ProgressBar({ valor, tom = "brand" }: Props) {
       <View
         style={{
           flex: 1,
-          backgroundColor: cores[corPreenchimento],
+          backgroundColor: cor ?? cores[corPreenchimento],
           transform: [{ scaleX: clampado }],
           transformOrigin: "left",
         }}

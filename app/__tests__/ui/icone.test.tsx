@@ -16,6 +16,12 @@ describe("Icone", () => {
     expect(c.UNSAFE_getByType(IconeStub).props).toMatchObject({ size: 20, color: claro.inkFaint });
   });
 
+  it("`cor` (série de dado) vence o `tom`; sem `cor`, o `tom` segue valendo (teste acima)", () => {
+    const { claro: c, escuro: e } = renderNosDoisTemas(<Icone nome="Target" tamanho={20} tom="danger" cor="#9333EA" />);
+    expect(c.UNSAFE_getByType(IconeStub).props.color).toBe("#9333EA");
+    expect(e.UNSAFE_getByType(IconeStub).props.color).toBe("#9333EA");
+  });
+
   it.each([
     "CaretRight",
     "Wallet",
