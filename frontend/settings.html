@@ -2164,10 +2164,14 @@ async function saveSecurityContact(kind) {
   const senha = document.getElementById("security-email-senha");
   if (kind === "email") {
     senha.hidden = !HAS_PASSWORD;   // o rebusque do /auth/me pode ter mudado com o editor aberto
+    // E-mail igual ao atual (o rótulo; trim+minúsculas como o servidor): o servidor trata como no-op,
+    // sem senha e sem contar no teto. Não exigir nem mandar a senha. Rótulo ainda não carregado
+    // ("Carregando...") nunca bate com e-mail válido, então cai no caminho que exige a senha.
+    const igualAtual = value.toLowerCase() === document.getElementById("security-email-value").textContent.trim().toLowerCase();
     // Vazio nem sai: o 400 do servidor conta no teto de 5 trocas por hora.
     // Texto aprovado (D5), igual ao 400 de settings_contato.py:exigir_senha_atual: o HTML é estático e não importa a constante do Python.
-    if (!senha.hidden && !senha.value) { showToast("Confirme sua senha atual para trocar o e-mail.", "error"); return; }
-    if (!senha.hidden) body.current_password = senha.value;
+    if (!senha.hidden && !igualAtual && !senha.value) { showToast("Confirme sua senha atual para trocar o e-mail.", "error"); return; }
+    if (!senha.hidden && !igualAtual) body.current_password = senha.value;
   }
 
   // Save de contato em voo — o PBRefresh da aba security encadeia atrás dele

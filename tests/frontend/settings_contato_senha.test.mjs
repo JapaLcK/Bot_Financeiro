@@ -140,6 +140,35 @@ test("S4 campo vazio: nem chama o servidor", async () => {
   } finally { await fechar(); }
 });
 
+// O servidor trata o e-mail igual ao atual (strip+lower) como no-op sem senha e sem contar no teto.
+// O rótulo carrega "a@b.com" (mock de /settings/1/security).
+for (const digitado of ["a@b.com", "A@B.com", "  a@B.com  "]) {
+  test(`S9 e-mail igual ao atual (${JSON.stringify(digitado)}): Salvar manda 1 PATCH sem current_password e sem o toast da senha`, async () => {
+    const { page, patches, fechar } = await abre(COM_SENHA, () => json({ email: "a@b.com", plan: "pro" }));
+    try {
+      await page.click("#security-email-edit-btn");
+      await page.fill("#security-email-input", digitado);
+      await page.click("#security-email-edit button");
+      await waitFor(async () => (await toast(page)).includes("E-mail atualizado"), "toast de sucesso");
+      assert.equal(patches.length, 1);
+      assert.deepEqual(patches[0].body, { email: digitado.trim() });
+      assert.ok(!(await toast(page)).includes("Confirme sua senha"));
+    } finally { await fechar(); }
+  });
+}
+
+test("S9b e-mail diferente com senha digitada: leva current_password (positivo do S9)", async () => {
+  const { page, patches, fechar } = await abre(COM_SENHA, () => json({ email: "novo@b.com", plan: "pro" }));
+  try {
+    await page.click("#security-email-edit-btn");
+    await page.fill("#security-email-senha", "Segredo-123");
+    await page.fill("#security-email-input", "novo@b.com");
+    await page.click("#security-email-edit button");
+    await waitFor(async () => patches.length === 1, "o PATCH");
+    assert.deepEqual(patches[0].body, { email: "novo@b.com", current_password: "Segredo-123" });
+  } finally { await fechar(); }
+});
+
 test("S5 nome e telefone não mandam senha (positivo: o corpo segue puro)", async () => {
   const { page, patches, fechar } = await abre(COM_SENHA, () => json({ email: "a@b.com", plan: "pro" }));
   try {
