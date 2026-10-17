@@ -100,7 +100,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 28 | Conversa | **De exemplo**: `CHAT_REAL = false`, respostas de `lib/topics.tsx`; só o assunto `investido` é real | **Real**: `POST /ai/chat/stream`, `GET /ai/messages`, `DELETE /ai/pending`, feedback 👍👎, parar, chips (#943 a #956) | Etapa 7 do web "continua inteira" (plano §8) | **web atrás (W2)** |
+| 28 | Conversa | **De exemplo**: `CHAT_REAL = false`, respostas de `lib/topics.tsx`; só o assunto `investido` é real | **Real**: `POST /ai/chat/stream`, `GET /ai/messages`, `DELETE /ai/pending`, **copiar resposta**, feedback 👍👎, parar, chips (#943 a #956) | Etapa 7 do web "continua inteira" (plano §8) | **web atrás (W2)** |
 | 29 | Cards no chat (`show_card`) | Blocos de exemplo | `periodo`, `caixinhas`, `metas` (só leitura, E1) e os do `TITULOS`; o card de gastos E2 (#1031) já está na `main` | Quando o web ligar o chat real, o `show_card` já vem do servidor | acompanha o 28 |
 
 ### 3.7 Guia e ajuda
