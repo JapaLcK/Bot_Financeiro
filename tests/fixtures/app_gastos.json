@@ -1,0 +1,157 @@
+{
+ "mes": "2026-10",
+ "disponivel": true,
+ "hoje": "2026-10-14",
+ "dia_de_corte": 14,
+ "historico_desde": null,
+ "total": "342.157",
+ "categorias": [
+  {
+   "chave": "lazer",
+   "nome": "Lazer",
+   "emoji": "🎮",
+   "cor": "#8b5cf6",
+   "valor": "250.00",
+   "quantidade": 1,
+   "valor_ate_corte": "250.00",
+   "anterior_ate_corte": "120.00"
+  },
+  {
+   "chave": "mercado",
+   "nome": "Mercado",
+   "emoji": "🛒",
+   "cor": "#10b981",
+   "valor": "90.005",
+   "quantidade": 1,
+   "valor_ate_corte": "90.005",
+   "anterior_ate_corte": "80.00"
+  },
+  {
+   "chave": "alimentacao",
+   "nome": "Alimentação",
+   "emoji": "🍔",
+   "cor": "#f59e0b",
+   "valor": "2.148",
+   "quantidade": 4,
+   "valor_ate_corte": "2.148",
+   "anterior_ate_corte": "30.00"
+  },
+  {
+   "chave": "transporte",
+   "nome": "Transporte",
+   "emoji": "🚌",
+   "cor": "#3b82f6",
+   "valor": "0.004",
+   "quantidade": 1,
+   "valor_ate_corte": "0.004",
+   "anterior_ate_corte": null
+  }
+ ],
+ "dias": [
+  {
+   "dia": "2026-10-03",
+   "total": "1.137",
+   "maiores": [
+    {
+     "descricao": "Padaria",
+     "valor": "1.040",
+     "categoria": "alimentacao"
+    },
+    {
+     "descricao": "Feira",
+     "valor": "0.097",
+     "categoria": "alimentacao"
+    }
+   ],
+   "quantidade": 2,
+   "categorias": [
+    {
+     "chave": "alimentacao",
+     "valor": "1.137"
+    }
+   ]
+  },
+  {
+   "dia": "2026-10-05",
+   "total": "91.010",
+   "maiores": [
+    {
+     "descricao": "Mercado",
+     "valor": "90.005",
+     "categoria": "mercado"
+    },
+    {
+     "descricao": "Café",
+     "valor": "1.005",
+     "categoria": "alimentacao"
+    }
+   ],
+   "quantidade": 2,
+   "categorias": [
+    {
+     "chave": "mercado",
+     "valor": "90.005"
+    },
+    {
+     "chave": "alimentacao",
+     "valor": "1.005"
+    }
+   ]
+  },
+  {
+   "dia": "2026-10-09",
+   "total": "0.010",
+   "maiores": [
+    {
+     "descricao": "Bala",
+     "valor": "0.006",
+     "categoria": "alimentacao"
+    },
+    {
+     "descricao": "Passe",
+     "valor": "0.004",
+     "categoria": "transporte"
+    }
+   ],
+   "quantidade": 2,
+   "categorias": [
+    {
+     "chave": "alimentacao",
+     "valor": "0.006"
+    },
+    {
+     "chave": "transporte",
+     "valor": "0.004"
+    }
+   ]
+  },
+  {
+   "dia": "2026-10-12",
+   "total": "250.00",
+   "maiores": [
+    {
+     "descricao": "Show",
+     "valor": "250.00",
+     "categoria": "lazer"
+    }
+   ],
+   "quantidade": 1,
+   "categorias": [
+    {
+     "chave": "lazer",
+     "valor": "250.00"
+    }
+   ]
+  }
+ ],
+ "fora_da_grade": {
+  "quantidade": 0,
+  "valor": "0"
+ },
+ "saidas_em_outra_moeda": 0,
+ "anterior_total_ate_corte": "230.00",
+ "motivos": [
+  "banco_desatualizado",
+  "arredondamento_por_grupo"
+ ]
+}

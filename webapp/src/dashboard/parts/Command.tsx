@@ -7,7 +7,7 @@ import { DEMO, MESES, guiaQuery } from "../lib/v2";
 import { abrirDica, dicaDe } from "./Dica";
 import { abrirGuia } from "./Guia";
 import { PRESETS } from "../widgets/Simulator";
-import { NO_MONTH, ROUTES, go, useRoute, type Path } from "../router";
+import { ATIVAS, NO_MONTH, go, useRoute, type Path } from "../router";
 import { NATIVE, hide, isOpen, show, untrap } from "./dialog";
 
 interface Cmd { id: string; group: string; label: string; hint?: string; icon: string; run: () => void }
@@ -18,7 +18,7 @@ const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").t
 function commands(q: string, here: Path, dica: boolean): Cmd[] {
   const s = get();
   const list: Cmd[] = [
-    ...ROUTES.map((r) => ({ id: `nav-${r.path}`, group: "Ir para", label: r.label, icon: r.icon, run: () => go(r.path) })),
+    ...ATIVAS.map((r) => ({ id: `nav-${r.path}`, group: "Ir para", label: r.label, icon: r.icon, run: () => go(r.path) })),
     ...(DEMO ? [] : [{ id: "guia", group: "Ações", label: "Mostrar o guia do painel", icon: "ph-question", run: abrirGuia }]),
     ...(dica ? [{ id: "dica", group: "Ações", label: "Como funciona esta tela", icon: "ph-info", run: abrirDica }] : []),
     { id: "edit", group: "Ações", label: s.editing ? "Terminar de organizar o painel" : "Organizar o painel", icon: "ph-pencil-simple", run: () => set({ editing: !s.editing }) },

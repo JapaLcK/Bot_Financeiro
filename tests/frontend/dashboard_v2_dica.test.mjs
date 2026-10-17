@@ -144,7 +144,8 @@ test("telas sem dica (/ e /gastos): a Ajuda é o botão de sempre e abre o guia 
 });
 
 // A Ajuda do celular mora no Menu da barra de baixo (parts/MenuTelas.tsx): as mesmas ações do menu do trilho.
-const ajudaDaFolha = (page) => page.locator(".menu-telas li button").allTextContents();
+// Só o grupo Ajuda: o grupo Conta (Sair) é outro botão da mesma folha.
+const ajudaDaFolha = (page) => page.locator('.menu-telas [aria-labelledby="menu-ajuda"] li button').allTextContents();
 test("390: o Menu mostra a Ajuda com a dica da tela, dentro da tela; o item fecha a folha e reabre o card; nada estoura", async () => {
   const { ctx, page } = await abrir({ width: 390, height: 844, guia: "concluido", rota: "/assinaturas" });
   await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();

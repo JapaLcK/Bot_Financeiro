@@ -32,7 +32,7 @@ it("o número do chat é o do bloco, não o do provider", async () => {
 
 it("o card é 100% do chat: sem botão de abrir, e tocar nele não abre folha nem modal", async () => {
   comBlocos(bloco("metas")); await perguntar();
-  expect(screen.queryByRole("button", { name: /abrir detalhes/ })).toBeNull(); expect(within(screen.getByTestId("bloco-metas")).queryAllByRole("button")).toHaveLength(0);
+  expect(screen.queryByRole("button", { name: /abrir detalhes/ })).toBeNull(); expect(within(screen.getByTestId("bloco-metas")).queryAllByRole("button").map((b) => b.props.accessibilityLabel)).toEqual(["+6, mostrar mais 6 metas"]); // o único botão é o "+N", que expande dentro do card
   fireEvent.press(screen.getByTestId("bloco-metas")); fireEvent.press(within(screen.getByTestId("bloco-metas")).getByText("Metas"));
   expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); // só a Folha tem "Fechar" e o header
   expect(screen.getByTestId("bloco-metas")).toBeTruthy(); expect(screen.getByText("Resposta do Piggy")).toBeTruthy(); // o card segue no chat
