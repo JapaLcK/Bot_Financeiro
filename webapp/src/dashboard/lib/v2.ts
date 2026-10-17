@@ -42,7 +42,7 @@ export class ErroApi extends Error {
 async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch("/api/v2" + path, { credentials: "same-origin", ...init });
+    r = await fetch((path.startsWith("/auth/") ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
@@ -93,6 +93,17 @@ export const assinaturasQuery = {
   refetchOnWindowFocus: false,
   networkMode: "always" as const,
   retry: meQuery.retry,
+};
+
+// Nome e e-mail da conta (`GET /auth/dashboard-profile`, fora da /api/v2): só em memória, nunca em localStorage.
+export const contaQuery = {
+  queryKey: ["conta"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => chamar<{ display_name: string | null; email: string | null }>("/auth/dashboard-profile", { headers: { Accept: "application/json" }, signal }),
+  staleTime: 0,
+  refetchOnWindowFocus: false,
+  networkMode: "always" as const,
+  retry: meQuery.retry,
+  enabled: !DEMO,
 };
 
 // Dado que muda: relido a cada montagem, foco de aba e aviso do SSE.
@@ -186,3 +197,16 @@ export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor
   getNextPageParam: (pagina) => pagina.proximo ?? undefined,
   ...vivo,
 });
+
+// Sair: o mesmo roteiro do `logoutSettings` (settings.html). O fetch é o GLOBAL, não o `apiPost`: o
+// auth-refresh.js reconhece o POST em /auth/logout e limpa o estado do aparelho, mesmo se ele REJEITAR.
+// A chave avisa as outras abas (`escutarLogout`); o redirecionamento sai do fetch, resolvido ou não.
+const LOGOUT_AT = "finbot_logout_at";
+const DEPOIS_DO_LOGOUT = "/?logout=1";
+export function sair(e: { currentTarget: HTMLButtonElement }) {
+  e.currentTarget.disabled = true; // o 2º clique não manda outro POST; a página sai de qualquer jeito (fim)
+  try { localStorage.setItem(LOGOUT_AT, String(Date.now())); } catch { /* storage bloqueado: o logout segue */ }
+  const fim = () => location.replace(DEPOIS_DO_LOGOUT);
+  fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: window.pbCsrfHeaders?.() ?? {} }).then(fim, fim);
+}
+export const escutarLogout = () => window.addEventListener("storage", (e) => { if (e.key === LOGOUT_AT) location.replace(DEPOIS_DO_LOGOUT); });
