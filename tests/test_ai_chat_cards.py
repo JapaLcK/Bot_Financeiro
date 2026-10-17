@@ -6,6 +6,7 @@ teste que os mantém iguais). Controle negativo: `test_paridade_pega_leitor_troc
 Gates, teto e eventos do stream: `test_ai_chat_cards_turno.py`.
 """
 import json
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -66,12 +67,55 @@ def test_paridade_pega_leitor_trocado(mundo, monkeypatch):
 
     def errado(uid, args):
         top = db.get_top_expense_categories(uid, INICIO, INICIO + timedelta(days=27))
-        return [(m, {"detalhes": {**o["detalhes"].model_dump(mode="json"), "categorias": top}})
+        return [(m, {**o, "detalhes": {**o["detalhes"].model_dump(mode="json"), "categorias": top}})
                 for m, o in real["categorias"].ler(uid, args)]
 
     monkeypatch.setattr(cards, "registro", lambda: {**real, "categorias": cards.Card(errado, real["categorias"].visao)})
     with pytest.raises(AssertionError):
         confere_paridade(a, "categorias")
+
+
+def test_categorias_leva_as_contas_em_cada_aba_e_a_visao_nao(mundo):
+    """E2: o app mostra a sincronização mais antiga a partir do PRÓPRIO bloco (nunca do provider); o modelo não vê `contas`."""
+    a, _ = mundo
+    r, (bloco,), _ = mostrar(a, card="categorias", meses=[M, M0])
+    assert len(bloco["abas"]) == len(r["abas"]) == 2
+    assert all(set(aba["recursos"]) == {"detalhes", "contas"} for aba in bloco["abas"])
+    assert all("contas" not in aba for aba in r["abas"])
+
+
+@contextmanager
+def _quebra(modulo, nome):
+    """`modulo.nome` levanta; o `registro` (@cache) importa os leitores na 1ª chamada, então é refeito dos dois lados."""
+    def boom(**kw):
+        raise RuntimeError("falha de teste")
+    try:
+        with pytest.MonkeyPatch.context() as m:
+            m.setattr(modulo, nome, boom)
+            cards.registro.cache_clear()
+            yield
+    finally:
+        cards.registro.cache_clear()
+
+
+def test_categorias_sem_contas_quando_contas_falha_e_loga(mundo, caplog):
+    """`contas` é enfeite (sincronização): se cair, o card sai sem ele e a falha fica no log; a visão não muda."""
+    import api.v2.contas as v2
+    a, _ = mundo
+    ok = mostrar(a, card="categorias", meses=[M, M0])[0]
+    with _quebra(v2, "contas"):
+        r, (bloco,), _ = mostrar(a, card="categorias", meses=[M, M0])
+    assert all(set(aba["recursos"]) == {"detalhes"} for aba in bloco["abas"]) and len(bloco["abas"]) == 2
+    assert r == ok
+    assert any("contas indisponível" in x.getMessage() and x.exc_info for x in caplog.records)
+
+
+def test_categorias_falha_de_mes_detalhes_continua_falhando(mundo):
+    """Só `contas` é engolido: sem `mes_detalhes` não há card."""
+    import api.nativo.mes_detalhes as nativo
+    a, _ = mundo
+    with _quebra(nativo, "mes_detalhes"), pytest.raises(RuntimeError):
+        mostrar(a, card="categorias", meses=[M])
 
 
 @pytest.mark.parametrize("card", list(CASOS))
