@@ -55,7 +55,10 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"|\bdia\s*:?\s*(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
     r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
     # hora compacta "18h30" / "18 h 30"; "18h" nua já é a unidade `h` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
-    r"|\b\d{1,2}\s*h\s*\d{2}\b",
+    r"|\b\d{1,2}\s*h\s*\d{2}\b"
+    # hora solta com crase ("às 18", "ás 9"): só com acento, "as 18" é artigo + número. Não quando o número é dinheiro
+    # ("às 18 reais", "às 18,50"); "às 18:30", "às 18 h 30" e "às 18/10" ficam com as alternativas acima. ponytail: "as 18" sem acento segue lido como valor (pode ancorar 18)
+    r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)",
     re.IGNORECASE,
 )
 _NAO_VALOR_RE = re.compile(

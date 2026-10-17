@@ -21,12 +21,15 @@ from core.services.ai_chat import runner
 from core.services.ai_chat._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import _BY_NAME, get_tool
 from core.services.ai_chat.valor_do_usuario import _centavos_lidos, ancora_valor
+from conftest import usuario_pagante
 from tests._fusao_of_helpers import uid_pro  # noqa: F401 (fixture)
 from tests._ia_falsa_helpers import (
-    chamada, com_tools, desliga_flag, lancamento, lancamentos, openai_falso,
+    chamada, com_tools, desliga_flag, lancamento, lancamentos, openai_falso, texto as texto_ia,
 )
 from tests._pendencia_credito_helpers import diga
+from tests.test_ai_chat_metas_escrita import linhas as metas_gravadas
 from tests.test_manual_launches_carteira_piggy import _connect_fake_bank
+from tests.test_wa_minhas_metas import chave  # noqa: F401 (fixture)
 
 RECUSA = "Não anotei nada: não achei esse valor no que você escreveu. Qual é o valor?"
 RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
@@ -288,6 +291,15 @@ def test_texto_sem_valor_nao_le_nada(texto):
     ("às 18 h 30", set(), {1800, 3000}),
     ("boleto de 150 às 18h30", {15000}, {1800, 3000, 183000}),
     ("gastei 50 hot dog", {5000}, set()),
+    # hora solta com crase: "às 18" não é R$ 18; "às 18 reais"/"às 18,50" segue dinheiro; "boleto de 150 às 18" ancora só o 150
+    ("anota o boleto da internet para amanhã às 18", set(), {1800}),
+    ("às 9", set(), {900}),
+    ("boleto de 150 às 18", {15000}, {1800}),
+    ("paguei 50 às 18h", {5000}, {1800}),
+    ("paguei às 18 reais", {1800}, set()),
+    ("paguei às 18,50", {1850}, set()),
+    ("paguei às 18 conto", {1800}, set()),
+    ("mas 18", {1800}, set()),   # "mas" não é "às"
 ])
 def test_quantidade_duracao_medida_nao_ancora(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -469,7 +481,10 @@ def test_log_da_recusa_e_do_descarte(uid_pro, monkeypatch):
 # Portão contra o próximo caso: escritor sem confirmação com argumento de dinheiro (type "number" no
 # schema; contagens como parcelas/meses/ids são "integer") tem que declarar `valor_do_usuario`.
 SEM_ANCORA_DE_PROPOSITO = {
-    "create_meta": "ancorada por pede_criar_meta_ja/_confere (metas_conversa), não por esta guarda",
+    # O alvo do create_meta só grava direto se `pede_criar_meta_ja(frase, args)` confere (metas_gate._confere: o valor da
+    # frase == args.alvo); senão vira "Só confirmando" com o valor À VISTA e o "sim" do usuário. Provado por
+    # test_meta_*_alvo_inventado_*, não por esta guarda.
+    "create_meta": "ancorada pelo gate da frase (metas_gate) ou pelo 'sim' do usuário, não por esta guarda",
 }
 
 
@@ -1111,6 +1126,17 @@ def test_n14_boleto_para_o_dia_1o_nao_grava_o_dia_como_valor(uid_pro, monkeypatc
     assert _boletos(uid_pro) == 1
 
 
+def test_n15_boleto_as_18_sem_h_nao_grava_hora_como_valor(uid_pro, monkeypatch):   # P1 do Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 18, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para amanhã às 18", platform="whatsapp")
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto de 150 às 18", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 def test_p5_conta_variavel_com_valor_dito_paga(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
     conta = _conta_variavel(uid_pro)
@@ -1118,3 +1144,31 @@ def test_p5_conta_variavel_com_valor_dito_paga(uid_pro, monkeypatch):
     runner.chat(uid_pro, "paguei a luz, deu 132", platform="whatsapp")
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 132.0}]
     assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "paid"
+
+
+# create_meta (auto-executa, mas `confirmar_se=_confirmar_criar`): o alvo que o modelo manda só grava direto se a FRASE
+# traz o mesmo valor; senão arma o "Só confirmando" (nada gravado até o "sim"). Codex: "alvo inventado grava direto".
+@pytest.mark.parametrize("frase,alvo", [
+    ("cria uma meta Viagem", 5000),            # imperativa sem valor: o 5000 é do modelo
+    ("cria uma meta Viagem de 3000", 5000),    # valor na frase diverge do alvo
+])
+def test_meta_alvo_inventado_nao_grava_direto_pergunta(chave, monkeypatch, frase, alvo):
+    u = usuario_pagante(plan="pro_max")
+    chave(u)
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("create_meta", {"nome": "Viagem", "tipo": "meta", "alvo": alvo})),
+                       texto_ia("🐷 Confirma?"))
+    r = runner.chat(u, frase, platform="whatsapp")
+    _usa_ia(cli)
+    assert metas_gravadas(u) == [], r
+    p = db.ai_get_pending_action(u)
+    assert p and p["tool_name"] == "create_meta" and "R$ 5.000,00" in p["summary"], (p, r)   # o valor aparece na pergunta
+
+
+def test_meta_alvo_igual_ao_da_frase_grava_direto(chave, monkeypatch):
+    u = usuario_pagante(plan="pro_max")
+    chave(u)
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, com_tools(chamada("create_meta", {"nome": "Viagem", "tipo": "meta", "alvo": 3000})))
+    runner.chat(u, "cria uma meta Viagem de 3000", platform="whatsapp")
+    assert [m["alvo"] for m in metas_gravadas(u)] == [3000] and db.ai_get_pending_action(u) is None
