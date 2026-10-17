@@ -71,7 +71,7 @@ export function ContaPerfil() {
       <div className="page-grid">
         <section className="panel span-12 conta-perfil" aria-label="Sua conta">
           {carregando ? <p role="status" className="faint">Carregando…</p>
-            : !dados ? (
+            : !dados || sessao ? ( // sessão acabada esconde o que ficou em cache (a refetch por foco devolve 401 e o React Query guarda o dado antigo)
               <div className="empty" role="alert">
                 <p>{sessao ? "Sua sessão terminou." : "Não deu para carregar seu perfil."}</p>
                 {sessao ? <button type="button" className="btn btn-ghost retry" onClick={() => location.reload()}>Recarregar</button>
@@ -92,7 +92,7 @@ export function ContaPerfil() {
           <p role="status" className="sr-only">{aviso}</p>
         </section>
       </div>
-      {aberto && uid && dados && (
+      {aberto && uid && dados && !sessao && (
         <ContatoForm campo={aberto} uid={uid} seguranca={dados} salvou={setAviso}
           fechar={() => { const c = aberto; setAberto(null); lapis.current[c]?.focus(); }} />
       )}

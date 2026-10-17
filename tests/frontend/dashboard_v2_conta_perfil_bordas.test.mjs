@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
-import { JSON_ERRO, abrirPerfil, ate, portao } from "./_conta_perfil.mjs";
+import { JSON_ERRO, SESSAO, abrirPerfil, ate, portao } from "./_conta_perfil.mjs";
 
 const browser = navegador();
 void browser;
@@ -105,6 +105,17 @@ test("volta ao app (foco da aba): o WhatsApp vira 'Conectado' e o nome novo apar
   await p.page.locator(".conta-perfil dl > div").nth(3).getByText("Conectado").waitFor({ state: "attached" });
   await p.page.waitForFunction(() => document.querySelector(".conta-perfil dd")?.textContent === "Nome vindo de fora");
   await p.ctx.close();
+});
+
+test("sessão acaba com o perfil na tela (foco da aba devolve 401): 'Sua sessão terminou.' e Recarregar, nada do cache fica visível", async () => {
+  const p = await abrirPerfil();
+  p.s.getErro = (r) => r.fulfill({ status: 401, json: { detail: "Not authenticated" }, headers: SESSAO });
+  await p.page.evaluate(() => document.dispatchEvent(new Event("visibilitychange", { bubbles: true })));
+  await p.page.locator(".conta-perfil [role=alert]").waitFor();
+  const r = [await p.page.locator(".conta-perfil [role=alert]").innerText(), await p.page.locator(".conta-perfil").innerText()];
+  await p.ctx.close();
+  assert.equal(r[0], "Sua sessão terminou.\n\nRecarregar");
+  assert.ok(!r[1].includes("Ana Teste") && !r[1].includes("exemplo.com"), r[1]);
 });
 
 test("/auth/me só é pedido pelo modal do E-MAIL: abrir e salvar nome e telefone não o chamam", async () => {
