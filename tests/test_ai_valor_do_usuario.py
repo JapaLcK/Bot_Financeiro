@@ -64,6 +64,21 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("preço final 2300", {230000}, set()),
     ("conta 1500,50", {150050}, {5000}),   # a vírgula não deixa sobrar ",50" como R$ 50
     ("conta final 1234", set(), {123400}),
+    # centavos: "n centavos" é n, não R$ n; "reais e centavos" segue somado
+    ("gastei 50 centavos", {50}, {5000}),
+    ("50 centavos no bombom", {50}, {5000}),
+    ("75 centavos", {75}, {7500}),
+    ("gastei 10 no uber e 50 centavos no bombom", {1000, 50}, {5000}),
+    ("30 reais e 50 centavos", {3050}, {50}),
+    # extenso lido por trecho, não a soma da mensagem
+    ("gastei cinquenta no mercado e vinte no uber", {5000, 2000}, {7000}),
+    ("cinquenta e cinco", {5500}, {5000, 500}),
+    ("vinte e cinco", {2500}, {2000, 500}),
+    ("cento e vinte", {12000}, {10000}),
+    ("mil e duzentos", {120000}, set()),
+    ("dois mil e trezentos e cinquenta", {235000}, set()),
+    ("cento e vinte mil e quinhentos", {12050000}, set()),
+    ("cinquenta e vinte", {5000, 2000}, {7000}),   # "e" só junta quando o nível desce
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -384,6 +399,24 @@ def test_p3_multiplicador_e_extenso(uid_pro, monkeypatch, frase, valor):
     openai_falso(monkeypatch, lancamento(valor))
     runner.chat(uid_pro, frase, platform="dashboard")
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": float(valor)}]
+
+
+def test_p6_n_centavos_grava_meio_real_e_nao_50_reais(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(0.5), lancamento(50), lancamento(0.5))
+    runner.chat(uid_pro, "gastei 50 centavos", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
+    r = runner.chat(uid_pro, "gastei 50 centavos", platform="dashboard")   # R$ 50 inventado: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}], r
+
+
+def test_p7_dois_extensos_na_mesma_frase_gravam_os_dois_e_a_soma_nao(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, com_tools(chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "mercado"}, "c1"),
+                                        chamada("add_launch", {"tipo": "despesa", "valor": 20, "alvo": "uber"}, "c2")))
+    runner.chat(uid_pro, "gastei cinquenta no mercado e vinte no uber", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}, {"tipo": "despesa", "valor": 20.0}]
+    assert _ancora(uid_pro, "add_launch", {"valor": 70}, "gastei cinquenta no mercado e vinte no uber")[1] == "recusa"
 
 
 def test_p4_cartao_12x_de_50_grava(uid_pro, monkeypatch):

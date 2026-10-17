@@ -78,12 +78,43 @@ def _textos_do_usuario(user_id: int) -> list[str]:
     return textos[:_MENSAGENS] + [atual]
 
 
+# "50 centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
+# ponytail: só dígitos; "cinquenta centavos" por extenso não é lido (recusa e pergunta o valor).
+_CENTAVOS_RE = re.compile(r"(?<!reais e )(?<!real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
+
+
+def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
+    return 4 if v >= 1000 else 3 if v >= 100 else 2 if v >= 20 else 1
+
+
+def _extensos(t: str) -> list[float | None]:
+    """Um número por extenso por trecho: "cinquenta no mercado e vinte no uber" → [50, 20], não 70.
+    O "e" só junta enquanto o nível desce ("cinquenta e cinco", "cento e vinte", "mil e duzentos");
+    "cinquenta e vinte" são dois."""
+    runs, prev = [], None
+    for tok in re.findall(r"\w+", t):
+        v = _words_to_number(tok)
+        if v is None:
+            prev = prev if tok.lower() == "e" else None
+            continue
+        n = _nivel(v)
+        if prev is not None and (n < prev or n == 4 > prev):
+            runs[-1].append(tok)
+        else:
+            runs.append([tok])
+        prev = n
+    return [_words_to_number(" ".join(r)) for r in runs]
+
+
 def _centavos_lidos(textos: list[str]) -> set[int]:
     textos = [_NAO_VALOR_RE.sub(" ", t) for t in textos]
-    lidos = set(collect_evidence([], "\n".join(textos))[0])
+    lidos = {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
+    textos = [_CENTAVOS_RE.sub(" ", t) for t in textos]  # "50 centavos" não vira também "R$ 50"
+    lidos |= set(collect_evidence([], "\n".join(textos))[0])
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
-        for v in (_extract_valor(limpo), _words_to_number(limpo)):
+        # sem dígito o `_extract_valor` cai no extenso da mensagem inteira (soma): os `_extensos` leem por trecho
+        for v in (_extract_valor(limpo) if re.search(r"\d", limpo) else None, *_extensos(limpo)):
             if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
                 lidos.add(round(v * 100))
     return lidos

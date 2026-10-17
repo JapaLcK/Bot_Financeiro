@@ -670,19 +670,28 @@ def test_negacao_ou_pergunta_confirma(uid_pro, monkeypatch, frase):
 # ── Valor e tipo por lista positiva ─────────────────────────────────────────
 
 @pytest.mark.parametrize("frase,args", [
-    ("gastei cinquenta reais no mercado com dois amigos", lancamento(52)),
     ("gastei 50 no mercado com dois amigos", lancamento(50)),   # 1 dígito + 1 extenso
     ("o mercado me devolveu 50 reais", lancamento(50)),
     ("o mercado me devolveu 50 reais", lancamento(50, tipo="receita")),
     ("reembolso mercado 50", lancamento(50, alvo="reembolso mercado")),
     ("uber aeroporto 23", lancamento(23, alvo="uber aeroporto")),
-], ids=["extenso-soma-52", "digito-e-extenso", "devolveu-despesa", "devolveu-receita",
+], ids=["digito-e-extenso", "devolveu-despesa", "devolveu-receita",
          "reembolso", "uber-aeroporto"])
 def test_valor_ou_tipo_sem_apoio_confirma(uid_pro, monkeypatch, frase, args):
     liga_flag(monkeypatch)
     openai_falso(monkeypatch, args)
     r = diga(uid_pro, frase)
     assert "Só confirmando" in r, r
+    assert lancamentos(uid_pro) == []
+
+
+def test_extenso_somado_52_e_recusado_pela_ancora(uid_pro, monkeypatch):
+    """"cinquenta reais ... com dois amigos" → modelo manda 52 (soma): a âncora lê cada número
+    por trecho (50 e 2), 52 não está escrito, então recusa antes da confirmação."""
+    liga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(52))
+    r = diga(uid_pro, "gastei cinquenta reais no mercado com dois amigos")
+    assert "não achei esse valor" in r, r
     assert lancamentos(uid_pro) == []
 
 
