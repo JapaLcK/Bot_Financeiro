@@ -216,3 +216,14 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .conta-ponte b, .conta-ponte span { max-width: 100%; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
 .conta-ponte span { color: var(--ink-2); }
 .conta-ponte .btn { margin-top: 12px; min-height: 44px; height: auto; }
+
+/* Perfil da Conta (conta/Perfil.tsx): ícone, valor e ação em grid (sem flex gap: Safari 14); a palavra de cada linha é .sr-only. */
+.conta-perfil { padding: 16px 20px; }
+.conta-perfil .detail-facts > div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; }
+.conta-perfil dt { margin: 0; font-size: 20px; line-height: 1; color: var(--ink-3); }
+.conta-perfil dd { margin: 0; min-width: 0; font-size: 16px; font-weight: 500; letter-spacing: 0; overflow-wrap: break-word; word-break: break-word; } /* o anywhere não existe no Safari 14 */
+.conta-perfil .icon-btn { width: 44px; height: 44px; }
+.conta-perfil .btn { min-height: 44px; height: auto; }
+.conta-perfil .perfil-ok { color: var(--gain); font-size: 22px; }
+.conta-perfil .perfil-erro { grid-column: 1 / -1; padding-bottom: 10px; font-size: 13px; }
+.conta-perfil .empty { padding: 12px 0; }

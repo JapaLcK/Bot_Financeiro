@@ -66,7 +66,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 ## Conta, segurança e sistema
 
-No web, Perfil, Cobrança e Configurações do `/painel` são só páginas-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`); o conteúdo abaixo mora lá.
+No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar WhatsApp e "Desde …", pelas rotas `/settings/{uid}/security[/contact]`, `/auth/dashboard-profile`, `/auth/me` (só `has_password`) e `/auth/link-code`); Cobrança e Configurações do `/painel` seguem páginas-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`), onde mora o resto do conteúdo abaixo.
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
@@ -74,7 +74,7 @@ No web, Perfil, Cobrança e Configurações do `/painel` são só páginas-ponte
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |
-| Contato (e-mail, nome, telefone) | `/settings` | Não há; o app coleta no cadastro e não edita | — | App | a discutir com o dono |
+| Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Não há; o app coleta no cadastro e não edita | — | App | par: plano/sessão separada do app (Perfil, Cobrança, exclusão de conta exigida pela Apple) |
 | Trocar a senha de quem já tem senha | `/settings` (`password-reset`) | Só o fluxo de conta sem senha | — | App | a discutir com o dono |
 | Open Finance: reconectar e desconectar um banco | Só conecta (sem reconectar) e desconecta todos | Reconecta e desconecta um por vez | O web não reconecta nem desconecta um | Web | a discutir com o dono |
 | Open Finance: atualizar agora, desconectar todos | Sim (`/refresh`, `disconnectAll`) | Não há | — | App | a discutir com o dono |
