@@ -14,7 +14,7 @@ Completo | Leve | Direto — e por quê.
 
 Par no outro lado: já existe | plano/issue #N | específico da plataforma porque …
 
-<!-- Paridade app × /painel: docs/plano-app-paridade.md. Apague a linha que não vale. -->
+<!-- Paridade app × /painel (CLAUDE.md §4). Apague as opções que não valem. -->
 
 ## Time-dev
 
