@@ -288,8 +288,8 @@ def _boletos(uid):
 _BOLETO = chamada("add_boleto", {"name": "IPTU", "amount": 300, "days": 10}, "b")
 
 
-def _lanca(valor):
-    return chamada("add_launch", {"tipo": "despesa", "valor": valor, "alvo": "mercado"}, "a")
+def _lanca(valor, alvo="mercado"):
+    return chamada("add_launch", {"tipo": "despesa", "valor": valor, "alvo": alvo}, "a")
 
 
 @pytest.mark.parametrize("modo", list(_MODOS))
@@ -310,7 +310,8 @@ def test_confirmacao_e_outra_escrita_na_mesma_rodada_nada_roda(uid_pro, monkeypa
 
 def test_add_launch_certo_e_outra_escrita_rodam_como_hoje(uid_pro, monkeypatch):
     liga_flag(monkeypatch)
-    openai_falso(monkeypatch, com_tools(_lanca(50), _BOLETO))
+    boleto = chamada("add_boleto", {"name": "IPTU", "amount": 50, "days": 10}, "b")  # o valor tem que estar no texto
+    openai_falso(monkeypatch, com_tools(_lanca(50), boleto))
     r = diga(uid_pro, "gastei 50 no mercado")
     assert "Só confirmando" not in r, r
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]
@@ -334,9 +335,9 @@ def test_confirmacao_com_leitura_na_rodada(uid_pro, monkeypatch, leitura_antes):
     monkeypatch.setattr(runner, "get_tool",
                         lambda n: contada if n == "get_period_summary" else ai_tools.get_tool(n))
     leitura = chamada("get_period_summary", {}, "s")
-    rodada = [leitura, _lanca(500)] if leitura_antes else [_lanca(500), leitura]
+    rodada = [leitura, _lanca(500, "zé")] if leitura_antes else [_lanca(500, "zé"), leitura]  # alvo sem regra: confirma
     openai_falso(monkeypatch, com_tools(*rodada))
-    r = diga(uid_pro, "gastei 50 no mercado")
+    r = diga(uid_pro, "gastei 500 no zé")
     assert "Só confirmando" in r, r
     assert db.ai_get_pending_action(uid_pro)["tool_name"] == "add_launch"
     assert rodou == ([1] if leitura_antes else [])

@@ -412,6 +412,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # reversível (undo), igual add_launch
         execute=_pay_bill_execute,
+        valor_do_usuario="amount",  # opcional: sem âncora é descartado (valor fixo da conta, ou pergunta)
         arma_pendencia_no_execute=True,  # "quanto veio este mês?" (bill_amount_expected)
     ),
     Tool(
@@ -441,6 +442,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # reversível (dá pra apagar); baixa fricção
         execute=_add_boleto_execute,
+        valor_do_usuario="amount",
     ),
     Tool(
         schema={
