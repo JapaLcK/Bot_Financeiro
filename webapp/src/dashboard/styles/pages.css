@@ -210,3 +210,9 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 }
 @media (max-width: 508px) { .detail-auto { display: none; } }
 @container (max-width: 440px) { .detail-auto { display: none; } }
+
+/* Páginas-ponte da Conta (conta/Ponte.tsx): nome, e-mail e o botão para a tela antiga, em grid (sem flex gap: Safari 14). */
+.conta-ponte { display: grid; gap: 4px; justify-items: start; padding: 20px; }
+.conta-ponte b, .conta-ponte span { max-width: 100%; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+.conta-ponte span { color: var(--ink-2); }
+.conta-ponte .btn { margin-top: 12px; min-height: 44px; height: auto; }

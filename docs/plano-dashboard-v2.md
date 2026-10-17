@@ -39,6 +39,13 @@ Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e
 Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
+**Conta no painel (dono, 2026-10-17):** a seção "Conta" fica na barra lateral, embaixo, com
+Perfil, Cobrança e Configurações, mais o botão Sair (sem atalhos de teclado). O conteúdo
+vem em PRs, uma página por vez; até lá as três são páginas-ponte (nome, e-mail e um link
+para a tela antiga). O "continua em `settings.html`" acima vale até cada página receber o
+seu conteúdo; a `/settings` antiga fica como saída de emergência. A tela "Assinaturas"
+(Netflix etc.) é outra coisa e já existe.
+
 O Resumo tem um bloco de **contas**: o saldo de hoje no total e o de cada conta conectada
 no Open Finance, mais a carteira Piggy (dono, 2026-09-30: o protótipo não mostrava o saldo
 em lugar nenhum).
