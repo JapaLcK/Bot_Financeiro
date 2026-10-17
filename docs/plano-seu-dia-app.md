@@ -111,7 +111,7 @@ do card que muda; a aba já é longa; o card ocupa a tela inteira o tempo todo, 
 | Barra de divisão + legenda "emoji nome · R$" | **traduz**: `BarraComposicao` + **só os emojis** das fatias (até 4; "+N" se houver mais); nome e valor só no `accessibilityLabel` | forma e ícone no lugar de texto; só com ≥ 2 fatias > 0 |
 | "Compras do dia" (lista completa do `/lancamentos`) | **corta**; fica **os 3 maiores** (`maiores`, já no payload), descrição + valor | a lista completa é o extrato; zero requisição extra |
 | "Ver em Lançamentos" | **traduz** para "Ver extrato do dia" → `/extrato?dia=` (rota existente; **o `Extrato` passa a mandar `dia` na consulta**, §5) | a instrução indispensável; o app chama a tela de **Extrato** |
-| Região `role="status"` ao trocar o dia | `AccessibilityInfo.announceForAccessibility` (data + total) | equivalente nativo |
+| Região `role="status"` ao trocar o dia | `AccessibilityInfo.announceForAccessibility` (data + total; **só a data com `oculto`**: o anúncio não passa pela máscara do `Money`) | equivalente nativo |
 | Tag "Só \<categoria\>" / modo categoria | **fora**: o app não tem o filtro de categoria no calendário nem o modo categoria | não existe no app hoje |
 
 Texto visível na folha: **a data (título), o total, "N%", N, 3 descrições e 1 botão**. Nenhuma frase.
@@ -121,7 +121,7 @@ Texto visível na folha: **a data (título), o total, "N%", N, 3 descrições e 
 | Estado | O que a folha mostra |
 |---|---|
 | carregando (1ª abertura do mês) | `ActivityIndicator` com `accessibilityLabel` (padrão do `RecursoDados`); a data e o ✕ já aparecem |
-| erro (rede, 5xx, contrato) | `mensagemRecurso` + "Tentar novamente" (padrão do `RecursoDados`); 403/402 caem no portão como nas outras telas |
+| erro (rede, 5xx, contrato) | `mensagemRecurso` + "Tentar novamente" (padrão do `RecursoDados`). **402 e 403 `open_finance_onboarding_required` caem no portão, mas não de graça:** `p.falhou` (`provider.tsx:73-76`) só trata sessão expirada e 402; o 403 do onboarding é tratado **dentro** do `carregar` do provider (`provider.tsx:131`). O `useGastosMes` precisa do mesmo tratamento (achado do Codex no #1050; o `useLancamentos` tem a mesma lacuna hoje), §5 |
 | `disponivel: false` (mês todo antes do corte) | **não abre a folha**: o toque navega para o extrato, como hoje (o calendário nativo também não terá linha útil) |
 | dia **fora da grade** (a linha existe em `detalhes` mas não em `/gastos.dias`, §2.2.3) | **não abre a folha**: o toque navega para o extrato, como hoje. Nunca mostra "R$ 0,00" para uma linha que tem valor |
 | dia da grade **sem saída** (só entrada) | data, setas, `Valor` R$ 0,00, ✕ e o botão do extrato; sem pílula, contador nem barra |
@@ -184,6 +184,10 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
   app**: o PR 2 acrescenta `dia` à `URLSearchParams` do `Extrato` e passa a usar o `dia` como parte da consulta (o filtro no aparelho deixa de ser necessário, e o `chave` extra do
   `useLancamentos` também). Servidor igual, app instalado não muda. Teste: mês com > 50 lançamentos e o dia na 2ª página (vermelho antes, verde depois).
 - `Calendario` (chat, `bloco`): **inalterado**.
+- **403 do onboarding na leitura sob demanda (achado do Codex no #1050).** Se o onboarding do Open Finance deixa de estar completo entre o foco e a leitura, `/api/app/gastos` devolve 403
+  `open_finance_onboarding_required`. Hoje só o `carregar` do provider o leva ao portão (`cancelar(); setGate("negado"); setDados({})`, `provider.tsx:131`); `p.falhou` não. O PR 1 extrai essa
+  checagem para um ponto só (o 403 com o corpo do onboarding tratado em `falhou`, ou um helper chamado pelo `carregar` e pelo hook) e o `useGastosMes` a usa; o `useLancamentos` passa a se beneficiar
+  (§0.7: uma regra). Teste: 403 do onboarding na leitura do mês manda o painel para o portão, e **não** mostra "Tentar novamente"; 403 de outro motivo segue como "negado" do recurso.
 - `mudarMes`/`atualizar`/`versao`: a leitura do mês reinicia por esses gatilhos (molde do `useLancamentos`), e fecha a folha se o mês muda.
 
 ## 6. Testes e verificação
@@ -192,7 +196,7 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 - paridade com a tabela dourada (`gastosDia`), com **controle negativo**: trocar a regra de borda (−5/+15, dia agendado fora da média) tem de deixar vermelho;
 - o schema contra a fixture; **controle negativo**: campo de dinheiro inválido → `ContratoInvalido`, não 0;
 - a folha pelo `renderRouter` (molde de `painel_numeros_gastos.test.tsx`): toque abre; setas e limites (`disabled` no 1º/último dia aberto); estados da §3.3
-  (carregando, erro com "Tentar novamente", dia sem saída, hoje, agendado, dia fora da grade navega, `disponivel:false` navega, `oculto` sem pílula/barra/valores no label);
+  (carregando, erro com "Tentar novamente", dia sem saída, hoje, agendado, dia fora da grade navega, `disponivel:false` navega, `oculto` sem pílula/barra/valores no label **nem no anúncio da troca de dia**);
   fatia ≤ 0 fora da barra; `"91.010"` × `"1.005"` sem erro; `fontScale` ampliado; `accessibilityLabel` com data, total e sentido;
 - `Extrato` com `dia`: mês com > 50 lançamentos e o dia fora da 1ª página mostra as compras do dia (hoje mostra vazio); a consulta leva `mes` e `dia` juntos;
 - o negativo do conserto de grade: com o fallback desligado, a linha fora da grade abre a folha com R$ 0,00 → o teste fica **vermelho**;
@@ -221,7 +225,7 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 
 | # | Conteúdo | Faixa | Deixa pronto |
 |---|---|---|---|
-| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (centavos) + tabela dourada + caso no teste web; `useGastosMes`; `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
+| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (centavos) + tabela dourada + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
 | **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
 | **3** | **O dia em contexto.** Pílula ↓↑ %, barra com emojis e os 3 maiores. | **Leve** | paridade visual com o web na versão sem texto; o jest dos tons e da barra |
 | — | **Build** pelo Xcode (dono) e validação no iPhone. Não é PR. | — | fecha o que só o aparelho prova |
