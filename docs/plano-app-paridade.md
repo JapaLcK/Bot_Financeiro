@@ -91,7 +91,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 25 | Ler: busca (`q`), origem, tipo, categoria, dia, cursor | `GET /lancamentos` (`parts/Lancamentos.tsx`) | `GET /api/app/lancamentos` (`extrato.tsx`): mesmos filtros; `dia` filtra no aparelho | Paridade de filtros (conta e cartão existem no servidor e nenhum dos dois expõe) | paridade |
+| 25 | Ler: busca (`q`), origem, tipo, categoria, **conta**, dia, cursor | `GET /lancamentos` (`parts/Lancamentos.tsx`): seletor de **Conta** (de `GET /contas`) e de Origem com as quatro (inclui `registro_antigo`) | `GET /api/app/lancamentos` (`extrato.tsx`): busca, origem (sem `registro_antigo`, de propósito: o comentário do arquivo só diz que "o filtro não o oferece", o motivo não foi achado), tipo, categoria; `dia` filtra no aparelho; **não manda `conta`** | O servidor já aceita `conta` e `cartao` (`api/v2/lancamentos.py`); o web só expõe `conta` e o app nenhum dos dois. Os dados de `/contas` já chegam ao app (`contasResumo`) | **app atrás (A14)** no filtro por conta; `registro_antigo` e `cartao` a decidir |
 | 26 | `guardado=1` (aportes e saques como linhas marcadas, #983) | O `/painel` manda | O app **não manda, de propósito**: app instalado não atualiza com o backend (plano §8) | Um build novo pode mandar | **app atrás (A7)** |
 | 27 | Escrever: lançar, editar, apagar na Carteira (Q36) | `POST /lancamentos/carteira`, `/editar`, `/apagar`, regra `pode` | O Extrato só lê | **Sem chave de idempotência** (`api/v2/lancamentos.py:107`): num celular com rede ruim, repetir o POST grava duas vezes | **app atrás (A4)** |
 
@@ -131,11 +131,12 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 | 47 | Contas sincronizadas e últimas transações do banco | Cards em `settings.html` (`view=open-finance`) | Não há tela de configuração com isso; os saldos e as transações aparecem no Patrimônio e no Extrato do painel nativo | Mesma informação em outra superfície; a duplicata em Configurações é do web | paridade (equivalente nas telas do painel) |
 | 48 | Vincular caixinha do banco a uma meta | `POST /open-finance/{user_id}/caixinhas/bind`, card "Caixinhas & metas"; **beta, só para allowlist** (404 fora dela) | Não há | Beta no web; vira linha de lacuna quando sair da allowlist | web beta; **a decidir com o dono quando abrir** |
 | 49 | Política de Privacidade | Seção "Privacidade e documentos" em Configurações (`/privacy`, `settings.html`) | Só no cadastro (`features/auth/Termos.tsx`); Configurações tem Suporte e Sair, sem o link | Quem já tem conta não alcança a política pelo app | **app atrás (A13)** |
+| 50 | Atalhos de conta no shell: **Configurações/Conta**, **Suporte** e **Sair** | **Não há no `/painel`**: `frontend/painel.html` só monta o bundle e `webapp/src/dashboard` não tem link para `/suporte`, `/settings` (só "Conectar banco" → `?view=open-finance`) nem logout (`git grep` 2026-10-16). O painel antigo (`dashboard.html`) tem os três | `configuracoes.tsx`: Bancos conectados, Segurança, Suporte (`/suporte` no navegador) e Sair | Sair toca a sessão: a limpeza de logout é central (`auth-refresh`), o `/painel` não pode inventar outro caminho | **web atrás (W8)** |
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
 Resumo, para não perder: linhas 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
-(Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais) e 28 (chat real). Dentro dos "específicos da
+(Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) e 50 (Suporte, Conta e Sair no shell). Dentro dos "específicos da
 plataforma" o app ainda tem biometria, tampa de privacidade e Compras Apple (linhas 36 e 37).
 Isso é **mais** do que a regra do dono previa ao dizer "o app está atrás": **o web também está atrás**, e por dívida
 grande (§6).
@@ -159,6 +160,7 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A9 | Excluir conta e exportar dados | **a verificar**: se `DELETE /auth/account` e `account/export` aceitam Bearer; senão acrescentar | telas nativas | **Completo** (auth, sessão, destrutivo) | G | Sem data de submissão (§10, P4) |
 | A12 | Sessões ativas e atividade recente, preferências de notificação, editar e-mail, nome e telefone, trocar senha, recomeçar do zero (linhas 41 a 44 e 46) | **a verificar**: as rotas `/settings/{user_id}/...` aceitam Bearer? Se não, acrescentar equivalentes sem `user_id` no caminho | telas nativas na Segurança e em Configurações, mínimo de texto | **Completo** (auth e sessão) | G | A9 (mesma área); o PR #1035 (login com MFA e exclusão agendada) pode mexer no mesmo código |
 | A13 | **Atualizar agora** do Open Finance (linha 32) e link da **Política de Privacidade** em Configurações (linha 49) | 0 para o link; **a verificar** para o refresh: `POST /open-finance/{user_id}/refresh` é rota legada que o app já usa para ler (`/open-finance/{uid}`), então tende a aceitar Bearer, mas `wait` e o limite de frequência não foram lidos | uma chamada em `services/openFinance.ts`, trocar "Conferir de novo" e o puxar-para-atualizar de `conexoes.tsx` para pedir a sincronização; `ListRow` "Política de Privacidade" abrindo `/privacy` (mesmo padrão do Suporte) | Leve (**Completo** se o refresh exigir mudar o servidor) | P | Nenhuma; refresh toca fornecedor externo, então confirmar o limite antes |
+| A14 | **Extrato: filtro por conta** (linha 25) | 0 (`/api/app/lancamentos?conta=` e `/api/app/contas` já montados) | um `Chip`/seletor de conta em `extrato.tsx`, lista vinda do que `contasResumo` já lê; decidir `registro_antigo` e `cartao` | Leve | P | Nenhuma; a mesma lista de contas serve à escolha de fonte da meta (A3) |
 | A10 | Guia e dicas, adaptados ao nativo (P3: sim) | **Muda o contrato, só por acréscimo**: o roteiro `PASSOS` (`api/v2/guia.py`) é do web (âncoras e ações do DOM; o passo `piggy.pergunta` é `exemplo` e a fala diz que o chat real "chega em breve", o que é falso no app, onde o chat é real). Decidir no plano do A10: (a) roteiro por plataforma no servidor, sem mudar o que o web lê, ou (b) mapeamento nativo no cliente que ignora `ancora`/`acao` e troca a fala. Não reaproveitar a fala do web como está | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto | Leve (cliente) + servidor aditivo, a classificar no plano do A10 | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
@@ -186,7 +188,7 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 3 | **A5 Receitas do extrato + A6** | Já era trabalho prometido (P7 2b); fecha uma função de dinheiro que o web já oferece. |
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
 | 5 | **A4 Escrita na Carteira**, com o PR de servidor (idempotência) **antes** | Contesto "escrita primeiro": é o item mais caro (Completo, G), o servidor não protege contra repetição de POST e o produto já reduziu a escrita manual a uma só (Carteira). Vale começar o PR de servidor cedo, em paralelo, porque ele não depende de build. |
-| 6 | A7, A8, A13 | Pequenos; A8 espera o #1033; A13 é uma chamada e um link. |
+| 6 | A7, A8, A13, A14 | Pequenos; A8 espera o #1033; A13 é uma chamada e um link; A14 é um filtro. |
 | 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
@@ -249,7 +251,7 @@ Medido, por leitura estática e grep, em 2026-10-16: rotas dos dois sub-apps, co
 `TITULOS` e perfis do app, `Frame` com e sem `real`, `CHAT_REAL`, schema da previsão (campos que o app lê e usa),
 `MetaFonte` e `investidoQuery`, filtros do `/lancamentos`, rotas legadas que o app usa, o `app.config.ts`, os PRs abertos.
 
-**Não levantado (escopo):** as funções que só existem no painel antigo `/app` (linha 45) e o conteúdo de cada card de `frontend/settings.html`, que foi varrido card a card na 4ª rodada do Codex (títulos dos cards e chamadas `fetch`, comando `grep -n 'card-title\|data-title\|legal-title\|fetch(' frontend/settings.html`, 2026-10-16): cada card tem linha na matriz (32 a 35, 41 a 44, 46 a 49). Os campos internos de cada card e as regras de plano de cada chamada não foram lidos um a um.
+**Não levantado (escopo):** as funções que só existem no painel antigo `/app` (linha 45) e o conteúdo de cada card de `frontend/settings.html`, que foi varrido card a card na 4ª rodada do Codex (títulos dos cards e chamadas `fetch`, comando `grep -n 'card-title\|data-title\|legal-title\|fetch(' frontend/settings.html`, 2026-10-16): cada card tem linha na matriz (32 a 35, 41 a 44, 46 a 49). Os campos internos de cada card e as regras de plano de cada chamada não foram lidos um a um. Na 5ª rodada varri também os filtros do Extrato (linha 25) e os atalhos de conta do shell (linha 50, `git grep` em `frontend/painel.html` e `webapp/src/dashboard`), e conferi pela lista de ações as linhas 2, 10, 11 e 33, os "paridade" que sobravam com "—" na diferença; a comparação foi por ações disponíveis, não por pixel nem por regra de plano.
 
 **Não medido:** nenhum jest, nenhum teste web, nenhuma chamada ao servidor nem a produção, nada aberto em aparelho
 ou simulador. Os `?` da matriz: onde fica a ordem salva da Home no web; limites e reconexão do Open Finance em cada

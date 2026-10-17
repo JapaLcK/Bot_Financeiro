@@ -256,14 +256,14 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 | W5 | **Saldo do mês e Guardado líquido reais** no Resumo do mês (hoje só Entrou e Saiu são reais; "Guardado no mês" saiu por ser inventado) | `mes-detalhes` só no app: montar no v2 | Completo (rota), Leve (tela) | P |
 | W6 | **Modo privacidade** (esconder valores): o app o tem em todo lugar e o painel antigo também (`toggleHideBalance`); o `/painel` não | nenhum | Leve | P |
 | W7 | Compromissos do **Resumo** (`compromissos: Bills`) ainda de exemplo, embora a versão real exista na página `/previsao` (`Compromissos.tsx`) | nenhum | Leve | P |
+| W8 | **Conta no shell do `/painel`**: links para Configurações (`/settings`) e Suporte (`/suporte`) e o **Sair**; hoje o shell só monta o bundle e não tem nenhum dos três (matriz do plano do app, linha 50) | nenhum para os links; o Sair reutiliza `/auth/logout` e a limpeza central do `auth-refresh` | links **Leve**, Sair **Completo** (sessão) | P |
 
-**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A13): Para onde vai v2 e "Seu dia", Metas v2
+**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A14): Para onde vai v2 e "Seu dia", Metas v2
 (leitura e escrita), escrita na Carteira, receitas do extrato, premissas e grupos da Previsão, `guardado=1`, comparação,
-conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero; Atualizar agora do Open Finance e Política de Privacidade), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
+conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero; Atualizar agora do Open Finance e Política de Privacidade; filtro por conta no Extrato), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
-risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5** e
-**W6**, pequenos; **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
+risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5**, **W6** e **W8**, pequenos; **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
 decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
