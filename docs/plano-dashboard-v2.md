@@ -257,9 +257,9 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 | W6 | **Modo privacidade** (esconder valores): o app o tem em todo lugar e o painel antigo também (`toggleHideBalance`); o `/painel` não | nenhum | Leve | P |
 | W7 | Compromissos do **Resumo** (`compromissos: Bills`) ainda de exemplo, embora a versão real exista na página `/previsao` (`Compromissos.tsx`) | nenhum | Leve | P |
 
-**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A12): Para onde vai v2 e "Seu dia", Metas v2
+**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A13): Para onde vai v2 e "Seu dia", Metas v2
 (leitura e escrita), escrita na Carteira, receitas do extrato, premissas e grupos da Previsão, `guardado=1`, comparação,
-conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
+conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero; Atualizar agora do Open Finance e Política de Privacidade), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
 risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5** e
