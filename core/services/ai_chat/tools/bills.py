@@ -412,7 +412,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,  # reversível (undo), igual add_launch
         execute=_pay_bill_execute,
-        valor_do_usuario="amount",  # opcional: sem âncora é descartado (valor fixo da conta, ou pergunta)
+        valor_do_usuario="amount",  # opcional: sem âncora e sem valor no texto é descartado (valor fixo da conta, ou pergunta); com outro valor no texto, recusa
         arma_pendencia_no_execute=True,  # "quanto veio este mês?" (bill_amount_expected)
     ),
     Tool(

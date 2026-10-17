@@ -52,7 +52,9 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     # rótulo de dia, com ou sem dois-pontos: "dia: 18", "vencimento dia: 18", "venc. 18". O dia (1-2 dígitos) nunca é valor;
     # sem o lookahead "vence 18/10" mascararia o 18 e deixaria "/10" para ser lido. ponytail: "vence 50 reais" mascara o 50 (fail-closed)
     r"|\bdia\s*:?\s*\d{1,2}\b(?![/.:,-]\d)"
-    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?\d{1,2}\b(?![/.:,-]\d)",
+    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?\d{1,2}\b(?![/.:,-]\d)"
+    # hora compacta "18h30" / "18 h 30"; "18h" nua já é a unidade `h` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
+    r"|\b\d{1,2}\s*h\s*\d{2}\b",
     re.IGNORECASE,
 )
 _NAO_VALOR_RE = re.compile(
@@ -158,9 +160,9 @@ def _parcelas(bruto, textos: list[str]) -> tuple[int, bool]:
 
 def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     """(args, acao). `acao`: None = valor ancorado (ou nada a conferir); "recusa" =
-    campo obrigatório sem âncora; "recusa_parcelas" = idem, mas o valor está no texto e
-    a contagem de parcelas não; "descarta" = campo opcional sem âncora, já
-    removido dos args devolvidos."""
+    campo obrigatório sem âncora, ou opcional com outro valor no texto; "recusa_parcelas" = idem, mas o valor está no texto e
+    a contagem de parcelas não; "descarta" = campo opcional sem âncora e sem valor
+    nenhum no texto, já removido dos args devolvidos."""
     campo = getattr(tool, "valor_do_usuario", None)  # getattr: o runner trata assim todo atributo de tool
     if campo is None or not isinstance(args, dict) or args.get(campo) is None:
         return args, None
@@ -187,7 +189,8 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
                 de_parcela |= {r + int(mc[2]) for r in _centavos_lidos([mc[1]])} if mc else _centavos_lidos([s])
     if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None
-    acao = "recusa" if campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
+    # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
+    acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) else "descarta"
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",
                           source="ai_chat/valor_do_usuario", user_id=user_id,
                           details={"tool": tool.name, "acao": acao, "motivo": "valor" if escrita else "parcelas",

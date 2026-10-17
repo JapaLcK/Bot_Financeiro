@@ -268,6 +268,11 @@ def test_texto_sem_valor_nao_le_nada(texto):
     ("gastei 100 lanche", {10000}, set()),       # idem "l"
     ("gastei 100 mercado", {10000}, set()),      # idem "m"
     ("gastei 100 hamburguer", {10000}, set()),   # idem "h"
+    # hora compacta: "18h30" não são R$ 18 e R$ 30; "h" colado em palavra segue dinheiro
+    ("para amanhã às 18h30", set(), {1800, 3000, 183000}),
+    ("às 18 h 30", set(), {1800, 3000}),
+    ("boleto de 150 às 18h30", {15000}, {1800, 3000, 183000}),
+    ("gastei 50 hot dog", {5000}, set()),
 ])
 def test_quantidade_duracao_medida_nao_ancora(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -309,6 +314,11 @@ def test_regra_da_ancora(uid_pro):
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "doze vezes de cinquenta")[1] == "recusa"
     # campo opcional sem âncora: descartado; obrigatório: recusa
     args, acao = _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": 150}, "paguei a luz")
+    assert acao == "descarta" and args == {"name": "luz"}
+    # opcional com valor escrito que não bate é divergência (recusa); data mascarada não conta como valor
+    assert _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": 500}, "paguei 50 da luz")[1] == "recusa"
+    assert _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": 120}, "paguei 120 da luz")[1] is None
+    args, acao = _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": 500}, "paguei a luz do dia 20")
     assert acao == "descarta" and args == {"name": "luz"}
     assert _ancora(uid_pro, "add_boleto", {"name": "x", "amount": 300}, "anota um boleto")[1] == "recusa"
     assert _ancora(uid_pro, "set_budget", {"categoria": "lazer", "budget": 300}, "orçamento de lazer")[1] == "recusa"
@@ -1030,6 +1040,47 @@ def test_q7_regra_das_parcelas_no_unitario(uid_pro):
     assert a({"valor": 600, "parcelas": 12}, "12 parcelas de 50") is None
     # tool sem `parcelas` no schema ignora o campo, então não recusa por ele
     assert _ancora(uid_pro, "add_launch", {"valor": 50, "parcelas": 6}, "gastei 50")[1] is None
+
+
+def _conta_fixa(uid):
+    from datetime import date
+    import db.bills as B
+    import db.recurring as R
+    rec = R.create_recurring_expense(uid, "Luz", 120, "conta", 10, "account", payment_mode="manual")
+    B.ensure_bill_instance(rec["id"], uid, date.today(), 120)
+    return B.list_bills(uid, include_paid=False)[0]
+
+
+def test_n12_conta_paga_valor_escrito_diverge_recusa(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    conta = _conta_fixa(uid_pro)
+    cli = openai_falso(monkeypatch, _paga_luz(500))
+    r = runner.chat(uid_pro, "paguei 50 da luz", platform="whatsapp")   # escreveu 50, o modelo mandou 500
+    _usa_ia(cli)
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "pending"
+
+
+def test_n12b_conta_paga_sem_valor_escrito_descarta_o_do_modelo_e_paga_o_cadastrado(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    conta = _conta_fixa(uid_pro)
+    openai_falso(monkeypatch, _paga_luz(500))
+    runner.chat(uid_pro, "paguei a luz", platform="whatsapp")   # nenhum valor escrito: o 500 é descartado
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 120.0}]
+    assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "paid"
+
+
+def test_n13_boleto_as_18h30_nao_grava_hora_como_valor(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 30, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 18, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    for _ in range(2):
+        r = runner.chat(uid_pro, "anota o boleto da internet para amanhã às 18h30", platform="whatsapp")
+        assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto da internet de 150 às 18h30", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
 
 
 def test_p5_conta_variavel_com_valor_dito_paga(uid_pro, monkeypatch):
