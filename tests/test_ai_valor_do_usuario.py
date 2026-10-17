@@ -151,6 +151,43 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("anota o boleto da internet para 15 out", set(), {1500}),
     ("boleto de 150 para 15 out 2026", {15000}, {1500, 202600}),
     ("boleto de 15 out 150", {15000}, {1500}),               # 150 não é ano: segue dinheiro
+    # o ano depois de "[N de] MÊS" é da data, inclusive atrás do rótulo "dia"/"vence" (N18 do Codex)
+    ("dia 15 de outubro de 2026", set(), {1500, 202600}),
+    ("dia 15 de outubro 2026", set(), {1500, 202600}),
+    ("dia 15 outubro 2026", set(), {1500, 202600}),
+    ("dia 15 de outubro de 26", set(), {1500, 2600}),
+    ("15 de outubro de 2026", set(), {1500, 202600}),
+    ("15 de out de 2026", set(), {1500, 202600}),
+    ("para outubro de 2026", set(), {202600}),
+    ("outubro 2026", set(), {202600}),
+    ("out/2026", set(), {202600}),
+    ("10/2026", set(), {1000, 202600}),
+    ("vence 15 de outubro 2026", set(), {1500, 202600}),
+    ("vencimento dia 15 de outubro de 2026", set(), {1500, 202600}),
+    ("boleto de 150 dia 15 de outubro de 2026", {15000}, {1500, 202600}),
+    ("boleto de 150 dia 15 de outubro 2026", {15000}, {1500, 202600}),
+    ("boleto de 150 vence 15 de outubro 2026", {15000}, {1500, 202600}),
+    ("boleto de 150 para outubro 2026", {15000}, {202600}),
+    ("boleto de 150 dia 15 de outubro 150", {15000}, {1500}),   # 150 sem "de" não é ano: segue dinheiro
+    ("gastei 50 em março de 2026", {5000}, set()),
+    # centavos por extenso / "e meio": o composto inteiro sai e nada ancora (N19 do Codex)
+    ("paguei 30 reais e cinquenta centavos", set(), {3000, 3050, 5000, 50}),
+    ("30 reais e vinte e cinco centavos no mercado", set(), {3000, 3025, 2500}),
+    ("R$ 30 e cinquenta centavos", set(), {3000, 3050}),
+    ("1 real e cinquenta centavos", set(), {100, 150}),
+    ("30 reais e meio", set(), {3000, 3050}),
+    ("30 reais e meia", set(), {3000}),
+    ("30 reais e cinquenta centavos e 10 reais no uber", {1000}, {3000, 3050}),
+    ("30 reais e 50 centavos", {3050}, {3000, 50}),            # positivo: dígito + dígito segue composto
+    ("trinta reais e 50 centavos", {50}, {3050, 5000}),         # positivo: inteiro por extenso segue como hoje
+    # porcentagem por extenso não é valor (N20 do Codex)
+    ("multa de 10 por cento", set(), {1000}),
+    ("multa de 10 porcento", set(), {1000}),
+    ("multa de 10 por cent", set(), {1000}),
+    ("juros de 2,5 por cento ao mês", set(), {250, 25}),
+    ("10 porcento", set(), {1000}),
+    ("boleto de 150 com multa de 10 por cento", {15000}, {1000}),
+    ("gastei 10 por 5 centavos", {5}, {500}),                   # positivo: "por" sem "cento" não mascara
     ("gastei 50 em março", {5000}, set()),
     ("gastei 50 mercado em outubro", {5000}, set()),
     # data ISO e pontuada não é valor; milhar e decimal seguem lidos
@@ -1331,6 +1368,47 @@ def test_n16_boleto_amanha_18hs_nao_grava_hora_como_valor(uid_pro, monkeypatch):
     assert RECUSA in r and _boletos(uid_pro) == 0, r
     _usa_ia(cli)
     runner.chat(uid_pro, "boleto de 150 para amanhã 18hs", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n18_boleto_dia_15_de_outubro_2026_nao_grava_o_ano_como_valor(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "15/10"})))
+    for fala in ("anota o boleto da internet para o dia 15 de outubro 2026", "anota o boleto da internet para o dia 15 de outubro de 2026"):
+        r = runner.chat(uid_pro, fala, platform="whatsapp")
+        assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto da internet de 150 dia 15 de outubro de 2026", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n19_centavos_por_extenso_nao_ancora_nem_o_inteiro(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(30), lancamento(30.5), lancamento(30))
+    for _ in range(2):
+        r = runner.chat(uid_pro, "paguei 30 reais e cinquenta centavos no mercado", platform="whatsapp")
+        assert RECUSA in r and lancamentos(uid_pro) == [], r
+    r = runner.chat(uid_pro, "paguei 30 reais e 50 centavos no mercado", platform="whatsapp")   # dígito + dígito: 30 não ancora, 3050 sim
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+
+
+def test_n19b_centavos_em_digito_gravam_o_composto(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(30.5))
+    runner.chat(uid_pro, "paguei 30 reais e 50 centavos no mercado", platform="whatsapp")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.5}]
+
+
+def test_n20_multa_por_cento_nao_grava_a_porcentagem_como_valor(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 10, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet com multa de 10 por cento", platform="whatsapp")
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto da internet de 150 com multa de 10 por cento", platform="whatsapp")   # 150 escrito: grava
     assert _boletos(uid_pro) == 1
 
 

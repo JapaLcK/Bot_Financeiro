@@ -39,21 +39,27 @@ _MENSAGENS = 3
 # `_MASCARA_NAO_MONETARIA_RE` do ai_guard alimenta a guarda de afirmações. Os dígitos
 # depois da palavra pedem 4+. `conta`/`cartão`/`final` sozinhos NÃO mascaram: vêm antes de
 # dinheiro ("paguei a conta 1200", "valor final 1500"); só "cartão final"/"conta final" 1234.
+# O ano que segue "[N de] MÊS" faz parte da data ("15 de outubro de 2026"); sem "de" só 20dd ("15 out 150" mantém o 150 como dinheiro).
+_MES = (r"\b(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro"
+        r"|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b")
+_ANO = r"(?:\s+de\s+\d{2,4}\b|\s+20\d\d\b)"
 _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também ignora ("em 12/10" é data; "em 12 meses" segue sendo 12x)
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
-    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
+    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*(?:%|por\s*cent(?:o)?\b|pct\b)"
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
     r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]", "15 out 2026"): só "N [de] MÊS", nunca "50 em março".
     # Ano sem "de" só com 20dd: "15 out 150" mantém o 150 como dinheiro
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
-    r"|(?<![\d.,])(?:\d{1,2}[ºª°]?|\d[oa])\s+(?:de\s+)?(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
-    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4}|\s+20\d\d\b)?"
+    r"|(?<![\d.,])(?:\d{1,2}[ºª°]?|\d[oa])\s+(?:de\s+)?" + _MES + _ANO + "?"
+    # mês + ano sozinhos ("outubro 2026", "out/2026", "10/2026"): o ano não é valor
+    r"|\b" + _MES + r"(?:\s*/\s*\d{2,4}\b|" + _ANO + ")"
+    r"|(?<![\d.,])\d{1,2}/20\d\d\b"
     # rótulo de dia, com ou sem dois-pontos: "dia: 18", "vencimento dia: 18", "venc. 18". O dia (1-2 dígitos) nunca é valor;
     # sem o lookahead "vence 18/10" mascararia o 18 e deixaria "/10" para ser lido. ponytail: "vence 50 reais" mascara o 50 (fail-closed)
     # Sufixo ordinal opcional ("dia 1º", "1o"): o \b pós-dígito não casa antes de "º"/"ª". "o"/"a" colados só após 1 dígito: "50a" segue sem mascarar.
-    r"|\bdia\s*:?\s*(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
-    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)"
+    r"|\bdia\s*:?\s*(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)(?:\s+(?:de\s+)?" + _MES + _ANO + "?)?"
+    r"|\b(?:vencimento|vence|venc\.?|vcto)\s*:?\s*(?:dia\s*:?\s*)?(?:\d{1,2}[ºª]?|\d[oa])\b(?![/.:,-]\d)(?:\s+(?:de\s+)?" + _MES + _ANO + "?)?"
     # hora compacta "18h30" / "18 h 30" / "18hs30" / "18hrs30"; "18h"/"18hs" nua já é a unidade `h|hs|hrs?` do _NAO_VALOR_RE. O \b depois do h poupa "100 hamburguer"
     r"|\b\d{1,2}\s*h(?:rs?|s)?\s*\d{2}\b"
     # hora solta com crase ("às 18", "ás 9"): só com acento, "as 18" é artigo + número. Não quando o número é dinheiro
@@ -114,8 +120,10 @@ _CENTAVOS_RE = re.compile(r"\b(\d{1,9})\s*centavos?\b", re.IGNORECASE)
 # "30 reais e 50 centavos" / "30 real e 5 centavos" / "R$ 30 e 50 centavos" / "2 mil reais e 50 centavos" / "1 real e 50 centavos"
 # são UM valor (3050): só o composto ancora, nunca o "30" nem o "50" soltos (o modelo que descarta os centavos gravaria R$ 30).
 # Só o inteiro em dígito: "trinta reais e 50 centavos" / "um real e 50 centavos" seguem mistos (só os 50 centavos).
+# Centavos por extenso ("30 reais e cinquenta centavos", "e vinte e cinco centavos") ou "e meio/meia": o composto sai por inteiro e
+# NADA ancora (extenso nunca ancora; o 30 solto deixaria o modelo gravar R$ 30). ponytail: "30 reais e cinquenta" (sem "centavos") segue dois valores; "e meia hora" também sai.
 _N = r"\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?"
-_REAIS_E_CENTAVOS_RE = re.compile(rf"(?<![\w.,])(?:r\$\s*({_N})|({_N})\s*(?:reais|real))\s*e\s*(\d{{1,2}})\s*centavos?\b", re.IGNORECASE)
+_REAIS_E_CENTAVOS_RE = re.compile(rf"(?<![\w.,])(?:r\$\s*({_N})|({_N})\s*(?:reais|real))\s*e\s*(?:(\d{{1,2}})\s*centavos?|(?:{PT_PHRASE})\s*centavos?|mei[oa])\b", re.IGNORECASE)
 
 
 # "gastei 49.90" é 49,90: o `collect_evidence` lê todo ponto como milhar (499000) e abriria a porta
@@ -146,7 +154,7 @@ _PARCELA_RE = re.compile(
     # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
     r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
-    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
+    rf"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*(?:\d+|{PT_PHRASE})\s*centavos?\b)?)", re.IGNORECASE)
 
 
 def _capturas_parcela(t: str):
@@ -159,7 +167,7 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
     lidos: set[int] = set()
 
     def compor(m):  # o composto sai do texto: seus componentes não são leitura independente
-        reais = _extract_valor(m[1] or m[2])
+        reais = _extract_valor(m[1] or m[2]) if m[3] else None  # m[3] vazio = centavos por extenso/"meio": nada lido
         if reais and 0 < reais < 1e12:
             lidos.add(round(reais * 100) + int(m[3]))
         return " ; "
