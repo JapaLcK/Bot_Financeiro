@@ -249,7 +249,7 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 
 | ID | O que falta no `/painel` | O que o servidor pede | Faixa | Esforço |
 |---|---|---|---|---|
-| W1 | **Patrimônio, "Onde está o dinheiro" e Rendimento reais** (a Etapa 6): hoje `NetWorth`, `Wealth` e `Yield` leem `lib/api.ts` sem rede e saem como exemplo | `patrimonio` e `rendimento` só existem em `api/nativo/`: montar também no namespace v2, como o #1033 faz com `comparacao` (`api/v2/app.py`); regenerar `api-v2.gen.ts` | Completo (dinheiro) | M |
+| W1 | **Patrimônio, "Onde está o dinheiro" e Rendimento reais** (a Etapa 6): hoje `NetWorth`, `Wealth` e `Yield` leem `lib/api.ts` sem rede e saem como exemplo; a janela do histórico é a do plano (`history_earliest_date`: mês corrente, 90, 365 ou 730 dias), não um valor fixo, e o critério de aceite tem de valer por plano | `patrimonio` e `rendimento` só existem em `api/nativo/`: montar também no namespace v2, como o #1033 faz com `comparacao` (`api/v2/app.py`); regenerar `api-v2.gen.ts` | Completo (dinheiro) | M |
 | W2 | **Chat real** (a Etapa 7): `CHAT_REAL = false`, só o assunto `investido` é real | `/ai/chat/stream` já existe e o app o consome | Completo | G |
 | W3 | **Simulador real**: `widgets/Simulator.tsx` e a página são de exemplo; o do app calcula no cliente sobre gastos observados | nenhum (lê `/gastos`) | Leve | M |
 | W4 | **Fatura, Parcelas futuras, Renda mês a mês e "Piggy notou" reais**: o app já os lê, mas pelo legado (`/cards/{uid}/summary`, `/installments/{uid}/list`, `/analytics/{uid}/evolution`, `/insights/{uid}/current`) | contrato novo em `/api/v2`, montado nos dois namespaces; depende das fontes do plano "só Open Finance" (a fatura manual saiu) | Completo | G |
@@ -257,9 +257,9 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 | W6 | **Modo privacidade** (esconder valores): o app o tem em todo lugar e o painel antigo também (`toggleHideBalance`); o `/painel` não | nenhum | Leve | P |
 | W7 | Compromissos do **Resumo** (`compromissos: Bills`) ainda de exemplo, embora a versão real exista na página `/previsao` (`Compromissos.tsx`) | nenhum | Leve | P |
 
-**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A11): Para onde vai v2 e "Seu dia", Metas v2
+**O que o app deve ao web** está no `docs/plano-app-paridade.md` §4 (A1 a A12): Para onde vai v2 e "Seu dia", Metas v2
 (leitura e escrita), escrita na Carteira, receitas do extrato, premissas e grupos da Previsão, `guardado=1`, comparação,
-conta (excluir, exportar, definir senha), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
+conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
 risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5** e
