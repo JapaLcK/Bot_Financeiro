@@ -582,6 +582,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   botões travados até o navegador cortar a conexão; sem rede a mutação falha na hora (`networkMode: "always"`). O mesmo padrão de
   `useMutation` em `Subscriptions.tsx` (sem `networkMode`, foco movido sem checar onde o usuário está) não foi tocado. Servidor
   sem o campo (deploy fora de ordem): a caixa não aparece.
+  **No app nativo (PR 2b, `app/src/features/painel/receitas.tsx`)**: uma caixa só, no TOPO do Resumo (`TelaResumo`), para todo
+  usuário com Previsão liberada, tenha ou não o card "Saldo previsto" no layout (o provider lê a previsão sempre). Previsão
+  `negado` ou `erro` sem falha de toque: sem caixa. Falha de um toque deixa o aviso até a próxima leitura boa; se a previsão está `erro`, a caixa
+  fica só com o aviso até o "Tentar novamente" do card; se está `negado` (p.ex. o plano caiu para Essencial com o app aberto), caixa e aviso somem. Mesma rota (`POST /api/app/previsao/receita`) e mesma regra de reconciliação da web. Releitura só da
+  previsão por `relerPrevisao()` do provider (não `atualizar()`, que zera a tela e relê tudo). Diferenças: sem a frase de abertura; resultado
+  anunciado por `announceForAccessibility`, sem mover o foco; Sim e Não ambos neutros (`Acao`, "Fantasma"); POST ok e releitura que
+  falha: a caixa some até a próxima leitura boa (o app não guarda cache da previsão), sem alerta. `.catch([])` no schema: campo
+  ausente, que não seja array, ou item de forma nova nunca derrubam a Previsão nem o card `hero` do chat. A tolerância é POR ITEM:
+  o inválido sai (p.ex. status novo no servidor) e os válidos ficam. O aviso "Não deu para salvar" é ESTADO (`falhou`) que
+  se apaga quando chega uma leitura `pronto` da previsão (troca de horizonte concluída, "Tentar novamente", recarga) e quando começa uma
+  recarga completa (puxar para atualizar: previsão `undefined`, a caixa some enquanto relê). Assim o Banner, que anuncia ao montar, não
+  remonta com aviso velho nem repete o anúncio. Mantêm o aviso: a troca de horizonte em curso (`carregando`) e a previsão `erro`. A releitura
+  que acompanha a própria falha não o apaga. `negado` esconde caixa e aviso e só se sai dele por uma recarga (passa por `undefined`).
+  Limites declarados: (a) POST 2xx anuncia sucesso mesmo que a releitura venha velha (réplica atrasada), como na web; (b) o
+  deslocamento de layout quando a linha muda de grupo, e o foco do VoiceOver quando o botão tocado desmonta, só se medem no aparelho.
   **Recorrências do Open Finance (Fase 1a, `core/services/previsao_recorrencias.py`)**: com os
   bancos na base, `ler` gera a fonte `recorrencia_banco` das cadeias mensais de
   `of_recurring_payments` (a mesma seleção de Assinaturas, `assinaturas.cadeias`), **só despesa**,
