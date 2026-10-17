@@ -931,6 +931,21 @@ Exclusão agendada (#989): `/d/` checa logo depois de consumir o código e ANTES
 `conta_em_exclusao`; o desafio e o código seguem valendo se a exclusão for desfeita).
 `tests/test_login_exclusao_vinculo.py` (x1 a x4).
 
+Auto-vínculo Google/Apple por e-mail (#988): `_vincular_se_permitido` (ao lado de `_mfa_ligado`)
+só grava `auth_identities` se NÃO há exclusão agendada E `not _mfa_ligado`; é o único caminho de
+produção até `link_google_identity` (callback web/app do Google e `POST /auth/apple/exchange`). Conta
+com MFA entra como antes (o e-mail do provedor casa a cada login, mais o código), só não ganha o
+vínculo antes de provar o segundo fator. Limites, sem código:
+- Conta SEM MFA continua auto-vinculada por e-mail. Follow-up (issue); por isso o #988 fecha só a
+  parte do MFA e da exclusão.
+- MFA com setup pendente (`user_mfa.enabled = false`) conta como desligado, coerente com `_desafio_mfa`.
+- Janela de milissegundos entre `_mfa_ligado` do helper e o de `_desafio_mfa` (TOCTOU): MFA ligado
+  nesse intervalo ainda deixa o vínculo nascer.
+- Apple com MFA e sem vínculo depende do claim `email` em todo login (sem ele cai em
+  `apple_sem_email`). NÃO verificado: só se prova com Apple real no aparelho.
+`tests/test_login_exclusao_vinculo.py` (y1 a y5), `test_auth_apple_troca.py` (a6, a6c, a6d) e
+`test_google_web_mfa.py` (c3).
+
 O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos snippets de
 GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
 `config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
