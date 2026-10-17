@@ -17,7 +17,7 @@ from _cards_apoio import M, M0, _http, mostrar, mundo, valores_de_b_em  # noqa: 
 from _ia_stream_helpers import openai_falso, rodada
 from conftest import usuario_pagante
 from core.services.ai_chat import cards, runner, streaming
-from core.services.ai_chat._context import CARDS_DO_TURNO
+from core.services.ai_chat._context import CARDS_DO_TURNO, CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import get_tool
 from core.services.ai_chat.tools import launches
 from test_api_app_sessao import completo
@@ -484,7 +484,11 @@ def test_excecao_em_escrita_auto_executada_nao_vai_ao_historico(monkeypatch):
     def explode(uid, args):
         raise RuntimeError("psycopg SELECT segredo")
     monkeypatch.setattr(runner, "get_tool", lambda n: replace(real, execute=explode))
-    historico, terminal = runner._dispatch_tool(1, "add_launch", {"tipo": "despesa", "valor": 1})
+    tok = CURRENT_USER_MESSAGE.set("gastei 1 real")  # a âncora de valor lê o texto do usuário
+    try:
+        historico, terminal = runner._dispatch_tool(1, "add_launch", {"tipo": "despesa", "valor": 1})
+    finally:
+        CURRENT_USER_MESSAGE.reset(tok)
     assert "falha_interna" in historico and "segredo" not in historico and terminal == runner.ERROR_MSG
 
 

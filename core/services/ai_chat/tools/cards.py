@@ -663,6 +663,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_credit_purchase_execute,
+        valor_do_usuario="valor",  # aceita parcelas × valor ("12x de 50")
     ),
     Tool(
         schema={

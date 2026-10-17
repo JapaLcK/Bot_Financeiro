@@ -1065,6 +1065,14 @@ def _manuais(uid) -> int:
         return cur.fetchone()["n"]
 
 
+def _valores_manuais(uid) -> list[float]:
+    from db.connection import get_conn
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select valor from launches where user_id=%s "
+                    "and coalesce(source,'manual') <> 'open_finance' order by id", (uid,))
+        return [float(r["valor"]) for r in cur.fetchall()]
+
+
 def cena_24_of_gasto_e_pix():
     sc = Scenario("24. Banco conectado: gasto sem forma → pix", "Forma de pagamento", "pro + OF — Q40")
     SCENARIOS.append(sc)
@@ -1086,7 +1094,13 @@ def cena_25_of_frase_so_da_ia():
     sc.check(_manuais(uid) == 0 and ("dinheiro" in r1.lower() or "banco" in r1.lower()),
              "\"torrei 80 conto no bar\" → nada gravado e a forma é perguntada (sem inventar)")
     sc.turn(uid, "foi em dinheiro")
-    sc.check(_manuais(uid) == 1, "\"foi em dinheiro\" → 1 lançamento na Carteira")
+    valores = _valores_manuais(uid)
+    # (a) o que a guarda garante: ✅ com [] ou [80.0]; qualquer outro valor (50, 450,73...) é invenção do modelo.
+    sc.check(all(v == 80.0 for v in valores), "\"foi em dinheiro\" → nenhum valor diferente de 80 gravado")
+    # (b) o produto. ❌ CONHECIDO com WA_IA_PRIMEIRO desligada: o "torrei 80 conto no bar" é respondido pelo
+    # roteador e o 80 não entra em ai_messages, então a IA não o ancora e pergunta o valor de novo.
+    # Só passa com a flag ligada.
+    sc.check(valores == [80.0], "\"foi em dinheiro\" → 1 lançamento de 80 na Carteira")
     sc.set_veredict("✅" if all(x[0] for x in sc.checklist) else "❌")
 
 

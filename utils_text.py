@@ -1329,6 +1329,23 @@ def parse_pt_number(text: str) -> float | None:
     return float(v) if v is not None else None
 
 
+def extract_parcelas(t_low: str) -> int:
+    """Contagem de parcelas no texto (minúsculo): "em 3x", "em 3 vezes", "em 3", "3x",
+    "em doze vezes". Sem contagem → 1. "em N" vem antes (não captura o valor da compra);
+    o numeral solto só vale com unidade (x/vezes/parcelas); por extenso também exige unidade."""
+    mx = (re.search(r"\bem\s+(\d+)\s*(?:x|vezes?|parcelas?)?\b", t_low)
+          or re.search(r"(\d+)\s*(?:x|vezes?|parcelas?)\b", t_low))
+    if mx:
+        try:
+            return int(mx.group(1))
+        except ValueError:
+            return 1
+    smx = (re.search(rf"\bem\s+({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE)
+           or re.search(rf"\b({PT_PHRASE})\s+(?:x|vezes?|parcelas?)\b", t_low, re.IGNORECASE))
+    c = parse_pt_number(smx.group(1)) if smx else None
+    return int(c) if c and c >= 1 else 1
+
+
 # foca a IA para responder questoes so do bot e nao geral
 def should_use_ai(text: str) -> bool:
     t = text.lower().strip()

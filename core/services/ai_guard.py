@@ -34,9 +34,10 @@ O QUE ELA NÃO PEGA (teto conhecido)
   Também não julga TEXTO: "seu maior gasto foi no mercado" não tem número
   e passa batido. A guarda é sobre número.
 
-NÃO ESTÁ LIGADA NO CAMINHO DE PRODUÇÃO. Hoje só o harness de QA a chama.
-Ligar depois é uma linha em `_run_tool_loop`, passando os `history_content`
-que o `_dispatch_tool` já devolve.
+EM PRODUÇÃO ela roda só em modo LOG: `ai_chat/runner._log_unsupported_claims` chama
+`check` ao fim do turno e não altera a resposta. A parte `collect_evidence` (texto do
+usuário) também alimenta a âncora de valor de `ai_chat/valor_do_usuario.py`, que essa sim
+recusa gravação.
 """
 from __future__ import annotations
 
@@ -159,7 +160,7 @@ def _brl_to_cents(raw: str) -> int | None:
         if "," in s:
             return sinal * round(float(s.replace(".", "").replace(",", ".")) * 100)
         return sinal * round(float(s.replace(".", "")) * 100)
-    except ValueError:
+    except (ValueError, OverflowError):  # 306+ dígitos: float vira inf e round(inf) estoura
         return None
 
 
