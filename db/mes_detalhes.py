@@ -63,6 +63,7 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
     origens = dict.fromkeys(("cartao", "banco", "carteira", "registro_antigo"), Decimal(0))
     guardado = {"aportes": Decimal(0), "saques": Decimal(0)}
     fora = 0
+    saiu_agendado = Decimal(0)  # saída fora do cartão com data depois de `agora`: valor já conhecido
     for r in movimentos:
         if r["moeda"] != "BRL":
             fora += r["quantidade"]
@@ -76,6 +77,8 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
         diario = dias.setdefault(dia, {"dia": dia, "entrou": Decimal(0), "saiu": Decimal(0)})
         diario["entrou" if r["tipo"] == "entrada" else "saiu"] += r["valor"]
         if r["tipo"] == "saida":
+            if r["origem"] != "cartao" and r["dia"] > agora.date():
+                saiu_agendado += r["valor"]
             categoria = categorias.setdefault(r["categoria"], {
                 "categoria": r["categoria"], "valor": Decimal(0), "quantidade": 0})
             categoria["valor"] += r["valor"]
@@ -90,7 +93,7 @@ def ler(user_id: int, ano: int, mes: int, agora) -> dict:
     return {"mes": f"{ano:04d}-{mes:02d}", "ate": (fim - timedelta(days=1)).isoformat(),
             "entrou": total["entrou"], "saiu": total["saiu"],
             "categorias": sorted(categorias.values(), key=lambda c: (-c["valor"], c["categoria"] or "")),
-            "origens": origens,
+            "origens": origens, "saiu_agendado": saiu_agendado,
             "dias": [dias[dia] for dia in sorted(dias)],
             "guardado": {**guardado, "liquido": guardado["aportes"] - guardado["saques"],
                          "cobertura": "movimentos_registrados"},
