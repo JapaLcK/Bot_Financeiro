@@ -30,10 +30,19 @@ export const rendaSchema = z.object({ ok: z.literal(true), evolution: z.array(z.
 export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(z.object({ key: z.string(), title: z.string(), message: z.string(), severity: z.string(), action_label: texto, action_view: texto })) });
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
-/** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
-export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas";
-const cardId = z.enum(["periodo", "caixinhas", ...Object.keys(TITULOS)] as [CardChat, ...CardChat[]]);
 const mesAAAAMM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/); // `tituloPeriodo` lança em "" (nomeMes): mês malformado invalida o bloco
+/** Os cards que a PRÓPRIA tool do servidor emite (`cards.DA_TOOL` em `core/services/ai_chat/cards.py`, sem `show_card`): só do chat, fora do `TITULOS`. O schema valida o contrato do servidor (inclusive chaves opcionais que o card não desenha); fixtures: `tests/fixtures/ai_chat_bloco_{maiores_gastos,fim_do_mes}.json`. Esta é a fonte da lista `cards` que o app manda no POST (`CARDS_DA_TOOL`): `tests/test_ai_chat_cards_ids_app.py` a compara com o Python. */
+const maioresGastosSchema = z.object({
+  start_date: z.string(), end_date: z.string(),
+  expenses: z.array(z.object({ valor: legado, categoria: texto, descricao: texto, data: z.string(), instituicao: texto, parcelamento: texto })),
+  motivos: motivos.optional(), historico_desde: texto.optional(), limitado_a_12_meses: z.boolean().optional(), pedido: z.object({ start_date: z.string(), end_date: z.string() }).optional(), aviso_limite: z.string().optional(), fim_ajustado: z.boolean().optional(), aviso_fim: z.string().optional(),
+});
+const fimDoMesSchema = z.object({ mes: mesAAAAMM, dias_corridos: z.number().int(), dias_no_mes: z.number().int(), receita: legado, despesa: legado, despesa_projetada: legado, saldo_projetado: legado, vai_fechar_negativo: z.boolean(), motivos });
+const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema };
+export const CARDS_DA_TOOL = Object.keys(schemasDaTool) as (keyof typeof schemasDaTool)[];
+/** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS`, o catálogo de widgets ("Adicionar blocos", `lerLayout`). */
+export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas" | (typeof CARDS_DA_TOOL)[number];
+const cardId = z.enum(["periodo", "caixinhas", ...Object.keys(TITULOS), ...CARDS_DA_TOOL] as [CardChat, ...CardChat[]]);
 /** O recurso `periodo` do card (`api/nativo/mes_detalhes.py`), uma aba com `mes: null`. Fixture: `tests/fixtures/ai_chat_bloco_periodo.json`. */
 export const periodoSchema = z.object({ inicio: mesAAAAMM, fim: mesAAAAMM, ate: z.string(), entrou: dinheiro, saiu: dinheiro, saldo: dinheiro, meses: z.array(z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro })), categorias: z.array(z.object({ categoria: texto, valor: dinheiro, quantidade: z.number().int(), percentual: z.number().int(), maiores: z.array(lancamentoSchema) })), motivos, historico_desde: texto, fora_do_total: z.number().int() });
 /** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
@@ -55,7 +64,7 @@ export const gastosSchema = z.object({
 });
 export type Gastos = z.output<typeof gastosSchema>;
 /** `caixinhas` (só do chat) traz o formato legado `{ok, goals}`; o `metas` do chat vem no formato v2 (`metasV2Schema`, desenhado por `MetasChat`). Só o BLOCO troca: `schemasRecurso.metas` (provider, `TelaMetas`) segue legado, então não reaproveite `schemas[recurso]` para o card. */
-const schemasBloco = { ...schemasRecurso, metas: metasV2Schema, periodo: periodoSchema, caixinhas: metasSchema };
+const schemasBloco = { ...schemasRecurso, metas: metasV2Schema, periodo: periodoSchema, caixinhas: metasSchema, ...schemasDaTool };
 export type RecursosBloco = { [K in keyof typeof schemasBloco]?: z.output<(typeof schemasBloco)[K]> };
 /** Chave desconhecida é descartada; recurso que não passa no schema do app invalida o bloco (quem lê descarta SÓ o evento). Dinheiro chega em centavos. */
 const recursosBloco = z.record(z.string(), z.unknown()).transform((bruto, ctx): RecursosBloco => {
