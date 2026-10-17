@@ -192,6 +192,28 @@ def test_fonte_ambigua_nao_cria(k):
     assert r.startswith("🐷 Tem mais de uma opção com esse nome") and linhas(k) == []
 
 
+def test_fonte_pelo_nome_da_conta_ou_do_banco_dela(k, monkeypatch):
+    # Codex P2 (#1051): a tool diz "nome do banco ou da conta"; o rótulo completo é "Nubank · Conta"
+    _banco(k, "Nubank", "acc-1")
+    assert "saldo da conta Nubank · Conta" in cria(k, nome="A", fonte="Conta")  # nome da conta, sem rótulo exato
+    assert "em Nubank" in cria(k, nome="B", fonte="Nubank")  # o rótulo exato (investido do banco) segue ganhando
+    assert [m["fonte_tipo"] for m in linhas(k)] == ["conta", "banco"]
+    outro = usuario_pagante(plan="pro_max")  # nome de conta de OUTRO usuário nunca vale
+    _banco(outro, "Inter", "acc-o")
+    assert cria(k, nome="C", fonte="Inter").startswith("🐷 Não achei essa fonte")
+    from api.v2 import investido as inv, metas as rota
+    for modulo in (metas_fonte, inv, rota):
+        monkeypatch.setattr(modulo, "plan_gate_ok", lambda u, f: f != "investments")
+    assert "saldo da conta Nubank · Conta" in cria(k, nome="D", fonte="Nubank")  # sem investimentos: o banco da conta
+
+
+def test_fonte_pelo_nome_da_conta_ambiguo_pergunta(k):
+    _banco(k, "Nubank", "acc-1")
+    _banco(k, "Inter", "acc-2")  # duas contas chamadas "Conta"
+    r = cria(k, fonte="Conta")
+    assert r.startswith("🐷 Tem mais de uma opção com esse nome") and linhas(k) == []
+
+
 def test_plano_sem_investimentos_pede_a_conta_e_com_o_rotulo_cria(k, monkeypatch):
     from api.v2 import investido as inv, metas as rota
     nega = lambda u, f: f != "investments"  # noqa: E731
