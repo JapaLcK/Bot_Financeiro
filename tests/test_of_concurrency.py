@@ -21,6 +21,7 @@ import asyncio
 import os
 import threading
 import time
+import types
 from datetime import date
 from decimal import Decimal
 
@@ -945,7 +946,11 @@ def test_escrita_da_reconexao_herda_o_que_sobrou_do_prazo(user_id, monkeypatch):
             relogio.anda(3.0)          # o lock comeu 3s do orçamento
         yield True
 
-    monkeypatch.setattr(of_routes.time, "monotonic", relogio.monotonic)
+    # Só a visão da ROTA: `of_routes.time` é o módulo `time` global, e trocar
+    # `.monotonic` nele falsificava o relógio das leituras reais de `db/` (t0=1003 contra
+    # `monotonic` real) e o `statement_timeout` delas virava 1 ms (#550). Se um teste
+    # irmão passar a ler o banco de verdade, vale o mesmo cuidado.
+    monkeypatch.setattr(of_routes, "time", types.SimpleNamespace(monotonic=relogio.monotonic))
     monkeypatch.setattr(of_routes, "pluggy_item_lock", _lock_que_demora)
     monkeypatch.setattr(of_routes, "save_pluggy_open_finance_item",
                         lambda uid, remote, **kw: recebidos.append(kw.get("budget_ms")) or {"id": 9})

@@ -3572,6 +3572,18 @@ async def _mfa_ligado(user_id: int) -> bool:
     return bool((await asyncio.to_thread(get_mfa_status, user_id)).get("enabled"))
 
 
+async def _vincular_se_permitido(user_id: int, sub: str, email: str, provider: str | None = None) -> None:
+    """Auto-vínculo por e-mail (Google/Apple) só em conta que ainda entraria sem
+    segundo fator e sem exclusão agendada (#988): o vínculo é permanente e
+    invisível, não pode nascer antes do código nem de uma conta recusada.
+    Quem ficou sem vínculo entra de novo pelo e-mail, que casa a cada login."""
+    from db import PROVIDER_GOOGLE, is_account_scheduled_for_deletion, link_google_identity
+
+    if await asyncio.to_thread(is_account_scheduled_for_deletion, user_id) or await _mfa_ligado(user_id):
+        return
+    await asyncio.to_thread(link_google_identity, user_id, sub, email, provider or PROVIDER_GOOGLE)
+
+
 async def _desafio_mfa(request: Request, user_id: int, email: str) -> str | None:
     """Desafio de MFA do login, ou None se a conta não tem MFA ligado.
 
@@ -4269,6 +4281,11 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     # tentativas por desafio quem troca de IP e de desafio chutaria ~25/min.
     # Depois da reserva (a tentativa já conta no desafio), antes de conferir.
     await _check_persistent_rate_limit("mfa-verify", f"user:{user_id}", 5, 60)
+    # Exclusão agendada depois do desafio (#989): recusa ANTES de consumir, o TOTP não queima.
+    try:
+        await asyncio.to_thread(_raise_if_account_scheduled_for_deletion, user_id)
+    except HTTPException as exc:
+        return _recusa(exc.detail, "conta_em_exclusao")
 
     verificado = await asyncio.to_thread(
         mfa_consume_login_challenge_with_code,
@@ -4738,7 +4755,6 @@ async def auth_google_callback(
     from db import (
         find_user_by_google_sub,
         find_user_id_by_email,
-        link_google_identity,
         create_pending_google_signup,
     )
 
@@ -4801,7 +4817,7 @@ async def auth_google_callback(
         if not user_id:
             existing = await asyncio.to_thread(find_user_id_by_email, email)
             if existing:
-                await asyncio.to_thread(link_google_identity, existing, sub, email)
+                await _vincular_se_permitido(existing, sub, email)
                 user_id = existing
 
         # 3) Conta totalmente nova → cria pendente e manda pra /completar-cadastro
@@ -5054,7 +5070,6 @@ async def auth_apple_exchange(request: Request, response: Response, body: AppleE
         find_user_id_by_email,
         get_auth_user,
         get_pending_google_signup,
-        link_google_identity,
     )
 
     try:
@@ -5095,7 +5110,7 @@ async def auth_apple_exchange(request: Request, response: Response, body: AppleE
                 "email": email,
                 "name_hint": (pendente or {}).get("name_hint") or "",
             }
-        await asyncio.to_thread(link_google_identity, existente, sub, email, PROVIDER_APPLE)
+        await _vincular_se_permitido(existente, sub, email, PROVIDER_APPLE)
         user_id = existente
 
     user = await asyncio.to_thread(get_auth_user, user_id)
@@ -7461,6 +7476,8 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         )
     from db import get_auth_user
 
+    # Exclusão agendada (#989): antes do desafio, mesma ordem do _concluir_login.
+    await asyncio.to_thread(_raise_if_account_scheduled_for_deletion, int(user_id))
     u = await asyncio.to_thread(get_auth_user, int(user_id))
     # Conta com MFA (#605): o link do bot prova a posse do WhatsApp, não o
     # segundo fator. Sem sessão e sem cookie; o código é pedido no /login.
