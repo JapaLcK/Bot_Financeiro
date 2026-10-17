@@ -268,7 +268,7 @@ risco, porque as rotas, a foto diária e a regra única já existem; é só expo
 decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
-**Regra daqui para a frente** (proposta; o texto para o `CLAUDE.md` raiz está no §7.2 do plano do app, aguardando o dono):
+**Regra daqui para a frente** (aprovada pelo dono em 2026-10-16; o texto para o `CLAUDE.md` raiz está no §7.2 do plano do app e entra em PR próprio):
 todo PR de feature de um lado declara no corpo `Par no outro lado: já existe | plano/issue #N | específico da plataforma
 porque …`; rota nova de dado nasce em `api/v2` e é montada nos dois namespaces (`api/nativo/` só para o que for do app
 de verdade, com a razão escrita); o servidor só **acrescenta** campo, porque app instalado não atualiza com o deploy.

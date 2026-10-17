@@ -41,7 +41,7 @@ blocos sem `real` é a dívida do web (§3, linhas 3, 9, 15 e 18 a 22).
 ## 3. Matriz de paridade
 
 Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plataforma** (específico, com o porquê) ·
-**ambos atrás** (existe só no painel antigo `/app` ou no site). `?` = não verificado a fundo (§9).
+**ambos atrás** (existe só no painel antigo `/app` ou no site). "a verificar" e "a conferir" = não verificado a fundo (§9).
 
 ### 3.1 Resumo e blocos
 
@@ -172,10 +172,10 @@ acompanha o item W4 do web (`docs/plano-dashboard-v2.md`): como o web precisa do
 `/api/v2` e é montada nos dois namespaces**, e o app troca a fonte depois (campo novo, nunca mudando o que o build
 antigo lê).
 
-## 5. Específico da plataforma (proposta, aguardando o dono)
+## 5. Específico da plataforma (decidido: o guia não é específico; aberto: modo privacidade)
 
 Não entram na matriz como dívida: SSE × foco e foreground (38), atalhos de teclado (31), biometria e tampa (37),
-Compras Apple × cobrança do site (36), conexão de banco por navegador × widget (32). O dono decidiu (§10, P3) que o
+Compras Apple × cobrança do site (36), a superfície de conexão de banco, navegador × widget (32; reconectar, desconectar e atualizar **não** são plataforma, são dívida das duas pontas, linha 32). O dono decidiu (§10, P3) que o
 guia **não** é específico: existe no app, adaptado ao nativo (A10). Segue aberta a pergunta do modo privacidade (5), cuja
 recomendação é **não** ser específico (o painel antigo já o tem).
 
@@ -212,7 +212,7 @@ Par no outro lado: já existe | plano/issue #N | específico da plataforma porqu
 
 Não existe `.github/pull_request_template.md` hoje; criá-lo é a forma barata de a linha aparecer sem ninguém lembrar.
 
-**7.2 No `CLAUDE.md` raiz (proposta de texto, §4 "PR, Codex e threads").**
+**7.2 No `CLAUDE.md` raiz (texto aprovado em P1, §4 "PR, Codex e threads"; entra em PR próprio).**
 
 > **Paridade app × `/painel`.** Toda feature de um lado declara no corpo do PR o par no outro:
 > `Par no outro lado: já existe | plano/issue #N | específico da plataforma porque …`. Feature
@@ -257,9 +257,7 @@ Medido, por leitura estática e grep, em 2026-10-16: rotas dos dois sub-apps, co
 **Não levantado (escopo):** as funções que só existem no painel antigo `/app` (linha 45) e o conteúdo de cada card de `frontend/settings.html`, que foi varrido card a card na 4ª rodada do Codex (títulos dos cards e chamadas `fetch`, comando `grep -n 'card-title\|data-title\|legal-title\|fetch(' frontend/settings.html`, 2026-10-16): cada card tem linha na matriz (32 a 35, 41 a 44, 46 a 49). Os campos internos de cada card e as regras de plano de cada chamada não foram lidos um a um. Na 5ª rodada varri também os filtros do Extrato (linha 25) e os atalhos de conta do shell (linha 50, `git grep` em `frontend/painel.html` e `webapp/src/dashboard`), e conferi pela lista de ações as linhas 2, 10, 11 e 33, os "paridade" que sobravam com "—" na diferença; a comparação foi por ações disponíveis, não por pixel nem por regra de plano.
 
 **Não medido:** nenhum jest, nenhum teste web, nenhuma chamada ao servidor nem a produção, nada aberto em aparelho
-ou simulador. Os `?` da matriz: onde fica a ordem salva da Home no web; limites e reconexão do Open Finance em cada
-lado; se as rotas de excluir conta e exportar dados aceitam Bearer; se o
-catálogo de blocos tem exatamente os mesmos itens por perfil; a regra da App Store (5.1.1(v)) é conhecimento da
+ou simulador. O que segue sem verificar (as linhas dizem "a verificar" ou "a conferir"): se as rotas de excluir conta e exportar dados aceitam Bearer; se o catálogo de blocos tem exatamente os mesmos itens por perfil; as regras de plano e os limites do Open Finance **no servidor** (web e app têm cada um a sua checagem de limite no cliente, comparada só por existir, não por valor). Deixaram de ser dúvida por achado do Codex: onde fica a ordem salva da Home no web (W10) e a reconexão de banco (W11). a regra da App Store (5.1.1(v)) é conhecimento da
 política, não verificada nesta sessão.
 
 ## 10. Decisões do dono (2026-10-16) e perguntas que seguem abertas
