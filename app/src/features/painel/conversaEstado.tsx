@@ -9,6 +9,7 @@ import type { Pergunta } from "./perguntas";
 export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; interrompida: boolean; chips: string[] };
 const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
+export const cotaCheia = (u: Uso | null) => !!u && u.used >= u.limit;
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
 type Bloqueio = "abrindo" | "livre" | "falhou";
 type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean> };

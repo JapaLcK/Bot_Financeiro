@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { falado, VALOR_INDISPONIVEL_FALADO, VALOR_OCULTO_FALADO } from "@/ui/dinheiro";
@@ -56,18 +56,23 @@ function Pilula({ m, custo }: { m: MetaV2; custo: MetasV2["custo_mensal"] }) {
       : !oculto && !semAtual && m.percentual !== null && <ProgressBar valor={m.percentual / 100} tom={batida ? "positive" : "brand"} />}
   </View>;
 }
-/** Card `metas` do chat (formato v2 de `/api/v2/metas`), só leitura: pílulas com ícone, % e barra (blocos na reserva), sem frases; elas só alimentam o VoiceOver. Reserva primeiro, depois as outras na ordem do servidor; mais de `VISIVEIS` linhas (a de "Monte no painel" conta): "+N" expande o resto aqui mesmo. Criar e editar é no painel (web). */
+/** Linha-botão que pede algo AO CHAT (`pedir.enviar`, como se o usuário tivesse digitado): nada navega nem abre folha. Sem `pedir` (card fora da conversa) ou com a entrada do chat desligada, fica desativada. */
+function LinhaPedido({ icone, rotulo, rotuloAcessivel, pedido, children }: { icone: NomeIcone; rotulo: string; rotuloAcessivel: string; pedido: string; children?: ReactNode }) {
+  const { cores } = useTema(); const pedir = useBloco()?.pedir; const off = !pedir || pedir.desativado;
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotuloAcessivel} accessibilityState={{ disabled: off }} disabled={off} onPress={() => { selecao(); pedir?.enviar(pedido); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8, opacity: off ? 0.5 : 1 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Icone nome={icone} tamanho={20} tom="brand" /><Texto variante="rotulo">{rotulo}</Texto></View>
+    {children}
+  </Pressable>;
+}
+/** Card `metas` do chat (formato v2 de `/api/v2/metas`): pílulas com ícone, % e barra (blocos na reserva), sem frases; elas só alimentam o VoiceOver. Reserva primeiro, depois as outras na ordem do servidor; mais de `VISIVEIS` linhas (a de "Montar reserva" conta): "+N" expande o resto aqui mesmo. Criar é pedir à IA no próprio chat (`LinhaPedido`); editar e apagar também são com a IA. */
 export function MetasChat() {
   const d = useBloco()?.recursos.metas; const { cores } = useTema(); const [aberto, setAberto] = useState(false);
   if (!d) return <Vazio texto="Dado indisponível neste card." />;
   const ordem = [...d.metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva")), semReserva = !ordem.some((m) => m.tipo === "reserva");
-  const visiveis = VISIVEIS - Number(semReserva), resto = ordem.length - visiveis; // a linha "Monte no painel" ocupa a vaga da reserva
+  const visiveis = VISIVEIS - Number(semReserva), resto = ordem.length - visiveis; // a linha "Montar reserva" ocupa a vaga da reserva
   return <View style={{ gap: 8 }}>
-    {semReserva && <View accessible accessibilityLabel={`Reserva de emergência, ${MESES_PADRAO} meses, ainda não criada. Monte no painel.`} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Icone nome="PiggyBank" tamanho={20} tom="inkMuted" /><Texto variante="rotulo" tom="inkMuted">Monte no painel</Texto></View>
-      <Blocos n={MESES_PADRAO} cheios={0} tom="brand" />
-    </View>}
-    {!ordem.length && <Vazio texto="Crie sua primeira meta no painel." />}
+    {semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel={`Montar reserva de emergência, ${MESES_PADRAO} meses, ainda não criada`} pedido="Quero montar minha reserva de emergência"><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
+    {!ordem.length && <LinhaPedido icone="Plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" pedido="Quero criar uma meta" />}
     {(aberto ? ordem : ordem.slice(0, visiveis)).map((m) => <Pilula key={m.id} m={m} custo={d.custo_mensal} />)}
     {resto > 0 && <Pressable testID="meta-mais" accessibilityRole="button" accessibilityLabel={aberto ? "Mostrar menos metas" : `+${resto}, mostrar mais ${resto} ${resto === 1 ? "meta" : "metas"}`} onPress={() => { selecao(); setAberto(!aberto); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
       <Texto variante="rotulo">{aberto ? "Mostrar menos" : `+${resto}`}</Texto>

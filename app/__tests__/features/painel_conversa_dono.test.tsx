@@ -4,7 +4,7 @@ import { useEstadoPainel } from "@/features/painel/provider";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, bela as ehBela, delecoes, enviar, fim, fluxoFim, posts, reiniciar, respostaFluxo, srv, trocarParaBela, type Fluxo } from "./conversa_apoio";
+import { abrir, bela as ehBela, delecoes, enviar, fim, fluxoFim, posts, pronto, reiniciar, respostaFluxo, srv, trocarParaBela, type Fluxo } from "./conversa_apoio";
 import fixture from "./painel.fixture.json";
 // Isolamento entre usuários: o estado da conversa de A nunca pode ser RENDERIZADO com o uid de B (nem por um quadro).
 const caminho = (u: unknown) => new URL(String(u)).pathname;
@@ -22,14 +22,14 @@ it("POST de A termina no segundo plano e B entra: nenhum render com o uid de B t
   if (/^\/open-finance\/\d\/limite$/.test(p)) return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
   if (p === "/api/app/perfil") return resposta(200, { perfil: "padrao" });
   if (p === "/ai/pending") return resposta(200, { cancelada: null });
-  if (p === "/ai/chat/stream") { await g.promessa; return fluxoFim("Resposta da Ana", 77); }
+  if (p === "/ai/chat/stream") { await g.promessa; return fluxoFim("Resposta da Ana", 90); }
   if (p === "/ai/messages") return resposta(200, { messages: [], usage: { used: bela(req) ? 5 : 2, limit: 100 } });
   return resposta(200, (fixture as Record<string, unknown>)[p.replace("/2/", "/1/")] ?? {});
  });
  const real = estado.useConversa, vistos: { uid: unknown; c: ReturnType<typeof real> }[] = [];
  jest.spyOn(estado, "useConversa").mockImplementation(() => { const c = real(); vistos.push({ uid: useEstadoPainel().usuario?.user_id, c }); return c; });
  renderRouter("./app", { initialUrl: "/piggy" });
- await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ await pronto();
  const campo = () => screen.getByLabelText("Mensagem para o Piggy");
  await act(async () => { fireEvent.changeText(campo(), "Pergunta da Ana"); await drenar(); });
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Enviar mensagem" })); await drenar(); });
@@ -50,9 +50,9 @@ it("stream da Ana aberto, Bela entra: o signal da Ana aborta, o delta e o fim ta
  const post = posts()[0]!, antes = delecoes().length;
  await trocarParaBela(); await waitFor(() => expect(vistos.some((v) => v.uid === 2)).toBe(true));
  expect(post[1].signal.aborted).toBe(true);
- await act(async () => { f!.empurrar({ tipo: "delta", texto: " tardio" }); f!.empurrar(fim("Resposta da Ana", { usage: { used: 77, limit: 100 } })); await drenar(); await drenar(); });
+ await act(async () => { f!.empurrar({ tipo: "delta", texto: " tardio" }); f!.empurrar(fim("Resposta da Ana", { usage: { used: 90, limit: 100 } })); await drenar(); await drenar(); });
  const deBela = vistos.filter((v) => v.uid === 2); expect(deBela.length).toBeGreaterThan(0);
- for (const { c } of deBela) { expect(c.turnos).toEqual([]); expect(c.uso?.used).not.toBe(77); }
- expect(screen.queryByText(/da Ana|tardio/)).toBeNull(); expect(screen.queryByText("77 de 100 mensagens utilizadas")).toBeNull();
+ for (const { c } of deBela) { expect(c.turnos).toEqual([]); expect(c.uso?.used).not.toBe(90); }
+ expect(screen.queryByText(/da Ana|tardio/)).toBeNull(); expect(screen.queryByText("90 de 100 mensagens utilizadas")).toBeNull();
  expect(delecoes().slice(antes).filter(([, r]) => !ehBela(r))).toHaveLength(0);
 });
