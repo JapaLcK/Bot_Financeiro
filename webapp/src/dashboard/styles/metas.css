@@ -27,3 +27,38 @@
 .meta-radio input { width: 20px; height: 20px; margin: 0; accent-color: var(--pink); }
 .meta-form .field[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--warn); }
 .meta .btn-ghost, .meta-convite .btn-ghost { background: var(--plane-3); }
+
+/* A pílula de meta do chat (parts/MetaPilula.tsx, parts/MetasResposta.tsx): o mesmo desenho do app. Grid, não flex com gap (Safari 14). */
+.metas-chat { display: grid; gap: 8px; max-width: 480px; justify-items: stretch; }
+.metas-chat ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+/* Cor de série da pílula: a reserva é sempre o rosa da marca; as outras ganham uma de 4 pelo `id` da meta
+   (data-serie, MetaPilula.tsx), estável entre listas. Longe do verde (batida), do âmbar e do laranja (estado);
+   o ⚠ segue neutro. Washes como rgba (sem color-mix: Safari 14). Contraste das 5 contra --plane-2 e --plane-3: ≥ 4,8:1. */
+.metas-chat {
+  --serie-1: #22d3ee; --serie-1-wash: rgba(34, 211, 238, 0.12);
+  --serie-2: #c084fc; --serie-2-wash: rgba(192, 132, 252, 0.12);
+  --serie-3: #60a5fa; --serie-3-wash: rgba(96, 165, 250, 0.12);
+  --serie-4: #f0abfc; --serie-4-wash: rgba(240, 171, 252, 0.12);
+}
+.pilula { --cor: var(--pink); --cor-wash: var(--pink-wash); }
+.pilula[data-serie="1"] { --cor: var(--serie-1); --cor-wash: var(--serie-1-wash); }
+.pilula[data-serie="2"] { --cor: var(--serie-2); --cor-wash: var(--serie-2-wash); }
+.pilula[data-serie="3"] { --cor: var(--serie-3); --cor-wash: var(--serie-3-wash); }
+.pilula[data-serie="4"] { --cor: var(--serie-4); --cor-wash: var(--serie-4-wash); }
+.pilula { display: grid; gap: 8px; min-height: 44px; padding: 8px 12px; border-radius: var(--r-ctrl); background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); }
+.pilula-topo { display: grid; grid-template-columns: 32px minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: auto; align-items: center; column-gap: 8px; }
+.pilula-icone { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--cor-wash); color: var(--cor); font-size: 18px; }
+.pilula .pilula-icone.vazio { background: var(--plane-3); color: var(--ink-3); }
+.pilula-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 500; }
+.pilula-pct { font-size: 13.5px; font-weight: 500; }
+.pilula-topo > i { font-size: 20px; }
+.pilula .meter { display: block; height: 6px; }
+.pilula .meter > span { background: var(--cor); }
+.pilula .meter.ok > span { background: var(--gain); }
+/* Um bloco por mês da reserva, 12 por linha. */
+.blocos { display: grid; grid-template-columns: repeat(12, minmax(0, 20px)); gap: 4px; justify-content: start; }
+.blocos > span { height: 10px; border-radius: 3px; background: var(--plane-3); box-shadow: inset 0 0 0 1px var(--rule-strong); }
+.blocos > .cheio { background: var(--cor); box-shadow: none; }
+.blocos > .cheio.ok { background: var(--gain); }
+.metas-chat .pilula-mais, .metas-chat .msg-open { min-height: 44px; }
+.metas-chat .pilula-mais { width: 100%; justify-content: center; }

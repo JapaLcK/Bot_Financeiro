@@ -4,8 +4,10 @@ import { RECURRING } from "./data.js";
 import { money, money0, monthName, monthYear, signed0 } from "./format.js";
 import { get } from "./store.js";
 import type { DashState, Launch } from "./types";
+import { DEMO as PROTOTIPO } from "./v2";
 import { InvestidoResposta } from "../parts/InvestidoResposta";
 import { Ledger } from "../parts/Ledger";
+import { MetasCartoes, MetasResposta } from "../parts/MetasResposta";
 import type { Path } from "../router";
 import { Bills } from "../widgets/Bills";
 import { Calendar } from "../widgets/Calendar";
@@ -30,7 +32,8 @@ export type TopicId = "categorias" | "categoria" | "lancamentos" | "fatura" | "i
 export interface Follow { label: string; topic: TopicId; cat?: string; key?: string }
 export type Block = (s: DashState) => ReactNode;
 // `real`: a resposta vem do servidor (sem o selo "demonstração" na mensagem).
-export interface Answer { text: ReactNode; blocks: Block[]; follow: Follow[]; s0?: DashState; page?: Path; real?: boolean }
+// `card`: conteúdo de bloco que carrega sozinho, fora do texto e da cópia do role=status.
+export interface Answer { text: ReactNode; card?: ReactNode; blocks: Block[]; follow: Follow[]; s0?: DashState; page?: Path; real?: boolean }
 
 const NOW = MONTHS[MONTHS.length - 1];
 const DAY = TODAY.getDate();
@@ -96,6 +99,15 @@ function byTopic(topic: TopicId, cat: string | null): Answer {
       };
     }
     case "metas": {
+      if (!PROTOTIPO) {
+        return {
+          text: <MetasResposta />,
+          card: <MetasCartoes />,
+          blocks: [],
+          real: true,
+          follow: [{ label: "Onde dá pra cortar pra chegar antes?", topic: "categorias", key: "economizar-mes" }, { label: "Como estão meus investimentos?", topic: "investimentos" }, { label: "Vai sobrar até o fim do mês?", topic: "saldo" }],
+        };
+      }
       const next = GOALS.map((g) => ({ g, eta: goalEta(g) })).sort((a, b) => a.eta.months - b.eta.months)[0];
       return {
         text: <>A meta mais perto é <b>{next.g.label}</b>: faltam {money0(next.g.target - next.g.saved)}, e no ritmo de hoje ela chega em {monthYear(next.eta.date)}. Sua reserva cobre {reserveMonths().toLocaleString("pt-BR", { maximumFractionDigits: 1 })} meses de contas fixas.</>,
@@ -295,7 +307,8 @@ const LEADS: Record<string, (cat: string | null) => Partial<Answer>> = {
 /** A resposta pronta do assunto; `key` (a pergunta da faixa) ajusta o texto quando ela pede um recorte. */
 export function answer(topic: TopicId, cat: string | null = null, key?: string): Answer {
   const base = byTopic(topic, key === "categoria-cresceu" ? grower()?.c.id ?? cat : cat);
-  return { s0: snap(), page: PAGE[topic], ...base, ...(key ? LEADS[key]?.(cat) : undefined) };
+  // Uma LEAD é texto de exemplo (número inventado): nunca cobre uma resposta real.
+  return { s0: snap(), page: PAGE[topic], ...base, ...(key && !base.real ? LEADS[key]?.(cat) : undefined) };
 }
 
 // Texto livre no protótipo: sem IA, o Piggy oferece os assuntos que ele sabe mostrar.

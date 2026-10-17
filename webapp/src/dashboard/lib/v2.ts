@@ -119,6 +119,7 @@ export const contasQuery = {
   ...vivo,
 };
 // As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.
+// Lida pela página Metas e pelo assunto `metas` do chat (parts/MetasResposta.tsx).
 export const metasQuery = {
   queryKey: ["metas"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/metas", signal),
@@ -130,7 +131,7 @@ export const guiaQuery = {
   ...vivo,
 };
 // A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx), menos o assunto
-// `investido` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
+// `investido` e `metas` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
 // o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
 export const CHAT_REAL = false;
 // O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
