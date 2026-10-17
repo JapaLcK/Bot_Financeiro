@@ -799,7 +799,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 
 Situação em 2026-10-13, conferida contra os PRs mergeados (a 5 foi marcada concluída em 2026-10-15). Ficam abertas: a 3, porque
 simulador v2 e estimativa variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta
-o PR C.
+a conferência pós-deploy do PR C (marcá-la concluída é decisão do dono, como foi com a 5).
 
 | Etapa | PRs mergeados |
 |---|---|
@@ -807,7 +807,7 @@ o PR C.
 | 1 | #750 (A), #754 (B), #757 (D), #764 (C), #781 (C2) |
 | 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
-| 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
+| 4 | #950 (PR A), #954 (PR A2), #961 (PR B), #982 (PR C1, IA), #1009 (PR C2, WhatsApp), #1051 (PR C4, escrita pela IA), #NNN (PR C3, chat do `/painel`) |
 | 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria), #1008 (PR 2, a tela ligada à API), #1019 (o card de compras na mesma tela); 6: nenhum PR de etapa. A Etapa 5 está concluída: o dono conferiu o Saiu em produção em 2026-10-15 (ele respondeu "Bateu" na sessão) |
 | 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
 
@@ -816,8 +816,8 @@ o PR C.
   investido, um banco ou uma conta), a reserva de emergência (no máximo uma, alvo = meses ×
   custo mensal das recorrências do banco) e, no A2, o `ritmo` (crescimento atual da fonte em
   R$/mês, medido nas fotos por posição) e o `chega_em`. O contrato, os motivos e os limites
-  declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. Faltam o PR
-  C (IA e WhatsApp usarem a mesma regra) e a conferência pós-deploy.
+  declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. O PR C
+  (IA, WhatsApp e o chat do `/painel` usarem a mesma regra) está feito; falta só a conferência pós-deploy.
 - Chat do Piggy (Etapa 7, lado do backend e do app nativo): `POST /ai/chat/stream` com
   parar e 👍👎 (#943), `show_card` com a mesma fonte do app (#946, #947), chips de
   continuação (#949), períodos de até 12 meses e card `periodo` (#957), e o consumo no app
