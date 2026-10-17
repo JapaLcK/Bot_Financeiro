@@ -2,11 +2,9 @@ import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-rout
 import { router } from "expo-router";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
-import { metasSchema } from "@/api/schemas/painel";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
-import metasBanco from "./painel_metas_banco.fixture.json";
 import arredondamento from "./painel_arredondamento.fixture.json";
 import { fluxoFim } from "./conversa_apoio";
 const aviso = "Os valores de cada grupo são arredondados. A soma exibida pode diferir em centavos do total.";
@@ -19,7 +17,6 @@ function servidor() {
   if (path === "/open-finance/1/limite") return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
   if (path === "/api/app/perfil") return resposta(200, { perfil: "padrao" });
   if (path === "/api/app/mes-detalhes") return resposta(200, detalhes);
-  if (path === "/goals/1/status") return resposta(200, metasBanco);
   if (path === "/ai/chat/stream") {
    uso++;
    return fluxoFim("Resposta exclusiva", uso, limite);
@@ -63,27 +60,6 @@ it("extrato sem drilldown continua sem parâmetro categoria", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  const url = fetchFalso.mock.calls.map(([u]) => new URL(String(u))).find((u) => u.pathname === "/api/app/lancamentos")!;
  expect(url.searchParams.has("categoria")).toBe(false); expect(screen.queryByText("Sem categoria")).toBeNull();
-});
-it("payload bancário com 500.005 é aceito e apresentado na rota Metas", async () => {
- expect(metasSchema.parse(metasBanco).goals[0]!.balance).toBe(50001);
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Espelhada")).toBeTruthy());
- expect(screen.queryByText("Recebemos dados incompatíveis. Tente atualizar.")).toBeNull(); expect(screen.getByLabelText("500 reais e 1 centavo")).toBeTruthy();
-});
-it("indicador tight e prazo da meta têm cópia em português", async () => {
- const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/goals/1/status" ? resposta(200, { ...metasBanco, goals: [{ ...metasBanco.goals[0], is_goal: true, indicator: "tight", target_date: "2026-11-03" }] }) : impl(url, req));
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Prazo apertado")).toBeTruthy());
- expect(screen.getByText("03/11/2026")).toBeTruthy(); expect(screen.queryByText("tight")).toBeNull();
-});
-it("valores ocultos na rota Metas: a barra de progresso e os valores da meta somem; voltam ao mostrar", async () => {
- const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/goals/1/status" ? resposta(200, fixture["/goals/1/status"]) : impl(url, req));
- const barras = () => screen.UNSAFE_root.findAll((n) => typeof n.type === "string" && n.props.accessibilityRole === "progressbar"); // a barra não é `accessible`: getByRole não a acha
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Caixinha manual")).toBeTruthy());
- expect(barras()).toHaveLength(1); expect(screen.getByLabelText("6000 reais")).toBeTruthy();
- await apertar("Ocultar valores");
- expect(barras()).toHaveLength(0); expect(screen.queryByLabelText("6000 reais")).toBeNull(); expect(screen.getByText("Caixinha manual")).toBeTruthy();
- await apertar("Mostrar valores"); expect(barras()).toHaveLength(1);
 });
 it("calendário distingue meses de compra e mantém a data civil no drilldown", async () => {
  detalhes = { ...fixture["/api/app/mes-detalhes"], dias: [{ dia: "2026-09-03", entrou: "0.00", saiu: "1.00" }, { dia: "2026-10-03", entrou: "0.00", saiu: "2.00" }] };

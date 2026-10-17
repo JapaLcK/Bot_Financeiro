@@ -11,7 +11,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Blocos e perfis da home | `Board.tsx`; esconde bloco que o plano não cobre (`locked`); ordem guardada sem o id do usuário (`pigbank.dashboard.layout.v1.<perfil>`) | `catalogo.ts`; oferece todos os blocos; ordem guardada por usuário e perfil | Plano filtra bloco só no web; chave sem usuário só no web; o app tem o bloco "Metas e caixinhas", que o web não tem | App (filtro por plano) e web (chave) | a discutir com o dono |
+| Blocos e perfis da home | `Board.tsx`; esconde bloco que o plano não cobre (`locked`); ordem guardada sem o id do usuário (`pigbank.dashboard.layout.v1.<perfil>`) | `catalogo.ts`; oferece os blocos da Home (`BLOCOS_HOME`: "Adicionar blocos" não oferece `metas`); ordem guardada por usuário e perfil | Plano filtra bloco só no web; chave sem usuário só no web; o app já não tem o bloco "Metas e caixinhas" (a aba Metas tem o seu, o `metas`, fora da home como no web) | App (filtro por plano) e web (chave) | a discutir com o dono |
 | Contas | Nome, saldo e selos | Soma a data da última sincronização ("Atualizado dd/mm") e uma barra de composição (os lançamentos do mês de cada conta só aparecem nos cards do chat, não na home) | O contrato do web já traz `sincronizado_em`, mas a tela não mostra | Web | a discutir com o dono |
 | Resumo do mês | Compara com o mês anterior inteiro, sem porcentagem (comentário "decisão N4" em `Stats.tsx`); o card "Fatura" é de exemplo | Compara no mesmo ponto do mês, com variação em % e curva | Duas comparações diferentes | Não está claro; pode ser decisão | a discutir com o dono |
 | Saldo do mês e Guardado líquido | Não há | Topo da aba Gastos (`numerosMes.tsx`), de `mes-detalhes` | O dado só existe no namespace do app (`api/nativo/mes_detalhes.py`) | Web | a discutir com o dono |
@@ -41,7 +41,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Metas: ler | `GET /metas` | Tela de Metas: `GET /goals/{uid}/status` (rota legada); o card de metas do chat usa o formato novo | Duas fontes diferentes para a mesma meta | App | a discutir com o dono |
+| Metas: ler | `GET /metas` | Aba Metas (primeiro build arquivado depois deste merge): `GET /api/app/metas` (a mesma v2), as mesmas pílulas do chat, só leitura, todas as metas; a rota do app não filtra pela chave `dashboard_v2_enabled`: a lista vem vazia só para quem não tem meta ("Nenhuma meta ainda."); builds ≤31 seguem na rota legada | Nenhuma: a mesma fonte | Nenhum | resolvido no PR 1 do app; a escrita é o PR 2 |
 | Metas: criar, editar, apagar | Formulário (`MetaForm.tsx`) | Só pelo chat do Piggy (a IA cria, edita e apaga; o card oferece "Criar meta" como pedido ao chat); sem formulário | Fluxos diferentes | App | a discutir com o dono |
 | Patrimônio e "Onde está o dinheiro" | Exemplo | Real (`/api/app/patrimonio`) | A rota só existe no namespace do app | Web | a discutir com o dono |
 | Rendimento | Exemplo ("Rendimento × CDI") | Real (taxa contratada, `/api/app/rendimento`) | Idem | Web | a discutir com o dono |

@@ -1,6 +1,8 @@
 import type { PerfilPainel } from "@/api/schemas/painel";
-export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas e caixinhas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
+export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
 export type Widget = keyof typeof TITULOS;
+/** O que a Home oferece e guarda: `metas` tem aba própria e fica só no `TITULOS` (título do bloco e `cardId` do chat). Ordem salva com `metas` perde o id na leitura, como na web (`readLayout`, #961). */
+export const BLOCOS_HOME: Widget[] = (Object.keys(TITULOS) as Widget[]).filter((id) => id !== "metas");
 export const PADRAO: Widget[] = ["contas", "hero", "resumo", "categorias", "calendario", "simulador", "compromissos", "piggy", "patrimonio"];
 export const PERFIS: { id: PerfilPainel; label: string; preset: Widget[] }[] = [
   { id: "padrao", label: "Padrão", preset: PADRAO },
@@ -13,7 +15,7 @@ export const PERFIS: { id: PerfilPainel; label: string; preset: Widget[] }[] = [
 export const preset = (p: PerfilPainel) => PERFIS.find((x) => x.id === p)!.preset;
 export function sanitizarLayout(raw: unknown, p: PerfilPainel): Widget[] {
   if (!Array.isArray(raw)) return [...preset(p)];
-  return [...new Set(raw)].filter((v): v is Widget => typeof v === "string" && Object.hasOwn(TITULOS, v));
+  return [...new Set(raw)].filter((v): v is Widget => typeof v === "string" && BLOCOS_HOME.includes(v as Widget));
 }
 export const chaveLayout = (uid: number, p: PerfilPainel) => `pigbank.painel.v1.u${uid}.${p}`;
 /** Hoje em "AAAA-MM-DD", no fuso de Brasília (o `sv-SE` formata em ISO). */
