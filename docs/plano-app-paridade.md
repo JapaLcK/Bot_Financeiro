@@ -196,10 +196,7 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
-Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais), W5 (Saldo e Guardado líquido)
-só precisam **montar no namespace v2** rotas que já existem; W7 e W8 são de cliente puro (W8 com o Sair, que é Completo); W10 é uma chave de `localStorage`; W11 (reconectar banco, Completo) usa o `item_id` que o servidor já aceita; W2 (chat real) é a Etapa 7; W3 (Simulador) é
-cliente puro; W4 (Fatura, Parcelas, Renda, "Piggy notou") precisa de contrato novo e de decisão sobre as fontes
-(plano "só Open Finance"). W6 (modo privacidade) espera a decisão P5; W9 (tema claro) é grande, já estava em "Depois" e fica por último.
+Em paralelo, no web, a ordem de W1 a W12 mora em um só lugar: "Ordem recomendada do lado do web", §6 de `docs/plano-dashboard-v2.md`. Cada W tem lá a sua definição, faixa e dependência (inclusive o que exige servidor e o que é Completo); não é repetida aqui para não ficar para trás.
 
 ## 7. Regra operacional daqui para a frente
 

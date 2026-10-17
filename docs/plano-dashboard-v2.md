@@ -264,9 +264,7 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 
 **O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A16), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
-**Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
-risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W11** (sem ele o web não recupera uma conexão que pede reautorização; a frequência disso em produção não foi medida), **W5**, **W6**, **W7**, **W8** e **W12**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
-decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
+**Ordem recomendada do lado do web** (fonte única da ordem; o §6 do plano do app e o checklist do §8 apontam para cá, não a repetem; justificada no §6 do plano do app). 1) **W1**: a Etapa 6 é a de menor risco, porque as rotas, a foto diária e a regra única já existem. 2) **W11**: sem ele o web não recupera uma conexão que pede reautorização (a frequência disso em produção não foi medida; Completo, Open Finance). 3) Os pequenos: **W5**, **W6** (espera a decisão P5 do plano do app), **W7** (só troca o exemplo pelo `Compromissos` real da `/previsao`), **W8** (o Sair é Completo) e **W12**. 4) **W10**, Completo: o bundle não tem id de conta, então decidir o caminho (campo opaco em `/me`, `GET /auth/me` ou layout no servidor) antes de codar. 5) **W3**, cliente puro. 6) **W2** (Etapa 7) e **W4**, os grandes e Completos; W4 depende de decisão do dono sobre as fontes. 7) **W9** (tema claro), por último: é grande e já estava em "Depois". **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
 **Regra daqui para a frente** (aprovada pelo dono em 2026-10-16; o texto para o `CLAUDE.md` raiz está no §7.2 do plano do app e entra em PR próprio):
@@ -921,4 +919,4 @@ o 409).
 - [x] Decisões do dono (§10 do plano do app, 2026-10-16): ordem aprovada, texto da regra aprovado para o `CLAUDE.md`
   (em PR próprio), guia existe no app, sem data de App Store. Seguem abertas: modo privacidade no `/painel` (W6) e
   Guardado líquido no Resumo (W5).
-- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W11, W5, W6, W7, W8 e W12, depois W10 (Completo, depois de decidir o caminho), W3, W2 e W4, e por último W9).
+- [ ] Executar as lacunas, uma por PR: o lado do app na ordem do §6 do plano do app; o lado do web na **Ordem recomendada** do §6 deste plano (W1 a W12, fonte única).
