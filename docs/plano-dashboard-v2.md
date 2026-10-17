@@ -277,7 +277,7 @@ Cada item acima que o app ainda não tem entra na **A21** (`docs/plano-app-parid
 
 | Situação | Regra |
 |---|---|
-| Leitura, servidor sem registro, cache local **personalizado** | sobe o layout com gravação "só se ainda não houver registro"; quem ganha a corrida vale, quem perde adota o do servidor |
+| Leitura, servidor sem registro, cache local **personalizado** (definição abaixo) | sobe o layout com gravação "só se ainda não houver registro"; quem ganha a corrida vale, quem perde adota o do servidor |
 | Leitura, servidor sem registro, cache **vazio ou padrão** (por exemplo depois do logout do web) | **não grava nada**: o perfil continua sem registro, e um aparelho com layout personalizado que ler depois é quem o reivindica; um padrão nunca ganha a migração |
 | Leitura, servidor com registro | o servidor vale; o cache local é reescrito com ele |
 | Salvar (online) | grava sobre a `versão` que o cliente leu; o cliente só **confirma na tela depois do ack**; conflito de versão faz reler, mesclar contra o layout mais recente e tentar de novo uma vez |
@@ -287,7 +287,9 @@ Cada item acima que o app ainda não tem entra na **A21** (`docs/plano-app-parid
 | Restaurar o padrão | grava o registro com o padrão **explícito**, que conta como reivindicado: nenhum aparelho com layout antigo o ressuscita |
 | Id de bloco que o escritor não mostra (desconhecido, ou escondido pelo plano) | preservado em toda gravação. **O corpo do salvar leva três coisas**: a `versão` lida, o `layout` novo e `visiveis`, o conjunto de ids que o escritor **mostrava** quando leu (conhecidos por ele e não escondidos pelo plano). Com isso o servidor decide sem adivinhar: `removido = visiveis − layout` e `escondido = layout mais recente − visiveis`; só o removido sai, o escondido (inclusive um id de cliente mais novo que o escritor não conhece) fica. O merge é do servidor contra o layout mais recente, com **âncora determinística**: o id escondido vai junto do bloco visível que o **precede** no layout mais recente (se não houver, fica no início) e acompanha esse bloco quando a ordem visível muda. **Se o bloco âncora foi removido**, o escondido passa para o bloco visível **mais próximo antes dele que sobreviveu** (andando para trás no layout mais recente) e, se nenhum sobreviveu, para o início; o escondido nunca é descartado nem ressuscita o removido. Exemplo: no servidor `[A, metas, B]`, o web, que só vê `[A, B]`, salva `[B, A]`, e o resultado é `[B, A, metas]`; se o web salvar `[B]` (removeu `A`), o resultado é `[metas, B]`; testes do cruzamento, da remoção e da remoção junto com um id genuinamente desconhecido |
 
-Testes: migração concorrente, padrão que não ganha, reset entre aparelhos, gravação com falha de rede, duas gravações concorrentes com id desconhecido. A **A22** cumpre esta tabela no app.
+**O que é "personalizado"** (sem isso um padrão velho ganharia a migração): o cache passa a guardar `{ids, origem}`, e `origem: "usuario"` só é gravada quando a pessoa organiza ou restaura. Um cache **sem** `origem`, escrito por cliente anterior, é só uma lista de ids: conta como personalizado **só se for diferente de todos os presets que já existiram para aquele perfil**, numa lista **versionada de presets históricos, num lugar só** (CLAUDE.md §0.7), com teste de paridade entre o web e o app que a compara; igual a algum deles, é padrão e não reivindica.
+
+Testes: migração concorrente, padrão que não ganha, **preset histórico que não ganha**, reset entre aparelhos, gravação com falha de rede, duas gravações concorrentes com id desconhecido. A **A22** cumpre esta tabela no app.
 
 **O que o app deve ao web** é a tabela do §4 do `docs/plano-app-paridade.md` (A1 a A22), com título, faixa e dependências de cada item. A lista não é repetida aqui de propósito (CLAUDE.md §0.7): uma cópia resumida já ficou para trás três vezes na revisão deste PR. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
