@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 import db
+import db.bills  # noqa: F401 (submódulo usado como db.bills nos testes; não depende da ordem de coleta)
 from core.services.ai_chat import runner
 from core.services.ai_chat._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import _BY_NAME, get_tool
@@ -141,6 +142,13 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("vence 12-10-2026", set(), {1200, 1000, 202600}),
     ("gastei 50 em março", {5000}, set()),
     ("gastei 50 de gasolina em outubro", {5000}, set()),
+    # data ISO e pontuada não é valor; milhar e decimal seguem lidos
+    ("anota o boleto da internet para 2026-10-20", set(), {202600, 2000, 1000}),
+    ("boleto de 150 para 2026-10-20", {15000}, {202600, 2000, 1000}),
+    ("vence 10.12.2026", set(), {1012202600}),
+    ("vence 10.12.26", set(), {10122600}),
+    ("boleto de 150 vence 10.12.2026", {15000}, {1012202600}),
+    ("paguei 1.500 em 2026-10-20", {150000}, {202600}),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -545,6 +553,17 @@ def test_n8_boleto_daqui_10_dias_nao_grava_10_reais(uid_pro, monkeypatch):
     assert _boletos(uid_pro) == 1
 
 
+def test_n9b_boleto_para_data_iso_nao_grava_o_ano(uid_pro, monkeypatch):   # Codex: o 2026 de "2026-10-20"
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 2026-10-20", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet de 150 para 2026-10-20", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 def test_n9_boleto_para_12_de_outubro_nao_grava_12_reais(uid_pro, monkeypatch):   # P1 do Codex: o 12 é o dia
     desliga_flag(monkeypatch)
     cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 12, "due_date": "12/10"})),
@@ -787,6 +806,17 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("12x de 50.", 600, 12, True),                  # ponto final de frase
     ("12x de 50.", 50, 12, False),
     ("12x de 50 reais", 50, 12, False),
+    # contagem nua ("em 12") não é R$ 12; o total escrito ao lado segue ancorando
+    ("comprei a TV em 12", 12, 12, False),
+    ("comprei a TV de 1200 em 12", 12, 12, False),
+    ("comprei a TV de 1200 em 12", 1200, 12, True),
+    ("parcelei 600 em 12", 600, 12, True),
+    ("comprei 12 em 12", 12, 12, True),             # o 1º 12 é o total; só o "em 12" é contagem
+    ("comprei a TV em 12,50", 12.5, 12, True),      # "em 12,50" é valor, não contagem
+    # valor de parcela em centavos: "12x de 50 centavos" são 12 × R$ 0,50 = R$ 6
+    ("12x de 50 centavos", 6, 12, True),
+    ("12x de 50 centavos", 600, 12, False),
+    ("12x de 50 centavos", 0.5, 12, False),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -805,6 +835,22 @@ def test_q9b_conversa_total_ou_parcela(uid_pro, monkeypatch, fala, inventado, es
     _usa_ia(cli)
     assert RECUSA in r and _credito(uid_pro) == 0, r
     db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)   # a janela da conversa não ancora o 2º envio
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
+@pytest.mark.parametrize("fala,inventado,escrito", [
+    ("comprei a TV de 1200 em 12 no nubank", 12, 1200),   # o 12 é a contagem, não R$ 12
+    ("compra de 12x de 50 centavos no nubank", 600, 6),   # 50 centavos × 12 = R$ 6, não R$ 600
+])
+def test_q10_conversa_contagem_nua_e_parcela_em_centavos(uid_pro, monkeypatch, fala, inventado, escrito):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(inventado, parcelas=12), _compra_cartao(escrito, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
     runner.chat(uid_pro, fala, platform="whatsapp")
     assert _credito(uid_pro) == 12
 

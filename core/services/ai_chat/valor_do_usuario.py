@@ -42,6 +42,8 @@ _MENSAGENS = 3
 _NAO_VALOR_RE = re.compile(
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
+    # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]"): só "N de MÊS", nunca "50 em março"
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
     r"|(?<![\d.,])\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
@@ -112,7 +114,7 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # ambíguo e fica fora: o 50 segue ancorando como total. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
     rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
-    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?)", re.IGNORECASE)
+    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s+centavos?\b)?)", re.IGNORECASE)
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -159,7 +161,8 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     # com parcelas>1, o valor lido só no "Nx de <valor>" é de parcela: não é o total; só `parcelas × esse valor` é
     fora, de_parcela = lidos, set()
     if p > 1:
-        fora = _centavos_lidos([_PARCELA_RE.sub(" ", t) for t in textos])
+        # o "em 12" nu ("comprei a TV em 12") é a contagem, não R$ 12 (depois do _PARCELA_RE: "em 12x de 50" é dele)
+        fora = _centavos_lidos([re.sub(rf"\bem\s+{p}\b(?![.,]\d)", " ", _PARCELA_RE.sub(" ", t)) for t in textos])
         de_parcela = _centavos_lidos([m[1].rstrip(".,") for t in textos for m in _PARCELA_RE.finditer(t)])
     if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None
