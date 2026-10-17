@@ -113,7 +113,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 32 | Conectar e reconectar banco (Open Finance) | Fora do shell v2: `/settings?view=open-finance` (`frontend/settings.html`) | `conectar-banco`, `conexoes`, `open-finance-volta` (OAuth no navegador, ADR 0005) | Superfícies diferentes pela plataforma. O web ainda tem **Atualizar agora** (`POST /open-finance/{user_id}/refresh`, `settings.html`, que pede a sincronização ao banco); o app só relê o que já foi sincronizado (`conexoes.tsx`, "Conferir de novo"; `services/openFinance.ts` não tem a chamada). Limites e reconexão de cada lado `?` | paridade na conexão e na desconexão; **app atrás no Atualizar agora (A13)** |
+| 32 | Conectar, **reconectar** e desconectar banco (Open Finance) | Fora do shell v2: `/settings?view=open-finance` (`frontend/settings.html`, `open-finance-connect.js`). **Conectar** e limites por plano (`refreshLimits`) existem; **reconectar não**: o widget sempre pede `connect-token` com corpo vazio (`open-finance-connect.js:563`) e o servidor exige `item_id` para um banco já conectado (`routes/open_finance.py:1811`), senão a Pluggy recusa "already exists". **Desconectar** só todos de uma vez (`disconnectAll`, `DELETE /open-finance/{user_id}`); **Atualizar agora** (`POST .../refresh`) | `conectar-banco`, `conexoes` ("Reconectar" manda `provider_item_id`, "Conferir de novo"), `open-finance-volta` (OAuth no navegador, ADR 0005). **Desconecta um banco por vez** (`DELETE .../connections/{id}`), sem "desconectar todos"; só relê o sincronizado, sem `refresh` | Superfícies diferentes pela plataforma, e cada lado tem o que o outro não tem | **web atrás (W11)** em reconectar e desconectar um; **app atrás (A13)** no Atualizar agora e **(A16)** no desconectar todos |
 | 33 | MFA e segurança | `settings.html` | `seguranca`, `mfa-ativar`, `mfa-desativar`, `mfa-novos-codigos` | — | paridade |
 | 34 | Definir senha (conta Google/Apple sem senha) | `settings.html` ("Definir senha", #976) | Segurança do app (`seguranca.tsx`): `EsqueciSenha` em modo `emailFixo`, rotulado "Definir senha", pede o link de reset | Mesmo efeito por caminhos próprios | paridade |
 | 35 | **Excluir conta** e **exportar meus dados** | `settings.html` | Não há | Destrutivo e LGPD. **Provável exigência da App Store** para app com cadastro (diretriz 5.1.1(v), a confirmar antes da submissão; hoje só TestFlight) | **app atrás (A9)** |
@@ -136,7 +136,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 ### 3.9 O sentido contrário: o que o app tem e o web não
 
-Resumo, para não perder: linhas 1 (ordem salva por usuário), 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
+Resumo, para não perder: linhas 1 (ordem salva por usuário), 32 (reconectar e desconectar um banco), 4 (Saldo e Guardado líquido), 5 (privacidade), 9 (Simulador real), 18 a 22
 (Patrimônio, Rendimento, Fatura, Parcelas, Renda, "Piggy notou" reais), 28 (chat real) 50 (Suporte, Conta e Sair no shell) e 51 (tema claro). Dentro dos "específicos da
 plataforma" o app ainda tem biometria, tampa de privacidade e Compras Apple (linhas 36 e 37).
 Isso é **mais** do que a regra do dono previa ao dizer "o app está atrás": **o web também está atrás**, e por dívida
@@ -163,6 +163,7 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A13 | **Atualizar agora** do Open Finance (linha 32) e link da **Política de Privacidade** em Configurações (linha 49) | 0 para o link; **a verificar** para o refresh: `POST /open-finance/{user_id}/refresh` é rota legada que o app já usa para ler (`/open-finance/{uid}`), então tende a aceitar Bearer, mas `wait` e o limite de frequência não foram lidos | uma chamada em `services/openFinance.ts`, trocar "Conferir de novo" e o puxar-para-atualizar de `conexoes.tsx` para pedir a sincronização; `ListRow` "Política de Privacidade" abrindo `/privacy` (mesmo padrão do Suporte) | Leve (**Completo** se o refresh exigir mudar o servidor) | P | Nenhuma; refresh toca fornecedor externo, então confirmar o limite antes |
 | A14 | **Extrato: filtro por conta** (linha 25); o `dia` no servidor não é daqui, vem com a A1 | 0 (`/api/app/lancamentos?conta=` e `/api/app/contas` já montados) | um `Chip`/seletor de conta em `extrato.tsx`, lista vinda do que `contasResumo` já lê; decidir `registro_antigo` e `cartao` | Leve | P | Nenhuma; a mesma lista de contas serve à escolha de fonte da meta (A3) |
 | A15 | **Para onde vai nativo** (linha 6): estabelecimentos por categoria, série de 3 meses e detalhe da categoria (`GET /gastos/categoria`) | 0 (`/gastos` e `/gastos/categoria` são do mesmo router `api/v2/gastos.py`, que `criar_app` monta nos dois namespaces; falta só conferir por teste de contrato, como o plano do Seu dia §6 faz para `/gastos`) | tela de detalhe e série no lugar do extrato filtrado de `Categorias`; reaproveita o schema `/gastos` do A1 | Leve | M | A1 (schema e `gastosDia.ts`); o plano do Seu dia não inclui este bloco |
+| A16 | **Desconectar todos os bancos** (linha 32) | 0 (`DELETE /open-finance/{user_id}` é a rota legada que o app já usa para os outros `/open-finance/{uid}`; confirmar Bearer) | uma ação com confirmação nativa em `conexoes.tsx`, mesmo padrão do "Desconectar" por banco | **Completo** (Open Finance, destrutivo) | P | A13 (mesma tela) |
 | A10 | Guia e dicas, adaptados ao nativo (P3: sim) | **Muda o contrato, só por acréscimo**: o roteiro `PASSOS` (`api/v2/guia.py`) é do web (âncoras e ações do DOM; o passo `piggy.pergunta` é `exemplo` e a fala diz que o chat real "chega em breve", o que é falso no app, onde o chat é real). Decidir no plano do A10: (a) roteiro por plataforma no servidor, sem mudar o que o web lê, ou (b) mapeamento nativo no cliente que ignora `ancora`/`acao` e troca a fala. Não reaproveitar a fala do web como está | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto | Leve (cliente) + servidor aditivo, a classificar no plano do A10 | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
@@ -190,12 +191,12 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 3 | **A5 Receitas do extrato + A6** | Já era trabalho prometido (P7 2b); fecha uma função de dinheiro que o web já oferece. |
 | 4 | **A3 Metas (escrita)** com `/investido` e `/contas` | Depende de A2. `/investido` **não é item sozinho**: o único consumidor real é a escolha da fonte da meta. |
 | 5 | **A4 Escrita na Carteira**, com o PR de servidor (idempotência) **antes** | Contesto "escrita primeiro": é o item mais caro (Completo, G), o servidor não protege contra repetição de POST e o produto já reduziu a escrita manual a uma só (Carteira). Vale começar o PR de servidor cedo, em paralelo, porque ele não depende de build. |
-| 6 | A7, A8, A13, A14 | Pequenos; A8 espera o #1033; A13 é uma chamada e um link; A14 é um filtro. |
+| 6 | A7, A8, A13, A14, A16 | Pequenos; A8 espera o #1033; A13 é uma chamada e um link; A14 é um filtro. |
 | 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
 Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais), W5 (Saldo e Guardado líquido)
-só precisam **montar no namespace v2** rotas que já existem; W7 e W8 são de cliente puro (W8 com o Sair, que é Completo); W2 (chat real) é a Etapa 7; W3 (Simulador) é
+só precisam **montar no namespace v2** rotas que já existem; W7 e W8 são de cliente puro (W8 com o Sair, que é Completo); W10 é uma chave de `localStorage`; W11 (reconectar banco, Completo) usa o `item_id` que o servidor já aceita; W2 (chat real) é a Etapa 7; W3 (Simulador) é
 cliente puro; W4 (Fatura, Parcelas, Renda, "Piggy notou") precisa de contrato novo e de decisão sobre as fontes
 (plano "só Open Finance"). W6 (modo privacidade) espera a decisão P5; W9 (tema claro) é grande, já estava em "Depois" e fica por último.
 
@@ -242,7 +243,7 @@ conferida, não inferência.
 - **Build do app:** pelo Xcode, com `PATH=/usr/bin` primeiro no `export` (o app não tem projeto EAS). O `buildNumber: "15"`
   em `app/app.config.ts` é velho de propósito (o Xcode escolhe o próximo livre no App Store Connect). O último
   número registrado é o 30 (2026-10-12, segundo `docs/plano-seu-dia-app.md` §7); o próximo quem confirma é o dono, que vê o App Store Connect.
-- **Quase todo item de cliente (A1 a A8, A13, A14 e A15) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
+- **Quase todo item de cliente (A1 a A8 e A13 a A16) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
   próprio por terem teste de aparelho.
 - **PRs abertos relacionados:** #1050 (plano do Seu dia), #1033 (comparação; condiciona A8), #1051 (IA cria metas;
   mesma regra do servidor de A3), #1035 (login com MFA e exclusão agendada; pode condicionar A9, a conferir).
