@@ -14,11 +14,15 @@ import asyncio
 import json
 import logging
 import threading
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, StrictInt, field_validator
+from pydantic import BaseModel, StrictInt, field_validator, model_validator
 
+from core.pg_text import limpa_para_pg
 from core.services.ai_chat import streaming
+from db.ai_feedback import MOTIVOS
 from frontend.routes import shared
 
 logger = logging.getLogger(__name__)
@@ -34,8 +38,31 @@ class AIChatBody(BaseModel):
     message: str
 
 
+TEXTO_MAX = 500
+
+
 class FeedbackBody(BaseModel):
     nota: StrictInt | None  # StrictInt: true e 1.0 não são nota
+    # Literal derivado de MOTIVOS: uma fonte só. Build 31 manda só `{nota}` (motivo/texto = None).
+    motivo: Literal[tuple(MOTIVOS)] | None = None
+    texto: str | None = None
+
+    @field_validator("texto")
+    @classmethod
+    def _texto(cls, v):
+        # Sem eco do valor na mensagem. Não trunca: passou de 500 é 422.
+        v = limpa_para_pg(v).strip() if v is not None else None
+        if len(v or "") > TEXTO_MAX:
+            raise ValueError(f"texto passa de {TEXTO_MAX} caracteres")
+        return v or None
+
+    @model_validator(mode="after")
+    def _regras_do_estado(self):
+        if self.motivo is not None and self.nota != -1:
+            raise ValueError("motivo só vale com nota -1")
+        if self.texto is not None and self.motivo != "outro":
+            raise ValueError("texto só vale com o motivo outro")
+        return self
 
     @field_validator("nota")
     @classmethod
@@ -127,7 +154,7 @@ def criar_router(pro) -> APIRouter:
         import db
 
         # Mesmo 404 para inexistente, de outro usuário ou de mensagem do usuário.
-        if not await asyncio.to_thread(db.ai_set_feedback, user_id, message_id, body.nota):
+        if not await asyncio.to_thread(db.ai_set_feedback, user_id, message_id, body.nota, body.motivo, body.texto):
             raise HTTPException(status_code=404, detail="Mensagem não encontrada.")
         return {"ok": True, "nota": body.nota}
 
