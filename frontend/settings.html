@@ -827,6 +827,7 @@ body.balance-hidden .account-balance {
   margin-top: 12px;
 }
 .security-edit.show { display: grid; }
+.security-edit .security-input-senha { grid-column: 1 / -1; }
 .security-input {
   min-height: 34px;
   min-width: 0;
@@ -1479,6 +1480,7 @@ body.balance-hidden .account-balance {
                 <div class="security-value" id="security-email-value">Carregando...</div>
                 <div class="security-note" id="security-email-note">Usado para login e recuperação de senha.</div>
                 <div class="security-edit" id="security-email-edit">
+                  <input class="security-input security-input-senha" id="security-email-senha" type="password" placeholder="Senha atual" aria-label="Senha atual" autocomplete="current-password" hidden />
                   <input class="security-input" id="security-email-input" type="email" placeholder="seu@email.com" autocomplete="email" />
                   <button class="btn-sm" type="button" onclick="saveSecurityContact('email')">Salvar</button>
                   <button class="btn-sm" type="button" onclick="toggleSecurityEdit('email', false)">Cancelar</button>
@@ -1851,9 +1853,11 @@ const API = window.location.origin;
 const params = new URLSearchParams(window.location.search);
 let USER_ID = null;
 // Conta criada só via Google não tem senha: pedir senha é pedir o que não
-// existe. Só `has_password === false` bloqueia — ausente/undefined (falha do
-// /auth/me, stub de teste) degrada pro comportamento de sempre. A AUTORIDADE é
-// o servidor (409); isto aqui é advisory, pra o campo de senha nem aparecer.
+// existe. Só `has_password === false` esconde o campo — ausente/undefined (falha do
+// /auth/me, stub de teste) fica `true`. A AUTORIDADE é o servidor (409 da conta
+// só-Google); isto aqui é advisory, pra o campo de senha nem aparecer. Para a troca
+// de e-mail (B0a) esse default é o lado RESTRITIVO: a conta do quiz e a só-Google
+// veem "Senha atual" e o cliente barra sem mandar o PATCH até puxar a tela.
 // Lido no boot E rebuscado no PBRefresh (a senha é definida FORA desta página).
 let HAS_PASSWORD = true;
 // Geração, mesmo padrão de _securityGen/_mfaGen — mas na ESCRITA, porque as três
@@ -1879,8 +1883,12 @@ function setHasPassword(me, myGen) {
 
      boot com /auth/me ok .......... escreve, com geração: initSettings bumpa o
        _hasPwGen antes do fetch e passa o meGen para o setHasPassword.
-     boot com /auth/me não-ok, ou exceção .... NÃO escreve, fica `true` — o lado
-       permissivo, por decisão; a autoridade é o 409 do servidor.
+     boot com /auth/me não-ok, ou exceção .... NÃO escreve, fica `true`. Na troca
+       de e-mail (B0a) esse é o lado RESTRITIVO para a conta do quiz (D2) e a
+       só-Google (D1): veem "Senha atual" e o cliente barra sem mandar o PATCH;
+       puxar a tela (PTR) rebusca e resolve. Mantido por decisão do dono (custo
+       baixo). O servidor ignora a senha da conta sem credencial, e a só-Google
+       recebe o 409.
      PTR na aba `security` ......... rebusca ANTES dos loaders, porque
        applySecuritySettings lê HAS_PASSWORD para escolher a copy do card; falha
        do /auth/me não pula os loaders, vira âmbar no fim.
@@ -2119,11 +2127,21 @@ function toggleSecurityEdit(kind, force) {
   const box = document.getElementById(`security-${kind}-edit`);
   const show = typeof force === "boolean" ? force : !box.classList.contains("show");
   box.classList.toggle("show", show);
+  if (kind === "email") {
+    // Trocar o e-mail pede a senha atual (B0a). Só quem tem senha: a conta só-Google leva o
+    // 409 "defina uma senha" do servidor e a sem credencial (quiz) troca livre.
+    const senha = document.getElementById("security-email-senha");
+    senha.hidden = !HAS_PASSWORD;
+    senha.value = "";
+    if (show && !senha.hidden) return senha.focus();
+  }
   if (show) document.getElementById(`security-${kind}-input`).focus();
 }
 
 let _securitySave = null;
 async function saveSecurityContact(kind) {
+  // Salvar em voo trava o botão: duplo clique mandava dois PATCH idênticos.
+  const salvar = document.querySelector(`#security-${kind}-edit button`);
   const input = document.getElementById(`security-${kind}-input`);
   const rawValue = input.value;
   const value = (rawValue || "").trim();
@@ -2143,11 +2161,24 @@ async function saveSecurityContact(kind) {
   else if (kind === "phone") body = { phone: value };
   else if (kind === "name") body = { display_name: value };
   else return;
+  const senha = document.getElementById("security-email-senha");
+  if (kind === "email") {
+    senha.hidden = !HAS_PASSWORD;   // o rebusque do /auth/me pode ter mudado com o editor aberto
+    // E-mail igual ao atual (o rótulo; trim+minúsculas como o servidor): o servidor trata como no-op,
+    // sem senha e sem contar no teto. Não exigir nem mandar a senha. Rótulo ainda não carregado
+    // ("Carregando...") nunca bate com e-mail válido, então cai no caminho que exige a senha.
+    const igualAtual = value.toLowerCase() === document.getElementById("security-email-value").textContent.trim().toLowerCase();
+    // Vazio nem sai: o 400 do servidor conta no teto de 5 trocas por hora.
+    // Texto aprovado (D5), igual ao 400 de settings_contato.py:exigir_senha_atual: o HTML é estático e não importa a constante do Python.
+    if (!senha.hidden && !igualAtual && !senha.value) { showToast("Confirme sua senha atual para trocar o e-mail.", "error"); return; }
+    if (!senha.hidden && !igualAtual) body.current_password = senha.value;
+  }
 
   // Save de contato em voo — o PBRefresh da aba security encadeia atrás dele
   // (mesma razão do notif): um GET que capturou estado pré-PATCH chegando por
   // último sobrescreveria o nome/e-mail/telefone salvo.
   let _doneSave;
+  salvar.disabled = true;
   _securitySave = new Promise(function (r) { _doneSave = r; });
   try {
     const resp = await fetch(`${API}/settings/${USER_ID}/security/contact`, {
@@ -2191,6 +2222,8 @@ async function saveSecurityContact(kind) {
   } catch (err) {
     showToast(err.message || "Erro ao salvar dado", "error");
   } finally {
+    salvar.disabled = false;
+    if (kind === "email") senha.value = "";   // sucesso ou erro: a senha não fica na página
     _doneSave();   // libera o PBRefresh enfileirado atrás do save
   }
 }

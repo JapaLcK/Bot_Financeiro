@@ -36,6 +36,9 @@ from db import (
 )
 from db.connection import get_conn
 from frontend.routes import shared
+from frontend.routes.settings_contato import (
+    avisar_email_antigo, contato_atual, exigir_senha_atual, telefone_livre, travar_e_ler_email,
+)
 from utils_phone import normalize_phone_e164
 
 router = APIRouter()
@@ -45,6 +48,7 @@ class SecurityContactPayload(BaseModel):
     email: str | None = None
     phone: str | None = None
     display_name: str | None = None
+    current_password: str | None = None  # só a troca de e-mail pede (B0a)
 
 
 class AccountResetPayload(BaseModel):
@@ -279,24 +283,6 @@ async def security_settings_route(request: Request, user_id: int):
 CONTATO_EM_USO = "Este e-mail ou telefone já está em uso."
 
 
-def _telefone_livre(telefone: str, user_id: int) -> bool:
-    """O `telefone_livre` dos cadastros (§0.7): a variante com/sem o nono dígito do
-    número de outra conta também está em uso. O índice único só vê o número exato,
-    e continua de rede para a corrida entre esta leitura e o UPDATE (#630)."""
-    from db_support import telefone_livre
-    with get_conn() as conn, conn.cursor() as cur:
-        return telefone_livre(cur, telefone, exceto_user_id=user_id) is not None
-
-
-def _contato_atual(user_id: int) -> dict | None:
-    """Hashes do contato gravado, direto do banco: o `get_auth_user` tem cache de
-    10 s que pode estar velho (até depois de invalidar, `db_support.py:587-594`),
-    e o "mudou?" decide o teto e o `telefone_livre` (#911). Hash é a forma da escrita."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select email_hash, phone_hash from auth_accounts where user_id = %s", (user_id,))
-        return cur.fetchone()
-
-
 @router.patch("/settings/{user_id}/security/contact")
 async def update_security_contact_route(
     request: Request,
@@ -315,7 +301,7 @@ async def update_security_contact_route(
     # corrigir o e-mail é a saída de quem pagou sem senha (PR 4 do funil v3).
     # Dono, exclusão agendada, DIREITO e CSRF continuam valendo.
     shared.authorize_dashboard_access(request, user_id, exige_credencial=False)
-    atual = await asyncio.to_thread(_contato_atual, user_id)
+    atual = await asyncio.to_thread(contato_atual, user_id)
     if not atual:
         raise HTTPException(status_code=400, detail="Esta conta ainda não tem login por e-mail configurado.")
 
@@ -355,8 +341,11 @@ async def update_security_contact_route(
         # (D5): 5 trocas/hora, contando também as que dão 409 — é a enumeração.
         from frontend.finance_bot_websocket_custom import _check_persistent_rate_limit
         await _check_persistent_rate_limit("settings-contact", f"user:{user_id}", 5, 60 * 60)
-    if phone_actually_changed and not await asyncio.to_thread(_telefone_livre, normalized_phone, user_id):
+    # B0a: ANTES do 409 do telefone/e-mail, ou a ordem enumera contas (senha errada → 401, nunca 409).
+    avisa_antigo = email_actually_changed and await exigir_senha_atual(user_id, payload.current_password)
+    if phone_actually_changed and not await asyncio.to_thread(telefone_livre, normalized_phone, user_id):
         raise HTTPException(status_code=409, detail=CONTATO_EM_USO)
+    linha_antiga = None
 
     try:
         async with await shared.db_connect() as conn:
@@ -365,7 +354,14 @@ async def update_security_contact_route(
                 # auto-link do WhatsApp por phone_hash) — atualizar só a coluna em
                 # claro deixa o hash apontando pro valor antigo e o bot nunca
                 # reconhece o número novo.
-                if email:
+                if email_actually_changed:
+                    # Sob o lock: PATCH concorrente que já trocou vira "sem mudança" (sem aviso).
+                    linha_antiga = await travar_e_ler_email(cur, user_id)
+                    if linha_antiga and linha_antiga["email_hash"] == hash_pii_optional(email, kind="email"):
+                        email_actually_changed = avisa_antigo = False
+                # Só grava o e-mail na decisão final (sob o lock): "sem mudança" não regrava,
+                # senão um PATCH com o e-mail antigo desfaz a troca concorrente feita com senha.
+                if email_actually_changed:
                     # Pendência do e-mail no Stripe (PR 4b), na MESMA transação: o
                     # 409 do e-mail repetido desfaz as duas. Compara no banco, não
                     # no cache. O `on conflict` NÃO zera o claim de
@@ -437,6 +433,8 @@ async def update_security_contact_route(
     except psycopg.errors.UniqueViolation as exc:
         raise HTTPException(status_code=409, detail=CONTATO_EM_USO) from exc
 
+    if avisa_antigo:
+        await avisar_email_antigo(linha_antiga, user_id, email)
     if email_actually_changed:
         await asyncio.to_thread(
             record_audit_event,

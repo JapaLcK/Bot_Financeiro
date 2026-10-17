@@ -516,6 +516,8 @@ _401_RENOVAVEL = {
     # (monólito) e no reset de dados (settings.py). Dinâmico, daí o marcador.
     (_MONO, "auth_delete_account", "<str(exc)>"): False,
     ("frontend/routes/settings.py", "account_reset_route", "<str(exc)>"): False,
+    # Senha atual errada ao trocar o e-mail (B0a); a função mora em settings_contato.py.
+    ("frontend/routes/settings_contato.py", "exigir_senha_atual", "Senha incorreta."): False,
     # Chave de API do lead engine e webhook server-to-server: sem sessão nenhuma.
     ("frontend/routes/prospects.py", "prospect_status", "Chave inválida."): False,
     ("frontend/routes/open_finance.py", "open_finance_pluggy_webhook",

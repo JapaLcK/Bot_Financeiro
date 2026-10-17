@@ -19,7 +19,7 @@ from conftest import promote_to_pro
 from core.crypto import hash_pii_optional
 from db import attempt_whatsapp_phone_link, link_platform_identity
 from db.connection import get_conn
-from tests._helpers_pii import insert_auth_account_pii
+from tests._helpers_pii import HASH_SENHA, SENHA, insert_auth_account_pii
 
 
 def _client_for(user_id: int, email: str) -> tuple[TestClient, dict]:
@@ -80,14 +80,14 @@ def test_patch_contact_email_resyncs_hash(user_id):
     new_email = f"pii-sync-novo-{uuid.uuid4().hex[:8]}@test.local"
 
     with get_conn() as conn, conn.cursor() as cur:
-        insert_auth_account_pii(cur, user_id, email)
+        insert_auth_account_pii(cur, user_id, email, password_hash=HASH_SENHA)
         conn.commit()
     promote_to_pro(user_id)
 
     client, csrf_headers = _client_for(user_id, email)
     resp = client.patch(
         f"/settings/{user_id}/security/contact",
-        json={"email": new_email},
+        json={"email": new_email, "current_password": SENHA},
         headers=csrf_headers,
     )
     assert resp.status_code == 200, resp.text
