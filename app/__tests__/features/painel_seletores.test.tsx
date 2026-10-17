@@ -16,7 +16,7 @@ function servidor() {
   if (path === "/onboarding/open-finance") return resposta(200, { ok: true, completed: true, completed_at: "2026-10-05T12:00:00Z" });
   if (path === "/open-finance/1/limite") return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
   if (path === "/api/app/previsao") return resposta(200, { ...fixture[path], dias: Number(u.searchParams.get("dias") || 30) });
-  if (path === "/api/app/lancamentos" && u.searchParams.has("q")) { const segunda = u.searchParams.has("cursor"); return resposta(200, { ...fixture[path], itens: [{ ...fixture[path].itens[0], id: segunda ? "busca-outra" : "busca-antiga", data: segunda ? "2026-08-01" : "2026-09-01", descricao: segunda ? "Loja de agosto" : "Loja de setembro" }], proximo: segunda ? null : "pagina-2" }); }
+  if (path === "/api/app/lancamentos" && u.searchParams.has("q")) { const segunda = u.searchParams.has("cursor"), dia = u.searchParams.get("dia"), item = { ...fixture[path].itens[0], id: segunda ? "busca-outra" : "busca-antiga", data: segunda ? "2026-08-01" : "2026-09-01", descricao: segunda ? "Loja de agosto" : "Loja de setembro" }; return resposta(200, { ...fixture[path], itens: dia && item.data !== dia ? [] : [item], proximo: segunda ? null : "pagina-2" }); } // o servidor filtra pelo `dia` da consulta
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 }
@@ -175,7 +175,7 @@ it("busca com categoria vazia e dia civil mantém filtros e paginação global",
  expect(screen.queryByText("Loja de setembro")).toBeNull(); expect(screen.getByText("Sem categoria")).toBeTruthy(); expect(screen.getByText("01/08/2026")).toBeTruthy();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de agosto")).toBeTruthy();
  const paginas = fetchFalso.mock.calls.map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/lancamentos" && u.searchParams.has("q"));
- expect(paginas).toHaveLength(2); for (const u of paginas) { expect(u.searchParams.get("categoria")).toBe(""); expect(u.searchParams.get("q")).toBe("Loja"); }
+ expect(paginas).toHaveLength(2); for (const u of paginas) { expect(u.searchParams.get("categoria")).toBe(""); expect(u.searchParams.get("q")).toBe("Loja"); expect(u.searchParams.get("dia")).toBe("2026-08-01"); }
 });
 
 it("horizonte não repete leituras mensais, conversa ou insights", async () => {

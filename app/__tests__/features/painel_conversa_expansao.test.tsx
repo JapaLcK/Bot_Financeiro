@@ -30,7 +30,7 @@ it("categoria de OUTRO mês: pede o mês da aba, expande no lugar, recolhe ao to
 it("controle positivo: no painel (aba Gastos) a mesma linha segue levando ao Extrato", async () => {
   instalarCards(true); const push = jest.spyOn(router, "push"); await abrir(); await ir("/gastos");
   await waitFor(() => expect(screen.getByRole("button", { name: /Alimentação/ })).toBeTruthy());
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação" } });
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação", entrada: expect.any(Number) } });
   await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy()); await act(drenar); // espera o Extrato aberto terminar a leitura (senão ela atualiza o estado depois do teste)
 });
 it("categoria null: pede `categoria=` vazio (casa 'sem categoria')", async () => {
