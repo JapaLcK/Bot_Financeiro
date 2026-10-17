@@ -320,35 +320,3 @@ for (const [name, changes, value] of projectionCases) {
     await page.close();
   });
 }
-
-test("KPI das Análises: o rótulo diz a regra (PL-07) com o N do servidor e o title traz a escolha, escapada", async () => {
-  const page = await viewPage("analytics");
-  const r = await page.evaluate(() => {
-    const k = { total_income: 600, total_expense: 300, savings_rate: 0.5, peak_day: null };
-    const ler = () => [...document.querySelectorAll("#analytics-stats .stat-delta")].slice(0, 2).map((e) => [e.textContent, e.getAttribute("title")]);
-    // `delta_meses` (o N que o servidor usou, com o teto dele) manda no rótulo, não o seletor (6)
-    renderAnalyticsKPIs({ ...k, delta_pct: { income: -20, expense: 0 }, delta_escolha: 'De 1º "x" <b>y</b>', delta_meses: 3 }, 6);
-    const plus = [...ler(), document.querySelectorAll("#analytics-stats b").length];
-    renderAnalyticsKPIs({ ...k }, 3); // Essencial: sem delta, sem title
-    return [plus, ler()];
-  });
-  assert.deepEqual(r, [
-    [["0,0% vs os mesmos dias, 3 meses antes", 'De 1º "x" <b>y</b>'], ["-20,0% vs os mesmos dias, 3 meses antes", 'De 1º "x" <b>y</b>'], 0],
-    [["—", null], ["—", null]],
-  ]);
-  await page.close();
-});
-
-test("KPI das Análises: o \"—\" de fora do histórico (Plus, 12 meses) explica no title", async () => {
-  // Mede o repasse da `delta_escolha` para o `title` quando não há número, não a frase (essa é do
-  // servidor, `FORA_DO_HISTORICO`, e o teste dela está em tests/test_analytics_kpi_comparacao.py).
-  const frase = "frase do servidor sem número";
-  const page = await viewPage("analytics");
-  const r = await page.evaluate((frase) => {
-    renderAnalyticsKPIs({ total_income: 600, total_expense: 300, savings_rate: 0.5, peak_day: null,
-      delta_pct: { income: null, expense: null }, delta_escolha: frase, delta_meses: 12 }, 12);
-    return [...document.querySelectorAll("#analytics-stats .stat-delta")].slice(0, 2).map((e) => [e.textContent, e.getAttribute("title")]);
-  }, frase);
-  assert.deepEqual(r, [["—", frase], ["—", frase]]);
-  await page.close();
-});

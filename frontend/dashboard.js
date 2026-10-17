@@ -6237,7 +6237,8 @@ function _deltaLabel(pct, meses) {
   if (pct == null) return { text: "—", cls: "" };
   const sign = pct > 0 ? "+" : "";
   const cls = pct > 0 ? "down" : (pct < 0 ? "up" : "");
-  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs os mesmos dias, ${meses} meses antes`, cls };
+  const antes = meses === 1 ? "1 mês antes" : `${meses} meses antes`; // `?months=1` direto na API
+  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs os mesmos dias, ${antes}`, cls };
 }
 
 function renderAnalyticsKPIs(k, months) {
