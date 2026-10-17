@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import db
+import db.bank_conferencia as conferencia
 import db.bank_movements as movements
 from core.services.cashflow_snapshot import carregar
 from db.bank_declaracoes import congelada
@@ -46,7 +47,7 @@ def test_so_casada_congela_pendente_nunca(user_id):
     assert not congelada(_decls(user_id)[0], today_tz())
     # segue a conferir: resumo, lista do modal e Previsão
     assert movements.bank_movement_summary(user_id)["pending_count"] == 1
-    assert [m["launch_id"] for m in movements.list_bank_movements(user_id)] == [lid]
+    assert [m["launch_id"] for m in conferencia.list_bank_movements(user_id)] == [lid]
     motivos = carregar(user_id, today_tz(), today_tz() + timedelta(days=30)).motivos
     assert ("declaracao_bancaria_a_conferir", lid) in [(m.codigo, m.origem_id) for m in motivos]
     # e o reconcile não a pula: a transação antiga chega e ela casa
@@ -84,12 +85,12 @@ def test_confirmar_outro_par_se_comporta_igual_congelada_ou_recente(user_id, dia
     """Casada e congelada (50) ou casada e recente (5): o modal não lista a casada e confirmar OUTRA
     transação recusa igual nos dois (trocar o par passa por apagar a transação ou o lançamento)."""
     cid, lid, tx_id = _casada_antiga(user_id, dias)
-    assert movements.list_bank_movements(user_id) == []
+    assert conferencia.list_bank_movements(user_id) == []
     sincroniza(cid, user_id, tx(txid="t2", days=-dias))
     with pytest.raises(ValueError, match="MOVEMENT_ALREADY_MATCHED"):
-        movements.confirm_bank_movement(user_id, lid, q(
+        conferencia.confirm_bank_movement(user_id, lid, q(
             "select id from open_finance_transactions where provider_transaction_id='t2'")["id"])
-    movements.confirm_bank_movement(user_id, lid, tx_id)  # idempotente na própria prova
+    conferencia.confirm_bank_movement(user_id, lid, tx_id)  # idempotente na própria prova
 
 
 def test_banco_apagando_a_transacao_desvincula_e_um_novo_par_religa(user_id):

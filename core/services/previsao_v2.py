@@ -50,7 +50,8 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
              "marcos": [{"dias": n, "data": marcos[str(n)]["target"],
                          "saldo": marcos[str(n)]["projetado"]} for n in horizontes],
              "periodo": None, "ancora": None, "trajetoria": None,
-             "pior_dia": None, "compromissos": None}
+             "pior_dia": None, "compromissos": None,
+             "receitas_do_banco": snapshot.receitas_do_banco}  # fora do `detalhes`: o Plus também responde
     if not detalhes:
         return dados
 

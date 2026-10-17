@@ -4,10 +4,8 @@ from decimal import Decimal
 
 import pytest
 import db
-from db.bank_movements import (
-    bank_movement_summary, confirm_bank_movement, list_bank_movements,
-    migrate_legacy_bank_movements,
-)
+from db.bank_movements import bank_movement_summary
+from db.bank_conferencia import confirm_bank_movement, list_bank_movements, migrate_legacy_bank_movements
 from conftest import promote_to_pro
 from core.services import funding
 from utils_date import _tz

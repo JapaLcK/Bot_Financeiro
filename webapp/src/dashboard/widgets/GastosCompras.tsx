@@ -1,17 +1,19 @@
 // O card de compras de /gastos: as saídas de um dia do calendário (`gastosAberto.dia`) ou de uma categoria
 // (`gastosAberto.categoria`, o "Ver compras" do detalhe), na própria tela. O total é o do servidor, da mesma
 // consulta que pinta o calendário ou o detalhe (em cache); a lista é a de /lancamentos com tipo=saida, e o que
-// o total não soma (movimento interno, guardado, outra moeda) vem marcado pelo LancamentoLinha. Nada é somado aqui.
+// o total não soma (movimento interno, guardado, outra moeda) vem marcado pelo LancamentoLinha. Nada é somado aqui: no modo
+// dia o topo (parts/GastosDiaTopo.tsx) mostra o que o servidor mandou do dia e só compara com a média do calendário.
 import { useEffect, useRef } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { Lancamento } from "../lib/api-v2.gen";
-import { isoDay, longDate, moneyText, monthName } from "../lib/format.js";
+import { moneyText, monthName } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import { mesDe } from "../lib/store.js";
 import { categoriasQuery, contasQuery, gastosCategoriaQuery, gastosQuery, lancamentosQuery } from "../lib/v2";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { estadoGastos } from "../parts/GastosEstado";
+import { GastosDiaTopo } from "../parts/GastosDiaTopo";
 import { LancamentoLinha } from "../parts/LancamentoLinha";
 import { Selos } from "../parts/Selos";
 
@@ -35,16 +37,27 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const estado = estadoGastos(q);
   const pronto = !estado && !lista.isPending; // total e lista na tela: o card já tem a altura final
   const ref = useRef<HTMLDivElement>(null);
+  const porSeta = useRef<string | null>(null); // o dia a que as setas levaram: a pessoa já está no card e o botão fica onde estava
   // No quadro seguinte: vindo do Resumo, o foco no título da página (App.tsx) é do efeito do pai, que roda depois deste.
+  // Se o foco já está num botão do card (as setas de dia), ele fica ali; só vai ao card quando esse botão desabilitou (o limite
+  // do mês: o Chromium já o tira do foco, o Safari e o Firefox o mantêm) ou sumiu.
   useEffect(() => {
-    const f = requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+    const f = requestAnimationFrame(() => {
+      const a = document.activeElement as HTMLButtonElement | null;
+      if (!(a && ref.current?.contains(a) && !a.disabled)) ref.current?.focus({ preventScroll: true });
+    });
     return () => cancelAnimationFrame(f);
   }, [dia ?? cat]);
   // O scroll espera o conteúdo: com o card ainda vazio o fim da página está mais perto e o pedido fica no mesmo lugar. Na chegada
   // (vindo do Resumo) o alinhamento é o do efeito de baixo: o scroll suave do roteador (volta ao topo) ainda corre, e "nearest"
-  // mediria contra ele.
+  // mediria contra ele. Troca pelas setas não rola: num card mais alto que a janela "nearest" alinha o topo e a seta foge do dedo. Não se
+  // lê o foco porque o Safari não foca botão ao toque; a marca é do dia e se apaga quando outro dia (o calendário) abre.
   useEffect(() => {
-    const f = requestAnimationFrame(() => { if (!chegada.current) ref.current?.scrollIntoView({ block: "nearest" }); });
+    const f = requestAnimationFrame(() => {
+      const viaSeta = !!dia && porSeta.current === dia;
+      if (!viaSeta) porSeta.current = null;
+      if (!viaSeta && !chegada.current) ref.current?.scrollIntoView({ block: "nearest" });
+    });
     return () => cancelAnimationFrame(f);
   }, [dia ?? cat, pronto]);
   // Na chegada o card vai ao início da janela e o Detalhe, acima dele, carrega depois e o empurraria para baixo da dobra: enquanto a
@@ -75,17 +88,21 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const nome = daCat.data?.categoria.nome;
   const [y, m] = mes.split("-").map(Number);
   const entrada = dia && d ? d.dias.find((x) => x.dia === dia) : undefined;
-  const titulo = dia ? longDate(isoDay(dia)) : nome ? `${nome[0].toUpperCase()}${nome.slice(1)} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
-  const rotulo = dia ? (dia > (d?.hoje ?? "") ? "Agendado para o dia" : "Gasto no dia") : "Gasto no mês";
-  const total = dia ? entrada?.total : daCat.data?.total;
-  const comTotal = dia ? !!entrada : Number(daCat.data?.compras) > 0;
+  const titulo = dia ? "Seu dia" : nome ? `${daCat.data!.categoria.emoji} ${nome[0].toUpperCase()}${nome.slice(1)} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
+  const compras = daCat.data?.compras ?? 0;
+  const comTotal = dia ? !!entrada : Number(compras) > 0;
 
   return (
-    <div ref={ref} className="panel" role="region" id="gastos-compras" tabIndex={-1} aria-labelledby="w-compras-h" onKeyDown={(e) => { if (e.key === "Escape") fechar(); }}>
+    <div ref={ref} className="panel" role="region" id="gastos-compras" tabIndex={-1} aria-labelledby={dia ? "w-compras-h w-compras-data" : "w-compras-h"} onKeyDown={(e) => { if (e.key === "Escape") fechar(); }}>
       <Frame id="compras" real title={titulo} aside={dia && cat && nome && <span className="tag-demo">Só {nome}</span>}>
         {estado ?? <>
-          {total !== undefined ? <p className="w-lede">{rotulo} · <span className="num">{moneyText(total) ?? "—"}</span></p> : <p className="faint">Nenhum gasto neste dia.</p>}
-          <Selos motivos={d?.motivos ?? []} />
+          {dia ? <GastosDiaTopo d={d!} dia={dia} catalogo={geral.data?.categorias ?? []} porCategoria={!!cat} ir={(k) => { porSeta.current = k; set({ gastosAberto: { dia: k } }); }} /> : (
+            <>
+              <p className="w-lede"><span className="num">{moneyText(daCat.data?.total) ?? "—"}</span> · {compras} {compras === 1 ? "compra" : "compras"}</p>
+              <Selos motivos={d?.motivos ?? []} />
+            </>
+          )}
+          {dia && (entrada || itens.length > 0) && <h3 className="dia-lista-t">Compras do dia</h3>}
           {lista.isPending && <p role="status" className="faint">Carregando…</p>}
           {lista.isError && !lista.data && (
             <div className="empty" role="alert">
@@ -106,7 +123,7 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
           )}
         </>}
         <div className="compras-pe">
-          <button type="button" className="link" onClick={ver}>Ver em Lançamentos</button>
+          <button type="button" className="link" onClick={ver}>Ver em Lançamentos<i className="ph ph-arrow-square-out" aria-hidden="true" /></button>
           <button type="button" className="link" onClick={fechar}>Fechar</button>
         </div>
       </Frame>

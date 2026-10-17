@@ -65,6 +65,14 @@ def _visual(meta, chave: str) -> dict:
     return {"chave": chave, "nome": m["name"] if m else chave, **cat_visual(m and m["emoji"], m and m["color"])}
 
 
+def _por_categoria(rs) -> list:
+    """`{chave, valor}` do dia, das MESMAS linhas que dão o `total`; maior valor primeiro, empate pela chave."""
+    por_chave: dict = {}
+    for r in rs:
+        por_chave[_chave(r)] = por_chave.get(_chave(r), Decimal(0)) + r["valor"]
+    return [{"chave": k, "valor": v} for k, v in sorted(por_chave.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
 def _calendario(atual, saidas) -> tuple[list, dict]:
     """Os dias com saída dentro da grade e a linha `fora_da_grade`, das `saidas` dadas."""
     por_dia: dict = {}
@@ -78,7 +86,8 @@ def _calendario(atual, saidas) -> tuple[list, dict]:
     dias = [{"dia": d.isoformat(), "total": sum((r["valor"] for r in rs), Decimal(0)),
              "maiores": [{"descricao": (r["descricao"] or "").strip() or SEM_DESCRICAO, "valor": r["valor"],
                           "categoria": _chave(r)}
-                         for r in sorted(rs, key=lambda r: -r["valor"])[:MAIORES_POR_DIA]]}
+                         for r in sorted(rs, key=lambda r: -r["valor"])[:MAIORES_POR_DIA]],
+             "quantidade": len(rs), "categorias": _por_categoria(rs)}
             for d, rs in sorted(por_dia.items())]
     return dias, fora_da_grade
 

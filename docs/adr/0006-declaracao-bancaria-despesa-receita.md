@@ -149,7 +149,7 @@ A ADR 0003 trata “guardei/saquei” como declaração: o usuário diz que fez,
 - **Pendência de investigação: persistir a recusa de um vínculo.** O próximo sync não pode refazer sozinho um vínculo que o usuário desfez ou recusou. Antes de criar uma tabela nova, verificar o que já existe: o `reconciliation_status` de `open_finance_transactions` (valores como `imported`, `pending`, `bank_movement_confirmed`), `reject_reconciliation` (`db/reconciliation.py`, que grava a rejeição do pendente da fusão) e as colunas atuais de `bank_movement_declarations` e `open_finance_transactions`. Uma tabela nova é escolha de implementação, a justificar depois dessa verificação.
 - **Pendência de desenho: “lançamento correspondente” na Carteira.** Como achar e propor o candidato na Carteira sem duplicar (decisão 6). Ainda não desenhado.
 - Sem expiração e sem lembrete, as declarações sem par se acumulam; o A2 existe para isso.
-- Antes dele, mover `list_bank_movements`, `confirm_bank_movement` e `migrate_legacy_bank_movements` para um módulo próprio: `db/bank_movements.py` está no teto de 350 linhas (350 em `origin/main` `518494cb`, medido em 2026-10-15 com `wc -l`; remeça antes de reusar), e qualquer linha nova reprova `tests/test_max_lines_python.py`.
+- Feito no PR-A2a (commit `751a81d5`): `list_bank_movements`, `confirm_bank_movement` e `migrate_legacy_bank_movements` moram em `db/bank_conferencia.py`, e `db/bank_movements.py` saiu do teto de `tests/test_max_lines_python.py`.
 
 ## Consequências
 

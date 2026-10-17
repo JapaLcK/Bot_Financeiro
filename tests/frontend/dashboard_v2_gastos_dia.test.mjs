@@ -33,14 +33,18 @@ const pedidos = (page) => {
   return urls;
 };
 // O que a pessoa vê no card: o total do dia, e cada linha com a marca que o servidor mandou.
-const lerCard = (page) => page.evaluate(() => ({
-  lede: document.querySelector("#gastos-compras .w-lede")?.textContent.replace(/\s/g, " "),
+const lerCard = (page) => page.evaluate(() => { const lede = () => { const r = document.querySelector("#gastos-compras .dia-rotulo"), t = document.querySelector("#gastos-compras .dia-total"); return r && `${r.textContent} · ${t.textContent}`; }; return {
+  lede: lede(),
   nota: document.querySelector(".compras-nota")?.textContent ?? null,
   linhas: [...document.querySelectorAll("#gastos-compras .lanc-linha")].map((li) => ({
     valor: li.querySelector(".lanc-valor").textContent,
     marcada: /fora de Entrou\/Saiu/.test(li.textContent) || [...li.querySelectorAll(".selo")].some((x) => x.textContent === "outra moeda"),
   })),
-}));
+}; });
+// "Gasto no dia · R$ 290,00": o rótulo e o total do dia, que agora moram na faixa e não numa linha só.
+const ledeDoDia = (page) => page.evaluate(() => `${document.querySelector("#gastos-compras .dia-rotulo").textContent} · ${document.querySelector("#gastos-compras .dia-total").textContent}`);
+// A data do card (o título é "Seu dia"): espera o dia certo no lugar do antigo `#w-compras-h` com a data.
+const diaAberto = (page, texto) => page.locator("#gastos-compras .dia-data", { hasText: texto });
 const somaNaoMarcadas = (linhas) => linhas.filter((l) => !l.marcada).reduce((a, l) => a + centavos(l.valor), 0);
 
 async function cardDoDia(itens) {
@@ -95,12 +99,12 @@ test("dia: tocar abre sem sair da tela, no mesmo dia fecha, em outro troca; 'Dia
 
   await celula(page, 7).click();
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
-  assert.deepEqual(await ver(), { hash: "#/gastos", aberto: true, titulo: "qua, 7 de outubro", foco: "gastos-compras", expandidas: ["7"], controla: ["7:gastos-compras"], pressed: 0 });
+  assert.deepEqual(await ver(), { hash: "#/gastos", aberto: true, titulo: "Seu dia", foco: "gastos-compras", expandidas: ["7"], controla: ["7:gastos-compras"], pressed: 0 });
   assert.equal(await page.locator("#gastos-compras").getAttribute("role"), "region");
   assert.deepEqual(lanc.at(-1), "?mes=2026-10&dia=2026-10-07&tipo=saida&guardado=true");
 
   await celula(page, 3).click(); // outro dia: troca
-  await page.locator("#w-compras-h", { hasText: "3 de outubro" }).waitFor();
+  await diaAberto(page, "3 de outubro").waitFor();
   assert.deepEqual((await ver()).expandidas, ["3"]);
   assert.equal(lanc.at(-1), "?mes=2026-10&dia=2026-10-03&tipo=saida&guardado=true");
   await celula(page, 3).click(); // o mesmo dia: fecha
@@ -109,7 +113,7 @@ test("dia: tocar abre sem sair da tela, no mesmo dia fecha, em outro troca; 'Dia
 
   const caro = page.locator("#w-calendario .cal-foot .link");
   await caro.click(); // "Dia mais caro" (7): abre
-  await page.locator("#w-compras-h", { hasText: "7 de outubro" }).waitFor();
+  await diaAberto(page, "7 de outubro").waitFor();
   await caro.click(); // e nunca fecha
   assert.deepEqual([(await ver()).aberto, (await ver()).expandidas], [true, ["7"]]);
   await page.locator("#gastos-compras").focus();
@@ -120,10 +124,10 @@ test("dia: tocar abre sem sair da tela, no mesmo dia fecha, em outro troca; 'Dia
 
   await celula(page, 20).focus(); // pelo teclado; dia futuro com lançamento agendado
   await page.keyboard.press("Enter");
-  await page.locator("#w-compras-h", { hasText: "20 de outubro" }).waitFor();
-  assert.equal(await page.locator("#gastos-compras .w-lede").textContent(), "Agendado para o dia · R$ 50,00");
+  await diaAberto(page, "20 de outubro").waitFor();
+  assert.equal(await ledeDoDia(page), "Agendado para o dia · R$ 50,00");
   await celula(page, 5).click(); // dia sem entrada: o texto e, mesmo assim, a lista é pedida (pode trazer só linha marcada)
-  await page.locator("#w-compras-h", { hasText: "5 de outubro" }).waitFor();
+  await diaAberto(page, "5 de outubro").waitFor();
   assert.equal(await page.locator("#gastos-compras .faint").first().textContent(), "Nenhum gasto neste dia.");
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
   assert.equal(lanc.at(-1), "?mes=2026-10&dia=2026-10-05&tipo=saida&guardado=true");
@@ -139,7 +143,7 @@ test("'Ver em Lançamentos' ainda leva `mes` e `dia`; com categoria escolhida o 
   await page.locator("#w-calendario .tag-demo").waitFor();
   await celula(page, 7).click();
   await page.locator("#gastos-compras .tag-demo", { hasText: "Só alimentação" }).waitFor(); // a fixture da categoria responde alimentação
-  assert.equal(await page.locator("#gastos-compras .w-lede").textContent(), "Gasto no dia · R$ 200,00"); // o total do dia na categoria
+  assert.equal(await ledeDoDia(page), "Gasto no dia · R$ 200,00"); // o total do dia na categoria
   assert.equal(lanc.at(-1), "?mes=2026-10&dia=2026-10-07&tipo=saida&categoria=sem+categoria&guardado=true");
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
@@ -160,7 +164,7 @@ test("categoria: 'Ver compras' abre o card do mês da categoria e alterna; outra
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
   const aberto = await page.evaluate(() => ({ titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent,
     foco: document.activeElement.id, exp: document.querySelector('[aria-controls="gastos-compras"]').textContent }));
-  assert.deepEqual(aberto, { titulo: "Alimentação · outubro", lede: "Gasto no mês · R$ 300,00", foco: "gastos-compras", exp: "Ver compras" });
+  assert.deepEqual(aberto, { titulo: "🍽️ Alimentação · outubro", lede: "R$ 300,00 · 2 compras", foco: "gastos-compras", exp: "Ver compras" });
   assert.equal(lanc.at(-1), "?mes=2026-10&tipo=saida&categoria=alimentacao&guardado=true");
   await page.keyboard.press("Escape");
   await page.locator("#gastos-compras").waitFor({ state: "detached" });
@@ -180,7 +184,7 @@ test("categoria: 'Ver compras' abre o card do mês da categoria e alterna; outra
   await page.locator("#gastos-compras").waitFor({ state: "detached" });
 
   await celula(page, 7).click(); // dia aberto: o "Ver compras" troca para a categoria
-  await page.locator("#w-compras-h", { hasText: "7 de outubro" }).waitFor();
+  await diaAberto(page, "7 de outubro").waitFor();
   await botao.click();
   await page.locator("#w-compras-h", { hasText: "· outubro" }).waitFor();
   assert.equal(await page.locator("#w-calendario .cal-day[aria-expanded=true]").count(), 0);
@@ -203,7 +207,7 @@ test("carregando, erro com 'Tentar de novo' (44px) e 'Carregar mais'", async () 
   await ir("/gastos");
   await celula(page, 7).click();
   await page.locator('#gastos-compras [role="status"]', { hasText: "Carregando…" }).waitFor(); // o total do dia já está, a lista carrega
-  assert.equal(await page.locator("#gastos-compras .w-lede").textContent(), "Gasto no dia · R$ 290,00");
+  assert.equal(await ledeDoDia(page), "Gasto no dia · R$ 290,00");
   estado = "erro";
   libera();
   await page.locator("#gastos-compras [role=alert]").waitFor({ timeout: 15000 });
@@ -290,9 +294,9 @@ for (const width of [1440, 390]) {
       const card = document.querySelector("#gastos-compras").getBoundingClientRect();
       return {
         lateral: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth,
-        estouram: [...document.querySelectorAll("#gastos-compras *")].filter((e) => e.scrollWidth > e.clientWidth && e.clientWidth > 0).map((e) => `${e.className || e.tagName}:${e.scrollWidth}>${e.clientWidth}`),
+        estouram: [...document.querySelectorAll("#gastos-compras *:not(.sr-only)")].filter((e) => e.scrollWidth > e.clientWidth && e.clientWidth > 0).map((e) => `${e.className || e.tagName}:${e.scrollWidth}>${e.clientWidth}`),
         fora: [...document.querySelectorAll("#gastos-compras .lanc-linha, #gastos-compras .lanc-valor")].filter((e) => e.getBoundingClientRect().right > card.right + 0.5).length,
-        lede: document.querySelector("#gastos-compras .w-lede").textContent, linhas: document.querySelectorAll("#gastos-compras .lanc-linha").length,
+        lede: `${document.querySelector("#gastos-compras .dia-rotulo").textContent} · ${document.querySelector("#gastos-compras .dia-total").textContent}`, linhas: document.querySelectorAll("#gastos-compras .lanc-linha").length,
       };
     });
     await ctx.close();
@@ -329,7 +333,7 @@ for (const width of [1440, 390]) for (const movimento of ["reduce", "no-preferen
     console.log(`# Resumo ${width}px ${movimento}:`, JSON.stringify(medidas));
     for (const m of medidas) {
       assert.equal(m.foco, "gastos-compras", JSON.stringify(m));
-      assert.equal(m.titulo, "qua, 7 de outubro");
+      assert.equal(m.titulo, "Seu dia");
       // à vista: pelo menos o título, quando o scroll assentou (com movimento ele é suave, e no meio do caminho o card passa por fora)
       if (m.depois === 1100) assert.ok(m.topo >= 0 && m.topo + 48 <= m.alturaDaJanela, `card fora da vista: ${JSON.stringify(m)}`);
     }
@@ -370,12 +374,14 @@ test("sair de /gastos fecha o card: voltar pelo menu não o reabre, não rouba o
 });
 
 // A barra fixa (askbar no desktop, tabbar no celular) não cobre os botões do pé do card logo depois de abrir (WCAG 2.4.11).
-// Em 1440x720 o card (680px) é mais alto que a área livre da janela: o início dele fica à vista e os botões, abaixo da dobra,
-// continuam sem barra por cima (elementFromPoint fora da janela é null), como antes da margem.
+// A fixture tem UMA linha na lista: com o topo do dia (faixa, fatos, barra) um card de 4 linhas passa da janela em ~900px de altura
+// (limite declarado no doc); aqui se mede só que nenhuma barra fixa cobre o pé. Em janela baixa (720) os botões podem ficar abaixo
+// da dobra, e então elementFromPoint fora da janela é null.
 for (const [width, height] of [[1440, 900], [1180, 800], [390, 844], [1440, 720]]) {
   test(`${width}x${height}: 'Ver em Lançamentos' e 'Fechar' ${height === 720 ? "sem barra fixa por cima" : "ficam à vista, nenhuma barra fixa por cima,"} logo depois de abrir`, async () => {
     const { ctx, page, ir } = await abrir({ width });
     await page.setViewportSize({ width, height });
+    await ctx.route(LANC, (r) => r.fulfill({ json: { ...DIA7, itens: DIA7.itens.slice(0, 1) } })); // uma linha: com o topo do dia o card de 4 linhas passa da janela em 900px
     await ir("/gastos");
     await celula(page, 7).click();
     await compras(page);
@@ -396,6 +402,7 @@ for (const atraso of [300, 2500]) {
     for (const gesto of [false, true]) {
       if (gesto && atraso !== 2500) continue;
       const { ctx, page, erros, ir } = await abrir({ gastos: "muitas", espera: "#w-calendario" });
+      await ctx.route(LANC, (r) => r.fulfill({ json: { ...DIA7, itens: DIA7.itens.slice(0, 2) } })); // com o topo do dia, "inteiro à vista" em 900px só cabe com até 2 linhas
       await ctx.route((u) => u.pathname === "/api/v2/gastos/categoria", async (r) => { await new Promise((ok) => setTimeout(ok, atraso)); await r.fulfill({ json: RESPOSTAS.gastos_categoria.padrao }); });
       await ir("/");
       await celula(page, 7).click();
@@ -418,7 +425,7 @@ test("Fechar com a célula do dia desabilitada (o dia não existe na categoria e
   const { ctx, page, ir } = await abrir({});
   await ir("/gastos");
   await celula(page, 20).click(); // agendado, só existe no geral
-  await page.locator("#w-compras-h", { hasText: "20 de outubro" }).waitFor();
+  await diaAberto(page, "20 de outubro").waitFor();
   await page.locator("#w-categorias .cat", { hasText: "alimentação" }).click();
   await page.locator("#w-categorias .cat[aria-pressed=true]").waitFor();
   await page.waitForFunction(() => document.querySelector("#w-calendario .tag-demo") && [...document.querySelectorAll("#w-calendario .cal-day")].find((b) => b.textContent === "20").disabled);

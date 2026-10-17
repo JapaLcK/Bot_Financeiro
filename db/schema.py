@@ -464,7 +464,10 @@ def init_db():
         # Marcação do usuário na lista de assinaturas (core/services/assinaturas.py):
         # 'assinatura' põe em "serviços", 'ignorar' esconde; `assinatura_antes` guarda
         # a marca que o ignorar substituiu, para o Voltar a mostrar. A chave é a
-        # `merchant_key` da descrição da Pluggy.
+        # `merchant_key` da descrição da Pluggy. Desde 2026-10-16 a mesma tabela guarda a
+        # resposta sobre a RECEITA detectada no extrato, com `merchant_key` = o id `extrato#…`
+        # (core/services/previsao_recorrencias.py): 'assinatura' = confirmada, 'ignorar' =
+        # negada, sem linha = pendente. Aqui os nomes NÃO significam assinatura.
         """
         create table if not exists subscription_marks (
           user_id bigint not null references users(id) on delete cascade,
@@ -3206,7 +3209,7 @@ def _run_ddl(conn, ddl_statements) -> None:
                     print(stmt)
                     raise
 
-            from .bank_movements import migrate_legacy_bank_movements
+            from .bank_conferencia import migrate_legacy_bank_movements
             migrate_legacy_bank_movements(cur)
 
             # Corrige FKs em users(id) que ficaram com on_delete errado
