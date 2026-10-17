@@ -925,6 +925,12 @@ antigo) respondem 302 para `/login?next=<destino>#mfa=<desafio>` sem cookie nem
 registra o login (o callback `app-` não registra mais quando há MFA). O desafio vem de
 `_desafio_mfa`, o mesmo de `_concluir_login`. O `next` de `/d/` só chega ao destino se
 estiver na allowlist do `login.html`.
+Exclusão agendada (#989): `/d/` checa logo depois de consumir o código e ANTES de
+`_desafio_mfa` (403 pela página de erro, sem desafio, cookie nem `auth_sessions`);
+`mfa/verify-login` checa depois da reserva da tentativa e ANTES de consumir o TOTP (400
+`conta_em_exclusao`; o desafio e o código seguem valendo se a exclusão for desfeita).
+`tests/test_login_exclusao_vinculo.py` (x1 a x4).
+
 O `#mfa=` sai da URL num script no topo do `<head>` do `login.html`, ANTES dos snippets de
 GA4/Meta Pixel que `inject_tracking` põe no fim do `<head>` (o GA4 lê `location.href` no
 `config`); `tests/test_google_web_mfa.py::test_e6` e `tests/frontend/login_mfa_tracking.test.mjs`
@@ -933,7 +939,6 @@ prendem isso. Aceitos, sem código:
   login"), comportamento herdado do `/login`.
 - `/d/` com falha em `get_auth_user`/`get_mfa_status` responde 500 e queima o código (fail-closed:
   pedir link novo).
-- `/d/` e `mfa/verify-login` não checam exclusão agendada (o callback web recusa). Follow-up.
 - Recarregar o `/login` depois do `replaceState` perde o formulário de código (o desafio saiu da URL);
   no `/d/` o código do link já foi queimado, então recomeça por senha ou por um link novo.
 - O link do bot COM MFA passa a registrar login e e-mail de novo IP no `verify-login`; o SEM MFA segue

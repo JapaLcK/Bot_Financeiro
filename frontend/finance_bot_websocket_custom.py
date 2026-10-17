@@ -4269,6 +4269,11 @@ async def auth_mfa_verify_login(request: Request, response: Response, body: MFAV
     # tentativas por desafio quem troca de IP e de desafio chutaria ~25/min.
     # Depois da reserva (a tentativa já conta no desafio), antes de conferir.
     await _check_persistent_rate_limit("mfa-verify", f"user:{user_id}", 5, 60)
+    # Exclusão agendada depois do desafio (#989): recusa ANTES de consumir, o TOTP não queima.
+    try:
+        await asyncio.to_thread(_raise_if_account_scheduled_for_deletion, user_id)
+    except HTTPException as exc:
+        return _recusa(exc.detail, "conta_em_exclusao")
 
     verificado = await asyncio.to_thread(
         mfa_consume_login_challenge_with_code,
@@ -7461,6 +7466,8 @@ Os links expiram em __MAGIC_LINK_MINUTES__ minutos e funcionam uma única vez.</
         )
     from db import get_auth_user
 
+    # Exclusão agendada (#989): antes do desafio, mesma ordem do _concluir_login.
+    await asyncio.to_thread(_raise_if_account_scheduled_for_deletion, int(user_id))
     u = await asyncio.to_thread(get_auth_user, int(user_id))
     # Conta com MFA (#605): o link do bot prova a posse do WhatsApp, não o
     # segundo fator. Sem sessão e sem cookie; o código é pedido no /login.
