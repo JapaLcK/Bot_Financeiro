@@ -61,15 +61,20 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"|\b[àá]s\s+\d{1,2}\b(?!\s*(?:real|reais|conto|pila|centavo|h\b)|[.,:/]\d)",
     re.IGNORECASE,
 )
+_MEDIDA_PREFIXO = r"(?<![\d.,])\d+(?:[.,]\d+)*\s*"
+_MEDIDA = (r"dias?|semanas?|anos?|horas?|h|minutos?|min|km|kg|g|ml|l|litros?"
+           r"|metros?|m2|m²|unidades?|un|pessoas?")
 _NAO_VALOR_RE = re.compile(
     _DATA_RE.pattern +
     r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}"
     # quantidade/duração/medida: "daqui 10 dias", "5 km", "3 pessoas". Nunca mil/milhão ("2 mil") nem real/conto/centavo.
     # Sem outro dígito logo depois: "paguei 300 dia 20" é dinheiro + data. ponytail: "1500 mês" (sem "por/ao") mascara.
-    r"|(?<![\d.,])\d+(?:[.,]\d+)*\s*(?:dias?|semanas?|m[eê]s|meses|anos?|horas?|h|minutos?|min|km|kg|g|ml|l|litros?"
-    r"|metros?|m2|m²|unidades?|un|pessoas?)\b(?!\s*\d)",
+    rf"|{_MEDIDA_PREFIXO}(?:{_MEDIDA}|m[eê]s|meses)\b(?!\s*\d)",
     re.IGNORECASE,
 )
+# A mesma medida sem "mês/meses": "em 12 dias" não é prazo de parcelamento ("em 12 meses" é). Só o `_parcelas` usa.
+# ponytail: "garantia em 12 meses" com parcelas=12 ainda ancora a contagem (mês é parcelamento legítimo); só o "meses" fora da lista distingue.
+_DURACAO_RE = re.compile(rf"{_MEDIDA_PREFIXO}(?:{_MEDIDA})\b(?!\s*\d)", re.IGNORECASE)
 
 # Resposta terminal (sem nova ida ao modelo) e o que o histórico guarda: sem o
 # número inventado, senão o ai_guard o leria como evidência.
@@ -129,10 +134,13 @@ _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[
 # "12x de 50" / "12x R$ 50" / "12 parcelas a 50" / "12 prestações de 50": o valor depois do "de"/"a"/"R$" é da PARCELA e o `valor` das tools de
 # cartão é o TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora
 # (um produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). A contagem pode vir
-# por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$) é
+# por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$/"cada") é
 # ambíguo e fica fora: o 50 segue ancorando como total. "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
-    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
+    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)(?:\s*[,:]\s*|\s+)"
+    # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
+    r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
+    r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
     r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
 
 
@@ -159,7 +167,7 @@ def _parcelas(bruto, textos: list[str]) -> tuple[int, bool]:
         p = int(bruto or 1)
     except (TypeError, ValueError, OverflowError):
         return 1, True
-    return p, p <= 1 or p in {extract_parcelas(_DATA_RE.sub(" ", t.lower())) for t in textos}  # "em 12/10" é data, não 12x
+    return p, p <= 1 or p in {extract_parcelas(_DURACAO_RE.sub(" ", _DATA_RE.sub(" ", t.lower()))) for t in textos}  # "em 12/10" é data e "em 12 dias" duração, não 12x
 
 
 def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:

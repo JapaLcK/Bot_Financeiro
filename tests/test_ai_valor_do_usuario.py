@@ -960,6 +960,37 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("em 12 prestações R$ 50", 600, 12, True),
     ("em 12 prestações R$ 50", 50, 12, False),
     ("em 1 prestação de 50", 50, 1, True),
+    # duração depois de "em" não é contagem de parcelas ("meses" segue sendo)
+    ("comprei a TV por 600, entrega em 12 dias", 600, 12, False),
+    ("comprei a TV por 600, garantia em 12 semanas", 600, 12, False),
+    ("comprei a TV por 600, entrega em 12 horas", 600, 12, False),
+    ("comprei a TV por 600, garantia de 12 anos, em 12 anos", 600, 12, False),
+    ("comprei a TV por 600, entrega em 12 dias", 600, 1, True),
+    ("comprei a TV por 600 em 12 meses, entrega em 3 dias", 600, 12, True),
+    ("comprei a TV por 600 em 12x, entrega em 12 dias", 600, 12, True),
+    ("comprei a TV por 600, garantia em 12 meses", 600, 12, True),   # LIMITE conhecido (ponytail): "meses" é parcelamento legítimo
+    # valor de parcela rotulado ("no valor de ... cada"): o 50 é a parcela, o total é 10 × 50
+    ("comprei em 10 parcelas no valor de R$ 50 cada", 50, 10, False),
+    ("comprei em 10 parcelas no valor de R$ 50 cada", 500, 10, True),
+    ("10 vezes, R$ 50 cada", 50, 10, False),
+    ("10 vezes, R$ 50 cada", 500, 10, True),
+    ("10 parcelas, 50 cada", 50, 10, False),
+    ("10 parcelas, 50 cada", 500, 10, True),
+    ("10 vezes, 50 reais cada", 50, 10, False),
+    ("10 vezes, 50 reais cada", 500, 10, True),
+    ("10x de R$ 50 cada", 50, 10, False),
+    ("10x de R$ 50 cada", 500, 10, True),
+    ("10 parcelas com valor de 50", 50, 10, False),
+    ("10 parcelas com valor de 50", 500, 10, True),
+    ("10 parcelas valor: 50", 500, 10, True),
+    ("10 parcelas, 2 mil cada", 20000, 10, True),
+    ("10 parcelas, 2 mil cada", 2000, 10, False),
+    ("10 parcelas, 30 reais e 50 centavos cada", 305, 10, True),
+    ("10 parcelas, 30 reais e 50 centavos cada", 30.5, 10, False),
+    # sem rótulo continua como era: total
+    ("50 em 10 vezes", 50, 10, True),
+    ("50 em 10 vezes", 500, 10, False),
+    ("comprei por 600 em 12 vezes, entrega amanhã", 600, 12, True),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -1019,6 +1050,37 @@ def test_q10b_conversa_total_antes_de_em_12_vezes(uid_pro, monkeypatch):
     runner.chat(uid_pro, "comprei a TV por 600 em 12 vezes no nubank", platform="whatsapp")
     _usa_ia(cli)
     assert _credito(uid_pro) == 12
+
+
+def test_q13_conversa_duracao_nao_e_contagem(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei a TV por 600, entrega em 12 dias no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(600, parcelas=12), _compra_cartao(600))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA_PARCELAS in r and _credito(uid_pro) == 0, r   # o 12 é a entrega: parcelas inventadas
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 1
+
+
+def test_q13b_conversa_em_12_meses_grava_12(uid_pro, monkeypatch):
+    _cartao_diz(uid_pro, monkeypatch, "comprei a TV por 600 em 12 meses no nubank", 600, parcelas=12)
+    assert _credito(uid_pro) == 12
+
+
+def test_q14_conversa_parcela_rotulada_cada(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei a TV em 10 parcelas no valor de R$ 50 cada no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=10), _compra_cartao(500, parcelas=10))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r   # 50 é a parcela, não o total
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 10
 
 
 def test_q11_conversa_data_nao_e_contagem(uid_pro, monkeypatch):
