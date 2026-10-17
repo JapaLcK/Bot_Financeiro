@@ -77,7 +77,7 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("50 centavos no bombom", {50}, {5000}),
     ("75 centavos", {75}, {7500}),
     ("gastei 10 no uber e 50 centavos no bombom", {1000, 50}, {5000}),
-    ("30 reais e 50 centavos", {3050}, {50}),
+    ("30 reais e 50 centavos", {3050}, {50, 3000}),
     # extenso não ancora (nem centavos, nem reais, nem composição): só o que está em dígito
     ("gastei cinquenta centavos", set(), {50, 5000}),
     ("vinte e cinco centavos", set(), {25, 2500, 2000, 500}),
@@ -163,11 +163,11 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     # centavos colado ao número, e "1 real e N centavos" compõe o total (o 50 não é R$ 50)
     ("gastei 50centavos", {50}, {5000}),
     ("gastei 50 centavos", {50}, {5000}),
-    ("1 real e 50 centavos", {100, 150}, {5000, 50}),
-    ("1 real e 50centavos", {100, 150}, {5000, 50}),
-    ("30 reais e 50 centavos", {3000, 3050}, {5000, 50}),
+    ("1 real e 50 centavos", {150}, {100, 5000, 50}),
+    ("1 real e 50centavos", {150}, {100, 5000, 50}),
+    ("30 reais e 50 centavos", {3050}, {3000, 5000, 50}),
     ("um real e 50 centavos", {50}, {5000, 150}),          # "um" por extenso não ancora o real; mistura como "trinta reais e 50 centavos"
-    ("21 real e 50 centavos", set(), {2150}),               # o "1" tem de ser o número inteiro
+    ("21 real e 50 centavos", {2150}, {100, 150, 2100}),    # o "1" tem de ser o número inteiro
     # rótulo de dia com dois-pontos: o dia não é valor; o dinheiro ao lado segue lido
     ("anota o boleto da internet, vencimento dia: 18", set(), {1800}),
     ("boleto de 150, vencimento dia: 18", {15000}, {1800}),
@@ -203,6 +203,32 @@ def test_centavos_lidos(texto, tem, nao_tem):
     assert tem <= lidos and not (nao_tem & lidos), lidos
 
 
+# "N reais e M centavos" é UM valor: o inteiro e os centavos soltos nunca ancoram (senão o modelo que
+# descarta os centavos grava R$ 30 em vez de 30,50). Dois valores ("30 reais e 50") seguem dois.
+@pytest.mark.parametrize("texto,tem,nao_tem", [
+    ("paguei 30 reais e 50 centavos", {3050}, {3000, 50, 5000}),
+    ("paguei 30 real e 50 centavos", {3050}, {3000, 50}),
+    ("30 reais e 50centavos", {3050}, {3000, 50}),
+    ("30reais e 50 centavos", {3050}, {3000, 50}),
+    ("30 reais   e   50 centavos", {3050}, {3000, 50}),
+    ("30 REAIS E 50 CENTAVOS", {3050}, {3000, 50}),
+    ("30 reais e 5 centavos", {3005}, {3000, 5}),
+    ("R$ 30 e 50 centavos", {3050}, {3000, 50}),
+    ("R$30,00 e 50 centavos", {3050}, {3000, 50}),
+    ("1.200 reais e 50 centavos", {120050}, {120000, 50}),
+    ("2 mil reais e 50 centavos", {200050}, {200000, 50}),
+    ("1 real e 50 centavos", {150}, {100, 50}),
+    ("um real e 50 centavos", {50}, {100, 150}),
+    ("gastei 30 reais e 50 no mercado", {3000, 5000}, {3050}),
+    ("paguei 50 centavos", {50}, {5000}),
+    ("30 reais e 20 centavos no pão e 10 reais no uber", {3020, 1000}, {3000, 20}),
+    ("10 reais no uber e 30 reais e 50 centavos no pão", {3050, 1000}, {3000, 50}),
+])
+def test_reais_e_centavos_so_o_composto_ancora(texto, tem, nao_tem):
+    lidos = _centavos_lidos([texto])
+    assert tem <= lidos and not (nao_tem & lidos), lidos
+
+
 # Valor por extenso não ancora nada, em nenhuma posição (a contagem de coisa tampouco).
 @pytest.mark.parametrize("texto", [
     "comprei duas TVs no Nubank", "dois amigos", "três pizzas", "comprei um carro",
@@ -219,7 +245,7 @@ def test_extenso_nao_ancora(texto):
 # Dígito ao lado de extenso: só o dígito ancora.
 @pytest.mark.parametrize("texto,tem,nao_tem", [
     ("paguei uma pizza de 40", {4000}, {100}),
-    ("30 reais e 50 centavos", {3000, 3050}, {50}),
+    ("30 reais e 50 centavos", {3050}, {3000, 50}),
     ("trinta reais e 50 centavos", {50}, {5000, 3050}),
     ("gastei cinquenta reais com 2 amigos", {200}, {5000}),
 ])
@@ -766,6 +792,15 @@ def test_p11_reais_e_centavos(uid_pro, monkeypatch):
     r = runner.chat(uid_pro, "paguei trinta reais e cinquenta centavos", platform="dashboard")   # extenso: recusa
     assert RECUSA in r and lancamentos(uid_pro) == [], r
     runner.chat(uid_pro, "paguei 30 reais e 50 centavos", platform="dashboard")                  # dígito: grava o total
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.5}]
+
+
+def test_p11b_reais_e_centavos_modelo_que_derruba_os_centavos_recusa(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(30), lancamento(30.5))
+    r = runner.chat(uid_pro, "paguei 30 reais e 50 centavos no mercado", platform="dashboard")   # valor=30: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    runner.chat(uid_pro, "paguei 30 reais e 50 centavos no mercado", platform="dashboard")        # 30,5: grava
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.5}]
 
 

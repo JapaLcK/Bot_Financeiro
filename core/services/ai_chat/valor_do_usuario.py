@@ -109,13 +109,13 @@ def _textos_do_usuario(user_id: int) -> list[str]:
     return textos[:_MENSAGENS] + [atual]
 
 
-# "50 centavos" / "50centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
-# O lookbehind exige dígito antes de "reais e": "trinta reais e 50 centavos" (extenso) lê o 50 como centavos.
-_CENTAVOS_RE = re.compile(r"(?<!\d reais e )(?<!\d real e )\b(\d{1,9})\s*centavos?\b", re.IGNORECASE)
-# O "N centavos" depois de "<dígito> real(is) e" é parte do total, não R$ N: sai da leitura em reais (não da do `_extract_valor`).
-_CENTAVOS_DO_TOTAL_RE = re.compile(r"(?:(?<=\d reais e )|(?<=\d real e ))\d{1,9}\s*centavos?\b", re.IGNORECASE)
-# "1 real e 50 centavos" = 150 (o `_extract_valor` só compõe o plural). Só o "1" em dígito: "um real e 50 centavos" segue misto (só os 50 centavos).
-_UM_REAL_E_CENTAVOS_RE = re.compile(r"(?<![\d.,])1\s+real\s+e\s+(\d{1,2})\s*centavos?\b", re.IGNORECASE)
+# "50 centavos" / "50centavos" são 50 centavos (não R$ 50).
+_CENTAVOS_RE = re.compile(r"\b(\d{1,9})\s*centavos?\b", re.IGNORECASE)
+# "30 reais e 50 centavos" / "30 real e 5 centavos" / "R$ 30 e 50 centavos" / "2 mil reais e 50 centavos" / "1 real e 50 centavos"
+# são UM valor (3050): só o composto ancora, nunca o "30" nem o "50" soltos (o modelo que descarta os centavos gravaria R$ 30).
+# Só o inteiro em dígito: "trinta reais e 50 centavos" / "um real e 50 centavos" seguem mistos (só os 50 centavos).
+_N = r"\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?"
+_REAIS_E_CENTAVOS_RE = re.compile(rf"(?<![\w.,])(?:r\$\s*({_N})|({_N})\s*(?:reais|real))\s*e\s*(\d{{1,2}})\s*centavos?\b", re.IGNORECASE)
 
 
 # "gastei 49.90" é 49,90: o `collect_evidence` lê todo ponto como milhar (499000) e abriria a porta
@@ -146,10 +146,18 @@ _PARCELA_RE = re.compile(
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
     textos = [_PONTO_DECIMAL_RE.sub(r"\1,\2", _NAO_VALOR_RE.sub(" ", t)) for t in textos]
-    lidos = {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
-    lidos |= {100 + int(c) for t in textos for c in _UM_REAL_E_CENTAVOS_RE.findall(t)}
+    lidos: set[int] = set()
+
+    def compor(m):  # o composto sai do texto: seus componentes não são leitura independente
+        reais = _extract_valor(m[1] or m[2])
+        if reais and 0 < reais < 1e12:
+            lidos.add(round(reais * 100) + int(m[3]))
+        return " ; "
+
+    textos = [_REAIS_E_CENTAVOS_RE.sub(compor, t) for t in textos]
+    lidos |= {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
     textos = [_CENTAVOS_RE.sub(" ", t) for t in textos]  # "50 centavos" não vira também "R$ 50"
-    lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", _CENTAVOS_DO_TOTAL_RE.sub(" ", t)) for t in textos))[0])
+    lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", t) for t in textos))[0])
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
         # sem dígito o `_extract_valor` cairia no extenso da mensagem inteira: só dígito ancora
@@ -195,10 +203,7 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
         de_parcela = set()
         for t in textos:
             for m in _PARCELA_RE.finditer(t):
-                s = m[1].rstrip(".,")
-                # "30 reais e 50 centavos" é 3050; o 30 e o 50 soltos (que o `_centavos_lidos` também lê) não são a parcela
-                mc = re.fullmatch(r"(.+?)\s*(?:reais|real)\s*e\s*(\d+)\s*centavos?", s, re.I)
-                de_parcela |= {r + int(mc[2]) for r in _centavos_lidos([mc[1]])} if mc else _centavos_lidos([s])
+                de_parcela |= _centavos_lidos([m[1].rstrip(".,")])  # "30 reais e 50 centavos" = só 3050
     if escrita and (v in fora or v in {c * p for c in de_parcela}):
         return args, None
     # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
