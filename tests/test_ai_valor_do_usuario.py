@@ -108,6 +108,20 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("dois milhões de reais", {200000000}, set()),
     ("dois milhões e meio", {200000000}, {250000000}),
     ("duzentos mil", {20000000}, set()),
+    # "<dígitos> mil|milhão|bilhão": só o valor expandido ancora, nunca o componente (R$ 2) nem o "mil" solto (R$ 1.000)
+    ("gastei 2 mil", {200000}, {200, 100000}),
+    ("gastei 2 MIL", {200000}, {200, 100000}),
+    ("gastei 2mil", {200000}, {200}),
+    ("2,5 mil", {250000}, {250, 100000}),
+    ("1.5 mil", {150000}, {150, 100000}),
+    ("gastei 2 milhões", {200000000}, {200}),
+    ("gastei 2 milhoes", {200000000}, {200}),
+    ("1 bilhão", {100000000000}, {100}),
+    ("2 mil e 500", {250000, 50000}, {200, 100000}),   # o 500 solto segue ancorando (já ancorava)
+    ("gastei 2", {200}, set()),
+    ("gastei 2 no mercado", {200}, set()),
+    ("1.200", {120000}, set()),                          # milhar, não multiplicador
+    ("5k", {500}, set()),                                # limite conhecido, não muda
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
@@ -394,6 +408,15 @@ def test_numero_gigante_na_mensagem_nao_derruba_nem_trava(uid_pro, monkeypatch, 
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}]   # o 50 escrito ancora
     runner.chat(uid_pro, "gastei 50 na padaria", platform="whatsapp")                    # não ficou travada
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}] * 2
+
+
+def test_mil_derrubado_pelo_modelo_nao_grava_mil_vezes_menos(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(2), lancamento(2000))
+    runner.chat(uid_pro, "gastei 2 mil", platform="whatsapp")   # modelo manda 2: recusado
+    assert lancamentos(uid_pro) == []
+    runner.chat(uid_pro, "gastei 2 mil", platform="whatsapp")   # modelo manda 2000: grava
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 2000.0}]
 
 
 def _duas(primeiro, segundo):

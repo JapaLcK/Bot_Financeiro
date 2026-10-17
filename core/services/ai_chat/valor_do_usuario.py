@@ -104,6 +104,13 @@ _MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
          "bilhão": 1e9, "bilhao": 1e9, "bilhões": 1e9, "bilhoes": 1e9}
 
 
+# "2 mil" / "2,5 milhões" / "1 bilhão": o dígito é componente do multiplicador. Só o valor expandido (o do
+# `_extract_valor`) ancora; o "2" (R$ 2) e o "mil" solto (R$ 1.000) não, senão o modelo que derruba o
+# multiplicador grava 1000x menos. "1.200" (milhar) e "5k" não casam. ponytail: "2 mil e 500" mantém o 500 como
+# R$ 500 (já ancorava); o composto 2.500 vem do `_extract_valor`.
+_MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b", re.IGNORECASE)
+
+
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
     return 4 if v >= 1000 else 3 if v >= 100 else 2 if v >= 20 else 1
 
@@ -149,12 +156,12 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
     textos = [_PONTO_DECIMAL_RE.sub(r"\1,\2", _NAO_VALOR_RE.sub(" ", t)) for t in textos]
     lidos = {int(n) for t in textos for n in _CENTAVOS_RE.findall(t)}
     textos = [_CENTAVOS_RE.sub(" ", t) for t in textos]  # "50 centavos" não vira também "R$ 50"
-    lidos |= set(collect_evidence([], "\n".join(textos))[0])
+    lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", t) for t in textos))[0])
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
         # sem dígito o `_extract_valor` cai no extenso da mensagem inteira (soma): os `_extensos` leem por trecho
         vs = [_extract_valor(limpo) if re.search(r"\d", limpo) else None]
-        for v, depois in _extensos(limpo):
+        for v, depois in _extensos(_MULT_DIGITOS_RE.sub(" ", limpo)):
             vs.append(v / 100 if depois.startswith("centavo") else v)   # "cinquenta centavos" são 50, não R$ 50
         for v in vs:
             if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
