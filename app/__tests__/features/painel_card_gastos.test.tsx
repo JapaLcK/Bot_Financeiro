@@ -5,7 +5,7 @@ import { decimalParaCentavos, percentualDe, somarCentavos } from "@/features/pai
 import { falado } from "@/ui/dinheiro";
 import { prepararCaso } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { apertar, reiniciar } from "./conversa_apoio";
+import { reiniciar } from "./conversa_apoio";
 import { F, comBlocos, consultaLanc, instalarCards, perguntar } from "./conversa_cards_apoio";
 import tabela from "../../../tests/fixtures/percentual_categorias.json";
 // O card `categorias` do chat (E2): UM card por bloco, abas por mês, colunas por categoria, "Outras", origem e sincronização. Desenha só o bloco.
@@ -31,10 +31,12 @@ it("T1: 3 abas viram UM card com 3 tabs; trocar de aba troca o título e o conte
   fireEvent.press(screen.getByText("set"));
   expect(screen.getByText("Para onde vai · setembro de 2026")).toBeTruthy(); expect(card().getByText("Lazer")).toBeTruthy(); expect(card().queryByText("Casa")).toBeNull();
 });
-it("T2: tocar o card abre a Folha da aba SELECIONADA", async () => {
+it("T2: o card é 100% do chat: tocar nele não abre folha nem modal; a coluna da aba selecionada mostra as transações no próprio card", async () => {
   await mostrar(...aba3); fireEvent.press(screen.getByText("ago"));
-  fireEvent.press(screen.getByTestId("bloco-categorias"));
-  expect(screen.getByRole("header", { name: "Para onde vai · agosto de 2026" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2); expect(screen.queryByText("Casa")).toBeNull();
+  fireEvent.press(screen.getByTestId("bloco-categorias")); fireEvent.press(card().getByText("Para onde vai · agosto de 2026"));
+  expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); expect(screen.queryByRole("header", { name: /Para onde vai/ })).toBeNull(); // só a Folha tem "Fechar" e o header
+  expect(screen.getAllByText("Viagem")).toHaveLength(1); expect(screen.getAllByTestId("bloco-categorias")).toHaveLength(1); // o card segue no chat
+  await tocar(/^Viagem/); expect(card().getByTestId("gastos-transacoes")).toBeTruthy(); expect(consultaLanc().get("mes")).toBe("2026-08");
 });
 it("T3: trocar de aba zera a coluna e as transações; tocar a coluna nova pede o mês novo; nada abre a Folha", async () => {
   const dois = (mes: string) => aba(mes, [cat("Casa", 100), cat("Lazer", 50)]);
@@ -92,11 +94,11 @@ it("A11: com uma coluna selecionada as outras ficam a 0.4 e a selecionada a 1; s
   const op = () => colunas().map((b) => StyleSheet.flatten(b.props.style).opacity);
   expect(op()).toEqual([1, 1]); await tocar(/^Casa/); expect(op()).toEqual([1, 0.4]);
 });
-it("T9b: oculto (Folha): a coluna diz 'Valor oculto', sem % e sem origem", async () => {
+it("T9b: oculto: o card some do chat, sem % e sem origem (controle: antes, 41% e origem)", async () => {
   await mostrar(aba("2026-10", F["/api/app/mes-detalhes"].categorias, { origens: { cartao: "600.00", banco: "400.00", carteira: "0.00", registro_antigo: "0.00" } }));
-  fireEvent.press(screen.getByTestId("bloco-categorias")); expect(screen.getAllByText("41%").length).toBeGreaterThan(0); expect(screen.getAllByLabelText(/Origem dos gastos/).length).toBeGreaterThan(0); // controle: visível
+  expect(screen.getAllByText("41%").length).toBeGreaterThan(0); expect(screen.getAllByLabelText(/Origem dos gastos/).length).toBeGreaterThan(0); // controle: visível
   fireEvent.press(screen.getByRole("button", { name: "Ocultar valores", hidden: true }));
-  expect(screen.getAllByLabelText("Alimentação, Valor oculto", { hidden: true }).length).toBeGreaterThan(0);
+  expect(screen.queryByTestId("bloco-categorias")).toBeNull();
   expect(screen.queryAllByText(/%/, { hidden: true })).toEqual([]); expect(screen.queryAllByLabelText(/Origem dos gastos|%/, { hidden: true })).toEqual([]);
 });
 it("T10: tocar 'Outras' lista a 5ª e a 6ª; tocar a 6ª pede as transações dela", async () => {
@@ -158,8 +160,4 @@ describe("T13: sincronização", () => {
     await mostrar(aba("2026-10", cats, {}, {})); expect(card().getByText("Alimentação")).toBeTruthy(); expect(card().queryByLabelText(/Sincronizado/)).toBeNull();
   });
   it("sem `contas` no bloco, não há ícone", async () => { await mostrar(aba("2026-10", cats)); expect(card().queryByLabelText(/Sincronizado/)).toBeNull(); });
-});
-it("a Folha de uma aba desenha o mesmo card, sem abas, e Fechar volta ao chat", async () => {
-  await mostrar(...aba3); fireEvent.press(screen.getByTestId("bloco-categorias")); expect(screen.getAllByRole("tab")).toHaveLength(3); // só as do card do chat
-  await apertar("Fechar"); expect(screen.queryByRole("header", { name: /Para onde vai/ })).toBeNull();
 });

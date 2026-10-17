@@ -15,7 +15,7 @@ const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: C
 /** No chat o servidor já aplicou o plano (`plan_gate_ok`): o gate do simulador vale só FORA de um bloco. */
 export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel(); const bloco = useBloco();
  if (id === "periodo") return <CardPeriodo />;
- if (id === "categorias" && bloco) return <CardGastos />; // chat e Folha; o painel segue com `Categorias`
+ if (id === "categorias" && bloco) return <CardGastos />; // card do chat; o painel segue com `Categorias`
  if (id === "metas" && bloco) return <MetasChat />; // v2 (`/api/v2/metas`); fora do chat, `Metas` lê o provider (legado)
  if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
  const Componente = VIEWS[id]; return <Componente />; }

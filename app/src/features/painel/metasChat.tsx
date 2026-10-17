@@ -71,7 +71,7 @@ function Meta({ m, custo }: { m: MetaV2; custo: MetasV2["custo_mensal"] }) {
 }
 /**
  * Card `metas` do chat (formato v2 de `/api/v2/metas`), só leitura: desenha o que o servidor mandou, sem somar nem derivar dinheiro. Reserva primeiro,
- * depois as outras na ordem do servidor. Criar e editar é no painel (web): nenhum botão aqui, o toque é do `Bloco` (abre a Folha com o mesmo bloco).
+ * depois as outras na ordem do servidor. Criar e editar é no painel (web): nenhum botão aqui, e o card não abre nada: tudo fica no chat.
  */
 export function MetasChat() {
   const d = useBloco()?.recursos.metas; const { cores } = useTema();

@@ -23,7 +23,7 @@ type Item = { chave: string; nome: string; valor: number; pct: number; cor: stri
 const VISIVEIS = 5, ALTURA = 96;
 const ORIGENS = [["cartao", "CreditCard", "cartão", "ink"], ["banco", "Bank", "banco", "inkMuted"], ["carteira", "Wallet", "carteira", "inkFaint"], ["registro_antigo", "ClockCounterClockwise", "registro antigo", "border"]] as const;
 const consulta = (mes: string, chave: string) => new URLSearchParams({ mes, categoria: chave, tipo: "saida", limite: "10" }).toString();
-/** Uma coluna por categoria (as 4 maiores + "Outras" se passar de 5). Nenhuma abre selecionada; tocar alterna. O toque na coluna é do card, não da Folha. */
+/** Uma coluna por categoria (as 4 maiores + "Outras" se passar de 5). Nenhuma abre selecionada; tocar alterna. O toque na coluna é do card. */
 function Coluna({ item: c, maior, selecionada, apagada, onPress }: { item: Item; maior: number; selecionada: boolean; apagada: boolean; onPress: () => void }) {
   const { cores } = useTema(); const { oculto } = usePainel(); const { ampliado } = useTipografiaPainel();
   const pct = rotuloPercentual(c.pct, c.valor), h = oculto ? 0 : alturaBarra(c.valor, maior, ALTURA);
@@ -51,7 +51,7 @@ function Origem({ origens }: { origens: Record<(typeof ORIGENS)[number][0], numb
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 16 }}>{partes.map((o, i) => <View key={o.nome} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}><Icone nome={o.icone} tamanho={20} tom="inkMuted" /><Texto variante="legenda" tom="inkMuted">{pcts[i]}%</Texto></View>)}</View>
   </View>;
 }
-/** Card `categorias` do chat e da Folha (UMA aba): total, período, colunas por categoria, transações da coluna tocada e origem. Dado = só o bloco. */
+/** Card `categorias` do chat (UMA aba por vez): total, período, colunas por categoria, transações da coluna tocada e origem. Dado = só o bloco. */
 export function CardGastos() {
   const bloco = useBloco(), d = bloco?.recursos.detalhes, p = usePainel(), entrada = useEntrada();
   const [sel, setSel] = useState<number | null>(null); // índice da coluna

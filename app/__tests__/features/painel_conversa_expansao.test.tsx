@@ -111,16 +111,6 @@ it("transação: a linha recolhida já diz 'parcela 3/10' e o toque abre o detal
   expect(screen.getByText("Casa · Nubank · 09:30 · Parcela 3/10")).toBeTruthy();
 });
 
-it("na Folha: a mesma expansão, com estado independente do card", async () => {
-  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar();
-  await tocar(/Alimentação/); await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy());
-  fireEvent.press(screen.getByTestId("bloco-categorias")); expect(screen.getByRole("header", { name: "Para onde vai · março de 2025" })).toBeTruthy();
-  const linhas = () => screen.getAllByRole("button", { name: /Alimentação/ });
-  expect(linhas().map((l) => l.props.accessibilityState.selected)).toEqual([true, false]); // a da Folha abre sem seleção
-  await act(async () => { fireEvent.press(linhas()[1]!); await drenar(); });
-  expect(linhas().map((l) => l.props.accessibilityState.selected)).toEqual([true, true]); expect(screen.getAllByText("Mercado do bairro")).toHaveLength(2);
-});
-
 it("card `periodo`: a categoria expande os maiores lançamentos no lugar — sem busca e sem Folha", async () => {
   comBlocos(bloco("periodo")); await perguntar();
   await tocar(/Mercado/); expect(screen.getByText("Supermercado")).toBeTruthy();
