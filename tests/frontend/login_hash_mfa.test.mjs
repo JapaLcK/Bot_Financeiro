@@ -6,6 +6,9 @@
  * Controle negativo: tire o `if(PB_MFA)showMfa(PB_MFA,'')` do login.html e os casos de hash
  * válido ficam vermelhos (o formulário de e-mail e senha aparece no lugar);
  * os de "sem hash"/"hash malformado" seguem verdes e provam o caminho normal.
+ * Sessão viva (#991): tire o `if(!PB_MFA)` que embrulha o `/auth/validate` e os casos
+ * "sessão viva + #mfa=" ficam vermelhos; os de "sessão viva sem hash / hash
+ * malformado" seguem verdes (o pulo do app iOS continua).
  *
  * Só no navegador local, com o `/auth/**` mockado; o 302 do servidor é provado
  * em `tests/test_google_web_mfa.py`.
@@ -22,11 +25,12 @@ after(async () => { await browser?.close(); server?.kill(); });
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 const TELAS = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } };
 
-async function abre(tela, caminho, { verify } = {}) {
+async function abre(tela, caminho, { verify, validate = 401 } = {}) {
   const page = await browser.newPage({ viewport: TELAS[tela] });
   const chamadas = [];
+  page.validates = 0;                       // quantas vezes o login.html consultou a sessão
   await page.context().addCookies([{ name: 'csrf_token', value: 'csrf-local', url: origin }]);
-  await page.route('**/auth/validate', route => json(route, {}, 401));
+  await page.route('**/auth/validate', route => { page.validates++; return json(route, {}, validate); });
   await page.route('**/auth/refresh', route => json(route, {}, 401));
   await page.route('**/auth/mfa/verify-login', route => {
     chamadas.push(route.request().postDataJSON());
@@ -76,6 +80,37 @@ for (const hash of ['#mfa=', '#mfa=a b', '#mfa=<script>', '#mfa=abc&x=1', '#outr
     assert.equal(await page.locator('#form-mfa').isVisible(), false);
     await page.close();
   });
+}
+
+// #991: sessão viva (de OUTRA conta) não pode vencer o formulário de código.
+// `validate: 200` = o cookie ainda vale. O contador prova que o IIFE nem rodou
+// (só "não navegou" passaria por sorte de timing).
+for (const tela of Object.keys(TELAS)) {
+  test(`${tela}: sessão viva + #mfa= mostra o código, não consulta /auth/validate e não navega`, async () => {
+    const { page, chamadas } = await abre(tela, '/login.html?next=/continuar-compra#mfa=abc_DEF-123', { validate: 200 });
+    await page.locator('#form-mfa').waitFor({ state: 'visible' });
+    await page.waitForLoadState('networkidle');
+    assert.equal(page.validates, 0);
+    assert.equal(new URL(page.url()).pathname, '/login.html');
+    assert.equal(await page.locator('#form-login').isVisible(), false);
+    assert.equal(await semOverflow(page), true);
+
+    await page.fill('#mfa-code', '123456');
+    await page.click('#btn-mfa');
+    await page.waitForURL(url => url.pathname === '/continuar-compra');
+    assert.deepEqual(chamadas, [{ challenge: 'abc_DEF-123', code: '123456', use_backup: false }]);
+    await page.close();
+  });
+
+  // Positivo: sem desafio válido, a sessão viva continua pulando o login (app iOS).
+  for (const hash of ['', '#mfa=a b']) {
+    test(`${tela}: sessão viva e hash ${JSON.stringify(hash)} ainda pula o login`, async () => {
+      const { page } = await abre(tela, `/login.html?next=/precos${hash}`, { validate: 200 });
+      await page.waitForURL(url => url.pathname === '/precos');
+      assert.equal(page.validates, 1);
+      await page.close();
+    });
+  }
 }
 
 // Todo destino que o servidor devolve em `next` (callback: /continuar-compra;
