@@ -22,6 +22,7 @@ import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
 import { nomeDe } from "./cabecalho";
 import { cotaCheia, useConversa, type Turno } from "./conversaEstado";
+import { MotivoFeedback } from "./motivoFeedback";
 import { WidgetConteudo } from "./widgets";
 export const OCULTA = "Mensagem oculta enquanto os valores estão privados.";
 /** O servidor usa o negrito do WhatsApp (`*x*`): o conteúdo começa e termina com não-espaço, colado aos asteriscos; dígito colado não vale (`5*3*4` é conta). */
@@ -79,7 +80,7 @@ function Acoes({ turno: t }: { turno: Turno }) {
     try { await setStringAsync(t.resposta!.replace(new RegExp(NEGRITO.source, "g"), "$1")); sucesso(); toast.mostrar({ mensagem: "Copiado", tom: "sucesso" }); }
     catch { toast.mostrar({ mensagem: "Não conseguimos copiar.", tom: "erro" }); }
   };
-  const nota = async (n: 1 | -1) => { if (!(await c.avaliar(t, n))) toast.mostrar({ mensagem: "Não conseguimos registrar sua avaliação.", tom: "erro" }); };
+  const nota = async (n: 1 | -1) => { if ((await c.avaliar(t, n)) === false) toast.mostrar({ mensagem: "Não conseguimos registrar sua avaliação.", tom: "erro" }); };
   return <View style={{ flexDirection: "row", marginLeft: -10 }}>
     <BotaoAcao rotulo="Copiar resposta" icone="Copy" onPress={() => void copiar()} />
     {t.messageId !== null && <><BotaoAcao rotulo="Gostei da resposta" icone="ThumbsUp" selecionado={t.feedback === 1} onPress={() => void nota(1)} /><BotaoAcao rotulo="Não gostei da resposta" icone="ThumbsDown" selecionado={t.feedback === -1} onPress={() => void nota(-1)} /></>}
@@ -124,6 +125,7 @@ export function TurnoChat({ turno: t, ultimo, onLayout }: { turno: Turno; ultimo
         {t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}
         {t.interrompida && t.resposta === undefined && !t.erro && <Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto>}
         {ultimo && t.resposta !== undefined && <Acoes turno={t} />}
+        {ultimo && t.feedback === -1 && t.messageId !== null && <MotivoFeedback turno={t} />}
       </FalaPiggy>
     </>}
   </View>;
