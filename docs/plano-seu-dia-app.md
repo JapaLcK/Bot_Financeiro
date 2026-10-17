@@ -177,8 +177,12 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
 ### 4.3 O resto
 - **Fatia ≤ 0 é descartada** antes da barra (estorno ou zero inseridos direto no banco podem vir do servidor); a barra só desenha com ≥ 2 fatias > 0.
   `BarraComposicao` já exige `valor > 0`; o filtro fica no chamador.
-- **Nunca comparar o texto de `total` com o de `categorias[].valor`** (a escala pode diferir, "91.010" × "1.005"). Cada valor vira centavos sozinho; a
-  folha nem mostra o valor por categoria (só no `accessibilityLabel`), e a largura da fatia usa só o `valor` da categoria.
+- **Positividade e proporção da barra usam o decimal bruto, não os centavos (achado do Codex no #1050).** O schema guarda o texto de `categorias[].valor` (e de `maiores[].valor`) como guarda o de `total`;
+  o filtro "> 0" e o `valor` de cada `Segmento` saem de `Number(raw)`, como o `flex-grow` do web. Com `"0.004"` e `"0.006"` a barra é 40/60 (em centavos seria 0 e 1, a 1ª fatia sumiria e a barra
+  também). Centavos só no que se **exibe** (o `accessibilityLabel`, as maiores compras). Regra geral: **toda decisão** (positivo, zero, ≤ 0, tom da pílula, "dia sem gasto") usa o bruto, como o web;
+  centavos só para mostrar. Teste: categorias sub-centavo `"0.004"` + `"0.006"` desenham 2 segmentos 40/60; `"0.004"` sozinha não desenha barra.
+- **Nunca comparar o texto de `total` com o de `categorias[].valor`** (a escala pode diferir, "91.010" × "1.005"). A folha nem mostra o valor por categoria
+  (só no `accessibilityLabel`, em centavos), e a largura da fatia usa só o `valor` bruto da categoria.
 - `hoje` vem de `/gastos` (o servidor, no fuso do app), **não** do relógio do aparelho. Em `Calendario`, `hojeSP()` segue valendo para o resto do painel.
 - `arredondamento_por_grupo` em `motivos`: `Avisos` já cobre; a folha não repete.
 - Total ilegível ou `dinheiro` inválido: o zod lança `ContratoInvalido` ("Recebemos dados incompatíveis"), vira erro recuperável da folha, nunca R$ 0,00.
@@ -192,6 +196,9 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
   hoje já navega, tem o mesmo risco: **não verificado** no simulador.) O PR 2 faz o botão "Ver extrato do dia" fechar a folha do dia **e** a folha que a contém antes de navegar:
   o contexto de navegação ganha um registro de "fechadores" (`ContextoNavegacaoPainel`/`useNavegarPainel`, onde o `aoSair` já vive), a folha do dia e o `TelaResumo` registram o seu, e o `navegar`
   roda todos antes do `router.push`. Teste: nas duas origens (aba Gastos e Resumo) nenhuma folha fica visível depois do toque e o Extrato está montado com o `dia` pedido.
+- **Zerar os filtros do Extrato ao entrar pelo dia (achado do Codex no #1050).** O `Extrato` guarda `q`, `busca`, `origem` e `tipo` em `useState` local (`extrato.tsx:40`) e as abas do
+  `expo-router` ficam montadas (provável; **não verificado**), então "Entradas" escolhido antes combinaria com o dia e a tela diria "vazio". Ao chegar com `dia` (a mudança de `params.dia`)
+  o `Extrato` zera os quatro filtros; o PR 2 inclui isso. Teste: escolher "Entradas", voltar a Gastos, abrir um dia com saídas pelo botão: o extrato mostra as saídas do dia.
 - **`Extrato` com `dia` na consulta (achado do Codex no #1050; já é um defeito de hoje).** `extrato.tsx:42-47` pede só `mes` e `limite=50` e filtra `params.dia` **no aparelho**
   sobre a 1ª página. Num mês com mais de 50 lançamentos, o dia que cai depois da 1ª página aparece vazio ("Nenhum resultado nesta página.") ou parcial, e o botão da folha
   prometeria o extrato completo do dia. `/api/app/lancamentos` já aceita `dia` (`api/v2/lancamentos.py:79`, sempre junto do `mes`, que é o da fatura), então a correção é **só do
@@ -213,6 +220,8 @@ sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `di
   (carregando, erro com "Tentar novamente", dia sem saída, hoje, agendado, dia fora da grade navega, `disponivel:false` navega, `oculto` sem pílula/barra/valores no label **nem no anúncio da troca de dia**);
   fatia ≤ 0 fora da barra; `"91.010"` × `"1.005"` sem erro; `fontScale` ampliado; `accessibilityLabel` com data, total e sentido;
 - fechamento: depois de "Ver extrato do dia" (aba Gastos e Resumo) nenhuma folha fica visível e o Extrato está montado; controle negativo: sem o registro de fechadores o `Modal` do Resumo continua visível;
+- filtros: "Entradas" escolhido antes, voltar a Gastos e abrir um dia com saídas mostra as saídas do dia (hoje combinaria com o filtro e ficaria vazio);
+- barra: categorias `"0.004"` + `"0.006"` dão 2 segmentos 40/60 e `"0.004"` sozinha não desenha barra;
 - `Extrato` com `dia`: mês com > 50 lançamentos e o dia fora da 1ª página mostra as compras do dia (hoje mostra vazio); a consulta leva `mes` e `dia` juntos;
 - o negativo do conserto de grade: com o fallback desligado, a linha fora da grade abre a folha com R$ 0,00 → o teste fica **vermelho**;
 - **servidor, só teste** (`tests/test_api_app_gastos.py`, sem mudar o código do servidor): usuário **sem** chave beta lê `/api/app/gastos` (200) e a fixture do app valida contra o
@@ -241,7 +250,7 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 | # | Conteúdo | Faixa | Deixa pronto |
 |---|---|---|---|
 | **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (emula o `double` do web) + tabela dourada com casos sub-centavo e de empate + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
-| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** e as folhas se fecham antes de navegar (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
+| **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** e as folhas se fecham antes de navegar e o `Extrato` zera os filtros ao entrar pelo dia (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
 | **3** | **O dia em contexto.** Pílula ↓↑ %, barra com emojis e os 3 maiores. | **Leve** | paridade visual com o web na versão sem texto; o jest dos tons e da barra |
 | — | **Build** pelo Xcode (dono) e validação no iPhone. Não é PR. | — | fecha o que só o aparelho prova |
 
