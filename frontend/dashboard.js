@@ -6232,11 +6232,13 @@ function _fmtDateBR(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   return m ? `${m[3]}/${m[2]}` : iso;
 }
-function _deltaLabel(pct) {
+// `meses`: o N que o servidor usou na comparação (`delta_meses`), não o do seletor.
+function _deltaLabel(pct, meses) {
   if (pct == null) return { text: "—", cls: "" };
   const sign = pct > 0 ? "+" : "";
   const cls = pct > 0 ? "down" : (pct < 0 ? "up" : "");
-  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs período anterior`, cls };
+  const antes = meses === 1 ? "1 mês antes" : `${meses} meses antes`; // `?months=1` direto na API
+  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs os mesmos dias, ${antes}`, cls };
 }
 
 function renderAnalyticsKPIs(k, months) {
@@ -6249,8 +6251,10 @@ function renderAnalyticsKPIs(k, months) {
   const n = Math.max(1, months || 6);
   const avgExpense = k.total_expense / n;
   const avgIncome  = k.total_income  / n;
-  const dExpense = _deltaLabel(k.delta_pct?.expense ?? null);
-  const dIncome  = _deltaLabel(k.delta_pct?.income  ?? null);
+  const dExpense = _deltaLabel(k.delta_pct?.expense ?? null, k.delta_meses);
+  const dIncome  = _deltaLabel(k.delta_pct?.income  ?? null, k.delta_meses);
+  // A regra (período e base do cartão) vem do servidor, a mesma frase do chat.
+  const dTitle = k.delta_pct && k.delta_escolha ? ` title="${escapeHtmlSafe(k.delta_escolha)}"` : "";
   // Inverte semântica do delta de despesa: mais despesa = ruim, então
   // delta positivo deve ficar "down" (vermelho). Recebe assim do _deltaLabel.
   const savings = (k.savings_rate || 0) * 100;
@@ -6270,12 +6274,12 @@ function renderAnalyticsKPIs(k, months) {
     <div class="stat-tile">
       <div class="stat-label">Gasto médio mensal</div>
       <div class="stat-value">${_fmtBRL(avgExpense)}</div>
-      <div class="stat-delta ${dExpense.cls}">${dExpense.text}</div>
+      <div class="stat-delta ${dExpense.cls}"${dTitle}>${dExpense.text}</div>
     </div>
     <div class="stat-tile">
       <div class="stat-label">Receita média</div>
       <div class="stat-value" style="color:${_toneMoney(avgIncome)}">${_fmtBRL(avgIncome)}</div>
-      <div class="stat-delta ${dIncome.cls}">${dIncome.text}</div>
+      <div class="stat-delta ${dIncome.cls}"${dTitle}>${dIncome.text}</div>
     </div>
     <div class="stat-tile">
       <div class="stat-label">Taxa de poupança</div>

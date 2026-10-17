@@ -259,7 +259,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   proteção de build que falha depois do claim.
   `scripts/comparar_resumo_mes.py` compara antigo × novo por usuário e mês, só lendo.
   **Comparação de períodos (PL-07, Plus+):** `core/services/comparacao_periodos.py` decide a janela e o
-  delta; a tool `compare_periods` da IA é o único consumidor (o endpoint e a tela v2 são o PR B). Lê a
+  delta; consumidores: a tool `compare_periods` da IA, o `GET /api/v2/comparacao` (bloco "Comparado ao mês
+  anterior" da tela v2, no catálogo do Organizar) e o KPI "vs" das Análises do painel antigo (`meses=N`, abaixo). Lê a
   regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA; janela parcial
   = faturas que fecham dentro dela). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
   se AS DUAS janelas são meses-calendário inteiros (dia 1 até o último dia; no mês corrente, dia 1 até hoje ou
@@ -274,6 +275,14 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   ele inteiro e marca `anterior_encurtado`. Mês fechado = mês inteiro × mês inteiro. Categoria nova tem
   `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
   do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
+  KPI das Análises (`/analytics/{uid}/kpis`, Plus+): `comparar_mes(..., meses=N)` com N = os meses do seletor,
+  do dia 1 do 1º mês até hoje contra os mesmos dias N meses antes (cartão pela fatura; `delta_pct.income/expense` e
+  `delta_escolha`, a frase); gate antes de ler o anterior; `compute_kpis(..., com_anterior=False)` na rota (o `prev`
+  antigo, N dias corridos antes, só vai ao LLM de insights, PL-06); janela livre (`from` E `to`, a regra de
+  `resolve_window`) fica sem delta; falha da comparação também (loga só a classe, os totais saem); no "12 meses" o
+  Plus (o `history_days` dele em `core/services/plan_limits.py` não alcança o anterior) recebe `inicio_do_historico`,
+  vê "—" e o `title` começa pela constante `FORA_DO_HISTORICO` de `frontend/routes/analytics.py`. O rótulo usa
+  `delta_meses`, o N que a rota usou (com o teto de `resolve_window`), e não o do seletor.
   Saída da tool: dinheiro e `pct` são NÚMERO JSON (o `ai_guard` só lê número como evidência; mesma convenção de
   `_resumo_periodo`) e moram em `total_atual`/`total_anterior`/`total_delta` (o guard só lê número sob chave
   monetária; `atual`/`anterior`/`delta` soltos não contariam). `motivos` + `nota` são os avisos de dado incompleto do
@@ -286,6 +295,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Divergência conhecida: `get_spending_trend` soma o cartão pela data da compra, então a tendência de um mês pode
   diferir da comparação por `mes=` (fatura) na mesma conversa; `get_period_summary` e a comparação por datas
   parciais concordam (as duas, data da compra). No período livre o rótulo da categoria é a grafia de MAIOR total.
+- `GET /api/v2/comparacao?mes=AAAA-MM` (`api/v2/comparacao.py`, regra em `core/services/comparacao_periodos.py`,
+  PL-07): o mês contra o anterior equivalente, a mesma conta da tool `compare_periods`. Plus+ (`financial_comparison`,
+  gate na dependência antes de qualquer leitura; Essencial = 403 `pro_required` sem payload). Só `mes` (sem ele, o
+  corrente; futuro ou fora do serviço = 422). Dinheiro e `pct` são texto, datas ISO; `escolha` é a frase do período e
+  da base do cartão, a mesma do chat. Montado também em `/api/app/comparacao`, sem cliente no app nativo ainda.
 - `GET /api/v2/assinaturas` e `POST /api/v2/assinaturas/marca` (`api/v2/assinaturas.py`):
   a lista do Recurring Payments da Pluggy (`core/services/assinaturas.py`) e a marcação
   do usuário por chave do comerciante (`assinatura`/`ignorar`/`nenhuma`; chave fora da

@@ -19,7 +19,7 @@ export function useLancamentoMutation() {
     if (primeiraPagina) qc.setQueriesData<InfiniteData<Lancamentos, string | null>>({ queryKey: ["lancamentos"] }, (d) => d && ({ ...d, pages: d.pages.slice(0, 1), pageParams: d.pageParams.slice(0, 1) }));
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["lancamentos"] }, { throwOnError: true }),
-      ...["categorias", "contas", "resumo-do-mes", "gastos"].map((k) => qc.invalidateQueries({ queryKey: [k] })),
+      ...["categorias", "contas", "resumo-do-mes", "gastos", "comparacao"].map((k) => qc.invalidateQueries({ queryKey: [k] })),
     ]);
   };
   const m = useMutation({

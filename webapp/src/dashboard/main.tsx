@@ -4,9 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
+import { COMPARACAO_EXEMPLO } from "./lib/data.js";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas, Investido } from "./lib/api-v2.gen";
+import { DEMO, comparacaoQuery, contasQuery, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Comparacao, Investido } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -40,6 +41,7 @@ if (DEMO) {
     const anterior = prev && { mes: prev, entrou: txt(summary(prev).income), saiu: txt(summary(prev).expense) };
     const ate = `${mes}-${new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate()}`;
     qc.setQueryData(resumoMesQuery(mes).queryKey, { mes, ate, entrou: txt(m.income), saiu: txt(m.expense), anterior, motivos: [] });
+    qc.setQueryData<Comparacao>(comparacaoQuery(mes).queryKey, COMPARACAO_EXEMPLO as Comparacao);
   }
 }
 
