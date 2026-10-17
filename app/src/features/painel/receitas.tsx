@@ -14,9 +14,9 @@ import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 type Receita = Dados["previsao"]["receitas_do_banco"][number];
 type Resposta = "sim" | "nao" | "desfazer";
 type Espera = { chave: string; nome: string; resposta: Resposta; postOk: boolean; antes: unknown };
-// Mesmos status e falas da web (`widgets/ReceitasDoBanco.tsx`): o que a lista passa a ter quando o POST pegou, e o que o leitor de tela ouve.
+// Status esperado na lista quando o POST pegou, e a fala curta do toast (que o leitor de tela também ouve), sem o nome da receita.
 const ESPERADO: Record<Resposta, Receita["status"]> = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
-const DITO: Record<Resposta, string> = { sim: "confirmada.", nao: "recusada.", desfazer: "resposta desfeita." };
+const DITO: Record<Resposta, string> = { sim: "Receita confirmada", nao: "Receita recusada", desfazer: "Resposta desfeita" };
 /** O que a caixa devolve a quem a hospeda (`TelaPainel`): as pendentes como avisos da pilha, o "Não deu para salvar" (feedback, fica FORA da pilha) e a linha das respondidas (abaixo da pilha). */
 export type Apresentacao = { itens: AvisoDaPilha[]; erro: ReactNode; respondidas: ReactNode };
 /** `key` pelo usuário: zera trava, aviso, espera e lista (nada da conta A aparece na B). Defesa de custo zero: o `PortaoPainel` já desmonta tudo na troca de conta, então tirar o `key` não deixa teste vermelho. */
@@ -47,7 +47,7 @@ function Caixa({ children }: { children: (r: Apresentacao) => ReactNode }) {
     if (!viu.current || r.fase === "carregando") return;
     const pegou = r.fase === "pronto" && r.dado.receitas_do_banco.some((x) => x.chave === espera.chave && x.status === ESPERADO[espera.resposta]);
     // O Toast já anuncia ao leitor de tela: anunciar aqui também falaria duas vezes.
-    if (espera.postOk || pegou) { toast.mostrar({ mensagem: `${espera.nome}: ${DITO[espera.resposta]}`, tom: "sucesso" }); sucesso(); } else { setFalhou(true); vibrarAviso(); }
+    if (espera.postOk || pegou) { toast.mostrar({ mensagem: DITO[espera.resposta], tom: "sucesso" }); sucesso(); } else { setFalhou(true); vibrarAviso(); }
     setEspera(null); voo.current = null; setOcupado(false);
   }, [r, espera, toast]);
   const responder = async (rec: Receita, resposta: Resposta) => {

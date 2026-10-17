@@ -87,9 +87,9 @@ it("responder: o aviso só sai depois da releitura, o toast curto aparece sem bo
   expect(screen.getByRole("button", { name: "Sim, é receita fixa: Salário Acme" }).props.accessibilityState.disabled).toBe(true);
   await act(async () => { g.soltar(); await drenar(); await drenar(); });
   await waitFor(() => expect(screen.getByTestId("toast")).toBeTruthy());
-  expect(within(screen.getByTestId("toast")).getByText("Salário Acme: confirmada.")).toBeTruthy(); expect(within(screen.getByTestId("toast")).queryAllByRole("button")).toHaveLength(0);
+  expect(within(screen.getByTestId("toast")).getByText("Receita confirmada")).toBeTruthy(); expect(within(screen.getByTestId("toast")).queryAllByRole("button")).toHaveLength(0);
   expect(screen.getByText("Freela Beta")).toBeTruthy(); expect(screen.queryByText("Salário Acme", { exact: true })).toBeNull(); expect(pontos()).toBe(0);
-  expect((AccessibilityInfo.announceForAccessibility as jest.Mock).mock.calls.filter(([t]) => t === "Salário Acme: confirmada.")).toHaveLength(1);
+  expect((AccessibilityInfo.announceForAccessibility as jest.Mock).mock.calls.filter(([t]) => t === "Receita confirmada")).toHaveLength(1);
 });
 it("o selecionado some (receita respondida): cai no primeiro, sem índice fora da lista", async () => {
   comBanco(); await abrir(); await waitFor(() => expect(pontos()).toBe(3));
@@ -125,11 +125,30 @@ it("seleção morta e DEPOIS entra um aviso de prioridade: toca na Freela, respo
   await soltar(); await waitFor(() => expect(pontos()).toBe(2));
   expect(valor()).toBe("Aviso 1 de 2: Dados do banco desatualizados"); expect(screen.queryByText("Salário Acme")).toBeNull();
 });
-it("puxar para atualizar zera os dados por um instante, mas a escolha do usuário (Freela, 'Aviso 3 de 3') sobrevive à volta deles", async () => {
+const puxar = (tique = 2) => act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); for (let k = 0; k < tique; k++) await drenar(); });
+it("puxar para atualizar volta ao 1º aviso pela prioridade (decisão do produto), mesmo com o usuário em outro", async () => {
   comBanco(); await abrir(); await waitFor(() => expect(pontos()).toBe(3));
   await toqueNoPonto(2); expect(valor()).toBe("Aviso 3 de 3: Receitas do extrato"); expect(screen.getByText("Freela Beta")).toBeTruthy();
-  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); await drenar(); });
-  await waitFor(() => expect(pontos()).toBe(3)); expect(valor()).toBe("Aviso 3 de 3: Receitas do extrato"); expect(screen.getByText("Freela Beta")).toBeTruthy();
+  await puxar(); await waitFor(() => expect(pontos()).toBe(3)); expect(valor()).toBe("Aviso 1 de 3: Dados do banco desatualizados");
+});
+it.each([["previsão (receitas)", true], ["banco", false]])("puxar para atualizar com %s chegando por último: sempre o banco primeiro, em qualquer ordem de chegada", async (_, soPrevisao) => {
+  comBanco(); await abrir(); await waitFor(() => expect(pontos()).toBe(3)); await toqueNoPonto(2);
+  const g = segurar();
+  for (const k of soPrevisao ? [PREVISAO] : ["/api/app/contas", "/api/app/patrimonio", "/api/app/resumo-do-mes", "/api/app/mes-detalhes"]) { const r = extra[k] ?? (() => resposta(200, previsao())); extra[k] = (o) => g.promessa.then(() => r(o)); }
+  servidor(); await puxar(); await act(async () => { g.soltar(); await drenar(); await drenar(); });
+  await waitFor(() => expect(pontos()).toBe(3)); expect(valor()).toBe("Aviso 1 de 3: Dados do banco desatualizados");
+});
+it("responder uma receita: o 'Sim' da próxima NÃO reaproveita o nó do 'Sim' tocado (o foco do VoiceOver não fica num botão que mudou de receita)", async () => {
+  await abrir(); await waitFor(() => expect(pontos()).toBe(2));
+  const sim = screen.getByRole("button", { name: "Sim, é receita fixa: Salário Acme" });
+  await apertar("Sim, é receita fixa: Salário Acme"); await waitFor(() => expect(screen.getByText("Freela Beta")).toBeTruthy());
+  expect(screen.getByRole("button", { name: "Sim, é receita fixa: Freela Beta" })).not.toBe(sim);
+});
+it("o foco do leitor vai para o título quando o visível SAI da lista (resposta), e NÃO muda no toque de ponto nem ao montar", async () => {
+  const foco = AccessibilityInfo.sendAccessibilityEvent as jest.Mock; foco.mockClear();
+  await abrir(); await waitFor(() => expect(pontos()).toBe(2)); expect(foco).not.toHaveBeenCalled(); // montar
+  await toqueNoPonto(1); expect(foco).not.toHaveBeenCalled(); // ponto
+  await apertar("Não é receita fixa: Freela Beta"); await waitFor(() => expect(foco).toHaveBeenCalledTimes(1)); expect(foco.mock.calls[0]![1]).toBe("focus"); // o visível saiu
 });
 it("a receita só aparece no Resumo; nas outras abas a pilha só tem o banco", async () => {
   comBanco(); await abrir("/gastos", "Para onde vai");

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Animated, Pressable, View } from "react-native";
+import { AccessibilityInfo, Animated, Pressable, Text, View } from "react-native";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { selecao } from "@/ui/haptics";
 import { duracoes, facilitador, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
-import { raio, tingir } from "@/ui/tokens";
+import { ALFA_FUNDO_TOM, raio, tingir } from "@/ui/tokens";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 
 /** `decisao` (rosa): pede uma resposta do usuário. `alerta` (âmbar): os números ou a conexão estão com problema. Só apresentação: a pilha não sabe de banco nem de receita. */
@@ -21,27 +21,33 @@ const TOM = { decisao: { fio: "brand", tinta: "brandInk" }, alerta: { fio: "warn
 export function PilhaDeAvisos({ itens }: { itens: AvisoDaPilha[] }) {
   const { cores, esquema, acesso } = useTema(); const { ampliado } = useTipografiaPainel(); const reduzir = useReduzirMovimento();
   const [selecionado, setSelecionado] = useState<string | null>(null);
-  const subida = useRef(new Animated.Value(1)).current; const vista = useRef<string | undefined>(undefined);
+  const tituloRef = useRef<Text>(null); const subida = useRef(new Animated.Value(1)).current; const vista = useRef<string | undefined>(undefined);
   const n = itens.length, i = Math.max(0, itens.findIndex((x) => x.id === selecionado)), atual = itens[i], proximo = itens[(i + 1) % n], vid = atual?.id;
-  // Seleção morta (o aviso sumiu): volta a null = "o primeiro", sem gesto não há seleção. Prender no id visível deixaria a receita (que chegou antes) na frente do banco, que tem prioridade; e o id antigo, se voltar (Desfazer), não ressuscita.
-  // ponytail: lista vazia = sumiço transitório (puxar para atualizar zera `dados`), mantém a escolha. Com a conexão pendente na pilha (não vem de `dados`) a lista não esvazia e a escolha cai no primeiro; aceito.
-  if (selecionado !== null && itens.length > 0 && !itens.some((x) => x.id === selecionado)) setSelecionado(null);
+  // Seleção morta (o aviso sumiu): volta a null = "o primeiro", e sem gesto do usuário a prioridade vence (conexão, banco, receitas), em qualquer ordem de chegada. O id antigo, se voltar (Desfazer), não ressuscita.
+  // Puxar para atualizar zera `dados` de uma vez: todo aviso vindo dele some no mesmo render, a seleção vira null e a pilha volta ao 1º aviso. É decisão do produto.
+  if (selecionado !== null && !itens.some((x) => x.id === selecionado)) setSelecionado(null);
+  const ids = itens.map((x) => x.id).join("|");
   useEffect(() => {
     const antes = vista.current; vista.current = vid;
-    if (vid === undefined || antes === undefined || antes === vid || reduzir) return;
+    if (vid === undefined || antes === undefined || antes === vid) return;
+    // O visível SAIU da lista (respondido, fechado): o foco do leitor iria para o vazio, então vai para o título novo. Toque de ponto, mount e o refresh comum (a lista esvazia) não mexem no foco.
+    // ponytail: um refresh com a conexão pendente na pilha (ela não vem de `dados`) também "tira" o visível e move o foco para o título; raro e só no leitor de tela. Distinguir exige saber quem tirou o aviso.
+    if (!ids.split("|").includes(antes) && tituloRef.current) AccessibilityInfo.sendAccessibilityEvent(tituloRef.current, "focus");
+    if (reduzir) return;
     subida.setValue(0); Animated.timing(subida, { toValue: 1, duration: duracoes.transicao, easing: facilitador, useNativeDriver: true }).start();
-  }, [vid, reduzir, subida]);
+  }, [vid, ids, reduzir, subida]);
   if (!atual || !proximo) return null;
   const ir = (k: number) => { const alvo = itens[Math.min(n - 1, Math.max(0, k))]; if (alvo && alvo.id !== atual.id) { selecao(); setSelecionado(alvo.id); } };
   const t = TOM[atual.tom], fio = cores[t.fio], rotulo = n > 1 ? `Aviso ${i + 1} de ${n}: ${atual.titulo}` : atual.titulo;
   return <View testID="pilha-avisos">
-    <Animated.View style={{ opacity: subida, transform: [{ translateY: subida.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }], flexDirection: "row", gap: 12, padding: 16, borderRadius: raio.bloco, borderWidth: 1, borderColor: fio, backgroundColor: acesso ? cores.bg : tingir(fio, esquema) }}>
+    <Animated.View style={{ opacity: subida, transform: [{ translateY: subida.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }], flexDirection: "row", gap: 12, padding: 16, borderRadius: raio.bloco, borderWidth: 1, borderColor: fio, backgroundColor: acesso ? cores.bg : tingir(fio, ALFA_FUNDO_TOM[esquema]) }}>
       <Icone nome={atual.icone} tom={t.tinta} />
-      <View style={{ flex: 1, minWidth: 0, gap: 8 }}>
-        <Texto variante="rotulo" accessibilityRole="header" accessibilityLabel={rotulo}>{atual.titulo}</Texto>
+      {/* `key` pelo aviso: o corpo (os botões) e o X são de OUTRO aviso na troca; sem ela o mesmo nó nativo viraria o "Sim" da próxima receita com o foco do leitor nele. Na `Animated.View` não: remontá-la quebra o driver nativo da subida. */}
+      <View key={atual.id} style={{ flex: 1, minWidth: 0, gap: 8 }}>
+        <Texto ref={tituloRef} variante="rotulo" accessibilityRole="header" accessibilityLabel={rotulo}>{atual.titulo}</Texto>
         {atual.corpo}
       </View>
-      {atual.aoFechar && <Pressable accessibilityRole="button" accessibilityLabel="Fechar aviso" onPress={atual.aoFechar} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", alignSelf: "flex-start", margin: -12 }}><Icone nome="X" tamanho={20} tom="inkMuted" /></Pressable>}
+      {atual.aoFechar && <Pressable key={`x-${atual.id}`} accessibilityRole="button" accessibilityLabel="Fechar aviso" onPress={atual.aoFechar} style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center", alignSelf: "flex-start", margin: -12 }}><Icone nome="X" tamanho={20} tom="inkMuted" /></Pressable>}
     </Animated.View>
     {n > 1 && <>
       {/* A borda do próximo por baixo: só pista visual, o leitor de tela fica com os pontos. */}

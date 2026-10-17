@@ -68,14 +68,14 @@ it("Sim: POST com Bearer e JSON, depois UMA releitura só da previsão; a linha 
  const novas = fetchFalso.mock.calls.slice(antes).map(([u]) => caminho(u)); expect(novas).toEqual([POST, PREVISAO]);
  const [, req] = chamadas(POST)[0]!; expect(corpo(req)).toEqual({ chave: "extrato#sal", resposta: "sim" });
  expect(req.method).toBe("POST"); expect(req.headers.Authorization).toBe("Bearer access-ana"); expect(req.headers["Content-Type"]).toBe("application/json");
- expect(pendentes()).toBe(1); expect(screen.getByText("Já respondidas (3)")).toBeTruthy(); anunciou("Salário Acme: confirmada."); expect(Haptics.notificationAsync).toHaveBeenCalledWith("success");
+ expect(pendentes()).toBe(1); expect(screen.getByText("Já respondidas (3)")).toBeTruthy(); anunciou("Receita confirmada"); expect(Haptics.notificationAsync).toHaveBeenCalledWith("success");
  expect(screen.queryByText(ERRO)).toBeNull(); expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
 });
 it.each([
- ["Não é receita fixa: Freela Beta", "extrato#free", "negada", "Freela Beta: recusada."],
- ["Sim, é receita fixa: Freela Beta", "extrato#free", "confirmada", "Freela Beta: confirmada."],
- ["Desfazer resposta: Aluguel Carla", "extrato#alu", "pendente", "Aluguel Carla: resposta desfeita."],
- ["Desfazer resposta: Pix Tio", "extrato#tio", "pendente", "Pix Tio: resposta desfeita."],
+ ["Não é receita fixa: Freela Beta", "extrato#free", "negada", "Receita recusada"],
+ ["Sim, é receita fixa: Freela Beta", "extrato#free", "confirmada", "Receita confirmada"],
+ ["Desfazer resposta: Aluguel Carla", "extrato#alu", "pendente", "Resposta desfeita"],
+ ["Desfazer resposta: Pix Tio", "extrato#tio", "pendente", "Resposta desfeita"],
 ])("%s manda a chave certa (a segunda da lista também) e o servidor guarda %s", async (nome, chave, status, fala) => {
  await abrir(); await act(async () => { fireEvent.press(screen.getByText("Já respondidas (2)")); await drenar(); });
  if (nome.includes("Freela")) await ver(1); // a pilha mostra uma pendente por vez
@@ -108,12 +108,12 @@ it.each([
  expect(screen.getByText(ERRO)).toBeTruthy(); anunciou(ERRO); expect(Haptics.notificationAsync).toHaveBeenCalledWith("warning"); expect(pendentes()).toBe(2); expect(marcas["extrato#sal"]).toBe("pendente");
  expect(chamadas(PREVISAO).length).toBe(antes + 1); expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
  await apertar("Sim, é receita fixa: Salário Acme");
- expect(screen.queryByText(ERRO)).toBeNull(); expect(pendentes()).toBe(1); anunciou("Salário Acme: confirmada.");
+ expect(screen.queryByText(ERRO)).toBeNull(); expect(pendentes()).toBe(1); anunciou("Receita confirmada");
 });
 it.each([
- ["Sim", "Sim, é receita fixa: Salário Acme", "confirmada", "Salário Acme: confirmada."],
- ["Não", "Não é receita fixa: Freela Beta", "negada", "Freela Beta: recusada."],
- ["Desfazer", "Desfazer resposta: Aluguel Carla", "pendente", "Aluguel Carla: resposta desfeita."],
+ ["Sim", "Sim, é receita fixa: Salário Acme", "confirmada", "Receita confirmada"],
+ ["Não", "Não é receita fixa: Freela Beta", "negada", "Receita recusada"],
+ ["Desfazer", "Desfazer resposta: Aluguel Carla", "pendente", "Resposta desfeita"],
 ])("resposta perdida com %s (o servidor gravou e a rede caiu): a releitura mostra o status esperado e vale como sucesso", async (_, nome, status, fala) => {
  await abrir(); await act(async () => { fireEvent.press(screen.getByText("Já respondidas (2)")); await drenar(); });
  sem = (path, req) => { if (path !== POST) return undefined; marcas[corpo(req).chave] = status; return Promise.reject(new TypeError("Network request failed")); };
@@ -125,13 +125,13 @@ it("controle do anterior: o POST caiu SEM gravar e a chave SUMIU da releitura N�
  await abrir();
  sem = (path, req) => { if (path !== POST) return undefined; delete marcas[corpo(req).chave]; return Promise.reject(new TypeError("Network request failed")); };
  await apertar("Sim, é receita fixa: Salário Acme");
- expect(screen.getByText(ERRO)).toBeTruthy(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Salário Acme: confirmada.");
+ expect(screen.getByText(ERRO)).toBeTruthy(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Receita confirmada");
 });
 it("POST ok e releitura 500: sem Banner, sucesso anunciado, e quando a lista volta no Tentar novamente os botões estão ativos", async () => {
  await abrir(); let cai = true;
  sem = (path) => path === PREVISAO && cai && marcas["extrato#sal"] === "confirmada" ? Promise.resolve(resposta(500, { detail: "x" })) : undefined;
  await apertar("Sim, é receita fixa: Salário Acme");
- expect(screen.queryByText(ERRO)).toBeNull(); anunciou("Salário Acme: confirmada.");
+ expect(screen.queryByText(ERRO)).toBeNull(); anunciou("Receita confirmada");
  await waitFor(() => expect(screen.getAllByRole("button", { name: "Tentar novamente" }).length).toBeGreaterThan(0));
  cai = false; await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: "Tentar novamente" })[0]!); await drenar(); });
  await waitFor(() => expect(screen.getByText("Já respondidas (3)")).toBeTruthy()); expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
@@ -193,7 +193,7 @@ it.each([
  sem = (path) => path === POST ? Promise.resolve(falha()) : path === "/auth/refresh" ? Promise.resolve(resposta(401, { detail: "invalid_refresh_token" })) : undefined;
  const antes = chamadas(PREVISAO).length; await apertar("Sim, é receita fixa: Salário Acme"); await act(drenar);
  expect(screen.queryByText("Receitas do extrato")).toBeNull(); expect(screen.queryByText(ERRO)).toBeNull(); expect(chamadas(PREVISAO).length).toBe(antes);
- expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Salário Acme: confirmada.");
+ expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Receita confirmada");
 });
 it("com 'Já respondidas' aberta, o Desfazer também fica travado durante a espera", async () => {
  await abrir(); await act(async () => { fireEvent.press(screen.getByText("Já respondidas (2)")); await drenar(); });
@@ -211,7 +211,7 @@ it("puxar para atualizar com o POST no ar aborta o POST, sem Banner, e os botõe
  const [, req] = chamadas(POST)[0]!; expect(botao("Sim, é receita fixa: Salário Acme").props.accessibilityState.disabled).toBe(true);
  sem = undefined; await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
  expect(req.signal.aborted).toBe(true); await waitFor(() => expect(botao("Sim, é receita fixa: Salário Acme").props.accessibilityState.disabled).toBe(false));
- expect(screen.queryByText(ERRO)).toBeNull(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Salário Acme: confirmada.");
+ expect(screen.queryByText(ERRO)).toBeNull(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Receita confirmada");
 });
 it("troca de conta com o POST no ar: nada da Ana na Bela (sem Banner, sem anúncio, sem lista, sem releitura extra) e os botões dela ativos", async () => {
  await abrir(); const post = segurar(); const ana = marcas; const dela = { "extrato#bela": "pendente" };
@@ -222,7 +222,7 @@ it("troca de conta com o POST no ar: nada da Ana na Bela (sem Banner, sem anúnc
   marcas = dela; await trocarParaBela(); await waitFor(() => expect(screen.getByText("Pagadora Bela")).toBeTruthy());
   const gets = chamadas(PREVISAO).filter(([, r]) => bela(r)).length;
   await act(async () => { post.soltar(); await drenar(); await drenar(); });
-  expect(screen.queryByText(ERRO)).toBeNull(); expect(screen.queryByText("Salário Acme")).toBeNull(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith(expect.stringContaining("Salário"));
+  expect(screen.queryByText(ERRO)).toBeNull(); expect(screen.queryByText("Salário Acme")).toBeNull(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith(expect.stringMatching(/^(Receita|Resposta) /));
   expect(chamadas(PREVISAO).filter(([, r]) => bela(r)).length).toBe(gets); expect(botao("Sim, é receita fixa: Pagadora Bela").props.accessibilityState.disabled).toBe(false);
  } finally { BASE.pop(); marcas = ana; }
 });
@@ -288,7 +288,7 @@ it("leitura de horizonte VELHA que cai no mesmo tique da resposta perdida não �
  };
  seguraGet = true; await apertar("60 dias"); await act(async () => { fireEvent.press(botao("Sim, é receita fixa: Salário Acme")); await drenar(); });
  await act(async () => { g60.soltar(); post.soltar(); await drenar(); await drenar(); await drenar(); });
- await waitFor(() => expect(pendentes()).toBe(1)); expect(screen.queryByText(ERRO)).toBeNull(); expect(erros()).toBe(0); anunciou("Salário Acme: confirmada.");
+ await waitFor(() => expect(pendentes()).toBe(1)); expect(screen.queryByText(ERRO)).toBeNull(); expect(erros()).toBe(0); anunciou("Receita confirmada");
  expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
 });
 it("só respondidas: caixa com 'Já respondidas', sem pergunta e sem Sim/Não", async () => {

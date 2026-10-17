@@ -93,8 +93,8 @@ describe("contraste", () => {
       expect(contraste(paleta.inkMuted, tingido)).toBeGreaterThanOrEqual(4.5);
     }
   });
-  it("tingir grava o mesmo alfa de 8 bits que o teste compõe (06 no claro, 24 no escuro)", () => {
-    expect(tingir(claro.warning, "light")).toBe(`${claro.warning}0f`); expect(tingir(escuro.warning, "dark")).toBe(`${escuro.warning}24`);
+  it("tingir grava em hex de 2 dígitos o ALFA_FUNDO_TOM de cada esquema (0f no claro = 6%, 24 no escuro = 14%)", () => {
+    expect(tingir(claro.warning, ALFA_FUNDO_TOM.light)).toBe(`${claro.warning}0f`); expect(tingir(escuro.warning, ALFA_FUNDO_TOM.dark)).toBe(`${escuro.warning}24`);
   });
   it("controle: 12% no claro reprovava (é por isso que o alfa do claro é menor)", () => {
     expect(contraste(claro.warning, sobre(claro.warning, claro.surface, 0.12))).toBeLessThan(4.5);
