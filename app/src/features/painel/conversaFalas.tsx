@@ -5,6 +5,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { useIsFocused } from "expo-router";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { useToast } from "@/ui/componentes/Toast";
+import { SegmentedControl } from "@/ui/componentes/SegmentedControl";
 import { Skeleton } from "@/ui/componentes/Skeleton";
 import { sucesso } from "@/ui/haptics";
 import { duracoes, useEntrada, useReduzirMovimento } from "@/ui/motion";
@@ -13,7 +14,7 @@ import { useTema } from "@/ui/tema";
 import type { BlocoChat, CardChat } from "@/api/schemas/painel";
 import { Bloco, tituloWidget } from "./base";
 import { BlocoContexto } from "./blocoContexto";
-import { nomeMes } from "./catalogo";
+import { mesAbrev, mesCurto, nomeMes } from "./catalogo";
 import { tituloPeriodo } from "./cardPeriodo";
 import { raio, texto as escalas } from "@/ui/tokens";
 import { ChipPainel, TextoPainel as Texto } from "./tipografia";
@@ -91,12 +92,18 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
-/** Um card por aba do bloco, cada um com os dados embutidos pelo servidor; tocar em qualquer ponto livre abre a Folha com o MESMO bloco/aba. */
-export function CardChat({ bloco, abrir }: { bloco: BlocoChat; abrir: (b: BlocoChat, aba: number) => void }) {
-  return <>{bloco.abas.map((aba, i) => <BlocoContexto.Provider key={i} value={{ recursos: aba.recursos }}><Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)} ir={{ destino: "detalhes", acao: () => abrir(bloco, i) }}><WidgetConteudo id={bloco.card} /></Bloco></BlocoContexto.Provider>)}</>;
+/** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tudo acontece dentro do card, no chat: não há folha nem toque que abra outra tela. */
+export function CardChat({ bloco }: { bloco: BlocoChat }) {
+  const [selecionada, setSel] = useState(0); const { abas } = bloco, sel = Math.min(selecionada, abas.length - 1), aba = abas[sel]!;
+  // Rótulo único (é a identidade no `SegmentedControl`): "out" se todas são do mesmo ano, senão "out/2026".
+  const mesmoAno = abas.every((a) => a.mes?.slice(0, 4) === abas[0]!.mes?.slice(0, 4)), rotulos = abas.map((a, i) => a.mes ? (mesmoAno ? mesAbrev(a.mes) : mesCurto(a.mes)) : String(i + 1));
+  return <Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)}>
+    {abas.length > 1 && <SegmentedControl opcoes={rotulos} acessiveis={abas.map((a, i) => a.mes ? nomeMes(a.mes) : rotulos[i]!)} valor={rotulos[sel]!} onChange={(v) => setSel(rotulos.indexOf(v))} />}
+    <BlocoContexto.Provider key={sel} value={{ recursos: aba.recursos }}><WidgetConteudo id={bloco.card} /></BlocoContexto.Provider>
+  </Bloco>;
 }
 /** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e os cards (`bloco`) que o servidor montou, antes do texto. */
-export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (b: BlocoChat, aba: number) => void }) {
+export function TurnoChat({ turno: t, onLayout }: { turno: Turno; onLayout?: (y: number) => void }) {
   const p = usePainel(); const entrada = useEntrada();
   const emVoo = t.resposta === undefined && !t.erro && !t.interrompida, status = emVoo && !t.parcial;
   const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto; enquanto o status os mostra, não duplica
@@ -106,7 +113,7 @@ export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayou
       <FalaPiggy>
         {status && <StatusPiggy passos={t.passos} />}
         {!status && !!passos && <Texto variante="legenda" tom="inkMuted">{passos}</Texto>}
-        {abrir && t.blocos.map((b, i) => <Animated.View key={i} entering={entrada}><CardChat bloco={b} abrir={abrir} /></Animated.View>)}
+        {t.blocos.map((b, i) => <Animated.View key={i} entering={entrada}><CardChat bloco={b} /></Animated.View>)}
         {emVoo && t.previa && t.blocos.at(-1)?.card !== t.previa && <Skeleton largura="100%" altura={120} raio={raio.bloco} />}
         {t.erro ? <Texto tom="warning">{t.erro}</Texto> : <Markdown texto={t.resposta ?? t.parcial} />}
         {t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}

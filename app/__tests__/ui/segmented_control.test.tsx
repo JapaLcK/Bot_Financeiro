@@ -47,6 +47,13 @@ describe("SegmentedControl", () => {
     expect(tabs[1]!.props.accessibilityState).toMatchObject({ selected: true });
   });
 
+  it("`acessiveis` vira o accessibilityLabel de cada tab (o visível pode ser abreviado); sem ele, o rótulo é o texto", () => {
+    const { getAllByRole } = renderInterativo(<SegmentedControl opcoes={["out", "set"]} acessiveis={["outubro de 2026", "setembro de 2026"]} valor="out" onChange={jest.fn()} />);
+    expect(getAllByRole("tab").map((t) => t.props.accessibilityLabel)).toEqual(["outubro de 2026", "setembro de 2026"]);
+    const { getAllByRole: sem } = renderInterativo(<SegmentedControl opcoes={["out", "set"]} valor="out" onChange={jest.fn()} />);
+    expect(sem("tab").map((t) => t.props.accessibilityLabel)).toEqual([undefined, undefined]);
+  });
+
   it("dois rótulos iguais: só o primeiro marca selected, e tocar o segundo chama onChange — mas NÃO fica selecionável (rótulo repetido não é suportado, ver JSDoc de `opcoes`)", () => {
     const onChange = jest.fn();
     const erroConsole = jest.spyOn(console, "error").mockImplementation(() => {});

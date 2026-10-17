@@ -55,14 +55,14 @@ export function diasDoProvider(dados: ReturnType<typeof usePainel>["dados"]) { c
  * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
  * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
  * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
- * `ir` com `acao` (o card do chat) roda a função em vez de navegar; o `ArrowSquareOut` ao lado do título só sinaliza, o botão é o título. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
+ * O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
  */
-export function Bloco({ id, titulo: tituloDado, children, abrir, ir }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } | { destino: string; acao: () => void } }) {
+export function Bloco({ id, titulo: tituloDado, children, abrir, ir }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href } }) {
   const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
-  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } if ("acao" in ir) ir.acao(); else navegar(ir.rota); };
-  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{ir && "acao" in ir && <View accessibilityElementsHidden importantForAccessibility="no"><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></View>}</View>;
+  const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
+  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto></View>;
   const card = <SegurouContext.Provider value={segurou}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPressIn={zerar} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></SegurouContext.Provider>;
-  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : card;
+  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : <View testID={`bloco-${id}`}>{card}</View>;
 }
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(), bloco = useBloco(); const r = p.dados[nome];

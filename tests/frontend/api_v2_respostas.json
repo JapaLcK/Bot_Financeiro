@@ -754,6 +754,298 @@
         }
       ]
     },
+    "pro30_receitas": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "10.005",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "receitas_do_banco": [
+        {
+          "chave": "extrato#a1b2c3d4e5f60718",
+          "nome": "Empresa Alfa Ltda",
+          "valor": "4000.00",
+          "dia": 4,
+          "status": "pendente"
+        },
+        {
+          "chave": "extrato#0f1e2d3c4b5a6978",
+          "nome": "Maria Souza",
+          "valor": "1500.00",
+          "dia": 10,
+          "status": "confirmada"
+        },
+        {
+          "chave": "extrato#1122334455667788",
+          "nome": "Pix do João",
+          "valor": "250.50",
+          "dia": 20,
+          "status": "negada"
+        }
+      ],
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "7.33"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "10.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "7.33",
+          "compromissos": [
+            {
+              "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "2.675",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "7.33",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-07",
+        "saldo": "7.33",
+        "desde": "2026-10-06",
+        "causas": [
+          {
+            "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+            "ciclo": "2026-10-07",
+            "data": "2026-10-07",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Aluguel",
+            "valor": "2.675",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "f94dbb7e6c46f6f6654d57cf37c8a2c2518e727219e299edb40252f1e8f19387",
+          "fonte": "gasto_recorrente",
+          "nome": "Aluguel",
+          "primeira_data": "2026-10-07",
+          "ultima_data": "2026-10-07",
+          "ocorrencias": [
+            {
+              "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "2.675",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        }
+      ]
+    },
     "pro60": {
       "hoje": "2026-10-06",
       "calculado_em": "2026-10-06T12:00:00-03:00",

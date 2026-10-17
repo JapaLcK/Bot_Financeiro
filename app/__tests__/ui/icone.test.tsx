@@ -28,6 +28,9 @@ describe("Icone", () => {
     "PauseCircle",
     "Trash",
     "Question",
+    "CreditCard",
+    "Bank",
+    "ClockCounterClockwise",
   ] as const)("resolve o ícone %s sem lançar", (nome) => {
     const { claro: c } = renderNosDoisTemas(<Icone nome={nome} />);
     expect(c.UNSAFE_getByType(IconeStub)).toBeTruthy();
