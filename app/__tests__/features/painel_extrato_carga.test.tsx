@@ -169,7 +169,7 @@ describe("Extrato: consulta, dia e detalhe", () => {
 describe("Extrato: filtros zeram a cada entrada", () => {
  const selecionado = (nome: string) => screen.getByRole("button", { name: nome }).props.accessibilityState.selected;
  const ir = async (rota: "/gastos" | "/extrato") => { await act(async () => { router.navigate(rota); await drenar(); }); };
- const dia = "calendario-dia-2026-10-02", tocarDia = async () => { await waitFor(() => expect(screen.getByTestId(dia)).toBeTruthy()); await act(async () => { fireEvent.press(screen.getByTestId(dia)); await drenar(); }); };
+ const dia = "calendario-dia-2026-10-02", tocarDia = async () => { await waitFor(() => expect(screen.getByTestId(dia)).toBeTruthy()); await act(async () => { fireEvent.press(screen.getByTestId(dia)); await drenar(); }); await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ver extrato do dia" })); await drenar(); }); }; // o toque abre a folha do dia (PR 2b); o botão dela leva ao Extrato
  // Busca, origem e tipo de uma só vez; o debounce (300 ms) é avançado à mão porque o Router já usa timers falsos.
  const filtrar = async () => { marcar("Banco"); marcar("Entradas"); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Sal"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); }); expect(selecionado("Banco")).toBe(true); expect(selecionado("Entradas")).toBe(true); expect(screen.getByTestId("extrato-escopo-busca")).toBeTruthy(); };
  // Chamado LOGO após a entrada, sem avançar o debounce: um reset que esquece `busca` ou `origem` ainda deixa `q`/`origem` na consulta aqui, e só converge sozinho 300 ms depois.

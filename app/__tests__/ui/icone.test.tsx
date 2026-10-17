@@ -23,6 +23,7 @@ describe("Icone", () => {
   });
 
   it.each([
+    "CaretLeft",
     "CaretRight",
     "Wallet",
     "Bell",
@@ -63,6 +64,7 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
    * módulo (tela branca).
    */
   it.each([
+    ["CaretLeft", "CaretLeftIcon"],
     ["CaretRight", "CaretRightIcon"],
     ["Wallet", "WalletIcon"],
     ["Bell", "BellIcon"],
