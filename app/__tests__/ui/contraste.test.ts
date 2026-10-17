@@ -1,5 +1,5 @@
 import { contraste, PARES } from "@/ui/contraste";
-import { ALFA_FUNDO_TOM, claro, escuro, acessoClaro, acessoEscuro } from "@/ui/tokens";
+import { ALFA_FUNDO_TOM, ALFA_WASH_SERIE, claro, escuro, acessoClaro, acessoEscuro, SERIE_META } from "@/ui/tokens";
 
 describe("contraste", () => {
   // Referência do plano: prova a fórmula contra dois valores medidos à mão,
@@ -81,5 +81,29 @@ describe("contraste", () => {
   });
   it("controle: 12% no claro reprovava (é por isso que o alfa do claro é menor)", () => {
     expect(contraste(claro.warning, sobre(claro.warning, claro.surface, 0.12))).toBeLessThan(4.5);
+  });
+
+  // Cor de série das pílulas de meta: barra e ícone (cor do dado, não texto) pedem 3:1 contra a pílula (`surfaceControl`), a trilha (`border`) e o próprio wash.
+  // O claro não tem par na web (as da web dão 1,5 a 2,3 ali): preso por propriedade — matiz perto do escuro e longe dos estados, para a série nunca virar sinal de estado.
+  const matiz = (h: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number], mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+    const m = (mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60; return (m + 360) % 360;
+  };
+  const arco = (a: string, b: string) => { const d = Math.abs(matiz(a) - matiz(b)); return Math.min(d, 360 - d); };
+  const SERIES = [["claro", claro, SERIE_META.light], ["escuro", escuro, SERIE_META.dark]] as const;
+  it.each(SERIES)("cor de série %s: 3:1 contra a pílula, a trilha e o wash a 12%%; 4 distintas e nenhuma é o brand", (_n, paleta, serie) => {
+    expect(new Set(serie).size).toBe(4); expect(serie).not.toContain(paleta.brand);
+    for (const c of serie) {
+      for (const fundo of [paleta.surfaceControl, paleta.border, sobre(c, paleta.surfaceControl, ALFA_WASH_SERIE)]) expect(contraste(c, fundo)).toBeGreaterThanOrEqual(3);
+    }
+  });
+  it.each(SERIES)("cor de série %s: a 25° ou mais de positive, warning, alert e danger do tema", (_n, paleta, serie) => {
+    for (const c of serie) for (const estado of ["positive", "warning", "alert", "danger"] as const) expect(arco(c, paleta[estado])).toBeGreaterThanOrEqual(25);
+  });
+  it("cor de série: o claro tem o matiz do escuro de mesmo índice (até 12°)", () => {
+    SERIE_META.light.forEach((c, i) => expect(arco(c, SERIE_META.dark[i]!)).toBeLessThanOrEqual(12));
+  });
+  it("controle: as cores escuras da web no claro reprovam (fúcsia #F0ABFC dá 1,53 contra a pílula)", () => {
+    expect(contraste("#F0ABFC", claro.surfaceControl)).toBeLessThan(3); expect(contraste("#22D3EE", claro.surfaceControl)).toBeLessThan(3);
   });
 });

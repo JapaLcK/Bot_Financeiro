@@ -1396,6 +1396,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_launch_execute,
+        valor_do_usuario="valor",
         summary=_add_launch_summary,
         confirmar_se=precisa_confirmar_lancamento,
         ao_confirmar=_congela_pendencia,

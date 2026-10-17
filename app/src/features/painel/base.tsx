@@ -1,4 +1,4 @@
-import type { Href } from "expo-router";
+import { useIsFocused, type Href } from "expo-router";
 import { useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -79,6 +79,7 @@ const MOTIVOS: Record<string, string> = {
  especie_incompleta: "O dinheiro em espécie pode estar incompleto.", banco_desatualizado: "Os dados do banco precisam ser atualizados.",
  saldo_ausente: "O banco não informou um dos saldos.", moeda_presumida: "A moeda de uma conta ainda precisa ser confirmada.",
  conta_fora_do_ultimo_sync: "Uma conta não apareceu na última sincronização.", conexao_pausada: "Há uma conexão bancária pausada.",
+ inicio_do_historico: "O histórico do seu plano tem uma data de início: o que vem antes dela não entra nos números do período nem na comparação.",
 };
 /** Estado do banco: vai só no aviso único do topo (`TelaPainel`), nunca repetido nos cards. */
 export const MOTIVOS_BANCO = new Set(["banco_desatualizado", "conexao_pausada"]);
@@ -95,9 +96,10 @@ export function Avisos({ motivos }: { motivos: string[] }) {
  return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }
 export function Vazio({ texto }: { texto: string }) { return <Texto variante="rotulo" tom="inkMuted">{texto}</Texto>; }
-export function Folha({ titulo, aberta, fechar, children }: { titulo: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
-  const { cores } = useTema(); const reduzir = useReduzirMovimento();
-  return <Modal visible={aberta} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
+/** `rotulo`: o que o VoiceOver lê no lugar do título (data curta → longa). `aberta && focado`: o `Modal` do RN cobre a aba de destino, então a folha some com a aba (e reaparece ao voltar: o estado segue "aberta"). */
+export function Folha({ titulo, rotulo, aberta, fechar, children }: { titulo: string; rotulo?: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
+  const { cores } = useTema(); const reduzir = useReduzirMovimento(); const focado = useIsFocused();
+  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" accessibilityLabel={rotulo} style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
 }
 export function Curva({ valores }: { valores: (number | null)[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();

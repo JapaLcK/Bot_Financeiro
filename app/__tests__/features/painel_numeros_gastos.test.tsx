@@ -62,7 +62,7 @@ it.each([
  expect(sinal()).toBeTruthy();
 });
 it.each([
- ["/resumo", "bloco-resumo"], ["/metas", "Ritmo mensal necessário"], ["/extrato", "Buscar lançamento"], ["/piggy", "Mensagem para o Piggy"],
+ ["/resumo", "bloco-resumo"], ["/metas", "bloco-metas"], ["/extrato", "Buscar lançamento"], ["/piggy", "Mensagem para o Piggy"],
 ] as const)("a aba %s continua sem o bloco", async (url, sinal) => {
  renderRouter("./app", { initialUrl: url });
  await waitFor(() => expect(screen.queryByTestId(sinal) ?? screen.queryByText(sinal) ?? screen.queryByLabelText(sinal)).toBeTruthy());

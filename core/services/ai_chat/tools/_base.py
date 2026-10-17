@@ -19,6 +19,8 @@ Toda tool exposta ao LLM é representada por um objeto `Tool` com:
   - confirmar_se: SÓ pra writes com requires_confirmation=False. Recebe
              (user_id, args); True = desta vez vira pending action como as de
              confirmação, com resposta fixa do runner. None = sempre executa.
+  - valor_do_usuario: nome do argumento de dinheiro que só vale se o usuário o
+             escreveu (ver o campo abaixo). None = sem conferência.
 
 Cada arquivo em tools/ exporta uma lista `TOOLS: list[Tool]`. O `__init__.py`
 do pacote tools/ agrega todas e expõe utilitários (schemas, lookup por nome).
@@ -67,6 +69,11 @@ class Tool:
     has_side_effects: bool = False
     """Consulta que sincroniza ou aplica juros. Não é comando de escrita,
     mas uma falha após sua tentativa não pode restituir a reserva da cota."""
+
+    valor_do_usuario: Optional[str] = None
+    """Nome do argumento de dinheiro que o usuário tem de ter escrito
+    (`valor_do_usuario.py`). Sem âncora no texto dele: argumento obrigatório no
+    schema → o runner recusa a chamada; opcional → o argumento é descartado."""
 
     @property
     def name(self) -> str:
