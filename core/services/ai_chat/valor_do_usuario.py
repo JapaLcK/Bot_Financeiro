@@ -79,31 +79,36 @@ def _textos_do_usuario(user_id: int) -> list[str]:
 
 
 # "50 centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
-# ponytail: só dígitos; "cinquenta centavos" por extenso não é lido (recusa e pergunta o valor).
+# Por extenso ("cinquenta centavos") é o `_extensos` que separa, abaixo.
 _CENTAVOS_RE = re.compile(r"(?<!reais e )(?<!real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
+
+
+_DEPOIS_DE_UM = ("real", "reais", "conto", "contos", "pila", "pilas", "centavo", "centavos")
 
 
 def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
     return 4 if v >= 1000 else 3 if v >= 100 else 2 if v >= 20 else 1
 
 
-def _extensos(t: str) -> list[float | None]:
-    """Um número por extenso por trecho: "cinquenta no mercado e vinte no uber" → [50, 20], não 70.
+def _extensos(t: str) -> list[tuple[float | None, str]]:
+    """Um número por extenso por trecho, com a palavra que vem depois dele:
+    "cinquenta no mercado e vinte no uber" → [(50, "no"), (20, "no")], não 70.
     O "e" só junta enquanto o nível desce ("cinquenta e cinco", "cento e vinte", "mil e duzentos");
     "cinquenta e vinte" são dois."""
+    toks = re.findall(r"\w+", t)
     runs, prev = [], None
-    for tok in re.findall(r"\w+", t):
+    for i, tok in enumerate(toks):
         v = _words_to_number(tok)
         if v is None:
             prev = prev if tok.lower() == "e" else None
             continue
         n = _nivel(v)
         if prev is not None and (n < prev or n == 4 > prev):
-            runs[-1].append(tok)
+            runs[-1][1] = i + 1
         else:
-            runs.append([tok])
+            runs.append([i, i + 1])
         prev = n
-    return [_words_to_number(" ".join(r)) for r in runs]
+    return [(_words_to_number(" ".join(toks[a:b])), toks[b].lower() if b < len(toks) else "") for a, b in runs]
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -114,7 +119,12 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
         # sem dígito o `_extract_valor` cai no extenso da mensagem inteira (soma): os `_extensos` leem por trecho
-        for v in (_extract_valor(limpo) if re.search(r"\d", limpo) else None, *_extensos(limpo)):
+        vs = [_extract_valor(limpo) if re.search(r"\d", limpo) else None]
+        for v, depois in _extensos(limpo):
+            if v == 1 and depois not in _DEPOIS_DE_UM:  # "um"/"uma" soltos são artigo ("comprei uma tv")
+                continue
+            vs.append(v / 100 if depois.startswith("centavo") else v)   # "cinquenta centavos" são 50, não R$ 50
+        for v in vs:
             if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
                 lidos.add(round(v * 100))
     return lidos

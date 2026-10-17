@@ -70,6 +70,16 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("75 centavos", {75}, {7500}),
     ("gastei 10 no uber e 50 centavos no bombom", {1000, 50}, {5000}),
     ("30 reais e 50 centavos", {3050}, {50}),
+    # centavos por extenso são n centavos, não R$ n
+    ("gastei cinquenta centavos", {50}, {5000}),
+    ("vinte e cinco centavos", {25}, {2500, 2000, 500}),
+    ("um centavo", {1}, {100}),
+    ("trinta reais e cinquenta centavos", {3000, 50}, {5000}),
+    # "um"/"uma" soltos são artigo, não R$ 1
+    ("comprei uma tv", set(), {100}),
+    ("comprei um carro", set(), {100}),
+    ("paguei um real", {100}, set()),
+    ("paguei uma pizza de 40", {4000}, {100}),
     # extenso lido por trecho, não a soma da mensagem
     ("gastei cinquenta no mercado e vinte no uber", {5000, 2000}, {7000}),
     ("cinquenta e cinco", {5500}, {5000, 500}),
@@ -408,6 +418,24 @@ def test_p6_n_centavos_grava_meio_real_e_nao_50_reais(uid_pro, monkeypatch):
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
     r = runner.chat(uid_pro, "gastei 50 centavos", platform="dashboard")   # R$ 50 inventado: recusa
     assert RECUSA in r and lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}], r
+
+
+def test_p8_cinquenta_centavos_por_extenso_grava_meio_real_e_nao_50(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    openai_falso(monkeypatch, lancamento(0.5), lancamento(50))
+    runner.chat(uid_pro, "gastei cinquenta centavos", platform="dashboard")
+    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
+    r = runner.chat(uid_pro, "gastei cinquenta centavos", platform="dashboard")   # R$ 50 (100x): recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}], r
+
+
+def test_p9_artigo_um_nao_ancora_valor_1(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(1))   # "uma tv": o 1 é inventado
+    r = runner.chat(uid_pro, "comprei uma tv no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
 
 
 def test_p7_dois_extensos_na_mesma_frase_gravam_os_dois_e_a_soma_nao(uid_pro, monkeypatch):
