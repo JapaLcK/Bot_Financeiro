@@ -18,7 +18,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, constr, field_validator, model_validator
 
 from core.pg_text import limpa_para_pg
 from core.services.ai_chat import streaming
@@ -36,6 +36,9 @@ _TURNOS: set[asyncio.Task] = set()
 
 class AIChatBody(BaseModel):
     message: str
+    # Os cards que o app sabe mostrar. Ausente (build antigo) = só os de sempre: o card que a própria tool emite
+    # (`cards.DA_TOOL`) só sai se vier aqui, senão o app o descartaria e o dado sumiria.
+    cards: list[constr(max_length=40)] = Field(default_factory=list, max_length=50)
 
 
 TEXTO_MAX = 500
@@ -86,7 +89,7 @@ def _sse(evento: dict) -> str:
     return f"data: {json.dumps(evento, ensure_ascii=False)}\n\n"
 
 
-async def _fluxo(user_id: int, text: str, monthly_limit: int):
+async def _fluxo(user_id: int, text: str, monthly_limit: int, cards: tuple[str, ...] = ()):
     import db
 
     loop = asyncio.get_running_loop()
@@ -100,7 +103,7 @@ async def _fluxo(user_id: int, text: str, monthly_limit: int):
         try:
             r = await asyncio.to_thread(
                 streaming.executar, user_id, text,
-                monthly_limit=monthly_limit, emissor=emissor, cancela=cancela)
+                monthly_limit=monthly_limit, emissor=emissor, cancela=cancela, cards=cards)
             if not r.interrompida:
                 usado = await asyncio.to_thread(db.ai_get_usage_this_month, user_id)
                 emissor({"tipo": "fim", "reply": r.reply, "message_id": r.message_id,
@@ -139,7 +142,7 @@ def criar_router(pro) -> APIRouter:
 
         monthly_limit = await asyncio.to_thread(ai_monthly_limit_for, user_id)
         return StreamingResponse(
-            _fluxo(user_id, text, monthly_limit), media_type="text/event-stream",
+            _fluxo(user_id, text, monthly_limit, tuple(body.cards)), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @router.post("/ai/messages/{message_id}/feedback")

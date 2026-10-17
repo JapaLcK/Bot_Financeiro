@@ -116,10 +116,10 @@ def openai_falso(monkeypatch, *rodadas, pausa=0, chips=()):
     return reg
 
 
-def executar(uid, texto, cancela=None):
+def executar(uid, texto, cancela=None, cards=()):
     eventos = []
     cancela = cancela or threading.Event()
-    r = streaming.executar(uid, texto, monthly_limit=100, emissor=eventos.append, cancela=cancela)
+    r = streaming.executar(uid, texto, monthly_limit=100, emissor=eventos.append, cancela=cancela, cards=cards)
     return r, eventos, cancela
 
 
