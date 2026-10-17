@@ -16,6 +16,7 @@ import { Bloco, tituloWidget } from "./base";
 import { BlocoContexto } from "./blocoContexto";
 import { mesAbrev, mesCurto, nomeMes } from "./catalogo";
 import { tituloPeriodo } from "./cardPeriodo";
+import { tituloFimDoMes, tituloMaiores } from "./cardMaiores";
 import { raio, texto as escalas } from "@/ui/tokens";
 import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
@@ -89,6 +90,8 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   const periodo = aba.recursos.periodo;
   if (card === "periodo") return periodo ? tituloPeriodo(periodo.inicio, periodo.fim) : "Período";
   if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
+  if (card === "maiores_gastos") return tituloMaiores(aba.recursos.maiores_gastos);
+  if (card === "fim_do_mes") return tituloFimDoMes(aba.recursos.fim_do_mes);
   if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }

@@ -39,6 +39,8 @@ export function dataPtBr(dia: string | null) {
   if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) return "Data não informada";
   return `${dia.slice(8)}/${dia.slice(5, 7)}/${dia.slice(0, 4)}`;
 }
+/** "dd/mm", com "/aa" quando o dia é de outro ano que `ref` (senão dois "17/10" de anos diferentes se confundem). */
+export const diaMes = (dia: string, ref: string) => dataPtBr(dia).slice(0, 5) + (dia.slice(0, 4) !== ref.slice(0, 4) ? `/${dia.slice(2, 4)}` : "");
 export function indicadorMeta(indicador: string) {
   const rotulos: Record<string, string> = { no_target: "Sem objetivo definido", achieved: "Objetivo alcançado", on_track: "No ritmo para alcançar", ahead: "Adiantada em relação ao objetivo", behind: "Abaixo do ritmo necessário", tight: "Prazo apertado", active: "Meta em andamento", no_deadline: "Sem prazo definido" };
   return rotulos[indicador] ?? "Ritmo da meta a conferir";

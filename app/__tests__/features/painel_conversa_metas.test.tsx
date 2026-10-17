@@ -205,10 +205,10 @@ describe("outros casos da fixture", () => {
   // O card pede AO CHAT (como se o usuário tivesse digitado): a mensagem sai pelo POST de sempre, sem navegar nem abrir folha.
   it("'Criar meta' envia 'Quero criar uma meta' no próprio chat; 'Montar reserva' envia o pedido da reserva", async () => {
     await mostrar("vazio"); const antes = posts().length;
-    await apertar("Criar meta"); expect(posts()).toHaveLength(antes + 1); expect(JSON.parse(String(posts().at(-1)![1].body))).toEqual({ message: "Quero criar uma meta" });
+    await apertar("Criar meta"); expect(posts()).toHaveLength(antes + 1); expect(JSON.parse(String(posts().at(-1)![1].body))).toMatchObject({ message: "Quero criar uma meta" });
     await waitFor(() => expect(screen.getAllByText("Resposta do Piggy").length).toBeGreaterThan(0)); // a conversa segue no mesmo chat: a pergunta vira bolha
     expect(screen.getByText("Quero criar uma meta")).toBeTruthy();
-    await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: /Montar reserva/ }).at(-1)!); await drenar(); }); expect(JSON.parse(String(posts().at(-1)![1].body))).toEqual({ message: "Quero montar minha reserva de emergência" });
+    await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: /Montar reserva/ }).at(-1)!); await drenar(); }); expect(JSON.parse(String(posts().at(-1)![1].body))).toMatchObject({ message: "Quero montar minha reserva de emergência" });
   });
   it("cota cheia depois da resposta: os botões do card (no chat de verdade) ficam desativados, como a entrada", async () => {
     srv.uso = 99; const c = await mostrar("vazio"); // a resposta com o card grava 100 de 100

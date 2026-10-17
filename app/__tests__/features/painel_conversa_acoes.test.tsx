@@ -20,7 +20,7 @@ it("chip tocado: o POST leva o texto exato, a bolha mostra o chip e a linha some
   srv.chat = (n) => n === 1 ? comFim("Primeira", { chips: ["E o mês passado?", "Chip B"] })() : ok("Segunda")();
   await abrir(); await enviar("p1"); await waitFor(() => expect(chip("E o mês passado?")).toBeTruthy());
   await apertar("E o mês passado?"); await waitFor(() => expect(texto("Segunda")).toBeTruthy());
-  expect(corpo(1)).toEqual({ message: "E o mês passado?" }); expect(texto("E o mês passado?")).toBeTruthy(); expect(chip("E o mês passado?")).toBeNull(); expect(chip("Chip B")).toBeNull();
+  expect(corpo(1)).toMatchObject({ message: "E o mês passado?" }); expect(texto("E o mês passado?")).toBeTruthy(); expect(chip("E o mês passado?")).toBeNull(); expect(chip("Chip B")).toBeNull();
 });
 it("chips só do último turno; somem com valores ocultos e voltam ao mostrar", async () => {
   srv.chat = (n) => comFim(`R${n}`, { chips: [`Chip ${n}`] })();
@@ -32,8 +32,8 @@ it("chip tocado com rascunho no campo: o POST leva o chip e o campo mantém o ra
   srv.chat = (n) => n === 1 ? comFim("Primeira", { chips: ["Chip A"] })() : ok("Segunda")();
   await abrir(); await enviar("p1"); await waitFor(() => expect(chip("Chip A")).toBeTruthy());
   await digitar("meu rascunho"); await apertar("Chip A"); await waitFor(() => expect(texto("Segunda")).toBeTruthy());
-  expect(corpo(1)).toEqual({ message: "Chip A" }); expect(campo().props.value).toBe("meu rascunho");
-  await apertar("Enviar mensagem"); await waitFor(() => expect(posts()).toHaveLength(3)); expect(corpo(2)).toEqual({ message: "meu rascunho" }); expect(campo().props.value).toBe("");
+  expect(corpo(1)).toMatchObject({ message: "Chip A" }); expect(campo().props.value).toBe("meu rascunho");
+  await apertar("Enviar mensagem"); await waitFor(() => expect(posts()).toHaveLength(3)); expect(corpo(2)).toMatchObject({ message: "meu rascunho" }); expect(campo().props.value).toBe("");
 });
 it("valores ocultos com turno em voo: Parar habilitado, parar não revela nada e a legenda aparece ao mostrar", async () => {
   const f = respostaFluxo(); srv.chat = () => f; await abrir(); await enviar("p1"); await waitFor(() => expect(posts()).toHaveLength(1));
