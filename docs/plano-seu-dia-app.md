@@ -148,7 +148,7 @@ Texto visível na folha: **a data (título), o total, "N%", N, 3 descrições e 
 - O zod do app lê **só**: `hoje`, `disponivel`, `historico_desde`, `dias[{dia, total, quantidade, maiores[{descricao, valor, categoria}], categorias[{chave, valor}]}]`,
   `categorias[{chave, emoji, cor?}]` (para a posição/cor e o emoji da fatia) e `motivos`. Dinheiro com o `dinheiro` do `painel.ts`
   (texto decimal → **centavos inteiros** por `decimalParaCentavos`, HALF_UP) **só para exibir**. Para a média e o `pct` (§4.2) o schema guarda também o **texto decimal bruto** de
-  `dias[].total` (o servidor devolve `Decimal` sem arredondar, "1.137" existe): arredondar para centavos antes de calcular muda o resultado (§4.2). Campo a mais é ignorado (sem `.strict()`).
+  `dias[].total` (o servidor devolve `Decimal` sem arredondar, "1.137" existe): arredondar para centavos antes de calcular muda o resultado (§4.2); a conta do §4.2 lê esse texto com `Number(raw)`, como o web. Campo a mais é ignorado (sem `.strict()`).
 - `total` do dia, o que a folha mostra, vem de `dias[].total`. **O app não soma saída nenhuma** além da média do §4.2.
 
 ### 4.2 A única conta nova no cliente: a média do calendário
@@ -157,18 +157,21 @@ desse intervalo (dia agendado e dia antes do corte **não entram, nem como zero*
 sem comparação com média ≤ 0, nula ou total ilegível. Mesmas regras de `diaAbrivel`/`vizinho`.
 
 **Fonte de verdade (§0.7).** O app não importa o web (projetos npm separados; é o precedente do `metasTextos.ts`). Duas implementações, **uma tabela**:
-- `app/src/features/painel/gastosDia.ts` reimplementa `mediaDoPeriodo`, `diaAbrivel`, `vizinho` e `contraMedia` com **decimal exato** (achado do Codex no #1050):
-  cada `total` bruto vira inteiro escalado (`BigInt`, escala = o maior número de casas entre os totais do mês), a média e o `pct` saem de aritmética racional inteira, com a regra do
-  `Math.round` do web (meio para +∞), **sem float** e **sem arredondar a centavos antes da conta**. Só o valor exibido (o total do dia) é arredondado a centavos (HALF_UP). **A autoridade é o web**
-  (já entregue, #1029, e `Number(raw)` é quase exato): o app tem de dar o mesmo `pct` e o mesmo tom;
+- `app/src/features/painel/gastosDia.ts` reimplementa `mediaDoPeriodo`, `diaAbrivel`, `vizinho` e `contraMedia` **emulando a aritmética do web expressão a expressão**
+  (achados do Codex no #1050): `Number(raw)` de cada `total`, a mesma ordem das operações e `Math.round` em `double`. **A autoridade é o web** (já entregue, #1029), e o tom da
+  pílula que ele mostra hoje é o comportamento observável a reproduzir. Duas alternativas foram descartadas: (a) centavos primeiro, que muda o tom em casos sub-centavo
+  (`"1.040"` e `"1.137"`: web −4% neutro, centavos −5% positivo); (b) decimal exato, que erra nos empates do meio porque o `double` do web cai do outro lado (`"0.191"` e `"0.209"`:
+  `(0.191/0.2 − 1)·100 = −4.5000000000000036`, então o web dá −5% e o decimal exato daria −4%). O `float` fica restrito a este cálculo de razão, mostrado como inteiro; **todo valor exibido
+  em reais** (o total do dia, as maiores compras) continua em centavos inteiros pelo `decimalParaCentavos`, e a média em R$ do `accessibilityLabel` é arredondada a centavos. Mudar o web para
+  decimal exato seria outro PR (web) e está fora deste plano;
 - **tabela dourada** `tests/fixtures/gastos_dia_casos.json` (entrada: `mes`, `hoje`, `historico_desde`, `dias` com `total` em texto, **inclusive com 3 ou mais casas**;
   saída: `media`, `nDias`, `pct`, `tom`, `diaAbrivel` por dia, `vizinho`) lida pelo `jest` do app **e** pelo teste web existente
   `tests/frontend/dashboard_v2_gastos_dia_topo.test.mjs` (que já importa o `.ts` direto, linha 18; só ganha um caso que lê a tabela: não toca no código do painel).
   A tabela entra em `paths` do `.github/workflows/app.yml` (precedente: `tests/fixtures/ai_chat_eventos.json`). A mesma ideia já vive no
   #1031 (`tests/fixtures/percentual_categorias.json`, Python × TS).
-- **Casos que a tabela precisa ter (sub-centavo):** dois dias decorridos com `"1.040"` e `"1.137"`: média 1,0885; o primeiro dia dá −4% (neutro) no web; **arredondando a centavos antes**
-  (104 e 114, média 109) daria −5% (positivo). É o controle negativo da paridade: a implementação "centavos primeiro" tem de ficar vermelha. Mais: `"91.010"` × `"1.005"` (escalas diferentes no mesmo mês),
-  total com 6 casas, e o empate exato no meio (.5), onde o web em `float` e o decimal exato podem divergir; a tabela fixa o resultado do web e, se o `float` errar o meio, o caso fica documentado como exceção conhecida.
+- **Casos que a tabela precisa ter:** `"1.040"` e `"1.137"` (primeiro dia −4% neutro; é o controle negativo de "centavos primeiro", que dá −5%); `"0.191"` e `"0.209"` (−5% positivo no web por erro de
+  `double`; é o controle negativo de "decimal exato", que dá −4%); `"91.010"` × `"1.005"` (escalas diferentes no mesmo mês); total com 6 casas; empates exatos no meio onde o `double` cai para cada lado.
+  Os valores esperados são **os que o web produz** (a tabela é gerada rodando `lib/gastos-dia.ts`), e os dois lados leem a mesma tabela: se o app divergir, o jest do app fica vermelho.
 - **Não verificado:** se o `jest` do app consegue importar o `.ts` do web direto (`jest.config.js` não define `roots`; não testei). Se der, o teste de paridade importa o web em vez de usar tabela.
 
 ### 4.3 O resto
@@ -237,7 +240,7 @@ Dynamic Type máximo; valor longo; `oculto`; setas; Resumo (folha dentro de folh
 
 | # | Conteúdo | Faixa | Deixa pronto |
 |---|---|---|---|
-| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (decimal exato) + tabela dourada com casos sub-centavo + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
+| **1** | **Base, sem UI.** `gastosSchema` + fixture de `/api/app/gastos`; `gastosDia.ts` (emula o `double` do web) + tabela dourada com casos sub-centavo e de empate + caso no teste web; `useGastosMes` (com o 403 do onboarding indo ao portão, §5); `tests/test_api_app_gastos.py` (só teste); `paths` do `app.yml`. | **Leve** | tudo que a folha lê, provado por teste e contrato; nenhuma mudança visível; o Manager confere a conta de centavos |
 | **2** | **A folha do dia.** `Calendario` abre a `Folha` com data, setas, total, contador, estados, fallback para o extrato, privacidade, a11y e anúncio; **`Extrato` pede `dia` ao servidor** e as folhas se fecham antes de navegar (§5). Sem pílula nem barra. | **Leve** | o essencial do pedido ("o total do dia é o alvo"); simulador claro/escuro/fonte grande; `Resumo` (folha dentro de folha) resolvido |
 | **3** | **O dia em contexto.** Pílula ↓↑ %, barra com emojis e os 3 maiores. | **Leve** | paridade visual com o web na versão sem texto; o jest dos tons e da barra |
 | — | **Build** pelo Xcode (dono) e validação no iPhone. Não é PR. | — | fecha o que só o aparelho prova |
@@ -248,7 +251,7 @@ O dono escolheu a opção (a) (§9), então o 2 e o 3 ficam separados como na ta
 1. **Grade diferente entre `detalhes` e `/gastos`** (§2.2.3): mitigado pelo fallback para o extrato, pelo teste `saiu == total` e pelo negativo que religa o bug.
 2. **`Folha` dentro de `Folha` no Resumo** (o `Calendario` do Resumo já abre numa folha): não há precedente no repo; **não verificado**. Plano B: dentro da folha o toque segue navegando ao extrato; plano C: trocar o conteúdo da própria folha.
 3. **Conflito com o #1031** nos mesmos arquivos: esperar o merge.
-4. **Média: decimal exato no app × `float` do web:** só o empate exato no meio pode divergir; tabela dourada com casos sub-centavo (o app nunca arredonda a centavos antes da conta).
+4. **Média e %: o app emula a aritmética `double` do web** (tom idêntico, inclusive nos empates do meio); tabela dourada com casos sub-centavo e de empate, gerada pelo próprio web.
 5. **Leitura sob demanda:** a 1ª abertura de cada mês mostra o carregando; `versao` e troca de conta reiniciam (o `useLancamentos` já trata); resposta pequena (≤ 31 dias × 3 maiores + categorias).
 6. **O servidor mudar um campo lido:** o build novo quebra com "dados incompatíveis"; o teste de contrato do PR 1 pega no CI do backend.
 7. **Privacidade:** pílula e barra revelam proporção; somem em `oculto` (como `LinhaCategoria` já faz).
