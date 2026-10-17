@@ -6,6 +6,10 @@ Conversas com o runner e o banco de verdade; só o modelo é falso
 
 Controle negativo: com a âncora desligada (`runner.ancora_valor` devolvendo os
 args), N1–N5 ficam vermelhos. Os P* (caminho legítimo) valem nos dois estados.
+
+Contrato: a guarda lê valor SÓ EM DÍGITOS. Valor por extenso ("cinquenta") não ancora e a
+conversa recusa com "Qual é o valor?" (falso-rejeite aceito, fail-closed). A CONTAGEM de parcelas
+("doze vezes") segue lida por extenso: contagem não é valor.
 """
 from __future__ import annotations
 
@@ -34,8 +38,8 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("50,5", {5050}, set()),
     ("R$ 1.234,56", {123456}, set()),
     ("1,2 mil", {120000}, set()),
-    ("cinquenta", {5000}, set()),
-    ("mil e duzentos", {120000}, set()),
+    ("cinquenta", set(), {5000}),            # extenso não ancora (só dígitos)
+    ("mil e duzentos", set(), {120000}),
     ("torrei 80 conto no bar", {8000}, set()),
     ("dia 20 paguei 300", {30000}, {2000}),
     ("12x de 50", {5000}, {1200}),
@@ -70,25 +74,26 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("75 centavos", {75}, {7500}),
     ("gastei 10 no uber e 50 centavos no bombom", {1000, 50}, {5000}),
     ("30 reais e 50 centavos", {3050}, {50}),
-    # centavos por extenso são n centavos, não R$ n
-    ("gastei cinquenta centavos", {50}, {5000}),
-    ("vinte e cinco centavos", {25}, {2500, 2000, 500}),
-    ("um centavo", {1}, {100}),
-    ("trinta reais e cinquenta centavos", {3000, 50}, {5000}),
+    # extenso não ancora (nem centavos, nem reais, nem composição): só o que está em dígito
+    ("gastei cinquenta centavos", set(), {50, 5000}),
+    ("vinte e cinco centavos", set(), {25, 2500, 2000, 500}),
+    ("um centavo", set(), {1, 100}),
+    ("trinta reais e cinquenta centavos", set(), {3000, 50, 3050, 5000}),
+    ("trinta reais e 50 centavos", {50}, {5000, 3050}),   # misto: o 50 em dígito são centavos, nunca R$ 50
     # "um"/"uma" soltos são artigo, não R$ 1
     ("comprei uma tv", set(), {100}),
     ("comprei um carro", set(), {100}),
-    ("paguei um real", {100}, set()),
+    ("paguei um real", set(), {100}),
     ("paguei uma pizza de 40", {4000}, {100}),
-    # extenso lido por trecho, não a soma da mensagem
-    ("gastei cinquenta no mercado e vinte no uber", {5000, 2000}, {7000}),
-    ("cinquenta e cinco", {5500}, {5000, 500}),
-    ("vinte e cinco", {2500}, {2000, 500}),
-    ("cento e vinte", {12000}, {10000}),
-    ("mil e duzentos", {120000}, set()),
-    ("dois mil e trezentos e cinquenta", {235000}, set()),
-    ("cento e vinte mil e quinhentos", {12050000}, set()),
-    ("cinquenta e vinte", {5000, 2000}, {7000}),   # "e" só junta quando o nível desce
+    # extenso nunca ancora, nem por trecho, nem somado
+    ("gastei cinquenta no mercado e vinte no uber", set(), {5000, 2000, 7000}),
+    ("cinquenta e cinco", set(), {5500, 5000, 500}),
+    ("vinte e cinco", set(), {2500, 2000, 500}),
+    ("cento e vinte", set(), {12000, 10000}),
+    ("dois mil e trezentos e cinquenta", set(), {235000}),
+    ("cento e vinte mil e quinhentos", set(), {12050000}),
+    ("cinquenta e vinte", set(), {5000, 2000, 7000}),
+    ("gastei cinquenta reais no mercado com 2 amigos", {200}, {5000}),   # o dígito ancora, o extenso ao lado não
     # ponto + 1-2 dígitos é decimal (o ai_guard lê ponto como milhar: 49.90 virava 499000)
     ("gastei 49.90", {4990}, {499000}),
     ("gastei 49.9", {4990}, {49900, 499000}),   # 1 casa decimal também é decimal
@@ -101,13 +106,12 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("1.000.000", {100000000}, set()),
     ("49,90", {4990}, {499000}),
     ("10.12.2026", set(), {1012, 101200}),
-    # multiplicador por extenso: n×milhão/bilhão (reais → centavos); "e meio" fica de fora
-    ("meu orçamento é dois milhões", {200000000}, {200, 20000}),
-    ("um milhão", {100000000}, {100}),
-    ("três bilhões", {300000000000}, set()),
-    ("dois milhões de reais", {200000000}, set()),
-    ("dois milhões e meio", {200000000}, {250000000}),
-    ("duzentos mil", {20000000}, set()),
+    # multiplicador por extenso não ancora
+    ("meu orçamento é dois milhões", set(), {200000000, 200, 20000}),
+    ("um milhão", set(), {100000000}),
+    ("três bilhões", set(), {300000000000}),
+    ("dois milhões de reais", set(), {200000000}),
+    ("duzentos mil", set(), {20000000}),
     # "<dígitos> mil|milhão|bilhão": só o valor expandido ancora, nunca o componente (R$ 2) nem o "mil" solto (R$ 1.000)
     ("gastei 2 mil", {200000}, {200, 100000}),
     ("gastei 2 MIL", {200000}, {200, 100000}),
@@ -122,55 +126,48 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("gastei 2 no mercado", {200}, set()),
     ("1.200", {120000}, set()),                          # milhar, não multiplicador
     ("5k", {500}, set()),                                # limite conhecido, não muda
-    # extenso antes de marcador de tempo (não é substantivo contado)
-    ("gastei cinquenta ontem", {5000}, set()),
-    ("gastei vinte hoje", {2000}, set()),
-    ("paguei trinta anteontem", {3000}, set()),
-    ("gastei dez agora", {1000}, set()),
-    ("gastei quarenta amanhã", {4000}, set()),
+    # extenso antes de marcador de tempo: também não ancora
+    ("gastei cinquenta ontem", set(), {5000}),
+    ("gastei vinte hoje", set(), {2000}),
+    ("paguei trinta anteontem", set(), {3000}),
+    ("gastei dez agora", set(), {1000}),
+    ("gastei quarenta amanhã", set(), {4000}),
     ("comprei duas tvs", set(), {200}),
+    # data: "N de MÊS" e dd-mm não são valor; "50 em março" é (só "N de MÊS" mascara)
+    ("anota o boleto da internet para 12 de outubro", set(), {1200}),
+    ("boleto de 150 para 12 de outubro de 2026", {15000}, {1200, 202600}),
+    ("vence 5 de mar", set(), {500}),
+    ("vence 12-10", set(), {1200, 1000}),
+    ("vence 12-10-2026", set(), {1200, 1000, 202600}),
+    ("gastei 50 em março", {5000}, set()),
+    ("gastei 50 de gasolina em outubro", {5000}, set()),
 ])
 def test_centavos_lidos(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
     assert tem <= lidos and not (nao_tem & lidos), lidos
 
 
-# Extenso só ancora se a próxima palavra for dinheiro, conector ou o fim; substantivo = contagem de coisa.
-@pytest.mark.parametrize("texto,tem,nao_tem", [
-    # número + substantivo: contagem, não valor
-    ("comprei duas TVs no Nubank", set(), {200}),
-    ("dois amigos", set(), {200}),
-    ("três pizzas", set(), {300}),
-    ("comprei um carro", set(), {100}),
-    ("comprei uma tv", set(), {100}),
-    ("paguei uma pizza de 40", {4000}, {100}),
-    ("gastei cinquenta reais no mercado com dois amigos", {5000}, {200}),
-    # número + preposição/conector/fim/pontuação
-    ("gastei cinquenta no mercado", {5000}, set()),
-    ("paguei vinte na farmácia", {2000}, set()),
-    ("paguei trinta pelo uber", {3000}, set()),
-    ("gastei dois", {200}, set()),
-    ("gastei dois, ontem", {200}, set()),
-    ("gastei cinquenta e vinte", {5000, 2000}, {7000}),
-    # número + dinheiro
-    ("paguei um real", {100}, set()),
-    ("paguei dois reais", {200}, set()),
-    ("torrei oitenta conto", {8000}, set()),
-    ("achei vinte pilas", {2000}, set()),
-    ("gastei cinquenta centavos", {50}, {5000}),
-    # reais + centavos: componentes e total, nas três grafias
-    ("paguei trinta reais e cinquenta centavos", {3000, 50, 3050}, set()),
-    ("trinta reais e 50 centavos", {3000, 3050}, {50}),
-    ("30 reais e 50 centavos", {3000, 3050}, {50}),
-    ("um real e vinte e cinco centavos", {100, 25, 125}, set()),
-    ("trinta reais e cinquenta pizzas", {3000}, {3050, 50}),   # só centavos compõem o total
-    ("trinta reais e cinquenta", {3000, 5000}, {3050}),
-    # multiplicador: a palavra depois dele passa na mesma lista; contagem de coisa não é valor
-    ("comprei dois milhões de pizzas", {200000000}, set()),   # "de" é conector (mesmo limite de "dois de ...")
-    ("dois milhões pizzas", set(), {200000000}),
-    ("um milhão no mercado", {100000000}, set()),
+# Valor por extenso não ancora nada, em nenhuma posição (a contagem de coisa tampouco).
+@pytest.mark.parametrize("texto", [
+    "comprei duas TVs no Nubank", "dois amigos", "três pizzas", "comprei um carro",
+    "gastei cinquenta reais no mercado com dois amigos", "gastei cinquenta no mercado", "paguei vinte na farmácia",
+    "gastei dois", "gastei dois, ontem", "gastei cinquenta e vinte", "paguei um real", "torrei oitenta conto",
+    "achei vinte pilas", "gastei cinquenta centavos", "paguei trinta reais e cinquenta centavos",
+    "um real e vinte e cinco centavos", "trinta reais e cinquenta", "comprei dois milhões de pizzas",
+    "um milhão no mercado",
 ])
-def test_extenso_so_ancora_antes_de_dinheiro_conector_ou_fim(texto, tem, nao_tem):
+def test_extenso_nao_ancora(texto):
+    assert _centavos_lidos([texto]) == set()
+
+
+# Dígito ao lado de extenso: só o dígito ancora.
+@pytest.mark.parametrize("texto,tem,nao_tem", [
+    ("paguei uma pizza de 40", {4000}, {100}),
+    ("30 reais e 50 centavos", {3000, 3050}, {50}),
+    ("trinta reais e 50 centavos", {50}, {5000, 3050}),
+    ("gastei cinquenta reais com 2 amigos", {200}, {5000}),
+])
+def test_digito_ancora_extenso_ao_lado_nao(texto, tem, nao_tem):
     lidos = _centavos_lidos([texto])
     assert tem <= lidos and not (nao_tem & lidos), lidos
 
@@ -264,6 +261,14 @@ def test_regra_da_ancora(uid_pro):
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 100, "parcelas": 3}, "3 vezes de 100")[1] == "recusa"  # 100 é a parcela
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "12 parcelas de 50")[1] is None
     assert _ancora(uid_pro, "add_credit_purchase", {"valor": 650, "parcelas": 13}, "12x de 50")[1] == "recusa_parcelas"
+    # valor de parcela sem "de": "12x R$ 50", "12 parcelas a 50" (P1 do Codex); "12x 50" solto é ambíguo e segue como total
+    for fala in ("geladeira 12x R$ 50", "12 parcelas a 50"):
+        assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, fala)[1] is None
+        assert _ancora(uid_pro, "add_credit_purchase", {"valor": 50, "parcelas": 12}, fala)[1] == "recusa"
+    assert _ancora(uid_pro, "add_credit_purchase", {"valor": 50, "parcelas": 12}, "12x 50")[1] is None
+    assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "12x 50")[1] == "recusa"
+    # valor da parcela por extenso não ancora nem o total derivado: recusa (a contagem "doze vezes" é lida)
+    assert _ancora(uid_pro, "add_credit_purchase", {"valor": 600, "parcelas": 12}, "doze vezes de cinquenta")[1] == "recusa"
     # campo opcional sem âncora: descartado; obrigatório: recusa
     args, acao = _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": 150}, "paguei a luz")
     assert acao == "descarta" and args == {"name": "luz"}
@@ -540,6 +545,17 @@ def test_n8_boleto_daqui_10_dias_nao_grava_10_reais(uid_pro, monkeypatch):
     assert _boletos(uid_pro) == 1
 
 
+def test_n9_boleto_para_12_de_outubro_nao_grava_12_reais(uid_pro, monkeypatch):   # P1 do Codex: o 12 é o dia
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 12, "due_date": "12/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "12/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 12 de outubro", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto de 150 para 12 de outubro", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 # ── (3) P: o caminho legítimo continua gravando ─────────────────────────────
 
 def test_p1_gastei_50_no_mercado(uid_pro, monkeypatch):
@@ -559,8 +575,8 @@ def test_p2_app_com_banco_pergunta_a_forma_e_dinheiro_grava(uid_pro, monkeypatch
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 500.0}]
 
 
-@pytest.mark.parametrize("frase,valor", [("1,2 mil de aluguel", 1200), ("gastei cinquenta no mercado", 50)])
-def test_p3_multiplicador_e_extenso(uid_pro, monkeypatch, frase, valor):
+@pytest.mark.parametrize("frase,valor", [("1,2 mil de aluguel", 1200), ("gastei 2 mil", 2000)])
+def test_p3_multiplicador_em_digito(uid_pro, monkeypatch, frase, valor):
     desliga_flag(monkeypatch)
     openai_falso(monkeypatch, lancamento(valor))
     runner.chat(uid_pro, frase, platform="dashboard")
@@ -585,20 +601,22 @@ def test_p12_ponto_decimal_grava_49_90_e_nao_4990(uid_pro, monkeypatch):
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 49.9}]
 
 
-def test_p13_orcamento_de_dois_milhoes_grava(uid_pro, monkeypatch):
+def test_p13_orcamento_de_milhoes(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
-    openai_falso(monkeypatch, com_tools(chamada("set_budget", {"categoria": "Lazer", "budget": 2000000})))
-    runner.chat(uid_pro, "meu orçamento de lazer é dois milhões", platform="dashboard")
+    openai_falso(monkeypatch, com_tools(chamada("set_budget", {"categoria": "Lazer", "budget": 2000000})),
+                 com_tools(chamada("set_budget", {"categoria": "Lazer", "budget": 2000000})))
+    r = runner.chat(uid_pro, "meu orçamento de lazer é dois milhões", platform="dashboard")   # extenso: recusa
+    assert RECUSA in r and db.get_budget(uid_pro, "Lazer") is None, r
+    runner.chat(uid_pro, "meu orçamento de lazer é 2 milhões", platform="dashboard")          # dígito: grava
     assert db.get_budget(uid_pro, "Lazer")["budget"] == 2000000
 
 
-def test_p8_cinquenta_centavos_por_extenso_grava_meio_real_e_nao_50(uid_pro, monkeypatch):
+def test_p8_cinquenta_centavos_por_extenso_nao_ancora(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
     openai_falso(monkeypatch, lancamento(0.5), lancamento(50))
-    runner.chat(uid_pro, "gastei cinquenta centavos", platform="dashboard")
-    assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}]
-    r = runner.chat(uid_pro, "gastei cinquenta centavos", platform="dashboard")   # R$ 50 (100x): recusa
-    assert RECUSA in r and lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 0.5}], r
+    for _ in range(2):   # nem 0,50 nem R$ 50: o extenso não é lido
+        r = runner.chat(uid_pro, "gastei cinquenta centavos", platform="dashboard")
+        assert RECUSA in r and lancamentos(uid_pro) == [], r
 
 
 def test_p9_artigo_um_nao_ancora_valor_1(uid_pro, monkeypatch):
@@ -619,20 +637,28 @@ def test_p10_duas_tvs_nao_ancora_valor_2(uid_pro, monkeypatch):
     assert RECUSA in r and _credito(uid_pro) == 0, r
 
 
-def test_p11_reais_e_centavos_por_extenso_gravam_o_total(uid_pro, monkeypatch):
+def test_p11_reais_e_centavos(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
-    openai_falso(monkeypatch, lancamento(30.5))
-    runner.chat(uid_pro, "paguei trinta reais e cinquenta centavos", platform="dashboard")
+    openai_falso(monkeypatch, lancamento(30.5), lancamento(30.5))
+    r = runner.chat(uid_pro, "paguei trinta reais e cinquenta centavos", platform="dashboard")   # extenso: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    runner.chat(uid_pro, "paguei 30 reais e 50 centavos", platform="dashboard")                  # dígito: grava o total
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 30.5}]
 
 
-def test_p7_dois_extensos_na_mesma_frase_gravam_os_dois_e_a_soma_nao(uid_pro, monkeypatch):
+def _mercado_e_uber():
+    return com_tools(chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "mercado"}, "c1"),
+                     chamada("add_launch", {"tipo": "despesa", "valor": 20, "alvo": "uber"}, "c2"))
+
+
+def test_p7_dois_valores_na_mesma_frase_gravam_os_dois_e_a_soma_nao(uid_pro, monkeypatch):
     desliga_flag(monkeypatch)
-    openai_falso(monkeypatch, com_tools(chamada("add_launch", {"tipo": "despesa", "valor": 50, "alvo": "mercado"}, "c1"),
-                                        chamada("add_launch", {"tipo": "despesa", "valor": 20, "alvo": "uber"}, "c2")))
-    runner.chat(uid_pro, "gastei cinquenta no mercado e vinte no uber", platform="dashboard")
+    openai_falso(monkeypatch, _mercado_e_uber(), _mercado_e_uber())
+    r = runner.chat(uid_pro, "gastei cinquenta no mercado e vinte no uber", platform="dashboard")   # extenso: recusa
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    runner.chat(uid_pro, "gastei 50 no mercado e 20 no uber", platform="dashboard")
     assert lancamentos(uid_pro) == [{"tipo": "despesa", "valor": 50.0}, {"tipo": "despesa", "valor": 20.0}]
-    assert _ancora(uid_pro, "add_launch", {"valor": 70}, "gastei cinquenta no mercado e vinte no uber")[1] == "recusa"
+    assert _ancora(uid_pro, "add_launch", {"valor": 70}, "gastei 50 no mercado e 20 no uber")[1] == "recusa"
 
 
 def test_p4_cartao_12x_de_50_grava(uid_pro, monkeypatch):
@@ -719,6 +745,13 @@ def test_q4b_valor_da_parcela_como_total_recusa_e_nao_grava(uid_pro, monkeypatch
     ("12x de 50 total 600", 600, 12, True),
     ("12x de 50", 50, 1, True),              # sem parcelas>1 não há o que desfazer
     ("12x de 50", 50, None, True),
+    ("geladeira 12x R$ 50", 50, 12, False),  # P1 do Codex: sem "de" também é parcela
+    ("geladeira 12x R$ 50", 600, 12, True),
+    ("12 parcelas a 50", 50, 12, False),
+    ("12 parcelas a 50", 600, 12, True),
+    ("12x de R$50", 600, 12, True),
+    ("12x 50", 50, 12, True),                # solto (sem de/a/R$) é ambíguo: segue como total
+    ("12x 50", 600, 12, False),
 ])
 def test_q8_valor_de_parcela_nao_ancora_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor} | ({"parcelas": parcelas} if parcelas else {})
@@ -729,8 +762,8 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     assert _ancora(uid_pro, "add_launch", {"valor": 50, "parcelas": 12}, "12x de 50")[1] is None
 
 
-# Classe "valor por parcela × total": `valor` é o TOTAL. Só `parcelas × valor-de-parcela escrito` o deriva;
-# contagem e valor em dígito ou por extenso. (ancora = a âncora aceita o `valor`.)
+# Classe "valor por parcela × total": `valor` é o TOTAL. Só `parcelas × valor-de-parcela escrito em DÍGITO` o deriva;
+# a contagem pode ser por extenso, o valor não (extenso não ancora: recusa os dois). (ancora = a âncora aceita o `valor`.)
 @pytest.mark.parametrize("fala,valor,parcelas,ancora", [
     ("comprei por 50 em 12x", 50, 12, True),        # o 50 era o total
     ("comprei por 50 em 12x", 600, 12, False),      # 12 × 50 inventado: 50 não é valor de parcela
@@ -738,18 +771,18 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("comprei 600 em 12x", 600, 12, True),
     ("600 em 12x de 50", 600, 12, True),
     ("600 em 12x de 50", 50, 12, False),
-    ("doze vezes de cinquenta", 600, 12, True),     # contagem e valor por extenso
-    ("doze vezes de cinquenta", 50, 12, False),     # antes aceitava e gravava R$ 50 em vez de 600
+    ("doze vezes de cinquenta", 600, 12, False),    # valor por extenso: nada em dígito que derive
+    ("doze vezes de cinquenta", 50, 12, False),
     ("comprei tv em doze vezes de 50", 50, 12, False),   # era R1 caso 4 (aceito); agora recusado
     ("comprei tv em doze vezes de 50", 600, 12, True),
-    ("12 vezes de cinquenta", 600, 12, True),       # contagem em dígito, valor por extenso
+    ("12 vezes de cinquenta", 600, 12, False),      # contagem em dígito, valor por extenso
     ("12 vezes de cinquenta", 50, 12, False),
     ("doze vezes de 50", 600, 12, True),            # contagem por extenso, valor em dígito
-    ("em doze parcelas de cinquenta e cinco", 660, 12, True),
+    ("em doze parcelas de cinquenta e cinco", 660, 12, False),
     ("em doze parcelas de cinquenta e cinco", 55, 12, False),
-    ("10x de dois mil", 20000, 10, True),
+    ("10x de dois mil", 20000, 10, False),
     ("10x de dois mil", 2000, 10, False),
-    ("dez vezes de dois milhões", 20000000, 10, True),
+    ("dez vezes de dois milhões", 20000000, 10, False),
     ("dez vezes de dois milhões", 2000000, 10, False),
     ("12x de 50.", 600, 12, True),                  # ponto final de frase
     ("12x de 50.", 50, 12, False),
@@ -762,7 +795,7 @@ def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, a
 
 @pytest.mark.parametrize("fala,inventado,escrito", [
     ("comprei por 50 em 12x no nubank", 600, 50),          # 50 é o total
-    ("geladeira doze vezes de cinquenta no nubank", 50, 600),   # 50 é a parcela: o total é 12 × 50
+    ("geladeira doze vezes de 50 no nubank", 50, 600),   # 50 é a parcela: o total é 12 × 50 (contagem por extenso, valor em dígito)
 ])
 def test_q9b_conversa_total_ou_parcela(uid_pro, monkeypatch, fala, inventado, escrito):
     desliga_flag(monkeypatch)

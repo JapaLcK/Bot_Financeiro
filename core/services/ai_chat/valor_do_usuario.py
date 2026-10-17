@@ -7,11 +7,12 @@ ter sido escrito pelo usuário.
 prompt). Vale em todo canal e com a flag WA_IA_PRIMEIRO desligada.
 
 Só texto do USUÁRIO conta: linhas assistant e tool nunca (é o que impede copiar
-exemplo do bot). Leitores reaproveitados: `ai_guard.collect_evidence` (dígitos BRL, já
-descarta "dia 20", "12x", "em 2026", "#50"), `_extract_valor` (multiplicador: "1,2 mil"),
-`_words_to_number` (extenso: "cinquenta") e `utils_text.extract_parcelas` (contagem, a mesma do
-`parcelar` do cartão). Só uma regex é daqui: `_NAO_VALOR_RE` (número que não é valor: CPF, data,
-cartão final).
+exemplo do bot). A guarda lê valor SÓ EM DÍGITOS (decisão do dono): quem escreve o valor por
+extenso ("cinquenta") não ancora e é perguntado "Qual é o valor?" (falso-rejeite aceito, fail-closed).
+Leitores reaproveitados: `ai_guard.collect_evidence` (dígitos BRL, já descarta "dia 20", "12x",
+"em 2026", "#50"), `_extract_valor` (multiplicador em dígito: "1,2 mil") e `utils_text.extract_parcelas`
+(contagem de parcelas, a mesma do `parcelar` do cartão; contagem não é valor, então "doze vezes" vale).
+Só uma regex de leitura é daqui: `_NAO_VALOR_RE` (número que não é valor: CPF, data, cartão final).
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ import re
 import db
 from core.observability import log_system_event_sync
 from core.services.ai_guard import _MASCARA_NAO_MONETARIA_RE, _NAO_MONETARIO_DO_USUARIO_RE, collect_evidence
-from parsers import _extract_valor, _words_to_number
+from parsers import _extract_valor
 from utils_text import PT_PHRASE, extract_parcelas
 
 from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
@@ -33,7 +34,7 @@ from ._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 _MENSAGENS = 3
 
 # Número que a mensagem do usuário traz e NÃO é valor (o `ai_guard` já cobre dia/Nx/
-# ano com "em|de"): CPF/CNPJ, data, hora, porcentagem e "palavra + dígitos"
+# ano com "em|de"): CPF/CNPJ, data (dd/mm, dd-mm, "12 de outubro"), hora, porcentagem e "palavra + dígitos"
 # (cartão final 1234, ano 2026, conta/ag/cep/tel). Local de propósito: o
 # `_MASCARA_NAO_MONETARIA_RE` do ai_guard alimenta a guarda de afirmações. Os dígitos
 # depois da palavra pedem 4+. `conta`/`cartão`/`final` sozinhos NÃO mascaram: vêm antes de
@@ -41,6 +42,10 @@ _MENSAGENS = 3
 _NAO_VALOR_RE = re.compile(
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
+    # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]"): só "N de MÊS", nunca "50 em março"
+    r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
+    r"|(?<![\d.,])\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
+    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?"
     r"|\b(?:(?:cart[aã]o|conta)\s+final|ag[eê]ncia|ag|ano|n[º°]|n[uú]mero|cep|telefone|tel|cel)\.?\s*:?\s*\d[\d\-]{3,}"
     # quantidade/duração/medida: "daqui 10 dias", "5 km", "3 pessoas". Nunca mil/milhão ("2 mil") nem real/conto/centavo.
     # Sem outro dígito logo depois: "paguei 300 dia 20" é dinheiro + data. ponytail: "1500 mês" (sem "por/ao") mascara.
@@ -83,18 +88,8 @@ def _textos_do_usuario(user_id: int) -> list[str]:
 
 
 # "50 centavos" são 50 centavos (não R$ 50); "30 reais e 50 centavos" fica com o `_extract_valor`.
-# Por extenso ("cinquenta centavos") é o `_extensos` que separa, abaixo.
-_CENTAVOS_RE = re.compile(r"(?<!reais e )(?<!real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
-
-
-# Extenso só é valor se a PRÓXIMA palavra for dinheiro, conector ou o fim: "dois amigos", "duas tvs",
-# "uma pizza" são contagem de coisa. Lista fechada de propósito (sem substantivo).
-_REAIS = ("real", "reais", "conto", "contos", "pila", "pilas")
-_CENTAVOS = ("centavo", "centavos")
-_CONECTORES = frozenset(
-    "de do da dos das no na nos nas num numa em pra pro para por pelo pela pelos pelas com sem e ou a ao aos "
-    "à às até ate só so mais menos ontem anteontem hoje amanhã amanha agora já ja depois antes".split())
-_ADMITE = frozenset(_REAIS + _CENTAVOS) | _CONECTORES
+# O lookbehind exige dígito antes de "reais e": "trinta reais e 50 centavos" (extenso) lê o 50 como centavos.
+_CENTAVOS_RE = re.compile(r"(?<!\d reais e )(?<!\d real e )\b(\d{1,9})\s+centavos?\b", re.IGNORECASE)
 
 
 # "gastei 49.90" é 49,90: o `collect_evidence` lê todo ponto como milhar (499000) e abriria a porta
@@ -103,11 +98,6 @@ _ADMITE = frozenset(_REAIS + _CENTAVOS) | _CONECTORES
 # ponytail: "1,234.56" (formato US) não é normalizado; a leitura de hoje é mantida.
 _PONTO_DECIMAL_RE = re.compile(r"(?<![\d.,])(\d+)\.(\d{1,2})(?!\d|\.\d|,\d)")
 
-# "dois milhões": o extenso por trecho multiplica; "e meio" / "e trezentos mil" ficam de fora.
-_MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
-         "bilhão": 1e9, "bilhao": 1e9, "bilhões": 1e9, "bilhoes": 1e9}
-
-
 # "2 mil" / "2,5 milhões" / "1 bilhão": o dígito é componente do multiplicador. Só o valor expandido (o do
 # `_extract_valor`) ancora; o "2" (R$ 2) e o "mil" solto (R$ 1.000) não, senão o modelo que derruba o
 # multiplicador grava 1000x menos. "1.200" (milhar) e "5k" não casam. ponytail: "2 mil e 500" mantém o 500 como
@@ -115,55 +105,14 @@ _MULT = {"milhão": 1e6, "milhao": 1e6, "milhões": 1e6, "milhoes": 1e6,
 _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b", re.IGNORECASE)
 
 
-# "12x de 50" / "doze vezes de cinquenta": o valor depois do "de" é da PARCELA e o `valor` das tools de cartão é o
-# TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora (um
-# produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). Contagem e valor em
-# dígito ou por extenso; o grupo 1 é o valor. ponytail: "dez vezes de 2 mil e quinhentos" (dígito + "e <extenso>") não compõe.
-_MULT_PT = r"(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)"
+# "12x de 50" / "12x R$ 50" / "12 parcelas a 50": o valor depois do "de"/"a"/"R$" é da PARCELA e o `valor` das tools de
+# cartão é o TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora
+# (um produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). A contagem pode vir
+# por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$) é
+# ambíguo e fica fora: o 50 segue ancorando como total. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
-    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+de\s+(?:r\$\s*)?"
-    rf"(\d[\d.,]*(?:\s*{_MULT_PT}\b)?|(?:{PT_PHRASE})(?:\s+{_MULT_PT}\b(?:\s+e\s+(?:{PT_PHRASE}))?)?)", re.IGNORECASE)
-
-
-def _nivel(v: float) -> int:  # milhar > centena > dezena > unidade
-    return 4 if v >= 1000 else 3 if v >= 100 else 2 if v >= 20 else 1
-
-
-def _extensos(t: str) -> list[tuple[float | None, str]]:
-    """Um número por extenso por trecho, com a palavra que vem depois dele, só os que passam em
-    `_ADMITE`: "cinquenta no mercado e vinte no uber" → [(50, "no"), (20, "no")], não 70.
-    O "e" só junta enquanto o nível desce ("cinquenta e cinco", "cento e vinte", "mil e duzentos");
-    "cinquenta e vinte" são dois. "<reais> reais e <centavos> centavos" também devolve o total
-    ("trinta reais e cinquenta centavos" → (30.5, "reais"))."""
-    toks = re.findall(r"\w+|[^\w\s]", t.lower())  # pontuação é token: "gastei dois, ontem" termina o trecho
-    runs, prev = [], None
-    for i, tok in enumerate(toks):
-        v = _words_to_number(tok)
-        if v is None:
-            prev = prev if tok == "e" else None
-            continue
-        n = _nivel(v)
-        if prev is not None and (n < prev or n == 4 > prev):
-            runs[-1][1] = i + 1
-        else:
-            runs.append([i, i + 1])
-        prev = n
-    vs = []
-    for a, b in runs:
-        v, d = _words_to_number(" ".join(toks[a:b])), toks[b] if b < len(toks) else ""
-        if d in _MULT:  # a palavra seguinte ao multiplicador é que passa em `_ADMITE`
-            v, b = v * _MULT[d], b + 1
-            d = toks[b] if b < len(toks) else ""
-        vs.append((v, d, a, b))
-    out = [(v, d) for v, d, _, _ in vs if not d or not d[0].isalnum() or d in _ADMITE]
-    for v, d, _, b in vs:
-        if d not in _REAIS or toks[b + 1:b + 2] != ["e"]:
-            continue
-        cent = [c for c, d2, a2, _ in vs if a2 == b + 2 and d2 in _CENTAVOS]  # extenso: "e cinquenta centavos"
-        if not cent and toks[b + 2:b + 3] and toks[b + 2].isdigit() and toks[b + 3:b + 4] and toks[b + 3] in _CENTAVOS:
-            cent = [int(toks[b + 2])]  # misto: "e 50 centavos"
-        out += [(v + c / 100, "reais") for c in cent if c < 100]
-    return out
+    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
+    r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?)", re.IGNORECASE)
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -173,13 +122,10 @@ def _centavos_lidos(textos: list[str]) -> set[int]:
     lidos |= set(collect_evidence([], "\n".join(_MULT_DIGITOS_RE.sub(" ", t) for t in textos))[0])
     for t in textos:
         limpo = _NAO_MONETARIO_DO_USUARIO_RE.sub(" ", _MASCARA_NAO_MONETARIA_RE.sub(" ", t))
-        # sem dígito o `_extract_valor` cai no extenso da mensagem inteira (soma): os `_extensos` leem por trecho
-        vs = [_extract_valor(limpo) if re.search(r"\d", limpo) else None]
-        for v, depois in _extensos(_MULT_DIGITOS_RE.sub(" ", limpo)):
-            vs.append(v / 100 if depois.startswith("centavo") else v)   # "cinquenta centavos" são 50, não R$ 50
-        for v in vs:
-            if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
-                lidos.add(round(v * 100))
+        # sem dígito o `_extract_valor` cairia no extenso da mensagem inteira: só dígito ancora
+        v = _extract_valor(limpo) if re.search(r"\d", limpo) else None
+        if v and 0 < v < 1e12:  # também descarta NaN/inf, que o parse_money pode devolver
+            lidos.add(round(v * 100))
     return lidos
 
 
