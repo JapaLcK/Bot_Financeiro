@@ -52,6 +52,10 @@ describe("varios", () => {
     const m = await mostrarMeta({ ...base(1), atual: "17999.00", falta: "1.00", percentual: 99 });
     expect(cheios(m)).toHaveLength(5); expect(vazios(m)).toHaveLength(1);
   });
+  it("fronteira intermediária com fração abaixo do centavo (2999.995 de 18000, falta 15000.01): 0 cheios, não 1", async () => {
+    expect(cheios(await mostrarMeta({ ...base(1), atual: "2999.995", falta: "15000.01", percentual: 16 }))).toHaveLength(0);
+    expect(cheios(await mostrarMeta({ ...base(1), atual: "5999.995", falta: "12000.01", percentual: 33 }))).toHaveLength(1);
+  });
   it("O1: atual com fração abaixo do centavo (17999.995, 99%, falta 0.01) não enche todos os blocos nem diz mais que o %: 5 cheios", async () => {
     const m = await mostrarMeta({ ...base(1), atual: "17999.995", falta: "0.01", percentual: 99 });
     expect(cheios(m)).toHaveLength(5); expect(vazios(m)).toHaveLength(1); expect(m.queryByTestId("icone-CheckCircle")).toBeNull();

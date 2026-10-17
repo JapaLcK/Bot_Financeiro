@@ -21,8 +21,8 @@ function Blocos({ n, cheios, tom }: { n: number; cheios: number; tom: "brand" | 
     {Array.from({ length: n }, (_, i) => <View key={i} testID={i < cheios ? "bloco-cheio" : "bloco-vazio"} style={{ width: LADO, height: 10, borderRadius: raio.barra, backgroundColor: i < cheios ? cores[tom] : cores.border }} />)}
   </View>;
 }
-/** Blocos cheios = meses cobertos: `floor(atual*meses/alvo)` em inteiros (centavos), de 0 a `meses`. O `percentual` do servidor já vem truncado, então não serve de base (4/6 meses viraria 3 blocos). */
-const blocosCheios = (atual: number | null, alvo: number | null, meses: number) => atual === null || !alvo || alvo <= 0 ? 0 : Math.min(meses, Number(BigInt(Math.max(atual, 0)) * BigInt(meses) / BigInt(alvo)));
+/** Blocos cheios = meses cobertos: `floor((alvo-falta)*meses/alvo)` em centavos, de 0 a `meses`. Nem o `percentual` (o servidor trunca: 4/6 meses viraria 3 blocos) nem o `atual` (vem sem quantizar e o cliente arredonda: 2999,995 de 18000 encheria 1 bloco) servem de base; o `falta` já está em centavos e é a régua do "batida" (`db/metas.py`). */
+const blocosCheios = (m: MetaV2, meses: number) => m.alvo === null || m.falta === null || m.alvo <= 0 ? 0 : Math.min(meses, Number(BigInt(Math.max(m.alvo - m.falta, 0)) * BigInt(meses) / BigInt(m.alvo)));
 /** O que o VoiceOver lê da pílula: as frases que saíram da tela moram aqui. Com valores ocultos: sem %, sem valores, sem contagem de meses e sem a chegada (deriva do dinheiro); o prazo e os motivos (incluída a frase do ritmo que o ⚠ sinaliza) não são dinheiro e ficam. */
 function rotulo(m: MetaV2, custo: MetasV2["custo_mensal"], oculto: boolean, cheios: number, meses: number): string {
   const reserva = m.tipo === "reserva", batida = m.falta === 0, dito = (c: number) => falado(c) ?? VALOR_INDISPONIVEL_FALADO;
@@ -43,7 +43,7 @@ function Pilula({ m, custo }: { m: MetaV2; custo: MetasV2["custo_mensal"] }) {
   const { cores } = useTema(); const { oculto } = usePainel(); const { ampliado } = useTipografiaPainel();
   const reserva = m.tipo === "reserva", batida = m.falta === 0, semAtual = m.atual === null, semAlvo = reserva && m.alvo === null;
   const conferir = m.atual === 0 && m.motivos.some((c) => !DO_ALVO.includes(c));
-  const meses = m.meses ?? MESES_PADRAO, cheios = oculto || semAlvo ? 0 : batida ? meses : Math.min(blocosCheios(m.atual, m.alvo, meses), meses - 1); // meta não batida nunca fecha todos os blocos (o `atual` pode ter fração abaixo do centavo e o cliente arredonda)
+  const meses = m.meses ?? MESES_PADRAO, cheios = oculto || semAlvo || semAtual ? 0 : blocosCheios(m, meses); // não batida (falta ≥ 1 centavo) nunca fecha todos os blocos
   const aviso = semAtual || semAlvo || conferir || avisos(m).length > 0 || (reserva && !!fraseCusto(custo)), icone: NomeIcone = reserva ? "PiggyBank" : "Target";
   return <View testID={`meta-${m.id}`} accessible accessibilityLabel={rotulo(m, custo, oculto, cheios, meses)} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
