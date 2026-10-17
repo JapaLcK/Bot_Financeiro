@@ -47,7 +47,8 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*(?:%|por\s*cent(?:o)?\b|pct\b)"
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
-    r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
+    # ano primeiro com barra/ponto só com 20dd ("2026/10/20", "2026.10.20"): o dd/mm acima casaria o rabo "10/20" e sobraria o ano
+    r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,/-])20\d\d[/.]\d{1,2}[/.]\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
     # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]", "15 out 2026"): só "N [de] MÊS", nunca "50 em março".
     # Ano sem "de" só com 20dd: "15 out 150" mantém o 150 como dinheiro
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
@@ -158,7 +159,10 @@ _PARCELA_RE = re.compile(
     # depois da unidade: "de/a [R$]", "R$", "[no|com] valor [de|:] [R$]", ":" ou, com "cada" depois do valor ("10 vezes, 50 reais cada"), nada
     r"(?:(?:(?:(?:no|com)\s+)?valor\s*(?:de\s+|:\s*)?|de\s+|a\s+|:\s*)(?:r\$\s*)?|r\$\s*"
     r"|(?=(?:r\$\s*)?\d[\d.,]*(?:\s*(?:mil\w*|bilh\w*|reais?|centavos?|e\s*\d+))*\s*cada\b))"
-    rf"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*(?:\d+|{PT_PHRASE})\s*centavos?\b)?)", re.IGNORECASE)
+    # `(?![\d.,])` (sem recuar para "5" de "50ml") e o lookahead final: "12x de 50ml de perfume" / "12x de 3 kg" é quantidade, não valor de parcela
+    # ("50 reais"/"50 centavos"/"50 no cartão" seguem). Mesmo `(?!\s*\d)` do _NAO_VALOR_RE: "12x de 50 dia 10" é parcela + data.
+    rf"(\d[\d.,]*(?![\d.,])(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*(?:\d+|{PT_PHRASE})\s*centavos?\b)?)"
+    rf"(?!\s*(?:{_MEDIDA}|m[eê]s|meses)\b(?!\s*\d))", re.IGNORECASE)
 
 
 def _capturas_parcela(t: str):

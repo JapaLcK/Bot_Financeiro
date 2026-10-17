@@ -20,7 +20,7 @@ import db.bills  # noqa: F401 (submódulo usado como db.bills nos testes; não d
 from core.services.ai_chat import runner
 from core.services.ai_chat._context import CURRENT_PLATFORM, CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import _BY_NAME, get_tool
-from core.services.ai_chat.valor_do_usuario import _centavos_lidos, ancora_valor
+from core.services.ai_chat.valor_do_usuario import _capturas_parcela, _centavos_lidos, ancora_valor
 from conftest import usuario_pagante
 from tests._fusao_of_helpers import uid_pro  # noqa: F401 (fixture)
 from tests._ia_falsa_helpers import (
@@ -152,6 +152,13 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("boleto de 150 para 15 out 2026", {15000}, {1500, 202600}),
     ("boleto de 15 out 150", {15000}, {1500}),               # 150 não é ano: segue dinheiro
     # o ano depois de "[N de] MÊS" é da data, inclusive atrás do rótulo "dia"/"vence" (N18 do Codex)
+    # ano primeiro com barra/ponto (Codex): o dd/mm casava "10/20" e sobrava o ano como R$ 2.026
+    ("anota o boleto para 2026/10/20", set(), {2026, 202600, 2000, 1020}),
+    ("2026/1/5", set(), {202600, 100}),
+    ("2026.10.20", set(), {2026102000, 202600}),
+    ("2026-10-20", set(), {202600}),
+    ("boleto de 150 para 2026/10/20", {15000}, {202600}),
+    ("gastei 50 em 10/20", {5000}, set()),                    # sem ano na frente: segue dd/mm
     ("dia 15 de outubro de 2026", set(), {1500, 202600}),
     ("dia 15 de outubro 2026", set(), {1500, 202600}),
     ("dia 15 outubro 2026", set(), {1500, 202600}),
@@ -1153,6 +1160,51 @@ def test_q20b_mensagens_separadas_mesma_regra(uid_pro, valor, parcelas, ancora):
     db.ai_append_message(uid_pro, "user", "fogão 12x de 60")
     r = _ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": parcelas}, "no nubank")[1]
     assert (r is None) is ancora
+
+
+@pytest.mark.parametrize("fala,captura", [
+    # valor de parcela seguido de medida/quantidade é quantidade, não parcela (Codex): sem captura, nada deriva o total
+    ("comprei 12x de 50ml de perfume", None), ("12x de 50 ml", None), ("12x de 3 kg de arroz", None),
+    ("12x de 50,5 ml", None), ("12x de 50 dias", None), ("12x de 50 un", None),
+    # positivos: reais/centavos/mil/cartão/cada/hamburguer não são medida; "dia 10" depois é data, não "50 dia(s)"
+    ("12x de 50", "50"), ("12x de 50 reais", "50"), ("12x de 50 centavos, sem juros", "50 centavos"),
+    ("12x de 50, sem juros", "50,"), ("12x de 50 cada", "50"), ("12x de 50 no cartão", "50"),
+    ("12 parcelas de 50 hamburguer", "50"), ("12x de 50 dia 10", "50"), ("12x de 2 mil", "2 mil"),
+    ("12x de 30 reais e 50 centavos", "30 reais e 50 centavos"),
+])
+def test_q21_valor_de_parcela_com_medida_nao_e_parcela(fala, captura):
+    assert [v for _, v in _capturas_parcela(fala)] == ([captura] if captura else [])
+
+
+@pytest.mark.parametrize("fala,valor,ancora", [
+    ("comprei 12x de 50ml de perfume", 600, False), ("comprei 12x de 50ml de perfume", 50, False),
+    ("comprei perfume por 600 em 12x", 600, True), ("comprei 12x de 50", 600, True),
+])
+def test_q21b_total_derivado_nao_atravessa_medida(uid_pro, fala, valor, ancora):
+    assert (_ancora(uid_pro, "add_credit_purchase", {"valor": valor, "parcelas": 12}, fala)[1] is None) is ancora
+
+
+def test_q21c_conversa_12x_de_50ml_nao_grava_600(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    cli = openai_falso(monkeypatch, _compra_cartao(600, parcelas=12), _compra_cartao(600, parcelas=12))
+    r = runner.chat(uid_pro, "comprei 12x de 50ml de perfume no nubank", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, "comprei perfume por 600 em 12x no nubank", platform="whatsapp")   # 600 escrito: grava
+    assert _credito(uid_pro) == 12
+
+
+def test_n20_boleto_para_data_ano_primeiro_com_barra_nao_grava_o_ano(uid_pro, monkeypatch):   # Codex: "2026/10/20" lido como R$ 2.026
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "20/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "20/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 2026/10/20", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "boleto da internet de 150 para 2026/10/20", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
 
 
 def test_q20c_conversa_total_cruzado_nao_grava(uid_pro, monkeypatch):
