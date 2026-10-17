@@ -106,6 +106,16 @@ it("T10: tocar 'Outras' lista a 5ª e a 6ª; tocar a 6ª pede as transações de
   await act(async () => { fireEvent.press(regiao.getByRole("button", { name: /Foxtrote/ })); await drenar(); });
   expect([consultaLanc().get("categoria"), consultaLanc().get("mes"), consultaLanc().get("tipo")]).toEqual(["Foxtrote", "2026-10", "saida"]);
 });
+it("T10b: categoria real chamada '__outras' (nome livre) é coluna comum: pede as transações dela; com 6, ela e 'Outras' selecionam separadas", async () => {
+  await mostrar(aba("2026-10", [cat("__outras", 300), cat("Casa", 100)]));
+  await tocar(/^__outras,/);
+  expect(consultaLanc().get("categoria")).toBe("__outras");
+  await reiniciar(); instalarCards();
+  await mostrar(aba("2026-10", [cat("__outras", 700), ...seis]));
+  await tocar(/^__outras,/); expect(selecionadas()).toEqual([true, false, false, false, false]);
+  await tocar(/^Outras,/); expect(selecionadas()).toEqual([false, false, false, false, true]);
+  expect(within(screen.getByTestId("gastos-transacoes")).getByText("Foxtrote")).toBeTruthy();
+});
 describe("T11: origem", () => {
   const origens = { cartao: "600.00", banco: "400.00", carteira: "0.00", registro_antigo: "0.00" };
   it("2 itens (60%, 40%), sem a carteira, um elemento só para o VoiceOver e nenhum botão dentro", async () => {

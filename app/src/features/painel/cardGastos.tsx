@@ -18,8 +18,9 @@ import { percentualDe, somarCentavos } from "./decimal";
 import { LancamentosDe, LinhaExpansivel } from "./expansao";
 import { rotuloPercentual } from "./gastos";
 import { usePainel } from "./provider";
-type Item = { chave: string; nome: string; valor: number; pct: number; cor: string };
-const OUTRAS = "__outras", VISIVEIS = 5, ALTURA = 96;
+// `outras` marca a coluna sintética: a chave é da categoria real, e qualquer string é nome de categoria válido.
+type Item = { chave: string; nome: string; valor: number; pct: number; cor: string; outras?: true };
+const VISIVEIS = 5, ALTURA = 96;
 const ORIGENS = [["cartao", "CreditCard", "cartão", "ink"], ["banco", "Bank", "banco", "inkMuted"], ["carteira", "Wallet", "carteira", "inkFaint"], ["registro_antigo", "ClockCounterClockwise", "registro antigo", "border"]] as const;
 const consulta = (mes: string, chave: string) => new URLSearchParams({ mes, categoria: chave, tipo: "saida", limite: "10" }).toString();
 /** Uma coluna por categoria (as 4 maiores + "Outras" se passar de 5). Nenhuma abre selecionada; tocar alterna. O toque na coluna é do card, não da Folha. */
@@ -53,15 +54,15 @@ function Origem({ origens }: { origens: Record<(typeof ORIGENS)[number][0], numb
 /** Card `categorias` do chat e da Folha (UMA aba): total, período, colunas por categoria, transações da coluna tocada e origem. Dado = só o bloco. */
 export function CardGastos() {
   const bloco = useBloco(), d = bloco?.recursos.detalhes, p = usePainel(), entrada = useEntrada();
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<number | null>(null); // índice da coluna
   if (!d) return <Vazio texto="Dado indisponível neste card." />;
   const catalogo = p.dados.categorias?.fase === "pronto" ? p.dados.categorias.dado.categorias : undefined;
   const total = somarCentavos(d.categorias.map((c) => c.valor));
   const todas: Item[] = d.categorias.map((c, i) => ({ chave: c.categoria ?? "", nome: nomeCategoria(c.categoria, catalogo), valor: c.valor, pct: percentualDe(c.valor, total), cor: CORES_CATEGORIA[i % CORES_CATEGORIA.length]! }));
   // Até 5 categorias, todas pelo nome; com 6 ou mais, as 4 maiores e "Outras" (valor = Σ das restantes, % da soma, nunca soma de % arredondados).
   const resto = todas.length > VISIVEIS ? todas.slice(VISIVEIS - 1) : [], restoValor = somarCentavos(resto.map((c) => c.valor));
-  const colunas: Item[] = resto.length ? [...todas.slice(0, VISIVEIS - 1), { chave: OUTRAS, nome: "Outras", valor: restoValor, pct: percentualDe(restoValor, total), cor: CORES_CATEGORIA[6] }] : todas;
-  const maior = Math.max(...colunas.map((c) => c.valor)), intervalo = `${dataPtBr(`${d.mes}-01`).slice(0, 5)}–${dataPtBr(d.ate).slice(0, 5)}`;
+  const colunas: Item[] = resto.length ? [...todas.slice(0, VISIVEIS - 1), { chave: "", nome: "Outras", valor: restoValor, pct: percentualDe(restoValor, total), cor: CORES_CATEGORIA[6], outras: true }] : todas;
+  const escolhida = sel === null ? undefined : colunas[sel], maior = Math.max(...colunas.map((c) => c.valor)), intervalo = `${dataPtBr(`${d.mes}-01`).slice(0, 5)}–${dataPtBr(d.ate).slice(0, 5)}`;
   // A sincronização mais antiga entre as contas CONECTADAS (a pausada ou removida vem com `conexao_pausada`) que têm data; sem nenhuma, sem ícone.
   const sinc = bloco?.recursos.contas?.contas.filter((c) => !c.motivos.includes("conexao_pausada")).map((c) => c.sincronizado_em).filter((s): s is string => !!s && !Number.isNaN(Date.parse(s))).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
   return <View style={{ gap: 12 }}>
@@ -73,9 +74,9 @@ export function CardGastos() {
     <Avisos motivos={d.motivos} />
     {!colunas.length ? <Vazio texto="Nenhum gasto em reais registrado neste período." /> : <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ minWidth: "100%" }}>
-        <View style={{ flexDirection: "row", flexGrow: 1, gap: 4 }}>{colunas.map((c) => <Coluna key={c.chave} item={c} maior={maior} selecionada={sel === c.chave} apagada={sel !== null && sel !== c.chave} onPress={() => { selecao(); setSel(sel === c.chave ? null : c.chave); }} />)}</View>
+        <View style={{ flexDirection: "row", flexGrow: 1, gap: 4 }}>{colunas.map((c, i) => <Coluna key={i} item={c} maior={maior} selecionada={sel === i} apagada={sel !== null && sel !== i} onPress={() => { selecao(); setSel(sel === i ? null : i); }} />)}</View>
       </ScrollView>
-      {sel !== null && <Animated.View key={sel} testID="gastos-transacoes" entering={entrada}>{sel === OUTRAS ? <CategoriasDeOutras itens={resto} mes={d.mes} /> : <LancamentosDe consulta={consulta(d.mes, sel)} />}</Animated.View>}
+      {escolhida && <Animated.View key={sel} testID="gastos-transacoes" entering={entrada}>{escolhida.outras ? <CategoriasDeOutras itens={resto} mes={d.mes} /> : <LancamentosDe consulta={consulta(d.mes, escolhida.chave)} />}</Animated.View>}
       {d.origens && !p.oculto && <Origem origens={d.origens} />}
     </>}
   </View>;
