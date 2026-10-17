@@ -42,11 +42,16 @@ _MENSAGENS = 3
 # O ano que segue "[N de] MÊS" faz parte da data ("15 de outubro de 2026"); sem "de" só 20dd ("15 out 150" mantém o 150 como dinheiro).
 _MES = (r"\b(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro"
         r"|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b")
-_ANO = r"(?:\s+de\s+\d{2,4}\b|\s+20\d\d\b)"
+# Separador opcional entre o mês e o ano ("15 de outubro, 2026", "(2026)", "- 2026", "/ 2026"); seguido de real/reais/conto/pila/centavo ou ",50" o ano é dinheiro.
+# ponytail: "outubro, 2050" (20dd depois de vírgula) mascara mesmo sendo dinheiro possível (fail-closed).
+_FIM_ANO = r"\)?(?!\s*(?:real|reais|conto|pila|centavo)|[.,]\d)"
+_ANO = r"(?:(?:\s*[,(\-–/]\s*|\s+)(?:de\s+\d{2,4}|20\d\d)\b" + _FIM_ANO + ")"
+# dd/mm + separador + ano 20dd ("15/10, 2026", "15/10 (2026)", "15/10 - 2026"): sem separador ("15/10 2026") o ano segue lido
+_ANO_DD_MM = r"(?:\s*[,(\-–]\s*20\d\d\b" + _FIM_ANO + ")?"
 _TAXA = r"(?:%|por\s*cent(?:o)?\b|pct\b)"  # taxa: o número antes dela não é valor (nem de parcela: "12x com juros de 5%")
 _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também ignora ("em 12/10" é data; "em 12 meses" segue sendo 12x)
     r"\d{3}\.\d{3}\.\d{3}-\d{2}|\d{2}\.\d{3}\.\d{3}/\d{4}-?\d{2}"
-    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*" + _TAXA +
+    r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b" + _ANO_DD_MM + r"|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*" + _TAXA +
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
     # ano primeiro com barra/ponto só com 20dd ("2026/10/20", "2026.10.20"): o dd/mm acima casaria o rabo "10/20" e sobraria o ano
     r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,/-])20\d\d[/.]\d{1,2}[/.]\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
@@ -187,7 +192,19 @@ def _capturas_parcela(t: str):
 # ponytail: "paguei a luz de dez dias atrás" também pergunta o valor (fail-closed).
 _SINAL_PARCIAL_RE = re.compile(
     rf"\b(?:{'|'.join(sorted((w for w, n in _PT_NUM_WORDS.items() if n >= 10), key=len, reverse=True))}|mil"
-    r"|metade|meio|meia|parte|parcial|um\s+pouco|resto|restante|por\s*cent\w*)\b|\d\s*%", re.IGNORECASE)
+    r"|metade|meio|meia|parte|parcial|um\s+pouco|resto|restante|por\s*cent\w*"
+    # fração por extenso; "quarto/terço" só com um/dois/três antes. ponytail: "aluguel de três quartos" também pergunta o valor (fail-closed)
+    r"|(?:um|dois|tr[eê]s)\s+(?:ter[cç]os?|quartos?|quintos?))\b|\d\s*%", re.IGNORECASE)
+# Fração em dígito ("1/2", "3/4") também é sinal de parcial, mas o `_DATA_RE` a mascara como data: só conta com numerador < denominador
+# ("20/10" é data), sem terceiro componente ("20/10/2026") e sem rótulo de data antes ("dia 1/2", "vence 1/2", "para 1/2", "até", "em").
+# ponytail: "paguei a luz 5/11" (data sem rótulo) pergunta o valor (fail-closed).
+_FRACAO_RE = re.compile(r"(?<![\d/.,-])(\d{1,2})\s*/\s*(\d{1,2})(?![\d/]|[.,]\d)")
+_ROTULO_DATA_RE = re.compile(r"\b(?:dia|vence|vencimento|venc\.?|vcto|para|at[ée]|em)\s*:?\s*$", re.IGNORECASE)
+
+
+def _sinal_parcial(t: str) -> bool:
+    return bool(_SINAL_PARCIAL_RE.search(t)) or any(
+        int(m[1]) < int(m[2]) and not _ROTULO_DATA_RE.search(t[:m.start()]) for m in _FRACAO_RE.finditer(t))
 
 
 def _centavos_lidos(textos: list[str]) -> set[int]:
@@ -260,7 +277,7 @@ def ancora_valor(user_id: int, tool, args: dict) -> tuple[dict, str | None]:
     # opcional: só some se o usuário não escreveu valor nenhum; com outro valor no texto ("paguei 50" + amount=500) é divergência
     # sinal de valor parcial sem dígito ("paguei cinquenta/metade/50%"): descartar o amount pagaria o cadastrado cheio
     acao = "recusa" if lidos or campo in tool.schema["function"]["parameters"].get("required", []) \
-        or any(_SINAL_PARCIAL_RE.search(t) for t in textos) else "descarta"
+        or any(_sinal_parcial(t) for t in textos) else "descarta"
     # "em quantas parcelas?" só quando o VALOR está no texto e falta a contagem; valor também sem âncora é "não achei esse valor"
     so_contagem = not escrita and (v in fora or v in quase)
     log_system_event_sync("info", "ai_valor_sem_ancora", "valor da IA sem âncora no texto do usuário",

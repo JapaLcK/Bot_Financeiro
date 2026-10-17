@@ -177,6 +177,24 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("boleto de 150 para outubro 2026", {15000}, {202600}),
     ("boleto de 150 dia 15 de outubro 150", {15000}, {1500}),   # 150 sem "de" não é ano: segue dinheiro
     ("gastei 50 em março de 2026", {5000}, set()),
+    # ano separado do mês por vírgula/parênteses/hífen/barra (Codex): o ano é da data; só 20dd, e dinheiro ao lado segue lido
+    ("para 15 de outubro, 2026", set(), {1500, 202600}), ("15 de outubro (2026)", set(), {1500, 202600}),
+    ("15 de outubro - 2026", set(), {1500, 202600}), ("15 de outubro – 2026", set(), {1500, 202600}),
+    ("outubro, 2026", set(), {202600}), ("outubro (2026)", set(), {202600}), ("dia 15 de outubro, 2026", set(), {1500, 202600}),
+    ("vence 15 de outubro, 2026", set(), {1500, 202600}), ("vence dia 15 de outubro (2026)", set(), {1500, 202600}),
+    ("boleto de 150 para 15 de outubro, 2026", {15000}, {1500, 202600}),
+    ("gastei 50 em outubro, 2026", {5000}, {202600}),
+    ("dia 15 de outubro, 150", {15000}, {1500}),                # 150 não é 20dd: segue dinheiro
+    ("15 de outubro, 2026 reais", {202600}, {1500}),            # positivo: o número com "reais" é dinheiro
+    ("15 de outubro, 2026,50", {202650}, set()),
+    # "de 26" depois de separador, e dd/mm + separador + ano 20dd (Codex): o ano é da data; sem separador ou com "reais"/",50" é dinheiro
+    ("15 de outubro, de 26", set(), {1500, 2600}), ("15 de outubro de 26", set(), {1500, 2600}), ("outubro, de 2026", set(), {202600}),
+    ("para 15/10, 2026", set(), {1500, 1000, 202600}), ("15/10 (2026)", set(), {1500, 1000, 202600}), ("15/10 - 2026", set(), {1500, 1000, 202600}),
+    ("15/10 – 2026", set(), {1500, 1000, 202600}), ("vence 15/10, 2026", set(), {1500, 1000, 202600}),
+    ("boleto de 150 para 15/10, 2026", {15000}, {1500, 1000, 202600}),
+    ("15/10, 2026 reais", {202600}, {1500, 1000}), ("15/10, 2026,50", {202650}, {1500, 1000}), ("15/10 - 2026 reais", {202600}, set()),
+    ("15/10, 150", {15000}, {1500, 1000}),                      # 150 não é 20dd: segue dinheiro
+    ("15/10 2026", {202600}, {1500, 1000}),                     # sem separador o ano segue lido (limite declarado)
     # ano solto depois de preposição não é valor, mas dinheiro ao lado (ou o próprio número com "reais") segue (Codex)
     ("é para 2027", set(), {202700}), ("vence em 2027", set(), {202700}), ("até 2027", set(), {202700}),
     ("desde 2026", set(), {202600}), ("no ano de 2027", set(), {202700}),
@@ -1607,6 +1625,28 @@ def test_n18_boleto_dia_15_de_outubro_2026_nao_grava_o_ano_como_valor(uid_pro, m
     assert _boletos(uid_pro) == 1
 
 
+def test_n18c_boleto_15_de_outubro_virgula_2026_nao_grava_o_ano_como_valor(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "15/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 15 de outubro, 2026", platform="whatsapp")
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto da internet de 150 para 15 de outubro (2026)", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
+def test_n18d_boleto_15_barra_10_virgula_2026_nao_grava_o_ano_como_valor(uid_pro, monkeypatch):   # Codex
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "15/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 15/10, 2026", platform="whatsapp")
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    _usa_ia(cli)
+    runner.chat(uid_pro, "boleto de 150 para 15/10, 2026", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 def test_n18b_boleto_para_2027_nao_grava_o_ano_como_valor(uid_pro, monkeypatch):   # Codex: "é para 2027" lido como R$ 2.027
     desliga_flag(monkeypatch)
     cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2027, "due_date": "10/12"})),
@@ -1702,6 +1742,13 @@ def test_meta_alvo_igual_ao_da_frase_grava_direto(chave, monkeypatch):
     ("paguei a luz", 120, "descarta"), ("paguei uma conta de luz", 120, "descarta"), ("paguei a conta de luz de ontem", 120, "descarta"),
     ("paguei duas contas de luz", 120, "descarta"), ("paguei a luz do dia 20", 120, "descarta"),
     ("paguei 50 da luz", 50, None),
+    # fração (Codex): o `_DATA_RE` mascara "1/2" como data, mas é sinal de parcial; data com rótulo / numerador >= denominador / 3 componentes não
+    ("paguei 1/2 da luz", 60, "recusa"), ("paguei um terço da luz", 40, "recusa"), ("paguei um quarto da luz", 30, "recusa"),
+    ("paguei 3/4 da luz", 90, "recusa"), ("paguei dois terços da luz", 80, "recusa"), ("paguei três quartos da luz", 90, "recusa"),
+    ("paguei 1 / 2 da luz", 60, "recusa"),
+    ("paguei a luz do dia 20/10", 120, "descarta"), ("paguei a luz dia 1/2", 120, "descarta"), ("paguei a luz vence 1/2", 120, "descarta"),
+    ("paguei a luz para 1/2", 120, "descarta"), ("paguei a luz do dia 1/2/2026", 120, "descarta"), ("paguei a luz 20/10/2026", 120, "descarta"),
+    ("paguei a luz 25/12", 120, "descarta"), ("paguei o quarto da luz", 120, "descarta"),
 ])
 def test_amount_opcional_com_valor_parcial_sem_digito_recusa(uid_pro, fala, amount, acao):
     args, a = _ancora(uid_pro, "mark_bill_paid", {"name": "luz", "amount": amount}, fala)
@@ -1713,6 +1760,16 @@ def test_conversa_pagar_cinquenta_da_luz_nao_paga_o_cadastrado(uid_pro, monkeypa
     conta = _conta_fixa(uid_pro)
     cli = openai_falso(monkeypatch, _paga_luz(50))
     r = runner.chat(uid_pro, "paguei cinquenta da luz", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and lancamentos(uid_pro) == [], r
+    assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "pending"
+
+
+def test_conversa_pagar_meia_luz_em_fracao_nao_paga_o_cadastrado(uid_pro, monkeypatch):   # Codex: "1/2" era lido como data
+    desliga_flag(monkeypatch)
+    conta = _conta_fixa(uid_pro)
+    cli = openai_falso(monkeypatch, _paga_luz(60))
+    r = runner.chat(uid_pro, "paguei 1/2 da luz", platform="whatsapp")
     _usa_ia(cli)
     assert RECUSA in r and lancamentos(uid_pro) == [], r
     assert db.bills.get_bill(uid_pro, conta["id"])["status"] == "pending"
