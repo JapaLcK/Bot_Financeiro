@@ -74,8 +74,11 @@ def get_user_email(user_id: int) -> str | None:
             (user_id,),
         )
         row = cur.fetchone()
-    if not row:
-        return None
+    return email_da_linha(row, user_id) if row else None
+
+
+def email_da_linha(row: dict, user_id: int) -> str | None:
+    """E-mail em claro de uma linha de `auth_accounts` (`email`, `email_enc`)."""
     if row.get("email_enc"):
         return decrypt_pii_optional(
             row["email_enc"],

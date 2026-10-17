@@ -1436,6 +1436,31 @@ não mudou durante o envio. A troca no app nunca é desfeita: falha transitória
 claim (mesma régua do e-book); `InvalidRequestError` (cliente apagado, e-mail recusado)
 fecha e loga `stripe_email_sync_recusado`, sem o e-mail. Fora do export LGPD; cascade.
 
+**Trocar o e-mail pede a senha atual (B0a).** `PATCH /settings/{uid}/security/contact` com
+e-mail que muda (comparado por hash) exige `current_password` (`frontend/routes/settings_contato.py`):
+campo ausente/vazio → 400; errada → 401 "Senha incorreta." SEM `WWW-Authenticate` (o
+`auth-refresh.js` não renova); conta só-Google (sem senha, com identidade) → 409 "defina uma
+senha" (o de `_reauth_password_ok`, antes do 400). A checagem vem DEPOIS do teto `settings-contact`
+(5/h, senha errada também conta) e ANTES de qualquer 409 de contato em uso: senha errada nunca
+enumera conta alheia. Recusa = nada gravado (nem nome nem telefone do mesmo corpo); nome,
+telefone e e-mail igual ao atual não pedem senha. A conta paga SEM credencial (quiz/funil,
+`conta_sem_credencial`) troca o e-mail sem senha e sem aviso: é a saída "E-mail errado?
+Corrigir" do `criar-senha.js`, e ela não tem senha para dar. Depois do commit, o e-mail ANTIGO
+recebe `send_email_changed_notice` com o novo mascarado (`n•••@dominio`; sem IP nem horário),
+best-effort: a decifragem do antigo e o envio só logam e nunca desfazem a troca. "Mudou?" e o
+e-mail antigo são decididos DENTRO da transação, com a linha de `auth_accounts` travada
+(`travar_e_ler_email`, `select … for update`): dois PATCH que trocam o e-mail (duplo clique,
+duas abas) se serializam nesse lock, o segundo enxerga o e-mail já trocado e responde 200 sem
+mudança (sem 2º aviso, sem 2ª pendência do Stripe, sem 2ª auditoria). Só o PATCH que troca o
+e-mail toma esse lock; um PATCH julgado "sem mudança" só espera se gravar nome/telefone na mesma
+linha. Invariante: o PATCH julgado "sem mudança" NÃO regrava o e-mail (o `UPDATE` do e-mail e a
+pendência do Stripe só rodam sob `email_actually_changed` pós-lock), para não desfazer uma troca
+concorrente feita com senha. O botão Salvar do `settings.html` também fica
+travado enquanto o PATCH está em voo. As outras sessões NÃO são encerradas, e o e-mail NOVO não
+é confirmado (quem troca para o e-mail de outra pessoa é assunto da issue própria, via
+auto-vínculo Google/Apple). Sobra: conta com 2 linhas em `auth_accounts` (o `user_id` não é
+unique) segue em 409 na troca, como antes; o "antigo" do aviso é o da primeira linha lida. Resend lento atrasa a resposta do PATCH (o aviso é `await` depois do commit, sem lock e sem timeout próprio), e o e-mail antigo vai ao `system_event_logs`, como os outros avisos.
+
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
 linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da
