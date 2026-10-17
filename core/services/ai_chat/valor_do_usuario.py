@@ -44,10 +44,11 @@ _DATA_RE = re.compile(  # CPF/CNPJ, data, hora, %: o que o `_parcelas` também i
     r"|\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|\b\d{1,2}:\d{2}\b|\d+(?:[.,]\d+)?\s*%"
     # data ISO ("2026-10-20") e pontuada ("10.12.2026"); "1.000.000" e "12.345" (milhar) e "49.90" (decimal) não casam
     r"|\b\d{4}-\d{1,2}-\d{1,2}\b|(?<![\d.,])\d{1,2}\.\d{1,2}\.\d{2,4}\b"
-    # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]"): só "N de MÊS", nunca "50 em março"
+    # data com hífen ("12-10", "12-10-2026") e por extenso ("12 de outubro [de 2026]", "15 out 2026"): só "N [de] MÊS", nunca "50 em março".
+    # Ano sem "de" só com 20dd: "15 out 150" mantém o 150 como dinheiro
     r"|(?<![\d.,-])\d{1,2}-\d{1,2}(?:-\d{2,4})?\b"
-    r"|(?<![\d.,])\d{1,2}\s+de\s+(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
-    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4})?"
+    r"|(?<![\d.,])\d{1,2}\s+(?:de\s+)?(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro"
+    r"|dezembro|jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\b(?:\s+de\s+\d{2,4}|\s+20\d\d\b)?"
     # rótulo de dia, com ou sem dois-pontos: "dia: 18", "vencimento dia: 18", "venc. 18". O dia (1-2 dígitos) nunca é valor;
     # sem o lookahead "vence 18/10" mascararia o 18 e deixaria "/10" para ser lido. ponytail: "vence 50 reais" mascara o 50 (fail-closed)
     r"|\bdia\s*:?\s*\d{1,2}\b(?![/.:,-]\d)"
@@ -119,13 +120,13 @@ _PONTO_DECIMAL_RE = re.compile(r"(?<![\d.,])(\d+)\.(\d{1,2})(?!\d|\.\d|,\d)")
 _MULT_DIGITOS_RE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)*\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b", re.IGNORECASE)
 
 
-# "12x de 50" / "12x R$ 50" / "12 parcelas a 50": o valor depois do "de"/"a"/"R$" é da PARCELA e o `valor` das tools de
+# "12x de 50" / "12x R$ 50" / "12 parcelas a 50" / "12 prestações de 50": o valor depois do "de"/"a"/"R$" é da PARCELA e o `valor` das tools de
 # cartão é o TOTAL. Esse trecho não ancora o total sozinho: com parcelas>1 só `parcelas × valor-de-parcela lido` o ancora
 # (um produto com qualquer outro número lido, como o 50 de "comprei por 50 em 12x", seria invenção). A contagem pode vir
 # por extenso ("doze vezes": contagem não é valor); o VALOR só em dígito (o grupo 1). "12x 50" (solto, sem de/a/R$) é
 # ambíguo e fica fora: o 50 segue ancorando como total. "12x de 30 reais e 50 centavos" é 3050. ponytail: "dez vezes de 2 mil e 500" (dígito + "e 500") não compõe.
 _PARCELA_RE = re.compile(
-    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
+    rf"\b(?:\d+\s*|(?:{PT_PHRASE})\s+)(?:x|vezes?|parcelas?|presta[çc][ãa]o|presta[çc][õo]es)\s+(?:(?:de|a)\s+(?:r\$\s*)?|r\$\s*)"
     r"(\d[\d.,]*(?:\s*(?:mil(?:h[ãa]o|h[õo]es)?|bilh[ãa]o|bilh[õo]es)\b)?(?:\s*centavos?\b|\s*(?:reais|real)\s*e\s*\d+\s*centavos?\b)?)", re.IGNORECASE)
 
 

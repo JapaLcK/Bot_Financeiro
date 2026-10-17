@@ -142,6 +142,14 @@ RECUSA_PARCELAS = "🐷 Não anotei nada: em quantas parcelas foi? Ex.: 12x."
     ("vence 12-10-2026", set(), {1200, 1000, 202600}),
     ("gastei 50 em março", {5000}, set()),
     ("gastei 50 de gasolina em outubro", {5000}, set()),
+    # "de" opcional: "15 outubro 2026", "15 out 2026", "15 out" são data; ano sem "de" só 20dd
+    ("anota o boleto da internet para 15 outubro 2026", set(), {1500, 202600}),
+    ("anota o boleto da internet para 15 out 2026", set(), {1500, 202600}),
+    ("anota o boleto da internet para 15 out", set(), {1500}),
+    ("boleto de 150 para 15 out 2026", {15000}, {1500, 202600}),
+    ("boleto de 15 out 150", {15000}, {1500}),               # 150 não é ano: segue dinheiro
+    ("gastei 50 em março", {5000}, set()),
+    ("gastei 50 mercado em outubro", {5000}, set()),
     # data ISO e pontuada não é valor; milhar e decimal seguem lidos
     ("anota o boleto da internet para 2026-10-20", set(), {202600, 2000, 1000}),
     ("boleto de 150 para 2026-10-20", {15000}, {202600, 2000, 1000}),
@@ -597,6 +605,20 @@ def test_n9_boleto_para_12_de_outubro_nao_grava_12_reais(uid_pro, monkeypatch): 
     assert _boletos(uid_pro) == 1
 
 
+def test_n9c_boleto_para_15_out_2026_sem_de_nao_grava_dia_nem_ano(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 2026, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 15, "due_date": "15/10"})),
+                       com_tools(chamada("add_boleto", {"name": "internet", "amount": 150, "due_date": "15/10"})))
+    r = runner.chat(uid_pro, "anota o boleto da internet para 15 outubro 2026", platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _boletos(uid_pro) == 0, r
+    runner.chat(uid_pro, "anota o boleto da internet para 15 outubro 2026", platform="whatsapp")   # o 15 também recusa
+    assert _boletos(uid_pro) == 0
+    runner.chat(uid_pro, "boleto de 150 para 15 out 2026", platform="whatsapp")   # 150 escrito: grava
+    assert _boletos(uid_pro) == 1
+
+
 def test_n10_boleto_vencimento_dia_dois_pontos_nao_grava_o_dia(uid_pro, monkeypatch):   # o 18 de "dia: 18" é o dia
     desliga_flag(monkeypatch)
     cli = openai_falso(monkeypatch, com_tools(chamada("add_boleto", {"name": "internet", "amount": 18, "due_date": "18"})),
@@ -891,6 +913,13 @@ def test_q8b_tool_sem_campo_parcelas_nao_e_afetada(uid_pro):
     ("12x de 50centavos", 600, 12, False),
     ("12x de 1 real e 50 centavos", 18, 12, True),
     ("12x de 1 real e 50 centavos", 600, 12, False),
+    # "prestação(ões)" é unidade de parcela, com ou sem acento
+    ("comprei a geladeira em 12 prestações de R$ 50", 50, 12, False),
+    ("comprei a geladeira em 12 prestações de R$ 50", 600, 12, True),
+    ("em 12 prestacoes a 50", 600, 12, True),
+    ("em 12 prestações R$ 50", 600, 12, True),
+    ("em 12 prestações R$ 50", 50, 12, False),
+    ("em 1 prestação de 50", 50, 1, True),
 ])
 def test_q9_valor_de_parcela_so_deriva_o_total(uid_pro, fala, valor, parcelas, ancora):
     args = {"valor": valor, "parcelas": parcelas}
@@ -925,6 +954,19 @@ def test_q10_conversa_contagem_nua_e_parcela_em_centavos(uid_pro, monkeypatch, f
     r = runner.chat(uid_pro, fala, platform="whatsapp")
     _usa_ia(cli)
     assert RECUSA in r and _credito(uid_pro) == 0, r
+    db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
+    runner.chat(uid_pro, fala, platform="whatsapp")
+    assert _credito(uid_pro) == 12
+
+
+def test_q12_conversa_prestacoes(uid_pro, monkeypatch):
+    desliga_flag(monkeypatch)
+    db.create_card(uid_pro, "Nubank", closing_day=10, due_day=17)
+    fala = "comprei a geladeira em 12 prestações de R$ 50 no nubank"
+    cli = openai_falso(monkeypatch, _compra_cartao(50, parcelas=12), _compra_cartao(600, parcelas=12))
+    r = runner.chat(uid_pro, fala, platform="whatsapp")
+    _usa_ia(cli)
+    assert RECUSA in r and _credito(uid_pro) == 0, r   # 50 é a parcela, não o total
     db.ai_append_message(uid_pro, "system", runner._ATENDIDA_FORA)
     runner.chat(uid_pro, fala, platform="whatsapp")
     assert _credito(uid_pro) == 12
