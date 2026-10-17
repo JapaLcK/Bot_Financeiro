@@ -263,7 +263,7 @@ documento. O plano do card "Seu dia" no app é `docs/plano-seu-dia-app.md` (PR #
 conta (excluir, exportar; sessões ativas e atividade, notificações, e-mail, nome e telefone, recomeçar do zero; Atualizar agora do Open Finance e Política de Privacidade; filtro por conta no Extrato), guia. **Ambos atrás:** gerenciar categorias (só no painel antigo).
 
 **Ordem recomendada do lado do web** (justificada no §6 do plano do app): primeiro **W1** (a Etapa 6 é a de menor
-risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5**, **W6** e **W8**, pequenos; **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
+risco, porque as rotas, a foto diária e a regra única já existem; é só expor no namespace v2 e desenhar); depois **W5**, **W6**, **W7** e **W8**, pequenos (W7 só troca o exemplo pelo `Compromissos` real que já existe na `/previsao`); **W3** (cliente puro) em seguida; **W2** (Etapa 7) e **W4** são os grandes e Completos, e W4 depende de
 decisão do dono sobre as fontes. **Não** copiar o `/investido` para o app como item solto: o consumidor real dele é a
 escolha da fonte da meta (`MetaFonte.tsx`), que entra com a escrita de metas no app.
 
@@ -915,8 +915,8 @@ o 409).
 ### Paridade com o app (2026-10-16)
 
 - [x] Matriz de paridade `/painel` × app nativo levantada e a regra do dono registrada, **só em plano** (nenhum código):
-  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W7).
+  `docs/plano-app-paridade.md`, com o resumo do que o web deve ao app no §6 acima (W1 a W8).
 - [x] Decisões do dono (§10 do plano do app, 2026-10-16): ordem aprovada, texto da regra aprovado para o `CLAUDE.md`
   (em PR próprio), guia existe no app, sem data de App Store. Seguem abertas: modo privacidade no `/painel` (W6) e
   Guardado líquido no Resumo (W5).
-- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W3, depois W2 e W4).
+- [ ] Executar as lacunas, uma por PR, na ordem do §6 do plano do app (lado do web: W1, W5, W6, W7 e W8, depois W3, e por fim W2 e W4).

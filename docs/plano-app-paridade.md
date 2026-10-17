@@ -91,7 +91,7 @@ Legenda do veredito: **paridade** · **app atrás** · **web atrás** · **plata
 
 | # | Função / tela | Web | App | Diferença que importa | Veredito |
 |---|---|---|---|---|---|
-| 25 | Ler: busca (`q`), origem, tipo, categoria, **conta**, dia, cursor | `GET /lancamentos` (`parts/Lancamentos.tsx`): seletor de **Conta** (de `GET /contas`) e de Origem com as quatro (inclui `registro_antigo`) | `GET /api/app/lancamentos` (`extrato.tsx`): busca, origem (sem `registro_antigo`, de propósito: o comentário do arquivo só diz que "o filtro não o oferece", o motivo não foi achado), tipo, categoria; `dia` filtra no aparelho; **não manda `conta`** | O servidor já aceita `conta` e `cartao` (`api/v2/lancamentos.py`); o web só expõe `conta` e o app nenhum dos dois. Os dados de `/contas` já chegam ao app (`contasResumo`) | **app atrás (A14)** no filtro por conta; `registro_antigo` e `cartao` a decidir |
+| 25 | Ler: busca (`q`), origem, tipo, categoria, **conta**, dia, cursor | `GET /lancamentos` (`parts/Lancamentos.tsx`): seletor de **Conta** (de `GET /contas`) e de Origem com as quatro (inclui `registro_antigo`) | `GET /api/app/lancamentos` (`extrato.tsx`): busca, origem (sem `registro_antigo`, de propósito: o comentário do arquivo só diz que "o filtro não o oferece", o motivo não foi achado), tipo, categoria; `dia` filtra só no aparelho, nas páginas já carregadas (num mês com mais de 50 lançamentos o dia antigo pode abrir "Nenhum resultado nesta página"): **o app não manda `dia` nem `conta`**; o plano do Seu dia (§5, linha "Ver extrato do dia") já prevê mandar `dia` na consulta | O servidor já aceita `conta` e `cartao` (`api/v2/lancamentos.py`); o web só expõe `conta` e o app nenhum dos dois. Os dados de `/contas` já chegam ao app (`contasResumo`) | **app atrás**: `dia` no servidor entra com **A1**, filtro por conta é a **A14**; `registro_antigo` e `cartao` a decidir |
 | 26 | `guardado=1` (aportes e saques como linhas marcadas, #983) | O `/painel` manda | O app **não manda, de propósito**: app instalado não atualiza com o backend (plano §8) | Um build novo pode mandar | **app atrás (A7)** |
 | 27 | Escrever: lançar, editar, apagar na Carteira (Q36) | `POST /lancamentos/carteira`, `/editar`, `/apagar`, regra `pode` | O Extrato só lê | **Sem chave de idempotência** (`api/v2/lancamentos.py:107`): num celular com rede ruim, repetir o POST grava duas vezes | **app atrás (A4)** |
 
@@ -160,7 +160,7 @@ Legenda: servidor **0** = nenhuma mudança (a rota já está no namespace do app
 | A9 | Excluir conta e exportar dados | **a verificar**: se `DELETE /auth/account` e `account/export` aceitam Bearer; senão acrescentar | telas nativas | **Completo** (auth, sessão, destrutivo) | G | Sem data de submissão (§10, P4) |
 | A12 | Sessões ativas e atividade recente, preferências de notificação, editar e-mail, nome e telefone, trocar senha, recomeçar do zero (linhas 41 a 44 e 46) | **a verificar**: as rotas `/settings/{user_id}/...` aceitam Bearer? Se não, acrescentar equivalentes sem `user_id` no caminho | telas nativas na Segurança e em Configurações, mínimo de texto | **Completo** (auth e sessão) | G | A9 (mesma área); o PR #1035 (login com MFA e exclusão agendada) pode mexer no mesmo código |
 | A13 | **Atualizar agora** do Open Finance (linha 32) e link da **Política de Privacidade** em Configurações (linha 49) | 0 para o link; **a verificar** para o refresh: `POST /open-finance/{user_id}/refresh` é rota legada que o app já usa para ler (`/open-finance/{uid}`), então tende a aceitar Bearer, mas `wait` e o limite de frequência não foram lidos | uma chamada em `services/openFinance.ts`, trocar "Conferir de novo" e o puxar-para-atualizar de `conexoes.tsx` para pedir a sincronização; `ListRow` "Política de Privacidade" abrindo `/privacy` (mesmo padrão do Suporte) | Leve (**Completo** se o refresh exigir mudar o servidor) | P | Nenhuma; refresh toca fornecedor externo, então confirmar o limite antes |
-| A14 | **Extrato: filtro por conta** (linha 25) | 0 (`/api/app/lancamentos?conta=` e `/api/app/contas` já montados) | um `Chip`/seletor de conta em `extrato.tsx`, lista vinda do que `contasResumo` já lê; decidir `registro_antigo` e `cartao` | Leve | P | Nenhuma; a mesma lista de contas serve à escolha de fonte da meta (A3) |
+| A14 | **Extrato: filtro por conta** (linha 25); o `dia` no servidor não é daqui, vem com a A1 | 0 (`/api/app/lancamentos?conta=` e `/api/app/contas` já montados) | um `Chip`/seletor de conta em `extrato.tsx`, lista vinda do que `contasResumo` já lê; decidir `registro_antigo` e `cartao` | Leve | P | Nenhuma; a mesma lista de contas serve à escolha de fonte da meta (A3) |
 | A10 | Guia e dicas, adaptados ao nativo (P3: sim) | **Muda o contrato, só por acréscimo**: o roteiro `PASSOS` (`api/v2/guia.py`) é do web (âncoras e ações do DOM; o passo `piggy.pergunta` é `exemplo` e a fala diz que o chat real "chega em breve", o que é falso no app, onde o chat é real). Decidir no plano do A10: (a) roteiro por plataforma no servidor, sem mudar o que o web lê, ou (b) mapeamento nativo no cliente que ignora `ancora`/`acao` e troca a fala. Não reaproveitar a fala do web como está | desenho nativo (coach marks ou cartões de primeiro uso), mínimo de texto | Leve (cliente) + servidor aditivo, a classificar no plano do A10 | M | Depois dos itens de dinheiro |
 | A11 | Categorias: gerenciar | Depende do web | idem | Leve/Completo | G | Web primeiro (plano §6) |
 
@@ -192,8 +192,8 @@ depois `/investido`; por último guia e dicas. **A evidência pede outra ordem:*
 | 7 | **A9 e A12** | Sem data de App Store (§10, P4): fica aqui. Sobe no dia em que o dono marcar uma submissão. |
 | 8 | A10, A11 | A10 já decidido (P3, sim); A11 depende do web. |
 
-Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais) e W5 (Saldo e Guardado líquido)
-só precisam **montar no namespace v2** rotas que já existem; W2 (chat real) é a Etapa 7; W3 (Simulador) é
+Em paralelo, no web (`docs/plano-dashboard-v2.md`): W1 (Patrimônio e Rendimento reais), W5 (Saldo e Guardado líquido)
+só precisam **montar no namespace v2** rotas que já existem; W7 e W8 são de cliente puro (W8 com o Sair, que é Completo); W2 (chat real) é a Etapa 7; W3 (Simulador) é
 cliente puro; W4 (Fatura, Parcelas, Renda, "Piggy notou") precisa de contrato novo e de decisão sobre as fontes
 (plano "só Open Finance").
 
@@ -240,7 +240,7 @@ conferida, não inferência.
 - **Build do app:** pelo Xcode, com `PATH=/usr/bin` primeiro no `export` (o app não tem projeto EAS). O `buildNumber: "15"`
   em `app/app.config.ts` é velho de propósito (o Xcode escolhe o próximo livre no App Store Connect). O último
   número registrado é o 30 (2026-10-12, segundo `docs/plano-seu-dia-app.md` §7); o próximo quem confirma é o dono, que vê o App Store Connect.
-- **Quase todo item de cliente (A1 a A8) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
+- **Quase todo item de cliente (A1 a A8, A13 e A14) acumula em builds**: A1, A2 e A7 cabem no mesmo build; A4 e A9 pedem build
   próprio por terem teste de aparelho.
 - **PRs abertos relacionados:** #1050 (plano do Seu dia), #1033 (comparação; condiciona A8), #1051 (IA cria metas;
   mesma regra do servidor de A3), #1035 (login com MFA e exclusão agendada; pode condicionar A9, a conferir).
