@@ -16,7 +16,7 @@ from conftest import promote_to_pro
 from db import ensure_user
 from db.connection import get_conn
 from frontend.routes.settings import CONTATO_EM_USO
-from tests._helpers_pii import insert_auth_account_pii
+from tests._helpers_pii import HASH_SENHA, SENHA, insert_auth_account_pii
 from tests.test_senha_obrigatoria_whatsapp import _dono_do_numero, _gastos, _manda, enviadas  # noqa: F401
 from tests.test_settings_contact_pii_sync import _auth_row, _client_for
 
@@ -35,12 +35,14 @@ def _conta(uid: int, phone: str | None = None):
     """Conta com login e plano; devolve (patch, email, phone)."""
     email = _email()
     with get_conn() as conn, conn.cursor() as cur:
-        insert_auth_account_pii(cur, uid, email, phone=phone)
+        insert_auth_account_pii(cur, uid, email, phone=phone, password_hash=HASH_SENHA)
         conn.commit()
     promote_to_pro(uid)
     client, headers = _client_for(uid, email)
 
     def patch(**body):
+        if "email" in body:  # trocar e-mail pede a senha atual; o resto do teste mede o teto
+            body.setdefault("current_password", SENHA)
         return client.patch(f"/settings/{uid}/security/contact", json=body, headers=headers)
 
     return patch, email, phone
