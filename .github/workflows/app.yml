@@ -4,15 +4,50 @@
 # inteiro e roda 8 mil testes de backend. Nada disso serve ao app, e pendurar o
 # app lá faria cada PR de Python esperar por `npm ci` do React Native.
 #
-# `paths` restringe a execução: PR que não toca `app/` não dispara nada aqui.
+# `paths` restringe a execução: PR que não toca `app/` (nem um arquivo que os testes do app
+# leem) não dispara nada aqui.
+# `frontend/finance_bot_websocket_custom.py` é lido pelos testes do app (SETUP_EXPIRADO) e ficou
+# fora de `paths:` DE PROPÓSITO (decisão D1=b do dono): PR que só toca o monólito não dispara o App.
 name: App
 
 on:
   push:
     branches: [main]
-    paths: ["app/**", "tests/fixtures/ai_chat_eventos.json", ".github/workflows/app.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+      # Fora de `app/`, mas lidos por testes do app (app/__tests__): mudar só um deles tem
+      # de rodar o jest. A lista é conferida por tests/test_app_yml_paths_cobrem_testes_do_app.py.
+      - "tests/fixtures/ai_chat_eventos.json"
+      - "tests/fixtures/ai_chat_bloco_periodo.json"
+      - "tests/fixtures/telefones_cadastro.json"
+      - "tests/fixtures/user_agents_app.json"
+      - "tests/frontend/api_v2_respostas.json"
+      - "webapp/src/dashboard/lib/metas-textos.ts"
+      - "webapp/src/dashboard/lib/profiles.js"
+      - "webapp/src/dashboard/lib/prompts.js"
+      - "webapp/src/dashboard/parts/Board.tsx"
+      - "webapp/src/dashboard/parts/MetaCartao.tsx"
+      - "core/services/metas_conversa.py"
+      - "db/metas_ritmo.py"
   pull_request:
-    paths: ["app/**", "tests/fixtures/ai_chat_eventos.json", ".github/workflows/app.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+      # Fora de `app/`, mas lidos por testes do app (app/__tests__): mudar só um deles tem
+      # de rodar o jest. A lista é conferida por tests/test_app_yml_paths_cobrem_testes_do_app.py.
+      - "tests/fixtures/ai_chat_eventos.json"
+      - "tests/fixtures/ai_chat_bloco_periodo.json"
+      - "tests/fixtures/telefones_cadastro.json"
+      - "tests/fixtures/user_agents_app.json"
+      - "tests/frontend/api_v2_respostas.json"
+      - "webapp/src/dashboard/lib/metas-textos.ts"
+      - "webapp/src/dashboard/lib/profiles.js"
+      - "webapp/src/dashboard/lib/prompts.js"
+      - "webapp/src/dashboard/parts/Board.tsx"
+      - "webapp/src/dashboard/parts/MetaCartao.tsx"
+      - "core/services/metas_conversa.py"
+      - "db/metas_ritmo.py"
 
 # A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
 # `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
