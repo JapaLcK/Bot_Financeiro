@@ -91,6 +91,12 @@ describe("atualizar (a): o POST", () => {
     await atualizar(d);
     expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
+  it("o item que ainda coleta também é julgado pelo estado (still_updating é independente do state no servidor): partial coletando é problema; rate_limited coletando acompanha", async () => {
+    const a = mundo({ enviar: async () => refresh([item("it_1", "partial", true, "Parte dos dados ainda não veio")]) }); await atualizar(a.d);
+    expect(a.ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(a.w.leituras).toEqual([]);
+    const b = mundo({ enviar: async () => refresh([item("it_1", "rate_limited", true)]), lista: () => [con("it_1", "updated", null, { last_sync_at: "2026-10-10T13:00:00Z" })] }); await atualizar(b.d);
+    expect(b.w.leituras).toHaveLength(1); expect(b.w.sucessos).toBe(1);
+  });
   it("item com problema: resultado com a instrução do servidor, aviso(), recarga, e NADA de acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "partial", false, "Cartão desatualizado desde 12/08")]) });
     await atualizar(d);

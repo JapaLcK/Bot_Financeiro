@@ -157,8 +157,9 @@ export async function atualizar(d: Deps): Promise<void> {
     }
     if (!d.atual()) return parar(d);
     const coletando = r.sync.items.filter((i) => i.still_updating);
-    // Erro antes do neutro (como o `refreshVerdict` do web): a falha de um banco só existe nesta resposta (o `partial` do PATCH não vai para o snapshot), então um banco ainda coletando não pode escondê-la.
-    const texto = julgar(r.sync.items.filter((i) => !i.still_updating).map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason, detalhe: i.detail ?? (i.state === "updating" ? FALHA : i.label) })));
+    // Erro antes do neutro (como o `refreshVerdict` do web), em TODOS os itens: a falha de um banco só existe nesta resposta (o `partial` do PATCH não vai para o snapshot), então um banco ainda coletando não pode escondê-la;
+    // e o `still_updating` do servidor é independente do `state` (pluggy_sync.py), então o item que ainda coleta também é julgado pelo estado dele.
+    const texto = julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason, detalhe: i.detail ?? (i.state === "updating" ? FALHA : i.label) })));
     if (texto === null && coletando.length) return acompanhar(d, new Map(coletando.map((i) => [i.item_id, r.connections.find((c) => c.provider_item_id === i.item_id)?.last_sync_at ?? null])));
     concluir(d, texto);
   } catch (e) {
