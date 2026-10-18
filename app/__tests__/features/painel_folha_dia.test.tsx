@@ -5,13 +5,18 @@ import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-rout
 import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { abreFolha, dataCurta, dataFalada } from "@/features/painel/folhaDia";
-import { faladoComSinal } from "@/ui/dinheiro";
+import { falado, faladoComSinal } from "@/ui/dinheiro";
+import { CORES_CATEGORIA, claro, escuro } from "@/ui/tokens";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import gastosBase from "../../../tests/fixtures/app_gastos.json";
+import tabela from "../../../tests/fixtures/gastos_dia_casos.json";
 
 jest.setTimeout(30_000); // monta o painel inteiro pelo router
+// Os ícones viram `View testID="icone-<nome>"`: é assim que o teste sabe qual seta e qual tom a pílula usa (mesmo recurso de painel_conversa_metas).
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- a fábrica do jest.mock não importa módulos de fora (hoisting)
+jest.mock("@/ui/componentes/Icone", () => ({ Icone: ({ nome, tom }: { nome: string; tom?: string }) => require("react").createElement(require("react-native").View, { testID: `icone-${nome}`, tom }) }));
 
 const F = fixture as Record<string, any>, DET = "/api/app/mes-detalhes", GAS = "/api/app/gastos", LANC = "/api/app/lancamentos";
 const dia = (d: string, saiu: string, entrou = "0.00") => ({ dia: d, entrou, saiu });
@@ -206,5 +211,134 @@ describe("mês do painel", () => {
   await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12");
   await apertar(nomeMes(mesAtual()).slice(0, 3)); await apertar(nomeMes(mesesAnteriores(mesAtual())[1]!));
   await waitFor(() => expect(tituloDa("2026-10-12")).toBeNull());
+ });
+});
+
+// ---- PR 3: pílula contra a média, barra com emojis e 3 maiores ----
+type Par = [string, string]; // [chave, valor bruto] / [descricao, valor]
+const D = (d: string, total: string, categorias: Par[] = [], maiores: Par[] = []) => ({ dia: d, total, quantidade: 1, categorias: categorias.map(([chave, valor]) => ({ chave, valor })), maiores: maiores.map(([descricao, valor]) => ({ descricao, valor, categoria: "x" })) });
+const pronta = (oculto = false) => waitFor(() => expect(folha().getAllByLabelText(oculto ? "Valor oculto" : /real|reais|centavo/).length).toBeGreaterThan(0));
+async function abrirDia(d: string, dias: ReturnType<typeof D>[], extra: Record<string, unknown> = {}, oculto = false, fontScale = 1) { // o fontScale padrão do jest é 2 (ampliado): fixar 1 para a barra aparecer
+ await act(async () => { Dimensions.set({ window: { ...janelaOriginal, width: 402, height: 874, fontScale } }); await drenar(); });
+ gastos = () => resposta(200, { ...gastosBase, dias, ...extra }); detalhes = { ...F[DET], dias: dias.map((x) => dia(x.dia, x.total)) };
+ await abrir("/gastos", d); if (oculto) await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ocultar valores" })); });
+ await tocar(d); await folhaAberta(d); await pronta(oculto);
+}
+// Um caso da tabela dourada (a mesma que prende `gastosDia.ts`): o total de cada dia vira o do /gastos e o corte vira o do /auth/me.
+const doCaso = (i: number, d: string, oculto = false) => { const e = tabela[i]!.entrada; corte = e.historico_desde; return abrirDia(d, e.dias.map((x) => D(x.dia, x.total)), { hoje: e.hoje, historico_desde: e.historico_desde }, oculto); };
+// Caso 2 do rótulo: média 25.37875, o arredondamento a centavos (round, não floor) dá 25,38.
+const pilula = () => folha().queryByTestId("pilula-dia");
+// A barra é decorativa (escondida do leitor de tela): sem `includeHiddenElements` o RNTL não a acha e "sem barra" passaria vazio.
+const barra = () => folha().queryByTestId("barra-composicao", { includeHiddenElements: true });
+const segmentos = () => folha().queryAllByTestId("segmento-composicao", { includeHiddenElements: true }).map((s) => StyleSheet.flatten(s.props.style));
+const cor = (no: any) => StyleSheet.flatten(no.props.style).color;
+
+describe("pílula contra a média (PR 3)", () => {
+ // 1: hoje 10-02, sem corte. 7: hoje 10-14, corte 10-06, 10-09 tem "0.000", 10-11 tem "0.004" (0 centavos), 10-20 é agendado.
+ it.each([
+  ["dia anterior ao hoje do /gastos", 1, "2026-10-01", true],
+  ["hoje (o dia em curso não compara)", 1, "2026-10-02", false],
+  ["agendado", 7, "2026-10-20", false],
+  ["total bruto 0.000", 7, "2026-10-09", false],
+  ["bruto 0.004 (0 centavos): decide o bruto", 7, "2026-10-11", true],
+ ])("%s", async (_n, i, d, aparece) => { await doCaso(i, d); expect(!!pilula()).toBe(aparece); });
+ it.each([
+  [0, "-4 neutro", "inkMuted", "ArrowDown"], [1, "-5 positivo", "positive", "ArrowDown"], [6, "+15 aviso", "warning", "ArrowUp"], [11, "0% sem seta", "inkMuted", null],
+ ] as const)("caso %s da tabela, %s: tom, seta e N%%", async (i, _n, tom, seta) => {
+  await doCaso(i, "2026-10-01"); const e = tabela[i]!.saida.dias.find((x) => x.dia === "2026-10-01")!, N = `${Math.abs(e.pct!)}%`;
+  expect(tom).toBe(({ gain: "positive", warn: "warning", "": "inkMuted" } as const)[e.tom as "gain"]); // o mapeamento web → app, contra a própria tabela
+  const t = within(pilula()!).getByText(N); expect([escuro[tom], claro[tom]]).toContain(cor(t));
+  for (const s of ["ArrowDown", "ArrowUp"]) { const ic = within(pilula()!).queryByTestId(`icone-${s}`); if (s === seta) expect(ic!.props.tom).toBe(tom); else expect(ic).toBeNull(); }
+ });
+ it.each([[1, `5% abaixo da média do mês, ${falado(20)} por dia`], [6, `15% acima da média do mês, ${falado(10000)} por dia`], [11, `na média do mês, ${falado(10000)} por dia`], [2, `259% acima da média do mês, ${falado(2538)} por dia`]])("caso %s: o rótulo fala o sentido e a média", async (i, rotulo) => {
+  await doCaso(i, "2026-10-01"); expect(pilula()!.props.accessibilityLabel).toBe(rotulo);
+ });
+ it("oculto: sem pílula e nenhum rótulo da folha fala média", async () => {
+  await doCaso(6, "2026-10-01", true); expect(pilula()).toBeNull(); expect(folha().queryByLabelText(/média/)).toBeNull();
+ });
+});
+
+describe("barra de categorias com emojis (PR 3)", () => {
+ const DIA = "2026-10-05"; // catálogo do fixture: lazer 🎮, mercado 🛒, alimentacao 🍔, transporte 🚌 (posições 0..3)
+ const cat = (n: number) => Array.from({ length: n }, (_, i) => ({ chave: `c${i}`, nome: `Cat ${i}`, emoji: ["🅰", "🅱", "🅾", "🆎", "🆑", "🆒", "🆓", "🆔", "🆕"][i]! }));
+ it("0.004 + 0.006 desenham 2 segmentos 40/60 pelo bruto; 0.004 sozinha não desenha barra nem emojis", async () => {
+  await abrirDia(DIA, [D(DIA, "0.010", [["alimentacao", "0.006"], ["transporte", "0.004"]])]);
+  expect(segmentos().map((x) => x.flexGrow)).toEqual([0.006, 0.004]); expect(folha().getByText("🍔")).toBeTruthy();
+ });
+ it("0.004 sozinha: sem barra e sem emojis", async () => {
+  await abrirDia(DIA, [D(DIA, "0.004", [["transporte", "0.004"]])]);
+  expect(barra()).toBeNull(); expect(folha().queryByText("🚌")).toBeNull();
+ });
+ it("fatia <= 0 fica fora da barra, dos emojis e do rótulo; só uma fatia > 0 sobra: sem barra", async () => {
+  await abrirDia(DIA, [D(DIA, "10.00", [["lazer", "10.00"], ["mercado", "0.00"], ["alimentacao", "-5.00"]])]);
+  expect(barra()).toBeNull(); expect(folha().queryByText("🛒")).toBeNull();
+ });
+ it("duas > 0 e uma zero: 2 segmentos, a zero não entra; escalas 90.005 × 1.005 sem erro; cor pela posição no catálogo", async () => {
+  await abrirDia(DIA, [D(DIA, "91.010", [["mercado", "90.005"], ["transporte", "0.00"], ["alimentacao", "1.005"]])]);
+  const s = segmentos(); expect(s.map((x) => x.flexGrow)).toEqual([90.005, 1.005]);
+  expect(s.map((x) => x.backgroundColor)).toEqual([CORES_CATEGORIA[1], CORES_CATEGORIA[2]]); // posição 1 e 2 no catálogo; no índice da fatia seriam 0 e 1
+  expect(folha().getAllByText(/^(🛒|🍔)$/).map((t) => t.props.children)).toEqual(["🛒", "🍔"]);
+  expect(folha().getByLabelText(`Mercado, ${falado(9001)}; Alimentação, ${falado(101)}`)).toBeTruthy(); // nome e valor (centavos) só no rótulo
+  expect(folha().queryByText(/Mercado|Alimentação/)).toBeNull();
+ });
+ it("chave fora do catálogo: cor neutra", async () => {
+  await abrirDia(DIA, [D(DIA, "3.00", [["fantasma", "1.00"], ["lazer", "2.00"]])]);
+  expect(segmentos().map((x) => x.backgroundColor)).toEqual([CORES_CATEGORIA[6], CORES_CATEGORIA[0]]);
+  expect(folha().getByText("•")).toBeTruthy(); // emoji de reserva da chave sem catálogo
+ });
+ it("a cor gira no vetor: a 9ª categoria (posição 8) pega CORES_CATEGORIA[8 % length], nunca undefined", async () => {
+  await abrirDia(DIA, [D(DIA, "2.00", [["c8", "1.00"], ["c1", "1.00"]])], { categorias: cat(9) });
+  expect(segmentos().map((x) => x.backgroundColor)).toEqual([CORES_CATEGORIA[8 % CORES_CATEGORIA.length], CORES_CATEGORIA[1]]);
+ });
+ it("até 4 emojis e '+N' para o resto; com exatamente 4, sem '+N'", async () => {
+  const f = (n: number) => D(DIA, "6.00", Array.from({ length: n }, (_, i) => [`c${i}`, "1.00"] as Par));
+  await abrirDia(DIA, [f(6)], { categorias: cat(6) });
+  expect(folha().getAllByText(/^[🅰🅱🅾🆎🆑🆒]$/u)).toHaveLength(4); expect(folha().getByText("+2")).toBeTruthy(); expect(folha().queryByText("🆑")).toBeNull();
+  expect(folha().getByLabelText(/Cat 5, /)).toBeTruthy(); // o rótulo lista TODAS as fatias
+ });
+ it("4 fatias: 4 emojis e nenhum '+N'", async () => {
+  await abrirDia(DIA, [D(DIA, "4.00", ["c0", "c1", "c2", "c3"].map((c) => [c, "1.00"] as Par))], { categorias: cat(4) });
+  expect(folha().getAllByText(/^[🅰🅱🅾🆎]$/u)).toHaveLength(4); expect(folha().queryByText(/^\+/)).toBeNull();
+ });
+ it("oculto: sem barra, emojis nem rótulo de fatias", async () => {
+  await abrirDia(DIA, [D(DIA, "91.010", [["mercado", "90.005"], ["alimentacao", "1.005"]])], {}, true);
+  expect(barra()).toBeNull(); expect(folha().queryByText("🛒")).toBeNull(); expect(folha().queryByLabelText(/Mercado/)).toBeNull();
+ });
+ it("fonte ampliada: sem barra, mas os emojis e o rótulo ficam", async () => {
+  await abrirDia(DIA, [D(DIA, "91.010", [["mercado", "90.005"], ["alimentacao", "1.005"]])], {}, false, 2);
+  expect(barra()).toBeNull(); expect(folha().getByText("🛒")).toBeTruthy(); expect(folha().getByLabelText(/^Mercado, /)).toBeTruthy();
+ });
+});
+
+describe("3 maiores (PR 3)", () => {
+ const DIA = "2026-10-05";
+ it("descrição + valor em centavos (HALF_UP do bruto) na ordem do servidor; descrição só com espaços vira 'Lançamento'", async () => {
+  await abrirDia(DIA, [D(DIA, "93.010", [], [["Mercado", "90.005"], ["Café", "1.005"], ["   ", "2.00"]])]);
+  expect(folha().getAllByText(/^(Mercado|Café|Lançamento)$/).map((t) => t.props.children)).toEqual(["Mercado", "Café", "Lançamento"]);
+  for (const c of [9001, 101]) expect(folha().getByLabelText(faladoComSinal(c, "saida"))).toBeTruthy();
+ });
+ it("oculto: 'Lançamento' no lugar das descrições e valores mascarados", async () => {
+  await abrirDia(DIA, [D(DIA, "91.010", [], [["Mercado", "90.005"], ["Café", "1.005"]])], {}, true);
+  expect(folha().queryByText("Mercado")).toBeNull(); expect(folha().getAllByText("Lançamento")).toHaveLength(2); expect(folha().queryByLabelText(faladoComSinal(9001, "saida"))).toBeNull();
+  expect(folha().getAllByLabelText("Valor oculto").length).toBeGreaterThanOrEqual(3); // total + 2 maiores
+ });
+ it("dia sem saída (estado do 2b) não ganha pílula, barra nem maiores", async () => {
+  detalhes = { ...F[DET], dias: DIAS }; // 10-04 só tem entrada (na grade, ausente de /gastos.dias)
+  await abrir(); await tocar("2026-10-04"); await folhaAberta("2026-10-04"); await pronta();
+  expect(pilula()).toBeNull(); expect(barra()).toBeNull(); expect(folha().queryByText("Lançamento")).toBeNull();
+ });
+});
+
+describe("troca de dia pela seta (PR 3)", () => {
+ it("do dia 05 ao 09: pílula, barra, emojis e maiores são os do dia NOVO, e os do 05 somem", async () => {
+  await abrirDia("2026-10-05", [D("2026-10-05", "91.010", [["mercado", "90.005"], ["alimentacao", "1.005"]], [["Mercado", "90.005"], ["Café", "1.005"]]), D("2026-10-09", "0.010", [["alimentacao", "0.006"], ["transporte", "0.004"]], [["Bala", "0.006"], ["Passe", "0.004"]])]);
+  expect(within(pilula()!).getByText("1300%")).toBeTruthy(); expect(segmentos().map((x) => x.flexGrow)).toEqual([90.005, 1.005]); expect(folha().getByText("Mercado")).toBeTruthy();
+  for (let i = 0; i < 4; i++) await apertar("Dia seguinte");
+  await folhaAberta("2026-10-09");
+  expect(within(pilula()!).getByText("100%")).toBeTruthy(); expect(within(pilula()!).getByTestId("icone-ArrowDown").props.tom).toBe("positive");
+  expect(segmentos().map((x) => x.flexGrow)).toEqual([0.006, 0.004]);
+  expect(folha().getAllByText(/^(🛒|🍔|🚌)$/).map((t) => t.props.children)).toEqual(["🍔", "🚌"]);
+  expect(folha().getAllByText(/^(Mercado|Café|Bala|Passe)$/).map((t) => t.props.children)).toEqual(["Bala", "Passe"]);
+  expect(folha().getByLabelText(faladoComSinal(1, "saida"))).toBeTruthy(); // 0.006 → 1 centavo (HALF_UP do bruto)
  });
 });
