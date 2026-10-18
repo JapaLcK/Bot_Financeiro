@@ -47,6 +47,12 @@ describe("só leitura no chat; as abas do painel seguem como eram", () => {
     expect(within(screen.getByTestId("bloco-hero")).queryByRole("button", { name: "30 dias" })).toBeNull();
     await ir("/resumo"); await waitFor(() => expect(screen.getByRole("button", { name: "30 dias" })).toBeTruthy());
   });
+  it("hero no chat não leva a seção 'Receitas na previsão', mesmo com respondidas no bloco; na aba (Resumo) ela é do card", async () => {
+    const respondidas = [{ chave: "extrato#alu", nome: "Aluguel Carla", valor: "1200.00", dia: 10, status: "confirmada" }];
+    instalarCards(true); comBlocos(bloco("hero", { previsao: { ...F["/api/app/previsao"], receitas_do_banco: respondidas } })); await perguntar();
+    expect(within(screen.getByTestId("bloco-hero")).getByText("30 dias · 05/11/2026")).toBeTruthy(); // o card desenhou o bloco
+    expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); expect(screen.queryByTestId("receitas-respondidas")).toBeNull();
+  });
   it("assinaturas sem Ignorar/É assinatura/Voltar a mostrar/Remover marca; na aba, com", async () => {
     const dado = { ...F["/api/app/assinaturas"] }, outra = { ...dado.servicos[0], chave: "o", nome: "Outra" };
     const todas = { ...dado, servicos: [{ ...dado.servicos[0], marcada: true }], outras: [outra], ignoradas: [{ ...outra, chave: "i", nome: "Ignorada" }] };

@@ -433,6 +433,8 @@ from .privacy import (
     ensure_account_deletion_columns,
     is_account_scheduled_for_deletion,
     schedule_account_deletion,
+    excluir_conta_marcada,
+    ReautenticacaoRecusada,
     build_user_export_zip,
     delete_user_data,
     process_due_account_deletions,
@@ -591,7 +593,8 @@ __all__ = [
     "news_url_exists", "insert_news_post", "backfill_news_image", "get_recent_news",
     # privacy
     "ensure_account_deletion_columns", "is_account_scheduled_for_deletion",
-    "schedule_account_deletion", "build_user_export_zip", "delete_user_data",
+    "schedule_account_deletion", "excluir_conta_marcada", "ReautenticacaoRecusada",
+    "build_user_export_zip", "delete_user_data",
     "process_due_account_deletions",
     "verify_user_password", "PasswordNotSetError", "get_user_email",
     "create_data_export_token", "consume_data_export_token",

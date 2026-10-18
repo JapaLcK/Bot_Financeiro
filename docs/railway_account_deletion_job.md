@@ -1,6 +1,6 @@
 # Job dedicado de exclusão de conta no Railway
 
-Este job conclui exclusões de conta cujo período de carência de 7 dias já venceu.
+Este job conclui exclusões de conta que vencem sem terminar: as que falharam no `DELETE /auth/account` (que agora apaga no ato e deixa a conta `scheduled` vencida se der erro) e as agendadas antes da exclusão imediata, com carência de 7 dias.
 Ele foi feito para Railway Cron: roda uma vez, processa as contas vencidas, envia o e-mail final e encerra o processo.
 
 ## Serviço no Railway

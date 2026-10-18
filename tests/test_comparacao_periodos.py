@@ -1,9 +1,9 @@
 """Comparação de períodos equivalentes (PL-07): a janela (tabela pura) e os números (banco real).
 
-Relógio: `agora` injetado (12/10/2026, fuso do app). Cartão pela FATURA, closing_day 10: a compra de
+Relógio: `agora` injetado (12/10/2026, fuso do app); o mês aberto é o mês INTEIRO (P1-B, igual ao `resumo_do_mes`). Cartão pela FATURA, closing_day 10: a compra de
 20/09 cai na fatura de 10/10 e o parcelado de 20/08 (3x) tem uma parcela em 10/09, uma em 10/10 e
 uma em 10/11. Controles por mutação (CLAUDE.md §3), medidos para o GRUPO: base trocada por
-`get_summary_by_period`, "mesmos N dias" trocado por mês inteiro, `user_id` fora de uma perna, gate
+`get_summary_by_period`, mês aberto trocado pelos mesmos N dias, `user_id` fora de uma perna, gate
 depois da leitura, `hoje` em UTC, pct arredondado em 0 casas. Os resultados estão no relato do PR.
 """
 from __future__ import annotations
@@ -66,10 +66,10 @@ def semeia(uid: int, fator: int = 1) -> None:
     desp(600, 10, 3, "Alimentação"); desp(300, 10, 5, "Alimentacao")   # noqa: E702  duas grafias, uma categoria
     desp(45, 10, 4, "Streaming"); desp(20, 10, 6, None); desp(100, 10, 8, "Transporte")        # noqa: E702
     desp(500, 10, 7, "Alimentação", interno=True)                         # movimento interno: fora
-    desp(777, 10, 15, "Alimentação")                                      # depois de hoje (12): fora
+    desp(777, 10, 15, "Alimentação")                                      # depois de hoje (12): entra, o mês aberto é inteiro
     _lanc(uid, "receita", 3000 * fator, 10, 5)
     desp(1000, 9, 2, "alimentação"); desp(200, 9, 8, "Lazer"); desp(100, 9, 3, "Transporte")   # noqa: E702
-    desp(1800, 9, 20, "Alimentação")                                      # setembro depois do dia 12
+    desp(1800, 9, 20, "Alimentação")                                      # setembro depois do dia 12: entra, o anterior é inteiro
     _lanc(uid, "receita", 2500 * fator, 9, 1)
     cartao = db.create_card(uid, "Nubank", closing_day=10, due_day=17)
     db.add_credit_purchase(uid, cartao, 70 * fator, "Alimentação", "fatura 10/10", date(2026, 9, 20))
@@ -84,37 +84,39 @@ def _linhas(r, chave="categorias"):
     return {c["categoria"]: c for c in r[chave]}
 
 
-def test_mes_aberto_mesmos_n_dias_cartao_pela_fatura_e_categorias():
+def test_mes_aberto_inteiro_cartao_pela_fatura_e_categorias():
     uid = usuario_pagante("plus")
     semeia(uid)
     r = cp.comparar_mes(uid, 2026, 10, AGORA)
-    assert r["modo"] == "mes_aberto" and r["mesmo_tamanho"] and not r["anterior_encurtado"]
-    assert (r["atual"]["fim"], r["anterior"]["fim"]) == (date(2026, 10, 12), date(2026, 9, 12))
-    # Outubro: 900 + 45 + 20 + 100 + (70 + parcela de 100 na fatura de 10/10). Setembro: 1000 + 200 + 100 + (150 + 100).
-    assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"]) == (D("1235.00"), D("1550.00"))
-    assert (r["despesa"]["total_delta"], r["despesa"]["pct"]) == (D("-315.00"), D("-20.3"))
+    assert r["modo"] == "mes_aberto" and not r["mesmo_tamanho"] and not r["anterior_encurtado"]   # 31 × 30 dias
+    assert (r["atual"]["fim"], r["anterior"]["fim"]) == (date(2026, 10, 31), date(2026, 9, 30))
+    # Outubro inteiro: 900 + 45 + 20 + 100 + 777 (dia 15) + (70 + parcela de 100 na fatura de 10/10). Setembro inteiro:
+    # 1000 + 200 + 100 + 1800 (dia 20) + (150 + 100). A receita não muda (3000 e 2500: nenhuma é depois do dia 12).
+    assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"]) == (D("2012.00"), D("3350.00"))
+    assert (r["despesa"]["total_delta"], r["despesa"]["pct"]) == (D("-1338.00"), D("-39.9"))
     assert (r["receita"]["total_atual"], r["receita"]["pct"]) == (D("3000.00"), D("20.0"))
-    assert (r["resultado"]["total_atual"], r["resultado"]["total_anterior"], r["resultado"]["total_delta"]) == (D("1765.00"), D("950.00"), D("815.00"))
+    assert (r["resultado"]["total_atual"], r["resultado"]["total_anterior"], r["resultado"]["total_delta"]) == (D("988.00"), D("-850.00"), D("1838.00"))
     assert r["base"] == {"regra": "entrou_e_saiu_do_mes", "cartao": "fatura", "origem": "lançamentos + faturas de cartão",
                          "cartao_lancamentos": {"atual": 2, "anterior": 2}}
     assert r["motivo"] is None and r["categorias_omitidas"] == 0
     assert [c["categoria"] for c in r["categorias"]] == [  # |delta| desc
-        "Lazer", "Saúde", "Streaming", "Alimentação", "sem categoria", "Transporte"]
+        "Alimentação", "Lazer", "Saúde", "Streaming", "sem categoria", "Transporte"]
     por = _linhas(r)
     assert (por["Streaming"]["estado"], por["Streaming"]["pct"]) == ("nova", None)
     assert (por["Lazer"]["estado"], por["Lazer"]["pct"], por["Lazer"]["total_delta"]) == ("sem_gasto", D("-100.0"), D("-200.00"))
     assert (por["Saúde"]["estado"], por["Transporte"]["estado"]) == ("sem_gasto", "igual")
-    assert (por["Alimentação"]["total_atual"], por["Alimentação"]["total_anterior"], por["Alimentação"]["pct"]) == (D("970.00"), D("1000.00"), D("-3.0"))
+    assert (por["Alimentação"]["total_atual"], por["Alimentação"]["total_anterior"], por["Alimentação"]["pct"]) == (D("1747.00"), D("2800.00"), D("-37.6"))
     assert por["sem categoria"]["estado"] == "nova"
     assert sum(c["total_atual"] for c in r["categorias"]) == r["despesa"]["total_atual"]
 
 
-def test_dia_31_contra_mes_de_30_dias_compara_com_o_anterior_inteiro():
+def test_o_dia_de_hoje_nao_muda_o_mes_aberto():
     uid = usuario_pagante("plus")
     semeia(uid)
     r = cp.comparar_mes(uid, 2026, 10, datetime(2026, 10, 31, 9, tzinfo=_tz()))
-    assert r["anterior_encurtado"] and not r["mesmo_tamanho"] and "só 30 dias" in r["escolha"]
+    assert not r["anterior_encurtado"] and not r["mesmo_tamanho"] and "Outubro até agora" in r["escolha"]
     assert (r["atual"]["dias"], r["anterior"]["dias"]) == (31, 30)
+    assert r["despesa"] == cp.comparar_mes(uid, 2026, 10, AGORA)["despesa"]     # dia 31 e dia 12: o mesmo número
     # setembro inteiro: 1000 + 200 + 100 + 1800 e as faturas que fecham em setembro (150 + 100)
     assert r["despesa"]["total_anterior"] == D("3350.00")
 
@@ -148,16 +150,16 @@ def test_usuario_b_na_mesma_janela_nao_vaza_nem_centavo():
     semeia(a)
     semeia(b, fator=7)
     ra, rb = cp.comparar_mes(a, 2026, 10, AGORA), cp.comparar_mes(b, 2026, 10, AGORA)
-    assert (ra["despesa"]["total_atual"], ra["despesa"]["total_anterior"]) == (D("1235.00"), D("1550.00"))
+    assert (ra["despesa"]["total_atual"], ra["despesa"]["total_anterior"]) == (D("2012.00"), D("3350.00"))
     assert ra["base"]["cartao_lancamentos"] == {"atual": 2, "anterior": 2}
-    assert _linhas(ra)["Alimentação"]["total_atual"] == D("970.00")
+    assert _linhas(ra)["Alimentação"]["total_atual"] == D("1747.00")
     janelas = (("2026-10-01", "2026-10-12"), ("2026-09-01", "2026-09-12"))   # e o período livre (cartão pela compra)
     la, lb = _intervalo(a, *janelas), _intervalo(b, *janelas)
     assert (la["despesa"]["total_atual"], la["despesa"]["total_anterior"]) == (D("1065.00"), D("1450.00"))
     assert (lb["despesa"]["total_atual"], lb["despesa"]["total_anterior"]) == (D("7455.00"), D("10150.00"))
     assert la["base"]["cartao_lancamentos"] == lb["base"]["cartao_lancamentos"] == {"atual": 0, "anterior": 1}
-    assert (rb["despesa"]["total_atual"], rb["despesa"]["total_anterior"]) == (D("8645.00"), D("10850.00"))
-    assert _linhas(rb)["Alimentação"]["total_atual"] == D("6790.00")
+    assert (rb["despesa"]["total_atual"], rb["despesa"]["total_anterior"]) == (D("14084.00"), D("23450.00"))   # 7 × A
+    assert _linhas(rb)["Alimentação"]["total_atual"] == D("12229.00")
 
 
 def test_so_o_mes_atual_com_dados_vira_sem_base_sem_dividir_por_zero():
@@ -167,7 +169,7 @@ def test_so_o_mes_atual_com_dados_vira_sem_base_sem_dividir_por_zero():
     assert r["motivo"] == "sem_base" and r["categorias"] == []
     assert (r["despesa"]["estado"], r["despesa"]["pct"], r["despesa"]["total_atual"]) == ("nova", None, D("80.00"))
     assert (r["receita"]["estado"], r["resultado"]["pct"]) == ("vazio", None)
-    assert "Nenhuma fatura de cartão fechou" in r["escolha"]            # sem cartão na janela: o texto diz
+    assert "Nenhuma fatura de cartão no mês" in r["escolha"]            # sem cartão na janela: o texto diz
 
 
 def test_categoria_vazia_vira_sem_categoria_e_grafias_formam_uma_linha():
@@ -194,7 +196,7 @@ def test_mais_de_dez_categorias_omite_as_menores():
 def test_downgrade_devolve_none_sem_ler_nada(tier, monkeypatch):
     uid = usuario_pagante("plus")
     semeia(uid)
-    assert cp.comparar_mes(uid, 2026, 10, AGORA)["despesa"]["total_atual"] == D("1235.00")   # positivo: Plus lê
+    assert cp.comparar_mes(uid, 2026, 10, AGORA)["despesa"]["total_atual"] == D("2012.00")   # positivo: Plus lê
     tier("essencial")
     boom = lambda *a, **k: pytest.fail("leu algo depois do gate")  # noqa: E731
     for alvo in ("get_conn", "history_earliest_date"):
@@ -227,7 +229,7 @@ def test_categorias_falhando_mantem_os_totais_e_loga_so_a_classe(monkeypatch, ca
     with caplog.at_level(logging.WARNING):
         r = cp.comparar_mes(uid, 2026, 10, AGORA)
     assert r["motivo"] == "categorias_indisponiveis" and r["categorias"] == []
-    assert r["despesa"]["total_atual"] == D("1235.00")
+    assert r["despesa"]["total_atual"] == D("2012.00")
     assert "RuntimeError" in caplog.text and "segredo" not in caplog.text
 
 
@@ -332,7 +334,7 @@ def test_rotulo_e_a_grafia_do_lancamento_mais_recente_e_cartao_sem_categoria():
 
 def test_ultimo_dia_da_janela_entra_e_contagens_de_cartao_assimetricas():
     uid = usuario_pagante("plus")
-    cartao = db.create_card(uid, "Nubank", closing_day=12, due_day=19)    # a fatura fecha NO último dia da janela
+    cartao = db.create_card(uid, "Nubank", closing_day=12, due_day=19)    # a fatura fecha no dia 12, dentro do mês
     for dia in (3, 5, 7):
         db.add_credit_purchase(uid, cartao, 10, "Mercado", f"out{dia}", date(2026, 10, dia))
     db.add_credit_purchase(uid, cartao, 40, "Mercado", "set", date(2026, 9, 4))
@@ -340,7 +342,7 @@ def test_ultimo_dia_da_janela_entra_e_contagens_de_cartao_assimetricas():
          (%s, 'despesa', 3, 'Mercado', %s)""", (uid, datetime(2026, 10, 12, 23, 59, tzinfo=_tz()), uid,
                                               datetime(2026, 9, 12, 23, 59, tzinfo=_tz())))
     r = cp.comparar_mes(uid, 2026, 10, AGORA)
-    assert (r["atual"]["fim"], r["anterior"]["fim"]) == (date(2026, 10, 12), date(2026, 9, 12))
+    assert (r["atual"]["fim"], r["anterior"]["fim"]) == (date(2026, 10, 31), date(2026, 9, 30))   # mesmo número: nada depois do dia 12
     assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"]) == (D("37.00"), D("43.00"))
     assert r["base"]["cartao_lancamentos"] == {"atual": 3, "anterior": 1}
     assert "Nenhuma fatura" not in r["escolha"]
@@ -354,7 +356,7 @@ def test_categorias_com_erro_de_banco_nao_derrubam_a_conexao(monkeypatch):
         cur.execute("select 1/0")
     monkeypatch.setattr(resumo_mes, "categorias", erro_sql)
     r = cp.comparar_mes(uid, 2026, 10, AGORA)
-    assert r["motivo"] == "categorias_indisponiveis" and r["despesa"]["total_atual"] == D("1235.00")
+    assert r["motivo"] == "categorias_indisponiveis" and r["despesa"]["total_atual"] == D("2012.00")
     monkeypatch.undo()
     assert cp.comparar_mes(uid, 2026, 10, AGORA)["motivo"] is None   # a conexão voltou limpa ao pool
 
@@ -395,7 +397,7 @@ def test_motivos_do_bloco_de_contas_viram_aviso_e_falha_deles_degrada(monkeypatc
     monkeypatch.setattr(contas, "listar", falha)
     with caplog.at_level(logging.WARNING):
         r = cp.comparar_mes(uid, 2026, 10, AGORA)
-    assert r["motivos"] == [] and r["nota"] is None and r["despesa"]["total_atual"] == D("1235.00")
+    assert r["motivos"] == [] and r["nota"] is None and r["despesa"]["total_atual"] == D("2012.00")
     assert "RuntimeError" in caplog.text and "segredo" not in caplog.text
 
 
@@ -425,9 +427,9 @@ def test_afirmacao_certa_fica_sustentada_pelo_json_da_tool_e_a_trocada_nao():
     semeia(uid)
     r = _compare_periods(uid, {"mes": "2026-10"})
     evidencia = [json.dumps(r, ensure_ascii=False)]                    # sem default=: tudo já é JSON
-    certo = check("🐷 Você gastou R$ 1.235,00 contra R$ 1.550,00 em setembro.", evidencia, "compara")
+    certo = check("🐷 Você gastou R$ 2.012,00 contra R$ 3.350,00 em setembro.", evidencia, "compara")
     assert certo and all(c.supported for c in certo), certo
-    errado = check("🐷 Você gastou R$ 1.236,00 contra R$ 1.550,00 em setembro.", evidencia, "compara")
+    errado = check("🐷 Você gastou R$ 2.013,00 contra R$ 3.350,00 em setembro.", evidencia, "compara")
     assert any(not c.supported for c in errado), errado
     cat = check("🐷 Em Lazer foram R$ 0,00 contra R$ 200,00.", evidencia, "compara")
     assert cat and all(c.supported for c in cat), cat
@@ -441,7 +443,7 @@ def test_periodo_livre_cartao_pela_data_da_compra_e_mes_pela_fatura():
     assert livre["base"]["regra"] == "periodo_livre" and livre["base"]["cartao"] == "data_da_compra"
     assert "data da compra" in livre["escolha"]
     # Outubro 1-10 não tem compra de cartão (as faturas de 10/10 são de compras de setembro e agosto); setembro
-    # 1-10 tem a de 150 do dia 03. A fatura que fecha na janela NÃO entra: 1065 e 1450, não 1235 e 1550.
+    # 1-10 tem a de 150 do dia 03. A fatura que fecha na janela NÃO entra: 1065 e 1450, não 2012 e 3350 do `mes`.
     assert (livre["despesa"]["total_atual"], livre["despesa"]["total_anterior"]) == (D("1065.00"), D("1450.00"))
     assert livre["base"]["cartao_lancamentos"] == {"atual": 0, "anterior": 1}
     # o parcelado 3x de 20/08 (as 3 parcelas de 100 com a mesma data) entra inteiro em agosto
@@ -449,7 +451,7 @@ def test_periodo_livre_cartao_pela_data_da_compra_e_mes_pela_fatura():
     assert ago["despesa"]["total_atual"] == D("700.00") and ago["base"]["cartao_lancamentos"]["atual"] == 3
     # o mesmo período pelo caminho `mes`: fatura
     mes = cp.comparar_mes(uid, 2026, 10, AGORA)
-    assert mes["base"]["cartao"] == "fatura" and mes["despesa"]["total_atual"] == D("1235.00")
+    assert mes["base"]["cartao"] == "fatura" and mes["despesa"]["total_atual"] == D("2012.00")
     # diferencial contra as outras tools de período livre da IA (mesmas consultas)
     from core.services.ai_chat.tools import get_tool
     for (ini, fim), lado in ((atual, "total_atual"), (anterior, "total_anterior")):
@@ -550,13 +552,13 @@ def test_receita_e_despesa_no_ultimo_dia_da_janela_livre_entram():
 # ── rodada 8: redirecionamento, rótulos, conexões ───────────────────────────
 @pytest.mark.parametrize("fim_b", ["2026-10-12", "2026-10-31"])
 def test_mes_corrente_x_anterior_por_datas_responde_como_mes(fim_b):
-    """"outubro contra setembro" por 4 datas (hoje = 12/10) é `mes=2026-10`: campo a campo, com os mesmos 12 dias."""
+    """"outubro contra setembro" por 4 datas (hoje = 12/10) é `mes=2026-10`: campo a campo, o mês inteiro."""
     uid = usuario_pagante("plus")
     semeia(uid)
     r = _compare_periods(uid, _quatro(("2026-09-01", "2026-09-30"), ("2026-10-01", fim_b)))
     m = _compare_periods(uid, {"mes": "2026-10"})
     assert r == m and r["modo"] == "mes_aberto" and r["base"]["cartao"] == "fatura"
-    assert (r["atual"]["inicio"], r["atual"]["fim"], r["anterior"]["fim"]) == ("2026-10-01", "2026-10-12", "2026-09-12")
+    assert (r["atual"]["inicio"], r["atual"]["fim"], r["anterior"]["fim"]) == ("2026-10-01", "2026-10-31", "2026-09-30")
     # não redireciona: setembro × agosto (fechados) e outubro × agosto (dois meses atrás) seguem por datas
     for a, b in ((("2026-08-01", "2026-08-31"), ("2026-09-01", "2026-09-30")), (("2026-08-01", "2026-08-31"), ("2026-10-01", fim_b))):
         assert _compare_periods(uid, _quatro(a, b))["modo"] == "periodos_informados", (a, b)

@@ -15,7 +15,7 @@ consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 `categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); lê dela
 `core/services/comparacao_periodos.py` (`compare_periods` da IA, PL-07, com `mes=`; com datas que não são meses
 inteiros dos dois lados ele usa a regra de período livre das outras tools, cartão pela data da compra:
-`n_compras_cartao` conta essas compras).
+`n_compras_cartao` conta essas compras). O mês aberto da comparação é o mês inteiro, como o `resumo_do_mes`.
 
 Ficam fora da regra, de propósito, e é divergência conhecida: relatório diário e semanal
 (só `launches`, sem cartão: `get_summary_by_period`), o Repórter

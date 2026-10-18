@@ -25,7 +25,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import google_de_mentira, login_google
+from _apoio_auth_app import google_de_mentira, login_google, marca_exclusao
 
 SENHA = "senha-forte-123"
 UA_APP = "PigBankApp/0.1.0 (iPhone 17 Pro; iOS 26.1)"
@@ -145,7 +145,7 @@ def test_b9_conta_com_exclusao_agendada_nao_troca():
     bot, por exemplo), senão o 400 viria por outro motivo e o teste não mediria
     a guarda da troca."""
     uid, _ = _conta()
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA)
     r = _troca(db.create_dashboard_session(uid, 5 / 60))
     assert r.status_code == 403, r.text
     _sem_tokens(r)
