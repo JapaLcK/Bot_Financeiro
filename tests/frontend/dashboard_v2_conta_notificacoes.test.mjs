@@ -1,6 +1,6 @@
 /**
  * /painel#/conta/configuracoes (conta/Notificacoes.tsx, conta/api.ts): "Notificações", as 7 preferências da /settings.
- *   · a carga bate com o GET; cada interruptor salva sozinho, com o corpo mínimo (só o campo tocado) e o CSRF; UM PATCH em voo, no máximo;
+ *   · a carga bate com o GET; cada interruptor salva sozinho, com o corpo mínimo (só o campo tocado) e o CSRF; UM PATCH em voo, no máximo (também se a rota é deixada e reaberta: a trava é do módulo);
  *   · a tela segue a RESPOSTA do PATCH; 400 sai verbatim, 500/prazo viram a reserva, 401 vira "sessão"; em toda falha o interruptor volta ao servidor;
  *   · 402 no GET = sem plano; sem e-mail/WhatsApp = interruptores travados e link para o Perfil; semanal fora do plano (travado, ou gravado e desligável);
  *   · o horário NÃO religa o diário (D1: o corpo leva o `daily_report_enabled` atual; o servidor de mentira imita o `set_daily_report_hour`);
@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { navegador } from "./_guia.mjs";
 import { RAIZ } from "./_painel.mjs";
-import { JSON_ERRO, SESSAO, abrirSeguranca, notifPadrao, portao } from "./_conta_seguranca.mjs";
+import { JSON_ERRO, SESSAO, abrirSeguranca, ate, notifPadrao, portao } from "./_conta_seguranca.mjs";
 
 const browser = navegador();
 void browser;
@@ -319,6 +319,28 @@ test("um GET em voo DURANTE o PATCH não repinta o valor de antes (o invalidate 
   const marca = await p.sw("Dicas de uso").isChecked();
   await fecha(p);
   assert.equal(marca, false);
+});
+
+test("NEG: sair da rota e voltar com o PATCH em voo NÃO libera um 2º PATCH (a trava é do módulo, não do componente)", async () => {
+  const p = await abrirSeguranca();
+  await p.sw("Dicas de uso").waitFor();
+  const [segura, solta] = portao();
+  p.s.nPatch = async (r) => { await segura; p.s.notif.tip_email_enabled = false; await r.fulfill({ json: structuredClone(p.s.notif) }); };
+  await p.sw("Dicas de uso").click();
+  await ate(p.page, () => p.s.nPatches.length === 1, "o 1º PATCH saiu");
+  await p.page.evaluate(() => { location.hash = "#/conta/perfil"; });
+  await p.page.locator("#page-title", { hasText: "Perfil" }).waitFor();
+  await p.page.evaluate(() => { location.hash = "#/conta/configuracoes"; });
+  await p.sw("Dicas de uso").waitFor(); // `Preferencias` remontou: sem `previa`, o clique só é barrado pela trava
+  await p.sw("Dicas de uso").click();
+  await p.page.waitForTimeout(400);
+  assert.equal(p.s.nPatches.length, 1, "o clique depois de voltar não gera um 2º PATCH com o 1º em voo");
+  solta();
+  await ate(p.page, () => p.s.notif.tip_email_enabled === false, "o 1º PATCH terminou");
+  await p.page.waitForTimeout(400);
+  await p.sw("Dicas de uso").click(); // POS: solto o 1º, um clique novo gera o 2º
+  await ate(p.page, () => p.s.nPatches.length === 2, "o 2º PATCH saiu");
+  await fecha(p);
 });
 
 test("hora gravada fora da lista (15:00, 09:30) aparece no select, selecionada, sem mudar nada sozinha", async () => {

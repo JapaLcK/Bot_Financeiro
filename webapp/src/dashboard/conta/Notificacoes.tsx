@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErroApi, contaQuery } from "../lib/v2";
 import { href } from "../router";
@@ -14,6 +14,10 @@ export function ContaNotificacoes() {
   return uidValido(uid) ? <Preferencias key={uid} uid={uid} /> : null; // sem uid (ou protótipo) nenhum pedido sai
 }
 
+// No MÓDULO, não no componente: sair da rota e voltar remonta `Preferencias` e uma trava por instância liberaria um 2º PATCH com o 1º em voo
+// (e o corpo do 2º sairia do cache velho). Síncrona: dois cliques no mesmo tick não passam por `previa`.
+const voando = { current: false };
+
 function Preferencias({ uid }: { uid: number }) {
   const id = useId();
   const qc = useQueryClient();
@@ -22,7 +26,6 @@ function Preferencias({ uid }: { uid: number }) {
   const [previa, setPrevia] = useState<Partial<Notificacoes> | null>(null); // o valor que o dono acabou de pedir, até o servidor responder
   const [aviso, setAviso] = useState("");
   const [falha, setFalha] = useState<Falha | null>(null);
-  const voando = useRef(false); // síncrona: dois cliques no mesmo tick não passam por `previa`
 
   const erro = q.error instanceof ErroApi ? q.error : null;
   const sessao = erro?.status === 401; // sessão acabada esconde o que ficou em cache
