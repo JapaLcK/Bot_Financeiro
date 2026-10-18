@@ -1,6 +1,8 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 
 import { chamar, comLimite } from "@/api/client";
+import { bancosSchema } from "@/api/schemas/painel";
+import { lerRecurso } from "@/services/painel";
 import { conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema, refreshSchema } from "@/api/schemas/openFinance";
 
 /**
@@ -61,3 +63,6 @@ export const registrarItem = (uid: number, itemId: string, controlador?: AbortCo
 export const onboardingBancario = () => chamar("/onboarding/open-finance", onboardingBancarioSchema, { sinal: comLimite() });
 export const limiteBancario = (uid: number) => chamar(`/open-finance/${uid}/limite`, limiteBancarioSchema, { sinal: comLimite() });
 export const desconectarBanco = (uid: number, id: number) => chamar(`/open-finance/${uid}/connections/${id}`, desconectadoSchema, { metodo: "DELETE", sinal: comLimite() });
+
+/** O que cada banco vale (`GET /api/app/bancos`). OPCIONAL para quem chama: 403 (onboarding), 404 (servidor velho), 5xx, rede e abort são "sem números". */
+export const bancos = (controlador: AbortController) => lerRecurso("/api/app/bancos", bancosSchema, controlador);

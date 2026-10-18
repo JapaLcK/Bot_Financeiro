@@ -9,6 +9,16 @@ export const perfilPainelSchema = z.object({ perfil: z.enum(["padrao", "economiz
 export const categoriasSchema = z.object({ categorias: z.array(z.object({ chave: z.string(), nome: z.string() })) });
 export const planoSchema = z.object({ plan_tier: z.enum(["free", "essencial", "plus", "pro"]) });
 export const contasSchema = z.object({ total: dinheiro, motivos, fora_do_total: z.number().int(), carteira: z.object({ saldo: dinheiro, motivos }), contas: z.array(z.object({ id: z.number().int(), instituicao: texto, nome: texto, saldo: dinheiro.nullable(), moeda: z.string(), no_total: z.boolean(), conexao: z.string(), sincronizado_em: texto, motivos })) });
+/**
+ * `GET /api/app/bancos` (`api/v2/bancos.py`): o que cada banco vale, calculado no servidor (o app NÃO soma dinheiro). `null` ≠ zero. Tolerante POR ITEM: um banco que não passa
+ * (p.ex. dinheiro em notação científica, "1E-7", que `decimalParaCentavos` recusa) sai da lista e a tela mostra "—" para ele; o topo que não passa vira `null`.
+ */
+const bancoSchema = z.object({ conexao_id: z.number().int(), saldo_conta: dinheiro.nullable(), investido: dinheiro.nullable(), total: dinheiro.nullable(), contas: z.number().int().nonnegative(), cartoes: z.number().int().nonnegative(), investimentos: z.number().int().nonnegative().nullable(), motivos });
+export const bancosSchema = z.object({
+  total: dinheiro.nullable().catch(null), motivos: motivos.catch([]),
+  bancos: z.array(z.unknown()).transform((itens) => itens.flatMap((i) => { const b = bancoSchema.safeParse(i); return b.success ? [b.data] : []; })),
+});
+export type BancoLido = z.output<typeof bancoSchema>;
 export const resumoSchema = z.object({ mes: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, anterior: z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro }).nullable(), motivos });
 export const lancamentoSchema = z.object({ id: z.string(), data: z.string(), hora: texto, tipo: z.enum(["entrada", "saida"]), interno: z.boolean(), valor: dinheiro, moeda: z.string(), descricao: texto, mensagem: texto, categoria: texto, origem: z.enum(["carteira", "banco", "cartao", "registro_antigo"]), fundido: z.boolean(), instituicao: texto, conta_id: z.number().int().nullable(), cartao_id: z.number().int().nullable(), parcela: z.object({ n: z.number().int(), total: z.number().int() }).nullable(), fatura: texto, pode: z.array(z.string()), motivos });
 export const lancamentosSchema = z.object({ mes: z.string(), itens: z.array(lancamentoSchema), proximo: texto, motivos });
