@@ -89,11 +89,9 @@ export function temMotivoBanco(v: unknown): boolean {
  if (!v || typeof v !== "object") return false;
  return Object.entries(v).some(([k, x]) => (k === "motivos" && Array.isArray(x) && x.some((m) => MOTIVOS_BANCO.has(typeof m === "string" ? m : m?.codigo))) || temMotivoBanco(x));
 }
-/** As frases dos `motivos` (sem os de banco, deduplicadas): o `Avisos` atrás do ícone e o "Como foi feita" da Previsão. */
-export function mensagensDosMotivos(motivos: string[]) { return [...new Set(motivos.filter((m) => !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))]; }
 export function Avisos({ motivos }: { motivos: string[] }) {
  const [aberto, setAberto] = useState(false);
- const mensagens = mensagensDosMotivos(motivos);
+ const mensagens = [...new Set(motivos.filter((m) => !MOTIVOS_BANCO.has(m)).map((m) => MOTIVOS[m] ?? "Há informações incompletas ou a conferir neste recurso."))];
  if (!mensagens.length) return null;
  return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }

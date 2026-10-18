@@ -56,13 +56,14 @@ it("pior dia sem causas é só a linha, sem nada para abrir", async () => {
  expect(hero().getByText("Menor saldo previsto · 25/10/2026")).toBeTruthy(); expect(screen.queryByTestId("pior-dia")).toBeNull(); expect(hero().queryByText(/^desde/)).toBeNull();
 });
 it("'Como foi feita' fica fechado e, aberto, mostra a base, as premissas e a cobertura", async () => {
- previsao = { ...F, premissas: ["Projeção condicional; receitas previstas não são garantidas."], cobertura: { fontes_incompletas: ["conciliacao_pendente"], janela_conferencia_inicio: "2026-09-01", inclui_estimativa_variavel: false } };
+ const p = "Projeção condicional; receitas previstas não são garantidas."; const erro = jest.spyOn(console, "error");
+ previsao = { ...F, premissas: [p, p], cobertura: { fontes_incompletas: ["gastos_variaveis_nao_estimados"], janela_conferencia_inicio: "2026-09-01", inclui_estimativa_variavel: false } };
  await abrirResumo();
  expect(hero().queryByText(/receitas previstas não são garantidas/)).toBeNull(); expect(hero().queryByText("Saldo de partida")).toBeNull();
  await apertar(screen.getByTestId("como-foi-feita"));
- expect(hero().getByText("• Projeção condicional; receitas previstas não são garantidas.")).toBeTruthy();
+ expect(hero().getAllByText(`• ${p}`)).toHaveLength(2); expect(erro.mock.calls.flat().join(" ")).not.toMatch(/same key/); // premissa repetida não quebra a lista
  expect(hero().getByText("Saldo de partida")).toBeTruthy(); expect(hero().getByText("Carteira + 2 contas do Open Finance")).toBeTruthy();
- expect(hero().getByText("Conferência desde 01/09")).toBeTruthy(); expect(hero().getByText("Há movimentos aguardando conciliação.")).toBeTruthy();
+ expect(hero().getByText("Conferência desde 01/09")).toBeTruthy(); expect(hero().queryByText(/Há informações incompletas/)).toBeNull();
 });
 it("compromissos: grupo de valores iguais mostra o valor e quantas vezes; uma ocorrência é uma linha só", async () => {
  previsao = { ...F, compromissos: [
@@ -76,6 +77,13 @@ it("compromissos: grupo de valores iguais mostra o valor e quantas vezes; uma oc
  expect(card.queryByText("10/11/2026")).toBeNull();
  await apertar(screen.getByTestId("grupo-net"));
  expect(card.getByText("10/10/2026")).toBeTruthy(); expect(card.getByText("10/11/2026")).toBeTruthy();
+});
+// Sem data fica no fim do grupo: o intervalo vai até a última data conhecida, não some (o simulador mostrou "10/10" sozinho).
+it("compromissos: grupo com ocorrência sem data mostra o intervalo até a última data conhecida", async () => {
+ const n = (chave: string, data: string | null) => oc(chave, "x", data, "55.90", { nome: "Netflix", tipo: "gasto_fixo" });
+ previsao = { ...F, compromissos: [{ chave: "net", fonte: "gasto_recorrente", nome: "Netflix", primeira_data: "2026-10-10", ultima_data: "2026-11-10", ocorrencias: [n("n1", "2026-10-10"), n("n3", null), n("n2", "2026-11-10")] }] };
+ await abrirResumo();
+ expect(within(screen.getByTestId("bloco-compromissos")).getByText("3 vezes · 10/10 a 10/11")).toBeTruthy();
 });
 it("com valores ocultos, nenhum dígito das causas nem da base aparece", async () => {
  previsao = { ...F, pior_dia: { data: "2026-10-25", saldo: "-120.00", desde: "2026-10-14", causas: [oc("alug", "2026-10", "2026-10-15", "1800.00", { nome: "Aluguel", tipo: "gasto_fixo" })] } };

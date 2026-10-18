@@ -6,21 +6,19 @@ import { ChipPainel as Chip, TextoPainel as Texto } from "./tipografia";
 import { dataPtBr, nomeLegivel } from "./catalogo";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
-import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros, mensagensDosMotivos } from "./base";
+import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros } from "./base";
 import { LinhaExpansivel } from "./expansao";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
 const ORIGEM: Record<string, (n: number) => string> = { manual: () => "Carteira", consolidated: (n) => `Carteira + ${n} ${n === 1 ? "conta" : "contas"} do Open Finance` };
-/** "Como esta previsão foi feita" (o /painel mostra num quadro à parte): fechado por padrão, porque o card do app não carrega texto explicativo (#870). */
+/** "Como esta previsão foi feita" (o /painel mostra num quadro à parte): fechado por padrão, porque o card do app não carrega texto explicativo (#870). Da cobertura, como o /painel, só a janela de conferência: `fontes_incompletas` são códigos sem rótulo no app. */
 function ComoFoiFeita({ d }: { d: DadosPrevisao }) {
-  const avisos = mensagensDosMotivos(d.cobertura.fontes_incompletas);
   return <View style={{ gap: 8 }}>
     <Linha titulo="Saldo de partida" valor={d.base.saldo} detalhe={ORIGEM[d.base.origem]?.(d.base.contas_bancarias) ?? "Sem saldo de partida"} />
-    {d.premissas.map((t) => <Texto key={t} variante="legenda" tom="inkMuted">• {t}</Texto>)}
+    {d.premissas.map((t, i) => <Texto key={i} variante="legenda" tom="inkMuted">• {t}</Texto>)}
     {d.cobertura.janela_conferencia_inicio && <Texto variante="legenda" tom="inkMuted">Conferência desde {ddmm(d.cobertura.janela_conferencia_inicio)}</Texto>}
-    {avisos.map((t) => <Texto key={t} variante="legenda" tom="warning">{t}</Texto>)}
   </View>;
 }
 export function Previsao() {
@@ -60,8 +58,8 @@ export function Compromissos() {
     return <View style={{ gap: 4 }}>{grupos.map(({ g, oc }) => {
       const [o] = oc as [Ocorrencia, ...Ocorrencia[]];
       if (oc.length === 1) return <Linha key={g.chave} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={junta([quando(o, d.hoje), ...selos(o)])} />;
-      const iguais = oc.every((x) => x.valor === o.valor && x.direcao === o.direcao), semValor = oc.some((x) => x.valor === null), ultima = oc[oc.length - 1]!;
-      const datas = o.data === null ? "sem data" : ultima.data === null || ultima.data === o.data ? ddmm(o.data) : `${ddmm(o.data)} a ${ddmm(ultima.data)}`;
+      const iguais = oc.every((x) => x.valor === o.valor && x.direcao === o.direcao), semValor = oc.some((x) => x.valor === null), ultima = oc.findLast((x) => x.data !== null)?.data; // sem data fica no fim: o intervalo vai até a última data conhecida
+      const datas = o.data === null || !ultima ? "sem data" : ultima === o.data ? ddmm(o.data) : `${ddmm(o.data)} a ${ddmm(ultima)}`;
       const linha = <Linha titulo={nome(o, g.nome)} valor={semValor ? null : iguais ? o.valor : undefined} tipo={o.direcao} detalhe={junta([`${oc.length} vezes`, datas, !semValor && !iguais && "valores diferentes", oc.some((x) => x.data !== null && x.data < d.hoje) && "venceu"])} />;
       return <LinhaExpansivel key={g.chave} testID={`grupo-${g.chave}`} linha={linha} aberta={aberto === g.chave} alternar={() => setAberto(aberto === g.chave ? null : g.chave)}><View style={{ gap: 4 }}>{oc.map((x) => <Linha key={x.chave + x.ciclo} titulo={quando(x, d.hoje)} valor={x.valor} tipo={x.direcao} detalhe={junta(selos(x)) || undefined} />)}</View></LinhaExpansivel>;
     })}</View>;

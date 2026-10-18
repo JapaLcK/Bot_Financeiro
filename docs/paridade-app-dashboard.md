@@ -33,8 +33,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Saldo previsto | Mostra o saldo de hoje com as premissas (`ancora`), bancos fora do cálculo, o pior dia com desde quando e causas, premissas e cobertura | Mostra marcos, curva e o menor saldo; o schema lê `ancora`, `premissas` e `cobertura`, mas nenhuma tela os usa | Campos que já chegam e não aparecem | App | a discutir com o dono |
-| Compromissos | Agrupados como a API manda | Lista plana | Falta o agrupamento | App | a discutir com o dono |
+| Saldo previsto: motivos | Lista cada motivo da previsão com a direção do erro (`MotivosPrevisao`), o estado ("Previsão condicional", "A conferir") e os selos da base | Âncora, bancos fora do cálculo, pior dia com desde e causas, premissas e cobertura já aparecem (`futuro.tsx`, "Como foi feita" fechado); os motivos e o estado não aparecem (`cobertura.fontes_incompletas` são os mesmos códigos, sem rótulo no app) | O app não diz para que lado o saldo pode errar | App | a discutir com o dono |
 | "Próximos 30 dias" no Resumo | `Bills.tsx`, de exemplo (a versão real só existe na página Previsão) | Real | O bloco do Resumo não mostra dado real | Web | a discutir com o dono |
 
 ## Metas, patrimônio e cartões
