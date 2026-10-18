@@ -1,5 +1,6 @@
 // A seção "Conta" do /painel (App.tsx, parts/MenuTelas.tsx, conta/): Perfil (página de verdade, testada em
-// dashboard_v2_conta_perfil.test.mjs), duas páginas-ponte (Cobrança, Configurações) e o Sair na própria barra lateral.
+// dashboard_v2_conta_perfil.test.mjs), a Cobrança (ponte), as Configurações (a Segurança, testada em dashboard_v2_conta_seguranca*.test.mjs,
+// e o link para a tela antiga) e o Sair na própria barra lateral.
 //   · o Sair faz POST no /auth/logout com o fetch GLOBAL (o auth-refresh.js limpa o aparelho), com o
 //     CSRF, grava `finbot_logout_at` e vai para /?logout=1, inclusive com o fetch REJEITADO;
 //   · logout em outra aba derruba esta (evento `storage`);
@@ -122,7 +123,7 @@ test("Sair: dois cliques seguidos mandam um POST só e o botão fica desabilitad
   assert.ok(desabilitado);
 });
 
-test("as duas páginas-ponte: título, aria-current no trilho e o link para a tela antiga (o Perfil tem teste próprio)", async () => {
+test("as duas páginas: título, aria-current no trilho e o link para a tela antiga (Cobrança é só ponte; Configurações mostra a Segurança antes do link; o Perfil tem teste próprio)", async () => {
   const { antes } = conta();
   const { ctx, page } = await abrir({ guia: "concluido", antes });
   const vistas = [];
@@ -132,11 +133,11 @@ test("as duas páginas-ponte: título, aria-current no trilho e o link para a te
     await page.locator("#page-title", { hasText: titulo }).waitFor();
     vistas.push([await page.locator("#page-title").innerText(), await page.locator('.rail-conta [aria-current="page"]').innerText(), await page.locator(".conta-ponte a").getAttribute("href"), await page.title(), await page.locator(".topbar .month-switch").count()]);
     assert.equal(destino, vistas.at(-1)[2]);
-    botoes.push([await page.locator(".conta-ponte a").innerText(), await page.locator(".page-lede").count()]); // dono 2026-10-17: sem subtítulo
+    botoes.push([await page.locator(".conta-ponte a").innerText(), await page.locator(".page-lede").count(), await page.locator(".conta-seguranca").count()]); // dono 2026-10-17: sem subtítulo
   }
   await ctx.close();
   assert.deepEqual(vistas.map((v) => [v[0], v[1], v[3], v[4]]), [["Cobrança", "Cobrança", "PigBank · Cobrança", 0], ["Configurações", "Configurações", "PigBank · Configurações", 0]]);
-  assert.deepEqual(botoes, [["Abrir cobrança", 0], ["Abrir configurações", 0]]);
+  assert.deepEqual(botoes, [["Abrir cobrança", 0, 0], ["Abrir configurações", 0, 1]]);
 });
 
 test("⌘K lista as rotas da Conta", async () => {
