@@ -8,7 +8,10 @@ CONTROLES NEGATIVOS (injetados e restaurados na entrega, ver o relato):
   • `listar(..., tipo="saida")` em `recentes` -> `test_itens_em_comum_com_o_extrato_sao_identicos`;
   • `fim` = o do Extrato (dia 1 do mês seguinte) em `recentes` -> `test_compra_depois_do_fechamento_aparece`;
   • `com_guardado=False` em `recentes` -> `test_guardado_aparece`;
-  • `_item(r)` sem o `user_seq` -> `test_user_seq_so_nos_l`.
+  • `_item(r)` sem o `user_seq` -> `test_user_seq_so_nos_l`;
+  • `sem_categoria` sem o filtro no `listar` -> `test_sem_categoria_...` (receita, interno e categorizada na lista);
+  • o filtro sem `not x.interno` -> `test_sem_categoria_so_a_saida_...` (o saque em espécie e o guardado entram);
+  • o filtro sem o `outros` -> `test_sem_categoria_...` (a "Outros" fora).
 CONTROLES POSITIVOS: o item do Extrato continua aparecendo; a compra antes do fechamento está nos dois lados.
 """
 from __future__ import annotations
@@ -108,7 +111,7 @@ def test_limit_de_1_a_50(mundo, monkeypatch):
     uid, _ = mundo
     visto = []
     real = lancamentos_leitura.recentes
-    monkeypatch.setattr(lancamentos_leitura, "recentes", lambda u, agora, limite: visto.append(limite) or real(u, agora, limite))
+    monkeypatch.setattr(lancamentos_leitura, "recentes", lambda u, agora, limite, **kw: visto.append(limite) or real(u, agora, limite, **kw))
     for pedido in ({}, {"limit": 0}, {"limit": 2}, {"limit": -5}, {"limit": 999}):
         ultimos_lancamentos(uid, pedido)
     assert visto == [10, 10, 2, 1, 50]  # 0 = não informado: o padrão
@@ -124,3 +127,66 @@ def test_isolamento_entre_usuarios(mundo):
     assert da_b == {"Padaria do B"}  # positivo: B vê o dele
     da_a = ultimos_lancamentos(a, {})["itens"]
     assert "Padaria do B" not in {i["descricao"] for i in da_a} and {i["id"] for i in da_a} >= set(ids_a.values())
+
+
+# ── sem categoria ────────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def sem_cat():
+    """Entram: despesa sem categoria, em "Outros" (caixa e acento), compra de cartão sem categoria do provedor e em
+    "outros". Ficam de fora: despesa categorizada, receita, saque interno, guardado e compra de cartão categorizada."""
+    uid = completo(usuario_pagante())
+    q("update accounts set balance = 5000 where user_id = %s returning user_id", (uid,))
+    l = lambda *a, **k: f"l{db.add_launch_and_update_balance(uid, *a, **k)[0]}"  # noqa: E731
+    entram = {"vazia": l("despesa", 10, "Vazia", None), "outros": l("despesa", 20, "Outros", None, categoria="Outros"),
+              "nula": l("despesa", 30, "Nula", None)}
+    q("update launches set categoria = null where user_id = %s and id = %s returning id", (uid, int(entram["vazia"][1:])))
+    q("update launches set categoria = '' where user_id = %s and id = %s returning id", (uid, int(entram["nula"][1:])))
+    card = db.create_card(uid, "Banco", closing_day=31, due_day=28)
+    hoje = today_tz()
+    entram["cartao_nulo"] = f"c{db.add_imported_credit_purchase(uid, card, 40, None, hoje, f'ct-{uid}-1')[0]}"
+    entram["cartao_outros"] = f"c{db.add_imported_credit_purchase(uid, card, 50, 'Outros', hoje, f'ct-{uid}-2')[0]}"
+    ficam = {"categorizada": l("despesa", 60, "Categorizada", None, categoria="alimentação"),
+             "receita": l("receita", 1000, "Salário", None, categoria="outros"),
+             "interno": l("despesa", 70, "Saque", None, categoria="outros", is_internal_movement=True),
+             "cartao_categorizado": f"c{db.add_imported_credit_purchase(uid, card, 80, 'mercado', hoje, f'ct-{uid}-3')[0]}"}
+    db.create_pocket(uid, "Viagem")
+    ficam["guardado"] = f"l{db.pocket_deposit_from_account(uid, 'Viagem', 90, 'dep')[0]}"
+    q("update launches set categoria = null where user_id = %s and id = %s returning id", (uid, int(ficam["guardado"][1:])))
+    return uid, entram, ficam
+
+
+def test_sem_categoria_traz_a_saida_sem_categoria_do_lancamento_e_do_cartao(sem_cat):
+    from core.services.ai_chat.tools.listas_ia import sem_categoria
+    uid, entram, _ = sem_cat
+    r = sem_categoria(uid, {})
+    assert set(r) == {"itens", "motivos"}  # sem total
+    assert {i["id"] for i in r["itens"]} >= set(entram.values())
+    assert all(i["tipo"] == "despesa" and i["categoria"] in (None, "outros") for i in r["itens"]), r["itens"]
+
+
+def test_sem_categoria_so_a_saida_nao_interna_e_categorizada_fica_de_fora(sem_cat):
+    from core.services.ai_chat.tools.listas_ia import sem_categoria
+    uid, entram, ficam = sem_cat
+    ids = {i["id"] for i in sem_categoria(uid, {})["itens"]}
+    assert ids == set(entram.values()), (ids ^ set(entram.values()), ficam)
+
+
+def test_sem_categoria_e_o_item_do_extrato_e_o_user_seq_so_nos_l(sem_cat):
+    from core.services.ai_chat.tools.listas_ia import sem_categoria
+    uid, entram, _ = sem_cat
+    ia = {i["id"]: i for i in sem_categoria(uid, {})["itens"]}
+    app = _do_app(uid)
+    from api.v2.lancamentos import Lancamento
+    d = {i["id"]: Lancamento(**i).model_dump(mode="json") for i in lancamentos_leitura.recentes(uid, now_tz(), 50, sem_categoria=True)["itens"]}
+    assert set(d) == set(ia) and all(d[i] == app[i] for i in d)  # os mesmos itens do Extrato, campo a campo
+    assert "user_seq" in ia[entram["vazia"]] and "user_seq" not in ia[entram["cartao_nulo"]]
+
+
+def test_sem_categoria_isolamento(sem_cat):
+    from core.services.ai_chat.tools.listas_ia import sem_categoria
+    a, entram, _ = sem_cat
+    b = usuario_pagante()
+    db.add_launch_and_update_balance(b, "despesa", 33, "Do B", None, categoria="outros")
+    assert [i["descricao"] for i in sem_categoria(b, {})["itens"]] == ["Do B"]
+    assert "Do B" not in {i["descricao"] for i in sem_categoria(a, {})["itens"]}

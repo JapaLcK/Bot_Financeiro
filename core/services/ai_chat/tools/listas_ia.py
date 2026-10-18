@@ -1,5 +1,5 @@
 """
-core/services/ai_chat/tools/listas_ia.py — as listas de lançamento da IA (`list_recent_launches`), lidas
+core/services/ai_chat/tools/listas_ia.py — as listas de lançamento da IA (`list_recent_launches`, `get_uncategorized_launches`), lidas
 pelo MESMO `listar` do Extrato (`db/lancamentos_leitura.recentes`): mesmos itens, mesmo `id`
 (`l<id>`/`c<id>`, o que `extrato_ia.py` lê nas escritas), mesmo `pode`.
 
@@ -31,7 +31,16 @@ def _para_ia(i: dict) -> dict:
             "parcela": i["parcela"], "fatura": i["fatura"], "pode": i["pode"]}
 
 
-def ultimos_lancamentos(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+def _lista(user_id: int, args: dict[str, Any], sem_categoria: bool) -> dict[str, Any]:
     limit = max(1, min(int(args.get("limit") or 10), 50))
-    d = lancamentos_leitura.recentes(user_id, now_tz(), limit)
+    d = lancamentos_leitura.recentes(user_id, now_tz(), limit, sem_categoria=sem_categoria)
     return {"itens": [_para_ia(i) for i in d["itens"]], "motivos": d["motivos"]}
+
+
+def ultimos_lancamentos(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    return _lista(user_id, args, False)
+
+
+def sem_categoria(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
+    """`get_uncategorized_launches`: a mesma lista, só as saídas (cartão incluído) sem categoria ou em "outros"."""
+    return _lista(user_id, args, True)

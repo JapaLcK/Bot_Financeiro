@@ -44,7 +44,7 @@ from utils_date import _tz
 
 from .analytics import clausula_busca, termos_busca
 from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
-from .connection import LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
+from .connection import CAT_VAZIA_LABEL, LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
 from .open_finance import ACTIONABLE_PENDING_SQL, actionable_pending_params
 from .open_finance_cash import VINCULADO_SQL
 from .reconciliation import FUSED_STATUSES
@@ -270,11 +270,12 @@ def ler_cursor(texto: str) -> tuple:
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
            categoria=None, tipo=None, q=None, apos=None, limite=50,
-           com_guardado=False, dia=None, ident=None) -> tuple[list[dict], bool]:
+           com_guardado=False, dia=None, ident=None, sem_categoria=False) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
     `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
-    agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item."""
+    agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item.
+    `sem_categoria`: só a saída não interna sem categoria ou em "outros" (o cartão também)."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
     perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
@@ -302,6 +303,8 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
         if valor is not None:
             filtros.append(sql)
             params.append(valor)
+    if sem_categoria:
+        filtros.append(f"x.tipo = 'saida' and not x.interno and {cat_key_sql('x.categoria')} in ('{CAT_VAZIA_LABEL}', 'outros')")
     # ponytail: a busca filtra a união já montada, então o estado de toda linha da janela é
     # calculado antes (250 ms com 6000 lançamentos, plano §8); empurrar o filtro de texto para
     # dentro das pernas se pesar.

@@ -375,13 +375,12 @@ def test_apagar_e_so_do_lancamento_mesmo_que_o_pode_da_compra_um_dia_de_apagar()
 
 def test_as_listas_devolvem_o_id_que_as_escritas_leem(uid_pro):
     """Sem o `l`, o modelo mandaria o id interno cru, que as escritas leem como `#N`."""
-    from core.services.ai_chat.tools.categories import _get_uncategorized_launches
-    from core.services.ai_chat.tools.listas_ia import ultimos_lancamentos
+    from core.services.ai_chat.tools.listas_ia import sem_categoria, ultimos_lancamentos
 
     lid, seq = lancar(uid_pro)
     q("update launches set categoria = 'outros' where user_id = %s and id = %s returning id", (uid_pro, lid))
     recentes = ultimos_lancamentos(uid_pro, {})["itens"]
-    sem_cat = _get_uncategorized_launches(uid_pro, {})["launches"]
+    sem_cat = sem_categoria(uid_pro, {})["itens"]
     for item in (*recentes, *sem_cat):
         assert item["id"] == f"l{lid}", item
         assert ia.validar_apagar(uid_pro, {"launch_id": item["id"]}) is None
