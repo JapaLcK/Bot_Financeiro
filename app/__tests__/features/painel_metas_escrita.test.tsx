@@ -44,6 +44,11 @@ const fechou = (titulo: string) => waitFor(() => expect(screen.queryByText(titul
 const salvar = () => apertar("Salvar");
 
 describe("criar", () => {
+  it("a folha ROLA: o corpo dela é um ScrollView (Fonte com muitas contas, 24 blocos ou fonte grande passam da tela; sem rolagem Salvar/Apagar ficam inalcançáveis)", async () => {
+    lista = TODAS.vazio; await abrirAba();
+    await apertar("Criar meta"); await folha("Nova meta");
+    expect(screen.getByTestId("sheet-conteudo").type).toBe("RCTScrollView");
+  });
   it("meta nova: manda nome, tipo, fonte e alvo em texto exato; fecha a folha e a aba relê (a meta nova aparece)", async () => {
     lista = TODAS.vazio; await abrirAba();
     await apertar("Criar meta"); await folha("Nova meta");

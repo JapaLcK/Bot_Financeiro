@@ -7,7 +7,7 @@ import { SheetConteudo } from "@/ui/componentes/Sheet";
 export default function MetaSheet() {
   const { id, tipo } = useLocalSearchParams<{ id?: string; tipo?: string }>();
   return (
-    <SheetConteudo>
+    <SheetConteudo rolar>
       <MetaFolha id={id === undefined ? undefined : /^\d+$/.test(id) ? Number(id) : NaN} comecar={tipo === "reserva" ? "reserva" : undefined} />
     </SheetConteudo>
   );
