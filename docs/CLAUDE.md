@@ -747,6 +747,38 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `rotulo` vem de `investido.TIPOS` (o TS não tem tabela de tipos). Consumidor: o assunto
   `investido` do chat do `/painel` (`parts/InvestidoResposta.tsx`).
 
+- `GET /api/v2/bancos` (`api/v2/bancos.py`, regra em `db/bancos.py`; também `/api/app/bancos`): o que cada banco
+  conectado vale — `{total, motivos, bancos: [{conexao_id, saldo_conta, investido, total, contas, cartoes,
+  investimentos, motivos}]}`, dinheiro em texto, `null` ≠ zero. **Ressalva do plano:** sem o recurso `investments`, a
+  conexão que só tem posição (sem conta) fica fora de `bancos` (o app deve mostrar "—" para ela, PR 3). Uma entrada por CONEXÃO (`conexao_id` é o id local, na
+  ordem crescente dele; duas "Nubank" são duas), e o app não soma. Nenhuma regra de dinheiro nova, tudo num snapshot
+  (repeatable read, só leitura): `saldo_conta` = Σ das contas `no_total` de `contas_hoje.listar` (`null` se nenhuma
+  entra; outra moeda, conexão pausada e saldo ausente ficam fora, com o motivo); `investido` =
+  `investido.calcular(por_conexao=True)`: `null` sem posição lida na conexão, só posição sem saldo, conexão pausada, e
+  também quando `/investido` devolve `total: null` (nenhuma conexão viva sincronizada com posição: o critério é do
+  conjunto; os motivos, como `banco_desatualizado`, seguem). Σ `investido` coincide com o `total` de `/investido`, SALVO
+  (i) quando `/investido` anula o total por `saldo_ausente` com soma 0 e há outra conexão com resgatada/zero conhecido
+  (Σ dá `0.00`, o total é `null`) e (ii) com posição só em outra moeda (`/investido` dá `0.00`, a conexão fica `null`
+  com `outra_moeda`); em nenhum dos dois o `/bancos` perde dado, ele é o mais honesto. Resgatada
+  de conexão viva é `0.00`. `total` do banco = as partes não nulas, `null` se as duas são, e exclusão parcial não anula o
+  número; `total` e `motivos` do topo saem SÓ dos bancos listados. Sem o recurso `investments` do plano: `investido` e
+  `investimentos` `null` + `plano_sem_investimentos`, e o saldo segue (não é o 403 de `/investido`). Limite: nesse
+  plano o motivo de estado (`conexao_pausada`, `banco_desatualizado`) de uma conexão SÓ com cartão e sem conta sai como
+  `plano_sem_investimentos` (o estado se perde nessa conexão; o saldo não é afetado) e, se as demais conexões listadas
+  não têm o motivo, o topo também não o acusa: plano sem `investments`, uma conexão viva com conta e outra PAUSED só
+  com cartão dão o topo `["plano_sem_investimentos"]`, sem `conexao_pausada`, e o estado da pausada se perde por
+  completo (da entrada e do topo). Só ocorre com o freio `PLANS_V2_ENABLED=0` / plano sem `investments`; testado
+  em `tests/test_api_v2_bancos.py` só no nível da entrada.
+  **Quem não vem em `bancos`:** conexão sem nenhuma conta, cartão e posição no espelho (DELETED sem linhas, reconexão
+  cujas identidades migraram para a nova, viva recém-conectada sem dado). O app deve mostrar "—" quando a conexão não
+  vem aqui (requisito do PR 3; hoje nenhuma tela consome `/bancos`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
+  **Contagens:** `contas`, `cartoes`, `investimentos` são as linhas do espelho da conexão (sem duplicata de reconexão,
+  `distinct on` pela identidade do provedor) — o que o banco mostra, e NÃO o que entra no valor: contam também conexão
+  pausada, outra moeda e posição resgatada (uma pausada pode ter `cartoes: 1` com tudo `null`). Carteira, cartão e
+  fatura ficam fora dos valores. **Texto decimal:** a escala é a da fonte, a mesma de `/contas` (`"0"`, `"0.00"`,
+  `"1000"`): o cliente interpreta o decimal, não compara texto. Limites: conta com `raw` sem `balance` e coluna ≠ 0
+  entra no `total` de `/contas` e sai `null` aqui (`patrimonio.sem_saldo`). Fixture do app: `tests/fixtures/app_bancos.json`.
+
 - `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
   regra em `db/metas.py`, tabela `metas`; também em `/api/app/metas`): metas do `/painel`. Meta não
   guarda dinheiro, só organiza dado do banco (sem input financeiro manual): `nome` (1 a 60, com ao menos um caractere visível e sem caractere de controle; NUL no meio é saneado), `tipo`

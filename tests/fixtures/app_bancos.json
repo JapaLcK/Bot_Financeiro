@@ -1,0 +1,12 @@
+{
+  "total": "67000.00",
+  "motivos": ["conexao_pausada"],
+  "bancos": [
+    {"conexao_id": 11, "saldo_conta": "5000.00", "investido": "40000.00", "total": "45000.00",
+     "contas": 2, "cartoes": 1, "investimentos": 3, "motivos": []},
+    {"conexao_id": 12, "saldo_conta": "7000.00", "investido": "15000.00", "total": "22000.00",
+     "contas": 1, "cartoes": 0, "investimentos": 2, "motivos": []},
+    {"conexao_id": 13, "saldo_conta": null, "investido": null, "total": null,
+     "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": ["conexao_pausada"]}
+  ]
+}
