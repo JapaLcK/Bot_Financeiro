@@ -31,6 +31,10 @@ INVALIDAS = [
     # C1 e invisíveis de formatação: a classe tem de recusar, não só o C0
     "https://x.com/a\x80b", "https://x.com/a\x9bb", "https://x.com/a\u200bb",
     "https://x.com/a\u202eb", "https://x.com/a\u2066b", "https://x.com/a\ufeffb",
+    # a CLASSE (categoria Cf/Co/Z*), não só as faixas: U+061C (Codex, #1106), soft hyphen, word joiner,
+    # separador de vogal mongol, tag Unicode, uso privado, separador de parágrafo
+    "https://x.com/a\u061cb", "https://x.com/a\u00adb", "https://x.com/a\u2060b", "https://x.com/a\u180eb",
+    "https://x.com/a\U000e0001b", "https://x.com/a\ue000b", "https://x.com/a\u2029b",
 ]
 
 VALIDAS_NAO_ASCII = ["https://x.com/caf\u00e9", "https://x.com/\U0001f437/a.svg"]

@@ -19,9 +19,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import threading
 import time
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -138,14 +138,17 @@ SQL_EXECUTION_STATUS = (
 # dado do provedor e vai para uma imagem no navegador/app (se for SVG, o app vai
 # precisar de SvgUri), então é conferido antes de sair.
 SQL_LOGO_URL = "raw->'connector'->>'imageUrl' as logo_url"
-# recusa espaço, controles C0/DEL/C1 (\x00-\x1f\x7f-\x9f) e invisíveis de formatação (ZW*, bidi, BOM)
-_LOGO_URL = re.compile(
-    r"https://[^\s\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]{1,492}")  # 500 no total
+# Recusa por CATEGORIA Unicode, não por lista de faixas: qualquer controle (Cc: C0, DEL, C1), formato
+# (Cf: ZW*, bidi, U+061C, soft hyphen, BOM, tags), separador (Z*: espaço, NBSP, U+2028), uso privado,
+# substituto e não atribuído. A lista de faixas deixou passar o U+061C (Codex, PR #1106): a classe inteira fecha.
+_LOGO_MAX = 500
 
 
 def logo_url_valida(valor: Any) -> str | None:
-    """`https://`, até 500 caracteres, sem espaço, controle nem invisível de formatação; senão None."""
-    return valor if isinstance(valor, str) and _LOGO_URL.fullmatch(valor) else None
+    """`https://`, até 500 caracteres, sem caractere de categoria C* ou Z*; senão None."""
+    ok = (isinstance(valor, str) and valor.startswith("https://") and 8 < len(valor) <= _LOGO_MAX
+          and not any(unicodedata.category(c)[0] in "CZ" for c in valor))
+    return valor if ok else None
 
 
 # ── A coleta vencida (Onda 5, D1) ────────────────────────────────────────────
