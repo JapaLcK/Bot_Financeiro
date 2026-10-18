@@ -51,10 +51,13 @@ def _motivos(cur, user_id: int, cortou: bool) -> list[str]:
 
 
 def recentes(user_id: int, agora: datetime, limite: int, *, sem_categoria: bool = False) -> dict:
-    """Os "últimos lançamentos" da IA: o `listar` do Extrato, mais novos primeiro, com o guardado (a IA o
-    lista) e a janela de 12 meses até o fim do mês SEGUINTE: a compra no cartão feita depois do fechamento
-    entra pela fatura do mês que vem (`MES_CARTAO_SQL`), e no Extrato ela só aparece lá. Cada `l` leva o
-    `user_seq` (o `#N` que o usuário vê) em `numero`, fora do `_item` (o contrato da v2 não o tem).
+    """Os "últimos lançamentos" da IA: o `listar` do Extrato, mais novos primeiro, com 3 diferenças: o guardado
+    entra (a IA o lista); a janela de 12 meses vai até o fim do mês SEGUINTE (a compra no cartão feita depois do
+    fechamento entra pela fatura do mês que vem, `MES_CARTAO_SQL`, e no Extrato só aparece lá); e o parcelamento
+    vem em UMA linha, a da menor parcela da janela (as parcelas de faturas futuras repetiriam a compra com a data
+    dela; recategorizar o `c<id>` já propaga ao grupo). Cada `l` leva o `user_seq` (o `#N` que o usuário vê) no
+    campo `numero` do item (a tool o entrega ao modelo como `user_seq`) e a categoria como foi gravada em
+    `categoria_nome` (o `_item` só tem a chave, sem acento nem caixa), ambos fora do `_item` (o contrato da v2 não os tem).
     `sem_categoria`: só as saídas não internas sem categoria ou em "outros" (o cartão também)."""
     from core.services.plan_service import history_earliest_date
 
@@ -66,13 +69,14 @@ def recentes(user_id: int, agora: datetime, limite: int, *, sem_categoria: bool 
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("set transaction isolation level repeatable read, read only")
         linhas, _ = listar(cur, user_id, max(inicio, corte) if corte else inicio, fim,
-                           limite=limite, com_guardado=True, sem_categoria=sem_categoria)
+                           limite=limite, com_guardado=True, sem_categoria=sem_categoria, uma_por_compra=True)
         ids = [r["id"] for r in linhas if r["tabela"] == "l"]
         cur.execute("select id, user_seq from launches where user_id = %s and id = any(%s)", (user_id, ids))
         seq = {r["id"]: r["user_seq"] for r in cur.fetchall()}
         motivos = _motivos(cur, user_id, bool(corte and corte > inicio))
         conn.rollback()
-    return {"itens": [_item(r) | {"numero": seq.get(r["id"]) if r["tabela"] == "l" else None} for r in linhas],
+    return {"itens": [_item(r) | {"numero": seq.get(r["id"]) if r["tabela"] == "l" else None, "categoria_nome": r["categoria_cru"]}
+                      for r in linhas],
             "motivos": motivos}
 
 

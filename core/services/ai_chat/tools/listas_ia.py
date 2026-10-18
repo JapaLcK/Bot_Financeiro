@@ -7,7 +7,8 @@ O modelo recebe cada item como `_para_ia`: dinheiro em float sob `valor` (o `ai_
 de receita/despesa (o interno sai `entrada`/`saída`, senão o saque em espécie seria lido como ganho), a categoria
 pelo nome e, nos `l`, o `user_seq` (o `#N` que o usuário vê; é a única chave de id que o `ai_guard` reconhece).
 Diferenças para a 1ª página de `/api/app/lancamentos`, declaradas: a janela vai até o mês seguinte (a
-compra no cartão depois do fechamento) e o guardado entra.
+compra no cartão depois do fechamento), o guardado entra e o parcelamento vem em uma linha só (a menor parcela
+da janela). A categoria vai como foi gravada (com acento e caixa), não como a chave do Extrato.
 
 Cada lista é também um card do app (`ultimos_lancamentos`, `sem_categoria`): o bloco é o `Lancamento` da v2 (até
 10 itens: o app mostra 5 e um "+5"), sem total; só sai pelo `mostrar_da_tool` (app que declara o card, com vaga).
@@ -20,6 +21,7 @@ from typing import Any
 from ai_router import ALLOWED_CATEGORIES
 from db import lancamentos_leitura
 from db.connection import cat_key
+from db.estabelecimentos import SEM_DESCRICAO
 from utils_date import now_tz
 
 from .. import streaming
@@ -28,15 +30,23 @@ from ..cards import mostrar_da_tool
 MAX_NO_CARD = 10
 
 # O Extrato entrega a CHAVE da categoria (minúscula, sem acento); a conversa escreve o nome. As do catálogo
-# voltam com o nome; a personalizada fica como a chave (ponytail: ler `user_categories` se isso incomodar).
+# voltam com o nome canônico; as outras, como foram gravadas (`categoria_nome`: "Café", "salário"), que é o que o
+# usuário vê e o que o `resolve_category_input` reencontra no "recategoriza" sem criar uma gêmea.
 _NOME = {cat_key(c): c for c in ALLOWED_CATEGORIES}
+
+
+def descricao_do_item(i: dict) -> str:
+    """O que o usuário vê como nome do item: a descrição, senão a nota, senão `SEM_DESCRICAO` (a compra sem nota e sem
+    descrição do banco chega com os dois nulos). A lista da IA e o resumo da pendência dizem o mesmo."""
+    return (i["descricao"] or i["mensagem"] or "").strip() or SEM_DESCRICAO
+
 
 def _para_ia(i: dict) -> dict:
     tipo = ("entrada" if i["tipo"] == "entrada" else "saída") if i["interno"] else (
         "receita" if i["tipo"] == "entrada" else "despesa")
     return {"id": i["id"], **({"user_seq": i["numero"]} if i.get("numero") else {}), "data": i["data"], "tipo": tipo,
-            "valor": float(i["valor"]), "moeda": i["moeda"], "descricao": i["descricao"] or i["mensagem"],
-            "categoria": _NOME.get(i["categoria"], i["categoria"]), "origem": i["origem"], "guardado": i["guardado"],
+            "valor": float(i["valor"]), "moeda": i["moeda"], "descricao": descricao_do_item(i),
+            "categoria": _NOME.get(i["categoria"]) or i["categoria_nome"] or i["categoria"], "origem": i["origem"], "guardado": i["guardado"],
             "parcela": i["parcela"], "fatura": i["fatura"], "pode": i["pode"]}
 
 

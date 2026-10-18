@@ -900,7 +900,11 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             )
         _PENDENCIA_DO_TURNO.set(armada)
         if tool.ao_armar is not None:  # só aqui: com `_OUTRO_PEDIDO` nada foi armado
-            tool.ao_armar(user_id, args)
+            try:  # enfeite (o card): a pendência já está armada e o resumo já diz o item, então não derruba o turno
+                tool.ao_armar(user_id, args)
+            except Exception as e:
+                from core.observability import _log_falha
+                _log_falha("ai_ao_armar_falhou", user_id, e, nivel=logging.WARNING, tool=name)
         return (
             json.dumps(
                 {

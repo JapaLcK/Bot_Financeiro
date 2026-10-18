@@ -165,7 +165,7 @@ _PERNA_LANCAMENTOS = f"""
              where a2.provider_account_id = a.provider_account_id and upper(a2.type) = 'BANK'
              order by c2.id desc limit 1) as conta_id,
            null::bigint as cartao_id, null::int as parcela_n, null::int as parcela_total,
-           null::text as fatura, l.pode,
+           null::uuid as group_id, l.categoria as categoria_cru, null::text as fatura, l.pode,
            {_motivos(("conciliacao_pendente", "l.pendente or (l.declarada and not l.casada)"),
                      ("transacao_pendente", "t.status_banco = 'PENDING'"), *_moeda("a"))} as motivos
       from (select launches.*, {TIPO_CANON_SQL} as tipo_canon, {LAUNCH_HAS_TIME_SQL} as has_time,
@@ -197,7 +197,7 @@ _PERNA_CARTAO = f"""
            case when ct.source = 'open_finance' then 'cartao' else 'registro_antigo' end as origem,
            false as fundido, oc.institution_name as instituicao, null::bigint as conta_id,
            cc.id as cartao_id, ct.installment_no as parcela_n,
-           ct.installments_total as parcela_total, to_char(b.period_end, 'YYYY-MM') as fatura,
+           ct.installments_total as parcela_total, ct.group_id, ct.categoria as categoria_cru, to_char(b.period_end, 'YYYY-MM') as fatura,
            {PODE_CARTAO_SQL} as pode,
            {_motivos(("transacao_pendente", "o.status_banco = 'PENDING'"), *_moeda("oa"))} as motivos
       from {MES_CARTAO_SQL}
@@ -270,12 +270,14 @@ def ler_cursor(texto: str) -> tuple:
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
            categoria=None, tipo=None, q=None, apos=None, limite=50,
-           com_guardado=False, dia=None, ident=None, sem_categoria=False) -> tuple[list[dict], bool]:
+           com_guardado=False, dia=None, ident=None, sem_categoria=False,
+           uma_por_compra=False) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
     `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
     agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item.
-    `sem_categoria`: só a saída não interna sem categoria ou em "outros" (o cartão também)."""
+    `sem_categoria`: só a saída não interna sem categoria ou em "outros" (o cartão também).
+    `uma_por_compra`: do parcelamento, só a menor parcela da janela (as outras são as faturas dos meses seguintes)."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
     perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
@@ -305,6 +307,10 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
             params.append(valor)
     if sem_categoria:
         filtros.append(f"x.tipo = 'saida' and not x.interno and {cat_key_sql('x.categoria')} in ('{CAT_VAZIA_LABEL}', 'outros')")
+    uniao = f"(({perna_l}) union all ({perna_c}))"
+    if uma_por_compra:
+        uniao = f"(select u.*, min(u.parcela_n) over (partition by u.group_id) as menor from {uniao} u)"
+        filtros.append("(x.group_id is null or x.parcela_n is not distinct from x.menor)")
     # ponytail: a busca filtra a união já montada, então o estado de toda linha da janela é
     # calculado antes (250 ms com 6000 lançamentos, plano §8); empurrar o filtro de texto para
     # dentro das pernas se pesar.
@@ -318,7 +324,7 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     if limite is not None:
         params.append(limite + 1)
     cur.execute(f"""{_CTE_PENDENTES}
-        select * from (({perna_l}) union all ({perna_c})) x
+        select * from {uniao} x
          {"where " + " and ".join(filtros) if filtros else ""}
          order by x.dia desc, x.instante desc, x.tabela desc, x.id desc
          {limite_sql}""", params)

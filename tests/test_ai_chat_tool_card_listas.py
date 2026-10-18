@@ -7,23 +7,29 @@ CONTROLES NEGATIVOS (injetados e restaurados na entrega, ver o relato):
   • `DA_TOOL` sem os 2 ids -> `test_bloco_*` e `test_app_que_*`;
   • `mostrar_itens` sem o corte de `MAX_NO_CARD` -> `test_o_bloco_leva_ate_10_e_o_modelo_todos`;
   • `armar_apagar` chamado no `ao_confirmar` (antes de armar) -> `test_card_da_confirmacao_*` (sai com o `_OUTRO_PEDIDO`);
-  • `ao_armar` fora do `delete_launch` -> `test_card_da_confirmacao_sai_depois_de_armar`.
+  • `ao_armar` fora do `delete_launch` -> `test_card_da_confirmacao_sai_depois_de_armar`;
+  • o `try` do `ao_armar` no runner -> `test_card_que_falha_*` (e `test_ao_armar_que_levanta_*` em `test_ai_chat_runner_ganchos`);
+  • o `streaming.ativo()` antes do `um_item` em `armar_apagar` -> `test_sem_emissor_o_ao_armar_nao_le_o_item`;
+  • a regra do repetido (`cards_livres`) -> `test_card_da_confirmacao_nao_repete_a_lista_ja_na_tela`;
+  • `motivos` zerados no card -> `test_motivos_do_plano_vao_ao_card_e_ao_modelo`.
 CONTROLES POSITIVOS: o card sai no caso legítimo; a recategorização arma sem card; a pendência fica armada.
 """
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 import db
+from db import lancamentos_leitura
 from api.v2.lancamentos import Lancamento
 from conftest import usuario_pagante
 from core.services.ai_chat import cards, runner, streaming
 from core.services.ai_chat._context import CARDS_DO_APP, CARDS_DO_TURNO
-from core.services.ai_chat.tools import get_tool
+from core.services.ai_chat.tools import extrato_ia, get_tool
 from core.services.ai_chat.tools._base import OUTRO_PEDIDO
 from _ia_stream_helpers import executar, openai_falso, rodada
 from test_ai_chat_periodo import _conforme
@@ -85,7 +91,7 @@ def test_o_bloco_leva_ate_10_e_o_modelo_todos(monkeypatch, mundo):
     _, (bloco,), _ = _turno(monkeypatch, uid, ("list_recent_launches", {"limit": 20}))
     assert len(bloco["abas"][0]["recursos"]["ultimos_lancamentos"]["itens"]) == 10  # o app mostra 5 e um "+5"
     (visao,) = _tool_msgs(uid)
-    assert len(visao["itens"]) == 15 and visao["card_na_tela"] is True  # o "apaga o 12º" precisa do id
+    assert len(visao["itens"]) == 16 and visao["card_na_tela"] is True  # o "apaga o 12º" precisa do id
 
 
 def test_lista_vazia_nao_vira_card(monkeypatch, uid_pro):
@@ -126,7 +132,7 @@ def test_app_que_nao_declarou_o_card_recebe_o_dado_sem_bloco(monkeypatch, mundo,
 def test_vagas_gastas_o_card_nao_sai_e_a_tool_devolve_o_dado(mundo):
     uid, _ = mundo
     r, blocos, usados = _chama(uid, ("list_recent_launches", {}), usados=["contas", "hero", "resumo"])
-    assert not blocos and "card_na_tela" not in r and len(r["itens"]) == 7 and len(usados) == 3
+    assert not blocos and "card_na_tela" not in r and len(r["itens"]) == 8 and len(usados) == 3
 
 
 def test_vaga_livre_o_card_gasta_uma_vaga_e_o_quarto_nao_sai(mundo):
@@ -144,7 +150,7 @@ def test_repetida_no_turno_so_a_primeira_emite(monkeypatch, mundo):
     _, eventos, _ = executar(uid, "pergunta", cards=DO_APP)
     assert [e["bloco"]["card"] for e in eventos if e["tipo"] == "bloco"] == ["ultimos_lancamentos"]
     primeira, segunda = _tool_msgs(uid)
-    assert primeira["card_na_tela"] and "card_na_tela" not in segunda and len(segunda["itens"]) == 7  # a 2ª: o dado
+    assert primeira["card_na_tela"] and "card_na_tela" not in segunda and len(segunda["itens"]) == 8  # a 2ª: o dado
 
 
 # ── 4. a confirmação de apagar mostra o item (P-5) ────────────────────────────────────────────────
@@ -196,12 +202,55 @@ def test_card_da_confirmacao_so_para_o_app_que_o_declara(mundo, declarado):
     assert final is None and not _blocos(ev) and db.ai_get_pending_action(uid)  # armou, sem card
 
 
-def test_card_da_confirmacao_respeita_o_teto_de_vagas_e_a_lista_ja_na_tela(mundo):
+def test_card_da_confirmacao_respeita_o_teto_de_vagas(mundo):
     uid, ids = mundo
     with _app(uid) as ev:
         CARDS_DO_TURNO.get().extend(["contas", "hero", "resumo"])  # sem vaga
         _, final = runner._dispatch_tool(uid, "delete_launch", {"launch_id": ids["despesa"]})
     assert final is None and not _blocos(ev)
+
+
+def test_card_da_confirmacao_nao_repete_a_lista_ja_na_tela(mundo):
+    uid, ids = mundo
+    with _app(uid) as ev:
+        assert get_tool("list_recent_launches").execute(uid, {})["card_na_tela"]  # a lista já está na tela
+        _, final = runner._dispatch_tool(uid, "delete_launch", {"launch_id": ids["despesa"]})
+    assert final is None and db.ai_get_pending_action(uid)["tool_name"] == "delete_launch"  # arma
+    ((bloco, _),) = _blocos(ev)  # e não emite outro: só o da lista
+    assert len(bloco["abas"][0]["recursos"]["ultimos_lancamentos"]["itens"]) > 1
+
+
+def test_card_que_falha_nao_derruba_a_confirmacao_e_o_sim_apaga(monkeypatch, mundo, caplog):
+    uid, ids = mundo
+    monkeypatch.setattr(extrato_ia, "mostrar_itens", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Mercado Extra 50")))
+    with _app(uid) as ev, caplog.at_level(logging.WARNING):
+        historico, final = runner._dispatch_tool(uid, "delete_launch", {"launch_id": ids["despesa"]})
+    assert final is None and json.loads(historico)["status"] == "pending_user_confirmation" and not _blocos(ev)
+    pend = db.ai_get_pending_action(uid)
+    assert pend["tool_name"] == "delete_launch"  # a pendência ficou armada
+    assert "ai_ao_armar_falhou" in caplog.text and "Mercado Extra" not in caplog.text  # o log tem o evento, não o dado
+    assert "Apagado" in runner._execute_pending(uid, pend)  # e o "sim" apaga
+
+
+def test_sem_emissor_o_ao_armar_nao_le_o_item(monkeypatch, mundo):
+    uid, ids = mundo
+    leituras = []
+    real = lancamentos_leitura.um_item
+    monkeypatch.setattr(lancamentos_leitura, "um_item", lambda *a: leituras.append(a) or real(*a))
+    extrato_ia.armar_apagar(uid, {"launch_id": ids["despesa"]})  # WhatsApp: ninguém para receber o card
+    assert leituras == []
+    with _app(uid):
+        extrato_ia.armar_apagar(uid, {"launch_id": ids["despesa"]})
+    assert leituras == [(uid, "l", int(ids["despesa"][1:]))]  # positivo: com emissor lê
+
+
+def test_motivos_do_plano_vao_ao_card_e_ao_modelo(monkeypatch):
+    uid = completo(usuario_pagante(plan="essencial"))
+    db.add_launch_and_update_balance(uid, "despesa", 20, "Padaria", None)
+    _, (bloco,), _ = _turno(monkeypatch, uid, ("list_recent_launches", {}))
+    assert bloco["abas"][0]["recursos"]["ultimos_lancamentos"]["motivos"] == ["inicio_do_historico"]
+    (visao,) = _tool_msgs(uid)
+    assert visao["motivos"] == ["inicio_do_historico"]
 
 
 def test_recusa_no_validate_nao_arma_nem_mostra_card(mundo):

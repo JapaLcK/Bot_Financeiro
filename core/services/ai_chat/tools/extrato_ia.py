@@ -27,10 +27,10 @@ from core.pg_text import violacao_finito
 from db import lancamentos, lancamentos_leitura
 from db.cards import MSG_COMPRA_DO_BANCO
 from db.categories import resolve_category_input
-from db.estabelecimentos import SEM_DESCRICAO
 from utils_text import fmt_brl
 
-from .listas_ia import mostrar_itens
+from .. import streaming
+from .listas_ia import descricao_do_item, mostrar_itens
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor e a descrição da
 # linha, e a mensagem genérica ainda tem de dizer o que fazer.
@@ -86,7 +86,7 @@ def _achar(user_id: int, bruto: Any) -> tuple[str, int] | None:
 def _resumo_item(item: dict) -> dict:
     """O que a pendência guarda do item: lido do banco, com `valor` em float (o `ai_guard` o lê)."""
     p = item["parcela"]
-    return {"descricao": (item["descricao"] or item["mensagem"] or "").strip()[:60] or SEM_DESCRICAO,
+    return {"descricao": descricao_do_item(item)[:60],
             "valor": float(item["valor"]), "data": item["data"],
             "parcelas": p["total"] if p and p["total"] > 1 else 1, "moeda": item.get("moeda") or "BRL"}
 
@@ -217,7 +217,7 @@ def armar_apagar(user_id: int, args: dict[str, Any]) -> None:
     pergunta. Só o app que declara o card, com vaga (no mesmo turno da lista, ela já está na tela). A recategorização
     não ganha card: o resumo dela já diz qual item e é reversível; só o apagar (sem undo) mostra o item."""
     ident = lancamentos.ler_id(str(args.get("launch_id") or ""))
-    if item := ident and lancamentos_leitura.um_item(user_id, *ident):
+    if streaming.ativo() and (item := ident and lancamentos_leitura.um_item(user_id, *ident)):  # sem emissor, sem a 3ª leitura
         mostrar_itens(user_id, "ultimos_lancamentos", [item], [])
 
 
