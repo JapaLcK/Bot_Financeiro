@@ -50,7 +50,7 @@ O que só existe no app e a web precisa: `coresBanco` (`app/src/ui/tokens.ts`) e
 ## O que a tela mostra
 
 Rota nova do painel: `#/conta/bancos`, "Bancos conectados", na seção Conta (`CONTA` em `router.ts`), fora do
-seletor de mês (`NO_MONTH` já inclui `...CONTA`). Ver decisão aberta 1.
+seletor de mês (`NO_MONTH` já inclui `...CONTA`). Decisão 1.
 
 Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o painel é só escuro.
 
@@ -132,14 +132,14 @@ que hoje só `/bancos` emite); faltando, acrescentar ali, que é a fonte do pain
 
 ### W3 — Reconectar e Acompanhar (Completo; depende de staging)
 
-- O widget da Pluggy só existe no legado (`open-finance-connect.js`, IIFE, `window.PBOpenFinance`). Duas saídas, ver
-  decisão aberta 3. A recomendada: `PBOpenFinance` ganha um parâmetro opcional `itemId` que vai no corpo do
+- O widget da Pluggy só existe no legado (`open-finance-connect.js`, IIFE, `window.PBOpenFinance`). Decidido (decisão 3):
+  `PBOpenFinance` ganha um parâmetro opcional `itemId` que vai no corpo do
   `connect-token` e no `updateItem` do `PluggyConnect`; o painel carrega o script e o SDK da Pluggy só ao clicar.
   Quem não passa `itemId` (o settings) recebe o mesmo comportamento de hoje.
 - **Não verificado, condição para começar:** que o SDK da Pluggy na versão carregada aceita `updateItem` com um token
   criado com `itemId`. Só se prova em staging (conta demo), com um banco real.
 - "Acompanhar sincronização" quando `ui.state === "updating"`: reaproveitar `PBColetaOF` (`frontend/of-status-poll.js`)
-  se ele aceitar um item; senão, só reler o snapshot pelo `vivo` (foco de aba) e mostrar "Atualizando…" (decisão aberta 4).
+  se ele aceitar um item; senão, só reler o snapshot pelo `vivo` (foco de aba) e mostrar "Atualizando…" (decisão 4: só a pílula).
 - Regras de quando mostrar Reconectar: as do app (`provider_item_id` presente, `of_banks_max !== 0`, estado fora de
   `removed`, `item_missing`, `paused`). Reconectar não conta vaga nova (P1 do `/limite`).
 
@@ -206,19 +206,17 @@ W3:
 Só depois do deploy (todos os PRs): números reais com a conta demo, painel e app lado a lado mostrando o mesmo topo e os
 mesmos bancos; Safari do iPhone no `/painel`.
 
-## Decisões abertas (para o dono)
+## Decisões do dono (fechadas em 2026-10-18: "pode seguir com as suas recomendações")
 
-1. **Onde mora a tela.** Recomendo página nova no `/painel` (`#/conta/bancos`, seção Conta), porque o painel é onde a
-   web está indo e "Configurações" ainda é ponte. Alternativa: refazer os cards dentro da aba Open Finance do
-   `settings.html` (JS inline, sem `bancosQuery`, mais código legado). Se for o painel: os links "Conectar banco" do
-   painel passam a apontar para a página nova quando o W3 entrar?
-2. **O total do topo.** O pedido desta tarefa falava em "total só em saldo em conta"; a decisão 1 do dono no plano do app
-   é **saldo em conta + investimentos**, e é o que `/bancos` devolve. Este plano segue o app. Confirmar.
-3. **Reconectar no painel:** (a) estender `PBOpenFinance` com `itemId` e carregá-lo no painel (recomendado, um widget só);
-   ou (b) o Reconectar leva para o settings, que ganha o botão. (b) espalha a tela em duas.
-4. **Acompanhar sincronização** no painel: vale o acompanhamento ao vivo do settings (`PBColetaOF`), ou basta a pílula
-   "Atualizando…" relida ao voltar à aba?
-5. **"↻ Atualizar" e "Remover todas as conexões"** (só na web hoje): vêm para a página nova ou ficam no settings?
-6. **Esconder valores** não existe no painel. A tela nova nasce sem, como o resto do painel (o app respeita)?
-7. **Logo:** o W1 sai com a inicial colorida e o logo entra quando o PR 2 do app (`logo_url`) estiver na `main`, ou o W1
-   espera o PR 2?
+1. **A tela mora no `/painel`** (`#/conta/bancos`, seção Conta). Os links "Conectar banco" do painel passam a apontar
+   para a página nova quando o W3 entrar; até lá seguem no `/settings?view=open-finance`.
+2. **Total do topo = saldo em conta + investimentos**, como o app e como `/bancos` devolve.
+3. **Reconectar estende `PBOpenFinance`** com `itemId` e o painel o carrega (um widget só). É o W3.
+4. **Acompanhar sincronização:** só a pílula "Atualizando…", relida pelo SSE e pelo foco da aba. Sem `PBColetaOF` no
+   painel; o W3 fica sem esse botão.
+5. **"↻ Atualizar" e "Remover todas as conexões" ficam no settings.** O app não os tem; a página nova não os ganha.
+6. **Esconder valores:** a tela nasce sem, como o resto do painel. Fica a linha própria na paridade.
+7. **Logo:** o W1 sai com a inicial colorida; o logo entra num PR pequeno quando o `logo_url` (PR 2 do app) estiver na `main`.
+
+Ajuste de execução: o W0 (cores) entra dentro do W1, para um ciclo de revisão a menos. O teste de paridade das cores
+continua obrigatório.
