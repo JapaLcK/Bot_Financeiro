@@ -1,8 +1,10 @@
 /**
- * A caixa "Receitas do extrato" no topo de /painel#/previsao (webapp/src/dashboard/widgets/ReceitasDoBanco.tsx):
- * a `receitas_do_banco` da Previsão, com Sim / Não / Desfazer = POST /api/v2/previsao/receita.
- *   · só a `pendente` pergunta; confirmada e negada ficam em "Já respondidas", com Desfazer;
- *   · lista vazia: a caixa não existe; Plus também a vê;
+ * A caixa "Receitas do extrato" no topo de /painel#/previsao e a seção "Receitas na previsão" no fim
+ * (webapp/src/dashboard/widgets/ReceitasDoBanco.tsx, `modo` pendentes / respondidas): a `receitas_do_banco`
+ * da Previsão, com Sim / Não / Desfazer = POST /api/v2/previsao/receita.
+ *   · só a `pendente` pergunta no topo; confirmada e negada saem do topo e moram na seção do fim, com Desfazer;
+ *   · a última pendente respondida some com o painel do topo (fica só o anúncio e o alvo do foco, sr-only);
+ *   · lista vazia: nada existe; Plus também vê;
  *   · falha do POST (500, 403 de CSRF, 404): mensagem fixa e a lista intacta, com o GET refeito;
  *   · POST no ar trava os botões até a releitura voltar (também depois de sair da página e voltar);
  *     dois cliques no mesmo tique mandam um POST só; sem rede, a mutação falha com aviso, sem POST pendurado;
@@ -19,7 +21,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { RESPOSTAS, exigeArtefatoEmDia } from "./_painel.mjs";
-import { ALFA, MARIA, JOAO, CAIXA, PEND, RESP, abrir as abrirComBrowser, texto, abrirRespondidas, dito, semPendente } from "./_receitas.mjs";
+import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, texto, dito, alerta, painelVisivel, botoesDasCaixas, semPendente } from "./_receitas.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -27,18 +29,20 @@ after(() => browser?.close());
 
 const abrir = (opts) => abrirComBrowser(browser, opts);
 
-test("pendente: nome, valor do texto da API, dia e a pergunta; Sim e Não rotulados, 44 px; as respondidas ficam recolhidas", async () => {
+test("pendente: nome, valor do texto da API, dia e a pergunta; Sim e Não rotulados, 44 px; as respondidas ficam na seção do fim, fora do topo", async () => {
   const { ctx, page, erros } = await abrir();
   const pend = await texto(page, PEND);
   const botoes = await page.locator(`${PEND} button`).evaluateAll((bs) => bs.map((b) => [b.textContent, b.getAttribute("aria-label"), b.getBoundingClientRect().height]));
-  const resumo = (await texto(page, `${CAIXA} summary`))[0];
-  const aberto = await page.locator(`${CAIXA} details`).evaluate((d) => d.open);
+  const resp = await texto(page, RESP);
+  const titulo = (await texto(page, `${SECAO} h2`))[0];
+  const noTopo = await page.locator(`${CAIXA} ul[aria-label="Receitas respondidas"], ${CAIXA} button[aria-label^="Desfazer"], ${CAIXA} .selo`).count();
   await ctx.close();
   assert.deepEqual(pend, ["Empresa Alfa Ltda R$ 4.000,00 todo dia 4. É sua receita fixa? Sim Não"]);
   assert.deepEqual(botoes.map(([t, a]) => [t, a]), [["Sim", "Sim, é receita fixa: Empresa Alfa Ltda"], ["Não", "Não é receita fixa: Empresa Alfa Ltda"]]);
   assert.ok(botoes.every(([, , h]) => h >= 44), JSON.stringify(botoes));
-  assert.match(resumo, /^Já respondidas \(2\)/);
-  assert.equal(aberto, false);
+  assert.equal(titulo, "Receitas na previsão");
+  assert.deepEqual(resp, ["Maria Souza R$ 1.500,00 Confirmada todo dia 10 Desfazer", "Pix do João R$ 250,50 Recusada todo dia 20 Desfazer"]);
+  assert.equal(noTopo, 0);
   assert.deepEqual(erros, []);
 });
 
@@ -48,11 +52,12 @@ test("Sim: POST com corpo e CSRF do cookie, a linha sai da pendente e vai para a
   await semPendente(page);
   await page.waitForFunction(() => document.activeElement?.classList.contains("rec-foco"));
   const foco = await page.evaluate(() => document.activeElement?.closest("article")?.id + "|" + document.activeElement?.tagName);
-  await abrirRespondidas(page);
   const resp = await texto(page, RESP);
   const lede = (await texto(page, `${CAIXA} .rec-foco`))[0];
   const falado = await dito(page);
+  const topo = await painelVisivel(page, CAIXA);
   await ctx.close();
+  assert.equal(topo, false, "sem pendente, o painel do topo some");
   assert.deepEqual(posts, [{ corpo: { chave: ALFA, resposta: "sim" }, csrf: "tok-123" }]);
   assert.deepEqual(resp, ["Empresa Alfa Ltda R$ 4.000,00 Confirmada todo dia 4 Desfazer", "Maria Souza R$ 1.500,00 Confirmada todo dia 10 Desfazer", "Pix do João R$ 250,50 Recusada todo dia 20 Desfazer"]);
   assert.equal(foco, "w-previsao-receitas|P");
@@ -64,13 +69,43 @@ test("Não: vai para as respondidas como Recusada", async () => {
   const { ctx, page, posts } = await abrir();
   await page.getByRole("button", { name: "Não é receita fixa: Empresa Alfa Ltda" }).click();
   await semPendente(page);
-  await abrirRespondidas(page);
   const alfa = await texto(page, `${RESP}:has-text("Empresa Alfa")`);
   const falado = await dito(page);
   await ctx.close();
   assert.deepEqual(posts.map((p) => p.corpo), [{ chave: ALFA, resposta: "nao" }]);
   assert.deepEqual(alfa, ["Empresa Alfa Ltda R$ 4.000,00 Recusada todo dia 4 Desfazer"]);
   assert.equal(falado, "Empresa Alfa Ltda: recusada.");
+});
+
+test("última pendente respondida: o painel do topo some (sem a frase na tela, anúncio sr-only), a receita aparece na seção com Desfazer; Desfazer a traz de volta ao topo", async () => {
+  const receitas = [
+    { chave: ALFA, nome: "Empresa Alfa Ltda", valor: "4000.00", dia: 4, status: "pendente" },
+    { chave: MARIA, nome: "Maria Souza", valor: "1500.00", dia: 10, status: "confirmada" },
+  ];
+  const { ctx, page, posts } = await abrir({ receitas });
+  const antes = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
+  await page.getByRole("button", { name: "Sim, é receita fixa: Empresa Alfa Ltda" }).click();
+  await semPendente(page);
+  await page.locator(RESP, { hasText: "Empresa Alfa" }).waitFor();
+  const apos = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
+  const frase = await page.getByText("Nenhuma receita a confirmar.").evaluate((p) => { const r = p.closest(".sr-only").getBoundingClientRect(); return [r.width, r.height]; });
+  const secao = await texto(page, RESP);
+  const falado = await dito(page);
+  await page.getByRole("button", { name: "Desfazer resposta: Empresa Alfa Ltda" }).click();
+  await page.locator(PEND, { hasText: "Empresa Alfa" }).waitFor();
+  const volta = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
+  const pend = await texto(page, PEND);
+  const resp = await texto(page, RESP);
+  await ctx.close();
+  assert.deepEqual(antes, [true, true]);
+  assert.deepEqual(apos, [false, true]);
+  assert.ok(frase[0] <= 2 && frase[1] <= 2, `a frase sobrou na tela: ${frase}`);
+  assert.deepEqual(secao, ["Empresa Alfa Ltda R$ 4.000,00 Confirmada todo dia 4 Desfazer", "Maria Souza R$ 1.500,00 Confirmada todo dia 10 Desfazer"]);
+  assert.equal(falado, "Empresa Alfa Ltda: confirmada.");
+  assert.deepEqual(volta, [true, true]);
+  assert.deepEqual(pend, ["Empresa Alfa Ltda R$ 4.000,00 todo dia 4. É sua receita fixa? Sim Não"]);
+  assert.deepEqual(resp, ["Maria Souza R$ 1.500,00 Confirmada todo dia 10 Desfazer"]);
+  assert.deepEqual(posts.map((p) => p.corpo.resposta), ["sim", "desfazer"]);
 });
 
 test("duas pendentes: Sim e Não na SEGUNDA mandam a chave dela, não a da primeira", async () => {
@@ -83,7 +118,6 @@ test("duas pendentes: Sim e Não na SEGUNDA mandam a chave dela, não a da prime
   const { ctx, page, posts } = await abrir({ receitas });
   await page.getByRole("button", { name: "Não é receita fixa: Beta Serviços" }).click();
   await page.locator(PEND, { hasText: "Beta" }).waitFor({ state: "detached" });
-  await abrirRespondidas(page);
   await page.getByRole("button", { name: "Desfazer resposta: Beta Serviços" }).click();
   await page.locator(PEND, { hasText: "Beta" }).waitFor();
   await page.getByRole("button", { name: "Sim, é receita fixa: Beta Serviços" }).click();
@@ -96,28 +130,28 @@ test("duas pendentes: Sim e Não na SEGUNDA mandam a chave dela, não a da prime
 
 test("Desfazer: a confirmada e a recusada voltam a pendente, cada uma com a sua pergunta", async () => {
   const { ctx, page, posts } = await abrir();
-  await abrirRespondidas(page);
   await page.getByRole("button", { name: "Desfazer resposta: Maria Souza" }).click();
   await page.locator(PEND, { hasText: "Maria Souza" }).waitFor();
   await page.getByRole("button", { name: "Desfazer resposta: Pix do João" }).click();
   await page.locator(PEND, { hasText: "Pix do João" }).waitFor();
   const pend = await texto(page, PEND);
-  const vazio = await page.locator(`${CAIXA} .rec-respondidas`).count();
+  await page.locator(RESP).first().waitFor({ state: "detached" });
+  const secao = await painelVisivel(page, SECAO);
   const falado = await dito(page);
   await ctx.close();
   assert.deepEqual(posts.map((p) => p.corpo), [{ chave: MARIA, resposta: "desfazer" }, { chave: JOAO, resposta: "desfazer" }]);
   assert.equal(pend.length, 3);
-  assert.equal(vazio, 0);
+  assert.equal(secao, false, "sem respondidas, a seção some");
   assert.equal(falado, "Pix do João: resposta desfeita.");
 });
 
-test("lista vazia: a caixa não existe; só respondidas: sem pergunta e sem Sim/Não; Plus também vê a caixa", async () => {
+test("lista vazia: nada existe; só respondidas: nada no topo, só a seção, sem Sim/Não; Plus também vê a caixa", async () => {
   const vazia = await abrir({ receitas: [] });
-  const v = await vazia.page.locator(CAIXA).count();
+  const v = await vazia.page.locator(`${CAIXA}, ${SECAO}`).count();
   await vazia.ctx.close();
   const r = RESPOSTAS.previsao.pro30_receitas.receitas_do_banco;
   const so = await abrir({ receitas: r.slice(1) });
-  const s = [await so.page.locator(PEND).count(), await so.page.getByRole("button", { name: /^Sim/ }).count(), (await texto(so.page, `${CAIXA} .rec-foco`))[0]];
+  const s = [await so.page.locator(PEND).count(), await so.page.getByRole("button", { name: /^Sim/ }).count(), await so.page.locator(CAIXA).count(), (await texto(so.page, RESP)).length];
   await so.ctx.close();
   const plus = await abrir({ plano: "plus" });
   const p = await texto(plus.page, PEND);
@@ -126,7 +160,7 @@ test("lista vazia: a caixa não existe; só respondidas: sem pergunta e sem Sim/
   const postou = plus.posts.length;
   await plus.ctx.close();
   assert.equal(v, 0);
-  assert.deepEqual(s, [0, 0, "Nenhuma receita a confirmar."]);
+  assert.deepEqual(s, [0, 0, 0, 2]);
   assert.equal(p.length, 1);
   assert.equal(postou, 1);
 });
@@ -168,8 +202,8 @@ test("POST no ar: Sim, Não e Desfazer travados; só destravam DEPOIS da releitu
   const { ctx, page, posts, gets } = await abrir({ post: () => trava, get: (n) => (n ? lenta : undefined) });
   await page.getByRole("button", { name: /^Sim/ }).click();
   while (!posts.length) await page.waitForTimeout(20);
-  await page.locator(`${CAIXA} button:disabled`).first().waitFor();
-  const travados = () => page.locator(`${CAIXA} button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+  await page.locator(`${CAIXA} button:disabled, ${SECAO} button:disabled`).first().waitFor();
+  const travados = () => botoesDasCaixas(page);
   const durante = await travados();
   const antes = gets.length;
   soltarPost();
@@ -195,10 +229,10 @@ test("sair da página com o POST no ar e voltar: os botões nascem travados e de
   await page.locator("#board-profile").waitFor();
   await ir("/previsao");
   await page.locator(CAIXA).waitFor();
-  const durante = await page.locator(`${CAIXA} button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+  const durante = await botoesDasCaixas(page);
   soltar();
   await semPendente(page);
-  const depois = await page.locator(`${CAIXA} button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+  const depois = await botoesDasCaixas(page);
   await ctx.close();
   assert.ok(durante.length >= 2 && durante.every(Boolean), JSON.stringify(durante));
   assert.ok(depois.length >= 3 && depois.every((d) => !d), JSON.stringify(depois));
@@ -210,13 +244,13 @@ test("resposta perdida (o POST grava e a conexão cai): a releitura mostra que p
   await page.getByRole("button", { name: /^Sim/ }).click();
   await semPendente(page);
   await page.waitForFunction(() => document.activeElement?.classList.contains("rec-foco"));
-  const msg = (await texto(page, `${CAIXA} [role=alert]`))[0];
-  const resumo = (await texto(page, `${CAIXA} summary`))[0];
+  const msg = await alerta(page);
+  const resp = await texto(page, RESP);
   const falado = await dito(page);
   await ctx.close();
   assert.equal(posts.length, 1);
   assert.equal(msg, "");
-  assert.match(resumo, /^Já respondidas \(3\)/);
+  assert.equal(resp.length, 3);
   assert.equal(falado, "Empresa Alfa Ltda: confirmada.");
 });
 
@@ -280,7 +314,6 @@ test("dois cliques no mesmo tique (antes do re-render): um POST só, no Sim e no
   await duplo(`${PEND} button`);
   await semPendente(page);
   await page.waitForLoadState("networkidle");
-  await abrirRespondidas(page);
   await duplo(`${RESP} button`);
   await page.locator(PEND).waitFor();
   await page.waitForLoadState("networkidle");
@@ -327,24 +360,25 @@ test("nome do pagador é texto: <script> e <img onerror> não viram elemento; no
 
 // PAINEL_SHOT=<pasta>: guarda as capturas da verificação visual.
 for (const [nome, width] of [["desktop", 1280], ["mobile", 390]]) {
-  test(`layout ${nome} (${width} px): sem rolagem horizontal, a caixa acima do saldo, botões inteiros dentro da caixa`, async () => {
+  test(`layout ${nome} (${width} px): sem rolagem horizontal, a caixa acima do saldo, a seção das respondidas depois de Compromissos e Como foi feita, botões dentro dos recipientes`, async () => {
     const { ctx, page } = await abrir({ width });
     const m = await page.evaluate(() => {
       const c = document.querySelector("#w-previsao-receitas").getBoundingClientRect();
       const h = document.querySelector("#w-previsao").getBoundingClientRect();
-      const bs = [...document.querySelectorAll("#w-previsao-receitas button")].map((b) => b.getBoundingClientRect());
-      return { larg: [document.documentElement.scrollWidth, innerWidth], caixaAcima: c.bottom <= h.top, caixa: [c.left, c.right],
-        fora: bs.filter((b) => b.left < c.left || b.right > c.right).length };
+      const sec = document.querySelector("#w-previsao-receitas-respondidas").getBoundingClientRect();
+      const fim = Math.max(...["#w-previsao-qualidade", "#w-previsao-compromissos"].map((q) => document.querySelector(q)?.getBoundingClientRect().bottom ?? 0));
+      const fora = (raiz, caixa) => [...document.querySelectorAll(`${raiz} button`)].map((b) => b.getBoundingClientRect()).filter((b) => b.left < caixa.left || b.right > caixa.right).length;
+      return { larg: [document.documentElement.scrollWidth, innerWidth], caixaAcima: c.bottom <= h.top, secaoDepois: sec.top >= fim, caixa: [c.left, c.right],
+        fora: fora("#w-previsao-receitas", c) + fora("#w-previsao-receitas-respondidas", sec) };
     });
     if (process.env.PAINEL_SHOT) {
       mkdirSync(process.env.PAINEL_SHOT, { recursive: true });
-      await page.screenshot({ path: `${process.env.PAINEL_SHOT}/previsao-${nome}-fechada.png`, fullPage: true });
-      await abrirRespondidas(page);
-      await page.screenshot({ path: `${process.env.PAINEL_SHOT}/previsao-${nome}-respondidas.png`, fullPage: true });
+      await page.screenshot({ path: `${process.env.PAINEL_SHOT}/previsao-${nome}.png`, fullPage: true });
     }
     await ctx.close();
     assert.ok(m.larg[0] <= m.larg[1], `rolagem horizontal: ${m.larg}`);
     assert.equal(m.caixaAcima, true);
+    assert.equal(m.secaoDepois, true);
     assert.equal(m.fora, 0);
   });
 }

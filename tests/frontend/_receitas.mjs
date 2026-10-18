@@ -1,4 +1,4 @@
-// Mock com estado da caixa "Receitas do extrato", dividido entre dashboard_v2_previsao_receitas*.test.mjs.
+// Mock com estado da caixa "Receitas do extrato" (pendentes, topo) e da seção "Receitas na previsão" (respondidas, fim), dividido entre dashboard_v2_previsao_receitas*.test.mjs.
 import { RESPOSTAS, abrirPainel } from "./_painel.mjs";
 
 export const ALFA = "extrato#a1b2c3d4e5f60718"; // pendente
@@ -7,7 +7,10 @@ export const JOAO = "extrato#1122334455667788"; // negada
 export const STATUS = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
 export const CAIXA = "#w-previsao-receitas";
 export const PEND = `${CAIXA} ul[aria-label="Receitas a confirmar"] li`;
-export const RESP = `${CAIXA} .rec-respondidas li`;
+export const SECAO = "#w-previsao-receitas-respondidas";
+export const RESP = `${SECAO} ul[aria-label="Receitas respondidas"] li`;
+// Os dois recipientes (cada um anuncia o que ele mesmo fez): o texto não vazio do aviso / da região viva.
+const AMBOS = (papel) => `${CAIXA} [role=${papel}], ${SECAO} [role=${papel}]`;
 
 /**
  * Abre /previsao com o mock com estado. `opts.post(corpo, n)` pode devolver {status, json} para falhar
@@ -51,6 +54,11 @@ export async function abrir(browser, { receitas, post, get, ...resto } = {}) {
   return r;
 }
 export const texto = (page, sel) => page.locator(sel).evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
-export const abrirRespondidas = (page) => page.locator(`${CAIXA} .rec-respondidas summary`).click();
-export const dito = async (page) => (await texto(page, `${CAIXA} [role=status]`))[0];
+export const dito = async (page) => (await texto(page, AMBOS("status"))).find(Boolean) ?? "";
+export const alerta = async (page) => (await texto(page, AMBOS("alert"))).find(Boolean) ?? "";
+/** O alerta de cada instância separado: [topo (pendentes), fim (respondidas)]. `alerta()` junta as duas e esconde o estado cruzado. */
+export const alertas = (page) => Promise.all([CAIXA, SECAO].map(async (s) => (await texto(page, `${s} [role=alert]`))[0] ?? ""));
+/** Painel visível = o recipiente tem caixa de verdade; no estado sr-only ele é 1 px (só o anúncio e o alvo do foco ficam no DOM). */
+export const painelVisivel = (page, sel) => page.locator(sel).evaluate((a) => { const r = a.parentElement.getBoundingClientRect(); return r.width > 2 && r.height > 2; });
+export const botoesDasCaixas = (page) => page.locator(`${CAIXA} button, ${SECAO} button`).evaluateAll((bs) => bs.map((b) => b.disabled));
 export const semPendente = (page) => page.locator(PEND).waitFor({ state: "detached" });

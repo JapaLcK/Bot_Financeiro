@@ -175,14 +175,18 @@ function ComoFoiFeita({ d }: { d: Previsao }) {
 export function PrevisaoPainel() {
   const p = usePrevisao();
   const d = p.d;
+  const [falhaEm, setFalhaEm] = useState<"pendentes" | "respondidas" | null>(null);
+  // As caixas desmontam quando `d` some (troca de horizonte): o alerta não sobrevive a isso, como antes (estado local).
+  if (!d && falhaEm) setFalhaEm(null);
   return (
     <>
-      {d && <ReceitasDoBanco lista={d.receitas_do_banco ?? []} />}
+      {d && <ReceitasDoBanco lista={d.receitas_do_banco ?? []} modo="pendentes" falhaEm={falhaEm} setFalhaEm={setFalhaEm} />}
       <div className="panel span-12"><PrevisaoHero p={p} id="previsao" /></div>
       {d && (
         <>
           <div className="panel span-7"><Compromissos grupos={d.compromissos} dias={d.dias} hoje={d.hoje} /></div>
           <div className="panel span-5"><ComoFoiFeita d={d} /></div>
+          <ReceitasDoBanco lista={d.receitas_do_banco ?? []} modo="respondidas" falhaEm={falhaEm} setFalhaEm={setFalhaEm} />
         </>
       )}
     </>
