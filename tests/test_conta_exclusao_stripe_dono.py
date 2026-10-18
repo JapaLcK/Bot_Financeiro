@@ -10,7 +10,7 @@ teste n do arquivo irmão (dois customers, tudo da própria conta).
 from __future__ import annotations
 
 from test_conta_exclusao_stripe import (  # noqa: F401
-    _completo, _conta, _del, _deleting, _status, c, contas, emails, loja, sql,
+    _completo, _conta, _del, _deleting, _segunda_linha, _status, c, contas, emails, loja,
 )
 
 
@@ -50,8 +50,7 @@ def test_h4_so_checkout_de_outro_usuario_tambem_levanta(c, contas, loja):
 
 def test_h5_dois_customers_o_segundo_com_assinatura_alheia_nada_do_primeiro_e_tocado(c, contas, loja):
     a, b = _conta(contas, "cus_A5"), _conta(contas, "cus_B5a")
-    sql("insert into auth_accounts (user_id, email, password_hash, stripe_customer_id)"
-        " values (%s, %s, 'x', 'cus_B5b')", b.uid, f"b5b-{b.uid}@example.com")
+    _segunda_linha(b, "cus_B5b")
     loja.nova("sub_1", "cus_B5a", dono=b.uid)
     loja.sessao("cs_1", "cus_B5a")
     loja.nova("sub_alheia", "cus_B5b", dono=a.uid)

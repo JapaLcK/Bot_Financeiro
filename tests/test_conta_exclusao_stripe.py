@@ -121,6 +121,15 @@ def _conta(contas, customer):
     return conta
 
 
+def _segunda_linha(conta, customer):
+    """2ª linha de `auth_accounts` do mesmo user_id, com a MESMA senha: o reauth da
+    exclusão lê `limit 1` sem ordem, e um hash falso ('x') vira 401 "Senha incorreta."
+    quando o índice devolve essa linha primeiro (flake do CI, sob reuso de espaço no heap)."""
+    sql("insert into auth_accounts (user_id, email, password_hash, stripe_customer_id)"
+        " select user_id, %s, password_hash, %s from auth_accounts where user_id = %s",
+        f"{customer}-{conta.uid}@example.com", customer, conta.uid)
+
+
 def _status(uid):
     return _um("select deletion_status from auth_accounts where user_id = %s", uid)["deletion_status"]
 
@@ -332,8 +341,7 @@ def test_m_expire_que_falha_vira_deleting_e_o_job_refaz(c, contas, loja):
 
 def test_n_dois_customers_da_mesma_conta_tem_checkout_e_assinatura_tratados(c, contas, loja):
     conta = _conta(contas, "cus_n1")
-    sql("insert into auth_accounts (user_id, email, password_hash, stripe_customer_id)"
-        " values (%s, %s, 'x', 'cus_n2')", conta.uid, f"n2-{conta.uid}@example.com")
+    _segunda_linha(conta, "cus_n2")
     for n in ("1", "2"):
         loja.nova(f"sub_n{n}", f"cus_n{n}")
         loja.sessao(f"cs_n{n}", f"cus_n{n}")
