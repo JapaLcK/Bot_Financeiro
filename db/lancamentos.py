@@ -37,6 +37,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from datetime import date, datetime
 
 from utils_date import _tz
@@ -60,6 +61,8 @@ RESGATAR = ("saque_caixinha", "resgate_investimento")
 _GUARDADO = "(" + ",".join(f"'{s}'" for s in GUARDAR + RESGATAR) + ")"
 _RESGATAR = "(" + ",".join(f"'{s}'" for s in RESGATAR) + ")"
 _MAX_ID = 2**63 - 1
+# O id de um item (`l<id>`/`c<id>`): `_item` o produz, `ler_id` o lê, a rota o valida (`[0-9]`, nunca `\d`).
+ID_RE = r"^[lc][1-9][0-9]{0,18}$"
 
 # Lançamentos em par pendente com o banco, dos dois lados (o manual e a sombra): o mesmo
 # conjunto acionável que o bloco de contas conta (`ACTIONABLE_PENDING_SQL`). Params:
@@ -239,6 +242,13 @@ class CursorInvalido(ValueError):
     pass
 
 
+def ler_id(texto: str) -> tuple[str, int] | None:
+    """`l42` -> ("l", 42); None fora do formato ou acima do bigint."""
+    if not isinstance(texto, str) or not re.fullmatch(ID_RE, texto) or int(texto[1:]) > _MAX_ID:
+        return None
+    return texto[0], int(texto[1:])
+
+
 def cursor_de(item: dict) -> str:
     chave = [item["dia"].isoformat(), item["instante"].isoformat(), item["tabela"], item["id"]]
     return base64.urlsafe_b64encode(json.dumps(chave).encode()).decode()
@@ -260,11 +270,11 @@ def ler_cursor(texto: str) -> tuple:
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
            categoria=None, tipo=None, q=None, apos=None, limite=50,
-           com_guardado=False, dia=None) -> tuple[list[dict], bool]:
+           com_guardado=False, dia=None, ident=None) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
     `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
-    agregados internos (`mes_detalhes`) seguem sem passá-lo."""
+    agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
     perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
@@ -272,10 +282,16 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     perna_l += " and false" if cartao is not None else ""
     params += [tz, tz, user_id, inicio, fim, user_id]
     params += [user_id, user_id, conta] if conta is not None else []
+    if ident is not None:
+        perna_l += " and l.id = %s" if ident[0] == "l" else " and false"
+        params += [ident[1]] if ident[0] == "l" else []
     perna_c = _PERNA_CARTAO + (" and cc.id = %s" if cartao is not None else "")
     perna_c += " and false" if conta is not None else ""
     params += [user_id, user_id, inicio, fim, user_id, user_id]
     params += [cartao] if cartao is not None else []
+    if ident is not None:
+        perna_c += " and ct.id = %s" if ident[0] == "c" else " and false"
+        params += [ident[1]] if ident[0] == "c" else []
 
     filtros = []
     if apos is not None:
@@ -319,31 +335,3 @@ def _item(r: dict) -> dict:
             "conta_id": r["conta_id"], "cartao_id": r["cartao_id"], "parcela": parcela,
             "fatura": r["fatura"], "pode": r["pode"], "motivos": r["motivos"]}
 
-
-def pagina(user_id: int, ano: int, mes: int, agora: datetime, *, cursor: str | None = None,
-           limite: int = 50, q: str | None = None, **filtros) -> dict:
-    """O `GET /api/v2/lancamentos`. O mês pedido, cortado pela janela do plano como
-    `resumo_do_mes`; com busca, a janela inteira do plano. `motivos` da lista: os do bloco
-    de contas (situação de hoje) e `inicio_do_historico` quando a janela cortou o pedido.
-    `cursor` vem cru do cliente: `CursorInvalido` sobe para quem chama."""
-    from core.services.plan_service import history_earliest_date
-
-    from .connection import get_conn
-    from .contas_hoje import listar as contas
-    from .resumo_mes import MOTIVOS, mes_de
-
-    apos = ler_cursor(cursor) if cursor else None
-    corte = history_earliest_date(user_id, agora)
-    inicio, fim = (date.min, date.max) if termos_busca(q) else mes_de(date(ano, mes, 1))
-    cortou = bool(corte and corte > inicio)
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("set transaction isolation level repeatable read, read only")
-        linhas, mais = listar(cur, user_id, max(inicio, corte) if corte else inicio, fim,
-                              q=q, apos=apos, limite=limite, **filtros)
-        vistos = set(contas(cur, user_id)["motivos"])
-        conn.rollback()
-    if cortou:
-        vistos.add("inicio_do_historico")
-    return {"mes": f"{ano:04d}-{mes:02d}", "itens": [_item(r) for r in linhas],
-            "proximo": cursor_de(linhas[-1]) if mais else None,
-            "motivos": [m for m in MOTIVOS if m in vistos]}

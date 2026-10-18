@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from api.v2.resumo_mes import PADRAO_MES, mes_pedido
 from api.v2.sessao import usuario_atual
 from core.pg_text import limpa_para_pg
-from db import lancamentos, resumo_mes
+from db import lancamentos, lancamentos_leitura, resumo_mes
 from db.categories import CATEGORY_NAME_MAX_LEN
 from utils_date import day_tz, now_tz
 
@@ -93,7 +93,7 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
         raise _recusa("dia", "Data inválida.") from None
     ano, m, agora = mes_pedido(mes)
     try:
-        dados = lancamentos.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
+        dados = lancamentos_leitura.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
                                    origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
                                    categoria=categoria, tipo=tipo, com_guardado=guardado)
     except lancamentos.CursorInvalido as e:
@@ -108,7 +108,7 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
 # Idempotency-Key (coluna pedido_id com índice único parcial, entrando na exportação, no reset
 # e na exclusão) quando a tela (PR 4) mostrar duplicata real.
 _VALOR = r"^[0-9]{1,9}(\.[0-9]{1,2})?$"
-_ID = r"^[lc][1-9][0-9]{0,18}$"
+_ID = lancamentos.ID_RE
 
 
 def _nao_achou():  # o MESMO corpo para id de outro usuário e id inexistente
@@ -143,10 +143,10 @@ class LancamentoId(BaseModel):
 
 
 def _id(texto: str) -> tuple[str, int]:
-    n = int(texto[1:])
-    if n > _MAX_ID:
+    ident = lancamentos.ler_id(texto)
+    if ident is None:
         raise _recusa("id", "Id fora da faixa.", "body")
-    return texto[0], n
+    return ident
 
 
 def _valor(texto: str) -> Decimal:
