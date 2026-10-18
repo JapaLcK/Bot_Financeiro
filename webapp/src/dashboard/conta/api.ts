@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, chamar, escrever, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, chamar, escrever, instante, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
 
 export type Campo = "nome" | "email" | "telefone";
@@ -49,13 +49,15 @@ export const mfaStatusQuery = queryOptions({
   enabled: !DEMO,
 });
 
-// A releitura do status depois de um enable ambíguo. `fetchQuery` não recebe signal: corre contra o mesmo prazo de 30 s (a consulta que
-// sobra termina no cache, sem efeito); estouro ou rejeição = null, e o modal não fica preso na releitura que nunca responde.
-export const lerStatusMfa = (qc: QueryClient) => {
+// Espera uma releitura contra o prazo de 30 s (as consultas não recebem signal): a que sobra termina no cache, sem efeito.
+// Estouro ou rejeição = null, e quem espera (o modal do MFA, o diálogo das sessões) não fica preso numa leitura que nunca responde.
+export const comPrazoLeitura = <T,>(p: Promise<T>) => {
   let prazo: ReturnType<typeof setTimeout>;
-  return Promise.race([qc.fetchQuery(mfaStatusQuery).catch(() => null), new Promise<null>((ok) => { prazo = setTimeout(() => ok(null), 30000); })])
+  return Promise.race([p.catch(() => null), new Promise<null>((ok) => { prazo = setTimeout(() => ok(null), 30000); })])
     .finally(() => clearTimeout(prazo));
 };
+// A releitura do status depois de um enable ambíguo.
+export const lerStatusMfa = (qc: QueryClient) => comPrazoLeitura(qc.fetchQuery(mfaStatusQuery));
 
 const post = <T,>(path: string, corpo: unknown, sinal?: AbortSignal) => escrever<T>("POST", path, corpo, sinal);
 export const iniciarMfa = (password: string) => comPrazo((sinal) => post<MfaSetup>("/auth/mfa/setup", { password }, sinal));
@@ -76,6 +78,48 @@ const gerar = <T,>(f: () => Promise<T>) => {
 export const ativarMfa = (code: string) => gerar(() => post<{ backup_codes: unknown }>("/auth/mfa/enable", { code }).then((r) => guardarCodigos(r.backup_codes, false)));
 export const regerarCodigos = (password: string, code: string) =>
   gerar(() => post<{ backup_codes: unknown }>("/auth/mfa/regenerate-backup-codes", { password, code }).then((r) => guardarCodigos(r.backup_codes, true)));
+
+// Dispositivos conectados (rotas antigas /settings/{uid}/sessions). Só monta com o uid já validado (inteiro positivo).
+export type Sessao = { jti: string; device_label: string; ip: string | null; created_at: string | null; last_seen_at: string | null; is_current: boolean };
+export type SessoesAtivas = { sessions: Sessao[]; current_jti: string | null };
+// A borda: item que não é objeto com `jti` string some; ip/datas que não são string viram vazio; rótulo vazio vira o texto do servidor (core/sessions.py: device_label).
+const txt = (v: unknown) => (typeof v === "string" ? v : "");
+const objeto = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+const sessoesDe = (r: unknown): SessoesAtivas => {
+  // Fora do contrato (corpo que não é objeto, `sessions` que não é lista, lista cheia de itens e nenhum aproveitável) é ERRO de carga,
+  // não "Nenhuma sessão ativa."; só a lista vazia de verdade (`sessions: []`) é vazia.
+  const o = objeto(r) ? r : {};
+  if (!Array.isArray(o.sessions)) throw new ErroApi(200, "contrato");
+  const sessions = o.sessions.filter(objeto).filter((s) => typeof s.jti === "string" && s.jti).map((s) => ({
+    jti: s.jti as string, device_label: txt(s.device_label).trim() || "Dispositivo desconhecido", ip: txt(s.ip) || null, created_at: txt(s.created_at) || null, last_seen_at: txt(s.last_seen_at) || null, is_current: s.is_current === true }));
+  if (o.sessions.length && !sessions.length) throw new ErroApi(200, "contrato");
+  return { current_jti: typeof o.current_jti === "string" ? o.current_jti : null, sessions };
+};
+export const sessoesQuery = (uid: number) => queryOptions({
+  queryKey: ["conta", "sessoes", uid],
+  queryFn: ({ signal }) => chamar<unknown>(`/settings/${uid}/sessions`, GET(signal)).then(sessoesDe),
+  staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
+  enabled: !DEMO,
+});
+// Idempotentes no servidor (o 2º DELETE da mesma sessão é 404, o das outras devolve revoked: 0): abortar no prazo não perde nada.
+export const encerrarSessao = (uid: number, jti: string) => comPrazo((sinal) => escrever<{ ok: boolean }>("DELETE", `/settings/${uid}/sessions/${encodeURIComponent(jti)}`, undefined, sinal));
+export const encerrarOutras = (uid: number) => comPrazo((sinal) => escrever<{ ok: boolean; revoked?: number }>("DELETE", `/settings/${uid}/sessions`, undefined, sinal));
+
+// Cópia de `formatActivityTime` (settings.html): o teste dashboard_v2_conta_sessoes compara as duas (§0.7). Duas diferenças, de propósito:
+// `instante` em vez de `new Date` (o ISO de 6 casas é NaN no Safari 14) e a data antiga no FUSO do painel, não no do aparelho.
+const dataAntiga = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit", year: "numeric" });
+export function horaRelativa(iso: unknown, agora = Date.now()) {
+  const t = instante(iso);
+  if (isNaN(t)) return "";
+  const seg = Math.max(1, Math.floor((agora - t) / 1000));
+  if (seg < 60) return `há ${seg}s`;
+  const min = Math.floor(seg / 60);
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `há ${d}d` : dataAntiga.format(new Date(t));
+}
 
 // Cópia de `formatPhoneBR` (settings.html): o teste dashboard_v2_conta_perfil compara as duas (§0.7).
 export function telefoneBR(valor: string | null) {
