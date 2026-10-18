@@ -1436,7 +1436,27 @@ def excluir_conta_marcada(user_id: int) -> dict:
     Corpo único do job (`process_due_account_deletions`) e do
     `DELETE /auth/account`. Falhou: reagenda como `scheduled` (vencida) e
     devolve `deleted: False` — o job termina depois.
+
+    Antes de apagar o banco (que leva o `stripe_customer_id`), cancela as
+    assinaturas de cartão na Stripe, sem reembolso (S2). Falha dela devolve a
+    conta a `scheduled` com `error: "stripe"`: cartão vivo sobre conta apagada
+    seguiria cobrando.
     """
+    try:
+        from core.services.stripe_exclusao import cancelar_assinaturas
+
+        cancelar_assinaturas(user_id)
+    except Exception as exc:  # noqa: BLE001
+        from core.observability import log_system_event_sync
+
+        _restore_account_deletion_schedule(user_id)
+        log_system_event_sync(
+            "error", "account_deletion_stripe_cancel_failed",
+            "Exclusao de conta adiada: a assinatura no Stripe nao foi cancelada.",
+            source="db.privacy", user_id=int(user_id),
+            details={"error_type": type(exc).__name__},
+        )
+        return {"user_id": user_id, "deleted": False, "error": "stripe"}
     # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
     # local varreu (RETURNING), para o 2º passe pegar item salvo na janela
     # entre as duas coisas. Mesma regra de POST /settings/reset

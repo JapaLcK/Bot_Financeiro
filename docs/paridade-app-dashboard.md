@@ -65,16 +65,16 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 ## Conta, segurança e sistema
 
-No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar WhatsApp e "Desde …", pelas rotas `/settings/{uid}/security[/contact]`, `/auth/dashboard-profile`, `/auth/me` (só `has_password`) e `/auth/link-code`); Cobrança e Configurações do `/painel` seguem páginas-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`), onde mora o resto do conteúdo abaixo.
+No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar WhatsApp e "Desde …", pelas rotas `/settings/{uid}/security[/contact]`, `/auth/dashboard-profile`, `/auth/me` (só `has_password`) e `/auth/link-code`); a Cobrança do `/painel` segue página-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`); as Configurações mostram a Segurança (senha por link de e-mail e MFA, pelas rotas `/auth/mfa/*` e `/settings/{uid}/password-reset`; `conta/Seguranca.tsx`) e o link para a `/settings`, onde mora o resto do conteúdo abaixo.
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 (exclusão imediata, `reauth-code`; `settings.html` já usa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
+| Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 e S2 (exclusão imediata, `reauth-code`, cancela a assinatura Stripe na hora sem reembolso; `settings.html` já usa e avisa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |
 | Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Não há; o app coleta no cadastro e não edita | — | App | issue #1083; plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), seção B |
-| Trocar a senha de quem já tem senha | `/settings` (`password-reset`) | Só o fluxo de conta sem senha | — | App | a discutir com o dono |
+| Trocar a senha de quem já tem senha | `/settings` e Configurações do `/painel` (link por e-mail, `password-reset`) | Só o link por e-mail para conta sem senha (`seguranca.tsx`) | — | App | a discutir com o dono |
 | Open Finance: reconectar e desconectar um banco | Só conecta (sem reconectar) e desconecta todos | Reconecta e desconecta um por vez | O web não reconecta nem desconecta um | Web | a discutir com o dono |
 | Open Finance: atualizar agora, desconectar todos | Sim (`/refresh`, `disconnectAll`) | Não há | — | App | a discutir com o dono |
 | Vincular caixinha do banco a uma meta | `/settings` | Não há | — | App | a discutir com o dono |

@@ -227,3 +227,23 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .conta-perfil .perfil-ok { color: var(--gain); font-size: 22px; }
 .conta-perfil .perfil-erro { grid-column: 1 / -1; padding-bottom: 10px; font-size: 13px; }
 .conta-perfil .empty { padding: 12px 0; }
+
+/* Segurança da Conta (conta/Seguranca.tsx, MfaForm.tsx, Cofre.tsx): ações em linha própria, sem flex gap (Safari 14). */
+.conta-seguranca h2 { margin: 0 0 8px; font-size: 16px; }
+.conta-seguranca dd.seg-extra { grid-column: 2 / -1; padding-bottom: 8px; font-size: 14px; color: var(--ink-2); }
+.conta-seguranca dd.seg-extra:empty { display: none; }
+.conta-seguranca .seg-extra > .warn { display: block; }
+.conta-seguranca .seg-extra > .btn { margin-top: 8px; }
+.conta-seguranca .seg-acoes { display: flex; flex-wrap: wrap; margin: -8px 0 0 -8px; padding-bottom: 12px; }
+.conta-seguranca .seg-acoes > .btn { margin: 8px 0 0 8px; }
+.cofre { display: grid; gap: 14px; }
+.cofre h2 { font-size: 18px; margin: 0; }
+.cofre p { margin: 0; }
+.cofre-acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; margin: -8px 0 0 -8px; }
+.cofre-acoes > * { margin: 8px 0 0 8px; }
+.mfa-codigos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.mfa-codigos li, .mfa-segredo { padding: 10px 12px; border-radius: 10px; background: var(--plane-2); text-align: center; }
+.mfa-codigos code, .mfa-segredo { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; letter-spacing: .04em; }
+.mfa-segredo { display: block; word-break: break-all; user-select: all; }
+.mfa-qr { width: 216px; max-width: 100%; margin: 0 auto; padding: 8px; border-radius: 12px; background: #fff; } /* fundo branco: a câmera não lê QR escuro no tema escuro */
+.mfa-qr img { display: block; width: 100%; height: auto; }

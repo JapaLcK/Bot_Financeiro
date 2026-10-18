@@ -972,14 +972,24 @@ HMAC fica em `account_reauth_codes`). MFA ligado exige também `totp` (TOTP ou b
 e backup só ficam consumidos se a marca commitar. A marca (`schedule_account_deletion`, nome
 histórico) põe `deletion_status='processing'` e revoga `auth_sessions` e
 `auth_refresh_tokens` na mesma transação; `excluir_conta_marcada` (o mesmo corpo do job)
-apaga no mesmo request. **Resposta 200:** `{ok, user_id, status:"deleted"|"deleting", deleted,
+apaga no mesmo request. **Stripe (S2):** antes de apagar o banco (que leva o `stripe_customer_id`),
+`excluir_conta_marcada` chama `core/services/stripe_exclusao.cancelar_assinaturas`: lê os
+customers da própria conta em `auth_accounts`, expira os checkouts abertos de cada um (um
+checkout pago depois da exclusão criaria assinatura sem conta; QR Pix pendente fica fora), lista as assinaturas vivas (inclui as com
+`cancel_at_period_end`, `past_due`, `unpaid`), solta o `SubscriptionSchedule` e cancela na hora,
+**sem reembolso** (`cancellation_details.comment = MARCA_EXCLUSAO`, que o ramo `deleted` do
+webhook lê para não mandar e-mail "assinatura cancelada"). Levanta em qualquer dúvida (sem
+chave, listagem falha, sobrou checkout aberto ou assinatura viva, assinatura com `finbot_user_id` de outro usuário). Ordem:
+credenciais, marca `processing` e revoga sessões, cancela Stripe, apaga banco; por isso o cartão
+nunca é cancelado por senha errada. **Corrida com checkout:** `cancelar_assinaturas` roda sob o MESMO advisory lock do checkout (`billing_checkout:<uid>`, o de `_billing_user_lock`), solto antes de `delete_user_data`; checkout que já estava sob o lock termina antes e é expirado ali, e quem toma o lock depois leva 403 da guarda dentro de `_billing_user_lock` (conta com `auth_accounts` em `scheduled`/`processing`, ou sem linha em `users`, já apagada; só-WhatsApp, `users` sem `auth_accounts`, segue), em create-checkout, bump e Pix. Falha no Stripe: a conta volta a `scheduled` vencida, a rota
+responde 200 `deleting`, o job tenta de novo a cada rodada. **Resposta 200:** `{ok, user_id, status:"deleted"|"deleting", deleted,
 deletion_scheduled_for, grace_days:0, message}` (os dois últimos campos de data e carência são
-legados). `deleting` = a limpeza LOCAL falhou (`delete_user_data`: lock, deadlock); a conta
-volta a `scheduled` vencida e o job termina e manda o e-mail. A Pluggy é best-effort
+legados). `deleting` = a limpeza LOCAL falhou (`delete_user_data`: lock, deadlock) ou o
+cancelamento no Stripe falhou; a conta volta a `scheduled` vencida e o job termina e manda o e-mail. A Pluggy é best-effort
 (`db/privacy.py`): falha dela NÃO leva a `deleting`. **Erros** (`{"code","message"}` no
 `detail`): 400 `confirmacao_invalida`, 409 `export_pendente` (link de export ≤15 min, que morre
-com a conta), 409 `assinatura_ativa` (Stripe viva com renovação), 503 `stripe_indisponivel`
-(a consulta falhou: nada é apagado), 400 `codigo_obrigatorio`, 401 `codigo_invalido`, 401
+com a conta), 503 `stripe_indisponivel` (pré-checagem: a consulta falhou, nada é gasto nem apagado; não há mais
+409 `assinatura_ativa`), 400 `codigo_obrigatorio`, 401 `codigo_invalido`, 401
 `codigo_expirado` (vencido, usado, esgotado ou inexistente), 400 `mfa_obrigatorio`, 401
 `mfa_invalido`. Senha errada/vazia e sem credencial seguem como `detail` string (401 "Senha
 incorreta.", 400 "Informe sua senha...", 409). Só o 401 de SESSÃO leva `WWW-Authenticate`;
@@ -1545,6 +1555,13 @@ travado enquanto o PATCH está em voo. As outras sessões NÃO são encerradas, 
 é confirmado (quem troca para o e-mail de outra pessoa é assunto da issue própria, via
 auto-vínculo Google/Apple). Sobra: conta com 2 linhas em `auth_accounts` (o `user_id` não é
 unique) segue em 409 na troca, como antes; o "antigo" do aviso é o da primeira linha lida. Resend lento atrasa a resposta do PATCH (o aviso é `await` depois do commit, sem lock e sem timeout próprio), e o e-mail antigo vai ao `system_event_logs`, como os outros avisos. O teto de 5/h conta a tentativa antes da senha e do lock, sem estorno: 5 PATCH concorrentes com o mesmo e-mail novo (só API direta ou várias abas; o botão trava em voo) gastam as 5 e o próximo update leva 429 até a hora virar. Declarado de propósito: estornar enfraqueceria o limite de brute-force da senha.
+
+**Configurações do /painel mostram a Segurança (S0 + C1a).** `conta/Seguranca.tsx`: o link de redefinição de senha por e-mail
+(`password-reset`) e o MFA (`/auth/mfa/*`, modal em `conta/MfaForm.tsx`). Os códigos de backup moram no Cofre
+(`conta/Cofre.tsx`), irmão do `<Entrada>` em `main.tsx`, na memória do módulo: o servidor os devolve uma vez e fechar o modal,
+trocar de página ou o portão cair não os apagam; só o "Concluído". `enable` e `regenerate-backup-codes` NÃO têm timeout (o
+servidor comita e a resposta é a única cópia dos códigos); resposta perdida relê o status (T2 "gerar novos códigos" se o MFA ligou;
+o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu.
 
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
