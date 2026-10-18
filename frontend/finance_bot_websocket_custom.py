@@ -5243,6 +5243,7 @@ async def _billing_user_lock(user_id: int):
                     raise HTTPException(status_code=403, detail="Esta conta está em exclusão.")
                 yield
             finally:
+                await conn.rollback()   # guarda falhou = transação abortada; o lock de sessão sobrevive ao rollback
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
 
 

@@ -159,3 +159,68 @@ def test_d_exclusao_espera_o_lock_e_expira_o_checkout_criado_sob_ele(contas, loj
                              (_lock_key(conta.uid),)).fetchone()["ok"]
         outra.execute("select pg_advisory_unlock(hashtext(%s))", (_lock_key(conta.uid),))
         outra.commit()
+
+
+def test_h_guarda_que_falha_depois_do_lock_nao_deixa_o_lock_preso(user_id, monkeypatch):
+    """A consulta-guarda aborta a transacao (SQL invalido de verdade) depois do lock: sem o
+    `rollback` o `pg_advisory_unlock` do finally cai em InFailedSqlTransaction e a conexao
+    volta ao pool com o lock de sessao preso -- checkout e exclusao do usuario travam."""
+    from frontend.routes import shared
+    from test_fuso_do_app import _no_pool_do_dashboard
+
+    real = shared.db_connect
+
+    class _Cur:
+        def __init__(self, cur):
+            self._c = cur
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return await self._c.__aexit__(*a)
+
+        async def execute(self, sql, *a, **k):
+            if "deletion_status" in sql:
+                return await self._c.execute("select 1/0")
+            return await self._c.execute(sql, *a, **k)
+
+        def __getattr__(self, nome):
+            return getattr(self._c, nome)
+
+    class _Conn:
+        def __init__(self, conn):
+            self._c = conn
+
+        def cursor(self, *a, **k):
+            return _Cur(self._c.cursor(*a, **k))
+
+        def __getattr__(self, nome):
+            return getattr(self._c, nome)
+
+    class _CM:
+        def __init__(self, cm):
+            self._cm = cm
+
+        async def __aenter__(self):
+            return _Conn(await self._cm.__aenter__())
+
+        async def __aexit__(self, *a):
+            return await self._cm.__aexit__(*a)
+
+    async def _db_connect():
+        return _CM(await real())
+    monkeypatch.setattr(dashboard, "db_connect", _db_connect)
+
+    async def _corpo():
+        with pytest.raises(Exception, match="division by zero"):
+            async with dashboard._billing_user_lock(user_id):
+                pytest.fail("a guarda falhou: o corpo nao pode rodar")
+        # antes de o pool fechar (fechar a conexao soltaria o lock e mascararia o bug)
+        with db.get_conn() as outra:
+            livre = outra.execute("select pg_try_advisory_lock(hashtext(%s)) as ok",
+                                  (_lock_key(user_id),)).fetchone()["ok"]
+            outra.execute("select pg_advisory_unlock(hashtext(%s))", (_lock_key(user_id),))
+            outra.commit()
+        return livre
+    assert _no_pool_do_dashboard(_corpo) is True
