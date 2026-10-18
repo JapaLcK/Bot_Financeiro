@@ -25,7 +25,7 @@ def test_sem_emissor_a_chamada_a_openai_e_a_de_sempre(monkeypatch, pro_user_id):
     reg = openai_falso(monkeypatch, rodada("Oi!"))
     assert runner.chat(pro_user_id, "oi", monthly_limit=100) == "Oi!"
     (kw,) = reg.creates
-    assert "stream" not in kw and set(kw) == {"model", "temperature", "messages", "tools", "max_tokens"}
+    assert "stream" not in kw and set(kw) == {"model", "temperature", "messages", "tools", "max_completion_tokens", "reasoning_effort"}
     assert kw["tools"] is SCHEMAS
 
 

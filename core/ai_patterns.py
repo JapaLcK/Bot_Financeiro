@@ -1,7 +1,7 @@
 """
 core/ai_patterns.py — Sprint 7. Insights e padrões proativos via LLM (OpenAI).
 
-Estratégia: backend agrega dados estruturados, manda pra `gpt-4o-mini` com
+Estratégia: backend agrega dados estruturados, manda pra o modelo com
 prompt específico, recebe JSON validado, cacheia em `ai_proactive_cache`.
 
 Cache TTL por kind:

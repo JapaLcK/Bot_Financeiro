@@ -42,6 +42,9 @@ from datetime import date, datetime
 _PRICES_USD_PER_MTOK = {
     "gpt-4o-mini": (0.15, 0.075, 0.60),
     "gpt-4o": (2.50, 1.25, 10.00),
+    # developers.openai.com/api/docs/pricing, 2026-10-17. A tabela não tem coluna de
+    # cache-write (US$ 0,125/Mtok): o custo da Luna pode estar subestimado até ~25% na entrada nova.
+    "gpt-6-luna": (0.10, 0.01, 0.50),
 }
 
 # Ledger fora do worktree: acumula entre worktrees, que é o que "acumulado do
@@ -244,6 +247,12 @@ if __name__ == "__main__":
     # 200 novos × 0.15/M + 800 cacheados × 0.075/M + 500 saída × 0.60/M
     assert abs(usd_c - (0.00003 + 0.00006 + 0.0003)) < 1e-9, usd_c
     assert usd_c < 0.00045, "custo com cache tem que ser MENOR que sem cache"
+
+    # Luna: 200 novos × 0.10/M + 800 cacheados × 0.01/M + 500 saída × 0.50/M
+    mark_l = snapshot()
+    _record("gpt-6-luna", "gpt-6-luna", _UC())
+    usd_l, unknown_l = cost_usd(since(mark_l))
+    assert abs(usd_l - (0.00002 + 0.000008 + 0.00025)) < 1e-9 and unknown_l == [], (usd_l, unknown_l)
 
     # Usage ausente conta como chamada (senão o turno viraria "comando").
     _record("gpt-4o", "gpt-4o", None)

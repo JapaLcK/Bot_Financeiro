@@ -116,7 +116,7 @@ async def analytics_top_merchants_route(
 @router.get("/insights/{user_id}/current")
 @shared.limiter.limit("20/minute")
 async def insights_current_route(request: Request, user_id: int):
-    """Insights acionáveis do Piggy, gerados via LLM (gpt-4o-mini).
+    """Insights acionáveis do Piggy, gerados via LLM.
 
     Recebe estado financeiro ATUAL (orçamentos, recorrentes, metas, KPIs) e
     devolve 3-5 insights priorizados por severidade. Cache 6h por user.
@@ -141,7 +141,7 @@ async def analytics_patterns_route(
     request: Request,
     user_id: int,
 ):
-    """Padrões comportamentais via LLM (gpt-4o-mini). Cache 24h.
+    """Padrões comportamentais via LLM. Cache 24h.
 
     O LLM recebe métricas agregadas (gastos por hora, weekend split, salary
     burn, top merchants, top categorias) e devolve narrativas descobertas
