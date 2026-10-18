@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, chamar, escrever, instante, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
 
 export type Campo = "nome" | "email" | "telefone";
@@ -39,6 +39,12 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
 export const limiteQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "limite", uid],
   queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
+  ...aberto, enabled: !DEMO && uidValido(uid),
+});
+// `/api/v2/bancos` lê o usuário da sessão; o `uid` na chave só separa o cache por conta, para o valor de uma nunca sair ao lado da lista da outra.
+export const bancosQuery = (uid: unknown) => queryOptions({
+  queryKey: ["conta", "bancos", uid],
+  queryFn: ({ signal }) => apiGet("/bancos", signal),
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
 

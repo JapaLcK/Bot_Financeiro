@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ErroApi, bancosQuery, contaQuery } from "../lib/v2";
+import { ErroApi, contaQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { bancosValidos, barraDosBancos } from "../lib/bancos";
 import { ICON } from "../lib/brand";
 import { OF } from "../parts/guia-falas";
 import { Selos } from "../parts/Selos";
 import { route } from "../router";
-import { conexoesQuery, limiteQuery, uidValido } from "./api";
+import { bancosQuery, conexoesQuery, limiteQuery, uidValido } from "./api";
 import { BancoCard } from "./BancoCard";
 
 // Bancos conectados (/conta/bancos), só leitura: o estado de cada conexão vem do snapshot do Open Finance (`/open-finance/{uid}`, o uid
@@ -18,10 +18,10 @@ export function ContaBancos() {
   const uid = conta.data?.user_id;
   const conexoes = useQuery(conexoesQuery(uid));
   const limite = useQuery(limiteQuery(uid));
-  const bancos = useQuery(bancosQuery);
+  const bancos = useQuery(bancosQuery(uid));
 
-  const lista = conexoes.data;
   const erro = [conta.error, conexoes.error].find((e) => e) ?? null;
+  const lista = erro ? undefined : conexoes.data; // releitura que falhou: o erro com "Tentar de novo", nunca a lista velha
   const semUid = conta.isSuccess && !uidValido(uid);
   const sessao = erro instanceof ErroApi && erro.status === 401; // sessão acabada esconde o que ficou em cache
   const b = bancos.isError || !bancosValidos(bancos.data) ? undefined : bancos.data; // releitura que falhou ou fora do contrato: sem números, nunca valor velho

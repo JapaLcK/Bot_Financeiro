@@ -456,3 +456,49 @@ test("a cor de cada segmento da barra é a do card do mesmo banco, com um banco 
   assert.notEqual(r.cards[1], r.cards[2]); // nem o índice recontado só entre bancos com saldo (Gama seria o 1)
   assert.deepEqual(r.barra, [r.cards[0], r.cards[2]]);
 });
+
+// ---- Codex no #1116 ----
+test("releitura do snapshot que falha (500) depois de a lista estar na tela: o erro com 'Tentar de novo', nunca a lista velha; o botão recupera", async () => {
+  let falha = false;
+  const { ctx, page } = await bancos({ snap: (r) => (falha ? ERRO_500(r) : r.fulfill({ json: { ok: true, connections: PADRAO() } })), bancos: "padrao" });
+  await esperaCards(page, 3);
+  falha = true;
+  await refoco(page);
+  await page.getByRole("alert").waitFor({ timeout: 12000 }); // 3 tentativas, ~3 s
+  const r = { texto: await page.getByRole("alert").innerText(), cards: await page.locator(".banco-card").count(), topo: await page.locator(".bancos-topo").count() };
+  falha = false;
+  await page.getByRole("button", { name: "Tentar de novo" }).click();
+  await esperaCards(page, 3);
+  await ctx.close();
+  assert.match(r.texto, /Não deu para carregar seus bancos\./);
+  assert.deepEqual([r.cards, r.topo], [0, 0]);
+});
+
+test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o total da conta antiga nunca aparece ao lado da lista nova", async () => {
+  let uid = 7, solta;
+  const preso = new Promise((ok) => { solta = ok; });
+  const s = servidorBancos({ bancos: "padrao" });
+  const { ctx, page } = await abrir({
+    guia: "concluido", rota: "/conta/bancos",
+    antes: async (c) => {
+      await s.antes(c);
+      // Registradas depois, vencem as do servidor de bancos.
+      await c.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: uid, whatsapp_linked: false } }));
+      await c.route((u) => u.pathname === "/open-finance/8", (r) => r.fulfill({ json: { ok: true, connections: [con(21, "C6 Bank")] } }));
+      await c.route((u) => u.pathname === "/open-finance/8/limite", (r) => r.fulfill({ json: LIMITE({ em_uso: 1 }) }));
+      await c.route((u) => u.pathname === "/api/v2/bancos", async (r) => { if (uid === 8) await preso; return r.fulfill({ json: RESPOSTAS.bancos.padrao }).catch(() => {}); });
+    },
+  });
+  await esperaCards(page, 3);
+  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  uid = 8;
+  await refoco(page);
+  await page.waitForFunction(() => document.querySelectorAll(".banco-card").length === 1, null, { timeout: 8000 });
+  const r = { corpo: await corpo(page), topo: await page.locator(".bancos-topo").count(), card: await page.locator(".banco-card .banco-total").innerText() };
+  solta();
+  await ctx.close();
+  assert.match(r.corpo, /C6 Bank/);
+  assert.equal(r.topo, 0, r.corpo);
+  assert.ok(!r.corpo.includes("67.000,00"), r.corpo);
+  assert.equal(r.card, "…");
+});
