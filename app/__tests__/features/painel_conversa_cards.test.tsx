@@ -47,12 +47,12 @@ describe("só leitura no chat; as abas do painel seguem como eram", () => {
     expect(within(screen.getByTestId("bloco-hero")).queryByRole("button", { name: "30 dias" })).toBeNull();
     await ir("/resumo"); await waitFor(() => expect(screen.getByRole("button", { name: "30 dias" })).toBeTruthy());
   });
-  it("assinaturas sem Ignorar/É assinatura/Reconsiderar; na aba, com", async () => {
+  it("assinaturas sem Ignorar/É assinatura/Voltar a mostrar/Remover marca; na aba, com", async () => {
     const dado = { ...F["/api/app/assinaturas"] }, outra = { ...dado.servicos[0], chave: "o", nome: "Outra" };
-    const todas = { ...dado, outras: [outra], ignoradas: [{ ...outra, chave: "i", nome: "Ignorada" }] };
+    const todas = { ...dado, servicos: [{ ...dado.servicos[0], marcada: true }], outras: [outra], ignoradas: [{ ...outra, chave: "i", nome: "Ignorada" }] };
     instalarCards(true); comBlocos(bloco("assinaturas", { assinaturas: todas })); await perguntar();
     const c = within(screen.getByTestId("bloco-assinaturas"));
-    expect(c.getByText("Netflix")).toBeTruthy(); for (const n of [/Ignorar/, /É assinatura|Marcar .* como assinatura/, /Reconsiderar/]) expect(c.queryByRole("button", { name: n })).toBeNull();
+    expect(c.getByText("Netflix")).toBeTruthy(); for (const n of [/Ignorar/, /É assinatura|Marcar .* como assinatura/, /Voltar a mostrar/, /Remover marca|Não é assinatura/]) expect(c.queryByRole("button", { name: n })).toBeNull();
     await ir("/gastos"); await waitFor(() => expect(screen.getAllByRole("button", { name: /Ignorar/ }).length).toBeGreaterThan(0));
   });
   it("simulador no plano free: o chat mostra os sliders (o servidor já aplicou o plano); a aba, 'indisponível'", async () => {
