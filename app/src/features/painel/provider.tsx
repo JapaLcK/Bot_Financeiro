@@ -140,7 +140,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const soMetas = !completa && recursos.every((k) => k === "metas"); // releitura de foco: silenciosa (sem RefreshControl, e o dado bom fica na tela)
     const chaveMudou = (k: Recurso) => !!anterior && ((anterior.mes !== mes && MENSAIS.includes(k)) || (anterior.dias !== dias && k === "previsao")); // mês/dias novos: o dado velho é de outra chave
     const quieto = (k: Recurso) => soMetas || (quieta && !chaveMudou(k));
-    if (recursos.some((k) => !quieto(k))) setAtualizando(true);
+    const visivelEmVoo = () => [...leituras.current.values()].some((x) => !quietas.current.has(x));
+    setAtualizando(recursos.some((k) => !quieto(k)) || visivelEmVoo()); // escreve o false também: o blur abortou a carga visível e o `finally` dela não limpa (geração velha)
     if (!completa || quieta) setDados((d) => ({ ...d, ...Object.fromEntries(recursos.map((k) => [k, quieto(k) && d[k]?.fase === "pronto" ? d[k] : { fase: "carregando" }])) }));
     const carregar = async <K extends Recurso>(k: K) => {
       const anterior = leituras.current.get(k);
@@ -163,7 +164,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       } finally {
         controladores.current.delete(c);
         if (leituras.current.get(k) === c) leituras.current.delete(k);
-        if (g === geracao.current && dono.current === uid) setAtualizando([...leituras.current.values()].some((x) => !quietas.current.has(x)));
+        if (g === geracao.current && dono.current === uid) setAtualizando(visivelEmVoo());
       }
     };
     void Promise.all(recursos.map(carregar));

@@ -181,6 +181,13 @@ describe("CONSERTO: o pull-to-refresh acende o spinner só quando é pull", () =
     await emResumo(); await pull(); await assentar(); await ir("/configuracoes"); const contas = prender("/api/app/contas"); await voltar(); await assentar();
     expect(refrescando()).toBe(false); expect(saldo(/8[.]?123/)).toBe(true); expect(screen.queryByLabelText("Carregando dados")).toBeNull(); contas.soltar(); await assentar();
   });
+  it("D1: pull em voo, blur abortando e volta com TODAS as leituras silenciosas presas: o spinner antigo apaga já", async () => {
+    await emResumo(); const resumo = prender("/api/app/resumo-do-mes"); await pull(); expect(refrescando()).toBe(true);
+    await ir("/configuracoes"); const todas = segurar(), impl = fetchFalso.getMockImplementation()!; // só o acesso passa; toda leitura de recurso espera
+    fetchFalso.mockImplementation((u: string, r: RequestInit) => /^\/(api\/app|cards|installments|analytics|insights)\//.test(caminho(u)) ? todas.promessa.then(() => impl(u, r)) : impl(u, r));
+    await voltar(); await assentar(); expect(refrescando()).toBe(false);
+    resumo.soltar(); todas.soltar(); await assentar(); expect(refrescando()).toBe(false);
+  });
   it("S7: pull durante a validação que falha com 503: depois dela o spinner acende", async () => {
     await emResumo(); await ir("/configuracoes"); const me = prender("/auth/me"); await voltar(); await assentar(); await pull();
     meStatus = 503; const resumo = prender("/api/app/resumo-do-mes"); me.soltar(); await waitFor(() => expect(refrescando()).toBe(true)); resumo.soltar(); await waitFor(() => expect(refrescando()).toBe(false));
