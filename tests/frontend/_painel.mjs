@@ -52,7 +52,7 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`. O GET `/gastos` e o
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
  * `mes` do pedido não as reescreve). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
- * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O GET `/bancos` responde a fixture de nome `bancos` (padrão `padrao`).
+ * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar).
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */

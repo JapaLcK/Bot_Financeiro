@@ -7,13 +7,14 @@
  *   · falha do POST: o alerta fica FORA da pilha; o X do banco vale até recarregar; teclado ← →;
  *   · medidas: cabe na coluna em 1440 e 375, alvo de 44 px, contraste, sem animação com movimento reduzido;
  *   · sem aviso (banco em dia, sem receita pendente): a pilha não existe.
- * Mock com estado das receitas em _receitas.mjs; o banco desatualizado vem da fixture `bancos.desatualizado`.
+ * Mock com estado das receitas em _receitas.mjs; o banco desatualizado vem da fixture `bancos.pilha_desatualizado` (a `desatualizado` é a da tela Bancos).
  * Rodar:  npm run test:frontend   (artefato: `npm --prefix webapp run build`)
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { exigeArtefatoEmDia, abrirPainel, RESPOSTAS } from "./_painel.mjs";
+import { con, LIMITE } from "./_bancos.mjs";
 import { ALFA, MARIA, abrir as abrirReceitas, CAIXA, dito, alertas, pontos, verAviso } from "./_receitas.mjs";
 
 let browser;
@@ -34,7 +35,7 @@ const titulo = (page) => page.locator(TITULO).innerText().then((t) => t.replace(
 
 /** O Resumo com banco desatualizado e uma receita pendente: a pilha de 2 avisos. */
 async function abrirResumo(opts = {}) {
-  const r = await abrirReceitas(browser, { bancos: "desatualizado", receitas: UMA, ...opts });
+  const r = await abrirReceitas(browser, { bancos: "pilha_desatualizado", receitas: UMA, ...opts });
   await r.ir("/");
   await r.page.locator(PILHA).waitFor();
   return r;
@@ -59,7 +60,7 @@ test("P1: banco desatualizado + 1 receita pendente em `/`: UM card, o banco prim
     assert.equal(t1, "Aviso 1 de 2: Dados do banco desatualizados");
     assert.equal(tom1, "alerta");
     assert.equal(texto1, "Os dados de Itaú, Bradesco precisam ser atualizados. Alguns valores podem estar incompletos.");
-    assert.equal(link, "/settings?view=open-finance");
+    assert.equal(link, "#/conta/bancos");
     assert.deepEqual(rotulos, [["Aviso 1 de 2: Dados do banco desatualizados", "true"], ["Aviso 2 de 2: Receitas do extrato, Empresa Alfa Ltda", null]]);
     assert.equal(t2, "Aviso 2 de 2: Receitas do extrato");
     assert.equal(tom2, "decisao");
@@ -111,7 +112,7 @@ test("P3: seleção morta: no ponto 2 (receita), responder faz a pilha cair no p
 });
 
 test("P4: `/gastos` com banco desatualizado: só o banco, ZERO receitas e nenhum GET /previsao; `/piggy` e a Conta: sem pilha", async () => {
-  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "desatualizado", previsao: "pro30_receitas" });
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado", previsao: "pro30_receitas" });
   const gets = [];
   page.on("request", (q) => { if (new URL(q.url()).pathname === "/api/v2/previsao") gets.push(q.url()); });
   await ir("/gastos");
@@ -131,7 +132,7 @@ test("P4: `/gastos` com banco desatualizado: só o banco, ZERO receitas e nenhum
 });
 
 test("P4b: `/previsao` também tem as receitas na pilha, depois do banco", async () => {
-  const { ctx, page } = await abrirReceitas(browser, { bancos: "desatualizado", receitas: UMA });
+  const { ctx, page } = await abrirReceitas(browser, { bancos: "pilha_desatualizado", receitas: UMA });
   await page.locator(PILHA).waitFor();
   const rotulos = await pontos(page).evaluateAll((bs) => bs.map((b) => b.getAttribute("aria-label")));
   await ctx.close();
@@ -178,7 +179,7 @@ test("P5: falha do POST da receita: o alerta fica FORA da pilha (antes dela), se
 });
 
 test("P6: o X do banco fecha o aviso, e ele continua fechado ao trocar de tela; volta ao recarregar a página", async () => {
-  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "desatualizado" });
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
   await ir("/");
   await page.locator(PILHA).waitFor();
   await page.getByRole("button", { name: "Fechar aviso" }).click();
@@ -310,7 +311,7 @@ const pendentes = (n) => Array.from({ length: n }, (_, i) => ({ chave: `extrato#
 
 for (const [n, width] of [[12, 375], [12, 320], [41, 1440]]) {
   test(`D1 (${n} avisos, ${width} px): a linha de pontos quebra em linhas, sem rolagem lateral e com alvos de 44 px`, async () => {
-    const { ctx, page } = await abrirReceitas(browser, { width, bancos: "desatualizado", receitas: pendentes(n - 1) });
+    const { ctx, page } = await abrirReceitas(browser, { width, bancos: "pilha_desatualizado", receitas: pendentes(n - 1) });
     await page.locator(PILHA).waitFor();
     const m = await page.evaluate(() => ({
       larg: [document.documentElement.scrollWidth, innerWidth],
@@ -410,7 +411,7 @@ async function seguraHorizonte(ctx) {
 }
 
 test("D6: troca de horizonte na `/previsao` com o 60 dias ainda carregando: a receita pendente fica na pilha, na MESMA posição (nem a seleção zera)", async () => {
-  const { ctx, page } = await abrirReceitas(browser, { bancos: "desatualizado", receitas: UMA });
+  const { ctx, page } = await abrirReceitas(browser, { bancos: "pilha_desatualizado", receitas: UMA });
   await page.locator(PILHA).waitFor();
   await verAviso(page, 2);
   const soltar = await seguraHorizonte(ctx);
@@ -513,7 +514,7 @@ test("D10: o Desfazer não ressuscita o aviso que o usuário tinha escolhido: re
   assert.match(corpo, /Empresa Alfa Ltda/);
 });
 
-for (const [fixture, rotulo] of [["pausada", "conexão pausada"], ["desatualizado", "banco desatualizado"]]) {
+for (const [fixture, rotulo] of [["pausada", "conexão pausada"], ["pilha_desatualizado", "banco desatualizado"]]) {
   test(`D11: o gatilho do banco vale para cada motivo sozinho (${rotulo}): o aviso aparece em /gastos`, async () => {
     const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: fixture });
     await ir("/gastos");
@@ -565,7 +566,7 @@ for (const [rota, nome] of [["/", "Resumo"], ["/previsao", "Previsão"]]) {
 }
 
 test("A2: a releitura que esvazia a pilha (o banco volta a ficar em dia) com o foco no body NÃO move o foco nem cria 'Nenhum aviso.'", async () => {
-  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "desatualizado" });
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
   await ir("/gastos");
   await page.locator(PILHA).waitFor();
   await page.evaluate(() => document.activeElement?.blur?.());
@@ -586,7 +587,7 @@ test("A3: o alvo 'Nenhum aviso.' que nasceu do Sim não fica para trás: com a p
   await page.getByRole("button", { name: /^Sim, é receita fixa/ }).focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.activeElement?.textContent === "Nenhum aviso.");
-  await ctx.route("**/api/v2/bancos", (r) => r.fulfill({ json: RESPOSTAS.bancos.desatualizado }));
+  await ctx.route("**/api/v2/bancos", (r) => r.fulfill({ json: RESPOSTAS.bancos.pilha_desatualizado }));
   await refocar(page);
   await page.locator(PILHA).waitFor();
   await ctx.route("**/api/v2/bancos", (r) => r.fulfill({ json: RESPOSTAS.bancos.em_dia }));
@@ -599,7 +600,7 @@ test("A3: o alvo 'Nenhum aviso.' que nasceu do Sim não fica para trás: com a p
 });
 
 test("A4: o X do último aviso (banco) leva o foco ao alvo 'Nenhum aviso.' (a ação do usuário na pilha, não só o Sim)", async () => {
-  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "desatualizado" });
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
   await ir("/gastos");
   await page.getByRole("button", { name: "Fechar aviso" }).click();
   await page.waitForFunction(() => document.activeElement?.textContent === "Nenhum aviso.");
@@ -607,7 +608,7 @@ test("A4: o X do último aviso (banco) leva o foco ao alvo 'Nenhum aviso.' (a a�
 });
 
 test("O2: clicar no TEXTO do aviso (não em botão) e depois a releitura esvaziar a pilha, com o foco no body, NÃO move o foco; o Sim (botão) continua movendo (P2/A4)", async () => {
-  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "desatualizado" });
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
   await ir("/gastos");
   await page.locator(PILHA).waitFor();
   await page.locator(`${PILHA} .pilha-texto`).click();
@@ -737,7 +738,7 @@ test("E2b: controle positivo, na tela do POST (`/`): Sim na única pendente, POS
   assert.equal(pilha, 0);
 });
 
-test("E3: o POST em voo, o usuário vai para /gastos e o POST volta ok: o anúncio é falado lá e sai sozinho (não fica pendurado)", async () => {
+test("E3: o POST em voo, o usuário vai para /gastos e o POST volta ok: o anúncio entra na região de status de lá e sai sozinho em 3 s (não fica pendurado)", async () => {
   let larga;
   const { ctx, page } = await abrirReceitas(browser, { receitas: UMA, post: () => new Promise((r) => { larga = r; }) });
   await page.locator(PILHA).waitFor();
@@ -784,9 +785,47 @@ test("F2: o plano Free em `/`: nenhum GET /previsao (nem no foco da aba) e nenhu
 
 test("F3: 300 caracteres sem espaço no nome, a 320 px: a pilha cabe na coluna (sem rolagem lateral, o card não passa da tela)", async () => {
   const lista = [{ chave: ALFA, nome: "X".repeat(300), valor: "123456789012.00", dia: 3, status: "pendente" }];
-  const { ctx, page } = await abrirReceitas(browser, { width: 320, receitas: lista, bancos: "desatualizado" });
+  const { ctx, page } = await abrirReceitas(browser, { width: 320, receitas: lista, bancos: "pilha_desatualizado" });
   await page.locator(PILHA).waitFor();
   const m = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, pilha: document.querySelector(".pilha").getBoundingClientRect().right }));
   await ctx.close();
   assert.ok(m.sw <= m.iw && m.pilha <= m.iw + 0.5, JSON.stringify(m));
+});
+
+test("G1: sem GET duplicado de /api/v2/bancos: a pilha lê em `/` (1), a tela Bancos lê a dela (+1) e a pilha não pede nada em /conta/bancos", async () => {
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
+  await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "a@b.c", user_id: 7, whatsapp_linked: false } }));
+  await ctx.route((u) => u.pathname === "/open-finance/7", (r) => r.fulfill({ json: { ok: true, connections: [con(1, "Nubank")] } }));
+  await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => r.fulfill({ json: LIMITE() }));
+  let gets = 0;
+  page.on("request", (q) => { if (new URL(q.url()).pathname === "/api/v2/bancos") gets++; });
+  await ir("/");
+  await page.locator(PILHA).waitFor();
+  await page.waitForTimeout(300);
+  const emResumo = gets;
+  await page.evaluate(() => { location.hash = "#/conta/bancos"; });
+  await page.locator(".banco-card").waitFor();
+  await page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…"));
+  await page.waitForTimeout(500);
+  const pilha = await page.locator(PILHA).count();
+  await ctx.close();
+  assert.equal(emResumo, 1);
+  assert.equal(gets, 2);
+  assert.equal(pilha, 0);
+});
+
+test("G2: 'Ver bancos conectados' no aviso do banco abre a página Bancos conectados do painel (#/conta/bancos), sem sair do /painel", async () => {
+  const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
+  await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "a@b.c", user_id: 7, whatsapp_linked: false } }));
+  await ctx.route((u) => u.pathname === "/open-finance/7", (r) => r.fulfill({ json: { ok: true, connections: [con(1, "Nubank")] } }));
+  await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => r.fulfill({ json: LIMITE() }));
+  await ir("/");
+  await page.locator(PILHA).waitFor();
+  await page.getByRole("link", { name: "Ver bancos conectados" }).click();
+  await page.waitForFunction(() => document.querySelector("#page-title")?.textContent.trim() === "Bancos conectados");
+  const hash = await page.evaluate(() => location.hash);
+  const pilha = await page.locator(PILHA).count();
+  await ctx.close();
+  assert.equal(hash, "#/conta/bancos");
+  assert.equal(pilha, 0);
 });

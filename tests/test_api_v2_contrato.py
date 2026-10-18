@@ -39,6 +39,15 @@ from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F40
 FIXTURES = json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"))
 
 
+def test_fixtures_nao_tem_chave_repetida():
+    """`json.loads` guarda só a ÚLTIMA chave repetida: duas `"bancos"` no arquivo escondiam metade das fixtures (e dos testes)."""
+    def sem_repeticao(pares):
+        assert len({k for k, _ in pares}) == len(pares), [k for k, _ in pares]
+        return dict(pares)
+
+    json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"), object_pairs_hook=sem_repeticao)
+
+
 def test_tipos_gerados_em_dia():
     assert gerar(app_v2.openapi()) == SAIDA.read_text(encoding="utf-8"), (
         "webapp/src/dashboard/lib/api-v2.gen.ts está velho: rode "
@@ -273,13 +282,6 @@ def test_fixture_de_contas_segue_o_modelo_e_fecha_a_conta(nome):
     assert c.total == c.carteira.saldo + sum((x.saldo for x in c.contas if x.no_total), Decimal(0))
     assert c.fora_do_total == sum(not x.no_total for x in c.contas)
     assert set(c.motivos) == set(c.carteira.motivos).union(*(x.motivos for x in c.contas))
-
-
-@pytest.mark.parametrize("nome", sorted(FIXTURES["bancos"]))
-def test_fixture_de_bancos_segue_o_modelo(nome):
-    """O `motivos` de cima é a união dos motivos dos bancos (`db/bancos.py::montar`): é ele que acende o aviso do topo."""
-    b = Bancos.model_validate(FIXTURES["bancos"][nome])
-    assert set(b.motivos) == set().union(*(x.motivos for x in b.bancos))
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["investido"]))

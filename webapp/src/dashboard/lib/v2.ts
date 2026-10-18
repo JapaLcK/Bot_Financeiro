@@ -127,7 +127,10 @@ export const contasQuery = {
   ...vivo,
 };
 // Os bancos conectados (`GET /api/v2/bancos`): só o `motivos` de cima alimenta o aviso do topo (parts/AvisosDoTopo.tsx).
-export const bancosQuery = {
+// Não é o `bancosQuery(uid)` da Conta (conta/api.ts): aquele mostra valores em R$ e por isso confere a conta depois da resposta (um GET
+// a mais de /auth/dashboard-profile e o `uid` do contaQuery, que fora da Conta ninguém lê). O aviso só lê `motivos`, como `contasQuery`
+// e `perfilQuery`, e não monta em /conta/* (SEM_PILHA): os dois nunca pedem /bancos ao mesmo tempo (dashboard_v2_pilha_avisos, "sem GET duplicado").
+export const avisoDeBancoQuery = {
   queryKey: ["bancos"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/bancos", signal),
   ...vivo,

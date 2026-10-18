@@ -4,11 +4,10 @@
 // "Conexão com o banco pendente" fica de fora: no app ela vem do cofre do aparelho (OAuth no navegador externo), e no web não há fonte equivalente.
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CONTA, type Path } from "../router";
+import { CONTA, href, type Path } from "../router";
 import { locked } from "../lib/profiles.js";
-import { DEMO, ErroApi, bancosQuery, contasQuery, perfilQuery, previsaoQuery, usePlan } from "../lib/v2";
+import { DEMO, ErroApi, avisoDeBancoQuery, contasQuery, perfilQuery, previsaoQuery, usePlan } from "../lib/v2";
 import { FeedbackReceita, itensDeReceita, useFalhaReceita, useListaDaPagina, useReceitas } from "../widgets/ReceitasDoBanco";
-import { OF } from "./guia-falas";
 import { comCardPrevisao } from "./Board";
 import { PilhaAvisos, type AvisoDaPilha } from "./PilhaAvisos";
 
@@ -25,7 +24,7 @@ export function AvisosDoTopo({ path }: { path: Path }) {
   const r = useReceitas("pendentes");
   // Nem o alerta de falha nem o anúncio da última resposta atravessam telas. Só a rota é dependência: `r.falar` muda a cada render.
   useEffect(() => { setFalhaEm(null); r.falar(""); }, [path, setFalhaEm]);
-  const bancos = useQuery({ ...bancosQuery, enabled: dentro });
+  const bancos = useQuery({ ...avisoDeBancoQuery, enabled: dentro });
   const contas = useQuery({ ...contasQuery, enabled: dentro });
   // Receitas pendentes: nas telas com card/página da previsão, a lista é a que ELE leu (`useListaDaPagina`, no horizonte que ele mostra): um segundo observador da chave
   // padrão guardaria o dado do plano antigo com o card em 60 ou 90 dias, e o card o adotaria na hora no downgrade (4xx nunca mostra dado guardado).
@@ -48,7 +47,7 @@ export function AvisosDoTopo({ path }: { path: Path }) {
       corpo: (
         <>
           <p className="pilha-texto">{`Os dados de ${nomes.length ? nomes.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`}</p>
-          <a className="btn btn-ghost" href={OF}>Ver bancos conectados</a>
+          <a className="btn btn-ghost" href={href("/conta/bancos")}>Ver bancos conectados</a>
         </>
       ),
     }] : []),
