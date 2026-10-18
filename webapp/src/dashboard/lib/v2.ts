@@ -71,9 +71,10 @@ export function apiGet<P extends keyof RotasGet>(path: P, signal?: AbortSignal, 
 }
 
 // Escrita: o x-csrf-token sai do cookie `csrf_token` pelo helper do auth-refresh.js.
-export function escrever<T>(method: "POST" | "PUT" | "PATCH", path: string, corpo: unknown, signal?: AbortSignal) {
-  const json = { Accept: "application/json", "Content-Type": "application/json" };
-  return chamar<T>(path, { method, body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
+// `corpo` undefined (o DELETE): sem corpo e sem Content-Type.
+export function escrever<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, corpo: unknown, signal?: AbortSignal) {
+  const json = { Accept: "application/json", ...(corpo === undefined ? {} : { "Content-Type": "application/json" }) };
+  return chamar<T>(path, { method, body: corpo === undefined ? undefined : JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
 }
 export const apiPost = <P extends keyof RotasPost>(path: P, corpo: RotasPost[P]["corpo"]) =>
   escrever<RotasPost[P]["resposta"]>("POST", path, corpo);

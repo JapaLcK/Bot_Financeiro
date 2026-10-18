@@ -236,6 +236,18 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .conta-seguranca .seg-extra > .btn { margin-top: 8px; }
 .conta-seguranca .seg-acoes { display: flex; flex-wrap: wrap; margin: -8px 0 0 -8px; padding-bottom: 12px; }
 .conta-seguranca .seg-acoes > .btn { margin: 8px 0 0 8px; }
+/* Dispositivos conectados (conta/Sessoes.tsx): ícone, aparelho e ação em grid (sem flex gap: Safari 14). */
+.conta-sessoes h2 { margin: 0 0 8px; font-size: 16px; }
+.sess-lista { list-style: none; margin: 0; padding: 0; }
+.sess-lista li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; padding: 6px 0; }
+.sess-lista li > i { font-size: 20px; color: var(--ink-3); }
+.sess-lista b { font-size: 16px; font-weight: 500; overflow-wrap: break-word; word-break: break-word; }
+.sess-lista .selo { margin-left: 8px; vertical-align: middle; }
+.sess-meta { display: block; font-size: 13px; color: var(--ink-2); overflow-wrap: break-word; word-break: break-word; }
+.conta-sessoes .sess-todas { margin-top: 8px; }
+.sess-falha { margin-top: 8px; font-size: 14px; }
+.sess-falha > .warn { display: block; }
+.sess-falha > .btn { margin-top: 8px; }
 .cofre { display: grid; gap: 14px; }
 .cofre h2 { font-size: 18px; margin: 0; }
 .cofre p { margin: 0; }

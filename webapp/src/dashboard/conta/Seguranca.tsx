@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ErroApi, contaQuery } from "../lib/v2";
 import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, type Falha } from "./api";
 import { MfaForm, type ModoMfa } from "./MfaForm";
+import { Sessoes } from "./Sessoes";
 import { SemSenha } from "./SemSenha";
 
 const vazio = (palavra: string) => <><span aria-hidden="true">—</span><span className="sr-only">{palavra}</span></>;
 
-// Segurança da conta (dentro de /conta/configuracoes): a senha (o link por e-mail, igual à /settings) e o MFA. Só rotas antigas
+// Segurança da conta (dentro de /conta/configuracoes): a senha (o link por e-mail, igual à /settings), o MFA e os dispositivos conectados (Sessoes.tsx). Só rotas antigas
 // (/settings/{uid}/password-reset, /auth/mfa/*); o `uid` vem só do /auth/dashboard-profile. Cada dado é um ícone e o valor;
 // a palavra só existe para o leitor de tela (como o Perfil).
 export function ContaSeguranca() {
@@ -81,6 +82,7 @@ export function ContaSeguranca() {
         </dl>
         <p role="status" className="sr-only">{aviso}</p>
       </section>
+      {uidOk && <Sessoes uid={uid} />}
       {aberto === "sem-senha" && <SemSenha fechar={() => setAberto(null)} definir={() => botaoSenha.current?.focus()} />}
       {aberto && aberto !== "sem-senha" && !sessao && <MfaForm modo={aberto} fechar={() => setAberto(null)} salvou={setAviso} />}
     </>
