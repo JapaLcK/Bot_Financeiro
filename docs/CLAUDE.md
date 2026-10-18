@@ -580,11 +580,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
-  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (topo; não no card do Resumo), lê
+  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (não no card do Resumo), lê
   `receitas_do_banco` e faz Sim/Não/Desfazer em `POST /api/v2/previsao/receita`. Sem atualização otimista: a mutação só termina
   (e destrava os botões) depois de reler toda `["previsao", …]` ativa, porque a resposta do POST é a do menor horizonte. Resposta
-  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Se o Desfazer esvazia a lista, a caixa fica com
-  "Nenhuma receita a confirmar." para o anúncio e o foco. Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
+  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Duas instâncias do mesmo componente (`modo`): `pendentes` no
+  topo (some quando não há o que perguntar) e `respondidas` no fim, a seção "Receitas na previsão" com o Desfazer (decisão do dono, 2026-10-17: respondida
+  sai do topo). Sem o que mostrar, o recipiente vira `sr-only` e fica montado para o anúncio e o foco (Sim na última pendente, Desfazer na última respondida).
+  No app, as respondidas moram no card "Saldo previsto" do Resumo (contexto `ProvedorRespondidas`; perfil sem esse card não as alcança, limite aceito). Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
   retries a lista fica a de antes do POST, com Sim/Não ativos e o aviso de previsão antiga; (b) POST falha e a releitura não
   mostra a marca: alerta "Não deu para salvar", nada anunciado. Só conta como gravado quem volta na lista com o status esperado:
   resposta perdida de uma linha que sumiu da lista (ou lista vazia, p.ex. banco fora do ar) mostra "Não deu para salvar" mesmo que
