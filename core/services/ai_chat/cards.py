@@ -128,6 +128,16 @@ def _so(rec: str, *chaves: str):
     return lambda r: {k: r[rec][k] for k in chaves}
 
 
+def visao_hero(r: dict) -> dict:
+    """`receitas_do_banco` fica fora: candidata pendente/negada não é evidência até o Sim do dono. Só as
+    confirmadas vão, em `receitas_confirmadas` (uma que pode não somar na previsão, por pagador parado ou conta fora dela, segue listada: a visão não tem
+    o `incluida_no_calculo` do `detalhes`); vazia = nenhuma, não campo ausente."""
+    p = r["previsao"]
+    return {k: v for k, v in p.items() if k not in ("trajetoria", "compromissos", "receitas_do_banco")} | {
+        "receitas_confirmadas": [{"nome": str(x["nome"])[:60], "valor": x["valor"], "dia": x["dia"]}
+                                 for x in p["receitas_do_banco"] if x["status"] == "confirmada"]}
+
+
 def _mes(uid: int, a: dict, **recursos: Callable) -> list[tuple[str | None, dict]]:
     return [(None, {n: f(mes=m, uid=uid) for n, f in recursos.items()}) for m in a["meses"] or [None]]
 
@@ -234,9 +244,7 @@ def registro() -> dict[str, Card]:
     todo = lambda rec: (lambda r: r[rec])  # noqa: E731
     return {
         "contas": Card(lambda uid, a: [(None, {"contas": contas(uid=uid)})], todo("contas")),
-        # `receitas_do_banco` fica fora: candidata pendente/negada não é evidência até o Sim do dono
-        "hero": Card(prev, lambda r: {k: v for k, v in r["previsao"].items()
-                                      if k not in ("trajetoria", "compromissos", "receitas_do_banco")}, gate_prev),
+        "hero": Card(prev, visao_hero, gate_prev),
         "compromissos": Card(prev, _so("previsao", "hoje", "dias", "compromissos", "motivos"), gate_prev),
         "resumo": Card(lambda uid, a: _mes(uid, a, resumo=resumo, detalhes=mes_detalhes),
                        lambda r: {"resumo": r["resumo"],

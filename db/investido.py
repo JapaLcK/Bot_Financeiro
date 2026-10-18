@@ -79,10 +79,38 @@ def _partes(acc: dict, chave: str, rotulo, *, zeradas: bool = False, ordem=MOTIV
                                       p.get("rotulo", p.get("banco"))))
 
 
-def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool = False) -> dict:
+def _por_conexao(conexoes, vivas, velha, linhas, acc) -> dict:
+    """`{connection_id: {valor, motivos, posicoes}}` de TODA conexão, pelo id: duas "Nubank" são duas
+    (`por_banco` agrupa pelo nome). `valor` = Σ das posições dela (a regra de `_partes`); `None` = não se
+    sabe: sem posição lida, só posição sem saldo, só posição em outra moeda ou conexão pausada; e em TODA
+    conexão no ramo cedo de `calcular` (nenhuma viva sincronizada com posição: o critério é do conjunto). Resgatada de conexão viva é R$ 0
+    conhecido, como em `por_banco_com_zero`. `posicoes` = as linhas do espelho dela, sem duplicata."""
+    dela = {}
+    for r in linhas:
+        dela.setdefault(r["connection_id"], []).append(r)
+    ids_vivas = {c["id"] for c in vivas}
+    out = {}
+    for c in conexoes:
+        cid = c["id"]
+        rs = dela.get(cid, [])
+        fora = separar_posicoes(rs)[1]
+        soma, ms = acc.get(cid, (Decimal("0.00"), set()))
+        ms = ms | _motivos_fora(fora) | ({"banco_desatualizado"} if velha.get(cid) else set())
+        if cid not in ids_vivas:
+            ms.add("conexao_pausada")
+        valor = soma if cid in ids_vivas and (cid in acc or fora["resgatada"]) else None
+        if valor == 0 and "saldo_ausente" in ms:
+            valor = None
+        out[cid] = {"valor": valor, "motivos": _ordem(ms, MOTIVOS_BANCO), "posicoes": len(rs)}
+    return out
+
+
+def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool = False,
+             por_conexao: bool = False) -> dict:
     """`com_zero` (só `db/metas.py`) acrescenta `por_banco_com_zero`: `por_banco` mais o banco lido
-    que resgatou tudo, em R$ 0 (e `com_posicao`, `bancos_com_posicao`, `conexoes_por_banco`). Sem ele o
-    retorno é o de sempre."""
+    que resgatou tudo, em R$ 0 (e `com_posicao`, `bancos_com_posicao`, `conexoes_por_banco`).
+    `por_conexao` (só `db/bancos.py`) acrescenta `por_conexao`, a soma por conexão. Sem eles o retorno
+    é o de sempre."""
     conexoes, estados = ler_conexoes(cur, user_id)
     por_id = {c["id"]: c for c in conexoes}
     vivas = [c for c in conexoes if (c["status"] or "").upper() not in _TERMINAL]
@@ -94,7 +122,7 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
     ultima = ultima_geracao(cur, user_id, "open_finance_investments")
 
     topo = _motivos_fora(fora) | ({"banco_desatualizado"} if any(velha.values()) else set())
-    total, por_tipo, por_banco = Decimal("0.00"), {}, {}
+    total, por_tipo, por_banco, por_cx = Decimal("0.00"), {}, {}, {}
     for p in posicoes:
         c = por_id[p["connection_id"]]
         ausente = sem_saldo(p)
@@ -105,7 +133,7 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
         q = q_posicao(p)
         total += q
         for acc, k in ((por_tipo, tipo_da_posicao(p["type"], p["subtype"])),
-                       (por_banco, c["institution_name"] or SEM_NOME)):
+                       (por_banco, c["institution_name"] or SEM_NOME), (por_cx, c["id"])):
             soma, ms = acc.get(k, (Decimal("0.00"), set()))
             acc[k] = (soma + q, ms | motivos)
 
@@ -129,6 +157,9 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
             # Moeda/resgatada não chegam aqui: a linha põe a conexão viva em `ultima`.
             topo.add("nenhum_investimento")
         vazio = {"total": None, "por_tipo": [], "por_banco": [], "motivos": _ordem(topo)}
+        if por_conexao:  # o `total` é `None` aqui: o `investido` de cada conexão também (Σ == total)
+            vazio["por_conexao"] = {k: {**v, "valor": None}
+                                    for k, v in _por_conexao(conexoes, vivas, velha, linhas, por_cx).items()}
         if not com_zero:
             return vazio
         # Banco só de conexão pausada existe (≠ sumiu): `null` com o motivo DELE, nunca R$ 0.
@@ -145,6 +176,8 @@ def calcular(cur, user_id: int, *, agora: datetime | None = None, com_zero: bool
         "por_banco": _partes(por_banco, "banco", lambda k: {}),
         "motivos": _ordem(topo),
     }
+    if por_conexao:
+        dados["por_conexao"] = _por_conexao(conexoes, vivas, velha, linhas, por_cx)
     if com_zero:  # banco lido que resgatou tudo (posições em 0 ou `TOTAL_WITHDRAWAL`) segue lá, em R$ 0
         acc = dict(por_banco)
         for c in vivas:  # todo item lido do banco conta (a ordem dos ids não decide o motivo)
