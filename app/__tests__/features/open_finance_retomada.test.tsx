@@ -4,7 +4,7 @@ import type { Conexao } from "@/api/schemas/openFinance";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
-import { appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
 // Só a fronteira WebView nativa é dublada; Router, autorização e HTTP são reais.
 jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: () => null }));
@@ -108,6 +108,7 @@ it.each(["Retomar retorno do banco", "Conectar para testar", "Ver bancos conecta
 it("Acompanhar antes de Reconectar irmão não emite token por trás da recuperação", async () => {
   servidor(); const r = renderRouter("./app", { initialUrl: "/conexoes" });
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Acompanhar sincronização" })).toHaveLength(2));
+  await abrirBancos();
   const a = screen.getAllByRole("button", { name: "Acompanhar sincronização" })[0]!;
   const b = screen.getByRole("button", { name: "Reconectar Itaú" });
   await act(async () => { fireEvent.press(a); fireEvent.press(b); await drenar(); });
