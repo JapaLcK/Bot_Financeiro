@@ -5231,6 +5231,16 @@ async def _billing_user_lock(user_id: int):
         async with conn.cursor() as cur:
             await cur.execute("select pg_advisory_lock(hashtext(%s))", (lock_key,))
             try:
+                # Conta em exclusão, ou já apagada (sem linha em `users`), não ganha checkout:
+                # a exclusão toma este mesmo lock em `stripe_exclusao.cancelar_assinaturas`.
+                # Só-WhatsApp (`users` sem `auth_accounts`) SEGUE; `auth_accounts` pode ter
+                # mais de uma linha por user_id: qualquer uma em exclusão recusa.
+                await cur.execute(
+                    "select a.deletion_status from users u"
+                    " left join auth_accounts a on a.user_id = u.id where u.id = %s", (int(user_id),))
+                rows = await cur.fetchall()
+                if not rows or any(r["deletion_status"] in ("scheduled", "processing") for r in rows):
+                    raise HTTPException(status_code=403, detail="Esta conta está em exclusão.")
                 yield
             finally:
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))

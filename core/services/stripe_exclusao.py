@@ -3,7 +3,9 @@ uma conta que está sendo excluída (S2), na hora e SEM reembolso, e expira ante
 checkouts abertos do customer (senão um checkout pago depois da exclusão criaria
 assinatura viva sem conta). QR Pix pendente continua fora.
 
-Chamado por `db.privacy.excluir_conta_marcada`, o corpo comum da rota e do job. O
+Chamado por `db.privacy.excluir_conta_marcada`, o corpo comum da rota e do job, sob o
+advisory lock do checkout do usuário (uma conta em `processing` não ganha checkout novo
+depois dele: a guarda está em `_billing_user_lock`). O
 customer vem só de `auth_accounts WHERE user_id` da própria conta. **Levanta em
 qualquer dúvida** (sem chave, listagem falha, sobrou checkout aberto ou assinatura
 viva, checkout ou assinatura de outro usuário): quem chama devolve a conta a `scheduled` e o job tenta de novo.
@@ -67,10 +69,25 @@ def _expirar_checkouts(stripe, customer: str, user_id: int, lista: list) -> None
 
 
 def cancelar_assinaturas(user_id: int) -> None:
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select distinct stripe_customer_id from auth_accounts"
-                    " where user_id = %s and stripe_customer_id is not null", (user_id,))
-        customers = [r["stripe_customer_id"] for r in cur.fetchall()]
+    """Toda a fase Stripe roda sob o MESMO advisory lock do checkout
+    (`_billing_user_lock`, `billing_checkout:<uid>`): checkout que ganha o lock antes
+    é listado e expirado aqui; quem ganha depois vê a conta `processing` e leva 403."""
+    chave = f"billing_checkout:{int(user_id)}"
+    with get_conn() as conn:
+        conn.execute("select pg_advisory_lock(hashtext(%s))", (chave,))
+        try:
+            _cancelar(conn, user_id)
+        finally:
+            conn.rollback()   # lock de sessão sobrevive ao rollback; o unlock não pode cair em transação abortada
+            conn.execute("select pg_advisory_unlock(hashtext(%s))", (chave,))
+            conn.commit()
+
+
+def _cancelar(conn, user_id: int) -> None:
+    customers = [r["stripe_customer_id"] for r in conn.execute(
+        "select distinct stripe_customer_id from auth_accounts"
+        " where user_id = %s and stripe_customer_id is not null", (user_id,)).fetchall()]
+    conn.commit()   # sem transação aberta durante as chamadas à Stripe
     if not customers:
         return
     import stripe

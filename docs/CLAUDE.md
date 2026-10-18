@@ -975,7 +975,7 @@ checkout pago depois da exclusão criaria assinatura sem conta; QR Pix pendente 
 webhook lê para não mandar e-mail "assinatura cancelada"). Levanta em qualquer dúvida (sem
 chave, listagem falha, sobrou checkout aberto ou assinatura viva, assinatura com `finbot_user_id` de outro usuário). Ordem:
 credenciais, marca `processing` e revoga sessões, cancela Stripe, apaga banco; por isso o cartão
-nunca é cancelado por senha errada. Falha no Stripe: a conta volta a `scheduled` vencida, a rota
+nunca é cancelado por senha errada. **Corrida com checkout:** `cancelar_assinaturas` roda sob o MESMO advisory lock do checkout (`billing_checkout:<uid>`, o de `_billing_user_lock`), solto antes de `delete_user_data`; checkout que já estava sob o lock termina antes e é expirado ali, e quem toma o lock depois leva 403 da guarda dentro de `_billing_user_lock` (conta com `auth_accounts` em `scheduled`/`processing`, ou sem linha em `users`, já apagada; só-WhatsApp, `users` sem `auth_accounts`, segue), em create-checkout, bump e Pix. Falha no Stripe: a conta volta a `scheduled` vencida, a rota
 responde 200 `deleting`, o job tenta de novo a cada rodada. **Resposta 200:** `{ok, user_id, status:"deleted"|"deleting", deleted,
 deletion_scheduled_for, grace_days:0, message}` (os dois últimos campos de data e carência são
 legados). `deleting` = a limpeza LOCAL falhou (`delete_user_data`: lock, deadlock) ou o
