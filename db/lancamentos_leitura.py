@@ -2,15 +2,19 @@
 
 `pagina` é o `GET /api/v2/lancamentos`; `um_item` é UM item do usuário pelo id `l<id>`/`c<id>`
 (a escrita da IA relê por ele, para dizer o que vai apagar com o que o banco tem, não com o que
-o modelo falou). Moram aqui porque `db/lancamentos.py` está no teto de linhas.
+o modelo falou); `recentes` são os "últimos lançamentos" da IA. Moram aqui porque
+`db/lancamentos.py` está no teto de linhas.
 """
 from __future__ import annotations
 
 from datetime import date, datetime
 
+from utils_date import day_tz
+
 from .analytics import termos_busca
 from .connection import get_conn
 from .lancamentos import _item, ler_cursor, cursor_de, listar
+from .resumo_mes import MOTIVOS, mes_de
 
 
 def pagina(user_id: int, ano: int, mes: int, agora: datetime, *, cursor: str | None = None,
@@ -21,9 +25,6 @@ def pagina(user_id: int, ano: int, mes: int, agora: datetime, *, cursor: str | N
     `cursor` vem cru do cliente: `CursorInvalido` sobe para quem chama."""
     from core.services.plan_service import history_earliest_date
 
-    from .contas_hoje import listar as contas
-    from .resumo_mes import MOTIVOS, mes_de
-
     apos = ler_cursor(cursor) if cursor else None
     corte = history_earliest_date(user_id, agora)
     inicio, fim = (date.min, date.max) if termos_busca(q) else mes_de(date(ano, mes, 1))
@@ -32,13 +33,46 @@ def pagina(user_id: int, ano: int, mes: int, agora: datetime, *, cursor: str | N
         cur.execute("set transaction isolation level repeatable read, read only")
         linhas, mais = listar(cur, user_id, max(inicio, corte) if corte else inicio, fim,
                               q=q, apos=apos, limite=limite, **filtros)
-        vistos = set(contas(cur, user_id)["motivos"])
+        motivos = _motivos(cur, user_id, cortou)
         conn.rollback()
+    return {"mes": f"{ano:04d}-{mes:02d}", "itens": [_item(r) for r in linhas],
+            "proximo": cursor_de(linhas[-1]) if mais else None, "motivos": motivos}
+
+
+def _motivos(cur, user_id: int, cortou: bool) -> list[str]:
+    """Os `motivos` de uma lista: os do bloco de contas (situação de hoje) e `inicio_do_historico`
+    quando a janela do plano cortou o pedido."""
+    from .contas_hoje import listar as contas
+
+    vistos = set(contas(cur, user_id)["motivos"])
     if cortou:
         vistos.add("inicio_do_historico")
-    return {"mes": f"{ano:04d}-{mes:02d}", "itens": [_item(r) for r in linhas],
-            "proximo": cursor_de(linhas[-1]) if mais else None,
-            "motivos": [m for m in MOTIVOS if m in vistos]}
+    return [m for m in MOTIVOS if m in vistos]
+
+
+def recentes(user_id: int, agora: datetime, limite: int) -> dict:
+    """Os "últimos lançamentos" da IA: o `listar` do Extrato, mais novos primeiro, com o guardado (a IA o
+    lista) e a janela de 12 meses até o fim do mês SEGUINTE: a compra no cartão feita depois do fechamento
+    entra pela fatura do mês que vem (`MES_CARTAO_SQL`), e no Extrato ela só aparece lá. Cada `l` leva o
+    `user_seq` (o `#N` que o usuário vê) em `numero`, fora do `_item` (o contrato da v2 não o tem)."""
+    from core.services.plan_service import history_earliest_date
+
+    hoje = day_tz(agora)
+    primeiro = hoje.replace(day=1)
+    corte = history_earliest_date(user_id, agora)
+    inicio = date(primeiro.year - 1 + (primeiro.month == 12), primeiro.month % 12 + 1, 1)  # M-11
+    fim = mes_de(mes_de(hoje)[1])[1]  # dia 1 do mês depois do seguinte
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("set transaction isolation level repeatable read, read only")
+        linhas, _ = listar(cur, user_id, max(inicio, corte) if corte else inicio, fim,
+                           limite=limite, com_guardado=True)
+        ids = [r["id"] for r in linhas if r["tabela"] == "l"]
+        cur.execute("select id, user_seq from launches where user_id = %s and id = any(%s)", (user_id, ids))
+        seq = {r["id"]: r["user_seq"] for r in cur.fetchall()}
+        motivos = _motivos(cur, user_id, bool(corte and corte > inicio))
+        conn.rollback()
+    return {"itens": [_item(r) | {"numero": seq.get(r["id"]) if r["tabela"] == "l" else None} for r in linhas],
+            "motivos": motivos}
 
 
 def um_item(user_id: int, tabela: str, n: int) -> dict | None:
