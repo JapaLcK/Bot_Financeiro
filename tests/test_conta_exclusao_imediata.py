@@ -14,7 +14,7 @@ Controles do grupo (CLAUDE.md §3), cada um medido tirando o conserto e vendo ve
   em andamento: sem o retorno antecipado -> D2. retry: sem o `_restore` -> D1.
   revogação: sem os dois UPDATE -> D1 (sessão ainda viva); P2 é o positivo.
   export pendente: sem a guarda -> E1; E5: sem `consume_data_export_token` -> E5.
-  Stripe: sem a guarda -> T1; falha como "sem assinatura" -> T3; positivos T2/T4.
+  Stripe (S2): mora em `test_conta_exclusao_stripe.py`.
   teto: sem `_check_persistent_rate_limit` -> L1.
 """
 from __future__ import annotations
@@ -323,50 +323,6 @@ def test_e4_export_por_modo_da_conta(c, emails, contas):
     assert _exporta(c, g, emails).status_code == 200                   # sem senha, só o e-mail da conta
     assert _exporta(c, s, emails, password=SENHA).status_code == 409
     assert _exporta(c, pm, emails, password=SENHA).status_code == 200  # export não pede TOTP
-
-
-# ── T: Stripe ────────────────────────────────────────────────────────────────
-
-def _com_stripe(conta, monkeypatch, resultado):
-    sql("update auth_accounts set stripe_customer_id = 'cus_teste' where user_id = %s", conta.uid)
-    chamadas = []
-
-    def _acha(stripe, customer):
-        chamadas.append(customer)
-        if isinstance(resultado, Exception):
-            raise resultado
-        return resultado
-    monkeypatch.setattr(dashboard, "_find_active_subscription", _acha)
-    return chamadas
-
-
-def test_t1_assinatura_viva_com_renovacao_recusa(c, contas, monkeypatch):
-    conta = _nova(contas)
-    _com_stripe(conta, monkeypatch, {"id": "sub_1", "cancel_at_period_end": False})
-    r = _del(c, conta, _completo(conta))
-    assert r.status_code == 409 and r.json()["detail"]["code"] == "assinatura_ativa"
-    assert _existe(conta.uid) and _codigo(conta.uid)["used_at"] is None
-
-
-def test_t2_renovacao_cancelada_exclui(c, contas, monkeypatch):
-    conta = _nova(contas)
-    _com_stripe(conta, monkeypatch, {"id": "sub_1", "cancel_at_period_end": True})
-    assert _del(c, conta, _completo(conta)).status_code == 200
-
-
-def test_t3_stripe_fora_do_ar_recusa_com_503_e_nao_apaga(c, contas, monkeypatch):
-    conta = _nova(contas)
-    _com_stripe(conta, monkeypatch, RuntimeError("stripe fora"))
-    r = _del(c, conta, _completo(conta))
-    assert r.status_code == 503 and r.json()["detail"]["code"] == "stripe_indisponivel"
-    assert _existe(conta.uid)
-
-
-def test_t4_sem_customer_nao_consulta_a_stripe(c, contas, monkeypatch):
-    conta = _nova(contas)
-    chamadas = _com_stripe(conta, monkeypatch, RuntimeError("não devia chamar"))
-    sql("update auth_accounts set stripe_customer_id = null where user_id = %s", conta.uid)
-    assert _del(c, conta, _completo(conta)).status_code == 200 and chamadas == []
 
 
 # ── D: retentativa e em andamento ────────────────────────────────────────────

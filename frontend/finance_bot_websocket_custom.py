@@ -129,6 +129,7 @@ from core.pg_text import detalhe_seguro, limpa_para_pg, recusa_veneno, tem_venen
 from core.dashboard_links import link_whatsapp
 from core.secure_compare import constant_time_eq
 from core.services.pkce import VERIFIER_PATTERN as _PKCE_VERIFIER_PATTERN
+from core.services.stripe_sdk import _is_missing_stripe_customer, _sg
 from core.services.pkce import challenge_valido, s256 as pkce_s256
 from core.limite_corpo import LimiteCorpoMiddleware, MAX_OFX_BYTES
 from api.v2 import app as api_v2_app, eventos as api_v2_eventos
@@ -255,18 +256,6 @@ def _plan_interval_for_price(price_id: str | None) -> tuple[str | None, str | No
     return (None, None)
 
 
-def _sg(obj, key, default=None):
-    """Acessor seguro pra objetos do SDK Stripe v8 (não são dicts — sempre
-    obj[k] com try/except, nunca .get). Espelho do _g do webhook."""
-    if obj is None:
-        return default
-    try:
-        v = obj[key]
-    except (KeyError, TypeError, AttributeError):
-        return default
-    return v if v is not None else default
-
-
 def _sub_price_id(sub) -> str | None:
     """Price do primeiro item da assinatura (SDK v8: só via _sg)."""
     items_obj = _sg(sub, "items", {})
@@ -291,18 +280,6 @@ def _sub_period_end_ts(sub) -> int | None:
 
 class StripeLookupError(Exception):
     """A consulta ao Stripe falhou; isso não significa ausência de assinatura."""
-
-
-def _is_missing_stripe_customer(stripe_mod, exc: Exception) -> bool:
-    """Distingue customer apagado de indisponibilidade real da API."""
-    invalid_request = getattr(getattr(stripe_mod, "error", None), "InvalidRequestError", None)
-    if not isinstance(invalid_request, type) or not isinstance(exc, invalid_request):
-        return False
-    return (
-        (getattr(exc, "code", None) == "resource_missing"
-         and getattr(exc, "param", None) == "customer")
-        or "no such customer" in str(exc).lower()
-    )
 
 
 def _find_active_subscription(stripe_mod, customer_id: str):
@@ -4551,8 +4528,9 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     """Exclui a conta NA HORA, depois de reautenticar (senha e/ou código do e-mail, + MFA).
 
     Ordem: sessão, frase `EXCLUIR` (sem banco, não gasta nada), teto por conta,
-    guardas (export pendente, assinatura Stripe), credenciais (`schedule_account_deletion`,
-    que também marca `processing` e revoga as sessões) e, por fim, a exclusão. Só o
+    guardas (export pendente, Stripe fora do ar = 503), credenciais (`schedule_account_deletion`,
+    que também marca `processing` e revoga as sessões) e, por fim, a exclusão, que antes
+    cancela a assinatura de cartão na Stripe, sem reembolso (falhou: 200 `deleting`). Só o
     401 de SESSÃO leva WWW-Authenticate (é o que encerra a sessão no cliente); os de
     credencial são só recusa.
     """
@@ -4571,16 +4549,12 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     if customer:
         import stripe
         stripe.api_key = STRIPE_SECRET_KEY
-        try:
-            sub = await asyncio.to_thread(_find_active_subscription, stripe, customer)
+        try:   # pré-checagem: Stripe fora do ar recusa ANTES de gastar a credencial
+            await asyncio.to_thread(_find_active_subscription, stripe, customer)
         except Exception as exc:  # noqa: BLE001 — "não sei" não é "não tem": nada é apagado
             raise HTTPException(status_code=503, detail={
                 "code": "stripe_indisponivel",
                 "message": "Não deu para conferir sua assinatura agora. Tente de novo em alguns minutos."}) from exc
-        if sub and not _sg(sub, "cancel_at_period_end"):
-            raise HTTPException(status_code=409, detail={
-                "code": "assinatura_ativa",
-                "message": "Cancele a renovação da assinatura antes de excluir."})
     try:
         marca = await asyncio.to_thread(
             schedule_account_deletion, user_id, body.password, code=body.code, totp=body.totp)
@@ -5257,8 +5231,19 @@ async def _billing_user_lock(user_id: int):
         async with conn.cursor() as cur:
             await cur.execute("select pg_advisory_lock(hashtext(%s))", (lock_key,))
             try:
+                # Conta em exclusão, ou já apagada (sem linha em `users`), não ganha checkout:
+                # a exclusão toma este mesmo lock em `stripe_exclusao.cancelar_assinaturas`.
+                # Só-WhatsApp (`users` sem `auth_accounts`) SEGUE; `auth_accounts` pode ter
+                # mais de uma linha por user_id: qualquer uma em exclusão recusa.
+                await cur.execute(
+                    "select a.deletion_status from users u"
+                    " left join auth_accounts a on a.user_id = u.id where u.id = %s", (int(user_id),))
+                rows = await cur.fetchall()
+                if not rows or any(r["deletion_status"] in ("scheduled", "processing") for r in rows):
+                    raise HTTPException(status_code=403, detail="Esta conta está em exclusão.")
                 yield
             finally:
+                await conn.rollback()   # guarda falhou = transação abortada; o lock de sessão sobrevive ao rollback
                 await cur.execute("select pg_advisory_unlock(hashtext(%s))", (lock_key,))
 
 
@@ -7243,11 +7228,13 @@ async def billing_webhook(request: Request, background_tasks: BackgroundTasks):
                 source="billing",
                 user_id=user_id,
             )
-            # Cancelamento NOSSO (cartão recusado por Pix vigente): a conta
-            # continua paga, então nada de "assinatura cancelada" ao cliente
-            # nem ao admin. Revogação e recompute acima já rodaram.
+            # Cancelamento NOSSO (cartão recusado por Pix vigente: a conta
+            # continua paga; exclusão de conta: ela está sumindo): nada de
+            # "assinatura cancelada" ao cliente nem ao admin. Revogação e
+            # recompute acima já rodaram.
             from core.services.cartao_recusado_por_pix import MARCA
-            if _g(_g(obj, "cancellation_details"), "comment") == MARCA:
+            from core.services.stripe_exclusao import MARCA_EXCLUSAO
+            if _g(_g(obj, "cancellation_details"), "comment") in (MARCA, MARCA_EXCLUSAO):
                 return {"received": True}
             # Email de confirmacao de cancelamento (item 41)
             # O plano sai do PRICE do `obj`, que é a própria Subscription do
