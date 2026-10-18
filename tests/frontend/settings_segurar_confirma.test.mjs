@@ -46,10 +46,10 @@ for (const a of ACOES) {
       await assenta();
       assert.equal(reqs.length, 1);
       assert.equal(reqs[0].metodo, a.metodo);
-      assert.deepEqual(reqs[0].corpo, { password: "senha123" });
+      assert.deepEqual(reqs[0].corpo, a.corpo);
       assert.equal(await confirmAberto(page), false, "o caminho do hold não passa pelo confirmModal");
       if (a.nome === "delete") {   // fluxo de sempre: alertModal pós-sucesso
-        await waitFor(() => page.evaluate(() => /Exclusão agendada/.test(document.querySelector(".pig-modal-overlay")?.textContent || "")),
+        await waitFor(() => page.evaluate(() => /Conta excluída/.test(document.querySelector(".pig-modal-overlay")?.textContent || "")),
                       "alertModal pós-sucesso da exclusão");
       }
     } finally { await ctx.close(); }
@@ -241,9 +241,9 @@ for (const a of ACOES) {
       await page.clock.runFor(100);
       await assenta();
       assert.equal(reqs.length, 0, "antes do 'sim' nada vai");
-      await page.getByRole("button", { name: a.modal }).click();
+      await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
       await waitFor(() => reqs.length === 1, "a requisição depois do 'sim'");
-      assert.deepEqual(reqs[0].corpo, { password: "senha123" });
+      assert.deepEqual(reqs[0].corpo, a.corpo);
     } finally { await ctx.close(); }
   });
 }

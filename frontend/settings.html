@@ -346,6 +346,12 @@ a { color: inherit; text-decoration: none; }
   margin-top: 14px;
 }
 .delete-confirm.show { display: grid; }
+/* Campos da exclusão imediata (frase, código do e-mail, TOTP): uma coluna, acima da senha
+   e do botão de segurar. `hidden` do TOTP precisa ganhar do display do .privacy-input. */
+.delete-extra { grid-column: 1 / -1; display: grid; gap: 8px; }
+.delete-extra label { color: var(--muted); font-size: .75rem; font-weight: 700; }
+.delete-extra [hidden] { display: none; }
+.delete-codigo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 /* Confirmar segurando (frontend/hold-confirm.js). Classe própria: o #export-confirm
    usa .delete-confirm e não pode herdar nada daqui. */
 .hold-btn {
@@ -1771,20 +1777,29 @@ body.balance-hidden .account-balance {
           <div class="card-head">
             <div>
               <div class="card-title">Excluir conta</div>
-              <div class="card-sub">Agende a remoção definitiva da conta e dos dados financeiros</div>
+              <div class="card-sub">Apaga sua conta e seus dados na hora.</div>
             </div>
           </div>
           <div class="card-body">
             <div class="danger-panel">
-              <div class="danger-title">Exclusão permanente após 7 dias</div>
-              <div class="danger-copy">
-                Ao confirmar, sua conta ficará agendada para exclusão e o acesso será encerrado. Durante o período de carência, os dados ficam preservados para evitar exclusão acidental ou indevida; depois do prazo, os dados pessoais e financeiros são removidos permanentemente, exceto registros exigidos por obrigação legal, segurança ou prevenção de fraude.
-              </div>
+              <div class="danger-title">Exclusão imediata e permanente</div>
+              <div class="danger-copy">Não dá para desfazer. Baixe sua cópia antes.</div>
               <div style="height:12px"></div>
               <button class="btn-danger" type="button" id="delete-start-btn" onclick="showDeleteConfirm()" style="max-width:220px">
                 Excluir conta
               </button>
               <div class="delete-confirm" id="delete-confirm">
+                <div class="delete-extra">
+                  <label for="delete-confirmacao">Digite EXCLUIR</label>
+                  <input class="privacy-input" id="delete-confirmacao" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="EXCLUIR" />
+                  <label for="delete-codigo">Código do e-mail</label>
+                  <div class="delete-codigo-row">
+                    <input class="privacy-input" id="delete-codigo" type="text" inputmode="numeric" autocomplete="one-time-code" />
+                    <button class="btn-sm" type="button" id="delete-codigo-btn">Enviar código</button>
+                  </div>
+                  <span class="data-sub" id="delete-codigo-status" aria-live="polite"></span>
+                  <input class="privacy-input" id="delete-totp" type="text" autocomplete="one-time-code" placeholder="Código do autenticador ou backup" aria-label="Código do autenticador ou backup" hidden />
+                </div>
                 <input class="privacy-input" id="delete-password" type="password" autocomplete="current-password" placeholder="Confirme sua senha" />
                 <button class="btn-danger hold-btn" type="button" id="delete-confirm-btn">
                   <svg class="hold-ring" viewBox="0 0 18 18" aria-hidden="true"><circle class="hold-ring-bg" cx="9" cy="9" r="7"/><circle class="hold-ring-fg" cx="9" cy="9" r="7"/></svg><span class="hold-label">Segure para excluir a conta</span>
@@ -2832,10 +2847,19 @@ function requireSenhaDefinida() {
   return false;
 }
 
+// Conta só-Google/Apple (sem senha, MAS com identidade): o e-mail dela está provado, então o
+// código por e-mail basta e o campo de senha some. Espelha o `codigo` do servidor
+// (`MODO_SQL`) com o que o /auth/me já devolve: sem senha e sem `precisa_criar_senha`.
+// Sem credencial nenhuma (quiz/funil) segue barrada por requireSenhaDefinida (409 do servidor).
+const exclusaoPorCodigo = () => !HAS_PASSWORD && !PRECISA_SENHA;
+
 function showExportConfirm() {
-  if (!requireSenhaDefinida()) return;
+  const porCodigo = exclusaoPorCodigo();
+  if (!porCodigo && !requireSenhaDefinida()) return;
+  const campo = document.getElementById("export-password");
+  campo.hidden = porCodigo;
   document.getElementById("export-confirm").classList.add("show");
-  document.getElementById("export-password").focus();
+  (porCodigo ? document.getElementById("export-confirm-btn") : campo).focus();
 }
 
 function hideExportConfirm() {
@@ -2844,11 +2868,9 @@ function hideExportConfirm() {
 }
 
 async function requestDataExport() {
-  const password = document.getElementById("export-password").value;
-  if (!password) {
-    showToast("Confirme sua senha", "error");
-    return;
-  }
+  if (!senhaPreenchida("export-password")) return;
+  const campoSenha = document.getElementById("export-password");
+  const password = campoSenha.hidden ? undefined : campoSenha.value;   // JSON.stringify omite
 
   const btn = document.getElementById("export-confirm-btn");
   const original = btn.textContent;
@@ -2894,7 +2916,8 @@ function hideResetConfirm() {
 const HOLD_MS_IRREVERSIVEL = 1200;
 
 function senhaPreenchida(id) {
-  if (document.getElementById(id).value) return true;
+  const campo = document.getElementById(id);
+  if (campo.hidden || campo.value) return true;   // campo escondido: a conta não usa senha aqui
   showToast("Confirme sua senha", "error");
   return false;
 }
@@ -2947,26 +2970,61 @@ async function requestAccountReset(origem) {
 }
 
 function showDeleteConfirm() {
-  if (!requireSenhaDefinida()) return;
+  const porCodigo = exclusaoPorCodigo();
+  if (!porCodigo && !requireSenhaDefinida()) return;
+  document.getElementById("delete-password").hidden = porCodigo;
   document.getElementById("delete-confirm").classList.add("show");
-  document.getElementById("delete-password").focus();
+  // O campo do autenticador é só de quem tem MFA ligado. O status não é carregado nesta
+  // seção (só na de segurança), então confere agora; se a consulta falhar, mostra o campo:
+  // esconder deixaria quem tem MFA sem como confirmar, e para quem não tem ele é ignorado.
+  const totp = document.getElementById("delete-totp");
+  // Esconde SÓ se ESTA resposta confirmou `enabled === false`: se outra carga a superou
+  // (o loadMfaStatus devolve undefined), o `_mfaStatus` pode estar velho; em dúvida, mostra.
+  loadMfaStatus({ propagate: true }).then((st) => { totp.hidden = !!(st && st.enabled === false); },
+                                          () => { totp.hidden = false; });
+  document.getElementById("delete-confirmacao").focus();
 }
 
 function hideDeleteConfirm() {
   document.getElementById("delete-confirm").classList.remove("show");
-  document.getElementById("delete-password").value = "";
+  for (const id of ["delete-password", "delete-confirmacao", "delete-codigo", "delete-totp"]) {
+    document.getElementById(id).value = "";
+  }
+  document.getElementById("delete-codigo-status").textContent = "";
   holdDelete.resetar();
+}
+
+// Pede o código que autoriza a exclusão: vai para o e-mail da conta (a rota não recebe destino).
+async function sendDeleteCode() {
+  const btn = document.getElementById("delete-codigo-btn");
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API}/auth/account/reauth-code`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: authHeaders({ "Content-Type":"application/json" }),
+      body: "{}",
+    });
+    if (!resp.ok) throw new Error(await readApiError(resp));
+    const data = await resp.json();
+    document.getElementById("delete-codigo-status").textContent = `Código enviado para ${data.email_mascarado}.`;
+  } catch (err) {
+    showToast(err.message || "Erro ao enviar o código", "error");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function requestAccountDeletion(origem) {
   if (!senhaPreenchida("delete-password")) return holdDelete.resetar();
-  const password = document.getElementById("delete-password").value;
+  const campoSenha = document.getElementById("delete-password");
+  const password = campoSenha.hidden ? undefined : campoSenha.value;   // JSON.stringify omite
   if (origem !== "segurar") {
     const ok = await confirmModal(
-      "Sua conta e todos os seus dados serão removidos definitivamente em 7 dias. Você pode cancelar a exclusão fazendo login novamente nesse período.",
+      "Isso apaga tudo e não dá para desfazer.",
       {
-        title: "Agendar exclusão da conta?",
-        confirmText: "Agendar exclusão",
+        title: "Excluir a conta agora?",
+        confirmText: "Excluir conta",
         destructive: true,
       },
     );
@@ -2977,22 +3035,31 @@ async function requestAccountDeletion(origem) {
   const rotulo = btn.querySelector(".hold-label");
   const original = rotulo.textContent;
   btn.disabled = true;
-  rotulo.textContent = "Agendando...";
+  rotulo.textContent = "Excluindo...";
   try {
     const resp = await fetch(`${API}/auth/account`, {
       method: "DELETE",
       credentials: "same-origin",
       headers: authHeaders({ "Content-Type":"application/json" }),
-      body: JSON.stringify({ password }),
+      // A frase EXCLUIR é conferida só no servidor (uma fonte da regra); o erro volta no toast.
+      body: JSON.stringify({
+        password,
+        code: document.getElementById("delete-codigo").value,
+        confirmacao: document.getElementById("delete-confirmacao").value,
+        ...(document.getElementById("delete-totp").hidden ? {} : { totp: document.getElementById("delete-totp").value }),
+      }),
     });
     if (!resp.ok) throw new Error(await readApiError(resp));
     const data = await resp.json();
-    const when = fmtDate(data.deletion_scheduled_for);
-    await alertModal(`Sua conta foi agendada para exclusão em ${when}.`, { title: "Exclusão agendada" });
+    if (data.status === "deleting") {
+      await alertModal("Estamos concluindo. Você recebe um e-mail ao terminar.", { title: "Excluindo" });
+    } else {
+      await alertModal("Pronto, sua conta foi excluída.", { title: "Conta excluída" });
+    }
     localStorage.setItem("finbot_logout_at", String(Date.now()));
     window.location.href = "/";
   } catch (err) {
-    showToast(err.message || "Erro ao agendar exclusão", "error");
+    showToast(err.message || "Erro ao excluir a conta", "error");
   } finally {
     btn.disabled = false;
     rotulo.textContent = original;
@@ -3017,6 +3084,7 @@ function ligarHold(botaoId, avisoId, senhaId, confirmar) {
 }
 const holdReset = ligarHold("reset-confirm-btn", "reset-hold-aviso", "reset-password", requestAccountReset);
 const holdDelete = ligarHold("delete-confirm-btn", "delete-hold-aviso", "delete-password", requestAccountDeletion);
+document.getElementById("delete-codigo-btn").addEventListener("click", sendDeleteCode);   // sem onclick inline (gate handlers_inline)
 
 /* ── Bank select ─────────────────────────────── */
 /* ── Estado do plano (Open Finance) ──────────── */
@@ -3817,6 +3885,7 @@ async function loadMfaStatus({ propagate = false } = {}) {
     _mfaStatus = { enabled: false, has_pending_secret: false, backup_codes_remaining: 0 };
   }
   applyMfaUi();
+  return _mfaStatus;   // undefined quando superada (acima): quem decide com isto trata como "não sei"
 }
 
 function applyMfaUi() {
