@@ -81,6 +81,8 @@ def _lista(user_id: int, args: dict[str, Any], sem_categoria: bool) -> dict[str,
     resultado = {"itens": [_para_ia(i) for i in d["itens"]], "motivos": d["motivos"]}
     if mostrar_itens(user_id, "sem_categoria" if sem_categoria else "ultimos_lancamentos", d["itens"], d["motivos"]):
         resultado["card_na_tela"] = True
+        if len(d["itens"]) > MAX_NO_CARD:  # o card corta: o modelo escreve os que ficaram fora (Codex no #1107)
+            resultado["card_mostra"] = MAX_NO_CARD
     return resultado
 
 

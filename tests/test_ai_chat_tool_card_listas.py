@@ -92,6 +92,16 @@ def test_o_bloco_leva_ate_10_e_o_modelo_todos(monkeypatch, mundo):
     assert len(bloco["abas"][0]["recursos"]["ultimos_lancamentos"]["itens"]) == 10  # o app mostra 5 e um "+5"
     (visao,) = _tool_msgs(uid)
     assert len(visao["itens"]) == 16 and visao["card_na_tela"] is True  # o "apaga o 12º" precisa do id
+    assert visao["card_mostra"] == 10  # Codex no #1107: o modelo sabe que do 11º em diante não está no card
+    from core.services.ai_chat.system_prompt import ADENDO_CARDS
+    assert "`card_mostra: N`" in ADENDO_CARDS  # e o prompt diz o que fazer com eles
+
+
+def test_lista_que_cabe_no_card_nao_leva_card_mostra(monkeypatch, mundo):
+    uid, _ = mundo
+    _, (bloco,), _ = _turno(monkeypatch, uid, ("list_recent_launches", {"limit": 10}))
+    (visao,) = _tool_msgs(uid)
+    assert visao["card_na_tela"] is True and len(visao["itens"]) <= 10 and "card_mostra" not in visao
 
 
 def test_lista_vazia_nao_vira_card(monkeypatch, uid_pro):
