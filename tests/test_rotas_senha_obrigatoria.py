@@ -221,7 +221,8 @@ GET /open-finance/{user_id}/limite
 POST /open-finance/{user_id}/pluggy-item|POST /open-finance/{user_id}/sync|POST /open-finance/{user_id}/refresh
 POST /open-finance/{user_id}/mock-connect|DELETE /open-finance/{user_id}|GET /open-finance/{user_id}/movements
 DELETE /open-finance/{user_id}/connections/{connection_id}
-POST /open-finance/{user_id}/movements/confirm|GET /open-finance/{user_id}/reconciliations
+POST /open-finance/{user_id}/movements/confirm|POST /open-finance/{user_id}/movements/undo
+GET /open-finance/{user_id}/reconciliations
 POST /open-finance/{user_id}/reconciliations/{of_tx_id}/{action}
 GET /open-finance/{user_id}/cash-transfers|POST /open-finance/{user_id}/cash-transfers/{link_id}/{action}
 """

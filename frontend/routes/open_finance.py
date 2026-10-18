@@ -2686,15 +2686,33 @@ async def open_finance_disconnect_connection_route(request: Request, user_id: in
 class BankMovementConfirmation(BaseModel):
     launch_id: int
     transaction_id: int
+    replace_transaction_id: int | None = None  # trocar: o par que o cliente viu (CAS)
+
+
+class BankMovementUndo(BaseModel):
+    launch_id: int
+    transaction_id: int  # o par que o cliente viu (CAS)
 
 
 @router.get("/open-finance/{user_id}/movements")
 @shared.limiter.limit("60/minute")
-async def bank_movements_route(request: Request, user_id: int):
+async def bank_movements_route(request: Request, user_id: int, launch_id: int | None = None):
     shared.authorize_dashboard_access(request, user_id)
     from db.bank_conferencia import list_bank_movements
-    rows = await asyncio.to_thread(list_bank_movements, user_id)
+    rows = await asyncio.to_thread(list_bank_movements, user_id, launch_id)
     return {"ok": True, "movements": rows}
+
+
+async def _bank_movement_action(user_id, fn, *args):
+    from db.reconciliation import ReconciliationConflict
+    try:
+        result = await asyncio.to_thread(fn, user_id, *args)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Movimentação não encontrada.") from exc
+    except (ValueError, ReconciliationConflict) as exc:
+        raise HTTPException(status_code=409, detail="Esses registros não podem ser vinculados. Atualize a lista e confira novamente.") from exc
+    shared.invalidate_dashboard_current_cache(user_id)
+    return result
 
 
 @router.post("/open-finance/{user_id}/movements/confirm")
@@ -2702,14 +2720,17 @@ async def bank_movements_route(request: Request, user_id: int):
 async def bank_movement_confirm_route(request: Request, user_id: int, body: BankMovementConfirmation):
     shared.authorize_dashboard_access(request, user_id)
     from db.bank_conferencia import confirm_bank_movement
-    try:
-        await asyncio.to_thread(confirm_bank_movement, user_id, body.launch_id, body.transaction_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail="Movimentação não encontrada.") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail="Esses registros não podem ser vinculados. Atualize a lista e confira novamente.") from exc
-    shared.invalidate_dashboard_current_cache(user_id)
+    await _bank_movement_action(user_id, confirm_bank_movement, body.launch_id, body.transaction_id,
+                                body.replace_transaction_id)
     return {"ok": True}
+
+
+@router.post("/open-finance/{user_id}/movements/undo")
+@shared.limiter.limit("30/minute")
+async def bank_movement_undo_route(request: Request, user_id: int, body: BankMovementUndo):
+    shared.authorize_dashboard_access(request, user_id)
+    from db.bank_conferencia import undo_bank_movement
+    return await _bank_movement_action(user_id, undo_bank_movement, body.launch_id, body.transaction_id)
 
 
 # `shared_limit(scope=)` e não `limit()`: com o `key_style="url"` do slowapi cada

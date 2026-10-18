@@ -1044,6 +1044,18 @@ def init_db():
         create index if not exists idx_bank_movement_declarations_user
           on bank_movement_declarations(user_id, matched_transaction_id)
         """,
+        # I7 (ADR 0006): escolha explícita, troca ou desfazer => o reconcile não liga o fluxo sozinho.
+        """
+        alter table bank_movement_declarations add column if not exists manual_only boolean not null default false
+        """,
+        # Backfill (DP-8): fluxo já casado à mão antes da coluna. Mesmo predicado de `e_fluxo`/`DECLARADA_SQL`;
+        # idempotente (o código novo grava a flag junto com o `manual`, então depois da 1ª vez não acha linha).
+        """
+        update bank_movement_declarations d set manual_only = true
+          from launches l
+         where l.id = d.launch_id and l.user_id = d.user_id and l.tipo in ('despesa', 'receita')
+           and d.account_id is null and d.confirmation_method = 'manual' and not d.manual_only
+        """,
 
         # Saque/depósito em espécie do Open Finance → Carteira (db/open_finance_cash.py).
         # `ativo` com `launch_id` nulo = desfeito: apagar o lançamento por qualquer

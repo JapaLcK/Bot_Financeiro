@@ -11,7 +11,8 @@ INVARIANTES x ESCRITORES (a classe de achados do #969: cada invariante tem um es
 checa e escreve precisa fazer os dois sob o MESMO mutex do usuário, `bank_movements._lock_user`, a linha de
 `accounts`, sempre o primeiro lock). Invariantes: I1 não é interna; I2 valor/data = projeção (declarado
 sem par, extrato com par); I3 uma sombra por transação; I4 par automático único nos dois sentidos; I5
-`delta_conta` 0, Carteira intocada; I6 tudo filtrado por `user_id`.
+`delta_conta` 0, Carteira intocada; I6 tudo filtrado por `user_id`; I7 escolha explícita, troca ou desfazer
+=> `manual_only`; o reconcile nunca liga fluxo `manual_only` (ele segue em `claims`); aporte nunca recebe a flag.
   criar (`add_launch_and_update_balance`)  I1 recusa argumento; I5; I6   mutex = o `update accounts`, e o
                                            reconcile na mesma transação (cursor externo é recusado)
   editar categoria / lote                  I1 recusa categoria interna   SEM mutex, de propósito: a
@@ -24,9 +25,12 @@ sem par, extrato com par); I3 uma sombra por transação; I4 par automático ún
   migração do boot (`schema.py`)           I1 não marca a declarada (marca `funding_source`)   SCHEMA_INIT_LOCK;
                                            a marca é imutável, então não corre com o escritor
   apagar um/lote/tudo                      I3 devolve a sombra, I6   mutex (`uses_bank_movement_lock`)
-  sync/import/reconcile/desconexão         I2 projeção, I3, I4   mutex, checa e escreve na transação
-  confirmar manual / rejeitar par          I2, I4   mutex (`bank_conferencia.confirm_bank_movement`,
-                                                    `_locked_tx`)
+  sync/import/reconcile/desconexão         I2 projeção, I3, I4, I7   mutex, checa e escreve na transação
+  escolher manual / rejeitar par           I2, I4, I7   mutex (`bank_conferencia.confirm_bank_movement`,
+                                                        `_locked_tx`)
+  trocar (`confirm` com `replace`)         I2, I3, I4, I6, I7   mutex -> `_transactions(lock)` -> `_locked_tx`;
+                                           CAS no par visto; sombra do antigo e bind do novo na mesma transação
+  desfazer (`undo_bank_movement`)          I2, I3, I6, I7   mutex -> `_locked_tx`; CAS no par visto
   desfazer fusão vizinha (`_desfaz`)       só FUSED_STATUSES; não alcança `bank_movement_confirmed`   mutex
   merge de contas / reset / exclusão       I6 (a declaração muda de dono ou cai junto)   locks próprios de
                                            `users.py`/`privacy.py`, fora desta tabela
