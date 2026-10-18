@@ -392,6 +392,12 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   usuário e inexistente), 409 `nao_editavel` (fora do `pode` e as recusas de domínio do apagar,
   sem motivo no corpo), 422 `validation_error`. Sem chave de idempotência (dois POST iguais
   gravam dois).
+  A IA apaga e recategoriza pelo MESMO `pode` (`core/services/ai_chat/tools/extrato_ia.py`, `delete_launch` e
+  `recategorize_launch`): o id da escrita é o da lista, `l<id>` (launches) ou `c<id>` (compra no cartão); o inteiro
+  vale SÓ como o `#N` (`user_seq`), nunca como id interno nem de compra. `validate` recusa fora do `pode` com o motivo
+  do estado e o que a IA ainda faz; o resumo da pergunta vem do banco (`_item` na pendência) e o "sim" relê: item
+  sumido, fora do `pode` ou editado depois da pergunta não executa. Registro que o Extrato não lista (criar/apagar
+  caixinha e investimento) é recusado com frase própria. `c<id>` nunca apaga.
 - `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
