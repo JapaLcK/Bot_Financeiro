@@ -76,6 +76,8 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
     ["PauseCircle", "PauseCircleIcon"],
     ["Trash", "TrashIcon"],
     ["Question", "QuestionIcon"],
+    ["TrendUp", "TrendUpIcon"],
+    ["ShieldCheck", "ShieldCheckIcon"],
     ["Phone", "PhoneIcon"],
     ["WhatsappLogo", "WhatsappLogoIcon"],
   ] as const)("o módulo real de %s exporta %s (nomeado, existe de fato no pacote)", (arquivo, nomeado) => {

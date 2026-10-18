@@ -1,7 +1,7 @@
 // Previsão real (/api/v2/previsao): o que a API mandou, sem recalcular. Âncora = hoje, a
 // série começa amanhã; dinheiro é o texto da API (moneyText) e Number() só desenha o SVG.
 // 4xx nunca mostra dado guardado; rede/5xx com dado mostra o antigo, com aviso.
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Previsao } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, longDate, moneyText } from "../lib/format.js";
@@ -12,7 +12,7 @@ import { Frame } from "../parts/Frame";
 import { Seg } from "../parts/Seg";
 import { MotivosPrevisao, Selos } from "../parts/Selos";
 import { Compromissos, ConvitePro, ddmm, valorOc } from "./Compromissos";
-import { ReceitasDoBanco } from "./ReceitasDoBanco";
+import { RespondidasDoBanco, useFalhaReceita, useListaDaPagina } from "./ReceitasDoBanco";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Dias = 30 | 60 | 90;
@@ -35,6 +35,12 @@ function usePrevisao() {
   const d = !e4 && q.data && (dias === null || q.data.dias === dias) ? q.data : undefined;
   if (e4) permitidos.current = [];
   if (d) permitidos.current = d.dias_permitidos;
+  // A pilha do topo mostra as pendentes desta lista (a do card do Resumo e a da página dividem o contexto: nunca há as duas na tela); sai de cena junto com o card/página.
+  // Carregando o horizonte novo (sem `d` e sem 4xx) a última lista fica: apagá-la tirava a receita da pilha, desmontava o botão com o POST no ar e zerava a seleção.
+  // Resposta boa troca a lista; 4xx (downgrade, portão) a apaga: 4xx nunca mostra dado guardado.
+  const [, setLista] = useListaDaPagina();
+  useEffect(() => { if (d || e4) setLista(d?.receitas_do_banco ?? null); }, [d, e4, setLista]);
+  useEffect(() => () => setLista(null), [setLista]);
   return { q, d, e4, dias, aviso, permitidos: permitidos.current, escolher: (n: Dias) => { setAviso(""); setDias(n); } };
 }
 type Estado = ReturnType<typeof usePrevisao>;
@@ -175,18 +181,18 @@ function ComoFoiFeita({ d }: { d: Previsao }) {
 export function PrevisaoPainel() {
   const p = usePrevisao();
   const d = p.d;
-  const [falhaEm, setFalhaEm] = useState<"pendentes" | "respondidas" | null>(null);
-  // As caixas desmontam quando `d` some (troca de horizonte): o alerta não sobrevive a isso, como antes (estado local).
-  if (!d && falhaEm) setFalhaEm(null);
+  // O alerta de falha da receita mora no contexto (a pilha do topo e o fim desta página o dividem): a troca de horizonte (`d` some) o apaga.
+  // ponytail: a receita pendente segue na pilha sem o alerta (limite aceito, docs/CLAUDE.md (h)); o Sim de novo mostra o alerta outra vez.
+  const [, setFalhaEm] = useFalhaReceita();
+  useEffect(() => { if (!d) setFalhaEm(null); }, [d, setFalhaEm]);
   return (
     <>
-      {d && <ReceitasDoBanco lista={d.receitas_do_banco ?? []} modo="pendentes" falhaEm={falhaEm} setFalhaEm={setFalhaEm} />}
       <div className="panel span-12"><PrevisaoHero p={p} id="previsao" /></div>
       {d && (
         <>
           <div className="panel span-7"><Compromissos grupos={d.compromissos} dias={d.dias} hoje={d.hoje} /></div>
           <div className="panel span-5"><ComoFoiFeita d={d} /></div>
-          <ReceitasDoBanco lista={d.receitas_do_banco ?? []} modo="respondidas" falhaEm={falhaEm} setFalhaEm={setFalhaEm} />
+          <RespondidasDoBanco lista={d.receitas_do_banco ?? []} />
         </>
       )}
     </>

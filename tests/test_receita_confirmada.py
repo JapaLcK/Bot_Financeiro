@@ -110,6 +110,20 @@ def test_pendente_sim_nao_desfazer_pelo_endpoint(novo):
     assert uma(d)["status"] == "pendente" and na_conta(d) == [] and linhas(a) == []
 
 
+def test_repetir_a_mesma_resposta_e_idempotente(novo):
+    """O cliente pode mandar o mesmo POST duas vezes (5xx ou rede na releitura do horizonte, o Sim de novo): mesma lista, mesma marca."""
+    a = novo()
+    salario_do_dono(a)
+    r = uma(ver(a))
+    for resposta, status in (("sim", "confirmada"), ("nao", "negada"), ("desfazer", "pendente")):
+        primeira = responder(a, r["chave"], resposta)
+        marcas1 = linhas(a)
+        segunda = responder(a, r["chave"], resposta)
+        assert primeira.status_code == segunda.status_code == 200, (resposta, segunda.text)
+        assert uma(segunda.json())["status"] == status and segunda.json()["receitas_do_banco"] == primeira.json()["receitas_do_banco"]
+        assert linhas(a) == marcas1 and len(marcas1) == (0 if resposta == "desfazer" else 1)
+
+
 def test_pendentes_vem_primeiro_depois_por_valor(novo):
     a = novo()
     salario_do_dono(a)

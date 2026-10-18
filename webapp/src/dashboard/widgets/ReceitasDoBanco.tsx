@@ -1,17 +1,18 @@
 // Receitas que o servidor achou no extrato (`receitas_do_banco` da Previsão): só a que o usuário
-// confirma entra na conta. Duas instâncias na página /previsao, mesma mutationKey (então `useIsMutating`
-// trava as duas juntas): `modo="pendentes"` no topo (some quando não há o que perguntar) e
-// `modo="respondidas"` no fim, com o Desfazer. Sem painel visível, a marcação sr-only fica montada
-// para o anúncio e o foco do resultado. Sim/Não/Desfazer = POST /previsao/receita; sem atualização otimista:
-// a lista na tela é sempre a última resposta do servidor. O nome é texto livre do pagador:
+// confirma entra na conta. Duas pontas com a mesma mutationKey (então `useIsMutating` trava as duas juntas):
+// as PENDENTES moram na pilha de avisos do topo (`itensDeReceita`, montada por parts/AvisosDoTopo.tsx, em `/` e em `/previsao`)
+// e as RESPONDIDAS, com o Desfazer, na seção "Receitas na previsão" no fim da `/previsao` (`RespondidasDoBanco`).
+// Sem nada visível, a marcação sr-only fica montada para o anúncio e o foco do resultado. Sim/Não/Desfazer = POST /previsao/receita;
+// sem atualização otimista: a lista na tela é sempre a última resposta do servidor. O nome é texto livre do pagador:
 // só como texto do React, truncado no CSS.
-import { useRef, useState } from "react";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Previsao, ReceitaDoBanco, RespostaReceitaIn } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { apiPost } from "../lib/v2";
 import { Frame } from "../parts/Frame";
+import type { AvisoDaPilha } from "../parts/PilhaAvisos";
 
 const CHAVE = ["previsao", "receita"];
 const CHIP = { confirmada: "Confirmada", negada: "Recusada" } as const;
@@ -21,9 +22,21 @@ const STATUS: Record<Resposta, string> = { sim: "confirmada", nao: "negada", des
 const DITO: Record<Resposta, string> = { sim: "confirmada.", nao: "recusada.", desfazer: "resposta desfeita." };
 
 type Modo = "pendentes" | "respondidas";
-// `falhaEm` mora no pai e é UM só para as duas instâncias: o alerta aparece onde a ação falhou, e um sucesso (ou resposta que pegou) em qualquer uma o limpa.
-export function ReceitasDoBanco({ lista, modo, falhaEm, setFalhaEm }: { lista: Previsao["receitas_do_banco"]; modo: Modo; falhaEm: Modo | null; setFalhaEm: (m: Modo | null) => void }) {
+// `falhaEm` é UM só para as duas pontas (a pilha e o fim da /previsao têm pais diferentes, então mora num contexto):
+// o alerta aparece onde a ação falhou, e um sucesso (ou resposta que pegou) em qualquer uma o limpa.
+const ContextoFalha = createContext<[Modo | null, (m: Modo | null) => void]>([null, () => {}]);
+export const useFalhaReceita = () => useContext(ContextoFalha);
+// A lista de receitas que a PÁGINA /previsao leu (no horizonte que ela mostra): a pilha do topo a usa em vez de ler a previsão por conta própria,
+// porque um segundo observador da chave padrão guardaria o dado do plano antigo enquanto a página está em 60 ou 90 dias (e ela o adotaria no downgrade).
+const ContextoLista = createContext<[Previsao["receitas_do_banco"] | null, (l: Previsao["receitas_do_banco"] | null) => void]>([null, () => {}]);
+export const useListaDaPagina = () => useContext(ContextoLista);
+export function ReceitasProvider({ children }: { children: ReactNode }) {
+  return <ContextoFalha.Provider value={useState<Modo | null>(null)}><ContextoLista.Provider value={useState<Previsao["receitas_do_banco"] | null>(null)}>{children}</ContextoLista.Provider></ContextoFalha.Provider>;
+}
+
+export function useReceitas(modo: Modo) {
   const qc = useQueryClient();
+  const [falhaEm, setFalhaEm] = useFalhaReceita();
   const falhou = falhaEm === modo;
   const setFalhou = (f: boolean) => setFalhaEm(f ? modo : null);
   // `n` muda a cada resposta: duas receitas de mesmo nome dão o mesmo texto, e sem DOM novo o leitor de tela não repete.
@@ -42,6 +55,7 @@ export function ReceitasDoBanco({ lista, modo, falhaEm, setFalhaEm }: { lista: P
   // não se planta a resposta numa chave: toda `["previsao", …]` ativa é relida, e a mutação só
   // termina (e destrava os botões) depois da releitura. O GET também replanta o cookie de CSRF.
   // `networkMode: "always"`: sem rede o fetch falha e cai no onError, em vez de congelar a mutação.
+  // `tituloRef` só existe nas respondidas: na pilha, quem leva o foco ao aviso que subiu é a PilhaAvisos (o visível saiu da lista).
   const m = useMutation({
     mutationKey: CHAVE,
     networkMode: "always",
@@ -66,52 +80,66 @@ export function ReceitasDoBanco({ lista, modo, falhaEm, setFalhaEm }: { lista: P
   // `m.isPending` só muda no re-render: dois cliques no mesmo tique mandariam dois POST.
   const ocupado = () => qc.isMutating({ mutationKey: CHAVE }) > 0;
   const pendente = useIsMutating({ mutationKey: CHAVE }) > 0;
-  const pendentes = lista.filter((r) => r.status === "pendente");
-  const respondidas = lista.filter((r) => r.status !== "pendente");
-  const itens = modo === "pendentes" ? pendentes : respondidas;
-  // A caixa fica montada enquanto houver o que anunciar: o Sim da última pendente (ou o Desfazer da última respondida) esvazia a lista,
-  // e o aviso e o foco precisam de onde pousar. Sem itens e sem erro ela vira marcação sr-only: nada visível, só o anúncio e o alvo do foco.
-  if (!itens.length && !dito.t && !falhou) return null;
-  const visivel = itens.length > 0 || falhou;
+  return { m, falhou, dito, falar, raizRef, tituloRef, avisoRef, ocupado, pendente };
+}
+type Receitas = ReturnType<typeof useReceitas>;
 
-  const botao = (r: ReceitaDoBanco, resposta: Resposta, rotulo: string, aria: string, cls: string) => (
-    <button type="button" className={`btn ${cls}`} disabled={pendente} aria-label={`${aria}: ${r.nome}`}
-      onClick={() => { if (!ocupado()) m.mutate({ r, resposta }); }}>{rotulo}</button>
-  );
-  const meta = (r: ReceitaDoBanco) => <>todo dia {r.dia}</>;
+// O alerta de falha (fora de qualquer pilha) e a região viva do anúncio.
+export function FeedbackReceita({ r }: { r: Receitas }) {
   return (
-    <div ref={raizRef} className={visivel ? "panel span-12" : "sr-only"}>
-      <Frame id={modo === "pendentes" ? "previsao-receitas" : "previsao-receitas-respondidas"} title={modo === "pendentes" ? "Receitas do extrato" : "Receitas na previsão"} real>
-        <p ref={tituloRef} tabIndex={-1} className={`rec-foco ${modo === "pendentes" ? "w-lede" : "sr-only"}`}>
-          {modo === "pendentes"
-            ? (pendentes.length ? "Entram na previsão só as que você confirmar." : "Nenhuma receita a confirmar.")
-            : (respondidas.length ? "Receitas respondidas." : "Nenhuma receita respondida.")}
-        </p>
-        <p ref={avisoRef} tabIndex={-1} role="alert" className="rec-foco rec-erro">{falhou && "Não deu para salvar. Tente de novo."}</p>
-        <p className="sr-only" role="status"><span key={dito.n}>{dito.t}</span></p>
-        {modo === "pendentes" && pendentes.length > 0 && (
-          <ul className="subs" aria-label="Receitas a confirmar">
-            {pendentes.map((r) => (
-              <li key={r.chave} className="sub">
-                <b className="sub-name rec-nome">{r.nome}</b>
-                <span className="sub-amt num">{moneyText(r.valor) ?? "—"}</span>
-                <p className="sub-meta">{meta(r)}. É sua receita fixa?</p>
-                <div className="sub-acoes">
-                  {botao(r, "sim", "Sim", "Sim, é receita fixa", "btn-ghost")}
-                  {botao(r, "nao", "Não", "Não é receita fixa", "btn-quiet")}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-        {modo === "respondidas" && respondidas.length > 0 && (
+    <>
+      <p ref={r.avisoRef} tabIndex={-1} role="alert" className="rec-foco rec-erro">{r.falhou && "Não deu para salvar. Tente de novo."}</p>
+      <p className="sr-only" role="status"><span key={r.dito.n}>{r.dito.t}</span></p>
+    </>
+  );
+}
+
+const botao = (r: Receitas, x: ReceitaDoBanco, resposta: Resposta, rotulo: string, aria: string, cls: string) => (
+  <button type="button" className={`btn ${cls}`} disabled={r.pendente} aria-label={`${aria}: ${x.nome}`}
+    onClick={() => { if (!r.ocupado()) r.m.mutate({ r: x, resposta }); }}>{rotulo}</button>
+);
+const meta = (x: ReceitaDoBanco) => <>todo dia {x.dia}</>;
+
+// Cada pendente vira um aviso da pilha (decisão, rosa); a respondida não: ela mora em `RespondidasDoBanco`.
+export function itensDeReceita(lista: Previsao["receitas_do_banco"], r: Receitas): AvisoDaPilha[] {
+  return lista.filter((x) => x.status === "pendente").map((x) => ({
+    id: `receita:${x.chave}`, tom: "decisao", icone: "ph-wallet", titulo: "Receitas do extrato", ponto: `Receitas do extrato, ${x.nome}`,
+    corpo: (
+      <ul className="subs" aria-label="Receitas a confirmar">
+        <li className="sub">
+          <b className="sub-name rec-nome">{x.nome}</b>
+          <span className="sub-amt num">{moneyText(x.valor) ?? "—"}</span>
+          <p className="sub-meta">{meta(x)}. É sua receita fixa?</p>
+          <div className="sub-acoes">
+            {botao(r, x, "sim", "Sim", "Sim, é receita fixa", "btn-ghost")}
+            {botao(r, x, "nao", "Não", "Não é receita fixa", "btn-quiet")}
+          </div>
+        </li>
+      </ul>
+    ),
+  }));
+}
+
+export function RespondidasDoBanco({ lista }: { lista: Previsao["receitas_do_banco"] }) {
+  const r = useReceitas("respondidas");
+  const respondidas = lista.filter((x) => x.status !== "pendente");
+  // A seção fica montada enquanto houver o que anunciar: o Desfazer da última respondida esvazia a lista,
+  // e o aviso e o foco precisam de onde pousar. Sem itens e sem erro ela vira marcação sr-only: nada visível, só o anúncio e o alvo do foco.
+  if (!respondidas.length && !r.dito.t && !r.falhou) return null;
+  const visivel = respondidas.length > 0 || r.falhou;
+  return (
+    <div ref={r.raizRef} className={visivel ? "panel span-12" : "sr-only"}>
+      <Frame id="previsao-receitas-respondidas" title="Receitas na previsão" real>
+        <p ref={r.tituloRef} tabIndex={-1} className="rec-foco sr-only">{respondidas.length ? "Receitas respondidas." : "Nenhuma receita respondida."}</p>
+        <FeedbackReceita r={r} />
+        {respondidas.length > 0 && (
           <ul className="subs" aria-label="Receitas respondidas">
-            {respondidas.map((r) => (
-              <li key={r.chave} className="sub">
-                <b className="sub-name rec-nome">{r.nome}</b>
-                <span className="sub-amt num">{moneyText(r.valor) ?? "—"}</span>
-                <p className="sub-meta"><span className={`selo rec-${r.status}`}>{CHIP[r.status as keyof typeof CHIP]}</span> {meta(r)}</p>
-                <div className="sub-acoes">{botao(r, "desfazer", "Desfazer", "Desfazer resposta", "btn-ghost")}</div>
+            {respondidas.map((x) => (
+              <li key={x.chave} className="sub">
+                <b className="sub-name rec-nome">{x.nome}</b>
+                <span className="sub-amt num">{moneyText(x.valor) ?? "—"}</span>
+                <p className="sub-meta"><span className={`selo rec-${x.status}`}>{CHIP[x.status as keyof typeof CHIP]}</span> {meta(x)}</p>
+                <div className="sub-acoes">{botao(r, x, "desfazer", "Desfazer", "Desfazer resposta", "btn-ghost")}</div>
               </li>
             ))}
           </ul>

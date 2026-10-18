@@ -3,7 +3,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { guardarCredenciais, lerTentativaBancaria } from "@/storage/secure";
 import { cofre, chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 type Props = { connectToken: string; updateItem?: string; onSuccess: (d: { item: { id: string } }) => void; onClose: () => void };
 const mockWidgets: Props[] = [];
@@ -34,6 +34,7 @@ it.each([
   ["/conexoes", "Reconectar Nubank", "Conectar outro banco"],
 ])("Expo Router real: %s, %s e %s no mesmo frame emitem um token", async (url, primeiro, segundo) => {
   renderRouter("./app", { initialUrl: url });
+  if (url === "/conexoes") await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: primeiro })).toBeTruthy());
   const a = screen.getByRole("button", { name: primeiro });
   const b = screen.getByRole("button", { name: segundo });
@@ -108,8 +109,9 @@ it("nova sessão após sair da autorização não herda reserva ou callback da s
 // de dupla emissão acima usam Expo Router/Stack reais, sem spy de navegação.
 it.each(["/conectar-banco", "/conexoes"])("%s desativa visualmente todos os CTAs de autorização da origem", async (url) => {
   servidor(false, true);
-  const rotulos = url === "/conectar-banco" ? ["Conectar meu banco", "Ver meus bancos", "Configurações", "Continuar para o Início"] : ["Reconectar Nubank", "Reconectar Itaú", "Conectar outro banco", "Acompanhar sincronização", "Voltar ao Início"];
+  const rotulos = url === "/conectar-banco" ? ["Conectar meu banco", "Ver meus bancos", "Configurações", "Continuar para o Início"] : ["Reconectar Nubank", "Reconectar Itaú", "Conectar outro banco", "Acompanhar sincronização"];
   renderRouter("./app", { initialUrl: url });
+  if (url === "/conexoes") await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: rotulos[0] })).toBeEnabled());
   const push = jest.spyOn(router, "push").mockImplementation(() => {});
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: rotulos[0] })); await drenar(); });
@@ -152,7 +154,6 @@ const navegacoesIrmas = [
   ["/conectar-banco", "Conectar meu banco", "Ver meus bancos", "/conexoes"],
   ["/conectar-banco", "Conectar meu banco", "Configurações", "/configuracoes"],
   ["/conectar-banco", "Conectar meu banco", "Continuar para o Início", "/resumo"],
-  ["/conexoes", "Conectar outro banco", "Voltar ao Início", "/resumo"],
   ["/conexoes", "Conectar outro banco", "Acompanhar sincronização", "/open-finance-volta"],
 ];
 it.each(navegacoesIrmas)("reserva em %s por %s bloqueia %s antes do render", async (url, autorizar, navegar) => {

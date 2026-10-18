@@ -44,7 +44,7 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `cheia` no Plus e no Pro e o 403 `pro_required` nos outros; o `/api/v2/eventos` (SSE) fica
  * pendente para sempre: stream aberto e mudo. O `/api/v2/perfil` guarda o que o PUT gravou
  * (começa em `perfil`; `null` = nunca escolheu, o modal abre); `/contas` e `/resumo-do-mes`
- * respondem as fixtures de nome `contas` e `resumo`; o GET `/guia`, a de nome `guia` (padrão
+ * respondem as fixtures de nome `contas` e `resumo`; o `/bancos` (o aviso do topo), a de nome `bancos` (padrão `em_dia`: sem motivo, então SEM pilha nas telas que não são dela); o GET `/guia`, a de nome `guia` (padrão
  * `concluido`: o convite do guia não aparece nos testes que não são dele). O GET `/previsao` responde
  * a fixture `previsao` quando dada; sem ela, como o servidor: Pro → `pro<dias, padrão 30>`, Plus →
  * `plus30` (sem `dias` ou 30) e 403 `forecast_horizon_not_allowed` em 60/90, os outros → 403
@@ -52,11 +52,11 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`. O GET `/gastos` e o
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
  * `mes` do pedido não as reescreve). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
- * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O GET `/bancos` responde a fixture de nome `bancos` (padrão `padrao`).
+ * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar).
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;

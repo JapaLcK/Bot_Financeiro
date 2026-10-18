@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
-import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredenciais(S); });
 afterEach(() => jest.restoreAllMocks());
@@ -15,9 +15,10 @@ it("confirma remoção individual sem afetar a segunda conexão ou enviar DELETE
   });
   const alert = jest.spyOn(Alert, "alert").mockImplementation((_title, _message, botoes) => { botoes?.find((b) => b.style === "destructive")?.onPress?.(); });
   renderRouter("./app", { initialUrl: "/conexoes" });
+  await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
-  // Sem segundos; o ano só fora do ano corrente.
-  expect(screen.getAllByText(/^Última sincronização: \d{2}\/\d{2}(\/\d{4})?, \d{2}:\d{2}$/)).toHaveLength(2);
+  // A hora da última sincronização vira tempo relativo ("há N dias"), uma por banco; o formato em si é de `bancos_juntar.test.ts`.
+  expect(screen.getAllByText(/^há \d+ (min|h|dias?)$/)).toHaveLength(2);
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
   expect(screen.getByRole("button", { name: "Desconectar Itaú" })).toBeTruthy();
@@ -34,6 +35,7 @@ it("DELETE concluído em background libera ações ao voltar ao foreground", asy
   });
   jest.spyOn(Alert, "alert").mockImplementation((_title, _message, botoes) => { botoes?.find((b) => b.style === "destructive")?.onPress?.(); });
   renderRouter("./app", { initialUrl: "/conexoes" });
+  await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await appVai("background");

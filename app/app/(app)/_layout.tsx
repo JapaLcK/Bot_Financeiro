@@ -1,5 +1,6 @@
 import { Stack, type NativeStackNavigationOptions } from "expo-router";
 
+import { PrivacidadeProvider } from "@/features/painel/privacidade";
 import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
 import { useTema } from "@/ui/tema";
 import { texto } from "@/ui/tokens";
@@ -15,7 +16,7 @@ export const unstable_settings = { initialRouteName: "index" };
 /** Os códigos de backup não cabem em meia tela: sheet só inteira, e sem alça (não há o que arrastar). */
 const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllowedDetents: [1], sheetGrabberVisible: false };
 
-export default function LayoutApp() {
+function PilhaApp() {
   const { cores } = useTema();
   const CABECALHO: NativeStackNavigationOptions = {
     headerShown: true,
@@ -45,5 +46,14 @@ export default function LayoutApp() {
       <Stack.Screen name="excluir-conta" options={SHEET_INTEIRA} />
       <Stack.Screen name="exportar-dados" options={SHEET_INTEIRA} />
     </Stack>
+  );
+}
+
+/** "Ocultar valores" vive aqui, acima do Painel: Bancos conectados (fora dele) respeita a mesma escolha. */
+export default function LayoutApp() {
+  return (
+    <PrivacidadeProvider>
+      <PilhaApp />
+    </PrivacidadeProvider>
   );
 }

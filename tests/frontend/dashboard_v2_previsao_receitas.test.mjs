@@ -1,9 +1,9 @@
 /**
- * A caixa "Receitas do extrato" no topo de /painel#/previsao e a seção "Receitas na previsão" no fim
- * (webapp/src/dashboard/widgets/ReceitasDoBanco.tsx, `modo` pendentes / respondidas): a `receitas_do_banco`
+ * As receitas "Receitas do extrato" na PILHA de avisos do topo de /painel#/previsao (webapp/src/dashboard/parts/AvisosDoTopo.tsx) e a seção
+ * "Receitas na previsão" no fim (webapp/src/dashboard/widgets/ReceitasDoBanco.tsx, `useReceitas` pendentes / respondidas): a `receitas_do_banco`
  * da Previsão, com Sim / Não / Desfazer = POST /api/v2/previsao/receita.
- *   · só a `pendente` pergunta no topo; confirmada e negada saem do topo e moram na seção do fim, com Desfazer;
- *   · a última pendente respondida some com o painel do topo (fica só o anúncio e o alvo do foco, sr-only);
+ *   · só a `pendente` pergunta no topo, um aviso por vez; confirmada e negada saem do topo e moram na seção do fim, com Desfazer;
+ *   · a última pendente respondida some com a pilha (fica só o anúncio e o alvo do foco, sr-only);
  *   · lista vazia: nada existe; Plus também vê;
  *   · falha do POST (500, 403 de CSRF, 404): mensagem fixa e a lista intacta, com o GET refeito;
  *   · POST no ar trava os botões até a releitura voltar (também depois de sair da página e voltar);
@@ -21,7 +21,7 @@ import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 import { RESPOSTAS, exigeArtefatoEmDia } from "./_painel.mjs";
-import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, texto, dito, alerta, painelVisivel, botoesDasCaixas, semPendente } from "./_receitas.mjs";
+import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, texto, dito, alerta, painelVisivel, pilhaVisivel, botoesDasCaixas, semPendente, pontos, verAviso } from "./_receitas.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -51,17 +51,17 @@ test("Sim: POST com corpo e CSRF do cookie, a linha sai da pendente e vai para a
   await page.getByRole("button", { name: "Sim, é receita fixa: Empresa Alfa Ltda" }).click();
   await semPendente(page);
   await page.waitForFunction(() => document.activeElement?.classList.contains("rec-foco"));
-  const foco = await page.evaluate(() => document.activeElement?.closest("article")?.id + "|" + document.activeElement?.tagName);
+  const foco = await page.evaluate(() => document.activeElement?.parentElement?.id + "|" + document.activeElement?.tagName);
   const resp = await texto(page, RESP);
-  const lede = (await texto(page, `${CAIXA} .rec-foco`))[0];
+  const lede = (await texto(page, `${CAIXA} .rec-foco:not([role])`))[0];
   const falado = await dito(page);
-  const topo = await painelVisivel(page, CAIXA);
+  const topo = await pilhaVisivel(page);
   await ctx.close();
-  assert.equal(topo, false, "sem pendente, o painel do topo some");
+  assert.equal(topo, false, "sem pendente, a pilha some");
   assert.deepEqual(posts, [{ corpo: { chave: ALFA, resposta: "sim" }, csrf: "tok-123" }]);
   assert.deepEqual(resp, ["Empresa Alfa Ltda R$ 4.000,00 Confirmada todo dia 4 Desfazer", "Maria Souza R$ 1.500,00 Confirmada todo dia 10 Desfazer", "Pix do João R$ 250,50 Recusada todo dia 20 Desfazer"]);
-  assert.equal(foco, "w-previsao-receitas|P");
-  assert.equal(lede, "Nenhuma receita a confirmar.");
+  assert.equal(foco, "avisos-topo|P");
+  assert.equal(lede, "Nenhum aviso.");
   assert.equal(falado, "Empresa Alfa Ltda: confirmada.");
 });
 
@@ -77,23 +77,23 @@ test("Não: vai para as respondidas como Recusada", async () => {
   assert.equal(falado, "Empresa Alfa Ltda: recusada.");
 });
 
-test("última pendente respondida: o painel do topo some (sem a frase na tela, anúncio sr-only), a receita aparece na seção com Desfazer; Desfazer a traz de volta ao topo", async () => {
+test("última pendente respondida: a pilha some (sem a frase na tela, anúncio sr-only), a receita aparece na seção com Desfazer; Desfazer a traz de volta ao topo", async () => {
   const receitas = [
     { chave: ALFA, nome: "Empresa Alfa Ltda", valor: "4000.00", dia: 4, status: "pendente" },
     { chave: MARIA, nome: "Maria Souza", valor: "1500.00", dia: 10, status: "confirmada" },
   ];
   const { ctx, page, posts } = await abrir({ receitas });
-  const antes = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
+  const antes = [await pilhaVisivel(page), await painelVisivel(page, SECAO)];
   await page.getByRole("button", { name: "Sim, é receita fixa: Empresa Alfa Ltda" }).click();
   await semPendente(page);
   await page.locator(RESP, { hasText: "Empresa Alfa" }).waitFor();
-  const apos = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
-  const frase = await page.getByText("Nenhuma receita a confirmar.").evaluate((p) => { const r = p.closest(".sr-only").getBoundingClientRect(); return [r.width, r.height]; });
+  const apos = [await pilhaVisivel(page), await painelVisivel(page, SECAO)];
+  const frase = await page.getByText("Nenhum aviso.").evaluate((p) => { const r = p.closest(".sr-only").getBoundingClientRect(); return [r.width, r.height]; });
   const secao = await texto(page, RESP);
   const falado = await dito(page);
   await page.getByRole("button", { name: "Desfazer resposta: Empresa Alfa Ltda" }).click();
   await page.locator(PEND, { hasText: "Empresa Alfa" }).waitFor();
-  const volta = [await painelVisivel(page, CAIXA), await painelVisivel(page, SECAO)];
+  const volta = [await pilhaVisivel(page), await painelVisivel(page, SECAO)];
   const pend = await texto(page, PEND);
   const resp = await texto(page, RESP);
   await ctx.close();
@@ -116,12 +116,15 @@ test("duas pendentes: Sim e Não na SEGUNDA mandam a chave dela, não a da prime
     { chave: MARIA, nome: "Maria Souza", valor: "1500.00", dia: 10, status: "confirmada" },
   ];
   const { ctx, page, posts } = await abrir({ receitas });
+  // A pilha mostra um aviso por vez: a Beta é o 2º ponto.
+  await verAviso(page, 2);
   await page.getByRole("button", { name: "Não é receita fixa: Beta Serviços" }).click();
-  await page.locator(PEND, { hasText: "Beta" }).waitFor({ state: "detached" });
+  await pontos(page).first().waitFor({ state: "detached" }); // sobrou a Alfa: sem pontos
   await page.getByRole("button", { name: "Desfazer resposta: Beta Serviços" }).click();
-  await page.locator(PEND, { hasText: "Beta" }).waitFor();
+  await pontos(page).nth(1).waitFor();
+  await verAviso(page, 2);
   await page.getByRole("button", { name: "Sim, é receita fixa: Beta Serviços" }).click();
-  await page.locator(PEND, { hasText: "Beta" }).waitFor({ state: "detached" });
+  await pontos(page).first().waitFor({ state: "detached" });
   const falado = await dito(page);
   await ctx.close();
   assert.deepEqual(posts.map((p) => p.corpo), [{ chave: BETA, resposta: "nao" }, { chave: BETA, resposta: "desfazer" }, { chave: BETA, resposta: "sim" }]);
@@ -131,27 +134,32 @@ test("duas pendentes: Sim e Não na SEGUNDA mandam a chave dela, não a da prime
 test("Desfazer: a confirmada e a recusada voltam a pendente, cada uma com a sua pergunta", async () => {
   const { ctx, page, posts } = await abrir();
   await page.getByRole("button", { name: "Desfazer resposta: Maria Souza" }).click();
-  await page.locator(PEND, { hasText: "Maria Souza" }).waitFor();
+  await pontos(page).nth(1).waitFor();
   await page.getByRole("button", { name: "Desfazer resposta: Pix do João" }).click();
-  await page.locator(PEND, { hasText: "Pix do João" }).waitFor();
-  const pend = await texto(page, PEND);
+  await pontos(page).nth(2).waitFor();
+  const pend = [];
+  for (const k of [1, 2, 3]) { await verAviso(page, k); pend.push((await texto(page, PEND))[0]); } // um card por vez: cada ponto, a sua pergunta
   await page.locator(RESP).first().waitFor({ state: "detached" });
   const secao = await painelVisivel(page, SECAO);
   const falado = await dito(page);
   await ctx.close();
   assert.deepEqual(posts.map((p) => p.corpo), [{ chave: MARIA, resposta: "desfazer" }, { chave: JOAO, resposta: "desfazer" }]);
-  assert.equal(pend.length, 3);
+  assert.deepEqual(pend, [
+    "Empresa Alfa Ltda R$ 4.000,00 todo dia 4. É sua receita fixa? Sim Não",
+    "Maria Souza R$ 1.500,00 todo dia 10. É sua receita fixa? Sim Não",
+    "Pix do João R$ 250,50 todo dia 20. É sua receita fixa? Sim Não",
+  ]);
   assert.equal(secao, false, "sem respondidas, a seção some");
   assert.equal(falado, "Pix do João: resposta desfeita.");
 });
 
 test("lista vazia: nada existe; só respondidas: nada no topo, só a seção, sem Sim/Não; Plus também vê a caixa", async () => {
   const vazia = await abrir({ receitas: [] });
-  const v = await vazia.page.locator(`${CAIXA}, ${SECAO}`).count();
+  const v = await vazia.page.locator(`${CAIXA} section.pilha, ${SECAO}`).count();
   await vazia.ctx.close();
   const r = RESPOSTAS.previsao.pro30_receitas.receitas_do_banco;
   const so = await abrir({ receitas: r.slice(1) });
-  const s = [await so.page.locator(PEND).count(), await so.page.getByRole("button", { name: /^Sim/ }).count(), await so.page.locator(CAIXA).count(), (await texto(so.page, RESP)).length];
+  const s = [await so.page.locator(PEND).count(), await so.page.getByRole("button", { name: /^Sim/ }).count(), await so.page.locator(`${CAIXA} section.pilha`).count(), (await texto(so.page, RESP)).length];
   await so.ctx.close();
   const plus = await abrir({ plano: "plus" });
   const p = await texto(plus.page, PEND);
@@ -298,9 +306,9 @@ test("POST lento: se o usuário foi digitar no chat do Piggy, o foco e o texto f
   assert.ok(noCampo);
 });
 
-test("servidor sem `receitas_do_banco` (deploy fora de ordem): sem caixa, sem erro, a Previsão normal", async () => {
+test("servidor sem `receitas_do_banco` (deploy fora de ordem): sem pilha, sem erro, a Previsão normal", async () => {
   const { ctx, page, erros } = await abrir({ receitas: null });
-  const caixa = await page.locator(CAIXA).count();
+  const caixa = await page.locator(`${CAIXA} section.pilha`).count();
   const hora = await page.locator("#w-previsao .prev-hora").count();
   await ctx.close();
   assert.equal(caixa, 0);
@@ -343,12 +351,17 @@ test("nome do pagador é texto: <script> e <img onerror> não viram elemento; no
     { chave: JOAO, nome: longo, valor: "1234567.89", dia: 3, status: "pendente" },
   ];
   const { ctx, page, erros } = await abrir({ receitas, width: 390 });
+  const nomes = [];
+  for (const k of [1, 2, 3]) { // um card por vez
+    await verAviso(page, k);
+    nomes.push(await page.evaluate(() => { const n = document.querySelector("#avisos-topo .rec-nome"); return [n.textContent, n.scrollWidth > n.clientWidth]; }));
+  }
   const r = await page.evaluate(() => ({
     xss: window.__xss ?? null,
-    scripts: document.querySelectorAll("#w-previsao-receitas script, #w-previsao-receitas img").length,
-    nomes: [...document.querySelectorAll("#w-previsao-receitas .rec-nome")].map((n) => [n.textContent, n.scrollWidth > n.clientWidth]),
+    scripts: document.querySelectorAll("#avisos-topo script, #avisos-topo img").length,
     larg: [document.documentElement.scrollWidth, innerWidth],
   }));
+  r.nomes = nomes;
   await ctx.close();
   assert.equal(r.xss, null);
   assert.equal(r.scripts, 0);
@@ -360,16 +373,16 @@ test("nome do pagador é texto: <script> e <img onerror> não viram elemento; no
 
 // PAINEL_SHOT=<pasta>: guarda as capturas da verificação visual.
 for (const [nome, width] of [["desktop", 1280], ["mobile", 390]]) {
-  test(`layout ${nome} (${width} px): sem rolagem horizontal, a caixa acima do saldo, a seção das respondidas depois de Compromissos e Como foi feita, botões dentro dos recipientes`, async () => {
+  test(`layout ${nome} (${width} px): sem rolagem horizontal, a pilha acima do saldo, a seção das respondidas depois de Compromissos e Como foi feita, botões dentro dos recipientes`, async () => {
     const { ctx, page } = await abrir({ width });
     const m = await page.evaluate(() => {
-      const c = document.querySelector("#w-previsao-receitas").getBoundingClientRect();
+      const c = document.querySelector("#avisos-topo section.pilha").getBoundingClientRect();
       const h = document.querySelector("#w-previsao").getBoundingClientRect();
       const sec = document.querySelector("#w-previsao-receitas-respondidas").getBoundingClientRect();
       const fim = Math.max(...["#w-previsao-qualidade", "#w-previsao-compromissos"].map((q) => document.querySelector(q)?.getBoundingClientRect().bottom ?? 0));
       const fora = (raiz, caixa) => [...document.querySelectorAll(`${raiz} button`)].map((b) => b.getBoundingClientRect()).filter((b) => b.left < caixa.left || b.right > caixa.right).length;
       return { larg: [document.documentElement.scrollWidth, innerWidth], caixaAcima: c.bottom <= h.top, secaoDepois: sec.top >= fim, caixa: [c.left, c.right],
-        fora: fora("#w-previsao-receitas", c) + fora("#w-previsao-receitas-respondidas", sec) };
+        fora: fora("#avisos-topo section.pilha", c) + fora("#w-previsao-receitas-respondidas", sec) };
     });
     if (process.env.PAINEL_SHOT) {
       mkdirSync(process.env.PAINEL_SHOT, { recursive: true });

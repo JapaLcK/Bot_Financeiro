@@ -1,6 +1,6 @@
 /** Apoio dos dois arquivos da rota `open-finance-volta` (`renderRouter("./app")`). */
 import * as LA from "expo-local-authentication";
-import { act, screen } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
 import { INTERVALO_MS } from "@/features/openFinance/volta";
 
@@ -29,6 +29,13 @@ export function titulo(espera: boolean, opcoes?: { includeHiddenElements: boolea
 export const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
+
+/** Os cartões de `/conexoes` nascem FECHADOS e `Reconectar`/`Desconectar` moram dentro: espera a lista e abre todos (cada toque abre o seu). */
+export async function abrirBancos() {
+  await waitFor(() => expect(screen.getAllByRole("button", { expanded: false }).length).toBeGreaterThan(0));
+  for (const toggle of screen.getAllByRole("button", { expanded: false })) fireEvent.press(toggle);
+  await act(async () => { await drenar(); });
+}
 
 export const deOpenFinance = () => chamadas().filter((c) => c.caminho.startsWith("/open-finance"));
 export const contarGets = () => deOpenFinance().filter((c) => c.caminho === "/open-finance/1").length;

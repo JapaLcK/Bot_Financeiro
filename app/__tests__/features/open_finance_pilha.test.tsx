@@ -5,7 +5,7 @@ import { JANELA_MS } from "@/features/openFinance/volta";
 import { iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { chamadas, cofre, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 type Props = { onSuccess: (d: { item: { id: string } }) => void; onClose: () => void };
 const mockWidget: { props: Props | null } = { props: null };
@@ -57,6 +57,7 @@ it("primeira conexão volta à Home existente; back e repetição não reabrem a
   expect(router.canGoBack()).toBe(false);
   expect(r.getRouterState()?.routes[0]?.state?.routes.find((route) => route.name === "(app)")?.state?.routes.map((route) => route.name)).toEqual(["(painel)"]);
   await apertar("Bancos conectados");
+  await abrirBancos();
   await autorizar("Reconectar Nubank");
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
   await apertar("Continuar");
@@ -66,11 +67,13 @@ it("primeira conexão volta à Home existente; back e repetição não reabrem a
   expect(tokens()).toHaveLength(2);
 });
 
-it.each(["conectar-banco", "conexoes"] as const)("retorno explícito de %s não duplica Home nem deixa origem no histórico", async (destino) => {
+it.each(["conectar-banco", "conexoes"] as const)("retorno de %s não duplica Home nem deixa origem no histórico", async (destino) => {
   servidor(); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeEnabled());
   await act(async () => { router.push(`/${destino}`); await drenar(); });
-  await apertar(destino === "conexoes" ? "Voltar ao Início" : "Continuar para o Início");
+  // Bancos conectados não tem mais o botão "Voltar ao Início": volta pela seta do cabeçalho (`router.back`), que não pode deixar a origem no histórico.
+  if (destino === "conexoes") await act(async () => { router.back(); await drenar(); });
+  else await apertar("Continuar para o Início");
   expect(screen).toHavePathname("/resumo");
   expect(router.canGoBack()).toBe(false);
   expect(tokens()).toHaveLength(0);
@@ -116,6 +119,7 @@ it("retorno frio revalida entitlement sem conceder Início nem deixar Volta no b
 
 it("back de widget continua permitindo tentar de novo com nonce novo", async () => {
   servidor(); renderRouter("./app", { initialUrl: "/conexoes" });
+  await abrirBancos();
   await apertar("Reconectar Nubank");
   await waitFor(() => expect(screen.getByTestId("widget-pilha")).toBeTruthy());
   const a = await lerTentativaBancaria(1);

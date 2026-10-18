@@ -7,7 +7,7 @@ import { concluirTentativaBancaria, guardarCredenciais, iniciarTentativaBancaria
 import { redirectSystemPath } from "../../app/+native-intent";
 import { chamadas, cofre, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, ITEM, JWT_OF, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
 jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: () => jest.requireActual("react").createElement(jest.requireActual("react-native").View, { testID: "widget-substituicao" }) }));
 function servidor() {
@@ -29,7 +29,7 @@ async function apertar(nome: string) {
 }
 async function aviso(url = "/autorizando") {
   renderRouter("./app", { initialUrl: url });
-  if (url === "/conexoes") await apertar("Reconectar Nubank");
+  if (url === "/conexoes") { await abrirBancos(); await apertar("Reconectar Nubank"); }
   await waitFor(() => expect(screen.getByRole("button", { name: "Iniciar nova tentativa" })).toBeEnabled());
   expect(tokens()).toHaveLength(0);
   expect(screen.queryByTestId("widget-substituicao")).toBeNull();
