@@ -12,6 +12,7 @@ import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 // O "Atualizar agora" do aviso de banco, pela rota: o servidor falso guarda o snapshot de conexões e o que o POST /refresh devolve.
 // A máquina pura (cadência, teto, cancelamento) tem o relógio falso em `painel_atualizar_banco_maquina.test.ts`; aqui a conversa inteira.
+jest.setTimeout(30_000); // `renderRouter` monta a árvore inteira: no CI o 1º teste paga o carregamento a frio e passou dos 5 s (igual a painel_receitas)
 const AINDA = "O banco está demorando. Seus dados aparecem aqui quando terminar.", PARCIAL_TEXTO = "Nubank: Parte dos dados ainda não veio.";
 const BANCO = ["banco_desatualizado"], FALHA = "Não conseguimos atualizar agora. Tente de novo.", SOZINHO = "O banco está atualizando. Seus dados aparecem aqui sozinhos quando terminar.";
 const VELHO = "2026-10-10T12:00:00Z", NOVO = "2026-10-10T13:00:00Z";
@@ -261,6 +262,11 @@ it("...e COM o bump: o mesmo (a visibilidade e o toque usam a mesma regra, a ope
   const r = await fimComProblema(true);
   expect(r.meio).toEqual({ botoes: [], sozinho: true }); expect(r.postsNovos).toBe(0);
   expect(screen.getByText(PARCIAL_TEXTO)).toBeTruthy(); expect(botoes()).toEqual(["Ver bancos conectados"]); expect(haptico("warning")).toBe(1); expect(anuncios().filter((t) => t === PARCIAL_TEXTO)).toHaveLength(1);
+});
+it("provider remontado para a MESMA conta (sair e entrar): a `versao` recomeça e repete a chave, mas a leitura velha não vale e o botão segue o snapshot novo", async () => {
+  await abrir(); expect(botoes()).toEqual(["Atualizar agora"]); const g0 = gets();
+  screen.unmount(); srv.estado = "needs_user_action"; srv.detalhe = "Reautorize o banco";
+  await abrir(); await waitFor(() => expect(botoes()).toEqual(["Reconectar Nubank"])); expect(gets() - g0).toBe(1);
 });
 it("quatro abas montadas: UM GET do snapshot por recarga (dedupe por uid:versao)", async () => {
   await abrir();

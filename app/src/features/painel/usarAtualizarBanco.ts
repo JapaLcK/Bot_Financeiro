@@ -78,10 +78,11 @@ function reavaliar(p: Painel, uid: number) {
 
 async function lerSnapshot(p: Painel, uid: number, versao: number) {
   const chave = `${uid}:${versao}`;
-  if (S.leitura?.chave === chave) return;
+  // Dedupe só da leitura que ainda vale: o provider remontado (sair e entrar na mesma conta) recomeça a `versao` e repete a chave, mas a operação velha já caiu.
+  if (S.leitura?.chave === chave && S.leitura.vale?.()) return;
   const op = p.operacao(); ativos.add(op.controlador);
-  definir({ leitura: { chave } });
-  const solta = () => { if (S.leitura?.chave === chave) definir({ leitura: null }); };
+  const minha: Leitura = { chave, vale: op.atual }; definir({ leitura: minha });
+  const solta = () => { if (S.leitura === minha) definir({ leitura: null }); };
   try {
     const lista = (await conexoes(uid, op.controlador)).connections;
     // O limite do plano só se pergunta com candidato a reconectar (como o `conexoes.tsx`); sem resposta, não oferece.
@@ -94,7 +95,7 @@ async function lerSnapshot(p: Painel, uid: number, versao: number) {
   } catch (e) {
     if (!op.atual() || e instanceof RequisicaoSuperada) return solta();
     p.falhou(e);
-    if (op.atual()) definir({ leitura: { chave, falhou: true } }); // o aviso segue com "Ver bancos conectados"
+    if (op.atual()) definir({ leitura: { chave, falhou: true, vale: op.atual } }); // o aviso segue com "Ver bancos conectados"
   } finally { ativos.delete(op.controlador); }
 }
 
@@ -103,7 +104,7 @@ export function useAtualizarBanco(): { acao: AcaoBanco | null; maquina: EstadoAt
   const p = usePainel(), uid = p.usuario.user_id, versao = p.versao;
   const s = useSyncExternalStore(assinar, () => S);
   useEffect(() => { void lerSnapshot(p, uid, versao); }, [uid, versao]);
-  const l = s.leitura?.chave === `${uid}:${versao}` ? s.leitura : null;
+  const l = s.leitura?.chave === `${uid}:${versao}` && s.leitura.vale?.() ? s.leitura : null;
   const acao: AcaoBanco | null = !l || (!l.conexoes && !l.falhou) ? null : l.conexoes ? classificar(l.conexoes, l.pode ?? false) : { tipo: "ver", texto: null };
   return { acao, maquina: s.uid === uid && s.vale() ? s.maquina : OCIOSO, atualizar: () => { if (!ocupado(uid)) correr(p, uid, atualizar); } };
 }
