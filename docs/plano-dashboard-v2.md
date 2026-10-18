@@ -36,7 +36,7 @@ marca na seção 8 o que concluiu.
 ### O que a primeira versão tem (Q3, Q6)
 
 Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e o chat do
-Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
+Piggy com IA real e blocos. Pix, conexão do Open Finance e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
 **Conta no painel (dono, 2026-10-17):** a seção "Conta" fica na barra lateral, embaixo, com
