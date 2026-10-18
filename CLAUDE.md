@@ -265,7 +265,8 @@ simulador de outra tarefa). Se o teste morrer com `INTERNALERROR` no import, iss
 **Como rodar é assunto da skill `baseline-testes`, e só dela.** Invoque-a antes de
 qualquer `pytest` neste repositório: ela tem o interpretador certo, a única variável
 que você precisa exportar, e por que não passar `--ignore`. Este arquivo não repete
-os comandos de propósito — quando repetia, as duas versões divergiram (§0.7).
+os comandos de propósito — quando repetia, as duas versões divergiram (§0.7). O jest
+do app (`app/`) também tem seção nessa skill.
 
 **Frontend:** `npm run test:frontend` (`node --test tests/frontend/*.test.mjs`, com
 Playwright). O `package.json` da raiz existe só para isso e segue **sem script

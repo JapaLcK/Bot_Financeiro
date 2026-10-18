@@ -2,6 +2,11 @@
 module.exports = {
   preset: "jest-expo",
   setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
+  // O jest confere o heap (`heapUsed`) do worker após cada arquivo de teste e o
+  // reinicia se passar do limite; não muda resultado de teste. Efeito colateral:
+  // com esta opção o jest nunca roda in-band sozinho (até 1 arquivo ou
+  // `--maxWorkers=1` vai para um worker filho); só `-i`/`--runInBand` roda in-band.
+  workerIdleMemoryLimit: "512MB",
   testMatch: ["<rootDir>/__tests__/**/*.test.ts?(x)"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
