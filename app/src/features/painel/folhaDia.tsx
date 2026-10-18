@@ -14,7 +14,7 @@ import type { Resultado } from "./provider";
 import { contraMediaDoDia, mediaDoPeriodo, vizinho } from "./gastosDia";
 import { irAoExtrato, useNavegacaoPainel } from "./navegacao";
 /**
- * A folha do "Seu dia" (aba Gastos): total do dia, pílula contra a média, contador, barra de categorias com emojis, 3 maiores e o botão do extrato. Mínimo de texto: o dado é número e ícone.
+ * A folha do "Seu dia" (aba Gastos): total do dia, pílula contra a média, contador, barra de categorias com emojis, 3 maiores (sem sinal "−", decisão do dono 2026-10-18: negativo na frente induz sensação de prejuízo) e o botão do extrato. Mínimo de texto: o dado é número e ícone.
  * Decisão SÍNCRONA de abrir (antes de qualquer leitura): o dia está no mês exibido e não antes do corte do plano. A linha tocada vem de `detalhes`, então o dia tem lançamento;
  * dia de outro mês/ano (parcela) ou antes do corte não existe em `/gastos` e vai ao extrato (nunca R$ 0,00). Não usa `saiu`, `hojeSP()` nem o `diaAbrivel`, que dependem do `/gastos`.
  */
@@ -70,7 +70,7 @@ function Corpo({ dia, g, trocar, fechar }: { dia: string; g: Resultado<Gastos> &
       {!ampliado && <BarraComposicao segmentos={fatias.map((f) => ({ valor: Number(f.valor.bruto), cor: f.cor }))} />}
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>{fatias.slice(0, 4).map((f, i) => <Texto key={i}>{f.emoji}</Texto>)}{fatias.length > 4 && <Texto variante="rotulo" tom="inkMuted">+{fatias.length - 4}</Texto>}</View>
     </View>}
-    {dado && entrada && entrada.maiores.length > 0 && <View>{entrada.maiores.map((m, i) => <Linha key={i} titulo={oculto ? "Lançamento" : m.descricao.trim() || "Lançamento"} valor={m.valor} tipo="saida" />)}</View>}
+    {dado && entrada && entrada.maiores.length > 0 && <View>{entrada.maiores.map((m, i) => <Linha key={i} titulo={oculto ? "Lançamento" : m.descricao.trim() || "Lançamento"} valor={m.valor} />)}</View>}
     <ButtonPainel rotulo="Ver extrato do dia" onPress={() => { fechar(); irAoExtrato(navegar, { dia }); }} />
   </View>;
 }
