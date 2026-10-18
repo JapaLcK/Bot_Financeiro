@@ -127,7 +127,9 @@ mas um único arquivo ainda pode crescer além dele — não é licença para ro
 `Exceeded timeout of … ms` (5000 ms é o padrão; há testes com timeout próprio) com a
 máquina carregada é ambiente, não regressão: veja o `uptime`, rode aquele arquivo
 sozinho antes de concluir qualquer coisa, e anote os NOMES dos testes que falharam,
-nunca a contagem (ver "Ler o resultado").
+nunca a contagem (ver "Ler o resultado"). Se o arquivo só estoura sob carga, compare
+com a baseline em condição equivalente (o mesmo arquivo sem a sua mudança, ou o run
+do CI) antes de descartar regressão: lentidão nova passa sozinha e estoura carregada.
 
 ## Ambiente remoto (Claude Code na web) é outro mundo
 
