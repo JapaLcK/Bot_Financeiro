@@ -661,7 +661,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   até cerca de `TOLERANCIA_DIA`+1 dias, medido: 5). A lista não depende do `dias` pedido; `sim`/`nao` numa pendente escondida dá 404 (`chave`, `nome`, `valor`, `dia`, `status` `pendente|confirmada|negada`, pendentes
   primeiro, depois por valor). Como toda leitura passa por `anexar`, a candidata fica fora da CONTA do `/painel`, do app,
   do WhatsApp, da IA, do forecast e do simulador; a lista só vai ao cliente (API) para a tela perguntar, e a visão do modelo
-  do card `hero` da IA a omite (`core/services/ai_chat/cards.py`; teste `test_visao_do_modelo_no_hero_*`): o único consumidor
+  do card `hero` da IA omite a lista `receitas_do_banco` mas leva `receitas_confirmadas` (as que o dono respondeu Sim: nome, valor, dia; uma confirmada que pode não somar na previsão (pagador que parou de depositar, ou conta fora da previsão) segue listada, sem entrar na conta, porque a visão do modelo não tem o `incluida_no_calculo`, que é do `detalhes` do Pro) (`core/services/ai_chat/cards.py`; testes `test_visao_do_modelo_no_hero_*`, `test_visao_hero_*` e `test_confirmada_interrompida_*`): o único consumidor
   de `Previsao` da IA é esse card, e `compromissos` usa `_so` com chaves explícitas. A lista é devolvida em `receitas_do_banco` de `GET /api/v2/previsao`
   (e `/api/app/previsao`), também no Plus (fora do `detalhes`); a receita que deixa de ser detectada (confirmada ou não) some da lista.
   `POST /api/v2/previsao/receita` (`api/v2/previsao.py`; também em `/api/app/previsao/receita`), corpo
