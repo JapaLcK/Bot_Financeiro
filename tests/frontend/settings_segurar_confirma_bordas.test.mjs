@@ -66,7 +66,7 @@ for (const a of ACOES) {
       assert.equal(await confirmAberto(page), true);
       await page.clock.runFor(100);
       assert.equal(reqs.length, 0, "antes do 'sim' nada vai");
-      await page.getByRole("button", { name: a.modal }).click();
+      await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
       await waitFor(() => reqs.length === 1, "a requisição depois do 'sim'");
     } finally { await ctx.close(); }
   });
@@ -136,7 +136,7 @@ for (const a of ACOES) {
       await waitFor(() => reqs.length === 1, "a requisição do hold");
       assert.equal(await aviso(page, a), "Confirmado");
       assert.equal(await estado(page, a), "done");
-      assert.equal(await nomeOk(page, a.nome === "reset" ? "Apagando..." : "Agendando..."), 1, "em done");
+      assert.equal(await nomeOk(page, a.nome === "reset" ? "Apagando..." : "Excluindo..."), 1, "em done");
     } finally { await ctx.close(); }
   });
 
@@ -177,14 +177,14 @@ for (const a of ACOES) {
   }
 }
 
-test("delete: Enter ainda apertado depois do disparo — o repeat não fecha o alerta 'Exclusão agendada'; Enter novo fecha", async () => {
+test("delete: Enter ainda apertado depois do disparo — o repeat não fecha o alerta 'Conta excluída'; Enter novo fecha", async () => {
   const a = ACOES[1];
   const { page, ctx } = await abre(a);
   try {
     await page.focus(`#${a.botao}`);
     await page.keyboard.down("Enter");
     await page.clock.runFor(1200);
-    await waitFor(() => page.evaluate(() => /Exclusão agendada/.test(document.querySelector(".pig-modal-overlay")?.textContent || "")),
+    await waitFor(() => page.evaluate(() => /Conta excluída/.test(document.querySelector(".pig-modal-overlay")?.textContent || "")),
                   "alertModal pós-sucesso da exclusão");
     for (let i = 0; i < 3; i++) await page.keyboard.down("Enter");   // auto-repeat
     await assenta();

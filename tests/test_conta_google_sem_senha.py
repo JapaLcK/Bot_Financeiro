@@ -81,7 +81,7 @@ def _sem_email_de_verdade(monkeypatch):
     for nome in (
         "send_data_export_link_email",
         "send_data_export_completed_email",
-        "send_account_deletion_scheduled_email",
+        "send_account_deletion_completed_email",
     ):
         monkeypatch.setattr(email_service, nome, lambda *a, **kw: True, raising=False)
     yield
@@ -111,10 +111,12 @@ def _auth(client: TestClient, uid: int, email: str) -> dict:
     return {dashboard.CSRF_HEADER_NAME: token, "Content-Type": "application/json"}
 
 
-def _chamadas(client: TestClient, headers: dict, senha: str):
-    """Os 6 endpoints, com o DELETE por último (ele agenda exclusão e os outros
-    passam a devolver 403 depois disso)."""
+def _chamadas(client: TestClient, headers: dict, senha: str, codigo_exclusao: str = "000000"):
+    """Os 6 endpoints, com o DELETE por último (ele apaga a conta e os outros
+    passam a devolver 401/403 depois disso). O DELETE leva a frase `EXCLUIR` e
+    o código de e-mail da exclusão (`codigo_exclusao`)."""
     corpo = {"password": senha, "code": "000000"}
+    corpo_exclusao = {**corpo, "code": codigo_exclusao, "confirmacao": "EXCLUIR"}
     return [
         ("POST /auth/account/export",
          lambda: client.post("/auth/account/export", json=corpo, headers=headers)),
@@ -127,7 +129,7 @@ def _chamadas(client: TestClient, headers: dict, senha: str):
         ("POST /settings/reset",
          lambda: client.post("/settings/reset", json=corpo, headers=headers)),
         ("DELETE /auth/account",
-         lambda: client.request("DELETE", "/auth/account", json=corpo, headers=headers)),
+         lambda: client.request("DELETE", "/auth/account", json=corpo_exclusao, headers=headers)),
     ]
 
 
@@ -155,7 +157,8 @@ def test_delete_account_sem_senha_e_o_segundo_caminho_de_codigo(user_id):
     client = TestClient(dashboard.app)
     headers = _auth(client, user_id, email)
 
-    resp = client.request("DELETE", "/auth/account", json={"password": "x"}, headers=headers)
+    resp = client.request("DELETE", "/auth/account", json={"password": "x", "code": "000000", "confirmacao": "EXCLUIR"},
+                          headers=headers)
 
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == PASSWORD_NOT_SET_MSG
@@ -245,16 +248,24 @@ def test_conta_com_senha_aceita_a_certa_e_recusa_a_errada_com_401(user_id):
         assert resp.status_code == 401, f"{nome} devolveu {resp.status_code}: {resp.text}"
         assert resp.json()["detail"] == "Senha incorreta.", nome
 
-    # Senha CERTA → passa da re-autenticação nos 6 (nem 401 nem 409 nem 500).
-    for nome, chamada in _chamadas(client, headers, SENHA):
+    # Senha CERTA → passa da re-autenticação nos 6 (nem 401 nem 409 nem 500). O
+    # DELETE leva também o código de e-mail da exclusão.
+    from db.reauth_codes import EXCLUIR, emitir
+    for nome, chamada in _chamadas(client, headers, SENHA, emitir(user_id, EXCLUIR)):
+        if nome.startswith("DELETE"):
+            # O export acima deixou o link pendente (409 export_pendente é a guarda
+            # certa); aqui a pessoa já baixou a cópia.
+            with get_conn() as conn, conn.cursor() as cur:
+                cur.execute("update data_export_tokens set used_at = now() where user_id = %s", (user_id,))
+                conn.commit()
         resp = chamada()
         assert resp.status_code not in (401, 409, 500), \
             f"{nome} barrou a senha certa: {resp.status_code} {resp.text}"
 
-    # E a exclusão (última da lista) foi de fato agendada com a senha certa.
+    # E a exclusão (última da lista) apagou a conta com a senha certa.
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("select deletion_status from auth_accounts where user_id = %s", (user_id,))
+            cur.execute("select 1 from auth_accounts where user_id = %s", (user_id,))
             row = cur.fetchone()
         conn.commit()
-    assert row["deletion_status"] == "scheduled"
+    assert row is None

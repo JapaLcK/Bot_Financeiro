@@ -62,6 +62,7 @@ TABELA = {
     ("POST", "/auth/account/export"): (L, "exige senha → 409"),
     ("GET", "/auth/account/export/download/{token}"): (P, "token de uso único (#687, fora)"),
     ("DELETE", "/auth/account"): (L, "exige senha → 409"),
+    ("POST", "/auth/account/reauth-code"): (L, "recusa 409 por conta própria"),
     ("POST", "/auth/dashboard-token"): _SAIDA, ("POST", "/auth/dashboard-link"): _SAIDA,
     ("GET", "/auth/google/start"): (P, "login"), ("GET", "/auth/google/callback"): (P, "login"),
     ("POST", "/auth/google/exchange"): (P, "login"),

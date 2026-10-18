@@ -42,7 +42,7 @@ NAO_AVISAM = {
     "pending_actions", "budget_alert_sent", "recurring_suggestion_dismissed",
     "ofx_imports", "open_finance_item_registry", "pix_charges", "financial_spaces",
     "auth_accounts", "auth_identities", "auth_login_events", "auth_refresh_tokens",
-    "auth_sessions", "dashboard_sessions", "data_export_tokens", "link_codes",
+    "auth_sessions", "dashboard_sessions", "data_export_tokens", "account_reauth_codes", "link_codes",
     "mfa_login_challenges", "password_reset_tokens", "platform_onboarding_tokens",
     "user_identities", "user_mfa", "user_mfa_backup_codes", "plan_grants", "plan_trials",
     "push_tokens", "daily_report_prefs", "checkout_funnel_events", "ebook_entregas", "affiliates",
