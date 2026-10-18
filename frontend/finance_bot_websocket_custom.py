@@ -58,6 +58,7 @@ from core.admin_dashboard import (
     admin_error_logging_middleware,
     register_admin_routes,
 )
+from core.feedback_routes import register_feedback_routes
 from core.funil_routes import register_funil_routes
 from core.audit import (
     AuditEvent,
@@ -2816,6 +2817,7 @@ app.add_middleware(
 # ─── Admin dashboard routes (delegado para core/admin_dashboard.py) ───────────
 register_admin_routes(app, HERE, JWT_SECRET, limiter)
 register_funil_routes(app, HERE, JWT_SECRET)
+register_feedback_routes(app, HERE, JWT_SECRET)
 
 # ─── Auth helpers ────────────────────────────────────────────────────────────
 
