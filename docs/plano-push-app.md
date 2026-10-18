@@ -78,7 +78,10 @@ Achados que mudam o desenho:
   TestFlight e loja = `production`), depois do login e a cada abertura (o token muda);
 - baixar no Sair e na troca de conta, ANTES de revogar a sessão: o unregister no servidor e, sempre, o
   desregistro local do aparelho no APNs (`Notifications.unregisterForNotificationsAsync`, que não depende
-  de rede). O próximo login registra de novo;
+  de rede). O desregistro local vale para TODA limpeza do cofre, não só o Sair: o 401 terminal da
+  renovação (`renovar` em `app/src/api/client.ts`, refresh vencido há mais de 14 dias) limpa o cofre sem
+  passar pelo `sair()`. Por isso ele mora nos pontos que limpam o cofre (`limparSe` e `limparSessaoDe`,
+  `app/src/storage/secure.ts`). O próximo login registra de novo;
 - tratar o toque (D6): abrir a rota do payload, esperando a trava biométrica (`features/bloqueio`) liberar;
 - o envio do lado do servidor para o(s) evento(s) da D1, só a quem tem acesso, com a preferência da D5.
 
@@ -104,7 +107,7 @@ as contestou: valem até ele dizer o contrário.
 | D1 | Que evento dispara o primeiro push? | **Banco que precisa reconectar**, só ele no começo (o job de saúde do Open Finance já grava o estado). Um push por mudança de estado, não a cada volta do job. Depois: receita detectada a confirmar, alerta do Xerife, lembrete de pagamento |
 | D2 | Quando pedir a permissão? | **Na primeira abertura do app** (o dono escolheu isto, contra a recomendação de pedir depois do 1º banco). Quem recusa só reativa pela chave da tela de Notificações, que manda aos Ajustes |
 | D3 | Como acertar o tópico do app novo? | **`APNS_TOPIC` por servidor** (`com.pigbankai.mobile` em produção, `.staging` no staging) e `DeviceTokenNotForTopic` tratado como token inválido (apagado). O Capacitor deixa de receber push; hoje nada de produto envia push para ele |
-| D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. Fecha o que o servidor revoga: logout que chegou ao servidor, "encerrar outros dispositivos", troca de senha e exclusão. É migração (coluna nova). NÃO fecha o logout sem rede (a sessão segue ativa no servidor): esse é fechado no aparelho, pelo desregistro local no APNs no Sair (seção 4). Que o APNs para de entregar depois do desregistro local só se prova no aparelho |
+| D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. "Ativa" para o push NÃO é só `auth_sessions.revoked_at is null`: a linha não tem validade, e o refresh que vence por idade é revogado sem tocar nela. Ativa = sessão não revogada E com um `auth_refresh_tokens` daquele `session_jti` ainda utilizável (`used_at` e `revoked_at` nulos, `expires_at > now()`). Fecha o que o servidor revoga: logout que chegou ao servidor, "encerrar outros dispositivos", troca de senha, exclusão e o refresh vencido por idade. É migração (coluna nova). NÃO fecha o logout sem rede (a sessão segue ativa no servidor): esse é fechado no aparelho, pelo desregistro local no APNs no Sair (seção 4). Que o APNs para de entregar depois do desregistro local só se prova no aparelho |
 | D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o da D1. A rota tem gate de plano; o envio também (seção 2) |
 | D6 | Para onde o toque leva? | Para a tela do evento (D1: Bancos conectados). O payload leva só o nome da rota, nunca dado |
 | D7 | Texto do primeiro push | Título "PigBank", corpo "Um banco precisa de atenção. Toque para ver." (sem nome do banco) |
