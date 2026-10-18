@@ -125,6 +125,8 @@ jest.mock("react-native/Libraries/Components/AccessibilityInfo/AccessibilityInfo
     // `Toast` (PR C2) anuncia cada mensagem — sem espiã aqui a chamada
     // lançaria "não é uma função" no Jest (o módulo real é nativo).
     announceForAccessibility: jest.fn(),
+    // `PilhaDeAvisos` move o foco do leitor quando o aviso visível sai da lista.
+    sendAccessibilityEvent: jest.fn(), // (setAccessibilityFocus está deprecada no RN 0.86)
   },
 }));
 
