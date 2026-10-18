@@ -1,13 +1,14 @@
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
-import { Alert } from "react-native";
+import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
+import { Alert, Platform } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
 // Folha de meta (PR 2 do app v2), continuação de painel_metas_escrita.test.tsx (o teto de 350 linhas): falha com a folha dispensada, resultado desconhecido, `?id=` inválido. O seletor de data é nativo: o dublê expõe o `onChange`.
-jest.mock("@react-native-community/datetimepicker", () => ({ __esModule: true, default: (p: object) => jest.requireActual("react").createElement(jest.requireActual("react-native").View, { testID: "seletor-data", ...p }) }));
+jest.mock("@react-native-community/datetimepicker", () => ({ __esModule: true, default: (p: object) => jest.requireActual("react").createElement(jest.requireActual("react-native").View, { testID: "seletor-data", ...p }), DateTimePickerAndroid: { open: jest.fn() } }));
 jest.setTimeout(30_000);
 type Corpo = Record<string, unknown>;
 const TODAS = (v2 as unknown as { metas: { varios: { metas: Record<string, unknown>[]; custo_mensal: unknown }; vazio: unknown; sem_custo: unknown } }).metas;
@@ -81,5 +82,39 @@ describe("`?id=` inválido", () => {
   it.each(["", "0", "-1", "1.5"])("`?id=%j` (presente e inválido) é 'Essa meta não existe mais', nunca 'Nova meta'", async (id) => {
     lista = TODAS.vazio; await abrirAba(); act(() => router.push(`/meta?id=${id}` as never));
     await waitFor(() => expect(screen.getByText("Essa meta não existe mais.")).toBeTruthy()); expect(screen.queryByText("Nova meta")).toBeNull(); expect(screen.queryByLabelText(/^Nome/)).toBeNull();
+  });
+});
+
+describe("o tipo não troca com o POST em voo", () => {
+  const preparar = async () => { lista = TODAS.vazio; await abrirAba(); await apertar("Criar meta"); await folha("Nova meta"); digitar(/^Nome/, "Viagem"); digitarValor("100000"); };
+  const tocarReserva = () => act(async () => { fireEvent.press(screen.getByRole("tab", { name: "Reserva" })); await drenar(); });
+  it("tocar em 'Reserva' depois de Salvar não muda a tela, e o corpo enviado é o de meta (positivo: depois de uma falha 400, o toque troca)", async () => {
+    await preparar(); const preso = segurar(); escrita = async () => { await preso.promessa; return resposta(400, { error: { code: "valor_invalido", message: "x" } }); };
+    await act(async () => { fireEvent.press(botao("Salvar")); await drenar(); }); expect(posts()).toHaveLength(1);
+    await tocarReserva(); expect(screen.getByText("Nova meta")).toBeTruthy(); expect(screen.queryByText("Montar reserva")).toBeNull();
+    expect(posts()[0]!.corpo).toMatchObject({ tipo: "meta", nome: "Viagem" });
+    preso.soltar(); await act(drenar); await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy()); // falha conhecida: a trava solta
+    await tocarReserva(); expect(screen.getByText("Montar reserva")).toBeTruthy();
+  });
+});
+
+describe("Android: o prazo abre o diálogo uma vez, no toque (não é o componente que reabre a cada render)", () => {
+  const abrir = DateTimePickerAndroid.open as jest.Mock;
+  const prepararAndroid = async () => { jest.replaceProperty(Platform, "OS", "android"); abrir.mockClear(); lista = TODAS.vazio; await abrirAba(); await apertar("Criar meta"); await folha("Nova meta"); digitar(/^Nome/, "Casa"); digitarValor("100000"); };
+  it("tocar em Prazo chama `open` uma vez (mode date); 'dismissed' não muda nada; 'set' grava a data; o componente inline não é renderizado", async () => {
+    await prepararAndroid(); expect(abrir).not.toHaveBeenCalled();
+    await apertar(/Prazo/); expect(abrir).toHaveBeenCalledTimes(1); expect(abrir.mock.calls[0]![0]).toMatchObject({ mode: "date" });
+    const { onChange } = abrir.mock.calls[0]![0] as { onChange: (e: { type: string }, d?: Date) => void };
+    await act(async () => { onChange({ type: "dismissed" }); await drenar(); }); expect(screen.getByText("Sem prazo")).toBeTruthy();
+    await act(async () => { onChange({ type: "set" }, new Date(2030, 0, 5, 9)); await drenar(); });
+    expect(screen.getByText("05/01/2030")).toBeTruthy(); expect(screen.queryByTestId("seletor-data")).toBeNull(); expect(abrir).toHaveBeenCalledTimes(1); // nem ao aparecer a data nem a cada render
+    await salvar(); await waitFor(() => expect(posts()[0]!.corpo).toMatchObject({ data_alvo: "2030-01-05" }));
+  });
+  it("com a data já posta, tocar na linha reabre o diálogo com ela; desativado (resultado desconhecido) não abre", async () => {
+    await prepararAndroid(); await apertar(/Prazo/);
+    await act(async () => { (abrir.mock.calls[0]![0] as { onChange: (e: { type: string }, d?: Date) => void }).onChange({ type: "set" }, new Date(2030, 0, 5, 9)); await drenar(); });
+    await apertar(/Prazo/); expect(abrir).toHaveBeenCalledTimes(2); expect((abrir.mock.calls[1]![0] as { value: Date }).value.getFullYear()).toBe(2030);
+    escrita = () => resposta(500, undefined); await salvar(); await waitFor(() => expect(screen.getByText("Pode ter salvo. Confira a lista.")).toBeTruthy());
+    await apertar(/Prazo/); expect(abrir).toHaveBeenCalledTimes(2);
   });
 });

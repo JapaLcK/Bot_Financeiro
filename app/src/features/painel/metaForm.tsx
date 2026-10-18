@@ -1,7 +1,7 @@
-import DateTimePicker from "@react-native-community/datetimepicker";
+import DateTimePicker, { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Alert, View } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, Alert, Platform, View } from "react-native";
 import type { z } from "zod";
 import { SessaoExpirada } from "@/api/client";
 import * as S from "@/api/schemas/painel";
@@ -19,7 +19,7 @@ import { sucesso } from "@/ui/haptics";
 import { useTema } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
 import { Acao } from "./base";
-import { hojeSP } from "./catalogo";
+import { dataPtBr, hojeSP } from "./catalogo";
 import { CONTA_A_ESCOLHER, INVESTIDO, MESES_MAX, MESES_MIN, NOME_MAX, NOME_RESERVA, chaveFonte, codigoDe, corpoCriar, corpoEditar, dataDoSeletor, falhaDaEscrita, inicialDe, isoDoSeletor, metasMudaram, validar, type Campos, type Falha, type Fonte } from "./metasEscrita";
 import { Blocos } from "./metasChat";
 import { MESES_PADRAO } from "./metasTextos";
@@ -67,7 +67,7 @@ function Formulario({ meta, comecar, custo, temReserva, bancos, contas, semPlano
   const voando = useRef(false); // síncrona: dois toques no mesmo tick não passam pelo `pendente` (estado só vale no render seguinte)
   useEffect(() => { if (falha?.geral) AccessibilityInfo.announceForAccessibility(falha.geral); }, [falha]);
   const perdida = falha?.motivo === "perdida", bloqueado = pendente || perdida; // resultado desconhecido: o formulário trava e só sobra "Fechar" (outro Salvar duplicaria a meta)
-  const mudar = (p: Partial<Campos>) => { if (perdida) return; setC((x) => ({ ...x, ...p })); setFalha(null); };
+  const mudar = (p: Partial<Campos>) => { if (perdida || voando.current) return; setC((x) => ({ ...x, ...p })); setFalha(null); }; // `voando`: o corpo do POST já foi capturado, mudar a tela agora mostraria o que não vai ser gravado
   const reserva = c.tipo === "reserva", mudou = novo || corpoEditar(meta.id, c, inicial) !== null;
 
   /** Uma escrita por vez. Sucesso mantém a trava até a folha sair (um 2º toque na animação de fechar não grava de novo); falha a solta, sem reenviar sozinha. */
@@ -103,6 +103,9 @@ function Formulario({ meta, comecar, custo, temReserva, bancos, contas, semPlano
   if (!escolhida && haEscolha) opcoes.unshift({ titulo: c.fonte.tipo === "investido" ? "Tudo investido" : c.fonte.tipo === "banco" ? c.fonte.banco! : (meta?.fonte.rotulo ?? "Conta"), sub: "Não disponível", fonte: c.fonte }); // a escolha gravada que sumiu da lista não some em silêncio
   const rotuloFonte = (escolhida ?? opcoes.find((o) => chaveFonte(o.fonte) === chaveFonte(c.fonte)))?.titulo ?? "Escolher";
   const trocarTipo = (v: string) => { const tipo = v === "Reserva" ? "reserva" : "meta"; mudar({ tipo, nome: tipo === "reserva" && !c.nome ? NOME_RESERVA : tipo === "meta" && c.nome === NOME_RESERVA ? "" : c.nome }); };
+  // Android: o `<DateTimePicker>` é um componente que abre o diálogo num efeito com `onChange` nas dependências (reabriria a cada render); a API imperativa abre uma vez, no toque.
+  const android = Platform.OS === "android";
+  const abrirPrazo = () => DateTimePickerAndroid.open({ value: dataDoSeletor(c.data ?? hojeSP()), mode: "date", minimumDate: dataDoSeletor(hojeSP()), onChange: (e, d) => { if (e.type === "set" && d) mudar({ data: isoDoSeletor(d) }); } });
   const titulo = !novo ? "Editar meta" : reserva ? "Montar reserva" : "Nova meta", meses = c.meses;
 
   return <View style={{ gap: espaco.xl }}>
@@ -122,9 +125,9 @@ function Formulario({ meta, comecar, custo, temReserva, bancos, contas, semPlano
         : <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto tom="inkMuted">Custo mensal</Texto><Money centavos={custo.valor} /></View>}
     </View> : <AmountInput rotulo="Valor" centavos={c.centavos} onChange={(centavos) => mudar({ centavos })} erro={falha?.campos.alvo} desativado={bloqueado} />}
     <GrupoDeLinhas>
-      {c.data
+      {c.data && !android
         ? <ListRow titulo="Prazo" trailing={<DateTimePicker value={dataDoSeletor(c.data)} mode="date" display="compact" minimumDate={dataDoSeletor(hojeSP())} themeVariant={esquema} locale="pt-BR" accessibilityLabel="Prazo" disabled={bloqueado} onChange={(_, d) => { if (d) mudar({ data: isoDoSeletor(d) }); }} />} />
-        : <ListRow titulo="Prazo" trailing={<Texto tom="inkMuted">Sem prazo</Texto>} chevron desativado={bloqueado} onPress={() => mudar({ data: hojeSP() })} />}
+        : <ListRow titulo="Prazo" trailing={<Texto tom="inkMuted">{c.data ? dataPtBr(c.data) : "Sem prazo"}</Texto>} chevron desativado={bloqueado} onPress={android ? abrirPrazo : () => mudar({ data: hojeSP() })} />}
       {c.data ? <ListRow titulo="Tirar prazo" desativado={bloqueado} onPress={() => mudar({ data: null })} /> : null}
       <ListRow titulo="Fonte" trailing={<Texto tom="inkMuted">{rotuloFonte}</Texto>} chevron desativado={bloqueado} onPress={() => setFonteAberta((v) => !v)} />
       {fonteAberta ? opcoes.map((o) => <ListRow key={chaveFonte(o.fonte)} titulo={o.titulo} subtitulo={o.sub} desativado={bloqueado} trailing={chaveFonte(o.fonte) === chaveFonte(c.fonte) ? <Icone nome="CheckCircle" tamanho={20} tom="brand" /> : undefined} onPress={() => { mudar({ fonte: o.fonte }); setFonteAberta(false); }} />) : null}
