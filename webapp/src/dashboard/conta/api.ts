@@ -10,12 +10,36 @@ export type Seguranca = { email: string | null; display_name: string | null; pho
 export type CorpoContato = { display_name: string } | { phone: string } | { email: string; current_password?: string };
 
 const GET = (signal: AbortSignal) => ({ headers: { Accept: "application/json" }, signal });
+// O `uid` do /auth/dashboard-profile vai no caminho das rotas antigas: só inteiro positivo (0, -3 e 1.5 viram /settings/0/…).
+export const uidValido = (uid: unknown): uid is number => typeof uid === "number" && Number.isInteger(uid) && uid > 0;
 
 export const segurancaQuery = (uid: number | undefined) => queryOptions({
   queryKey: ["conta", "seguranca", uid],
   queryFn: ({ signal }) => chamar<Seguranca>(`/settings/${uid}/security`, GET(signal)),
   staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
   enabled: !DEMO && !!uid,
+});
+
+// Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
+// contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
+export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
+const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry } as const;
+
+export const conexoesQuery = (uid: unknown) => queryOptions({
+  queryKey: ["conta", "conexoes", uid],
+  queryFn: async ({ signal }): Promise<Conexao[]> => {
+    const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, GET(signal));
+    const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
+    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at),
+      ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } }));
+  },
+  ...aberto, enabled: !DEMO && uidValido(uid),
+});
+export const limiteQuery = (uid: unknown) => queryOptions({
+  queryKey: ["conta", "limite", uid],
+  queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
+  ...aberto, enabled: !DEMO && uidValido(uid),
 });
 
 // Só o `has_password` do /auth/me (a mesma fonte do settings.html): o resto da resposta nunca entra no cache.

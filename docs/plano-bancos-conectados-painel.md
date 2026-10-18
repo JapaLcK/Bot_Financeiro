@@ -56,10 +56,12 @@ Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o
 
 1. **Topo:** `total` de `/bancos` (saldo em conta + investido, decisão 1 do dono no plano do app). Rótulo **não** é
    "Disponível agora". Com `motivos` não vazio, selo "a conferir" pelos `Selos` existentes. `total: null` = "—".
-2. **Barra por banco** (`.comp-bar`), um segmento por banco com a cor de `corDoBanco`. Desenha só se: todo `total` de
-   banco é não nulo e > 0, a soma dos segmentos em centavos inteiros fecha **exatamente** com o `total` do topo e
-   nenhum motivo mexe no valor (lista branca como `MOTIVOS_SEM_EFEITO_NO_SALDO`). Senão, sem barra. A barra compara,
-   não mostra soma: o número na tela é sempre o do servidor. Menos de 2 segmentos não é composição.
+2. **Barra por banco** (`.comp-bar`), um segmento por banco com a cor de `corDoBanco`. Desenha só se: nenhum motivo,
+   no topo ou num banco (lista branca **vazia**: o `MOTIVOS_SEM_EFEITO_NO_SALDO` do app é de `/contas`, e em `/bancos`
+   `outra_moeda` tira dinheiro do valor); todo `total` de banco é não nulo e finito, nunca negativo; há ao menos 2
+   segmentos; e a soma em inteiros exatos (BigInt, não centavos) fecha **exatamente** com o `total` do topo. Banco com
+   total exatamente zero não vira segmento e não impede a barra (como o app, `composicaoContas.ts`). Senão, sem barra.
+   A barra compara, não mostra soma: o número na tela é sempre o do servidor. Menos de 2 segmentos não é composição.
    `role="img"` com `aria-label` "Nubank 67%, Inter 33%", como em `Wealth.tsx`.
 3. **Vagas do plano:** "2 de 3 bancos" de `/limite` (`em_uso`, `of_banks_max`). `of_banks_max: null` = nada (sem teto).
    Com `pode_adicionar: false`, mostra a `message` do servidor no lugar do botão de conectar.
@@ -70,8 +72,9 @@ Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o
    - linha curta: saldo em conta · investido · "1 conta · 1 cartão · 4 investimentos" (contagens de `/bancos`);
      `null` = "—", nunca "R$ 0,00";
    - "há 12 min" de `last_sync_at` (texto inteiro no `title`/`<time datetime>`);
-   - abre inline (`<details>`/`<summary>`, sem folha nem modal) com as ações: Acompanhar sincronização (estado
-     `updating`), Reconectar, Desconectar.
+   - **no W1 o card não tem `<details>`:** sem ação dentro só revelaria uma linha, e `ui.detail` já aparece no card. O
+     `<details>`/`<summary>` (inline, sem folha nem modal) entra no W2, com Desconectar; depois o W3 acrescenta
+     Acompanhar sincronização (estado `updating`) e Reconectar.
 5. **Nenhum banco:** o Piggy (`ICON`) e um botão "Conectar banco". Sem frase longa.
 6. **Conexão sem linha em `/bancos`** (recém-conectada, só posição sem conta, `DELETED`): o card aparece pelo snapshot
    com "—" no valor. Junta-se por `conexao_id` = `connection.id`, **nunca** por nome nem por posição.
@@ -88,7 +91,7 @@ em `<dialog>` em vez de `Alert`, grade de 2 colunas no desktop (≥ 900 px) e um
   escuro). Antes de escrever o contraste, procurar se o webapp já tem cálculo de luminância (`git grep -n "luminanc"
   webapp/src`); não achando, porta-se a função do app (`app/src/ui/contraste.ts`).
 - **Uma fonte de verdade (§0.7):** os dois projetos npm não importam um do outro. Teste
-  `tests/frontend/cores_banco_paridade.test.mjs` lê os dois arquivos e exige o mesmo mapa (precedente:
+  `tests/frontend/bancos_paridade.test.mjs` lê os dois arquivos e exige o mesmo mapa (precedente:
   `tests/test_phosphor_subset.py`). Negativo: mudar um hex só de um lado reprova.
 - Por que separado: é a única peça que pode ser provada sem tela, e o W1 fica menor.
 
@@ -120,9 +123,19 @@ do sync do Open Finance avisa (`recurso: "open_finance"`). A página relê sozin
 Motivos: conferir que `parts/Selos.tsx` tem texto para os 7 de `Bancos.motivos` (inclui `plano_sem_investimentos`,
 que hoje só `/bancos` emite); faltando, acrescentar ali, que é a fonte do painel para texto de motivo.
 
+Decisões de execução do W1 (2026-10-18), além das já anotadas acima (barra, sem `<details>`, teste de paridade):
+- **Resposta fora do contrato não derruba a página:** `/bancos` malformado (sem `bancos`/`motivos`, motivo que não é
+  texto) é leitura falha (cards sem números); campo do snapshot que não é texto (nome, `ui.label`, `ui.detail`,
+  `last_sync_at`) vira nulo. Chave como `constructor` em mapa (motivo, estado, direção do erro) sai como texto cru ou
+  "pendente", nunca como função herdada de `Object`.
+- **O `@media` compacto do trilho subiu para `max-height: 768px`** (e o gêmeo em `flexgap.css`), porque a Conta ganhou
+  um item e o rodapé era cortado entre 741 e 748 px. Afeta o trilho de **todas** as páginas do painel nessas alturas
+  (itens de 36 para 32 px). O de altura curta foi de 620 para 650 px.
+- **Nubank e BTG saem em cinza na web** pela regra 3:1 sobre o card (2,64:1 e 1,23:1; decisão do dono, 2026-10-18).
+
 ### W2 — Desconectar um banco (Completo)
 
-- Botão "Desconectar <banco>" dentro do card aberto, `<dialog>` de confirmação ("Desconectar" / "Manter banco"),
+- O card ganha o `<details>`/`<summary>` (fora do W1, ver acima); o botão "Desconectar <banco>" mora dentro do card aberto, `<dialog>` de confirmação ("Desconectar" / "Manter banco"),
   `DELETE /open-finance/{uid}/connections/{id}` por `escrever` (manda `pbCsrfHeaders`).
 - Mesmas regras do app (`conexoes.tsx`, `remover`): uma remoção por vez (outro "Desconectar" desabilitado enquanto uma
   voa); resposta perdida não manda segundo DELETE, relê o snapshot e a ausência confirma; 401 de sessão vai para o fluxo

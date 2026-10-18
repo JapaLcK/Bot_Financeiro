@@ -1,7 +1,7 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ErroApi, contaQuery } from "../lib/v2";
-import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, type Falha } from "./api";
+import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, uidValido, type Falha } from "./api";
 import { MfaForm, type ModoMfa } from "./MfaForm";
 import { Sessoes } from "./Sessoes";
 import { SemSenha } from "./SemSenha";
@@ -13,7 +13,7 @@ const vazio = (palavra: string) => <><span aria-hidden="true">—</span><span cl
 // a palavra só existe para o leitor de tela (como o Perfil).
 export function ContaSeguranca() {
   const uid = useQuery(contaQuery).data?.user_id;
-  const uidOk = typeof uid === "number" && Number.isInteger(uid) && uid > 0; // 0, -3, 1.5 viram /settings/0/password-reset
+  const uidOk = uidValido(uid); // 0, -3, 1.5 viram /settings/0/password-reset
   const mfa = useQuery(mfaStatusQuery);
   // Só `false` (conta só-Google) abre o diálogo "defina uma senha"; carregando ou falhou, o formulário abre e o 409 do servidor decide.
   const temSenha = useQuery(temSenhaQuery(true)).data?.temSenha;

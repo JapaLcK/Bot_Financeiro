@@ -251,6 +251,19 @@ test("qualidade: estado, motivos em português com a direção, código novo sai
   assert.deepEqual(cru, ["pedido pendente na conversa · pode variar para os dois lados", "codigo_novo_x · pode variar para os dois lados"]);
 });
 
+test("direção do erro fora da tabela ('constructor') sai crua, nunca a função herdada de Object", async () => {
+  const { ctx, page } = await abrir({ previsao: "real_diario" });
+  await pronta(page);
+  const ruim = structuredClone(RESPOSTAS.previsao.pendencia);
+  ruim.motivos = [{ codigo: "codigo_novo_x", direcao_do_erro: "constructor" }];
+  await servirPrevisao(ctx, ruim);
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForFunction(() => document.querySelector("#w-previsao-qualidade")?.innerText.includes("codigo_novo_x"));
+  const li = await page.locator("#w-previsao-qualidade .prev-motivos li").allTextContents();
+  await ctx.close();
+  assert.deepEqual(li, ["codigo_novo_x · constructor"]);
+});
+
 // §0.7: os códigos moram no Python e os rótulos no Selos.tsx. Servidos todos de uma vez,
 // nenhum pode sair cru na tela.
 test("paridade: todo `_motivo(s, '…')` do motor (cashflow_snapshot.py e previsao_recorrencias.py) tem rótulo em português", async () => {

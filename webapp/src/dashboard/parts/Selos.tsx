@@ -61,7 +61,8 @@ const MOTIVO: Record<string, string> = {
   valor_recorrente_desconhecido: "valor do fixo desconhecido",
   valor_recorrente_estimado: "valor do fixo estimado",
 };
-export const rotulo = (codigo: string) => MOTIVO[codigo] ?? codigo;
+// Só chave PRÓPRIA do mapa: "constructor"/"toString"/"__proto__" não podem virar função/objeto (React error #31). hasOwn não existe no Safari 14.
+export const rotulo = (codigo: string) => (Object.prototype.hasOwnProperty.call(MOTIVO, codigo) ? MOTIVO[codigo] : codigo);
 
 // Para que lado o número real pode ficar, por motivo da previsão. `so_melhora`: a falta ou o
 // erro do dado só deixa a projeção melhor do que a realidade, então o real pode ser PIOR
@@ -86,7 +87,7 @@ export function MotivosPrevisao({ motivos }: { motivos: MotivoPrevisao[] }) {
   if (!motivos.length) return null;
   return (
     <ul className="prev-motivos">
-      {motivos.map((m) => <li key={m.codigo + m.direcao_do_erro}><b>{rotulo(m.codigo)}</b> <span className="faint">· {DIRECAO[m.direcao_do_erro] ?? m.direcao_do_erro}</span></li>)}
+      {motivos.map((m) => <li key={m.codigo + m.direcao_do_erro}><b>{rotulo(m.codigo)}</b> <span className="faint">· {Object.prototype.hasOwnProperty.call(DIRECAO, m.direcao_do_erro) ? DIRECAO[m.direcao_do_erro] : m.direcao_do_erro}</span></li>)}
     </ul>
   );
 }

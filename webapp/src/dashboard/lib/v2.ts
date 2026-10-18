@@ -47,7 +47,7 @@ export class ErroApi extends Error {
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((/^\/(auth|settings)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings|open-finance)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
@@ -124,6 +124,11 @@ export const perfilQuery = {
 export const contasQuery = {
   queryKey: ["contas"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
+  ...vivo,
+};
+export const bancosQuery = {
+  queryKey: ["bancos"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/bancos", signal),
   ...vivo,
 };
 // As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.

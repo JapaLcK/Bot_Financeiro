@@ -40,10 +40,10 @@ Piggy com IA real e blocos. Pix, conexão do Open Finance e notificações conti
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
 
 **Conta no painel (dono, 2026-10-17):** a seção "Conta" fica na barra lateral, embaixo, com
-Perfil, Cobrança e Configurações, mais o botão Sair (sem atalhos de teclado). O conteúdo
+Perfil, Cobrança, Configurações e Bancos conectados, mais o botão Sair (sem atalhos de teclado). O conteúdo
 vem em PRs, uma página por vez. O **Perfil** já é página de verdade (`conta/Perfil.tsx`: nome,
 e-mail e telefone editáveis em modal, WhatsApp e "Desde"; só ícone e valor, a palavra é para o
-leitor de tela); só a Cobrança segue página-ponte (nome, e-mail e um link para a tela
+leitor de tela); **Bancos conectados** também é página real, só leitura (`conta/Bancos.tsx`: total, barra por banco, estado de cada conexão); só a Cobrança segue página-ponte (nome, e-mail e um link para a tela
 antiga); as Configurações mostram a Segurança (senha por link de e-mail e MFA) e os dispositivos conectados e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
 `/settings` antiga fica como saída de emergência. A tela "Assinaturas"
 (Netflix etc.) é outra coisa e já existe.

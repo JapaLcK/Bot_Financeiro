@@ -17,6 +17,7 @@ from pydantic import ValidationError
 import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
+from api.v2.bancos import Bancos
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
 from api.v2.erros import ErroV2
@@ -289,6 +290,24 @@ def test_fixture_de_investido_segue_o_modelo(nome):
     for lado in ("por_tipo", "por_banco"):
         assert sum((Decimal(p["valor"] or 0) for p in f[lado]), Decimal(0)) == Decimal(f["total"] or 0)
         assert all(set(p["motivos"]) <= set(f["motivos"]) for p in f[lado])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["bancos"]))
+def test_fixture_de_bancos_segue_o_modelo(nome):
+    """`total` do banco = Σ das partes não nulas (ou null se as duas são); o topo = Σ dos totais dos bancos listados
+    (ou null) e seus motivos = a união dos motivos dos bancos (db/bancos.py). A `padrao` é o JSON do app (§0.7)."""
+    f = FIXTURES["bancos"][nome]
+    b = Bancos.model_validate(f)
+    soma = lambda xs: sum(xs, Decimal(0)) if xs else None  # noqa: E731
+    for x in b.bancos:
+        assert x.total == soma([v for v in (x.saldo_conta, x.investido) if v is not None])
+    assert b.total == soma([x.total for x in b.bancos if x.total is not None])
+    assert set(b.motivos) == set().union(*(x.motivos for x in b.bancos))
+    assert len({x.conexao_id for x in b.bancos}) == len(b.bancos)
+
+
+def test_fixture_padrao_de_bancos_e_a_do_app():
+    assert FIXTURES["bancos"]["padrao"] == json.loads((Path(__file__).parent / "fixtures" / "app_bancos.json").read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["metas"]))

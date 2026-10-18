@@ -68,16 +68,16 @@
 .rail-conta { margin-top: auto; display: grid; gap: 2px; }
 .rail-conta button:disabled, .menu-telas-conta button:disabled { opacity: 0.5; cursor: default; } /* Sair já clicado */
 .rail-conta-t { margin: 0; padding: 0 12px 4px; font-size: 11.5px; color: var(--ink-3); }
-/* Trilho mais baixo que a coluna (um 1366×768 deixa ~657px e o trilho não rola; 593px é a menor altura em que o trilho cheio ainda cabe, e um 1280×720 deixa ~590px: aí rola, ver o @media de 620px): itens e espaços menores. */
-@media (max-height: 740px) {
+/* Trilho mais baixo que a coluna: o trilho normal (Conta + rodapé) só cabe a partir de 749px e só com a folga de baixo a partir de 769px, então 768px é o último compacto (com o limite em 740px, 741–748px cortava o rodapé). Um 1366×768 deixa ~657px e o trilho não rola; 625px é a menor altura em que o trilho compacto ainda cabe (624 rola 1px); um 1280×720 deixa ~590px: aí rola, ver o @media de 650px. Itens e espaços menores. */
+@media (max-height: 768px) {
   .rail { gap: 14px; padding: 14px 14px 12px; }
   .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 32px; }
   .rail-list { gap: 0; }
   .rail-conta ul { gap: 0; }
 }
 /* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. O overflow cortaria o menu da Ajuda,
-   que abre para a direita: nessa altura ele fica `fixed`, ao lado do trilho e rente ao pé da janela. 620px = o trilho cheio (~595px a 1440 de largura) + folga. */
-@media (max-height: 620px) {
+   que abre para a direita: nessa altura ele fica `fixed`, ao lado do trilho e rente ao pé da janela. 650px = o trilho cheio (~625px a 1440 de largura) + folga. */
+@media (max-height: 650px) {
   .rail { overflow-y: auto; z-index: 41; } /* 41 > .askbar (40, chat.css): o menu fixo não fica sob a barra do Piggy; o guia (45+) e os diálogos (80+) seguem acima */
   .rail .ajuda-menu { position: fixed; left: calc(var(--rail-w) + 8px); bottom: 12px; }
 }

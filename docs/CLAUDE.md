@@ -791,7 +791,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   em `tests/test_api_v2_bancos.py` só no nível da entrada.
   **Quem não vem em `bancos`:** conexão sem nenhuma conta, cartão e posição no espelho (DELETED sem linhas, reconexão
   cujas identidades migraram para a nova, viva recém-conectada sem dado). O app deve mostrar "—" quando a conexão não
-  vem aqui (requisito do PR 3; hoje nenhuma tela consome `/bancos`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
+  vem aqui (requisito do PR 3; consumidor: `/painel#/conta/bancos`, em `conta/Bancos.tsx` e `lib/bancos.ts`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
   **Contagens:** `contas`, `cartoes`, `investimentos` são as linhas do espelho da conexão (sem duplicata de reconexão,
   `distinct on` pela identidade do provedor) — o que o banco mostra, e NÃO o que entra no valor: contam também conexão
   pausada, outra moeda e posição resgatada (uma pausada pode ter `cartoes: 1` com tudo `null`). Carteira, cartão e
