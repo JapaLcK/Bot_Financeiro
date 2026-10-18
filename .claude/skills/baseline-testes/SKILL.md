@@ -119,8 +119,9 @@ cd app && npx jest __tests__/a.test.tsx __tests__/b.test.tsx --maxWorkers=2
 **Nunca um filtro ou prefixo largo** (`painel_`, uma pasta): ele puxa muitos
 arquivos, e muitos deles montam o app inteiro com `renderRouter("./app")`, então o
 worker só cresce de um arquivo para o outro. O `workerIdleMemoryLimit` do
-`app/jest.config.js` reinicia o worker entre arquivos quando o heap passa do limite,
-mas um único arquivo ainda pode crescer além dele — não é licença para rodada larga.
+`app/jest.config.js` (só fora do CI) reinicia o worker entre arquivos quando o heap
+passa do limite, mas um único arquivo ainda pode crescer além dele — não é licença
+para rodada larga.
 
 **`--maxWorkers=2` no máximo.**
 
