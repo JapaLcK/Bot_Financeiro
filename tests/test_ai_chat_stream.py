@@ -25,7 +25,7 @@ def test_sem_emissor_a_chamada_a_openai_e_a_de_sempre(monkeypatch, pro_user_id):
     reg = openai_falso(monkeypatch, rodada("Oi!"))
     assert runner.chat(pro_user_id, "oi", monthly_limit=100) == "Oi!"
     (kw,) = reg.creates
-    assert "stream" not in kw and set(kw) == {"model", "temperature", "messages", "tools", "max_tokens"}
+    assert "stream" not in kw and set(kw) == {"model", "temperature", "messages", "tools", "max_completion_tokens", "reasoning_effort"}
     assert kw["tools"] is SCHEMAS
 
 
@@ -69,7 +69,7 @@ def test_sugerivel_falso_com_pendencia_armada_no_turno(monkeypatch, pro_user_id)
 def test_erro_da_openai_nao_oferece_feedback(monkeypatch, pro_user_id):
     openai_falso(monkeypatch, rodada(erro=RuntimeError("fora")))
     r, _, _ = executar(pro_user_id, "oi")
-    assert r.reply == runner.ERROR_MSG and r.message_id is None
+    assert r.reply == runner.ERROR_MSG.removeprefix("🐷 ") and r.message_id is None
 
 
 # ── o endpoint ──────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ def test_endpoint_fim_do_erro_da_openai_sem_message_id(monkeypatch):
     _, c = conta()
     openai_falso(monkeypatch, rodada(erro=RuntimeError("fora")))
     fim = eventos_sse(c.post("/ai/chat/stream", json={"message": "oi"}, headers=H))[-1]
-    assert fim["reply"] == runner.ERROR_MSG and fim["message_id"] is None
+    assert fim["reply"] == runner.ERROR_MSG.removeprefix("🐷 ") and fim["message_id"] is None
 
 
 def test_endpoint_erro_do_turno_vira_evento_erro(monkeypatch):

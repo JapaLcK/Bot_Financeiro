@@ -1,0 +1,27 @@
+{
+  "card": "fim_do_mes",
+  "abas": [
+    {
+      "mes": null,
+      "recursos": {
+        "fim_do_mes": {
+          "mes": "2026-10",
+          "hoje": "2026-10-17",
+          "dias_corridos": 17,
+          "dias_no_mes": 31,
+          "receita": 5200.0,
+          "despesa": 2100.5,
+          "saldo_ate_agora": 3099.5,
+          "despesa_cartao": 800.0,
+          "despesa_agendada": 0.0,
+          "despesa_no_ritmo": 1300.5,
+          "despesa_projetada": 3180.0,
+          "saldo_projetado": 2020.0,
+          "vai_fechar_negativo": false,
+          "cartao_por": "fatura",
+          "motivos": []
+        }
+      }
+    }
+  ]
+}

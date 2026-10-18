@@ -14,7 +14,7 @@ const definirReduzir = (v: boolean) => (global as unknown as { __definirReduzirM
 const MES = "2025-03"; // nunca é o mês do provider (o mês atual)
 const detalhesDe = (mes: string, categorias = F["/api/app/mes-detalhes"].categorias) => ({ detalhes: { ...F["/api/app/mes-detalhes"], mes, categorias } });
 const linha = (nome: RegExp) => screen.getByRole("button", { name: nome });
-const aberta = (nome: RegExp) => linha(nome).props.accessibilityState.expanded;
+const aberta = (nome: RegExp) => linha(nome).props.accessibilityState.selected; // a coluna do `CardGastos` (selected), não a linha expansível
 const tocar = async (nome: RegExp) => { await act(async () => { fireEvent.press(linha(nome)); await drenar(); }); };
 
 it("categoria de OUTRO mês: pede o mês da aba, expande no lugar, recolhe ao tocar de novo, e nunca navega", async () => {
@@ -30,7 +30,7 @@ it("categoria de OUTRO mês: pede o mês da aba, expande no lugar, recolhe ao to
 it("controle positivo: no painel (aba Gastos) a mesma linha segue levando ao Extrato", async () => {
   instalarCards(true); const push = jest.spyOn(router, "push"); await abrir(); await ir("/gastos");
   await waitFor(() => expect(screen.getByRole("button", { name: /Alimentação/ })).toBeTruthy());
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação" } });
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação", entrada: expect.any(Number) } });
   await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy()); await act(drenar); // espera o Extrato aberto terminar a leitura (senão ela atualiza o estado depois do teste)
 });
 it("categoria null: pede `categoria=` vazio (casa 'sem categoria')", async () => {
@@ -111,23 +111,16 @@ it("transação: a linha recolhida já diz 'parcela 3/10' e o toque abre o detal
   expect(screen.getByText("Casa · Nubank · 09:30 · Parcela 3/10")).toBeTruthy();
 });
 
-it("na Folha: a mesma expansão, com estado independente do card", async () => {
-  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar();
-  await tocar(/Alimentação/); await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy());
-  fireEvent.press(screen.getByTestId("bloco-categorias")); expect(screen.getByRole("header", { name: "Para onde vai · março de 2025" })).toBeTruthy();
-  const linhas = () => screen.getAllByRole("button", { name: /Alimentação/ });
-  expect(linhas().map((l) => l.props.accessibilityState.expanded)).toEqual([true, false]); // a da Folha abre fechada
-  await act(async () => { fireEvent.press(linhas()[1]!); await drenar(); });
-  expect(linhas().map((l) => l.props.accessibilityState.expanded)).toEqual([true, true]); expect(screen.getAllByText("Mercado do bairro")).toHaveLength(2);
-});
-
 it("card `periodo`: a categoria expande os maiores lançamentos no lugar — sem busca e sem Folha", async () => {
   comBlocos(bloco("periodo")); await perguntar();
   await tocar(/Mercado/); expect(screen.getByText("Supermercado")).toBeTruthy();
   expect(chamadasLanc()).toHaveLength(0); expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); // sem Folha (só ela tem "Fechar")
 });
 
-it.each([[true, "undefined"], [false, "object"]])("reduzir movimento=%s: o conteúdo expandido entra com entering %s", async (reduzir, tipo) => {
+it.each([[true, "undefined"], [false, "object"]])("reduzir movimento=%s: as transações da coluna entram com entering %s", async (reduzir, tipo) => {
   definirReduzir(reduzir); comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/Alimentação/);
-  await waitFor(() => expect(typeof screen.getByTestId("linha-expandida").props.entering).toBe(tipo));
+  await waitFor(() => expect(typeof screen.getByTestId("gastos-transacoes").props.entering).toBe(tipo));
+});
+it("reduzir movimento: o dia (linha expansível) segue entrando com `linha-expandida`", async () => {
+  definirReduzir(false); await tocarDia(); expect(typeof screen.getByTestId("linha-expandida").props.entering).toBe("object");
 });

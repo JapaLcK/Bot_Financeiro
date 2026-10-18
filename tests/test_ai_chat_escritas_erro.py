@@ -7,6 +7,7 @@ import db
 import db.bills
 from core.handlers import forma_pagamento as fp
 from core.services.ai_chat import runner
+from core.services.ai_chat._context import CURRENT_USER_MESSAGE
 from core.services.ai_chat.tools import get_tool
 
 SEGREDO = "psycopg SELECT segredo"
@@ -65,7 +66,11 @@ def test_escrita_nao_devolve_a_causa_da_excecao(monkeypatch, nome, args, falhas,
 
 def test_historico_tambem_nao_leva_a_causa(monkeypatch):
     monkeypatch.setattr(db.bills, "create_boleto", _boom)
-    historico, _ = runner._dispatch_tool(1, "add_boleto", {"name": "luz", "amount": 10, "due_date": "2099-01-15"})
+    tok = CURRENT_USER_MESSAGE.set("boleto da luz de 10 vence 15/01")  # a âncora de valor lê o texto do usuário
+    try:
+        historico, _ = runner._dispatch_tool(1, "add_boleto", {"name": "luz", "amount": 10, "due_date": "2099-01-15"})
+    finally:
+        CURRENT_USER_MESSAGE.reset(tok)
     assert "segredo" not in historico and "Não consegui cadastrar o boleto" in historico
 
 

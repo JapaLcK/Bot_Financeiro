@@ -107,10 +107,11 @@ export const coresBanco: Record<string, string> = {
 /** Grade de 4pt. */
 export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 48 } as const;
 /**
- * Escala de raio do PDF, só com os valores em uso. `pilula`: maior que qualquer
- * altura, o RN corta na metade. `bloco`: Card/Banner/faixa do Piggy;
- * `controle`: Button, Input, trilho do segmentado, grupo de ListRow; `chip`: Chip;
- * `celula`: polegar do segmentado; `barra`: ProgressBar; `cartao`: o resto.
+ * Escala de raio do PDF. `pilula`: maior que qualquer altura, o RN corta na metade
+ * (Button, Chip, Acao, trilho e polegar do segmentado). `bloco`: Card/Banner/faixa do Piggy;
+ * `controle`: Input e grupo de ListRow; `chip`: cartão pequeno e chip de tom (meta no chat, % do ritmo);
+ * `barra`: ProgressBar; `cartao`: o resto. `celula` (antes o polegar do segmentado) ficou sem uso
+ * no app e é mantido: `tailwind_tokens` compara a escala inteira.
  */
 export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8, celula: 7, barra: 4 } as const;
 /**
@@ -118,6 +119,8 @@ export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8,
  * `contraste.test.ts`). No claro o texto escuro já está a ~4,6:1 do fundo e qualquer tinta o rebaixa (12% dava 4,24 a 4,44; 8%, 4,49): 6%.
  */
 export const ALFA_FUNDO_TOM = { light: 0.06, dark: 0.14 } as const;
+/** `cor` (hex de 6 dígitos) com o alfa (0 a 1) em 2 dígitos hex: `#RRGGBBAA`. Fundo tingido do chip e dos avisos da pilha (`ALFA_FUNDO_TOM[esquema]`) e wash da série das metas (`ALFA_WASH_SERIE`). */
+export const tingir = (cor: string, alfa: number) => `${cor}${Math.round(alfa * 255).toString(16).padStart(2, "0")}`;
 
 // `fontFamily`, não `fontWeight`: peso + família custom cai de volta no
 // sistema no Android (RN não faz "negrito sintético" de uma TTF nomeada).
@@ -139,6 +142,17 @@ export const texto = {
  * então a cor nunca é o único sinal e fica fora do portão de contraste.
  */
 export const CORES_CATEGORIA = ["#3987E5", "#D95926", "#2FA0C8", "#C98500", "#9085E9", "#E66767", "#7C8391", "#5A5F6A"] as const;
+
+/**
+ * Cor de série das pílulas do card `metas` (ciano, lilás, azul, fúcsia claro), também paleta de dado fora de `Paleta`. O escuro
+ * é o `--serie-1..4` de `webapp/src/dashboard/styles/metas.css` (o teste `metas_serie_paridade` compara); o claro tem paleta
+ * própria, mesmo matiz e mais escura, porque as da web somem (1,5 a 2,3:1) sobre `surfaceControl` claro. Wash = a cor a `ALFA_WASH_SERIE`.
+ */
+export const SERIE_META = {
+  light: ["#0E7490", "#9333EA", "#2563EB", "#C026D3"],
+  dark: ["#22D3EE", "#C084FC", "#60A5FA", "#F0ABFC"],
+} as const;
+export const ALFA_WASH_SERIE = 0.12;
 
 /** Paleta das telas de acesso: mantém o fundo da tampa biométrica nativa. */
 export const acessoClaro: Paleta = {

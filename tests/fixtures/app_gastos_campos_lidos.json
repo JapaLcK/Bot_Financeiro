@@ -1,0 +1,7 @@
+{
+ "Gastos": ["hoje", "disponivel", "historico_desde", "dias", "categorias", "motivos"],
+ "GastoDia": ["dia", "total", "quantidade", "maiores", "categorias"],
+ "GastoMaior": ["descricao", "valor", "categoria"],
+ "GastoDiaCategoria": ["chave", "valor"],
+ "GastoCategoria": ["chave", "nome", "emoji"]
+}

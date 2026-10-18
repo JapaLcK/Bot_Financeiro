@@ -18,15 +18,14 @@ Write (auto-executado, SEM confirmação):
     com o texto do usuário (`confirmar_se`, `core/services/wa_ia_primeiro.py`).
 
 Write (PEDE confirmação — destrutivo):
-  - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
-    Bifurca entre `launches` (user_seq) e `credit_transactions` (id global).
+  - delete_launch: apaga um lançamento da carteira pelo `pode` do Extrato (`extrato_ia.py`);
+    compra no cartão, guardado e o que veio do banco são recusados antes de pedir o "sim".
   - delete_all_launches: apaga TODOS os lançamentos da conta corrente de uma vez,
     revertendo o saldo. Só pra pedidos explícitos de "apagar tudo".
 """
 from __future__ import annotations
 
 import json
-import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -46,43 +45,13 @@ from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
 from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, JANELAS_DO_TURNO
-from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve
+from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
+from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
-
-# A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
-# e a descrição da linha (`DETAIL: Key (…)=(…)`), e "connection to server was
-# lost" não diz nada pra quem só quer apagar um gasto. A mensagem genérica ainda
-# tem de dizer o que fazer — sem isso o usuário fica sem ação.
-_ERRO_APAGAR = (
-    "🐷 Não consegui apagar agora — deu um erro do meu lado. "
-    "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
-)
-
-
-def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    limit = int(args.get("limit") or 10)
-    limit = max(1, min(limit, 50))
-
-    # Saque em espécie/transferência (receita/despesa interna) vai como
-    # "entrada"/"saída": como "receita", o modelo o leria como ganho.
-    from core.handlers.launches import _rotulo_interno
-
-    rows = db.list_launches(user_id, limit=limit)
-    return {
-        "launches": [
-            {
-                "id": r["id"],
-                "user_seq": r.get("user_seq"),
-                "tipo": _rotulo_interno(r) or r["tipo"],
-                "valor": float(r["valor"] or 0),
-                "alvo": r.get("alvo"),
-                "nota": r.get("nota"),
-                "categoria": r.get("categoria"),
-                "criado_em": r["criado_em"].isoformat() if r.get("criado_em") else None,
-            }
-            for r in rows
-        ]
-    }
+from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
+from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
+from .extrato_ia import apagar, armar_apagar, resumo_apagar, validar_apagar
+from .listas_ia import texto_parcelamento, ultimos_lancamentos
 
 
 def _parse_iso_date(s: str | None) -> date | None:
@@ -201,9 +170,9 @@ def _recusa_se_for_do_card(
 
 def _recusa_comparar(user_id: int, ma, mb) -> dict[str, Any] | None:
     """No app, `compare_periods` de DOIS meses inteiros, diferentes e passados (`ma`/`mb` = `_meses_inteiros` de cada
-    lado) vira o card `categorias` com `meses=[...]` (o card lado a lado é a comparação). Fora disso o dado, como
-    antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (os mesmos dias,
-    F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
+    lado) vira o card `categorias` com `meses=[...]` (o card com uma aba por mês é a comparação). Fora disso o dado, como
+    antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (o mês aberto
+    inteiro contra o anterior, F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
     (o card não traz o `historico_desde`). Vem DEPOIS do `plan_gate_ok`: quem não tem a comparação não a ganha pelo card."""
     hoje = today_tz()
     if not (streaming.ativo() and ma and mb and ma[0] == ma[1] and mb[0] == mb[1] and ma != mb
@@ -289,8 +258,7 @@ def _resumo_periodo(user_id: int, start: date, end: date) -> dict[str, Any]:
         if "inicio_do_historico" in motivos:  # limite do plano não é "incompleto": o aviso abaixo é só dos outros motivos
             nota += (f" Limite do plano (inicio_do_historico){f': histórico a partir de {historico_desde}' if historico_desde else ''};"
                      " antes disso não é falta de gasto.")
-        if outros := [m for m in motivos if m != "inicio_do_historico"]:
-            nota += f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário."
+        nota += _aviso_motivos(motivos)
         if futuro:
             motivos.append("mes_futuro")
         return {
@@ -339,16 +307,6 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return _resumo_periodo(user_id, start, end)
 
 
-def _texto_parcelamento(r: dict[str, Any]) -> str | None:
-    """Texto pronto: o modelo confundia `parcela` "1/3" (valor da parcela) com compra em 3x."""
-    if r.get("parcelas"):
-        return f"compra de {fmt_brl(r['valor'])} em {r['parcelas']}x"
-    if r.get("parcela"):
-        n, total = r["parcela"].split("/")
-        return f"parcela {n} de {total} — {fmt_brl(r['valor'])} neste período"
-    return None
-
-
 def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if erro := _data_invalida(args, "start_date", "end_date"):
         return erro
@@ -373,11 +331,11 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         user_id, start, end, limit, categoria=categoria, by_bill_month=por_fatura, juntar_parcelas=True,
     )
     for r in rows:
-        r["parcelamento"] = _texto_parcelamento(r)
+        r["parcelamento"] = texto_parcelamento(r)
         # só o texto pronto vai à IA: os campos crus foram mal lidos ("parcelado em 3x" numa parcela OF)
         r.pop("parcela", None)
         r.pop("parcelas", None)
-    return {
+    resultado = {
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
         "categoria": categoria,
@@ -386,6 +344,9 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         **limite,
         **extra,
     }
+    if rows and mostrar_da_tool(user_id, "maiores_gastos", resultado):  # o card é este mesmo resultado
+        return resumo_maiores(resultado)
+    return resultado
 
 
 def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -420,7 +381,7 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             hoje = today_tz()
             corrente_x_anterior = tuple((m[0] == m[1] == (d.year, d.month)) if m else False for m, d in zip(
                 meses, (hoje.replace(day=1) - timedelta(days=1), hoje)))
-            if all(corrente_x_anterior):  # "outubro contra setembro" = `mes=<corrente>`: os mesmos N dias, o mesmo número
+            if all(corrente_x_anterior):  # "outubro contra setembro" = `mes=<corrente>`: o mês inteiro, o mesmo número
                 r = cp.comparar_mes(user_id, *meses[1][0])
             else:
                 if all(meses):
@@ -434,7 +395,16 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             return {"error": "informe mes (AAAA-MM) ou period_a_start, period_a_end, period_b_start, period_b_end em ISO (YYYY-MM-DD)."}
     except ValueError as exc:
         return {"error": str(exc)}
-    return recusa if r is None else cp.para_json(r)
+    if r is None:
+        return recusa
+    j = cp.para_json(r)
+    serie = j.pop("serie", None)  # só a tela desenha a série: o modelo (e o `ai_guard`) nunca a vê
+    # O card é este mesmo resultado (uma só conta); `escolha` e `nota` são para o modelo, não para a tela. Sem número
+    # (`inicio_do_historico`) ou sem base (`sem_base`: nada a comparar) não vira card com cara de sucesso.
+    if j["despesa"] is not None and j["motivo"] != "sem_base" and mostrar_da_tool(
+            user_id, "comparacao", {**{k: v for k, v in j.items() if k not in ("escolha", "nota")}, "serie": serie}):
+        return resumo_comparacao(j)
+    return j
 
 
 def _tendencia(despesas: list[float]) -> dict[str, Any]:
@@ -493,73 +463,80 @@ def _get_spending_trend(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _aviso_motivos(motivos) -> str:
+    """O aviso de número incompleto: o limite do plano (`inicio_do_historico`) não conta, tem nota própria."""
+    outros = [m for m in motivos if m != "inicio_do_historico"]
+    return f" Número pode estar desatualizado ou incompleto ({', '.join(outros)}); avise o usuário." if outros else ""
+
+
+def _projetar_mes(m: dict[str, Any], dias_corridos: int, dias_no_mes: int) -> dict[str, Any]:
+    """A conta do fim do mês, pura: `m` é o `mes_detalhes.ler` do mês corrente. Decimal por dentro, float na saída."""
+    entrou, saiu, saiu_cartao = m["entrou"], m["saiu"], m["origens"]["cartao"]
+    # Lançamento fora do cartão com data depois de hoje é valor conhecido: entra uma vez, não esticado pelo
+    # ritmo (como a fatura). O leitor soma só as linhas que já alimentam `saiu`, sem o cartão.
+    saiu_agendado = m["saiu_agendado"]
+    saiu_no_ritmo = saiu - saiu_cartao - saiu_agendado
+    saiu_projetado = saiu_no_ritmo * dias_no_mes / dias_corridos + saiu_cartao + saiu_agendado
+    saldo_projetado = round(entrou - saiu_projetado, 2) + 0  # `+ 0` tira o -0.0 (Decimal('-0.00') + 0 = 0.00)
+    d = lambda x: float(round(x, 2))  # noqa: E731
+    return {
+        "receita": d(entrou),
+        "despesa": d(saiu),
+        "saldo_ate_agora": d(entrou - saiu),
+        "despesa_cartao": d(saiu_cartao),
+        "despesa_agendada": d(saiu_agendado),
+        "despesa_no_ritmo": d(saiu_no_ritmo),
+        "despesa_projetada": d(saiu_projetado),
+        "saldo_projetado": d(saldo_projetado),
+        "vai_fechar_negativo": saldo_projetado < 0,  # sobre o valor já arredondado: nunca -0.0 com True
+    }
+
+
 def _forecast_month_end(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    """Projeção do fim do mês corrente.
-
-    Modelo:
-      - Despesa real → escala pelo ritmo diário (gastos do dia-a-dia).
-      - Aportes → trata como CONSTANTE (eventos pontuais, não fluxo).
-        Soma só o que já foi feito; não projeta novos aportes futuros.
-      - Receita → assume mesma (pontual, recibos não acontecem em ritmo).
-
-    Saídas totais = despesa real projetada + aportes já feitos.
-    `fluxo_do_mes` (parcial) = receita - despesa - aportes do MÊS CORRENTE
-    (não confundir com saldo da conta corrente, que reflete meses
-    anteriores também).
-    """
+    """Projeção do fim do mês corrente, lendo o mês pelo MESMO leitor do card `categorias`
+    (`mes_detalhes.ler`): receita e despesa até agora são as do painel (pagamento de fatura, transferência
+    e guardar ficam fora). Só o cartão do Open Finance entra como está na fatura (`origens["cartao"]`); o
+    resto, inclusive cartão manual, é extrapolado pelo ritmo diário, salvo o lançamento com data futura
+    (`despesa_agendada`, constante); a receita não é projetada. Conta em
+    Decimal, sai float. As chaves seguem o padrão `receita`/`despesa*`/`saldo*` porque é o que o `ai_guard`
+    (`_CHAVE_MONETARIA_RE`) reconhece como dinheiro."""
     from calendar import monthrange
     from core.services.plan_service import plans_v2_enabled, plan_gate_ok
     if plans_v2_enabled() and not plan_gate_ok(user_id, "forecast"):
         return {"error": "pro_required", "message": "A projeção de fechamento está disponível nos planos Plus e Pro."}
 
-    today = date.today()
-    month_start = today.replace(day=1)
-    days_in_month = monthrange(today.year, today.month)[1]
-    days_elapsed = today.day
+    from db.mes_detalhes import ler
 
-    sum_current = db.get_summary_by_period(user_id, month_start, today)
-    despesa_real_atual = float(sum_current.get("despesa") or 0)
-    receita_atual = float(sum_current.get("receita") or 0)
-    aportes_atual = float(db.get_internal_movement_total(user_id, month_start, today))
-
-    saidas_atual = despesa_real_atual + aportes_atual
-
-    # Projeção: SÓ despesa escala por ritmo. Aportes ficam constantes
-    # (eventos pontuais, não fluxo contínuo).
-    if days_elapsed <= 0:
-        despesa_projetada = despesa_real_atual
-    else:
-        ritmo_diario = despesa_real_atual / days_elapsed
-        despesa_projetada = ritmo_diario * days_in_month
-
-    saidas_projetadas = despesa_projetada + aportes_atual
-
-    return {
-        "today": today.isoformat(),
-        "month_start": month_start.isoformat(),
-        "days_elapsed": days_elapsed,
-        "days_in_month": days_in_month,
-        "despesa_real_atual": round(despesa_real_atual, 2),
-        "aportes_atual": round(aportes_atual, 2),
-        "saidas_atual": round(saidas_atual, 2),
-        "receita_atual": round(receita_atual, 2),
-        # Fluxo do mês = receita - saidas DO MÊS CORRENTE.
-        # NÃO é saldo da conta (que reflete histórico anterior tb).
-        "fluxo_do_mes": round(receita_atual - saidas_atual, 2),
-        "despesa_projetada_fim_do_mes": round(despesa_projetada, 2),
-        "aportes_projetados_fim_do_mes": round(aportes_atual, 2),  # constante
-        "saidas_projetadas_fim_do_mes": round(saidas_projetadas, 2),
-        "saldo_projetado": round(receita_atual - saidas_projetadas, 2),
-        "vai_fechar_negativo": (receita_atual - saidas_projetadas) < 0,
-        "cartao_incluido": False,
-        "nota_metodologia": (
-            "Projeção SEM as compras no cartão de crédito. "
-            "Despesa projetada por ritmo (extrapola dia-a-dia). "
-            "Aportes são eventos pontuais — somados como constante, "
-            "não projetados. `fluxo_do_mes` é o saldo do MÊS, não o "
-            "saldo da conta corrente."
-        ),
+    agora = now_tz()
+    hoje = agora.date()
+    m = ler(user_id, hoje.year, hoje.month, agora)
+    dias_no_mes = monthrange(hoje.year, hoje.month)[1]
+    nota = (
+        "`receita` e `despesa` são as do painel do mês (pagamento de fatura, transferência e guardar ficam "
+        "fora). Só as compras do cartão conectado pelo Open Finance entram como estão na fatura que fecha no "
+        "mês (`despesa_cartao`); o resto do gasto até hoje, inclusive cartão lançado à mão, é projetado pelo ritmo "
+        "diário (`despesa_no_ritmo`); lançamento fora do cartão com data depois de hoje, no mês, também entra "
+        "como está (`despesa_agendada`), sem esticar; receita com data futura no mês já está em `receita`, "
+        "como no painel, e não é projetada."
+    )
+    nota += _aviso_motivos(m["motivos"])
+    resultado = {
+        "mes": m["mes"],
+        "hoje": hoje.isoformat(),
+        "dias_corridos": hoje.day,
+        "dias_no_mes": dias_no_mes,
+        **_projetar_mes(m, hoje.day, dias_no_mes),
+        "cartao_incluido": True,
+        "cartao_por": "fatura",
+        "motivos": m["motivos"],
+        "nota_metodologia": nota,
     }
+    # O card é este mesmo resultado (uma só conta); a nota é para o modelo, não para a tela.
+    # Mês sem lançamento nenhum: tudo zerado não vira card (cara de sucesso); o modelo recebe o resultado normal.
+    if (resultado["receita"] or resultado["despesa"]) and mostrar_da_tool(
+            user_id, "fim_do_mes", {k: v for k, v in resultado.items() if k not in ("nota_metodologia", "cartao_incluido")}):
+        resultado["card_na_tela"] = True
+    return resultado
 
 
 def _get_top_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -772,164 +749,6 @@ _PERGUNTE_A_FORMA = (
 )
 
 
-# ─── Write: delete_launch (PEDE confirmação — destrutivo) ───────────────────
-
-def _delete_launch_summary(args: dict[str, Any]) -> str:
-    lid = args.get("launch_id")
-    return f'apagar o lançamento #{lid}' if lid else "apagar lançamento"
-
-
-def _try_int(s: str) -> int | None:
-    try:
-        n = int(s)
-        return n if n > 0 else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _delete_launch_validate(user_id: int, args: dict[str, Any]) -> str | None:
-    """Roda ANTES da confirmação. Se o ID nem existe, mostra erro imediato
-    em vez de pedir 'confirma apagar #X?' enganoso. Crítico porque o LLM
-    às vezes inventa IDs quando o user diz 'aquele' sem especificar.
-
-    Aceita 3 formas:
-      1. user_seq de launches (#5, #142) — número pequeno
-      2. id de credit_transaction (numérico, mais alto)
-      3. código de parcelamento (PCxxxxxxxx, ex: PC81524273)
-    """
-    raw_id = str(args.get("launch_id") or "").strip()
-    if not raw_id:
-        return "🐷 Faltou o ID do lançamento."
-
-    lid = _try_int(raw_id)
-    if lid is not None:
-        # user_seq de launches?
-        if db.resolve_user_seq_to_id(user_id, lid):
-            return None
-        # id de credit_transaction?
-        with db.get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "select 1 from credit_transactions where user_id=%s and id=%s",
-                    (user_id, lid),
-                )
-                if cur.fetchone():
-                    return None
-
-    # Código de parcelamento (PCxxxxxxxx ou só os hex do início do group_id)
-    if db.resolve_installment_group_id(user_id, raw_id):
-        return None
-
-    return (
-        f"🐷 Não achei o lançamento '{raw_id}'. "
-        f"Manda o ID exato (aparece no histórico como #N, ou o código do "
-        f"parcelamento tipo PCxxxxxxxx) ou pede pra eu listar os últimos lançamentos."
-    )
-
-
-def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
-    """Apaga um lançamento. Tenta na ordem:
-      1. user_seq de `launches` (cenário comum: "#5") → delete_launch_and_rollback
-      2. id global de credit_transactions → undo_credit_transaction (auto desfaz
-         grupo inteiro se for parcelado)
-      3. código de parcelamento (PCxxxxxxxx) → undo_installment_group
-    """
-    raw_id = str(args.get("launch_id") or "").strip()
-    if not raw_id:
-        return "🐷 Faltou o ID do lançamento."
-
-    lid = _try_int(raw_id)
-    if lid is not None:
-        # 1. user_seq de launches
-        internal_id = db.resolve_user_seq_to_id(user_id, lid)
-        if internal_id:
-            try:
-                aviso = db.delete_launch_and_rollback(user_id, internal_id)
-                if aviso:  # apagou a fundida: o banco volta para a lista (P3)
-                    return f"🗑️ Lançamento #{lid} apagado. {aviso}"
-                return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
-            except LookupError:
-                return f"🐷 Não achei o lançamento #{lid}."
-            except db.LaunchNoEffects as e:
-                # Lançamento sem `efeitos`: condição PERMANENTE, não erro
-                # técnico. `_ERRO_APAGAR` manda tentar de novo em alguns
-                # minutos — conselho que nunca ia funcionar aqui. Mesma
-                # distinção do `delete_all_launches` (`kept_no_effects` ×
-                # `errors`).
-                _log_falha("delete_launch_sem_efeitos", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
-                    f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
-                )
-            except db.InvestmentMovementNotLast as e:
-                # Antes do `LaunchUnsafeRollback` (subclasse); mesma frase do WhatsApp.
-                _log_falha("delete_launch_movimento_posterior", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
-            except db.PocketHasMovement as e:
-                # Idem: subclasse, antes da mãe; mesma frase do WhatsApp.
-                _log_falha("delete_launch_caixinha_com_movimento", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
-            except db.LaunchUnsafeRollback as e:
-                # `efeitos` existe mas não dá pra revertê-lo por inteiro —
-                # mesma condição PERMANENTE do WhatsApp (`core/handlers/
-                # pending.py`), mesma frase.
-                _log_falha("delete_launch_inseguro", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 Não consigo reverter o lançamento #{lid} com segurança, "
-                    f"então mantive ele intacto pra não bagunçar seu saldo."
-                )
-            except db.InvestmentLotHasWithdrawal as e:
-                # TEMPORÁRIA e com contorno: apagar o resgate reabre o lote.
-                # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
-                # (o dado está inteiro) servem aqui.
-                _log_falha("delete_launch_lote_com_resgate", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 Não dá pra desfazer o aporte #{lid}: esse lote já teve "
-                    f"resgate. Apaga o resgate primeiro e depois volta aqui pra "
-                    f"apagar o aporte."
-                )
-            except Exception as e:
-                if violacao_finito(e):
-                    raise  # runner responde MSG_VALOR_WHATSAPP
-                _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
-                return _ERRO_APAGAR
-
-        # 2. id de credit_transaction
-        try:
-            result = db.undo_credit_transaction(user_id, lid)
-        except db.CompraDoBanco as e:
-            return f"🐷 {e}"
-        except Exception as e:
-            _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=lid)
-            return _ERRO_APAGAR
-        if result is not None:
-            removed = int(result.get("removed_count") or 1)
-            if removed > 1:
-                return f"🗑️ Parcelamento apagado ({removed} parcelas)."
-            return f"🗑️ Compra no crédito #{lid} apagada."
-
-    # 3. Código de parcelamento (PCxxxxxxxx)
-    group_id = db.resolve_installment_group_id(user_id, raw_id)
-    if group_id:
-        try:
-            result = db.undo_installment_group(user_id, group_id)
-        except db.CompraDoBanco as e:
-            return f"🐷 {e}"
-        except Exception as e:
-            _log_falha("undo_installment_group", user_id, e, group_id=group_id)
-            return _ERRO_APAGAR
-        if result:
-            removed = int(result.get("removed_count") or 0)
-            return f"🗑️ Parcelamento {raw_id.upper()} apagado ({removed} parcelas)."
-
-    return f"🐷 Não achei o lançamento '{raw_id}'."
-
-
 # ─── Write: delete_all_launches (PEDE confirmação — destrutivo em massa) ─────
 
 def _delete_all_launches_summary(args: dict[str, Any]) -> str:
@@ -1042,7 +861,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "list_recent_launches",
-                "description": "Retorna os lançamentos (despesas e receitas) mais recentes do usuário, em ordem cronológica decrescente. Use pra perguntas tipo 'meus últimos gastos', 'o que registrei hoje', 'mostra os lançamentos'.",
+                "description": "Retorna os lançamentos (despesas, receitas e compras no cartão) mais recentes do usuário, em ordem cronológica decrescente, os mesmos que o Extrato mostra. Cada item traz o `id` (use-o em delete_launch/recategorize_launch; NUNCA o mostre ao user), o `user_seq` (o #N que o user vê; só nos que não são de cartão), `pode` (o que dá pra fazer com ele) e `moeda`. Use pra perguntas tipo 'meus últimos gastos', 'o que registrei hoje', 'mostra os lançamentos'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1058,7 +877,7 @@ TOOLS: list[Tool] = [
             },
         },
         is_write=False,
-        execute=_list_recent_launches,
+        execute=ultimos_lancamentos,
     ),
     Tool(
         schema={
@@ -1224,7 +1043,7 @@ TOOLS: list[Tool] = [
                     "Compara receita, despesa e categorias entre 2 períodos equivalentes. "
                     "Use pra 'gastei mais em abril ou maio?', 'esse mês vs o anterior', "
                     "'compara com o mês passado'. Pra mês use `mes` (AAAA-MM; o mês corrente "
-                    "compara os mesmos dias do anterior; datas do mês corrente contra o anterior inteiro dão o mesmo "
+                    "compara o mês inteiro (o já lançado) com o anterior inteiro; datas do mês corrente contra o anterior inteiro dão o mesmo "
                     "resultado); datas só pra períodos livres ou meses antigos. "
                     "Cartão: com `mes`, ou com datas que são meses-calendário inteiros dos dois lados, "
                     "entra pela FATURA (a regra do 'Saiu do mês', igual ao painel); com qualquer período "
@@ -1289,12 +1108,17 @@ TOOLS: list[Tool] = [
                 "description": (
                     "Projeta como o mês corrente vai fechar. Use pra 'no ritmo "
                     "atual vou fechar no negativo?', 'projeção do mês', 'vou "
-                    "estourar?'. Retorna despesa real, aportes, receita, "
-                    "fluxo do mês atual e projeções. IMPORTANTE pra mensagem: "
-                    "(1) `fluxo_do_mes` é o saldo do mês corrente, NÃO o saldo "
-                    "da conta corrente (que tem histórico). (2) Despesa é "
-                    "projetada por ritmo diário; aportes são CONSTANTES (eventos "
-                    "pontuais já feitos, não escalados). Mostra ambos separado."
+                    "estourar?'. Os números até agora (`receita`, `despesa`) são os "
+                    "do painel do mês. IMPORTANTE pra mensagem: (1) "
+                    "`saldo_ate_agora` é receita menos despesa no mês corrente, "
+                    "NÃO o saldo da conta. (2) Só as compras do cartão conectado "
+                    "pelo Open Finance (`despesa_cartao`) entram como estão na "
+                    "fatura; o resto do gasto até hoje, inclusive cartão lançado à mão, é "
+                    "projetado pelo ritmo diário (`despesa_no_ritmo`). Lançamento "
+                    "fora do cartão com data depois de hoje, no mês, entra como "
+                    "está (`despesa_agendada`), sem esticar. Receita com data "
+                    "futura no mês já está em `receita`, como no painel; a "
+                    "receita não é projetada."
                 ),
                 "parameters": {"type": "object", "properties": {}},
             },
@@ -1368,6 +1192,7 @@ TOOLS: list[Tool] = [
         is_write=True,
         requires_confirmation=False,
         execute=_add_launch_execute,
+        valor_do_usuario="valor",
         summary=_add_launch_summary,
         confirmar_se=precisa_confirmar_lancamento,
         ao_confirmar=_congela_pendencia,
@@ -1380,10 +1205,11 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "delete_launch",
                 "description": (
-                    "Apaga um lançamento (despesa, receita ou compra no "
-                    "cartão). Use pra 'apaga o gasto #5', 'remove o último', "
-                    "'apaga aquela compra'. Reverte saldo automaticamente. "
-                    "Se for parcela de parcelamento, derruba o grupo inteiro. "
+                    "Apaga um lançamento da carteira (despesa ou receita). Use pra "
+                    "'apaga o gasto #5', 'remove o último', 'apaga aquela compra'. "
+                    "Reverte saldo automaticamente. Compra no cartão, movimento de "
+                    "caixinha/investimento e o que veio do banco NÃO se apagam por "
+                    "aqui: a tool recusa na hora e diz o que dá pra fazer. "
                     "ESCRITA DESTRUTIVA — pede confirmação (não tem undo)."
                 ),
                 "parameters": {
@@ -1392,12 +1218,11 @@ TOOLS: list[Tool] = [
                         "launch_id": {
                             "type": "string",
                             "description": (
-                                "ID exatamente como aparece no histórico. "
-                                "Aceita: '#5' (user_seq de lançamento normal), "
-                                "número grande (id de compra no cartão), OU "
-                                "'PCxxxxxxxx' (código de parcelamento, ex: "
-                                "PC81524273). Use sempre o que o user disse "
-                                "literalmente, NUNCA invente."
+                                "O `id` exatamente como veio da tool (list_recent_launches, "
+                                "get_open_bill: 'l123' ou 'c45'), OU o '#5' que o user "
+                                "disse, OU 'CC45' / 'PCxxxxxxxx' (códigos de compra no "
+                                "cartão e de parcelamento; o `codigo` de list_installments). "
+                                "NUNCA invente nem deduza um número."
                             ),
                         },
                     },
@@ -1407,9 +1232,11 @@ TOOLS: list[Tool] = [
         },
         is_write=True,
         requires_confirmation=True,
-        summary=_delete_launch_summary,
-        execute=_delete_launch_execute,
-        validate=_delete_launch_validate,
+        summary=resumo_apagar,
+        execute=apagar,
+        validate=validar_apagar,
+        ao_confirmar=_ao_confirmar_alvo,
+        ao_armar=armar_apagar,
     ),
     Tool(
         schema={

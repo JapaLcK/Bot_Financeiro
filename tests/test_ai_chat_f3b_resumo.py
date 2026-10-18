@@ -141,7 +141,7 @@ def _lista(*nomes):
     (("Café", "cafe-"), "cafe", {"categoria": "Café", "valor": 10.0}),                             # só a dobra de acento da chave desempata: o texto solto acharia 2
 ])
 def test_categoria_pedida_casa_pela_chave_exata_e_so_cai_no_texto_solto_se_for_unico(nomes, pedida, esperado):
-    from core.services.ai_chat.cards import _top3
+    from core.services.ai_chat.cards_resumos import _top3
     assert _top3(_lista(*nomes), pedida)["categoria_pedida"] == esperado
 
 

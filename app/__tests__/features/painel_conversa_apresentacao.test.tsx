@@ -47,9 +47,11 @@ it("sair da tela com o status à mostra limpa o timer: nada dispara depois", asy
   expect(limpar).not.toHaveBeenCalled(); screen.unmount(); expect(limpar).toHaveBeenCalledWith(idDoIntervalo(intervalo));
   await act(async () => { jest.advanceTimersByTime(10_000); }); expect(erro).not.toHaveBeenCalled();
 });
-it("passos ficam numa linha acima do texto, sem repetição e em ordem", async () => {
-  await abrir(); await enviar("oi"); await empurrar(passo("Montando o card"), passo("Comparando outubro com setembro"), passo("Montando o card"), fim("Pronto"));
-  expect(screen.getByText("Montando o card · Comparando outubro com setembro")).toBeTruthy(); expect(status()).toBeNull(); expect(screen.getByText("Pronto")).toBeTruthy();
+it("passos ficam numa linha acima do texto enquanto a resposta chega, sem repetição e em ordem; com a resposta pronta, a linha some", async () => {
+  const LEGENDA = "Montando o card · Comparando outubro com setembro";
+  await abrir(); await enviar("oi"); await empurrar(passo("Montando o card"), passo("Comparando outubro com setembro"), passo("Montando o card"), delta("Texto parcial"));
+  expect(screen.getByText(LEGENDA)).toBeTruthy(); expect(status()).toBeNull(); expect(screen.getByText("Texto parcial")).toBeTruthy();
+  await empurrar(fim("Pronto")); expect(screen.getByText("Pronto")).toBeTruthy(); expect(screen.queryByText(LEGENDA)).toBeNull(); // controle: sem o `resposta === undefined` do TurnoChat a legenda fica grudada
 });
 it("em voo o passo aparece uma vez só; no erro a linha fica; turno sem passos não ganha linha", async () => {
   await abrir(); await enviar("oi"); await empurrar(passo("Vendo")); expect(screen.getAllByText("Vendo")).toHaveLength(1);

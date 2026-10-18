@@ -166,13 +166,14 @@ def test_c2b_callback_web_com_mfa_sem_next_nao_leva_query(monkeypatch):
 
 def test_c3_auto_vinculo_por_email_com_mfa_nao_emite_sessao(monkeypatch):
     """Conta existente (com senha e MFA), sem identidade Google prévia: o
-    e-mail do Google a vincula, e o vínculo não dispensa o código."""
+    e-mail do Google a deixa chegar ao código, sem sessão e sem vínculo (#988)."""
     uid, email, _ = _conta(True)
     assert db.find_user_by_google_sub(f"sub-{email}") is None
     antes = _sessoes(uid)
     _, r = _web(monkeypatch, email)
     _desafio(r)
     _sem_sessao(r, uid, antes)
+    assert db.find_user_by_google_sub(f"sub-{email}") is None
 
 
 def test_c4_callback_web_limpa_os_cookies_do_oauth_no_desvio_para_o_mfa(monkeypatch):

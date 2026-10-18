@@ -889,6 +889,33 @@ def send_account_exists_notice(to: str, login_url: str = "", reset_url: str = ""
     return send_email(to=to, subject="🐷 Você já tem conta no PigBank", html_body=html, text_body=text)
 
 
+def send_email_changed_notice(to: str, novo_mascarado: str) -> bool:
+    """Aviso ao e-mail ANTIGO de que o e-mail de acesso foi trocado (B0a). Só o novo
+    MASCARADO (`n•••@dominio`, `mascarar_email`): sem IP, sem horário."""
+    novo = _esc(novo_mascarado)
+    content = f"""
+      <p>Olá!</p>
+      <p>O e-mail de acesso da sua conta no <strong>PigBank</strong> foi trocado para <strong>{novo}</strong>.</p>
+      <p><strong>Foi você?</strong> Pode ignorar este aviso.</p>
+      <p><strong>Não foi você?</strong> Escreva agora para <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
+      <p class="warn">A partir de agora, o login e a recuperação de senha usam o e-mail novo.</p>
+    """
+    html = _base_html("🔔 O e-mail da sua conta PigBank foi alterado", content)
+    text = (
+        "Olá! O e-mail de acesso da sua conta no PigBank foi trocado para "
+        f"{novo_mascarado}.\n\n"
+        "Foi você? Pode ignorar este aviso.\n"
+        f"Não foi você? Escreva agora para {SUPPORT_EMAIL}.\n\n"
+        "A partir de agora, o login e a recuperação de senha usam o e-mail novo."
+    )
+    return send_email(
+        to=to,
+        subject="🔔 O e-mail da sua conta PigBank foi alterado",
+        html_body=html,
+        text_body=text,
+    )
+
+
 def send_data_export_link_email(
     to: str,
     download_url: str,
@@ -967,55 +994,44 @@ def send_data_export_completed_email(
     )
 
 
-def send_account_deletion_scheduled_email(to: str, scheduled_for: str) -> bool:
-    """Confirma que a exclusão da conta foi agendada."""
+def send_account_reauth_code_email(to: str, code: str) -> bool:
+    """Código de 6 dígitos que autoriza excluir a conta (vale 15 min)."""
     content = f"""
-      <p>Olá!</p>
-      <p>Recebemos uma solicitação para excluir sua conta no <strong>PigBank</strong>.</p>
-      <div class="highlight">
-        <p style="margin:0">A exclusão definitiva está agendada para:<br/>
-        <strong>{scheduled_for}</strong></p>
-      </div>
-      <p>Durante o período de carência, sua conta fica bloqueada para evitar novas alterações e proteger seus dados contra exclusão acidental ou indevida.</p>
-      <p>Após o prazo, removeremos os dados pessoais e financeiros vinculados à sua conta, salvo registros mínimos que precisem ser preservados por obrigação legal, segurança, prevenção de fraude ou defesa de direitos.</p>
-      <p class="warn">Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente:
+      <p>Seu código para excluir a conta: <strong>{code}</strong></p>
+      <p>Vale 15 minutos.</p>
+      <p class="warn">Não foi você? Não passe o código e fale com o suporte:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
-    html = _base_html("Exclusão de conta agendada — PigBank", content)
+    html = _base_html("Código para excluir a conta — PigBank", content)
     text = (
-        "PigBank — exclusão de conta agendada\n\n"
-        f"A exclusão definitiva está agendada para: {scheduled_for}\n\n"
-        "Durante o período de carência, sua conta fica bloqueada. "
-        f"Se você não solicitou essa exclusão, entre em contato com o suporte imediatamente: {SUPPORT_EMAIL}."
+        f"Seu código para excluir a conta: {code}. Vale 15 minutos. "
+        f"Não foi você? Não passe o código e fale com o suporte: {SUPPORT_EMAIL}."
     )
-    return send_email(
-        to=to,
-        subject="Exclusão de conta agendada — PigBank",
-        html_body=html,
-        text_body=text,
-    )
+    # O código vai SÓ no corpo: `send_email` grava assunto e destinatário em log e em
+    # `system_event_logs` (user_id nulo, sobrevive à exclusão), então nenhum dos dois
+    # pode carregar o código nem o endereço.
+    return send_email(to=to, subject="Seu código para excluir a conta PigBank",
+                      html_body=html, text_body=text, log_recipient=False)
 
 
 def send_account_deletion_completed_email(to: str) -> bool:
-    """Confirma que a exclusão definitiva foi concluída."""
+    """Confirma que a conta foi excluída."""
     content = f"""
-      <p>Olá!</p>
-      <p>A exclusão da sua conta no <strong>PigBank</strong> foi concluída.</p>
-      <p>Removemos os dados pessoais e financeiros vinculados à conta, salvo registros mínimos que precisem ser preservados por obrigação legal, segurança, prevenção de fraude ou defesa de direitos.</p>
-      <p>Se você acredita que isso foi um erro, fale com o suporte:
+      <p>Sua conta foi excluída e seus dados apagados, salvo o que a lei exige guardar.
+        Não dá para desfazer.</p>
+      <p>Se você tinha assinatura no cartão, ela foi cancelada e não haverá novas cobranças.</p>
+      <p class="warn">Não foi você? Fale com o suporte:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
-      <p>Este é o último e-mail transacional relacionado a essa conta.</p>
     """
     html = _base_html("Conta excluída — PigBank", content)
     text = (
-        "PigBank — conta excluída\n\n"
-        "A exclusão da sua conta foi concluída. "
-        f"Se você acredita que isso foi um erro, fale com o suporte: {SUPPORT_EMAIL}. "
-        "Este é o último e-mail transacional relacionado a essa conta."
+        "Sua conta foi excluída e seus dados apagados, salvo o que a lei exige guardar. "
+        "Não dá para desfazer. Se você tinha assinatura no cartão, ela foi cancelada "
+        f"e não haverá novas cobranças. Não foi você? Fale com o suporte: {SUPPORT_EMAIL}."
     )
     return send_email(
         to=to,
-        subject="Conta excluída — PigBank",
+        subject="Sua conta PigBank foi excluída",
         html_body=html,
         text_body=text,
         # Este e-mail sai DEPOIS do commit da exclusão: o endereço já não tem

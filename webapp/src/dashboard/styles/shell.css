@@ -23,8 +23,8 @@
 }
 .brand img { border-radius: 8px; }
 
-.rail-list { display: grid; gap: 2px; }
-.rail-list a, .rail-list button {
+.rail-list, .rail-conta ul { display: grid; gap: 2px; }
+.rail-list a, .rail-list button, .rail-conta a, .rail-conta button {
   display: flex; align-items: center; gap: 11px;
   width: 100%;
   height: 36px; padding: 0 12px;
@@ -34,12 +34,12 @@
   transition: color var(--t-fast) ease, background-color var(--t-fast) ease;
 }
 /* "Ajuda" (abre o guia, parts/Guia.tsx) e "Menu" da barra de baixo: botão com a cara dos links. */
-.rail-list button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
-.rail-list i { font-size: 17px; }
-.rail-list a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
-.rail-list a[aria-current="page"] i { color: var(--pink); }
+.rail-list button, .rail-conta button, .tabbar button { border: 0; background: none; font: inherit; cursor: pointer; }
+.rail-list i, .rail-conta i { font-size: 17px; }
+.rail-list a[aria-current="page"], .rail-conta a[aria-current="page"] { color: var(--ink); background: var(--pink-wash); }
+.rail-list a[aria-current="page"] i, .rail-conta a[aria-current="page"] i { color: var(--pink); }
 @media (hover: hover) and (pointer: fine) {
-  .rail-list a:hover, .rail-list button:hover { color: var(--ink); background: var(--plane-1); }
+  .rail-list a:hover, .rail-list button:hover, .rail-conta a:hover, .rail-conta button:hover { color: var(--ink); background: var(--plane-1); }
 }
 /* A Ajuda que vira menu (parts/Ajuda.tsx, nas telas com dica). O botão ocupa a célula inteira. O trilho sobe acima do conteúdo da página, que
    tem `position: relative` com z-index: senão o menu, que abre para a direita, fica embaixo. */
@@ -64,7 +64,24 @@
   .rail-list .ajuda-menu button:hover { background: var(--plane-3); }
 }
 
-.rail-foot { margin-top: auto; padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
+/* Conta (App.tsx): presa embaixo do trilho (o margin-top:auto era do .rail-foot, que agora fecha a coluna). */
+.rail-conta { margin-top: auto; display: grid; gap: 2px; }
+.rail-conta button:disabled, .menu-telas-conta button:disabled { opacity: 0.5; cursor: default; } /* Sair já clicado */
+.rail-conta-t { margin: 0; padding: 0 12px 4px; font-size: 11.5px; color: var(--ink-3); }
+/* Trilho mais baixo que a coluna: o trilho normal (Conta + rodapé) só cabe a partir de 749px e só com a folga de baixo a partir de 769px, então 768px é o último compacto (com o limite em 740px, 741–748px cortava o rodapé). Um 1366×768 deixa ~657px e o trilho não rola; 625px é a menor altura em que o trilho compacto ainda cabe (624 rola 1px); um 1280×720 deixa ~590px: aí rola, ver o @media de 650px. Itens e espaços menores. */
+@media (max-height: 768px) {
+  .rail { gap: 14px; padding: 14px 14px 12px; }
+  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { height: 32px; }
+  .rail-list { gap: 0; }
+  .rail-conta ul { gap: 0; }
+}
+/* Janela baixa demais até para isso (zoom, janela pequena): o trilho rola e o Sair se alcança com Tab. O overflow cortaria o menu da Ajuda,
+   que abre para a direita: nessa altura ele fica `fixed`, ao lado do trilho e rente ao pé da janela. 650px = o trilho cheio (~625px a 1440 de largura) + folga. */
+@media (max-height: 650px) {
+  .rail { overflow-y: auto; z-index: 41; } /* 41 > .askbar (40, chat.css): o menu fixo não fica sob a barra do Piggy; o guia (45+) e os diálogos (80+) seguem acima */
+  .rail .ajuda-menu { position: fixed; left: calc(var(--rail-w) + 8px); bottom: 12px; }
+}
+.rail-foot { padding: 0 12px; display: grid; gap: 4px; font-size: 12px; }
 .rail-sync { display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
 .dot-live {
   position: relative;
@@ -138,8 +155,8 @@
 @media (max-width: 1180px) {
   :root { --rail-w: 72px; --gutter: 28px; }
   .brand span, .rail-label { display: none; }
-  .rail-list a, .rail-list button { justify-content: center; padding: 0; }
-  .rail-list i { font-size: 19px; }
+  .rail-list a, .rail-list button, .rail-conta a, .rail-conta button { justify-content: center; padding: 0; }
+  .rail-list i, .rail-conta i { font-size: 19px; }
   .brand { justify-content: center; padding: 4px 0; }
   .rail-foot { display: none; }
 }
@@ -204,6 +221,7 @@
 .menu-telas-body { padding: 8px 8px 0; }
 .menu-telas h2 { margin: 0; padding: 8px 12px 0; font-size: 17px; }
 .menu-telas [role="group"] { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--rule); }
+.menu-telas .menu-telas-conta { margin: 8px 0 0; padding-bottom: 0; border-top: 1px solid var(--rule); border-bottom: 0; }
 .menu-telas-sec { margin: 0; padding: 12px 12px 4px; font-size: 11.5px; color: var(--ink-3); }
 /* Fechar: a faixa toda de baixo, até a borda (área segura inclusa), presa ao rodapé da folha — com a altura da
    barra inteira, não só do botão Menu: o 2º toque de um duplo toque pode cair em qualquer ponto dele. */

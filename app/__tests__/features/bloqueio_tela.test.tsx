@@ -175,7 +175,7 @@ describe("trava — voltando do fundo", () => {
     expect(prompts()).toBe(1);
   });
 
-  it("trava DESLIGADA: o inactive não desmonta o painel (é da tampa nativa); só o background (#897)", async () => {
+  it("trava DESLIGADA: nem o inactive nem o background desmontam o painel (é da tampa nativa); a volta curta revalida em silêncio", async () => {
     await guardarCredenciais(S);
     cofre.set(TRAVA, "1");
     renderRouter("./app", { initialUrl: "/" });
@@ -186,13 +186,16 @@ describe("trava — voltando do fundo", () => {
     expect(screen.getByText(OLA)).toBeTruthy();
     expect(prompts()).toBe(0);
 
+    const leituras = chamadas().filter((c) => c.caminho === "/auth/me").length;
     await appVai("background");
-    expect(screen.queryByText(OLA)).toBeNull();
-    expect(screen.queryByTestId("painel-conta")).toBeNull();
+    expect(screen.getByText(OLA)).toBeTruthy();
+    expect(screen.getByTestId("painel-conta")).toBeTruthy();
     expect(prompts()).toBe(0);
 
     await appVai("active");
-    await waitFor(() => expect(screen.getByText(OLA)).toBeTruthy());
+    expect(screen.queryByText("Conferindo seu acesso…")).toBeNull();
+    await waitFor(() => expect(chamadas().filter((c) => c.caminho === "/auth/me")).toHaveLength(leituras + 1));
+    expect(screen.getByText(OLA)).toBeTruthy();
     expect(screen).toHavePathname("/resumo");
     expect(travaNaTela()).toBe(false);
     expect(prompts()).toBe(0);

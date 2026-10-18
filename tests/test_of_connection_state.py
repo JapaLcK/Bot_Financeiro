@@ -1251,7 +1251,7 @@ def test_reconexao_pelo_ramo_do_CONFLITO_cala_o_aviso_so_ate_o_health_voltar(
 # `raw` inteiro nunca sai do banco (ele carrega `clientUserId`) —, válido só
 # enquanto `health is null` E a autorização atual couber em
 # `JANELA_DEVICE_AUTH_MIN`. Ele é removido do dict (`pop`) antes da serialização:
-# o corpo HTTP fica idêntico em chaves ao de antes.
+# o corpo HTTP fica idêntico em chaves ao de antes (exceto logo_url, PR 2).
 #
 # NENHUM teste deste grupo monta `health` ou linha na mão: todos entram por
 # `save_pluggy_open_finance_item` (o caminho de produção) e saem pelo
@@ -1357,6 +1357,7 @@ CHAVES_DA_CONEXAO = {
     "institution_id",   # #732: o gate de reconexão do front compara por id do conector
     "last_sync_at", "last_attempt_at", "status_reason", "health",
     "reconnected_at", "ui",
+    "logo_url",   # derivado de `raw.connector.imageUrl`, validado (db/open_finance_state.py)
 }
 
 

@@ -10,6 +10,7 @@ import type { Paleta } from "@/ui/tokens";
  */
 export type NomeIcone =
   | "CaretRight"
+  | "CaretLeft"
   | "Wallet"
   | "Bell"
   | "CheckCircle"
@@ -47,7 +48,12 @@ export type NomeIcone =
   | "Copy"
   | "ThumbsUp"
   | "ThumbsDown"
-  | "Stop";
+  | "Stop"
+  | "CreditCard"
+  | "Bank"
+  | "ClockCounterClockwise"
+  | "Phone"
+  | "WhatsappLogo";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -100,7 +106,13 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   ThumbsUp: resolver(require("phosphor-react-native/src/icons/ThumbsUp"), "ThumbsUpIcon"),
   ThumbsDown: resolver(require("phosphor-react-native/src/icons/ThumbsDown"), "ThumbsDownIcon"),
   Stop: resolver(require("phosphor-react-native/src/icons/Stop"), "StopIcon"),
+  CreditCard: resolver(require("phosphor-react-native/src/icons/CreditCard"), "CreditCardIcon"),
+  Bank: resolver(require("phosphor-react-native/src/icons/Bank"), "BankIcon"),
+  ClockCounterClockwise: resolver(require("phosphor-react-native/src/icons/ClockCounterClockwise"), "ClockCounterClockwiseIcon"),
+  Phone: resolver(require("phosphor-react-native/src/icons/Phone"), "PhoneIcon"),
+  WhatsappLogo: resolver(require("phosphor-react-native/src/icons/WhatsappLogo"), "WhatsappLogoIcon"),
 
+  CaretLeft: resolver(require("phosphor-react-native/src/icons/CaretLeft"), "CaretLeftIcon"),
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
   Wallet: resolver(require("phosphor-react-native/src/icons/Wallet"), "WalletIcon"),
   Bell: resolver(require("phosphor-react-native/src/icons/Bell"), "BellIcon"),
@@ -123,10 +135,12 @@ interface Props {
   tamanho?: 20 | 24;
   /** Nunca ícone em quadrado colorido (identidade pigbank-frontend): a cor é sempre um tom neutro do texto, nunca `brand`/`acao` soltos. */
   tom?: keyof Paleta;
+  /** Cor de série de dado (pílula de meta); vence o `tom`. Só para cor de dado (série da pílula de meta, o verde da batida), nunca para chrome. */
+  cor?: string;
 }
 
-export function Icone({ nome, tamanho = 24, tom = "ink" }: Props) {
+export function Icone({ nome, tamanho = 24, tom = "ink", cor }: Props) {
   const { cores } = useTema();
   const Componente = ICONES[nome];
-  return <Componente size={tamanho} color={cores[tom]} weight="regular" />;
+  return <Componente size={tamanho} color={cor ?? cores[tom]} weight="regular" />;
 }

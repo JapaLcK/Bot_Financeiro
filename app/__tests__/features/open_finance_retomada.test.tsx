@@ -218,7 +218,10 @@ it("navigate Piggy repetido não trava o destino nem duplica a pilha", async () 
 
 it.each([["Resumo do mês, abrir Gastos", true], ["Resumo do mês, abrir Gastos", false], ["01/10/2026", true], ["01/10/2026", false]])("Retomar × link do widget %s, recovery primeiro=%s, usa a mesma reserva", async (irma, recoveryPrimeiro) => {
  servidor(); const r = renderRouter("./app", { initialUrl: "/" }); await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
- const a = screen.getByRole("button", { name: "Retomar conexão" }), b = irma !== "01/10/2026" ? screen.getByRole("button", { name: irma }) : screen.getByTestId("calendario-dia-2026-10-01");
+ const a = screen.getByRole("button", { name: "Retomar conexão" });
+ // O toque no dia abre a folha do dia (PR 2b); quem navega ao Extrato é o botão dela, que disputa a mesma reserva de navegação.
+ if (irma === "01/10/2026") await act(async () => { fireEvent.press(screen.getByTestId("calendario-dia-2026-10-01")); await drenar(); });
+ const b = irma !== "01/10/2026" ? screen.getByRole("button", { name: irma }) : screen.getByRole("button", { name: "Ver extrato do dia" });
  await act(async () => { fireEvent.press(recoveryPrimeiro ? a : b); fireEvent.press(recoveryPrimeiro ? b : a); await drenar(); });
  expect(pilha(r)?.map((p) => p.nome)).toEqual(recoveryPrimeiro ? ["(painel)", "open-finance-volta"] : ["(painel)"]);
  expect(screen).toHavePathname(recoveryPrimeiro ? "/open-finance-volta" : irma === "01/10/2026" ? "/extrato" : "/gastos");

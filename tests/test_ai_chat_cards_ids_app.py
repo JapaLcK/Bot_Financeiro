@@ -32,3 +32,27 @@ def test_ids_do_python_que_o_app_ainda_nao_conhece_sao_so_os_pendentes():
 def test_controle_id_novo_no_python_sem_o_app_fica_vermelho(monkeypatch):
     monkeypatch.setattr(cards, "IDS", (*cards.IDS, "novo_card"))
     assert set(cards.IDS) - ids_lidos() == PENDENTE_NO_APP | {"novo_card"} != PENDENTE_NO_APP
+
+
+# Cards da tool que o Python já emite (`cards.DA_TOOL`) e o app ainda não desenha. `ultimos_lancamentos` e `sem_categoria` entraram
+# no `schemasDaTool` no PR B da onda 2; a `comparacao` vem em outro PR, como gráfico de linha. Esvazie quando ela entrar.
+PENDENTE_DA_TOOL = {"comparacao"}
+
+
+def ids_da_tool_do_app(painel_ts: str) -> set[str]:
+    corpo = re.search(r"const schemasDaTool = \{(.*?)\};", painel_ts, re.S)
+    assert corpo, "o `schemasDaTool` do app mudou de forma: ajuste este teste"
+    return set(re.findall(r"(\w+):\s*\w+Schema", corpo.group(1)))
+
+
+def test_cards_da_tool_do_app_sao_os_do_python():
+    """O app manda `cards` = `CARDS_DA_TOOL` (= as chaves do `schemasDaTool`) no POST do chat; sem um id aqui o servidor não o emite,
+    e id a mais no app que o Python não conhece é código morto. Fora de `cards.IDS` de propósito (ver `cards.DA_TOOL`)."""
+    app = ids_da_tool_do_app((PAINEL / "api/schemas/painel.ts").read_text(encoding="utf-8"))
+    assert set(cards.DA_TOOL) - app == PENDENTE_DA_TOOL and app - set(cards.DA_TOOL) == set()
+
+
+def test_controle_card_da_tool_novo_no_python_sem_o_app_fica_vermelho(monkeypatch):
+    monkeypatch.setattr(cards, "DA_TOOL", (*cards.DA_TOOL, "novo_card"))
+    app = ids_da_tool_do_app((PAINEL / "api/schemas/painel.ts").read_text(encoding="utf-8"))
+    assert set(cards.DA_TOOL) - app == PENDENTE_DA_TOOL | {"novo_card"} != PENDENTE_DA_TOOL

@@ -1,6 +1,6 @@
 ---
 name: baseline-testes
-description: Como rodar a suíte do PigBank e ler o resultado — qual interpretador usar, quais variáveis a suíte exige, e como distinguir regressão sua de falha preexistente. Use ANTES de rodar pytest neste repositório, antes de afirmar que "os testes passam/falham", e antes de abrir PR. Também cobre o ambiente remoto (Claude Code na web), que tem procedimento diferente do local.
+description: Como rodar a suíte do PigBank e ler o resultado — qual interpretador usar, quais variáveis a suíte exige, e como distinguir regressão sua de falha preexistente. Use ANTES de rodar pytest ou jest (app/) neste repositório, antes de afirmar que "os testes passam/falham", e antes de abrir PR. Também cobre o ambiente remoto (Claude Code na web), que tem procedimento diferente do local.
 ---
 
 # Rodar a suíte do PigBank
@@ -106,6 +106,31 @@ produção.
 
 Se algum dia a coleta voltar a estourar, o conserto é instalar a dependência no
 `.venv` — não recriar a lista de `--ignore` à mão.
+
+## App (jest em `app/`)
+
+Mesma regra do pytest: **na máquina, rode só os arquivos de teste da sua mudança,
+nomeando cada um**, e a suíte inteira roda no CI (`.github/workflows/app.yml`).
+
+```bash
+cd app && npx jest __tests__/a.test.tsx __tests__/b.test.tsx --maxWorkers=2
+```
+
+**Nunca um filtro ou prefixo largo** (`painel_`, uma pasta): ele puxa muitos
+arquivos, e muitos deles montam o app inteiro com `renderRouter("./app")`, então o
+worker só cresce de um arquivo para o outro. O `workerIdleMemoryLimit` do
+`app/jest.config.js` (só fora do CI) reinicia o worker entre arquivos quando o heap
+passa do limite, mas um único arquivo ainda pode crescer além dele — não é licença
+para rodada larga.
+
+**`--maxWorkers=2` no máximo.**
+
+`Exceeded timeout of … ms` (5000 ms é o padrão; há testes com timeout próprio) com a
+máquina carregada é ambiente, não regressão: veja o `uptime`, rode aquele arquivo
+sozinho antes de concluir qualquer coisa, e anote os NOMES dos testes que falharam,
+nunca a contagem (ver "Ler o resultado"). Se o arquivo só estoura sob carga, compare
+com a baseline em condição equivalente (o mesmo arquivo sem a sua mudança, ou o run
+do CI) antes de descartar regressão: lentidão nova passa sozinha e estoura carregada.
 
 ## Ambiente remoto (Claude Code na web) é outro mundo
 

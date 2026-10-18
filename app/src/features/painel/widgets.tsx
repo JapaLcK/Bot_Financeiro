@@ -5,7 +5,9 @@ import { Previsao, Compromissos } from "./futuro";
 import { Caixinhas, Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";
 import { Faturas, Parcelas, Renda, Assinaturas, Notou } from "./complementos";
 import { CardPeriodo } from "./cardPeriodo";
-import { MetasChat } from "./metasChat";
+import { CardGastos } from "./cardGastos";
+import { CardFimDoMes, CardMaiores } from "./cardMaiores";
+import { CardLancamentos } from "./cardLancamentos";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
 import { Vazio } from "./base";
@@ -14,6 +16,9 @@ const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: C
 /** No chat o servidor já aplicou o plano (`plan_gate_ok`): o gate do simulador vale só FORA de um bloco. */
 export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel(); const bloco = useBloco();
  if (id === "periodo") return <CardPeriodo />;
- if (id === "metas" && bloco) return <MetasChat />; // v2 (`/api/v2/metas`); fora do chat, `Metas` lê o provider (legado)
+ if (id === "maiores_gastos") return <CardMaiores />;
+ if (id === "fim_do_mes") return <CardFimDoMes />;
+ if (id === "ultimos_lancamentos" || id === "sem_categoria") return <CardLancamentos id={id} />;
+ if (id === "categorias" && bloco) return <CardGastos />; // card do chat; o painel segue com `Categorias`
  if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
  const Componente = VIEWS[id]; return <Componente />; }

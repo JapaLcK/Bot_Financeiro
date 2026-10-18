@@ -24,7 +24,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import APAGA, NONCE_CRU, apple_de_mentira
+from _apoio_auth_app import APAGA, NONCE_CRU, apple_de_mentira, marca_exclusao
 
 SENHA = "senha-forte-123"
 UA_APP = "PigBankApp/0.1.0 (iPhone 17 Pro; iOS 26.1)"
@@ -164,7 +164,7 @@ def test_a3_conta_com_exclusao_agendada_nao_entra(apple):
     uid, email = _conta()
     sub = _sub()
     db.link_google_identity(uid, sub, email, db.PROVIDER_APPLE)
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA)
 
     r = _troca(apple.emitir(sub=sub, email=email))
     assert r.status_code == 403, r.text
@@ -176,10 +176,10 @@ def test_a4_token_ruim_de_conta_com_mfa_e_exclusao_da_400_antes_de_tudo(apple, d
     """I1/I2: com a conta vinculada tendo MFA E exclusão agendada, qualquer
     decisão tomada antes da verificação apareceria como 403 ou `mfa_required`."""
     uid, email = _conta()
-    _com_mfa(uid, email)
+    segredo = _com_mfa(uid, email)
     sub = _sub()
     db.link_google_identity(uid, sub, email, db.PROVIDER_APPLE)
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA, segredo)
 
     if defeito == "aud":
         token = apple.emitir(sub=sub, email=email, aud="host.exp.Exponent")
@@ -225,7 +225,8 @@ def test_a6_email_real_verificado_vincula_e_entra(apple):
     assert _identidades_apple(sub) == [uid]
 
 
-def test_a6_email_real_de_conta_com_mfa_vincula_e_pede_o_desafio(apple):
+def test_a6_email_real_de_conta_com_mfa_pede_o_desafio_e_nao_vincula(apple):
+    """#988: o vínculo é permanente e invisível, então não nasce antes do código."""
     uid, email = _conta()
     _com_mfa(uid, email)
     sub = _sub()
@@ -233,7 +234,18 @@ def test_a6_email_real_de_conta_com_mfa_vincula_e_pede_o_desafio(apple):
     assert r.status_code == 200, r.text
     assert r.json()["mfa_required"] is True
     _sem_tokens(r)
-    assert _identidades_apple(sub) == [uid]
+    assert _identidades_apple(sub) == []
+
+
+def test_a6d_conta_com_exclusao_agendada_recusa_sem_vincular(apple):
+    """#988: a conta é recusada (403) e o vínculo também não fica para trás."""
+    uid, email = _conta()
+    marca_exclusao(uid, SENHA)
+    sub = _sub()
+    r = _troca(apple.emitir(sub=sub, email=email))
+    assert r.status_code == 403, r.text
+    _sem_tokens(r)
+    assert _identidades_apple(sub) == []
 
 
 @pytest.mark.parametrize("verificado", [False, "false"], ids=["bool", "str"])
@@ -247,10 +259,11 @@ def test_a6b_nao_verificado_nunca_vincula(apple, verificado):
 
 
 @pytest.mark.parametrize("mfa", [False, True], ids=["sem-mfa", "com-mfa"])
-def test_a6c_conta_com_email_relay_e_sub_novo_vincula(apple, mfa):
+def test_a6c_conta_com_email_relay_e_sub_novo_so_vincula_sem_mfa(apple, mfa):
     """P4 ampliada: conta cujo e-mail é o relay e perdeu o vínculo. Antes, a
     troca devolvia `signup_required` e o complete-signup caía na P7
-    ("Cadastro expirado") — um laço sem saída."""
+    ("Cadastro expirado") — um laço sem saída. Com MFA (#988) entra pelo
+    e-mail, sem gravar o vínculo."""
     uid, relay = _conta(f"{uuid.uuid4().hex[:10]}@privaterelay.appleid.com")
     if mfa:
         _com_mfa(uid, relay)
@@ -264,7 +277,7 @@ def test_a6c_conta_com_email_relay_e_sub_novo_vincula(apple, mfa):
         _sem_tokens(r)
     else:
         assert corpo["user_id"] == uid and corpo["email"] == relay and corpo["access_token"]
-    assert _identidades_apple(sub) == [uid]
+    assert _identidades_apple(sub) == ([] if mfa else [uid])
     assert _pendentes_apple(sub) == 0
 
 

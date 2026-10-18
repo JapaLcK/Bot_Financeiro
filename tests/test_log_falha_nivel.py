@@ -28,7 +28,6 @@ import db
 from conftest import promote_to_pro
 from core.handlers import pending as h_pending
 from core.services.ai_chat.tools import get_tool
-from core.services.ai_chat.tools import launches as tool_mod
 
 
 def _niveis(caplog, prefixo: str) -> list[str]:
@@ -42,18 +41,19 @@ def _whatsapp_apaga(user_id: int) -> str:
 
 
 def _ai_chat_apaga(user_id: int) -> str:
-    return get_tool("delete_launch").execute(user_id, {"launch_id": "9"})
+    lid, _, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, "x", None)
+    from core.services.ai_chat.tools.extrato_ia import ao_confirmar  # o "sim" executa a pendência com `_item`
+    return get_tool("delete_launch").execute(user_id, ao_confirmar(user_id, {"launch_id": f"l{lid}"}))
 
 
 def test_condicao_de_dominio_loga_warning_nas_duas_portas(user_id, monkeypatch, caplog):
     """Aporte cujo lote já teve resgate: condição esperada, com contorno pelo
     próprio usuário. Não é incidente do backend — não pode contar como erro em
     porta nenhuma."""
-    def explode(uid, launch_id):
+    def explode(uid, launch_id, **_):
         raise db.InvestmentLotHasWithdrawal("lote já teve resgate")
 
     monkeypatch.setattr(db, "delete_launch_and_rollback", explode)
-    monkeypatch.setattr(tool_mod.db, "resolve_user_seq_to_id", lambda uid, lid: 4242)
 
     with caplog.at_level(logging.WARNING):
         resp_wa = _whatsapp_apaga(user_id)
@@ -68,11 +68,10 @@ def test_condicao_de_dominio_loga_warning_nas_duas_portas(user_id, monkeypatch, 
 
 def test_lancamento_sem_efeitos_loga_warning_nas_duas_portas(user_id, monkeypatch, caplog):
     """A outra condição de domínio, pelo mesmo critério."""
-    def explode(uid, launch_id):
+    def explode(uid, launch_id, **_):
         raise db.LaunchNoEffects("lançamento sem 'efeitos'")
 
     monkeypatch.setattr(db, "delete_launch_and_rollback", explode)
-    monkeypatch.setattr(tool_mod.db, "resolve_user_seq_to_id", lambda uid, lid: 4242)
 
     with caplog.at_level(logging.WARNING):
         _whatsapp_apaga(user_id)
@@ -86,11 +85,10 @@ def test_falha_tecnica_continua_error_nas_duas_portas(user_id, monkeypatch, capl
     """Controle POSITIVO: unificar não podia silenciar o que É incidente. Banco
     caído / deadlock / bug continua `error` — e agora nas DUAS portas, não só
     na do /ai/chat."""
-    def explode(uid, launch_id):
+    def explode(uid, launch_id, **_):
         raise RuntimeError("connection to server was lost")
 
     monkeypatch.setattr(db, "delete_launch_and_rollback", explode)
-    monkeypatch.setattr(tool_mod.db, "resolve_user_seq_to_id", lambda uid, lid: 4242)
 
     with caplog.at_level(logging.WARNING):
         resp_wa = _whatsapp_apaga(user_id)

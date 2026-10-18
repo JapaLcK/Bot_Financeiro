@@ -20,8 +20,9 @@ export function moneyIn(n, moeda) {
 // Dinheiro da /api/v2 (texto decimal) sem passar por float nem pelo Intl, que no Safari 14
 // converte a string em número: todas as casas que vierem (no mínimo 2), sem arredondar.
 // Zero sai "R$ 0,00", sem sinal. Inválido (null, "", "NaN", "Infinity") → null.
+const DECIMAL = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d{1,3}))?$/;
 export function moneyText(s) {
-  const m = typeof s === "string" && /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d{1,3}))?$/.exec(s);
+  const m = typeof s === "string" && DECIMAL.exec(s);
   if (!m) return null;
   let digitos = m[2] + (m[3] ?? "");
   let ponto = m[2].length + Number(m[4] ?? 0);
@@ -30,6 +31,15 @@ export function moneyText(s) {
   digitos = digitos.padEnd(ponto, "0");
   const inteiro = (digitos.slice(0, ponto).replace(/^0+/, "") || "0").replace(/\B(?=(\d{3})+$)/g, ".");
   return `${m[1] ? "−" : ""}R$ ${inteiro},${digitos.slice(ponto).padEnd(2, "0")}`;
+}
+// O mesmo texto decimal como inteiro exato: valor = n / 10^escala (BigInt, sem float). Inválido → null.
+export function decimal(s) {
+  const m = typeof s === "string" && DECIMAL.exec(s);
+  if (!m) return null;
+  const frac = m[3] ?? "";
+  let n = BigInt(m[2] + frac), escala = frac.length - Number(m[4] ?? 0);
+  if (escala < 0) { n *= BigInt(10) ** BigInt(-escala); escala = 0; }
+  return { n: m[1] ? -n : n, escala };
 }
 // O valor que o usuário digita num formulário de escrita (Lançamento, Meta): vírgula vira ponto,
 // no máximo 9 dígitos e 2 casas, maior que zero. Texto, nunca float.
@@ -70,4 +80,14 @@ export function relativeDays(n) {
   if (n === 1) return "amanhã";
   if (n === -1) return "ontem";
   return n > 0 ? `em ${n} dias` : `há ${-n} dias`;
+}
+
+// "há 12 min", "há 3 h", "há 2 dias" a partir de um instante em ms (`instante()`). Inválido → null; menos de 1 min ou futuro → "agora".
+export function haQuanto(ms, agora = Date.now()) {
+  if (!Number.isFinite(ms)) return null;
+  const min = Math.floor((agora - ms) / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  if (min < 1440) return `há ${Math.floor(min / 60)} h`;
+  return relativeDays(-Math.floor(min / 1440));
 }

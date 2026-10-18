@@ -37,13 +37,14 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from datetime import date, datetime
 
 from utils_date import _tz
 
 from .analytics import clausula_busca, termos_busca
 from .bank_declaracoes import CASADA_SQL, DECLARADA_SQL
-from .connection import LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
+from .connection import CAT_VAZIA_LABEL, LAUNCH_HAS_TIME_SQL, TIPO_CANON_SQL, cat_key_sql, cat_norm_sql
 from .open_finance import ACTIONABLE_PENDING_SQL, actionable_pending_params
 from .open_finance_cash import VINCULADO_SQL
 from .reconciliation import FUSED_STATUSES
@@ -60,6 +61,8 @@ RESGATAR = ("saque_caixinha", "resgate_investimento")
 _GUARDADO = "(" + ",".join(f"'{s}'" for s in GUARDAR + RESGATAR) + ")"
 _RESGATAR = "(" + ",".join(f"'{s}'" for s in RESGATAR) + ")"
 _MAX_ID = 2**63 - 1
+# O id de um item (`l<id>`/`c<id>`): `_item` o produz, `ler_id` o lê, a rota o valida (`[0-9]`, nunca `\d`).
+ID_RE = r"^[lc][1-9][0-9]{0,18}$"
 
 # Lançamentos em par pendente com o banco, dos dois lados (o manual e a sombra): o mesmo
 # conjunto acionável que o bloco de contas conta (`ACTIONABLE_PENDING_SQL`). Params:
@@ -162,7 +165,7 @@ _PERNA_LANCAMENTOS = f"""
              where a2.provider_account_id = a.provider_account_id and upper(a2.type) = 'BANK'
              order by c2.id desc limit 1) as conta_id,
            null::bigint as cartao_id, null::int as parcela_n, null::int as parcela_total,
-           null::text as fatura, l.pode,
+           null::uuid as group_id, l.categoria as categoria_cru, null::text as fatura, l.pode,
            {_motivos(("conciliacao_pendente", "l.pendente or (l.declarada and not l.casada)"),
                      ("transacao_pendente", "t.status_banco = 'PENDING'"), *_moeda("a"))} as motivos
       from (select launches.*, {TIPO_CANON_SQL} as tipo_canon, {LAUNCH_HAS_TIME_SQL} as has_time,
@@ -194,7 +197,7 @@ _PERNA_CARTAO = f"""
            case when ct.source = 'open_finance' then 'cartao' else 'registro_antigo' end as origem,
            false as fundido, oc.institution_name as instituicao, null::bigint as conta_id,
            cc.id as cartao_id, ct.installment_no as parcela_n,
-           ct.installments_total as parcela_total, to_char(b.period_end, 'YYYY-MM') as fatura,
+           ct.installments_total as parcela_total, ct.group_id, ct.categoria as categoria_cru, to_char(b.period_end, 'YYYY-MM') as fatura,
            {PODE_CARTAO_SQL} as pode,
            {_motivos(("transacao_pendente", "o.status_banco = 'PENDING'"), *_moeda("oa"))} as motivos
       from {MES_CARTAO_SQL}
@@ -239,6 +242,13 @@ class CursorInvalido(ValueError):
     pass
 
 
+def ler_id(texto: str) -> tuple[str, int] | None:
+    """`l42` -> ("l", 42); None fora do formato ou acima do bigint."""
+    if not isinstance(texto, str) or not re.fullmatch(ID_RE, texto) or int(texto[1:]) > _MAX_ID:
+        return None
+    return texto[0], int(texto[1:])
+
+
 def cursor_de(item: dict) -> str:
     chave = [item["dia"].isoformat(), item["instante"].isoformat(), item["tabela"], item["id"]]
     return base64.urlsafe_b64encode(json.dumps(chave).encode()).decode()
@@ -260,11 +270,15 @@ def ler_cursor(texto: str) -> tuple:
 
 def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=None, cartao=None,
            categoria=None, tipo=None, q=None, apos=None, limite=50,
-           com_guardado=False, dia=None) -> tuple[list[dict], bool]:
+           com_guardado=False, dia=None, ident=None, sem_categoria=False,
+           uma_por_compra=False) -> tuple[list[dict], bool]:
     """Os itens em `[inicio, fim)` pela regra do mês, mais novos primeiro, no máximo
     `limite`, e se há mais. `apos` = `ler_cursor(...)`. `tipo` = entrada|saida.
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
-    agregados internos (`mes_detalhes`) seguem sem passá-lo."""
+    agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item.
+    `sem_categoria`: só a saída não interna sem categoria ou em "outros" (o cartão também).
+    `uma_por_compra`: do parcelamento, só a menor parcela de cada data (manual grava a mesma data em todas e
+    vira uma linha; no Open Finance cada cobrança tem a sua e aparece). Roda depois de `sem_categoria`."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
     perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
@@ -272,10 +286,16 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     perna_l += " and false" if cartao is not None else ""
     params += [tz, tz, user_id, inicio, fim, user_id]
     params += [user_id, user_id, conta] if conta is not None else []
+    if ident is not None:
+        perna_l += " and l.id = %s" if ident[0] == "l" else " and false"
+        params += [ident[1]] if ident[0] == "l" else []
     perna_c = _PERNA_CARTAO + (" and cc.id = %s" if cartao is not None else "")
     perna_c += " and false" if conta is not None else ""
     params += [user_id, user_id, inicio, fim, user_id, user_id]
     params += [cartao] if cartao is not None else []
+    if ident is not None:
+        perna_c += " and ct.id = %s" if ident[0] == "c" else " and false"
+        params += [ident[1]] if ident[0] == "c" else []
 
     filtros = []
     if apos is not None:
@@ -286,6 +306,14 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
         if valor is not None:
             filtros.append(sql)
             params.append(valor)
+    sem_cat = f"x.tipo = 'saida' and not x.interno and {cat_key_sql('x.categoria')} in ('{CAT_VAZIA_LABEL}', 'outros')"
+    if sem_categoria:
+        filtros.append(sem_cat)
+    uniao = f"(({perna_l}) union all ({perna_c}))"
+    if uma_por_compra:
+        onde = f" where {sem_cat}" if sem_categoria else ""  # o filtro antes da janela: a menor é da que sobrou
+        uniao = f"(select x.*, min(x.parcela_n) over (partition by x.group_id, x.dia) as menor from {uniao} x{onde})"
+        filtros.append("(x.group_id is null or x.parcela_n is not distinct from x.menor)")
     # ponytail: a busca filtra a união já montada, então o estado de toda linha da janela é
     # calculado antes (250 ms com 6000 lançamentos, plano §8); empurrar o filtro de texto para
     # dentro das pernas se pesar.
@@ -299,7 +327,7 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     if limite is not None:
         params.append(limite + 1)
     cur.execute(f"""{_CTE_PENDENTES}
-        select * from (({perna_l}) union all ({perna_c})) x
+        select * from {uniao} x
          {"where " + " and ".join(filtros) if filtros else ""}
          order by x.dia desc, x.instante desc, x.tabela desc, x.id desc
          {limite_sql}""", params)
@@ -319,31 +347,3 @@ def _item(r: dict) -> dict:
             "conta_id": r["conta_id"], "cartao_id": r["cartao_id"], "parcela": parcela,
             "fatura": r["fatura"], "pode": r["pode"], "motivos": r["motivos"]}
 
-
-def pagina(user_id: int, ano: int, mes: int, agora: datetime, *, cursor: str | None = None,
-           limite: int = 50, q: str | None = None, **filtros) -> dict:
-    """O `GET /api/v2/lancamentos`. O mês pedido, cortado pela janela do plano como
-    `resumo_do_mes`; com busca, a janela inteira do plano. `motivos` da lista: os do bloco
-    de contas (situação de hoje) e `inicio_do_historico` quando a janela cortou o pedido.
-    `cursor` vem cru do cliente: `CursorInvalido` sobe para quem chama."""
-    from core.services.plan_service import history_earliest_date
-
-    from .connection import get_conn
-    from .contas_hoje import listar as contas
-    from .resumo_mes import MOTIVOS, mes_de
-
-    apos = ler_cursor(cursor) if cursor else None
-    corte = history_earliest_date(user_id, agora)
-    inicio, fim = (date.min, date.max) if termos_busca(q) else mes_de(date(ano, mes, 1))
-    cortou = bool(corte and corte > inicio)
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute("set transaction isolation level repeatable read, read only")
-        linhas, mais = listar(cur, user_id, max(inicio, corte) if corte else inicio, fim,
-                              q=q, apos=apos, limite=limite, **filtros)
-        vistos = set(contas(cur, user_id)["motivos"])
-        conn.rollback()
-    if cortou:
-        vistos.add("inicio_do_historico")
-    return {"mes": f"{ano:04d}-{mes:02d}", "itens": [_item(r) for r in linhas],
-            "proximo": cursor_de(linhas[-1]) if mais else None,
-            "motivos": [m for m in MOTIVOS if m in vistos]}

@@ -16,7 +16,14 @@ describe("Icone", () => {
     expect(c.UNSAFE_getByType(IconeStub).props).toMatchObject({ size: 20, color: claro.inkFaint });
   });
 
+  it("`cor` (série de dado) vence o `tom`; sem `cor`, o `tom` segue valendo (teste acima)", () => {
+    const { claro: c, escuro: e } = renderNosDoisTemas(<Icone nome="Target" tamanho={20} tom="danger" cor="#9333EA" />);
+    expect(c.UNSAFE_getByType(IconeStub).props.color).toBe("#9333EA");
+    expect(e.UNSAFE_getByType(IconeStub).props.color).toBe("#9333EA");
+  });
+
   it.each([
+    "CaretLeft",
     "CaretRight",
     "Wallet",
     "Bell",
@@ -28,6 +35,9 @@ describe("Icone", () => {
     "PauseCircle",
     "Trash",
     "Question",
+    "CreditCard",
+    "Bank",
+    "ClockCounterClockwise",
   ] as const)("resolve o ícone %s sem lançar", (nome) => {
     const { claro: c } = renderNosDoisTemas(<Icone nome={nome} />);
     expect(c.UNSAFE_getByType(IconeStub)).toBeTruthy();
@@ -54,6 +64,7 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
    * módulo (tela branca).
    */
   it.each([
+    ["CaretLeft", "CaretLeftIcon"],
     ["CaretRight", "CaretRightIcon"],
     ["Wallet", "WalletIcon"],
     ["Bell", "BellIcon"],
@@ -65,6 +76,8 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
     ["PauseCircle", "PauseCircleIcon"],
     ["Trash", "TrashIcon"],
     ["Question", "QuestionIcon"],
+    ["Phone", "PhoneIcon"],
+    ["WhatsappLogo", "WhatsappLogoIcon"],
   ] as const)("o módulo real de %s exporta %s (nomeado, existe de fato no pacote)", (arquivo, nomeado) => {
     const caminho = `${__dirname}/../../node_modules/phosphor-react-native/src/icons/${arquivo}`;
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- mesmo motivo do Icone.tsx: caminho estático, fora do grafo do tsc.

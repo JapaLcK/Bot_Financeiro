@@ -16,7 +16,7 @@ function servidor() {
   if (path === "/onboarding/open-finance") return resposta(200, { ok: true, completed: true, completed_at: "2026-10-05T12:00:00Z" });
   if (path === "/open-finance/1/limite") return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
   if (path === "/api/app/previsao") return resposta(200, { ...fixture[path], dias: Number(u.searchParams.get("dias") || 30) });
-  if (path === "/api/app/lancamentos" && u.searchParams.has("q")) { const segunda = u.searchParams.has("cursor"); return resposta(200, { ...fixture[path], itens: [{ ...fixture[path].itens[0], id: segunda ? "busca-outra" : "busca-antiga", data: segunda ? "2026-08-01" : "2026-09-01", descricao: segunda ? "Loja de agosto" : "Loja de setembro" }], proximo: segunda ? null : "pagina-2" }); }
+  if (path === "/api/app/lancamentos" && u.searchParams.has("q")) { const segunda = u.searchParams.has("cursor"), dia = u.searchParams.get("dia"), item = { ...fixture[path].itens[0], id: segunda ? "busca-outra" : "busca-antiga", data: segunda ? "2026-08-01" : "2026-09-01", descricao: segunda ? "Loja de agosto" : "Loja de setembro" }; return resposta(200, { ...fixture[path], itens: dia && item.data !== dia ? [] : [item], proximo: segunda ? null : "pagina-2" }); } // o servidor filtra pelo `dia` da consulta
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 }
@@ -71,10 +71,12 @@ it("mês não consome nova cota de insights nem substitui o saldo independente",
   if (new URL(url).pathname === "/insights/1/current" && ++insights > 1) return resposta(429, { detail: "limite" });
   return impl(url, req);
  });
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByLabelText("9400 reais e 25 centavos")).toBeTruthy()); await act(drenar);
- const saldo = screen.getByLabelText("9400 reais e 25 centavos");
+ // O saldo das contas (a âncora da previsão tem o mesmo valor no fixture: o card de contas desambigua).
+ const contas = () => within(screen.getByTestId("bloco-contas"));
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(contas().getByLabelText("9400 reais e 25 centavos")).toBeTruthy()); await act(drenar);
+ const saldo = contas().getByLabelText("9400 reais e 25 centavos");
  await escolherMes(mesesAnteriores(mesAtual())[1]!);
- expect(screen.getByLabelText("9400 reais e 25 centavos")).toBe(saldo); expect(insights).toBe(1);
+ expect(contas().getByLabelText("9400 reais e 25 centavos")).toBe(saldo); expect(insights).toBe(1);
  expect(screen.queryByText("Seu limite foi alcançado. Tente novamente mais tarde.")).toBeNull();
 });
 it("leitura independente em voo continua válida após seleção de mês", async () => {
@@ -133,7 +135,7 @@ it("POST do Piggy em voo não é cancelado pela seleção de mês e conserva sua
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
- await waitFor(() => expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy());
+ await waitFor(() => expect(screen.getByRole("button", { name: /Onde eu consigo economizar/ })).toBeEnabled());
  await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Pergunta em voo"); }); await apertar("Enviar mensagem");
  const post = fetchFalso.mock.calls.find(([url]) => new URL(String(url)).pathname === "/ai/chat/stream")!;
  await act(async () => { router.navigate("/gastos"); await drenar(); }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
@@ -175,7 +177,7 @@ it("busca com categoria vazia e dia civil mantém filtros e paginação global",
  expect(screen.queryByText("Loja de setembro")).toBeNull(); expect(screen.getByText("Sem categoria")).toBeTruthy(); expect(screen.getByText("01/08/2026")).toBeTruthy();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de agosto")).toBeTruthy();
  const paginas = fetchFalso.mock.calls.map(([url]) => new URL(String(url))).filter((u) => u.pathname === "/api/app/lancamentos" && u.searchParams.has("q"));
- expect(paginas).toHaveLength(2); for (const u of paginas) { expect(u.searchParams.get("categoria")).toBe(""); expect(u.searchParams.get("q")).toBe("Loja"); }
+ expect(paginas).toHaveLength(2); for (const u of paginas) { expect(u.searchParams.get("categoria")).toBe(""); expect(u.searchParams.get("q")).toBe("Loja"); expect(u.searchParams.get("dia")).toBe("2026-08-01"); }
 });
 
 it("horizonte não repete leituras mensais, conversa ou insights", async () => {

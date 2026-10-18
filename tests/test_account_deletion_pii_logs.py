@@ -66,7 +66,7 @@ from db.connection import get_conn
 # da sessão (o `monkeypatch.undo` restauraria a função real, não o stub).
 _SEND_EMAIL_REAL = email_service.send_email
 
-ASSUNTO_FINAL = "Conta excluída — PigBank"
+ASSUNTO_FINAL = "Sua conta PigBank foi excluída"
 SENHA = "senha-certa-123"
 
 
@@ -368,3 +368,45 @@ def test_t15_texto_de_erro_do_provedor_nao_persiste_o_endereco(forma, user_id, m
     assert falha[0]["details"]["error"] == esperado, \
         f"a CAUSA é o que sobra no lugar do texto do provedor: {falha[0]['details']}"
     assert falha[0]["details"]["subject"] == ASSUNTO_FINAL, falha[0]["details"]
+
+
+# ── T16 (S1): o e-mail do código de reautenticação ──────────────────────────
+
+def test_t16_email_do_codigo_nao_deixa_codigo_nem_endereco_em_log(monkeypatch, marca, caplog):
+    """O código de exclusão era o ASSUNTO ("482913 é seu código PigBank") e o
+    `send_email` grava assunto e destinatário no log de aplicação e em
+    `system_event_logs` (`email_sent`, `user_id` nulo: sobrevive à exclusão).
+    Agora o código vai só no corpo, e o endereço sai do log (`log_recipient=False`).
+
+    Negativo: pôr o código de volta no assunto, ou tirar o `log_recipient=False`,
+    deixa o teste vermelho. Positivo: o CORPO enviado tem o código, e o rastro
+    operacional (`email_sent` + assunto fixo) continua existindo.
+    """
+    import logging
+
+    code, email = "482913", "fulano.reauth@example.com"
+    enviados: list[dict] = []
+
+    class _ResendFalso:
+        class Emails:
+            @staticmethod
+            def send(params):
+                enviados.append(params)
+                return {"id": "fake"}
+
+    monkeypatch.setenv("RESEND_API_KEY", "re_fake")
+    monkeypatch.setattr(email_service, "send_email", _SEND_EMAIL_REAL)
+    monkeypatch.setattr(email_service, "_get_resend", lambda: _ResendFalso)
+
+    with caplog.at_level(logging.DEBUG):
+        assert email_service.send_account_reauth_code_email(email, code) is True
+
+    assert [p["to"] for p in enviados] == [[email]]
+    assert code in enviados[0]["html"] and code in enviados[0]["text"], "o código tem de ir no corpo"
+    assert code not in enviados[0]["subject"]
+
+    assert code not in caplog.text and email not in caplog.text, caplog.text
+    assert _linhas_com(code, 0) == [] and _linhas_com(email, 0) == [], \
+        "código ou endereço ficaram em system_event_logs"
+    enviado = _novos(marca, "email_sent")
+    assert len(enviado) == 1 and enviado[0]["details"]["subject"] == "Seu código para excluir a conta PigBank"

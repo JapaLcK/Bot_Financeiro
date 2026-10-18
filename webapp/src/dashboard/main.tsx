@@ -3,9 +3,10 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
+import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { DEMO, contasQuery, escutarLogout, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
@@ -45,7 +46,8 @@ if (DEMO) {
 
 const root = document.getElementById("pigbank-dashboard");
 if (root) {
+  if (!DEMO) escutarLogout(); // sair em outra aba derruba o painel (o dashboard.js antigo faz o mesmo)
   createRoot(root).render(
-    <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada></QueryClientProvider></StrictMode>,
+    <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada>{/* irmão do portão: o /me falhar não apaga os códigos de backup do MFA */}<Cofre /></QueryClientProvider></StrictMode>,
   );
 }

@@ -85,6 +85,7 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const blocos = {};
+  let cartoesMetas = 0;
   for (const [assunto, nome] of [
     ["categorias", "Pra onde vai meu dinheiro?"], ["lancamentos", "Quais foram meus maiores gastos do mês?"],
     ["categoria", /^Me mostra o detalhe/], ["saldo", "Vai sobrar até o fim do mês?"], ["fatura", "E a minha fatura?"],
@@ -93,13 +94,19 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   ]) {
     await seguir(page, nome);
     blocos[assunto] = await page.locator(".chat > .msg-piggy").last().locator(".msg-block").count();
+    // metas é real (parts/MetasResposta.tsx): sem bloco de exemplo, as pílulas vêm do servidor
+    if (assunto === "metas") {
+      await page.locator(".chat > .msg-piggy").last().locator(".pilula").first().waitFor();
+      cartoesMetas = await page.locator(".chat > .msg-piggy").last().locator(".pilula").count();
+    }
   }
   const r = await page.evaluate(() => {
     const ids = [...document.querySelectorAll("[id]")].map((e) => e.id);
     return [ids.filter((x, i) => ids.indexOf(x) !== i), document.querySelectorAll(".chat .chat-follow").length];
   });
   await ctx.close();
-  assert.deepEqual(blocos, { categorias: 1, lancamentos: 1, categoria: 1, saldo: 2, fatura: 2, saldo2: 2, metas: 1, investimentos: 2, renda: 1 });
+  assert.deepEqual(blocos, { categorias: 1, lancamentos: 1, categoria: 1, saldo: 2, fatura: 2, saldo2: 2, metas: 0, investimentos: 2, renda: 1 });
+  assert.equal(cartoesMetas, 5);
   assert.deepEqual(r, [[], 1]); // nenhum id repetido; só a última resposta oferece próximas perguntas
   assert.deepEqual(erros, []);
 });
@@ -208,6 +215,7 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
     const pergunta = await botao.textContent();
     await botao.click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .msg-text").textContent.includes("Calculando"));
     vistos[pergunta] = [await page.locator(".chat > .msg-piggy .msg-text").textContent(), erros.length];
     await ctx.close();
   }
@@ -218,7 +226,8 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const fds = await page.locator(".chat > .msg-piggy .msg-text").textContent();
   await ctx.close();
-  for (const [q, [texto, n]] of Object.entries(vistos)) assert.ok(texto.length > 40 && n === 0, `${q}: ${texto} (${n} erros)`);
+  // metas é real: a frase é curta de propósito (as pílulas vêm abaixo dela)
+  for (const [q, [texto, n]] of Object.entries(vistos)) assert.ok((texto.length > 40 || /^Você tem 11 metas\.$/.test(texto)) && n === 0, `${q}: ${texto} (${n} erros)`);
   assert.equal(chave, "fim-de-semana");
   assert.match(fds, /por fim de semana|segurar o fim de semana/);
   assert.deepEqual(erros, []);
@@ -254,6 +263,7 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
     const { ctx, page } = await abrir({ hash: "#/piggy", perfil });
     await page.locator(".chat-follow button", { hasText: texto }).click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .msg-text").textContent.includes("Calculando"));
     const t = await page.locator(".chat > .msg-piggy .msg-text").textContent();
     await ctx.close();
     return t;
@@ -269,7 +279,8 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
   };
   assert.match(await pela("dividas", "comprometido"), /^No mês que vem, R\$ 1\.821 já estão comprometidos: R\$ 1\.310 de contas fixas e R\$ 511 de parcelas/);
   assert.match(await pela("dividas", "volta a caber"), /acaba em março de 2027/);
-  assert.match(await pela("investir", "reserva de emergência"), /^Sua reserva cobre 3,3 meses .* já passou do mínimo/);
+  // metas é real: o chip da reserva mostra as metas do servidor, não o texto de exemplo (que o teste do protótipo cobre)
+  assert.match(await pela("investir", "reserva de emergência"), /^Você tem 11 metas\./);
   assert.match(await pela("dividas", "economizar este mês"), /^O que mais subiu foi Delivery/);
   // comuns fora das sugestões: pela faixa (3 insights × 2 + 11 comuns × 1 = 17)
   assert.match(await faixa(12.5 / 17, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);

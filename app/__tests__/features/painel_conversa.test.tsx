@@ -1,10 +1,10 @@
 import { KeyboardAvoidingView, StyleSheet, View } from "react-native";
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { claro } from "@/ui/tokens";
 import { BY_PROFILE, COMMON } from "@/features/painel/perguntas";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, apertar, bela, campo, caminho, delecoes, digitar, enviar, fim, ir, noResumo, ok, posts, reiniciar, respostaFluxo, srv, trocarParaBela, voltar, type Segurar } from "./conversa_apoio";
+import { abrir, apertar, bela, campo, caminho, delecoes, digitar, enviar, fim, ir, noResumo, ok, posts, pronto, reiniciar, respostaFluxo, srv, trocarParaBela, voltar, type Segurar } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
 // O 1º caso monta o app inteiro a frio; no runner do CI isso passa dos 5 s padrão.
 jest.setTimeout(20_000);
@@ -18,7 +18,7 @@ it("pergunta à direita em bolha, fala do Piggy à esquerda, sem bolha", async (
  expect(StyleSheet.flatten(screen.getByTestId("bolha-usuario").props.style)).toMatchObject({ alignSelf: "flex-end", maxWidth: "80%" });
  expect(StyleSheet.flatten(screen.getByTestId("fala-piggy").props.style)).toMatchObject({ alignSelf: "flex-start" });
  expect(StyleSheet.flatten(screen.getByTestId("fala-piggy").props.style).backgroundColor).toBeUndefined();
- expect(screen.getByText("Converse com o Piggy")).toBeTruthy(); expect(screen.getByLabelText("Mensagem para o Piggy").props.placeholder).toBe("Converse com o Piggy…");
+ expect(screen.queryByText("Converse com o Piggy")).toBeNull(); expect(within(screen.getByTestId("fala-piggy")).queryByText("Piggy")).toBeNull(); expect(screen.getByLabelText("Mensagem para o Piggy").props.placeholder).toBe("Converse com o Piggy…"); // sem título e sem a linha "Piggy" acima da fala
  expect(screen.getByLabelText("Mensagem para o Piggy").props.maxLength).toBe(2000); expect(screen.queryByText("PigBank")).toBeNull();
 });
 it("o teclado desconta o Y do pai do campo na janela (measureInWindow), não um número fixo", async () => {
@@ -28,23 +28,22 @@ it("o teclado desconta o Y do pai do campo na janela (measureInWindow), não um 
  await act(async () => { fireEvent(kav().parent!, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 700 } } }); });
  expect(medir).toHaveBeenCalled(); expect(kav().props.keyboardVerticalOffset).toBe(91);
 });
-it("bolha do usuário é cinza (surfaceControl) e sem borda; nome do Piggy é neutro", async () => {
+it("bolha do usuário é cinza (surfaceControl) e sem borda", async () => {
  await abrir(); await enviar("Minha pergunta"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
  const bolha = StyleSheet.flatten(screen.getByTestId("bolha-usuario").props.style);
  expect(bolha.backgroundColor).toBe(claro.surfaceControl); expect(bolha.borderWidth).toBeUndefined();
- expect(StyleSheet.flatten(screen.getByTestId("fala-piggy-nome").props.style).color).not.toBe("#FF2D8E");
-});
+ });
 it("o histórico do servidor não aparece ao abrir; o GET só lê a cota (limit=1)", async () => {
- srv.historico = [{ role: "user", content: "Pergunta antiga", created_at: null }, { role: "assistant", content: "Resposta antiga", created_at: null }];
+ srv.uso = 80; srv.historico = [{ role: "user", content: "Pergunta antiga", created_at: null }, { role: "assistant", content: "Resposta antiga", created_at: null }];
  await abrir(); expect(screen.queryByText("Pergunta antiga")).toBeNull(); expect(screen.queryByText("Resposta antiga")).toBeNull();
  const gets = fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/ai/messages"); expect(gets).toHaveLength(1); expect(new URL(String(gets[0]![0])).searchParams.get("limit")).toBe("1");
- expect(screen.getByText("2 de 100 mensagens utilizadas")).toBeTruthy();
+ expect(screen.getByText("80 de 100 mensagens utilizadas")).toBeTruthy(); // 80% = o primeiro ponto em que o contador aparece
 });
 it("enviar, ir ao Resumo e voltar: chat limpo (mensagens e rascunho) e leitura refeita", async () => {
- await abrir(); await enviar("Pergunta que some"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
+ srv.uso = 80; await abrir(); await enviar("Pergunta que some"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
  await digitar("rascunho que some"); await noResumo(); await voltar();
  expect(screen.queryByText("Pergunta que some")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull(); expect(campo().props.value).toBe("");
- expect(fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/ai/messages")).toHaveLength(2); expect(screen.getByText("3 de 100 mensagens utilizadas")).toBeTruthy();
+ expect(fetchFalso.mock.calls.filter(([u]) => caminho(u) === "/ai/messages")).toHaveLength(2); expect(screen.getByText("81 de 100 mensagens utilizadas")).toBeTruthy();
 });
 it("POST lento: sair e voltar mostra o turno e o POST não é abortado", async () => {
  const g = segurar(); srv.chat = async () => { await g.promessa; return ok("Resposta tardia")(); };
@@ -53,7 +52,7 @@ it("POST lento: sair e voltar mostra o turno e o POST não é abortado", async (
  expect(post[1].signal.aborted).toBe(false); expect(screen.getByText("Pergunta lenta")).toBeTruthy(); expect(screen.getByText("Resposta tardia")).toBeTruthy();
 });
 it("privacidade: turno inteiro vira marcador, sem card; campo, chips e cota desligados", async () => {
- srv.chat = () => { srv.uso++; const f = respostaFluxo(); f.empurrar({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2.metas.varios } }] } }); f.empurrar(fim("Resposta do Piggy")); f.fechar(); return f; };
+ srv.uso = 90; srv.chat = () => { srv.uso++; const f = respostaFluxo(); f.empurrar({ tipo: "bloco", bloco: { card: "metas", abas: [{ mes: null, recursos: { metas: v2.metas.varios } }] } }); f.empurrar(fim("Resposta do Piggy")); f.fechar(); return f; };
  await abrir(); await enviar("metas"); await waitFor(() => expect(screen.getByTestId("bloco-metas")).toBeTruthy());
  await apertar("Ocultar valores");
  expect(screen.getAllByText("Mensagem oculta enquanto os valores estão privados.")).toHaveLength(1); expect(screen.queryByTestId("bloco-metas")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull();
@@ -74,7 +73,7 @@ it.each([
 });
 it.each(["5 * 3 = 15", "**", "um * dois\ne * três", "*linha\nquebrada*", "2 * 3 = 6 e 4 * 5 = 20", "* item", "**x**", "5*3*4", "2*3 e 4*5"])("asterisco que não é negrito fica como veio: %j", async (reply) => {
  srv.chat = ok(reply); await abrir(); await enviar("oi"); await waitFor(() => expect(screen.getByTestId("fala-piggy")).toBeTruthy());
- expect(screen.getByTestId("fala-piggy").findAll((n) => n.props.style && StyleSheet.flatten(n.props.style)?.fontFamily === "Inter-SemiBold" && (n.type as unknown) === "Text" && n.props.children !== "Piggy")).toHaveLength(0);
+ expect(screen.getByTestId("fala-piggy").findAll((n) => n.props.style && StyleSheet.flatten(n.props.style)?.fontFamily === "Inter-SemiBold" && (n.type as unknown) === "Text")).toHaveLength(0);
  expect(screen.getByText(reply, { exact: true })).toBeTruthy();
 });
 it.each([["*R$ 454*", "R$ 454"], ["*a*", "a"], ["_*x*_", "x"], ["ção*x*", "x"]])("negrito colado aos asteriscos: %s", async (reply, negrito) => {
@@ -93,7 +92,7 @@ it("troca de conta com voo e a tela fechada: o POST da Ana é abortado, nenhum D
 });
 it("troca de conta com a tela aberta e resposta concluída: o chat da Bela abre vazio", async () => {
  await abrir(); await enviar("Pergunta da Ana"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
- await trocarParaBela(); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ await trocarParaBela(); await pronto();
  expect(screen.queryByText("Pergunta da Ana")).toBeNull(); expect(screen.queryByText("Resposta do Piggy")).toBeNull(); expect(campo().props.value).toBe("");
 });
 
@@ -103,14 +102,14 @@ it("abertura: envio e chips ficam desligados até o DELETE dar 2xx", async () =>
  await waitFor(() => expect(delecoes()).toHaveLength(1)); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  await digitar("Pergunta"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); expect(screen.getByRole("button", { name: ASK_ECONOMIZAR })).toBeDisabled();
  await apertar("Enviar mensagem"); expect(posts()).toHaveLength(0);
- srv.segurarDelete.soltar(); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ srv.segurarDelete.soltar(); await pronto();
  expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeEnabled(); expect(screen.getByRole("button", { name: ASK_ECONOMIZAR })).toBeEnabled();
 });
 it("DELETE com 404 ou rede caída: aviso com Tentar novamente, envio bloqueado até o 2xx", async () => {
  srv.statusPendencia = 404; renderRouter("./app", { initialUrl: "/piggy" });
  await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
  await digitar("Pergunta"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled(); expect(screen.getByRole("button", { name: ASK_META })).toBeDisabled(); expect(posts()).toHaveLength(0);
- srv.statusPendencia = 200; const antes = delecoes().length; await apertar("Tentar novamente"); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy()); expect(delecoes()).toHaveLength(antes + 1);
+ srv.statusPendencia = 200; const antes = delecoes().length; await apertar("Tentar novamente"); await pronto(); expect(delecoes()).toHaveLength(antes + 1);
  expect(screen.queryByRole("button", { name: "Tentar novamente" })).toBeNull(); await apertar("Enviar mensagem"); await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
 });
 it("saída sem voo: exatamente 1 DELETE se enviou; abrir e sair sem enviar não manda", async () => {
@@ -207,7 +206,7 @@ it("segundo plano com voo: o POST não é abortado e o turno aparece ao voltar",
  const g = segurar(); srv.chat = async () => { await g.promessa; return ok("Resposta do segundo plano")(); };
  await abrir(); await enviar("pergunta"); const post = posts()[0]!;
  await appVai("background"); expect(post[1].signal.aborted).toBe(false);
- g.soltar(); await act(drenar); await appVai("active"); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ g.soltar(); await act(drenar); await appVai("active"); await pronto();
  expect(screen.getByText("pergunta")).toBeTruthy(); expect(screen.getByText("Resposta do segundo plano")).toBeTruthy();
 });
 it("depois de um POST com erro, o DELETE sai antes do próximo envio; se ele falhar, nada é enviado", async () => {
@@ -235,7 +234,7 @@ it("erro do POST que chega com o DELETE da reabertura em voo: o próximo envio a
  srv.segurarDelete = segurar(); await ir("/piggy"); await act(drenar);
  g.soltar(); await act(drenar); await act(drenar); // o POST falha com o DELETE da reabertura ainda em voo
  const sd = srv.segurarDelete; srv.segurarDelete = null; sd.soltar(); await act(drenar); await act(drenar);
- await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy());
+ await pronto();
  const antes = delecoes().length; await enviar("sim"); await waitFor(() => expect(screen.getByText("executou")).toBeTruthy());
  expect(delecoes().length).toBeGreaterThan(antes);
  const ordem = fetchFalso.mock.calls.map(([u, r]) => `${r.method ?? "GET"} ${caminho(u)}`).filter((x) => x === "DELETE /ai/pending" || x === "POST /ai/chat/stream");

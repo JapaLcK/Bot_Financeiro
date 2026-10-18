@@ -78,7 +78,7 @@ def test_conversa_comparar_dois_meses_no_app_vai_ao_card_e_no_whatsapp_recebe_o_
     ("passados_A_B", True),                  # positivo: o caso do card
     ("passados_B_A", True),                  # ordem trocada: a lista sai cronológica
     ("mes=M", True),                         # `mes=` passado = [M-1, M]
-    ("mes=corrente", False),                 # o mês corrente: os mesmos dias, texto (F3)
+    ("mes=corrente", False),                 # o mês corrente: mês inteiro × anterior inteiro, sem a recusa (no app com `comparacao` vira o card)
     ("corrente_x_anterior", False),
     ("corrente_em_um_lado", False),
     ("lado_de_2_meses", False),

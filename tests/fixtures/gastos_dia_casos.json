@@ -1,0 +1,3176 @@
+[
+ {
+  "nome": "centavos primeiro erra: 1.040 e 1.137 (web −4% neutro; centavos −5% positivo)",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "1.040"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "1.137"
+    }
+   ]
+  },
+  "saida": {
+   "media": 1.0885,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": -4,
+     "tom": ""
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": 4,
+     "tom": ""
+    }
+   ]
+  }
+ },
+ {
+  "nome": "decimal exato erra: 0.191 e 0.209 (web −5% por erro de double; exato −4%)",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "0.191"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "0.209"
+    }
+   ]
+  },
+  "saida": {
+   "media": 0.2,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": -5,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": 4,
+     "tom": ""
+    }
+   ]
+  }
+ },
+ {
+  "nome": "escalas diferentes no mesmo mês: 91.010 × 1.005",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-04",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "91.010"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "1.005"
+    },
+    {
+     "dia": "2026-10-03",
+     "total": "2.000"
+    },
+    {
+     "dia": "2026-10-04",
+     "total": "7.5"
+    }
+   ]
+  },
+  "saida": {
+   "media": 25.37875,
+   "nDias": 4,
+   "vividos": 4,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": "2026-10-03"
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": true,
+     "anterior": "2026-10-02",
+     "proximo": "2026-10-04"
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": true,
+     "anterior": "2026-10-03",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": "2026-10-04",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": 259,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": -96,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-03",
+     "pct": -92,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-04",
+     "pct": -70,
+     "tom": "gain"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "total com 6 casas",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "12.345678"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "7.654322"
+    }
+   ]
+  },
+  "saida": {
+   "media": 10,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": 23,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": -23,
+     "tom": "gain"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "empate no meio, média 100: 95.500 cai abaixo de −4,5 (−5, gain) e 104.500 abaixo de +4,5",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "95.500"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "104.500"
+    }
+   ]
+  },
+  "saida": {
+   "media": 100,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": -5,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": 4,
+     "tom": ""
+    }
+   ]
+  }
+ },
+ {
+  "nome": "empate no meio, média 10: 9.550 cai acima de −4,5 (−4, neutro)",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "9.550"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "10.450"
+    }
+   ]
+  },
+  "saida": {
+   "media": 10,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": -4,
+     "tom": ""
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": 4,
+     "tom": ""
+    }
+   ]
+  }
+ },
+ {
+  "nome": "empate no meio, média 100: 114.500 cai acima de +14,5 (15, warn) e 85.500 abaixo de −14,5",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "114.500"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "85.500"
+    }
+   ]
+  },
+  "saida": {
+   "media": 100,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": 15,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": -15,
+     "tom": "gain"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "mês corrente com corte do histórico, dia agendado e dia sem gasto",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-14",
+   "historico_desde": "2026-10-06",
+   "dias": [
+    {
+     "dia": "2026-10-03",
+     "total": "50.00"
+    },
+    {
+     "dia": "2026-10-06",
+     "total": "115.00"
+    },
+    {
+     "dia": "2026-10-08",
+     "total": "180.00"
+    },
+    {
+     "dia": "2026-10-09",
+     "total": "0.000"
+    },
+    {
+     "dia": "2026-10-11",
+     "total": "0.004"
+    },
+    {
+     "dia": "2026-10-14",
+     "total": "50.00"
+    },
+    {
+     "dia": "2026-10-20",
+     "total": "40.00"
+    },
+    {
+     "dia": "2026-10-25",
+     "total": "0.00"
+    }
+   ]
+  },
+  "saida": {
+   "media": 38.33377777777778,
+   "nDias": 9,
+   "vividos": 4,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": "2026-10-06"
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-07"
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": true,
+     "anterior": "2026-10-06",
+     "proximo": "2026-10-08"
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": true,
+     "anterior": "2026-10-07",
+     "proximo": "2026-10-09"
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": true,
+     "anterior": "2026-10-08",
+     "proximo": "2026-10-10"
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": true,
+     "anterior": "2026-10-09",
+     "proximo": "2026-10-11"
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": true,
+     "anterior": "2026-10-10",
+     "proximo": "2026-10-12"
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": true,
+     "anterior": "2026-10-11",
+     "proximo": "2026-10-13"
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": true,
+     "anterior": "2026-10-12",
+     "proximo": "2026-10-14"
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": true,
+     "anterior": "2026-10-13",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": "2026-10-14",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": "2026-10-20"
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": "2026-10-20",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": "2026-10-25"
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": "2026-10-25",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-03",
+     "pct": 30,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-06",
+     "pct": 200,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-08",
+     "pct": 370,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-09",
+     "pct": -100,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-11",
+     "pct": -100,
+     "tom": "gain"
+    },
+    {
+     "dia": "2026-10-14",
+     "pct": 30,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-10-20",
+     "pct": 4,
+     "tom": ""
+    },
+    {
+     "dia": "2026-10-25",
+     "pct": -100,
+     "tom": "gain"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "corte depois de hoje: nenhum dia vivido, sem média",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-14",
+   "historico_desde": "2026-10-20",
+   "dias": [
+    {
+     "dia": "2026-10-05",
+     "total": "10.00"
+    },
+    {
+     "dia": "2026-10-22",
+     "total": "5.00"
+    }
+   ]
+  },
+  "saida": {
+   "media": null,
+   "nDias": -5,
+   "vividos": 0,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": "2026-10-22"
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": "2026-10-22",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-05",
+     "pct": null,
+     "tom": null
+    },
+    {
+     "dia": "2026-10-22",
+     "pct": null,
+     "tom": null
+    }
+   ]
+  }
+ },
+ {
+  "nome": "mês passado inteiro (vai até o fim do mês)",
+  "entrada": {
+   "mes": "2026-09",
+   "hoje": "2026-10-14",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-09-01",
+     "total": "100.00"
+    },
+    {
+     "dia": "2026-09-15",
+     "total": "300.00"
+    },
+    {
+     "dia": "2026-09-30",
+     "total": "20.00"
+    }
+   ]
+  },
+  "saida": {
+   "media": 14,
+   "nDias": 30,
+   "vividos": 3,
+   "grade": [
+    {
+     "dia": "2026-09-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-09-02"
+    },
+    {
+     "dia": "2026-09-02",
+     "abrivel": true,
+     "anterior": "2026-09-01",
+     "proximo": "2026-09-03"
+    },
+    {
+     "dia": "2026-09-03",
+     "abrivel": true,
+     "anterior": "2026-09-02",
+     "proximo": "2026-09-04"
+    },
+    {
+     "dia": "2026-09-04",
+     "abrivel": true,
+     "anterior": "2026-09-03",
+     "proximo": "2026-09-05"
+    },
+    {
+     "dia": "2026-09-05",
+     "abrivel": true,
+     "anterior": "2026-09-04",
+     "proximo": "2026-09-06"
+    },
+    {
+     "dia": "2026-09-06",
+     "abrivel": true,
+     "anterior": "2026-09-05",
+     "proximo": "2026-09-07"
+    },
+    {
+     "dia": "2026-09-07",
+     "abrivel": true,
+     "anterior": "2026-09-06",
+     "proximo": "2026-09-08"
+    },
+    {
+     "dia": "2026-09-08",
+     "abrivel": true,
+     "anterior": "2026-09-07",
+     "proximo": "2026-09-09"
+    },
+    {
+     "dia": "2026-09-09",
+     "abrivel": true,
+     "anterior": "2026-09-08",
+     "proximo": "2026-09-10"
+    },
+    {
+     "dia": "2026-09-10",
+     "abrivel": true,
+     "anterior": "2026-09-09",
+     "proximo": "2026-09-11"
+    },
+    {
+     "dia": "2026-09-11",
+     "abrivel": true,
+     "anterior": "2026-09-10",
+     "proximo": "2026-09-12"
+    },
+    {
+     "dia": "2026-09-12",
+     "abrivel": true,
+     "anterior": "2026-09-11",
+     "proximo": "2026-09-13"
+    },
+    {
+     "dia": "2026-09-13",
+     "abrivel": true,
+     "anterior": "2026-09-12",
+     "proximo": "2026-09-14"
+    },
+    {
+     "dia": "2026-09-14",
+     "abrivel": true,
+     "anterior": "2026-09-13",
+     "proximo": "2026-09-15"
+    },
+    {
+     "dia": "2026-09-15",
+     "abrivel": true,
+     "anterior": "2026-09-14",
+     "proximo": "2026-09-16"
+    },
+    {
+     "dia": "2026-09-16",
+     "abrivel": true,
+     "anterior": "2026-09-15",
+     "proximo": "2026-09-17"
+    },
+    {
+     "dia": "2026-09-17",
+     "abrivel": true,
+     "anterior": "2026-09-16",
+     "proximo": "2026-09-18"
+    },
+    {
+     "dia": "2026-09-18",
+     "abrivel": true,
+     "anterior": "2026-09-17",
+     "proximo": "2026-09-19"
+    },
+    {
+     "dia": "2026-09-19",
+     "abrivel": true,
+     "anterior": "2026-09-18",
+     "proximo": "2026-09-20"
+    },
+    {
+     "dia": "2026-09-20",
+     "abrivel": true,
+     "anterior": "2026-09-19",
+     "proximo": "2026-09-21"
+    },
+    {
+     "dia": "2026-09-21",
+     "abrivel": true,
+     "anterior": "2026-09-20",
+     "proximo": "2026-09-22"
+    },
+    {
+     "dia": "2026-09-22",
+     "abrivel": true,
+     "anterior": "2026-09-21",
+     "proximo": "2026-09-23"
+    },
+    {
+     "dia": "2026-09-23",
+     "abrivel": true,
+     "anterior": "2026-09-22",
+     "proximo": "2026-09-24"
+    },
+    {
+     "dia": "2026-09-24",
+     "abrivel": true,
+     "anterior": "2026-09-23",
+     "proximo": "2026-09-25"
+    },
+    {
+     "dia": "2026-09-25",
+     "abrivel": true,
+     "anterior": "2026-09-24",
+     "proximo": "2026-09-26"
+    },
+    {
+     "dia": "2026-09-26",
+     "abrivel": true,
+     "anterior": "2026-09-25",
+     "proximo": "2026-09-27"
+    },
+    {
+     "dia": "2026-09-27",
+     "abrivel": true,
+     "anterior": "2026-09-26",
+     "proximo": "2026-09-28"
+    },
+    {
+     "dia": "2026-09-28",
+     "abrivel": true,
+     "anterior": "2026-09-27",
+     "proximo": "2026-09-29"
+    },
+    {
+     "dia": "2026-09-29",
+     "abrivel": true,
+     "anterior": "2026-09-28",
+     "proximo": "2026-09-30"
+    },
+    {
+     "dia": "2026-09-30",
+     "abrivel": true,
+     "anterior": "2026-09-29",
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-09-01",
+     "pct": 614,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-09-15",
+     "pct": 2043,
+     "tom": "warn"
+    },
+    {
+     "dia": "2026-09-30",
+     "pct": 43,
+     "tom": "warn"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "fevereiro bissexto (29 dias)",
+  "entrada": {
+   "mes": "2028-02",
+   "hoje": "2028-03-05",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2028-02-01",
+     "total": "58.00"
+    },
+    {
+     "dia": "2028-02-28",
+     "total": "29.00"
+    },
+    {
+     "dia": "2028-02-29",
+     "total": "0.01"
+    }
+   ]
+  },
+  "saida": {
+   "media": 3.0003448275862072,
+   "nDias": 29,
+   "vividos": 3,
+   "grade": [
+    {
+     "dia": "2028-02-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2028-02-02"
+    },
+    {
+     "dia": "2028-02-02",
+     "abrivel": true,
+     "anterior": "2028-02-01",
+     "proximo": "2028-02-03"
+    },
+    {
+     "dia": "2028-02-03",
+     "abrivel": true,
+     "anterior": "2028-02-02",
+     "proximo": "2028-02-04"
+    },
+    {
+     "dia": "2028-02-04",
+     "abrivel": true,
+     "anterior": "2028-02-03",
+     "proximo": "2028-02-05"
+    },
+    {
+     "dia": "2028-02-05",
+     "abrivel": true,
+     "anterior": "2028-02-04",
+     "proximo": "2028-02-06"
+    },
+    {
+     "dia": "2028-02-06",
+     "abrivel": true,
+     "anterior": "2028-02-05",
+     "proximo": "2028-02-07"
+    },
+    {
+     "dia": "2028-02-07",
+     "abrivel": true,
+     "anterior": "2028-02-06",
+     "proximo": "2028-02-08"
+    },
+    {
+     "dia": "2028-02-08",
+     "abrivel": true,
+     "anterior": "2028-02-07",
+     "proximo": "2028-02-09"
+    },
+    {
+     "dia": "2028-02-09",
+     "abrivel": true,
+     "anterior": "2028-02-08",
+     "proximo": "2028-02-10"
+    },
+    {
+     "dia": "2028-02-10",
+     "abrivel": true,
+     "anterior": "2028-02-09",
+     "proximo": "2028-02-11"
+    },
+    {
+     "dia": "2028-02-11",
+     "abrivel": true,
+     "anterior": "2028-02-10",
+     "proximo": "2028-02-12"
+    },
+    {
+     "dia": "2028-02-12",
+     "abrivel": true,
+     "anterior": "2028-02-11",
+     "proximo": "2028-02-13"
+    },
+    {
+     "dia": "2028-02-13",
+     "abrivel": true,
+     "anterior": "2028-02-12",
+     "proximo": "2028-02-14"
+    },
+    {
+     "dia": "2028-02-14",
+     "abrivel": true,
+     "anterior": "2028-02-13",
+     "proximo": "2028-02-15"
+    },
+    {
+     "dia": "2028-02-15",
+     "abrivel": true,
+     "anterior": "2028-02-14",
+     "proximo": "2028-02-16"
+    },
+    {
+     "dia": "2028-02-16",
+     "abrivel": true,
+     "anterior": "2028-02-15",
+     "proximo": "2028-02-17"
+    },
+    {
+     "dia": "2028-02-17",
+     "abrivel": true,
+     "anterior": "2028-02-16",
+     "proximo": "2028-02-18"
+    },
+    {
+     "dia": "2028-02-18",
+     "abrivel": true,
+     "anterior": "2028-02-17",
+     "proximo": "2028-02-19"
+    },
+    {
+     "dia": "2028-02-19",
+     "abrivel": true,
+     "anterior": "2028-02-18",
+     "proximo": "2028-02-20"
+    },
+    {
+     "dia": "2028-02-20",
+     "abrivel": true,
+     "anterior": "2028-02-19",
+     "proximo": "2028-02-21"
+    },
+    {
+     "dia": "2028-02-21",
+     "abrivel": true,
+     "anterior": "2028-02-20",
+     "proximo": "2028-02-22"
+    },
+    {
+     "dia": "2028-02-22",
+     "abrivel": true,
+     "anterior": "2028-02-21",
+     "proximo": "2028-02-23"
+    },
+    {
+     "dia": "2028-02-23",
+     "abrivel": true,
+     "anterior": "2028-02-22",
+     "proximo": "2028-02-24"
+    },
+    {
+     "dia": "2028-02-24",
+     "abrivel": true,
+     "anterior": "2028-02-23",
+     "proximo": "2028-02-25"
+    },
+    {
+     "dia": "2028-02-25",
+     "abrivel": true,
+     "anterior": "2028-02-24",
+     "proximo": "2028-02-26"
+    },
+    {
+     "dia": "2028-02-26",
+     "abrivel": true,
+     "anterior": "2028-02-25",
+     "proximo": "2028-02-27"
+    },
+    {
+     "dia": "2028-02-27",
+     "abrivel": true,
+     "anterior": "2028-02-26",
+     "proximo": "2028-02-28"
+    },
+    {
+     "dia": "2028-02-28",
+     "abrivel": true,
+     "anterior": "2028-02-27",
+     "proximo": "2028-02-29"
+    },
+    {
+     "dia": "2028-02-29",
+     "abrivel": true,
+     "anterior": "2028-02-28",
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2028-02-01",
+     "pct": 1833,
+     "tom": "warn"
+    },
+    {
+     "dia": "2028-02-28",
+     "pct": 867,
+     "tom": "warn"
+    },
+    {
+     "dia": "2028-02-29",
+     "pct": -100,
+     "tom": "gain"
+    }
+   ]
+  }
+ },
+ {
+  "nome": "pct −0: 99.9 contra média 100 (round dá −0; o `|| 0` o troca)",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "99.900"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "100.100"
+    }
+   ]
+  },
+  "saida": {
+   "media": 100,
+   "nDias": 2,
+   "vividos": 2,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": 0,
+     "tom": ""
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": 0,
+     "tom": ""
+    }
+   ]
+  }
+ },
+ {
+  "nome": "média 0 com dia presente (só zeros): sem pílula, nenhum dia vivido",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-02",
+   "historico_desde": null,
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "total": "0.000"
+    },
+    {
+     "dia": "2026-10-02",
+     "total": "0.000"
+    }
+   ]
+  },
+  "saida": {
+   "media": 0,
+   "nDias": 2,
+   "vividos": 0,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": false,
+     "anterior": "2026-10-02",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": [
+    {
+     "dia": "2026-10-01",
+     "pct": null,
+     "tom": null
+    },
+    {
+     "dia": "2026-10-02",
+     "pct": null,
+     "tom": null
+    }
+   ]
+  }
+ },
+ {
+  "nome": "mês sem nenhum gasto",
+  "entrada": {
+   "mes": "2026-10",
+   "hoje": "2026-10-14",
+   "historico_desde": null,
+   "dias": []
+  },
+  "saida": {
+   "media": 0,
+   "nDias": 14,
+   "vividos": 0,
+   "grade": [
+    {
+     "dia": "2026-10-01",
+     "abrivel": true,
+     "anterior": null,
+     "proximo": "2026-10-02"
+    },
+    {
+     "dia": "2026-10-02",
+     "abrivel": true,
+     "anterior": "2026-10-01",
+     "proximo": "2026-10-03"
+    },
+    {
+     "dia": "2026-10-03",
+     "abrivel": true,
+     "anterior": "2026-10-02",
+     "proximo": "2026-10-04"
+    },
+    {
+     "dia": "2026-10-04",
+     "abrivel": true,
+     "anterior": "2026-10-03",
+     "proximo": "2026-10-05"
+    },
+    {
+     "dia": "2026-10-05",
+     "abrivel": true,
+     "anterior": "2026-10-04",
+     "proximo": "2026-10-06"
+    },
+    {
+     "dia": "2026-10-06",
+     "abrivel": true,
+     "anterior": "2026-10-05",
+     "proximo": "2026-10-07"
+    },
+    {
+     "dia": "2026-10-07",
+     "abrivel": true,
+     "anterior": "2026-10-06",
+     "proximo": "2026-10-08"
+    },
+    {
+     "dia": "2026-10-08",
+     "abrivel": true,
+     "anterior": "2026-10-07",
+     "proximo": "2026-10-09"
+    },
+    {
+     "dia": "2026-10-09",
+     "abrivel": true,
+     "anterior": "2026-10-08",
+     "proximo": "2026-10-10"
+    },
+    {
+     "dia": "2026-10-10",
+     "abrivel": true,
+     "anterior": "2026-10-09",
+     "proximo": "2026-10-11"
+    },
+    {
+     "dia": "2026-10-11",
+     "abrivel": true,
+     "anterior": "2026-10-10",
+     "proximo": "2026-10-12"
+    },
+    {
+     "dia": "2026-10-12",
+     "abrivel": true,
+     "anterior": "2026-10-11",
+     "proximo": "2026-10-13"
+    },
+    {
+     "dia": "2026-10-13",
+     "abrivel": true,
+     "anterior": "2026-10-12",
+     "proximo": "2026-10-14"
+    },
+    {
+     "dia": "2026-10-14",
+     "abrivel": true,
+     "anterior": "2026-10-13",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-15",
+     "abrivel": false,
+     "anterior": "2026-10-14",
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-16",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-17",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-18",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-19",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-20",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-21",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-22",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-23",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-24",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-25",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-26",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-27",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-28",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-29",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-30",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    },
+    {
+     "dia": "2026-10-31",
+     "abrivel": false,
+     "anterior": null,
+     "proximo": null
+    }
+   ],
+   "dias": []
+  }
+ }
+]

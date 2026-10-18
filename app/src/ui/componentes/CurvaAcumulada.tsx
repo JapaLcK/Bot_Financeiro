@@ -57,7 +57,7 @@ export function indiceDoDia(x: number, largura: number, diasNoMes: number, limit
   if (util <= 0 || diasNoMes < 2) return 0;
   return Math.min(Math.max(Math.round(((x - MARGEM_X) / util) * (diasNoMes - 1)), 0), limite);
 }
-const reais = (c: number) => { const p = partes(c); return p ? `R$ ${p.inteiro},${p.centavos}` : "—"; };
+export const reais = (c: number) => { const p = partes(c); return p ? `R$ ${p.inteiro},${p.centavos}` : "—"; };
 /** Textos da bolha: o valor é o `pontos[i]` desenhado (nunca recalculado); a 2ª linha ("mês passado R$ ...") só com a série do mês passado, no mesmo `i` (a série já vem preenchida até o fim do mês). */
 export function conteudoBolha(i: number, pontos: number[], anterior: number[] | null) {
   return { dia: `dia ${i + 1}`, valor: reais(pontos[i]!), anterior: anterior && `mês passado ${reais(anterior[Math.min(i, anterior.length - 1)]!)}` };

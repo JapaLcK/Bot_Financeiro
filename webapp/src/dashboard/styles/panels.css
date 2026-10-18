@@ -195,6 +195,13 @@
 .sub-ignoradas summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
 .sub-ignoradas[open] .sub-mostrar, .sub-ignoradas:not([open]) .sub-esconder { display: none; }
 
+/* Receitas do extrato (reusa .subs/.sub/.sub-acoes): nome longo corta com reticências, o valor não encolhe. */
+.rec-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.rec-foco:focus { outline: none; }
+.rec-erro { color: var(--warn); font-size: 13px; }
+.rec-erro:empty { display: none; }
+.rec-confirmada { background: var(--gain-wash); color: var(--ink); }
+
 /* Piggy notou */
 .piggy-title { display: inline-flex; align-items: center; gap: 8px; }
 .insights { display: grid; gap: 18px; }

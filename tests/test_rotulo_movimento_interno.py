@@ -84,8 +84,8 @@ def test_ultimos_n_sem_data_marca_interno_e_o_tira_dos_totais(uid_wa):
 def test_tool_do_chat_devolve_interno_como_entrada_saida(uid_wa):
     """`list_recent_launches` (chat do Piggy) pelo `_dispatch_tool` do runner —
     o JSON que o modelo recebe. Com "receita" cru, o saque em espécie era lido
-    como ganho. NEGATIVO: `"tipo": r["tipo"]` de volta em
-    core/services/ai_chat/tools/launches.py → vermelho. POSITIVO: a comum
+    como ganho. NEGATIVO: `tipo` sem o ramo do interno em `_para_ia`
+    (core/services/ai_chat/tools/listas_ia.py) → vermelho. POSITIVO: a comum
     continua "receita"."""
     import json
 
@@ -94,7 +94,7 @@ def test_tool_do_chat_devolve_interno_como_entrada_saida(uid_wa):
     _base(uid_wa)
     conteudo, terminal = _dispatch_tool(uid_wa, "list_recent_launches", {"limit": 10})
     assert terminal is None
-    tipos = {l["alvo"]: l["tipo"] for l in json.loads(conteudo)["launches"]}
+    tipos = {l["descricao"]: l["tipo"] for l in json.loads(conteudo)["itens"]}
     assert tipos == {"freela": "receita", "Saque em dinheiro": "entrada",
                      "Depósito em dinheiro": "saída"}, tipos
 

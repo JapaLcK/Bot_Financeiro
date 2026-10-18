@@ -6,6 +6,7 @@ import { Selos } from "./Selos";
 
 // Motivos que explicam o alvo (não o saldo da fonte): não pedem "a conferir" no guardado.
 const DO_ALVO = ["custo_desconhecido", "plano_sem_custo_mensal"];
+export { DO_ALVO }; // a pílula do chat (MetaPilula.tsx) usa a mesma lista
 
 // A frase de um motivo com o botão que resolve (planos ou conectar banco).
 export function FraseComAcao({ f }: { f: Frase }) {

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { DEMO, guiaQuery } from "../lib/v2";
-import { RAIL, href, route, useRoute } from "../router";
+import { DEMO, guiaQuery, sair } from "../lib/v2";
+import { CONTA, RAIL, href, route, useRoute } from "../router";
 import { abrirDica, dicaDe } from "./Dica";
 import { abrirGuia } from "./Guia";
 import { NATIVE, hide, isOpen, show } from "./dialog";
@@ -51,6 +51,19 @@ export function MenuTelas() {
             </li>
           ))}
         </ul>
+        {!DEMO && <div role="group" className="menu-telas-conta" aria-labelledby="menu-conta">
+          <p id="menu-conta" className="menu-telas-sec">Conta</p>
+          <ul>
+            {CONTA.map(route).map((r) => (
+              <li key={r.path}>
+                <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} onClick={fechar}>
+                  <i className={`ph ${r.icon}`} aria-hidden="true" /><span>{r.label}</span>
+                </a>
+              </li>
+            ))}
+            <li><button type="button" onClick={sair}><i className="ph ph-sign-out" aria-hidden="true" /><span>Sair</span></button></li>
+          </ul>
+        </div>}
         {/* Fecha na faixa de baixo, onde o dedo estava ao abrir: o duplo toque no "Menu" da barra vira abrir+fechar. */}
         <button type="button" className="menu-telas-fechar" onClick={fechar}>Fechar</button>
       </div>

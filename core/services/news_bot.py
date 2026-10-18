@@ -5,7 +5,7 @@ Bot de notícias financeiras (curadoria / link-out). Roda 1x a cada ~12h:
 
   1. Busca RSS de fontes financeiras BR (InfoMoney, Exame Invest, Valor Investe).
   2. Pra cada item novo (URL ainda não vista), manda título + snippet pro
-     gpt-4o-mini, que atua como EDITOR: descarta o que não é financeiro
+     o modelo, que atua como EDITOR: descarta o que não é financeiro
      (política, esporte, entretenimento) e gera um resumo ORIGINAL curto no
      tom do Piggy + categoria + emoji.
   3. Grava em `news_posts`. O card no /blog leva o usuário pra ler na fonte.

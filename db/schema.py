@@ -1304,6 +1304,22 @@ def init_db():
         """
         create index if not exists idx_data_export_tokens_user on data_export_tokens (user_id, created_at desc)
         """,
+        # Código de reautenticação por e-mail (exclusão de conta). Uma linha por
+        # (usuário, propósito): o upsert troca o código anterior e a tabela não cresce.
+        # Fora de `user_owned_tables`/export de propósito: segredo transitório (cascade
+        # apaga na exclusão). Só o HMAC do código; nunca o código.
+        """
+        create table if not exists account_reauth_codes (
+          user_id bigint not null references users(id) on delete cascade,
+          purpose text not null,
+          code_hash text not null,
+          expires_at timestamptz not null,
+          attempts int not null default 0,
+          used_at timestamptz,
+          created_at timestamptz not null default now(),
+          primary key (user_id, purpose)
+        )
+        """,
         """
         create table if not exists auth_rate_limits (
           bucket text not null,
@@ -1867,6 +1883,10 @@ def init_db():
         # (`Literal[-1, 1] | None`), e uma constraint num ALTER em tabela cheia
         # varre tudo no boot.
         "alter table ai_messages add column if not exists feedback smallint",
+        # Motivo do 👎 (chave de `db.ai_feedback.MOTIVOS`) e comentário livre (só com
+        # "outro", ≤ 500). Nulas e sem CHECK, pelo mesmo motivo de `feedback`.
+        "alter table ai_messages add column if not exists feedback_motivo text",
+        "alter table ai_messages add column if not exists feedback_texto text",
 
         # Pending action: write proposto pela IA aguardando confirmação do user.
         # Quando o user manda "sim" / "confirma", a ação é executada e a linha

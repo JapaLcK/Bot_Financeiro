@@ -28,6 +28,13 @@ CARDS_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVa
 """Cards que o `show_card` já MOSTROU neste turno (emitiu bloco; chamada recusada não
 entra). O teto vale por turno. Setada pelo runner; None fora dele = sem teto."""
 
+CARDS_DO_APP: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "ai_chat_cards_do_app", default=()
+)
+"""Ids de card que o app SABE mostrar (`cards` do corpo de `/ai/chat/stream`). Os que saem da própria tool
+(`cards.DA_TOOL`) só são emitidos se estiverem aqui: o build antigo não manda o campo, descartaria o bloco calado e o
+dado sumiria. Setada por `streaming.executar`; vazio fora dele."""
+
 FALHAS_DE_CARD_DO_TURNO: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "ai_chat_falhas_de_card_do_turno", default=None
 )

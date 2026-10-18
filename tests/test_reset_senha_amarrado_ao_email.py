@@ -46,7 +46,7 @@ from db import consume_password_reset_token, create_password_reset_token, ensure
 from db.connection import get_conn
 from db_support import consume_password_reset_token_impl
 from tests._espera_lock import _esperar_backend_travado
-from tests._helpers_pii import insert_auth_account_pii
+from tests._helpers_pii import HASH_SENHA, SENHA, insert_auth_account_pii
 from test_copy_definir_senha import _client_for, spy_email  # noqa: F401 (fixture por import)
 
 ESPERA = 20  # teto de toda espera entre threads: falha vira vermelho, nunca trava a suíte
@@ -56,10 +56,10 @@ def _email() -> str:
     return f"reset-amarrado-{uuid.uuid4().hex[:10]}@test.local"
 
 
-def _conta(user_id: int) -> str:
+def _conta(user_id: int, password_hash: str = "hash") -> str:
     email = _email()
     with get_conn() as conn, conn.cursor() as cur:
-        insert_auth_account_pii(cur, user_id, email)  # password_hash = "hash"
+        insert_auth_account_pii(cur, user_id, email, password_hash=password_hash)
         conn.commit()
     return email
 
@@ -124,14 +124,15 @@ def _redefine(token: str, senha: str):
 
 def _patch_email(user_id: int, email_atual: str, novo: str) -> None:
     client, headers = _client_for(user_id, email_atual)
-    r = client.patch(f"/settings/{user_id}/security/contact", json={"email": novo}, headers=headers)
+    r = client.patch(f"/settings/{user_id}/security/contact",
+                     json={"email": novo, "current_password": SENHA}, headers=headers)
     assert r.status_code == 200, r.text
 
 
 # ── A conversa, pelas rotas ─────────────────────────────────────────────────
 
 def test_link_antigo_depois_da_troca_de_email_e_recusado(user_id, spy_email):
-    email = _conta(user_id)
+    email = _conta(user_id, HASH_SENHA)  # bcrypt de verdade: a troca de e-mail pede a senha
     promote_to_pro(user_id)
     jti = create_session(user_id)
     token = _pede_link(email, spy_email)
@@ -140,14 +141,14 @@ def test_link_antigo_depois_da_troca_de_email_e_recusado(user_id, spy_email):
     r = _redefine(token, "senhadoinvasor1")
 
     assert r.status_code == 400, r.text
-    assert _senha(user_id) == "hash"
+    assert _senha(user_id) == HASH_SENHA
     assert _used_at(token) is not None, "a recusa tem de queimar o token"
     assert get_active_session(jti) is not None, "o reset recusado derrubou a sessão do dono"
 
 
 def test_link_pedido_depois_da_troca_funciona(user_id, spy_email):
     """POSITIVO: sem ele o grupo passa num consumo que recusa tudo."""
-    email = _conta(user_id)
+    email = _conta(user_id, HASH_SENHA)
     promote_to_pro(user_id)
     jti = create_session(user_id)
     novo = _email()

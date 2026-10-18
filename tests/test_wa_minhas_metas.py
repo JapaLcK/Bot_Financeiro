@@ -46,8 +46,7 @@ COMO_ANTES = {
     "retirei 100 da caixinha reserva": ("pockets.withdraw", 0.95),
     "minhas caixinhas": ("pockets.list", 1.0), "caixinhas": ("pockets.list", 1.0),
     "saldo": ("balance.check", 1.0), "gastei 50 no mercado": ("launches.add", 0.95),
-    "apaga a meta Casa nova": ("out_of_scope", 0.0), "criar meta viagem": ("out_of_scope", 0.0),
-}
+}  # "apaga a meta Casa nova" e "criar meta viagem" saíram: para K viraram `metas.escrita` (C4, tests/test_wa_metas_escrita.py)
 
 
 @pytest.fixture

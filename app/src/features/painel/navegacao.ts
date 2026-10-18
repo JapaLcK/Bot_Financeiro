@@ -21,3 +21,8 @@ export function useNavegarPainel(aoSair?: () => void) {
  };
  return { navegar, entrando, aviso, emVoo };
 }
+let entradas = 0;
+/** Única porta para `/extrato` com `dia` ou `categoria`. A `entrada` (contador) muda a cada toque, mesmo no mesmo dia: o Extrato zera os filtros quando ela muda (as abas ficam montadas). */
+export function irAoExtrato(navegar: ReturnType<typeof useNavegacaoPainel>["navegar"], filtro: { dia: string } | { categoria: string }) {
+ navegar({ pathname: "/extrato", params: { ...filtro, entrada: ++entradas } });
+}

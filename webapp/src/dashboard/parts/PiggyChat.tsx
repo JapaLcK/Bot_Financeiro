@@ -19,6 +19,7 @@ function PiggySays({ m, live = true }: { m: Msg; live?: boolean }) {
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-by"><img src={ICON} alt="" width={24} height={24} />Piggy{!DEMO && !m.real && <Demonstracao />}</p>
       <p className="msg-text">{m.text}</p>
+      {m.card}
       {m.blocks?.length && m.s0 && m.page ? <LiveAnswer blocks={m.blocks} s0={m.s0} page={m.page} /> : null}
       {live && !!m.follow?.length && (
         <ul className="chat-follow" aria-label="Próximas perguntas">
