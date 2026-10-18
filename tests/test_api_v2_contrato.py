@@ -275,6 +275,13 @@ def test_fixture_de_contas_segue_o_modelo_e_fecha_a_conta(nome):
     assert set(c.motivos) == set(c.carteira.motivos).union(*(x.motivos for x in c.contas))
 
 
+@pytest.mark.parametrize("nome", sorted(FIXTURES["bancos"]))
+def test_fixture_de_bancos_segue_o_modelo(nome):
+    """O `motivos` de cima é a união dos motivos dos bancos (`db/bancos.py::montar`): é ele que acende o aviso do topo."""
+    b = Bancos.model_validate(FIXTURES["bancos"][nome])
+    assert set(b.motivos) == set().union(*(x.motivos for x in b.bancos))
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["investido"]))
 def test_fixture_de_investido_segue_o_modelo(nome):
     """Dinheiro é texto com 2 casas (ou null); o rótulo é o de `investido.TIPOS` (§0.7:

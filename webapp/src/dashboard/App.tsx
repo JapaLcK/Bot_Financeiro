@@ -11,6 +11,8 @@ import { Ajuda } from "./parts/Ajuda";
 import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
+import { AvisosDoTopo } from "./parts/AvisosDoTopo";
+import { ReceitasProvider } from "./widgets/ReceitasDoBanco";
 import { CONTA, NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
 import { ICON } from "./lib/brand";
 import { DEMO, MESES, contasQuery, sair } from "./lib/v2";
@@ -118,7 +120,10 @@ export function App() {
         <div className="main-col">
           <Topbar s={s} path={path} />
           <main id="main" className="page" data-page={path}>
-            <Page s={s} />
+            <ReceitasProvider>
+              <AvisosDoTopo path={path} />
+              <Page s={s} />
+            </ReceitasProvider>
             {DEMO && <p className="foot">Protótipo com dados sintéticos. Nenhum valor aqui pertence a um usuário real.</p>}
           </main>
         </div>

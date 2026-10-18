@@ -398,6 +398,29 @@
       }
     }
   },
+  "bancos": {
+    "em_dia": {
+      "total": "1200.00",
+      "motivos": [],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": []}
+      ]
+    },
+    "desatualizado": {
+      "total": "1200.00",
+      "motivos": ["banco_desatualizado"],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": ["banco_desatualizado"]}
+      ]
+    },
+    "pausada": {
+      "total": "1200.00",
+      "motivos": ["conexao_pausada"],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": ["conexao_pausada"]}
+      ]
+    }
+  },
   "investido": {
     "com_banco": {
       "total": "57123.45",

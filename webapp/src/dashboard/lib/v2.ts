@@ -126,6 +126,12 @@ export const contasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
   ...vivo,
 };
+// Os bancos conectados (`GET /api/v2/bancos`): só o `motivos` de cima alimenta o aviso do topo (parts/AvisosDoTopo.tsx).
+export const bancosQuery = {
+  queryKey: ["bancos"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/bancos", signal),
+  ...vivo,
+};
 // As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.
 // Lida pela página Metas e pelo assunto `metas` do chat (parts/MetasResposta.tsx).
 export const metasQuery = {

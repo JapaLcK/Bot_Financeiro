@@ -1,11 +1,11 @@
-// Mock com estado da caixa "Receitas do extrato" (pendentes, topo) e da seção "Receitas na previsão" (respondidas, fim), dividido entre dashboard_v2_previsao_receitas*.test.mjs.
+// Mock com estado das receitas pendentes (na pilha de avisos do topo, `#avisos-topo`) e da seção "Receitas na previsão" (respondidas, fim da /previsao), dividido entre dashboard_v2_previsao_receitas*.test.mjs.
 import { RESPOSTAS, abrirPainel } from "./_painel.mjs";
 
 export const ALFA = "extrato#a1b2c3d4e5f60718"; // pendente
 export const MARIA = "extrato#0f1e2d3c4b5a6978"; // confirmada
 export const JOAO = "extrato#1122334455667788"; // negada
 export const STATUS = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
-export const CAIXA = "#w-previsao-receitas";
+export const CAIXA = "#avisos-topo"; // o anfitrião da pilha: o alerta de falha e a região viva moram nele, a pilha (`section.pilha`) dentro
 export const PEND = `${CAIXA} ul[aria-label="Receitas a confirmar"] li`;
 export const SECAO = "#w-previsao-receitas-respondidas";
 export const RESP = `${SECAO} ul[aria-label="Receitas respondidas"] li`;
@@ -61,4 +61,9 @@ export const alertas = (page) => Promise.all([CAIXA, SECAO].map(async (s) => (aw
 /** Painel visível = o recipiente tem caixa de verdade; no estado sr-only ele é 1 px (só o anúncio e o alvo do foco ficam no DOM). */
 export const painelVisivel = (page, sel) => page.locator(sel).evaluate((a) => { const r = a.parentElement.getBoundingClientRect(); return r.width > 2 && r.height > 2; });
 export const botoesDasCaixas = (page) => page.locator(`${CAIXA} button, ${SECAO} button`).evaluateAll((bs) => bs.map((b) => b.disabled));
+/** A pilha tem card de verdade (no estado vazio ela é só um alvo de foco sr-only). */
+export const pilhaVisivel = (page) => page.locator(`${CAIXA} section.pilha`).count().then((n) => n > 0);
+/** Os pontos da pilha (um por aviso) e "ver o aviso k": com mais de um, só um card aparece por vez. */
+export const pontos = (page) => page.locator(`${CAIXA} .pilha-ponto`);
+export const verAviso = (page, k) => pontos(page).nth(k - 1).click();
 export const semPendente = (page) => page.locator(PEND).waitFor({ state: "detached" });
