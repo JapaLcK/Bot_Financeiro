@@ -598,22 +598,40 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
-  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (não no card do Resumo), lê
+  Receitas do extrato (PR 2a, `widgets/ReceitasDoBanco.tsx`; #1076 PR 1 as moveu para a pilha): as PENDENTES são avisos da PILHA DE AVISOS do topo
+  do `/painel` (`parts/AvisosDoTopo.tsx`, montada uma vez no `App.tsx`, um aviso por vez, pontos "Aviso k de n", rosa para decisão; o BANCO desatualizado,
+  âmbar, vem antes; `GET /api/v2/bancos` lido por `avisoDeBancoQuery` (`lib/v2.ts`; NÃO é o `bancosQuery(uid)` da página Bancos, `conta/api.ts`, que mostra valores em R$ e confere a conta), `motivos` com `banco_desatualizado` ou `conexao_pausada`, "Ver bancos conectados" abre a página
+  `#/conta/bancos` (`href("/conta/bancos")`; o "Reconectar {banco}" do PR 2 irá ao Ajustes antigo, onde está o widget); o X vale até recarregar a página). As receitas só entram na pilha em `/` e em `/previsao`, e só nos planos com previsão (`locked("hero", plano)`: Essencial e Free não fazem GET). A lista é a que o card/a página
+  leu quando o layout salvo diz que o card existe (exceção: limite (j)), no horizonte que ele mostra (`useListaDaPagina`, publicada por `usePrevisao`; durante a troca de horizonte ela mantém a última, e um 4xx a apaga: 4xx nunca mostra dado guardado, inclusive no downgrade com o card em 60/90 dias).
+  Em `/` o anfitrião espera o `/perfil` para saber se o card está no layout (`comCardPrevisao`, do Board): se está, não abre consulta nenhuma (UM GET por carga, testado com `/perfil` a 0, 150 e 600 ms);
+  só quando o Resumo NÃO tem o card (ex.: Economizar, ou o bloco tirado no Organizar) a pilha lê a chave `["previsao", null]` sozinha. Tirar o card no Organizar: ele desmonta e limpa a lista, o que re-renderiza a pilha, que passa a ler sozinha (NÃO coberto por teste; se o card nunca tinha publicado a lista, a leitura própria só abre no próximo render da pilha). Nas outras
+  telas a pilha só tem o banco e não há GET `/previsao`); `/piggy`, a Conta e o
+  protótipo não têm pilha. "Conexão com o banco pendente" do app NÃO existe no web (no app vem do cofre do aparelho; sem fonte equivalente aqui). As
+  RESPONDIDAS (Desfazer) ficam na seção "Receitas na previsão" no fim da `/previsao` (`RespondidasDoBanco`). A lógica da mutação é o hook `useReceitas`
+  (uma instância por ponta, mesma `mutationKey`); o alerta "Não deu para salvar" é UM só (contexto `ReceitasProvider`), fica FORA da pilha, acima dela, e
+  não atravessa telas. Lê
   `receitas_do_banco` e faz Sim/Não/Desfazer em `POST /api/v2/previsao/receita`. Sem atualização otimista: a mutação só termina
   (e destrava os botões) depois de reler toda `["previsao", …]` ativa, porque a resposta do POST é a do menor horizonte. Resposta
-  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Duas instâncias do mesmo componente (`modo`): `pendentes` no
-  topo (some quando não há o que perguntar) e `respondidas` no fim, a seção "Receitas na previsão" com o Desfazer (decisão do dono, 2026-10-17: respondida
-  sai do topo). Sem o que mostrar, o recipiente vira `sr-only` e fica montado para o anúncio e o foco (Sim na última pendente, Desfazer na última respondida).
+  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Duas pontas (`useReceitas(modo)`): `pendentes` na pilha do topo (a pilha some quando não há aviso; vazia, vira um alvo de foco sr-only "Nenhum aviso.", que só nasce quando o último aviso sai por AÇÃO do usuário na pilha, o Sim/Não ou o X, nunca por troca de rota nem por releitura: nelas o foco é do título da tela) e `respondidas` no fim, a seção "Receitas na previsão" com o Desfazer (decisão do dono, 2026-10-17: respondida
+  sai do topo). Sem o que mostrar, a seção das respondidas vira `sr-only` e fica montada para o anúncio e o foco (Desfazer na última respondida); o foco do Sim na pilha vai para o título do aviso que subiu (`PilhaAvisos`).
   No app, as respondidas moram no card "Saldo previsto" do Resumo (contexto `ProvedorRespondidas`; perfil sem esse card não as alcança, limite aceito). Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
   retries a lista fica a de antes do POST, com Sim/Não ativos e o aviso de previsão antiga; (b) POST falha e a releitura não
   mostra a marca: alerta "Não deu para salvar", nada anunciado. Só conta como gravado quem volta na lista com o status esperado:
   resposta perdida de uma linha que sumiu da lista (ou lista vazia, p.ex. banco fora do ar) mostra "Não deu para salvar" mesmo que
   tenha gravado, e nenhum dado se perde (falso erro é menos grave que falso sucesso). Também aceitos: (c) erro numa caixa sem linha
-  para tentar de novo (pendente única que some, 404 e releitura vazia: a caixa fica com o alerta, sem botões); (d) trocar o
-  horizonte com o POST no ar desmonta a caixa e o erro não aparece, mas a lista volta com Sim/Não ativos; (e) em lista longa,
+  para tentar de novo (pendente única que some, 404 e releitura vazia: o alerta fica sozinho no topo, sem pilha); (d) ver (h); (e) em lista longa,
   `preventScroll` deixa o foco no título fora da vista, e o anúncio sai pela região viva; GET de releitura pendurado mantém os
   botões travados até o navegador cortar a conexão; sem rede a mutação falha na hora (`networkMode: "always"`). O mesmo padrão de
-  `useMutation` em `Subscriptions.tsx` (sem `networkMode`, foco movido sem checar onde o usuário está) não foi tocado. Servidor
+  `useMutation` em `Subscriptions.tsx` (sem `networkMode`, foco movido sem checar onde o usuário está) não foi tocado. Também aceitos na pilha (#1076 PR 1):
+  (f) 5xx ou rede na releitura do horizonte novo: o POST do Sim pegou, é anunciado, mas a lista antiga fica na pilha (o card não sai) e um 2º Sim manda outro POST. Isso é
+  inofensivo: `POST /previsao/receita` é idempotente (`api/v2/previsao.py` `responder_receita`, upsert em `subscription_marks` e delete sem erro em `db/of_recurring.py` `marcar`;
+  `tests/test_receita_confirmada.py::test_repetir_a_mesma_resposta_e_idempotente`); (g) o POST em voo quando o usuário troca de tela: o alerta de falha NÃO aparece fora da tela do POST
+  (sem receita a repetir) e o anúncio "Nome: confirmada." entra numa região `role=status` que já estava montada vazia durante o POST (não nasce preenchida; o M3 de
+  `dashboard_v2_pilha_avisos.test.mjs` marca o nó com `data-marca` antes da resposta e confere que o texto entra no MESMO nó), sai sozinho em 3 s. Que o leitor de tela o FALE não foi medido aqui (só no aparelho, VoiceOver/NVDA);
+  (h) a troca de horizonte na `/previsao` apaga o alerta de falha que já estava na tela (o `useEffect` limpa quando a página fica sem `d`), mas NÃO o que chega depois: um POST que volta 500 com o
+  horizonte novo ainda carregando mostra o alerta, e ele fica depois que a resposta do horizonte chega (a receita segue pendente na pilha, com Sim/Não ativos; o Sim de novo o mostra outra vez); (i) o clique num BOTÃO da pilha (Sim, Não, X, ponto; clicar no texto não conta, teste O2) vale como "respondeu" até a próxima mudança da lista: POST que falha seguido de uma releitura que
+  esvazia a pilha, com o foco solto no body, ainda leva o foco ao alvo "Nenhum aviso.";
+  (j) o layout salvo e o card montado podem divergir. K5: o Pro está em `/` com o card em 90 dias; outra aba grava o layout salvo sem `hero` (Organizar); a pilha re-renderiza (p.ex. o `/bancos` muda) e passa a ler `["previsao", null]` sozinha mesmo com o card ainda montado, e no rebaixamento o card mostra o dado do Pro por um instante. K7, o inverso: no perfil Economizar, outra aba põe o `hero` no layout; a receita some da pilha até trocar de tela ou recarregar (sem perda de dado). Causa: `AvisosDoTopo.tsx` usa `comCardPrevisao`, que lê o layout salvo no localStorage em vez de observar se o card está montado. A correção estrutural é observar a montagem (contexto `undefined` = nada montado × `null` = montado sem lista); issue a abrir. Servidor
   sem o campo (deploy fora de ordem): a caixa não aparece.
   **No app nativo (PR 2b, `app/src/features/painel/receitas.tsx`)**: uma caixa só, no TOPO do Resumo (`TelaResumo`), para todo
   usuário com Previsão liberada, tenha ou não o card "Saldo previsto" no layout (o provider lê a previsão sempre). Previsão
@@ -770,7 +788,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/bancos` (`api/v2/bancos.py`, regra em `db/bancos.py`; também `/api/app/bancos`): o que cada banco
   conectado vale — `{total, motivos, bancos: [{conexao_id, saldo_conta, investido, total, contas, cartoes,
   investimentos, motivos}]}`, dinheiro em texto, `null` ≠ zero. **Ressalva do plano:** sem o recurso `investments`, a
-  conexão que só tem posição (sem conta) fica fora de `bancos` (o app deve mostrar "—" para ela, PR 3). Uma entrada por CONEXÃO (`conexao_id` é o id local, na
+  conexão que só tem posição (sem conta) fica fora de `bancos` (o app mostra "—" para ela). Uma entrada por CONEXÃO (`conexao_id` é o id local, na
   ordem crescente dele; duas "Nubank" são duas), e o app não soma. Nenhuma regra de dinheiro nova, tudo num snapshot
   (repeatable read, só leitura): `saldo_conta` = Σ das contas `no_total` de `contas_hoje.listar` (`null` se nenhuma
   entra; outra moeda, conexão pausada e saldo ausente ficam fora, com o motivo); `investido` =
@@ -790,14 +808,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   completo (da entrada e do topo). Só ocorre com o freio `PLANS_V2_ENABLED=0` / plano sem `investments`; testado
   em `tests/test_api_v2_bancos.py` só no nível da entrada.
   **Quem não vem em `bancos`:** conexão sem nenhuma conta, cartão e posição no espelho (DELETED sem linhas, reconexão
-  cujas identidades migraram para a nova, viva recém-conectada sem dado). O app deve mostrar "—" quando a conexão não
-  vem aqui (requisito do PR 3; consumidor: `/painel#/conta/bancos`, em `conta/Bancos.tsx` e `lib/bancos.ts`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
+  cujas identidades migraram para a nova, viva recém-conectada sem dado). O app mostra "—" quando a conexão não
+  vem aqui (`open_finance_bancos_tela.test.tsx`); o `/painel` faz o mesmo em `/painel#/conta/bancos` (`conta/Bancos.tsx`, `lib/bancos.ts`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
   **Contagens:** `contas`, `cartoes`, `investimentos` são as linhas do espelho da conexão (sem duplicata de reconexão,
   `distinct on` pela identidade do provedor) — o que o banco mostra, e NÃO o que entra no valor: contam também conexão
   pausada, outra moeda e posição resgatada (uma pausada pode ter `cartoes: 1` com tudo `null`). Carteira, cartão e
   fatura ficam fora dos valores. **Texto decimal:** a escala é a da fonte, a mesma de `/contas` (`"0"`, `"0.00"`,
   `"1000"`): o cliente interpreta o decimal, não compara texto. Limites: conta com `raw` sem `balance` e coluna ≠ 0
   entra no `total` de `/contas` e sai `null` aqui (`patrimonio.sem_saldo`). Fixture do app: `tests/fixtures/app_bancos.json`.
+  **Consumidor (app):** `app/app/(app)/conexoes.tsx` + `app/src/features/openFinance/conexoes/`. A leitura é paralela ao
+  snapshot e OPCIONAL: qualquer falha (403, 404, 5xx, rede, schema) deixa a tela sem números, nunca sem a lista nem
+  as ações. `bancosSchema` é tolerante por item (um item inválido não derruba os outros); a junção é por `conexao_id`
+  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. O topo é o `total` do
+  servidor, sem soma no app; a barra e a legenda em % usam só as partes positivas e o cálculo é do cliente, sem R$.
+  Limite declarado: os `motivos` do topo NÃO são desenhados. "Ocultar valores" é agora contexto do app inteiro
+  (`PrivacidadeProvider`, `app/src/features/painel/privacidade.tsx`), não mais estado local do Painel.
 
 - `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
   regra em `db/metas.py`, tabela `metas`; também em `/api/app/metas`): metas do `/painel`. Meta não
@@ -1729,6 +1754,10 @@ Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.
 `https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
 (`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
 e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
+No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG
+vem por `fetch` + `parse` + `SvgAst` (uma vez por URI, sem `Authorization`) e o `Avatar` cai na inicial em falha, `!ok` ou
+corpo que não é SVG. Limites: sem teto de tamanho do corpo; `<image href>` e `<use href>` dentro do SVG são renderizados;
+o `fetch` segue redirecionamento (o host fixo vale só no 1º salto). Sem `expo-updates`: a tela só chega com build novo.
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
@@ -1973,6 +2002,10 @@ APNs direto, sem serviço intermediário: `core/services/push_service.py` +
 `frontend/routes/push.py`, tabela `push_tokens` (token único por aparelho, com
 `environment` separando sandbox de produção — o mesmo token não vale nos dois).
 Configuração em `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY`, `APNS_TOPIC`.
+Sem as três primeiras o envio só loga. Nenhum evento de produto envia push ainda; o registro
+foi feito para o app Capacitor, e o `APNS_TOPIC` padrão (`com.pigbankai.app`) não é o id do app
+Expo (`com.pigbankai.mobile`). Plano do push no app e decisões do dono:
+[`plano-push-app.md`](plano-push-app.md).
 
 ### Admin e afiliados
 

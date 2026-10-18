@@ -5,7 +5,8 @@ import type { Conexao } from "@/api/schemas/openFinance";
 import { lerTentativaBancaria } from "@/storage/secure";
 import { cofre, chamadas, fetchFalso, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { voltarAoInicio } from "@/features/openFinance/navegacao";
+import { abrirBancos, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 type Props = { onSuccess: (d: { item: { id: string } }) => void };
 const mockWidget: { props: Props | null } = { props: null };
@@ -48,7 +49,7 @@ afterEach(() => jest.restoreAllMocks());
 
 it.each(["Reconectar Nubank", "Conectar outro banco"])("%s antes de Desconectar no mesmo frame não abre Alert nem inicia DELETE", async (autorizar) => {
   servidor(true); const alert = alerta(true);
-  renderRouter("./app", { initialUrl: "/conexoes" });
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: autorizar })).toBeEnabled());
   const a = screen.getByRole("button", { name: autorizar });
   const r = screen.getByRole("button", { name: "Desconectar Nubank" });
@@ -63,7 +64,7 @@ it.each(["Reconectar Nubank", "Conectar outro banco"])("%s antes de Desconectar 
 
 it.each(["Nubank", "Itaú"])("Alert %s aberto antes da autorização não executa confirmação tardia enquanto entrada reservada", async (banco) => {
   servidor(true); alerta();
-  renderRouter("./app", { initialUrl: "/conexoes" });
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
   await act(async () => {
     fireEvent.press(screen.getByRole("button", { name: `Desconectar ${banco}` }));
@@ -81,7 +82,7 @@ it.each(["Nubank", "Itaú"])("Alert %s aberto antes da autorização não execut
 });
 
 it("remoção livre mantém DELETE individual e libera demais bancos", async () => {
-  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
@@ -91,7 +92,7 @@ it("remoção livre mantém DELETE individual e libera demais bancos", async () 
 });
 
 it("voltar da autorização libera nova confirmação de remoção", async () => {
-  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Reconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.getByTestId("widget-remocao-entrada")).toBeTruthy());
@@ -105,7 +106,7 @@ it("voltar da autorização libera nova confirmação de remoção", async () =>
 
 it("DELETE em voo continua bloqueando autorização e libera ações ao terminar", async () => {
   const pausa = segurar(); servidor(false, pausa.promessa); alerta(true);
-  renderRouter("./app", { initialUrl: "/conexoes" });
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
   const a = screen.getByRole("button", { name: "Reconectar Nubank" });
   const r = screen.getByRole("button", { name: "Desconectar Nubank" });
@@ -120,12 +121,13 @@ it("DELETE em voo continua bloqueando autorização e libera ações ao terminar
 });
 
 it("confirmação de Alert da montagem substituída não inicia DELETE", async () => {
-  alerta(); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   const antiga = confirmar;
   expect(antiga).toBeDefined();
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Voltar ao Início" })); await drenar(); });
+  // A tela sai da pilha (o que o botão "Voltar ao Início" fazia): a confirmação do Alert antigo chega a uma montagem morta.
+  await act(async () => { voltarAoInicio(); await drenar(); });
   await waitFor(() => expect(screen).toHavePathname("/resumo"));
   await act(async () => { antiga?.(); await drenar(); });
   expect(deletes()).toHaveLength(0);
@@ -134,7 +136,7 @@ it("confirmação de Alert da montagem substituída não inicia DELETE", async (
 // Retém só a navegação para inspecionar origem/refresh ainda focados. Os casos
 // adversariais acima provam a execução pelo Router real, sem esse spy.
 it("reserva desativa ambos Desconectar e refresh não libera a entrada", async () => {
-  const alert = alerta(); renderRouter("./app", { initialUrl: "/conexoes" });
+  const alert = alerta(); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Conectar outro banco" })).toBeEnabled());
   jest.spyOn(router, "push").mockImplementation(() => {});
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Conectar outro banco" })); await drenar(); });

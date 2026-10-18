@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
-import { appVai, desligarTrava, drenar, liberar, ligarTrava, prompts } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, appVai, desligarTrava, drenar, liberar, ligarTrava, prompts } from "./open_finance_volta_rota_apoio";
 
 beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredenciais(S); });
 afterEach(() => jest.restoreAllMocks());
@@ -25,6 +25,7 @@ it.each([false, true])("remoção com resposta perdida=%p em background libera C
   renderRouter("./app", { initialUrl: "/conexoes" });
   await waitFor(() => expect(prompts()).toBe(1));
   await liberar();
+  await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
   await act(async () => {
     fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" }));
@@ -53,6 +54,7 @@ it("DELETE falho com item ainda presente mostra erro e libera retentativa", asyn
   });
   jest.spyOn(Alert, "alert").mockImplementation((_title, _message, botoes) => { botoes?.find((b) => b.style === "destructive")?.onPress?.(); });
   renderRouter("./app", { initialUrl: "/conexoes" });
+  await abrirBancos();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());

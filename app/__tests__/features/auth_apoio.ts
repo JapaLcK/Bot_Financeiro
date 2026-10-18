@@ -8,6 +8,8 @@
  * `entrar.ts`.
  */
 import painelFixture from "./painel.fixture.json";
+// O contrato de `GET /api/app/bancos`, LIDO do arquivo que o pytest valida contra o Pydantic (PR 1): nunca copiado (CLAUDE.md §0.7).
+import bancosFixture from "../../../tests/fixtures/app_bancos.json";
 import { deBase64Url } from "@/storage/secure";
 import { _resetRenovacao } from "@/api/client";
 import { _resetEntrar } from "@/features/auth/entrar";
@@ -106,6 +108,7 @@ export function credencialDe(email: string) {
 export function rotear(extra: Record<string, Rota> = {}) {
   const rotas: Record<string, Rota> = {
     ...Object.fromEntries(Object.entries(painelFixture).map(([path, body]) => [path, () => resposta(200, body)])),
+    "/api/app/bancos": () => resposta(200, bancosFixture),
     "/auth/login": (o) =>
       resposta(200, credencialDe((JSON.parse(String(o.body)) as { email: string }).email)),
     "/auth/me": me,
