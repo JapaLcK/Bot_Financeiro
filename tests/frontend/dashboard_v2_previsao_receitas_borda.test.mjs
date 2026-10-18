@@ -16,7 +16,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { exigeArtefatoEmDia } from "./_painel.mjs";
-import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, texto, dito, alerta, alertas, painelVisivel, semPendente } from "./_receitas.mjs";
+import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, dito, alerta, alertas, painelVisivel, semPendente } from "./_receitas.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
