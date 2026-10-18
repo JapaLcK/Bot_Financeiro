@@ -5,8 +5,8 @@
 //     CSRF, grava `finbot_logout_at` e vai para /?logout=1, inclusive com o fetch REJEITADO;
 //   · logout em outra aba derruba esta (evento `storage`);
 //   · nome e e-mail só em memória; o protótipo (DEMO) não tem a seção nem as rotas;
-//   · o Sair cabe na altura do trilho sem rolar de 1440×900 até 593px de altura; abaixo disso (o trilho tem overflow-y:auto
-//     em ≤620px) ele rola e o Sair se alcança com Tab, com o menu da Ajuda fora do corte;
+//   · o Sair cabe na altura do trilho sem rolar de 1440×900 até 625px de altura; abaixo disso (o trilho tem overflow-y:auto
+//     em ≤650px) ele rola e o Sair se alcança com Tab, com o menu da Ajuda fora do corte;
 //   · a Conta fica presa ao fim do trilho; nome/e-mail longos não criam rolagem lateral; 2 cliques no Sair = 1 POST.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -147,13 +147,15 @@ test("⌘K lista as rotas da Conta", async () => {
   await page.locator(".cmdk-item").first().waitFor();
   const itens = await page.locator(".cmdk-item").allTextContents();
   await ctx.close();
-  for (const rotulo of ["Perfil", "Cobrança", "Configurações"]) assert.ok(itens.some((t) => t.includes(rotulo)), rotulo);
+  for (const rotulo of ["Perfil", "Cobrança", "Configurações", "Bancos conectados"]) assert.ok(itens.some((t) => t.includes(rotulo)), rotulo);
 });
 
 // O trilho é sticky, com a altura da janela e sem rolagem: o Sair é o último e tem de estar à vista.
-// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×600 já cai no @media (max-height:620px) (overflow-y:auto, menu da
-// Ajuda fixo), mas o trilho cheio ainda cabe: 593px é a menor altura sem rolar (592 dá railRola=1); um 1280×720 útil (~590px) rola.
-for (const [width, height] of [[1440, 900], [1366, 657], [1280, 600], [1024, 768], [1181, 657], [1180, 657], [761, 640]]) {
+// 1366×657 é a janela útil de um 1366×768 (barras do navegador). 1280×640 já cai no @media (max-height:650px) (overflow-y:auto, menu da
+// Ajuda fixo), mas o trilho cheio ainda cabe: 625px é a menor altura sem rolar (624 dá railRola=1); um 1280×720 útil (~590px) rola.
+// 1440×745 e 1440×741: o trilho normal (Conta + rodapé) só cabe a partir de 749px (e com a folga de baixo a partir de 769px), então 741–768 têm de ser
+// compactas (com o @media em 740 o rodapé saía da janela: 741→8px cortados); 1440×768 e 1440×769 são os dois lados da fronteira.
+for (const [width, height] of [[1440, 900], [1366, 657], [1280, 640], [1440, 625], [1024, 768], [1181, 657], [1180, 657], [761, 640], [1440, 741], [1440, 745], [1440, 768], [1440, 769]]) {
   test(`trilho ${width}×${height}: o Sair cabe sem rolar o trilho, nada se sobrepõe e o popover da Ajuda não é cortado`, async () => {
     const { antes } = conta();
     const { ctx, page } = await abrir({ guia: "concluido", width, height, rota: "/assinaturas", antes });
@@ -166,6 +168,7 @@ for (const [width, height] of [[1440, 900], [1366, 657], [1280, 600], [1024, 768
       const pop = rect(document.querySelector(".rail .ajuda-menu"));
       return {
         sairFundo: Math.round(rect(sair).bottom), altura: innerHeight,
+        footFundo: Math.round(rect(document.querySelector(".rail-foot")).bottom), // 0 quando o rodapé some (≤1180px de largura)
         railRola: rail.scrollHeight - rail.clientHeight,
         sobrepoe: filhos.some((f, i) => i && f.top < filhos[i - 1].bottom - 0.5),
         popover: pop.top >= 0 && pop.bottom <= innerHeight && pop.right <= innerWidth,
@@ -176,7 +179,8 @@ for (const [width, height] of [[1440, 900], [1366, 657], [1280, 600], [1024, 768
     r.popoverPorCima = await page.evaluate(menuPorCima);
     await ctx.close();
     assert.ok(r.sairFundo <= r.altura, `Sair termina em ${r.sairFundo} e a janela tem ${r.altura}`);
-    assert.deepEqual({ ...r, sairFundo: 0, altura: 0 }, { sairFundo: 0, altura: 0, railRola: 0, sobrepoe: false, popover: true, popoverPorCima: true, sairNaTela: true, lateral: 0 });
+    assert.ok(r.footFundo <= r.altura, `o rodapé do trilho termina em ${r.footFundo} e a janela tem ${r.altura}`);
+    assert.deepEqual({ ...r, sairFundo: 0, altura: 0, footFundo: 0 }, { sairFundo: 0, altura: 0, footFundo: 0, railRola: 0, sobrepoe: false, popover: true, popoverPorCima: true, sairNaTela: true, lateral: 0 });
   });
 }
 
@@ -257,7 +261,7 @@ test("perfil com display_name número e email objeto: a página da Conta abre, s
   assert.deepEqual(erros, []);
 });
 
-test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Configurações, Sair) e o Sair se alcança rolando", async () => {
+test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Sair) e o Sair se alcança rolando", async () => {
   const { s, antes } = conta({ logout: "lento" });
   const { ctx, page } = await abrir({ guia: "concluido", width: 390, height: 844, antes });
   await page.locator(".tabbar").getByRole("button", { name: "Menu" }).click();
@@ -271,7 +275,7 @@ test("celular 390×844: a folha do Menu tem o grupo Conta (Perfil, Cobrança, Co
   await page.locator(".menu-telas-conta").getByRole("button", { name: "Sair" }).dblclick(); // dois cliques seguidos: um POST só
   await page.waitForURL(`${ORIGIN}/?logout=1`);
   await ctx.close();
-  assert.deepEqual(r, { titulo: "Conta", itens: ["Perfil", "Cobrança", "Configurações", "Sair"], rail: "none", alcanca: true });
+  assert.deepEqual(r, { titulo: "Conta", itens: ["Perfil", "Cobrança", "Configurações", "Bancos conectados", "Sair"], rail: "none", alcanca: true });
   assert.equal(s.posts.length, 1);
 });
 
@@ -297,5 +301,5 @@ test("protótipo (DEMO, mesmo bundle): sem seção Conta, sem Sair, rota da Cont
   await ctx.close();
   assert.deepEqual(r, { hash: "#/", titulo: r.titulo, conta: 0, folha: 0, ficou: true });
   assert.match(r.titulo, /^Resumo/);
-  assert.ok(!/Perfil|Cobrança|Configurações|Sair/.test(itens), itens);
+  assert.ok(!/Perfil|Cobrança|Configurações|Bancos conectados|Sair/.test(itens), itens);
 });

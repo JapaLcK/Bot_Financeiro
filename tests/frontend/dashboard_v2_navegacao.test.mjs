@@ -104,7 +104,7 @@ test("a aba do Piggy mostra quando é a página atual, como as outras", async ()
   assert.equal(dentro, "none|1");
 });
 
-// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Sair).
+// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Sair).
 // Nativo e com o fallback do Safari 14 (sem showModal/close): o mesmo roteiro.
 const ROTULOS = ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"];
 for (const semDialog of [false, true]) {
@@ -122,10 +122,10 @@ for (const semDialog of [false, true]) {
     r.atual = await textos(page, '.menu-telas a[aria-current="page"]');
     r.foco = await foco();
     r.guias = await page.locator(".menu-telas [data-guia]").count();
-    // 16 Tabs (fecha + 9 telas + 3 da Conta + Sair + Guia do painel = 15, então dá a volta): o foco nunca para num
+    // 17 Tabs (fecha + 9 telas + 4 da Conta + Sair + Guia do painel = 16, então dá a volta): o foco nunca para num
     // elemento de fora da folha. No nativo, a volta passa um Tab pelo navegador (document.body).
     r.tabs = [];
-    for (let i = 0; i < 16; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
+    for (let i = 0; i < 17; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
     // Com a folha aberta o ⌘K não abre um segundo modal.
     await page.keyboard.press("Meta+k");
     r.cmdk = await page.locator(".cmdk[open]").count();
@@ -154,8 +154,8 @@ for (const semDialog of [false, true]) {
     r.ajuda = [await visivel(), await page.evaluate(() => window.__guia)];
     await ctx.close();
     assert.deepEqual(r, {
-      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
-      tabs: Array(16).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
+      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações", "Bancos conectados"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
+      tabs: Array(17).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
       navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, 1],
     });
   });

@@ -15,6 +15,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
 const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
@@ -158,4 +159,9 @@ test("controle negativo: sem o fallback a simulação gruda os itens", async () 
     const { diffs } = await measure(w, p, false);
     assert.ok(diffs.length > 10, `${w} ${p}: a simulação sem fallback deu só ${diffs.length} diferenças`);
   }
+});
+
+test("§0.7: o @media de altura do trilho em flexgap.css é o mesmo limite do compacto de shell.css", () => {
+  const limite = (arq) => readFileSync(new URL(`../../webapp/src/dashboard/styles/${arq}`, import.meta.url), "utf8").match(/@media \(max-height: (\d+)px\)/)[1]; // o primeiro @media de altura de cada arquivo
+  assert.equal(limite("flexgap.css"), limite("shell.css"));
 });

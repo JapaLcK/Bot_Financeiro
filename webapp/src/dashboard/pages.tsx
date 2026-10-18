@@ -10,6 +10,7 @@ import { Lancamentos } from "./parts/Lancamentos";
 import { Ledger } from "./parts/Ledger";
 import { abrirGuia } from "./parts/Guia";
 import { PiggyChat } from "./parts/PiggyChat";
+import { ContaBancos } from "./conta/Bancos";
 import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
@@ -225,5 +226,5 @@ export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/ferramentas": Tools, "/piggy": PiggyChat,
-  "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes,
+  "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };

@@ -35,7 +35,7 @@
   .w > :not(:last-child), .w-body > :not(:last-child) { margin-bottom: 12px; }
   .prev-corpo > :not(:last-child) { margin-bottom: 12px; } /* display: contents (styles/panels.css) */
   .rail > :not(:last-child) { margin-bottom: 28px; }
-  @media (max-height: 740px) { .rail > :not(:last-child) { margin-bottom: 14px; } } /* o gap do trilho baixo (shell.css) */
+  @media (max-height: 768px) { .rail > :not(:last-child) { margin-bottom: 14px; } } /* o gap do trilho baixo (shell.css) */
   @media (max-width: 1180px) { .rail > .rail-conta { margin-bottom: 0; } } /* o .rail-foot some: nada abaixo para a margem separar */
   .stat > :not(:last-child) { margin-bottom: 8px; }
   .detail-facts.col > :not(:last-child) { margin-bottom: 14px; }

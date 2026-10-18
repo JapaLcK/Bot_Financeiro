@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Bancos, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -5650,6 +5650,193 @@
           }
         }
       ]
+    }
+  },
+  "bancos": {
+    "padrao": {
+      "total": "67000.00",
+      "motivos": [
+        "conexao_pausada"
+      ],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": []
+        },
+        {
+          "conexao_id": 13,
+          "saldo_conta": null,
+          "investido": null,
+          "total": null,
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 1,
+          "motivos": [
+            "conexao_pausada"
+          ]
+        }
+      ]
+    },
+    "barra": {
+      "total": "67000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": []
+        }
+      ]
+    },
+    "mesmo_nome": {
+      "total": "300.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 1,
+          "saldo_conta": "100.00",
+          "investido": null,
+          "total": "100.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        },
+        {
+          "conexao_id": 2,
+          "saldo_conta": "200.00",
+          "investido": null,
+          "total": "200.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "investido_nulo": {
+      "total": "5000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": null,
+          "total": "5000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "desatualizado": {
+      "total": "67000.00",
+      "motivos": [
+        "banco_desatualizado"
+      ],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": [
+            "banco_desatualizado"
+          ]
+        }
+      ]
+    },
+    "um_banco": {
+      "total": "45000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        }
+      ]
+    },
+    "cientifico": {
+      "total": "1000.0000001",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "1E-7",
+          "investido": "0",
+          "total": "1E-7",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 1,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "1000",
+          "investido": null,
+          "total": "1000",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "vazio": {
+      "total": null,
+      "motivos": [],
+      "bancos": []
     }
   }
 }
