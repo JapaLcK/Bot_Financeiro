@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -127,6 +128,25 @@ SQL_DEVICE_NA_JANELA = f"coalesce(({SQL_JANELA_DEVICE}), false) as device_na_jan
 SQL_EXECUTION_STATUS = (
     f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
 )
+
+# ── O logo do banco, derivado do `raw` ───────────────────────────────────────
+# O `raw` é o item da Pluggy e pode trazer `connector.imageUrl` (a documentação da
+# Pluggy mostra o campo; presença real não medida; some depois de item/deleted).
+# Só o escalar sai (o `raw` carrega `clientUserId`). `->>` devolve TEXTO mesmo de número/objeto/lista;
+# esses nunca começam com `https://`, então `logo_url_valida` os derruba (não há
+# `jsonb_typeof` no SQL: seria a mesma regra em dois lugares). Sem `%s`. O texto é
+# dado do provedor e vai para uma imagem no navegador/app (se for SVG, o app vai
+# precisar de SvgUri), então é conferido antes de sair.
+SQL_LOGO_URL = "raw->'connector'->>'imageUrl' as logo_url"
+# recusa espaço, controles C0/DEL/C1 (\x00-\x1f\x7f-\x9f) e invisíveis de formatação (ZW*, bidi, BOM)
+_LOGO_URL = re.compile(
+    r"https://[^\s\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]{1,492}")  # 500 no total
+
+
+def logo_url_valida(valor: Any) -> str | None:
+    """`https://`, até 500 caracteres, sem espaço, controle nem invisível de formatação; senão None."""
+    return valor if isinstance(valor, str) and _LOGO_URL.fullmatch(valor) else None
+
 
 # ── A coleta vencida (Onda 5, D1) ────────────────────────────────────────────
 # "Atualizando…" só é honesto enquanto a coleta da autorização atual pode estar
