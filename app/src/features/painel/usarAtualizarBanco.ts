@@ -87,15 +87,15 @@ async function lerSnapshot(p: Painel, uid: number, versao: number) {
     const lista = (await conexoes(uid, op.controlador)).connections;
     // O limite do plano só se pergunta com candidato a reconectar (como o `conexoes.tsx`); sem resposta, não oferece.
     const pode = classificar(lista, true).tipo !== "reconectar" || (await limiteBancario(uid).then((l) => l.of_banks_max !== 0, () => false));
-    if (!op.atual()) return solta();
+    if (!op.atual() || S.leitura !== minha) return solta(); // superada: a `versao` subiu sem cancelar (PUT de perfil estourado) e a leitura nova já ocupou o lugar
     // Com `resultado` (ou a falha dele) visível na mesma vista, a leitura (a0) não parte nem fica pendente: só uma recarga que derruba o `vale` reabre.
     const sozinho = classificar(lista, pode).tipo === "acompanhar" && !(visivel(uid) && S.maquina.fase === "resultado"), adiada = sozinho && ocupado(uid);
     definir({ leitura: { chave, conexoes: lista, pode, pendente: adiada, vale: op.atual } });
     if (sozinho && !adiada) correr(p, uid, (d) => acompanharLista(d, lista), true);
   } catch (e) {
-    if (!op.atual() || e instanceof RequisicaoSuperada) return solta();
+    if (!op.atual() || e instanceof RequisicaoSuperada || S.leitura !== minha) return solta();
     p.falhou(e);
-    if (op.atual()) definir({ leitura: { chave, falhou: true, vale: op.atual } }); // o aviso segue com "Ver bancos conectados"
+    definir({ leitura: { chave, falhou: true, vale: op.atual } }); // o aviso segue com "Ver bancos conectados"
   } finally { ativos.delete(op.controlador); }
 }
 

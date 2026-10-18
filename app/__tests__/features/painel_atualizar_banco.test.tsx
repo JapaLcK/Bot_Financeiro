@@ -263,6 +263,15 @@ it("...e COM o bump: o mesmo (a visibilidade e o toque usam a mesma regra, a ope
   expect(r.meio).toEqual({ botoes: [], sozinho: true }); expect(r.postsNovos).toBe(0);
   expect(screen.getByText(PARCIAL_TEXTO)).toBeTruthy(); expect(botoes()).toEqual(["Ver bancos conectados"]); expect(haptico("warning")).toBe(1); expect(anuncios().filter((t) => t === PARCIAL_TEXTO)).toHaveLength(1);
 });
+it("a `versao` sobe SEM cancelar (PUT de perfil estourado) com o snapshot velho em voo: a resposta velha, que chega depois da nova, não toma o lugar dela", async () => {
+  perfilQueEstoura(); const g = segurar(); let primeira = true;
+  srv.snapshot = async () => { if (!primeira) return resposta(200, { ok: true, connections: [con()] }); primeira = false; const velha = resposta(200, { ok: true, connections: [con()] }); await g.promessa; return velha; };
+  await abrir(); srv.estado = "needs_user_action"; srv.detalhe = "Reautorize o banco";
+  await apertar("Padrão"); await apertar("Economizar"); await avancar(16_000, 16_000);
+  await waitFor(() => expect(botoes()).toEqual(["Reconectar Nubank"]));
+  await act(async () => { g.soltar(); for (let k = 0; k < 6; k++) await drenar(); });
+  expect(botoes()).toEqual(["Reconectar Nubank"]); expect(gets()).toBe(2);
+});
 it("provider remontado para a MESMA conta (sair e entrar): a `versao` recomeça e repete a chave, mas a leitura velha não vale e o botão segue o snapshot novo", async () => {
   await abrir(); expect(botoes()).toEqual(["Atualizar agora"]); const g0 = gets();
   screen.unmount(); srv.estado = "needs_user_action"; srv.detalhe = "Reautorize o banco";
