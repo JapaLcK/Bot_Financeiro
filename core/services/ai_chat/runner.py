@@ -878,6 +878,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                     ensure_ascii=False,
                 )
                 return (history, err)
+        if tool.ao_confirmar is not None:  # o resumo e a pendência levam o que o banco tem, não o do modelo
+            args = tool.ao_confirmar(user_id, args)
 
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
@@ -897,6 +899,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                 _OUTRO_PEDIDO,
             )
         _PENDENCIA_DO_TURNO.set(armada)
+        if tool.ao_armar is not None:  # só aqui: com `_OUTRO_PEDIDO` nada foi armado
+            tool.ao_armar(user_id, args)
         return (
             json.dumps(
                 {

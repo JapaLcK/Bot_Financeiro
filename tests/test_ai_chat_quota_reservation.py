@@ -34,7 +34,8 @@ def test_ultima_vaga_nao_executa_ferramenta_da_requisicao_rejeitada(monkeypatch,
             raise RuntimeError('falha depois da gravação')
         return 'Despesa registrada.'
     tool = SimpleNamespace(is_write=True, requires_confirmation=confirmation,
-                           validate=None, summary=lambda args: 'registrar despesa', execute=execute)
+                           validate=None, ao_confirmar=None, ao_armar=None,
+                           summary=lambda args: 'registrar despesa', execute=execute)
     monkeypatch.setattr(runner, 'get_tool', lambda name: tool)
     dispatch = runner._dispatch_tool
     def observed_dispatch(*args):
