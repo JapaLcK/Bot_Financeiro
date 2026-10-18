@@ -17,6 +17,14 @@ const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllo
 
 export default function LayoutApp() {
   const { cores } = useTema();
+  const CABECALHO: NativeStackNavigationOptions = {
+    headerShown: true,
+    headerBackButtonDisplayMode: "minimal",
+    headerShadowVisible: false,
+    headerStyle: { backgroundColor: cores.bg },
+    headerTintColor: cores.ink,
+    headerTitleStyle: { fontFamily: texto.rotulo.fontFamily },
+  };
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: cores.bg } }}>
       <Stack.Screen name="index" />
@@ -27,18 +35,8 @@ export default function LayoutApp() {
       <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="teste-pluggy" options={{ headerShown: true, title: "Teste Open Finance", headerBackButtonDisplayMode: "minimal" }} />
-      <Stack.Screen
-        name="seguranca"
-        options={{
-          headerShown: true,
-          title: "Segurança",
-          headerBackButtonDisplayMode: "minimal",
-          headerShadowVisible: false,
-          headerStyle: { backgroundColor: cores.bg },
-          headerTintColor: cores.ink,
-          headerTitleStyle: { fontFamily: texto.rotulo.fontFamily },
-        }}
-      />
+      <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
+      <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
       {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
       <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
       <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
