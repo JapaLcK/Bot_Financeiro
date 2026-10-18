@@ -23,7 +23,7 @@ export type Recurso = keyof typeof schemas;
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };
 type Resultados = { [K in Recurso]?: Resultado<Dados[K]> };
-type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; relerPrevisao: () => void; relerMetas: () => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
+type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; relerPrevisao: () => void; relerMetas: (forcar?: boolean) => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
 const Contexto = createContext<Painel | null>(null);
 export function useEstadoPainel() { const p = useContext(Contexto); if (!p) throw new Error("Painel indisponível"); return p; }
 export function usePainel() { const p = useEstadoPainel(); if (!p.usuario || p.gate !== "liberado") throw new Error("Painel não autorizado"); return { ...p, usuario: p.usuario }; }
@@ -71,8 +71,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const filaStorage = useRef(Promise.resolve());
   const sessaoRef = useRef(sessao); sessaoRef.current = sessao;
   const versaoRef = useRef(versao); versaoRef.current = versao;
-  // Estável: a tela o passa ao `useFocusEffect`. Se as metas já estão a caminho (carga completa por vir ou em voo, como no foco do mount), a resposta é fresca: não relê de novo.
-  const relerMetas = useCallback(() => { const a = ultimaCarga.current; if (!a || a.uid !== dono.current || a.versao !== versaoRef.current || a.geracao !== geracao.current || leituras.current.has("metas")) return; setReleituraMetas((v) => v + 1); }, []);
+  // Estável: a tela o passa ao `useFocusEffect`. Se as metas já estão a caminho (carga completa por vir ou em voo, como no foco do mount), a resposta é fresca: não relê de novo. `forcar` (uma gravação terminou depois disso) supera a leitura em voo, que nasceu antes dela.
+  const relerMetas = useCallback((forcar?: boolean) => { const a = ultimaCarga.current; if (!a || a.uid !== dono.current || a.versao !== versaoRef.current || a.geracao !== geracao.current || (!forcar && leituras.current.has("metas"))) return; setReleituraMetas((v) => v + 1); }, []);
   const cancelar = useCallback(() => { geracao.current++; for (const c of controladores.current) c.abort(); controladores.current.clear(); leituras.current.clear(); }, []);
   useEffect(() => cancelar, [cancelar]);
   const falhou = useCallback((e: unknown) => {
