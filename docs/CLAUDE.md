@@ -1885,6 +1885,19 @@ apaga a linha de `plan_trials` do **telefone** da conta e zera
 `trial_started_at`/`trial_downsell_sent_at`. **Também não fala com a Stripe** —
 por isso recusa com 409 quando `last_payment_status` é `trialing|active|past_due`.
 
+`/admin/feedback` (`core/feedback_routes.py` + `db/ai_feedback.py::resumo_semanal`/`listar_negativos` +
+`frontend/admin-feedback.html`) é a tela do dono para ler o 👍/👎 do chat do Piggy (PR 4a/4b gravam, esta lê):
+semanas em BRT (segunda a domingo) com 👍, 👎 e 👎 por motivo, e a lista dos 👎 com pergunta, resposta, motivo e
+comentário. Mesma sessão do `/admin` (reusa `get_current_admin`), só GET, `no-store`, `limit` 1–200. É a ÚNICA leitura
+entre usuários de `db/ai_feedback.py` (CLAUDE.md §0): a mensagem é identificada só por data e id, a saída não tem
+`user_id`/nome/e-mail, e cada leitura grava em `pii_access_log` (`purpose=render_admin_ai_feedback`, uma linha por
+usuário da página, `extra.message_ids`), e a auditoria FALHA FECHADA: se a gravação falhar (INSERT, FK de usuário
+apagado no meio) a rota dá 503 sem dados e registra `admin_feedback_auditoria` (diferente de `_record_access`, que engole o
+erro); `PII_AUDIT_DISABLED=1` segue desligando tudo. Motivo fora de `MOTIVOS` entra em `outros_motivos`. A pergunta é a última mensagem `user` DO MESMO `user_id` antes da resposta.
+Sem índice parcial em `feedback`: as consultas varrem `ai_messages` sob `statement_timeout` de 5 s; se estourar, o
+conserto é um índice `where feedback is not null`, não aumentar o prazo. A frase de `frontend/privacy.html` que avisa
+que a equipe lê essas avaliações é parte do contrato.
+
 `/admin/funil` (`core/funil_routes.py` + `core/funil_dashboard.py` + `frontend/funil.html`)
 é o painel de funil: só leitura, agregados fechados (nenhum `user_id`/e-mail/quiz),
 7d e 30d na mesma resposta de `GET /admin/api/funil`, mesma sessão do `/admin` (reusa
