@@ -24,7 +24,7 @@ function ComoFoiFeita({ d }: { d: DadosPrevisao }) {
 export function Previsao() {
   const p = usePainel(), bloco = useBloco(); const [aberta, setAberta] = useState<"pior" | "como" | null>(null); const alternar = (q: "pior" | "como") => setAberta((a) => a === q ? null : q);
   return <RecursoDados nome="previsao">{(d) => {
-    const pior = d.pior_dia, piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde ? `desde ${ddmm(pior.desde)}` : undefined} />;
+    const pior = d.pior_dia, piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && pior.causas.length ? `desde ${ddmm(pior.desde)}` : undefined} />;
     return <View style={{ gap: 8 }}>
       {!bloco && <Filtros>{d.dias_permitidos.map((dias) => <Chip key={dias} rotulo={`${dias} dias`} selecionado={d.dias === dias} onPress={() => p.mudarDias(dias)} />)}</Filtros>}
       <Texto variante="legenda" tom="inkMuted">A partir de hoje, {ddmm(d.hoje)}</Texto>
@@ -58,9 +58,9 @@ export function Compromissos() {
     return <View style={{ gap: 4 }}>{grupos.map(({ g, oc }) => {
       const [o] = oc as [Ocorrencia, ...Ocorrencia[]];
       if (oc.length === 1) return <Linha key={g.chave} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={junta([quando(o, d.hoje), ...selos(o)])} />;
-      const iguais = oc.every((x) => x.valor === o.valor && x.direcao === o.direcao), semValor = oc.some((x) => x.valor === null), ultima = oc.findLast((x) => x.data !== null)?.data; // sem data fica no fim: o intervalo vai até a última data conhecida
+      const iguais = oc.every((x) => x.valor === o.valor && x.direcao === o.direcao), semValor = oc.some((x) => x.valor === null), fora = oc.filter((x) => !x.incluida_no_calculo).length, ultima = oc.findLast((x) => x.data !== null)?.data; // sem data fica no fim: o intervalo vai até a última data conhecida
       const datas = o.data === null || !ultima ? "sem data" : ultima === o.data ? ddmm(o.data) : `${ddmm(o.data)} a ${ddmm(ultima)}`;
-      const linha = <Linha titulo={nome(o, g.nome)} valor={semValor ? null : iguais ? o.valor : undefined} tipo={o.direcao} detalhe={junta([`${oc.length} vezes`, datas, !semValor && !iguais && "valores diferentes", oc.some((x) => x.data !== null && x.data < d.hoje) && "venceu"])} />;
+      const linha = <Linha titulo={nome(o, g.nome)} valor={semValor ? null : iguais ? o.valor : undefined} tipo={o.direcao} detalhe={junta([`${oc.length} vezes`, datas, !semValor && !iguais && "valores diferentes", oc.some((x) => x.data !== null && x.data < d.hoje) && "venceu", fora && `${fora} fora do cálculo`])} />;
       return <LinhaExpansivel key={g.chave} testID={`grupo-${g.chave}`} linha={linha} aberta={aberto === g.chave} alternar={() => setAberto(aberto === g.chave ? null : g.chave)}><View style={{ gap: 4 }}>{oc.map((x) => <Linha key={x.chave + x.ciclo} titulo={quando(x, d.hoje)} valor={x.valor} tipo={x.direcao} detalhe={junta(selos(x)) || undefined} />)}</View></LinhaExpansivel>;
     })}</View>;
   }}</RecursoDados>;

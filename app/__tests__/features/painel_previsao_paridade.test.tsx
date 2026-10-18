@@ -85,6 +85,16 @@ it("compromissos: grupo com ocorrência sem data mostra o intervalo até a últi
  await abrirResumo();
  expect(within(screen.getByTestId("bloco-compromissos")).getByText("3 vezes · 10/10 a 10/11")).toBeTruthy();
 });
+it("compromissos: o grupo fechado já diz quantas ocorrências ficam fora do cálculo", async () => {
+ const n = (chave: string, data: string, incluida: boolean) => oc(chave, "x", data, "55.90", { nome: "Netflix", tipo: "gasto_fixo", incluida_no_calculo: incluida });
+ previsao = { ...F, compromissos: [{ chave: "net", fonte: "gasto_recorrente", nome: "Netflix", primeira_data: "2026-10-10", ultima_data: "2026-11-10", ocorrencias: [n("n1", "2026-10-10", true), n("n2", "2026-11-10", false)] }] };
+ await abrirResumo();
+ expect(within(screen.getByTestId("bloco-compromissos")).getByText("2 vezes · 10/10 a 10/11 · 1 fora do cálculo")).toBeTruthy();
+});
+it("pior dia sem causas não diz 'desde', como o /painel", async () => {
+ previsao = { ...F, pior_dia: { data: "2026-10-25", saldo: "120.00", desde: "2026-10-14", causas: [] } };
+ await abrirResumo(); expect(hero().getByText("Menor saldo previsto · 25/10/2026")).toBeTruthy(); expect(hero().queryByText(/^desde/)).toBeNull();
+});
 it("com valores ocultos, nenhum dígito das causas nem da base aparece", async () => {
  previsao = { ...F, pior_dia: { data: "2026-10-25", saldo: "-120.00", desde: "2026-10-14", causas: [oc("alug", "2026-10", "2026-10-15", "1800.00", { nome: "Aluguel", tipo: "gasto_fixo" })] } };
  await abrirResumo();
