@@ -335,7 +335,7 @@ describe("a folha de meta: entrada e botões", () => {
   it("dois toques rápidos em 'Montar reserva' abrem UMA folha (um `back` volta à aba)", async () => {
     lista = TODAS.vazio; await abrirAba(); const b = botao("Montar reserva de emergência");
     await act(async () => { fireEvent.press(b); fireEvent.press(b); await drenar(); }); await folha("Montar reserva");
-    act(() => router.back()); await fechou("Montar reserva");
+    act(() => router.back()); await waitFor(() => expect(screen).toHavePathname("/metas")); // pelo caminho: a linha "Montar reserva" da própria aba tem o mesmo texto do título da folha (antes o portão a escondia na volta)
   });
   it("dois toques rápidos numa pílula abrem UMA folha (um `back` volta à aba)", async () => {
     await abrirAba(); const p = screen.getByRole("button", { name: /^Notebook novo.*editar$/ });

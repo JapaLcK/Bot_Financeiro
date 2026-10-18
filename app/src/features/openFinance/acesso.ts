@@ -6,7 +6,7 @@ import { descartarPreparacaoBancaria, iniciarTentativaBancaria, jtiDe, lerCreden
 
 export type AcessoBancario = { perfil: Perfil; fase: "inicio" | "conectar" | "sem-acesso" | "cobranca-pendente" | "sem-open-finance" | "senha" };
 
-async function conferirSessao(esperada: Credenciais | null) {
+export async function conferirSessao(esperada: Credenciais | null) {
   const atual = await lerCredenciais();
   if (!esperada || !atual || (jtiDe(esperada.access) ? jtiDe(atual.access) !== jtiDe(esperada.access) : atual.refresh !== esperada.refresh)) throw new RequisicaoSuperada();
 }
