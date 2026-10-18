@@ -222,6 +222,37 @@ test("enable que se perde com o MFA LIGADO no servidor: 'os códigos não chegar
   assert.deepEqual(cofre, NOVOS);
 });
 
+test("enable perdido e a releitura do status NUNCA responde: estoura em 30 s (prazo encurtado), T5, campos e botões voltam e Cancelar fecha", async () => {
+  const p = await abrirSeguranca();
+  await ateOQr(p);
+  const [segura, solta] = portao();
+  await p.encurtaPrazo(400);
+  p.s.enable = (r) => r.abort("internetdisconnected");
+  p.s.statusErro = async () => { await segura; };
+  await p.codigo.fill(TOTP);
+  await p.enviar.click();
+  await p.alerta.filter({ hasText: T5 }).waitFor();
+  const r = [await p.alerta.innerText(), await p.codigo.isEnabled(), await p.enviar.isEnabled(), await p.dialogo.getByRole("button", { name: "Cancelar" }).isEnabled(), await p.dialogo.getByRole("button", { name: "Fechar" }).isEnabled(), await p.page.evaluate(() => [...window.__ms])];
+  await p.dialogo.getByRole("button", { name: "Cancelar" }).click();
+  await p.fechado();
+  solta();
+  await p.ctx.close();
+  assert.deepEqual(r, [T5, true, true, true, true, [30000]]);
+});
+
+test("enable perdido e a releitura do status REJEITA (500): T5, sem esperar prazo", async () => {
+  const p = await abrirSeguranca();
+  await ateOQr(p);
+  p.s.enable = (r) => r.abort("internetdisconnected");
+  p.s.statusErro = (r) => r.fulfill({ status: 500, body: "x" });
+  await p.codigo.fill(TOTP);
+  await p.enviar.click();
+  await p.alerta.filter({ hasText: T5 }).waitFor();
+  const r = [await p.alerta.innerText(), await p.enviar.isEnabled()];
+  await p.ctx.close();
+  assert.deepEqual(r, [T5, true]);
+});
+
 for (const [nome, falha, ligou] of [
   ["rede, MFA NÃO ligou", () => (r) => r.abort("internetdisconnected"), false],
   ["500, MFA NÃO ligou", () => (r) => r.fulfill({ status: 500, body: "x" }), false],

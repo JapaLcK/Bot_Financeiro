@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { ErroApi } from "../lib/v2";
-import { DETALHES, ativarMfa, desativarMfa, falhaDe, iniciarMfa, mfaStatusQuery, regerarCodigos, type Falha } from "./api";
+import { DETALHES, ativarMfa, desativarMfa, falhaDe, iniciarMfa, lerStatusMfa, mfaStatusQuery, regerarCodigos, type Falha } from "./api";
 import { abrirCofre } from "./Cofre";
 
 export type ModoMfa = "ativar" | "desativar" | "regerar";
@@ -83,7 +83,7 @@ export function MfaForm({ modo: inicial, fechar, salvou }: { modo: ModoMfa; fech
         setFalha({ texto: T2 });
       } else if (f.revalida && ligando) {
         // O enable pode ter comitado antes de a resposta se perder: o status diz qual dos dois casos é este.
-        const st = await qc.fetchQuery(mfaStatusQuery).catch(() => null);
+        const st = await lerStatusMfa(qc);
         if (st?.enabled === true) setOferta(true);
         setFalha({ texto: st?.enabled === true ? T2 : T5 });
       } else {

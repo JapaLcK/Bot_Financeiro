@@ -1,7 +1,7 @@
 // Perfil da Conta: o que a página lê e escreve fora da /api/v2 (rotas antigas /settings e /auth).
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, chamar, escrever, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
 
@@ -48,6 +48,14 @@ export const mfaStatusQuery = queryOptions({
   staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
   enabled: !DEMO,
 });
+
+// A releitura do status depois de um enable ambíguo. `fetchQuery` não recebe signal: corre contra o mesmo prazo de 30 s (a consulta que
+// sobra termina no cache, sem efeito); estouro ou rejeição = null, e o modal não fica preso na releitura que nunca responde.
+export const lerStatusMfa = (qc: QueryClient) => {
+  let prazo: ReturnType<typeof setTimeout>;
+  return Promise.race([qc.fetchQuery(mfaStatusQuery).catch(() => null), new Promise<null>((ok) => { prazo = setTimeout(() => ok(null), 30000); })])
+    .finally(() => clearTimeout(prazo));
+};
 
 const post = <T,>(path: string, corpo: unknown, sinal?: AbortSignal) => escrever<T>("POST", path, corpo, sinal);
 export const iniciarMfa = (password: string) => comPrazo((sinal) => post<MfaSetup>("/auth/mfa/setup", { password }, sinal));
