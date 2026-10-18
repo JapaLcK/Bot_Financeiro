@@ -21,7 +21,7 @@ type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando
 const Contexto = createContext<Conversa | null>(null);
 export function useConversa() { const c = useContext(Contexto); if (!c) throw new Error("Conversa indisponível"); return c; }
 /**
- * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela no segundo plano e o turno em voo tem de sobreviver.
+ * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela quando a trava biométrica cobre (e a troca de conta a remonta) e o turno em voo tem de sobreviver.
  * Resposta em stream (`/ai/chat/stream`): TODO evento passa por `vivo()` (mesmo dono E mesmo voo); o `fim` encerra o voo, então o que vier depois cai nessa guarda. `parar()` aborta o voo e marca `parado`: é o que separa parar dos 60 s e da troca de conta.
  * O POST tem AbortController PRÓPRIO (fora de p.operacao()): o cancelar() do painel (segundo plano, trava, atualizar) não o toca;
  * só a troca de conta, o logout, o limite de 60 s do POST e a desmontagem do provider o abortam.

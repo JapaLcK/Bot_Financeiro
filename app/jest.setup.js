@@ -215,6 +215,7 @@ jest.mock("react-native/Libraries/AppState/AppState", () => ({
 // lançaria. Espiãs globais; `bloqueio_tampa.test.tsx` testa o `tampa.ts` real
 // com `jest.requireActual`.
 jest.mock("@/features/bloqueio/tampa", () => ({
+  temTampa: true,
   descobrir: jest.fn(),
   pular: jest.fn(() => Promise.resolve()),
 }));
