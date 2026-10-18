@@ -130,7 +130,7 @@ test("falha com a releitura PRESA: o interruptor volta ao servidor na hora (sem 
   const nPatches = p.s.nPatches.length;
   solta();
   await fecha(p, 1);
-  assert.deepEqual([antes, trava], [true, null], "o interruptor mostra o servidor com o GET ainda preso");
+  assert.deepEqual([antes, trava], [true, "true"], "o interruptor mostra o servidor e segue travado (aria-disabled) com o GET ainda preso");
   assert.equal(nPatches, 2, "depois do prazo o próximo clique sai");
 });
 

@@ -24,6 +24,7 @@ function Preferencias({ uid }: { uid: number }) {
   const chave = notificacoesQuery(uid).queryKey;
   const q = useQuery(notificacoesQuery(uid));
   const [previa, setPrevia] = useState<Partial<Notificacoes> | null>(null); // o valor que o dono acabou de pedir, até o servidor responder
+  const [ocupado, setOcupado] = useState(false); // travado do clique ao fim do salvamento, releitura da falha incluída (`previa` já volta antes, para o valor)
   const [aviso, setAviso] = useState("");
   const [falha, setFalha] = useState<Falha | null>(null);
 
@@ -38,6 +39,7 @@ function Preferencias({ uid }: { uid: number }) {
   const salvar = async (corpo: CorpoNotificacoes, pedido: Partial<Notificacoes> = corpo) => {
     if (voando.current) return;
     voando.current = true;
+    setOcupado(true);
     setPrevia(pedido);
     setFalha(null);
     setAviso("Salvando…");
@@ -50,14 +52,14 @@ function Preferencias({ uid }: { uid: number }) {
       setFalha(falhaDe(e, "Não foi possível salvar. Tente de novo."));
       setPrevia(null); // a tela volta já ao último dado do servidor; a releitura (até 30 s) só o confirma
       await comPrazoLeitura(qc.invalidateQueries({ queryKey: chave })); // estourou o prazo: não prende a tela
-    } finally { voando.current = false; setPrevia(null); }
+    } finally { voando.current = false; setOcupado(false); setPrevia(null); }
   };
 
   const interruptor = (campo: Campo, rotulo: string, ligado: boolean, travado: boolean, selo?: string, espelho?: keyof Notificacoes) => (
     <li key={campo}>
       <label htmlFor={`${id}-${campo}`}>{rotulo}{selo && <> <span className="selo">{selo}</span></>}</label>
-      {/* aria-disabled (não disabled) em voo: o foco do teclado não cai no <body>; a trava é o `voando` */}
-      <input id={`${id}-${campo}`} className="notif-switch" type="checkbox" role="switch" checked={ligado} disabled={travado} aria-disabled={previa ? true : undefined}
+      {/* aria-disabled (não disabled) em voo: o foco do teclado não cai no <body>; a trava é o `voando`; `ocupado` a espelha */}
+      <input id={`${id}-${campo}`} className="notif-switch" type="checkbox" role="switch" checked={ligado} disabled={travado} aria-disabled={ocupado ? true : undefined}
         onChange={(e) => salvar({ [campo]: e.target.checked }, { [campo]: e.target.checked, ...(espelho && { [espelho]: e.target.checked }) })} />
     </li>
   );
@@ -100,7 +102,7 @@ function Preferencias({ uid }: { uid: number }) {
         <li className="notif-hora">
           <i className="ph ph-clock" aria-hidden="true" />
           <label htmlFor={`${id}-hora`}>Horário dos resumos</label>
-          <select id={`${id}-hora`} className="field" value={fora ? "atual" : String(hora)} aria-disabled={previa ? true : undefined}
+          <select id={`${id}-hora`} className="field" value={fora ? "atual" : String(hora)} aria-disabled={ocupado ? true : undefined}
             disabled={!d.daily_report_enabled && !d.weekly_report_enabled && !d.monthly_report_enabled}
             onChange={(e) => { const h = Number(e.target.value); if (h >= 0) salvar({ daily_report_hour: h, daily_report_minute: 0, daily_report_enabled: dados!.daily_report_enabled }, { daily_report_hour: h, daily_report_minute: 0 }); }}>
             {HORAS.map((h) => <option key={h} value={h}>{hhmm(h, 0)}</option>)}
