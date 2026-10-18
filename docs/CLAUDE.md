@@ -920,6 +920,35 @@ mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
 
+**Exclusão de conta (S1): imediata, sem carência nem cancelamento.** `DELETE /auth/account`
+apaga no ato, com a frase fixa `EXCLUIR` conferida PRIMEIRO no servidor (sem banco, sem
+gastar tentativa). O "modo" da conta vem de `db/reauth_codes.py::MODO_SQL` (fonte única,
+derivada de `SEM_CREDENCIAL_SQL`): `senha` (senha + código por e-mail), `codigo` (conta só
+Google/Apple: só o código) e `sem_credencial` (409 `PASSWORD_NOT_SET_MSG`, como no export).
+O código de 6 dígitos sai de `POST /auth/account/reauth-code` (JSON `{}` com
+`Content-Type: application/json`: sem corpo o middleware de CSRF devolve 403; tetos, validade
+e tentativas vivem em `db/reauth_codes.py` e na rota `frontend/routes/conta_reauth.py`; só o
+HMAC fica em `account_reauth_codes`). MFA ligado exige também `totp` (TOTP ou backup); código
+e backup só ficam consumidos se a marca commitar. A marca (`schedule_account_deletion`, nome
+histórico) põe `deletion_status='processing'` e revoga `auth_sessions` e
+`auth_refresh_tokens` na mesma transação; `excluir_conta_marcada` (o mesmo corpo do job)
+apaga no mesmo request. **Resposta 200:** `{ok, user_id, status:"deleted"|"deleting", deleted,
+deletion_scheduled_for, grace_days:0, message}` (os dois últimos campos de data e carência são
+legados). `deleting` = a limpeza LOCAL falhou (`delete_user_data`: lock, deadlock); a conta
+volta a `scheduled` vencida e o job termina e manda o e-mail. A Pluggy é best-effort
+(`db/privacy.py`): falha dela NÃO leva a `deleting`. **Erros** (`{"code","message"}` no
+`detail`): 400 `confirmacao_invalida`, 409 `export_pendente` (link de export ≤15 min, que morre
+com a conta), 409 `assinatura_ativa` (Stripe viva com renovação), 503 `stripe_indisponivel`
+(a consulta falhou: nada é apagado), 400 `codigo_obrigatorio`, 401 `codigo_invalido`, 401
+`codigo_expirado` (vencido, usado, esgotado ou inexistente), 400 `mfa_obrigatorio`, 401
+`mfa_invalido`. Senha errada/vazia e sem credencial seguem como `detail` string (401 "Senha
+incorreta.", 400 "Informe sua senha...", 409). Só o 401 de SESSÃO leva `WWW-Authenticate`;
+os de credencial não (o interceptor do `auth-refresh.js` renovaria em vez de mostrar o erro).
+Limite conhecido: token de dashboard LEGADO sem `jti` não é revogável por `auth_sessions` e,
+passada a exclusão, ainda valida por até 12 h; todo emissor atual passa `jti`.
+O export continua pedindo só a senha (modo `codigo`: sem reautenticação) e devolve
+`email_mascarado`.
+
 **Deep link do WhatsApp: um construtor só, `core/dashboard_links.link_whatsapp(texto)`**
 (Grupo 7, PR-5b). Lê `WHATSAPP_NUMBER` a cada chamada, monta `api.whatsapp.com/send?phone=N&text=...`
 e, sem número, devolve `""` (falha fechada: o `wa.me/?text=` abre o seletor de contatos e o
