@@ -35,7 +35,11 @@ do push**; o push também não depende dela. Os dois podem andar em paralelo, co
   as chaves de push da decisão D5), mesmo que nasça vazia;
 - a preferência de push mora no **mesmo** `GET`/`PATCH /settings/{uid}/notifications`
   (`frontend/routes/settings.py`), como campo novo. O servidor só acrescenta campo: app instalado não
-  atualiza com o deploy, e o `/painel` ignora o que não conhece;
+  atualiza com o deploy, e o `/painel` ignora o que não conhece. Essa rota passa pelo gate de plano
+  (`authorize_dashboard_access`: 402 sem acesso, `tests/test_settings_saida_de_emergencia.py`), então
+  quem perdeu o acesso não alcança a chave. Por isso o envio também só vai a quem tem acesso
+  (`plan_service.has_app_access`, o mesmo filtro dos relatórios proativos): sem acesso não há push a
+  desligar. A chave do sistema (Ajustes do iPhone) desliga sempre;
 - no `/painel` o push é específico da plataforma: o C2 não mostra chave de push (não há web push).
 
 ## 3. O que já existe no servidor (não reescrever)
@@ -59,7 +63,9 @@ Achados que mudam o desenho:
   então o risco é baixo, mas a correção é uma cláusula (`and user_id = %s`).
 - **Logout não baixa token.** `POST /auth/logout` só revoga sessão e refresh. Se o app não conseguir chamar
   o unregister antes (sem rede, sessão já expirada), o token segue na conta que saiu até outra conta
-  registrar o mesmo aparelho. Decisão D4.
+  registrar o mesmo aparelho. E o `sair()` do app (`app/src/services/auth.ts`) limpa o cofre local mesmo
+  quando o `POST /auth/logout` falha: a sessão pode seguir ativa no servidor por até 14 dias (o refresh).
+  Decisão D4, que precisa de uma perna no próprio aparelho.
 
 ## 4. O que falta no app (escopo provável)
 
@@ -70,9 +76,11 @@ Achados que mudam o desenho:
   é registrado depois que há conta logada;
 - registrar com `platform: "ios"` e o `environment` real do binário (build de desenvolvimento = `sandbox`;
   TestFlight e loja = `production`), depois do login e a cada abertura (o token muda);
-- baixar no Sair e na troca de conta, ANTES de revogar a sessão;
+- baixar no Sair e na troca de conta, ANTES de revogar a sessão: o unregister no servidor e, sempre, o
+  desregistro local do aparelho no APNs (`Notifications.unregisterForNotificationsAsync`, que não depende
+  de rede). O próximo login registra de novo;
 - tratar o toque (D6): abrir a rota do payload, esperando a trava biométrica (`features/bloqueio`) liberar;
-- o envio do lado do servidor para o(s) evento(s) da D1, com a preferência da D5.
+- o envio do lado do servidor para o(s) evento(s) da D1, só a quem tem acesso, com a preferência da D5.
 
 Cuidados duros (valem em todo PR deste plano):
 
@@ -96,8 +104,8 @@ as contestou: valem até ele dizer o contrário.
 | D1 | Que evento dispara o primeiro push? | **Banco que precisa reconectar**, só ele no começo (o job de saúde do Open Finance já grava o estado). Um push por mudança de estado, não a cada volta do job. Depois: receita detectada a confirmar, alerta do Xerife, lembrete de pagamento |
 | D2 | Quando pedir a permissão? | **Na primeira abertura do app** (o dono escolheu isto, contra a recomendação de pedir depois do 1º banco). Quem recusa só reativa pela chave da tela de Notificações, que manda aos Ajustes |
 | D3 | Como acertar o tópico do app novo? | **`APNS_TOPIC` por servidor** (`com.pigbankai.mobile` em produção, `.staging` no staging) e `DeviceTokenNotForTopic` tratado como token inválido (apagado). O Capacitor deixa de receber push; hoje nada de produto envia push para ele |
-| D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. Fecha logout sem rede, "encerrar outros dispositivos", troca de senha e exclusão. É migração (coluna nova) |
-| D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o da D1 |
+| D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. Fecha o que o servidor revoga: logout que chegou ao servidor, "encerrar outros dispositivos", troca de senha e exclusão. É migração (coluna nova). NÃO fecha o logout sem rede (a sessão segue ativa no servidor): esse é fechado no aparelho, pelo desregistro local no APNs no Sair (seção 4). Que o APNs para de entregar depois do desregistro local só se prova no aparelho |
+| D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o da D1. A rota tem gate de plano; o envio também (seção 2) |
 | D6 | Para onde o toque leva? | Para a tela do evento (D1: Bancos conectados). O payload leva só o nome da rota, nunca dado |
 | D7 | Texto do primeiro push | Título "PigBank", corpo "Um banco precisa de atenção. Toque para ver." (sem nome do banco) |
 
