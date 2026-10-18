@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { abrir, navegador } from "./_guia.mjs";
 import { ate } from "./_conta_perfil.mjs";
-import { JSON_ERRO } from "./_conta_seguranca.mjs";
+import { JSON_ERRO, encurtaPrazo } from "./_conta_seguranca.mjs";
 import { PADRAO, con, servidorBancos } from "./_bancos.mjs";
 import { DEL, semReticencias, esperaCards, refoco, dlg, confirmar, manter, card, aviso, alerta, foco, noFoco, pedir, tiraDoSnapshot, lidosDepois, tela } from "./_bancos_desconectar.mjs";
 
@@ -126,4 +126,39 @@ test("C6 uma falha velha (Nubank) some quando se abre o diálogo de OUTRO banco 
   const r = await alerta(page).count();
   await ctx.close();
   assert.equal(r, 0);
+});
+
+test("C7 o DELETE aborta e a releitura do snapshot fica presa: passado o prazo, a falha sai COM o id e o foco volta ao botão; quando a releitura presa enfim volta sem o card, a falha some junto", async () => {
+  let apagou = false, solta;
+  const segura = new Promise((ok) => { solta = ok; });
+  const S = { conexoes: PADRAO() };
+  const { ctx, page, srv } = await tela({
+    snap: async (r) => { if (apagou) await segura; return r.fulfill({ json: { ok: true, connections: S.conexoes } }); },
+    del: (r) => { apagou = true; return r.abort(); } });
+  await encurtaPrazo(page, 400);
+  await pedir(page, "Nubank");
+  await confirmar(page).click();
+  await dlg(page).waitFor({ state: "detached" });
+  await alerta(page).waitFor();
+  const texto = await alerta(page).innerText();
+  await noFoco(page, "Desconectar Nubank");
+  tiraDoSnapshot(S, 11);
+  solta();
+  await esperaCards(page, 2);
+  await alerta(page).waitFor({ state: "detached" });
+  await ctx.close();
+  assert.equal(texto, "Não deu para desconectar Nubank. Tente de novo.");
+  assert.deepEqual(srv.dels, [DEL(11)]);
+});
+
+test("C8 o DELETE nunca responde: o prazo aborta, o diálogo fecha, a releitura decide e sai exatamente 1 DELETE", async () => {
+  const { ctx, page, srv } = await tela({ del: () => new Promise(() => {}) });
+  await encurtaPrazo(page, 400);
+  await pedir(page, "Nubank");
+  await confirmar(page).click();
+  await dlg(page).waitFor({ state: "detached" });
+  await alerta(page).waitFor();
+  const r = { texto: await alerta(page).innerText(), foco: await foco(page), dels: srv.dels.length };
+  await ctx.close();
+  assert.deepEqual(r, { texto: "Não deu para desconectar Nubank. Tente de novo.", foco: "Desconectar Nubank", dels: 1 });
 });

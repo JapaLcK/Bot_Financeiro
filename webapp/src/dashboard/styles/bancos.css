@@ -23,4 +23,3 @@
 .banco-acoes { grid-column: 1 / -1; }
 .banco-acoes summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
 .banco-acoes .btn { min-height: 44px; height: auto; white-space: normal; overflow-wrap: break-word; word-break: break-word; } /* nome sem espaço: quebra no botão (o anywhere não existe no Safari 14) */
-.cofre h2, .cofre p { overflow-wrap: break-word; word-break: break-word; } /* o título e o texto do diálogo com nome sem espaço */
