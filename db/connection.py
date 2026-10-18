@@ -19,6 +19,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from core.pg_text import redigir_failing_row
+from .cat_icones import icone_da_categoria
 
 # O psycopg monta o texto do erro com o DETAIL do Postgres; num CHECK violado (`finito_*`,
 # db/finito_checks.py) ele é `Failing row contains (<a linha inteira do usuário>)`. Redigir no
@@ -191,10 +192,11 @@ CAT_COR_PADRAO = {"#7c3aed", "#64748b"}
 
 
 def cat_visual(emoji, cor) -> dict:
-    """`{emoji, cor}` de uma linha do catálogo, nunca vazio nem inválido: o writer só faz `strip()`."""
-    emoji = (emoji or "").strip()
+    """`{emoji, icone, cor}` de uma linha do catálogo, nunca vazio nem inválido: o writer só faz `strip()`.
+    `icone` é o nome Phosphor do emoji (`db/cat_icones.py`); o emoji segue no payload (app instalado não atualiza)."""
+    emoji = (emoji or "").strip() or CAT_NEUTRA_EMOJI
     valida = bool(cor) and re.fullmatch(r"#[0-9a-fA-F]{6}", cor) and cor.lower() not in CAT_COR_PADRAO
-    return {"emoji": emoji or CAT_NEUTRA_EMOJI, "cor": cor if valida else CAT_NEUTRA_COR}
+    return {"emoji": emoji, "icone": icone_da_categoria(emoji), "cor": cor if valida else CAT_NEUTRA_COR}
 
 
 def cat_key_sql(expr: str) -> str:

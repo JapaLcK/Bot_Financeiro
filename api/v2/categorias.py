@@ -1,4 +1,4 @@
-"""`GET /api/v2/categorias`: o catálogo do usuário, `{chave, nome, emoji, cor}`.
+"""`GET /api/v2/categorias`: o catálogo do usuário, `{chave, nome, emoji, icone, cor}`.
 
 `chave` é a de casamento (`cat_norm_sql`, a mesma do `categoria` de cada lançamento e do
 filtro `categoria` de `/lancamentos`); `nome` é a grafia que vence entre as gêmeas
@@ -18,6 +18,7 @@ class Categoria(BaseModel):
     chave: str
     nome: str
     emoji: str
+    icone: str
     cor: str
 
 
