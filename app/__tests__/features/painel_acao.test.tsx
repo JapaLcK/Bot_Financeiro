@@ -15,7 +15,7 @@ it("Acao tem cara de botão: fundo surfaceControl sem contorno, alinhada ao iní
 it("compacta (ao lado de valor) fica com 30pt de altura, mas o alvo de toque continua 44", () => {
   const r = renderInterativo(<Acao rotulo="Ignorar Netflix" texto="Ignorar" compacta onPress={jest.fn()} />);
   expect(StyleSheet.flatten(r.getByRole("button").props.style)).toMatchObject({ minHeight: 44 });
-  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ minHeight: 30, borderRadius: raio.chip });
+  expect(StyleSheet.flatten(visual(r).props.style)).toMatchObject({ minHeight: 30, borderRadius: raio.pilula });
 });
 
 it("texto visível curto, rótulo do VoiceOver completo; iconeFim vem depois do texto", () => {

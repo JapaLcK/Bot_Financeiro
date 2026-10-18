@@ -1,6 +1,7 @@
 import { useIsFocused, type Href } from "expo-router";
-import { useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View } from "react-native";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView, View, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import { usePressao, useReduzirMovimento } from "@/ui/motion";
 import { useTema } from "@/ui/tema";
@@ -23,7 +24,7 @@ import { usePainel, type Dados, type Recurso } from "./provider";
  */
 export function Acao({ rotulo, texto = rotulo, onPress, icone, iconeFim, somenteIcone = false, desativado = false, compacta = false, ativa = false }: { rotulo: string; texto?: string; onPress: () => void; icone?: NomeIcone; iconeFim?: NomeIcone; somenteIcone?: boolean; desativado?: boolean; compacta?: boolean; ativa?: boolean }) {
   const { cores } = useTema(); const pressao = usePressao();
-  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, backgroundColor: ativa ? cores.brandSoft : cores.surfaceControl, borderRadius: compacta ? raio.chip : raio.controle, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" tom={ativa ? "brandInk" : undefined} style={{ flexShrink: 1, fontFamily: escalas.secao.fontFamily }}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} tom={ativa ? "brandInk" : undefined} />}</Animated.View></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, !somenteIcone && { minHeight: compacta ? 30 : 36, backgroundColor: ativa ? cores.brandSoft : cores.surfaceControl, borderRadius: raio.pilula, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} />}{!somenteIcone && <Texto variante="rotulo" tom={ativa ? "brandInk" : undefined} style={{ flexShrink: 1, fontFamily: escalas.secao.fontFamily }}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} tom={ativa ? "brandInk" : undefined} />}</Animated.View></Pressable>;
 }
 export function Valor({ valor, destaque = false, pequeno = false, tipo = "saldo" }: { valor: number | null; destaque?: boolean; pequeno?: boolean; tipo?: "saldo" | "entrada" | "saida" }) {
   const { oculto } = usePainel(); const { fontScale } = useTipografiaPainel();
@@ -50,20 +51,28 @@ export function SeteDias<T>({ itens, children }: { itens: T[]; children: (item: 
 export function tituloWidget(id: Widget, dias?: number) { return id === "compromissos" && dias ? `Próximos ${dias} dias` : TITULOS[id]; }
 /** Horizonte da previsão do provider, se já pronta (o card do chat usa o do próprio bloco). */
 export function diasDoProvider(dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return r?.fase === "pronto" ? r.dado.dias : undefined; }
+const ContextoAberto = createContext<{ aberto: boolean; avisar: (pronto: boolean) => void }>({ aberto: true, avisar: () => undefined });
+/**
+ * O card `hero` ("Saldo previsto") do Resumo (`recolhivel`) nasce recolhido e o card INTEIRO abre/fecha os detalhes ao toque (inline, nunca folha): quem está dentro lê `aberto` aqui.
+ * Fora dele (o card do chat, os outros blocos) `aberto` é sempre `true`: nada recolhe, o chat segue como era.
+ * `avisar(true)` (o `Pronto` de `futuro.tsx`, montado só com o dado na tela) liga a seta e o toque: carregando, erro e negado não têm o que abrir. O `Pressable` fica SEMPRE montado
+ * (só `disabled`): trocá-lo por uma `View` remontaria o card na troca de horizonte e no Desfazer e perderia o foco e o `aberto`.
+ */
+export const useCardAberto = () => useContext(ContextoAberto);
 /**
  * `ir`: o card INTEIRO leva a `destino` (aba) ao toque. O `Pressable` de fora só captura o toque (`accessible={false}`: o VoiceOver
  * continua lendo os textos e o `Avisos` de dentro, que seria engolido por um botão único); o título é o botão que o VoiceOver anuncia.
  * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
  * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
  * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
- * O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
+ * `hero` (`recolhivel`) usa o mesmo molde, mas o toque alterna `aberto` em vez de navegar; botões e chips de dentro tomam o próprio toque. O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
  */
-export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
-  const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
+export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao, recolhivel }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; recolhivel?: boolean; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
+  const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const [pronto, avisar] = useState(false), expansivel = !!recolhivel && pronto, [aberto, setAberto] = useState(false), alternar = () => setAberto((a) => !a); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
   const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
-  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto></View>;
-  const card = <SegurouContext.Provider value={segurou}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir ? <Pressable accessibilityRole="button" accessibilityLabel={`${titulo}, abrir ${ir.destino}`} onPressIn={zerar} onPress={aoIr} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{acao}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></SegurouContext.Provider>;
-  return ir ? <Pressable testID={`bloco-${id}`} accessible={false} onPressIn={zerar} onPress={aoIr} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : <View testID={`bloco-${id}`}>{card}</View>;
+  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{expansivel && <View style={{ transform: [{ rotate: aberto ? "180deg" : "0deg" }] }}><Icone nome="CaretDown" tamanho={20} tom="inkMuted" /></View>}</View>; // `CaretUp` não está no subset: a mesma seta gira 180°
+  const card = <SegurouContext.Provider value={segurou}><ContextoAberto.Provider value={{ aberto: recolhivel ? aberto : true, avisar }}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir || recolhivel ? <Pressable accessibilityRole="button" disabled={!ir && !expansivel} accessibilityLabel={ir ? `${titulo}, abrir ${ir.destino}` : titulo} accessibilityState={expansivel ? { expanded: aberto } : undefined} onPressIn={zerar} onPress={ir ? aoIr : alternar} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{acao}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></ContextoAberto.Provider></SegurouContext.Provider>;
+  return ir || recolhivel ? <Pressable testID={`bloco-${id}`} accessible={false} disabled={!ir && !expansivel} onPressIn={zerar} onPress={ir ? aoIr : alternar} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : <View testID={`bloco-${id}`}>{card}</View>;
 }
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(), bloco = useBloco(); const r = p.dados[nome];
@@ -97,10 +106,30 @@ export function Avisos({ motivos }: { motivos: string[] }) {
  return <View style={{ gap: 4 }}><Pressable accessibilityRole="button" accessibilityLabel={aberto ? "Ocultar ressalvas" : "Ver ressalvas"} accessibilityState={{ expanded: aberto }} onPress={() => setAberto((a) => !a)} style={{ minWidth: 44, minHeight: 44, alignSelf: "flex-start", justifyContent: "center" }}><Icone nome="Info" tamanho={20} tom="inkMuted" /></Pressable>{aberto && <Texto variante="legenda" tom="inkMuted">{mensagens.join(" ")}</Texto>}</View>;
 }
 export function Vazio({ texto }: { texto: string }) { return <Texto variante="rotulo" tom="inkMuted">{texto}</Texto>; }
-/** `rotulo`: o que o VoiceOver lê no lugar do título (data curta → longa). `aberta && focado`: o `Modal` do RN cobre a aba de destino, então a folha some com a aba (e reaparece ao voltar: o estado segue "aberta"). */
-export function Folha({ titulo, rotulo, aberta, fechar, children }: { titulo: string; rotulo?: string; aberta: boolean; fechar: () => void; children: ReactNode }) {
-  const { cores } = useTema(); const reduzir = useReduzirMovimento(); const focado = useIsFocused();
-  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}><View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" accessibilityLabel={rotulo} style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>{children}</View></Screen></View></Modal>;
+/**
+ * `rotulo`: o que o VoiceOver lê no lugar do título (data curta → longa). `aberta && focado`: o `Modal` do RN cobre a aba de destino, então a folha some com a aba (e reaparece ao voltar: o estado segue "aberta").
+ * `ancorada`: em vez do `pageSheet` (que no iOS sobe quase a tela inteira e o `Modal` não tem detents), painel colado embaixo com a ALTURA DO CONTEÚDO e teto de 80% da janela; acima disso a lista rola.
+ * Fundo escurecido que fecha ao toque, grabber (arrastar para baixo fecha) e o botão Fechar. Perde o gesto nativo de arrastar o painel junto com o dedo: ele só fecha ao soltar.
+ * Por que não a rota: a rota `meta` já tem a altura do conteúdo (`sheetAllowedDetents: "fitToContents"`, `app/(app)/_layout.tsx:43`) e é o precedente certo para folha de rota, com alça
+ * e raio do SISTEMA. A `FolhaDia` não é rota: abre de dentro do Calendário, que está num `Modal` `pageSheet`, e a troca de dia e o `useGastosMes` são estado do provider (a rota
+ * `meta` fica fora do `PainelProvider`). Aqui o `Modal` é transparente, então NÃO há alça nativa: o grabber desenhado à mão é o único (o aviso de `src/ui/componentes/Sheet.tsx:21-23`,
+ * alça à mão + nativa ficam duplas, vale para quem aninhar isto numa sheet de sistema). Decisão do dono de 2026-10-18, depois do build 37.
+ */
+const TETO_ANCORADA = 0.8, ARRASTE_FECHA = 60;
+export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, children }: { titulo: string; rotulo?: string; aberta: boolean; fechar: () => void; ancorada?: boolean; children: ReactNode }) {
+  const { cores } = useTema(); const reduzir = useReduzirMovimento(); const focado = useIsFocused(); const { height } = useWindowDimensions(); const { bottom } = useSafeAreaInsets(); const inicio = useRef(0);
+  const cabecalho = <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}><Texto variante="secao" accessibilityRole="header" accessibilityLabel={rotulo} style={{ flex: 1 }}>{titulo}</Texto><Acao rotulo="Fechar" icone="X" somenteIcone onPress={fechar} /></View>;
+  if (ancorada) return <Modal visible={aberta && focado} transparent animationType={reduzir ? "none" : "slide"} onRequestClose={fechar}>
+    <View style={{ flex: 1, justifyContent: "flex-end" }} accessibilityViewIsModal>
+      <Pressable testID="folha-fundo" accessible={false} importantForAccessibility="no" onPress={fechar} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" }} />
+      <View testID="folha-painel" onAccessibilityEscape={fechar} style={{ maxHeight: height * TETO_ANCORADA, backgroundColor: cores.bg, borderTopLeftRadius: raio.bloco, borderTopRightRadius: raio.bloco, paddingHorizontal: espaco.lg, paddingBottom: bottom + espaco.lg }}>
+        <View testID="folha-grabber" accessible={false} importantForAccessibility="no" onTouchStart={(e) => { inicio.current = e.nativeEvent.pageY; }} onTouchEnd={(e) => { if (e.nativeEvent.pageY - inicio.current > ARRASTE_FECHA) fechar(); }} style={{ height: 24, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 5, borderRadius: 3, backgroundColor: cores.border }} /></View>
+        {cabecalho}
+        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ paddingTop: 20 }} showsVerticalScrollIndicator={false}>{children}</ScrollView>
+      </View>
+    </View>
+  </Modal>;
+  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}>{cabecalho}{children}</View></Screen></View></Modal>;
 }
 export function Curva({ valores }: { valores: (number | null)[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();

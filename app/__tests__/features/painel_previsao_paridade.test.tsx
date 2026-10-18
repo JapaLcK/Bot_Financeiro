@@ -5,7 +5,7 @@ import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 // O que o /painel mostra da previsão e o app agora também (docs/paridade-app-dashboard.md, linha "Saldo previsto"):
-// âncora, bancos fora do cálculo, pior dia com desde e causas, "como foi feita" e compromissos agrupados.
+// âncora, bancos fora do cálculo, pior dia com desde e causas e compromissos agrupados. O card nasce recolhido (ver painel_card_saldo_previsto): aqui ele abre antes de ler os detalhes.
 let previsao: unknown;
 beforeEach(async () => {
  __resetAvisoBanco(); prepararCaso(); desligarTrava(); previsao = fixture["/api/app/previsao"];
@@ -23,7 +23,7 @@ const F = fixture["/api/app/previsao"], base = F.compromissos[0]!.ocorrencias[0]
 const oc = (chave: string, ciclo: string, data: string | null, valor: string | null, extra: object = {}) => ({ ...base, chave, ciclo, data, valor, ...extra });
 async function apertar(alvo: ReturnType<typeof screen.getByTestId>) { await act(async () => { fireEvent.press(alvo); await drenar(); }); }
 const hero = () => within(screen.getByTestId("bloco-hero"));
-async function abrirResumo() { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy()); }
+async function abrirResumo() { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy()); await apertar(hero().getByRole("button", { name: "Saldo previsto" })); }
 
 it("mostra o saldo de hoje com as premissas (âncora)", async () => {
  previsao = { ...F, ancora: { data: "2026-10-06", saldo: "9123.45" } };
@@ -55,15 +55,11 @@ it("pior dia sem causas é só a linha, sem nada para abrir", async () => {
  await abrirResumo();
  expect(hero().getByText("Menor saldo previsto · 25/10/2026")).toBeTruthy(); expect(screen.queryByTestId("pior-dia")).toBeNull(); expect(hero().queryByText(/^desde/)).toBeNull();
 });
-it("'Como foi feita' fica fechado e, aberto, mostra a base, as premissas e a cobertura", async () => {
- const p = "Projeção condicional; receitas previstas não são garantidas."; const erro = jest.spyOn(console, "error");
- previsao = { ...F, premissas: [p, p], cobertura: { fontes_incompletas: ["gastos_variaveis_nao_estimados"], janela_conferencia_inicio: "2026-09-01", inclui_estimativa_variavel: false } };
+it("'Como foi feita' não existe mais: nem a linha, nem a base, as premissas ou a cobertura, com o card aberto", async () => {
+ previsao = { ...F, premissas: ["Projeção condicional; receitas previstas não são garantidas."], cobertura: { fontes_incompletas: ["gastos_variaveis_nao_estimados"], janela_conferencia_inicio: "2026-09-01", inclui_estimativa_variavel: false } };
  await abrirResumo();
- expect(hero().queryByText(/receitas previstas não são garantidas/)).toBeNull(); expect(hero().queryByText("Saldo de partida")).toBeNull();
- await apertar(screen.getByTestId("como-foi-feita"));
- expect(hero().getAllByText(`• ${p}`)).toHaveLength(2); expect(erro.mock.calls.flat().join(" ")).not.toMatch(/same key/); // premissa repetida não quebra a lista
- expect(hero().getByText("Saldo de partida")).toBeTruthy(); expect(hero().getByText("Carteira + 2 contas do Open Finance")).toBeTruthy();
- expect(hero().getByText("Conferência desde 01/09")).toBeTruthy(); expect(hero().queryByText(/Há informações incompletas/)).toBeNull();
+ expect(screen.queryByTestId("como-foi-feita")).toBeNull(); expect(hero().queryByText("Como foi feita")).toBeNull();
+ expect(hero().queryByText(/receitas previstas não são garantidas/)).toBeNull(); expect(hero().queryByText("Saldo de partida")).toBeNull(); expect(hero().queryByText(/Conferência desde/)).toBeNull();
 });
 it("compromissos: grupo de valores iguais mostra o valor e quantas vezes; uma ocorrência é uma linha só", async () => {
  previsao = { ...F, compromissos: [
@@ -95,11 +91,10 @@ it("pior dia sem causas não diz 'desde', como o /painel", async () => {
  previsao = { ...F, pior_dia: { data: "2026-10-25", saldo: "120.00", desde: "2026-10-14", causas: [] } };
  await abrirResumo(); expect(hero().getByText("Menor saldo previsto · 25/10/2026")).toBeTruthy(); expect(hero().queryByText(/^desde/)).toBeNull();
 });
-it("com valores ocultos, nenhum dígito das causas nem da base aparece", async () => {
+it("com valores ocultos, nenhum dígito das causas aparece", async () => {
  previsao = { ...F, pior_dia: { data: "2026-10-25", saldo: "-120.00", desde: "2026-10-14", causas: [oc("alug", "2026-10", "2026-10-15", "1800.00", { nome: "Aluguel", tipo: "gasto_fixo" })] } };
  await abrirResumo();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ocultar valores" })); await drenar(); });
  const semDigitos = () => { expect(hero().queryByLabelText(/1800|9400|reais/)).toBeNull(); expect(hero().queryByText(/1\.800|9\.400/)).toBeNull(); };
  await apertar(screen.getByTestId("pior-dia")); expect(hero().getByText("Aluguel")).toBeTruthy(); semDigitos();
- await apertar(screen.getByTestId("como-foi-feita")); expect(hero().getByText("Saldo de partida")).toBeTruthy(); semDigitos();
 });
