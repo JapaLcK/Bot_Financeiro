@@ -4,7 +4,7 @@ Medido na `main` em c6c16fda (2026-10-18), por leitura de código. Nada foi aber
 Remeça antes de reusar: os comandos estão em "Como medi".
 
 Este plano existe para ninguém refazer o que o servidor já tem, e para a tela de preferências do app
-(#1121) e o push não colidirem. **O código só começa com as decisões da seção 5 respondidas pelo dono.**
+(#1121) e o push não colidirem. As decisões da seção 5 foram respondidas pelo dono em 2026-10-18.
 
 ## 1. O que push cobre e o que não cobre
 
@@ -65,8 +65,9 @@ Achados que mudam o desenho:
 
 - dependência `expo-notifications` (e `expo-application`, se a D3 precisar ler o ambiente APNs), com o
   plugin no `app.config.ts`: mexe no nativo (capability de push, `aps-environment`), só chega num build novo;
-- pedir permissão no momento da D2, nunca na primeira abertura; recusa não é perguntada de novo pelo app
-  (o iOS não deixa), só pela chave da tela de Notificações, que manda aos Ajustes;
+- pedir permissão na primeira abertura (D2); recusa não é perguntada de novo pelo app (o iOS não deixa),
+  só pela chave da tela de Notificações, que manda aos Ajustes. A permissão vem antes do login; o token só
+  é registrado depois que há conta logada;
 - registrar com `platform: "ios"` e o `environment` real do binário (build de desenvolvimento = `sandbox`;
   TestFlight e loja = `production`), depois do login e a cada abertura (o token muda);
 - baixar no Sair e na troca de conta, ANTES de revogar a sessão;
@@ -85,17 +86,20 @@ Cuidados duros (valem em todo PR deste plano):
 Faixa: **Completo** (sessão, token por usuário, consentimento).
 Par no outro lado: específico da plataforma (APNs exige app nativo; web push fora de escopo).
 
-## 5. Decisões abertas (do dono)
+## 5. Decisões (dono, 2026-10-18)
 
-| # | Pergunta | Recomendação |
+D1 a D4 foram perguntadas uma a uma. D5 a D7 iam no texto das perguntas como recomendação, e o dono não
+as contestou: valem até ele dizer o contrário.
+
+| # | Pergunta | Decisão |
 |---|---|---|
-| D1 | Que evento dispara o primeiro push? | **Um só no começo:** banco que precisa reconectar (o job de saúde do Open Finance já grava o estado; é acionável e não tem valor), um push por mudança de estado e não a cada volta do job. Candidatos depois: receita detectada a confirmar, alerta do Xerife, lembrete de pagamento |
-| D2 | Quando pedir a permissão? | Uma oferta própria do app (tela ou cartão com "Ativar" e "Agora não") depois de conectar o primeiro banco, mais a chave na tela de Notificações. O pedido do sistema só sai do "Ativar" |
-| D3 | Como acertar o tópico do app novo? | Trocar `APNS_TOPIC` por servidor (`com.pigbankai.mobile` em produção, `.staging` no staging) e tratar `DeviceTokenNotForTopic` como token inválido (apagar). Custo: o Capacitor deixa de receber push, e hoje nada de produto envia push para ele. A outra opção é guardar o tópico por token (coluna nova) |
-| D4 | Como garantir que o token sai com a conta? | Amarrar o token à sessão (`jti`) e enviar só para token de sessão ativa. Fecha de uma vez o logout sem rede, o "encerrar outros dispositivos", a troca de senha e a exclusão. É migração (coluna nova). A opção mínima é só o unregister no Sair, com o risco do logout sem rede |
-| D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o do D1 |
+| D1 | Que evento dispara o primeiro push? | **Banco que precisa reconectar**, só ele no começo (o job de saúde do Open Finance já grava o estado). Um push por mudança de estado, não a cada volta do job. Depois: receita detectada a confirmar, alerta do Xerife, lembrete de pagamento |
+| D2 | Quando pedir a permissão? | **Na primeira abertura do app** (o dono escolheu isto, contra a recomendação de pedir depois do 1º banco). Quem recusa só reativa pela chave da tela de Notificações, que manda aos Ajustes |
+| D3 | Como acertar o tópico do app novo? | **`APNS_TOPIC` por servidor** (`com.pigbankai.mobile` em produção, `.staging` no staging) e `DeviceTokenNotForTopic` tratado como token inválido (apagado). O Capacitor deixa de receber push; hoje nada de produto envia push para ele |
+| D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. Fecha logout sem rede, "encerrar outros dispositivos", troca de senha e exclusão. É migração (coluna nova) |
+| D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o da D1 |
 | D6 | Para onde o toque leva? | Para a tela do evento (D1: Bancos conectados). O payload leva só o nome da rota, nunca dado |
-| D7 | Texto do primeiro push | Proposta: título "PigBank", corpo "Um banco precisa de atenção. Toque para ver." (sem nome do banco). O dono aprova o texto final |
+| D7 | Texto do primeiro push | Título "PigBank", corpo "Um banco precisa de atenção. Toque para ver." (sem nome do banco) |
 
 ## 6. Ordem dos PRs (depois das decisões)
 

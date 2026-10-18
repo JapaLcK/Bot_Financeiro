@@ -1991,7 +1991,7 @@ APNs direto, sem serviço intermediário: `core/services/push_service.py` +
 Configuração em `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY`, `APNS_TOPIC`.
 Sem as três primeiras o envio só loga. Nenhum evento de produto envia push ainda; o registro
 foi feito para o app Capacitor, e o `APNS_TOPIC` padrão (`com.pigbankai.app`) não é o id do app
-Expo (`com.pigbankai.mobile`). Plano do push no app e decisões abertas:
+Expo (`com.pigbankai.mobile`). Plano do push no app e decisões do dono:
 [`plano-push-app.md`](plano-push-app.md).
 
 ### Admin e afiliados
