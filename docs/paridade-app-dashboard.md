@@ -40,8 +40,8 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Metas: ler | `GET /metas` | Aba Metas (primeiro build arquivado depois deste merge): `GET /api/app/metas` (a mesma v2), as mesmas pílulas do chat, só leitura, todas as metas; a rota do app não filtra pela chave `dashboard_v2_enabled`: a lista vem vazia só para quem não tem meta ("Nenhuma meta ainda."); builds ≤31 seguem na rota legada | Nenhuma: a mesma fonte | Nenhum | resolvido no PR 1 do app; a escrita é o PR 2 |
-| Metas: criar, editar, apagar | Formulário (`MetaForm.tsx`) | Só pelo chat do Piggy (a IA cria, edita e apaga; o card oferece "Criar meta" como pedido ao chat); sem formulário | Fluxos diferentes | App | a discutir com o dono |
+| Metas: ler | `GET /metas` | Aba Metas (primeiro build arquivado depois deste merge): `GET /api/app/metas` (a mesma v2), as mesmas pílulas do chat, todas as metas (tocar na pílula abre a folha de edição; a escrita está na linha seguinte); a rota do app não filtra pela chave `dashboard_v2_enabled`: a lista vem vazia só para quem não tem meta ("Nenhuma meta ainda."); builds ≤31 seguem na rota legada | Nenhuma: a mesma fonte | Nenhum | resolvido no PR 1 do app |
+| Metas: criar, editar, apagar | Formulário (`MetaForm.tsx`, `MetaFonte.tsx`); edição manda só o diff; confirmação do apagar no próprio diálogo | Folha nativa (`app/app/(app)/meta.tsx`, `metaForm.tsx`) aberta pelo "+" do cartão, pela pílula e por "Montar reserva", nas mesmas rotas `/api/app/metas*` (todo usuário do app, sem a chave); mesmas regras (`metasEscrita.ts`, presa por teste de paridade); prazo pelo seletor nativo, fonte numa lista expansível, `Alert` nativo para apagar; o chat do Piggy segue criando, editando e apagando (só para quem tem a chave) | Telas e textos próprios de cada plataforma (mínimo de texto no app); no app a conta sem a chave cria meta que o Piggy e o WhatsApp dela não enxergam até a chave abrir (P1-b); o web não tem "Tirar prazo" na criação | Nenhum no recurso; limite P1-b é de servidor | PR 2 do app (aguarda build novo: datetimepicker é nativo) |
 | Patrimônio e "Onde está o dinheiro" | Exemplo | Real (`/api/app/patrimonio`) | A rota só existe no namespace do app | Web | a discutir com o dono |
 | Rendimento | Exemplo ("Rendimento × CDI") | Real (taxa contratada, `/api/app/rendimento`) | Idem | Web | a discutir com o dono |
 | Fatura do cartão, parcelas futuras, renda mês a mês, "Piggy notou" | Exemplo | Reais, por rotas legadas com `user_id` no caminho (`/cards`, `/installments`, `/analytics`, `/insights`) | Web sem dado real; app preso a rota legada | Web (e o app, na rota) | a discutir com o dono |
@@ -69,7 +69,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Excluir conta e exportar dados | `/settings` | Não há | — | App | plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), aguardando o dono |
+| Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 (exclusão imediata, `reauth-code`; `settings.html` já usa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |

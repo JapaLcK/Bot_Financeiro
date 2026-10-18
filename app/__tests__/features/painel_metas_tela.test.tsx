@@ -41,14 +41,15 @@ describe("a aba lê a v2", () => {
   it("fixture do fallback é a mesma do contrato (uma fonte só)", () => { expect((fixture as Record<string, unknown>)["/api/app/metas"]).toEqual(METAS.sem_custo); });
 });
 
-describe("a aba só lê", () => {
-  it("sem metas: 'Nenhuma meta ainda.' e nenhum botão ('Montar reserva'/'Criar meta' são do chat)", async () => {
+describe("a aba lê e abre a folha de meta", () => {
+  it("sem metas: 'Nenhuma meta ainda.' e os dois caminhos de criar ('Criar meta' no cabeçalho, 'Montar reserva' na lista); nada pede à IA", async () => {
     metas = () => resposta(200, METAS.vazio); renderRouter("./app", { initialUrl: "/metas" });
     await waitFor(() => expect(aba().getByText("Nenhuma meta ainda.")).toBeTruthy());
-    expect(aba().queryAllByRole("button")).toHaveLength(0); expect(screen.queryByText("Montar reserva")).toBeNull(); expect(screen.queryByText("Criar meta")).toBeNull();
+    expect(aba().getAllByRole("button").map((b) => b.props.accessibilityLabel)).toEqual(["Criar meta", "Montar reserva de emergência"]); expect(aba().getByText("Montar reserva")).toBeTruthy();
   });
   it("com 11 metas todas aparecem, sem '+N'", async () => {
-    await abrirMetas(); expect(screen.getAllByTestId(/^meta-\d+$/)).toHaveLength(11); expect(screen.queryByTestId("meta-mais")).toBeNull(); expect(aba().queryAllByRole("button")).toHaveLength(0);
+    await abrirMetas(); expect(screen.getAllByTestId(/^meta-\d+$/)).toHaveLength(11); expect(screen.queryByTestId("meta-mais")).toBeNull(); expect(aba().getAllByRole("button")).toHaveLength(12); // 11 pílulas tocáveis + o '+' de criar; com reserva, não há 'Montar reserva'
+    expect(aba().queryByText("Montar reserva")).toBeNull();
   });
   it("relê ao abrir a aba: a meta criada no chat aparece, com 1 chamada nova; Resumo <-> Gastos não relê", async () => {
     metas = () => resposta(200, METAS.vazio); renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByTestId("bloco-resumo")).toBeTruthy());

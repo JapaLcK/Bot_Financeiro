@@ -18,3 +18,7 @@ export const avaliarResposta = (id: number, corpo: { nota: 1 | -1 | null; motivo
 export const cancelarPendencia = (pai: AbortController) => chamar("/ai/pending", S.cancelamentoSchema, { metodo: "DELETE", sinal: comLimite(undefined, pai) });
 export const marcarAssinatura = (chave: string, status: "assinatura" | "ignorar" | "nenhuma", pai: AbortController) => chamar("/api/app/assinaturas/marca", S.assinaturasSchema, { metodo: "POST", corpo: { chave, status }, sinal: comLimite(undefined, pai) });
 export const responderReceita = (chave: string, resposta: "sim" | "nao" | "desfazer", pai: AbortController) => chamar("/api/app/previsao/receita", S.previsaoSchema, { metodo: "POST", corpo: { chave, resposta }, sinal: comLimite(undefined, pai) }); // o corpo é a Previsão do MENOR horizonte: só valida o contrato; quem manda é a releitura
+/** Escrita de meta: POST com o id no corpo (não há PATCH nem DELETE). O corpo é montado por `metasEscrita.ts`; o servidor não deduplica, quem chama trava o duplo envio. */
+export const criarMeta = (corpo: object, pai: AbortController) => chamar("/api/app/metas", S.metaGravadaSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });
+export const editarMeta = (corpo: object, pai: AbortController) => chamar("/api/app/metas/editar", S.metaGravadaSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });
+export const apagarMeta = (id: number, pai: AbortController) => chamar("/api/app/metas/apagar", S.metaGravadaSchema, { metodo: "POST", corpo: { id }, sinal: comLimite(undefined, pai) });

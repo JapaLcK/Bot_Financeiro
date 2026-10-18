@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import google_de_mentira, login_google
+from _apoio_auth_app import google_de_mentira, login_google, marca_exclusao
 from test_google_web_mfa import (
     SENHA, _conta, _desafio, _eventos, _logins_ok, _sem_sessao, _sessoes, _verifica, _web,
 )
@@ -49,8 +49,8 @@ def _sub(email: str) -> str:
 
 @pytest.mark.parametrize("mfa", [False, True], ids=["sem_mfa", "com_mfa"])
 def test_x1_d_de_conta_agendada_recusa_sem_sessao_sem_desafio(mfa):
-    uid, _, _ = _conta(mfa)
-    db.schedule_account_deletion(uid, SENHA)
+    uid, _, segredo = _conta(mfa)
+    marca_exclusao(uid, SENHA, segredo)
     codigo = db.create_dashboard_session(uid)      # depois: o agendamento apaga os antigos
     antes, desafios = _sessoes(uid), _desafios(uid)
 
@@ -68,7 +68,7 @@ def test_x2_d_isolamento_conta_agendada_nao_afeta_outra():
     (sobrevive à remoção da guarda). O teste de isolamento é o x4."""
     a, _, _ = _conta(False)
     b, _, _ = _conta(False)
-    db.schedule_account_deletion(a, SENHA)
+    marca_exclusao(a, SENHA)
     antes_b = _sessoes(b)
     r = TestClient(dashboard.app).get(f"/d/{db.create_dashboard_session(b)}", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/app"
@@ -83,7 +83,7 @@ def test_x3_verify_login_de_conta_agendada_depois_do_desafio_recusa_e_nao_queima
     client, r = _web(monkeypatch, email)
     desafio = _desafio(r)                           # login com MFA: desafio vivo
     antes = _sessoes(uid)
-    db.schedule_account_deletion(uid, SENHA)        # a conta agenda a exclusão em outra aba
+    marca_exclusao(uid, SENHA, segredo)             # a conta marca a exclusão em outra aba
 
     fim = _verifica(client, desafio, segredo)       # TOTP correto
 
@@ -108,7 +108,7 @@ def test_x4_verify_login_isolamento_entre_contas(monkeypatch):
     ca, ra = _web(monkeypatch, email_a)
     cb, rb = _web(monkeypatch, email_b)
     desafio_a, desafio_b = _desafio(ra), _desafio(rb)
-    db.schedule_account_deletion(a, SENHA)
+    marca_exclusao(a, SENHA, segredo_a)
     antes_a, antes_b = _sessoes(a), _sessoes(b)
 
     cruzado = _verifica(cb, desafio_b, segredo_a)   # TOTP da A no desafio da B
@@ -144,7 +144,7 @@ def test_y2_web_com_mfa_continua_sem_vinculo_depois_do_verify_login(monkeypatch)
 @APPS
 def test_y3_conta_agendada_e_recusada_sem_vinculo(monkeypatch, app):
     uid, email, _ = _conta(False)
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA)
     google_de_mentira(monkeypatch, email)
     _, r = login_google(app)
     destino = "pigbank://auth?erro=conta_em_exclusao" if app == 2 else "/?google_error="

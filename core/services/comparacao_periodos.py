@@ -10,8 +10,9 @@ da IA) só mostram. Dois caminhos, um formato de saída; só a base do cartão m
   cartão pela DATA DA COMPRA: a compra parcelada tem a mesma `purchased_at` em todas as parcelas e entra
   inteira no dia da compra. Essas leituras abrem a própria conexão (sem o snapshot único do caminho `mes`).
 
-Mês aberto compara os MESMOS N dias do mês anterior; se o anterior tem menos de N dias,
-compara com ele inteiro e marca `anterior_encurtado`. Mês fechado: mês inteiro × mês inteiro.
+Mês aberto: o mês corrente INTEIRO (o que já está lançado nele, inclusive fatura que fecha e lançamento com data
+futura) contra o anterior inteiro, o mesmo número do `resumo_do_mes`. Mês fechado: mês inteiro × mês inteiro.
+`anterior_encurtado` é sempre False (mantido: é contrato do bloco).
 """
 from __future__ import annotations
 
@@ -60,10 +61,9 @@ def _janela(inicio: date, fim: date) -> dict:
     return {"inicio": inicio, "fim": fim, "dias": (fim - inicio).days + 1}
 
 
-def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, encurtado: bool = False,
-             cartao: str = "fatura") -> dict:
+def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, cartao: str = "fatura") -> dict:
     return {"modo": modo, "escolha": escolha, "atual": atual, "anterior": anterior, "cartao": cartao,
-            "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": encurtado}
+            "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": False}
 
 
 def escolher_janelas(hoje: date, ano: int, mes: int) -> dict:
@@ -75,17 +75,12 @@ def escolher_janelas(hoje: date, ano: int, mes: int) -> dict:
         raise ValueError(f"mês no futuro; o mês corrente é {hoje.year:04d}-{hoje.month:02d}.")
     ini, fim = _mes(idx)
     ant_ini, ant_fim = _mes(idx - 1)
+    a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
     if idx < idx_hoje:
-        a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
         return _janelas("mes_fechado", f"{_nome(ini).capitalize()} inteiro ({a['dias']} dias) contra "
                         f"{_nome(ant_ini)} inteiro ({p['dias']} dias).", a, p)
-    n = hoje.day
-    if n > ant_fim.day:
-        a, p = _janela(ini, hoje), _janela(ant_ini, ant_fim)
-        return _janelas("mes_aberto", f"Dias 1 a {n} de {_nome(ini)} contra {_nome(ant_ini)} inteiro, "
-                        f"que tem só {p['dias']} dias.", a, p, encurtado=True)
-    a, p = _janela(ini, hoje), _janela(ant_ini, ant_ini + timedelta(days=n - 1))
-    return _janelas("mes_aberto", f"Dias 1 a {n} de {_nome(ini)} contra os mesmos {n} dias de {_nome(ant_ini)}.", a, p)
+    return _janelas("mes_aberto", f"{MESES[mes - 1].capitalize()} até agora (o que já está lançado no mês, igual ao Resumo do mês) "
+                    f"contra {_nome(ant_ini)} inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor.", a, p)
 
 
 def _intervalos(hoje: date, atual: tuple[date, date], anterior: tuple[date, date], por_fatura: bool = False) -> dict:
@@ -169,6 +164,8 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     out = {**j, "base": {**{k: base[k] for k in ("regra", "cartao", "origem")}, "cartao_lancamentos": None},
            "despesa": None, "receita": None, "resultado": None,
            "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None}
+    if j["modo"] == "mes_aberto":  # a legenda "dia 17 de 31" do app: `atual.fim` é o fim do mês, não hoje (mesmos nomes do forecast_month_end)
+        out["dias_corridos"], out["dias_no_mes"] = day_tz(agora).day, j["atual"]["dias"]
     corte = history_earliest_date(user_id, agora)
     if corte and corte > min(j["atual"]["inicio"], j["anterior"]["inicio"]):  # o modelo pode trocar A e B
         out["motivo"] = "inicio_do_historico"  # o plano não enxerga o período mais antigo inteiro
@@ -202,7 +199,7 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     out["base"]["cartao_lancamentos"] = {"atual": int(ta["n_cartao"]), "anterior": int(tp["n_cartao"])}
     out["escolha"] += base["escolha"]
     if j["modo"] == "mes_aberto" and not ta["n_cartao"]:
-        out["escolha"] += " Nenhuma fatura de cartão fechou nesses dias."
+        out["escolha"] += " Nenhuma fatura de cartão no mês."
     out["despesa"] = _linha(_dinheiro(ta["saiu"]), _dinheiro(tp["saiu"]))
     out["receita"] = _linha(_dinheiro(ta["entrou"]), _dinheiro(tp["entrou"]))
     (r, dsp) = out["receita"], out["despesa"]

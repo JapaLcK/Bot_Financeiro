@@ -97,12 +97,12 @@ it("o selecionado some (receita respondida): cai no primeiro, sem índice fora d
   await apertar("Não é receita fixa: Freela Beta");
   await waitFor(() => expect(titulo()).toBe("Aviso 1 de 2: Dados do banco desatualizados")); expect(pontos()).toBe(2); expect(screen.queryByText("Freela Beta")).toBeNull();
 });
-it("o selecionado some e VOLTA (Desfazer na linha 'Já respondidas'): a pilha continua no aviso que estava na tela, não salta de volta", async () => {
+it("o selecionado some e VOLTA (Desfazer na linha 'Receitas na previsão'): a pilha continua no aviso que estava na tela, não salta de volta", async () => {
   await abrir(); await waitFor(() => expect(pontos()).toBe(2));
   await toqueNoPonto(1); expect(screen.getByText("Freela Beta")).toBeTruthy();
   await apertar("Não é receita fixa: Freela Beta");
-  await waitFor(() => expect(screen.getByText("Já respondidas (1)")).toBeTruthy()); expect(screen.getByText("Salário Acme")).toBeTruthy(); expect(pontos()).toBe(0);
-  await act(async () => { fireEvent.press(screen.getByText("Já respondidas (1)")); await drenar(); });
+  await waitFor(() => expect(screen.getByText("Receitas na previsão (1)")).toBeTruthy()); expect(screen.getByText("Salário Acme")).toBeTruthy(); expect(pontos()).toBe(0);
+  await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (1)")); await drenar(); });
   await apertar("Desfazer resposta: Freela Beta");
   await waitFor(() => expect(pontos()).toBe(2));
   expect(titulo()).toBe("Aviso 1 de 2: Receitas do extrato"); expect(screen.getByText("Salário Acme")).toBeTruthy(); expect(screen.queryByText("Freela Beta", { exact: true })).toBeNull();
@@ -152,16 +152,16 @@ it("o foco do leitor vai para o título quando o visível SAI da lista (resposta
 });
 it("a receita só aparece no Resumo; nas outras abas a pilha só tem o banco", async () => {
   comBanco(); await abrir("/gastos", "Para onde vai");
-  expect(screen.getByText("Dados do banco desatualizados")).toBeTruthy(); expect(pontos()).toBe(0); expect(screen.queryByText("Receitas do extrato")).toBeNull(); expect(screen.queryByText("Já respondidas (1)")).toBeNull();
+  expect(screen.getByText("Dados do banco desatualizados")).toBeTruthy(); expect(pontos()).toBe(0); expect(screen.queryByText("Receitas do extrato")).toBeNull(); expect(screen.queryByText("Receitas na previsão (1)")).toBeNull();
 });
 it("sem banco, receita sem aviso nenhum em outra aba: nem a pilha existe (controle positivo: sem nada, nada)", async () => {
   await abrir("/gastos", "Para onde vai");
   expect(screen.queryByTestId("pilha-avisos")).toBeNull(); expect(screen.queryByLabelText("Avisos")).toBeNull(); expect(pontos()).toBe(0);
 });
-it("a linha 'Já respondidas' fica logo abaixo da pilha, fora dela, e abre com Desfazer", async () => {
+it("a linha 'Receitas na previsão' fica fora da pilha, dentro do card Saldo previsto, e abre com Desfazer", async () => {
   marcas["extrato#free"] = "negada"; await abrir();
-  const pilha = screen.getByTestId("pilha-avisos"); expect(within(pilha).queryByText(/Já respondidas/)).toBeNull();
-  const linha = screen.getByText("Já respondidas (1)"); expect(linha).toBeTruthy();
+  const pilha = screen.getByTestId("pilha-avisos"); expect(within(pilha).queryByText(/Receitas na previsão/)).toBeNull();
+  const linha = screen.getByText("Receitas na previsão (1)"); expect(linha).toBeTruthy();
   await act(async () => { fireEvent.press(linha); await drenar(); }); expect(screen.getByRole("button", { name: "Desfazer resposta: Freela Beta" })).toBeTruthy();
 });
 it("feedback de navegação fica FORA da pilha: aparece como Banner sem 'N de N' e sem virar ponto", async () => {

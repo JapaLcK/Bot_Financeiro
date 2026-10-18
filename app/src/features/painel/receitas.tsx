@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { ErroDeApi, SessaoExpirada } from "@/api/client";
 import { responderReceita } from "@/services/painel";
 import { Banner } from "@/ui/componentes/Banner";
-import { Card } from "@/ui/componentes/Card";
 import { useToast } from "@/ui/componentes/Toast";
 import { aviso as vibrarAviso, sucesso } from "@/ui/haptics";
 import { Acao, Linha } from "./base";
@@ -17,8 +16,12 @@ type Espera = { chave: string; nome: string; resposta: Resposta; postOk: boolean
 // Status esperado na lista quando o POST pegou, e a fala curta do toast (que o leitor de tela também ouve), sem o nome da receita.
 const ESPERADO: Record<Resposta, Receita["status"]> = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
 const DITO: Record<Resposta, string> = { sim: "Receita confirmada", nao: "Receita recusada", desfazer: "Resposta desfeita" };
-/** O que a caixa devolve a quem a hospeda (`TelaPainel`): as pendentes como avisos da pilha, o "Não deu para salvar" (feedback, fica FORA da pilha) e a linha das respondidas (abaixo da pilha). */
+/** O que a caixa devolve a quem a hospeda (`TelaPainel`): as pendentes como avisos da pilha, o "Não deu para salvar" (feedback, fica FORA da pilha) e a linha das respondidas, que NÃO fica no topo: `TelaPainel` a entrega pelo contexto abaixo ao card "Saldo previsto". */
 export type Apresentacao = { itens: AvisoDaPilha[]; erro: ReactNode; respondidas: ReactNode };
+/** A linha "Receitas na previsão" que o card "Saldo previsto" do Resumo desenha. UMA caixa só (a do topo) manda nas duas pontas: a trava, a espera e a releitura são dela, então Sim/Não no topo e Desfazer no card nunca correm juntos. Só existe provider em `TelaPainel` com `comReceitas`; no chat (e fora do Resumo) o contexto é nulo e nada aparece. */
+const ContextoRespondidas = createContext<ReactNode>(null);
+export const ProvedorRespondidas = ContextoRespondidas.Provider;
+export const useRespondidas = () => useContext(ContextoRespondidas);
 /** `key` pelo usuário: zera trava, aviso, espera e lista (nada da conta A aparece na B). Defesa de custo zero: o `PortaoPainel` já desmonta tudo na troca de conta, então tirar o `key` não deixa teste vermelho. */
 export const ReceitasDoBanco = ({ children }: { children: (r: Apresentacao) => ReactNode }) => <Caixa key={usePainel().usuario.user_id}>{children}</Caixa>;
 /**
@@ -71,10 +74,10 @@ function Caixa({ children }: { children: (r: Apresentacao) => ReactNode }) {
   return <>{children({
     itens,
     erro: falhou ? <Banner tom="danger" mensagem="Não deu para salvar. Tente de novo." /> : null,
-    respondidas: respondidas.length > 0 ? <View testID="receitas-respondidas"><Card><LinhaExpansivel aberta={abertas} alternar={() => setAbertas((a) => !a)} linha={<Texto variante="rotulo">{`Já respondidas (${respondidas.length})`}</Texto>}>
+    respondidas: respondidas.length > 0 ? <View testID="receitas-respondidas"><LinhaExpansivel aberta={abertas} alternar={() => setAbertas((a) => !a)} linha={<Texto variante="rotulo" tom="inkMuted">{`Receitas na previsão (${respondidas.length})`}</Texto>}>
       {respondidas.map((x) => <Linha key={x.chave} titulo={x.nome} valor={x.valor} detalhe={`${x.status === "confirmada" ? "Confirmada" : "Recusada"} · todo dia ${x.dia}`}>
         <Acao texto="Desfazer" rotulo={`Desfazer resposta: ${x.nome}`} desativado={ocupado} onPress={() => void responder(x, "desfazer")} />
       </Linha>)}
-    </LinhaExpansivel></Card></View> : null,
+    </LinhaExpansivel></View> : null,
   })}</>;
 }
