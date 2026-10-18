@@ -47,6 +47,7 @@ from utils_text import fmt_brl, valor_valido
 from .. import streaming
 from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, JANELAS_DO_TURNO
 from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
+from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
 
 # A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
@@ -202,8 +203,8 @@ def _recusa_se_for_do_card(
 def _recusa_comparar(user_id: int, ma, mb) -> dict[str, Any] | None:
     """No app, `compare_periods` de DOIS meses inteiros, diferentes e passados (`ma`/`mb` = `_meses_inteiros` de cada
     lado) vira o card `categorias` com `meses=[...]` (o card com uma aba por mês é a comparação). Fora disso o dado, como
-    antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (os mesmos dias,
-    F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
+    antes: lado de mais de um mês ou de tamanhos diferentes, mês futuro, o corrente em qualquer lado (o mês aberto
+    inteiro contra o anterior, F3), card que não resolve (vaga, na tela, falhou, sem acesso) e o plano que corta o histórico no mês mais antigo
     (o card não traz o `historico_desde`). Vem DEPOIS do `plan_gate_ok`: quem não tem a comparação não a ganha pelo card."""
     hoje = today_tz()
     if not (streaming.ativo() and ma and mb and ma[0] == ma[1] and mb[0] == mb[1] and ma != mb
@@ -386,22 +387,8 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         **extra,
     }
     if rows and mostrar_da_tool(user_id, "maiores_gastos", resultado):  # o card é este mesmo resultado
-        return _resumo_maiores(resultado)
+        return resumo_maiores(resultado)
     return resultado
-
-
-def _resumo_maiores(r: dict[str, Any]) -> dict[str, Any]:
-    """O que o MODELO vê quando o card `maiores_gastos` está na tela: a lista está lá, e o modelo que a vê inteira a copia
-    (como `cards._RESUMOS`). Dinheiro em float sob chave `total_*`/`valor*` (o `_CHAVE_MONETARIA_RE` do `ai_guard` casa `^total_`)."""
-    rows = r["expenses"]
-    return {
-        **{k: v for k, v in r.items() if k != "expenses"},
-        # soma só dos `count` itens listados, NÃO o gasto do período (chave `total_*`: o `ai_guard` a reconhece como dinheiro)
-        "total_dos_itens": float(sum((Decimal(str(x["valor"])) for x in rows), Decimal(0))),
-        "maior": max(rows, key=lambda x: x["valor"]),
-        "categorias": list(dict.fromkeys(x["categoria"] for x in rows if x.get("categoria")))[:3],
-        "card_na_tela": True,
-    }
 
 
 def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
@@ -436,7 +423,7 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             hoje = today_tz()
             corrente_x_anterior = tuple((m[0] == m[1] == (d.year, d.month)) if m else False for m, d in zip(
                 meses, (hoje.replace(day=1) - timedelta(days=1), hoje)))
-            if all(corrente_x_anterior):  # "outubro contra setembro" = `mes=<corrente>`: os mesmos N dias, o mesmo número
+            if all(corrente_x_anterior):  # "outubro contra setembro" = `mes=<corrente>`: o mês inteiro, o mesmo número
                 r = cp.comparar_mes(user_id, *meses[1][0])
             else:
                 if all(meses):
@@ -450,7 +437,15 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
             return {"error": "informe mes (AAAA-MM) ou period_a_start, period_a_end, period_b_start, period_b_end em ISO (YYYY-MM-DD)."}
     except ValueError as exc:
         return {"error": str(exc)}
-    return recusa if r is None else cp.para_json(r)
+    if r is None:
+        return recusa
+    j = cp.para_json(r)
+    # O card é este mesmo resultado (uma só conta); `escolha` e `nota` são para o modelo, não para a tela. Sem número
+    # (`inicio_do_historico`) ou sem base (`sem_base`: nada a comparar) não vira card com cara de sucesso.
+    if j["despesa"] is not None and j["motivo"] != "sem_base" and mostrar_da_tool(
+            user_id, "comparacao", {k: v for k, v in j.items() if k not in ("escolha", "nota")}):
+        return resumo_comparacao(j)
+    return j
 
 
 def _tendencia(despesas: list[float]) -> dict[str, Any]:
@@ -1247,7 +1242,7 @@ TOOLS: list[Tool] = [
                     "Compara receita, despesa e categorias entre 2 períodos equivalentes. "
                     "Use pra 'gastei mais em abril ou maio?', 'esse mês vs o anterior', "
                     "'compara com o mês passado'. Pra mês use `mes` (AAAA-MM; o mês corrente "
-                    "compara os mesmos dias do anterior; datas do mês corrente contra o anterior inteiro dão o mesmo "
+                    "compara o mês inteiro (o já lançado) com o anterior inteiro; datas do mês corrente contra o anterior inteiro dão o mesmo "
                     "resultado); datas só pra períodos livres ou meses antigos. "
                     "Cartão: com `mes`, ou com datas que são meses-calendário inteiros dos dois lados, "
                     "entra pela FATURA (a regra do 'Saiu do mês', igual ao painel); com qualquer período "

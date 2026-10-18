@@ -229,7 +229,7 @@ real — a conta é de teste, então os valores podem ir).
 | C3 | `ligar resumo semanal` | responde "🐷 O resumo semanal automático está disponível nos planos Plus e Pro." e não muda a preferência | liga | liga |
 | C4 | `quanto vou ter de saldo daqui 30 dias?` | recusa com convite | responde | responde |
 | C5 | `quanto vou ter de saldo daqui 60 dias?` (frase completa, sem depender da mensagem anterior) | recusa | explica o limite de 30 dias, sem inventar número | responde |
-| C6 | `compara esse mês com o mês passado` | recusa com convite: a frase vai para a IA, que chama `compare_periods`, e ele devolve `pro_required` no Essencial | compara os mesmos dias do mês passado: a resposta cita os dois períodos (`escolha`), o cartão pela fatura (`mes=` ou meses inteiros; com período parcial, pela data da compra, dito em `escolha`) e, em mês fechado, os dois tamanhos | idem |
+| C6 | `compara esse mês com o mês passado` | recusa com convite: a frase vai para a IA, que chama `compare_periods`, e ele devolve `pro_required` no Essencial | compara o mês inteiro com o anterior inteiro (o mês corrente é o que já está lançado nele): a resposta cita os dois períodos (`escolha`), o cartão pela fatura (`mes=` ou meses inteiros; com período parcial, pela data da compra, dito em `escolha`) e, em mês fechado, os dois tamanhos | idem |
 | C6b | `quanto gastei esse mês?` | responde com o total do mês (análise básica, liberada) | idem | idem |
 | C7 | `se eu comprar um celular de 3 mil em 12x com 600 de entrada e juros de 1,49% ao mês, como fica meu caixa?` | recusa | recusa com convite ao Pro | simula (conferir contra G2) |
 | C8 | `resumo da semana` (pedido manual) | responde | responde | responde |
