@@ -1019,13 +1019,15 @@ def send_account_deletion_completed_email(to: str) -> bool:
     content = f"""
       <p>Sua conta foi excluída e seus dados apagados, salvo o que a lei exige guardar.
         Não dá para desfazer.</p>
+      <p>Se você tinha assinatura no cartão, ela foi cancelada e não haverá novas cobranças.</p>
       <p class="warn">Não foi você? Fale com o suporte:
         <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</p>
     """
     html = _base_html("Conta excluída — PigBank", content)
     text = (
         "Sua conta foi excluída e seus dados apagados, salvo o que a lei exige guardar. "
-        f"Não dá para desfazer. Não foi você? Fale com o suporte: {SUPPORT_EMAIL}."
+        "Não dá para desfazer. Se você tinha assinatura no cartão, ela foi cancelada "
+        f"e não haverá novas cobranças. Não foi você? Fale com o suporte: {SUPPORT_EMAIL}."
     )
     return send_email(
         to=to,

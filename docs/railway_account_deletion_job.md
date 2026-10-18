@@ -36,6 +36,14 @@ Copie para este serviço as mesmas variáveis de produção usadas pelo app prin
 - `PLUGGY_CLIENT_SECRET`
 - `PLUGGY_BASE_URL` opcional, default `https://api.pluggy.ai`
 - `PLUGGY_TIMEOUT` opcional, default `20` (segundos)
+- `STRIPE_SECRET_KEY`
+
+`STRIPE_SECRET_KEY` é obrigatória: a exclusão cancela as assinaturas de cartão e expira os
+checkouts abertos da conta (`core/services/stripe_exclusao.py`) antes de apagar o banco. Sem
+ela, conta com `stripe_customer_id` falha fechada (volta a `scheduled`, o job sai 1 e
+repete a cada rodada); conta sem customer não é afetada.
+Se for chave restrita (`rk_`), ela precisa de leitura e escrita em Subscriptions, Subscription
+Schedules e Checkout Sessions.
 
 As duas variáveis `PLUGGY_*` obrigatórias não são decoração: desde a Onda 4 a
 exclusão definitiva deleta os items do usuário na Pluggy antes do delete local
