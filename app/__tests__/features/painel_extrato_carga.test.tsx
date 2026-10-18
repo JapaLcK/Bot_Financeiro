@@ -262,7 +262,7 @@ describe("Extrato: limpar o filtro de dia e de categoria", () => {
  });
  it("a11y: role button, label do filtro e alvo de 44pt", async () => {
   await entrar({ dia: "2026-10-02" }); const b = screen.getByRole("button", { name: "Limpar filtro do dia 02/10/2026" });
-  expect(b.props.accessibilityLabel).toBe("Limpar filtro do dia 02/10/2026"); expect(within(b).UNSAFE_getByType(Icone).props.nome).toBe("X"); expect(StyleSheet.flatten(b.props.style)).toMatchObject({ minHeight: 44, minWidth: 44 });
+  expect(b.props.accessibilityLabel).toBe("Limpar filtro do dia 02/10/2026"); expect(within(b).UNSAFE_getByType(Icone).props.nome).toBe("X"); expect(within(b).UNSAFE_getByType(Icone).props.tom).toBe("brandInk"); expect(StyleSheet.flatten(b.props.style)).toMatchObject({ minHeight: 44, minWidth: 44 });
  });
  // dia e categoria ao mesmo tempo (URL com os dois): cada botão limpa só o seu param
  const ambos = async () => { await act(async () => { router.navigate("/extrato?dia=2026-10-02&categoria=alimentacao"); await drenar(); }); await waitFor(() => expect(consulta().get("categoria")).toBe("alimentacao")); expect(consulta().get("dia")).toBe("2026-10-02"); };
