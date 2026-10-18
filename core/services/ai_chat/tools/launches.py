@@ -398,10 +398,11 @@ def _compare_periods(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if r is None:
         return recusa
     j = cp.para_json(r)
+    serie = j.pop("serie", None)  # só a tela desenha a série: o modelo (e o `ai_guard`) nunca a vê
     # O card é este mesmo resultado (uma só conta); `escolha` e `nota` são para o modelo, não para a tela. Sem número
     # (`inicio_do_historico`) ou sem base (`sem_base`: nada a comparar) não vira card com cara de sucesso.
     if j["despesa"] is not None and j["motivo"] != "sem_base" and mostrar_da_tool(
-            user_id, "comparacao", {k: v for k, v in j.items() if k not in ("escolha", "nota")}):
+            user_id, "comparacao", {**{k: v for k, v in j.items() if k not in ("escolha", "nota")}, "serie": serie}):
         return resumo_comparacao(j)
     return j
 

@@ -20,13 +20,15 @@ import calendar
 import unicodedata
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from itertools import accumulate
 
 from core.observability import get_logger
 from core.reports.weekly import _categoria_em_uma_linha, _pct
 from core.services.plan_service import history_earliest_date, plan_gate_ok
 import db
-from db import resumo_mes
+from db import lancamentos, resumo_mes
 from db.connection import get_conn
+from db.mes_detalhes import _em_reais
 from utils_date import day_tz, now_tz
 
 logger = get_logger(__name__)
@@ -124,6 +126,23 @@ def _dinheiro(v) -> Decimal:
     return Decimal(v).quantize(_CENT)
 
 
+def _serie(linhas: list[dict], janela: dict, hoje: date, total: Decimal) -> list[Decimal] | None:
+    """Gasto acumulado por dia da janela (o filtro do `dias[]` do Resumo; dia fora da janela, como compra de cartão
+    anterior a ela, prende na ponta); `None` se a última posição não fecha o `total`. Na janela que contém hoje corta em hoje (ou no último lançamento de data futura)."""
+    n, por_dia, ult = janela["dias"], [Decimal(0)] * janela["dias"], 0
+    for r in _em_reais(linhas, set())[0]:
+        if r["tipo"] == "saida":
+            i = min(max((r["dia"] - janela["inicio"]).days, 0), n - 1)
+            por_dia[i] += r["valor"]
+            ult = max(ult, i + 1)
+    acc = [_dinheiro(v) for v in accumulate(por_dia)]
+    if acc[-1] != total:
+        return None
+    if janela["inicio"] <= hoje <= janela["fim"]:  # sobe em degrau até o lançamento de data futura (a última posição = total)
+        n = max((hoje - janela["inicio"]).days + 1, ult)
+    return acc[:n]
+
+
 def _categorias(atual: list[dict], anterior: list[dict]) -> list[dict]:
     """Casa as duas janelas pela chave da categoria; o rótulo é a grafia do lado atual, senão do anterior (no
     período livre, a de maior total: as linhas vêm por total desc e a última a ser lida manda, daí o `reversed`)."""
@@ -163,7 +182,7 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     base = BASES[cartao]
     out = {**j, "base": {**{k: base[k] for k in ("regra", "cartao", "origem")}, "cartao_lancamentos": None},
            "despesa": None, "receita": None, "resultado": None,
-           "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None}
+           "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None, "serie": None}
     if j["modo"] == "mes_aberto":  # a legenda "dia 17 de 31" do app: `atual.fim` é o fim do mês, não hoje (mesmos nomes do forecast_month_end)
         out["dias_corridos"], out["dias_no_mes"] = day_tz(agora).day, j["atual"]["dias"]
     corte = history_earliest_date(user_id, agora)
@@ -189,6 +208,14 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
                     cat_a, cat_p = resumo_mes.categorias(cur, user_id, ia, fa), resumo_mes.categorias(cur, user_id, ip, fp)
             except Exception as exc:
                 logger.warning("comparacao_periodos: categorias indisponíveis (%s)", type(exc).__name__)
+        if not por_compra:  # a série diária das duas janelas; extra como as categorias (savepoint). Período livre: sem linha
+            try:
+                with conn.transaction():
+                    serie = {lado: _serie(lancamentos.listar(cur, user_id, i, f, limite=None)[0], j[lado], day_tz(agora),
+                                          _dinheiro(t["saiu"])) for lado, i, f, t in (("atual", ia, fa, ta), ("anterior", ip, fp, tp))}
+                out["serie"] = None if None in serie.values() else serie
+            except Exception as exc:
+                logger.warning("comparacao_periodos: série indisponível (%s)", type(exc).__name__)
         try:
             vistos = set(listar(cur, user_id)["motivos"])  # os mesmos avisos do resumo do mês (último: sem savepoint)
         except Exception as exc:
