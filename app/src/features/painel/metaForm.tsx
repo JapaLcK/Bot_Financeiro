@@ -129,10 +129,10 @@ function Formulario({ meta, comecar, custo, temReserva, bancos, contas, semPlano
       {c.data && !android
         ? <ListRow titulo="Prazo" trailing={<DateTimePicker value={dataDoSeletor(c.data)} mode="date" display="compact" minimumDate={dataDoSeletor(hojeSP())} themeVariant={esquema} locale="pt-BR" accessibilityLabel="Prazo" disabled={bloqueado} onChange={(_, d) => { if (d) mudar({ data: isoDoSeletor(d) }); }} />} />
         : <ListRow titulo="Prazo" trailing={<Texto tom="inkMuted">{c.data ? dataPtBr(c.data) : "Sem prazo"}</Texto>} chevron desativado={bloqueado} onPress={android ? abrirPrazo : () => mudar({ data: hojeSP() })} />}
-      {c.data ? <ListRow titulo="Tirar prazo" desativado={bloqueado} onPress={() => mudar({ data: null })} /> : null}
       <ListRow titulo="Fonte" trailing={<Texto tom="inkMuted">{rotuloFonte}</Texto>} chevron desativado={bloqueado} onPress={() => setFonteAberta((v) => !v)} />
       {fonteAberta ? opcoes.map((o) => <ListRow key={chaveFonte(o.fonte)} titulo={o.titulo} subtitulo={o.sub} desativado={bloqueado} trailing={chaveFonte(o.fonte) === chaveFonte(c.fonte) ? <Icone nome="CheckCircle" tamanho={20} tom="brand" /> : undefined} onPress={() => { mudar({ fonte: o.fonte }); setFonteAberta(false); }} />) : null}
     </GrupoDeLinhas>
+    {c.data ? <Button rotulo="Tirar prazo" variante="secondary" desativado={bloqueado} onPress={() => mudar({ data: null })} /> : null}
     {falha?.campos.data_alvo ? <Texto variante="legenda" tom="danger">{falha.campos.data_alvo}</Texto> : null}
     {falha?.campos.fonte ? <Texto variante="legenda" tom="danger">{falha.campos.fonte}</Texto> : null}
     {falha && !Object.keys(falha.campos).length ? <Texto tom="danger" accessibilityRole="alert">{falha.geral}</Texto> : null}
