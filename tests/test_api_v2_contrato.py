@@ -39,6 +39,15 @@ from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F40
 FIXTURES = json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"))
 
 
+def test_fixtures_nao_tem_chave_repetida():
+    """`json.loads` guarda só a ÚLTIMA chave repetida: duas `"bancos"` no arquivo escondiam metade das fixtures (e dos testes)."""
+    def sem_repeticao(pares):
+        assert len({k for k, _ in pares}) == len(pares), [k for k, _ in pares]
+        return dict(pares)
+
+    json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"), object_pairs_hook=sem_repeticao)
+
+
 def test_tipos_gerados_em_dia():
     assert gerar(app_v2.openapi()) == SAIDA.read_text(encoding="utf-8"), (
         "webapp/src/dashboard/lib/api-v2.gen.ts está velho: rode "

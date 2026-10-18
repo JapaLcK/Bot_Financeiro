@@ -1,0 +1,31 @@
+/* Pilha de avisos do topo (parts/PilhaAvisos.tsx): um aviso por vez, a borda do próximo por baixo e os pontos "k de n".
+   `alerta` (âmbar) = os números ou a conexão estão com problema; `decisao` (rosa) = pede uma resposta. Grid, não flex gap (Safari 14). `.pilha` é bloco: o grid de uma coluna que ele já teve não mudava medida alguma (320, 375 e 1440 px, nome de 300 caracteres). */
+.avisos-topo { display: contents; }
+.pilha-card {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start;
+  padding: 16px; border: 1px solid var(--pilha-fio); border-radius: var(--r-panel);
+  background: var(--pilha-fundo); animation: pilha-sobe var(--t-mid) var(--ease-out);
+}
+.pilha[data-tom="alerta"] { --pilha-fio: var(--warn); --pilha-fundo: var(--warn-wash); --pilha-tinta: var(--warn); }
+.pilha[data-tom="decisao"] { --pilha-fio: var(--pink); --pilha-fundo: var(--pink-wash); --pilha-tinta: var(--pink-ink); }
+.pilha-icone { font-size: 20px; line-height: 1.2; color: var(--pilha-tinta); }
+.pilha-corpo { display: grid; gap: 8px; min-width: 0; }
+.pilha-corpo > * { margin: 0; }
+.pilha-titulo { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.pilha-titulo:focus { outline: none; }
+.pilha-texto { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.pilha-x { width: 44px; height: 44px; margin: -12px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink-2); border-radius: var(--r-ctrl); }
+.pilha-corpo .btn { justify-self: start; min-height: 44px; height: auto; white-space: normal; }
+.pilha .sub { border-top: 0; padding: 0; }
+.pilha-faixa { height: 6px; margin: 0 8px; border: 1px solid var(--faixa); border-top: 0; border-radius: 0 0 var(--r-panel) var(--r-panel); }
+.pilha-faixa[data-tom="alerta"] { --faixa: var(--warn); }
+.pilha-faixa[data-tom="decisao"] { --faixa: var(--pink); }
+.pilha-pontos { display: flex; flex-wrap: wrap; justify-content: center; }
+.pilha-ponto { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; }
+/* Inativo = anel, ativo = cheio e maior: a cor cheia (>= 3:1 sobre a página, WCAG 1.4.11) e a forma dizem qual é o atual; nunca só a opacidade. */
+.pilha-ponto > span { box-sizing: border-box; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--ponto); }
+.pilha-ponto[data-tom="alerta"] { --ponto: var(--warn); }
+.pilha-ponto[data-tom="decisao"] { --ponto: var(--pink); }
+.pilha-ponto[aria-current="true"] > span { width: 10px; height: 10px; background: var(--ponto); }
+@keyframes pilha-sobe { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pilha-card { animation: none; } }

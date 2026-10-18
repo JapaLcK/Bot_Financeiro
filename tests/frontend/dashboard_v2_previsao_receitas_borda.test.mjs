@@ -1,5 +1,5 @@
 /**
- * Bordas da caixa "Receitas do extrato" e da seção "Receitas na previsão" (ReceitasDoBanco.tsx): foco, rolagem, anúncio e resposta perdida.
+ * Bordas das receitas pendentes na pilha de avisos do topo e da seção "Receitas na previsão" (ReceitasDoBanco.tsx): foco, rolagem, anúncio e resposta perdida.
  * O caso comum está em dashboard_v2_previsao_receitas.test.mjs; o mock com estado, em _receitas.mjs.
  *
  *   · o foco do resultado nunca mexe na rolagem (o html tem `scroll-behavior: smooth`), no sucesso e na falha;
@@ -16,7 +16,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { exigeArtefatoEmDia } from "./_painel.mjs";
-import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, dito, alerta, alertas, painelVisivel, semPendente } from "./_receitas.mjs";
+import { ALFA, MARIA, JOAO, CAIXA, SECAO, PEND, RESP, abrir as abrirComBrowser, dito, alerta, alertas, painelVisivel, semPendente, pontos } from "./_receitas.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -37,7 +37,7 @@ for (const [nome, falha, some] of [["sucesso", undefined, true], ["falha (foco n
     // Não se mede o `scrollY`: o scroll anchoring o corrige quando a caixa, acima da tela, muda de altura.
     // Mede-se onde o saldo (abaixo da caixa) está na janela: parado se a rolagem não foi mexida.
     const topo = () => page.evaluate(() => document.querySelector("#w-previsao").getBoundingClientRect().top);
-    const caixaTopo = () => page.evaluate(() => document.querySelector("#w-previsao-receitas").parentElement.getBoundingClientRect().top);
+    const caixaTopo = () => page.evaluate(() => document.querySelector("#avisos-topo section.pilha").getBoundingClientRect().top);
     await page.evaluate(() => scrollTo({ top: 500, behavior: "instant" }));
     const y0 = await topo();
     const tirada = y0 - await caixaTopo(); // altura da caixa mais o vão até o saldo
@@ -52,18 +52,18 @@ for (const [nome, falha, some] of [["sucesso", undefined, true], ["falha (foco n
   });
 }
 
-test("foco no título da caixa durante o POST: o resultado ainda recebe o foco", async () => {
+test("foco no título do aviso durante o POST: o resultado ainda recebe o foco", async () => {
   let soltar;
   const trava = new Promise((ok) => { soltar = ok; });
   const { ctx, page, posts } = await abrir({ post: () => trava });
   await page.getByRole("button", { name: /^Sim/ }).click();
   while (!posts.length) await page.waitForTimeout(20);
-  await page.locator(`${CAIXA} .rec-foco`).first().focus();
-  const antes = await page.evaluate(() => document.activeElement?.tagName + "|" + document.activeElement?.closest("article")?.id);
+  await page.locator(`${CAIXA} .pilha-titulo`).focus();
+  const antes = await page.evaluate(() => document.activeElement?.tagName + "|" + document.activeElement?.closest("section")?.getAttribute("aria-label"));
   soltar();
   await comFoco(page);
   await ctx.close();
-  assert.equal(antes, "P|w-previsao-receitas");
+  assert.equal(antes, "H2|Avisos");
 });
 
 test("Desfazer que esvazia a lista: a seção vira sr-only mas fica, o anúncio sobrevive e o foco pousa no título dela (não no <body>)", async () => {
@@ -128,11 +128,11 @@ test("duas receitas de mesmo nome: cada Sim muda o DOM da região viva (o 2º é
   const { ctx, page } = await abrir({ receitas: [mk("extrato#00000000000000a1", "900.00", 5), mk("extrato#00000000000000a2", "800.00", 6)] });
   await page.evaluate(() => {
     window.__mut = 0;
-    new MutationObserver((l) => { window.__mut += l.length; }).observe(document.querySelector("#w-previsao-receitas [role=status]"), { childList: true, characterData: true, subtree: true });
+    new MutationObserver((l) => { window.__mut += l.length; }).observe(document.querySelector("#avisos-topo [role=status]"), { childList: true, characterData: true, subtree: true });
   });
   const sim = page.getByRole("button", { name: /^Sim/ }).first();
   await sim.click();
-  await page.locator(PEND).nth(1).waitFor({ state: "detached" });
+  await pontos(page).first().waitFor({ state: "detached" }); // sobrou uma: sem pontos
   const a = await page.evaluate(() => window.__mut);
   await sim.click();
   await semPendente(page);
@@ -165,7 +165,7 @@ for (const [nome, primeiro, segundo, onde, limpou] of [
   });
 }
 
-// As caixas desmontam na troca de horizonte (a leitura do outro horizonte ainda não chegou): o alerta, que mora no pai, tem de morrer junto.
+// A leitura do outro horizonte ainda não chegou (a página sai de `d`): o alerta, que mora no contexto, tem de morrer junto.
 test("POST 500 no Sim: alerta; trocar para 60 dias e voltar a 30 não traz o alerta de volta", async () => {
   const { ctx, page } = await abrir({ post: (_, n) => (n === 1 ? ERRO500 : undefined) });
   await page.getByRole("button", { name: /^Sim/ }).click();
