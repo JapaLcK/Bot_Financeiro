@@ -62,7 +62,7 @@ test("ícone da categoria: o `icone` do servidor vira Phosphor na lista e no det
   await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map((c, i) => ({ ...c, icone: i ? "shopping-cart" : "a b c" })) } }));
   await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].map((i) => i.className).join("|") === "ph ph-tag|ph ph-shopping-cart");
-  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map(({ icone, ...c }) => c) } }));
+  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map((c) => ({ ...c, icone: undefined })) } })); // undefined some do JSON: servidor velho, sem o campo
   await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].every((i) => i.className === "ph ph-tag"));
   await ctx.close();
