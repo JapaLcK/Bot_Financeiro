@@ -546,6 +546,9 @@ test("401 numa leitura opcional (/bancos ou /limite) depois de a lista estar na 
       ...(qual === "bancos" ? { bancosRes: nao((q) => q.fulfill({ json: RESPOSTAS.bancos.padrao })) } : { limiteRes: nao((q) => q.fulfill({ json: LIMITE() })) }),
     });
     await esperaCards(page, 3);
+    // A 1ª leitura de cada uma tem de ter terminado: o foco com a leitura ainda no ar reaproveita a mesma, e o 401 nunca chega.
+    await semReticencias(page);
+    await page.waitForFunction(() => /2 de 3 bancos/.test(document.body.innerText), null, { timeout: 8000 });
     expirou = true;
     await refoco(page);
     await page.getByRole("alert").waitFor({ timeout: 8000 });
@@ -567,6 +570,8 @@ test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os n�
     limiteRes: cai((q) => q.fulfill({ json: LIMITE() })),
   });
   await esperaCards(page, 3);
+  await semReticencias(page);
+  await page.waitForFunction(() => /2 de 3 bancos/.test(document.body.innerText), null, { timeout: 8000 });
   caiu = true;
   await refoco(page);
   await page.getByRole("alert").waitFor({ timeout: 12000 });
