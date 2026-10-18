@@ -63,8 +63,13 @@ class Tool:
     Bool = sempre/nunca; callable (user_id, args) = só quando aquela chamada
     armaria."""
     ao_confirmar: Optional[Callable[[int, dict[str, Any]], dict[str, Any]]] = None
-    """Só com `confirmar_se`: ajusta os args que vão para a pendência (e para
-    o resumo) — o que o "sim" grava é o que a pergunta mostrou."""
+    """Ajusta os args que vão para a pendência (e para o resumo) — o que o "sim"
+    grava é o que a pergunta mostrou. Roda com `confirmar_se` e, nas de
+    `requires_confirmation`, depois do `validate` e antes do `summary`."""
+    ao_armar: Optional[Callable[[int, dict[str, Any]], None]] = None
+    """Só nas de `requires_confirmation`: roda depois que a pendência foi de fato
+    armada (nunca com `_OUTRO_PEDIDO`), para o que aparece junto da pergunta — um
+    card — só existir se o "sim" tiver o que executar."""
 
     has_side_effects: bool = False
     """Consulta que sincroniza ou aplica juros. Não é comando de escrita,
