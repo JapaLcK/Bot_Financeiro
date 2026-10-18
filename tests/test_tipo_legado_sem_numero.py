@@ -8,7 +8,7 @@ número para comparar.
 | leitor                        | o que a linha legada tira do usuário          |
 |-------------------------------|-----------------------------------------------|
 | `find_recurring_candidate`    | subconta meses → não pergunta "virar fixo?"   |
-| `get_uncategorized_launches`  | a linha nunca vira candidata a regra          |
+| `recentes(sem_categoria=True)`| a linha nunca vira candidata a regra          |
 | `list_launches_by_tipo`       | bot pergunta o valor recorrente que já sabe   |
 
 `get_internal_movement_total` (o antigo terceiro leitor, aporte legado na projeção do fim do mês) saiu:
@@ -21,7 +21,7 @@ O `list_launches_by_tipo` (db/accounts.py:172) é o único em que o `tipo`
 
 Controles NEGATIVOS (um por site) — reverta o filtro para `tipo = 'despesa'` em:
   • db/recurring.py  (find_recurring_candidate)  → `test_repeticao_legada...` vermelho
-  • db/categories.py (get_uncategorized_launches) → `test_linha_legada_e_candidata...` vermelho
+  • db/resumo_mes.py (`MES_TIPOS_SQL`, a janela de `listar`: `tipo = 'despesa'`) → `test_linha_legada_e_candidata...` vermelho
   • db/accounts.py   (list_launches_by_tipo, `{TIPO_CANON_SQL}=%s` → `tipo=%s`)
     → `test_valor_recorrente_legado_e_sugerido` vermelho (None != 1200.0)
 Controles POSITIVOS — são DOIS, porque um só não separa as duas maneiras de errar:
@@ -31,12 +31,12 @@ Controles POSITIVOS — são DOIS, porque um só não separa as duas maneiras de
     filtros por `tipo is not null` deixaria receita/entrada/aporte entrarem como
     despesa, e sem este caso o grupo ficava verde nessa mutação (medido: 5 passed).
 
-TETO MEDIDO do positivo "não alargou de menos" — ele pegava 2 dos 4 sites (hoje 1 dos 3, o `get_uncategorized_launches`), e os
+TETO MEDIDO do positivo "não alargou de menos" — ele pegava 2 dos 4 sites (hoje 1 dos 3, o `recentes(sem_categoria=True)`), e os
 outros 2 são cegos por construção da FUNÇÃO, não do teste. Medido injetando
 `from launches, (values (1),(2)) as _dup(n)` (cada linha exatamente duas vezes)
 em UM site por vez, e rodando só `test_base_sem_linha_legada_responde_o_mesmo`:
 
-  db/categories.py  get_uncategorized_launches   → FAILED  (2 notas, esperava 1)
+  db/lancamentos_leitura.py recentes(sem_categoria)  → FAILED  (2 notas, esperava 1)
   db/accounts.py    list_launches_by_tipo        → passed  (cego)
   db/recurring.py   find_recurring_candidate     → cego, não medido
 
@@ -54,9 +54,9 @@ from datetime import datetime
 import db
 from core.handlers.launches import infer_recurring_value
 from db.accounts import add_launch_and_update_balance
-from db.categories import get_uncategorized_launches
+from db.lancamentos_leitura import recentes
 from db.recurring import find_recurring_candidate
-from utils_date import _tz, today_tz
+from utils_date import _tz, now_tz, today_tz
 
 from tests.test_tipo_legado_no_dashboard import _grava_tipo_legado, _hoje_as
 
@@ -103,7 +103,7 @@ def test_linha_legada_e_candidata_a_regra(user_id):
     _grava_tipo_legado(user_id, "saida", 31.00, "outros", nota="Padaria legada")
     _add_moderno(user_id, 12.00, "Padaria nova", "outros", *_ano_mes_hoje())
 
-    notas = {l["nota"] for l in get_uncategorized_launches(user_id)}
+    notas = {l["mensagem"] for l in _sem_categoria(user_id)}
     assert "Padaria legada" in notas, notas
     assert "Padaria nova" in notas, notas
 
@@ -181,7 +181,7 @@ def test_receita_nao_conta_como_despesa(user_id):
     assert find_recurring_candidate(
         user_id, "salario legado", 900.00, current_year=2026, current_month=9,
     ) == 0
-    assert get_uncategorized_launches(user_id) == []
+    assert _sem_categoria(user_id) == []
     assert infer_recurring_value(user_id, "despesa", "Salario legado") is None
     # e o espelho: como RECEITA a mesma descrição é encontrada — senão o caso
     # acima passaria num código que simplesmente não acha nada.
@@ -195,7 +195,7 @@ def test_base_sem_linha_legada_responde_o_mesmo(user_id):
     vezes — os leitores têm que devolver o valor de sempre numa base
     100% moderna, que é a produção de hoje.
 
-    TETO MEDIDO: ele pega 1 dos 3 sites (`get_uncategorized_launches`). Em `find_recurring_candidate` (`set` de
+    TETO MEDIDO: ele pega 1 dos 3 sites (`recentes(sem_categoria=True)`). Em `find_recurring_candidate` (`set` de
     meses) e em `list_launches_by_tipo` (argmax de um `Counter`) a contagem
     dupla é invisível por construção da FUNÇÃO — a tabela da medição está no
     docstring do módulo. Ali este caso prova só "o valor certo continua
@@ -207,7 +207,7 @@ def test_base_sem_linha_legada_responde_o_mesmo(user_id):
     ) == 2
 
     _add_moderno(user_id, 12.00, "Padaria nova", "outros", *_ano_mes_hoje())
-    notas = [l["nota"] for l in get_uncategorized_launches(user_id)]
+    notas = [l["mensagem"] for l in _sem_categoria(user_id)]
     assert notas.count("Padaria nova") == 1, notas
 
     # `list_launches_by_tipo`: prova só que o valor certo continua saindo (ver o
@@ -216,6 +216,11 @@ def test_base_sem_linha_legada_responde_o_mesmo(user_id):
 
 
 # ── auxiliares ──────────────────────────────────────────────────────────────
+
+def _sem_categoria(user_id):
+    """A lista "sem categoria" da IA (`get_uncategorized_launches`): `mensagem` é a `nota` da linha."""
+    return recentes(user_id, now_tz(), 50, sem_categoria=True)["itens"]
+
 
 def _ano_mes_hoje():
     h = today_tz()

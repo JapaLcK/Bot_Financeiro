@@ -1,8 +1,9 @@
 """Contrato dos kwargs que cada chamada ao chat da OpenAI manda (cliente falso,
 nada chama a rede).
 
-(a) com o modelo de hoje (gpt-4o-mini / gpt-4o), os kwargs são os LITERAIS de
-    antes de `core/services/modelo_openai.py` existir: a refatoração não muda produção;
+(a) o modelo PADRÃO (hoje gpt-6-luna, texto e visão) manda os kwargs da Luna; com o
+    modelo antigo (gpt-4o-mini / gpt-4o) os kwargs são os LITERAIS de antes de
+    `core/services/modelo_openai.py` existir (ramo fallback, cobertura por chamada);
 (b) com o modelo trocado por gpt-5.4-mini, `temperature`/`max_tokens` somem e
     entram `reasoning_effort` e (onde havia teto) `max_completion_tokens`.
 """
@@ -151,8 +152,24 @@ def _kwargs(chamada, mp):
 
 
 @pytest.mark.parametrize("caso", CASOS, ids=IDS)
-def test_a_kwargs_de_hoje_nao_mudam(monkeypatch, caso):
-    _, chamada, _, modelo, esperado, _, _ = caso
+def test_a_default_e_a_luna_effort_none_max_completion_tokens_e_temperature(monkeypatch, caso):
+    # sem setattr: é o default de produção que está sendo medido
+    _, chamada, _, _, esperado, teto, _ = caso
+    resto = {k: v for k, v in esperado().items() if k != "max_tokens"}  # temperature fica
+    esperado_a = {"model": "gpt-6-luna", **resto, "reasoning_effort": "none"}
+    if teto == "runner":
+        teto = _runner_teto()
+    if teto is not None:
+        esperado_a["max_completion_tokens"] = teto  # exato, sem o max(…, 2048) do 5.4-mini
+    assert _kwargs(chamada, monkeypatch) == esperado_a
+
+
+@pytest.mark.parametrize("caso", CASOS, ids=IDS)
+def test_a2_modelo_antigo_cai_no_fallback_max_tokens_e_temperature(monkeypatch, caso):
+    import importlib
+    _, chamada, onde, modelo, esperado, _, _ = caso
+    modulo, attr = onde.rsplit(".", 1)
+    monkeypatch.setattr(importlib.import_module(modulo), attr, modelo)
     assert _kwargs(chamada, monkeypatch) == {"model": modelo, **esperado()}
 
 
@@ -170,6 +187,15 @@ def test_b_gpt_5_4_mini_sem_temperature_nem_max_tokens(monkeypatch, caso):
     if teto is not None:
         esperado_b["max_completion_tokens"] = max(teto, 2048)
     assert _kwargs(chamada, monkeypatch) == esperado_b
+
+
+def test_gpt_6_luna_so_o_alias_exato():
+    from core.services.modelo_openai import completion_options as co
+    assert co("gpt-6-luna", 100, 0.3, with_tools=True) == co("gpt-6-luna", 100, 0.3) == {
+        "model": "gpt-6-luna", "max_completion_tokens": 100, "reasoning_effort": "none", "temperature": 0.3}
+    assert co("gpt-6-luna", None, 0) == {"model": "gpt-6-luna", "reasoning_effort": "none", "temperature": 0}
+    # nome fora do contrato cai no fallback (falha visível na API), não herda o ramo da Luna
+    assert co("gpt-6-luna-2027", 100, 0.3) == {"model": "gpt-6-luna-2027", "max_tokens": 100, "temperature": 0.3}
 
 
 def test_helper_budget_none_e_inteiro():
@@ -195,8 +221,8 @@ def _modelos(env_extra):
 
 
 def test_modelos_padrao_e_env():
-    assert _modelos({}) == ["gpt-4o-mini", "gpt-4o"]
-    assert _modelos({"OPENAI_MODEL": "outro"}) == ["outro", "gpt-4o"]
+    assert _modelos({}) == ["gpt-6-luna", "gpt-6-luna"]
+    assert _modelos({"OPENAI_MODEL": "outro"}) == ["outro", "gpt-6-luna"]
 
 
 def test_todos_os_modulos_seguem_a_env_e_visao_nao():
@@ -210,4 +236,4 @@ def test_todos_os_modulos_seguem_a_env_e_visao_nao():
     env = os.environ | {"OPENAI_MODEL": "modelo-sentinela-xyz", "PYTHONPATH": str(RAIZ)}
     out = subprocess.run([sys.executable, "-c", codigo], cwd=RAIZ, env=env,
                          capture_output=True, text=True, check=True)
-    assert out.stdout.split() == ["modelo-sentinela-xyz"] * 7 + ["gpt-4o"]
+    assert out.stdout.split() == ["modelo-sentinela-xyz"] * 7 + ["gpt-6-luna"]

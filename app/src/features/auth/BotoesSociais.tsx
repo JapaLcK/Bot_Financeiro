@@ -7,7 +7,7 @@ import { continuarComGoogle } from "@/features/auth/google";
 import { ALTURA, ALTURA_ACESSO, Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
 import { useTema } from "@/ui/tema";
-import { espaco, raio } from "@/ui/tokens";
+import { espaco } from "@/ui/tokens";
 
 interface Props {
   estado: EstadoEntrar;
@@ -57,7 +57,7 @@ export function BotoesSociais({ estado, aplicar, autenticar, bloqueado = false }
                   ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
                   : AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE
               }
-              cornerRadius={raio.controle}
+              cornerRadius={(acesso ? ALTURA_ACESSO.M : ALTURA.M) / 2}
               style={{ height: acesso ? ALTURA_ACESSO.M : ALTURA.M }}
               onPress={() => {
                 // A antes de `tocar()`, pelo mesmo motivo do Entrar (B1).

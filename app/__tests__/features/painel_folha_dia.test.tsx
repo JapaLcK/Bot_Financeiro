@@ -54,6 +54,8 @@ const tituloDa = (d: string, oculta = false) => titulos(oculta).includes(dataFal
 const folhaAberta = (d: string) => waitFor(() => expect(tituloDa(d)).toBeTruthy());
 const desativada = (nome: string) => screen.getByRole("button", { name: nome }).props.accessibilityState.disabled;
 const folha = () => within(screen.getByTestId("folha-dia"));
+// O total é o 1º valor da folha. Os maiores falam o valor SEM sinal, então num dia de uma compra só repetem o rótulo do total: pegue o primeiro.
+const totalDe = (centavos: number) => folha().getAllByLabelText(faladoComSinal(centavos))[0]!;
 // `announceForAccessibility` já é um jest.fn do preset do RN: `restoreAllMocks` não zera as chamadas de outro caso.
 const anunciar = () => { const s = jest.spyOn(AccessibilityInfo, "announceForAccessibility").mockImplementation(() => {}); s.mockClear(); return s; };
 const extratoMontado = () => waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
@@ -76,7 +78,7 @@ describe("abrir pelo toque", () => {
   await abrir(); expect(chamadas(GAS)).toHaveLength(0);
   await tocar("2026-10-12"); await folhaAberta("2026-10-12");
   expect(screen.getByText("seg, 12 out")).toBeTruthy(); expect(chamadas(GAS)).toHaveLength(1); expect(String(chamadas(GAS)[0]![0])).toContain("mes=2026-10");
-  await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy());
+  await waitFor(() => expect(totalDe(25000)).toBeTruthy());
   expect(folha().getByLabelText("1 compra")).toBeTruthy(); expect(screen.getByRole("button", { name: "Ver extrato do dia" })).toBeTruthy();
   expect(chamadas(LANC)).toHaveLength(0); // abrir a folha não vai ao extrato
  });
@@ -96,9 +98,9 @@ describe("abrir pelo toque", () => {
 
 describe("cache do mês", () => {
  it("abrir, fechar e abrir de novo no mesmo mês lê /gastos UMA vez (o hook persiste entre aberturas; sem isso são 2 leituras)", async () => {
-  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy());
+  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(totalDe(25000)).toBeTruthy());
   await apertar("Fechar"); await waitFor(() => expect(tituloDa("2026-10-12")).toBeNull());
-  await tocar("2026-10-14"); await folhaAberta("2026-10-14"); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(1000))).toBeTruthy());
+  await tocar("2026-10-14"); await folhaAberta("2026-10-14"); await waitFor(() => expect(totalDe(1000)).toBeTruthy());
   expect(chamadas(GAS)).toHaveLength(1);
  });
 });
@@ -106,11 +108,11 @@ describe("cache do mês", () => {
 describe("setas", () => {
  it("trocar de dia não fecha a folha nem lê /gastos de novo; dia sem saída mostra R$ 0,00 sem contador", async () => {
   const anuncio = anunciar();
-  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy());
+  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(totalDe(25000)).toBeTruthy());
   expect(anuncio).not.toHaveBeenCalled(); // a abertura cai no título, não anuncia
   await apertar("Dia anterior"); await folhaAberta("2026-10-11");
   expect(screen.getByText("dom, 11 out")).toBeTruthy(); expect(tituloDa("2026-10-12")).toBeNull();
-  expect(folha().getByLabelText(faladoComSinal(0))).toBeTruthy(); expect(folha().queryByLabelText(/compra/)).toBeNull();
+  expect(totalDe(0)).toBeTruthy(); expect(folha().queryByLabelText(/compra/)).toBeNull();
   expect(chamadas(GAS)).toHaveLength(1);
   expect(anuncio).toHaveBeenCalledTimes(1); expect(anuncio).toHaveBeenCalledWith(`${dataFalada("2026-10-11")}, ${faladoComSinal(0)}`);
   await apertar("Dia seguinte"); await folhaAberta("2026-10-12"); expect(anuncio).toHaveBeenLastCalledWith(`${dataFalada("2026-10-12")}, ${faladoComSinal(25000)}`);
@@ -121,17 +123,17 @@ describe("setas", () => {
  });
  it("hoje: o seguinte (futuro sem gasto) está desabilitado e o total aparece sem ícone de agendado", async () => {
   await abrir(); await tocar("2026-10-14"); await folhaAberta("2026-10-14");
-  await waitFor(() => expect(folha().getByLabelText(faladoComSinal(1000))).toBeTruthy());
+  await waitFor(() => expect(totalDe(1000)).toBeTruthy());
   expect(desativada("Dia seguinte")).toBe(true); expect(desativada("Dia anterior")).toBe(false); expect(folha().queryByLabelText("Agendado")).toBeNull(); expect(folha().getByLabelText("3 compras")).toBeTruthy();
  });
  it("agendado (dia futuro com saída em /gastos): ícone de calendário ao lado do total; sem seguinte (21 não tem gasto agendado)", async () => {
   await abrir(); await tocar("2026-10-20"); await folhaAberta("2026-10-20");
-  await waitFor(() => expect(folha().getByLabelText(faladoComSinal(3000))).toBeTruthy()); expect(folha().getByLabelText("Agendado")).toBeTruthy(); expect(desativada("Dia seguinte")).toBe(true);
+  await waitFor(() => expect(totalDe(3000)).toBeTruthy()); expect(folha().getByLabelText("Agendado")).toBeTruthy(); expect(desativada("Dia seguinte")).toBe(true);
  });
  it("dia futuro SÓ com entrada (ausente de /gastos.dias) abre em R$ 0,00 com o botão do extrato", async () => {
   detalhes = { ...F[DET], dias: [dia("2026-10-20", "0.00", "50.00")] }; gastos = () => resposta(200, gastosBase); await abrir("/gastos", "2026-10-20");
   await tocar("2026-10-20"); await folhaAberta("2026-10-20");
-  await waitFor(() => expect(folha().getByLabelText(faladoComSinal(0))).toBeTruthy()); expect(folha().queryByLabelText("Agendado")).toBeNull(); expect(screen.getByRole("button", { name: "Ver extrato do dia" })).toBeTruthy();
+  await waitFor(() => expect(totalDe(0)).toBeTruthy()); expect(folha().queryByLabelText("Agendado")).toBeNull(); expect(screen.getByRole("button", { name: "Ver extrato do dia" })).toBeTruthy();
  });
  it("antes do corte do plano a seta anterior é desabilitada (nunca R$ 0,00 de um dia desconhecido)", async () => {
   gastos = () => resposta(200, gastosCom({ historico_desde: "2026-10-12" })); corte = "2026-10-12"; await abrir();
@@ -152,7 +154,7 @@ describe("estados", () => {
   expect(screen.getByText("seg, 12 out")).toBeTruthy(); expect(screen.getByRole("button", { name: "Fechar" })).toBeTruthy();
   expect(folha().getAllByLabelText("Carregando dados").length).toBeGreaterThan(0); expect(desativada("Dia anterior")).toBe(true); expect(desativada("Dia seguinte")).toBe(true);
   expect(screen.getByRole("button", { name: "Ver extrato do dia" })).toBeTruthy();
-  await act(async () => { s.soltar(); await drenar(); }); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy()); expect(desativada("Dia anterior")).toBe(false);
+  await act(async () => { s.soltar(); await drenar(); }); await waitFor(() => expect(totalDe(25000)).toBeTruthy()); expect(desativada("Dia anterior")).toBe(false);
  });
  it("erro: mensagem e 'Tentar novamente' que repete SÓ a leitura de /gastos", async () => {
   let falha = true; gastos = () => (falha ? resposta(500, {}) : resposta(200, gastosCom()));
@@ -160,7 +162,7 @@ describe("estados", () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeTruthy());
   expect(desativada("Dia anterior")).toBe(true); expect(folha().queryByLabelText(/reais/)).toBeNull(); // nunca R$ 0,00 no erro
   const [det, res] = [chamadas(DET).length, chamadas("/api/app/resumo-do-mes").length]; falha = false;
-  await apertar("Tentar novamente"); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy());
+  await apertar("Tentar novamente"); await waitFor(() => expect(totalDe(25000)).toBeTruthy());
   expect(chamadas(GAS)).toHaveLength(2); expect(chamadas(DET)).toHaveLength(det); expect(chamadas("/api/app/resumo-do-mes")).toHaveLength(res); // o do RecursoDados recarregaria os 15 recursos
  });
  it("disponivel:false: só a data e o botão do extrato, nunca R$ 0,00", async () => {
@@ -179,10 +181,10 @@ describe("estados", () => {
  });
  it.each([[1, "linha"], [2, "coluna"]])("fontScale %s: setas com 44pt; %s (as setas só dividem a linha com o total quando não é ampliado)", async (fontScale, _n) => {
   await act(async () => { Dimensions.set({ window: { ...janelaOriginal, width: 402, height: 874, fontScale } }); await drenar(); });
-  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(folha().getByLabelText(faladoComSinal(25000))).toBeTruthy());
+  await abrir(); await tocar("2026-10-12"); await folhaAberta("2026-10-12"); await waitFor(() => expect(totalDe(25000)).toBeTruthy());
   for (const nome of ["Dia anterior", "Dia seguinte"]) { const e = StyleSheet.flatten(screen.getByRole("button", { name: nome }).props.style); expect(e.minHeight).toBeGreaterThanOrEqual(44); }
   const linhaDe = (no: any) => { let p = no.parent; while (p && StyleSheet.flatten(p.props?.style)?.flexDirection !== "row") p = p.parent; return p; };
-  const linha = linhaDe(screen.getByRole("button", { name: "Dia anterior" })), total = folha().getByLabelText(faladoComSinal(25000));
+  const linha = linhaDe(screen.getByRole("button", { name: "Dia anterior" })), total = totalDe(25000);
   expect(within(linha).queryByLabelText(faladoComSinal(25000))).toBe(fontScale === 1 ? total : null);
  });
 });
@@ -315,11 +317,13 @@ describe("3 maiores (PR 3)", () => {
  it("descrição + valor em centavos (HALF_UP do bruto) na ordem do servidor; descrição só com espaços vira 'Lançamento'", async () => {
   await abrirDia(DIA, [D(DIA, "93.010", [], [["Mercado", "90.005"], ["Café", "1.005"], ["   ", "2.00"]])]);
   expect(folha().getAllByText(/^(Mercado|Café|Lançamento)$/).map((t) => t.props.children)).toEqual(["Mercado", "Café", "Lançamento"]);
-  for (const c of [9001, 101]) expect(folha().getByLabelText(faladoComSinal(c, "saida"))).toBeTruthy();
+  for (const c of [9001, 101]) { expect(folha().getByLabelText(faladoComSinal(c))).toBeTruthy(); expect(folha().queryByLabelText(faladoComSinal(c, "saida"))).toBeNull(); } // VoiceOver não fala "menos"
+  expect(folha().getByText(/^R\$\s*90,01$/)).toBeTruthy(); expect(folha().getByText(/^R\$\s*1,01$/)).toBeTruthy(); // valor certo no texto visível
+  expect(folha().queryByText(/−/)).toBeNull(); // sem o sinal de menos (U+2212) em nenhum valor da folha
  });
  it("oculto: 'Lançamento' no lugar das descrições e valores mascarados", async () => {
   await abrirDia(DIA, [D(DIA, "91.010", [], [["Mercado", "90.005"], ["Café", "1.005"]])], {}, true);
-  expect(folha().queryByText("Mercado")).toBeNull(); expect(folha().getAllByText("Lançamento")).toHaveLength(2); expect(folha().queryByLabelText(faladoComSinal(9001, "saida"))).toBeNull();
+  expect(folha().queryByText("Mercado")).toBeNull(); expect(folha().getAllByText("Lançamento")).toHaveLength(2); expect(folha().queryByLabelText(faladoComSinal(9001))).toBeNull();
   expect(folha().getAllByLabelText("Valor oculto").length).toBeGreaterThanOrEqual(3); // total + 2 maiores
  });
  it("dia sem saída (estado do 2b) não ganha pílula, barra nem maiores", async () => {
@@ -339,6 +343,6 @@ describe("troca de dia pela seta (PR 3)", () => {
   expect(segmentos().map((x) => x.flexGrow)).toEqual([0.006, 0.004]);
   expect(folha().getAllByText(/^(🛒|🍔|🚌)$/).map((t) => t.props.children)).toEqual(["🍔", "🚌"]);
   expect(folha().getAllByText(/^(Mercado|Café|Bala|Passe)$/).map((t) => t.props.children)).toEqual(["Bala", "Passe"]);
-  expect(folha().getByLabelText(faladoComSinal(1, "saida"))).toBeTruthy(); // 0.006 → 1 centavo (HALF_UP do bruto)
+  expect(folha().getAllByLabelText(faladoComSinal(1))).toHaveLength(2); // total (0.010) + a maior "Bala" (0.006): 1 centavo (HALF_UP do bruto)
  });
 });

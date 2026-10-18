@@ -40,7 +40,11 @@ beforeEach(async () => {
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });
 afterEach(() => jest.restoreAllMocks());
-const abrir = async () => { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.queryByText("Receitas do extrato") ?? screen.queryByText(/^Receitas na previsão/)).toBeTruthy()); await act(drenar); };
+// O card Saldo previsto nasce recolhido (a linha das respondidas fica dentro dele): `abrir` já o abre, quando o perfil tem o card.
+const abrir = async () => {
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.queryByText("Receitas do extrato") ?? screen.queryByText(/^A partir de hoje/)).toBeTruthy()); await act(drenar);
+ const card = screen.queryByTestId("bloco-hero"); if (card) await act(async () => { fireEvent.press(within(card).getByRole("button", { name: "Saldo previsto" })); await drenar(); });
+};
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
 const apertar = async (nome: string) => { await act(async () => { fireEvent.press(botao(nome)); await drenar(); }); };
 const chamadas = (path: string) => fetchFalso.mock.calls.filter(([u]) => caminho(u) === path);
@@ -343,4 +347,14 @@ it.each([[1, 2], [2, undefined]])("nome longo com fontScale %s: título com numb
   Dimensions.set({ window: { ...janela, fontScale } }); await abrir();
   expect(screen.getByText(nome).props.numberOfLines).toBe(linhas); expect(botao(`Sim, é receita fixa: ${nome}`)).toBeTruthy();
  } finally { BASE[0]!.nome = "Salário Acme"; Dimensions.set({ window: janela }); }
+});
+// Fluxo REAL (o `abrir()` acima já deixa o card aberto): com o Saldo previsto RECOLHIDO, depois do Sim só resta o toast; o Desfazer exige abrir o card e tocar a linha (decisão do dono: detalhe fica dentro do card).
+it("card recolhido: Sim some do topo e só fica o toast; para Desfazer abre o Saldo previsto e toca 'Receitas na previsão'", async () => {
+ marcas = { "extrato#sal": "pendente", "extrato#alu": "confirmada" };
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.queryByText("Receitas do extrato")).toBeTruthy()); await act(drenar);
+ expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); await apertar("Sim, é receita fixa: Salário Acme"); // recolhido: a linha das respondidas não está à vista
+ expect(marcas["extrato#sal"]).toBe("confirmada"); expect(screen.queryByText("Receitas do extrato")).toBeNull(); anunciou("Receita confirmada");
+ expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); expect(screen.queryByRole("button", { name: /^Desfazer resposta/ })).toBeNull(); // só o toast
+ for (const alvo of ["Saldo previsto", "Receitas na previsão (2)"]) await act(async () => { fireEvent.press(alvo === "Saldo previsto" ? hero().getByRole("button", { name: alvo }) : hero().getByText(alvo)); await drenar(); });
+ await apertar("Desfazer resposta: Salário Acme"); expect(marcas["extrato#sal"]).toBe("pendente"); expect(screen.getByText("Receitas do extrato")).toBeTruthy(); anunciou("Resposta desfeita");
 });

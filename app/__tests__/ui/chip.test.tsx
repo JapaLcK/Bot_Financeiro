@@ -47,8 +47,8 @@ describe("Chip", () => {
   it("tem raio chip e nenhum contorno (o fundo surfaceControl se destaca do Card)", () => {
     const { claro: sel } = renderNosDoisTemas(<Chip rotulo="x" selecionado onPress={jest.fn()} />);
     const { claro: naoSel } = renderNosDoisTemas(<Chip rotulo="x" selecionado={false} onPress={jest.fn()} />);
-    expect(estiloVisual(sel)).toMatchObject({ borderRadius: raio.chip });
-    expect(estiloVisual(naoSel)).toMatchObject({ borderRadius: raio.chip });
+    expect(estiloVisual(sel)).toMatchObject({ borderRadius: raio.pilula });
+    expect(estiloVisual(naoSel)).toMatchObject({ borderRadius: raio.pilula });
     expect(estiloVisual(sel).borderWidth).toBeUndefined();
     expect(estiloVisual(naoSel).borderWidth).toBeUndefined();
   });

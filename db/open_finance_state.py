@@ -21,6 +21,7 @@ import logging
 import os
 import threading
 import time
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -127,6 +128,28 @@ SQL_DEVICE_NA_JANELA = f"coalesce(({SQL_JANELA_DEVICE}), false) as device_na_jan
 SQL_EXECUTION_STATUS = (
     f"case when {SQL_RAW_AINDA_VALE} then upper(raw->>'executionStatus') end as execution_status"
 )
+
+# ── O logo do banco, derivado do `raw` ───────────────────────────────────────
+# O `raw` é o item da Pluggy e pode trazer `connector.imageUrl` (a documentação da
+# Pluggy mostra o campo; presença real não medida; some depois de item/deleted).
+# Só o escalar sai (o `raw` carrega `clientUserId`). `->>` devolve TEXTO mesmo de número/objeto/lista;
+# esses nunca começam com `https://`, então `logo_url_valida` os derruba (não há
+# `jsonb_typeof` no SQL: seria a mesma regra em dois lugares). Sem `%s`. O texto é
+# dado do provedor e vai para uma imagem no navegador/app (se for SVG, o app vai
+# precisar de SvgUri), então é conferido antes de sair.
+SQL_LOGO_URL = "raw->'connector'->>'imageUrl' as logo_url"
+# Recusa por CATEGORIA Unicode, não por lista de faixas: qualquer controle (Cc: C0, DEL, C1), formato
+# (Cf: ZW*, bidi, U+061C, soft hyphen, BOM, tags), separador (Z*: espaço, NBSP, U+2028), uso privado,
+# substituto e não atribuído. A lista de faixas deixou passar o U+061C (Codex, PR #1106): a classe inteira fecha.
+_LOGO_MAX = 500
+
+
+def logo_url_valida(valor: Any) -> str | None:
+    """`https://`, até 500 caracteres, sem caractere de categoria C* ou Z*; senão None."""
+    ok = (isinstance(valor, str) and valor.startswith("https://") and 8 < len(valor) <= _LOGO_MAX
+          and not any(unicodedata.category(c)[0] in "CZ" for c in valor))
+    return valor if ok else None
+
 
 # ── A coleta vencida (Onda 5, D1) ────────────────────────────────────────────
 # "Atualizando…" só é honesto enquanto a coleta da autorização atual pode estar

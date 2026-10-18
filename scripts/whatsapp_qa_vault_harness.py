@@ -105,7 +105,7 @@ meter.install()
 # erro de apelido aqui, em 1 segundo, em vez de no meio de uma cena com o banco já semeado.
 # ABORTA só no que este harness realmente alcança. O `msg()` monta TODA
 # mensagem com `attachments=[]` (linha única no arquivo), então nenhuma cena
-# chega no whisper nem no gpt-4o de visão. Barrar a rodada porque a chave não
+# chega no whisper nem no modelo de visão. Barrar a rodada porque a chave não
 # tem acesso a um modelo de mídia que ninguém vai chamar é impedir trabalho
 # válido — defeito que EU introduzi ao fazer o preflight abortar.
 from core.services.modelo_openai import CHAT_MODEL as _MODELO_DE_CHAT, VISION_MODEL  # noqa: E402  (só depois da carga da env acima)

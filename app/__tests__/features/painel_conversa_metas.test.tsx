@@ -7,7 +7,7 @@ import { MetasChat, serieDaMeta } from "@/features/painel/metasChat";
 import * as provider from "@/features/painel/provider";
 import { falado } from "@/ui/dinheiro";
 import { TemaProvider } from "@/ui/tema";
-import { ALFA_WASH_SERIE, claro, escuro, SERIE_META } from "@/ui/tokens";
+import { ALFA_WASH_SERIE, claro, escuro, raio, SERIE_META } from "@/ui/tokens";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { prepararCaso, resposta, segurar } from "./auth_apoio";
 import { apertar, enviar, ok, posts, reiniciar, srv } from "./conversa_apoio";
@@ -147,6 +147,16 @@ describe("varios", () => {
     expect(c.queryAllByRole("button")).toHaveLength(0); expect(c.queryByTestId("meta-mais")).toBeNull();
     fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull();
     expect(screen.getAllByText("Viagem pro Japão")).toHaveLength(1);
+  });
+});
+const arredondamento = (el: { props: { style?: unknown } }) => (StyleSheet.flatten(el.props.style as object) as { borderRadius: number }).borderRadius;
+describe("botões em pílula (o cartão de meta segue cartão)", () => {
+  it("'+N, mostrar mais' é pílula e a pílula da meta continua com raio.chip", async () => {
+    const c = await mostrarIds([1, 2, 3, 4, 5, 6, 7]);
+    expect(arredondamento(c.getByTestId("meta-mais"))).toBe(raio.pilula); expect(arredondamento(c.getByTestId("meta-1"))).toBe(raio.chip);
+  });
+  it("'Montar reserva' é pílula", async () => {
+    const c = await mostrar("vazio"); expect(arredondamento(c.getByRole("button", { name: /Montar reserva/ }))).toBe(raio.pilula);
   });
 });
 describe("muitas metas: +N", () => {

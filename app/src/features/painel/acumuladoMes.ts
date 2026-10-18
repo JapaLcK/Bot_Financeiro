@@ -95,3 +95,38 @@ export function textoPct(pct: number) {
   const r = Math.round(pct * 10) / 10;
   return `${r < 0 ? "-" : r > 0 ? "+" : ""}${Math.abs(r).toFixed(1).replace(".", ",")}%`;
 }
+
+export interface EntrouSaiuMes {
+  /** Acumulado por dia em centavos; `[i]` é o dia `i + 1`. A última posição é a ponta: bate com o Entrou/Saiu do resumo. */
+  entrou: number[];
+  saiu: number[];
+  diasNoMes: number;
+}
+
+/**
+ * As duas linhas do topo de Gastos. Acumula TODOS os dias do mês, inclusive os depois de hoje no mês corrente (lançamento agendado, fatura que fecha depois
+ * de hoje): o Entrou/Saiu do resumo os inclui, então a ponta final bate com a legenda e o agendado aparece como degrau. Os dias ANTERIORES ao mês
+ * (fatura de cartão do mês anterior) entram no dia 1. Mês passado vai até o último dia; o corrente, até o maior entre hoje e o último dia com lançamento
+ * (sem rabo reto até o dia 31, que sugeriria "não vai gastar mais").
+ * `null` (gráfico vazio, sem erro) quando os números não se explicam: detalhe de outro mês, mês futuro, `inicio_do_historico` dentro do mês (a linha afirmaria
+ * zero onde não há dado), `m.entrou`/`m.saiu` ou a ponta calculada diferentes do `resumo` (mais de 1 centavo; outra moeda no total legado, corrida entre as duas chamadas),
+ * menos de 2 dias ou tudo zero.
+ */
+export function entrouSaiuAcumulados(d: Dados["resumo"], m: Dados["detalhes"], hoje: string): EntrouSaiuMes | null {
+  if (!MES.test(d.mes) || !DIA.test(hoje) || m.mes !== d.mes || m.motivos.includes("inicio_do_historico") || d.mes > hoje.slice(0, 7)) return null;
+  const perto = (a: number, b: number) => Math.abs(a - b) <= 1, diasNoMes = new Date(Date.UTC(Number(d.mes.slice(0, 4)), Number(d.mes.slice(5, 7)), 0)).getUTCDate();
+  if (!perto(m.entrou, d.entrou) || !perto(m.saiu, d.saiu)) return null;
+  const entrou = new Array<number>(diasNoMes).fill(0), saiu = new Array<number>(diasNoMes).fill(0);
+  let ultimo = d.mes === hoje.slice(0, 7) ? Number(hoje.slice(8, 10)) : diasNoMes;
+  for (const x of m.dias) {
+    if (!DIA.test(x.dia)) return null;
+    const mesDoDia = x.dia.slice(0, 7), n = mesDoDia < d.mes ? 1 : Number(x.dia.slice(8, 10));
+    if (mesDoDia > d.mes || n < 1 || n > diasNoMes) continue;
+    entrou[n - 1]! += x.entrou; saiu[n - 1]! += x.saiu;
+    if ((x.entrou !== 0 || x.saiu !== 0) && n > ultimo) ultimo = n;
+  }
+  for (let i = 1; i < diasNoMes; i++) { entrou[i]! += entrou[i - 1]!; saiu[i]! += saiu[i - 1]!; }
+  if (ultimo < 2 || !perto(entrou[diasNoMes - 1]!, d.entrou) || !perto(saiu[diasNoMes - 1]!, d.saiu)) return null;
+  const e = entrou.slice(0, ultimo), s = saiu.slice(0, ultimo);
+  return e.some((v) => v !== 0) || s.some((v) => v !== 0) ? { entrou: e, saiu: s, diasNoMes } : null;
+}

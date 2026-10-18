@@ -32,7 +32,7 @@ Este plano leva a **mesma ideia** ao app, na tradução que as decisões do dono
 | A rota `GET /api/app/gastos?mes=` | `api/v2/app.py:36` (`criar_app` monta `gastos`); `api/nativo/app.py:30-34` troca a dependência por `usuario_do_app` | **Já está no ar** e já traz `dias[].quantidade` e `dias[].categorias[{chave, valor}]` (#1024). Sem chave beta do v2 (a do `/painel`); exige o onboarding do Open Finance, como as outras rotas do app. Matriz de senha: `tests/test_rotas_senha_obrigatoria.py:148`. |
 | Quem lê hoje | `rota()` em `app/src/features/painel/provider.tsx:36-39` | **Nenhum recurso `gastos`.** `grep -rn "gastos" app/src` só acha nome de aba/tela (`TelaGastos`, `telas.tsx`). O app **não consome** `/api/app/gastos`. |
 | O dia no calendário nativo | `Calendario`, `gastos.tsx:26-36`; `detalhes` = `/api/app/mes-detalhes` | `dias: [{dia, entrou, saiu}]` (`painel.ts:18`; `api/nativo/mes_detalhes.py` `Dia`). **Sem quantidade, sem categoria, sem os maiores.** Uma linha por dia, mais recente primeiro, 7 + "Mostrar todos". Toque → `/extrato?dia=` (`gastos.tsx:35`). No chat (bloco), a linha expande `LancamentosDe` (`?dia=` do endpoint, `gastos.tsx:33-34`) e nunca navega. |
-| Folha | `Folha`, `base.tsx:98` | `Modal` com `presentationStyle="pageSheet"` (nativo do iOS). **Decisão do dono (#889): a Folha continua Modal pageSheet, sem alça.** O `Sheet` do expo-router (`ui/componentes/Sheet.tsx`) só serve à rota `_ds`. |
+| Folha | `Folha`, `base.tsx:98` | `Modal` com `presentationStyle="pageSheet"` (nativo do iOS) nas folhas em geral (decisão do dono, #889). **A `FolhaDia` é a exceção (`ancorada`), decisão do dono de 2026-10-18, depois do build 37:** `Modal` transparente, painel colado embaixo com a altura do conteúdo e teto de 80% da janela, alça visual (arrastar para baixo mais de 60pt fecha) e fundo escurecido que fecha ao toque; perde o gesto nativo de arrastar junto com o dedo. O `Sheet` do expo-router (`ui/componentes/Sheet.tsx`) só serve à rota `_ds`. |
 | Dinheiro | `Valor` (`base.tsx:27`), `Money`, `decimalParaCentavos` (`decimal.ts`), `somarCentavos` | Tudo em **centavos inteiros**; `oculto` (modo privacidade) já é tratado em `Valor`, `LinhaCategoria` e `Anel`. |
 | Barra de divisão | `BarraComposicao` (`ui/componentes/BarraComposicao.tsx`) | Barra empilhada de 10pt, largura proporcional ao `valor` (> 0), decorativa (some do VoiceOver). Serve como está. |
 | Cores de categoria | `CORES_CATEGORIA` (`tokens.ts:141`) | Decorativas, seguem o PDF à risca (não se ajusta por contraste: o Manager já reprovou isso). O app usa sempre a **posição** nesse vetor (`gastos.tsx:23`, `base.tsx:115`, `cardGastos.tsx:61`, `cardPeriodo.tsx`); o web usa a `cor` que o servidor manda (`GastosDiaTopo.tsx:31,72`). **[rev][decisão pendente do dono]** A folha segue o app: `CORES_CATEGORIA[posição em /gastos.categorias]`, para casar com o "Para onde vai" da mesma aba. *Limite declarado no PR 3:* o "Para onde vai" pinta pela posição em `/mes-detalhes` (que separa `NULL` de `'sem categoria'` e desempata por `categoria or ""`) e a folha, pela de `/gastos` (que funde os dois e desempata pela chave); as cores só coincidem quando as duas ordens coincidem (não em empate de valor com "sem categoria", nem com a categoria literal "Sem categoria" junto de `NULL`). É só cor; para casar sempre, pintar a folha pela posição em `detalhes` ou ler a `cor` do servidor. Se o dono preferir a cor do web, o schema lê `cor` (obrigatória no servidor, `api/v2/gastos.py:30`). |
@@ -121,7 +121,7 @@ do card que muda; a aba já é longa; o card ocupa a tela inteira o tempo todo, 
 
 Texto visível na folha: **a data (título), o total, "N%", N, o "+N" dos emojis (se houver mais de 4), as 3 descrições com o valor de cada uma e 1 botão**. Nenhuma frase.
 
-**[rev]** Desvios declarados do plano-pai (`plano-etapa5-gastos.md` §4.4): o dia sem saída mostra `R$ 0,00` (o pai mostra "Nenhum gasto neste dia.", frase que o "mínimo de texto" do app corta); e o pai registra que o dono rejeitou o modal **no web**, enquanto no app a `Folha` pageSheet é decisão do dono (#889, §9).
+**[rev]** Desvios declarados do plano-pai (`plano-etapa5-gastos.md` §4.4): o dia sem saída mostra `R$ 0,00` (o pai mostra "Nenhum gasto neste dia.", frase que o "mínimo de texto" do app corta); e o pai registra que o dono rejeitou o modal **no web**, enquanto no app a `Folha` é decisão do dono (#889, §9), e desde 2026-10-18 (depois do build 37) a do dia é painel ancorado: altura do conteúdo, teto de 80%, alça visual com arrasto de mais de 60pt.
 
 ### 3.3 Estados
 
@@ -145,7 +145,7 @@ Texto visível na folha: **a data (título), o total, "N%", N, o "+N" dos emojis
 
 ### 3.4 Fora (de propósito)
 
-- Deslizar entre dias com o dedo (gesto horizontal dentro do pageSheet): v2, depois de ver o uso. As setas cobrem.
+- Deslizar entre dias com o dedo (gesto horizontal dentro da folha): v2, depois de ver o uso. As setas cobrem.
 - O card do **chat** (`bloco`): `/gastos` não vem embutido no bloco, então o `Calendario` do chat segue expandindo `LancamentosDe`.
   Levar o "Seu dia" ao chat é o item D da §2.3 (servidor) e pertence ao plano do chat (E2/E3), não a este.
 - Modo categoria, filtro por categoria, lista completa de compras na folha, editar/apagar.
