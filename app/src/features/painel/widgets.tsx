@@ -7,6 +7,7 @@ import { Faturas, Parcelas, Renda, Assinaturas, Notou } from "./complementos";
 import { CardPeriodo } from "./cardPeriodo";
 import { CardGastos } from "./cardGastos";
 import { CardFimDoMes, CardMaiores } from "./cardMaiores";
+import { CardLancamentos } from "./cardLancamentos";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
 import { Vazio } from "./base";
@@ -17,6 +18,7 @@ export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel()
  if (id === "periodo") return <CardPeriodo />;
  if (id === "maiores_gastos") return <CardMaiores />;
  if (id === "fim_do_mes") return <CardFimDoMes />;
+ if (id === "ultimos_lancamentos" || id === "sem_categoria") return <CardLancamentos id={id} />;
  if (id === "categorias" && bloco) return <CardGastos />; // card do chat; o painel segue com `Categorias`
  if (id === "simulador" && !bloco) { const plano = p.dados.plano; if (!plano || plano.fase === "carregando") return <Vazio texto="Conferindo disponibilidade do simulador…" />; if (plano.fase !== "pronto" || plano.dado.plan_tier !== "pro") return <Vazio texto="Simulador indisponível no seu plano." />; }
  const Componente = VIEWS[id]; return <Componente />; }

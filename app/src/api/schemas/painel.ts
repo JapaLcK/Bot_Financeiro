@@ -31,14 +31,16 @@ export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
 const mesAAAAMM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/); // `tituloPeriodo` lança em "" (nomeMes): mês malformado invalida o bloco
-/** Os cards que a PRÓPRIA tool do servidor emite (`cards.DA_TOOL` em `core/services/ai_chat/cards.py`, sem `show_card`): só do chat, fora do `TITULOS`. O schema valida o contrato do servidor (inclusive chaves opcionais que o card não desenha); fixtures: `tests/fixtures/ai_chat_bloco_{maiores_gastos,fim_do_mes}.json`. Esta é a fonte da lista `cards` que o app manda no POST (`CARDS_DA_TOOL`): `tests/test_ai_chat_cards_ids_app.py` a compara com o Python. */
+/** Os cards que a PRÓPRIA tool do servidor emite (`cards.DA_TOOL` em `core/services/ai_chat/cards.py`, sem `show_card`): só do chat, fora do `TITULOS`. O schema valida o contrato do servidor (inclusive chaves opcionais que o card não desenha); fixtures: `tests/fixtures/ai_chat_bloco_{maiores_gastos,fim_do_mes,ultimos_lancamentos,sem_categoria}.json`. Esta é a fonte da lista `cards` que o app manda no POST (`CARDS_DA_TOOL`): `tests/test_ai_chat_cards_ids_app.py` a compara com o Python. */
 const maioresGastosSchema = z.object({
   start_date: z.string(), end_date: z.string(),
   expenses: z.array(z.object({ valor: legado, categoria: texto, descricao: texto, data: z.string(), instituicao: texto, parcelamento: texto })),
   motivos: motivos.optional(), historico_desde: texto.optional(), limitado_a_12_meses: z.boolean().optional(), pedido: z.object({ start_date: z.string(), end_date: z.string() }).optional(), aviso_limite: z.string().optional(), fim_ajustado: z.boolean().optional(), aviso_fim: z.string().optional(),
 });
 const fimDoMesSchema = z.object({ mes: mesAAAAMM, dias_corridos: z.number().int(), dias_no_mes: z.number().int(), receita: legado, despesa: legado, despesa_projetada: legado, saldo_projetado: legado, vai_fechar_negativo: z.boolean(), motivos });
-const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema };
+/** `ultimos_lancamentos` e `sem_categoria`: a mesma linha do Extrato (`lancamentoSchema`), até 10 itens (o servidor corta; o app não recusa lista maior). */
+const listaLancamentosSchema = z.object({ itens: z.array(lancamentoSchema), motivos });
+const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema, ultimos_lancamentos: listaLancamentosSchema, sem_categoria: listaLancamentosSchema };
 export const CARDS_DA_TOOL = Object.keys(schemasDaTool) as (keyof typeof schemasDaTool)[];
 /** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS` (ids e títulos de widget). O catálogo de "Adicionar blocos" e `lerLayout` é `BLOCOS_HOME` (`catalogo.ts`), que também deixa o `metas` de fora. */
 export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas" | (typeof CARDS_DA_TOOL)[number];
