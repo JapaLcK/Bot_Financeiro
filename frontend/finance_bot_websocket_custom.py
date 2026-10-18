@@ -27,6 +27,7 @@ import pathlib
 import secrets
 import sys
 import time as _startup_time
+import unicodedata
 import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, timezone
@@ -104,6 +105,8 @@ from db import (
     ensure_account_deletion_columns,
     process_due_account_deletions,
     schedule_account_deletion,
+    excluir_conta_marcada,
+    ReautenticacaoRecusada,
     investment_deposit_from_account,
     investment_withdraw_to_account,
     update_launch_fields,
@@ -118,6 +121,7 @@ from db import (
     InvestmentMovementNotLast,
     PocketHasMovement,
 )
+from db import reauth_codes
 from db.accounts import MENSAGEM_CAIXINHA_COM_MOVIMENTO
 from db.investment_undo import MENSAGEM_NAO_E_O_ULTIMO
 from core.observability import _log_falha, get_logger
@@ -139,6 +143,7 @@ from frontend.routes.agents import router as agents_router
 from frontend.routes.ai_chat import AIChatBody, criar_router as criar_ai_chat_router, texto_valido
 from frontend.routes.analytics import router as analytics_router
 from frontend.routes.cards import router as cards_router
+from frontend.routes.conta_reauth import router as conta_reauth_router
 from frontend.routes.categories import router as categories_router
 from frontend.routes.open_finance import router as open_finance_router
 from frontend.routes.open_finance_cash import router as open_finance_cash_router
@@ -3200,11 +3205,16 @@ class ResetPasswordBody(_CorpoSemVeneno):
 
 
 class DeleteAccountBody(BaseModel):
-    password: str
+    # Tudo opcional: o modo da conta (senha / código por e-mail / MFA) decide o que
+    # falta e responde com o erro certo, em vez de um 422 genérico.
+    password: str | None = None
+    code: str | None = None
+    totp: str | None = None
+    confirmacao: str | None = None
 
 
 class DataExportBody(BaseModel):
-    password: str
+    password: str | None = None
 
 
 class DashboardLinkBody(BaseModel):
@@ -4366,8 +4376,11 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     client_ip = ip_cliente(request)
     user_agent = (request.headers.get("user-agent") or "").strip() or None
 
-    # 1) Re-auth por senha
-    password_ok = await _reauth_password_ok(user_id, body.password)
+    # 1) Re-auth por senha. Conta só-Google/Apple (sem senha) não tem o que
+    # digitar: o link vai ao e-mail da conta e isso basta. Sem credencial nenhuma
+    # (e-mail não provado) o `_reauth_password_ok` devolve o 409 de sempre.
+    modo = await asyncio.to_thread(reauth_codes.modo, user_id)
+    password_ok = modo == "codigo" or await _reauth_password_ok(user_id, body.password or "")
     if not password_ok:
         await log_system_event(
             "warning",
@@ -4433,16 +4446,21 @@ async def auth_account_export_request(request: Request, body: DataExportBody):
     )
 
     if not sent:
+        # Link que ninguém recebeu não pode ficar pendente: travaria a nova tentativa
+        # (429 do cooldown) e a exclusão de conta (409 export_pendente) por até 15 min.
+        await asyncio.to_thread(consume_data_export_token, token)
         raise HTTPException(
             status_code=500,
             detail="Não foi possível enviar o e-mail com o link de exportação. Tente novamente em alguns minutos.",
         )
 
+    from core.services.retomada import mascarar_email
     return {
         "status": "email_sent",
         "message": "Enviamos um link de download para o seu e-mail. O link expira em 15 minutos e só pode ser usado uma vez.",
         "expires_in_minutes": 15,
         "expires_at": expires_at.isoformat(),
+        "email_mascarado": mascarar_email(email),
     }
 
 
@@ -4521,19 +4539,60 @@ async def auth_account_export_download(request: Request, token: str):
     )
 
 
+def _confirmacao_ok(texto: str | None) -> bool:
+    """A frase `EXCLUIR`, sem diferenciar caixa, espaço nas pontas nem acento."""
+    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return sem_acento.strip().casefold() == "excluir"
+
+
 @app.delete("/auth/account")
 @limiter.limit("5/minute")
 async def auth_delete_account(request: Request, response: Response, body: DeleteAccountBody):
-    """Agenda a exclusão definitiva da conta após o período de carência."""
+    """Exclui a conta NA HORA, depois de reautenticar (senha e/ou código do e-mail, + MFA).
+
+    Ordem: sessão, frase `EXCLUIR` (sem banco, não gasta nada), teto por conta,
+    guardas (export pendente, assinatura Stripe), credenciais (`schedule_account_deletion`,
+    que também marca `processing` e revoga as sessões) e, por fim, a exclusão. Só o
+    401 de SESSÃO leva WWW-Authenticate (é o que encerra a sessão no cliente); os de
+    credencial são só recusa.
+    """
     user_id = _resolve_dashboard_user_id(request)
-    auth_user = await asyncio.to_thread(get_auth_user, user_id)
-    email = (auth_user or {}).get("email")
+    if not _confirmacao_ok(body.confirmacao):
+        raise HTTPException(status_code=400, detail={
+            "code": "confirmacao_invalida", "message": "Digite EXCLUIR para confirmar."})
+    await _check_persistent_rate_limit("account-delete", f"user:{user_id}", 10, 3600)
+    # O link de export morre junto com a conta (FK cascade): quem pediu a cópia
+    # baixa antes de excluir.
+    if await asyncio.to_thread(has_recent_export_request, user_id, 60):
+        raise HTTPException(status_code=409, detail={
+            "code": "export_pendente",
+            "message": "Baixe sua cópia dos dados pelo link do e-mail antes de excluir."})
+    customer = ((await asyncio.to_thread(get_auth_user, user_id)) or {}).get("stripe_customer_id")
+    if customer:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        try:
+            sub = await asyncio.to_thread(_find_active_subscription, stripe, customer)
+        except Exception as exc:  # noqa: BLE001 — "não sei" não é "não tem": nada é apagado
+            raise HTTPException(status_code=503, detail={
+                "code": "stripe_indisponivel",
+                "message": "Não deu para conferir sua assinatura agora. Tente de novo em alguns minutos."}) from exc
+        if sub and not _sg(sub, "cancel_at_period_end"):
+            raise HTTPException(status_code=409, detail={
+                "code": "assinatura_ativa",
+                "message": "Cancele a renovação da assinatura antes de excluir."})
     try:
-        result = await asyncio.to_thread(schedule_account_deletion, user_id, body.password, 7)
+        marca = await asyncio.to_thread(
+            schedule_account_deletion, user_id, body.password, code=body.code, totp=body.totp)
     except PasswordNotSetError as exc:
         # ANTES do except PermissionError (é subclasse dele): invertido, o
         # genérico engole e o 409 nunca acontece.
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ReautenticacaoRecusada as exc:
+        # Idem. Sem headers de propósito: 401 com WWW-Authenticate faria o cliente
+        # tentar renovar a sessão em vez de mostrar o erro.
+        raise HTTPException(status_code=exc.status, detail={
+            "code": exc.codigo, "message": str(exc)}) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     except LookupError as exc:
@@ -4541,21 +4600,31 @@ async def auth_delete_account(request: Request, response: Response, body: Delete
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=detalhe_seguro(exc)) from exc
 
-    if email:
-        from core.services.email_service import send_account_deletion_scheduled_email
-
-        scheduled = result.get("deletion_scheduled_for")
-        scheduled_txt = scheduled.isoformat() if hasattr(scheduled, "isoformat") else str(scheduled)
-        await asyncio.to_thread(send_account_deletion_scheduled_email, email.strip().lower(), scheduled_txt)
+    apagada = False
+    if not marca.get("em_andamento"):
+        # Falhou a limpeza LOCAL (delete_user_data: lock, deadlock...): a conta volta a `scheduled` vencida e o job
+        # termina e manda o e-mail; as sessões já estão revogadas. A Pluggy é best-effort
+        # (db/privacy.py): falha dela NÃO leva a `deleting`.
+        feito = await asyncio.to_thread(excluir_conta_marcada, user_id)
+        apagada = bool(feito.get("deleted"))
+        if apagada and feito.get("email"):
+            from core.services.email_service import send_account_deletion_completed_email
+            await asyncio.to_thread(send_account_deletion_completed_email, feito["email"])
 
     _clear_session_cookies(response)
     _expire_cookie(response, RETOMADA_COOKIE)   # saída deliberada; no refresh falho o comprador do link fica
     _no_store(response)
-    return json.loads(jdump({
+    return {
         "ok": True,
-        **result,
-        "message": "Conta agendada para exclusão. Seus dados serão removidos definitivamente após o período de carência.",
-    }))
+        "user_id": user_id,
+        "status": "deleted" if apagada else "deleting",
+        "deleted": apagada,
+        # Campos legados do tempo da carência, mantidos para o site antigo.
+        "deletion_scheduled_for": datetime.now(timezone.utc).isoformat(),
+        "grace_days": 0,
+        "message": ("Pronto, sua conta foi excluída." if apagada
+                    else "Estamos concluindo. Você recebe um e-mail ao terminar."),
+    }
 
 
 @app.post("/auth/dashboard-token")
@@ -9613,6 +9682,8 @@ async def delete_investment_route(request: Request, user_id: int, name: str):
 
 # ─── Settings (segurança/sessões/notificações) → frontend/routes/settings.py ─
 app.include_router(settings_router)
+# Código por e-mail que autoriza excluir a conta → frontend/routes/conta_reauth.py
+app.include_router(conta_reauth_router)
 
 
 # ─── Open Finance (Pluggy + mock) → frontend/routes/open_finance.py (F1 E4) ──

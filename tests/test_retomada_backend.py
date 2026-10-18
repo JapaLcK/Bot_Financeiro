@@ -616,7 +616,9 @@ def test_refresh_falho_nao_derruba_o_comprador_do_link(monkeypatch):
 def test_exclusao_de_conta_expira_o_cookie_de_retomada():
     a, _ = _conta("del")
     c = _cliente(a, auth=a, painel=a)
-    r = c.request("DELETE", "/auth/account", headers=_CSRF_HEADERS, json={"password": "senha-forte-123"})
+    from db.reauth_codes import EXCLUIR, emitir
+    r = c.request("DELETE", "/auth/account", headers=_CSRF_HEADERS,
+                  json={"password": "senha-forte-123", "code": emitir(a, EXCLUIR), "confirmacao": "EXCLUIR"})
     assert r.status_code == 200, r.text
     assert any(x.lower().startswith(f'{rota.COOKIE}="";') and "max-age=0" in x.lower()
                for x in _set_cookie(r)), _set_cookie(r)
