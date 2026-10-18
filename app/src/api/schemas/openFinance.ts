@@ -40,7 +40,7 @@ export type Conexao = z.infer<typeof conexaoSchema>;
 export const refreshSchema = conexoesSchema.extend({
   sync: z.object({ items: z.array(z.object({
     item_id: z.string(), institution: z.string().nullable(), state: z.string(), label: z.string(),
-    detail: z.string().nullable().optional(), still_updating: z.boolean(),
+    detail: z.string().nullable().optional(), reason: z.string().nullable().optional(), still_updating: z.boolean(),
   })) }),
 });
 export type Refresh = z.infer<typeof refreshSchema>;

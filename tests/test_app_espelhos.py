@@ -250,5 +250,10 @@ def test_cadencia_e_prazo_do_atualizar_do_banco_sao_os_do_web():
         _achar(OF_STATUS_POLL_JS, r"const DEPOIS = (\d+);"))
     assert nomes(_achar(ATUALIZAR_BANCO_TS, r"const SEGUE = new Set\(\[(.*?)\]\)")) == nomes(
         _achar(OF_STATUS_POLL_JS, r"const SEGUE_ESPERANDO = \[(.*?)\];"))
+    # `updating` só é coleta com estes motivos; `""` conta, por isso a regex aceita aspas vazias.
+    com_vazio = lambda t: re.findall(r'"([^"]*)"', t)
+    assert com_vazio(_achar(ATUALIZAR_BANCO_TS, r"const MOTIVOS_COLETANDO = \[(.*?)\];")) == com_vazio(
+        _achar(SETTINGS_HTML, r"const OF_REASONS_OK = \[(.*?)\];")) + com_vazio(
+        _achar(SETTINGS_HTML, r"const OF_REASONS_COLETANDO = \[(.*?)\];"))
     assert numeros(_achar(SERVICO_OF_TS, r"const PRAZO_REFRESH_MS = ([\d_]+);")) == numeros(
         _achar(SETTINGS_HTML, r"const OF_REFRESH_PRAZO_MS = (\d+);"))

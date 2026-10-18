@@ -77,6 +77,15 @@ describe("atualizar (a): o POST", () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "rate_limited")]) });
     await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
   });
+  it("updating SEM coleta (motivo de falha, ex. read_failed na 1ª conexão): é problema, não sucesso; sem detalhe, a frase de falha", async () => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([{ ...item("it_1", "updating"), reason: "read_failed" }]) });
+    await atualizar(d);
+    expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Não conseguimos atualizar agora. Tente de novo." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
+  });
+  it.each([[null], [""], ["ok"], ["no_accounts"], ["OK"]])("updating com motivo de coleta (%p) segue em dia (controle positivo)", async (reason) => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([{ ...item("it_1", "updating"), reason }]) });
+    await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
+  });
   it("item com problema: resultado com a instrução do servidor, aviso(), recarga, e NADA de acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "partial", false, "Cartão desatualizado desde 12/08")]) });
     await atualizar(d);

@@ -22,6 +22,8 @@ const DEPOIS_MS = 60_000;
 const SEGUE = new Set(["updated", "updating", "partial", "no_accounts"]);
 /** Estados do veredito que NÃO são problema (`rate_limited` é só do POST: "acabou de atualizar"). */
 const OK = new Set(["updated", "rate_limited", "updating"]);
+/** `updating` só é coleta (e não falha) com estes motivos: o backend devolve `updating` também para a 1ª conexão cujo sync FALHOU. Mesma lista do `OF_REASONS_COLETANDO` do settings.html (o teste espelho compara). */
+const MOTIVOS_COLETANDO = ["", "ok", "no_accounts"];
 
 export type AcaoBanco =
   | { tipo: "atualizar" } // (a) pedido sem o usuário: POST /refresh
@@ -76,10 +78,12 @@ export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoB
   return { tipo: "ver", texto: frases.length ? frases.join(" ") : null };
 }
 
-type Item = { banco: string | null; estado: string; detalhe: string };
+/** `motivo` só vem do POST; a lista do snapshot já traz o `ui.state` resolvido pelo servidor (sem motivo = coleta). */
+type Item = { banco: string | null; estado: string; detalhe: string; motivo?: string | null };
+const ruim = (i: Item) => !OK.has(i.estado) || (i.estado === "updating" && !MOTIVOS_COLETANDO.includes(String(i.motivo ?? "").toLowerCase()));
 /** `null` = tudo em dia; senão, uma frase por banco com a instrução do servidor. */
 function julgar(itens: Item[]): string | null {
-  const ruins = itens.filter((i) => !OK.has(i.estado));
+  const ruins = itens.filter(ruim);
   return ruins.length ? ruins.map((i) => frase(i.banco, i.detalhe)).join(" ") : null;
 }
 
@@ -154,7 +158,7 @@ export async function atualizar(d: Deps): Promise<void> {
     if (!d.atual()) return parar(d);
     const coletando = r.sync.items.filter((i) => i.still_updating);
     if (coletando.length) return acompanhar(d, new Map(coletando.map((i) => [i.item_id, r.connections.find((c) => c.provider_item_id === i.item_id)?.last_sync_at ?? null])));
-    concluir(d, julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, detalhe: i.detail ?? i.label }))));
+    concluir(d, julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason, detalhe: i.detail ?? (i.state === "updating" ? FALHA : i.label) }))));
   } catch (e) {
     if (!d.atual()) return parar(d);
     falhar(d, e, false);
