@@ -50,7 +50,7 @@ def _compra(uid, nome, fechamento, valor=40):
 
 @pytest.fixture
 def mundo():
-    """Uma conta com: receita, despesa, saque interno, guardado, uma compra de cartão que entra na fatura DESTE
+    """Uma conta com: receita, despesa, despesa em "outros", saque interno, guardado, uma compra de cartão que entra na fatura DESTE
     mês e outra, feita hoje DEPOIS do fechamento, que entra na do mês seguinte."""
     hoje = today_tz()
     if hoje.day == 1:
@@ -65,6 +65,7 @@ def mundo():
     }
     db.create_pocket(uid, "Viagem")
     ids["guardado"] = db.pocket_deposit_from_account(uid, "Viagem", 120, "dep")[0]
+    ids["sem_categoria"] = db.add_launch_and_update_balance(uid, "despesa", 15, "Sem cat", None, categoria="outros")[0]
     ids = {k: f"l{v}" for k, v in ids.items()}
     ids["cartao_no_mes"] = _compra(uid, "Banco A", 31)
     ids["cartao_tarde"] = _compra(uid, "Banco B", hoje.day - 1)
@@ -115,7 +116,7 @@ def test_limit_de_1_a_50(mundo, monkeypatch):
     for pedido in ({}, {"limit": 0}, {"limit": 2}, {"limit": -5}, {"limit": 999}):
         ultimos_lancamentos(uid, pedido)
     assert visto == [10, 10, 2, 1, 50]  # 0 = não informado: o padrão
-    assert len(ultimos_lancamentos(uid, {"limit": 2})["itens"]) == 2 and len(ultimos_lancamentos(uid, {})["itens"]) == 6
+    assert len(ultimos_lancamentos(uid, {"limit": 2})["itens"]) == 2 and len(ultimos_lancamentos(uid, {})["itens"]) == 7
 
 
 def test_isolamento_entre_usuarios(mundo):

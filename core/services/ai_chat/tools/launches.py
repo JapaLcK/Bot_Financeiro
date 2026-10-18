@@ -50,7 +50,7 @@ from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
 from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
 from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
-from .extrato_ia import apagar, resumo_apagar, validar_apagar
+from .extrato_ia import apagar, armar_apagar, resumo_apagar, validar_apagar
 from .listas_ia import ultimos_lancamentos
 
 
@@ -1245,6 +1245,7 @@ TOOLS: list[Tool] = [
         execute=apagar,
         validate=validar_apagar,
         ao_confirmar=_ao_confirmar_alvo,
+        ao_armar=armar_apagar,
     ),
     Tool(
         schema={
