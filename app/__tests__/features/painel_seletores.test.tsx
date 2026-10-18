@@ -71,10 +71,12 @@ it("mês não consome nova cota de insights nem substitui o saldo independente",
   if (new URL(url).pathname === "/insights/1/current" && ++insights > 1) return resposta(429, { detail: "limite" });
   return impl(url, req);
  });
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByLabelText("9400 reais e 25 centavos")).toBeTruthy()); await act(drenar);
- const saldo = screen.getByLabelText("9400 reais e 25 centavos");
+ // O saldo das contas (a âncora da previsão tem o mesmo valor no fixture: o card de contas desambigua).
+ const contas = () => within(screen.getByTestId("bloco-contas"));
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(contas().getByLabelText("9400 reais e 25 centavos")).toBeTruthy()); await act(drenar);
+ const saldo = contas().getByLabelText("9400 reais e 25 centavos");
  await escolherMes(mesesAnteriores(mesAtual())[1]!);
- expect(screen.getByLabelText("9400 reais e 25 centavos")).toBe(saldo); expect(insights).toBe(1);
+ expect(contas().getByLabelText("9400 reais e 25 centavos")).toBe(saldo); expect(insights).toBe(1);
  expect(screen.queryByText("Seu limite foi alcançado. Tente novamente mais tarde.")).toBeNull();
 });
 it("leitura independente em voo continua válida após seleção de mês", async () => {

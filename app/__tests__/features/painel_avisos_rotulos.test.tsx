@@ -79,15 +79,16 @@ it("motivo de banco da previsão (objeto com código) também gera o aviso", asy
 const fatura = (ciclo: string, data: string | null, futura = false) => ({ chave: "fat", ciclo, data, fonte: "fatura", tipo: "fatura_cartao", nome: "ultraviolet-black", valor: futura ? "1240.50" : null, direcao: "saida", qualidade_valor: futura ? "conhecido" : "desconhecido", qualidade_data: "conhecida", realizacao: futura ? "prevista" : "a_conferir", incluida_no_calculo: true, motivos: [] });
 // Controles: tirar o `o.valor !== null` de qualquer dos dois filtros em futuro.tsx deixa este teste vermelho
 // (as datas das vencidas sem valor, ou um segundo "sem data", voltam); esconder tudo também (a vencida com valor e as futuras somem).
-it("Próximos N dias: vencida com valor primeiro, depois as futuras e o sem data com valor; o resto sem valor some", async () => {
+it("Próximos N dias: o grupo da API vira UMA linha; aberto, vencida com valor primeiro e depois as futuras; o resto sem valor some", async () => {
  const conta = (chave: string, nome: string, valor: string | null) => ({ ...fatura(chave, null), chave, nome, tipo: "conta", valor, qualidade_valor: valor ? "conhecido" : "desconhecido" });
  extra["/api/app/previsao"] = { ...fixture["/api/app/previsao"], hoje: "2026-10-07", compromissos: [{ chave: "fat", fonte: "fatura", nome: "ultraviolet-black", primeira_data: "2025-11-08", ultima_data: "2026-10-15", ocorrencias: [fatura("2026-10", "2026-10-15", true), fatura("2025-11", "2025-11-08"), fatura("2026-07", "2026-07-08"), fatura("2026-08", "2026-08-08"), { ...fatura("2026-09", "2026-09-08"), valor: "980.00", qualidade_valor: "conhecido" }, fatura("2026-10b", "2026-10-07", true)] }, { chave: "c", fonte: "conta", nome: "c", primeira_data: null, ultima_data: null, ocorrencias: [conta("acad", "Academia", "99.90"), conta("seguro", "Seguro", null)] }] };
- renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText(/^venceu 08\/09/)).toBeTruthy());
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("3 vezes · 08/09 a 15/10 · valores diferentes · venceu")).toBeTruthy());
+ expect(screen.getAllByText("Ultraviolet Black")).toHaveLength(1); expect(screen.queryByText(/^venceu 08\/09/)).toBeNull();
+ expect(screen.getAllByText(/^sem data/)).toHaveLength(1); expect(screen.getByText("Academia")).toBeTruthy(); expect(screen.queryByText("Seguro")).toBeNull();
+ fireEvent.press(screen.getByTestId("grupo-fat"));
  expect(screen.queryByText(/a conferir \(/)).toBeNull();
  expect(screen.queryByText(/08\/11/)).toBeNull(); expect(screen.queryByText(/08\/07/)).toBeNull(); expect(screen.queryByText(/08\/08/)).toBeNull();
- expect(screen.getAllByText(/^sem data/)).toHaveLength(1); expect(screen.getByText("Academia")).toBeTruthy(); expect(screen.queryByText("Seguro")).toBeNull();
  expect(screen.getAllByText(/^(venceu 08\/09|07\/10\/2026|15\/10\/2026|sem data)/).map((t) => String(t.props.children).split(" · ")[0])).toEqual(["venceu 08/09", "07/10/2026", "15/10/2026", "sem data"]);
- expect(screen.getAllByText("Ultraviolet Black")).toHaveLength(3);
  expect(screen.queryByText(/ultraviolet-black/)).toBeNull(); expect(screen.queryByText(/desconhecido/)).toBeNull(); expect(screen.queryByText(/a_conferir/)).toBeNull();
 });
 const categorias = { categorias: [{ chave: "transferencias", nome: "transferências" }, { chave: "servicos", nome: "serviços" }] };
@@ -124,7 +125,7 @@ it("lançamento de registro antigo tem rótulo legível, e o filtro de origem n�
 });
 it("compromisso realizado diz recebido na entrada e pago na saída", async () => {
  const oc = (chave: string, nome: string, direcao: string) => ({ ...fatura("x", "2026-10-15", true), chave, nome, tipo: "conta", direcao, realizacao: "realizada" });
- extra["/api/app/previsao"] = { ...fixture["/api/app/previsao"], hoje: "2026-10-07", compromissos: [{ chave: "c", fonte: "conta", nome: "c", primeira_data: "2026-10-15", ultima_data: "2026-10-15", ocorrencias: [oc("e", "Salário", "entrada"), oc("s", "Aluguel", "saida")] }] };
+ extra["/api/app/previsao"] = { ...fixture["/api/app/previsao"], hoje: "2026-10-07", compromissos: [oc("e", "Salário", "entrada"), oc("s", "Aluguel", "saida")].map((o) => ({ chave: o.chave, fonte: "conta", nome: o.nome, primeira_data: o.data, ultima_data: o.data, ocorrencias: [o] })) };
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("15/10/2026 · recebido")).toBeTruthy());
  expect(screen.getAllByText("15/10/2026 · pago")).toHaveLength(1);
 });
