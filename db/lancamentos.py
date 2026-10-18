@@ -277,7 +277,8 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
     `com_guardado` (P8) é opt-in: sem ele a lista é a de antes (nenhuma linha guardado) e os
     agregados internos (`mes_detalhes`) seguem sem passá-lo. `ident` = `ler_id(...)`: só aquele item.
     `sem_categoria`: só a saída não interna sem categoria ou em "outros" (o cartão também).
-    `uma_por_compra`: do parcelamento, só a menor parcela da janela (as outras são as faturas dos meses seguintes)."""
+    `uma_por_compra`: do parcelamento, só a menor parcela de cada data (manual grava a mesma data em todas e
+    vira uma linha; no Open Finance cada cobrança tem a sua e aparece). Roda depois de `sem_categoria`."""
     tz = _tz().key
     params: list = [*actionable_pending_params(cur, user_id)]
     perna_l = _PERNA_LANCAMENTOS if com_guardado else _PERNA_LANCAMENTOS.replace(_TIPOS_COM_GUARDADO, MES_TIPOS_SQL)
@@ -305,11 +306,13 @@ def listar(cur, user_id: int, inicio: date, fim: date, *, origem=None, conta=Non
         if valor is not None:
             filtros.append(sql)
             params.append(valor)
+    sem_cat = f"x.tipo = 'saida' and not x.interno and {cat_key_sql('x.categoria')} in ('{CAT_VAZIA_LABEL}', 'outros')"
     if sem_categoria:
-        filtros.append(f"x.tipo = 'saida' and not x.interno and {cat_key_sql('x.categoria')} in ('{CAT_VAZIA_LABEL}', 'outros')")
+        filtros.append(sem_cat)
     uniao = f"(({perna_l}) union all ({perna_c}))"
     if uma_por_compra:
-        uniao = f"(select u.*, min(u.parcela_n) over (partition by u.group_id) as menor from {uniao} u)"
+        onde = f" where {sem_cat}" if sem_categoria else ""  # o filtro antes da janela: a menor é da que sobrou
+        uniao = f"(select x.*, min(x.parcela_n) over (partition by x.group_id, x.dia) as menor from {uniao} x{onde})"
         filtros.append("(x.group_id is null or x.parcela_n is not distinct from x.menor)")
     # ponytail: a busca filtra a união já montada, então o estado de toda linha da janela é
     # calculado antes (250 ms com 6000 lançamentos, plano §8); empurrar o filtro de texto para

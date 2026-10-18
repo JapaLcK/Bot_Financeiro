@@ -225,8 +225,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   o card já está na tela e a regra do repetido não emite outro. `recategorize_launch` não ganha card (reversível; o resumo dela já nomeia o item). O app ainda não os desenha (`PENDENTE_DA_TOOL`, PR B).
   A lista é a do Extrato (`db/lancamentos_leitura.recentes` = `listar`, 12 meses): os itens em comum com a 1ª página de `/api/app/lancamentos` são idênticos campo a campo
   (`tests/test_ai_chat_listas.py`). **Três divergências declaradas:** a janela vai até o fim do mês SEGUINTE (a compra no cartão feita depois do fechamento entra pela fatura do mês que vem, e o Extrato só a mostra lá); o
-  guardado em caixinha/investimento entra (`interno`, `guardado`, `pode: []`); e o parcelamento vem em UMA linha, a da menor parcela da janela (`listar(uma_por_compra=True)`: no Extrato cada parcela é a
-  linha da sua fatura, mas aqui todas têm a data da compra e as de faturas futuras repetiriam a compra; recategorizar o `c<id>` já propaga ao grupo). `sem_categoria` = saída não interna com categoria vazia ou "outros", cartão incluído (`listar(sem_categoria=True)`).
+  guardado em caixinha/investimento entra (`interno`, `guardado`, `pode: []`); e o parcelamento vem em UMA linha por data, a da menor parcela (`listar(uma_por_compra=True)`, depois do filtro `sem_categoria`: no Extrato cada parcela é a
+  linha da sua fatura; o manual grava a data da compra em todas e as de faturas futuras repetiriam a compra, então vira uma linha; no Open Finance cada parcela é uma cobrança com data própria e cada uma aparece; recategorizar o `c<id>` já propaga ao grupo). `sem_categoria` = saída não interna com categoria vazia ou "outros", cartão incluído (`listar(sem_categoria=True)`).
   No WhatsApp (sem card) o texto da lista muda: entram as compras no cartão e o guardado, a data é a do Extrato e o `#N` vem de `user_seq`. O comando determinístico "últimos N" do WhatsApp não muda.
   Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
   hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o

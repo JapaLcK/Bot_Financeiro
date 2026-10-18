@@ -2,7 +2,7 @@
 
 Banco real. A lista é a do Extrato: os itens em comum com `/api/app/lancamentos` são IDÊNTICOS campo a campo;
 as diferenças são declaradas (P-4): a janela vai até o mês SEGUINTE (a compra no cartão feita depois do fechamento,
-que o Extrato só mostra no mês da fatura), o guardado entra e o parcelamento vem em UMA linha (a menor parcela da janela).
+que o Extrato só mostra no mês da fatura), o guardado entra e o parcelamento vem em UMA linha por data (a menor parcela).
 
 CONTROLES NEGATIVOS (injetados e restaurados na entrega, ver o relato):
   • `listar(..., tipo="saida")` em `recentes` -> `test_itens_em_comum_com_o_extrato_sao_identicos`;
@@ -15,6 +15,8 @@ CONTROLES NEGATIVOS (injetados e restaurados na entrega, ver o relato):
   • `uma_por_compra` desligado em `recentes` -> `test_parcelado_*` e `test_itens_em_comum_*`;
   • início da janela em M-10 (ou M-12) -> `test_janela_de_12_meses_*`; sem o corte do plano ou sem o motivo ->
     `test_plano_essencial_*`; `categoria` pela chave -> `test_categoria_*`; `descricao` sem o fallback -> `test_compra_sem_nota_*`;
+  • `partition by x.group_id` sem `x.dia` -> `test_open_finance_cada_parcela_*`; o `sem_categoria` depois da janela ->
+    `test_sem_categoria_so_a_parcela_1_*`; `categoria_cru` nulo ou `descricao` sem o `.strip()` -> `test_compra_de_cartao_com_categoria_*`;
   • `valor` como texto, sem `moeda` ou sem `pode` -> `test_o_modelo_recebe_valor_*`.
 CONTROLES POSITIVOS: o item do Extrato continua aparecendo; a compra antes do fechamento está nos dois lados.
 """
@@ -246,6 +248,44 @@ def test_o_limite_conta_depois_de_tirar_as_parcelas_repetidas():
     # 2 lançamentos + 1 parcelamento = 3 linhas: com o limite 4 não sobra vaga para parcela repetida
     assert len(lancamentos_leitura.recentes(uid, now_tz(), 4)["itens"]) == 3
     assert [i["id"] for i in lancamentos_leitura.recentes(uid, now_tz(), 2)["itens"]] == ids  # positivo: o limite corta
+
+
+def test_open_finance_cada_parcela_e_uma_cobranca_com_data_propria_e_a_de_ontem_aparece():
+    """OF: 4 parcelas em datas diferentes (90, 60, 30 e 1 dia atrás). Só as de mesma data viram uma linha."""
+    from uuid import uuid4
+
+    uid = completo(usuario_pagante())
+    q("update accounts set balance = 5000 where user_id = %s returning user_id", (uid,))
+    card = db.create_card(uid, "Banco OF", closing_day=28, due_day=10)
+    grupo, hoje = uuid4(), today_tz()
+    c = [f"c{db.add_imported_credit_purchase(uid, card, 100, 'compras online', hoje - timedelta(days=d), f'of-{grupo}-{n}', installment_no=n, installments_total=6, group_id=grupo)[0]}"
+         for n, d in enumerate((90, 60, 30, 1), 1)]
+    l5, l8 = _em(uid, hoje - timedelta(days=5), "L5"), _em(uid, hoje - timedelta(days=8), "L8")
+    assert [i["id"] for i in lancamentos_leitura.recentes(uid, now_tz(), 3)["itens"]] == [c[3], l5, l8]  # a de ontem, não a 1ª
+    assert {i["id"] for i in lancamentos_leitura.recentes(uid, now_tz(), 50)["itens"]} >= set(c)  # positivo: cada cobrança na sua data
+
+
+def test_sem_categoria_so_a_parcela_1_categorizada_a_compra_aparece_e_o_inverso_continua_certo():
+    uid = completo(usuario_pagante())
+    manual = _parcelado(uid, "Sofa", 4, 75, None)
+    q("update credit_transactions set categoria = 'casa' where user_id = %s and id = %s returning id", (uid, int(manual[1:])))
+    sem = [i["id"] for i in lancamentos_leitura.recentes(uid, now_tz(), 50, sem_categoria=True)["itens"]]
+    assert len(sem) == 1 and sem != [manual]  # a janela corre só sobre as parcelas sem categoria: sobra uma delas
+    inverso = _parcelado(uid, "Mesa", 4, 75, "casa")
+    q("update credit_transactions set categoria = null where user_id = %s and id = %s returning id", (uid, int(inverso[1:])))
+    ids = [i["id"] for i in lancamentos_leitura.recentes(uid, now_tz(), 50, sem_categoria=True)["itens"]]
+    assert inverso in ids and len(ids) == 2  # positivo: a parcela 1 sem categoria é a linha do grupo
+
+
+def test_compra_de_cartao_com_categoria_personalizada_chega_com_acento_e_nota_so_de_espacos_cai_no_fallback():
+    from db.estabelecimentos import SEM_DESCRICAO
+
+    uid = completo(usuario_pagante())
+    card = db.create_card(uid, "Banco", closing_day=31, due_day=28)
+    ct = db.add_imported_credit_purchase(uid, card, 40, "Café", today_tz(), f"ct-{uid}-ac")[0]
+    q("update credit_transactions set nota = '   ' where user_id = %s and id = %s returning id", (uid, ct))
+    (item,) = ultimos_lancamentos(uid, {})["itens"]
+    assert item["categoria"] == "Café" and item["descricao"] == SEM_DESCRICAO
 
 
 # ── a janela e o plano ───────────────────────────────────────────────────────────────────────────

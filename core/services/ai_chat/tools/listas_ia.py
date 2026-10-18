@@ -7,8 +7,8 @@ O modelo recebe cada item como `_para_ia`: dinheiro em float sob `valor` (o `ai_
 de receita/despesa (o interno sai `entrada`/`saída`, senão o saque em espécie seria lido como ganho), a categoria
 pelo nome e, nos `l`, o `user_seq` (o `#N` que o usuário vê; é a única chave de id que o `ai_guard` reconhece).
 Diferenças para a 1ª página de `/api/app/lancamentos`, declaradas: a janela vai até o mês seguinte (a
-compra no cartão depois do fechamento), o guardado entra e o parcelamento vem em uma linha só (a menor parcela
-da janela). A categoria vai como foi gravada (com acento e caixa), não como a chave do Extrato.
+compra no cartão depois do fechamento), o guardado entra e o parcelamento vem em uma linha por data (a menor parcela:
+o manual tem a mesma data em todas, o Open Finance uma por cobrança). A categoria vai como foi gravada (com acento e caixa), não como a chave do Extrato.
 
 Cada lista é também um card do app (`ultimos_lancamentos`, `sem_categoria`): o bloco é o `Lancamento` da v2 (até
 10 itens: o app mostra 5 e um "+5"), sem total; só sai pelo `mostrar_da_tool` (app que declara o card, com vaga).

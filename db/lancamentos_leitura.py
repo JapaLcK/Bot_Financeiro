@@ -54,8 +54,8 @@ def recentes(user_id: int, agora: datetime, limite: int, *, sem_categoria: bool 
     """Os "últimos lançamentos" da IA: o `listar` do Extrato, mais novos primeiro, com 3 diferenças: o guardado
     entra (a IA o lista); a janela de 12 meses vai até o fim do mês SEGUINTE (a compra no cartão feita depois do
     fechamento entra pela fatura do mês que vem, `MES_CARTAO_SQL`, e no Extrato só aparece lá); e o parcelamento
-    vem em UMA linha, a da menor parcela da janela (as parcelas de faturas futuras repetiriam a compra com a data
-    dela; recategorizar o `c<id>` já propaga ao grupo). Cada `l` leva o `user_seq` (o `#N` que o usuário vê) no
+    vem em UMA linha por data, a da menor parcela (o manual grava a data da compra em todas, então vira uma linha; no
+    Open Finance cada parcela é uma cobrança com a sua data e cada uma aparece; recategorizar o `c<id>` já propaga ao grupo). Cada `l` leva o `user_seq` (o `#N` que o usuário vê) no
     campo `numero` do item (a tool o entrega ao modelo como `user_seq`) e a categoria como foi gravada em
     `categoria_nome` (o `_item` só tem a chave, sem acento nem caixa), ambos fora do `_item` (o contrato da v2 não os tem).
     `sem_categoria`: só as saídas não internas sem categoria ou em "outros" (o cartão também)."""
