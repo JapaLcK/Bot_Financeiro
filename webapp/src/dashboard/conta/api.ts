@@ -62,9 +62,13 @@ export const iniciarMfa = (password: string) => comPrazo((sinal) => post<MfaSetu
 export const desativarMfa = (password: string, code: string) => comPrazo((sinal) => post<{ ok: boolean }>("/auth/mfa/disable", { password, code }, sinal));
 export const enviarLinkSenha = (uid: number) => comPrazo((sinal) => post<{ ok: boolean; message?: string }>(`/settings/${uid}/password-reset`, {}, sinal));
 // Sem prazo (ver `comPrazo`). A resposta vai DIRETO ao Cofre, nunca ao estado do componente: quem chamou pode ter desmontado.
-export const ativarMfa = (code: string) => post<{ backup_codes: unknown }>("/auth/mfa/enable", { code }).then((r) => guardarCodigos(r.backup_codes, false));
-export const regerarCodigos = (password: string, code: string) =>
-  post<{ backup_codes: unknown }>("/auth/mfa/regenerate-backup-codes", { password, code }).then((r) => guardarCodigos(r.backup_codes, true));
+// O bilhete (`seq`) sai na chamada, antes do fetch: resposta mais velha que a já guardada é ignorada (ver `guardarCodigos`).
+let seq = 0;
+export const ativarMfa = (code: string) => { const t = ++seq; return post<{ backup_codes: unknown }>("/auth/mfa/enable", { code }).then((r) => guardarCodigos(r.backup_codes, false, t)); };
+export const regerarCodigos = (password: string, code: string) => {
+  const t = ++seq;
+  return post<{ backup_codes: unknown }>("/auth/mfa/regenerate-backup-codes", { password, code }).then((r) => guardarCodigos(r.backup_codes, true, t));
+};
 
 // Cópia de `formatPhoneBR` (settings.html): o teste dashboard_v2_conta_perfil compara as duas (§0.7).
 export function telefoneBR(valor: string | null) {

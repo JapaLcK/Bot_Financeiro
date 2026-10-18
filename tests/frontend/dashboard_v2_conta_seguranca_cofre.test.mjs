@@ -4,12 +4,13 @@
  *   · aviso do SSE, foco da aba, troca de página e o portão cair (/me 500×3) NÃO apagam os códigos;
  *   · a resposta do enable chega mesmo com o modal do MFA já desmontado (troca de página em voo);
  *   · "Copiar todos" (avisos de leitor de tela) e `beforeunload` ligado enquanto houver códigos;
+ *   · resposta VELHA (sem prazo) que chega depois de uma nova já guardada não troca nem reabre os códigos; se a nova falhou, a velha vale;
  *   · Safari 14 (sem <dialog>): o Cofre abre DEPOIS do modal do MFA fechar (o fallback só aceita uma trava por vez).
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
-import { CODIGOS, NOVOS, SENHA, TOTP, abrirSeguranca, ate, ateOCofre, portao, rastros } from "./_conta_seguranca.mjs";
+import { CODIGOS, JSON_ERRO, NOVOS, SENHA, TOTP, abrirSeguranca, ate, ateOCofre, portao, rastros } from "./_conta_seguranca.mjs";
 
 const browser = navegador();
 void browser;
@@ -174,3 +175,55 @@ test("o que o Cofre mostrou não volta: depois do 'Concluído', recarregar a pá
   await p.ctx.close();
   assert.deepEqual(r, [0, false]);
 });
+
+// Dois pedidos sem prazo: o 1º (A) fica retido no portão, o usuário troca de rota (o form desmonta, o POST segue) e volta, e o 2º (B) é pedido.
+// A responde com `velho`; B com `segundo`. Devolve `solta` (libera A) e o que o Cofre mostra quando B terminou.
+const OUTROS = NOVOS.map((c) => c.replace("NNNN", "OOOO"));
+const par = {
+  regerar: { opcoes: { mfa: ON }, hook: "regerar", velho: NOVOS, corpo: (l) => ({ backup_codes: l }), pedir: async (p) => { await p.bt("Gerar novos códigos de backup").click(); await p.senha.fill(SENHA); await p.codigo.fill(TOTP); await p.enviar.click(); } },
+  ativar: { opcoes: {}, hook: "enable", velho: CODIGOS, corpo: (l) => ({ ok: true, backup_codes: l }), pedir: async (p) => { await p.bt("Ativar").click(); await p.senha.fill(SENHA); await p.enviar.click(); await p.dialogo.locator(".mfa-qr img").waitFor(); await p.codigo.fill(TOTP); await p.enviar.click(); } },
+};
+async function doisPedidos(nome, segundo) {
+  const { opcoes, hook, velho, corpo, pedir } = par[nome];
+  const p = await abrirSeguranca(opcoes);
+  const [segura, solta] = portao();
+  let n = 0;
+  p.s[hook] = async (r) => (++n === 1 ? (await segura, r.fulfill({ json: corpo(velho) })) : segundo(r, corpo(OUTROS)));
+  await pedir(p);
+  await p.dialogo.getByRole("button", { name: "Enviando…" }).waitFor();
+  await p.page.evaluate(() => { location.hash = "#/gastos"; });
+  await p.page.locator("#page-title", { hasText: "Para onde vai" }).waitFor();
+  await p.page.evaluate(() => { location.hash = "#/conta/configuracoes"; });
+  await p.painel.waitFor();
+  await pedir(p);
+  return { p, solta, velho };
+}
+const folga = (p) => p.page.waitForTimeout(500); // A tem de ter chegado (e sido processada) antes de olhar
+
+for (const nome of Object.keys(par)) {
+  for (const quando of ["antes", "depois"]) {
+    test(`${nome}: resposta VELHA tardia (${quando} do 'Concluído') não troca os códigos novos nem reabre o Cofre`, async () => {
+      const { p, solta } = await doisPedidos(nome, (r, c) => r.fulfill({ json: c }));
+      await p.cofre.waitFor();
+      const antes = await p.codigos();
+      if (quando === "antes") { solta(); await folga(p); }
+      const meio = await p.codigos();
+      await p.cofre.getByRole("button", { name: "Concluído" }).click(); await p.fechado();
+      if (quando === "depois") { solta(); await folga(p); }
+      const fim = [await p.page.locator("dialog[open]").count(), await p.page.locator(".mfa-codigos").count()];
+      await p.ctx.close();
+      assert.deepEqual(antes, OUTROS);
+      assert.deepEqual(meio, OUTROS); // sem a guarda de ordem, aqui apareceria a lista velha
+      assert.deepEqual(fim, [0, 0]);
+    });
+  }
+  test(`${nome}: controle positivo: o pedido novo FALHA (500) e a resposta velha, que ainda é a válida, é a que o Cofre mostra`, async () => {
+    const { p, solta, velho } = await doisPedidos(nome, JSON_ERRO(500, "interno"));
+    await p.alerta.waitFor();
+    solta();
+    await p.cofre.waitFor();
+    const r = await p.codigos();
+    await p.ctx.close();
+    assert.deepEqual(r, velho);
+  });
+}

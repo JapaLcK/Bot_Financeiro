@@ -13,9 +13,15 @@ const muda = (g: Guardado | null) => { guardado = g; ouvintes.forEach((f) => f()
 
 // Chamado pelas escritas (api.ts) com a resposta crua. Resposta que não é uma lista de textos = o servidor comitou e
 // os códigos não chegaram: quem chamou trata como falha ambígua (releitura do status).
-export function guardarCodigos(bruto: unknown, regerado: boolean) {
+// `t`: o bilhete tirado na CHAMADA (api.ts). Os pedidos não têm prazo, então uma resposta velha pode chegar depois de uma nova já
+// guardada; a velha traz códigos que o servidor já invalidou. Só `aplicado` (o maior bilhete já gravado) sobe: falha não o move.
+// ponytail: assume que o servidor comita na ordem de emissão; se não, vale o último a CHEGAR com bilhete maior.
+let aplicado = 0;
+export function guardarCodigos(bruto: unknown, regerado: boolean, t: number) {
   // Todos os itens têm de ser texto: mostrar MENOS códigos que os comitados, em silêncio, é pior que dizer que não vieram.
   if (!Array.isArray(bruto) || !bruto.length || !bruto.every((c) => typeof c === "string" && c !== "")) throw new ErroApi(200, "sem_codigos");
+  if (t < aplicado) return;
+  aplicado = t;
   muda({ codigos: bruto as string[], regerado, aberto: false });
 }
 // Separado de `guardar`: o modal do MFA fecha ANTES (o fallback sem <dialog> aceita uma trava por vez).
