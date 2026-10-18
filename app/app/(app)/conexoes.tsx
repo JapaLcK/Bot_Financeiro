@@ -77,7 +77,11 @@ export default function Conexoes() {
       const p = await perfil();
       if (p.app_access !== true) throw new Error("Acesso indisponível. Confira sua conta no Início.");
       // Em paralelo e OPCIONAL: qualquer falha vira "sem números" e nunca derruba a tela nem as ações (a promessa nunca rejeita).
-      const numeros: Promise<Numeros> = lerBancos(controlador).then((b) => ({ total: b.total, bancos: b.bancos }), () => null);
+      // Só o 401 terminal é dito à sessão (o cliente já limpou o cofre); `expirou` é idempotente, então o `catch` principal pegar o mesmo erro não repete o aviso.
+      const numeros: Promise<Numeros> = lerBancos(controlador).then((b) => ({ total: b.total, bancos: b.bancos }), (e: unknown) => {
+        if (e instanceof SessaoExpirada && !cancelado) sessao.expirou(e.detalhe);
+        return null;
+      });
       const l = await limiteBancario(p.user_id);
       const s = await conexoes(p.user_id, controlador);
       if (cancelado) return;

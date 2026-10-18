@@ -6,7 +6,7 @@ import type { Conexao } from "@/api/schemas/openFinance";
 import { guardarCredenciais } from "@/storage/secure";
 // O contrato LIDO do arquivo que o pytest valida contra o Pydantic (PR 1); nunca copiado (CLAUDE.md §0.7).
 import contrato from "../../../tests/fixtures/app_bancos.json";
-import { chamadas, fetchFalso, prepararCaso, resposta, rotear, S, type Rota } from "./auth_apoio";
+import { chamadas, fetchFalso, prepararCaso, resposta, rotear, S, segurar, type Rota } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
 import { abrirBancos, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
@@ -75,10 +75,36 @@ it.each([
   expect(screen.getByRole("button", { name: "Inter, Atualizado" })).toBeTruthy();
   expect(screen.queryAllByText(DINHEIRO, HIDDEN)).toHaveLength(0);
   expect(screen.queryAllByText("—", HIDDEN)).toHaveLength(0);
+  await act(drenar);
+  expect(screen).toHavePathname("/conexoes"); // falha comum de /bancos não é fim de sessão
   await abrirBancos();
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: /^Nubank,/ })).toBeNull());
   expect(chamadas().filter((c) => c.caminho === "/open-finance/1/connections/11")).toHaveLength(1);
+});
+
+describe("401 terminal em /bancos (o cliente já limpou o cofre): a sessão precisa saber", () => {
+  const expirado = () => resposta(401, { detail: "expirado" });
+  it("com perfil, limite e snapshot ok, vai para /entrar com o aviso", async () => {
+    servidor([NUBANK], {}, { "/api/app/bancos": expirado, "/auth/refresh": expirado });
+    renderRouter("./app", { initialUrl: "/conexoes" });
+    await waitFor(() => expect(screen).toHavePathname("/entrar"));
+    expect(screen.getByText("Sua sessão expirou. Entre de novo.")).toBeTruthy();
+  });
+  it("leitura cancelada por uma nova (Conferir de novo) com 401 tardio: NÃO expira a sessão", async () => {
+    const velha = segurar();
+    let vez = 0;
+    servidor([NUBANK], {}, { "/auth/refresh": expirado,
+      "/api/app/bancos": async () => (++vez === 1 ? (await velha.promessa, expirado()) : resposta(200, contrato)) });
+    renderRouter("./app", { initialUrl: "/conexoes" });
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Nubank,/ })).toBeTruthy());
+    await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Conferir de novo" })); await drenar(); });
+    await waitFor(() => expect(screen.getByText("R$ 67.000,00")).toBeTruthy());
+    velha.soltar();
+    await act(drenar);
+    expect(screen).toHavePathname("/conexoes");
+    expect(screen.getByText("R$ 67.000,00")).toBeTruthy();
+  });
 });
 
 it("Conferir de novo e puxar para atualizar releem as DUAS leituras", async () => {
