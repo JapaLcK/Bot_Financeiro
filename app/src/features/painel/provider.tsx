@@ -8,6 +8,7 @@ import type { Perfil } from "@/api/schemas/auth";
 import * as S from "@/api/schemas/painel";
 import { useSessao } from "@/features/auth/sessao";
 import { useBloqueio } from "@/features/bloqueio/bloqueio";
+import { temTampa } from "@/features/bloqueio/tampa";
 import { carregarAcessoBancario, conferirSessao } from "@/features/openFinance/acesso";
 import { useForeground } from "@/features/openFinance/useForeground";
 import { lerCredenciais, lerTentativaBancaria, type Credenciais } from "@/storage/secure";
@@ -86,7 +87,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     if (e instanceof SessaoExpirada) sessaoRef.current.expirou(e.detalhe);
     else if (e instanceof ErroDeApi && (e.status === 402 || (e.status === 403 && typeof e.corpo === "object" && e.corpo && JSON.stringify(e.corpo).includes("open_finance_onboarding_required")))) { cancelar(); setDados({}); setGate("negado"); } // 402 e 403 do onboarding: o portão, para toda chamada que passa por aqui (leituras e escritas: recursos, Extrato, chat, perfil, assinaturas, leitura sob demanda)
   }, [cancelar]);
-  useEffect(() => { if (!ativo || travado) setGate("carregando"); }, [ativo, travado]); // fora do foco: com rota empurrada o `useFocusEffect` não roda, e a volta do segundo plano tem de passar pelo portão
+  useEffect(() => { if (travado) setGate("carregando"); }, [travado]); // só a trava biométrica volta ao portão; o segundo plano sem trava (`!ativo`, de qualquer duração) mantém a tela e revalida em silêncio no focus effect (o `refoco` abaixo). A tampa nativa cobre o app switcher
   useFocusEffect(useCallback(() => {
     if (!ativo || travado) { cancelar(); return; }
     let cancelado = false;
@@ -216,7 +217,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {
  const p = useEstadoPainel(); const sessao = useSessao(); const [erroSaida, setErroSaida] = useState<string | null>(null);
- if (!p.ativo || p.travado) return <View />;
+ if (p.travado || (!p.ativo && !temTampa)) return <View />; // sem tampa nativa (Android, Expo Go) o fundo desmonta a árvore
  if (p.gate === "negado") return <Inicio />;
  if (p.gate !== "liberado" || !p.usuario) return <Screen><View style={{ gap: 16, flex: 1, justifyContent: "center" }}><ActivityIndicator accessibilityLabel="Conferindo seu acesso" /><Texto>{p.gate === "erro" ? p.erroGate : "Conferindo seu acesso…"}</Texto>{erroSaida && <Texto tom="danger">{erroSaida}</Texto>}<Button rotulo="Conferir acesso" onPress={p.voltarAoPortao} /><Button rotulo="Sair" variante="secondary" onPress={() => void sessao.sair().then((ok) => { if (!ok) setErroSaida("Não conseguimos sair. Tente de novo."); })} /></View></Screen>;
  return <Fragment key={p.usuario.user_id}>{children}</Fragment>;

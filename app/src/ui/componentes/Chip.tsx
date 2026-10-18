@@ -51,7 +51,7 @@ export function Chip({ rotulo, selecionado, onPress, desativado }: Props) {
           {
             paddingHorizontal: 10,
             paddingVertical: 6,
-            borderRadius: raio.chip,
+            borderRadius: raio.pilula,
             alignItems: "center",
             justifyContent: "center",
             minHeight: 28,

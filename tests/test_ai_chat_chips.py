@@ -33,9 +33,9 @@ def test_chips_saem_no_fim(monkeypatch):
     fim = _fim(_stream(c, "como foi o mês?"))
     assert fim["chips"] == CINCO[:4]
     (kw,) = reg.chips
-    assert kw["model"] == "gpt-4o-mini" and "tools" not in kw and "stream" not in kw
+    assert kw["model"] == "gpt-6-luna" and "tools" not in kw and "stream" not in kw
     assert kw["response_format"]["type"] == "json_schema"
-    assert kw["max_tokens"] == 120 and kw["temperature"] == 0.5
+    assert kw["max_completion_tokens"] == 120 and kw["temperature"] == 0.5 and kw["reasoning_effort"] == "none" and "max_tokens" not in kw
     assert reg.clientes[-1]["timeout"] == 4.0 and reg.clientes[-1]["max_retries"] == 0
     assert fim["usage"]["used"] == 1
     com_chips = [(l["role"], l["content"]) for l in linhas(uid)]

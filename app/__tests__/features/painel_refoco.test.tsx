@@ -3,9 +3,9 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
-import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { appVai, desligarTrava, drenar, ligarTrava, liberar, pendentes } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
-// Volta de uma rota EMPURRADA (Configurações, folha de meta) para a aba: o acesso é revalidado em segundo plano e a tela não vira o portão; a carga seguinte é silenciosa. A volta do fundo segue pelo portão (P3).
+// Volta de uma rota EMPURRADA (Configurações, folha de meta) para a aba: o acesso é revalidado em segundo plano e a tela não vira o portão; a carga seguinte é silenciosa. A volta CURTA do fundo também é silenciosa (decisão do dono, reverte o #897: P3, B1, F1-F5); só a trava biométrica fecha o portão (F3).
 jest.setTimeout(30_000);
 type Seg = ReturnType<typeof segurar>;
 const vistos = new Map<string, number>(), presas = new Map<string, { n: number; seg: Seg }>();
@@ -92,9 +92,9 @@ describe("CONTROLES POSITIVOS: o portão continua onde tem de continuar", () => 
     await emResumo(); await ir("/configuracoes"); meStatus = 402; await voltar(); await assentar();
     expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(saldo(/8[.]?123/)).toBe(false);
   });
-  it("P3: a volta do segundo plano AINDA passa pelo portão", async () => {
+  it("P3: a volta curta do segundo plano NÃO passa pelo portão: a tela fica enquanto o /auth/me está presa", async () => {
     await emResumo(); await appVai("background"); const me = prender("/auth/me"); await appVai("active"); await assentar();
-    expect(screen.getByText("Conferindo seu acesso…")).toBeTruthy(); expect(screen.queryByTestId("painel-conta")).toBeNull(); me.soltar(); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());
+    semPortao(); expect(saldo(/8[.]?123/)).toBe(true); expect(chamadas("/auth/me").length).toBeGreaterThan(1); me.soltar(); await assentar(); semPortao();
   });
   it("P4: corte de histórico novo na Configurações: o dado do mês velho não fica sob o mês novo, e as mensais pedem o novo", async () => {
     const velho = mesesAnteriores(mesAtual(), 3)[2]!, intermediario = mesesAnteriores(mesAtual(), 2)[1]!; mesEsquisito = velho;
@@ -113,17 +113,18 @@ describe("CONTROLES POSITIVOS: o portão continua onde tem de continuar", () => 
   });
 });
 
-describe("CONSERTO: fundo numa rota empurrada passa pelo portão; chave trocada durante a validação não mostra o dado velho", () => {
+describe("CONSERTO: o fundo curto numa rota empurrada também é silencioso; chave trocada durante a validação não mostra o dado velho", () => {
   const pediu = (path: string, q: string, v: string) => chamadas(path).some(([u]) => new URL(String(u)).searchParams.get(q) === v);
   const fundoEVolta = async () => { await ir("/configuracoes"); await appVai("background"); await appVai("active"); const me = prender("/auth/me"); await voltar(); await assentar(); return me; };
-  it("B1: fundo ESTANDO na rota empurrada: a volta passa pelo portão, sem o saldo, até o /auth/me responder", async () => {
+  it("B1: fundo ESTANDO na rota empurrada: a volta não passa pelo portão; o saldo fica até o /auth/me responder", async () => {
     await emResumo(); const me = await fundoEVolta();
-    expect(screen.getByText("Conferindo seu acesso…")).toBeTruthy(); expect(saldo(/8[.]?123/)).toBe(false);
-    me.soltar(); await waitFor(() => expect(saldo(/8[.]?123/)).toBe(true)); semPortao();
+    semPortao(); expect(saldo(/8[.]?123/)).toBe(true);
+    me.soltar(); await assentar(); semPortao(); expect(saldo(/8[.]?123/)).toBe(true);
   });
-  it("B1b: onboarding revogado durante o fundo + /auth/me presa: nunca o saldo na tela", async () => {
+  it("B1b: onboarding revogado durante o fundo + /auth/me presa: depois da validação cai no Início, sem painel nem saldo", async () => {
     await emResumo(); onboardingCompleto = false; const me = await fundoEVolta();
-    expect(saldo(/8[.]?123/)).toBe(false); me.soltar(); await assentar(); expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(saldo(/8[.]?123/)).toBe(false);
+    semPortao(); expect(saldo(/8[.]?123/)).toBe(true); // a tela velha fica até a validação responder (igual ao refoco de rota empurrada)
+    me.soltar(); await assentar(); expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(screen.queryByLabelText("Aba Gastos")).toBeNull(); expect(saldo(/8[.]?123/)).toBe(false);
   });
   it("B2: mês trocado com a validação presa: o número do mês velho não fica sob o chip do novo; solta, e a leitura do novo sai", async () => {
     const velho = mesesAnteriores(mesAtual(), 3)[2]!, novo = mesesAnteriores(mesAtual(), 2)[1]!; mesEsquisito = velho;
@@ -203,5 +204,50 @@ describe("CONSERTO: trocar o mês durante a validação presa também tira o det
     await act(async () => { fireEvent.press(screen.getByRole("button", { name: nomeMes(velho).slice(0, 3) })); await drenar(); });
     await act(async () => { fireEvent.press(screen.getByRole("button", { name: nomeMes(novo) })); await drenar(); }); await assentar();
     expect(saldo(/555/)).toBe(false); me.soltar(); await assentar(); expect(saldo(/555/)).toBe(false); expect(saldo(/980/)).toBe(true);
+  });
+});
+
+describe("CONSERTO (decisão do dono): fundo curto é silencioso; só a trava biométrica mostra o portão", () => {
+  it("F1: fundo→volta rápida com /auth/me presa: tela, saldo e conta ficam (inclusive no fundo), sem RefreshControl; solta, e a recarga silenciosa traz o valor novo", async () => {
+    await emResumo(); await appVai("inactive"); await appVai("background"); expect(saldo(/8[.]?123/)).toBe(true); expect(screen.getByLabelText("Aba Gastos")).toBeTruthy(); // a tampa nativa cobre o app switcher; a árvore não desmonta
+    const me = prender("/auth/me"); await appVai("active"); await assentar();
+    semPortao(); expect(saldo(/8[.]?123/)).toBe(true); expect(refrescando()).toBe(false); expect(screen.queryByLabelText("Carregando dados")).toBeNull();
+    contasTotal = "1111.11"; me.soltar(); await waitFor(() => expect(saldo(/1[.]?111/)).toBe(true)); await assentar(); expect(saldo(/8[.]?123/)).toBe(false); semPortao(); expect(refrescando()).toBe(false);
+  });
+  it("F2: fundo curto com acesso revogado (onboarding incompleto): depois da validação cai no Início, sem painel", async () => {
+    await emResumo(); await appVai("background"); onboardingCompleto = false; const me = prender("/auth/me"); await appVai("active"); await assentar();
+    semPortao(); me.soltar(); await assentar();
+    expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(screen.queryByLabelText("Aba Gastos")).toBeNull(); expect(saldo(/8[.]?123/)).toBe(false);
+  });
+  it("F2b: fundo curto com 402 em /auth/me: sem painel nem saldo", async () => {
+    await emResumo(); await appVai("background"); meStatus = 402; const me = prender("/auth/me"); await appVai("active"); await assentar();
+    semPortao(); me.soltar(); await assentar();
+    expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(screen.queryByLabelText("Aba Gastos")).toBeNull(); expect(saldo(/8[.]?123/)).toBe(false);
+  });
+  it("F3: fundo LONGO (>60 s) com trava ligada: a trava cobre; liberada, aparece 'Conferindo seu acesso…' até a validação, e o saldo não aparece antes", async () => {
+    pendentes.length = 0; ligarTrava(); renderRouter("./app", { initialUrl: "/resumo" });
+    await waitFor(() => expect(pendentes.length).toBe(1)); await liberar(); await waitFor(() => expect(saldo(/8[.]?123/)).toBe(true)); await assentar();
+    await appVai("inactive"); await appVai("background"); jest.setSystemTime(Date.now() + 61_000); await appVai("active"); await assentar();
+    expect(pendentes.length).toBe(1); expect(saldo(/8[.]?123/)).toBe(false); expect(screen.queryByText("Conferindo seu acesso…")).toBeNull(); // travado: nem saldo nem portão por baixo
+    const me = prender("/auth/me"); await liberar(); await assentar();
+    expect(screen.getByText("Conferindo seu acesso…")).toBeTruthy(); expect(saldo(/8[.]?123/)).toBe(false); expect(screen.queryByTestId("painel-conta")).toBeNull();
+    me.soltar(); await waitFor(() => expect(saldo(/8[.]?123/)).toBe(true)); semPortao();
+  });
+  it("F6: trava LIGADA, 59 s fora: sem portão, sem pedir a trava, e o saldo fica", async () => {
+    pendentes.length = 0; ligarTrava(); renderRouter("./app", { initialUrl: "/resumo" });
+    await waitFor(() => expect(pendentes.length).toBe(1)); await liberar(); await waitFor(() => expect(saldo(/8[.]?123/)).toBe(true)); await assentar();
+    await appVai("inactive"); await appVai("background"); jest.setSystemTime(Date.now() + 59_000); const me = prender("/auth/me"); await appVai("active"); await assentar();
+    expect(pendentes.length).toBe(0); semPortao(); expect(saldo(/8[.]?123/)).toBe(true); me.soltar(); await assentar(); semPortao();
+  });
+  it("F4: fundo curto com credencial trocada + /auth/me 503: portão com erro, sem a Ana na tela e sem ler dado com o token da Bela", async () => {
+    await emResumo(); await appVai("background"); await guardarCredenciais({ access: "access-bela", refresh: "rt_bela" }); const antes = fetchFalso.mock.calls.length; meStatus = 503; await appVai("active"); await assentar();
+    expect(saldo(/8[.]?123/)).toBe(false); expect(screen.queryByTestId("painel-conta")).toBeNull(); expect(screen.getByRole("button", { name: "Conferir acesso" })).toBeTruthy();
+    expect(fetchFalso.mock.calls.slice(antes).filter(([u, r]) => caminho(u).startsWith("/api/app/") && (r.headers as Record<string, string>).Authorization === "Bearer access-bela")).toEqual([]);
+  });
+  it("F5: leitura em voo abortada pelo fundo: ao voltar, nenhum card fica preso em 'Carregando dados' (Resumo e Gastos)", async () => {
+    const presa = prender("/api/app/contas"); await abrirEm("/resumo", () => screen.getByTestId("painel-conta")); expect(screen.getAllByLabelText("Carregando dados").length).toBeGreaterThan(0);
+    await appVai("inactive"); await appVai("background"); presa.soltar(); await appVai("active"); await waitFor(() => expect(saldo(/8[.]?123/)).toBe(true)); await assentar();
+    expect(screen.queryByLabelText("Carregando dados")).toBeNull(); expect(refrescando()).toBe(false); semPortao();
+    await act(async () => { router.navigate("/gastos"); await drenar(); }); await assentar(); expect(screen.queryByLabelText("Carregando dados")).toBeNull();
   });
 });

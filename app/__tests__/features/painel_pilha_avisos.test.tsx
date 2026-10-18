@@ -50,6 +50,8 @@ const fio = () => { let no = within(screen.getByTestId("pilha-avisos")).getByRol
 const alvo44 = (no: { props: { style?: unknown } }) => { const e = StyleSheet.flatten(no.props.style as never) as { width: number; height: number }; return Math.min(e.width, e.height) >= 44; };
 const acao = (nome: "increment" | "decrement") => act(async () => { fireEvent(ajustavel(), "accessibilityAction", { nativeEvent: { actionName: nome } }); await drenar(); });
 const apertar = async (nome: string) => { await act(async () => { fireEvent.press(screen.getByRole("button", { name: nome })); await drenar(); }); };
+// O card Saldo previsto nasce recolhido: a linha das respondidas só existe depois do toque nele.
+const abrirSaldoPrevisto = async () => { await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Saldo previsto" })); await drenar(); }); };
 const toqueNoPonto = (k: number) => act(async () => { fireEvent.press(ponto(k)); await drenar(); });
 
 it("a ordem é conexão pendente, banco e receitas; o adjustable lê 'Aviso N de 4' e troca de aviso sem sair da lista", async () => {
@@ -101,7 +103,7 @@ it("o selecionado some e VOLTA (Desfazer na linha 'Receitas na previsão'): a pi
   await abrir(); await waitFor(() => expect(pontos()).toBe(2));
   await toqueNoPonto(1); expect(screen.getByText("Freela Beta")).toBeTruthy();
   await apertar("Não é receita fixa: Freela Beta");
-  await waitFor(() => expect(screen.getByText("Receitas na previsão (1)")).toBeTruthy()); expect(screen.getByText("Salário Acme")).toBeTruthy(); expect(pontos()).toBe(0);
+  await waitFor(() => expect(pontos()).toBe(0)); await abrirSaldoPrevisto(); expect(screen.getByText("Receitas na previsão (1)")).toBeTruthy(); expect(screen.getByText("Salário Acme")).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (1)")); await drenar(); });
   await apertar("Desfazer resposta: Freela Beta");
   await waitFor(() => expect(pontos()).toBe(2));
@@ -161,6 +163,7 @@ it("sem banco, receita sem aviso nenhum em outra aba: nem a pilha existe (contro
 it("a linha 'Receitas na previsão' fica fora da pilha, dentro do card Saldo previsto, e abre com Desfazer", async () => {
   marcas["extrato#free"] = "negada"; await abrir();
   const pilha = screen.getByTestId("pilha-avisos"); expect(within(pilha).queryByText(/Receitas na previsão/)).toBeNull();
+  expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); await abrirSaldoPrevisto(); // recolhido, a linha não aparece
   const linha = screen.getByText("Receitas na previsão (1)"); expect(linha).toBeTruthy();
   await act(async () => { fireEvent.press(linha); await drenar(); }); expect(screen.getByRole("button", { name: "Desfazer resposta: Freela Beta" })).toBeTruthy();
 });

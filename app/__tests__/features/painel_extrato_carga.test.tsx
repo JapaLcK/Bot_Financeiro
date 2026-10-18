@@ -56,12 +56,13 @@ it("#897: inactive→active mantém busca, origem, tipo e lançamento aberto, se
  expect(screen.getByRole("button", { name: "Entradas" }).props.accessibilityState.selected).toBe(true);
  expect(detalhe()).toBeTruthy(); expect(authMe()).toBe(me); expect(chamadasLanc().length).toBe(lanc);
 });
-// Controle positivo do conserto do #897: o background (rede derrubada) continua fechando o portão e revalidando.
-it("#897: background→active fecha o portão e revalida", async () => {
+// Decisão do dono (reverte o #897): o background (rede derrubada) NÃO fecha o portão; a tela e os filtros ficam (a tampa nativa cobre o app switcher) e o acesso é revalidado em silêncio.
+it("background→active (volta curta) mantém a lista e a busca, e revalida o acesso em silêncio", async () => {
  await extratoComFiltros(); const me = authMe(); expect(detalhe()).toBeTruthy();
- await appVai("background"); expect(screen.queryByText("Salário")).toBeNull(); expect(detalhe()).toBeNull();
+ await appVai("background"); expect(screen.getByText("Salário")).toBeTruthy(); expect(detalhe()).toBeTruthy();
  await appVai("active"); await lista(); await act(drenar);
- expect(authMe()).toBe(me + 1); expect(screen.queryByText(VAZIO)).toBeNull();
+ expect(authMe()).toBe(me + 1); expect(screen.queryByText("Conferindo seu acesso…")).toBeNull(); expect(screen.queryByText(VAZIO)).toBeNull();
+ expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal"); // o detalhe aberto NÃO é afirmado: o Extrato fecha o detalhe e reinicia a lista a cada `versao` (extrato.tsx:30,46), igual ao refoco de rota empurrada
 });
 it("Extrato, Resumo com refresh, Extrato: a lista está lá", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await lista();

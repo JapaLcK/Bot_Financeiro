@@ -9,7 +9,7 @@ Fluxo de áudio:
 
 Fluxo de imagem:
   1. Recebe bytes de imagem (.jpg, .png, .webp, .gif)
-  2. Envia para GPT-4o Vision com prompt financeiro
+  2. Envia para visão do modelo com prompt financeiro
   3. Retorna dict estruturado com os dados extraídos (valor, alvo, tipo, etc.)
      ou None se a imagem não contiver informação financeira clara.
 """
@@ -117,7 +117,7 @@ def transcribe_audio(data: bytes, filename: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Análise de imagem (GPT-4o Vision)
+# Análise de imagem (visão do modelo)
 # ---------------------------------------------------------------------------
 
 _IMAGE_SYSTEM_PROMPT = """Você é um assistente financeiro que analisa imagens enviadas pelo usuário.
@@ -153,7 +153,7 @@ EXEMPLOS:
 
 def analyze_image(data: bytes, filename: str) -> dict[str, Any] | None:
     """
-    Analisa uma imagem com GPT-4o Vision para extrair dados financeiros.
+    Analisa uma imagem com visão do modelo para extrair dados financeiros.
     Retorna dict com os dados ou None em caso de falha.
     """
     if not data:

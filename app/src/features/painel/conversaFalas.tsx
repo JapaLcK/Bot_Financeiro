@@ -16,6 +16,7 @@ import { Bloco, tituloWidget } from "./base";
 import { BlocoContexto } from "./blocoContexto";
 import { mesAbrev, mesCurto, nomeMes } from "./catalogo";
 import { tituloPeriodo } from "./cardPeriodo";
+import { TITULO_LANCAMENTOS } from "./cardLancamentos";
 import { tituloFimDoMes, tituloMaiores } from "./cardMaiores";
 import { raio, texto as escalas } from "@/ui/tokens";
 import { TextoPainel as Texto } from "./tipografia";
@@ -93,6 +94,7 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
   if (card === "maiores_gastos") return tituloMaiores(aba.recursos.maiores_gastos);
   if (card === "fim_do_mes") return tituloFimDoMes(aba.recursos.fim_do_mes);
+  if (card === "ultimos_lancamentos" || card === "sem_categoria") return TITULO_LANCAMENTOS[card];
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
 /** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tudo acontece dentro do card, no chat: não há folha nem toque que abra outra tela. */

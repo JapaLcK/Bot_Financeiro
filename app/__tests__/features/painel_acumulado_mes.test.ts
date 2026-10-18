@@ -1,4 +1,4 @@
-import { pontosAcumulados, ritmoDoMes, textoPct, variacao } from "@/features/painel/acumuladoMes";
+import { entrouSaiuAcumulados, pontosAcumulados, ritmoDoMes, textoPct, variacao } from "@/features/painel/acumuladoMes";
 
 type R = Parameters<typeof pontosAcumulados>[0];
 type M = Parameters<typeof pontosAcumulados>[1];
@@ -220,4 +220,49 @@ describe("variacao e textoPct", () => {
   it.each([[-0.04, "0,0%"], [-32.44, "-32,4%"], [-32.46, "-32,5%"], [100, "+100,0%"], [0.05, "+0,1%"]])("textoPct(%f) = %s", (n, t) => {
     expect(textoPct(n)).toBe(t);
   });
+});
+
+describe("entrouSaiuAcumulados (as duas linhas do topo de Gastos)", () => {
+  const d2 = (dia: string, entrou: number, saiu: number) => ({ dia, entrou, saiu });
+  const soma = (dias: ReturnType<typeof d2>[], k: "entrou" | "saiu") => dias.reduce((t, x) => t + x[k], 0);
+  // `resumo` e `detalhes` fecham com a soma dos dias (o caso coerente); `o` quebra uma regra de cada vez.
+  const roda2 = (mes: string, dias: ReturnType<typeof d2>[], hoje: string, o: { resumo?: Record<string, unknown>; detalhe?: Record<string, unknown> } = {}) => {
+    const tot = { entrou: soma(dias, "entrou"), saiu: soma(dias, "saiu") };
+    return entrouSaiuAcumulados({ mes, ...tot, motivos: [], ...o.resumo } as unknown as R, { mes, ...tot, dias, motivos: [], ...o.detalhe } as unknown as M, hoje);
+  };
+  it("mês corrente: acumula Entrou e Saiu por dia até o fim do mês e a ponta bate com o total, incluindo a saída AGENDADA depois de hoje (degrau)", () => {
+    const r = roda2("2026-10", [d2("2026-10-01", 720000, 90000), d2("2026-10-03", 0, 24000), d2("2026-10-20", 5000, 7000)], "2026-10-05")!;
+    expect(r.diasNoMes).toBe(31); expect(r.saiu).toHaveLength(20); // até o último dia com lançamento (20), não até hoje (5) nem o dia 31
+    expect(r.saiu[4]).toBe(114000); expect(r.saiu[18]).toBe(114000); expect(r.saiu[19]).toBe(121000); // degrau no dia 20
+    expect(r.saiu.at(-1)).toBe(121000); expect(r.entrou.at(-1)).toBe(725000);
+  });
+  it("sem lançamento depois de hoje, a linha para em hoje (não inventa rabo reto)", () => {
+    const r = roda2("2026-10", [d2("2026-10-01", 100, 50), d2("2026-10-02", 0, 10)], "2026-10-04")!;
+    expect(r.saiu).toEqual([50, 60, 60, 60]); expect(r.entrou).toEqual([100, 100, 100, 100]);
+  });
+  it("mês passado: vai até o último dia do mês e as pontas são o total", () => {
+    const r = roda2("2026-09", [d2("2026-09-02", 100, 50), d2("2026-09-30", 200, 70)], "2026-10-15")!;
+    expect(r.saiu).toHaveLength(30); expect(r.entrou.at(-1)).toBe(300); expect(r.saiu.at(-1)).toBe(120);
+  });
+  it("dia ANTES do mês (fatura de cartão do mês anterior) entra no dia 1: a ponta bate com o total do card", () => {
+    const r = roda2("2026-10", [d2("2026-09-28", 0, 5000), d2("2026-10-02", 0, 200)], "2026-10-03")!;
+    expect(r.saiu).toEqual([5000, 5200, 5200]);
+  });
+  it("tolera 1 centavo de diferença entre a ponta e o resumo; 2 centavos já escondem", () => {
+    const dias = [d2("2026-10-01", 100, 50), d2("2026-10-03", 0, 10)];
+    expect(roda2("2026-10", dias, "2026-10-04", { resumo: { saiu: 61 }, detalhe: { saiu: 61 } })).not.toBeNull();
+    expect(roda2("2026-10", dias, "2026-10-04", { resumo: { saiu: 62 }, detalhe: { saiu: 62 } })).toBeNull();
+  });
+  it.each([
+    ["resumo.saiu 99999 contra detalhes 15000 (corrida/outra moeda)", () => roda2("2026-10", [d2("2026-10-02", 0, 15000), d2("2026-10-03", 5, 0)], "2026-10-05", { resumo: { saiu: 99999 } })],
+    ["resumo.entrou diferente do detalhes", () => roda2("2026-10", [d2("2026-10-02", 700, 15000), d2("2026-10-03", 5, 0)], "2026-10-05", { resumo: { entrou: 10 } })],
+    ["a ponta calculada não fecha com o resumo (detalhes.saiu mentiu)", () => roda2("2026-10", [d2("2026-10-02", 0, 15000), d2("2026-10-03", 5, 0)], "2026-10-05", { resumo: { saiu: 20000 }, detalhe: { saiu: 20000 } })],
+    ["detalhe de outro mês", () => entrouSaiuAcumulados({ mes: "2026-10", entrou: 2, saiu: 2, motivos: [] } as unknown as R, { mes: "2026-09", entrou: 2, saiu: 2, dias: [d2("2026-09-02", 1, 1), d2("2026-09-03", 1, 1)], motivos: [] } as unknown as M, "2026-10-05")],
+    ["inicio_do_historico dentro do mês", () => roda2("2026-10", [d2("2026-10-02", 1, 1), d2("2026-10-03", 1, 1)], "2026-10-05", { detalhe: { motivos: ["inicio_do_historico"] } })],
+    ["tudo zero", () => roda2("2026-10", [d2("2026-10-02", 0, 0)], "2026-10-05")],
+    ["sem dias", () => roda2("2026-10", [], "2026-10-05")],
+    ["dia 1 do mês corrente sem lançamento depois (um ponto só)", () => roda2("2026-10", [d2("2026-10-01", 1, 1)], "2026-10-01")],
+    ["mês futuro", () => roda2("2026-12", [d2("2026-12-02", 1, 1)], "2026-10-05")],
+    ["data inválida", () => roda2("2026-10", [d2("hoje", 1, 1)], "2026-10-05")],
+  ])("vazio (null, sem erro): %s", (_n, f) => { expect(f()).toBeNull(); });
 });

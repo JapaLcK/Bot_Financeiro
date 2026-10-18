@@ -1,18 +1,19 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ErroApi, contaQuery } from "../lib/v2";
-import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, type Falha } from "./api";
+import { DETALHES, enviarLinkSenha, falhaDe, mfaStatusQuery, temSenhaQuery, uidValido, type Falha } from "./api";
 import { MfaForm, type ModoMfa } from "./MfaForm";
+import { Sessoes } from "./Sessoes";
 import { SemSenha } from "./SemSenha";
 
 const vazio = (palavra: string) => <><span aria-hidden="true">—</span><span className="sr-only">{palavra}</span></>;
 
-// Segurança da conta (dentro de /conta/configuracoes): a senha (o link por e-mail, igual à /settings) e o MFA. Só rotas antigas
+// Segurança da conta (dentro de /conta/configuracoes): a senha (o link por e-mail, igual à /settings), o MFA e os dispositivos conectados (Sessoes.tsx). Só rotas antigas
 // (/settings/{uid}/password-reset, /auth/mfa/*); o `uid` vem só do /auth/dashboard-profile. Cada dado é um ícone e o valor;
 // a palavra só existe para o leitor de tela (como o Perfil).
 export function ContaSeguranca() {
   const uid = useQuery(contaQuery).data?.user_id;
-  const uidOk = typeof uid === "number" && Number.isInteger(uid) && uid > 0; // 0, -3, 1.5 viram /settings/0/password-reset
+  const uidOk = uidValido(uid); // 0, -3, 1.5 viram /settings/0/password-reset
   const mfa = useQuery(mfaStatusQuery);
   // Só `false` (conta só-Google) abre o diálogo "defina uma senha"; carregando ou falhou, o formulário abre e o 409 do servidor decide.
   const temSenha = useQuery(temSenhaQuery(true)).data?.temSenha;
@@ -81,6 +82,7 @@ export function ContaSeguranca() {
         </dl>
         <p role="status" className="sr-only">{aviso}</p>
       </section>
+      {uidOk && <Sessoes uid={uid} />}
       {aberto === "sem-senha" && <SemSenha fechar={() => setAberto(null)} definir={() => botaoSenha.current?.focus()} />}
       {aberto && aberto !== "sem-senha" && !sessao && <MfaForm modo={aberto} fechar={() => setAberto(null)} salvou={setAviso} />}
     </>

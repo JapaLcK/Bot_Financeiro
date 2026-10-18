@@ -50,6 +50,7 @@ def test_emite_o_bloco_com_a_forma_da_fixture_do_app(monkeypatch, uid):
     assert fix["card"] == bloco["card"] == "comparacao" and bloco["abas"][0]["mes"] is None
     rec = bloco["abas"][0]["recursos"]["comparacao"]
     _conforme(rec, fix["abas"][0]["recursos"]["comparacao"], "comparacao")
+    assert rec["serie"]["atual"][-1] == rec["despesa"]["total_atual"] and rec["serie"]["anterior"][-1] == rec["despesa"]["total_anterior"]
     assert "escolha" not in rec and "nota" not in rec  # são do modelo, não da tela
     assert len(rec["categorias"]) == 6  # o bloco leva todas (até 10); só a visão do modelo corta
 
@@ -58,10 +59,10 @@ def test_o_modelo_recebe_a_visao_com_uma_categoria_e_o_escolha(monkeypatch, uid)
     _, (bloco,), _ = _turno(monkeypatch, uid, COMPARA)
     (visao,) = _tool_msgs(uid)
     rec = bloco["abas"][0]["recursos"]["comparacao"]
-    assert visao["card_na_tela"] is True and visao["categorias"] == rec["categorias"][:1]
+    assert visao["card_na_tela"] is True and visao["categorias"] == rec["categorias"][:1] and "serie" not in visao  # o modelo não vê a série
     assert visao["categorias"][0]["categoria"] == "Alimentação" and "Outubro até agora" in visao["escolha"]
     assert {k: v for k, v in visao.items() if k not in ("card_na_tela", "escolha", "nota", "categorias", "categorias_total")} == {
-        k: v for k, v in rec.items() if k not in ("categorias", "categorias_omitidas")}
+        k: v for k, v in rec.items() if k not in ("categorias", "categorias_omitidas", "serie")}
 
 
 def test_a_visao_diz_quantas_categorias_ha_e_nao_repassa_o_omitidas_do_bloco(monkeypatch, uid):
