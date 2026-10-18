@@ -127,6 +127,16 @@ def test_campos_do_card_periodo_no_adendo_sao_do_modelo():
     assert set(NOME.findall(linha.replace("`saldo`", "`amount`"))) - NOMES_DE_TOOL - campos == {"amount"}  # negativo
 
 
+def test_textos_da_comparacao_dizem_mes_inteiro_e_o_card_na_tela():
+    """O que o modelo lê sobre `compare_periods` (onda 2): mês corrente INTEIRO (não "os mesmos dias") e o card sozinho."""
+    mostram = next(l for l in ADENDO_CARDS.splitlines() if "mostram o card sozinhas" in l)
+    assert "`compare_periods`" in mostram and "`card_na_tela: true`" in mostram
+    linha = next(l for l in SYSTEM_PROMPT.splitlines() if "compara o mês corrente inteiro" in l)
+    assert "mesmos dias" not in linha
+    desc = next(s["function"]["description"] for s in SCHEMAS if s["function"]["name"] == "compare_periods")
+    assert "mês inteiro" in desc and "mesmos dias" not in desc
+
+
 def test_error_msg_tem_uma_fonte_so():
     assert runner.ERROR_MSG is system_prompt.ERROR_MSG
     assert SYSTEM_PROMPT.count(system_prompt.ERROR_MSG) == 1

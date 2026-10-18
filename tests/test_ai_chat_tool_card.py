@@ -282,12 +282,12 @@ def test_numeros_do_fim_do_mes_sustentam_a_resposta(monkeypatch, uid):
 
 # ── 10. auditoria tool x card: tool de leitura nova sem classificação deixa isto vermelho ────────
 
-DA_TOOL_DE = {"get_largest_expenses": "maiores_gastos", "forecast_month_end": "fim_do_mes"}
+DA_TOOL_DE = {"get_largest_expenses": "maiores_gastos", "forecast_month_end": "fim_do_mes", "compare_periods": "comparacao"}
 R = "recusa→card"
 AUDITORIA = {
-    "get_largest_expenses": "da_tool", "forecast_month_end": "da_tool",
-    # o app só tem o card de meses inteiros: período livre e mês corrente x passado seguem em texto (onda 2)
-    "get_period_summary": R, "get_top_categories": R, "get_category_spend": R, "compare_periods": R,
+    "get_largest_expenses": "da_tool", "forecast_month_end": "da_tool", "compare_periods": "da_tool",
+    # o app só tem o card de meses inteiros: o período livre segue em texto (onda 2)
+    "get_period_summary": R, "get_top_categories": R, "get_category_spend": R,
     "get_open_bill": R, "list_pockets": "prompt→card",
     "forecast_balance": R, "forecast_next_bill": R, "get_balance": R, "get_card_limit_usage": R,
     "get_spending_trend": R, "get_total_debt": R, "list_installments": R, "list_metas": R,

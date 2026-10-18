@@ -5,7 +5,7 @@ Cada leitor chama a MESMA função que o endpoint do widget chama (as de `api/v2
 `compute_evolution`...), sempre com `uid` explícito, nunca vindo dos args do modelo.
 O bloco é o JSON do endpoint; a visão do modelo sai do MESMO objeto, só com número
 como número (o `ai_guard` não reconhece texto como evidência). Nos cards de gasto (`periodo`, `categorias`,
-`renda`, `calendario`) a visão é um RESUMO (`_RESUMOS`): a tabela está na tela, e o modelo que a vê inteira a copia. O envelope
+`renda`, `calendario`) a visão é um RESUMO (`cards_resumos._RESUMOS`): a tabela está na tela, e o modelo que a vê inteira a copia. O envelope
 `{"ok": True, ...}` das 5 rotas legadas existe aqui e na rota: o teste de paridade
 (`test_ai_chat_cards.py`) é quem os mantém iguais.
 """
@@ -20,18 +20,16 @@ from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
-from db.connection import CAT_VAZIA_LABEL, cat_key
-from utils_text import normalize_text
-
 from . import streaming
 from ._context import CARDS_DO_APP, CARDS_DO_TURNO, FALHAS_DE_CARD_DO_TURNO, metas_do_turno
+from .cards_resumos import _RESUMOS
 
 logger = logging.getLogger(__name__)
 
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
        "renda", "piggy", "periodo")
-DA_TOOL = ("maiores_gastos", "fim_do_mes")  # a PRÓPRIA tool os emite (`mostrar_da_tool`): fora de `IDS`, senão entram no enum do `show_card`
+DA_TOOL = ("maiores_gastos", "fim_do_mes", "comparacao")  # a PRÓPRIA tool os emite (`mostrar_da_tool`): fora de `IDS`, senão entram no enum do `show_card`
 MAX_MESES = 3
 MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
 MAX_POR_TURNO = 3
@@ -132,63 +130,6 @@ def _so(rec: str, *chaves: str):
 
 def _mes(uid: int, a: dict, **recursos: Callable) -> list[tuple[str | None, dict]]:
     return [(None, {n: f(mes=m, uid=uid) for n, f in recursos.items()}) for m in a["meses"] or [None]]
-
-
-def _dec(x) -> Decimal:
-    return Decimal(str(x))  # o float da visão vem do texto do bloco (`_casa`): o `str` dele volta o mesmo texto
-
-
-def _extremos(linhas) -> dict:
-    """`maior_mes`/`menor_mes` por `saiu` entre as (mês, entrou, saiu) COM movimento (o `compute_evolution` preenche
-    com zero, como na `tendencia`); None se nenhuma."""
-    com = [l for l in linhas if l[1] or l[2]]
-    um = lambda l: l and {"mes": l[0], "saiu": l[2]}  # noqa: E731
-    return {"maior_mes": um(max(com, key=lambda l: l[2], default=None)),
-            "menor_mes": um(min(com, key=lambda l: l[2], default=None))}
-
-
-def _top3(v: dict, categoria: str | None) -> dict:
-    """As 3 maiores categorias (o `montar` as corta para 1 por aba ao comparar meses), o total delas e, se o usuário
-    citou uma, o valor dela (`categoria_pedida`). Casa pela MESMA chave do `get_category_spend` (`cat_key`: caixa e
-    acento, vazio = `CAT_VAZIA_LABEL`); sem ela, pelo
-    `normalize_text` (pontuação fora: "e commerce" = "e-commerce") só se der um candidato único. Achou:
-    `{categoria, valor}`; não (ou ambíguo): `encontrada: False`, sem número."""
-    cats = v["categorias"]  # o leitor já as ordena por valor, da maior (`db/mes_detalhes.py`)
-    out = {**v, "categorias": cats[:3], "categorias_total": len(cats)}
-    if categoria:
-        achadas = [c for c in cats if cat_key(c["categoria"]) == cat_key(categoria)]
-        if not achadas and (n := normalize_text(categoria)):  # só texto (emoji e símbolo viram "" e não casam)
-            achadas = [c for c in cats if normalize_text(c["categoria"]) == n]
-        achada = achadas[0] if len(achadas) == 1 else None
-        out["categoria_pedida"] = ({"categoria": achada["categoria"] or CAT_VAZIA_LABEL, "valor": achada["valor"]}
-                                   if achada else {"categoria": categoria, "encontrada": False})
-    return out
-
-
-def _resumo_periodo(v: dict, categoria: str | None) -> dict:
-    out = _top3({k: x for k, x in v.items() if k != "meses"}, categoria)
-    return out | _extremos([(m["mes"], m["entrou"], m["saiu"]) for m in v["meses"]])
-
-
-def _resumo_categorias(v: dict, categoria: str | None) -> dict:
-    return _top3(v, categoria) | {"saldo": float(_dec(v["entrou"]) - _dec(v["saiu"]))}
-
-
-def _resumo_renda(v: dict, categoria: str | None) -> dict:
-    ev = v["evolution"]
-    entrou, saiu = (sum((_dec(m[k]) for m in ev), Decimal(0)) for k in ("income", "expense"))
-    return {"months": v["months"], "tendencia": v["tendencia"], "entrou": float(entrou), "saiu": float(saiu),
-            "saldo": float(entrou - saiu)} | _extremos([(m["month"], m["income"], m["expense"]) for m in ev])
-
-
-def _resumo_calendario(v: dict, categoria: str | None) -> dict:
-    com_gasto = [d for d in v["dias"] if d["saiu"] > 0]
-    maior = max(com_gasto, key=lambda d: d["saiu"], default=None)
-    return {**{k: x for k, x in v.items() if k != "dias"}, "maior_dia": maior and {"dia": maior["dia"], "saiu": maior["saiu"]}}
-
-
-_RESUMOS = {"periodo": _resumo_periodo, "categorias": _resumo_categorias, "renda": _resumo_renda,
-            "calendario": _resumo_calendario}
 
 
 @cache
