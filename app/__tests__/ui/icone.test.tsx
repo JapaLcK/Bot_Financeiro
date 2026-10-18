@@ -76,6 +76,8 @@ describe("Icone - exports reais do pacote (sem passar pelo stub)", () => {
     ["PauseCircle", "PauseCircleIcon"],
     ["Trash", "TrashIcon"],
     ["Question", "QuestionIcon"],
+    ["Phone", "PhoneIcon"],
+    ["WhatsappLogo", "WhatsappLogoIcon"],
   ] as const)("o módulo real de %s exporta %s (nomeado, existe de fato no pacote)", (arquivo, nomeado) => {
     const caminho = `${__dirname}/../../node_modules/phosphor-react-native/src/icons/${arquivo}`;
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- mesmo motivo do Icone.tsx: caminho estático, fora do grafo do tsc.
