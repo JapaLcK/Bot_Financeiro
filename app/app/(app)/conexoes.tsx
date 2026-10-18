@@ -58,6 +58,14 @@ export default function Conexoes() {
     try { router.push(itemId ? { pathname: "/autorizando", params: { itemId } } : "/autorizando"); }
     catch { entradaEmVoo.current = false; setEntrando(false); setErro("Não conseguimos abrir a autorização. Tente de novo."); }
   };
+  // "há N min" dos cartões: UM relógio para a tela toda, só em primeiro plano; ao voltar, acerta na hora.
+  const [agora, setAgora] = useState(Date.now);
+  useEffect(() => {
+    if (!ativo) return;
+    setAgora(Date.now());
+    const t = setInterval(() => setAgora(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, [ativo]);
   const montado = useRef(true);
   useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
   useFocusEffect(useCallback(() => {
@@ -117,7 +125,7 @@ export default function Conexoes() {
     {erro && !(dados && dados.lista.length > 0) && <Button rotulo="Conferir de novo" variante="secondary" onPress={() => setRodada((v) => v + 1)} />}
     {dados?.lista.length === 0 && <SemBancos desativado={entrando || !dados.podeAdicionar} aoConectar={() => abrirAutorizacao()} />}
     {dados && dados.lista.length > 0 && <ResumoBancos numeros={!!dados.numeros} total={dados.numeros?.total ?? null} partes={partes} panorama={panorama(dados.lista)} vagas={{ max: dados.max, emUso: dados.emUso }} oculto={oculto} aoConferir={() => setRodada((v) => v + 1)} />}
-    {dados && itens.map(({ conexao: c, banco }, i) => <BancoCard key={c.id} item={{ conexao: c, banco }} numeros={!!dados.numeros} oculto={oculto} indice={i}
+    {dados && itens.map(({ conexao: c, banco }, i) => <BancoCard key={c.id} item={{ conexao: c, banco }} numeros={!!dados.numeros} oculto={oculto} indice={i} agora={agora}
       aberto={abertos[c.id] ?? false} alternar={() => setAbertos((v) => ({ ...v, [c.id]: !v[c.id] }))} podeReconectar={dados.permiteReconectar} entrando={entrando} removendoId={removendo}
       aoAcompanhar={() => navegar({ pathname: "/open-finance-volta", params: { itemId: c.provider_item_id!, modo: "acompanhar" } })}
       aoReconectar={() => abrirAutorizacao(c.provider_item_id!)} aoDesconectar={() => pedirRemocao(c)} />)}

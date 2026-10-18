@@ -8,7 +8,7 @@ import { guardarCredenciais } from "@/storage/secure";
 import contrato from "../../../tests/fixtures/app_bancos.json";
 import { chamadas, fetchFalso, prepararCaso, resposta, rotear, S, type Rota } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
-import { abrirBancos, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBancos, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 // O SVG do logo vem do CDN: aqui a rede é o `fetchFalso` (rota por caminho) e o `react-native-svg` é o real.
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>';
@@ -193,6 +193,42 @@ it("a hora da última sincronização é tempo relativo, medido no relógio de a
   jest.spyOn(Date, "now").mockReturnValue(Date.parse("2026-10-05T12:12:30Z"));
   renderRouter("./app", { initialUrl: "/conexoes" });
   await waitFor(() => expect(screen.getByText("há 12 min")).toBeTruthy());
+});
+
+describe("o 'há N min' acompanha o relógio com a tela aberta (um intervalo de 1 min para a tela toda)", () => {
+  const SYNC = Date.parse("2026-10-05T12:00:00Z");
+  const subir = async (aposRelogio: () => void = () => {}) => {
+    jest.useFakeTimers({ now: SYNC + 30_000 });
+    aposRelogio();
+    servidor([banco(11, "Nubank", { last_sync_at: "2026-10-05T12:00:00Z" })]);
+    renderRouter("./app", { initialUrl: "/conexoes" });
+    await waitFor(() => expect(screen.getByText("agora")).toBeTruthy());
+  };
+  const passar = (ms: number) => act(async () => { jest.advanceTimersByTime(ms); await drenar(); });
+  afterEach(() => jest.useRealTimers());
+
+  it("30 s depois da sincronização é 'agora'; 5 min adiante, sem tocar em nada, 'há 5 min'", async () => {
+    await subir();
+    await passar(5 * 60_000);
+    expect(screen.getByText("há 5 min")).toBeTruthy();
+    expect(screen.queryByText("agora")).toBeNull();
+  });
+  it("em segundo plano o intervalo não corre; ao voltar o relógio acerta na hora", async () => {
+    await subir();
+    await appVai("background");
+    jest.setSystemTime(SYNC + 10 * 60_000);
+    await passar(5 * 60_000);
+    expect(screen.getByText("agora")).toBeTruthy(); // parado: nenhum tique rodou
+    await appVai("active");
+    expect(screen.getByText("há 15 min")).toBeTruthy();
+  });
+  it("desmontar limpa o intervalo: 5 min depois ninguém mais lê o relógio", async () => {
+    await subir();
+    screen.unmount();
+    const relogio = jest.spyOn(Date, "now");
+    await passar(5 * 60_000);
+    expect(relogio).not.toHaveBeenCalled();
+  });
 });
 
 it("alvo de toque de 44 pt ou mais: cabeçalho do cartão, 'Conferir de novo', 'Conectar outro banco' e os botões", async () => {

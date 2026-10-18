@@ -7,7 +7,7 @@ jest.mock("@/ui/componentes/Icone", () => ({ Icone: (p: { nome: string }) => jes
 
 const conexao = (estado: string, detail: string | null) => ({ id: 11, status: "ACTIVE", status_reason: null, last_sync_at: null, reconnected_at: null, provider_item_id: "item_11", institution_name: "Nubank", logo_url: null, ui: { state: estado, label: estado, detail } });
 const lido = (motivos: string[]) => ({ conexao_id: 11, saldo_conta: 100, investido: 200, total: 300, contas: 1, cartoes: 0, investimentos: 1, motivos });
-const desenhar = (item: Item, oculto = false) => renderInterativo(<BancoCard item={item} numeros oculto={oculto} aberto={false} alternar={() => {}} indice={0} podeReconectar entrando={false} removendoId={null} aoAcompanhar={() => {}} aoReconectar={() => {}} aoDesconectar={() => {}} />);
+const desenhar = (item: Item, oculto = false, agora?: number) => renderInterativo(<BancoCard agora={agora} item={item} numeros oculto={oculto} aberto={false} alternar={() => {}} indice={0} podeReconectar entrando={false} removendoId={null} aoAcompanhar={() => {}} aoReconectar={() => {}} aoDesconectar={() => {}} />);
 const avisos = (t: ReturnType<typeof desenhar>) => t.queryAllByTestId("icone-WarningCircle").length;
 
 describe("aviso 'conferir' no total do banco", () => {
@@ -34,6 +34,14 @@ describe("nome acessível do cartão fala o aviso que o ícone mostra", () => {
   });
   it("com valores ocultos o rótulo continua sem número (e sem aviso, que o ícone também esconde)", () => {
     expect(nome(desenhar({ conexao: conexao("updated", null), banco: lido(["conexao_pausada"]) }, true))).not.toMatch(/\d|conferir/);
+  });
+});
+
+describe("há quanto tempo sincronizou", () => {
+  it("usa o `agora` que a tela passa (não o relógio do render)", () => {
+    const sync = "2026-10-05T12:00:00Z";
+    const item = { conexao: { ...conexao("updated", null), last_sync_at: sync }, banco: lido([]) };
+    expect(desenhar(item, false, Date.parse(sync) + 5 * 60_000).getByText("há 5 min")).toBeTruthy();
   });
 });
 

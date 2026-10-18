@@ -25,6 +25,8 @@ interface Props {
   alternar: () => void;
   /** Posição na lista: escolhe a tinta quando o banco não tem cor própria. */
   indice: number;
+  /** O "agora" da tela (ela o atualiza a cada minuto); sem ele, o relógio do render. */
+  agora?: number;
   podeReconectar: boolean;
   /** Outra tela já está abrindo (entrada reservada): nenhuma ação nova. */
   entrando: boolean;
@@ -74,7 +76,7 @@ function falado(item: Item, numeros: boolean, oculto: boolean, aConferir: boolea
  * "banco, estado, total, a conferir (quando o ícone de aviso aparece)". O rodapé (hora e seta) é um segundo alvo de toque para o MESMO gesto, sem papel de botão: o leitor de tela lê a hora e usa o cabeçalho para abrir. O botão que a situação pede (`Reconectar` quando o banco
  * pede ação, `Acompanhar sincronização` enquanto atualiza) fica FORA do que abre: é a razão de o usuário olhar o cartão.
  */
-export function BancoCard({ item, numeros, oculto, aberto, alternar, indice, podeReconectar, entrando, removendoId, aoAcompanhar, aoReconectar, aoDesconectar }: Props) {
+export function BancoCard({ item, numeros, oculto, aberto, alternar, indice, agora, podeReconectar, entrando, removendoId, aoAcompanhar, aoReconectar, aoDesconectar }: Props) {
   const { cores } = useTema();
   const { conexao: c, banco: b } = item;
   const removendo = removendoId === c.id;
@@ -123,7 +125,7 @@ export function BancoCard({ item, numeros, oculto, aberto, alternar, indice, pod
         <Pressable onPress={alternar} accessible={false} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44, borderTopWidth: 1, borderTopColor: cores.border }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: espaco.xs }}>
             <Icone nome="ClockCounterClockwise" tamanho={16} tom="inkFaint" />
-            <Texto variante="legenda" tom="inkFaint">{c.last_sync_at ? tempoRelativo(c.last_sync_at) : "Ainda não sincronizou"}</Texto>
+            <Texto variante="legenda" tom="inkFaint">{c.last_sync_at ? tempoRelativo(c.last_sync_at, agora) : "Ainda não sincronizou"}</Texto>
           </View>
           <View style={{ transform: [{ rotate: aberto ? "180deg" : "0deg" }] }}><Icone nome="CaretDown" tamanho={16} tom="inkFaint" /></View>
         </Pressable>
