@@ -502,3 +502,36 @@ test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o to
   assert.ok(!r.corpo.includes("67.000,00"), r.corpo);
   assert.equal(r.card, "…");
 });
+
+test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfil e snapshot da conta antiga ainda no ar; o total da conta nova nunca sai sob a lista antiga", async () => {
+  let uid = 7, presos = 0, solta;
+  const preso = new Promise((ok) => { solta = ok; });
+  const novo = { total: "9999.00", motivos: [], bancos: [{ conexao_id: 21, saldo_conta: "9999.00", investido: null, total: "9999.00", contas: 1, cartoes: 0, investimentos: 0, motivos: [] }] };
+  const s = servidorBancos({ bancos: "padrao" });
+  const { ctx, page } = await abrir({
+    guia: "concluido", rota: "/conta/bancos",
+    antes: async (c) => {
+      await s.antes(c);
+      // A 1ª leitura do perfil depois da troca (a do foco) e o snapshot antigo ficam presos; a sessão já é da conta 8.
+      await c.route((u) => u.pathname === "/auth/dashboard-profile", async (r) => {
+        if (uid === 8 && presos++ === 0) await preso;
+        return r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: uid, whatsapp_linked: false } }).catch(() => {});
+      });
+      await c.route((u) => u.pathname === "/open-finance/7", async (r) => { if (uid === 8) await preso; return r.fulfill({ json: { ok: true, connections: PADRAO() } }).catch(() => {}); });
+      await c.route((u) => u.pathname === "/api/v2/bancos", async (r) => {
+        if (uid === 8) await new Promise((ok) => setTimeout(ok, 300)); // depois da leitura do perfil do foco
+        return r.fulfill({ json: uid === 8 ? novo : RESPOSTAS.bancos.padrao }).catch(() => {});
+      });
+    },
+  });
+  await esperaCards(page, 3);
+  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  uid = 8;
+  await refoco(page);
+  await page.waitForTimeout(1500);
+  const r = { corpo: await corpo(page), cards: await page.locator(".banco-card").count() };
+  solta();
+  await ctx.close();
+  assert.equal(r.cards, 3); // a lista antiga segue (as releituras dela estão presas)
+  assert.ok(!r.corpo.includes("9.999,00"), r.corpo);
+});
