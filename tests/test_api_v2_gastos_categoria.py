@@ -71,8 +71,8 @@ def test_total_e_serie_do_mes_sao_o_valor_da_mesma_chave_em_ler_mes():
     for c in mes["categorias"]:
         d = _cat(a, c["chave"])
         assert d["total"] == c["valor"] == d["serie"][2]["valor"] and d["compras"] == c["quantidade"]
-        assert {k: d["categoria"][k] for k in ("chave", "nome", "emoji", "cor")} == {
-            k: c[k] for k in ("chave", "nome", "emoji", "cor")}
+        assert {k: d["categoria"][k] for k in ("chave", "nome", "emoji", "icone", "cor")} == {
+            k: c[k] for k in ("chave", "nome", "emoji", "icone", "cor")}
         assert sum(x["total"] for x in d["dias"]) + d["fora_da_grade"]["valor"] == d["total"]
         assert all(m["categoria"] == c["chave"] for x in d["dias"] for m in x["maiores"])
         assert sum(e["valor"] for e in d["estabelecimentos"]) <= d["total"]

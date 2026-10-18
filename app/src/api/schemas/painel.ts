@@ -75,7 +75,7 @@ const dinheiroBruto = z.string().transform((v, ctx) => { try { return { centavos
 export const gastosSchema = z.object({
   hoje: z.string(), disponivel: z.boolean(), historico_desde: texto,
   dias: z.array(z.object({ dia: z.string(), total: dinheiroBruto, quantidade: z.number().int(), maiores: z.array(z.object({ descricao: z.string(), valor: dinheiro, categoria: z.string() })), categorias: z.array(z.object({ chave: z.string(), valor: dinheiroBruto })) })),
-  categorias: z.array(z.object({ chave: z.string(), nome: z.string(), emoji: z.string() })),
+  categorias: z.array(z.object({ chave: z.string(), nome: z.string(), emoji: z.string(), icone: z.string().catch("tag") })),
   motivos,
 });
 export type Gastos = z.output<typeof gastosSchema>;

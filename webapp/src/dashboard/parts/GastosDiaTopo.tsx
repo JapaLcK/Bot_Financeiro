@@ -1,9 +1,11 @@
 // O topo do card "Seu dia" de /gastos: setas de dia, o total em destaque com a pílula contra a média, os fatos e a barra por
 // categoria. Tudo vem do dia que o servidor mandou (`quantidade`, `maiores`, `categorias`); a única conta daqui é a comparação
 // com a média do calendário (lib/gastos-dia.ts).
+import type { ReactNode } from "react";
 import { isoDay, longDate, money, moneyText } from "../lib/format.js";
 import type { GastoCategoria, Gastos, GastosDaCategoria } from "../lib/api-v2.gen";
 import { contraMedia, mediaDoPeriodo, vizinho } from "../lib/gastos-dia";
+import { IconeCategoria } from "./IconeCategoria";
 import { Selos } from "./Selos";
 
 const Seta = ({ k, nome, icone, ir }: { k: string | null; nome: string; icone: string; ir: (k: string) => void }) => (
@@ -28,15 +30,15 @@ export function GastosDiaTopo({ d, dia, catalogo, porCategoria, ir }: {
   const cmp = entrada && dia < d.hoje && Number(entrada.total) > 0 ? contraMedia(Number(entrada.total), media) : null;
   const meta = (chave: string) => {
     const c = catalogo.find((x) => x.chave === chave);
-    return { nome: c?.nome ?? chave, emoji: c?.emoji ?? "🏷️", cor: c?.cor ?? "var(--ink-3)" };
+    return { nome: c?.nome ?? chave, icone: c?.icone, cor: c?.cor ?? "var(--ink-3)" };
   };
   const fatias = (entrada?.categorias ?? []).filter((c) => Number(c.valor) > 0); // fatia ≤ 0 não desenha
   const maior = entrada?.maiores[0];
   const principal = porCategoria ? undefined : fatias[0];
-  const fatos: Array<[string, string]> = [];
+  const fatos: Array<[string, ReactNode]> = [];
   if (entrada && entrada.quantidade > 0) fatos.push(["Compras", String(entrada.quantidade)]);
   if (maior) fatos.push(["Maior compra", moneyText(maior.valor) ?? "—"]);
-  if (principal) fatos.push(["Mais em", `${meta(principal.chave).emoji} ${meta(principal.chave).nome}`]);
+  if (principal) fatos.push(["Mais em", <><IconeCategoria icone={meta(principal.chave).icone} /> {meta(principal.chave).nome}</>]);
 
   return (
     <>
@@ -73,7 +75,7 @@ export function GastosDiaTopo({ d, dia, catalogo, porCategoria, ir }: {
           </div>
           <ul className="legend comp-legend dia-legend">
             {fatias.map((f) => (
-              <li key={f.chave}><span className="key" style={{ background: meta(f.chave).cor, height: 8, width: 8, borderRadius: 2 }} /><span className="dia-leg-nome">{meta(f.chave).emoji} {meta(f.chave).nome} · <b className="num">{moneyText(f.valor)}</b></span></li>
+              <li key={f.chave}><span className="key" style={{ background: meta(f.chave).cor, height: 8, width: 8, borderRadius: 2 }} /><span className="dia-leg-nome"><IconeCategoria icone={meta(f.chave).icone} /> {meta(f.chave).nome} · <b className="num">{moneyText(f.valor)}</b></span></li>
             ))}
           </ul>
         </>

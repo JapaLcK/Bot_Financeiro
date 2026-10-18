@@ -267,8 +267,8 @@ def test_categorias_da_chave_e_nome_do_usuario(libera):
     q("insert into user_categories (user_id, name) values (%s, 'Viagem Só Minha') returning id", (a,))
     libera(a, b)
     de_a = pede(a, "/api/v2/categorias").json()["categorias"]
-    assert {"chave": "alimentacao", "nome": "alimentação", "emoji": "🍔", "cor": "#f59e0b"} in de_a
-    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha", "emoji": "🏷️", "cor": "#94A3B8"} in de_a  # o default da coluna sai neutro
+    assert {"chave": "alimentacao", "nome": "alimentação", "emoji": "🍔", "icone": "hamburger", "cor": "#f59e0b"} in de_a
+    assert {"chave": "viagem so minha", "nome": "Viagem Só Minha", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8"} in de_a  # o default da coluna sai neutro
     assert not any(c["nome"] == "Viagem Só Minha" for c in pede(b, "/api/v2/categorias").json()["categorias"])
 
 

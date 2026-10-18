@@ -410,18 +410,22 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   do estado e o que a IA ainda faz; o resumo da pergunta vem do banco (`_item` na pendência) e o "sim" relê: item
   sumido, fora do `pode` ou editado depois da pergunta não executa. Registro que o Extrato não lista (criar/apagar
   caixinha e investimento) é recusado com frase própria. `c<id>` nunca apaga.
-- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, icone, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
   /app. Só o catálogo: a categoria que só aparece nos lançamentos e a "sem categoria" não têm entrada aqui
   (o fallback neutro é do `/gastos`).
+  `icone` (também em `/gastos` e `/gastos/categoria`, campo aditivo) é o nome Phosphor derivado do `emoji` por
+  `icone_da_categoria` (`db/cat_icones.py`, o mesmo mapa do `EMOJI_TO_PH` do `dashboard.js`, comparado por
+  `tests/test_cat_icones.py`); emoji sem par cai em `tag`. O `emoji` segue no payload (app instalado não atualiza)
+  e o /painel e o app desenham o `icone`, nunca o emoji.
 - `GET /api/v2/gastos?mes=AAAA-MM` (`api/v2/gastos.py`, regra em `db/gastos.py`; também em `/api/app/gastos`,
   porque `criar_app` monta o mesmo router nos dois: rota nova não afeta o app instalado): "Para onde vai",
   a visão do mês, só leitura (plano em `docs/plano-etapa5-gastos.md`). `mes` como em `resumo-do-mes` (sem
   ele o corrente; futuro ou fora do formato = 422). Resposta: `mes`, `disponivel`, `hoje` (AAAA-MM-DD no
   fuso do app), `dia_de_corte`, `historico_desde` (o corte do plano, se cai depois do dia 1 do mês; senão
   `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
-  `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
+  `emoji`, `icone`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
   (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
   recente primeiro no empate, `{descricao, valor, categoria}`; `quantidade` = quantas saídas somam o `total` do dia
   e `categorias` = `[{chave, valor}]` do dia, Σ `valor` = `total`, em `(-valor, chave)`, das MESMAS linhas do `total`:
@@ -475,7 +479,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
   senão 422). A chave é o `cat_key_sql` do parâmetro (no banco, no mesmo snapshot): "Alimentação" casa com `alimentacao` e
-  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, cor}` pelo catálogo (o catálogo vence; senão
+  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, icone, cor}` pelo catálogo (o catálogo vence; senão
   neutro, nome = chave). Resposta: `mes`, `disponivel`, `hoje`, `historico_desde`, `total` e `compras` (as saídas da
   chave no mês pedido, as MESMAS linhas do `/gastos`; categoria sem gasto = `0`/`0`, nunca 404), `valor_medio`
   (`total ÷ compras` HALF_UP a centavos, `null` sem compras), `ultimas` (as 6 primeiras na ordem do `listar`, a mais

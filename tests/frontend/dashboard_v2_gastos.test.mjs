@@ -49,6 +49,25 @@ test("critério do dono: Saiu do Resumo, lede do bloco e soma das linhas são os
   assert.equal(urls.length, 1, urls.join()); // o Resumo pede uma vez: categorias e calendário dividem a consulta
 });
 
+test("ícone da categoria: o `icone` do servidor vira Phosphor na lista e no detalhe, sem emoji na tela; servidor velho (sem o campo) = `tag`", async () => {
+  const emoji = /\p{Extended_Pictographic}/u;
+  const { ctx, page, ir } = await abrir({ ...COM_DADO });
+  await ir("/gastos");
+  await page.locator("#w-categorias .cat").first().waitFor();
+  const ler = () => page.evaluate(() => ({ lista: [...document.querySelectorAll("#w-categorias .cat-name i")].map((i) => i.className),
+    detalhe: document.querySelector("#w-cat-detalhe .detail-title i")?.className, texto: document.querySelector("#w-categorias").textContent + document.querySelector("#w-cat-detalhe .detail-title").textContent }));
+  const novo = await ler();
+  assert.deepEqual([novo.lista, novo.detalhe, emoji.test(novo.texto)], [["ph ph-fork-knife", "ph ph-tag"], "ph ph-fork-knife", false]);
+  // `icone` que não é nome de ícone (espaço = 3 classes CSS) cai em `tag`; o vizinho válido segue (controle: sem a regex a 1ª sairia "ph ph-a b c").
+  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map((c, i) => ({ ...c, icone: i ? "shopping-cart" : "a b c" })) } }));
+  await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].map((i) => i.className).join("|") === "ph ph-tag|ph ph-shopping-cart");
+  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map(({ icone, ...c }) => c) } }));
+  await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].every((i) => i.className === "ph ph-tag"));
+  await ctx.close();
+});
+
 test("outra moeda: o aviso diz quantas saídas ficaram fora, o selo aparece e a lede (subtotal em reais) difere do Saiu", async () => {
   const { ctx, page, ir } = await abrir({ gastos: "outra_moeda", resumo: "centavos", espera: "#w-categorias .cats" });
   await ir("/");
@@ -82,7 +101,7 @@ test("escolher categoria pede o detalhe e o calendário dela (uma requisição);
   const { ctx, page, ir } = await abrir({ ...COM_DADO });
   await ctx.route((u) => u.pathname === "/api/v2/gastos/categoria", (r) => {
     const chave = new URL(r.request().url()).searchParams.get("categoria");
-    return r.fulfill({ json: { ...RESPOSTAS.gastos_categoria.padrao, categoria: { chave, nome: chave, emoji: "🏷️", cor: "#94A3B8" } } });
+    return r.fulfill({ json: { ...RESPOSTAS.gastos_categoria.padrao, categoria: { chave, nome: chave, emoji: "🏷️", icone: "tag", cor: "#94A3B8" } } });
   });
   const urls = pedidos(page, "/api/v2/gastos/categoria");
   await ir("/gastos");
@@ -96,7 +115,7 @@ test("escolher categoria pede o detalhe e o calendário dela (uma requisição);
   await page.locator("#w-cat-detalhe .detail-title", { hasText: "alimentacao" }).waitFor();
   await ctx.close();
   assert.match(antes, /alimentacao.*maior gasto do mês/);
-  assert.deepEqual(depois, ["🏷️sem categoria", "sem categoria", 1]);
+  assert.deepEqual(depois, ["sem categoria", "sem categoria", 1]);
   assert.deepEqual(urls, ["?mes=2026-10&categoria=alimentacao", "?mes=2026-10&categoria=sem+categoria", "?mes=2026-10&categoria=alimentacao"]);
 });
 

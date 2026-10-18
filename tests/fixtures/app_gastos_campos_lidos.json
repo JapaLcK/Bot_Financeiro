@@ -3,5 +3,5 @@
  "GastoDia": ["dia", "total", "quantidade", "maiores", "categorias"],
  "GastoMaior": ["descricao", "valor", "categoria"],
  "GastoDiaCategoria": ["chave", "valor"],
- "GastoCategoria": ["chave", "nome", "emoji"]
+ "GastoCategoria": ["chave", "nome", "emoji", "icone"]
 }
