@@ -425,8 +425,12 @@ def test_o_codigo_do_parcelamento_da_lista_e_o_que_as_escritas_leem(uid_pro):
     assert g["codigo"] == "PCAB12CD34" and "group_id" not in g, g  # o uuid cru não sai
     h, final = arma(uid_pro, "delete_launch", {"launch_id": g["codigo"]})
     assert final and "só de leitura" in final and "Não achei" not in final, final
-    # as formas de o modelo escrever o grupo: a lista, o uuid inteiro, os 8 hex com letra (o #N cobre o resto)
-    for bruto in (g["codigo"], "ab12cd34-0000-4000-8000-000000000001", "AB12CD34", "ab12cd34"):
+    # as formas de o modelo escrever o grupo: a lista (com PC, em qualquer caixa) e o uuid inteiro
+    for bruto in (g["codigo"], g["codigo"].lower(), "ab12cd34-0000-4000-8000-000000000001"):
         assert ia._achar(uid_pro, bruto) == ("c", tx0), bruto
+    # os 8 hex SEM `PC` não armam o grupo: colidem com `c<id>`/`CC<id>` (uma compra de outro grupo)
+    assert ia._achar(uid_pro, "ab12cd34") is None
+    _, final = arma(uid_pro, "delete_launch", {"launch_id": "ab12cd34"})
+    assert final and "Não achei" in final, final
     assert ia._achar(uid_pro, "12345678") is None  # só dígitos é o `#N`, que não existe
     assert ia._achar(usuario_pagante(), "ab12cd34-0000-4000-8000-000000000001") is None  # de outro usuário

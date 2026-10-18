@@ -44,9 +44,9 @@ _SUMIU = "🐷 Não achei mais esse lançamento (pode já ter sido apagado). Nad
 _ANTIGA = ("🐷 Essa confirmação é de antes de uma atualização minha e não executei nada. "
            "Me pede de novo?")
 _CC = re.compile(r"CC([0-9]{1,18})", re.IGNORECASE)
-# Parcelamento: `PC`+8 hex (o código do WhatsApp), o uuid inteiro, ou os 8 hex sem `PC` SE tiverem letra
-# (8 dígitos soltos são o `#N`, nunca o grupo).
-_PC = re.compile(r"PC[0-9A-F]{8}|(?=[0-9]*[A-F])[0-9A-F]{8}|[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}", re.IGNORECASE)
+# Parcelamento: `PC`+8 hex (o código que a lista entrega) ou o uuid inteiro. Os 8 hex SEM `PC` não valem:
+# `c1234567` colidiria com o id `c<id>` e `cc123456` com o `CC<id>` (a compra de outro grupo do usuário).
+_PC = re.compile(r"PC[0-9A-F]{8}|[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}", re.IGNORECASE)
 _SEQ = re.compile(r"[0-9]{1,9}")  # [0-9] e nunca \d: "١٢" não é o #N
 
 # Recusas de domínio do `delete_launch_and_rollback` (a frase do WhatsApp mora em

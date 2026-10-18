@@ -68,13 +68,24 @@ def test_delete_launch_parcelamento_manual_e_recusado_pelo_codigo_pc_e_pela_parc
     info = _parcelamento(user_id)
     pc_code = f"PC{info['group_id'].replace('-', '').upper()[:8]}"
 
-    sem_pc = pc_code[2:]  # os 8 hex sem `PC` valem se tiverem letra; só dígitos é o `#N` (não existe)
-    for bruto in (pc_code, pc_code.lower(), f"c{info['tx_ids'][1]}", *([sem_pc] if not sem_pc.isdigit() else [])):
+    for bruto in (pc_code, pc_code.lower(), f"c{info['tx_ids'][1]}"):
         err = validar_apagar(user_id, {"launch_id": bruto})
         assert err and "só de leitura" in err, (bruto, err)
     with db.get_conn() as conn, conn.cursor() as cur:
         cur.execute("select count(*) as n from credit_transactions where user_id = %s", (user_id,))
         assert cur.fetchone()["n"] == 3
+
+
+def test_delete_launch_8_hex_sem_pc_nao_arma_o_grupo(user_id):
+    # group_id fixo: o hex solto `c1234567`/`cc123456` colide com `c<id>`/`CC<id>`, então nunca vale
+    info = _parcelamento(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update credit_transactions set group_id = %s::uuid where user_id = %s and group_id = %s::uuid",
+                    ("ab12cd34-0000-4000-8000-000000000001", user_id, info["group_id"]))
+        conn.commit()
+    assert "só de leitura" in validar_apagar(user_id, {"launch_id": "PCAB12CD34"})
+    for bruto in ("ab12cd34", "AB12CD34"):
+        assert "Não achei" in validar_apagar(user_id, {"launch_id": bruto}), bruto
 
 
 def test_delete_launch_id_vazio(user_id):
