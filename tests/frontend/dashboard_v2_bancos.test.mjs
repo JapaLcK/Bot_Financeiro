@@ -503,7 +503,7 @@ test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o to
   assert.equal(r.card, "…");
 });
 
-test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfil e snapshot da conta antiga ainda no ar; o total da conta nova nunca sai sob a lista antiga", async () => {
+test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfil e snapshot da conta antiga presos; a lista antiga sai, o perfil é relido e vem a conta nova", async () => {
   let uid = 7, presos = 0, solta;
   const preso = new Promise((ok) => { solta = ok; });
   const novo = { total: "9999.00", motivos: [], bancos: [{ conexao_id: 21, saldo_conta: "9999.00", investido: null, total: "9999.00", contas: 1, cartoes: 0, investimentos: 0, motivos: [] }] };
@@ -518,6 +518,8 @@ test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfi
         return r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: uid, whatsapp_linked: false } }).catch(() => {});
       });
       await c.route((u) => u.pathname === "/open-finance/7", async (r) => { if (uid === 8) await preso; return r.fulfill({ json: { ok: true, connections: PADRAO() } }).catch(() => {}); });
+      await c.route((u) => u.pathname === "/open-finance/8", (r) => r.fulfill({ json: { ok: true, connections: [con(21, "C6 Bank")] } }));
+      await c.route((u) => u.pathname === "/open-finance/8/limite", (r) => r.fulfill({ json: LIMITE({ em_uso: 1 }) }));
       await c.route((u) => u.pathname === "/api/v2/bancos", async (r) => {
         if (uid === 8) await new Promise((ok) => setTimeout(ok, 300)); // depois da leitura do perfil do foco
         return r.fulfill({ json: uid === 8 ? novo : RESPOSTAS.bancos.padrao }).catch(() => {});
@@ -527,13 +529,15 @@ test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfi
   await esperaCards(page, 3);
   await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
   uid = 8;
+  // Amostra a tela a cada quadro: em nenhum o total da conta nova aparece junto dos bancos da antiga.
+  await page.evaluate(() => { window.__mistura = false; const f = () => { const t = document.body.innerText; if (t.includes("9.999,00") && t.includes("Nubank")) window.__mistura = true; requestAnimationFrame(f); }; f(); });
   await refoco(page);
-  await page.waitForTimeout(1500);
-  const r = { corpo: await corpo(page), cards: await page.locator(".banco-card").count() };
+  await page.waitForFunction(() => document.querySelectorAll(".banco-card").length === 1 && document.body.innerText.includes("C6 Bank"), null, { timeout: 8000 });
+  const r = { corpo: await corpo(page), mistura: await page.evaluate(() => window.__mistura) };
   solta();
   await ctx.close();
-  assert.equal(r.cards, 3); // a lista antiga segue (as releituras dela estão presas)
-  assert.ok(!r.corpo.includes("9.999,00"), r.corpo);
+  assert.equal(r.mistura, false);
+  assert.ok(!/Nubank|Inter|Itaú/.test(r.corpo), r.corpo); // o snapshot antigo segue preso, e a lista dele já saiu
 });
 
 test("401 numa leitura opcional (/bancos ou /limite) depois de a lista estar na tela: 'Sua sessão terminou.' e nenhum card; o 500 delas segue opcional", async () => {
@@ -583,4 +587,35 @@ test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os n�
   const r = { topo: await page.locator(".bancos-topo").count(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
   await ctx.close();
   assert.deepEqual(r, { topo: 1, vagas: true });
+});
+
+test("troca de conta com TODA releitura do perfil presa (só a conferência do /bancos responde): a lista antiga sai e fica o erro, nunca os bancos da outra conta", async () => {
+  let uid = 7, bancosOk = false, conferido = false, solta;
+  const preso = new Promise((ok) => { solta = ok; });
+  const s = servidorBancos({ bancos: "padrao" });
+  const { ctx, page } = await abrir({
+    guia: "concluido", rota: "/conta/bancos",
+    antes: async (c) => {
+      await s.antes(c);
+      await c.route((u) => u.pathname === "/auth/dashboard-profile", async (r) => {
+        if (uid === 8 && !(bancosOk && !conferido && (conferido = true))) await preso; // só a 1ª depois do /bancos (a conferência) responde
+        return r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: uid, whatsapp_linked: false } }).catch(() => {});
+      });
+      await c.route((u) => u.pathname === "/open-finance/7", async (r) => { if (uid === 8) await preso; return r.fulfill({ json: { ok: true, connections: PADRAO() } }).catch(() => {}); });
+      await c.route((u) => u.pathname === "/api/v2/bancos", async (r) => {
+        if (uid === 8) { await new Promise((ok) => setTimeout(ok, 300)); bancosOk = true; }
+        return r.fulfill({ json: RESPOSTAS.bancos.padrao }).catch(() => {});
+      });
+    },
+  });
+  await esperaCards(page, 3);
+  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  uid = 8;
+  await refoco(page);
+  await page.getByRole("alert").waitFor({ timeout: 8000 });
+  const r = { corpo: await corpo(page), cards: await page.locator(".banco-card").count() };
+  solta();
+  await ctx.close();
+  assert.equal(r.cards, 0, r.corpo);
+  assert.match(r.corpo, /Não deu para carregar seus bancos\./);
 });

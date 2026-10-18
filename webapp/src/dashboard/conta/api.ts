@@ -41,13 +41,15 @@ export const limiteQuery = (uid: unknown) => queryOptions({
   queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
+// A sessão já é de outra conta (outra aba trocou): a tela esconde o que está em cache e relê o perfil.
+export class ContaTrocada extends Error {}
 // `/api/v2/bancos` lê o usuário da sessão, não o `uid`: a chave separa o cache por conta, e a sessão é conferida DEPOIS da resposta
 // (outra aba pode ter trocado de conta no meio). Sessão de outra conta = leitura falha (sem números), nunca o total dela sob este `uid`.
 export const bancosQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "bancos", uid],
   queryFn: async ({ signal }) => {
     const r = await apiGet("/bancos", signal);
-    if ((await chamar<{ user_id?: unknown }>("/auth/dashboard-profile", GET(signal))).user_id !== uid) throw new Error("conta_trocada");
+    if ((await chamar<{ user_id?: unknown }>("/auth/dashboard-profile", GET(signal))).user_id !== uid) throw new ContaTrocada();
     return r;
   },
   ...aberto, enabled: !DEMO && uidValido(uid),

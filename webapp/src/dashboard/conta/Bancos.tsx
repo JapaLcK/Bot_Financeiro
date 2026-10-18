@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { ErroApi, contaQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { bancosValidos, barraDosBancos } from "../lib/bancos";
@@ -6,7 +7,7 @@ import { ICON } from "../lib/brand";
 import { OF } from "../parts/guia-falas";
 import { Selos } from "../parts/Selos";
 import { route } from "../router";
-import { bancosQuery, conexoesQuery, limiteQuery, uidValido } from "./api";
+import { ContaTrocada, bancosQuery, conexoesQuery, limiteQuery, uidValido } from "./api";
 import { BancoCard } from "./BancoCard";
 
 // Bancos conectados (/conta/bancos), só leitura: o estado de cada conexão vem do snapshot do Open Finance (`/open-finance/{uid}`, o uid
@@ -20,8 +21,11 @@ export function ContaBancos() {
   const limite = useQuery(limiteQuery(uid));
   const bancos = useQuery(bancosQuery(uid));
 
-  // `/bancos` e `/limite` são opcionais, menos no 401: a sessão acabou, e nada do cache fica na tela.
-  const erro = [conta.error, conexoes.error].find((e) => e) ?? [bancos.error, limite.error].find((e) => e instanceof ErroApi && e.status === 401) ?? null;
+  // `/bancos` e `/limite` são opcionais, menos no 401 (a sessão acabou) e na conta trocada: nos dois, nada do cache fica na tela.
+  const erro = [conta.error, conexoes.error].find((e) => e)
+    ?? [bancos.error, limite.error].find((e) => (e instanceof ErroApi && e.status === 401) || e instanceof ContaTrocada) ?? null;
+  const trocada = bancos.error instanceof ContaTrocada;
+  useEffect(() => { if (trocada) conta.refetch(); }, [trocada]); // relê o perfil uma vez por troca
   const lista = erro ? undefined : conexoes.data; // releitura que falhou: o erro com "Tentar de novo", nunca a lista velha
   const semUid = conta.isSuccess && !uidValido(uid);
   const sessao = erro instanceof ErroApi && erro.status === 401; // sessão acabada esconde o que ficou em cache
