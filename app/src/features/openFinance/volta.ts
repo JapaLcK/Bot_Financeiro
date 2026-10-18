@@ -101,7 +101,7 @@ async function registrarTentativa(uid: number, t: TentativaBancaria, itemId: str
 }
 
 /** Falha que não diz nada sobre o item: rede, tempo limite, 5xx, 429, renovação instável. */
-function transitoria(e: unknown): boolean {
+export function transitoria(e: unknown): boolean {
   if (e instanceof RenovacaoIndisponivel) return true;
   if (!(e instanceof ErroDeApi)) return true; // TypeError (rede), AbortError (comLimite)
   return e.status >= 500 || e.status === 429;

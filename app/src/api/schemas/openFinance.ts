@@ -33,6 +33,18 @@ export const conexoesSchema = z.object({ connections: z.array(conexaoSchema) });
 
 export type Conexao = z.infer<typeof conexaoSchema>;
 
+/**
+ * `POST /open-finance/{uid}/refresh` (`refresh_and_sync_pluggy_user`): `sync.items[]` é o veredito por item e `connections`, o snapshot de DEPOIS.
+ * `sync.ok` e `sync.still_updating` ficam de fora de propósito: são a conjunção e a soma dos itens (o app lê os itens).
+ */
+export const refreshSchema = conexoesSchema.extend({
+  sync: z.object({ items: z.array(z.object({
+    item_id: z.string(), institution: z.string().nullable(), state: z.string(), label: z.string(),
+    detail: z.string().nullable().optional(), still_updating: z.boolean(),
+  })) }),
+});
+export type Refresh = z.infer<typeof refreshSchema>;
+
 export const onboardingBancarioSchema = z.object({
   ok: z.literal(true), completed: z.boolean(), completed_at: z.string().datetime({ offset: true }).nullable(),
 }).refine((v) => v.completed === (v.completed_at !== null));

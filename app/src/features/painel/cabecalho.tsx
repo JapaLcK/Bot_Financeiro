@@ -12,6 +12,8 @@ import { SIMBOLO } from "@/ui/stickers";
 import { useTema } from "@/ui/tema";
 import { raio } from "@/ui/tokens";
 import { fecharAvisoBanco, useAvisoBancoFechado } from "./avisoBanco";
+import { CorpoAvisoBanco } from "./corpoAvisoBanco";
+import { cancelarAtualizarBanco } from "./usarAtualizarBanco";
 import { PilhaDeAvisos, type AvisoDaPilha } from "./pilhaAvisos";
 import { ReceitasDoBanco } from "./receitas";
 import { usePainel } from "./provider";
@@ -42,7 +44,7 @@ export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: 
  // Ordem da pilha: conexão pendente (tem prazo), banco (os números estão errados agora), receitas (decisão). `p.aviso` e `avisoNavegacao` são feedback de uma ação: ficam FORA, como Banner.
  const itens: AvisoDaPilha[] = [
   ...(p.pendente ? [{ id: "conexao", tom: "alerta" as const, icone: "ArrowsClockwise" as const, titulo: "Conexão com o banco pendente", corpo: <Acao rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} /> }] : []),
-  ...(bancoVelho && !avisoFechado ? [{ id: "banco", tom: "alerta" as const, icone: "Bank" as const, titulo: "Dados do banco desatualizados", aoFechar: fecharAvisoBanco, corpo: <><Texto tom="inkMuted">{`Os dados de ${bancos.length ? bancos.join(", ") : "um banco conectado"} precisam ser atualizados. Alguns valores podem estar incompletos.`}</Texto><Acao rotulo="Ver bancos conectados" onPress={() => navegar("/conexoes")} /></> }] : []),
+  ...(bancoVelho && !avisoFechado ? [{ id: "banco", tom: "alerta" as const, icone: "Bank" as const, titulo: "Dados do banco desatualizados", aoFechar: () => { cancelarAtualizarBanco(); fecharAvisoBanco(); }, corpo: <CorpoAvisoBanco bancos={bancos} /> }] : []),
  ];
  const feedback = <>{p.aviso && <Banner tom="warning" mensagem={p.aviso} />}{avisoNavegacao && <Banner tom="warning" mensagem={avisoNavegacao} />}</>;
  const sair = async () => { setSaindo(true); setErroSaida(null); if (!(await sessao.sair())) { setSaindo(false); setErroSaida("Não conseguimos sair. Tente de novo."); } };

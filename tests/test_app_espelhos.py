@@ -27,6 +27,10 @@ SIMBOLO_SITE = RAIZ / "frontend" / "brand" / "email-logo.png"
 CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "ConnectionStatus.tsx"
 APP_CONFIG_TS = RAIZ / "app" / "app.config.ts"
 VOLTA_OF_TS = RAIZ / "app" / "src" / "features" / "openFinance" / "volta.ts"
+ATUALIZAR_BANCO_TS = RAIZ / "app" / "src" / "features" / "painel" / "atualizarBanco.ts"
+SERVICO_OF_TS = RAIZ / "app" / "src" / "services" / "openFinance.ts"
+OF_STATUS_POLL_JS = RAIZ / "frontend" / "of-status-poll.js"
+SETTINGS_HTML = RAIZ / "frontend" / "settings.html"
 
 PESOS = ["Regular", "Medium", "SemiBold"]
 
@@ -208,3 +212,43 @@ def test_regex_do_item_da_volta_e_a_do_servidor():
     assert m.group(1) == _ITEM_ID_OK.pattern.removesuffix(r"\Z"), (
         f"TS: {m.group(1)} × Python: {_ITEM_ID_OK.pattern}"
     )
+
+
+def test_detalhes_do_atualizar_do_banco_sao_os_do_servidor():
+    """O aviso de banco do app escolhe o botão pelo `ui.detail` do snapshot: o de dispositivo
+    ("Autorize o acesso no app do banco") NÃO pode virar "Reconectar" (perde a janela, Codex #166)
+    e o de coleta vencida é o que libera o "Atualizar agora". Frase mudada num lado só e o botão
+    errado aparece sem erro de build (CLAUDE.md §0.7)."""
+    from core.services.pluggy_health import _AUTORIZE_NO_APP, _DETALHE_COLETA_VENCIDA
+
+    texto = ATUALIZAR_BANCO_TS.read_text()
+    for nome, servidor in (("AUTORIZE_NO_APP", _AUTORIZE_NO_APP), ("COLETA_VENCIDA", _DETALHE_COLETA_VENCIDA)):
+        m = re.search(rf'export const {nome} = "(.*?)";', texto)
+        assert m, f"`export const {nome} = \"...\";` não encontrado em {ATUALIZAR_BANCO_TS}"
+        assert m.group(1) == servidor, f"{nome} TS: {m.group(1)!r} × Python: {servidor!r}"
+
+
+def _achar(arquivo: pathlib.Path, padrao: str) -> str:
+    m = re.search(padrao, arquivo.read_text(), re.S)
+    assert m, f"`{padrao}` não encontrado em {arquivo}"
+    return m.group(1)
+
+
+def test_cadencia_e_prazo_do_atualizar_do_banco_sao_os_do_web():
+    """O app acompanha a coleta com a MESMA cadência e a MESMA lista de estados do `of-status-poll.js`
+    e dá ao POST o MESMO prazo do `refreshOpenFinance` do settings.html (§0.7). Uma mudança num lado só
+    faria o app e o site discordarem sobre quando desistir, sem erro de build.
+
+    O TETO NÃO é espelhado: o app para em 5 min (`JANELA_MS`, o da volta do OAuth) e o web em 30 min
+    (`TETO`), de propósito."""
+    numeros = lambda t: [int(x.replace("_", "")) for x in re.findall(r"[\d_]+", t)]
+    nomes = lambda t: re.findall(r'"([^"]+)"', t)
+
+    assert numeros(_achar(ATUALIZAR_BANCO_TS, r"const CADENCIA_MS = \[(.*?)\];")) == numeros(
+        _achar(OF_STATUS_POLL_JS, r"const CADENCIA = \[(.*?)\];"))
+    assert numeros(_achar(ATUALIZAR_BANCO_TS, r"const DEPOIS_MS = ([\d_]+);")) == numeros(
+        _achar(OF_STATUS_POLL_JS, r"const DEPOIS = (\d+);"))
+    assert nomes(_achar(ATUALIZAR_BANCO_TS, r"const SEGUE = new Set\(\[(.*?)\]\)")) == nomes(
+        _achar(OF_STATUS_POLL_JS, r"const SEGUE_ESPERANDO = \[(.*?)\];"))
+    assert numeros(_achar(SERVICO_OF_TS, r"const PRAZO_REFRESH_MS = ([\d_]+);")) == numeros(
+        _achar(SETTINGS_HTML, r"const OF_REFRESH_PRAZO_MS = (\d+);"))
