@@ -32,7 +32,7 @@ export default tseslint.config(
     files: ["jest.config.js", "jest.setup.js", "jest.css-stub.js", "metro.config.js", "babel.config.js"],
     languageOptions: {
       sourceType: "commonjs",
-      globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly" },
+      globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly", process: "readonly" },
     },
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
