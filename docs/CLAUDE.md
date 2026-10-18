@@ -1710,6 +1710,11 @@ mantêm a URI anterior. Após os gates de sessão e acesso, JSON malformado, cam
 repetidos, corpo acima de 4096 bytes ou lento retornam 400 antes de qualquer chamada
 à Pluggy; corpo vazio continua permitido. Contrato completo em
 [`open-finance-ios-backend.md`](open-finance-ios-backend.md).
+Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.../sync`, `.../refresh`,
+`.../mock-connect`: todas as rotas que devolvem `**snapshot`) traz `logo_url`:
+`https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
+(`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
+e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
