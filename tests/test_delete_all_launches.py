@@ -659,14 +659,14 @@ def test_shape_legado_recusa_com_frase_de_produto_nas_duas_portas(user_id: int):
     assert "erro do meu lado" not in resp.lower(), resp
     assert "apagado" not in resp.lower(), resp
 
-    # porta 2 — /ai/chat
+    # porta 2 — /ai/chat: o depósito é guardado (`pode = []`), a IA recusa ANTES de armar a confirmação,
+    # com frase de produto e sem prometer retry
     pocket_deposit_from_account(user_id, "viagem", 400, "guardando de novo")
     dep2 = int(db.list_launches(user_id, limit=1)[0]["id"])
     _drop_efeito(user_id, dep2, "pocket_lot_create")
-    msg = get_tool("delete_launch").execute(
-        user_id, {"launch_id": str(_user_seq(user_id, dep2))})
-    assert "reverter" in msg.lower() and "segurança" in msg.lower(), msg
-    assert "tenta de novo" not in msg.lower(), msg
+    msg = get_tool("delete_launch").validate(user_id, {"launch_id": f"l{dep2}"})
+    assert "só de leitura" in msg, msg
+    assert "erro do meu lado" not in msg.lower() and "tenta de novo" not in msg.lower(), msg
 
     assert _pocket_balance(user_id, "viagem") == 700.0, "nenhuma porta pode ter mexido"
     assert _lotes(user_id, "pocket_lots") == (2, 700.0)

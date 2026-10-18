@@ -18,15 +18,14 @@ Write (auto-executado, SEM confirmação):
     com o texto do usuário (`confirmar_se`, `core/services/wa_ia_primeiro.py`).
 
 Write (PEDE confirmação — destrutivo):
-  - delete_launch: apaga um lançamento (despesa, receita ou compra no cartão).
-    Bifurca entre `launches` (user_seq) e `credit_transactions` (id global).
+  - delete_launch: apaga um lançamento da carteira pelo `pode` do Extrato (`extrato_ia.py`);
+    compra no cartão, guardado e o que veio do banco são recusados antes de pedir o "sim".
   - delete_all_launches: apaga TODOS os lançamentos da conta corrente de uma vez,
     revertendo o saldo. Só pra pedidos explícitos de "apagar tudo".
 """
 from __future__ import annotations
 
 import json
-import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -49,16 +48,9 @@ from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURREN
 from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
 from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
-
-# A causa vai pro LOG, nunca pro usuário: o texto do psycopg pode trazer o valor
-# e a descrição da linha (`DETAIL: Key (…)=(…)`), e "connection to server was
-# lost" não diz nada pra quem só quer apagar um gasto. A mensagem genérica ainda
-# tem de dizer o que fazer — sem isso o usuário fica sem ação.
-_ERRO_APAGAR = (
-    "🐷 Não consegui apagar agora — deu um erro do meu lado. "
-    "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
-)
-
+from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
+from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
+from .extrato_ia import apagar, resumo_apagar, validar_apagar
 
 def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     limit = int(args.get("limit") or 10)
@@ -72,7 +64,7 @@ def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return {
         "launches": [
             {
-                "id": r["id"],
+                "id": f"l{r['id']}",  # o id do Extrato (`l<id>`), o que as escritas da IA leem
                 "user_seq": r.get("user_seq"),
                 "tipo": _rotulo_interno(r) or r["tipo"],
                 "valor": float(r["valor"] or 0),
@@ -790,164 +782,6 @@ _PERGUNTE_A_FORMA = (
 )
 
 
-# ─── Write: delete_launch (PEDE confirmação — destrutivo) ───────────────────
-
-def _delete_launch_summary(args: dict[str, Any]) -> str:
-    lid = args.get("launch_id")
-    return f'apagar o lançamento #{lid}' if lid else "apagar lançamento"
-
-
-def _try_int(s: str) -> int | None:
-    try:
-        n = int(s)
-        return n if n > 0 else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _delete_launch_validate(user_id: int, args: dict[str, Any]) -> str | None:
-    """Roda ANTES da confirmação. Se o ID nem existe, mostra erro imediato
-    em vez de pedir 'confirma apagar #X?' enganoso. Crítico porque o LLM
-    às vezes inventa IDs quando o user diz 'aquele' sem especificar.
-
-    Aceita 3 formas:
-      1. user_seq de launches (#5, #142) — número pequeno
-      2. id de credit_transaction (numérico, mais alto)
-      3. código de parcelamento (PCxxxxxxxx, ex: PC81524273)
-    """
-    raw_id = str(args.get("launch_id") or "").strip()
-    if not raw_id:
-        return "🐷 Faltou o ID do lançamento."
-
-    lid = _try_int(raw_id)
-    if lid is not None:
-        # user_seq de launches?
-        if db.resolve_user_seq_to_id(user_id, lid):
-            return None
-        # id de credit_transaction?
-        with db.get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "select 1 from credit_transactions where user_id=%s and id=%s",
-                    (user_id, lid),
-                )
-                if cur.fetchone():
-                    return None
-
-    # Código de parcelamento (PCxxxxxxxx ou só os hex do início do group_id)
-    if db.resolve_installment_group_id(user_id, raw_id):
-        return None
-
-    return (
-        f"🐷 Não achei o lançamento '{raw_id}'. "
-        f"Manda o ID exato (aparece no histórico como #N, ou o código do "
-        f"parcelamento tipo PCxxxxxxxx) ou pede pra eu listar os últimos lançamentos."
-    )
-
-
-def _delete_launch_execute(user_id: int, args: dict[str, Any]) -> str:
-    """Apaga um lançamento. Tenta na ordem:
-      1. user_seq de `launches` (cenário comum: "#5") → delete_launch_and_rollback
-      2. id global de credit_transactions → undo_credit_transaction (auto desfaz
-         grupo inteiro se for parcelado)
-      3. código de parcelamento (PCxxxxxxxx) → undo_installment_group
-    """
-    raw_id = str(args.get("launch_id") or "").strip()
-    if not raw_id:
-        return "🐷 Faltou o ID do lançamento."
-
-    lid = _try_int(raw_id)
-    if lid is not None:
-        # 1. user_seq de launches
-        internal_id = db.resolve_user_seq_to_id(user_id, lid)
-        if internal_id:
-            try:
-                aviso = db.delete_launch_and_rollback(user_id, internal_id)
-                if aviso:  # apagou a fundida: o banco volta para a lista (P3)
-                    return f"🗑️ Lançamento #{lid} apagado. {aviso}"
-                return f"🗑️ Lançamento #{lid} apagado. Saldo revertido."
-            except LookupError:
-                return f"🐷 Não achei o lançamento #{lid}."
-            except db.LaunchNoEffects as e:
-                # Lançamento sem `efeitos`: condição PERMANENTE, não erro
-                # técnico. `_ERRO_APAGAR` manda tentar de novo em alguns
-                # minutos — conselho que nunca ia funcionar aqui. Mesma
-                # distinção do `delete_all_launches` (`kept_no_effects` ×
-                # `errors`).
-                _log_falha("delete_launch_sem_efeitos", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 O lançamento #{lid} é antigo e não guarda o que precisaria "
-                    f"ser revertido, então mantive ele intacto pra não bagunçar seu saldo."
-                )
-            except db.InvestmentMovementNotLast as e:
-                # Antes do `LaunchUnsafeRollback` (subclasse); mesma frase do WhatsApp.
-                _log_falha("delete_launch_movimento_posterior", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
-            except db.PocketHasMovement as e:
-                # Idem: subclasse, antes da mãe; mesma frase do WhatsApp.
-                _log_falha("delete_launch_caixinha_com_movimento", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return f"🐷 Não apaguei o lançamento #{lid}. {e}"
-            except db.LaunchUnsafeRollback as e:
-                # `efeitos` existe mas não dá pra revertê-lo por inteiro —
-                # mesma condição PERMANENTE do WhatsApp (`core/handlers/
-                # pending.py`), mesma frase.
-                _log_falha("delete_launch_inseguro", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 Não consigo reverter o lançamento #{lid} com segurança, "
-                    f"então mantive ele intacto pra não bagunçar seu saldo."
-                )
-            except db.InvestmentLotHasWithdrawal as e:
-                # TEMPORÁRIA e com contorno: apagar o resgate reabre o lote.
-                # Nem `_ERRO_APAGAR` (retry que nunca funciona) nem "é antigo"
-                # (o dado está inteiro) servem aqui.
-                _log_falha("delete_launch_lote_com_resgate", user_id, e,
-                           nivel=logging.WARNING, launch_id=internal_id, user_seq=lid)
-                return (
-                    f"🐷 Não dá pra desfazer o aporte #{lid}: esse lote já teve "
-                    f"resgate. Apaga o resgate primeiro e depois volta aqui pra "
-                    f"apagar o aporte."
-                )
-            except Exception as e:
-                if violacao_finito(e):
-                    raise  # runner responde MSG_VALOR_WHATSAPP
-                _log_falha("delete_launch", user_id, e, launch_id=internal_id, user_seq=lid)
-                return _ERRO_APAGAR
-
-        # 2. id de credit_transaction
-        try:
-            result = db.undo_credit_transaction(user_id, lid)
-        except db.CompraDoBanco as e:
-            return f"🐷 {e}"
-        except Exception as e:
-            _log_falha("undo_credit_transaction", user_id, e, credit_tx_id=lid)
-            return _ERRO_APAGAR
-        if result is not None:
-            removed = int(result.get("removed_count") or 1)
-            if removed > 1:
-                return f"🗑️ Parcelamento apagado ({removed} parcelas)."
-            return f"🗑️ Compra no crédito #{lid} apagada."
-
-    # 3. Código de parcelamento (PCxxxxxxxx)
-    group_id = db.resolve_installment_group_id(user_id, raw_id)
-    if group_id:
-        try:
-            result = db.undo_installment_group(user_id, group_id)
-        except db.CompraDoBanco as e:
-            return f"🐷 {e}"
-        except Exception as e:
-            _log_falha("undo_installment_group", user_id, e, group_id=group_id)
-            return _ERRO_APAGAR
-        if result:
-            removed = int(result.get("removed_count") or 0)
-            return f"🗑️ Parcelamento {raw_id.upper()} apagado ({removed} parcelas)."
-
-    return f"🐷 Não achei o lançamento '{raw_id}'."
-
-
 # ─── Write: delete_all_launches (PEDE confirmação — destrutivo em massa) ─────
 
 def _delete_all_launches_summary(args: dict[str, Any]) -> str:
@@ -1404,10 +1238,11 @@ TOOLS: list[Tool] = [
             "function": {
                 "name": "delete_launch",
                 "description": (
-                    "Apaga um lançamento (despesa, receita ou compra no "
-                    "cartão). Use pra 'apaga o gasto #5', 'remove o último', "
-                    "'apaga aquela compra'. Reverte saldo automaticamente. "
-                    "Se for parcela de parcelamento, derruba o grupo inteiro. "
+                    "Apaga um lançamento da carteira (despesa ou receita). Use pra "
+                    "'apaga o gasto #5', 'remove o último', 'apaga aquela compra'. "
+                    "Reverte saldo automaticamente. Compra no cartão, movimento de "
+                    "caixinha/investimento e o que veio do banco NÃO se apagam por "
+                    "aqui: a tool recusa na hora e diz o que dá pra fazer. "
                     "ESCRITA DESTRUTIVA — pede confirmação (não tem undo)."
                 ),
                 "parameters": {
@@ -1416,12 +1251,10 @@ TOOLS: list[Tool] = [
                         "launch_id": {
                             "type": "string",
                             "description": (
-                                "ID exatamente como aparece no histórico. "
-                                "Aceita: '#5' (user_seq de lançamento normal), "
-                                "número grande (id de compra no cartão), OU "
-                                "'PCxxxxxxxx' (código de parcelamento, ex: "
-                                "PC81524273). Use sempre o que o user disse "
-                                "literalmente, NUNCA invente."
+                                "O `id` exatamente como veio de list_recent_launches "
+                                "('l123' ou 'c45'), OU o '#5' que o user disse, OU "
+                                "'CC45' / 'PCxxxxxxxx' (códigos de compra no cartão e "
+                                "de parcelamento). NUNCA invente nem deduza um número."
                             ),
                         },
                     },
@@ -1431,9 +1264,10 @@ TOOLS: list[Tool] = [
         },
         is_write=True,
         requires_confirmation=True,
-        summary=_delete_launch_summary,
-        execute=_delete_launch_execute,
-        validate=_delete_launch_validate,
+        summary=resumo_apagar,
+        execute=apagar,
+        validate=validar_apagar,
+        ao_confirmar=_ao_confirmar_alvo,
     ),
     Tool(
         schema={

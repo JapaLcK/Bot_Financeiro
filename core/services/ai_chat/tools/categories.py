@@ -19,6 +19,7 @@ import db
 from ai_router import ALLOWED_CATEGORIES
 
 from ._base import Tool
+from .extrato_ia import ao_confirmar, recategorizar, resumo_categoria, validar_categoria
 
 
 # ─── Read handlers ──────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ def _get_uncategorized_launches(user_id: int, args: dict[str, Any]) -> dict[str,
     return {
         "launches": [
             {
-                "id": l["id"],
+                "id": f"l{l['id']}",  # o id do Extrato (`l<id>`), o que as escritas da IA leem
                 "valor": l["valor"],
                 "alvo": l.get("alvo"),
                 "nota": l.get("nota"),
@@ -76,36 +77,6 @@ def _delete_category_rule_execute(user_id: int, args: dict[str, Any]) -> str:
     if n > 0:
         return f'✅ Regra "{keyword}" apagada.'
     return f'🐷 Não achei a regra "{keyword}".'
-
-
-# ─── Write: recategorize_launch ─────────────────────────────────────────────
-
-def _recategorize_launch_summary(args: dict[str, Any]) -> str:
-    return (
-        f'mudar a categoria do lançamento #{args.get("launch_id")} '
-        f'para "{args.get("new_category")}"'
-    )
-
-
-def _recategorize_launch_execute(user_id: int, args: dict[str, Any]) -> str:
-    from db.accounts import LaunchDateLockedError, update_launch_fields
-    from db.categories import ensure_user_category, resolve_category_input
-    launch_id = int(args.get("launch_id") or 0)
-    new_category = resolve_category_input(
-        user_id, args.get("new_category") or "", create=True
-    )
-    if not new_category:
-        return "🐷 Faltou a categoria nova. Manda de novo."
-    try:
-        ok = update_launch_fields(user_id, launch_id, categoria=new_category)
-    except LaunchDateLockedError as exc:  # trava de categoria da declarada pelo banco
-        return f"🐷 {exc}"
-    if ok:
-        # criar só depois do UPDATE: launch_id inexistente não pode deixar
-        # categoria órfã no catálogo.
-        ensure_user_category(user_id, new_category)
-        return f"✅ Lançamento #{launch_id} agora é {new_category}."
-    return f"🐷 Não consegui atualizar o lançamento #{launch_id}."
 
 
 # ─── Tools registry ─────────────────────────────────────────────────────────
@@ -196,11 +167,11 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "recategorize_launch",
-                "description": "Muda a categoria de um lançamento específico. Ação de ESCRITA — pede confirmação. Use o launch_id retornado por get_uncategorized_launches.",
+                "description": "Muda a categoria de um lançamento específico (despesa, receita ou compra no cartão do banco). Ação de ESCRITA — pede confirmação; o que não dá pra mudar a tool recusa na hora e diz o que dá. Use o `id` retornado por get_uncategorized_launches ou list_recent_launches.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "launch_id": {"type": "integer"},
+                        "launch_id": {"type": "string", "description": "O `id` da lista ('l123' ou 'c45') OU o #N que o user disse. NUNCA invente nem deduza um número."},
                         "new_category": {"type": "string"},
                     },
                     "required": ["launch_id", "new_category"],
@@ -208,7 +179,9 @@ TOOLS: list[Tool] = [
             },
         },
         is_write=True,
-        summary=_recategorize_launch_summary,
-        execute=_recategorize_launch_execute,
+        summary=resumo_categoria,
+        execute=recategorizar,
+        validate=validar_categoria,
+        ao_confirmar=ao_confirmar,
     ),
 ]

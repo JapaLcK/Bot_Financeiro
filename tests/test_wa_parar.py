@@ -172,10 +172,9 @@ def test_com_pendencia_aberta_parar_vence_e_encerra_a_pendencia(enviadas):
 def test_parar_descarta_a_confirmacao_da_ia_e_o_sim_nao_apaga(enviadas, parar):
     """Sem PARAR o 'sim' apaga (prova que a pendência executa); com PARAR o lançamento fica."""
     uid, wa_id = _com_senha_ligada(True)
-    db.add_launch_and_update_balance(uid, "despesa", 50, None, "mercado")
+    lid, seq, _ = db.add_launch_and_update_balance(uid, "despesa", 50, None, "mercado")
     assert _gastos(uid) == 1
-    seq = _q("select user_seq from launches where user_id=%s", (uid,))["user_seq"]
-    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": str(seq)}, f"apagar o gasto #{seq}")
+    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": f"l{lid}"}, f"apagar o gasto #{seq}")
     if parar:
         _manda(wa_id, "PARAR")
         assert _opt_out(uid) and db.ai_get_pending_action(uid) is None
