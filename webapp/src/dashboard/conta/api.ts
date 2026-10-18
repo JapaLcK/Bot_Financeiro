@@ -62,13 +62,20 @@ export const iniciarMfa = (password: string) => comPrazo((sinal) => post<MfaSetu
 export const desativarMfa = (password: string, code: string) => comPrazo((sinal) => post<{ ok: boolean }>("/auth/mfa/disable", { password, code }, sinal));
 export const enviarLinkSenha = (uid: number) => comPrazo((sinal) => post<{ ok: boolean; message?: string }>(`/settings/${uid}/password-reset`, {}, sinal));
 // Sem prazo (ver `comPrazo`). A resposta vai DIRETO ao Cofre, nunca ao estado do componente: quem chamou pode ter desmontado.
-// O bilhete (`seq`) sai na chamada, antes do fetch: resposta mais velha que a já guardada é ignorada (ver `guardarCodigos`).
-let seq = 0;
-export const ativarMfa = (code: string) => { const t = ++seq; return post<{ backup_codes: unknown }>("/auth/mfa/enable", { code }).then((r) => guardarCodigos(r.backup_codes, false, t)); };
-export const regerarCodigos = (password: string, code: string) => {
-  const t = ++seq;
-  return post<{ backup_codes: unknown }>("/auth/mfa/regenerate-backup-codes", { password, code }).then((r) => guardarCodigos(r.backup_codes, true, t));
+// No máximo UM pedido gerador de códigos em voo no módulo: sem prazo, duas respostas poderiam chegar em ordem qualquer e o Cofre
+// mostraria códigos que o servidor já invalidou. O MfaForm trava o envio enquanto `geracaoEmVoo()` (ele sobrevive ao modal desmontado).
+let emVoo = false;
+const ouvintes = new Set<() => void>();
+export const geracaoEmVoo = () => emVoo;
+export const assinarGeracao = (f: () => void) => { ouvintes.add(f); return () => { ouvintes.delete(f); }; };
+const gerar = <T,>(f: () => Promise<T>) => {
+  const muda = (v: boolean) => { emVoo = v; ouvintes.forEach((o) => o()); };
+  muda(true);
+  return f().finally(() => muda(false));
 };
+export const ativarMfa = (code: string) => gerar(() => post<{ backup_codes: unknown }>("/auth/mfa/enable", { code }).then((r) => guardarCodigos(r.backup_codes, false)));
+export const regerarCodigos = (password: string, code: string) =>
+  gerar(() => post<{ backup_codes: unknown }>("/auth/mfa/regenerate-backup-codes", { password, code }).then((r) => guardarCodigos(r.backup_codes, true)));
 
 // Cópia de `formatPhoneBR` (settings.html): o teste dashboard_v2_conta_perfil compara as duas (§0.7).
 export function telefoneBR(valor: string | null) {

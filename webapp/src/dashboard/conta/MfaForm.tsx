@@ -1,8 +1,8 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { ErroApi } from "../lib/v2";
-import { DETALHES, ativarMfa, desativarMfa, falhaDe, iniciarMfa, lerStatusMfa, mfaStatusQuery, regerarCodigos, type Falha } from "./api";
+import { DETALHES, assinarGeracao, ativarMfa, desativarMfa, falhaDe, geracaoEmVoo, iniciarMfa, lerStatusMfa, mfaStatusQuery, regerarCodigos, type Falha } from "./api";
 import { abrirCofre } from "./Cofre";
 
 export type ModoMfa = "ativar" | "desativar" | "regerar";
@@ -36,6 +36,9 @@ export function MfaForm({ modo: inicial, fechar, salvou }: { modo: ModoMfa; fech
   const [pendente, setPendente] = useState(false);
   const cfg = modo === "ativar" ? setup : null; // o passo do QR
   const qr = !!cfg;
+  // Os dois pedidos que geram códigos (passo do código no ativar, e o regerar) esperam o que ainda estiver em voo, mesmo de um modal já desmontado.
+  const gera = modo === "regerar" || qr;
+  const espera = useSyncExternalStore(assinarGeracao, geracaoEmVoo) && gera;
   const passo = PASSO[modo === "ativar" ? (qr ? "qr" : "senha") : modo === "desativar" ? "desativar" : "regerar"];
   const botaoRegerar = useRef<HTMLButtonElement>(null);
   const campo = (n: string) => dlg.current?.querySelector<HTMLElement>(`[name=${n}]`);
@@ -49,7 +52,7 @@ export function MfaForm({ modo: inicial, fechar, salvou }: { modo: ModoMfa; fech
 
   const enviar = async (e: FormEvent) => {
     e.preventDefault();
-    if (voando.current) return;
+    if (voando.current || (gera && geracaoEmVoo())) return;
     const cod = codigo.trim();
     if (modo === "ativar" && !qr && !senha) { setFalha({ texto: "Digite sua senha", foco: "senha" }); return; }
     if (qr && !SEIS.test(cod)) { setFalha({ texto: "Digite os 6 dígitos do app" }); return; }
@@ -123,7 +126,7 @@ export function MfaForm({ modo: inicial, fechar, salvou }: { modo: ModoMfa; fech
         {oferta && <button type="button" className="btn btn-primary" ref={botaoRegerar} onClick={irRegerar}>Gerar novos códigos de backup</button>}
         <footer>
           <button className="btn btn-ghost" type="button" onClick={fecharDialog} disabled={pendente}>Cancelar</button>
-          {!oferta && <button className="btn btn-primary" type="submit" disabled={pendente}>{pendente ? "Enviando…" : passo[2]}</button>}
+          {!oferta && <button className="btn btn-primary" type="submit" disabled={pendente || espera}>{pendente || espera ? "Enviando…" : passo[2]}</button>}
         </footer>
       </form>
     </dialog>
