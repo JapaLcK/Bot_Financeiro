@@ -24,7 +24,7 @@ import db
 from conftest import usuario_pagante
 from core.services.ai_chat import runner
 from core.services.ai_chat.tools import extrato_ia as ia
-from db import lancamentos
+from db import lancamentos, lancamentos_leitura
 from db.cards import MSG_COMPRA_DO_BANCO
 from tests._fusao_of_helpers import manda, uid_pro  # noqa: F401 (fixture)
 from tests._ia_falsa_helpers import chamada, com_tools, openai_falso, texto
@@ -269,9 +269,13 @@ def test_pendencia_antiga_pede_de_novo_e_nao_toca_no_banco(uid_pro):
     assert db.count_launches(uid_pro) == n and categoria(uid_pro, a) != "lazer"
 
 
-def test_pendencia_canonica_executa(uid_pro):
+def test_pendencia_canonica_executa_com_item_e_sem_item_pede_de_novo(uid_pro):
     a, _ = lancar(uid_pro, 10, "A")
-    db.ai_set_pending_action(uid_pro, "recategorize_launch", {"launch_id": f"l{a}", "new_category": "lazer"}, "x")
+    args = {"launch_id": f"l{a}", "new_category": "lazer"}
+    db.ai_set_pending_action(uid_pro, "recategorize_launch", args, "x")  # sem `_item`: nada a comparar
+    assert "Me pede de novo" in sim(uid_pro) and categoria(uid_pro, a) != "lazer"
+    item = ia._resumo_item(lancamentos_leitura.um_item(uid_pro, "l", a))  # controle positivo: com `_item` executa
+    db.ai_set_pending_action(uid_pro, "recategorize_launch", {**args, "_item": item}, "x")
     assert "agora é lazer" in sim(uid_pro) and categoria(uid_pro, a) == "lazer"
 
 

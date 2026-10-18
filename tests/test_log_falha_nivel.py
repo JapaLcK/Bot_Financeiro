@@ -42,7 +42,8 @@ def _whatsapp_apaga(user_id: int) -> str:
 
 def _ai_chat_apaga(user_id: int) -> str:
     lid, _, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, "x", None)
-    return get_tool("delete_launch").execute(user_id, {"launch_id": f"l{lid}"})
+    from core.services.ai_chat.tools.extrato_ia import ao_confirmar  # o "sim" executa a pendência com `_item`
+    return get_tool("delete_launch").execute(user_id, ao_confirmar(user_id, {"launch_id": f"l{lid}"}))
 
 
 def test_condicao_de_dominio_loga_warning_nas_duas_portas(user_id, monkeypatch, caplog):

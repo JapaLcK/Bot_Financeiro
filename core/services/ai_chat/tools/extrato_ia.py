@@ -95,16 +95,31 @@ def _pode(item: dict, campo: str) -> bool:
     return campo in item["pode"] and not (campo == "apagar" and item["id"][0] == "c")
 
 
-def _motivo(i: dict) -> str:
+def _compra(user_id: int, n: int) -> dict | None:
+    """`source` e `is_refund` da compra `n` DO usuário (o item do Extrato não traz a fonte), ou None."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select source, is_refund from credit_transactions where user_id = %s and id = %s",
+                    (user_id, n))
+        row = cur.fetchone()
+        conn.commit()
+    return row
+
+
+def _motivo(user_id: int, i: dict) -> str:
     """Por que o item está fora do `pode`, em linguagem de produto (um texto por estado do Extrato)."""
     if i["guardado"]:
         return "Esse é um movimento de caixinha ou de investimento (guardar ou resgatar), e eu não apago nem mudo isso."
     o = i["origem"]
     if i["id"][0] == "c":
-        return MSG_COMPRA_DO_BANCO if o == "cartao" else (
-            "Essa compra no cartão foi lançada por você, e mexer nela mexe nas parcelas e na fatura.")
+        if o == "cartao":
+            return MSG_COMPRA_DO_BANCO
+        veio = "veio de um extrato importado" if (_compra(user_id, int(i["id"][1:])) or {}).get("source") == "ofx" \
+            else "foi lançada por você"
+        return f"Essa compra no cartão {veio}, e mexer nela mexe nas parcelas e na fatura."
     if o == "registro_antigo":
-        return "Esse registro é antigo ou veio de um extrato importado, e não guarda o que eu precisaria reverter no seu saldo."
+        if i["categoria"] == "pagamento_fatura":  # com Open Finance ativo o banco pagou: delta 0, sem marca
+            return "Esse é o pagamento de uma fatura que saiu direto do seu banco, e não mexeu no saldo da sua Carteira, então não tenho o que reverter."
+        return "Esse registro não guarda o efeito dele no seu saldo (é antigo, veio de um extrato importado ou não mexeu na sua conta), e eu não tenho o que reverter."
     if o == "banco":
         return "Esse lançamento veio do seu banco (Open Finance): o banco é dono do valor e da data."
     return ("Esse é o pagamento de uma conta ou fatura: apagar devolveria o dinheiro e a conta seguiria paga."
@@ -112,13 +127,13 @@ def _motivo(i: dict) -> str:
             "Esse é um saque ou depósito em dinheiro ligado ao seu banco, e a categoria dele é fixa.")
 
 
-def _recusa(item: dict, campo: str) -> str | None:
+def _recusa(user_id: int, item: dict, campo: str) -> str | None:
     """None = pode. Senão o motivo e o que a IA ainda faz com esse item (nada de apontar outro canal)."""
     if _pode(item, campo):
         return None
     outro, oferta = ("categoria", "mudo a categoria") if campo == "apagar" else ("apagar", "apago ele")
     resto = f" Se quiser, {oferta}." if _pode(item, outro) else " Ele é só de leitura pra mim."
-    return f"🐷 {_motivo(item)}{resto}"
+    return f"🐷 {_motivo(user_id, item)}{resto}"
 
 
 # Registro de `launches` que o Extrato não lista (criar/apagar caixinha e investimento): a IA o recusa
@@ -127,16 +142,19 @@ _CAIXINHA_INVEST = ("criar_caixinha", "create_investment", "delete_investment")
 
 
 def _fora_do_extrato(user_id: int, alvo: tuple[str, int]) -> str | None:
-    if alvo[0] != "l":
+    """`um_item` devolveu None: se o registro é DO usuário e o Extrato não o lista, diz por quê."""
+    if alvo[0] == "c":  # o estorno: o Extrato filtra (`MES_CARTAO_SQL`)
+        row = _compra(user_id, alvo[1])
+        quem = "Esse é o estorno de uma compra no cartão" if row and row["is_refund"] else None
+    else:
+        with db.get_conn() as conn, conn.cursor() as cur:
+            cur.execute("select tipo from launches where user_id = %s and id = %s", (user_id, alvo[1]))
+            row = cur.fetchone()
+            conn.commit()
+        quem = row and ("Esse é o registro de criar ou apagar uma caixinha ou um investimento"
+                        if row["tipo"] in _CAIXINHA_INVEST else "Esse tipo de registro")
+    if not quem:
         return None
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute("select tipo from launches where user_id = %s and id = %s", (user_id, alvo[1]))
-        row = cur.fetchone()
-        conn.commit()
-    if row is None:
-        return None
-    quem = ("Esse é o registro de criar ou apagar uma caixinha ou um investimento"
-            if row["tipo"] in _CAIXINHA_INVEST else "Esse tipo de registro")
     return f"🐷 {quem} e não aparece no Extrato, então não apago nem mudo por aqui. Eu mexo em gastos e receitas."
 
 
@@ -147,7 +165,7 @@ def _validar(user_id: int, args: dict[str, Any], campo: str) -> str | None:
     item = lancamentos_leitura.um_item(user_id, *alvo) if alvo else None
     if item is None:
         return (alvo and _fora_do_extrato(user_id, alvo)) or _NAO_ACHEI
-    return _recusa(item, campo)
+    return _recusa(user_id, item, campo)
 
 
 def validar_apagar(user_id: int, args: dict[str, Any]) -> str | None:
@@ -156,7 +174,8 @@ def validar_apagar(user_id: int, args: dict[str, Any]) -> str | None:
 
 def validar_categoria(user_id: int, args: dict[str, Any]) -> str | None:
     nova = args.get("new_category")
-    if not isinstance(nova, str) or not resolve_category_input(user_id, nova, create=True):
+    # NUL: o jsonb da pendência o recusa (DataError em `ai_set_pending_action`, que `chat()` repropaga).
+    if not isinstance(nova, str) or "\x00" in nova or not resolve_category_input(user_id, nova, create=True):
         return _FALTOU_CATEGORIA  # antes de armar "mudar para None"
     return _validar(user_id, args, "categoria")
 
@@ -197,7 +216,9 @@ def _reler(user_id: int, args: dict[str, Any], campo: str):
     if not _pode(item, campo):
         acao = "apagar" if campo == "apagar" else "mudar a categoria"
         return f"🐷 Esse lançamento mudou desde a pergunta e não dá mais pra {acao} por aqui. {nada}"
-    if args.get("_item") and args["_item"] != _resumo_item(item):  # editado depois da pergunta
+    # Sem `_item` não há o que comparar (o `ao_confirmar` não achou o item, que agora reapareceu): recusa.
+    # ponytail: a comparação roda fora do lock; edição do próprio usuário no mesmo ms do "sim" passa.
+    if args.get("_item") != _resumo_item(item):  # editado depois da pergunta
         return f"🐷 Esse lançamento mudou desde a pergunta. Me pede de novo. {nada}"
     return (*ident, item)
 

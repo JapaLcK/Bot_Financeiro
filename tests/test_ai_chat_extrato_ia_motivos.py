@@ -5,6 +5,10 @@ CONTROLES NEGATIVOS (injetados e restaurados, ver o relato): `exigir_pode=True` 
 escritas -> `test_corrida_*`; a comparação do `_item` fora de `_reler` -> `test_item_editado_*`;
 `_fora_do_extrato` fora de `_validar` -> `test_fora_do_extrato_*`; o `isinstance/resolve` fora de
 `validar_categoria` -> `test_categoria_ausente_*`. POSITIVOS: o item igual apaga/recategoriza.
+
+Rodada final do C1: o motivo da fatura paga pelo banco e da compra `ofx` (`test_cada_estado_*`), o estorno
+(`test_estorno_*`, com o guarda de tabela de `_fora_do_extrato`), a pendência sem `_item`
+(`test_pendencia_sem_item_*`) e as parcelas na comparação (`test_so_as_parcelas_mudam_*`).
 """
 from __future__ import annotations
 
@@ -46,6 +50,10 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
     db.add_launch_and_update_balance(a, "receita", 1000, "seed", None)
     antiga = _carteira(a, marcada=False)
     delta_zero = db.add_launch_and_update_balance(a, "despesa", 36, "x", None, apply_delta=False)[0]
+    # pagamento de fatura com Open Finance ativo: `delta_conta` 0, sem marca (`db/cards.py`, `apply_delta=not of_ativo`)
+    fatura_of = db.add_launch_and_update_balance(
+        a, "despesa", 100, "fatura:Nubank", "Pagamento de fatura (Nubank)", "pagamento_fatura", is_internal_movement=True,
+        extra_efeitos={"bill_id": 1, "paid_amount_added": 100, "funding_source": {"kind": "bank"}}, apply_delta=False)[0]
     sombra = _sombra(a, 38)
     paga = _carteira(a, valor=35, bill_id=1, paid_amount_added=35)
     paga_fund = _carteira(a, valor=41, bill_id=2, paid_amount_added=41)
@@ -56,15 +64,19 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
          returning id""", (a, especie, date.today()))
     cartao = db.create_card(a, "Nubank", closing_day=31, due_day=10)
     manual_ct = db.add_credit_purchase(a, cartao, 39, "mercado", "manual", date.today())[0]
+    ofx_ct = db.add_credit_purchase(a, cartao, 42, "mercado", "ofx", date.today())[0]
+    q("update credit_transactions set source = 'ofx' where user_id = %s and id = %s returning id", (a, ofx_ct))
     of_ct = db.add_imported_credit_purchase(a, cartao, 40, "mercado", date.today(), "ct-mot")[0]
     db.create_pocket(a, "viagem")
     db.pocket_deposit_from_account(a, "viagem", 5, "guardando")
     guardado = int(q("select id from launches where user_id=%s and tipo='deposito_caixinha'", (a,))["id"])
 
-    ANTIGO, BANCO, PAGAMENTO = "antigo ou veio de um extrato", "veio do seu banco", "pagamento de uma conta"
+    ANTIGO, BANCO, PAGAMENTO = "não guarda o efeito dele no seu saldo", "veio do seu banco", "pagamento de uma conta"
+    FATURA_OF, OFX = "fatura que saiu direto do seu banco", "veio de um extrato importado"
     CAIXINHA, CARTAO, ESPECIE = "caixinha ou de investimento", "compra no cartão foi lançada", "saque ou depósito em dinheiro"
     esperado = [  # (id, motivo de apagar, motivo de categoria) — None = pode
-        (f"l{antiga}", ANTIGO, ANTIGO), (f"l{delta_zero}", ANTIGO, ANTIGO), (f"l{sombra}", BANCO, None),
+        (f"l{antiga}", ANTIGO, ANTIGO), (f"l{delta_zero}", ANTIGO, ANTIGO),
+        (f"l{fatura_of}", FATURA_OF, FATURA_OF), (f"c{ofx_ct}", OFX, OFX), (f"l{sombra}", BANCO, None),
         (f"l{paga}", PAGAMENTO, None), (f"l{paga_fund}", PAGAMENTO, None), (f"l{especie}", None, ESPECIE),
         (f"c{manual_ct}", CARTAO, CARTAO), (f"c{of_ct}", MSG_COMPRA_DO_BANCO, None),
         (f"l{guardado}", CAIXINHA, CAIXINHA),
@@ -80,6 +92,7 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
             # o que a IA ainda faz: oferece o outro campo se o `pode` o permite, senão diz que é de leitura
             assert (("Se quiser" in final) if outro is None else ("só de leitura" in final)), (ident, final)
     assert ct_existe(a, manual_ct) and existe(a, antiga)
+    assert "antigo" not in _apagar(a, f"l{fatura_of}") and "extrato" not in _apagar(a, f"l{fatura_of}")  # o motivo é o dele
 
 
 # ── A1: o que o Extrato não lista ────────────────────────────────────────────────────────────
@@ -191,7 +204,8 @@ def test_corrida_recategorizar_c(uid_pro, monkeypatch):
 # ── A5: categoria ausente ────────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("extra", [{}, {"new_category": ""}, {"new_category": "  "}, {"new_category": None},
-                                   {"new_category": 5}, {"new_category": ["lazer"]}, {"new_category": "!!!"}])
+                                   {"new_category": 5}, {"new_category": ["lazer"]}, {"new_category": "!!!"},
+                                   {"new_category": "laz\x00er"}])
 def test_categoria_ausente_nao_arma(uid_pro, extra):
     lid, _ = lancar(uid_pro)
     h, final = arma(uid_pro, "recategorize_launch", {"launch_id": f"l{lid}", **extra})
@@ -222,3 +236,67 @@ def test_item_que_some_entre_validate_e_ao_confirmar_diz_nao_achei_mais(uid_pro,
 
 def _seq(uid, lid):
     return q("select user_seq from launches where user_id = %s and id = %s", (uid, lid))["user_seq"]
+
+
+# ── rodada final: estorno, pendência sem `_item`, parcelas ───────────────────────────────────
+
+def _estorno(uid, n="ct-est"):
+    cartao = db.create_card(uid, "Nubank", closing_day=31, due_day=10)
+    c = db.add_imported_credit_purchase(uid, cartao, 40, "mercado", date.today(), n)[0]
+    q("update credit_transactions set is_refund = true where user_id = %s and id = %s returning id", (uid, c))
+    return c
+
+
+def test_estorno_diz_o_motivo_e_o_de_outro_usuario_e_igual_ao_inexistente(uid_pro):
+    c = _estorno(uid_pro)
+    for fn in (_apagar, _cat):
+        r = fn(uid_pro, f"c{c}")
+        assert "estorno" in r and "não aparece no Extrato" in r and "Não achei" not in r and pend(uid_pro) is None
+    outro = usuario_pagante()
+    c2 = _estorno(outro, "ct-est2")
+    for fn in (_apagar, _cat):  # o estorno do outro: resposta idêntica à do id que não existe
+        assert fn(uid_pro, f"c{c2}") == fn(uid_pro, "c999999999") and "Não achei" in fn(uid_pro, f"c{c2}")
+
+
+def test_estorno_c_nao_responde_pela_caixinha_l_de_mesmo_numero(uid_pro):
+    c = _estorno(uid_pro)
+    db.create_pocket(uid_pro, "viagem")
+    lid = q("select id from launches where user_id = %s and tipo = 'criar_caixinha'", (uid_pro,))["id"]
+    n = max(c, lid) + 1000  # livre nas duas tabelas
+    q("update credit_transactions set id = %s where user_id = %s and id = %s returning id", (n, uid_pro, c))
+    q("update launches set id = %s where user_id = %s and id = %s returning id", (n, uid_pro, lid))
+    r = _apagar(uid_pro, f"c{n}")
+    assert "estorno" in r and "caixinha" not in r, r
+    assert "caixinha" in _apagar(uid_pro, f"l{n}")  # o mesmo número, na outra tabela, é a caixinha
+
+
+def test_pendencia_sem_item_pede_de_novo_e_nao_executa(uid_pro, monkeypatch):
+    """O `ao_confirmar` não achou o item (sumiu na hora) e no "sim" ele voltou a existir: nada a comparar."""
+    lid, _ = lancar(uid_pro, 50, "Mercado")
+    real, n = lancamentos_leitura.um_item, {"i": 0}
+
+    def some_so_no_confirmar(u, t, i):
+        n["i"] += 1
+        return None if n["i"] == 2 else real(u, t, i)
+
+    monkeypatch.setattr(lancamentos_leitura, "um_item", some_so_no_confirmar)
+    arma(uid_pro, "delete_launch", {"launch_id": f"l{lid}"})
+    assert "_item" not in pend(uid_pro)["tool_args"]
+    q("update launches set valor = 4999, alvo = 'Outro' where user_id = %s and id = %s returning id", (uid_pro, lid))
+    saldo = db.get_balance(uid_pro)
+    assert "Me pede de novo" in sim(uid_pro)
+    assert existe(uid_pro, lid) and db.get_balance(uid_pro) == saldo
+
+
+def test_so_as_parcelas_mudam_entre_a_pergunta_e_o_sim(uid_pro):
+    cartao = db.create_card(uid_pro, "Nubank", closing_day=31, due_day=10)
+    c = db.add_imported_credit_purchase(uid_pro, cartao, 40, "mercado", date.today(), "ct-par", installment_no=1,
+                                        installments_total=3)[0]
+    h, final = arma(uid_pro, "recategorize_launch", {"launch_id": f"c{c}", "new_category": "lazer"})
+    assert final is None and "3 parcelas" in h["summary"]
+    antes = q("select valor, purchased_at, nota, categoria from credit_transactions where user_id = %s and id = %s",
+              (uid_pro, c))
+    q("update credit_transactions set installments_total = 4 where user_id = %s and id = %s returning id", (uid_pro, c))
+    assert "mudou desde a pergunta" in sim(uid_pro)
+    assert q("select valor, purchased_at, nota, categoria from credit_transactions where user_id = %s and id = %s",
+             (uid_pro, c)) == antes  # só as parcelas mudaram e nada foi recategorizado

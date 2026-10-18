@@ -174,7 +174,8 @@ def test_parar_descarta_a_confirmacao_da_ia_e_o_sim_nao_apaga(enviadas, parar):
     uid, wa_id = _com_senha_ligada(True)
     lid, seq, _ = db.add_launch_and_update_balance(uid, "despesa", 50, None, "mercado")
     assert _gastos(uid) == 1
-    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": f"l{lid}"}, f"apagar o gasto #{seq}")
+    from core.services.ai_chat.tools.extrato_ia import ao_confirmar  # a pendência como o runner a arma (com `_item`)
+    db.ai_set_pending_action(uid, "delete_launch", ao_confirmar(uid, {"launch_id": f"l{lid}"}), f"apagar o gasto #{seq}")
     if parar:
         _manda(wa_id, "PARAR")
         assert _opt_out(uid) and db.ai_get_pending_action(uid) is None

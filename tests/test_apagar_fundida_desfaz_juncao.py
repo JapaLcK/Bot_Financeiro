@@ -17,7 +17,7 @@ import pytest
 import db
 import db.bank_movements as bank_mod
 from conftest import usuario_pagante
-from core.services.ai_chat.tools.extrato_ia import apagar
+from core.services.ai_chat.tools.extrato_ia import ao_confirmar, apagar
 from tests._fusao_of_helpers import (  # noqa: F401 (uid_pro/ia_fora são fixtures)
     conecta_banco, consolidado, ia_fora, manda, saldo_bruto, sincroniza, soma_delta_conta, tx,
     uid_pro, ultimo_launch,
@@ -76,7 +76,7 @@ def test_whatsapp_em_lote_avisa_por_lancamento(uid_pro, ia_fora):
 
 def test_ia_apaga_a_fundida_e_o_banco_volta(uid_pro, ia_fora):
     conexao, x, _ = _fundida(uid_pro)
-    msg = apagar(uid_pro, {"launch_id": f"l{x}"})
+    msg = apagar(uid_pro, ao_confirmar(uid_pro, {"launch_id": f"l{x}"}))  # com o `_item` da pendência
     assert msg.startswith("🗑️ Apagado: ") and msg.endswith(f". {FRASE}"), msg
     _confere_desfeito(uid_pro, conexao, x)
 

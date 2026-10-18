@@ -16,7 +16,7 @@ import pytest
 import db
 from adapters.whatsapp import wa_runtime
 from conftest import usuario_pagante
-from core.services.ai_chat.tools.extrato_ia import recategorizar
+from core.services.ai_chat.tools.extrato_ia import ao_confirmar, recategorizar
 from tests._of_cash_helpers import sync
 from tests.test_category_launches_query import _cliente_logado
 from tests.test_category_normalization import _botao, _wa
@@ -40,7 +40,7 @@ PORTAS_LANCAMENTO = {
     "patch_launches": lambda uid, lid, mp: _patch(uid, f"/launches/{uid}/{lid}"),
     "whatsapp": _via_whatsapp,
     "ia": lambda uid, lid, mp: recategorizar(
-        uid, {"launch_id": f"l{lid}", "new_category": "lazer"}),
+        uid, ao_confirmar(uid, {"launch_id": f"l{lid}", "new_category": "lazer"})),
     "lote": lambda uid, lid, mp: db.update_launch_categories_bulk(uid, [(lid, "lazer")]),
 }
 

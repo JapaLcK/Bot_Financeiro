@@ -499,7 +499,8 @@ def _outra_janela_arma(uid, depois):
     """Rodada que, antes de devolver `depois`, faz a outra janela armar (o `#1`, na forma canônica `l<id>`)."""
     def rodada(messages):
         lid = db.resolve_user_seq_to_id(uid, 1)
-        db.ai_set_pending_action(uid, "delete_launch", {"launch_id": f"l{lid}"}, "apagar o #1 (outra janela)")
+        from core.services.ai_chat.tools.extrato_ia import ao_confirmar  # a pendência como o runner a arma (com `_item`)
+        db.ai_set_pending_action(uid, "delete_launch", ao_confirmar(uid, {"launch_id": f"l{lid}"}), "apagar o #1 (outra janela)")
         return depois
     return rodada
 

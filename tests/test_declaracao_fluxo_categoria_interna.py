@@ -15,7 +15,7 @@ import pytest
 import db
 from adapters.whatsapp import wa_runtime
 from conftest import usuario_pagante
-from core.services.ai_chat.tools.extrato_ia import recategorizar
+from core.services.ai_chat.tools.extrato_ia import ao_confirmar, recategorizar
 from db.accounts import LaunchCategoryLockedError, LaunchDateLockedError
 from db.resumo_mes import totais_do_mes
 from tests._patrimonio_helpers import q
@@ -75,10 +75,10 @@ def test_app_patch_launches_recusa_com_frase_e_aceita_comum():
 
 def test_ia_recusa_com_frase_e_aceita_comum():
     uid, lid = _declarada()
-    msg = recategorizar(uid, {"launch_id": f"l{lid}", "new_category": "investimento_aporte"})
+    msg = recategorizar(uid, ao_confirmar(uid, {"launch_id": f"l{lid}", "new_category": "investimento_aporte"}))
     assert "declarado como pago pelo banco" in msg and "agora é" not in msg
     _intacta(uid, lid)
-    assert "agora é" in recategorizar(uid, {"launch_id": f"l{lid}", "new_category": "lazer"})
+    assert "agora é" in recategorizar(uid, ao_confirmar(uid, {"launch_id": f"l{lid}", "new_category": "lazer"}))
 
 
 def test_whatsapp_recusa_com_frase_e_aceita_comum():
