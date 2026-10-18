@@ -72,7 +72,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 | Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 e S2 (exclusão imediata, `reauth-code`, cancela a assinatura Stripe na hora sem reembolso; `settings.html` já usa e avisa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` e Configurações do `/painel` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
-| Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |
+| Preferências de notificação | `/settings` | Não há | — | App | issue #1121 (e-mail, WhatsApp e resumos, pelas rotas que já existem); a tela do app prevê a seção de push de [`plano-push-app.md`](plano-push-app.md) |
 | Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Só lê (`perfil.tsx`, P1): nome, e-mail, telefone, Conectar WhatsApp e "Desde …"; não edita | Edição (P2) | App | issue #1083; plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), seção B |
 | Trocar a senha de quem já tem senha | `/settings` e Configurações do `/painel` (link por e-mail, `password-reset`) | Só o link por e-mail para conta sem senha (`seguranca.tsx`) | — | App | a discutir com o dono |
 | Bancos conectados: quanto vale cada banco, total e vagas | `#/conta/bancos`: topo de `/bancos`, barra, "N de M bancos", card com estado (só leitura) | `conexoes.tsx`: lista com estado, reconectar, desconectar, `message` do `/limite`; sem valores nem "N de M" (PR 3 de `plano-bancos-conectados-app.md`) | O app não mostra valores nem vagas | App | a discutir com o dono |
@@ -91,7 +91,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 - Cmd-K e atalhos de teclado (`Command.tsx`): não têm par em toque.
 - Compras Apple e restauração: regra da loja; o `app/README.md` as dá como "entrega separada".
 - Tempo real: o web recebe SSE (`/eventos`); o app não tem cliente dele, e `docs/api-app-painel.md` registra o SSE só no namespace web.
-- Push: nenhum dos dois (`expo-notifications` não está em `app/package.json`).
+- Push: o servidor já envia por APNs (dormente sem as envs, e nenhum evento de produto dispara push) e tem as rotas de registro, feitas para o app Capacitor antigo; o app Expo não registra token (`expo-notifications` não está em `app/package.json`); o `/painel` não tem web push, e fica sem. Plano e decisões abertas em [`plano-push-app.md`](plano-push-app.md).
 
 ## Como medi
 
