@@ -6,7 +6,7 @@ import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 const netflix = fixture["/api/app/assinaturas"].servicos[0]!;
 const vazio = { ...fixture["/api/app/assinaturas"], servicos: [], outras: [], ignoradas: [] };
-let falhaMarca = false; let segura: Promise<void> | null = null; // `segura`: segura o POST de marca (um POST em voo)
+let falhaMarca = false; let falhaGet = false; let segura: Promise<void> | null = null; // `segura`: segura o POST de marca (um POST em voo)
 const spotify = { ...netflix, chave: "spotify", nome: "Spotify" };
 /** Serve a lista dada no GET e no POST de marca (o servidor devolve a lista inteira). */
 function servir(dados: unknown) {
@@ -15,6 +15,7 @@ function servir(dados: unknown) {
   if (path === "/auth/me") return resposta(200, { user_id: 1, display_name: "Ana", app_access: true });
   if (path === "/onboarding/open-finance") return resposta(200, { ok: true, completed: true, completed_at: "2026-10-05T12:00:00Z" });
   if (path === "/open-finance/1/limite") return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
+  if (path === "/api/app/assinaturas" && falhaGet) return resposta(500, {});
   if (path === "/api/app/assinaturas/marca" && segura) await segura;
   if (path === "/api/app/assinaturas/marca" && falhaMarca) return resposta(500, {});
   if (path === "/api/app/assinaturas" || path === "/api/app/assinaturas/marca") return resposta(200, dados);
@@ -24,7 +25,7 @@ function servir(dados: unknown) {
 const corpos = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/api/app/assinaturas/marca").map(([, req]) => JSON.parse(req.body));
 async function abrir(dados: unknown, botao: string) { servir(dados); renderRouter("./app", { initialUrl: "/gastos" }); await waitFor(() => expect(screen.getByRole("button", { name: botao })).toBeTruthy()); }
 async function apertar(nome: string) { await act(async () => { fireEvent.press(screen.getByRole("button", { name: nome })); await drenar(); }); }
-beforeEach(async () => { prepararCaso(); desligarTrava(); falhaMarca = false; segura = null; jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear(); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); });
+beforeEach(async () => { prepararCaso(); desligarTrava(); falhaMarca = false; falhaGet = false; segura = null; jest.mocked(AccessibilityInfo.announceForAccessibility).mockClear(); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); });
 afterEach(() => jest.restoreAllMocks());
 it("Voltar a mostrar restaura a marca manual guardada (marcada) em vez de apagá-la", async () => {
  await abrir({ ...vazio, ignoradas: [{ ...netflix, marcada: true }] }, "Voltar a mostrar Netflix"); await apertar("Voltar a mostrar Netflix");
@@ -111,4 +112,10 @@ it("Salvando… aparece no botão tocado, não no Ignorar da mesma linha", async
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Remover marca de Netflix" })); await drenar(); });
  expect(screen.getByRole("button", { name: "Salvando…" })).toBeDisabled(); expect(screen.getByRole("button", { name: "Ignorar Netflix" })).toBeDisabled(); expect(screen.queryByRole("button", { name: "Remover marca de Netflix" })).toBeNull();
  await act(async () => { soltar(); await drenar(); }); expect(screen.queryByRole("button", { name: "Salvando…" })).toBeNull();
+});
+it("recarga que falha depois da marca não esconde o aviso nem o Desfazer", async () => {
+ await abrir({ ...vazio, servicos: [{ ...netflix, marcada: true }] }, "Ignorar Netflix");
+ falhaGet = true; await apertar("Ignorar Netflix");
+ expect(screen.getByText("Netflix ignorada.")).toBeTruthy(); expect(screen.queryByRole("button", { name: "Remover marca de Netflix" })).toBeNull(); // a lista saiu: o recurso está em erro
+ falhaGet = false; await apertar("Desfazer"); expect(corpos()).toEqual([{ chave: "netflix", status: "ignorar" }, { chave: "netflix", status: "assinatura" }]);
 });
