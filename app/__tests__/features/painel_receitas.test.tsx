@@ -6,6 +6,7 @@ import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { trocarParaBela } from "./conversa_apoio";
 import fixture from "./painel.fixture.json";
+jest.setTimeout(30_000); // `renderRouter` carrega a árvore inteira de rotas: o 1º teste paga o carregamento a frio (no CI passou de 5 s quando a folha de meta entrou na árvore)
 // Caixa "Receitas do extrato" (PR 2b). O "servidor" guarda chave -> status; o POST muda o mapa e o GET devolve a lista dele: roda a conversa, não a função.
 type Pedido = (path: string, req: RequestInit) => Promise<Response> | undefined;
 const BASE = [
