@@ -580,11 +580,13 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   de `TABELAS_QUE_AVISAM`); a ressalva `acao_financeira_pendente` só aparece no próximo
   foco, aviso de outra escrita, `valido_ate` ou "Tentar de novo". Fechar isso mexe nos
   escritores compartilhados: PR próprio, faixa Completo.
-  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (topo; não no card do Resumo), lê
+  Caixa "Receitas do extrato" (PR 2a, `widgets/ReceitasDoBanco.tsx`): só na PÁGINA `/previsao` (não no card do Resumo), lê
   `receitas_do_banco` e faz Sim/Não/Desfazer em `POST /api/v2/previsao/receita`. Sem atualização otimista: a mutação só termina
   (e destrava os botões) depois de reler toda `["previsao", …]` ativa, porque a resposta do POST é a do menor horizonte. Resposta
-  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Se o Desfazer esvazia a lista, a caixa fica com
-  "Nenhuma receita a confirmar." para o anúncio e o foco. Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
+  perdida com a marca gravada: a releitura mostra que pegou e a tela trata como sucesso. Duas instâncias do mesmo componente (`modo`): `pendentes` no
+  topo (some quando não há o que perguntar) e `respondidas` no fim, a seção "Receitas na previsão" com o Desfazer (decisão do dono, 2026-10-17: respondida
+  sai do topo). Sem o que mostrar, o recipiente vira `sr-only` e fica montado para o anúncio e o foco (Sim na última pendente, Desfazer na última respondida).
+  No app, as respondidas moram no card "Saldo previsto" do Resumo (contexto `ProvedorRespondidas`; perfil sem esse card não as alcança, limite aceito). Limites: (a) POST ok e GET de releitura falha: sem alerta, o resultado é anunciado, e depois de ~3 s de
   retries a lista fica a de antes do POST, com Sim/Não ativos e o aviso de previsão antiga; (b) POST falha e a releitura não
   mostra a marca: alerta "Não deu para salvar", nada anunciado. Só conta como gravado quem volta na lista com o status esperado:
   resposta perdida de uma linha que sumiu da lista (ou lista vazia, p.ex. banco fora do ar) mostra "Não deu para salvar" mesmo que
@@ -919,6 +921,35 @@ desafio de MFA ou cadastro pendente, e `apple/complete-signup`; o pendente mora 
 mesma `pending_google_signups`, com `provider='apple'`);
 `dashboard-link`/`dashboard-token` (link mágico); `link-code` (vincula WhatsApp e
 Discord à conta); `logout`; `refresh`; `account` (exclusão) e `account/export`.
+
+**Exclusão de conta (S1): imediata, sem carência nem cancelamento.** `DELETE /auth/account`
+apaga no ato, com a frase fixa `EXCLUIR` conferida PRIMEIRO no servidor (sem banco, sem
+gastar tentativa). O "modo" da conta vem de `db/reauth_codes.py::MODO_SQL` (fonte única,
+derivada de `SEM_CREDENCIAL_SQL`): `senha` (senha + código por e-mail), `codigo` (conta só
+Google/Apple: só o código) e `sem_credencial` (409 `PASSWORD_NOT_SET_MSG`, como no export).
+O código de 6 dígitos sai de `POST /auth/account/reauth-code` (JSON `{}` com
+`Content-Type: application/json`: sem corpo o middleware de CSRF devolve 403; tetos, validade
+e tentativas vivem em `db/reauth_codes.py` e na rota `frontend/routes/conta_reauth.py`; só o
+HMAC fica em `account_reauth_codes`). MFA ligado exige também `totp` (TOTP ou backup); código
+e backup só ficam consumidos se a marca commitar. A marca (`schedule_account_deletion`, nome
+histórico) põe `deletion_status='processing'` e revoga `auth_sessions` e
+`auth_refresh_tokens` na mesma transação; `excluir_conta_marcada` (o mesmo corpo do job)
+apaga no mesmo request. **Resposta 200:** `{ok, user_id, status:"deleted"|"deleting", deleted,
+deletion_scheduled_for, grace_days:0, message}` (os dois últimos campos de data e carência são
+legados). `deleting` = a limpeza LOCAL falhou (`delete_user_data`: lock, deadlock); a conta
+volta a `scheduled` vencida e o job termina e manda o e-mail. A Pluggy é best-effort
+(`db/privacy.py`): falha dela NÃO leva a `deleting`. **Erros** (`{"code","message"}` no
+`detail`): 400 `confirmacao_invalida`, 409 `export_pendente` (link de export ≤15 min, que morre
+com a conta), 409 `assinatura_ativa` (Stripe viva com renovação), 503 `stripe_indisponivel`
+(a consulta falhou: nada é apagado), 400 `codigo_obrigatorio`, 401 `codigo_invalido`, 401
+`codigo_expirado` (vencido, usado, esgotado ou inexistente), 400 `mfa_obrigatorio`, 401
+`mfa_invalido`. Senha errada/vazia e sem credencial seguem como `detail` string (401 "Senha
+incorreta.", 400 "Informe sua senha...", 409). Só o 401 de SESSÃO leva `WWW-Authenticate`;
+os de credencial não (o interceptor do `auth-refresh.js` renovaria em vez de mostrar o erro).
+Limite conhecido: token de dashboard LEGADO sem `jti` não é revogável por `auth_sessions` e,
+passada a exclusão, ainda valida por até 12 h; todo emissor atual passa `jti`.
+O export continua pedindo só a senha (modo `codigo`: sem reautenticação) e devolve
+`email_mascarado`.
 
 **Deep link do WhatsApp: um construtor só, `core/dashboard_links.link_whatsapp(texto)`**
 (Grupo 7, PR-5b). Lê `WHATSAPP_NUMBER` a cada chamada, monta `api.whatsapp.com/send?phone=N&text=...`

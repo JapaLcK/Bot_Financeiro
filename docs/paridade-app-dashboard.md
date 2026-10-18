@@ -69,7 +69,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Excluir conta e exportar dados | `/settings` | Não há | — | App | plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), aguardando o dono |
+| Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 (exclusão imediata, `reauth-code`; `settings.html` já usa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |

@@ -466,14 +466,15 @@ def test_account_export_requires_password_and_emails_single_use_link(user_id, mo
     assert unknown.status_code == 410
 
 
-def test_delete_account_schedules_deletion_and_blocks_dashboard_token(user_id, monkeypatch):
+def test_delete_account_exclui_na_hora_e_manda_o_email(user_id, monkeypatch):
     import core.services.email_service as email_service
+    from db.reauth_codes import EXCLUIR, emitir
 
     sent_deletion_emails = []
     monkeypatch.setattr(
         email_service,
-        "send_account_deletion_scheduled_email",
-        lambda to, scheduled_for: sent_deletion_emails.append((to, scheduled_for)) or True,
+        "send_account_deletion_completed_email",
+        lambda to: sent_deletion_emails.append(to) or True,
     )
 
     email = f"delete-{user_id}@example.com"
@@ -488,32 +489,41 @@ def test_delete_account_schedules_deletion_and_blocks_dashboard_token(user_id, m
             )
         conn.commit()
 
-    token = dashboard.make_dashboard_token(user_id, hours=1)
+    # Sessão COM jti (a de todo emissor atual): é ela que a exclusão revoga e apaga. Um token de
+    # dashboard LEGADO sem jti não é revogável por `auth_sessions` e, passada a exclusão, ainda
+    # valida (limite conhecido, 12 h; nenhum emissor atual o gera).
+    from _apoio_auth_app import sessao_de
+    token = sessao_de(user_id)["dashboard"]
     client = TestClient(dashboard.app)
     client.cookies.set("dashboard_token", token)
+    antes = TestClient(dashboard.app)
+    antes.cookies.set("dashboard_token", token)
+    assert antes.get("/auth/validate").status_code == 200   # positivo: a sessão vale antes
 
-    wrong = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "wrong"})
+    code = emitir(user_id, EXCLUIR)
+    wrong = client.request("DELETE", "/auth/account", headers=_csrf_headers(client),
+                           json={"password": "wrong", "code": code, "confirmacao": "EXCLUIR"})
     assert wrong.status_code == 401
 
-    response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "secret123"})
+    response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client),
+                              json={"password": "secret123", "code": code, "confirmacao": "EXCLUIR"})
     assert response.status_code == 200
-    assert response.json()["status"] == "scheduled"
+    assert response.json()["status"] == "deleted"
     assert "auth_token=" in response.headers["set-cookie"]
     assert "dashboard_token=" in response.headers["set-cookie"]
-    assert sent_deletion_emails == [(email, response.json()["deletion_scheduled_for"])]
+    assert sent_deletion_emails == [email]
 
     with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "select deletion_status, deletion_scheduled_for from auth_accounts where user_id=%s",
-            (user_id,),
-        )
-        row = cur.fetchone()
-    assert row["deletion_status"] == "scheduled"
-    assert row["deletion_scheduled_for"] is not None
+        cur.execute("select 1 from users where id=%s", (user_id,))
+        assert cur.fetchone() is None
+        cur.execute("select 1 from auth_accounts where user_id=%s", (user_id,))
+        assert cur.fetchone() is None
 
-    blocked = TestClient(dashboard.app)
-    blocked.cookies.set("dashboard_token", token)
-    assert blocked.get("/auth/validate").status_code == 403
+    # A mesma sessão (cookie guardado) já não abre nada: 401, não mais 200 de conta que não existe.
+    depois = TestClient(dashboard.app)
+    depois.cookies.set("dashboard_token", token)
+    for rota in ("/auth/validate", f"/settings/{user_id}/security", "/auth/dashboard-profile"):
+        assert depois.get(rota).status_code == 401, rota
 
 
 def test_account_deletion_is_scoped_to_authenticated_user(user_id):
@@ -553,29 +563,22 @@ def test_account_deletion_is_scoped_to_authenticated_user(user_id):
         client = TestClient(dashboard.app)
         client.cookies.set("dashboard_token", token)
 
-        wrong_scope = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "other123"})
+        from db.reauth_codes import EXCLUIR, emitir
+        code = emitir(user_id, EXCLUIR)
+        wrong_scope = client.request("DELETE", "/auth/account", headers=_csrf_headers(client),
+                                     json={"password": "other123", "code": code, "confirmacao": "EXCLUIR"})
         assert wrong_scope.status_code == 401
 
-        response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client), json={"password": "secret123"})
+        response = client.request("DELETE", "/auth/account", headers=_csrf_headers(client),
+                                  json={"password": "secret123", "code": code, "confirmacao": "EXCLUIR"})
         assert response.status_code == 200
         assert response.json()["user_id"] == user_id
+        assert response.json()["deleted"] is True
 
         with db.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("select deletion_status from auth_accounts where user_id=%s", (user_id,))
-                assert cur.fetchone()["deletion_status"] == "scheduled"
                 cur.execute("select deletion_status from auth_accounts where user_id=%s", (other_user_id,))
                 assert cur.fetchone()["deletion_status"] is None
-
-                cur.execute(
-                    "update auth_accounts set deletion_scheduled_for = now() - interval '1 minute' where user_id=%s",
-                    (user_id,),
-                )
-            conn.commit()
-
-        results = db.process_due_account_deletions(limit=10)
-        assert any(r["user_id"] == user_id and r["deleted"] for r in results)
-        assert any(r["user_id"] == user_id and r["email"] == email for r in results)
 
         with db.get_conn() as conn:
             with conn.cursor() as cur:

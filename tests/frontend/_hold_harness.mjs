@@ -36,19 +36,27 @@ const T0 = 1_800_000_000_000;
 export const ACOES = [
   { nome: "reset", abrir: "showResetConfirm", fechar: "hideResetConfirm", bloco: "reset-confirm", senha: "reset-password",
     botao: "reset-confirm-btn", metodo: "POST", rota: "**/settings/reset", sucesso: { ok: true },
+    campos: {}, corpo: { password: "senha123" },
     rotulo: "Segure para apagar e recomeçar", modal: "Apagar tudo e recomeçar" },
   { nome: "delete", abrir: "showDeleteConfirm", fechar: "hideDeleteConfirm", bloco: "delete-confirm", senha: "delete-password",
-    botao: "delete-confirm-btn", metodo: "DELETE", rota: "**/auth/account", sucesso: { deletion_scheduled_for: "2026-10-21T00:00:00" },
-    rotulo: "Segure para excluir a conta", modal: "Agendar exclusão" },
+    botao: "delete-confirm-btn", metodo: "DELETE", rota: "**/auth/account", sucesso: { ok: true, status: "deleted", deleted: true },
+    // a frase e o código do e-mail digitados; a senha vai pelo campo `senha`
+    campos: { "delete-confirmacao": "EXCLUIR", "delete-codigo": "123456" },
+    corpo: { password: "senha123", code: "123456", confirmacao: "EXCLUIR" },
+    rotulo: "Segure para excluir a conta", modal: "Excluir conta" },
 ];
 
 /**
  * `resposta(n)` devolve o que a rota da ação responde (pode ser uma Promise: é como o
  * teste segura o fetch). `reqs` junta as requisições da ação, `errs` os pageerrors.
+ * `me`: o corpo do /auth/me (conta só-Google: `{has_password:false, precisa_criar_senha:false}`;
+ * sem credencial: `precisa_criar_senha:true`, e aí a página abre na segurança e `abre` volta cedo,
+ * sem relógio falso nem campos preenchidos).
+ * `mfa`: o /auth/mfa/status diz que o MFA está ligado (a exclusão passa a levar `totp`).
  * `semHold`: aborta o /hold-confirm.js (script que falha ao carregar).
  * `holdStub`: serve esse texto no lugar do /hold-confirm.js (ex.: `window.PBHoldConfirm = {};`).
  */
-export async function abre(a, { senha = "senha123", resposta, touch = false, viewport, semHold = false, holdStub } = {}) {
+export async function abre(a, { senha = "senha123", resposta, touch = false, viewport, semHold = false, holdStub, mfa = false, me = { has_password: true } } = {}) {
   const ctx = await env.browser.newContext({ hasTouch: touch, ...(viewport && { viewport }) });
   const page = await ctx.newPage();
   const reqs = [];
@@ -68,9 +76,9 @@ export async function abre(a, { senha = "senha123", resposta, touch = false, vie
     route.fulfill({ status: 200, contentType: "application/javascript",
                     body: readFileSync(join(FRONTEND, "static", "auth-refresh.js"), "utf8") }));
   await page.route("**/auth/validate", (route) => route.fulfill(json({ user_id: 1 })));
-  await page.route("**/auth/me", (route) => route.fulfill(json({ has_password: true })));
+  await page.route("**/auth/me", (route) => route.fulfill(json(me)));
   await page.route("**/settings/1/security", (route) => route.fulfill(json(SECURITY_OK)));
-  await page.route("**/auth/mfa/status", (route) => route.fulfill(json({ enabled: false })));
+  await page.route("**/auth/mfa/status", (route) => route.fulfill(json({ enabled: mfa })));
   await page.route(a.rota, async (route) => {
     const req = route.request();
     if (req.method() !== a.metodo) return route.fallback();
@@ -79,12 +87,21 @@ export async function abre(a, { senha = "senha123", resposta, touch = false, vie
     try { await route.fulfill(r); } catch { /* navegou/fechou */ }
   });
   await page.goto(`${env.origin}/settings.html?view=data`);
+  if (me.precisa_criar_senha) {
+    await waitFor(() => page.evaluate(() => !document.getElementById("section-security").hidden), "seção de segurança");
+    return { page, ctx, reqs, errs };
+  }
   await waitFor(() => page.evaluate(() => !document.getElementById("section-data").hidden),
                 "seção de dados (boot do initSettings)");
-  await page.evaluate(([abrir, id, s]) => {
+  await page.evaluate(([abrir, id, s, campos]) => {
     window[abrir]();
     document.getElementById(id).value = s;
-  }, [a.abrir, a.senha, senha]);
+    for (const [campo, valor] of Object.entries(campos)) document.getElementById(campo).value = valor;
+  }, [a.abrir, a.senha, senha, a.campos]);
+  if (mfa && a.nome === "delete") {   // o campo do autenticador aparece quando o status do MFA volta
+    await waitFor(() => page.isVisible("#delete-totp"), "o campo do autenticador");
+    await page.evaluate(() => { document.getElementById("delete-totp").value = "654321"; });
+  }
   await page.locator(`#${a.botao}`).scrollIntoViewIfNeeded();
   await page.clock.install({ time: T0 });
   await page.clock.pauseAt(T0 + 1000);

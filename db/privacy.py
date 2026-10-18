@@ -260,52 +260,104 @@ def is_account_scheduled_for_deletion(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) -> dict:
-    now = datetime.now(timezone.utc)
-    scheduled_for = now + timedelta(days=grace_days)
+class ReautenticacaoRecusada(PermissionError):
+    """Código de e-mail ou de MFA recusado, com o status e o `code` da resposta.
+
+    Herda de PermissionError (como PasswordNotSetError): se uma rota errar a
+    ordem dos `except`, a operação continua recusada.
+    """
+
+    def __init__(self, status: int, codigo: str, mensagem: str):
+        super().__init__(mensagem)
+        self.status = status
+        self.codigo = codigo
+
+
+def schedule_account_deletion(
+    user_id: int, password: str | None, *, code: str | None = None, totp: str | None = None
+) -> dict:
+    """Reautentica e MARCA a conta para exclusão imediata (`processing`).
+
+    O nome é histórico (já foi "agendar com carência"): hoje quem apaga é
+    `excluir_conta_marcada`, que a rota chama em seguida. Credenciais conforme o
+    modo da conta (`db.reauth_codes.MODO_SQL`): senha + código por e-mail; só o
+    código (Google/Apple sem senha); MFA ligado pede também `totp` (TOTP ou backup).
+    O código por e-mail e o backup de MFA só ficam consumidos se a marca commitar.
+    """
+    from .mfa import _consume_backup_code, _verify_totp
+    from .reauth_codes import EXCLUIR, MODO_SQL, confere_e_consome
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                select id, email, password_hash, deletion_status, deletion_scheduled_for
-                from auth_accounts
-                where user_id = %s
+                f"""
+                select a.password_hash, a.deletion_status,
+                       ({MODO_SQL}) as modo
+                from auth_accounts a
+                where a.user_id = %s
                 limit 1
+                for update of a
                 """,
                 (user_id,),
             )
             account = cur.fetchone()
             if not account:
                 raise LookupError("Conta de login não encontrada.")
+            # Já marcada: uma segunda chamada não reconfere nem gasta nada; a rota
+            # só devolve `deleting` (o job termina a exclusão).
+            if account["deletion_status"] == "processing":
+                return {"user_id": user_id, "em_andamento": True}
             # Este caminho NÃO passa por verify_user_password (select próprio):
             # sem esta guarda, _check_password(password, None) estoura
             # AttributeError, é engolido no `except` do `_check_password` e vira
-            # "Senha incorreta." — mesma raiz, segundo caminho de código.
-            if not account["password_hash"]:
+            # "Senha incorreta." — mesma raiz, segundo caminho de código. Vem ANTES
+            # de olhar `code`: sem credencial o e-mail não está provado.
+            modo = account["modo"]
+            if modo == "sem_credencial":
                 raise PasswordNotSetError(PASSWORD_NOT_SET_MSG)
-            # O "informe a senha" vem DEPOIS do estado da conta (era a primeira
-            # linha da função): senha vazia numa conta só-Google devolvia 400
-            # "Informe sua senha", terceiro status para o mesmo estado.
-            if not password:
-                raise ValueError("Informe sua senha para confirmar a exclusão.")
-            if not _check_password(password, account["password_hash"]):
-                raise PermissionError("Senha incorreta.")
+            if modo == "senha":
+                # O "informe a senha" vem DEPOIS do estado da conta: senha vazia
+                # numa conta só-Google devolvia 400 em vez do 409.
+                if not password:
+                    raise ValueError("Informe sua senha para confirmar a exclusão.")
+                # A senha vem ANTES do código: senha errada não gasta tentativa dele.
+                if not _check_password(password, account["password_hash"]):
+                    raise PermissionError("Senha incorreta.")
+            code = (code or "").strip().replace(" ", "")
+            if not code:
+                raise ReautenticacaoRecusada(400, "codigo_obrigatorio", "Peça o código por e-mail.")
+            r = confere_e_consome(cur, user_id, EXCLUIR, code)
+            if r != "ok":
+                # A tentativa gasta PRECISA persistir: sair por exceção faria o
+                # get_conn() dar rollback e o limite de 5 tentativas não valeria.
+                conn.commit()
+                if r == "invalido":
+                    raise ReautenticacaoRecusada(401, "codigo_invalido", "Código incorreto.")
+                raise ReautenticacaoRecusada(401, "codigo_expirado", "Código vencido. Peça outro.")
 
-            if account.get("deletion_status") == "scheduled" and account.get("deletion_scheduled_for"):
-                scheduled_for = account["deletion_scheduled_for"]
-            else:
-                cur.execute(
-                    """
-                    update auth_accounts
-                    set deletion_status = 'scheduled',
-                        deletion_requested_at = %s,
-                        deletion_scheduled_for = %s,
-                        deletion_processing_started_at = null
-                    where user_id = %s
-                    """,
-                    (now, scheduled_for, user_id),
-                )
+            cur.execute("select enabled from user_mfa where user_id = %s", (user_id,))
+            mfa = cur.fetchone()
+            if mfa and mfa["enabled"]:
+                totp = (totp or "").strip()
+                if not totp:
+                    raise ReautenticacaoRecusada(
+                        400, "mfa_obrigatorio", "Informe o código do autenticador ou de backup.")
+                # As MESMAS funções de /auth/mfa/disable, no cursor desta transação:
+                # exceção daqui em diante desfaz o backup e o código por e-mail.
+                if not (_verify_totp(cur, user_id, totp) or _consume_backup_code(cur, user_id, totp)):
+                    raise ReautenticacaoRecusada(401, "mfa_invalido", "Código do autenticador incorreto.")
+
+            cur.execute(
+                """
+                update auth_accounts
+                set deletion_status = 'processing',
+                    deletion_requested_at = now(),
+                    deletion_scheduled_for = now(),
+                    deletion_processing_started_at = now()
+                where user_id = %s
+                """,
+                (user_id,),
+            )
 
             # Reduz a janela de uso de tokens de uso único. Cookies JWT antigos
             # também são bloqueados pelos guards do backend.
@@ -313,17 +365,27 @@ def schedule_account_deletion(user_id: int, password: str, grace_days: int = 7) 
                 if _table_exists(cur, table):
                     cur.execute(f"delete from {table} where user_id = %s", (user_id,))
 
+            # Revoga TODAS as sessões e refresh tokens (inclusive a deste pedido): cobre
+            # a janela até a exclusão terminar, pedidos paralelos e outros aparelhos. SQL
+            # inline na mesma transação de propósito: os gêmeos
+            # core.sessions.revoke_other_sessions e
+            # core.refresh_tokens.revoke_user_refresh_tokens abrem conexão própria e
+            # engolem o erro (falha silenciosa da revogação).
+            cur.execute(
+                "update auth_sessions set revoked_at = now() where user_id = %s and revoked_at is null",
+                (user_id,),
+            )
+            cur.execute(
+                "update auth_refresh_tokens set revoked_at = now() where user_id = %s and revoked_at is null",
+                (user_id,),
+            )
+
         conn.commit()
 
     from db_support import invalidate_auth_user_cache
     invalidate_auth_user_cache(user_id)
 
-    return {
-        "user_id": user_id,
-        "status": "scheduled",
-        "deletion_scheduled_for": scheduled_for,
-        "grace_days": grace_days,
-    }
+    return {"user_id": user_id, "em_andamento": False}
 
 
 def _fetch_rows(cur, name: str, sql: str, params: tuple) -> tuple[str, list[dict]]:
@@ -1368,78 +1430,82 @@ def _restore_account_deletion_schedule(user_id: int) -> None:
     invalidate_auth_user_cache(user_id)
 
 
-def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 120) -> list[dict]:
-    due_user_ids = _claim_due_account_deletions(limit, stale_after_minutes)
+def excluir_conta_marcada(user_id: int) -> dict:
+    """Exclui AGORA uma conta já marcada `processing` (limpeza remota + banco).
 
-    results = []
-    for user_id in due_user_ids:
-        # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
-        # local varreu (RETURNING), para o 2º passe pegar item salvo na janela
-        # entre as duas coisas. Mesma regra de POST /settings/reset
-        # (frontend/routes/settings.py) e do disconnect.
-        enumerados: list[str] = []
+    Corpo único do job (`process_due_account_deletions`) e do
+    `DELETE /auth/account`. Falhou: reagenda como `scheduled` (vencida) e
+    devolve `deleted: False` — o job termina depois.
+    """
+    # O que a limpeza remota ENUMEROU — comparado adiante com o que o DELETE
+    # local varreu (RETURNING), para o 2º passe pegar item salvo na janela
+    # entre as duas coisas. Mesma regra de POST /settings/reset
+    # (frontend/routes/settings.py) e do disconnect.
+    enumerados: list[str] = []
 
-        def _limpeza_remota() -> None:
-            # Closure sobre o `user_id`/`enumerados` DESTA volta do laço: o hook
-            # é chamado sincronamente dentro do `delete_user_data` logo abaixo,
-            # então não há late binding a temer.
-            # Import DENTRO da função: `db/` não importa `frontend/` no topo
-            # (precedente: core/services/billing_access.py:243). Um ImportError
-            # aqui não bloqueia a exclusão — o `try` de `delete_user_data` em
-            # volta do hook cobre a categoria inteira (LGPD ganha do import).
+    def _limpeza_remota() -> None:
+        # Closure sobre o `user_id`/`enumerados` DESTA chamada: o hook
+        # é chamado sincronamente dentro do `delete_user_data` logo abaixo,
+        # então não há late binding a temer.
+        # Import DENTRO da função: `db/` não importa `frontend/` no topo
+        # (precedente: core/services/billing_access.py:243). Um ImportError
+        # aqui não bloqueia a exclusão — o `try` de `delete_user_data` em
+        # volta do hook cobre a categoria inteira (LGPD ganha do import).
+        from frontend.routes.open_finance import delete_pluggy_items_best_effort
+
+        # `log_user_id=False`: só a exclusão desliga o dono do log de apiKey
+        # falhada — a linha tem de sobreviver à cascata sem o identificador
+        # de uma conta apagada (o disconnect e o reset seguem com a coluna).
+        enumerados.extend(delete_pluggy_items_best_effort(user_id, log_user_id=False))
+
+    # `varridos` é preenchido DENTRO de `delete_user_data`, logo depois do
+    # commit local — antes da verificação pós-commit, que pode levantar. O
+    # retorno não serve sozinho: quando ela levanta, não há retorno nenhum e o
+    # 2º passe ficava sem alvo, deixando o item da janela órfão e pago
+    # (Codex, PR #539). Com o recipiente, o desfecho da exclusão local e o do
+    # passe remoto param de depender um do outro.
+    varridos: list[str] = []
+    falha_local: Exception | None = None
+    resultado: dict = {}
+    try:
+        resultado = delete_user_data(user_id, remote_cleanup=_limpeza_remota,
+                                     swept_sink=varridos)
+    except Exception as exc:
+        falha_local = exc
+
+    # 2º passe remoto: item salvo ENTRE a enumeração acima e o DELETE local
+    # foi varrido do banco sem ser deletado na Pluggy — órfão pago, com os
+    # dados bancários do titular, DEPOIS de uma exclusão LGPD. `tardios` é
+    # normalmente vazio. Best-effort como o 1º passe: o helper já loga por
+    # item; este `try` cobre a falha do helper inteiro.
+    resultado.pop("pluggy_items_swept", None)
+    tardios = sorted(set(varridos) - set(enumerados))
+    if tardios:
+        try:
             from frontend.routes.open_finance import delete_pluggy_items_best_effort
 
-            # `log_user_id=False`: só a exclusão desliga o dono do log de apiKey
-            # falhada — a linha tem de sobreviver à cascata sem o identificador
-            # de uma conta apagada (o disconnect e o reset seguem com a coluna).
-            enumerados.extend(delete_pluggy_items_best_effort(user_id, log_user_id=False))
+            delete_pluggy_items_best_effort(user_id, tardios, log_user_id=False)
+        except Exception as exc:  # noqa: BLE001 — a conta já foi excluída
+            from core.observability import log_system_event_sync
 
-        # `varridos` é preenchido DENTRO de `delete_user_data`, logo depois do
-        # commit local — antes da verificação pós-commit, que pode levantar. O
-        # retorno não serve sozinho: quando ela levanta, não há retorno nenhum e o
-        # 2º passe ficava sem alvo, deixando o item da janela órfão e pago
-        # (Codex, PR #539). Com o recipiente, o desfecho da exclusão local e o do
-        # passe remoto param de depender um do outro.
-        varridos: list[str] = []
-        falha_local: Exception | None = None
-        resultado: dict = {}
-        try:
-            resultado = delete_user_data(user_id, remote_cleanup=_limpeza_remota,
-                                         swept_sink=varridos)
-        except Exception as exc:
-            falha_local = exc
+            # `user_id=None`: a conta não existe mais e a FK é on delete
+            # cascade — ver o docstring de `delete_user_data`.
+            log_system_event_sync(
+                "warning", "account_deletion_pluggy_cleanup_failed",
+                f"2º passe remoto da exclusão de conta falhou: {exc}",
+                source="db.privacy", user_id=None,
+                details={"items": tardios, "error": str(exc)[:200]},
+            )
 
-        # 2º passe remoto: item salvo ENTRE a enumeração acima e o DELETE local
-        # foi varrido do banco sem ser deletado na Pluggy — órfão pago, com os
-        # dados bancários do titular, DEPOIS de uma exclusão LGPD. `tardios` é
-        # normalmente vazio. Best-effort como o 1º passe: o helper já loga por
-        # item; este `try` cobre a falha do helper inteiro.
-        resultado.pop("pluggy_items_swept", None)
-        tardios = sorted(set(varridos) - set(enumerados))
-        if tardios:
-            try:
-                from frontend.routes.open_finance import delete_pluggy_items_best_effort
+    # O desfecho local é reportado DEPOIS do 2º passe, e não no lugar dele:
+    # a exclusão que levanta reagenda e volta `deleted: False`, como antes.
+    if falha_local is not None:
+        _restore_account_deletion_schedule(user_id)
+        return {"user_id": user_id, "deleted": False, "error": str(falha_local)}
 
-                delete_pluggy_items_best_effort(user_id, tardios, log_user_id=False)
-            except Exception as exc:  # noqa: BLE001 — a conta já foi excluída
-                from core.observability import log_system_event_sync
+    return resultado
 
-                # `user_id=None`: a conta não existe mais e a FK é on delete
-                # cascade — ver o docstring de `delete_user_data`.
-                log_system_event_sync(
-                    "warning", "account_deletion_pluggy_cleanup_failed",
-                    f"2º passe remoto da exclusão de conta falhou: {exc}",
-                    source="db.privacy", user_id=None,
-                    details={"items": tardios, "error": str(exc)[:200]},
-                )
 
-        # O desfecho local é reportado DEPOIS do 2º passe, e não no lugar dele:
-        # a exclusão que levanta reagenda e volta `deleted: False`, como antes.
-        if falha_local is not None:
-            _restore_account_deletion_schedule(user_id)
-            results.append({"user_id": user_id, "deleted": False,
-                            "error": str(falha_local)})
-            continue
-
-        results.append(resultado)
-    return results
+def process_due_account_deletions(limit: int = 50, stale_after_minutes: int = 120) -> list[dict]:
+    return [excluir_conta_marcada(uid)
+            for uid in _claim_due_account_deletions(limit, stale_after_minutes)]

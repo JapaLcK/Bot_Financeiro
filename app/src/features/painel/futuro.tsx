@@ -8,6 +8,7 @@ import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
 import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros } from "./base";
 import { LinhaExpansivel } from "./expansao";
+import { useRespondidas } from "./receitas";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
@@ -22,7 +23,7 @@ function ComoFoiFeita({ d }: { d: DadosPrevisao }) {
   </View>;
 }
 export function Previsao() {
-  const p = usePainel(), bloco = useBloco(); const [aberta, setAberta] = useState<"pior" | "como" | null>(null); const alternar = (q: "pior" | "como") => setAberta((a) => a === q ? null : q);
+  const p = usePainel(), bloco = useBloco(), respondidas = useRespondidas(); const [aberta, setAberta] = useState<"pior" | "como" | null>(null); const alternar = (q: "pior" | "como") => setAberta((a) => a === q ? null : q);
   return <RecursoDados nome="previsao">{(d) => {
     const pior = d.pior_dia, piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && pior.causas.length ? `desde ${ddmm(pior.desde)}` : undefined} />;
     return <View style={{ gap: 8 }}>
@@ -37,6 +38,7 @@ export function Previsao() {
       {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
       {pior && (pior.causas.length ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={aberta === "pior"} alternar={() => alternar("pior")}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}</View></LinhaExpansivel> : piorLinha)}
       <LinhaExpansivel testID="como-foi-feita" linha={<Texto variante="rotulo" tom="inkMuted">Como foi feita</Texto>} aberta={aberta === "como"} alternar={() => alternar("como")}><ComoFoiFeita d={d} /></LinhaExpansivel>
+      {respondidas}
     </View>;
   }}</RecursoDados>;
 }

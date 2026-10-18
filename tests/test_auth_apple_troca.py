@@ -24,7 +24,7 @@ os.environ.setdefault("MFA_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import APAGA, NONCE_CRU, apple_de_mentira
+from _apoio_auth_app import APAGA, NONCE_CRU, apple_de_mentira, marca_exclusao
 
 SENHA = "senha-forte-123"
 UA_APP = "PigBankApp/0.1.0 (iPhone 17 Pro; iOS 26.1)"
@@ -164,7 +164,7 @@ def test_a3_conta_com_exclusao_agendada_nao_entra(apple):
     uid, email = _conta()
     sub = _sub()
     db.link_google_identity(uid, sub, email, db.PROVIDER_APPLE)
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA)
 
     r = _troca(apple.emitir(sub=sub, email=email))
     assert r.status_code == 403, r.text
@@ -176,10 +176,10 @@ def test_a4_token_ruim_de_conta_com_mfa_e_exclusao_da_400_antes_de_tudo(apple, d
     """I1/I2: com a conta vinculada tendo MFA E exclusão agendada, qualquer
     decisão tomada antes da verificação apareceria como 403 ou `mfa_required`."""
     uid, email = _conta()
-    _com_mfa(uid, email)
+    segredo = _com_mfa(uid, email)
     sub = _sub()
     db.link_google_identity(uid, sub, email, db.PROVIDER_APPLE)
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA, segredo)
 
     if defeito == "aud":
         token = apple.emitir(sub=sub, email=email, aud="host.exp.Exponent")
@@ -240,7 +240,7 @@ def test_a6_email_real_de_conta_com_mfa_pede_o_desafio_e_nao_vincula(apple):
 def test_a6d_conta_com_exclusao_agendada_recusa_sem_vincular(apple):
     """#988: a conta é recusada (403) e o vínculo também não fica para trás."""
     uid, email = _conta()
-    db.schedule_account_deletion(uid, SENHA)
+    marca_exclusao(uid, SENHA)
     sub = _sub()
     r = _troca(apple.emitir(sub=sub, email=email))
     assert r.status_code == 403, r.text
