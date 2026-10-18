@@ -43,8 +43,8 @@ Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações 
 Perfil, Cobrança e Configurações, mais o botão Sair (sem atalhos de teclado). O conteúdo
 vem em PRs, uma página por vez. O **Perfil** já é página de verdade (`conta/Perfil.tsx`: nome,
 e-mail e telefone editáveis em modal, WhatsApp e "Desde"; só ícone e valor, a palavra é para o
-leitor de tela); Cobrança e Configurações seguem páginas-ponte (nome, e-mail e um link para a tela
-antiga). O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
+leitor de tela); só a Cobrança segue página-ponte (nome, e-mail e um link para a tela
+antiga); as Configurações mostram a Segurança (senha por link de e-mail e MFA) e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
 `/settings` antiga fica como saída de emergência. A tela "Assinaturas"
 (Netflix etc.) é outra coisa e já existe.
 

@@ -1474,6 +1474,13 @@ travado enquanto o PATCH está em voo. As outras sessões NÃO são encerradas, 
 auto-vínculo Google/Apple). Sobra: conta com 2 linhas em `auth_accounts` (o `user_id` não é
 unique) segue em 409 na troca, como antes; o "antigo" do aviso é o da primeira linha lida. Resend lento atrasa a resposta do PATCH (o aviso é `await` depois do commit, sem lock e sem timeout próprio), e o e-mail antigo vai ao `system_event_logs`, como os outros avisos. O teto de 5/h conta a tentativa antes da senha e do lock, sem estorno: 5 PATCH concorrentes com o mesmo e-mail novo (só API direta ou várias abas; o botão trava em voo) gastam as 5 e o próximo update leva 429 até a hora virar. Declarado de propósito: estornar enfraqueceria o limite de brute-force da senha.
 
+**Configurações do /painel mostram a Segurança (S0 + C1a).** `conta/Seguranca.tsx`: o link de redefinição de senha por e-mail
+(`password-reset`) e o MFA (`/auth/mfa/*`, modal em `conta/MfaForm.tsx`). Os códigos de backup moram no Cofre
+(`conta/Cofre.tsx`), irmão do `<Entrada>` em `main.tsx`, na memória do módulo: o servidor os devolve uma vez e fechar o modal,
+trocar de página ou o portão cair não os apagam; só o "Concluído". `enable` e `regenerate-backup-codes` NÃO têm timeout (o
+servidor comita e a resposta é a única cópia dos códigos); resposta perdida relê o status (T2 "gerar novos códigos" se o MFA ligou;
+o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu.
+
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
 linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da

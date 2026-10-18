@@ -130,14 +130,10 @@ async def _get_security_settings(user_id: int) -> dict:
 
 
 def _current_session_jti(request: Request) -> str | None:
-    """Le o jti da sessao corrente a partir do cookie auth_token. None se ausente/legado."""
+    """jti da sessao corrente: o que o gate ja resolveu (o painel roda so com o dashboard_token de 12h), senao o do auth_token."""
     token = shared.get_auth_token_from_request(request, None)
-    if not token:
-        return None
-    payload = shared.decode_jwt(token)
-    if not payload or payload.get("type") != "auth":
-        return None
-    return payload.get("jti")
+    payload = (token and shared.decode_jwt(token)) or {}
+    return getattr(request.state, "session_jti", None) or (payload.get("jti") if payload.get("type") == "auth" else None)
 
 
 @router.post("/settings/reset")
