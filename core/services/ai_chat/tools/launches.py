@@ -1251,10 +1251,11 @@ TOOLS: list[Tool] = [
                         "launch_id": {
                             "type": "string",
                             "description": (
-                                "O `id` exatamente como veio de list_recent_launches "
-                                "('l123' ou 'c45'), OU o '#5' que o user disse, OU "
-                                "'CC45' / 'PCxxxxxxxx' (códigos de compra no cartão e "
-                                "de parcelamento). NUNCA invente nem deduza um número."
+                                "O `id` exatamente como veio da tool (list_recent_launches, "
+                                "get_open_bill: 'l123' ou 'c45'), OU o '#5' que o user "
+                                "disse, OU 'CC45' / 'PCxxxxxxxx' (códigos de compra no "
+                                "cartão e de parcelamento; o `codigo` de list_installments). "
+                                "NUNCA invente nem deduza um número."
                             ),
                         },
                     },

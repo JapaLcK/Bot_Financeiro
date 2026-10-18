@@ -68,7 +68,8 @@ def test_delete_launch_parcelamento_manual_e_recusado_pelo_codigo_pc_e_pela_parc
     info = _parcelamento(user_id)
     pc_code = f"PC{info['group_id'].replace('-', '').upper()[:8]}"
 
-    for bruto in (pc_code, pc_code.lower(), f"c{info['tx_ids'][1]}"):
+    sem_pc = pc_code[2:]  # os 8 hex sem `PC` valem se tiverem letra; só dígitos é o `#N` (não existe)
+    for bruto in (pc_code, pc_code.lower(), f"c{info['tx_ids'][1]}", *([sem_pc] if not sem_pc.isdigit() else [])):
         err = validar_apagar(user_id, {"launch_id": bruto})
         assert err and "só de leitura" in err, (bruto, err)
     with db.get_conn() as conn, conn.cursor() as cur:

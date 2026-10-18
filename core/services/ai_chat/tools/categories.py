@@ -167,11 +167,11 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "recategorize_launch",
-                "description": "Muda a categoria de um lançamento específico (despesa, receita ou compra no cartão do banco). Ação de ESCRITA — pede confirmação; o que não dá pra mudar a tool recusa na hora e diz o que dá. Use o `id` retornado por get_uncategorized_launches ou list_recent_launches.",
+                "description": "Muda a categoria de um lançamento específico (despesa, receita ou compra no cartão do banco). Ação de ESCRITA — pede confirmação; o que não dá pra mudar a tool recusa na hora e diz o que dá. Use o `id` retornado por get_uncategorized_launches, list_recent_launches ou get_open_bill.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "launch_id": {"type": "string", "description": "O `id` da lista ('l123' ou 'c45') OU o #N que o user disse. NUNCA invente nem deduza um número."},
+                        "launch_id": {"type": "string", "description": "O `id` exatamente como a tool devolveu ('l123' ou 'c45') OU o #N que o user disse. NUNCA invente nem deduza um número."},
                         "new_category": {"type": "string"},
                     },
                     "required": ["launch_id", "new_category"],

@@ -5,7 +5,9 @@ MESMO caminho e pelo MESMO `pode` do Extrato (`db/lancamentos`, `api/v2/lancamen
 O id da escrita é o da lista do Extrato: `l<id>` (launches) ou `c<id>` (credit_transactions); a
 tabela vai no próprio id, então `c42` nunca cai no lançamento 42. O inteiro vale SÓ como o `#N` que
 o usuário vê (`user_seq`): nunca como `launches.id` nem como id de compra. `CC<n>` (o código que o
-WhatsApp mostra na compra) é `c<n>`; `PC…` (parcelamento) é a 1ª parcela do grupo, `c<n>`.
+WhatsApp mostra na compra) é `c<n>`; `PC…` (parcelamento: o código, o uuid do grupo ou os 8 hex com letra) é a 1ª parcela do grupo, `c<n>`.
+Toda tool que entrega id ao modelo o entrega nesta forma (`l`/`c`/`PC`): `list_recent_launches`,
+`get_uncategorized_launches`, `get_open_bill` (`c<id>`) e `list_installments` (`codigo`).
 
 Fluxo: `validar_*` recusa pelo `pode` ANTES de armar (e diz o que dá para fazer); `ao_confirmar` troca
 o id do modelo pelo canônico e grava `_item` (descrição, valor e data LIDOS DO BANCO) na pendência, de
@@ -42,7 +44,9 @@ _SUMIU = "🐷 Não achei mais esse lançamento (pode já ter sido apagado). Nad
 _ANTIGA = ("🐷 Essa confirmação é de antes de uma atualização minha e não executei nada. "
            "Me pede de novo?")
 _CC = re.compile(r"CC([0-9]{1,18})", re.IGNORECASE)
-_PC = re.compile(r"PC[0-9A-F]{8}", re.IGNORECASE)
+# Parcelamento: `PC`+8 hex (o código do WhatsApp), o uuid inteiro, ou os 8 hex sem `PC` SE tiverem letra
+# (8 dígitos soltos são o `#N`, nunca o grupo).
+_PC = re.compile(r"PC[0-9A-F]{8}|(?=[0-9]*[A-F])[0-9A-F]{8}|[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}", re.IGNORECASE)
 _SEQ = re.compile(r"[0-9]{1,9}")  # [0-9] e nunca \d: "١٢" não é o #N
 
 # Recusas de domínio do `delete_launch_and_rollback` (a frase do WhatsApp mora em
@@ -105,6 +109,17 @@ def _compra(user_id: int, n: int) -> dict | None:
     return row
 
 
+def _pago_pelo_banco(user_id: int, n: int) -> bool:
+    """O pagamento de fatura que o banco fez (Open Finance ativo: `funding_source` bank e `delta_conta` 0), pelo
+    EFEITO gravado do usuário. O pagamento antigo que saiu da Carteira (`delta_conta` != 0) não é este."""
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select efeitos from launches where user_id = %s and id = %s", (user_id, n))
+        row = cur.fetchone()
+        conn.commit()
+    e = (row or {}).get("efeitos") or {}
+    return (e.get("funding_source") or {}).get("kind") == "bank" and not e.get("delta_conta")
+
+
 def _motivo(user_id: int, i: dict) -> str:
     """Por que o item está fora do `pode`, em linguagem de produto (um texto por estado do Extrato)."""
     if i["guardado"]:
@@ -117,7 +132,7 @@ def _motivo(user_id: int, i: dict) -> str:
             else "foi lançada por você"
         return f"Essa compra no cartão {veio}, e mexer nela mexe nas parcelas e na fatura."
     if o == "registro_antigo":
-        if i["categoria"] == "pagamento_fatura":  # com Open Finance ativo o banco pagou: delta 0, sem marca
+        if i["categoria"] == "pagamento_fatura" and _pago_pelo_banco(user_id, int(i["id"][1:])):
             return "Esse é o pagamento de uma fatura que saiu direto do seu banco, e não mexeu no saldo da sua Carteira, então não tenho o que reverter."
         return "Esse registro não guarda o efeito dele no seu saldo (é antigo, veio de um extrato importado ou não mexeu na sua conta), e eu não tenho o que reverter."
     if o == "banco":

@@ -386,3 +386,47 @@ def test_as_listas_antigas_devolvem_o_id_que_as_escritas_leem(uid_pro):
         assert item["id"] == f"l{lid}", item
         assert ia.validar_apagar(uid_pro, {"launch_id": item["id"]}) is None
     assert recentes[0]["user_seq"] == seq
+
+
+# ── 12. a classe: toda tool que entrega id às escritas o entrega na forma que `_achar` lê ────────────
+
+@pytest.mark.parametrize("tool", ["delete_launch", "recategorize_launch"])
+def test_o_id_da_fatura_arma_a_compra_e_nao_o_lancamento_de_mesmo_numero(uid_pro, tool):
+    from core.services.ai_chat.tools.cards import _get_open_bill
+
+    lid, seq = lancar(uid_pro)
+    card = db.create_card(uid_pro, "Banco", closing_day=31, due_day=10)
+    tx = db.add_imported_credit_purchase(uid_pro, card, 40, "mercado", date.today(), "ct-b1")[0]
+    do_carro(uid_pro, seq, tx)  # `#tx` é o lançamento "Mercado Extra", e `tx` é a compra da fatura
+
+    ids = [i["id"] for i in _get_open_bill(uid_pro, {"card_name": "Banco"})["items"]]
+    assert ids == [f"c{tx}"], ids  # o cru (`tx`) viraria o `#tx`: o lançamento errado
+    args = {"launch_id": ids[0], **({"new_category": "lazer"} if tool == "recategorize_launch" else {})}
+    h, final = arma(uid_pro, tool, args)
+    if tool == "recategorize_launch":  # a compra do banco muda de categoria; apagar é recusado (compra do banco)
+        assert final is None and pend(uid_pro)["tool_args"]["launch_id"] == f"c{tx}", (h, final)
+    else:
+        assert final and MSG_COMPRA_DO_BANCO in final and pend(uid_pro) is None, final
+    assert existe(uid_pro, lid) and ct_existe(uid_pro, tx)
+
+
+def test_o_codigo_do_parcelamento_da_lista_e_o_que_as_escritas_leem(uid_pro):
+    from core.services.ai_chat.tools.cards import _list_installments
+
+    card = db.create_card(uid_pro, "Manual", closing_day=10, due_day=17)
+    r = db.add_credit_purchase_installments(user_id=uid_pro, card_id=card, valor_total=300, categoria="outros",
+                                            nota="tv", purchased_at=date.today(), installments=3)
+    info = r[0] if isinstance(r, tuple) else r
+    q("update credit_transactions set group_id = %s::uuid where user_id = %s and group_id = %s::uuid returning id",
+      ("ab12cd34-0000-4000-8000-000000000001", uid_pro, info["group_id"]))
+    tx0 = min(info["tx_ids"])
+
+    [g] = _list_installments(uid_pro, {})["groups"]
+    assert g["codigo"] == "PCAB12CD34" and "group_id" not in g, g  # o uuid cru não sai
+    h, final = arma(uid_pro, "delete_launch", {"launch_id": g["codigo"]})
+    assert final and "só de leitura" in final and "Não achei" not in final, final
+    # as formas de o modelo escrever o grupo: a lista, o uuid inteiro, os 8 hex com letra (o #N cobre o resto)
+    for bruto in (g["codigo"], "ab12cd34-0000-4000-8000-000000000001", "AB12CD34", "ab12cd34"):
+        assert ia._achar(uid_pro, bruto) == ("c", tx0), bruto
+    assert ia._achar(uid_pro, "12345678") is None  # só dígitos é o `#N`, que não existe
+    assert ia._achar(usuario_pagante(), "ab12cd34-0000-4000-8000-000000000001") is None  # de outro usuário

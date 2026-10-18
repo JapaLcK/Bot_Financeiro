@@ -54,6 +54,11 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
     fatura_of = db.add_launch_and_update_balance(
         a, "despesa", 100, "fatura:Nubank", "Pagamento de fatura (Nubank)", "pagamento_fatura", is_internal_movement=True,
         extra_efeitos={"bill_id": 1, "paid_amount_added": 100, "funding_source": {"kind": "bank"}}, apply_delta=False)[0]
+    # o pagamento antigo que saiu da Carteira (`delta_conta` != 0, sem marca): o motivo da fatura do banco seria falso
+    fatura_carteira = db.add_launch_and_update_balance(
+        a, "despesa", 100, "fatura:Nubank", "Pagamento de fatura (Nubank)", "pagamento_fatura", is_internal_movement=True,
+        extra_efeitos={"bill_id": 1, "paid_amount_added": 100})[0]
+    q("update launches set origem = null where user_id = %s and id = %s returning id", (a, fatura_carteira))
     sombra = _sombra(a, 38)
     paga = _carteira(a, valor=35, bill_id=1, paid_amount_added=35)
     paga_fund = _carteira(a, valor=41, bill_id=2, paid_amount_added=41)
@@ -76,7 +81,7 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
     CAIXINHA, CARTAO, ESPECIE = "caixinha ou de investimento", "compra no cartão foi lançada", "saque ou depósito em dinheiro"
     esperado = [  # (id, motivo de apagar, motivo de categoria) — None = pode
         (f"l{antiga}", ANTIGO, ANTIGO), (f"l{delta_zero}", ANTIGO, ANTIGO),
-        (f"l{fatura_of}", FATURA_OF, FATURA_OF), (f"c{ofx_ct}", OFX, OFX), (f"l{sombra}", BANCO, None),
+        (f"l{fatura_of}", FATURA_OF, FATURA_OF), (f"l{fatura_carteira}", ANTIGO, ANTIGO), (f"c{ofx_ct}", OFX, OFX), (f"l{sombra}", BANCO, None),
         (f"l{paga}", PAGAMENTO, None), (f"l{paga_fund}", PAGAMENTO, None), (f"l{especie}", None, ESPECIE),
         (f"c{manual_ct}", CARTAO, CARTAO), (f"c{of_ct}", MSG_COMPRA_DO_BANCO, None),
         (f"l{guardado}", CAIXINHA, CAIXINHA),
@@ -93,6 +98,7 @@ def test_cada_estado_recusa_com_o_seu_motivo_e_o_que_a_ia_faz():
             assert (("Se quiser" in final) if outro is None else ("só de leitura" in final)), (ident, final)
     assert ct_existe(a, manual_ct) and existe(a, antiga)
     assert "antigo" not in _apagar(a, f"l{fatura_of}") and "extrato" not in _apagar(a, f"l{fatura_of}")  # o motivo é o dele
+    assert "banco" not in _apagar(a, f"l{fatura_carteira}")  # o da Carteira não ganha a frase do banco
 
 
 # ── A1: o que o Extrato não lista ────────────────────────────────────────────────────────────

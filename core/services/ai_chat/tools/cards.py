@@ -87,7 +87,7 @@ PARAMS_APP_OPEN_BILL = {"todos_os_itens": {
 
 def _item_da_fatura(it: dict[str, Any]) -> dict[str, Any]:
     return {
-        "id": it["id"],
+        "id": f"c{it['id']}",  # o id do Extrato (`c<id>`): o inteiro cru seria lido como o #N de OUTRO lançamento
         "valor": float(it["valor"] or 0),
         "categoria": it.get("categoria"),
         "nota": it.get("nota"),
@@ -240,6 +240,8 @@ def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     Por padrão filtra `only_pending=True` — só mostra os que ainda têm
     parcela a vencer. Útil pra "meus parcelamentos?", "o que tenho parcelado?".
     """
+    from core.handlers.credit import _group_code  # o MESMO `PC…` que o WhatsApp mostra
+
     only_pending = bool(args.get("only_pending", True))
     try:
         limit = int(args.get("limit") or 15)
@@ -254,7 +256,7 @@ def _list_installments(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         if only_pending and n_pending == 0:
             continue
         groups.append({
-            "group_id": r.get("group_id"),
+            "codigo": _group_code(r.get("group_id")),  # o `PC…` que as escritas da IA leem (nunca o uuid cru)
             "card_name": r.get("card_name"),
             "nota": r.get("nota"),
             "n_total": int(r.get("n_total") or 0),
