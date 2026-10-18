@@ -70,11 +70,11 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Excluir conta e exportar dados | `/settings` | Não há | — | App | a discutir com o dono |
+| Excluir conta e exportar dados | `/settings` | Não há | — | App | plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), aguardando o dono |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` | Não há | — | App | a discutir com o dono |
-| Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Não há; o app coleta no cadastro e não edita | — | App | par: plano/sessão separada do app (Perfil, Cobrança, exclusão de conta exigida pela Apple) |
+| Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Não há; o app coleta no cadastro e não edita | — | App | issue #1083; plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), seção B |
 | Trocar a senha de quem já tem senha | `/settings` (`password-reset`) | Só o fluxo de conta sem senha | — | App | a discutir com o dono |
 | Open Finance: reconectar e desconectar um banco | Só conecta (sem reconectar) e desconecta todos | Reconecta e desconecta um por vez | O web não reconecta nem desconecta um | Web | a discutir com o dono |
 | Open Finance: atualizar agora, desconectar todos | Sim (`/refresh`, `disconnectAll`) | Não há | — | App | a discutir com o dono |
