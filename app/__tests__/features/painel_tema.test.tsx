@@ -36,13 +36,16 @@ it.each([["light", claro], ["dark", escuro]] as const)("rótulo da aba ativa no 
  expect(cor).toBe(paleta.ink);
  expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
 });
-it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia no extrato (%s) é brandInk e passa 4,5:1", async (esquema, paleta) => {
+it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia no extrato (%s) é ink sobre surfaceControl e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
  renderRouter("./app", { initialUrl: "/extrato?dia=2026-10-01" });
  await waitFor(() => expect(screen.getByText("01/10/2026")).toBeTruthy());
  const cor = corDe(screen.getByText("01/10/2026"));
- expect(cor).toBe(paleta.brandInk);
- expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
+ expect(cor).toBe(paleta.ink);
+ // o rótulo virou o botão de limpar (`Acao`): mede contra o fundo REAL do botão (primeiro ancestral com `backgroundColor`), não contra a constante do tema
+ let el: { props: { style?: unknown }; parent: unknown } | null = screen.getByText("01/10/2026"); let fundo: string | undefined;
+ while (el && !(fundo = (StyleSheet.flatten(el.props.style as object) as { backgroundColor?: string } | undefined)?.backgroundColor)) el = el.parent as typeof el;
+ expect(fundo).toBe(paleta.surfaceControl); expect(contraste(cor, fundo!)).toBeGreaterThanOrEqual(4.5);
 });
 it.each([["light", claro], ["dark", escuro]] as const)("\"Como posso te ajudar?\" do chat novo (%s) é inkMuted e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
