@@ -34,11 +34,21 @@ it("conclusão servidor mantém Início e avatar abre Configurações/Teste OF",
   expect(screen.queryByText("Sua conta, do seu jeito")).toBeNull();
   expect(StyleSheet.flatten(screen.getByText("Sair").props.style).color).toBe(claro.danger);
 });
-it("falha transitória na rechecagem protege dados e oferece recuperação", async () => {
+it("falha transitória na rechecagem do fundo curto, com a MESMA credencial: a tela fica e a revalidação é silenciosa", async () => {
   servidor(p, true); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy());
   rotear({ "/auth/me": () => resposta(503, {}) });
+  const antes = chamadas().filter((c) => c.caminho === "/auth/me").length;
   await appVai("background"); await appVai("active");
+  await waitFor(() => expect(chamadas().filter((c) => c.caminho === "/auth/me").length).toBeGreaterThan(antes));
+  await act(drenar);
+  expect(screen.getByTestId("painel-conta")).toBeTruthy(); expect(screen.queryByRole("button", { name: "Conferir acesso" })).toBeNull(); expect(screen.queryByText("Conferindo seu acesso…")).toBeNull();
+});
+it("falha transitória na rechecagem do fundo curto, com credencial de OUTRA sessão: portão com erro, sem dados", async () => {
+  servidor(p, true); renderRouter("./app", { initialUrl: "/" });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy());
+  rotear({ "/auth/me": () => resposta(503, {}) });
+  await appVai("background"); await guardarCredenciais({ access: "access-bela", refresh: "rt_bela" }); await appVai("active");
   await waitFor(() => expect(screen.getByRole("button", { name: "Conferir acesso" })).toBeTruthy());
   expect(screen.queryByTestId("painel-conta")).toBeNull();
 });
