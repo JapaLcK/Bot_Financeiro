@@ -57,6 +57,17 @@ def test_ao_armar_nao_roda_com_outro_pedido_pendente(user_id, com_fake):
     assert db.ai_get_pending_action(user_id)["tool_name"] == "delete_category_rule"
 
 
+def test_ao_armar_que_levanta_nao_derruba_o_turno(user_id, com_fake, caplog):
+    def quebra(uid, a):
+        raise RuntimeError("valor 123,45 do usuario")
+    com_fake(_fake(ao_armar=quebra))
+    with caplog.at_level("WARNING"):
+        historico, final = runner._dispatch_tool(user_id, "fake_apagar", {"quem": "x"})
+    assert final is None and json.loads(historico)["status"] == "pending_user_confirmation"
+    assert db.ai_get_pending_action(user_id)["tool_name"] == "fake_apagar"  # a pendência fica armada
+    assert "ai_ao_armar_falhou" in caplog.text and "123,45" not in caplog.text
+
+
 @pytest.mark.parametrize("nome,args", [
     ("delete_category_rule", {"keyword": "uber"}),
     ("create_category_rule", {"keyword": "uber", "category": "transporte"}),

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 IDS = ("contas", "hero", "compromissos", "resumo", "categorias", "calendario", "simulador",
        "patrimonio", "wealth", "rendimento", "assinaturas", "metas", "caixinhas", "fatura", "parcelas",
        "renda", "piggy", "periodo")
-DA_TOOL = ("maiores_gastos", "fim_do_mes", "comparacao")  # a PRÓPRIA tool os emite (`mostrar_da_tool`): fora de `IDS`, senão entram no enum do `show_card`
+DA_TOOL = ("maiores_gastos", "fim_do_mes", "comparacao", "ultimos_lancamentos", "sem_categoria")  # a PRÓPRIA tool os emite (`mostrar_da_tool`): fora de `IDS`, senão entram no enum do `show_card`
 MAX_MESES = 3
 MAX_MESES_PERIODO = 12  # teto de toda janela da IA: card periodo, renda, tendência e as tools de data
 MAX_POR_TURNO = 3

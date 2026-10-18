@@ -326,8 +326,8 @@ def test_formas_de_digitar_o_id(uid_pro):
 # ── 10. a conversa pelo `handle_incoming` ────────────────────────────────────────────────────
 
 def _id_do(messages, alvo):
-    lista = json.loads([m for m in messages if m.get("role") == "tool"][-1]["content"])["launches"]
-    return next(i["id"] for i in lista if i["alvo"] == alvo)
+    lista = json.loads([m for m in messages if m.get("role") == "tool"][-1]["content"])["itens"]
+    return next(i["id"] for i in lista if i["descricao"] == alvo)
 
 
 def _pede_apagar(monkeypatch, alvo):
@@ -373,15 +373,14 @@ def test_apagar_e_so_do_lancamento_mesmo_que_o_pode_da_compra_um_dia_de_apagar()
     assert ia._pode({"id": "c5", "pode": ["categoria"]}, "categoria") is True
 
 
-def test_as_listas_antigas_devolvem_o_id_que_as_escritas_leem(uid_pro):
-    """Até o PR das listas novas: sem o `l`, o modelo mandaria o id interno cru, que agora é lido como `#N`."""
-    from core.services.ai_chat.tools.categories import _get_uncategorized_launches
-    from core.services.ai_chat.tools.launches import _list_recent_launches
+def test_as_listas_devolvem_o_id_que_as_escritas_leem(uid_pro):
+    """Sem o `l`, o modelo mandaria o id interno cru, que as escritas leem como `#N`."""
+    from core.services.ai_chat.tools.listas_ia import sem_categoria, ultimos_lancamentos
 
     lid, seq = lancar(uid_pro)
     q("update launches set categoria = 'outros' where user_id = %s and id = %s returning id", (uid_pro, lid))
-    recentes = _list_recent_launches(uid_pro, {})["launches"]
-    sem_cat = _get_uncategorized_launches(uid_pro, {})["launches"]
+    recentes = ultimos_lancamentos(uid_pro, {})["itens"]
+    sem_cat = sem_categoria(uid_pro, {})["itens"]
     for item in (*recentes, *sem_cat):
         assert item["id"] == f"l{lid}", item
         assert ia.validar_apagar(uid_pro, {"launch_id": item["id"]}) is None

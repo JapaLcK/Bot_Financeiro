@@ -206,8 +206,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   e `_limita_periodo`): acima disso vêm os 12 mais recentes com `limitado_a_12_meses`, `pedido` e
   `aviso_limite`, nunca `error` (a mesma chave na tool e na visão do `mostrar_card`); período que entra no
   futuro termina no fim do mês corrente, com `fim_ajustado` e `aviso_fim`.
-  **Card junto da tool (PR 3A; `compare_periods` na onda 2).** No app, `get_largest_expenses` (card `maiores_gastos`), `forecast_month_end`
-  (`fim_do_mes`) e `compare_periods` (`comparacao`) mostram o próprio card, sem `show_card` (`cards.mostrar_da_tool`; `cards.DA_TOOL` fica FORA de
+  **Card junto da tool (PR 3A; `compare_periods` e as listas na onda 2).** No app, `get_largest_expenses` (card `maiores_gastos`), `forecast_month_end`
+  (`fim_do_mes`), `compare_periods` (`comparacao`), `list_recent_launches` (`ultimos_lancamentos`) e `get_uncategorized_launches` (`sem_categoria`) mostram o próprio card, sem `show_card` (`cards.mostrar_da_tool`; `cards.DA_TOOL` fica FORA de
   `cards.IDS`). O bloco é o resultado que a tool calculou, uma conta só (`fim_do_mes` sem `nota_metodologia` e
   `cartao_incluido`; traz `dias_corridos` e `dias_no_mes`); gasta uma vaga do turno e respeita o repetido e o
   `card_ainda_resolve`. Só sai se o corpo do `/ai/chat/stream` declarar o card em `cards` (`AIChatBody.cards`,
@@ -218,6 +218,16 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   um pedido no prompt (`prompt_do_usuario(app=True)`), sem código que o imponha: quem mede é o staging. Tool de leitura sem card: `tests/test_ai_chat_tool_card.py` (`AUDITORIA`) lista uma a uma. Web: o /painel
   ainda não chama o stream (Etapa 7 do web).
   `comparacao` (onda 2, PR A): o bloco é o resultado de `compare_periods` sem `escolha` e `nota` (`modo`, `atual`/`anterior`, `base`, `despesa`/`receita`/`resultado` em `total_atual`/`total_anterior`/`total_delta`/`pct`/`estado`, até 10 `categorias` por |delta|, `categorias_omitidas`, `motivo`, `motivos`; só no `modo: mes_aberto`, `dias_corridos` (o dia de hoje) e `dias_no_mes`, para a legenda "dia 17 de 31", porque `atual.fim` é o fim do mês; dinheiro em float); o modelo recebe `cards_resumos.resumo_comparacao` (o mesmo resultado, só a 1ª categoria, com `escolha`, `nota` e `card_na_tela`). Sem card: `pro_required`, `error`, `inicio_do_historico` e `sem_base`; dois meses passados seguem a recusa para `categorias`. O app ainda não o desenha (`PENDENTE_DA_TOOL` em `tests/test_ai_chat_cards_ids_app.py`, PR B): o servidor só o emite a quem o declara em `cards`. Fixture: `tests/fixtures/ai_chat_bloco_comparacao.json`.
+  `ultimos_lancamentos` e `sem_categoria` (onda 2, PR C2): o bloco é `{itens, motivos}`, sem total, com até 10 itens (o app mostra 5 e um "+5") no formato `Lancamento` de `/api/v2/lancamentos`
+  (`mostrar_itens` em `core/services/ai_chat/tools/listas_ia.py`; fixtures `tests/fixtures/ai_chat_bloco_{ultimos_lancamentos,sem_categoria}.json`). O modelo recebe a lista INTEIRA (até `limit`, 50) com `card_na_tela: true`,
+  porque precisa do `id` para "apaga o segundo"; o item dele é `_para_ia` (`valor` float, `tipo` receita/despesa ou entrada/saída para o interno, `categoria` pelo nome do catálogo (fora dele, como foi gravada), `parcelamento` em texto pronto (nunca o `parcela` cru), `user_seq` só nos `l`). A confirmação de APAGAR
+  (`delete_launch`, `Tool.ao_armar`) mostra o item, 1 linha, no card `ultimos_lancamentos`: o card sai DEPOIS de a pendência estar armada (com pendência viva de outro pedido nada sai), só ao app que o declara, com vaga; no mesmo turno da lista
+  o card já está na tela e a regra do repetido não emite outro. `recategorize_launch` não ganha card (reversível; o resumo dela já nomeia o item). O app ainda não os desenha (`PENDENTE_DA_TOOL`, PR B).
+  A lista é a do Extrato (`db/lancamentos_leitura.recentes` = `listar`, 12 meses): os itens em comum com a 1ª página de `/api/app/lancamentos` são idênticos campo a campo
+  (`tests/test_ai_chat_listas.py`). **Três divergências declaradas:** a janela vai até o fim do mês SEGUINTE (a compra no cartão feita depois do fechamento entra pela fatura do mês que vem, e o Extrato só a mostra lá); o
+  guardado em caixinha/investimento entra (`interno`, `guardado`, `pode: []`); e o parcelamento vem em UMA linha por data, a da menor parcela (`listar(uma_por_compra=True)`, depois do filtro `sem_categoria`: no Extrato cada parcela é a
+  linha da sua fatura; o manual grava a data da compra em todas e as de faturas futuras repetiriam a compra, então vira uma linha; no Open Finance cada parcela é uma cobrança com data própria e cada uma aparece; recategorizar o `c<id>` já propaga ao grupo). `sem_categoria` = saída não interna com categoria vazia ou "outros", cartão incluído (`listar(sem_categoria=True)`).
+  No WhatsApp (sem card) o texto da lista muda: entram as compras no cartão e o guardado, a data é a do Extrato e o `#N` vem de `user_seq`. O comando determinístico "últimos N" do WhatsApp não muda.
   Limites da IA: (a) no mês corrente, QUALQUER janela dia 1..X com X >= hoje (a do dia 1 até
   hoje, mas também 1..20) é lida como o mês inteiro, então "quanto gastei hoje" no dia 1 vira o
   mês corrente inteiro; (b) mês futuro: é o número da regra (`resumo_do_mes`), só o que já está lançado
@@ -353,7 +363,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (Q41), só categoria e data se paga conta ou fatura, e só categoria se além disso fundida
   (sem apagar no v2: apagar o pagamento de
   conta devolve o dinheiro e a conta segue paga; o de fatura do cartão manual cai no mesmo ramo,
-  `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando). `launches.origem` (NULL =
+  `bill_id`, e sai junto; o `/app` e o WhatsApp seguem apagando; a IA segue este `pode` e NÃO apaga compra manual
+  no cartão, guardado nem pagamento de conta, nem recategoriza o ligado a dinheiro em espécie). `launches.origem` (NULL =
   antigo, sem backfill) vale `'carteira'` (`db.accounts.ORIGEM_CARTEIRA`) e quem grava é o
   escritor da carteira, por padrão, em todo canal (`/app`, WhatsApp, quick_entry, IA, saldo
   inicial e ajuste, pagamento de fatura pela carteira, a v2) e o saque/depósito automático da
@@ -365,7 +376,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   outro usuário dão a lista vazia, igual a id inexistente; `raw`, `provider_*_id`,
   `external_id` e o id da transação do banco nunca saem. **Divergência declarada:** a lista do
   `/app` (`list_history`) e as consultas 3 e 4 / "últimos N" do WhatsApp seguem com as
-  regras delas (data de gravação no cartão, sem o interno).
+  regras delas (data de gravação no cartão, sem o interno); a IA (`list_recent_launches`) usa esta lista,
+  com a janela até o mês seguinte e o guardado (ver "Card junto da tool").
 - `POST /api/v2/lancamentos/carteira`, `/lancamentos/editar` e `/lancamentos/apagar`
   (`api/v2/lancamentos.py`, PR 2a): a escrita, `def` síncronas, id no corpo, CSRF do pai (403
   `{"detail"}` fora do envelope), resposta `{id}`. **carteira**: `tipo` (`entrada`|`saida`),

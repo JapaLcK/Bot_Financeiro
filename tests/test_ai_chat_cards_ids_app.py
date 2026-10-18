@@ -36,7 +36,7 @@ def test_controle_id_novo_no_python_sem_o_app_fica_vermelho(monkeypatch):
 
 # Cards da tool que o Python já emite (`cards.DA_TOOL`) e o app ainda não desenha (PR B da onda 2). O servidor só os manda a
 # quem os declara em `cards`: o app que não os conhece nem os pede. Esvazie quando o `schemasDaTool` ganhar `comparacao`.
-PENDENTE_DA_TOOL = {"comparacao"}
+PENDENTE_DA_TOOL = {"comparacao", "ultimos_lancamentos", "sem_categoria"}
 
 
 def ids_da_tool_do_app(painel_ts: str) -> set[str]:
