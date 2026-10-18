@@ -1,0 +1,156 @@
+{
+  "contas": [
+    {
+      "conexao": "updated",
+      "instituicao": "Nubank",
+      "moeda": "BRL",
+      "motivos": [],
+      "no_total": true,
+      "nome": "Conta",
+      "saldo": "1000"
+    },
+    {
+      "conexao": "updated",
+      "instituicao": "Nubank",
+      "moeda": "BRL",
+      "motivos": [],
+      "no_total": true,
+      "nome": "Conta",
+      "saldo": "250.50"
+    },
+    {
+      "conexao": "updated",
+      "instituicao": "Inter",
+      "moeda": "BRL",
+      "motivos": [],
+      "no_total": true,
+      "nome": "Conta",
+      "saldo": "700"
+    },
+    {
+      "conexao": "updated",
+      "instituicao": "Inter",
+      "moeda": "USD",
+      "motivos": [
+        "outra_moeda"
+      ],
+      "no_total": false,
+      "nome": "Conta",
+      "saldo": "50"
+    },
+    {
+      "conexao": "paused",
+      "instituicao": "Itaú",
+      "moeda": "BRL",
+      "motivos": [
+        "conexao_pausada"
+      ],
+      "no_total": false,
+      "nome": "Conta",
+      "saldo": null
+    }
+  ],
+  "contas_topo": {
+    "carteira": {
+      "motivos": [
+        "especie_incompleta"
+      ],
+      "saldo": "0"
+    },
+    "fora_do_total": 2,
+    "motivos": [
+      "especie_incompleta",
+      "outra_moeda",
+      "conexao_pausada"
+    ],
+    "total": "1950.50"
+  },
+  "investido": {
+    "motivos": [
+      "saldo_ausente",
+      "conexao_pausada"
+    ],
+    "por_banco": [
+      {
+        "banco": "Nubank",
+        "motivos": [],
+        "valor": "4100.25"
+      },
+      {
+        "banco": "Inter",
+        "motivos": [
+          "saldo_ausente"
+        ],
+        "valor": null
+      }
+    ],
+    "por_tipo": [
+      {
+        "motivos": [],
+        "rotulo": "Renda fixa",
+        "tipo": "renda_fixa",
+        "valor": "4000.00"
+      },
+      {
+        "motivos": [],
+        "rotulo": "Ações",
+        "tipo": "acoes",
+        "valor": "100.25"
+      },
+      {
+        "motivos": [
+          "saldo_ausente"
+        ],
+        "rotulo": "Fundos de investimento",
+        "tipo": "fundos",
+        "valor": null
+      }
+    ],
+    "total": "4100.25"
+  },
+  "tool": {
+    "fonte": "posições dos bancos conectados (Open Finance); investimento cadastrado à mão não entra; não existe lista ativo por ativo",
+    "motivos": [
+      "saldo_ausente",
+      "conexao_pausada"
+    ],
+    "por_banco": [
+      {
+        "banco": "Nubank",
+        "motivos": [],
+        "valor": "4100.25"
+      },
+      {
+        "banco": "Inter",
+        "motivos": [
+          "saldo_ausente"
+        ],
+        "valor": null
+      }
+    ],
+    "por_tipo": [
+      {
+        "motivos": [],
+        "rotulo": "Renda fixa",
+        "tipo": "renda_fixa",
+        "valor": "4000.00"
+      },
+      {
+        "motivos": [],
+        "rotulo": "Ações",
+        "tipo": "acoes",
+        "valor": "100.25"
+      },
+      {
+        "motivos": [
+          "saldo_ausente"
+        ],
+        "rotulo": "Fundos de investimento",
+        "tipo": "fundos",
+        "valor": null
+      }
+    ],
+    "total_investido": "4100.25"
+  },
+  "whatsapp": "📈 **R$ 4.100,25** investidos nos bancos conectados\n\nPor tipo:\n• Renda fixa — R$ 4.000,00\n• Ações — R$ 100,25\n• Fundos de investimento — saldo não informado pelo banco\n\nPor banco:\n• Nubank — R$ 4.100,25\n• Inter — saldo não informado pelo banco\n\n_O valor pode estar desatualizado ou incompleto; confira no painel._"
+}

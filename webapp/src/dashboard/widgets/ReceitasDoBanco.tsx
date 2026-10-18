@@ -1,5 +1,8 @@
 // Receitas que o servidor achou no extrato (`receitas_do_banco` da Previsão): só a que o usuário
-// confirma entra na conta. Sim/Não/Desfazer = POST /previsao/receita; sem atualização otimista:
+// confirma entra na conta. Duas instâncias na página /previsao, mesma mutationKey (então `useIsMutating`
+// trava as duas juntas): `modo="pendentes"` no topo (some quando não há o que perguntar) e
+// `modo="respondidas"` no fim, com o Desfazer. Sem painel visível, a marcação sr-only fica montada
+// para o anúncio e o foco do resultado. Sim/Não/Desfazer = POST /previsao/receita; sem atualização otimista:
 // a lista na tela é sempre a última resposta do servidor. O nome é texto livre do pagador:
 // só como texto do React, truncado no CSS.
 import { useRef, useState } from "react";
@@ -17,9 +20,12 @@ type Resposta = RespostaReceitaIn["resposta"];
 const STATUS: Record<Resposta, string> = { sim: "confirmada", nao: "negada", desfazer: "pendente" };
 const DITO: Record<Resposta, string> = { sim: "confirmada.", nao: "recusada.", desfazer: "resposta desfeita." };
 
-export function ReceitasDoBanco({ lista }: { lista: Previsao["receitas_do_banco"] }) {
+type Modo = "pendentes" | "respondidas";
+// `falhaEm` mora no pai e é UM só para as duas instâncias: o alerta aparece onde a ação falhou, e um sucesso (ou resposta que pegou) em qualquer uma o limpa.
+export function ReceitasDoBanco({ lista, modo, falhaEm, setFalhaEm }: { lista: Previsao["receitas_do_banco"]; modo: Modo; falhaEm: Modo | null; setFalhaEm: (m: Modo | null) => void }) {
   const qc = useQueryClient();
-  const [falhou, setFalhou] = useState(false);
+  const falhou = falhaEm === modo;
+  const setFalhou = (f: boolean) => setFalhaEm(f ? modo : null);
   // `n` muda a cada resposta: duas receitas de mesmo nome dão o mesmo texto, e sem DOM novo o leitor de tela não repete.
   const [dito, setDito] = useState({ t: "", n: 0 });
   const falar = (t: string) => setDito((d) => ({ t, n: d.n + 1 }));
@@ -60,25 +66,30 @@ export function ReceitasDoBanco({ lista }: { lista: Previsao["receitas_do_banco"
   // `m.isPending` só muda no re-render: dois cliques no mesmo tique mandariam dois POST.
   const ocupado = () => qc.isMutating({ mutationKey: CHAVE }) > 0;
   const pendente = useIsMutating({ mutationKey: CHAVE }) > 0;
-  // A caixa fica montada enquanto houver o que anunciar: o Desfazer pode esvaziar a lista, e o aviso e o foco precisam de onde pousar.
-  if (!lista.length && !dito.t && !falhou) return null;
+  const pendentes = lista.filter((r) => r.status === "pendente");
+  const respondidas = lista.filter((r) => r.status !== "pendente");
+  const itens = modo === "pendentes" ? pendentes : respondidas;
+  // A caixa fica montada enquanto houver o que anunciar: o Sim da última pendente (ou o Desfazer da última respondida) esvazia a lista,
+  // e o aviso e o foco precisam de onde pousar. Sem itens e sem erro ela vira marcação sr-only: nada visível, só o anúncio e o alvo do foco.
+  if (!itens.length && !dito.t && !falhou) return null;
+  const visivel = itens.length > 0 || falhou;
 
   const botao = (r: ReceitaDoBanco, resposta: Resposta, rotulo: string, aria: string, cls: string) => (
     <button type="button" className={`btn ${cls}`} disabled={pendente} aria-label={`${aria}: ${r.nome}`}
       onClick={() => { if (!ocupado()) m.mutate({ r, resposta }); }}>{rotulo}</button>
   );
-  const pendentes = lista.filter((r) => r.status === "pendente");
-  const respondidas = lista.filter((r) => r.status !== "pendente");
   const meta = (r: ReceitaDoBanco) => <>todo dia {r.dia}</>;
   return (
-    <div ref={raizRef} className="panel span-12">
-      <Frame id="previsao-receitas" title="Receitas do extrato" real>
-        <p ref={tituloRef} tabIndex={-1} className="rec-foco w-lede">
-          {pendentes.length ? "Entram na previsão só as que você confirmar." : "Nenhuma receita a confirmar."}
+    <div ref={raizRef} className={visivel ? "panel span-12" : "sr-only"}>
+      <Frame id={modo === "pendentes" ? "previsao-receitas" : "previsao-receitas-respondidas"} title={modo === "pendentes" ? "Receitas do extrato" : "Receitas na previsão"} real>
+        <p ref={tituloRef} tabIndex={-1} className={`rec-foco ${modo === "pendentes" ? "w-lede" : "sr-only"}`}>
+          {modo === "pendentes"
+            ? (pendentes.length ? "Entram na previsão só as que você confirmar." : "Nenhuma receita a confirmar.")
+            : (respondidas.length ? "Receitas respondidas." : "Nenhuma receita respondida.")}
         </p>
         <p ref={avisoRef} tabIndex={-1} role="alert" className="rec-foco rec-erro">{falhou && "Não deu para salvar. Tente de novo."}</p>
         <p className="sr-only" role="status"><span key={dito.n}>{dito.t}</span></p>
-        {pendentes.length > 0 && (
+        {modo === "pendentes" && pendentes.length > 0 && (
           <ul className="subs" aria-label="Receitas a confirmar">
             {pendentes.map((r) => (
               <li key={r.chave} className="sub">
@@ -93,20 +104,17 @@ export function ReceitasDoBanco({ lista }: { lista: Previsao["receitas_do_banco"
             ))}
           </ul>
         )}
-        {respondidas.length > 0 && (
-          <details className="rec-respondidas">
-            <summary>Já respondidas ({respondidas.length})</summary>
-            <ul className="subs">
-              {respondidas.map((r) => (
-                <li key={r.chave} className="sub">
-                  <b className="sub-name rec-nome">{r.nome}</b>
-                  <span className="sub-amt num">{moneyText(r.valor) ?? "—"}</span>
-                  <p className="sub-meta"><span className={`selo rec-${r.status}`}>{CHIP[r.status as keyof typeof CHIP]}</span> {meta(r)}</p>
-                  <div className="sub-acoes">{botao(r, "desfazer", "Desfazer", "Desfazer resposta", "btn-ghost")}</div>
-                </li>
-              ))}
-            </ul>
-          </details>
+        {modo === "respondidas" && respondidas.length > 0 && (
+          <ul className="subs" aria-label="Receitas respondidas">
+            {respondidas.map((r) => (
+              <li key={r.chave} className="sub">
+                <b className="sub-name rec-nome">{r.nome}</b>
+                <span className="sub-amt num">{moneyText(r.valor) ?? "—"}</span>
+                <p className="sub-meta"><span className={`selo rec-${r.status}`}>{CHIP[r.status as keyof typeof CHIP]}</span> {meta(r)}</p>
+                <div className="sub-acoes">{botao(r, "desfazer", "Desfazer", "Desfazer resposta", "btn-ghost")}</div>
+              </li>
+            ))}
+          </ul>
         )}
       </Frame>
     </div>
