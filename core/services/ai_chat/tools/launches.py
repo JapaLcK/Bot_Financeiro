@@ -50,32 +50,8 @@ from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
 from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
 from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
-from .extrato_ia import apagar, resumo_apagar, validar_apagar
-
-def _list_recent_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    limit = int(args.get("limit") or 10)
-    limit = max(1, min(limit, 50))
-
-    # Saque em espécie/transferência (receita/despesa interna) vai como
-    # "entrada"/"saída": como "receita", o modelo o leria como ganho.
-    from core.handlers.launches import _rotulo_interno
-
-    rows = db.list_launches(user_id, limit=limit)
-    return {
-        "launches": [
-            {
-                "id": f"l{r['id']}",  # o id do Extrato (`l<id>`), o que as escritas da IA leem
-                "user_seq": r.get("user_seq"),
-                "tipo": _rotulo_interno(r) or r["tipo"],
-                "valor": float(r["valor"] or 0),
-                "alvo": r.get("alvo"),
-                "nota": r.get("nota"),
-                "categoria": r.get("categoria"),
-                "criado_em": r["criado_em"].isoformat() if r.get("criado_em") else None,
-            }
-            for r in rows
-        ]
-    }
+from .extrato_ia import apagar, armar_apagar, resumo_apagar, validar_apagar
+from .listas_ia import texto_parcelamento, ultimos_lancamentos
 
 
 def _parse_iso_date(s: str | None) -> date | None:
@@ -331,16 +307,6 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return _resumo_periodo(user_id, start, end)
 
 
-def _texto_parcelamento(r: dict[str, Any]) -> str | None:
-    """Texto pronto: o modelo confundia `parcela` "1/3" (valor da parcela) com compra em 3x."""
-    if r.get("parcelas"):
-        return f"compra de {fmt_brl(r['valor'])} em {r['parcelas']}x"
-    if r.get("parcela"):
-        n, total = r["parcela"].split("/")
-        return f"parcela {n} de {total} — {fmt_brl(r['valor'])} neste período"
-    return None
-
-
 def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if erro := _data_invalida(args, "start_date", "end_date"):
         return erro
@@ -365,7 +331,7 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         user_id, start, end, limit, categoria=categoria, by_bill_month=por_fatura, juntar_parcelas=True,
     )
     for r in rows:
-        r["parcelamento"] = _texto_parcelamento(r)
+        r["parcelamento"] = texto_parcelamento(r)
         # só o texto pronto vai à IA: os campos crus foram mal lidos ("parcelado em 3x" numa parcela OF)
         r.pop("parcela", None)
         r.pop("parcelas", None)
@@ -894,7 +860,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "list_recent_launches",
-                "description": "Retorna os lançamentos (despesas e receitas) mais recentes do usuário, em ordem cronológica decrescente. Use pra perguntas tipo 'meus últimos gastos', 'o que registrei hoje', 'mostra os lançamentos'.",
+                "description": "Retorna os lançamentos (despesas, receitas e compras no cartão) mais recentes do usuário, em ordem cronológica decrescente, os mesmos que o Extrato mostra. Cada item traz o `id` (use-o em delete_launch/recategorize_launch; NUNCA o mostre ao user), o `user_seq` (o #N que o user vê; só nos que não são de cartão), `pode` (o que dá pra fazer com ele) e `moeda`. Use pra perguntas tipo 'meus últimos gastos', 'o que registrei hoje', 'mostra os lançamentos'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -910,7 +876,7 @@ TOOLS: list[Tool] = [
             },
         },
         is_write=False,
-        execute=_list_recent_launches,
+        execute=ultimos_lancamentos,
     ),
     Tool(
         schema={
@@ -1269,6 +1235,7 @@ TOOLS: list[Tool] = [
         execute=apagar,
         validate=validar_apagar,
         ao_confirmar=_ao_confirmar_alvo,
+        ao_armar=armar_apagar,
     ),
     Tool(
         schema={

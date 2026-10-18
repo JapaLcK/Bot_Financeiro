@@ -3,7 +3,7 @@
 
 Uma fonte de verdade para o NÚMERO: `api.v2.metas.listar` (regra em `db/metas.py` e
 `db/metas_ritmo.py`); aqui só se escreve a frase. Dinheiro entra como string (o JSON da rota) e sai
-como texto pronto com "R$" (nunca float): é o que o `ai_guard` aceita como evidência e o que o gpt-4o-mini não confunde
+como texto pronto com "R$" (nunca float): é o que o `ai_guard` aceita como evidência e o que o modelo não confunde
 (`por_mes` × `ritmo.valor`, lição do #931). A cópia por motivo espelha
 `webapp/src/dashboard/lib/metas-textos.ts` (§0.7: `tests/test_ai_chat_metas.py` compara as
 chaves e a ordem), na voz da conversa. O nome da meta é texto do usuário: só vai como valor.

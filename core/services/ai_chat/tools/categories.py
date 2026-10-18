@@ -20,6 +20,7 @@ from ai_router import ALLOWED_CATEGORIES
 
 from ._base import Tool
 from .extrato_ia import ao_confirmar, recategorizar, resumo_categoria, validar_categoria
+from .listas_ia import sem_categoria
 
 
 # ─── Read handlers ──────────────────────────────────────────────────────────
@@ -31,23 +32,6 @@ def _list_categories(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
 def _list_user_rules(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     rules = db.list_user_category_rules(user_id)
     return {"rules": [{"keyword": k, "category": c} for k, c in rules]}
-
-
-def _get_uncategorized_launches(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
-    limit = int(args.get("limit") or 10)
-    launches = db.get_uncategorized_launches(user_id, limit=limit)
-    return {
-        "launches": [
-            {
-                "id": f"l{l['id']}",  # o id do Extrato (`l<id>`), o que as escritas da IA leem
-                "valor": l["valor"],
-                "alvo": l.get("alvo"),
-                "nota": l.get("nota"),
-                "categoria": l.get("categoria"),
-            }
-            for l in launches
-        ]
-    }
 
 
 # ─── Write: create_category_rule ────────────────────────────────────────────
@@ -111,7 +95,7 @@ TOOLS: list[Tool] = [
             "type": "function",
             "function": {
                 "name": "get_uncategorized_launches",
-                "description": "Retorna os lançamentos recentes do usuário que estão sem categoria útil (em 'outros' ou null). Útil pra sugerir criar regras.",
+                "description": "Retorna os gastos recentes do usuário (inclusive compras no cartão) que estão sem categoria útil (em 'outros' ou sem categoria), os mesmos que o Extrato mostra. Cada item traz o `id` (use-o em recategorize_launch; NUNCA o mostre ao user). Útil pra sugerir criar regras ou pra recategorizar.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -121,7 +105,7 @@ TOOLS: list[Tool] = [
             },
         },
         is_write=False,
-        execute=_get_uncategorized_launches,
+        execute=sem_categoria,
     ),
     Tool(
         schema={

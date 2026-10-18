@@ -1,0 +1,68 @@
+{
+  "card": "sem_categoria",
+  "abas": [
+    {
+      "mes": null,
+      "recursos": {
+        "sem_categoria": {
+          "itens": [
+            {
+              "id": "l14",
+              "data": "2026-10-17",
+              "hora": "09:30",
+              "tipo": "saida",
+              "interno": false,
+              "guardado": false,
+              "valor": "50",
+              "moeda": "BRL",
+              "descricao": "Padaria",
+              "mensagem": null,
+              "categoria": "outros",
+              "origem": "carteira",
+              "fundido": false,
+              "instituicao": null,
+              "conta_id": null,
+              "cartao_id": null,
+              "parcela": null,
+              "fatura": null,
+              "pode": [
+                "categoria",
+                "descricao",
+                "data",
+                "valor",
+                "apagar"
+              ],
+              "motivos": []
+            },
+            {
+              "id": "c8",
+              "data": "2026-10-16",
+              "hora": null,
+              "tipo": "saida",
+              "interno": false,
+              "guardado": false,
+              "valor": "39.9",
+              "moeda": "BRL",
+              "descricao": "Posto",
+              "mensagem": null,
+              "categoria": null,
+              "origem": "cartao",
+              "fundido": false,
+              "instituicao": "Nubank",
+              "conta_id": null,
+              "cartao_id": 3,
+              "parcela": null,
+              "fatura": "2026-11",
+              "pode": [
+                "categoria",
+                "descricao"
+              ],
+              "motivos": []
+            }
+          ],
+          "motivos": []
+        }
+      }
+    }
+  ]
+}

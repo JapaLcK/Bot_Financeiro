@@ -107,7 +107,11 @@ externa, sem catálogo frio, e conector direto que some do `/connectors` não im
 - Testes: aceita https; recusa http, `javascript:`, `data:`, vazio, >500, escalar que não é texto,
   objeto, `mock_pluggy`. Negativo: sem a validação, o caso `javascript:` reprova.
 
-**NÃO verificado, e é condição para começar este PR:**
+**Condição do PR, MEDIDA em produção em 2026-10-18 (o staging tem 0 conexões Pluggy):** `n=8`,
+`com_logo=4`, `svg=4` (todo logo medido é SVG, em `https://cdn.pluggy.ai/assets/connector-icons/…`). As 4 sem
+logo são as mais antigas (ids 161 a 179; 2 ACTIVE, 2 PAUSED) e o `raw` delas NÃO tem `connector`; o sync não
+reescreve o `raw`, então as antigas só ganham logo ao reconectar. O dono decidiu abrir o PR assim (o app cai na
+inicial onde não há logo); o plano B abaixo fica como follow-up. O texto original da condição:
 - se o `connector` embutido no item traz `imageUrl` (no repositório `imageUrl` só aparece lido do
   **catálogo**, `frontend/routes/open_finance.py:1675`);
 - o formato da imagem (lembrança não conferida: SVG no CDN da Pluggy). O `Image` do React Native não
@@ -120,6 +124,17 @@ externa, sem catálogo frio, e conector direto que some do `/connectors` não im
   dentro do snapshot.
 
 ## PR 3 — app: a tela
+
+**Do PR 2 (`logo_url`) — limites que a tela herda:**
+- O host NÃO é fixado: o validador aceita `user:pass@`, IP, `localhost`, porta e `https:///`. Quem controla o
+  `imageUrl` é a Pluggy, ou quem tem o secret do webhook `item/deleted`, não o usuário. Carregar a URL faz o
+  aparelho buscá-la; a PR 3 decide se fixa o host (p.ex. `cdn.pluggy.ai`).
+- O formato medido em produção é SVG (4 de 4, host `cdn.pluggy.ai`); o app deve usar `SvgUri` e cair na
+  inicial/`Avatar` se falhar ou se `logo_url` for `null`. Como o host medido é um só, a PR 3 pode fixá-lo.
+- `logo_url` é `null` em `mock_pluggy`, em item sem `connector` e DEPOIS de `item/deleted` (o envelope do webhook
+  substitui o `raw`).
+- O app instalado ignora a chave (zod sem `.strict`) e o `.catch(null)` cobre servidor velho.
+- Cobertura medida: 4 de 8 conexões (as antigas não têm `connector`); ver a condição acima.
 
 O Coder invoca a skill `pigbank-frontend`.
 

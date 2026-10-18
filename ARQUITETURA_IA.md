@@ -645,7 +645,8 @@ async function classifyWithAI(
 ): Promise<IntentResult> {
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-6-luna",
+      reasoning_effort: "none",
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [

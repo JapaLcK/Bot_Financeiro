@@ -1,7 +1,7 @@
 """
 core/services/ai_chat/sanitizer.py — saneamento defensivo da saída e do roteamento da IA.
 
-Existe porque o LLM (gpt-4o-mini) é teimoso com 3 regras do system prompt:
+Existe porque o LLM é teimoso com 3 regras do system prompt:
 
 1. **Regra 0 anti-markdown headers**: não escreva `#`, `##`, `###`. O
    WhatsApp não renderiza, o user vê literal. Mesmo com a regra dura e
