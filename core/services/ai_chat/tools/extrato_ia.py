@@ -86,12 +86,15 @@ def _resumo_item(item: dict) -> dict:
     p = item["parcela"]
     return {"descricao": (item["descricao"] or item["mensagem"] or "").strip()[:60] or SEM_DESCRICAO,
             "valor": float(item["valor"]), "data": item["data"],
-            "parcelas": p["total"] if p and p["total"] > 1 else 1}
+            "parcelas": p["total"] if p and p["total"] > 1 else 1, "moeda": item.get("moeda") or "BRL"}
 
 
 def _quem(i: dict) -> str:
     d = i["data"]
-    return f'"{i["descricao"]}", {fmt_brl(i["valor"])}, {d[8:10]}/{d[5:7]}'
+    v = fmt_brl(i["valor"])  # a conta do banco em outra moeda: o código no lugar do "R$" (o Extrato mostra a moeda)
+    if i.get("moeda", "BRL") != "BRL":
+        v = v.replace("R$", i["moeda"], 1)
+    return f'"{i["descricao"]}", {v}, {d[8:10]}/{d[5:7]}'
 
 
 def _pode(item: dict, campo: str) -> bool:

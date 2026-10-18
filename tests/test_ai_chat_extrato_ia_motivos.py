@@ -306,3 +306,13 @@ def test_so_as_parcelas_mudam_entre_a_pergunta_e_o_sim(uid_pro):
     assert "mudou desde a pergunta" in sim(uid_pro)
     assert q("select valor, purchased_at, nota, categoria from credit_transactions where user_id = %s and id = %s",
              (uid_pro, c)) == antes  # só as parcelas mudaram e nada foi recategorizado
+
+
+def test_item_em_outra_moeda_pergunta_e_confirma_com_a_moeda_dele():
+    """Codex no #1098: a pergunta e o "pronto" mostravam USD 38 como "R$ 38,00". O `_item` guarda a moeda do Extrato."""
+    a = usuario_pagante()
+    lid = _sombra(a, 38)
+    q("update launches set currency = 'USD' where id = %s returning id", (lid,))
+    h, final = arma(a, "recategorize_launch", {"launch_id": f"l{lid}", "new_category": "lazer"})
+    assert final is None and "USD 38,00" in h["summary"] and "R$" not in h["summary"], h
+    assert "USD 38,00" in sim(a) and categoria(a, lid) == "lazer"

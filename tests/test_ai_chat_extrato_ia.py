@@ -212,7 +212,7 @@ def test_resumo_vem_do_banco_e_nao_do_que_o_modelo_falou(uid_pro):
     assert final is None
     assert h["summary"] == f'apagar "Mercado Extra", R$ 50,00, {dia}'
     assert h["args"]["_item"] == {"descricao": "Mercado Extra", "valor": 50.0, "data": today_tz().isoformat(),
-                                  "parcelas": 1}
+                                  "parcelas": 1, "moeda": "BRL"}
     p = pend(uid_pro)
     assert p["summary"] == h["summary"] and p["tool_args"]["_item"] == h["args"]["_item"]
     # o modelo não forja `_item`: o runner tira a chave `_` do que ele manda
