@@ -12,7 +12,7 @@ jest.mock("@react-native-community/datetimepicker", () => ({ __esModule: true, d
 jest.setTimeout(30_000);
 type Corpo = Record<string, unknown>;
 const TODAS = (v2 as unknown as { metas: { varios: { metas: Record<string, unknown>[]; custo_mensal: unknown }; vazio: unknown; sem_custo: unknown } }).metas;
-let lista: unknown, escrita: (rota: string, corpo: Corpo) => Response | Promise<Response>, investido: () => Response;
+let lista: unknown, escrita: (rota: string, corpo: Corpo) => Response | Promise<Response>, investido: () => Response, contasFalha: boolean;
 const posts = () => fetchFalso.mock.calls.filter(([, o]) => (o as RequestInit)?.method === "POST").map(([u, o]) => ({ rota: new URL(String(u)).pathname, corpo: JSON.parse(String((o as RequestInit).body)) as Corpo }));
 const gets = () => fetchFalso.mock.calls.filter(([u, o]) => new URL(String(u)).pathname === "/api/app/metas" && (o as RequestInit).method === "GET").length;
 function servidor() {
@@ -24,13 +24,14 @@ function servidor() {
     if (path === "/api/app/perfil") return resposta(200, { perfil: "padrao" });
     if (path === "/api/app/metas" && o.method === "GET") return resposta(200, lista);
     if (path === "/api/app/investido") return investido();
+    if (path === "/api/app/contas" && contasFalha) return resposta(500, { error: { code: "erro", message: "x" } });
     if (path === "/api/app/contas") { const c = (fixture as unknown as Record<string, { contas: object[] }>)[path]!; return resposta(200, { ...c, contas: [...c.contas, { ...c.contas[0], id: 3, instituicao: "Wise", nome: "Dólar", moeda: "USD" }] }); } // uma conta em outra moeda: a meta é em reais, ela não entra na lista de fontes
     if (o.method === "POST" && path.startsWith("/api/app/metas")) return escrita(path, JSON.parse(String(o.body)));
     return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
   });
 }
 beforeEach(async () => {
-  prepararCaso(); desligarTrava(); lista = TODAS.varios; escrita = () => resposta(200, { id: 99 }); investido = () => resposta(200, v2.investido.com_banco);
+  prepararCaso(); desligarTrava(); lista = TODAS.varios; contasFalha = false; escrita = () => resposta(200, { id: 99 }); investido = () => resposta(200, v2.investido.com_banco);
   await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor(); jest.spyOn(Alert, "alert").mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
@@ -116,5 +117,17 @@ describe("Android: o prazo abre o diálogo uma vez, no toque (não é o componen
     await apertar(/Prazo/); expect(abrir).toHaveBeenCalledTimes(2); expect((abrir.mock.calls[1]![0] as { value: Date }).value.getFullYear()).toBe(2030);
     escrita = () => resposta(500, undefined); await salvar(); await waitFor(() => expect(screen.getByText("Pode ter salvo. Confira a lista.")).toBeTruthy());
     await apertar(/Prazo/); expect(abrir).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a carga da folha: `/contas` é essencial sem o plano", () => {
+  it("sem o plano E `/contas` falhou: 'Não deu para carregar' (não um formulário sem Fonte); 'Tentar de novo' abre com as contas", async () => {
+    investido = () => resposta(403, { error: { code: "pro_required", message: "Forbidden" } }); contasFalha = true; lista = TODAS.vazio; await abrirAba(); await apertar("Criar meta");
+    await waitFor(() => expect(screen.getByText("Não deu para carregar.")).toBeTruthy()); expect(screen.queryByLabelText(/^Nome/)).toBeNull();
+    contasFalha = false; await apertar("Tentar de novo"); await folha("Nova meta"); await apertar(/Fonte/); expect(screen.getByText(/Conta principal/)).toBeTruthy();
+  });
+  it("controle: COM o plano, `/contas` falhar só deixa a lista menor — abre com 'Tudo investido', sem erro", async () => {
+    contasFalha = true; lista = TODAS.vazio; await abrirAba(); await apertar("Criar meta"); await folha("Nova meta");
+    expect(screen.queryByText("Não deu para carregar.")).toBeNull(); await apertar(/Fonte/); expect(screen.getAllByText("Tudo investido").length).toBeGreaterThan(0); expect(screen.queryByText(/Conta principal/)).toBeNull();
   });
 });

@@ -29,8 +29,8 @@ type Carga = { fase: "carregando" } | { fase: "erro" } | { fase: "pronto"; metas
 const fecharFolha = () => router.back();
 
 /**
- * Lê o que a folha precisa (metas, bancos e contas), sozinha: a rota fica fora do `PainelProvider`. Só a lista de metas é essencial; `/investido` com 403 `pro_required`
- * é "sem o plano" (só contas) e qualquer outra falha dele ou de `/contas` só deixa a lista menor. ponytail: o formulário abre quando as três terminam (15 s de teto cada), sem
+ * Lê o que a folha precisa (metas, bancos e contas), sozinha: a rota fica fora do `PainelProvider`. Só a lista de metas é essencial — e `/contas` quando o `/investido` deu 403 `pro_required`
+ * ("sem o plano": contas são a única fonte, sem elas o formulário não salva nada); fora isso, a falha de `/investido` ou de `/contas` só deixa a lista menor. ponytail: o formulário abre quando as três terminam (15 s de teto cada), sem
  * abrir antes e reajustar o padrão da fonte depois.
  */
 function useCarga(tentativa: number): Carga {
@@ -40,8 +40,9 @@ function useCarga(tentativa: number): Carga {
     const vivo = <T,>(p: Promise<T>) => p.catch((e: unknown) => { if (e instanceof SessaoExpirada) sessao.expirou(e.detalhe); throw e; });
     void Promise.allSettled([vivo(lerRecurso("/api/app/metas", S.metasV2Schema, pai)), vivo(lerRecurso("/api/app/investido", S.investidoBancosSchema, pai)), vivo(lerRecurso("/api/app/contas", S.contasSchema, pai))]).then(([m, i, c]) => {
       if (pai.signal.aborted) return;
-      if (m.status !== "fulfilled") return setCarga({ fase: "erro" });
-      setCarga({ fase: "pronto", metas: m.value, bancos: i.status === "fulfilled" ? i.value.por_banco.map((b) => b.banco) : [], semPlano: i.status === "rejected" && codigoDe(i.reason) === "pro_required", contas: c.status === "fulfilled" ? c.value.contas.filter((k) => k.moeda === "BRL") : [] });
+      const semPlano = i.status === "rejected" && codigoDe(i.reason) === "pro_required";
+      if (m.status !== "fulfilled" || (semPlano && c.status !== "fulfilled")) return setCarga({ fase: "erro" });
+      setCarga({ fase: "pronto", metas: m.value, bancos: i.status === "fulfilled" ? i.value.por_banco.map((b) => b.banco) : [], semPlano, contas: c.status === "fulfilled" ? c.value.contas.filter((k) => k.moeda === "BRL") : [] });
     });
     return () => pai.abort();
   }, [tentativa]); // `sessao.expirou` é estável
