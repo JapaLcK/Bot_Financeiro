@@ -42,6 +42,8 @@ export default function LayoutApp() {
       <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-novos-codigos" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-desativar" options={SHEET_INTEIRA} />
+      <Stack.Screen name="excluir-conta" options={SHEET_INTEIRA} />
+      <Stack.Screen name="exportar-dados" options={SHEET_INTEIRA} />
     </Stack>
   );
 }
