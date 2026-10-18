@@ -101,7 +101,7 @@ test("falhas: 400 verbatim, 500 e prazo = reserva, 401 = sessão com Recarregar;
     const antes = p.s.nGets;
     await p.sw("Dicas de uso").click();
     await alerta(p).waitFor();
-    await p.page.waitForFunction((n) => !document.querySelector(".conta-notif > p[role=status]").textContent && document.querySelector(".conta-notif input[role=switch]:not([aria-disabled])"), antes);
+    await p.page.waitForFunction(() => !document.querySelector(".conta-notif > p[role=status]").textContent && document.querySelector(".conta-notif input[role=switch]:not([aria-disabled])"));
     const [msg, marca, recarregar] = [await alerta(p).innerText(), await p.sw("Dicas de uso").isChecked(), await p.notif.getByRole("button", { name: "Recarregar" }).count()];
     const gets = p.s.nGets;
     await fecha(p);
