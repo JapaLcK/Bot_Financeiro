@@ -7,7 +7,7 @@ const con = (id: string, state: string, detail: string | null = null, extra: Par
   id: 1, status: "ACTIVE", status_reason: null, last_sync_at: "2026-10-10T12:00:00Z", reconnected_at: null, provider_item_id: id, institution_name: "Nubank",
   ui: { state, label: state, detail }, ...extra,
 });
-const item = (id: string, state: string, still = false, detail: string | null = null) => ({ item_id: id, institution: "Nubank", state, label: state, detail, still_updating: still });
+const item = (id: string, state: string, still = false, detail: string | null = null, reason: string | null = null) => ({ item_id: id, institution: "Nubank", state, label: state, detail, reason, still_updating: still });
 const refresh = (items: ReturnType<typeof item>[], connections: Conexao[] = []): Refresh => ({ connections, sync: { items } });
 
 /** Relógio falso: `esperar` avança o tempo; cada `ler` anota o instante (para provar cadência e ausência de sobreposição). */
@@ -78,13 +78,18 @@ describe("atualizar (a): o POST", () => {
     await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
   });
   it("updating SEM coleta (motivo de falha, ex. read_failed na 1ª conexão): é problema, não sucesso; sem detalhe, a frase de falha", async () => {
-    const { w, d, ultimo } = mundo({ enviar: async () => refresh([{ ...item("it_1", "updating"), reason: "read_failed" }]) });
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, "read_failed")]) });
     await atualizar(d);
     expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Não conseguimos atualizar agora. Tente de novo." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
   it.each([[null], [""], ["ok"], ["no_accounts"], ["OK"]])("updating com motivo de coleta (%p) segue em dia (controle positivo)", async (reason) => {
-    const { w, d, ultimo } = mundo({ enviar: async () => refresh([{ ...item("it_1", "updating"), reason }]) });
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, reason)]) });
     await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
+  });
+  it("um banco ainda coletando NÃO esconde a falha de outro (erro antes do neutro, como o web): resultado na hora, sem acompanhar", async () => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", true), item("it_2", "partial", false, "Parte dos dados ainda não veio")]) });
+    await atualizar(d);
+    expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
   it("item com problema: resultado com a instrução do servidor, aviso(), recarga, e NADA de acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "partial", false, "Cartão desatualizado desde 12/08")]) });
