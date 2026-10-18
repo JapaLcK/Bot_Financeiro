@@ -20,7 +20,8 @@ export function ContaBancos() {
   const limite = useQuery(limiteQuery(uid));
   const bancos = useQuery(bancosQuery(uid));
 
-  const erro = [conta.error, conexoes.error].find((e) => e) ?? null;
+  // `/bancos` e `/limite` são opcionais, menos no 401: a sessão acabou, e nada do cache fica na tela.
+  const erro = [conta.error, conexoes.error].find((e) => e) ?? [bancos.error, limite.error].find((e) => e instanceof ErroApi && e.status === 401) ?? null;
   const lista = erro ? undefined : conexoes.data; // releitura que falhou: o erro com "Tentar de novo", nunca a lista velha
   const semUid = conta.isSuccess && !uidValido(uid);
   const sessao = erro instanceof ErroApi && erro.status === 401; // sessão acabada esconde o que ficou em cache
@@ -45,7 +46,7 @@ export function ContaBancos() {
             <section className="panel span-12 empty" role="alert">
               <p>{sessao ? "Sua sessão terminou." : "Não deu para carregar seus bancos."}</p>
               {sessao ? <button type="button" className="btn btn-ghost retry" onClick={() => location.reload()}>Recarregar</button>
-                : <button type="button" className="btn btn-ghost retry" onClick={() => { conta.refetch(); if (uidValido(uid)) conexoes.refetch(); }}>Tentar de novo</button>}
+                : <button type="button" className="btn btn-ghost retry" onClick={() => { conta.refetch(); if (uidValido(uid)) { conexoes.refetch(); bancos.refetch(); limite.refetch(); } }}>Tentar de novo</button>}
             </section>
           ) : (
             <>

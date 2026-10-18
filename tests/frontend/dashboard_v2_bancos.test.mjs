@@ -535,3 +535,47 @@ test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfi
   assert.equal(r.cards, 3); // a lista antiga segue (as releituras dela estão presas)
   assert.ok(!r.corpo.includes("9.999,00"), r.corpo);
 });
+
+test("401 numa leitura opcional (/bancos ou /limite) depois de a lista estar na tela: 'Sua sessão terminou.' e nenhum card; o 500 delas segue opcional", async () => {
+  const r = {};
+  for (const qual of ["bancos", "limite"]) {
+    let expirou = false;
+    const nao = (ok) => (q) => (expirou ? q.fulfill({ status: 401, json: { detail: "Not authenticated" } }) : ok(q));
+    const { ctx, page } = await bancos({
+      bancos: "padrao",
+      ...(qual === "bancos" ? { bancosRes: nao((q) => q.fulfill({ json: RESPOSTAS.bancos.padrao })) } : { limiteRes: nao((q) => q.fulfill({ json: LIMITE() })) }),
+    });
+    await esperaCards(page, 3);
+    expirou = true;
+    await refoco(page);
+    await page.getByRole("alert").waitFor({ timeout: 8000 });
+    r[qual] = { texto: await page.getByRole("alert").innerText(), cards: await page.locator(".banco-card").count() };
+    await ctx.close();
+  }
+  for (const qual of ["bancos", "limite"]) {
+    assert.match(r[qual].texto, /Sua sessão terminou\./, qual);
+    assert.equal(r[qual].cards, 0, qual);
+  }
+});
+
+test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os números (topo e vagas), não só a lista", async () => {
+  let caiu = false;
+  const cai = (ok) => (q) => (caiu ? ERRO_500(q) : ok(q));
+  const { ctx, page } = await bancos({
+    snap: cai((q) => q.fulfill({ json: { ok: true, connections: PADRAO() } })),
+    bancos: "padrao", bancosRes: cai((q) => q.fulfill({ json: RESPOSTAS.bancos.padrao })),
+    limiteRes: cai((q) => q.fulfill({ json: LIMITE() })),
+  });
+  await esperaCards(page, 3);
+  caiu = true;
+  await refoco(page);
+  await page.getByRole("alert").waitFor({ timeout: 12000 });
+  await page.waitForTimeout(3500); // as releituras opcionais também esgotam as tentativas
+  caiu = false;
+  await page.getByRole("button", { name: "Tentar de novo" }).click();
+  await esperaCards(page, 3);
+  await page.locator(".bancos-topo").waitFor({ timeout: 8000 }).catch(() => {});
+  const r = { topo: await page.locator(".bancos-topo").count(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
+  await ctx.close();
+  assert.deepEqual(r, { topo: 1, vagas: true });
+});
