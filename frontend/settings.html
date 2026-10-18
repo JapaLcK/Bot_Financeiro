@@ -3056,7 +3056,9 @@ async function requestAccountDeletion(origem) {
     } else {
       await alertModal("Pronto, sua conta foi excluída.", { title: "Conta excluída" });
     }
-    localStorage.setItem("finbot_logout_at", String(Date.now()));
+    // A conta já foi apagada: o marcador para as outras abas é só um aviso e, se o storage falhar
+    // (webview restrito, quota), a navegação NÃO pode ficar presa no catch abaixo.
+    try { localStorage.setItem("finbot_logout_at", String(Date.now())); } catch (_) { /* melhor esforço */ }
     window.location.href = "/";
   } catch (err) {
     showToast(err.message || "Erro ao excluir a conta", "error");

@@ -83,6 +83,20 @@ test("H4: status deleting — alerta 'Excluindo' com o texto de 'estamos conclui
   } finally { await ctx.close(); }
 });
 
+test("H4b: storage que lança (webview restrito) — a exclusão já feita ainda navega para a home, sem toast de erro", async () => {
+  const { page, ctx, reqs } = await abre(a, { resposta: () => json({ ok: true, status: "deleted", deleted: true }) });
+  try {
+    await page.evaluate(() => { Storage.prototype.setItem = () => { throw new DOMException("bloqueado", "SecurityError"); }; });
+    await holdSegurado(page);
+    await waitFor(() => reqs.length === 1, "a requisição do hold");
+    await waitFor(async () => /Pronto, sua conta foi excluída\./.test(await textoDoModal(page)), "o alerta de conta excluída");
+    // O relógio do harness está pausado (a animação do modal não termina): clica pelo DOM.
+    await page.evaluate(() => document.querySelector(".pig-modal-btn-primary").click());
+    await waitFor(() => new URL(page.url()).pathname === "/", "a navegação para a home");
+    assert.equal(await page.evaluate(() => document.querySelectorAll(".toast.error, .toast-error").length), 0);
+  } finally { await ctx.close(); }
+});
+
 test("H5: erro do servidor (frase) aparece no toast", async () => {
   const { page, ctx, reqs } = await abre(a, {
     resposta: () => json({ detail: { code: "confirmacao_invalida", message: "Digite EXCLUIR para confirmar." } }, 400),
