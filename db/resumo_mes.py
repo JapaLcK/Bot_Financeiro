@@ -7,7 +7,7 @@ estorno pelo `period_end` da fatura (parcelado: uma parcela por mês). Leem daqu
 `GET /api/v2/resumo-do-mes`, o "Gastos em <mês>" do WhatsApp, o relatório mensal, a
 consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de meses inteiros
 (`get_period_summary`, que para 2 a 12 meses lê `mes_detalhes.ler_periodo`, o mesmo do
-card `periodo` do chat; `forecast_month_end`, que lê o mês por `mes_detalhes.ler` e extrapola só o gasto até hoje fora do cartão do Open Finance; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07; `get_top_categories`, `get_largest_expenses` e
+card `periodo` do chat; `forecast_month_end`, que lê o mês por `mes_detalhes.ler` e extrapola só o gasto até hoje fora do cartão do Open Finance; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07, e `lancamentos.listar` para a série diária do gasto; `get_top_categories`, `get_largest_expenses` e
 `get_category_spend` pela fatura: `core/services/ai_chat/tools/launches.py`); as pernas dela (`MES_*_SQL`), a
 lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
 consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
