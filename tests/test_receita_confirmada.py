@@ -298,6 +298,53 @@ def test_visao_do_modelo_no_hero_soma_a_receita_so_depois_do_sim(novo, monkeypat
     assert "receitas_do_banco" not in v and D(str(depois[-1])) > D(str(antes[-1]))
 
 
+def test_visao_do_modelo_no_hero_lista_so_as_confirmadas(novo, monkeypatch):
+    a = novo()
+    db.set_balance(a, D(1000))
+    salario_do_dono(a)
+    na_visao = lambda: _visao_hero(a, monkeypatch)[1]
+    v = na_visao()
+    assert v["receitas_confirmadas"] == [] and "receitas_do_banco" not in v  # pendente: lista vazia, não ausente
+    r = uma(ver(a))
+    responder(a, r["chave"], "sim")
+    v = na_visao()
+    (x,) = v["receitas_confirmadas"]
+    assert x == {"nome": r["nome"], "valor": float(D(r["valor"])), "dia": r["dia"]} and isinstance(x["dia"], int)
+    assert r["chave"] not in str(v) and "receitas_do_banco" not in v
+    responder(a, r["chave"], "desfazer")
+    assert na_visao()["receitas_confirmadas"] == []
+    responder(a, r["chave"], "nao")
+    assert na_visao()["receitas_confirmadas"] == []
+
+
+def test_visao_hero_so_a_confirmada_e_nome_cortado_em_60():
+    from core.services.ai_chat.cards import visao_hero
+    rec = lambda n, st: {"chave": f"extrato#{n}", "nome": n, "valor": 10.5, "dia": 5, "status": st}
+    longo = "N" * 80
+    v = visao_hero({"previsao": {"marcos": [1], "receitas_do_banco": [
+        rec("PEND", "pendente"), rec(longo, "confirmada"), rec("NEG", "negada")]}})
+    assert v["receitas_confirmadas"] == [{"nome": "N" * 60, "valor": 10.5, "dia": 5}]
+    assert v["marcos"] == [1] and "receitas_do_banco" not in v and "extrato#" not in str(v)
+
+
+@pytest.mark.parametrize("motivo", ["_interrompida", "_fora_da_base"])
+def test_confirmada_interrompida_segue_listada_mas_nao_entra_na_conta(novo, monkeypatch, motivo):
+    """Comportamento aceito: o pagador parou (+40 dias) ou a conta saiu da base; a receita fica na lista
+    para o Desfazer e contribui 0."""
+    from core.services import previsao_recorrencias
+    a = novo()
+    db.set_balance(a, D(1000))
+    salario_do_dono(a)
+    responder(a, uma(ver(a))["chave"], "sim")
+    antes = _visao_hero(a, monkeypatch)[1]
+    assert len(antes["receitas_confirmadas"]) == 1 and len(na_conta(ver(a))) == 1
+    assert D(str(antes["marcos"][-1]["saldo"])) > D(1000)  # sem a interrupção ela soma
+    monkeypatch.setattr(previsao_recorrencias, motivo, lambda *a: True)
+    depois = _visao_hero(a, monkeypatch)[1]
+    assert [r["nome"] for r in depois["receitas_confirmadas"]] == ["EMPRESA X"]
+    assert na_conta(ver(a)) == [] and all(D(str(m["saldo"])) == D(1000) for m in depois["marcos"])  # contribui R$ 0
+
+
 # ── 8. só é pergunta a candidata que o Sim mudaria ───────────────────────────
 
 def test_candidata_parada_ha_120_dias_nao_e_pergunta(user_id):
