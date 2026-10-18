@@ -94,8 +94,8 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
     ano, m, agora = mes_pedido(mes)
     try:
         dados = lancamentos_leitura.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
-                                   origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
-                                   categoria=categoria, tipo=tipo, com_guardado=guardado)
+                                           origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
+                                           categoria=categoria, tipo=tipo, com_guardado=guardado)
     except lancamentos.CursorInvalido as e:
         raise _recusa("cursor", str(e)) from None
     return Lancamentos(**dados)

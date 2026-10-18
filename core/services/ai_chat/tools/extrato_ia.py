@@ -24,6 +24,7 @@ from core.observability import _log_falha
 from core.pg_text import violacao_finito
 from db import lancamentos, lancamentos_leitura
 from db.cards import MSG_COMPRA_DO_BANCO
+from db.categories import resolve_category_input
 from db.estabelecimentos import SEM_DESCRICAO
 from utils_text import fmt_brl
 
@@ -34,6 +35,7 @@ ERRO_APAGAR = (
     "Tenta de novo em alguns minutos; se continuar, me chama que eu vejo isso."
 )
 _FALTOU_ID = "🐷 Faltou o ID do lançamento."
+_FALTOU_CATEGORIA = "🐷 Faltou a categoria nova. Qual categoria você quer?"
 _NAO_ACHEI = ("🐷 Não achei esse lançamento. Manda o `id` da lista ou o #N, ou pede pra eu listar os "
               "últimos e você escolhe.")
 _SUMIU = "🐷 Não achei mais esse lançamento (pode já ter sido apagado). Nada mudou."
@@ -93,17 +95,49 @@ def _pode(item: dict, campo: str) -> bool:
     return campo in item["pode"] and not (campo == "apagar" and item["id"][0] == "c")
 
 
+def _motivo(i: dict) -> str:
+    """Por que o item está fora do `pode`, em linguagem de produto (um texto por estado do Extrato)."""
+    if i["guardado"]:
+        return "Esse é um movimento de caixinha ou de investimento (guardar ou resgatar), e eu não apago nem mudo isso."
+    o = i["origem"]
+    if i["id"][0] == "c":
+        return MSG_COMPRA_DO_BANCO if o == "cartao" else (
+            "Essa compra no cartão foi lançada por você, e mexer nela mexe nas parcelas e na fatura.")
+    if o == "registro_antigo":
+        return "Esse registro é antigo ou veio de um extrato importado, e não guarda o que eu precisaria reverter no seu saldo."
+    if o == "banco":
+        return "Esse lançamento veio do seu banco (Open Finance): o banco é dono do valor e da data."
+    return ("Esse é o pagamento de uma conta ou fatura: apagar devolveria o dinheiro e a conta seguiria paga."
+            if "categoria" in i["pode"] else
+            "Esse é um saque ou depósito em dinheiro ligado ao seu banco, e a categoria dele é fixa.")
+
+
 def _recusa(item: dict, campo: str) -> str | None:
     """None = pode. Senão o motivo e o que a IA ainda faz com esse item (nada de apontar outro canal)."""
     if _pode(item, campo):
         return None
-    if campo == "apagar":
-        motivo = MSG_COMPRA_DO_BANCO if item["origem"] == "cartao" else "Esse não dá pra apagar por aqui."
-        resto = " Se quiser, mudo a categoria." if _pode(item, "categoria") else ""
-    else:
-        motivo = "Esse não dá pra mudar a categoria por aqui."
-        resto = " Se quiser, apago ele." if _pode(item, "apagar") else ""
-    return f"🐷 {motivo}{resto or ' Ele é só de leitura pra mim.'}"
+    outro, oferta = ("categoria", "mudo a categoria") if campo == "apagar" else ("apagar", "apago ele")
+    resto = f" Se quiser, {oferta}." if _pode(item, outro) else " Ele é só de leitura pra mim."
+    return f"🐷 {_motivo(item)}{resto}"
+
+
+# Registro de `launches` que o Extrato não lista (criar/apagar caixinha e investimento): a IA o recusa
+# como o Extrato (P-1), mas com o motivo, não com "não achei".
+_CAIXINHA_INVEST = ("criar_caixinha", "create_investment", "delete_investment")
+
+
+def _fora_do_extrato(user_id: int, alvo: tuple[str, int]) -> str | None:
+    if alvo[0] != "l":
+        return None
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select tipo from launches where user_id = %s and id = %s", (user_id, alvo[1]))
+        row = cur.fetchone()
+        conn.commit()
+    if row is None:
+        return None
+    quem = ("Esse é o registro de criar ou apagar uma caixinha ou um investimento"
+            if row["tipo"] in _CAIXINHA_INVEST else "Esse tipo de registro")
+    return f"🐷 {quem} e não aparece no Extrato, então não apago nem mudo por aqui. Eu mexo em gastos e receitas."
 
 
 def _validar(user_id: int, args: dict[str, Any], campo: str) -> str | None:
@@ -111,7 +145,9 @@ def _validar(user_id: int, args: dict[str, Any], campo: str) -> str | None:
         return _FALTOU_ID
     alvo = _achar(user_id, args.get("launch_id"))
     item = lancamentos_leitura.um_item(user_id, *alvo) if alvo else None
-    return _NAO_ACHEI if item is None else _recusa(item, campo)
+    if item is None:
+        return (alvo and _fora_do_extrato(user_id, alvo)) or _NAO_ACHEI
+    return _recusa(item, campo)
 
 
 def validar_apagar(user_id: int, args: dict[str, Any]) -> str | None:
@@ -119,15 +155,22 @@ def validar_apagar(user_id: int, args: dict[str, Any]) -> str | None:
 
 
 def validar_categoria(user_id: int, args: dict[str, Any]) -> str | None:
+    nova = args.get("new_category")
+    if not isinstance(nova, str) or not resolve_category_input(user_id, nova, create=True):
+        return _FALTOU_CATEGORIA  # antes de armar "mudar para None"
     return _validar(user_id, args, "categoria")
 
 
 def ao_confirmar(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     """Depois do `validate`: id canônico + o item como o banco o tem agora. Se sumiu neste meio
-    tempo, segue sem `_item` (o `execute` relê e responde "não achei mais")."""
+    tempo, segue só com o id canônico, sem `_item` (o `execute` relê e responde "não achei mais")."""
     alvo = _achar(user_id, args.get("launch_id"))
-    item = lancamentos_leitura.um_item(user_id, *alvo) if alvo else None
-    return args if item is None else {**args, "launch_id": item["id"], "_item": _resumo_item(item)}
+    if alvo is None:
+        return args
+    item = lancamentos_leitura.um_item(user_id, *alvo)
+    if item is None:  # sumiu agora: o id canônico faz o "sim" responder "não achei mais"
+        return {**args, "launch_id": f"{alvo[0]}{alvo[1]}"}
+    return {**args, "launch_id": item["id"], "_item": _resumo_item(item)}
 
 
 def resumo_apagar(args: dict[str, Any]) -> str:
@@ -150,10 +193,12 @@ def _reler(user_id: int, args: dict[str, Any], campo: str):
     item = lancamentos_leitura.um_item(user_id, *ident)
     if item is None:
         return _SUMIU
+    nada = "Não apaguei nada." if campo == "apagar" else "Não mudei nada."
     if not _pode(item, campo):
         acao = "apagar" if campo == "apagar" else "mudar a categoria"
-        return (f"🐷 Esse lançamento mudou desde a pergunta e não dá mais pra {acao} por aqui. "
-                f"Não {'apaguei' if campo == 'apagar' else 'mudei'} nada.")
+        return f"🐷 Esse lançamento mudou desde a pergunta e não dá mais pra {acao} por aqui. {nada}"
+    if args.get("_item") and args["_item"] != _resumo_item(item):  # editado depois da pergunta
+        return f"🐷 Esse lançamento mudou desde a pergunta. Me pede de novo. {nada}"
     return (*ident, item)
 
 
@@ -185,7 +230,7 @@ def apagar(user_id: int, args: dict[str, Any]) -> str:
 def recategorizar(user_id: int, args: dict[str, Any]) -> str:
     from db.accounts import LaunchDateLockedError, update_launch_fields
     from db.cards import update_credit_transaction_fields
-    from db.categories import ensure_user_category, resolve_category_input
+    from db.categories import ensure_user_category
 
     r = _reler(user_id, args, "categoria")
     if isinstance(r, str):
@@ -193,7 +238,7 @@ def recategorizar(user_id: int, args: dict[str, Any]) -> str:
     tabela, n, item = r
     nova = resolve_category_input(user_id, args.get("new_category") or "", create=True)
     if not nova:
-        return "🐷 Faltou a categoria nova. Manda de novo."
+        return _FALTOU_CATEGORIA
     try:
         if tabela == "l":
             ok = update_launch_fields(user_id, n, categoria=nova, exigir_pode=True)
