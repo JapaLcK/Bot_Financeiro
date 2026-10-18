@@ -1,7 +1,7 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 
 import { chamar, comLimite } from "@/api/client";
-import { conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema } from "@/api/schemas/openFinance";
+import { conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema, refreshSchema } from "@/api/schemas/openFinance";
 
 /**
  * As rotas de Open Finance de `frontend/routes/open_finance.py`. O `uid` vem
@@ -32,17 +32,23 @@ export function pedirConnectToken(uid: number, itemId?: string, tentativaId?: st
 }
 
 /** Timeout pertence à chamada, não à janela inteira de polling. */
-async function comCancelamento<T>(pai: AbortController | undefined, operacao: (sinal: AbortSignal) => Promise<T>): Promise<T> {
+async function comCancelamento<T>(pai: AbortController | undefined, operacao: (sinal: AbortSignal) => Promise<T>, ms?: number): Promise<T> {
   const filho = new AbortController();
   const abortar = () => filho.abort();
   if (pai?.signal.aborted) filho.abort();
   pai?.signal.addEventListener("abort", abortar, { once: true });
-  try { return await operacao(comLimite(undefined, filho)); }
+  try { return await operacao(comLimite(ms, filho)); }
   finally { pai?.signal.removeEventListener("abort", abortar); }
 }
 
 export const conexoes = (uid: number, controlador?: AbortController) =>
   comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}`, conexoesSchema, { sinal }));
+
+/** Mesmo prazo do `OF_REFRESH_PRAZO_MS` do settings.html (`tests/test_app_espelhos.py` compara): o servidor leva até ~40 s (PATCH, espera de até 18 s, sync), e os 15 s padrão cortariam um refresh que deu certo. */
+const PRAZO_REFRESH_MS = 60_000;
+/** Pede ao banco dados novos (`refresh_and_sync_pluggy_user`); o cooldown de 120 s por item é do servidor. */
+export const atualizarBancos = (uid: number, controlador?: AbortController) =>
+  comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}/refresh`, refreshSchema, { metodo: "POST", sinal }), PRAZO_REFRESH_MS);
 
 /** O servidor só aproveita o `id`, e confere o dono na Pluggy (`clientUserId`). */
 export const registrarItem = (uid: number, itemId: string, controlador?: AbortController) =>
