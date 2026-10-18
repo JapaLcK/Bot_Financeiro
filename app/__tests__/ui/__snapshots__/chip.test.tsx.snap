@@ -45,7 +45,7 @@ exports[`Chip snapshot (dois temas): claro 1`] = `
       {
         "alignItems": "center",
         "backgroundColor": "#FFE6F1",
-        "borderRadius": 8,
+        "borderRadius": 999,
         "justifyContent": "center",
         "minHeight": 28,
         "minWidth": 44,
@@ -128,7 +128,7 @@ exports[`Chip snapshot (dois temas): escuro 1`] = `
       {
         "alignItems": "center",
         "backgroundColor": "#220D18",
-        "borderRadius": 8,
+        "borderRadius": 999,
         "justifyContent": "center",
         "minHeight": 28,
         "minWidth": 44,

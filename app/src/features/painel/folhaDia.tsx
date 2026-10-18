@@ -77,5 +77,5 @@ function Corpo({ dia, g, trocar, fechar }: { dia: string; g: Resultado<Gastos> &
 /** `dia` null = fechada. A leitura de `/gastos` só começa ao abrir (`dia` não nulo) e o hook vive aqui, que o `Calendario` mantém montado enquanto `detalhes` está pronto: reabrir o mesmo mês não repete a leitura (trocar de mês ou puxar para atualizar remonta e relê; o refoco silencioso não remonta, mas a chave leva `versao` e relê). */
 export function FolhaDia({ dia, mudar }: { dia: string | null; mudar: (dia: string | null) => void }) {
   const g = useGastosMes(dia && dia.slice(0, 7));
-  return <Folha titulo={dia ? dataCurta(dia) : ""} rotulo={dia ? dataFalada(dia) : undefined} aberta={!!dia} fechar={() => mudar(null)}>{dia && <Corpo dia={dia} g={g} trocar={mudar} fechar={() => mudar(null)} />}</Folha>;
+  return <Folha titulo={dia ? dataCurta(dia) : ""} rotulo={dia ? dataFalada(dia) : undefined} aberta={!!dia} ancorada fechar={() => mudar(null)}>{dia && <Corpo dia={dia} g={g} trocar={mudar} fechar={() => mudar(null)} />}</Folha>;
 }

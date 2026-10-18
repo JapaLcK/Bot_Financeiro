@@ -66,7 +66,7 @@ function Pilula({ m, custo, ir }: { m: MetaV2; custo: MetasV2["custo_mensal"]; i
 /** Linha-botão que pede algo AO CHAT (`pedir.enviar`, como se o usuário tivesse digitado): nada navega nem abre folha. Sem `pedir` (card fora da conversa) ou com a entrada do chat desligada, fica desativada. */
 function LinhaPedido({ icone, rotulo, rotuloAcessivel, pedido, ir, children }: { icone: NomeIcone; rotulo: string; rotuloAcessivel: string; pedido: string; ir?: () => void; children?: ReactNode }) {
   const { cores } = useTema(); const pedir = useBloco()?.pedir; const off = !ir && (!pedir || pedir.desativado);
-  return <Pressable accessibilityRole="button" accessibilityLabel={rotuloAcessivel} accessibilityState={{ disabled: off }} disabled={off} onPress={() => { selecao(); if (ir) ir(); else pedir?.enviar(pedido); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8, opacity: off ? 0.5 : 1 }}>
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotuloAcessivel} accessibilityState={{ disabled: off }} disabled={off} onPress={() => { selecao(); if (ir) ir(); else pedir?.enviar(pedido); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8, opacity: off ? 0.5 : 1 }}>
     <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Icone nome={icone} tamanho={20} tom="brand" /><Texto variante="rotulo">{rotulo}</Texto></View>
     {children}
   </Pressable>;
@@ -83,7 +83,7 @@ export function MetasChat({ d: dado }: { d?: MetasV2 } = {}) {
     {!bloco && !ordem.length && <Vazio texto="Nenhuma meta ainda." />}
     {bloco && !ordem.length && <LinhaPedido icone="Plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" pedido="Quero criar uma meta" />}
     {(aberto ? ordem : ordem.slice(0, visiveis)).map((m) => <Pilula key={m.id} m={m} custo={d.custo_mensal} ir={bloco ? undefined : () => navegar?.(`/meta?id=${m.id}` as Href)} />)}
-    {resto > 0 && <Pressable testID="meta-mais" accessibilityRole="button" accessibilityLabel={aberto ? "Mostrar menos metas" : `+${resto}, mostrar mais ${resto} ${resto === 1 ? "meta" : "metas"}`} onPress={() => { selecao(); setAberto(!aberto); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
+    {resto > 0 && <Pressable testID="meta-mais" accessibilityRole="button" accessibilityLabel={aberto ? "Mostrar menos metas" : `+${resto}, mostrar mais ${resto} ${resto === 1 ? "meta" : "metas"}`} onPress={() => { selecao(); setAberto(!aberto); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
       <Texto variante="rotulo">{aberto ? "Mostrar menos" : `+${resto}`}</Texto>
     </Pressable>}
   </View>;

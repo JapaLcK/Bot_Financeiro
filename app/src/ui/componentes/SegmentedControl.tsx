@@ -67,7 +67,7 @@ export function SegmentedControl({ opcoes, acessiveis, valor, onChange }: Props)
   return (
     <View
       accessibilityRole="tablist"
-      style={{ flexDirection: "row", backgroundColor: cores.surfaceControl, borderRadius: raio.controle, padding: 3 }}
+      style={{ flexDirection: "row", backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, padding: 3 }}
     >
       {opcoes.map((opcao, indice) => (
         <Segmento
@@ -117,7 +117,7 @@ function Segmento({
             left: 0,
             right: 0,
             bottom: 0,
-            borderRadius: raio.celula,
+            borderRadius: raio.pilula,
             backgroundColor: cores.surfaceRaised,
             // Sem borda (PDF): o polegar `surfaceRaised` sobre o trilho
             // `surfaceControl` é sutil; quem marca o selecionado é o texto

@@ -107,10 +107,11 @@ export const coresBanco: Record<string, string> = {
 /** Grade de 4pt. */
 export const espaco = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, xxxl: 32, huge: 48 } as const;
 /**
- * Escala de raio do PDF, só com os valores em uso. `pilula`: maior que qualquer
- * altura, o RN corta na metade. `bloco`: Card/Banner/faixa do Piggy;
- * `controle`: Button, Input, trilho do segmentado, grupo de ListRow; `chip`: Chip;
- * `celula`: polegar do segmentado; `barra`: ProgressBar; `cartao`: o resto.
+ * Escala de raio do PDF. `pilula`: maior que qualquer altura, o RN corta na metade
+ * (Button, Chip, Acao, trilho e polegar do segmentado). `bloco`: Card/Banner/faixa do Piggy;
+ * `controle`: Input e grupo de ListRow; `chip`: cartão pequeno e chip de tom (meta no chat, % do ritmo);
+ * `barra`: ProgressBar; `cartao`: o resto. `celula` (antes o polegar do segmentado) ficou sem uso
+ * no app e é mantido: `tailwind_tokens` compara a escala inteira.
  */
 export const raio = { pilula: 999, bloco: 16, cartao: 12, controle: 10, chip: 8, celula: 7, barra: 4 } as const;
 /**
