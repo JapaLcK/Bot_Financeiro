@@ -23,6 +23,7 @@ from db import lancamentos_leitura
 from db.connection import cat_key
 from db.estabelecimentos import SEM_DESCRICAO
 from utils_date import now_tz
+from utils_text import fmt_brl
 
 from .. import streaming
 from ..cards import mostrar_da_tool
@@ -41,13 +42,26 @@ def descricao_do_item(i: dict) -> str:
     return (i["descricao"] or i["mensagem"] or "").strip() or SEM_DESCRICAO
 
 
+def texto_parcelamento(r: dict[str, Any]) -> str | None:
+    """Texto pronto: o modelo confundia `parcela` "1/3" (valor da parcela) com compra em 3x. `parcela` é "n/total"
+    (maiores gastos) ou `{n, total}` (o item do Extrato)."""
+    if r.get("parcelas"):
+        return f"compra de {fmt_brl(r['valor'])} em {r['parcelas']}x"
+    if p := r.get("parcela"):
+        n, total = (p["n"], p["total"]) if isinstance(p, dict) else p.split("/")
+        return f"parcela {n} de {total} — {fmt_brl(r['valor'])} neste período"
+    return None
+
+
 def _para_ia(i: dict) -> dict:
-    tipo = ("entrada" if i["tipo"] == "entrada" else "saída") if i["interno"] else (
-        "receita" if i["tipo"] == "entrada" else "despesa")
-    return {"id": i["id"], **({"user_seq": i["numero"]} if i.get("numero") else {}), "data": i["data"], "tipo": tipo,
+    from core.handlers.launches import _INTERNAL_LABELS  # tardio: handler pesado, só aqui
+
+    tipo = "receita" if i["tipo"] == "entrada" else "despesa"
+    # só o texto pronto vai à IA: o `parcela` cru ({n, total}) casa com chave monetária do `ai_guard` e "total=12" virava R$ 12,00
+    return {"id": i["id"], **({"user_seq": i["numero"]} if i.get("numero") else {}), "data": i["data"], "tipo": _INTERNAL_LABELS[tipo] if i["interno"] else tipo,
             "valor": float(i["valor"]), "moeda": i["moeda"], "descricao": descricao_do_item(i),
             "categoria": _NOME.get(i["categoria"]) or i["categoria_nome"] or i["categoria"], "origem": i["origem"], "guardado": i["guardado"],
-            "parcela": i["parcela"], "fatura": i["fatura"], "pode": i["pode"]}
+            "parcelamento": texto_parcelamento(i), "fatura": i["fatura"], "pode": i["pode"]}
 
 
 def mostrar_itens(user_id: int, card: str, itens: list[dict], motivos: list[str]) -> bool:

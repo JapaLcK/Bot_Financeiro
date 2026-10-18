@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from utils_date import day_tz
+from utils_date import add_months, day_tz
 
 from .analytics import termos_busca
 from .connection import get_conn
@@ -64,7 +64,7 @@ def recentes(user_id: int, agora: datetime, limite: int, *, sem_categoria: bool 
     hoje = day_tz(agora)
     primeiro = hoje.replace(day=1)
     corte = history_earliest_date(user_id, agora)
-    inicio = date(primeiro.year - 1 + (primeiro.month == 12), primeiro.month % 12 + 1, 1)  # M-11
+    inicio = date(*add_months(primeiro.year, primeiro.month, -11), 1)  # M-11
     fim = mes_de(mes_de(hoje)[1])[1]  # dia 1 do mês depois do seguinte
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("set transaction isolation level repeatable read, read only")

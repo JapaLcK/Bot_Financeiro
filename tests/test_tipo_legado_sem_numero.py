@@ -36,7 +36,7 @@ outros 2 são cegos por construção da FUNÇÃO, não do teste. Medido injetand
 `from launches, (values (1),(2)) as _dup(n)` (cada linha exatamente duas vezes)
 em UM site por vez, e rodando só `test_base_sem_linha_legada_responde_o_mesmo`:
 
-  db/lancamentos.py recentes(sem_categoria)      → FAILED  (2 notas, esperava 1)
+  db/lancamentos_leitura.py recentes(sem_categoria)  → FAILED  (2 notas, esperava 1)
   db/accounts.py    list_launches_by_tipo        → passed  (cego)
   db/recurring.py   find_recurring_candidate     → cego, não medido
 

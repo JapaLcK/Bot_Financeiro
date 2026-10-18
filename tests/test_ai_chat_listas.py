@@ -330,6 +330,19 @@ def test_o_modelo_recebe_valor_numero_moeda_e_pode(mundo):
     assert ok and all(ok.values()) and solto and not any(solto.values()), (ok, solto)
 
 
+def test_parcelado_chega_ao_modelo_como_texto_pronto_e_nao_vira_valor_no_ai_guard(mundo):
+    """O `parcela` cru ({n: 1, total: 12}) tem a chave `total`, que o `ai_guard` lê como dinheiro: "R$ 12,00 no Notebook"
+    saía sustentado. O modelo recebe `parcelamento` (texto) e nunca `parcela`."""
+    uid, ids = mundo
+    r = ultimos_lancamentos(uid, {})
+    notebook = next(i for i in r["itens"] if i["id"] == ids["parcelado"])
+    assert "parcela" not in notebook and notebook["parcelamento"] == "parcela 1 de 12 — R$ 100,00 neste período"
+    assert all("parcelamento" in i and "parcela" not in i for i in r["itens"])
+    visto = {c.token: c.supported for c in ai_guard.check("Você gastou R$ 12,00 no Notebook.", ai_guard.tool_results(
+        [{"role": "tool", "content": json.dumps(r, ensure_ascii=False)}]))}
+    assert visto and not any(visto.values()), visto
+
+
 def test_categoria_chega_como_o_usuario_a_ve_e_a_ida_e_volta_nao_cria_outra():
     from core.services.ai_chat.tools import extrato_ia
 

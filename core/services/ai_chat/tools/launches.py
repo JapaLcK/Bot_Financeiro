@@ -51,7 +51,7 @@ from ._base import Tool
 from .extrato_ia import ERRO_APAGAR as _ERRO_APAGAR
 from .extrato_ia import ao_confirmar as _ao_confirmar_alvo
 from .extrato_ia import apagar, armar_apagar, resumo_apagar, validar_apagar
-from .listas_ia import ultimos_lancamentos
+from .listas_ia import texto_parcelamento, ultimos_lancamentos
 
 
 def _parse_iso_date(s: str | None) -> date | None:
@@ -307,16 +307,6 @@ def _get_period_summary(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     return _resumo_periodo(user_id, start, end)
 
 
-def _texto_parcelamento(r: dict[str, Any]) -> str | None:
-    """Texto pronto: o modelo confundia `parcela` "1/3" (valor da parcela) com compra em 3x."""
-    if r.get("parcelas"):
-        return f"compra de {fmt_brl(r['valor'])} em {r['parcelas']}x"
-    if r.get("parcela"):
-        n, total = r["parcela"].split("/")
-        return f"parcela {n} de {total} — {fmt_brl(r['valor'])} neste período"
-    return None
-
-
 def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if erro := _data_invalida(args, "start_date", "end_date"):
         return erro
@@ -341,7 +331,7 @@ def _get_largest_expenses(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
         user_id, start, end, limit, categoria=categoria, by_bill_month=por_fatura, juntar_parcelas=True,
     )
     for r in rows:
-        r["parcelamento"] = _texto_parcelamento(r)
+        r["parcelamento"] = texto_parcelamento(r)
         # só o texto pronto vai à IA: os campos crus foram mal lidos ("parcelado em 3x" numa parcela OF)
         r.pop("parcela", None)
         r.pop("parcelas", None)
