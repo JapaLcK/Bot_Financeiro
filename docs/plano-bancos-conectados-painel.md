@@ -238,7 +238,7 @@ Decisões de execução do W2 (2026-10-18), implementado em `conta/Bancos.tsx`, 
    painel; o W3 fica sem esse botão.
 5. **"↻ Atualizar" e "Remover todas as conexões" ficam no settings.** O app não os tem; a página nova não os ganha.
 6. **Esconder valores:** a tela nasce sem, como o resto do painel. Fica a linha própria na paridade.
-7. **Logo: feito** (#PR-LOGO, junto do plano B do servidor). O W1 saiu com a inicial colorida; agora o círculo traz o
+7. **Logo: feito** (#1142, junto do plano B do servidor). O W1 saiu com a inicial colorida; agora o círculo traz o
    `logo_url` quando há (host fixado no cliente, cópia da regra do app, com teste de paridade) e volta à inicial se a
    imagem falhar. Prova do logo real da Pluggy só depois do deploy.
 

@@ -122,7 +122,7 @@ dá logo a essas pelo catálogo. O texto original da condição:
   from open_finance_connections where provider='pluggy';` e depois hosts distintos e o `content-type` de um exemplo.
 - Se `com_logo` ficar bem abaixo de `n`: plano B = consulta ao catálogo **só em cache**, sem buscar nada
   dentro do snapshot.
-- **Plano B: feito** (#PR-LOGO). `logo_do_conector` (`core/services/pluggy_catalogo.py`) lê o catálogo
+- **Plano B: feito** (#1142). `logo_do_conector` (`core/services/pluggy_catalogo.py`) lê o catálogo
   em memória pelo `institution_id`, só em `provider='pluggy'`; o aquecimento roda no boot e no tique do Open Finance
   (`docs/CLAUDE.md`, parágrafo do `logo_url`). O app ganha o logo das antigas sem código novo, no build que tiver a tela.
   Falta provar depois do deploy: o catálogo real lista 611, 612, 651 e 775, e o host é `cdn.pluggy.ai`.
