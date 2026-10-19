@@ -16,8 +16,10 @@ por categoria; aqui é PERCENTUAL da renda do mês por pote. Decisões:
   launches `tipo = 'aporte_investimento'` (db/investments.py, sem categoria,
   `alvo` = investimento) → Liberdade financeira; launches
   `tipo = 'deposito_caixinha'` (db/pockets.py, sem categoria) → Metas.
-  Saque de caixinha e resgate de investimento ficam fora. A categoria
-  'investimentos' (genérica) segue fora: é interna e o dono não a mapeou.
+  Saque de caixinha e resgate de investimento ficam fora. Toda categoria que
+  `is_internal_category` trata como investimento (`INVESTMENT_CATEGORY_HINTS`:
+  investimentos, cripto, bitcoin, fii...) também → Liberdade financeira, no
+  launch e no cartão. `rendimentos` continua fora.
 - A leitura é em nível de LINHA (`_month_rows`) e o `spent` de cada pote é a
   soma dessas mesmas linhas que vão em `launches` — card e lista não divergem.
 - Gasto do mês = critério de `get_budgets_status_for_month` (launches por
@@ -31,7 +33,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from utils_text import TETO_ENTRADA, valor_finito
+from utils_text import INVESTMENT_CATEGORY_HINTS, TETO_ENTRADA, valor_finito
 
 from .connection import (
     CAT_VAZIA_LABEL, get_conn, cat_key_sql, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
@@ -80,11 +82,15 @@ CATEGORY_BUCKET: dict[str, str] = {
 }
 _DISPLAY_BY_KEY = {k.lower().translate(_CAT_ACCENTS_TR): k for k in _CATEGORY_BUCKET_DISPLAY}
 DEFAULT_BUCKET = "conforto"
+# Fonte única: as mesmas dicas que `is_internal_category` usa. Chave exata
+# (ponytail: 'Tesouro Selic' ou 'ações brasil' não casam; contains_word se o dono pedir).
+_APORTE_KEY = "investimento_aporte"
+_LIBERDADE_KEYS = (_APORTE_KEY, *sorted(INVESTMENT_CATEGORY_HINTS))
+CATEGORY_BUCKET.update({k: "liberdade_financeira" for k in _LIBERDADE_KEYS})
 
 # Categorias de movimento interno que contam como gasto aqui (ver docstring do
 # módulo). Comparadas pela mesma chave normalizada do resto.
-_APORTE_KEY = "investimento_aporte"
-_INTERNAS_QUE_CONTAM = (_APORTE_KEY, "criptomoedas")
+_INTERNAS_QUE_CONTAM = _LIBERDADE_KEYS
 
 # Launches sem categoria que caem num pote pelo TIPO (rótulo exibido incluso).
 _TIPO_BUCKET = {"deposito_caixinha": "metas", "aporte_investimento": "liberdade_financeira"}

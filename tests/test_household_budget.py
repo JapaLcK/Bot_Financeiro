@@ -269,6 +269,18 @@ def test_cripto_e_aporte_de_investimento_caem_em_liberdade(user_id):
     assert _bucket(get_household_budget_status(user_id, _mes_atual()), "conforto")["spent"] == 0.0
 
 
+def test_categorias_de_investimento_cripto_e_aliases_caem_em_liberdade(user_id):
+    _receita(user_id, 5000.0)
+    for cat in ("cripto", "Bitcoin", "investimentos"):
+        _gasto(user_id, cat, 100.0, interno=True)
+    _gasto_cartao(user_id, "btc", 50.0)
+    _gasto(user_id, "rendimentos", 70.0, interno=True)  # segue fora
+
+    st = get_household_budget_status(user_id, _mes_atual())
+    assert _bucket(st, "liberdade_financeira")["spent"] == 350.0
+    assert _bucket(st, "conforto")["spent"] == 0.0
+
+
 def test_launches_somam_o_spent_de_cada_pote_e_nao_vazam_entre_usuarios(user_id):
     outro = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(outro)
