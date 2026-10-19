@@ -138,6 +138,9 @@ export function servidor({ mfa = mfaOff(), temSenha = true, uid = 7, semUid = fa
   return s;
 }
 
+// Encurta o setTimeout de 30000 ms (e só ele) para `ms` e registra o que o app pediu em `window.__ms`.
+export const encurtaPrazo = (page, ms = 400) => page.evaluate((m) => { const st = window.setTimeout; window.__ms = []; window.setTimeout = (f, d, ...a) => { if (d === 30000) { window.__ms.push(d); d = m; } return st(f, d, ...a); }; }, ms);
+
 export async function abrirSeguranca({ width = 1440, height = 900, semDialog = false, ...opts } = {}) {
   const s = servidor(opts);
   const p = await abrir({ guia: "concluido", width, height, rota: "/conta/configuracoes", antes: (ctx) => s.antes(ctx), semDialog });
@@ -165,8 +168,7 @@ export async function abrirSeguranca({ width = 1440, height = 900, semDialog = f
     fechado: () => page.locator("dialog[open]").waitFor({ state: "detached" }),
     foco: () => page.evaluate(() => document.activeElement?.name || document.activeElement?.textContent?.trim()),
     codigos: () => page.locator(".mfa-codigos code").allTextContents(),
-    // Encurta o setTimeout de 30000 ms (e só ele) para `ms` e registra o que o app pediu em `window.__ms`.
-    encurtaPrazo: (ms = 400) => page.evaluate((m) => { const st = window.setTimeout; window.__ms = []; window.setTimeout = (f, d, ...a) => { if (d === 30000) { window.__ms.push(d); d = m; } return st(f, d, ...a); }; }, ms),
+    encurtaPrazo: (ms) => encurtaPrazo(page, ms),
   };
 }
 

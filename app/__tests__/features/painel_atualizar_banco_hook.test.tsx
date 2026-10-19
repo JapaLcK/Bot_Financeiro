@@ -50,9 +50,9 @@ it("o POST falha: a leitura adiada parte sozinha (a máquina vira 'acompanhando'
   const h = await adiada(); await h.falha(new ErroDeApi(500, "x"));
   expect(h.result.current.maquina.fase).toBe("acompanhando"); expect(await lidasDepois(5_000)).toBe(1);
 });
-it("...mas se o POST acaba COM resultado (problema), `reavaliar` não parte por cima: o texto do servidor fica e ninguém lê", async () => {
+it("...mas se o POST acaba COM resultado (problema), `reavaliar` não parte por cima: o aviso curto do banco fica e ninguém lê", async () => {
   const h = await adiada(); await h.responde({ connections: [], sync: { items: [{ item_id: "it_1", institution: "Nubank", state: "partial", label: "p", detail: "Parte dos dados ainda não veio", still_updating: false }] } });
-  expect(h.result.current.maquina).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(await lidasDepois(120_000)).toBe(0);
+  expect(h.result.current.maquina).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(await lidasDepois(120_000)).toBe(0);
 });
 it("a rodada de partida adiada acaba em silêncio (sessão) e NÃO parte de novo: uma vez só", async () => {
   const h = await adiada(); jest.mocked(conexoes).mockRejectedValue(new SessaoExpirada() as never); await h.falha(new ErroDeApi(500, "x"));
@@ -72,7 +72,7 @@ it("MGR2 (caminho da leitura, não do `reavaliar`): com o resultado visível, a 
   jest.mocked(conexoes).mockResolvedValue(lista("updating") as never); versaoAtual = 2; r.rerender({}); // a recarga do `concluir` traz a leitura nova, agora em coleta
   await waitFor(() => expect(r.result.current.acao?.tipo).toBe("acompanhar"));
   expect(r.result.current.maquina.fase).toBe("resultado"); expect(await lidasDepois(120_000)).toBe(0);
-  expect(r.result.current.maquina).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." });
+  expect(r.result.current.maquina).toEqual({ fase: "resultado", texto: "Erro em Nubank." });
 });
 
 it("o fim da rodada da conta 1 não parte a leitura pendente da conta 2 (nem a dela, nem a de ninguém)", async () => {

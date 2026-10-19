@@ -57,8 +57,8 @@ export type Deps = {
 };
 
 const nomeDe = (c: Conexao) => c.institution_name ?? "banco";
-const semPonto = (t: string) => t.replace(/\.+$/, "");
-const frase = (banco: string | null, detalhe: string) => `${banco ?? "Seu banco"}: ${semPonto(detalhe)}.`;
+/** O aviso é curto de propósito: o porquê de cada banco mora em "Bancos conectados" (o botão ao lado). */
+const erroEm = (bancos: (string | null)[]) => `Erro em ${[...new Set(bancos.map((b) => b || "seu banco"))].join(", ")}.`;
 
 /** Prioridade (b) > (a) > (a0) > (c): reautenticar vence, depois pedir, depois só esperar. `podeReconectar` = `of_banks_max !== 0` (como o `conexoes.tsx`). */
 export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoBanco {
@@ -74,17 +74,17 @@ export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoB
   if (b) return { tipo: "reconectar", itemId: b.provider_item_id!, banco: nomeDe(b) };
   if (grupos.some(([g]) => g === "a")) return { tipo: "atualizar" };
   if (grupos.some(([g]) => g === "a0")) return { tipo: "acompanhar" };
-  const frases = grupos.filter(([g]) => g === "c").map(([, c]) => frase(c.institution_name, c.ui.detail ?? c.ui.label));
-  return { tipo: "ver", texto: frases.length ? frases.join(" ") : null };
+  const sem = grupos.filter(([g]) => g === "c").map(([, c]) => c.institution_name);
+  return { tipo: "ver", texto: sem.length ? erroEm(sem) : null };
 }
 
 /** `motivo` só vem do POST; a lista do snapshot já traz o `ui.state` resolvido pelo servidor (sem motivo = coleta). */
-type Item = { banco: string | null; estado: string; detalhe: string; motivo?: string | null };
+type Item = { banco: string | null; estado: string; motivo?: string | null };
 const ruim = (i: Item) => !OK.has(i.estado) || (i.estado === "updating" && !MOTIVOS_COLETANDO.includes(String(i.motivo ?? "").toLowerCase()));
-/** `null` = tudo em dia; senão, uma frase por banco com a instrução do servidor. */
+/** `null` = tudo em dia; senão, uma frase curta com os bancos que falharam. */
 function julgar(itens: Item[]): string | null {
   const ruins = itens.filter(ruim);
-  return ruins.length ? ruins.map((i) => frase(i.banco, i.detalhe)).join(" ") : null;
+  return ruins.length ? erroEm(ruins.map((i) => i.banco)) : null;
 }
 
 const parar = (d: Deps) => d.aoMudar(OCIOSO);
@@ -106,7 +106,7 @@ function concluir(d: Deps, texto: string | null) {
   d.recarregar();
   if (texto === null) { parar(d); d.sucesso(); } else { d.aoMudar({ fase: "resultado", texto }); d.aviso(); d.anunciar(texto); }
 }
-const daLista = (lista: Conexao[]) => julgar(lista.map((c) => ({ banco: c.institution_name, estado: c.ui.state, detalhe: c.ui.detail ?? c.ui.label })));
+const daLista = (lista: Conexao[]) => julgar(lista.map((c) => ({ banco: c.institution_name, estado: c.ui.state })));
 
 /** Para quando todo item acompanhado sumiu, mudou o `last_sync_at` (o sync do fim da coleta) ou saiu dos estados de espera. */
 const terminou = (lista: Conexao[], base: Map<string, string | null>) =>
@@ -159,7 +159,7 @@ export async function atualizar(d: Deps): Promise<void> {
     const coletando = r.sync.items.filter((i) => i.still_updating);
     // Erro antes do neutro (como o `refreshVerdict` do web), em TODOS os itens: a falha de um banco só existe nesta resposta (o `partial` do PATCH não vai para o snapshot), então um banco ainda coletando não pode escondê-la;
     // e o `still_updating` do servidor é independente do `state` (pluggy_sync.py), então o item que ainda coleta também é julgado pelo estado dele.
-    const texto = julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason, detalhe: i.detail ?? (i.state === "updating" ? FALHA : i.label) })));
+    const texto = julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason })));
     if (texto === null && coletando.length) return acompanhar(d, new Map(coletando.map((i) => [i.item_id, r.connections.find((c) => c.provider_item_id === i.item_id)?.last_sync_at ?? null])));
     concluir(d, texto);
   } catch (e) {

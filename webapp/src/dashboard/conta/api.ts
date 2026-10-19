@@ -141,6 +141,8 @@ export const sessoesQuery = (uid: number) => queryOptions({
 // Idempotentes no servidor (o 2º DELETE da mesma sessão é 404, o das outras devolve revoked: 0): abortar no prazo não perde nada.
 export const encerrarSessao = (uid: number, jti: string) => comPrazo((sinal) => escrever<{ ok: boolean }>("DELETE", `/settings/${uid}/sessions/${encodeURIComponent(jti)}`, undefined, sinal));
 export const encerrarOutras = (uid: number) => comPrazo((sinal) => escrever<{ ok: boolean; revoked?: number }>("DELETE", `/settings/${uid}/sessions`, undefined, sinal));
+// Desconectar um banco (rota antiga). O 2º DELETE do mesmo id é 404, então abortar no prazo não perde nada: a releitura do snapshot decide.
+export const desconectarBanco = (uid: number, id: number) => comPrazo((s) => escrever<{ ok: boolean; deleted?: number }>("DELETE", `/open-finance/${uid}/connections/${id}`, undefined, s));
 
 // Preferências de notificação (rotas antigas /settings/{uid}/notifications). Mesma borda das sessões: booleano só `=== true`;
 // hora/minuto fora do intervalo (ou corpo que não é objeto) = ERRO de carga, nunca "09:00" inventado.
