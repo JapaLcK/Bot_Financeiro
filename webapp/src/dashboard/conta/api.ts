@@ -141,6 +141,8 @@ export const sessoesQuery = (uid: number) => queryOptions({
 // Idempotentes no servidor (o 2º DELETE da mesma sessão é 404, o das outras devolve revoked: 0): abortar no prazo não perde nada.
 export const encerrarSessao = (uid: number, jti: string) => comPrazo((sinal) => escrever<{ ok: boolean }>("DELETE", `/settings/${uid}/sessions/${encodeURIComponent(jti)}`, undefined, sinal));
 export const encerrarOutras = (uid: number) => comPrazo((sinal) => escrever<{ ok: boolean; revoked?: number }>("DELETE", `/settings/${uid}/sessions`, undefined, sinal));
+// Desconectar um banco (rota antiga). O 2º DELETE do mesmo id é 404, então abortar no prazo não perde nada: a releitura do snapshot decide.
+export const desconectarBanco = (uid: number, id: number) => comPrazo((s) => escrever<{ ok: boolean; deleted?: number }>("DELETE", `/open-finance/${uid}/connections/${id}`, undefined, s));
 
 // Cópia de `formatActivityTime` (settings.html): o teste dashboard_v2_conta_sessoes compara as duas (§0.7). Duas diferenças, de propósito:
 // `instante` em vez de `new Date` (o ISO de 6 casas é NaN no Safari 14) e a data antiga no FUSO do painel, não no do aparelho.

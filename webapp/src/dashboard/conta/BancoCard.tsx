@@ -7,10 +7,13 @@ import type { Conexao } from "./api";
 const quando = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); // sem dateStyle: Safari 14.0
 const plural = (n: number | null, um: string, varios: string) => (n && n > 0 ? [`${n} ${n === 1 ? um : varios}`] : []);
 
+export const nomeDoBanco = (c: Conexao) => c.institution_name?.trim() || "Banco";
+
 // Um banco conectado: o estado vem do snapshot e os valores de `/bancos` (juntados por id, nunca por nome). `v` é a linha do banco, ou
 // o que a tela mostra no lugar dela: "…" (lendo) e "—" (sem linha, ou a leitura falhou). Null do servidor também é "—", nunca "R$ 0,00".
-export function BancoCard({ c, i, v }: { c: Conexao; i: number; v: Banco | "…" | "—" }) {
-  const nome = c.institution_name?.trim() || "Banco";
+// `bloqueado`: já há um diálogo/DELETE em andamento (só um banco por vez); o botão que abriu entra no `onDesconectar` para devolver o foco.
+export function BancoCard({ c, i, v, onDesconectar, bloqueado }: { c: Conexao; i: number; v: Banco | "…" | "—"; onDesconectar: (botao: HTMLButtonElement) => void; bloqueado: boolean }) {
+  const nome = nomeDoBanco(c);
   const val = (x: string | null) => (typeof v === "string" ? v : moneyText(x) ?? "—");
   const ms = instante(c.last_sync_at);
   const quantos = typeof v === "string" ? [] : [...plural(v.contas, "conta", "contas"), ...plural(v.cartoes, "cartão", "cartões"), ...plural(v.investimentos, "investimento", "investimentos")];
@@ -29,6 +32,10 @@ export function BancoCard({ c, i, v }: { c: Conexao; i: number; v: Banco | "…"
         {quantos.length > 0 && <p>{quantos.join(" · ")}</p>}
         {Number.isFinite(ms) && <time dateTime={c.last_sync_at!} title={quando.format(new Date(ms))}>{haQuanto(ms)}</time>}
       </div>
+      <details className="banco-acoes">
+        <summary>Gerenciar<span className="sr-only"> {nome}</span></summary>
+        <button type="button" className="btn btn-ghost" disabled={bloqueado} onClick={(e) => onDesconectar(e.currentTarget)}>Desconectar {nome}</button>
+      </details>
     </li>
   );
 }

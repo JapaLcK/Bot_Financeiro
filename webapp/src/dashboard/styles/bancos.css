@@ -19,3 +19,7 @@
 .selo-erro { background: rgba(255, 122, 69, 0.12); color: var(--alert); }
 .btn-conectar { min-height: 44px; height: auto; } /* o link de conectar, na lista ou no estado vazio */
 .bancos-conectar p { margin: 0; }
+.banco-card { align-content: start; } /* o card esticado pela vizinha (a lista é grid) não centra o conteúdo na vertical */
+.banco-acoes { grid-column: 1 / -1; }
+.banco-acoes summary { padding: 12px 0; line-height: 20px; cursor: pointer; }
+.banco-acoes .btn { min-height: 44px; height: auto; white-space: normal; overflow-wrap: break-word; word-break: break-word; } /* nome sem espaço: quebra no botão (o anywhere não existe no Safari 14) */
