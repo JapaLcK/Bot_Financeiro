@@ -24,7 +24,8 @@ const transitoria = (e: unknown) => e instanceof ErroApi ? e.status === 0 || e.s
 // 401 e 402 já foram para o portão (`falhou`): a rodada para em silêncio.
 const silencioso = (e: unknown) => e instanceof ErroApi && (e.status === 401 || e.status === 402);
 
-export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean; semMotivo: boolean; dentro: boolean }) {
+// `automatico: false` (a página Bancos conectados, que só chama `atualizar` no clique do "Sincronizar"): a (a0) não parte sozinha de um banco em `updating`.
+export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true }: { ativo: boolean; semMotivo: boolean; dentro: boolean; automatico?: boolean }) {
   const qc = useQueryClient();
   const [estado, setEstado] = useState<{ uid: number; maquina: EstadoAtualizar }>({ uid: 0, maquina: OCIOSO });
   const [dito, setDito] = useState({ t: "", n: 0 });
@@ -98,7 +99,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
   useEffect(() => { marco.current = Date.now(); }, [ligado]); // o aviso entrou ou saiu da tela: o que já estava no cache não parte nada
   // (a0): só parte de uma leitura FEITA depois do último marco, com a fase visível diferente de `resultado`.
   useEffect(() => {
-    if (!ligado || uid === undefined || !conexoes.isSuccess || conexoes.isFetching || conexoes.dataUpdatedAt <= marco.current) return;
+    if (!automatico || !ligado || uid === undefined || !conexoes.isSuccess || conexoes.isFetching || conexoes.dataUpdatedAt <= marco.current) return;
     if (vivo.current || vista.fase === "resultado" || acao?.tipo !== "acompanhar") return;
     correr(uid, (d) => acompanharLista(d, conexoes.data), true);
   }, [conexoes.dataUpdatedAt, conexoes.isFetching, ligado, uid, vista.fase, acao?.tipo]);

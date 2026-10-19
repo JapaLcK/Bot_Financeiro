@@ -52,7 +52,7 @@ test("Disponíveis: os populares na ordem fixa (não a do servidor), no máximo 
   assert.deepEqual(r.nomes, ["Itaú", "Bradesco", "Banco do Brasil", "Santander", "Caixa"]); // Inter, C6, BTG e Mercado Pago ficaram de fora pelo teto de 5; Banco XYZ nunca entra
   assert.equal(itens, 6); // 5 + o "Ver todos"
   assert.deepEqual([r.ultima, r.rotulo], ["Ver todos os bancos", "Disponíveis para conectar"]);
-  assert.deepEqual(r.subtexto, Array(5).fill("Conecte sua conta"));
+  assert.deepEqual(r.subtexto, Array(5).fill("Conecte sua conta e tenha uma visão completa."));
   assert.deepEqual(aberto, [null]); // sem pré-seleção
   assert.equal(abertura.inits, 1);
   assert.deepEqual(erros, []);
@@ -76,7 +76,7 @@ test("Disponíveis: com a lista toda conectada nos populares, a seção (e o 'Ve
   assert.deepEqual(semCatalogo, { regiao: 0, todos: 0 });
 });
 
-test("o '+' de um disponível chama open({id, name}) do seletor; o do topo e o 'Ver todos' chamam open() sem argumento; sem o script o href do /settings segue valendo", async () => {
+test("o 'Conectar' de um disponível chama open({id, name}) do seletor; o do resumo e o 'Ver todos' chamam open() sem argumento; sem o script o href do /settings segue valendo", async () => {
   const a = await bancos({ conexoes: [con(11, "Nubank")], bancos: "padrao" });
   await esperaCards(a.page, 1);
   await esperaRegiao(a.page);
@@ -89,7 +89,7 @@ test("o '+' de um disponível chama open({id, name}) do seletor; o do topo e o '
   const r = await of(a.page);
   await a.ctx.close();
   assert.equal(href, "/settings?view=open-finance");
-  assert.deepEqual(caixa, [44, 44]);
+  assert.ok(caixa[0] >= 44 && caixa[1] === 44, `botão 'Conectar' com ${caixa}`); // o botão rosa com texto: 44 de altura, largura do conteúdo
   assert.deepEqual(r.opens, [{ id: 202, name: "Bradesco" }, null]);
   assert.ok(url.endsWith("/painel.html#/conta/bancos"), url); // o clique foi do seletor: a página não navegou
   // Sem o script do seletor: o link navega.
@@ -171,33 +171,34 @@ test("Disponíveis sem vaga (pode_adicionar false): nenhuma seção e a mensagem
   assert.deepEqual(r, { regiao: 0, links: 0 });
 });
 
-test("a lista e os Disponíveis são grupos de uma superfície só, com divisor fino entre as linhas, sem valor nem barra, alvos de 44 px e sem rolagem lateral em 390×844 e 1280×800", async () => {
+test("a página é uma coluna de 4 cards (resumo, Meus bancos, Disponíveis, segurança) da mesma borda e largura, superfície do .panel e canto de 16 px, com divisor fino entre as linhas, sem valor nem barra, alvos de 44 px e sem rolagem lateral em 390×844 e 1280×800", async () => {
   for (const [width, height] of [[390, 844], [1280, 800]]) {
     const { ctx, page } = await bancos({ bancos: "padrao" }, { width, height });
     await esperaCards(page, 3);
     await esperaRegiao(page);
-    await page.waitForFunction(() => document.querySelectorAll(".bancos-col").length === 2);
     const r = await page.evaluate(() => {
-      const grupos = [...document.querySelectorAll(".banco-grupo")];
+      const cards = [...document.querySelectorAll(".bancos-pag > section.panel")];
       const caixa = (e) => { const b = e.getBoundingClientRect(); return [Math.round(b.width), Math.round(b.height)]; };
+      const listas = [...document.querySelectorAll(".banco-lista")];
       return {
-        grupos: grupos.length, paineis: document.querySelectorAll(".banco-card .panel, button.panel").length,
-        fundo: grupos.map((g) => getComputedStyle(g).backgroundColor), canto: grupos.map((g) => getComputedStyle(g).borderTopLeftRadius), pagina: getComputedStyle(document.body).backgroundColor,
-        divisores: grupos.map((g) => [...g.children].map((li, i) => parseFloat(getComputedStyle(li).borderTopWidth) > 0 === (i > 0))), // entre as linhas, nunca antes da 1ª
+        cards: cards.map((c) => c.className.replace(" panel", "").replace("panel ", "")), bordas: cards.map((c) => { const b = c.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.width)]; }),
+        fundo: cards.map((g) => getComputedStyle(g).backgroundColor), canto: cards.map((g) => getComputedStyle(g).borderTopLeftRadius), pagina: getComputedStyle(document.body).backgroundColor,
+        aninhado: document.querySelectorAll(".banco-sec .panel, .banco-resumo .panel, .banco-seguro .panel").length,
+        divisores: listas.map((g) => [...g.children].map((li) => parseFloat(getComputedStyle(li).borderTopWidth) > 0)), // a 1ª linha também: o divisor separa o cabeçalho do card
         lixo: document.querySelectorAll(".bancos-topo, .comp-bar, .banco-barra, .banco-total").length, dinheiro: document.querySelector("#main").innerText.includes("R$"),
-        linhas: [...document.querySelectorAll(".banco-linha, .banco-todos")].map((e) => caixa(e)[1]), mais: [...document.querySelectorAll("a.banco-mais")].map(caixa), lateral: document.documentElement.scrollWidth - innerWidth,
+        alvos: [...document.querySelectorAll(".banco-card button, .banco-item a, .banco-todos, .banco-resumo a, .banco-saiba")].map(caixa), lateral: document.documentElement.scrollWidth - innerWidth,
       };
     });
     await ctx.close();
     const rotulo = `${width}×${height}`;
-    assert.equal(r.grupos, 2, rotulo);
-    assert.equal(r.paineis, 0, rotulo);
+    assert.deepEqual(r.cards, ["banco-resumo", "banco-sec", "banco-sec", "banco-seguro"], rotulo);
+    assert.equal(new Set(r.bordas.map((b) => b.join())).size, 1, `${rotulo}: ${JSON.stringify(r.bordas)}`); // uma coluna: todos com a mesma borda esquerda e largura
     assert.ok(r.fundo.every((f) => f === "rgb(16, 16, 19)") && r.fundo[0] !== r.pagina, `${rotulo}: ${r.fundo} sobre ${r.pagina}`);
-    assert.deepEqual(r.canto, ["16px", "16px"], rotulo);
-    assert.deepEqual(r.divisores.flat().filter((x) => !x), [], rotulo);
+    assert.deepEqual(r.canto, Array(4).fill("16px"), rotulo);
+    assert.equal(r.aninhado, 0, rotulo); // dentro de um card não há outro card
+    assert.deepEqual(r.divisores, [[true, true, true], [true, true, true, true, true, true]], rotulo); // 3 bancos; 5 disponíveis + "Ver todos"
     assert.deepEqual([r.lixo, r.dinheiro, r.lateral], [0, false, 0], rotulo);
-    assert.ok(r.linhas.length === 4 && r.linhas.every((h) => h >= 44), `${rotulo}: ${r.linhas}`); // 3 bancos + "Ver todos"
-    assert.ok(r.mais.length === 6 && r.mais.every(([w, h]) => w >= 44 && h >= 44), `${rotulo}: ${JSON.stringify(r.mais)}`); // o "+" do topo e os 5 disponíveis
+    assert.ok(r.alvos.length === 3 * 3 + 5 + 1 + 1 + 1 && r.alvos.every(([w, h]) => w >= 44 && h >= 44), `${rotulo}: ${JSON.stringify(r.alvos)}`); // 3×3 botões dos bancos, 5 "Conectar", "Ver todos", "Conectar banco" do resumo e "Saiba mais"
   }
 });
 
@@ -265,21 +266,6 @@ test("Disponíveis esperam o snapshot: com o /limite já com vaga e o snapshot p
   await ctx.close();
   assert.deepEqual(pendente, { regiao: 0, connectors: false });
   assert.ok(!nomes.includes("Nubank") && nomes.length > 0, `${nomes}`);
-});
-
-test("cantos do grupo: o clique/hover da 1ª e da última linha não passa do canto arredondado de 16 px (overflow:hidden); no meio da linha ele vale (controle positivo)", async () => {
-  const { ctx, page } = await bancos({ bancos: "padrao" });
-  await esperaCards(page, 3);
-  await esperaRegiao(page);
-  const r = await page.evaluate(() => {
-    const dentro = (x, y) => !!document.elementFromPoint(x, y)?.closest(".banco-linha, .banco-todos, .banco-item");
-    return [...document.querySelectorAll(".banco-grupo")].map((g) => {
-      const b = g.getBoundingClientRect();
-      return { cantos: [dentro(b.left + 2, b.top + 2), dentro(b.right - 3, b.top + 2), dentro(b.left + 2, b.bottom - 3), dentro(b.right - 3, b.bottom - 3)], meio: dentro(b.left + b.width / 2, b.top + 10) };
-    });
-  });
-  await ctx.close();
-  assert.deepEqual(r, [{ cantos: [false, false, false, false], meio: true }, { cantos: [false, false, false, false], meio: true }]);
 });
 
 test("o ladrilho do detalhe tem a cor do ladrilho da mesma linha na lista (3 bancos), e a lista tem cores diferentes entre si", async () => {

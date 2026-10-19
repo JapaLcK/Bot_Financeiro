@@ -1,5 +1,6 @@
 // Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado e os bancos disponíveis para conectar.
 import type { Bancos } from "./api-v2.gen";
+import { FUSO, instante } from "./v2";
 
 // Cópia de `coresBanco` (app/src/ui/tokens.ts): os dois projetos npm não se importam, e
 // tests/frontend/bancos_paridade.test.mjs compara o texto dos dois (§0.7).
@@ -58,6 +59,20 @@ export const TOM_DO_ESTADO: Record<string, "ok" | "pendente" | "erro"> = {
   error_recoverable: "erro", needs_user_action: "erro", item_missing: "erro", paused: "erro", removed: "erro",
 };
 export const tomDoEstado = (s: unknown) => (Object.prototype.hasOwnProperty.call(TOM_DO_ESTADO, String(s)) ? TOM_DO_ESTADO[String(s)] : "pendente"); // "constructor" não é estado (herdaria função)
+
+// "Hoje, 14:32", "Ontem, 19:45" ou "03/10, 08:10" no fuso do painel (nunca o do aparelho); sem data válida, "—". Sem dateStyle/hourCycle: Safari 14.0.
+const AAAA_MM_DD = new Intl.DateTimeFormat("en-CA", { timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit" });
+const HORA_MIN = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
+export function quandoSync(iso: unknown, agora = Date.now()): string {
+  const ms = instante(iso);
+  if (!Number.isFinite(ms)) return "—";
+  const dia = AAAA_MM_DD.format(ms);
+  const quando = dia === AAAA_MM_DD.format(agora) ? "Hoje" : dia === AAAA_MM_DD.format(agora - 864e5) ? "Ontem" : dia.slice(8) + "/" + dia.slice(5, 7);
+  return `${quando}, ${HORA_MIN.format(ms)}`;
+}
+// A sincronização mais recente entre as conexões (a que o resumo mostra); nenhuma com data válida = null.
+export const ultimaSync = (datas: (string | null)[]): string | null =>
+  datas.reduce<string | null>((a, d) => (Number.isFinite(instante(d)) && (a === null || instante(d) > instante(a)) ? d : a), null);
 
 // A resposta do /bancos tem a forma do contrato? Fora dela a tela trata como leitura falha (nunca quebra a SPA).
 const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
