@@ -31,9 +31,18 @@ const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always"
 const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
 const conexaoDe = (c: Partial<Conexao>): Conexao => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), provider_item_id: t(c.provider_item_id),
   ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } });
-export async function lerConexoes(uid: number, signal?: AbortSignal): Promise<Conexao[]> {
-  const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, signal ? GET(signal) : { headers: { Accept: "application/json" } });
-  return (r.connections ?? []).map(conexaoDe);
+// `connections` fora de lista é contrato quebrado nos dois caminhos (lista vazia diria "nenhum banco", e na rodada "todos removidos" = em dia).
+// `estrito` (a rodada do "Atualizar agora" e o POST): a conexão segue o `conexaoSchema` do app nos campos que a máquina lê, porque o nulo
+// saneado (`provider_item_id` número virando null) faria um item acompanhado parecer removido. A página Bancos fica com a borda branda.
+const conexaoValida = (c: unknown) => objeto(c) && typeof c.id === "number" && textoOuNulo(c.provider_item_id) && textoOuNulo(c.institution_name)
+  && textoOuNulo(c.last_sync_at) && objeto(c.ui) && typeof c.ui.state === "string" && typeof c.ui.label === "string" && textoOuNulo(c.ui.detail, true);
+const conexoesDe = (v: unknown, estrito: boolean) => {
+  if (!Array.isArray(v) || (estrito && !v.every(conexaoValida))) throw contrato();
+  return (v as Partial<Conexao>[]).map(conexaoDe);
+};
+export async function lerConexoes(uid: number, signal?: AbortSignal, estrito = false): Promise<Conexao[]> {
+  const r = await chamar<{ connections?: unknown }>(`/open-finance/${uid}`, signal ? GET(signal) : { headers: { Accept: "application/json" } });
+  return conexoesDe(r.connections, estrito);
 }
 export const conexoesQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "conexoes", uid],
@@ -43,7 +52,7 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
 // `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. O veredito decide o desfecho, então a borda é a do
 // `refreshSchema` do app: `sync.items` ausente, fora de lista, ou com um item fora do contrato (não-objeto, `item_id`/`state`/`label` sem string,
 // `still_updating` sem booleano, `institution`/`detail`/`reason` fora de string ou null) é contrato quebrado, nunca "em dia" calado: falha como o `ContratoInvalido`.
-// O servidor sempre manda os campos. O snapshot (`connections`) segue a borda branda de `conexaoDe` (o que não é string vira null).
+// O servidor sempre manda os campos. O snapshot do POST (`connections`) é o estrito de `conexoesDe`.
 const contrato = () => new ErroApi(200, "contrato");
 const textoOuNulo = (v: unknown, opcional = false) => typeof v === "string" || v === null || (opcional && v === undefined);
 const itemDe = (i: unknown) => {
@@ -52,10 +61,10 @@ const itemDe = (i: unknown) => {
   return { item_id: i.item_id, institution: i.institution as string | null, state: i.state, label: i.label, detail: (i.detail ?? null) as string | null,
     reason: (i.reason ?? null) as string | null, still_updating: i.still_updating };
 };
-const refreshDe = (r: { connections?: Partial<Conexao>[]; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
+const refreshDe = (r: { connections?: unknown; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
   if (!Array.isArray(r.sync?.items)) throw contrato();
   return {
-    connections: (r.connections ?? []).map(conexaoDe),
+    connections: conexoesDe(r.connections, true),
     sync: { ...(typeof r.sync.ok === "boolean" ? { ok: r.sync.ok } : {}), items: r.sync.items.map(itemDe) },
   };
 };

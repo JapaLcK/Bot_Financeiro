@@ -75,7 +75,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
       esperar: (ms) => new Promise<void>((r) => { const t = setTimeout(r, ms); ctrl.signal.addEventListener("abort", () => { clearTimeout(t); r(); }, { once: true }); }), // acorda ao abortar: a máquina para em vez de dormir até 60 s
       atual,
       enviar: () => comPrazo((s) => atualizarBancos(uidDaRodada, s), PRAZO_POST_MS, ctrl.signal),
-      ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
+      ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s, true), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
       aoMudar: (maquina) => { if (atual()) setEstado({ uid: uidDaRodada, maquina }); },
       recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(); } }, // o mesmo que um aviso do SSE: o aviso some porque o servidor deixa de mandar o motivo
       falhou: (e) => {

@@ -107,7 +107,8 @@ test("W4: a coleta nunca termina: no teto de 300 s fica o texto do 'demorando' +
 
 for (const [nome, resposta] of [["500", (r) => r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } })], ["429", (r) => r.fulfill({ status: 429, json: { error: { code: "rate_limited", message: "x" } } })], ["rede", (r) => r.abort()],
   // Contrato quebrado (sem `sync.items`, ou fora de lista): falha, nunca "em dia" calado. O vazio VÁLIDO (`items: []`, `ok: true`) conclui: W5b.
-  ["sem sync.items", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true } } })], ["sync.items objeto", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true, items: {} } } })]]) {
+  ["sem sync.items", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true } } })], ["sync.items objeto", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true, items: {} } } })],
+  ["sem connections", (r) => r.fulfill({ json: { ok: true, sync: { ok: true, items: [], still_updating: 0 } } })]]) {
   test(`W5 (${nome}): o POST falha: a falha aparece e 'Atualizar agora' volta NO MESMO nó, com o foco nele, e a falha é anunciada`, async () => {
     const { ctx, page, abrir, botao, s } = await abre();
     s.refresh = resposta;
