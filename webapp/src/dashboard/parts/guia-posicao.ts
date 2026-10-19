@@ -34,7 +34,13 @@ export function trazer(el: HTMLElement) {
   if (el.closest(".topbar")) return false;
   const r = el.getBoundingClientRect();
   const topo = document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0;
-  if (r.top < topo || r.bottom > innerHeight) el.scrollIntoView({ block: "center" });
+  // A fileira de perguntas do Piggy (chat.css) rola de lado e corta o chip do passo: os lados valem
+  // contra a janela E contra o ancestral que corta (o mais próximo com overflow-x que não é visible).
+  let c = el.parentElement;
+  while (c && c !== document.body && getComputedStyle(c).overflowX === "visible") c = c.parentElement;
+  const cr = c && c !== document.body ? c.getBoundingClientRect() : null;
+  const esq = Math.max(0, cr?.left ?? 0), dir = Math.min(innerWidth, cr?.right ?? innerWidth);
+  if (r.top < topo || r.bottom > innerHeight || r.left < esq || r.right > dir) el.scrollIntoView({ block: r.top < topo || r.bottom > innerHeight ? "center" : "nearest", inline: "nearest" });
   return true;
 }
 
