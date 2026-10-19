@@ -1,7 +1,7 @@
 import { router, useFocusEffect, type Href } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
-import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
+import { RequisicaoSuperada, SessaoExpirada, conferirLinhagem } from "@/api/client";
 import type { BancoLido } from "@/api/schemas/painel";
 import type { Conexao } from "@/api/schemas/openFinance";
 import { useSessao } from "@/features/auth/sessao";
@@ -10,6 +10,7 @@ import { useForeground } from "@/features/openFinance/useForeground";
 import { textoDaFalha } from "@/features/auth/entrar";
 import { bancos as lerBancos, conexoes, desconectarBanco, limiteBancario } from "@/services/openFinance";
 import { perfil } from "@/services/auth";
+import { lerCredenciais } from "@/storage/secure";
 import { corDoBanco } from "@/features/painel/composicaoContas";
 import { usePrivacidade } from "@/features/painel/privacidade";
 import { BancoCard } from "@/features/openFinance/conexoes/BancoCard";
@@ -74,6 +75,7 @@ export default function Conexoes() {
     const controlador = new AbortController();
     setCarregando(true); setErro(null);
     void (async () => {
+      const esperada = await lerCredenciais();
       const p = await perfil();
       if (p.app_access !== true) throw new Error("Acesso indisponível. Confira sua conta no Início.");
       // Em paralelo e OPCIONAL: qualquer falha vira "sem números" e nunca derruba a tela nem as ações (a promessa nunca rejeita).
@@ -82,15 +84,18 @@ export default function Conexoes() {
         if (e instanceof SessaoExpirada && !cancelado) sessao.expirou(e.detalhe);
         return null;
       });
-      const l = await limiteBancario(p.user_id);
-      const s = await conexoes(p.user_id, controlador);
+      // A conta trocada ENTRE o /auth/me e estas leituras as faz sair com o token novo e o uid antigo: o 403 de uid alheio vira RequisicaoSuperada.
+      const conferir = async (e: unknown): Promise<never> => { if (!(e instanceof SessaoExpirada)) await conferirLinhagem(esperada); throw e; };
+      const l = await limiteBancario(p.user_id).catch(conferir);
+      const s = await conexoes(p.user_id, controlador).catch(conferir);
       if (cancelado) return;
       // A lista e as ações aparecem com o snapshot; /bancos (lento ou pendurado) só completa os números depois, sem segurar a tela. `cancelado` descarta resposta de leitura velha.
       setDados({ uid: p.user_id, lista: s.connections, podeAdicionar: l.pode_adicionar,
         mensagem: l.message, permiteReconectar: l.of_banks_max !== 0, max: l.of_banks_max, emUso: l.em_uso, numeros: null });
       void numeros.then((n) => { if (!cancelado) setDados((d) => d && { ...d, numeros: n }); });
     })().catch((e: unknown) => {
-      if (cancelado || e instanceof RequisicaoSuperada) return;
+      if (cancelado) return;
+      if (e instanceof RequisicaoSuperada) { setDados(null); setRodada((v) => v + 1); return; } // a conta trocou: some o dado da anterior e relê
       if (e instanceof SessaoExpirada) sessao.expirou(e.detalhe);
       else setErro(e instanceof Error ? e.message : textoDaFalha(e));
     }).finally(() => { if (!cancelado) setCarregando(false); });

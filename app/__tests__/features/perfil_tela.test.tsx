@@ -5,7 +5,7 @@
 import { Linking } from "react-native";
 import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
-import { resposta, segurar } from "./auth_apoio";
+import { chamadas, resposta, segurar } from "./auth_apoio";
 import { CONTATO, LINK, abrirPerfil, abrirUrl, comWhatsApp, postsDoLink, tocar } from "./perfil_apoio";
 import { appVai, drenar, preparar } from "./seguranca_sem_senha_apoio";
 
@@ -252,6 +252,8 @@ describe("Perfil — estados do GET", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeTruthy());
     expect(screen.queryByText("Acesso negado")).toBeNull();
     expect(screen.queryByText("Esta conta está agendada para exclusão.")).toBeNull();
+    await act(async () => void (await drenar()));
+    expect(chamadas().filter((c) => c.caminho === "/auth/me")).toHaveLength(1); // 403 sem troca de conta: sem laço de recarga
   });
 
   it("500: Tentar de novo, e o toque rebusca", async () => {
