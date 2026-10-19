@@ -40,6 +40,7 @@ function rota(k: Recurso, uid: number, mes: string, dias?: number) {
   const base = `/api/app/`;
   return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, detalhesAnterior: base + `mes-detalhes?mes=${mesesAnteriores(mes, 2)[1]}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: base + "metas", cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, plano: base + "me", categorias: base + "categorias" })[k];
 }
+const FALHA_DESCARTE = "Não conseguimos descartar agora. Tente de novo.";
 export function PainelProvider({ children }: { children: ReactNode }) {
   const sessao = useSessao();
   const ativo = useForeground();
@@ -216,10 +217,10 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     try {
       await concluirTentativaBancaria(id);
       const relida = await lerTentativaBancaria(uid ?? undefined);
-      if (dono.current === uid) setPendente(relida?.tentativa_id ?? null);
+      if (dono.current === uid) { setPendente(relida?.tentativa_id ?? null); setAviso((a) => a === FALHA_DESCARTE ? null : a); }
       return true;
     } catch {
-      if (dono.current === uid) setAviso("Não conseguimos descartar agora. Tente de novo.");
+      if (dono.current === uid) setAviso(FALHA_DESCARTE);
       return false;
     }
   };

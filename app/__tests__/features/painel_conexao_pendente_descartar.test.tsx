@@ -63,6 +63,17 @@ it("falha ao apagar no cofre: erro visível e o aviso fica", async () => {
   expect(pendente()).toBeTruthy();
   expect(cofre.has("pb.of.tentativa")).toBe(true);
   expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+  // Tocar de novo com o cofre liberado limpa o aviso de erro: sem botão de fechar, ele ficava em todas as telas.
+  falharApagar(false);
+  await descartar();
+  await waitFor(() => expect(pendente()).toBeNull());
+  expect(screen.queryByText(ERRO)).toBeNull();
+  expect(cofre.has("pb.of.tentativa")).toBe(false);
+});
+
+it("a legenda do aviso diz como sair, sem supor que a pessoa desistiu", async () => {
+  await abrir();
+  expect(screen.getByText("Não vai concluir? Descarte e comece de novo quando quiser.")).toBeTruthy();
 });
 
 it("acessibilidade: botão com papel e rótulo 'Descartar'; o leitor ouve que descartou", async () => {
