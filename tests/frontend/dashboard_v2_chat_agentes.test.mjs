@@ -309,6 +309,25 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: clicar fora da lista, ou o foco ir a outro controle, fecha a lista do @; clicar num item ainda o escolhe`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await digitar(page, "@");
+    await lista(page).waitFor();
+    await page.locator(".chat-empty h2").click(); // fora da lista e do campo
+    await lista(page).waitFor({ state: "detached" });
+    assert.equal(await campo(page).inputValue(), "@", "o texto fica, como no Esc");
+    await digitar(page, "d");
+    await lista(page).waitFor();
+    await page.evaluate(() => document.querySelector("a[href]").focus()); // o foco vai a outro controle (teclado, leitor de tela)
+    await lista(page).waitFor({ state: "detached" });
+    await digitar(page, "e");
+    await lista(page).waitFor();
+    await page.locator("#mencoes-lista [role=option]").first().click();
+    await lista(page).waitFor({ state: "detached" });
+    assert.equal(await campo(page).inputValue(), "@Detetive ");
+    await ctx.close();
+  });
+
   test(`${width}: trocar de página fecha a lista do @ (no celular a barra some fora do /piggy)`, async () => {
     const { ctx, page } = await abrir({ width });
     await digitar(page, "@");

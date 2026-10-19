@@ -49,6 +49,13 @@ export function AskBar({ path }: { path: Path }) {
     if (aberta) document.body.dataset.mencoes = ""; else delete document.body.dataset.mencoes;
     return () => { delete document.body.dataset.mencoes; };
   }, [aberta]);
+  // Tocar fora da lista e do campo a fecha, como o Esc (Codex no #1157). Tocar num item não chega aqui como "fora", e o campo não perde o foco (Mencoes.tsx).
+  useEffect(() => {
+    if (!aberta) return;
+    const fora = (e: PointerEvent) => { const t = e.target as Element | null; if (t !== input.current && !t?.closest?.(".mencoes")) setFechada(true); };
+    document.addEventListener("pointerdown", fora);
+    return () => document.removeEventListener("pointerdown", fora);
+  }, [aberta]);
   useLayoutEffect(() => {
     if (depois.current == null) return;
     input.current?.setSelectionRange(depois.current, depois.current);
@@ -103,6 +110,7 @@ export function AskBar({ path }: { path: Path }) {
       <input ref={input} id="askbar-input" value={text} maxLength={500}
         onChange={(e) => { setText(e.target.value); setCursor(e.target.selectionStart ?? e.target.value.length); setFechada(false); setAtivo(0); }}
         onSelect={(e) => setCursor(e.currentTarget.selectionStart ?? 0)} onKeyDown={aoTeclar}
+        onBlur={(e) => { if (e.relatedTarget) setFechada(true); }} // o foco foi a outro controle (teclado, leitor de tela); sem alvo é a janela ou um toque, que o pointerdown cobre
         role="combobox" aria-expanded={aberta} aria-controls="mencoes-lista" aria-autocomplete="list" aria-activedescendant={aberta ? `mencao-${marcado}` : undefined}
         placeholder="Converse com o Piggy…" aria-label="Pergunte ao Piggy" autoComplete="off" enterKeyHint="send" />
       <button type="submit" className="askbar-send" aria-label="Enviar" disabled={!text.trim()}>
