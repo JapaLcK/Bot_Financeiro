@@ -716,6 +716,12 @@ for (const width of TELAS) {
     await lista(page).waitFor();
     await campo(page).press("Enter");
     assert.equal(await campo(page).inputValue(), "@Detetive resto"); // caminho comum: o resto fica, com um espaço só
+    await campo(page).fill("@Detetive,qual cobrança?");
+    await campo(page).press("Home");
+    for (let i = 0; i < 4; i++) await campo(page).press("ArrowRight"); // "@Det|etive,qual": a pontuação colada fica
+    await lista(page).waitFor();
+    await campo(page).press("Enter");
+    assert.equal(await campo(page).inputValue(), "@Detetive ,qual cobrança?");
     await ctx.close();
   });
 
