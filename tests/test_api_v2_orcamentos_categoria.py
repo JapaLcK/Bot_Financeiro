@@ -184,6 +184,19 @@ def test_orcamento_fora_do_catalogo_pode_ser_editado(a_e_b):
     assert _post(a, {"categoria": "outra inventada", "valor": "200"}).status_code == 422
 
 
+def test_conta_que_nunca_semeou_o_catalogo_ve_o_visual_e_usa_a_categoria_dos_lancamentos(a_e_b):
+    a, _ = a_e_b
+    add_launch_and_update_balance(a, "despesa", 30.0, "t", "t", categoria="Padaria do Zé")
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("insert into category_budgets (user_id, categoria, budget) values (%s, 'alimentação', 100)", (a,))
+        cur.execute("delete from user_categories where user_id=%s", (a,))  # conta de antes do catálogo
+        conn.commit()
+    assert _item(_get(a), "alimentação")["emoji"] == "🍔"  # do seed, não o neutro
+    r = _post(a, {"categoria": "padaria do zé", "valor": "80"})
+    assert r.status_code == 200, r.text
+    assert _item(r, "padaria do zé")["gasto"] == "30.00"
+
+
 def test_mesma_categoria_nova_em_paralelo_nao_estoura(a_e_b):
     a, _ = a_e_b
     n, erros, saidas = 6, [], []

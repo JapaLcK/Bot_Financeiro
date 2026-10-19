@@ -16,7 +16,7 @@ from api.v2.sessao import usuario_atual
 from core.services.plan_limits import PlanLimitExceeded
 from core.services.plan_service import get_user_limits
 from db import budgets
-from db.categories import CATEGORY_NAME_MAX_LEN, resolve_category_input
+from db.categories import CATEGORY_NAME_MAX_LEN, ensure_user_categories_seeded, resolve_category_input
 from db.connection import cat_visual
 
 router = APIRouter()
@@ -65,6 +65,9 @@ def _limite(uid: int) -> int | None:
 
 def _monta(uid: int) -> OrcamentosCategoria:
     ano, m, _ = mes_pedido(None)
+    # O ícone/cor vem do join com `user_categories`; conta antiga que nunca abriu /categorias tem o catálogo
+    # vazio e cairia toda no visual neutro. O seed é idempotente (como em `/categorias` e `db/gastos.py`).
+    ensure_user_categories_seeded(uid)
     s = budgets.get_budgets_status_for_month(uid, f"{ano:04d}-{m:02d}")
     t = s["totals"]
     return OrcamentosCategoria(
@@ -87,6 +90,7 @@ def ler(uid: int = Depends(usuario_atual)) -> OrcamentosCategoria:
 def salvar(corpo: OrcamentoIn, uid: int = Depends(usuario_atual)) -> OrcamentosCategoria:
     cat = _texto("categoria", corpo.categoria)
     valor = _valor(corpo.valor)
+    ensure_user_categories_seeded(uid)  # a categoria custom de quem nunca semeou só existe nos lançamentos
     existente = budgets.get_budget(uid, cat)
     nome = existente["categoria"] if existente else resolve_category_input(uid, cat, create=False)
     if nome is None:
