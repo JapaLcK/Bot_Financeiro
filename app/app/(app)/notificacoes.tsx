@@ -8,10 +8,12 @@ import type { Notificacoes } from "@/api/schemas/conta";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { semSenha, telefoneBR } from "@/features/conta/contato";
 import { algumResumo, corpoDaHora, hhmm, semanalNaTela, semanalTravado, textoDaEscrita } from "@/features/conta/notificacoes";
+import { conferirSessao } from "@/features/openFinance/acesso";
 import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
 import { lerNotificacoes, salvarNotificacoes, type CorpoNotificacoes } from "@/services/conta";
+import { lerCredenciais } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
@@ -84,9 +86,14 @@ export default function NotificacoesTela() {
     const minha = ++geracao.current;
     let emailDaConta: string | null = null;
     try {
+      const esperada = await lerCredenciais();
       const conta = await perfil();
       emailDaConta = conta.email?.trim() || null;
-      const dados = await lerNotificacoes(conta.user_id);
+      // A conta trocada ENTRE as duas leituras faz a 2ª sair com o token novo e o uid antigo: o 403 de uid alheio vira RequisicaoSuperada.
+      const dados = await lerNotificacoes(conta.user_id).catch(async (e: unknown) => {
+        if (esperada && !(e instanceof SessaoExpirada)) await conferirSessao(esperada);
+        throw e;
+      });
       if (minha !== geracao.current) return;
       setEstado({ fase: "pronto", uid: conta.user_id, dados, emailDaConta });
     } catch (e) {

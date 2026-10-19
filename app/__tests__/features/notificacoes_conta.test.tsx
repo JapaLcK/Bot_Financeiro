@@ -6,6 +6,8 @@ import { DateTimePickerAndroid } from "@react-native-community/datetimepicker";
 import { Platform } from "react-native";
 import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
+import * as servicosConta from "@/services/conta";
+
 import { fetchFalso, resposta, segurar } from "./auth_apoio";
 import { BASE, abrirNotificacoes, gets, ligada, patches, servidor, trocar } from "./notificacoes_apoio";
 import { appVai, drenar, preparar } from "./seguranca_sem_senha_apoio";
@@ -177,6 +179,32 @@ describe("Notificações — lacunas da suíte", () => {
       for (let i = 0; i < 10; i++) await drenar();
     });
     await waitFor(() => expect(ligada("Resumo mensal")).toBe(false)); // o que a conta 2 tem no servidor
+    expect(fetchFalso.mock.calls.some(([u]: [string]) => String(u).endsWith("/settings/2/notifications"))).toBe(true);
+  });
+
+  it("a conta troca ENTRE o /auth/me e a leitura (403 de uid alheio): some o dado da anterior e relê a conta nova", async () => {
+    let conta = 1, trocarAntes = false;
+    const srv2 = servidor({ monthly_report_enabled: false });
+    const daB = (o: RequestInit) => /access-b/.test((o.headers as Record<string, string>)["Authorization"] ?? "");
+    await abrirNotificacoes(servidor({}, { get: (o) => (daB(o) ? resposta(403, { detail: "Acesso negado" }) : resposta(200, { ...BASE })) }), {
+      "/auth/me": () => resposta(200, { user_id: conta, email: "sofia@x.com", display_name: "Sofia", app_access: true }),
+      "/settings/2/notifications": srv2.rota,
+    });
+    await esperar();
+    const real = servicosConta.lerNotificacoes;
+    jest.spyOn(servicosConta, "lerNotificacoes").mockImplementation(async (uid) => {
+      if (trocarAntes) { // outra conta assume o cofre depois do /auth/me da conta 1 e antes da 2ª leitura
+        trocarAntes = false;
+        cofre.set("pb.credenciais", JSON.stringify({ access: "access-b", refresh: "rt_b" }));
+        conta = 2;
+      }
+      return real(uid);
+    });
+    trocarAntes = true;
+    await appVai("background");
+    await appVai("active");
+    await act(async () => { for (let i = 0; i < 10; i++) await drenar(); });
+    await waitFor(() => expect(ligada("Resumo mensal")).toBe(false)); // o que a conta 2 tem no servidor, não o da conta 1
     expect(fetchFalso.mock.calls.some(([u]: [string]) => String(u).endsWith("/settings/2/notifications"))).toBe(true);
   });
 
