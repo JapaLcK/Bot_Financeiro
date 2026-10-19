@@ -3,12 +3,12 @@ import { AccessibilityInfo } from "react-native";
 import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { ativarAgente, conversarComAgente, lerAgentes } from "@/services/agentes";
 import { TEM_ARROBA, acessoDe, agenteDe, energiaDe, mencaoDe, type Acesso, type Agentes } from "./agentes";
-import { NOVO, cotaQueSobe, type Turno } from "./conversaEstado";
+import { NOVO, type Turno } from "./conversaEstado";
 // O `@Nome` do chat: o turno do agente é um `Turno` com `agente` (ordem, limpeza no fechar e na troca de conta, OCULTA: tudo já coberto). Porta de webapp/src/dashboard/lib/conversation.ts.
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string };
 export type TurnoAgente = { kind: string; mensagem: string; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
-type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; aplicarUso: Dispatch<SetStateAction<{ used: number; limit: number } | null>>; falhou: (e: unknown) => void };
+type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e: Energia | null): Partial<TurnoAgente> =>
@@ -24,7 +24,7 @@ const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: 
 const SEM_SENHA = "Crie a senha da sua conta pelo link que enviamos por e-mail para conversar com os agentes.";
 const semSenha = (e: unknown) => e instanceof ErroDeApi && (detalheDe(e).error === "password_required" || (e.corpo as { code?: unknown } | null | undefined)?.code === "password_required");
 
-export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso, falhou }: Deps) {
+export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso, esgotarCota, falhou }: Deps) {
   const [catalogo, setCatalogo] = useState<{ uid: number; dados: Agentes } | null>(null);
   const contextos = useRef(new Map<string, string | null>()), emVoo = useRef(new Set<string>()), epoca = useRef(0);
   const lendo = useRef<Promise<Agentes | null> | null>(null), esperando = useRef(false), leitura = useRef(0); // esperando: o 2º toque durante a espera do catálogo não duplica o envio
@@ -56,7 +56,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     try {
       const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c);
       if (dono.current !== alvo) return;
-      if (r.usage) aplicarUso(cotaQueSobe(r.usage)); // a cota do app sai desta resposta; o servidor só desconta quando o agente respondeu
+      if (r.usage) aplicarUso(r.usage); // a cota do app sai desta resposta; o servidor só desconta quando o agente respondeu
       if (!vivo()) return;
       if (!r.reply.trim()) throw new ErroDeApi(200, "resposta vazia");
       contextos.current.set(kind, r.context);
@@ -67,7 +67,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       const d = detalheDe(e), status = e instanceof ErroDeApi ? e.status : -1;
       const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
       if (d.error === "invalid_context") contextos.current.delete(kind); // o próximo envio recomeça a conversa
-      if (d.error === "quota_exhausted") aplicarUso((u) => u && { ...u, used: Math.max(u.used, u.limit) }); // outro cliente gastou o resto: trava o campo e as ações como a cota cheia
+      if (d.error === "quota_exhausted") esgotarCota(); // outro cliente gastou o resto: trava o campo e as ações como a cota cheia
       falhou(e);
       if (acesso) atualizar(id, estadoSemChat(kind, acesso, energia));
       else if (semSenha(e)) atualizar(id, { estado: "erro", texto: SEM_SENHA, repetir: false });

@@ -7,13 +7,12 @@ import { mensagemRecurso, useEstadoPainel } from "./provider";
 import type { Pergunta } from "./perguntas";
 import type { Motivo } from "./motivoFeedback";
 import { useConversaAgentes, type TurnoAgente } from "./conversaAgentes";
+import { mesAtual } from "./catalogo";
 /** `passos`/`previa`/`blocos` são só GUARDADOS aqui: quem os desenha é o D2/E1. `parcial` = texto do stream até o `fim`. */
 export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; motivo: Motivo | null; interrompida: boolean; chips: string[]; agente?: TurnoAgente };
 export const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
 export const cotaCheia = (u: Uso | null) => !!u && u.used >= u.limit;
-/** A cota vinda de uma resposta só sobe (mesmo limite): pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do modelo. Limite novo (troca de plano) entra direto; a virada do mês entra no `preparar`. */
-export const cotaQueSobe = (n: Uso) => (u: Uso | null) => u && u.limit === n.limit && u.used > n.used ? u : n;
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
 type Bloqueio = "abrindo" | "livre" | "falhou";
 /** O estado inteiro da avaliação, como o servidor o grava: `motivo`/`texto` só valem com `nota: -1`. */
@@ -51,7 +50,11 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
-  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso: (u) => { versaoUso.current++; setUso(u); }, falhou });
+  /** A cota de uma resposta só sobe no mesmo mês: pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do
+   * modelo. Mês novo (UTC, o do servidor, ou o de São Paulo) ou limite novo (troca de plano) entram direto, mesmo menores. */
+  const periodoUso = useRef(""), periodo = () => `${new Date().toISOString().slice(0, 7)}|${mesAtual()}`;
+  const subir = (n: Uso) => { const p = periodo(), virou = p !== periodoUso.current; periodoUso.current = p; return (u: Uso | null) => !virou && u && u.limit === n.limit && u.used > n.used ? u : n; };
+  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso: (n) => { versaoUso.current++; setUso(subir(n)); }, esgotarCota: () => { versaoUso.current++; setUso((u) => u && { ...u, used: Math.max(u.used, u.limit) }); }, falhou });
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
     const alvo = dono.current; if (alvo === null) return null;
     semDeleteUlt.current = semDelete;
@@ -64,7 +67,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
       const [, cota] = await Promise.all([d, lerRecurso("/ai/messages?limit=1", conversaSchema, cg), ...delecoes.current]);
       if (!vivo()) return null;
       if (erros.current === e0 && !semDelete) sujo.current = false;
-      if (versaoUso.current === v0) { setUso(cota.usage); }
+      if (versaoUso.current === v0) { periodoUso.current = periodo(); setUso(cota.usage); }
       setBloqueio("livre"); return cota.usage;
     } catch (e) { if (vivo()) { falhou(e); setBloqueio("falhou"); } return null; }
     finally { ativos.current.delete(cg); }
@@ -118,7 +121,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
         else if (e.tipo === "erro") throw new ErroDeApi(500, e.mensagem ?? "erro");
         else {
           fim = true; atualizar(() => ({ resposta: e.reply, parcial: "", messageId: e.message_id, chips: aberta.current ? e.chips : [] }));
-          versaoUso.current++; setUso(cotaQueSobe(e.usage));
+          versaoUso.current++; setUso(subir(e.usage));
           if (aberta.current) AccessibilityInfo.announceForAccessibility("Piggy respondeu");
           concluir();
         }

@@ -196,6 +196,12 @@ it("cota só sobe também no Piggy: o fim atrasado do Piggy (99) não destrava a
   await waitFor(() => expect(screen.getByText("Do Piggy")).toBeTruthy());
   await digitar("mais uma"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
 });
+it("cota renova na virada do mês: a resposta do mês novo, menor, entra (o 'só sobe' vale dentro do mês)", async () => {
+  jest.setSystemTime(new Date("2026-10-31T12:00:00Z")); let n = 0; ag.chat = () => resp("Ok", { usage: ++n === 1 ? { used: 90, limit: 100 } : { used: 1, limit: 100 } });
+  await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("90 de 100 mensagens utilizadas")).toBeTruthy());
+  jest.setSystemTime(new Date("2026-11-01T12:00:00Z")); await enviar("@Xerife e agora?");
+  await waitFor(() => expect(screen.queryByText("90 de 100 mensagens utilizadas")).toBeNull());
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
