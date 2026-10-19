@@ -46,26 +46,30 @@ do push**; o push também não depende dela. Os dois podem andar em paralelo, co
 
 | Peça | Onde | Estado |
 |---|---|---|
-| Envio APNs direto (HTTP/2, JWT ES256 com a `.p8`, cache do token) | `core/services/push_service.py::send_push_to_user` | Dormente sem `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY`: só loga e devolve 0. Apaga o token em 410 e em 400 `BadDeviceToken`/`Unregistered`. Não confere o texto: quem chama garante o genérico |
+| Envio APNs direto (HTTP/2, JWT ES256 com a `.p8`, cache do token) | `core/services/push_service.py::send_push_to_user` | Dormente sem `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY` e `APNS_TOPIC` (4 envs, o tópico é obrigatório): só loga e devolve 0. Apaga o token em 410 e em 400 `BadDeviceToken`/`Unregistered`/`DeviceTokenNotForTopic`. Não confere o texto: quem chama garante o genérico |
 | Registro do token | `POST /api/push/register` (`frontend/routes/push.py`) | Aceita Bearer (o app novo já autentica assim: `tests/_apoio_auth_app.py` usa esta rota como alvo) e cookie. Sem gate de plano, com a perna da senha (`exigir_credencial`). `platform` `ios`/`android`, `environment` `sandbox`/`production`; valor fora vira o padrão em silêncio |
-| Baixa do token | `POST /api/push/unregister` | Exige sessão, mas apaga **pelo token, de qualquer conta** (não filtra por `user_id`) |
-| Tabela | `push_tokens` (`db/schema.py`, `db/push.py`) | `token` único: o mesmo aparelho re-registrando muda o dono. `environment` por token. Sai com a conta (cascade) e no "Recomeçar do zero" |
-| Quem envia hoje | `core/admin_dashboard.py` (teste do admin) e `scripts/push_test.py` | **Nenhum evento de produto dispara push** |
+| Baixa do token | `POST /api/push/unregister` | Exige sessão e só apaga o token do próprio usuário (PR 1; antes apagava de qualquer conta) |
+| Tabela | `push_tokens` (`db/schema.py`, `db/push.py`) | `token` único: o mesmo aparelho re-registrando muda o dono. `environment` por token. Sai com a conta (cascade). **Sobrevive** ao "Recomeçar do zero" (`db/privacy.py`, `tests/test_account_reset.py`): o aparelho continua o mesmo |
+| Quem envia hoje | `core/admin_dashboard.py` (teste do admin) e `scripts/push_test.py` | Evento de produto: só `run_reconnect_push` (PR 1, "banco precisa reconectar"); os testes do admin e do script veem só tokens de sessão ativa |
 | Cliente antigo | `mobile/ios/App/App/AppDelegate.swift` + `frontend/app-mode.js::wirePush` | O AppDelegate entrega o token ao WebView, que chama o register com cookie |
 
-Achados que mudam o desenho:
+Achados que mudaram o desenho (estado antes do PR 1; a tabela acima é o estado de agora):
 
-- **Tópico.** `APNS_TOPIC` é um só por servidor, padrão `com.pigbankai.app` (o id do Capacitor). O app Expo
-  é `com.pigbankai.mobile` (`.dev`, `.staging` nos outros ambientes, `app/app.config.ts`). Com o padrão,
-  todo push para o app novo volta `DeviceTokenNotForTopic` (400, hoje só um warning; o token não é apagado).
-  Decisão D3.
-- **Baixa sem dono.** O unregister de qualquer conta apaga o token de outra. O token é segredo do aparelho,
-  então o risco é baixo, mas a correção é uma cláusula (`and user_id = %s`).
+- **Tópico.** `APNS_TOPIC` é um só por servidor. Antes do PR 1 havia um padrão, `com.pigbankai.app` (o id do
+  Capacitor). O app Expo é `com.pigbankai.mobile` (`.dev` no desenvolvimento e `.staging` no staging,
+  `app/app.config.ts`). Com o padrão, todo push para o app novo voltava `DeviceTokenNotForTopic` (400, só um
+  warning; o token não era apagado). PR 1: o padrão saiu. `_topic()` devolve `None` sem a env,
+  `is_configured()` exige o tópico e o `DeviceTokenNotForTopic` apaga o token. Decisão D3.
+- **Baixa sem dono.** Antes, o unregister de qualquer conta apagava o token de outra. O token é segredo do
+  aparelho, então o risco era baixo, mas a correção era uma cláusula (`and user_id = %s`). PR 1: feito, o
+  unregister só apaga token do próprio usuário.
 - **Logout não baixa token.** `POST /auth/logout` só revoga sessão e refresh. Se o app não conseguir chamar
   o unregister antes (sem rede, sessão já expirada), o token segue na conta que saiu até outra conta
   registrar o mesmo aparelho. E o `sair()` do app (`app/src/services/auth.ts`) limpa o cofre local mesmo
   quando o `POST /auth/logout` falha: a sessão pode seguir ativa no servidor por até 14 dias (o refresh).
-  Decisão D4, que precisa de uma perna no próprio aparelho.
+  Decisão D4, que precisa de uma perna no próprio aparelho. PR 1: o servidor só deixa de enviar a esse
+  token, porque ele fica amarrado à sessão do registro (`db/push.py::list_push_tokens`: sessão não revogada
+  e refresh utilizável). A baixa no aparelho e o `sair()` ficam para o PR 2.
 
 ## 4. O que falta no app (escopo provável)
 
@@ -106,7 +110,7 @@ as contestou: valem até ele dizer o contrário.
 |---|---|---|
 | D1 | Que evento dispara o primeiro push? | **Banco que precisa reconectar**, só ele no começo (o job de saúde do Open Finance já grava o estado). Um push por mudança de estado, não a cada volta do job. Depois: receita detectada a confirmar, alerta do Xerife, lembrete de pagamento |
 | D2 | Quando pedir a permissão? | **Na primeira abertura do app** (o dono escolheu isto, contra a recomendação de pedir depois do 1º banco). Quem recusa só reativa pela chave da tela de Notificações, que manda aos Ajustes |
-| D3 | Como acertar o tópico do app novo? | **`APNS_TOPIC` por servidor** (`com.pigbankai.mobile` em produção, `.staging` no staging) e `DeviceTokenNotForTopic` tratado como token inválido (apagado). O Capacitor deixa de receber push; hoje nada de produto envia push para ele |
+| D3 | Como acertar o tópico do app novo? | **`APNS_TOPIC` por servidor** (`com.pigbankai.mobile` em produção, `.staging` no staging, `.dev` no desenvolvimento) e `DeviceTokenNotForTopic` tratado como token inválido (apagado). O Capacitor deixa de receber push; hoje nada de produto envia push para ele |
 | D4 | Como garantir que o token sai com a conta? | **Token amarrado à sessão** (`jti`): envio só para token de sessão ativa. "Ativa" para o push NÃO é só `auth_sessions.revoked_at is null`: a linha não tem validade, e o refresh que vence por idade é revogado sem tocar nela. Ativa = sessão não revogada E com um `auth_refresh_tokens` daquele `session_jti` ainda utilizável (`used_at` e `revoked_at` nulos, `expires_at > now()`). Fecha o que o servidor revoga: logout que chegou ao servidor, "encerrar outros dispositivos", troca de senha, exclusão e o refresh vencido por idade. É migração (coluna nova). NÃO fecha o logout sem rede (a sessão segue ativa no servidor): esse é fechado no aparelho, pelo desregistro local no APNs no Sair (seção 4). Que o APNs para de entregar depois do desregistro local só se prova no aparelho |
 | D5 | Qual preferência controla o push? | Um campo por tipo de push no `/settings/{uid}/notifications`, ligado por padrão (o consentimento é a permissão do sistema). Começa com um campo, o da D1. A rota tem gate de plano; o envio também (seção 2) |
 | D6 | Para onde o toque leva? | Para a tela do evento (D1: Bancos conectados). O payload leva só o nome da rota, nunca dado |
@@ -114,13 +118,31 @@ as contestou: valem até ele dizer o contrário.
 
 ## 6. Ordem dos PRs (depois das decisões)
 
+**Estado (2026-10-18): o PR 1 está implementado** (D3, baixa com dono, D4, campo da D5 e o envio da D1).
+Decisões do dono para o envio: atraso até ~6 h aceito (só na varredura do tique do Open Finance); quem não
+tinha app registrado recebe depois (a trava solta quando nada foi entregue); sessão parada há mais de 7 dias
+continua recebendo (D4 como escrito); vários bancos na mesma varredura = um push.
+
 Separados por verificabilidade (raiz §4):
 
 1. **Servidor** (provável aqui): D3 (tratar `DeviceTokenNotForTopic`), a baixa com dono, D4, o campo da D5
    e o envio do evento da D1. Prova por pytest e pela rota.
 2. **App**: `expo-notifications`, permissão (D2), registro e baixa, toque (D6). Prova no build do
    aparelho; o servidor do PR 1 já tem de estar no ar (app instalado não espera deploy).
-3. Ligar as envs do APNs no Railway e conferir no aparelho: ato operacional do dono.
+3. Ligar as envs do APNs no Railway e conferir no aparelho: ato operacional do dono. Antes de ligar:
+   todo usuário com banco já quebrado e token entregável recebe 1 push no 1º tique; e um `APNS_TOPIC`
+   digitado errado apaga os tokens no 1º envio (`DeviceTokenNotForTopic`), que voltam quando o app
+   registrar de novo. Conferir a env.
+
+Limites declarados do PR 1: a reconexão pelo widget não solta a trava (banco que quebra de novo antes de
+uma varredura ver a conexão Atualizada ou Parcial fica sem push naquele episódio; reconexão que fica em
+updating/erro temporário mantém a trava sem prazo); só Atualizado/Parcial reabre a trava (oscilação,
+reconexão sem sync, pausado ou removido que voltam a quebrar não geram 2º push); banco curado no mesmo
+instante da varredura ainda pode receber 1 push (intervalo entre a leitura e a reivindicação, igual ao
+aviso do WhatsApp); requisito para o PR 2: tokens existentes ficam com `session_jti` NULL e param de
+receber no deploy, então o app precisa chamar o register depois de CADA login; re-registro sem `jti` (cliente
+legado) zera o `session_jti` e o token para de receber; a varredura não tem prazo próprio (com o APNs fora,
+cada token espera até 10 s em série e atrasa o PATCH do tique).
 
 ## Como medi
 

@@ -55,7 +55,7 @@ _POPULACAO = re.compile(r"^list_|^get_\w*users")
 
 # Enviar por qualquer canal. `send` cru é o Discord (`await user.send(...)`) e o
 # prefixo `_send_` pega os wrappers locais (`_send_periodic_template`).
-_ENVIO = {"send", "send_template", "send_text", "send_message"}
+_ENVIO = {"send", "send_template", "send_text", "send_message", "send_push_to_user"}
 
 
 def _envia(chamadas: set[str]) -> bool:
@@ -98,6 +98,17 @@ _ISENTOS_COM_RAZAO = {
         "já filtra o oposto (`get_plan_tier(user_id) != 'free'` → pula), e a "
         "copy dele é presa por "
         "`tests/test_billing_email_downsell_nao_promete_gratis.py`.",
+    "core/admin_dashboard.py::admin_push_test":
+        "Não é laço: botão do admin que manda um push de TESTE a um usuário que o "
+        "operador escolheu (`list_push_tokens` casa o enumerador só pelo nome). "
+        "Quem decide o alvo é a pessoa logada como admin, não um scheduler.",
+    "core/admin_dashboard.py::register_admin_routes":
+        "FALSO POSITIVO: é a função que REGISTRA as rotas do admin e contém "
+        "`admin_push_test` aninhada, então herda o `list_push_tokens` e o "
+        "`send_push_to_user` dela. Mesma razão da entrada de `admin_push_test`.",
+    "scripts/push_test.py::main":
+        "Script manual de um operador (um user_id na linha de comando) para "
+        "testar o APNs; não enumera população, só lê os tokens do alvo.",
     "core/services/payment_reminder_wa.py::_wa_lembrete":
         "Não é laço de população: roda POR usuário já escolhido pelo funil do "
         "lembrete, e tem gate próprio e mais estrito — "
@@ -210,6 +221,7 @@ _LACOS_ESPERADOS = {
     "core/reports/reports_daily.py::_periodic_reports_discord",
     "core/services/open_finance_proactive.py::run_salary_notifications",
     "core/services/open_finance_proactive.py::run_reconnect_notifications",
+    "core/services/open_finance_proactive.py::run_reconnect_push",
     "core/services/piggy_agents.py::run_agent_emails_once",
     "core/services/engagement_scheduler.py::_check_and_send",
     "core/services/payment_reminder.py::check_payment_reminder",

@@ -13,7 +13,8 @@ Envs necessárias pra ligar:
 - APNS_TEAM_ID     : Team ID da conta Apple Developer (= DEVELOPMENT_TEAM)
 - APNS_AUTH_KEY    : conteúdo do .p8 (PEM). Aceita quebras de linha reais ou
                      literais "\\n" (facilita colar como env var de uma linha)
-- APNS_TOPIC       : bundle id, default "com.pigbankai.app"
+- APNS_TOPIC       : bundle id do app. SEM padrão: sem a env o envio fica dormente
+                     (um tópico errado por padrão apagaria tokens válidos)
 
 REGRA APPLE (Anexo 1 §4 do contrato): o texto do push NÃO pode conter valor,
 saldo ou qualquer dado financeiro. Mande texto genérico ("Você tem uma novidade
@@ -57,6 +58,7 @@ def is_configured() -> bool:
         os.getenv("APNS_KEY_ID")
         and os.getenv("APNS_TEAM_ID")
         and _auth_key_pem()
+        and _topic()
     )
 
 
@@ -85,8 +87,8 @@ def _provider_token() -> str | None:
     return token
 
 
-def _topic() -> str:
-    return (os.getenv("APNS_TOPIC") or "com.pigbankai.app").strip()
+def _topic() -> str | None:
+    return (os.getenv("APNS_TOPIC") or "").strip() or None
 
 
 def send_push_to_user(
@@ -100,7 +102,7 @@ def send_push_to_user(
     """Envia um push pra todos os aparelhos do usuário.
 
     Retorna a quantidade de entregas aceitas pelo APNs. Limpa tokens que o APNs
-    reporta como inválidos (410 Unregistered / BadDeviceToken). Se o APNs não
+    reporta como inválidos (410 Unregistered / BadDeviceToken / DeviceTokenNotForTopic). Se o APNs não
     estiver configurado, loga e retorna 0 (dormente).
     """
     if not is_configured():
@@ -150,7 +152,9 @@ def send_push_to_user(
                         reason = (resp.json() or {}).get("reason", "")
                     except Exception:
                         pass
-                    if resp.status_code == 410 or reason in ("BadDeviceToken", "Unregistered"):
+                    if resp.status_code == 410 or reason in (
+                        "BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"
+                    ):
                         delete_push_token(token)
                         logger.info("APNs: token inválido removido (…%s, %s)", token[-6:], reason)
                     else:

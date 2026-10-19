@@ -29,13 +29,13 @@ def main():
     do_send = "--send" in args
 
     tokens = list_push_tokens(user_id)
-    print(f"[push_test] user {user_id}: {len(tokens)} token(s) registrado(s)")
+    print(f"[push_test] user {user_id}: {len(tokens)} token(s) de sessão ativa")
     for t in tokens:
         tok = t["token"]
         print(f"  - …{tok[-8:]}  platform={t.get('platform')}  env={t.get('environment')}")
 
     if not tokens:
-        print("[push_test] Nenhum token. Abra o app logado e aceite as notificações.")
+        print("[push_test] Nenhum aparelho com sessão ativa registrado. Abra o app logado e aceite as notificações.")
         return
 
     print(f"[push_test] APNs configurado? {push_service.is_configured()}")
