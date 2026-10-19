@@ -3,12 +3,11 @@ import { router, useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Platform, Switch, View } from "react-native";
 
-import { ErroDeApi, SessaoExpirada } from "@/api/client";
+import { ErroDeApi, SessaoExpirada, conferirLinhagem } from "@/api/client";
 import type { Notificacoes } from "@/api/schemas/conta";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { semSenha, telefoneBR } from "@/features/conta/contato";
 import { algumResumo, corpoDaHora, hhmm, semanalNaTela, semanalTravado, textoDaEscrita } from "@/features/conta/notificacoes";
-import { conferirSessao } from "@/features/openFinance/acesso";
 import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
@@ -91,7 +90,7 @@ export default function NotificacoesTela() {
       emailDaConta = conta.email?.trim() || null;
       // A conta trocada ENTRE as duas leituras faz a 2ª sair com o token novo e o uid antigo: o 403 de uid alheio vira RequisicaoSuperada.
       const dados = await lerNotificacoes(conta.user_id).catch(async (e: unknown) => {
-        if (esperada && !(e instanceof SessaoExpirada)) await conferirSessao(esperada);
+        if (!(e instanceof SessaoExpirada)) await conferirLinhagem(esperada);
         throw e;
       });
       if (minha !== geracao.current) return;
