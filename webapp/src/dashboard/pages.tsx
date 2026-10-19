@@ -31,6 +31,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { MetasPainel } from "./widgets/Metas";
+import { OrcamentoPainel } from "./widgets/OrcamentoDomestico";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SubscriptionList } from "./widgets/Subscriptions";
@@ -194,7 +195,7 @@ function Launches({ s }: { s: DashState }) {
 const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: string; run?: () => void }[] = [
   { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
-  { label: "Orçamento doméstico", line: "Divida as contas da casa com quem mora com você.", icon: "ph-house" },
+  { label: "Orçamento doméstico", line: "Divida a renda do mês em 6 potes e veja quanto ainda cabe em cada um.", icon: "ph-house", to: "/orcamento" },
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie" },
   { label: "Vale a pena comprar?", line: "Veja o que uma compra grande faz com o seu mês e as suas metas.", icon: "ph-shopping-cart" },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy" },
@@ -222,9 +223,17 @@ function Tools() {
   );
 }
 
+function Budget({ s }: { s: DashState }) {
+  return (
+    <Page path="/orcamento" lede="A renda do mês dividida em potes: quanto cabe em cada um e quanto já saiu. Aportes em investimento contam no pote Liberdade financeira.">
+      <OrcamentoPainel s={s} />
+    </Page>
+  );
+}
+
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
-  "/ferramentas": Tools, "/piggy": PiggyChat,
+  "/orcamento": Budget, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };

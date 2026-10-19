@@ -13,6 +13,8 @@ export const ROUTES = [
   { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
+  // Fora do RAIL (menu lateral e Menu do celular): abre pelo card de Ferramentas e pelo ⌘K.
+  { path: "/orcamento", label: "Orçamento doméstico", short: "Orçamento", icon: "ph-house", title: "Orçamento doméstico" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },
   // A seção "Conta" da barra lateral (fora do RAIL): o Perfil e a Cobrança (conta/Cobranca.tsx, lê /billing/subscription) já são páginas de verdade; as Configurações mostram a Segurança (conta/Seguranca.tsx), os dispositivos conectados (conta/Sessoes.tsx), as Notificações (conta/Notificacoes.tsx) e o link para a /settings; os Bancos conectados são página de verdade (conta/Bancos.tsx).
@@ -26,9 +28,9 @@ export type Path = (typeof ROUTES)[number]["path"];
 // No celular o Piggy fica no meio e o "Menu" (parts/MenuTelas.tsx) fecha a barra: toda tela que
 // não está aqui (Previsão, Metas, Simulador…) abre por ele, e a Ajuda também.
 export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
-// O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa.
+// O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa. O Orçamento doméstico também não (só Ferramentas e ⌘K).
 export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos"];
-export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && !CONTA.includes(p));
+export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/orcamento" && !CONTA.includes(p));
 // O protótipo (DEMO) não tem conta: as rotas da Conta não existem nele (nem hash, nem ⌘K).
 export const ATIVAS = ROUTES.filter((r) => !(DEMO && CONTA.includes(r.path)));
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.

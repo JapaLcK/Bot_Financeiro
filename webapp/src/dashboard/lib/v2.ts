@@ -146,6 +146,12 @@ export const metasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/metas", signal),
   ...vivo,
 };
+// O orçamento doméstico do mês (`GET /api/v2/orcamento-domestico`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentoQuery = (mes: string) => queryOptions({
+  queryKey: ["orcamento-domestico", mes],
+  queryFn: ({ signal }) => apiGet("/orcamento-domestico", signal, { mes }),
+  ...vivo,
+});
 export const guiaQuery = {
   queryKey: ["guia"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),
