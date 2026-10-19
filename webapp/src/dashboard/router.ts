@@ -65,5 +65,7 @@ window.addEventListener("hashchange", () => {
 
 export const useRoute = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => path);
 export const href = (p: Path) => `#${p}`;
+// Para onde vai "Conectar banco" fora da página Bancos. O protótipo (DEMO) não tem as rotas da Conta (ATIVAS): lá segue o destino antigo.
+export const conectarBanco = () => (DEMO ? "/settings?view=open-finance" : href("/conta/bancos"));
 export const go = (p: Path) => { window.location.hash = p; };
 export const route = (p: Path) => ROUTES.find((r) => r.path === p)!;

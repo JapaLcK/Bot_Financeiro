@@ -587,7 +587,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `orientacao` sempre `abster`: sem veredito. Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). Em aberto: o corte de hábito real (média de 3 meses, estimativa variável: decisão P2 do dono,
-  PR à parte) e a tela do app.
+  PR à parte). No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
+  `simuladorForm.tsx`, `simuladorResultado.tsx`), aberta pelo `+` do bloco Simulador na aba Gastos, só Pro;
+  frases mais curtas que as do web, chaves comparadas por `simulador_textos_paridade.test.ts`.
 - `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
   condicional do motor único, usuário da sessão e gates antes da leitura financeira.
   Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
