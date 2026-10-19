@@ -27,6 +27,7 @@
  * duplo clique não vira dois connect-tokens e dois widgets, e `onError` aqui
  * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
  * callback do host dispara para a conexão que estava em curso.
+ * O `onError`/`onClose` de um widget VELHO (já há outra conexão em curso, `ocupado` é outra sessão) não chegam ao host: a conexão mais nova é dona dele.
  * `init()` do SDK que rejeita: `onError` e em seguida `onClose()`, e a guarda é liberada.
  * `onError` do SDK também libera a guarda: a Pluggy não garante `onClose` depois dele, e
  * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
@@ -625,6 +626,8 @@
   async function openWidget(uid, host, itemId, sessao, vivo) {
     // Libera a guarda só se ainda for a desta conexão (não a de uma mais nova).
     const liberar = function () { if (ocupado === sessao) ocupado = null; };
+    // O widget é de uma conexão VELHA quando há outra, mais nova, em curso: o onError/onClose dele já não são do host (o onSuccess segue valendo: o item autorizado é sempre salvo).
+    const velha = function () { return !!ocupado && ocupado !== sessao; };
     const data = await post("/open-finance/" + uid + "/connect-token", itemId ? { item_id: itemId } : {});
     const accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
@@ -669,7 +672,7 @@
       },
       onError: function (error) {
         console.error("Pluggy Connect error", error);
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         // A Pluggy não garante onClose depois de onError: sem liberar aqui, o botão
         // do settings (que se reabilita no onError) ficaria mudo até recarregar.
         liberar();
@@ -678,7 +681,7 @@
       onClose: function () {
         // Reconexão: o host relê a lista no onClose, então ele só vem depois do
         // save — senão relê antes de o /pluggy-item gravar. O picker segue como era.
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         const fim = function () {
           if (!vivo()) return;
           liberar();
