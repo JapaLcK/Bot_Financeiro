@@ -73,16 +73,29 @@ export function PiggyChat() {
   useEffect(() => { if (msgs.length) desde.current = performance.now(); }, [msgs.length]);
   // A pergunta nova aparece no topo da tela (a resposta dela vem logo abaixo).
   useEffect(() => { end.current?.scrollIntoView({ block: "start" }); }, [msgs.length]);
-  const last = [...msgs].reverse().find((m) => m.role === "piggy");
   // Esvazia e preenche de novo a cada resposta: duas respostas iguais seguidas (o texto
   // livre no protótipo) também são anunciadas.
   const [said, setSaid] = useState<ReactNode>(null);
-  // Depende da última resposta e do estado dela: a do agente muda de "Preparando…" para o texto sem mudar o tamanho da lista.
+  // Anuncia a resposta que acabou de mudar de estado, não só a última: com dois agentes em voo, a mais
+  // antiga pode terminar enquanto a mais nova ainda está "Preparando…" (Codex no #1157).
+  const estados = useRef(new Map<number, string>());
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
+    let nova: (typeof msgs)[number] | undefined;
+    for (const m of msgs) {
+      if (m.role !== "piggy") continue;
+      const agora = m.estado ?? "pronto";
+      if (estados.current.get(m.id) === agora) continue;
+      estados.current.set(m.id, agora);
+      if (agora !== "enviando") nova = m;
+    }
+    if (!nova) return; // sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente
+    const texto = nova.text ?? null;
     setSaid(null);
-    const t = setTimeout(() => setSaid(last?.text ?? null), 60);
-    return () => clearTimeout(t);
-  }, [last?.id, last?.estado]);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setSaid(texto), 60);
+  }, [msgs]);
 
   // Título só para o leitor de tela e o foco da rota (App.tsx); o que se vê é a conversa.
   const head = <h1 id="page-title" tabIndex={-1} className="sr-only">Converse com o Piggy</h1>;

@@ -14,7 +14,7 @@ const TELAS = [1440, 390];
 // kind, nome, custo de energia. Orçamento 7 com detetive+xerife ativos (usa 5): Repórter, Carteiro e Banqueiro cabem; Barão e Faria Limer não.
 const CAT = [["xerife", "Xerife", 2], ["reporter", "Repórter", 1], ["carteiro", "Carteiro", 1], ["detetive", "Detetive", 3], ["cofre", "Banqueiro", 2], ["barao", "Barão", 3], ["faria_limer", "Faria Limer", 4]];
 
-// `lista`: sobrescreve o GET (status/json); `chat(corpo, n, kind)`: sobrescreve o POST de chat; `segura`: promise que segura o chat; `ativos`: quem começa ativo.
+// `lista`: sobrescreve o GET (status/json); `chat(corpo, n, kind)`: sobrescreve o POST de chat; `segura`: promise (ou `kind => promise`) que segura o chat; `ativos`: quem começa ativo.
 async function abrir({ width, demo = false, ativos = ["detetive", "xerife"], lista, chat, segura, ativarErro, soltaAtivar, opts = {} }) {
   const { ctx, page, erros, ir } = await abrirPainel(browser, { width, demo, espera: "#askbar-input", ...opts });
   const pedidos = [], chats = [], ativacoes = [];
@@ -41,7 +41,7 @@ async function abrir({ width, demo = false, ativos = ["detetive", "xerife"], lis
     }
     const corpo = r.request().postDataJSON();
     chats.push({ kind, ...corpo, csrf: r.request().headers()["x-csrf-token"] });
-    await segura;
+    await (typeof segura === "function" ? segura(kind) : segura);
     const n = chats.length;
     return r.fulfill((chat && chat(corpo, n, kind)) || { json: { reply: `Resposta ${n} do ${kind}.`, context: `ctx-${n}`, redirects: [], usage: { used: n, limit: 100 } } });
   });
@@ -221,6 +221,21 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: dois agentes em voo: a resposta mais antiga que termina primeiro é anunciada ao leitor de tela`, async () => {
+    const solta = {}, presas = { detetive: new Promise((ok) => { solta.detetive = ok; }), xerife: new Promise((ok) => { solta.xerife = ok; }) };
+    const { ctx, page } = await abrir({ width, segura: (kind) => presas[kind] });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await enviar(page, "@Xerife algo fora do padrão?");
+    await page.locator(".chat > .msg-piggy").nth(1).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    solta.detetive();
+    await resposta(page, 0).locator(".msg-text", { hasText: "do detetive." }).waitFor(); // o número da resposta é a contagem de POSTs na hora da resposta: os dois já chegaram
+    await page.waitForFunction(() => /do detetive\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""), null, { timeout: 3000 });
+    solta.xerife();
+    await page.waitForFunction(() => /do xerife\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""), null, { timeout: 3000 });
+    await ctx.close();
+  });
+
   test(`${width}: o redirect "Perguntar ao Carteiro" manda a pergunta dele ao Carteiro`, async () => {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });
@@ -272,6 +287,19 @@ for (const width of TELAS) {
     assert.equal(await page.getByText("Não foi possível ativar o agente").count(), 0);
     await ctx.close();
   });
+
+  for (const [nome, ativarErro] of [["401", { status: 401, json: { detail: "Não autenticado." } }], ["CSRF (403 em texto)", { status: 403, json: { detail: "Token CSRF inválido ou ausente." } }]]) {
+    test(`${width}: "Ativar e responder" com ${nome}: "Sua sessão terminou", sem oferecer ativar de novo`, async () => {
+      const { ctx, page } = await abrir({ width, ativarErro });
+      await enviar(page, "@Repórter resume");
+      const r = resposta(page);
+      await r.getByRole("button", { name: "Ativar e responder" }).click();
+      await r.locator(".msg-text", { hasText: "Sua sessão terminou. Recarregue a página." }).waitFor();
+      assert.equal(await r.getByRole("button", { name: /Ativar e responder|Tentar de novo/ }).count(), 0);
+      assert.equal(await page.getByText("Não foi possível ativar o agente").count(), 0);
+      await ctx.close();
+    });
+  }
 
   test(`${width}: sem energia mostra o que falta e "Ver planos", sem POST`, async () => {
     const { ctx, page, chats, ativacoes } = await abrir({ width });

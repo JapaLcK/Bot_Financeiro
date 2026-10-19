@@ -65,6 +65,9 @@ const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: 
 const SEM_SENHA = "Crie sua senha para conversar com os agentes. Depois de criar, volte para o painel novo.";
 /** `/agents/*` fica fora do `/api/v2`: o corpo real é `{"detail":{"error":"password_required"}}`; `code` cobre o envelope v2. */
 const semSenha = (e: unknown) => e instanceof ErroApi && (e.code === "password_required" || detalheDe(e).error === "password_required");
+const SESSAO = "Sua sessão terminou. Recarregue a página.";
+// Sessão/CSRF: o mesmo TEXTO de MetasResposta/InvestidoResposta, critério próprio (401 e 403 sem `error` de objeto, que cobre o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado para este usuário" da troca de conta em outra aba). Repetir não adianta. Vale no chat e no "Ativar e responder".
+const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
 async function enviar(id: number, kind: string, texto: string, uid: number) {
   emVoo.add(kind);
@@ -79,10 +82,8 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
     const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;
     const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
     if (d.error === "invalid_context") contextos.delete(kind); // o próximo envio recomeça a conversa
-    // Sessão/CSRF/senha: o mesmo TEXTO de MetasResposta/InvestidoResposta, critério próprio (401, `password_required` e 403 sem `error` de objeto, que cobre o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado para este usuário" da troca de conta em outra aba). Repetir não adianta.
-    const sessao = e instanceof ErroApi && (status === 401 || (status === 403 && !d.error));
     if (acesso) patch(id, estadoSemChat(kind, acesso));
-    else if (semSenha(e) || sessao) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : "Sua sessão terminou. Recarregue a página.", repetir: false });
+    else if (semSenha(e) || sessaoDe(e)) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false });
     else patch(id, {
       estado: "erro",
       text: typeof d.message === "string" ? d.message
@@ -128,7 +129,7 @@ export async function ativarEResponder(id: number, depois: () => void) {
     const d = detalheDe(e), acesso = d.error === "no_energy" ? "no_energy" : d.error === "pro_required" ? "upgrade" : null;
     const energia = m.custo != null && m.livre != null ? { custo: m.custo, livre: m.livre } : undefined;
     patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso, energia) }
-      : semSenha(e) ? { ativando: false, estado: "erro", text: SEM_SENHA, repetir: false }
+      : semSenha(e) || sessaoDe(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false }
       : { ativando: false, falhaAtivar: true });
     emVoo.delete(m.agente);
     return;
