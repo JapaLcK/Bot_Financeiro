@@ -251,6 +251,17 @@ it("a cota enche durante a ativação: ativa, não pergunta, e o turno pede para
   expect(screen.getByText("Agente ativado. A pergunta não foi enviada: tente de novo quando puder.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Tentar de novo" }).props.accessibilityState.disabled).toBe(true);
 });
+it("limite diferente (troca de plano no meio): a resposta velha com o limite antigo não volta a cota, relê o servidor", async () => {
+  const g = segurar(); ag.chat = async (n) => { if (n === 1) { await g.promessa; return resp("Velha", { usage: { used: 99, limit: 100 } }); } return resp("Nova", { usage: { used: 5, limit: 200 } }); };
+  await abrir(); srv.uso = 5; srv.limite = 200; await enviar("@Xerife a"); await enviar("@Carteiro b"); await waitFor(() => expect(screen.getByText("Nova")).toBeTruthy());
+  await act(async () => { g.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Velha")).toBeTruthy()); await act(drenar);
+  expect(screen.queryByText("99 de 100 mensagens utilizadas")).toBeNull();
+});
+it("escolher na lista com o cursor no meio de '@repórter' troca o token inteiro", async () => {
+  ag.catalogo = (u) => cat(Number(u), {}, null); await abrir(); await digitar("@repórter oi");
+  await act(async () => { fireEvent(campo(), "selectionChange", { nativeEvent: { selection: { start: 4, end: 4 } } }); await drenar(); });
+  await toque("Repórter, Resumo do mês"); expect(campo().props.value).toBe("@Repórter oi");
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());

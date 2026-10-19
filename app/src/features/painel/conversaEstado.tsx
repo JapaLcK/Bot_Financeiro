@@ -49,13 +49,13 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
-  /** A cota que vem numa resposta: pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do modelo, então uma
-   * contagem MENOR com o mesmo limite não se aplica às cegas (pode ser velha, ou o mês que virou): relê a cota no servidor, e a leitura só entra se
-   * nenhuma outra cota foi gravada enquanto ela voava. Limite novo (troca de plano) entra direto. */
+  /** A cota que vem numa resposta: pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do modelo, então só
+   * entra direto a contagem MAIOR com o mesmo limite. Menor (velha, ou o mês que virou) ou limite diferente (troca de plano, ou uma resposta de antes
+   * dela) relê a cota no servidor, e a leitura só entra se nenhuma outra cota foi gravada enquanto ela voava. */
   const usoAtual = useRef(uso); usoAtual.current = uso;
   const aplicarUso = (n: Uso) => {
     versaoUso.current++; const u = usoAtual.current;
-    if (!u || u.limit !== n.limit || n.used >= u.used) { usoAtual.current = n; setUso(n); return; }
+    if (!u || (u.limit === n.limit && n.used >= u.used)) { usoAtual.current = n; setUso(n); return; }
     const alvo = dono.current, v0 = versaoUso.current, c = novo();
     void lerRecurso("/ai/messages?limit=1", conversaSchema, c).then((r) => { if (dono.current === alvo && versaoUso.current === v0) { usoAtual.current = r.usage; setUso(r.usage); } }, () => {}).finally(() => ativos.current.delete(c));
   };

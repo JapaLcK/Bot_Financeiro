@@ -25,9 +25,10 @@ it("agente indisponível não vira menção quando o catálogo é dado", () => {
   expect(mencaoDe("@Xerife oi", d)).toBeNull(); expect(mencaoDe("@Xerife oi")).not.toBeNull();
 });
 it("tokenEm: só o @ no começo ou depois de espaço, até o cursor", () => {
-  expect(tokenEm("@rep", 4)).toEqual({ ini: 0, q: "rep" });
-  expect(tokenEm("oi @Repó", 8)).toEqual({ ini: 3, q: "repo" }); expect(tokenEm("oi @Repo\u0301", 9)).toEqual({ ini: 3, q: "repo" });
-  expect(tokenEm("x@gmail", 7)).toBeNull(); expect(tokenEm("@rep oi", 7)).toBeNull(); expect(tokenEm("@rep oi", 4)).toEqual({ ini: 0, q: "rep" });
+  expect(tokenEm("@rep", 4)).toEqual({ ini: 0, fim: 4, q: "rep" });
+  expect(tokenEm("oi @Repó", 8)).toEqual({ ini: 3, fim: 8, q: "repo" }); expect(tokenEm("oi @Repo\u0301", 9)).toEqual({ ini: 3, fim: 9, q: "repo" });
+  expect(tokenEm("x@gmail", 7)).toBeNull(); expect(tokenEm("@rep oi", 7)).toBeNull(); expect(tokenEm("@rep oi", 4)).toEqual({ ini: 0, fim: 4, q: "rep" });
+  expect(tokenEm("@repórter oi", 4)).toEqual({ ini: 0, fim: 9, q: "rep" }); // cursor no meio do token: o fim é o do token, não o cursor
 });
 it("acessoDe: upgrade, no_energy, ready, activate e indisponível", () => {
   expect(acessoDe(cat({ can_chat: false }), "xerife")).toBe("upgrade");

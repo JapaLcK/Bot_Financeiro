@@ -68,10 +68,11 @@ export function mencaoDe(texto: string, dados?: Agentes) {
   const msg = (esq + (/^[?!.,;:]/.test(dir) ? "" : " ") + dir).replace(/\s+/g, " ").trim();
   return { kind: m.kind, texto: /[\p{L}\d]/u.test(msg) ? msg : "" };
 }
-/** O token em edição: "@" + letras até o cursor, logo depois de espaço ou no começo. */
+/** O token em edição: "@" + letras até o cursor, logo depois de espaço ou no começo; `fim` = onde as letras dele acabam (o cursor pode estar no meio). */
 export function tokenEm(texto: string, cursor: number) {
   const m = /(^|\s)@([\p{L}\p{M}]*)$/u.exec(texto.slice(0, cursor)); // \p{M}: o acento solto de um nome colado
-  return m ? { ini: cursor - m[2]!.length - 1, q: semAcento(m[2]!) } : null;
+  // fim: o token continua depois do cursor (cursor no meio de "@repórter"); escolher um item troca o token inteiro, não só o prefixo
+  return m ? { ini: cursor - m[2]!.length - 1, fim: cursor + /^[\p{L}\p{M}]*/u.exec(texto.slice(cursor))![0].length, q: semAcento(m[2]!) } : null;
 }
 /** Os agentes da lista do @: disponíveis, com o prefixo digitado (sem acento) e na ordem dos grupos; dentro do grupo, a do catálogo. */
 export function itensMencao(d: Agentes, q: string) {

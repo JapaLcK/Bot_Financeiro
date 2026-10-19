@@ -45,7 +45,7 @@ function ConversaTela({ aviso }: { aviso: string | null }) {
   const quer = !com.ativo && !p.oculto && TEM_ARROBA.test(c.rascunho), { ler, catalogo } = c.agentes; // sem `@`, nenhuma requisição a /agents
   useEffect(() => { if (quer) void ler(); }, [quer, ler]);
   const token = quer ? tokenEm(c.rascunho, cursor) : null, itens = token && catalogo ? itensMencao(catalogo, token.q) : [];
-  const escolher = (nome: string) => { const antes = c.rascunho.slice(0, token!.ini); c.setRascunho(`${antes}@${nome} ${c.rascunho.slice(cursor)}`); setCursor(antes.length + nome.length + 2); };
+  const escolher = (nome: string) => { const antes = c.rascunho.slice(0, token!.ini); c.setRascunho(`${antes}@${nome} ${c.rascunho.slice(token!.fim).replace(/^ /, "")}`); setCursor(antes.length + nome.length + 2); };
   const enviarCampo = () => { const t = c.rascunho; if (!TEM_ARROBA.test(t)) return void c.enviar(t, undefined, true); void c.agentes.rotear(t).then((r) => { if (r === "piggy") void c.enviar(t, undefined, true); }); };
   const ativo = com.ativo ? com.pode && !p.oculto : c.enviando || podeEnviar; // enviando = o botão vira "Parar" (permitido com valores ocultos: não revela nada)
   return <Screen rolar={false} sobAbas><View ref={pai} onLayout={() => pai.current?.measureInWindow((_x, y) => setTopoJanela(y))} style={{ flex: 1 }}>
