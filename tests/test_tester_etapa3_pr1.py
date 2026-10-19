@@ -1,4 +1,4 @@
-from datetime import date,datetime,timedelta,timezone
+from datetime import date,datetime,time,timedelta,timezone
 from decimal import Decimal as D
 from pathlib import Path
 import pytest
@@ -102,15 +102,16 @@ def test_tester_extra_assinado_legitimo_e_meio_centavo(pro_small_uid):
 def test_tester_pendencias_frontier_expirada_ia_e_categoria(user_id):
     from core.services.cashflow_snapshot import ler
     from db.ai_chat import PENDING_TTL_MINUTES
-    now=datetime.now(timezone.utc)
+    from utils_date import _tz
+    hoje=date.today();now=datetime.combine(hoje,time(12),_tz())  # meio-dia: longe da meia-noite BRT que `ler` usa como teto
     db.set_pending_action(user_id,'payment_method_choice',{'valor':20})
     boundary=now+timedelta(seconds=40)
     q('update pending_actions set expires_at=%s where user_id=%s',(boundary,user_id))
     with db.get_conn() as conn,conn.cursor() as cur:
         cur.execute('set transaction isolation level repeatable read,read only')
-        s=ler(cur,user_id,date.today(),date.today()+timedelta(days=30),now,False)
+        s=ler(cur,user_id,hoje,hoje+timedelta(days=30),now,False)
         assert s.valido_ate==boundary
-        later=ler(cur,user_id,date.today(),date.today()+timedelta(days=30),boundary+timedelta(seconds=1),False)
+        later=ler(cur,user_id,hoje,hoje+timedelta(days=30),boundary+timedelta(seconds=1),False)
         assert not any(m.codigo=='acao_financeira_pendente' for m in later.motivos)
         cur.execute('select count(*) n from pending_actions where user_id=%s',(user_id,))
         assert cur.fetchone()['n']==1
