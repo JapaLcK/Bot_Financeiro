@@ -44,7 +44,7 @@ Perfil, Cobrança, Configurações e Bancos conectados, mais o botão Sair (sem 
 vem em PRs, uma página por vez. O **Perfil** já é página de verdade (`conta/Perfil.tsx`: nome,
 e-mail e telefone editáveis em modal, WhatsApp e "Desde"; só ícone e valor, a palavra é para o
 leitor de tela); **Bancos conectados** também é página real (`conta/Bancos.tsx`: total, barra por banco, estado de cada conexão e desconectar um banco); só a Cobrança segue página-ponte (nome, e-mail e um link para a tela
-antiga); as Configurações mostram a Segurança (senha por link de e-mail e MFA) e os dispositivos conectados e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
+antiga); as Configurações mostram a Segurança (senha por link de e-mail e MFA), os dispositivos conectados, as preferências de notificação e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
 `/settings` antiga fica como saída de emergência. A tela "Assinaturas"
 (Netflix etc.) é outra coisa e já existe.
 

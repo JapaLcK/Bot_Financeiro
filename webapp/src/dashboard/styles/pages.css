@@ -248,6 +248,28 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .sess-falha { margin-top: 8px; font-size: 14px; }
 .sess-falha > .warn { display: block; }
 .sess-falha > .btn { margin-top: 8px; }
+/* Notificações (conta/Notificacoes.tsx): ícone + dado, e cada preferência com o interruptor à direita (grid, sem flex gap: Safari 14). */
+.conta-notif h2 { margin: 0 0 8px; font-size: 16px; }
+.notif-grupo + .notif-grupo { margin-top: 8px; }
+.notif-dado { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; margin: 0; font-size: 16px; font-weight: 500; }
+.notif-dado > i, .notif-hora > i { font-size: 20px; line-height: 1; color: var(--ink-3); }
+.notif-dado > span { min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+.notif-grupo ul { list-style: none; margin: 0; padding: 0; }
+.notif-grupo li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 14px; min-height: 44px; padding-left: 34px; font-size: 15px; }
+.notif-grupo li.notif-hora { grid-template-columns: auto minmax(0, 1fr) auto; padding-left: 0; }
+.notif-grupo label { padding: 10px 0; }
+.notif-grupo label .selo { margin-left: 6px; vertical-align: middle; }
+.notif-hora select.field { height: 44px; min-width: 96px; font-size: 15px; background-position: calc(100% - 15px) 20px, calc(100% - 10px) 20px; }
+.notif-hora select.field:disabled, .notif-switch:disabled { opacity: .45; }
+.notif-switch { -webkit-appearance: none; appearance: none; position: relative; width: 44px; height: 44px; margin: 0; border: 0; background: none; cursor: pointer; }
+.notif-switch::before { content: ""; position: absolute; left: 0; top: 10px; width: 44px; height: 24px; border-radius: 12px; background: var(--plane-3); box-shadow: inset 0 0 0 1px var(--rule-strong); transition: background .15s; }
+.notif-switch::after { content: ""; position: absolute; left: 3px; top: 13px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.notif-switch:checked::before { background: var(--pink); box-shadow: none; }
+.notif-switch:checked::after { transform: translateX(20px); }
+.notif-switch:disabled, .notif-switch[aria-disabled="true"], .notif-hora select.field[aria-disabled="true"] { cursor: default; }
+.notif-switch:focus-visible { outline: none; }
+.notif-switch:focus-visible::before { outline: 2px solid var(--pink); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .notif-switch::before, .notif-switch::after { transition: none; } }
 .cofre { display: grid; gap: 14px; }
 .cofre h2 { font-size: 18px; margin: 0; }
 .cofre p { margin: 0; }
