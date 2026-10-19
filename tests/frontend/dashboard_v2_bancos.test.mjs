@@ -23,6 +23,9 @@ const esperaCards = (page, n) => page.waitForFunction((n) => document.querySelec
 const semReticencias = (page) => page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…") && document.querySelector(".banco-total"), null, { timeout: 8000 });
 const totais = (page) => page.locator(".banco-card .banco-total").allTextContents();
 const corpo = (page) => page.locator("body").innerText();
+// O detalhe de um banco (dialog modal): abre pela linha `n` e devolve o locator dele; `fechaDetalhe` usa o X.
+const detalhe = async (page, n = 0) => { await page.locator(".banco-linha").nth(n).click(); const d = page.locator("dialog.banco-det[open]"); await d.waitFor(); return d; };
+const fechaDetalhe = async (page) => { await page.locator("dialog.banco-det[open]").getByRole("button", { name: "Fechar" }).click(); await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" }); };
 
 test("o topo é o total do servidor, não a soma dos cards: snapshot só com o banco 11 mostra R$ 67.000,00 no topo e R$ 45.000,00 no card", async () => {
   const { ctx, page, erros } = await bancos({ conexoes: [con(11, "Nubank")], bancos: "padrao" });
@@ -43,21 +46,26 @@ test("dois bancos com o mesmo nome: cada card tem o valor da SUA conexão (junç
   assert.deepEqual(cards, ["R$ 200,00", "R$ 100,00"]);
 });
 
-test("null é '—', nunca R$ 0,00: investido nulo, banco com tudo nulo e nenhuma 'R$ 0,00' na tela", async () => {
+test("null é '—', nunca R$ 0,00: investido nulo, banco com tudo nulo e nenhuma 'R$ 0,00' na tela (lista e detalhe)", async () => {
   const a = await bancos({ conexoes: [con(11, "Nubank")], bancos: "investido_nulo" });
   await esperaCards(a.page, 1);
   await semReticencias(a.page);
-  const um = { card: await a.page.locator(".banco-card").innerText(), corpo: await corpo(a.page) };
+  const d1 = await detalhe(a.page);
+  const um = { detalhe: await d1.locator(".banco-det-dados").innerText(), corpo: await corpo(a.page) };
   await a.ctx.close();
-  assert.match(um.card, /Conta R\$ 5\.000,00 · Investido —/);
+  assert.match(um.detalhe, /Em conta\s+R\$ 5\.000,00/);
+  assert.match(um.detalhe, /Investido\s+—/);
   assert.ok(!um.corpo.includes("R$ 0,00"), um.corpo);
   const b = await bancos({ bancos: "padrao" }); // o banco 13 do padrão: total, saldo e investido nulos
   await esperaCards(b.page, 3);
   await semReticencias(b.page);
-  const tres = { card: await b.page.locator(".banco-card").nth(2).innerText(), corpo: await corpo(b.page) };
+  const d3 = await detalhe(b.page, 2);
+  const tres = { linha: await b.page.locator(".banco-card").nth(2).innerText(), detalhe: await d3.locator(".banco-det-dados").innerText(), total: await d3.locator(".banco-det-total").innerText(), corpo: await corpo(b.page) };
   await b.ctx.close();
-  assert.match(tres.card, /Conta — · Investido —/);
-  assert.ok(!tres.corpo.includes("R$ 0,00"), tres.corpo);
+  assert.match(tres.detalhe, /Em conta\s+—/);
+  assert.match(tres.detalhe, /Investido\s+—/);
+  assert.equal(tres.total, "—");
+  assert.ok(!tres.corpo.includes("R$ 0,00") && !tres.linha.includes("R$ 0,00"), tres.corpo);
 });
 
 test("barra por banco: 2 segmentos e 'Nubank 67%, Inter 33%' quando fecha; some com motivo no topo ou no banco, 1 banco só, banco fora do snapshot, total nulo e soma que não fecha", async () => {
@@ -92,7 +100,7 @@ test("leituras opcionais: /bancos 500 e 404 deixam os cards com nome e pílula, 
     await esperaCards(page, 3);
     await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 }); // 500: 3 tentativas, ~3 s
     const r = {
-      nomes: await page.locator(".banco-card h2").allTextContents(), pilulas: await page.locator(".banco-card .selo").allTextContents(),
+      nomes: await page.locator(".banco-nome").allTextContents(), pilulas: await page.locator(".banco-estado").allTextContents(),
       totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count(),
       vagas: await corpo(page).then((t) => /\d+ de \d+ bancos/.test(t)),
     };
@@ -154,7 +162,7 @@ test("nenhum banco: o Piggy, 'Nenhum banco conectado.' e o link para conectar, s
   assert.deepEqual([r.href, r.topo, r.cards], ["/settings?view=open-finance", 0, 0]);
 });
 
-test("nenhum banco: 'Conectar banco' tem 44 px em 390×844 e em 1280×800, sem rolagem lateral (o mesmo link da lista com bancos)", async () => {
+test("nenhum banco: 'Conectar banco' tem 44 px em 390×844 e em 1280×800, sem rolagem lateral (só o estado vazio; na lista com bancos o '+' é o `.banco-mais`)", async () => {
   for (const [width, height] of [[390, 844], [1280, 800]]) {
     const { ctx, page } = await bancos({ conexoes: [], bancos: "vazio" }, { width, height });
     await page.locator(".empty img").waitFor({ timeout: 8000 });
@@ -165,16 +173,25 @@ test("nenhum banco: 'Conectar banco' tem 44 px em 390×844 e em 1280×800, sem r
   }
 });
 
-test("tempo de sincronia, com o relógio em 2026-10-02 15:00Z: há 12 min (6 casas de fração), há 3 h, há 2 dias; <time> com datetime e title; sem data não há <time>", async () => {
+test("tempo de sincronia (no detalhe), com o relógio em 2026-10-02 15:00Z: há 12 min (6 casas de fração), há 3 h, há 2 dias; <time> com datetime e title; sem data não há <time> nem a linha; a lista não tem <time>", async () => {
   const conexoes = [con(11, "Nubank", "updated", "Atualizado", "2026-10-02T14:47:59.123456+00:00"), con(12, "Inter", "updated", "Atualizado", "2026-10-02T12:00:00+00:00"),
     con(13, "Itaú", "updated", "Atualizado", "2026-09-30T15:00:00+00:00"), con(14, "Caixa", "updated", "Atualizado", null)];
   const { ctx, page } = await bancos({ conexoes, bancos: "padrao" });
   await esperaCards(page, 4);
-  const r = await page.locator(".banco-card").evaluateAll((cs) => cs.map((c) => { const t = c.querySelector("time"); return t && [t.textContent, t.getAttribute("datetime"), t.title]; }));
+  const naLista = await page.locator(".banco-card time").count();
+  const r = [];
+  for (let n = 0; n < 4; n++) {
+    const d = await detalhe(page, n);
+    const t = await d.locator("time").evaluateAll((l) => l.map((e) => [e.textContent, e.getAttribute("datetime"), e.title]));
+    r.push({ t: t[0] ?? null, linha: await d.getByText("Última atualização").count() });
+    await fechaDetalhe(page);
+  }
   await ctx.close();
-  assert.deepEqual(r.map((x) => x && x[0]), ["há 12 min", "há 3 h", "há 2 dias", null]);
-  assert.equal(r[0][1], "2026-10-02T14:47:59.123456+00:00");
-  assert.match(r[0][2], /^02\/10\/2026,? 11:47$/); // o title em São Paulo
+  assert.equal(naLista, 0);
+  assert.deepEqual(r.map((x) => x.t && x.t[0]), ["há 12 min", "há 3 h", "há 2 dias", null]);
+  assert.deepEqual(r.map((x) => x.linha), [1, 1, 1, 0]);
+  assert.equal(r[0].t[1], "2026-10-02T14:47:59.123456+00:00");
+  assert.match(r[0].t[2], /^02\/10\/2026,? 11:47$/); // o title em São Paulo
 });
 
 test("cor do banco: Itaú na cor da marca; Nubank (roxo, 2,64:1 sobre o card), BTG (azul-marinho) e banco desconhecido na escala de tinta", async () => {
@@ -189,13 +206,17 @@ test("cor do banco: Itaú na cor da marca; Nubank (roxo, 2,64:1 sobre o card), B
   assert.ok(tintas.includes(cores[3]), `BTG: ${cores[3]}`);
 });
 
-test("pílula do estado: updated é ok, needs_user_action é erro, estado desconhecido é pendente (nunca verde); texto de ui.label e ui.detail na tela", async () => {
+test("estado: updated é ok (pontinho verde), needs_user_action é erro (laranja), estado desconhecido é pendente (âmbar, nunca verde); o rótulo de ui.label está na linha e ui.detail só no detalhe", async () => {
   const conexoes = [con(11, "Nubank", "updated", "Atualizado"), con(12, "Inter", "needs_user_action", "Reconectar", undefined, "O banco pediu novo login."), con(13, "Itaú", "foo", ""), con(14, "Caixa", "constructor", "")];
   const { ctx, page } = await bancos({ conexoes, bancos: "padrao" });
   await esperaCards(page, 4);
-  const r = await page.locator(".banco-card").evaluateAll((cs) => cs.map((c) => { const s = c.querySelector(".selo"); return [s.className.replace("selo ", ""), s.textContent, c.innerText.includes("O banco pediu novo login.")]; }));
+  const r = await page.locator(".banco-card").evaluateAll((cs) => cs.map((c) => { const s = c.querySelector(".banco-estado"); return [s.className.replace("banco-estado ", ""), s.textContent, getComputedStyle(s.querySelector(".ponto")).backgroundColor, c.innerText.includes("O banco pediu novo login.")]; }));
+  const d = await detalhe(page, 1);
+  const noDetalhe = await d.innerText();
   await ctx.close();
-  assert.deepEqual(r, [["selo-ok", "Atualizado", false], ["selo-erro", "Reconectar", true], ["selo-pendente", "Pendente", false], ["selo-pendente", "Pendente", false]]); // "constructor" não é estado: pendente, não "selo-function Object()…"
+  // "constructor" não é estado: pendente, não "estado-function Object()…"
+  assert.deepEqual(r, [["estado-ok", "Atualizado", "rgb(61, 220, 151)", false], ["estado-erro", "Reconectar", "rgb(255, 122, 69)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false]]);
+  assert.ok(noDetalhe.includes("O banco pediu novo login.") && noDetalhe.includes("Reconectar"), noDetalhe);
 });
 
 test("rota e isolamento: lê /open-finance/7 e /open-finance/7/limite (nunca /api/v2/open-finance); perfil sem user_id válido não pede nada de /open-finance e mostra o erro", async () => {
@@ -233,33 +254,37 @@ test("decimal em notação científica não derruba a tela: '1E-7' vira R$ 0,000
   const { ctx, page, erros } = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "cientifico" });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const t = await corpo(page);
+  const d = await detalhe(page, 0); // o "R$ 0,00" é o investido "0" do 1º banco
+  const t = await corpo(page) + await d.innerText();
   await ctx.close();
   for (const esperado of ["R$ 0,0000001", "R$ 1.000,00", "R$ 0,00"]) assert.ok(t.includes(esperado), `${esperado} em ${t}`);
   assert.deepEqual(erros, []);
 });
 
-test("layout 1280×800: dois cards lado a lado, no mesmo topo; 390×844: uma coluna, sem rolagem lateral, 'Conectar banco' com 44 px; 320 com nome de 60 letras sem espaço também", async () => {
+test("layout 1280×800: dois cards lado a lado, no mesmo topo; 390×844: uma coluna, sem rolagem lateral, o botão mais de conectar e a linha com 44 px; nome de 70 letras sem espaço a 320, 375 e 1280 também", async () => {
   const a = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width: 1280, height: 800 });
   await esperaCards(a.page, 2);
   const caixas = await a.page.locator(".banco-card").evaluateAll((l) => l.map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; }));
   await a.ctx.close();
   assert.equal(caixas[0].top, caixas[1].top);
   assert.notEqual(caixas[0].left, caixas[1].left);
-  const medidas = (page) => page.evaluate(() => ({ lateral: document.documentElement.scrollWidth - innerWidth, botao: Math.round([...document.querySelectorAll("a.btn")].find((e) => e.textContent.includes("Conectar banco")).getBoundingClientRect().height), lefts: [...document.querySelectorAll(".banco-card")].map((e) => Math.round(e.getBoundingClientRect().left)) }));
+  const medidas = (page) => page.evaluate(() => ({ lateral: document.documentElement.scrollWidth - innerWidth, botao: Math.round(document.querySelector("a.banco-mais").getBoundingClientRect().height), linha: Math.round(document.querySelector(".banco-linha").getBoundingClientRect().height), lefts: [...document.querySelectorAll(".banco-card")].map((e) => Math.round(e.getBoundingClientRect().left)) }));
   const b = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width: 390, height: 844 });
   await esperaCards(b.page, 2);
   const m = await medidas(b.page);
   await b.ctx.close();
   assert.equal(m.lateral, 0);
   assert.equal(new Set(m.lefts).size, 1); // uma coluna
-  assert.ok(m.botao >= 44, `botão com ${m.botao}px`);
-  const longo = "W".repeat(60);
-  const c = await bancos({ conexoes: [con(11, longo), con(12, "Inter")], bancos: "barra" }, { width: 320, height: 800 });
-  await esperaCards(c.page, 2);
-  const l = await medidas(c.page);
-  await c.ctx.close();
-  assert.equal(l.lateral, 0);
+  assert.ok(m.botao >= 44 && m.linha >= 44, `botão com ${m.botao}px, linha com ${m.linha}px`);
+  const longo = "W".repeat(70);
+  for (const width of [320, 375, 1280]) {
+    const c = await bancos({ conexoes: [con(11, longo), con(12, "Inter")], bancos: "barra" }, { width, height: 800 });
+    await esperaCards(c.page, 2);
+    await semReticencias(c.page);
+    const l = await medidas(c.page);
+    await c.ctx.close();
+    assert.equal(l.lateral, 0, `${width}: rolagem lateral`);
+  }
 });
 
 // ---- Achados do Tester no W1 ----
@@ -374,7 +399,7 @@ test("/bancos fora do contrato (sem 'bancos', sem 'motivos', banco sem 'motivos'
     const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoRuim });
     await esperaCards(page, 2);
     await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 });
-    const r = { nomes: await page.locator(".banco-card h2").allTextContents(), totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count() };
+    const r = { nomes: await page.locator(".banco-nome").allTextContents(), totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count() };
     await ctx.close();
     assert.deepEqual(r, { nomes: ["Nubank", "Inter"], totais: ["—", "—"], topo: 0, barra: 0 }, JSON.stringify(corpoRuim));
     assert.deepEqual(erros, [], JSON.stringify(corpoRuim));
@@ -411,7 +436,8 @@ test("snapshot fora do contrato não derruba a SPA: institution_name número, ui
   const feia = con(11, 5, "updated", { a: 1 }, 5, { b: 2 });
   const { ctx, page, erros } = await bancos({ conexoes: [feia, con(12, "Inter")], bancos: "barra" });
   await esperaCards(page, 2);
-  const r = { nomes: await page.locator(".banco-card h2").allTextContents(), selo: await page.locator(".banco-card").first().locator(".selo").innerText(), card: await page.locator(".banco-card").first().innerText(), tempos: await page.locator(".banco-card").first().locator("time").count() };
+  const d = await detalhe(page, 0);
+  const r = { nomes: await page.locator(".banco-nome").allTextContents(), selo: await page.locator(".banco-card").first().locator(".banco-estado").innerText(), card: await page.locator(".banco-card").first().innerText() + await d.innerText(), tempos: await d.locator("time").count() };
   await ctx.close();
   assert.deepEqual(r.nomes, ["Banco", "Inter"]);
   assert.equal(r.selo, "Pendente");
@@ -626,7 +652,7 @@ const comLogo = (opts = {}) => bancos({ conexoes: [con(11, "Itaú Unibanco", "up
 const ini = (page, n) => page.locator(".banco-card").nth(n).locator(".banco-ini");
 const bg = (loc) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
 
-test("logo: com logo_url o círculo traz a imagem (alt vazio, src do servidor, carregada), sem a letra, em fundo claro neutro; o banco sem logo segue com letra e cor", async () => {
+test("logo: com logo_url o ladrilho traz a imagem (alt vazio, src do servidor, carregada), sem a letra, em fundo claro neutro; o banco sem logo segue com letra e cor", async () => {
   const { ctx, page, srv, erros } = await comLogo();
   await esperaCards(page, 2);
   await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
@@ -680,28 +706,236 @@ test("logo: sem logo_url (null, ausente, número) ou com URL fora da regra (http
   assert.deepEqual(erros, []);
 });
 
-test("logo: nenhum texto novo (o nome é o mesmo h2; o resto do card é idêntico ao do banco sem logo) e o círculo segue aria-hidden", async () => {
+test("logo: nenhum texto novo (o nome é o mesmo; o resto da linha é idêntico ao do banco sem logo) e o ladrilho segue aria-hidden", async () => {
   const { ctx, page } = await bancos({ conexoes: [con(11, "Alfa", "updated", "Atualizado", undefined, null, LOGO), con(11, "Alfa")], bancos: "padrao" });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const lado = (n) => page.locator(".banco-card").nth(n).evaluate((c) => [".banco-id", ".banco-total", ".banco-resto"].map((s) => c.querySelector(s).innerText));
-  const r = { a: await lado(0), b: await lado(1), h2: await page.locator(".banco-card h2").allInnerTexts(), aria: await page.locator(".banco-ini").evaluateAll((l) => l.map((e) => e.getAttribute("aria-hidden"))) };
+  const lado = (n) => page.locator(".banco-card").nth(n).evaluate((c) => [".banco-id", ".banco-total"].map((s) => c.querySelector(s).innerText));
+  const r = { a: await lado(0), b: await lado(1), nomes: await page.locator(".banco-nome").allInnerTexts(), aria: await page.locator(".banco-ini").evaluateAll((l) => l.map((e) => e.getAttribute("aria-hidden"))) };
   await ctx.close();
   assert.deepEqual(r.a, r.b);
-  assert.deepEqual(r.h2, ["Alfa", "Alfa"]);
+  assert.deepEqual(r.nomes, ["Alfa", "Alfa"]);
   assert.deepEqual(r.aria, ["true", "true"]);
 });
 
-test("logo: a imagem cabe no círculo de 36×36 em 1280×800 e em 390×844, sem rolagem lateral", async () => {
+test("logo: a imagem cabe no ladrilho de 44×44 da linha e no de 64×64 do detalhe, em 1280×800 e em 390×844, sem rolagem lateral", async () => {
   for (const [width, height] of [[1280, 800], [390, 844]]) {
     const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank", "updated", "Atualizado", undefined, null, LOGO)], bancos: "padrao" }, { width, height });
     await esperaCards(page, 1);
-    await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
-    const r = await page.evaluate(() => {
-      const c = document.querySelector(".banco-ini").getBoundingClientRect(), i = document.querySelector(".banco-ini img").getBoundingClientRect();
-      return { c: [c.width, c.height], i: [i.width, i.height], dentro: i.left >= c.left && i.top >= c.top && i.right <= c.right && i.bottom <= c.bottom, lateral: document.documentElement.scrollWidth > innerWidth };
-    });
+    const medir = async (seletor) => {
+      await page.waitForFunction((s) => { const i = document.querySelector(`${s} .banco-ini img`); return i && i.complete && i.naturalWidth > 0; }, seletor, { timeout: 8000 });
+      return page.evaluate((s) => {
+        const c = document.querySelector(`${s} .banco-ini`).getBoundingClientRect(), i = document.querySelector(`${s} .banco-ini img`).getBoundingClientRect();
+        return { c: [c.width, c.height], i: [i.width, i.height], dentro: i.left >= c.left && i.top >= c.top && i.right <= c.right && i.bottom <= c.bottom, lateral: document.documentElement.scrollWidth > innerWidth };
+      }, seletor);
+    };
+    const linha = await medir(".banco-linha");
+    await detalhe(page);
+    const grande = await medir("dialog.banco-det[open]");
     await ctx.close();
-    assert.deepEqual(r, { c: [36, 36], i: [36, 36], dentro: true, lateral: false }, `${width}x${height}`);
+    assert.deepEqual(linha, { c: [44, 44], i: [44, 44], dentro: true, lateral: false }, `${width}x${height} linha`);
+    assert.deepEqual(grande, { c: [64, 64], i: [64, 64], dentro: true, lateral: false }, `${width}x${height} detalhe`);
   }
+});
+
+// ---- A linha clicável e o detalhe (sem o "Gerenciar") ----
+const dois_ = [con(11, "Nubank"), con(12, "Inter")];
+const foco = (page) => page.evaluate(() => { const e = document.activeElement; return e?.classList?.contains("banco-linha") ? e.querySelector(".banco-nome").textContent : e?.id || e?.tagName; });
+const noFoco = (page, t) => page.waitForFunction((t) => { const e = document.activeElement; return (e?.classList?.contains("banco-linha") ? e.querySelector(".banco-nome").textContent : e?.id || e?.tagName) === t; }, t, { timeout: 8000 });
+
+test("a linha é um <button> de 44 px+ com o chevron; sem <details>/<summary> nem 'Gerenciar' na página; a linha só tem nome, estado e total (e a barra conta × investido)", async () => {
+  const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const r = await page.evaluate(() => {
+    const b = document.querySelector(".banco-linha");
+    return { tag: b.tagName, tipo: b.getAttribute("type"), alto: Math.round(b.getBoundingClientRect().height), chevron: !!b.querySelector(".ph-caret-right[aria-hidden=true]"), details: document.querySelectorAll("details, summary").length,
+      gerenciar: document.body.innerText.includes("Gerenciar"), texto: b.innerText.split("\n").map((t) => t.trim()).filter(Boolean), barra: b.querySelector(".banco-barra")?.getAttribute("aria-label") };
+  });
+  await ctx.close();
+  assert.deepEqual([r.tag, r.tipo, r.chevron, r.details, r.gerenciar], ["BUTTON", "button", true, 0, false]);
+  assert.ok(r.alto >= 44, `linha com ${r.alto}px`);
+  assert.deepEqual(r.texto, ["N", "Nubank", "Atualizado", "R$ 45.000,00"]); // a inicial do ladrilho, o nome, o estado e o total; sem "há N min", contagens, "Conta … · Investido …" nem ui.detail
+  assert.equal(r.barra, "Em conta 11%, investido 89%"); // 5.000 × 40.000
+});
+
+test("barra conta × investido da linha: só com os dois números, sem ressalva do servidor; 'investido 0' vira um segmento só", async () => {
+  const lido = async (bancos_) => {
+    const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank")], bancos: bancos_ });
+    await esperaCards(page, 1);
+    await semReticencias(page);
+    const r = await page.locator(".banco-barra").evaluateAll((l) => l.map((e) => [e.getAttribute("aria-label"), e.getAttribute("role"), e.children.length]));
+    await ctx.close();
+    return r;
+  };
+  assert.deepEqual(await lido("barra"), [["Em conta 11%, investido 89%", "img", 2]]); // o banco 12 que o snapshot não conhece só afeta a barra do topo
+  const um = (o) => ({ ...corpoBancos("1.00", [[11, "1.00"]]), bancos: [{ conexao_id: 11, saldo_conta: "5000.00", investido: "40000.00", total: "45000.00", contas: 1, cartoes: 0, investimentos: 1, motivos: [], ...o }] });
+  assert.deepEqual(await lido(um({})), [["Em conta 11%, investido 89%", "img", 2]]);
+  assert.deepEqual(await lido(um({ investido: "0" })), [["Em conta 100%, investido 0%", "img", 1]]);
+  assert.deepEqual(await lido(um({ investido: null })), []); // número nulo: sem barra
+  assert.deepEqual(await lido(um({ saldo_conta: null })), []);
+  assert.deepEqual(await lido(um({ investido: "-1.00" })), []);
+  assert.deepEqual(await lido(um({ motivos: ["conexao_pausada"] })), []); // ressalva do servidor: o número é incerto
+  assert.deepEqual(await lido(um({ saldo_conta: "0", investido: "0" })), []); // nada a comparar
+});
+
+test("o detalhe: nome, estado, ui.detail, total grande, linhas Última atualização / Em conta / Investido e só as contagens > 0 com ícone; 'Desconectar banco' no fim; nada de Reconectar, nem card dentro de card", async () => {
+  const conexoes = [con(11, "Nubank", "needs_user_action", "Reconectar", undefined, "O banco pediu novo login."), con(12, "Inter")];
+  const { ctx, page } = await bancos({ conexoes, bancos: "barra" });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const d = await detalhe(page, 0);
+  const r = await d.evaluate((e) => ({
+    nome: e.querySelector("h2").textContent, labelledby: e.getAttribute("aria-labelledby") === e.querySelector("h2").id, estado: e.querySelector(".banco-estado").textContent, nota: e.querySelector(".banco-det-id p")?.textContent, total: e.querySelector(".banco-det-total").textContent,
+    linhas: [...e.querySelectorAll(".banco-det-dados > div:not(:has(.banco-det-cont))")].map((l) => l.innerText.replace(/\s+/g, " ").trim()),
+    contagens: [...e.querySelectorAll(".banco-det-cont > span")].map((x) => [x.querySelector(".ph").className.replace("ph ", ""), x.querySelector("b").textContent, x.querySelector(".sr-only").textContent]),
+    botoes: [...e.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") || b.textContent.trim()), paineis: e.querySelectorAll(".panel").length, reconectar: /reconectar banco/i.test(e.innerText),
+    seguro: (() => {
+      const t = "Conexão regulamentada pelo Banco Central, oficial pelo Open Finance.", f = [...e.querySelectorAll(".banco-det-seguro")].find((x) => x.textContent.trim() === t);
+      const lum = (c) => { const [r, g, b] = c.match(/\d+/g).slice(0, 3).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+      const cs = f && getComputedStyle(f), l1 = f && lum(cs.color), l2 = f && lum(cs.backgroundColor);
+      return { noDetalhe: !!f, naLista: !!document.querySelector(".banco-linha")?.innerText.includes("Banco Central"), depoisDasLinhas: !!f && !!(e.querySelector(".banco-det-dados").compareDocumentPosition(f) & 4), antesDoBotao: !!f && !!(f.compareDocumentPosition(e.querySelector(".banco-det-acoes")) & 4),
+        link: f ? f.querySelectorAll("a, button").length : -1, contraste: !!f && (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05) >= 4.5 };
+    })(),
+  }));
+  await ctx.close();
+  assert.equal(r.nome, "Nubank");
+  assert.ok(r.labelledby);
+  assert.deepEqual([r.estado, r.nota, r.total], ["Reconectar", "O banco pediu novo login.", "R$ 45.000,00"]);
+  assert.deepEqual(r.linhas.map((l) => l.replace(/há .*/, "há …")), ["Última atualização há …", "Em conta R$ 5.000,00", "Investido R$ 40.000,00"]);
+  assert.deepEqual(r.contagens, [["ph-bank", "2", "2 contas"], ["ph-credit-card", "1", "1 cartão"], ["ph-chart-line-up", "3", "3 investimentos"]]);
+  assert.deepEqual(r.botoes, ["Fechar", "Desconectar banco"]);
+  assert.deepEqual(r.seguro, { noDetalhe: true, naLista: false, depoisDasLinhas: true, antesDoBotao: true, link: 0, contraste: true }); // faixa estática, só no detalhe
+  assert.deepEqual([r.paineis, r.reconectar], [0, false]);
+});
+
+test("o detalhe só lista as contagens > 0 (o Inter não tem cartão)", async () => {
+  const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const d = await detalhe(page, 1);
+  const r = await d.locator(".banco-det-cont span .sr-only").allTextContents();
+  await ctx.close();
+  assert.deepEqual(r, ["1 conta", "2 investimentos"]);
+});
+
+for (const semDialog of [false, true]) {
+  test(`${semDialog ? "sem <dialog>" : "nativo"}: a linha abre o detalhe (foco no X); X, Esc e clique no fundo fecham e o foco volta à linha`, async () => {
+    const { ctx, page, erros } = await bancos({ conexoes: dois_, bancos: "barra" }, { width: 1280, height: 800, semDialog });
+    await esperaCards(page, 2);
+    await semReticencias(page);
+    const aberto = () => page.locator("dialog.banco-det[open]").count();
+    await page.evaluate(() => document.querySelectorAll(".banco-linha").forEach((b) => b.addEventListener("mousedown", (e) => e.preventDefault()))); // como o Safari: clicar num botão não o foca, então o foco a devolver é o que o código escolhe, não o do navegador
+    await page.locator(".banco-linha").nth(1).click();
+    await page.locator("dialog.banco-det[open]").waitFor();
+    const abertura = { n: await aberto(), foco: await page.evaluate(() => document.activeElement.getAttribute("aria-label")) };
+    const saidas = {};
+    await page.locator("dialog.banco-det[open]").getByRole("button", { name: "Fechar" }).click();
+    await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" });
+    saidas.x = await foco(page);
+    await page.locator(".banco-linha").nth(0).click();
+    await page.locator("dialog.banco-det[open]").waitFor();
+    await page.keyboard.press("Escape");
+    await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" });
+    saidas.esc = await foco(page);
+    await page.locator(".banco-linha").nth(1).click();
+    await page.locator("dialog.banco-det[open]").waitFor();
+    await page.waitForTimeout(500); // a janela do clique no fundo
+    await page.mouse.click(300, 400); // fora do painel (à direita no nativo, centrado no fallback) e do trilho
+    await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" });
+    saidas.fundo = await foco(page);
+    await ctx.close();
+    assert.deepEqual(abertura, { n: 1, foco: "Fechar" });
+    assert.deepEqual(saidas, { x: "Inter", esc: "Nubank", fundo: "Inter" });
+    assert.deepEqual(erros, []);
+  });
+}
+
+test("o detalhe fecha sozinho quando a conexão some (outra aba a tirou) e o foco vai ao título", async () => {
+  const { ctx, page, srv } = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  await detalhe(page, 0);
+  srv.conexoes = srv.conexoes.filter((c) => c.id !== 11);
+  await refoco(page);
+  await page.locator("dialog.banco-det[open]").waitFor({ state: "detached", timeout: 8000 });
+  await esperaCards(page, 1);
+  await noFoco(page, "page-title");
+  const r = await page.locator("dialog.banco-det").count();
+  await ctx.close();
+  assert.equal(r, 0);
+});
+
+test("o '+' do topo: link redondo de 44 px com o nome 'Conectar banco' e o href do Open Finance; sem ele quando o servidor não deixa; nenhum botão 'Conectar banco' em texto na lista", async () => {
+  const a = await bancos({ conexoes: dois_, bancos: "barra" });
+  await esperaCards(a.page, 2);
+  const mais = a.page.getByRole("link", { name: "Conectar banco", exact: true });
+  const r = { n: await mais.count(), href: await mais.getAttribute("href"), medida: await mais.evaluate((e) => [Math.round(e.getBoundingClientRect().width), Math.round(e.getBoundingClientRect().height), e.textContent.trim(), !!e.closest("header")]) };
+  await a.ctx.close();
+  assert.deepEqual(r, { n: 1, href: "/settings?view=open-finance", medida: [44, 44, "", true] });
+  const b = await bancos({ conexoes: dois_, bancos: "barra", limite: LIMITE({ pode_adicionar: false, message: "Plano cheio." }) });
+  await esperaCards(b.page, 2);
+  const sem = await b.page.getByRole("link", { name: "Conectar banco" }).count();
+  await b.ctx.close();
+  assert.equal(sem, 0);
+});
+
+// O mesmo gesto no detalhe do banco (useDialogo): apertar no texto do painel e soltar no fundo não fecha; o clique simples no fundo fecha.
+test("arrastar de dentro do detalhe e soltar no fundo não fecha o detalhe; o clique simples no fundo fecha", async () => {
+  const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" }, { width: 1280, height: 800 });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const d = await detalhe(page, 0);
+  await page.waitForTimeout(500); // a janela do clique no fundo
+  const h2 = await d.locator("h2").boundingBox();
+  await page.mouse.move(h2.x + 3, h2.y + h2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(300, 400, { steps: 8 }); // o fundo, à esquerda do painel
+  await page.mouse.up();
+  assert.equal(await page.locator("dialog.banco-det[open]").count(), 1); // antes do clique seguinte: fechado, ele cairia na lista por baixo
+  await page.mouse.click(300, 400);
+  await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" });
+  await ctx.close();
+});
+
+// Cor da composição (conta × investido): dado usa neutro/série, nunca o rosa de decisão; o pontinho do detalhe tem a cor do segmento da barra.
+test("a barra conta × investido não usa o rosa; o pontinho de 'Em conta' e 'Investido' no detalhe tem a cor do segmento e contraste >= 3:1 com o painel", async () => {
+  const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" }, { width: 1280, height: 800 });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const barra = await page.locator(".banco-barra").first().evaluate((b) => ({ cores: [...b.children].map((x) => getComputedStyle(x).backgroundColor), painel: getComputedStyle(b.closest(".panel")).backgroundColor }));
+  const d = await detalhe(page, 0);
+  const marcas = await d.locator(".banco-det-dados .marca").evaluateAll((l) => l.map((x) => [x.closest("dt").textContent, getComputedStyle(x).backgroundColor, x.getAttribute("aria-hidden")]));
+  await ctx.close();
+  const lum = (c) => { const [r, g, b] = c.match(/\d+/g).slice(0, 3).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const razao = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+  assert.equal(barra.cores.length, 2);
+  assert.ok(!barra.cores.includes("rgb(255, 45, 142)"), barra.cores.join()); // --pink
+  assert.notEqual(barra.cores[0], barra.cores[1]);
+  for (const c of barra.cores) assert.ok(razao(c, barra.painel) >= 3, `${c} contra ${barra.painel}`);
+  assert.deepEqual(marcas, [["Em conta", barra.cores[0], "true"], ["Investido", barra.cores[1], "true"]]);
+});
+
+// O X do detalhe fica à vista com o conteúdo rolado (a ação "Desconectar banco" do fim também), sem cobrir o conteúdo em repouso.
+test("375×500: o X do detalhe segue visível depois de rolar até o fim, e em repouso não cobre o nome", async () => {
+  const nota = "O banco pediu novo login e uma confirmação extra no aplicativo dele. ".repeat(4);
+  const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank", "needs_user_action", "Reconectar", undefined, nota), con(12, "Inter")], bancos: "barra" }, { width: 375, height: 500 });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const d = await detalhe(page, 0);
+  const x = d.getByRole("button", { name: "Fechar" });
+  const em = async () => {
+    const [bx, h2, desc] = await Promise.all([x.boundingBox(), d.locator("h2").boundingBox(), d.getByRole("button", { name: "Desconectar banco" }).boundingBox()]);
+    const topo = await x.evaluate((e) => { const r = e.getBoundingClientRect(), a = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return e === a || e.contains(a); });
+    return { x: bx, h2, desc, topo, rolado: await d.evaluate((e) => e.scrollTop), cabe: await d.evaluate((e) => e.scrollHeight > e.clientHeight) };
+  };
+  const repouso = await em();
+  await d.evaluate((e) => { e.scrollTop = e.scrollHeight; });
+  await page.waitForTimeout(100);
+  const fim = await em();
+  await ctx.close();
+  assert.ok(repouso.cabe && repouso.rolado === 0 && repouso.topo, JSON.stringify(repouso));
+  assert.ok(repouso.h2.y >= repouso.x.y + repouso.x.height, `o X cobre o nome em repouso: ${JSON.stringify(repouso)}`);
+  assert.ok(fim.rolado > 0 && fim.x.y >= 0 && fim.x.y + fim.x.height <= 500 && fim.topo, `o X saiu da tela: ${JSON.stringify(fim)}`);
+  assert.ok(fim.desc.y >= 0 && fim.desc.y + fim.desc.height <= 500, `o Desconectar saiu da dobra: ${JSON.stringify(fim)}`);
 });

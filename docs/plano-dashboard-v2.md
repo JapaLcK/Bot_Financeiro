@@ -876,7 +876,7 @@ reserva em meta comum e apagar. Decisões do dono: o card "Metas e caixinhas" SA
 hook `useDialogo` (`parts/dialog.ts`) é o esqueleto de modal do `LancamentoForm` e do
 `MetaForm`: o clique no fundo só vale passada a `JANELA_DO_FUNDO`, então o 2º clique de um
 duplo clique no botão que abriu o diálogo não o fecha (vale também para o lançamento da
-Carteira). Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
+Carteira). O mesmo clique também só vale se o ponteiro DESCEU no fundo (`onPointerDown`): apertar dentro do painel, arrastar a seleção e soltar no fundo não fecha nem perde o digitado. Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
 fonte padrão da meta nova é a conta (`MetaFonte`). Validação e mensagem do valor em dinheiro
 são uma só para lançamento e meta (`lib/format.js`); `DIAS_MINIMOS` e `MESES_PADRAO` de
 `lib/metas-textos.ts` copiam constantes do servidor e `tests/test_metas_textos_constantes.py`

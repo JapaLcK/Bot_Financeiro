@@ -55,6 +55,7 @@ export const FOCUS = 'input:not(:disabled), select:not(:disabled), button:not(:d
 export function useDialogo(fechar: () => void, travado?: () => boolean) {
   const dlg = useRef<HTMLDialogElement>(null);
   const abertoEm = useRef(0);
+  const desceu = useRef<EventTarget | null>(null); // onde o ponteiro desceu: soltar no fundo depois de apertar dentro do painel (arrastar a seleção) não é clique no fundo
   useEffect(() => {
     const d = dlg.current;
     abertoEm.current = performance.now();
@@ -86,7 +87,12 @@ export function useDialogo(fechar: () => void, travado?: () => boolean) {
       if (!travado || !d || d.open) return;
       if (travado()) d.showModal(); else fechar();
     },
-    onClick: (e: { target: EventTarget }) => { if (e.target === dlg.current) fundo(); },
+    onPointerDown: (e: { target: EventTarget }) => { desceu.current = e.target; },
+    onClick: (e: { target: EventTarget }) => {
+      const nasceuDentro = desceu.current && desceu.current !== dlg.current; // sem ponteiro (click() programático) vale como antes
+      desceu.current = null;
+      if (e.target === dlg.current && !nasceuDentro) fundo();
+    },
   };
   return { dlg, fecharDialog, fundo, props };
 }

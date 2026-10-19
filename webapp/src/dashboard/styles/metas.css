@@ -33,8 +33,8 @@
 .metas-chat ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 /* Cor de série da pílula: a reserva é sempre o rosa da marca; as outras ganham uma de 4 pelo `id` da meta
    (data-serie, MetaPilula.tsx), estável entre listas. Longe do verde (batida), do âmbar e do laranja (estado);
-   o ⚠ segue neutro. Washes como rgba (sem color-mix: Safari 14). Contraste das 5 contra --plane-2 e --plane-3: ≥ 4,8:1. */
-.metas-chat {
+   o ⚠ segue neutro. Os tokens valem na página inteira (`:root`): a barra do investido de Bancos (bancos.css) lê a `--serie-1`. Washes como rgba (sem color-mix: Safari 14). Contraste das 5 contra --plane-2 e --plane-3: ≥ 4,8:1. */
+:root {
   --serie-1: #22d3ee; --serie-1-wash: rgba(34, 211, 238, 0.12);
   --serie-2: #c084fc; --serie-2-wash: rgba(192, 132, 252, 0.12);
   --serie-3: #60a5fa; --serie-3-wash: rgba(96, 165, 250, 0.12);

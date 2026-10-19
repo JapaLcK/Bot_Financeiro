@@ -1782,7 +1782,7 @@ catálogo, `mock_pluggy` e `institution_id = "pluggy"` (item sem `connector` nem
 Ids de produção das 4 antigas, medidos pelo dono em 2026-10-18: 611, 612, 651, 775; que o catálogo
 real os liste só se prova depois do deploy. O servidor NÃO fixa o host (`logo_url_valida` segue
 aceitando qualquer https); quem fixa é o cliente.
-No /painel (`conta/BancoCard.tsx`) o círculo troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,
+No /painel (`conta/BancoCard.tsx`, `Ladrilho`) o ladrilho quadrado arredondado (44 px na linha, 64 px no detalhe) troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,
 `overflow: hidden`; o painel só tem tema escuro); `logoSeguro` (`conta/api.ts`) é a cópia da regra do app e
 `tests/frontend/logo_banco_paridade.test.mjs` as compara; imagem que falha volta à inicial na cor do banco.
 No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG

@@ -204,3 +204,23 @@ for (const fallback of [false, true]) test(`${fallback ? "Safari 14 (fallback)" 
   await esperarFechar(page);
   await ctx.close();
 });
+
+// Apertar o mouse DENTRO do painel (selecionar o texto de um campo) e soltar no fundo não é clique no fundo: o diálogo (useDialogo, o
+// mesmo dos outros 7) segue aberto e o digitado fica. O clique que nasce e acaba no fundo continua fechando.
+test("arrastar a seleção de dentro do painel e soltar no fundo não fecha o diálogo nem perde o digitado; o clique simples no fundo fecha", async () => {
+  const { ctx, page } = await abrir();
+  await novo(page);
+  await page.waitForTimeout(500); // a janela do clique no fundo
+  const campo = await page.locator('.lanc-form input[name="descricao"]').boundingBox();
+  const fora = await page.locator(".lanc-form").boundingBox();
+  const [fx, fy] = [Math.max(5, fora.x / 2), fora.y + fora.height / 2]; // à esquerda do painel: o ::backdrop
+  await page.mouse.move(campo.x + campo.width - 5, campo.y + campo.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(fx, fy, { steps: 8 });
+  await page.mouse.up();
+  assert.equal(await page.locator(".lanc-form[open]").count(), 1); // antes de ler o campo: fechado, o inputValue() esperaria o timeout
+  assert.equal(await page.locator('.lanc-form input[name="descricao"]').inputValue(), "Teste carteira");
+  await page.mouse.click(fx, fy);
+  await esperarFechar(page);
+  await ctx.close();
+});
