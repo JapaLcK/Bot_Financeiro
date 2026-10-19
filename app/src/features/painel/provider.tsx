@@ -212,6 +212,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
   // O erro do Descartar não tem botão de fechar: sai quando a pendência some, por qualquer caminho (descarte, prazo, Retomar, foco).
+  const pendenteVisivel = useRef<string | null>(null); pendenteVisivel.current = pendente?.id ?? null;
   useEffect(() => { if (pendente === null) setAviso((a) => a === FALHA_DESCARTE ? null : a); }, [pendente]);
   // O marcador vence com o painel aberto: sem isto o aviso ficaria até o próximo foco, com "Retomar" levando a uma volta sem tentativa.
   useEffect(() => {
@@ -229,7 +230,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       if (dono.current === uid) setPendente(vencimento(relida));
       return true;
     } catch {
-      if (dono.current === uid) setAviso(FALHA_DESCARTE);
+      if (dono.current === uid && pendenteVisivel.current === id) setAviso(FALHA_DESCARTE); // pendência que já saiu da tela (prazo, foco) não deixa erro órfão
       return false;
     }
   };

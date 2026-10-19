@@ -1,4 +1,5 @@
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import * as SecureStore from "expo-secure-store";
 import { AccessibilityInfo } from "react-native";
 import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 import { PRAZO_TENTATIVA_MS } from "@/storage/secure";
@@ -91,6 +92,18 @@ it("o marcador vence com o painel aberto: o aviso sai sozinho, sem esperar o pr�
   expect(pendente()).toBeTruthy(); // ainda dentro do prazo
   await act(async () => { jest.advanceTimersByTime(31_000); await drenar(); });
   expect(pendente()).toBeNull();
+});
+
+it("a falha do apagar chega DEPOIS de a pendência sair da tela (prazo): não deixa erro órfão", async () => {
+  idade(PRAZO_TENTATIVA_MS - 60_000);
+  await abrir();
+  let falhar!: (e: Error) => void;
+  jest.spyOn(SecureStore, "deleteItemAsync").mockImplementation(() => new Promise<void>((_, rej) => { falhar = rej; }));
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Descartar" })); await drenar(); });
+  await act(async () => { jest.advanceTimersByTime(61_000); await drenar(); });
+  expect(pendente()).toBeNull();
+  await act(async () => { falhar(new Error("keychain")); await drenar(); });
+  expect(screen.queryByText(ERRO)).toBeNull();
 });
 
 it("a legenda do aviso diz como sair, sem supor que a pessoa desistiu", async () => {
