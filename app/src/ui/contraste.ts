@@ -88,6 +88,6 @@ export const PARES: ParDeContraste[] = [
   })),
   // PDF §13: ink-3 é "cinza mais claro aceito para texto" (rótulo inativo do segmentado, placeholder).
   ...FUNDOS.map((segundo) => ({ primeiro: "inkFaint" as Chave, segundo, minimo: 4.5 as const })),
-  // Selo do indicador da meta (`patrimonio.tsx`): texto `ink` sobre fundo `border`.
+  // Selo (`Selo.tsx`; o indicador da meta em `patrimonio.tsx` tem o mesmo estilo): texto `ink` sobre fundo `border`.
   { primeiro: "ink", segundo: "border", minimo: 4.5 },
 ];

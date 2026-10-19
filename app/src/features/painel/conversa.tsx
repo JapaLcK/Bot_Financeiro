@@ -11,7 +11,7 @@ import { useTema } from "@/ui/tema";
 import { espaco, raio, texto as escalas } from "@/ui/tokens";
 import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
-import { BotaoPrivacidade } from "./cabecalho";
+import { BotaoFerramentas, BotaoPrivacidade } from "./cabecalho";
 import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
 import { cotaCheia, useConversa } from "./conversaEstado";
 import { EstadoVazio, TurnoChat } from "./conversaFalas";
@@ -49,7 +49,7 @@ function ConversaTela({ aviso }: { aviso: string | null }) {
   const enviarCampo = () => { const t = c.rascunho; if (!TEM_ARROBA.test(t)) return void c.enviar(t, undefined, true); void c.agentes.rotear(t).then((r) => { if (r === "piggy") void c.enviar(t, undefined, true); }); };
   const ativo = com.ativo ? com.pode && !p.oculto : c.enviando || podeEnviar; // enviando = o botão vira "Parar" (permitido com valores ocultos: não revela nada)
   return <Screen rolar={false} sobAbas><View ref={pai} onLayout={() => pai.current?.measureInWindow((_x, y) => setTopoJanela(y))} style={{ flex: 1 }}>
-    <View style={{ flexDirection: "row", justifyContent: "flex-end", backgroundColor: cores.bg }}><BotaoPrivacidade tamanho={20} /></View>
+    <View style={{ flexDirection: "row", justifyContent: "flex-end", backgroundColor: cores.bg }}><BotaoFerramentas tamanho={20} /><BotaoPrivacidade tamanho={20} /></View>
     {aviso && <Texto tom="warning">{aviso}</Texto>}
     <KeyboardAvoidingView keyboardVerticalOffset={topoJanela} behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
