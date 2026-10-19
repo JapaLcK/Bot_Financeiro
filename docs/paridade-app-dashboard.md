@@ -33,7 +33,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Saldo previsto: motivos | Lista cada motivo da previsão com a direção do erro (`MotivosPrevisao`), o estado ("Previsão condicional", "A conferir") e os selos da base | Âncora, bancos fora do cálculo, pior dia com desde e causas já aparecem (`futuro.tsx`, dentro do card, que nasce recolhido; sem "Como foi feita": premissas e cobertura saíram do app por decisão do dono, 2026-10-18); os motivos e o estado não aparecem (`cobertura.fontes_incompletas` são os mesmos códigos, sem rótulo no app) | O app não diz para que lado o saldo pode errar | App | a discutir com o dono |
+| Saldo previsto: motivos | Lista cada motivo da previsão com a direção do erro (`MotivosPrevisao`), o estado ("Previsão condicional", "A conferir") e os selos da base | Âncora, bancos fora do cálculo, pior dia com desde e causas já aparecem (`futuro.tsx`: a curva fica sempre no card e o resto (âncora, marcos, pior dia, receitas) na folha que o toque no card abre; no web é tudo inline, divergência de plataforma por decisão do dono, 2026-10-18; sem "Como foi feita": premissas e cobertura saíram do app por decisão do dono, 2026-10-18); os motivos e o estado não aparecem (`cobertura.fontes_incompletas` são os mesmos códigos, sem rótulo no app) | O app não diz para que lado o saldo pode errar | App | a discutir com o dono |
 | "Próximos 30 dias" no Resumo | `Bills.tsx`, de exemplo (a versão real só existe na página Previsão) | Real | O bloco do Resumo não mostra dado real | Web | a discutir com o dono |
 
 ## Metas, patrimônio e cartões

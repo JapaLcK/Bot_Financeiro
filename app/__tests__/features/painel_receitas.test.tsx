@@ -40,10 +40,10 @@ beforeEach(async () => {
  await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" }); servidor();
 });
 afterEach(() => jest.restoreAllMocks());
-// O card Saldo previsto nasce recolhido (a linha das respondidas fica dentro dele): `abrir` já o abre, quando o perfil tem o card.
-const abrir = async () => {
+// O card Saldo previsto é compacto (a linha das respondidas mora na folha que o toque nele abre): `abrir(true)` a abre, quando o perfil tem o card; por padrão fica fechada (aberta, a folha repete chips e `tela`, e quem os consulta por papel ou testID acha dois).
+const abrir = async (comFolha = false) => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.queryByText("Receitas do extrato") ?? screen.queryByText(/^A partir de hoje/)).toBeTruthy()); await act(drenar);
- const card = screen.queryByTestId("bloco-hero"); if (card) await act(async () => { fireEvent.press(within(card).getByRole("button", { name: "Saldo previsto" })); await drenar(); });
+ const card = comFolha && screen.queryByTestId("bloco-hero"); if (card) await act(async () => { fireEvent.press(within(card).getByRole("button", { name: "Saldo previsto, ver detalhes" })); await drenar(); });
 };
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
 const apertar = async (nome: string) => { await act(async () => { fireEvent.press(botao(nome)); await drenar(); }); };
@@ -55,7 +55,7 @@ const todosAtivos = () => screen.getAllByRole("button").filter((b) => /receita f
 const anunciou = (t: string) => expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith(t);
 
 it("mostra as pendentes com pergunta e botões rotulados, sem a frase de abertura; as respondidas ficam recolhidas", async () => {
- await abrir();
+ await abrir(true);
  expect(screen.getByText("Salário Acme")).toBeTruthy(); expect(screen.getByText("todo dia 5. É sua receita fixa?")).toBeTruthy(); expect(pendentes()).toBe(2);
  expect(botao("Sim, é receita fixa: Salário Acme")).toBeTruthy(); expect(botao("Não é receita fixa: Salário Acme")).toBeTruthy();
  expect(screen.queryByText(/Entram na previsão/)).toBeNull();
@@ -68,7 +68,7 @@ it("mostra as pendentes com pergunta e botões rotulados, sem a frase de abertur
  expect(ordem()).toEqual(["Freela Beta", "Aluguel Carla", "Pix Tio"]); // a ordem do servidor, sem inverter
 });
 it("Sim: POST com Bearer e JSON, depois UMA releitura só da previsão; a linha muda de grupo e o resultado é anunciado", async () => {
- await abrir(); const antes = fetchFalso.mock.calls.length;
+ await abrir(true); const antes = fetchFalso.mock.calls.length;
  await apertar("Sim, é receita fixa: Salário Acme");
  const novas = fetchFalso.mock.calls.slice(antes).map(([u]) => caminho(u)); expect(novas).toEqual([POST, PREVISAO]);
  const [, req] = chamadas(POST)[0]!; expect(corpo(req)).toEqual({ chave: "extrato#sal", resposta: "sim" });
@@ -82,7 +82,7 @@ it.each([
  ["Desfazer resposta: Aluguel Carla", "extrato#alu", "pendente", "Resposta desfeita"],
  ["Desfazer resposta: Pix Tio", "extrato#tio", "pendente", "Resposta desfeita"],
 ])("%s manda a chave certa (a segunda da lista também) e o servidor guarda %s", async (nome, chave, status, fala) => {
- await abrir(); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
+ await abrir(true); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
  if (nome.includes("Freela")) await ver(1); // a pilha mostra uma pendente por vez
  await apertar(nome); expect(corpo(chamadas(POST)[0]![1]).chave).toBe(chave); expect(marcas[chave]).toBe(status); anunciou(fala);
  expect(pendentes()).toBe(status === "pendente" ? 3 : 1);
@@ -120,7 +120,7 @@ it.each([
  ["Não", "Não é receita fixa: Freela Beta", "negada", "Receita recusada"],
  ["Desfazer", "Desfazer resposta: Aluguel Carla", "pendente", "Resposta desfeita"],
 ])("resposta perdida com %s (o servidor gravou e a rede caiu): a releitura mostra o status esperado e vale como sucesso", async (_, nome, status, fala) => {
- await abrir(); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
+ await abrir(true); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
  sem = (path, req) => { if (path !== POST) return undefined; marcas[corpo(req).chave] = status; return Promise.reject(new TypeError("Network request failed")); };
  if (nome.includes("Freela")) await ver(1);
  await apertar(nome);
@@ -133,7 +133,7 @@ it("controle do anterior: o POST caiu SEM gravar e a chave SUMIU da releitura N�
  expect(screen.getByText(ERRO)).toBeTruthy(); expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Receita confirmada");
 });
 it("POST ok e releitura 500: sem Banner, sucesso anunciado, e quando a lista volta no Tentar novamente os botões estão ativos", async () => {
- await abrir(); let cai = true;
+ await abrir(true); let cai = true;
  sem = (path) => path === PREVISAO && cai && marcas["extrato#sal"] === "confirmada" ? Promise.resolve(resposta(500, { detail: "x" })) : undefined;
  await apertar("Sim, é receita fixa: Salário Acme");
  expect(screen.queryByText(ERRO)).toBeNull(); anunciou("Receita confirmada");
@@ -201,7 +201,7 @@ it.each([
  expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalledWith("Receita confirmada");
 });
 it("com 'Receitas na previsão' aberta, o Desfazer também fica travado durante a espera", async () => {
- await abrir(); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
+ await abrir(true); await act(async () => { fireEvent.press(screen.getByText("Receitas na previsão (2)")); await drenar(); });
  const post = segurar(); sem = (path) => path === POST ? post.promessa.then(() => resposta(500, {})) : undefined;
  await act(async () => { fireEvent.press(botao("Sim, é receita fixa: Salário Acme")); await drenar(); });
  for (const nome of ["Desfazer resposta: Aluguel Carla", "Desfazer resposta: Pix Tio"]) expect(botao(nome).props.accessibilityState.disabled).toBe(true);
@@ -297,27 +297,27 @@ it("leitura de horizonte VELHA que cai no mesmo tique da resposta perdida não �
  expect(todosAtivos().every((b) => !b.props.accessibilityState.disabled)).toBe(true);
 });
 it("só respondidas: caixa com 'Receitas na previsão', sem pergunta e sem Sim/Não", async () => {
- marcas = { "extrato#alu": "confirmada", "extrato#tio": "negada" }; await abrir();
+ marcas = { "extrato#alu": "confirmada", "extrato#tio": "negada" }; await abrir(true);
  expect(pendentes()).toBe(0); expect(screen.getByText("Receitas na previsão (2)")).toBeTruthy(); expect(screen.queryByRole("button", { name: /^Sim|^Não/ })).toBeNull();
  expect(screen.queryByTestId("pilha-avisos")).toBeNull(); expect(screen.queryByText("Receitas do extrato")).toBeNull();
 });
 // Decisão do dono (2026-10-17): respondida SOME do topo e mora no card "Saldo previsto", com o Desfazer.
-const hero = () => within(screen.getByTestId("bloco-hero"));
-it("o topo mostra SÓ a pendente: as respondidas moram dentro do card Saldo previsto, fora da pilha, e abrem com Confirmada/Recusada e Desfazer", async () => {
- await abrir();
+const hero = () => within(screen.getByTestId("folha-sheet")); // a folha do Saldo previsto
+it("o topo mostra SÓ a pendente: as respondidas moram na folha do Saldo previsto, fora da pilha, e abrem com Confirmada/Recusada e Desfazer", async () => {
+ await abrir(true);
  expect(screen.queryByText(/Já respondidas/)).toBeNull(); expect(within(screen.getByTestId("pilha-avisos")).queryByText(/Receitas na previsão/)).toBeNull();
  expect(hero().getByTestId("receitas-respondidas")).toBeTruthy(); expect(screen.getAllByTestId("receitas-respondidas")).toHaveLength(1);
  await act(async () => { fireEvent.press(hero().getByText("Receitas na previsão (2)")); await drenar(); });
  expect(hero().getByText("Confirmada · todo dia 10")).toBeTruthy(); expect(hero().getByText("Recusada · todo dia 15")).toBeTruthy(); expect(hero().getByRole("button", { name: "Desfazer resposta: Aluguel Carla" })).toBeTruthy();
 });
 it("responder Sim na ÚLTIMA pendente: o aviso e a pilha somem, nada fica no topo, e a receita passa para a seção do card", async () => {
- marcas = { "extrato#sal": "pendente", "extrato#alu": "confirmada" }; await abrir(); expect(hero().getByText("Receitas na previsão (1)")).toBeTruthy();
+ marcas = { "extrato#sal": "pendente", "extrato#alu": "confirmada" }; await abrir(true); expect(hero().getByText("Receitas na previsão (1)")).toBeTruthy();
  await apertar("Sim, é receita fixa: Salário Acme");
  expect(screen.queryByText("Receitas do extrato")).toBeNull(); expect(screen.queryByTestId("pilha-avisos")).toBeNull(); expect(screen.queryByRole("button", { name: /^Sim|^Não/ })).toBeNull(); expect(screen.queryByText(/Já respondidas/)).toBeNull();
  expect(hero().getByText("Receitas na previsão (2)")).toBeTruthy(); anunciou("Receita confirmada");
 });
 it("Desfazer no card traz a receita de volta ao topo como pendente; sem mais respondidas a seção some", async () => {
- marcas = { "extrato#alu": "confirmada" }; await abrir();
+ marcas = { "extrato#alu": "confirmada" }; await abrir(true);
  await act(async () => { fireEvent.press(hero().getByText("Receitas na previsão (1)")); await drenar(); }); await apertar("Desfazer resposta: Aluguel Carla");
  expect(marcas["extrato#alu"]).toBe("pendente"); expect(screen.getByText("Receitas do extrato")).toBeTruthy(); expect(screen.getByText("todo dia 10. É sua receita fixa?")).toBeTruthy();
  expect(screen.queryByTestId("receitas-respondidas")).toBeNull(); anunciou("Resposta desfeita");
@@ -348,13 +348,13 @@ it.each([[1, 2], [2, undefined]])("nome longo com fontScale %s: título com numb
   expect(screen.getByText(nome).props.numberOfLines).toBe(linhas); expect(botao(`Sim, é receita fixa: ${nome}`)).toBeTruthy();
  } finally { BASE[0]!.nome = "Salário Acme"; Dimensions.set({ window: janela }); }
 });
-// Fluxo REAL (o `abrir()` acima já deixa o card aberto): com o Saldo previsto RECOLHIDO, depois do Sim só resta o toast; o Desfazer exige abrir o card e tocar a linha (decisão do dono: detalhe fica dentro do card).
-it("card recolhido: Sim some do topo e só fica o toast; para Desfazer abre o Saldo previsto e toca 'Receitas na previsão'", async () => {
+// Fluxo REAL (o `abrir(true)` acima já deixa a folha aberta): com o Saldo previsto COMPACTO, depois do Sim só resta o toast; o Desfazer exige abrir a folha e tocar a linha.
+it("card compacto: Sim some do topo e só fica o toast; para Desfazer abre o Saldo previsto e toca 'Receitas na previsão'", async () => {
  marcas = { "extrato#sal": "pendente", "extrato#alu": "confirmada" };
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.queryByText("Receitas do extrato")).toBeTruthy()); await act(drenar);
  expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); await apertar("Sim, é receita fixa: Salário Acme"); // recolhido: a linha das respondidas não está à vista
  expect(marcas["extrato#sal"]).toBe("confirmada"); expect(screen.queryByText("Receitas do extrato")).toBeNull(); anunciou("Receita confirmada");
  expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); expect(screen.queryByRole("button", { name: /^Desfazer resposta/ })).toBeNull(); // só o toast
- for (const alvo of ["Saldo previsto", "Receitas na previsão (2)"]) await act(async () => { fireEvent.press(alvo === "Saldo previsto" ? hero().getByRole("button", { name: alvo }) : hero().getByText(alvo)); await drenar(); });
+ for (const alvo of ["Saldo previsto", "Receitas na previsão (2)"]) await act(async () => { fireEvent.press(alvo === "Saldo previsto" ? screen.getByTestId("bloco-hero") : hero().getByText(alvo)); await drenar(); });
  await apertar("Desfazer resposta: Salário Acme"); expect(marcas["extrato#sal"]).toBe("pendente"); expect(screen.getByText("Receitas do extrato")).toBeTruthy(); anunciou("Resposta desfeita");
 });
