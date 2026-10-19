@@ -1,7 +1,8 @@
 /**
  * /painel#/orcamento, "+ Gasto fixo" (POST /api/v2/gastos-fixos): o botão abre o formulário, o envio manda o corpo certo
  * com CSRF, o 422 aparece no formulário (rascunho mantido), o sucesso fecha e avisa, o 403 pro_required convida ao plano,
- * o protótipo (DEMO) não tem o botão e 375px/1280px não rolam para o lado com o formulário aberto.
+ * o protótipo (DEMO) não tem o botão, 375px/1280px não rolam para o lado com o formulário aberto e, com o POST em voo,
+ * Esc, Fechar, Cancelar e o clique no fundo não fecham (senão reabrir mandaria um 2º POST: gasto duplicado).
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -19,11 +20,11 @@ async function aberto(opts = {}, resposta = { json: CRIADO }) {
   const posts = [];
   await p.ctx.route("**/api/v2/gastos-fixos", (r) => { posts.push({ h: r.request().headers(), corpo: r.request().postData() }); return r.fulfill(resposta); });
   await p.ir("/orcamento");
-  await p.page.locator(".orc-pote").first().waitFor();
+  await p.page.locator(".orc-tabela tbody tr").first().waitFor({ state: "attached" });
   return { ...p, posts };
 }
 const abrirForm = async (page) => {
-  await page.getByRole("button", { name: "+ Gasto fixo" }).click();
+  await page.getByRole("button", { name: "Gasto fixo", exact: true }).click();
   await page.locator("dialog.orc-form").waitFor();
 };
 const preenche = async (page, { nome = "Aluguel", valor = "1500,50", dia = "5" } = {}) => {
@@ -93,6 +94,30 @@ test("422 do servidor aparece no formulário, mantém o rascunho e duplo clique 
   assert.equal(aberto2, 1);
 });
 
+test("com o POST em voo nada fecha o formulário e só sai um POST; resolvido, o sucesso fecha", async () => {
+  const { ctx, page, posts } = await aberto();
+  let solta;
+  const pendurado = new Promise((r) => { solta = r; });
+  await ctx.route("**/api/v2/gastos-fixos", async (r) => { posts.push({}); await pendurado; return r.fulfill({ json: CRIADO }); });
+  await abrirForm(page);
+  await preenche(page);
+  await cadastrar(page).click();
+  await page.getByRole("button", { name: "Salvando…" }).waitFor();
+  const dlg = page.locator("dialog.orc-form");
+  for (let i = 0; i < 4; i++) await page.keyboard.press("Escape"); // o Chromium só veta o `cancel` 2 vezes sem gesto: o 3º fecha à força e o formulário reabre
+  await dlg.getByRole("button", { name: "Fechar", exact: true }).first().click();
+  await dlg.getByRole("button", { name: "Cancelar" }).click();
+  await page.mouse.click(2, 2); // o fundo do <dialog>
+  const aindaAberto = await dlg.evaluate((d) => d.open);
+  const pedidos = posts.length;
+  solta();
+  await dlg.waitFor({ state: "detached" });
+  await page.getByRole("status").filter({ hasText: "Gasto fixo cadastrado" }).waitFor();
+  await ctx.close();
+  assert.equal(aindaAberto, true);
+  assert.equal(pedidos, 1);
+});
+
 test("403 pro_required mostra o convite do plano no formulário", async () => {
   const e = RESPOSTAS.erros["403_pro_required"];
   const { ctx, page } = await aberto({}, { status: e.status, json: e.body });
@@ -108,7 +133,7 @@ test("403 pro_required mostra o convite do plano no formulário", async () => {
 
 test("protótipo (DEMO): sem o botão de gasto fixo", async () => {
   const { ctx, page, posts } = await aberto({ demo: true });
-  const n = await page.getByRole("button", { name: "+ Gasto fixo" }).count();
+  const n = await page.getByRole("button", { name: "Gasto fixo", exact: true }).count();
   await ctx.close();
   assert.equal(n, 0);
   assert.deepEqual(posts, []);

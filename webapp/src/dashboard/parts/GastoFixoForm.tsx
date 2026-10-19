@@ -29,14 +29,14 @@ export function falhaDoGastoFixo(e: unknown): Falha {
 export function GastoFixoForm({ feito, fechar }: { feito: () => void; fechar: () => void }) {
   const id = useId();
   const qc = useQueryClient();
-  const { dlg, fecharDialog, fundo, props } = useDialogo(fechar);
+  const voando = useRef(false); // síncrona: dois cliques/Enter no mesmo tick não passam por `isPending`
+  const { dlg, fecharDialog, fundo, props } = useDialogo(fechar, () => voando.current); // com o POST em voo nada fecha: desmontar soltaria a trava e reabrir enviaria de novo
   const cats = useQuery(categoriasQuery);
   const [nome, setNome] = useState("");
   const [valor, setValor] = useState("");
   const [dia, setDia] = useState("");
   const [cat, setCat] = useState("");
   const [falha, setFalha] = useState<Falha>({ geral: "" });
-  const voando = useRef(false); // síncrona: dois cliques/Enter no mesmo tick não passam por `isPending`
   const m = useMutation({
     retry: false, networkMode: "always",
     mutationFn: (c: Parameters<typeof apiPost<"/gastos-fixos">>[1]) => apiPost("/gastos-fixos", c),
@@ -58,6 +58,7 @@ export function GastoFixoForm({ feito, fechar }: { feito: () => void; fechar: ()
     setFalha({ geral: "" });
     try {
       await m.mutateAsync({ nome: nome.trim(), valor: norm, dia: diaN, categoria: escolhida, forma: "conta" });
+      voando.current = false; // o POST acabou: agora o fechar do sucesso pode passar
       feito();
       if (dlg.current?.isConnected) fecharDialog();
     } catch (err) { setFalha(falhaDoGastoFixo(err)); }
