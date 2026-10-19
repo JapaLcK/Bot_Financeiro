@@ -5,6 +5,8 @@ import type { Banco } from "../lib/api-v2.gen";
 import type { Conexao } from "./api";
 
 export const nomeDoBanco = (c: Conexao) => c.institution_name?.trim() || "Banco";
+// Cópia da regra do app (app/src/features/openFinance/conexoes/BancoCard.tsx): o teste bancos_paridade compara as duas listas (§0.7).
+export const SEM_RECONEXAO = ["removed", "item_missing", "paused"];
 export const plural = (n: number | null, um: string, varios: string) => (n && n > 0 ? [`${n} ${n === 1 ? um : varios}`] : []);
 // `v` é a linha do banco, ou o que a tela mostra no lugar dela: "…" (lendo) e "—" (sem linha, ou a leitura falhou). Null do servidor também é "—", nunca "R$ 0,00".
 export type Linha = Banco | "…" | "—";

@@ -134,7 +134,7 @@ test("nome de banco de 300 letras sem espaço a 320×640: o 'Conectar Open Finan
   assert.deepEqual(r, { dentro: true, lateral: 0 });
 });
 
-test("2º clique no mesmo ponto do '+' (100 e 300 ms depois, caindo numa linha do modal) NÃO troca o banco; passada a janela, clicar numa linha escolhe o banco", async () => {
+test("2º clique no mesmo ponto do '+' (100 e 250 ms depois, caindo numa linha do modal) NÃO troca o banco; passada a janela, clicar numa linha escolhe o banco", async () => {
   for (const [width, height] of [[390, 844], [360, 740]]) {
     const pre = await painel({ tela: { width, height } }); // pré-condição: sob o ponto do "+" há OUTRA linha do modal (senão o teste não mede nada)
     await esperaDisponiveis(pre.page);
@@ -144,18 +144,25 @@ test("2º clique no mesmo ponto do '+' (100 e 300 ms depois, caindo numa linha d
     const sob = await pre.page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".bank-row")?.textContent ?? null, [bb.x + bb.width / 2, bb.y + bb.height / 2]);
     await pre.ctx.close();
     assert.ok(sob && !/Bradesco/.test(sob), `${width}×${height}: precisa haver OUTRA linha sob o cursor (${sob})`);
-    for (const intervalo of [100, 300]) {
-      const { ctx, page } = await painel({ tela: { width, height } });
-      await esperaDisponiveis(page);
-      const b = await maisDe(page, "Bradesco").boundingBox();
-      const x = b.x + b.width / 2, y = b.y + b.height / 2;
-      await page.mouse.click(x, y);
-      await page.waitForTimeout(intervalo); // nada entre os dois cliques: o tempo medido é o do duplo clique
-      await page.mouse.click(x, y);
-      await page.waitForTimeout(50);
-      const r = { aberto: await abertoNoPicker(page), escolhido: await page.locator(".bankpick-count").innerText() };
-      await ctx.close();
-      const rotulo = `${width}×${height} +${intervalo}ms`;
+    for (const intervalo of [100, 250]) {
+      // A janela do módulo é de 350 ms: o que vale é o intervalo REAL entre os dois cliques (medido na página), não o `waitForTimeout`; sob carga o
+      // `mouse.click` demora, e um intervalo real >= 330 ms não prova nada (cai fora da janela): repete o caso em página nova, até 4 vezes.
+      let r, real, rotulo = `${width}×${height} +${intervalo}ms`;
+      for (let tentativa = 0; tentativa < 4 && !(real < 330); tentativa++) {
+        const { ctx, page } = await painel({ tela: { width, height } });
+        await esperaDisponiveis(page);
+        await page.evaluate(() => { window.__t = []; document.addEventListener("click", () => window.__t.push(performance.now()), true); });
+        const b = await maisDe(page, "Bradesco").boundingBox();
+        const x = b.x + b.width / 2, y = b.y + b.height / 2;
+        await page.mouse.click(x, y);
+        await page.waitForTimeout(intervalo); // nada entre os dois cliques: o tempo medido é o do duplo clique
+        await page.mouse.click(x, y);
+        await page.waitForTimeout(50);
+        real = await page.evaluate(() => window.__t[1] - window.__t[0]);
+        r = { aberto: await abertoNoPicker(page), escolhido: await page.locator(".bankpick-count").innerText() };
+        await ctx.close();
+      }
+      assert.ok(real < 330, `${rotulo}: o intervalo real ficou ${Math.round(real)} ms em 4 tentativas (máquina carregada)`);
       assert.equal(r.aberto, true, rotulo);
       assert.match(r.escolhido, /Bradesco/, `${rotulo}: o 2º clique trocou o banco`);
     }

@@ -1,5 +1,5 @@
 /* Bancos conectados (conta/Bancos.tsx, BancoCard.tsx, Disponiveis.tsx, BancoDetalhe.tsx). Grid, não flex com gap (Safari 14). */
-.bancos-cab { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+.bancos-cab { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; max-width: 720px; } /* a largura da coluna de bancos: o "+" alinha com a borda direita da lista */
 .bancos-tit { display: grid; gap: 6px; min-width: 0; }
 .banco-mais { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--pink); color: var(--on-pink); font-size: 20px; transition: transform var(--t-fast) var(--ease-out); }
 .banco-mais:active { transform: scale(0.97); }
@@ -8,11 +8,21 @@
 .bancos-conectar p { margin: 0; }
 
 /* Um grupo só: uma superfície, cantos de 16 px, divisor fino entre as linhas (sem card por banco). */
-.bancos-col { min-width: 0; max-width: 720px; }
+.bancos-cols { display: grid; gap: 20px; max-width: 720px; } /* uma coluna (celular, tela estreita, ou sem "Disponíveis"): conectados e depois disponíveis, na ordem do DOM */
+.bancos-esq { min-width: 0; }
+.bancos-esq > * + * { margin-top: 20px; }
+.bancos-esq > .banco-rotulo + * { margin-top: 0; }
+.bancos-esq > .banco-rotulo[aria-hidden="true"] { display: none; } /* a linha vazia só alinha os grupos nas duas colunas */ /* o rótulo "N de M bancos" cola no grupo, como o "Disponíveis para conectar" da outra coluna */
+.bancos-col { min-width: 0; }
+@media (min-width: 1101px) { /* o mesmo ponto em que o .page-grid deixa de ser uma coluna só */
+  .bancos-esq > .banco-rotulo[aria-hidden="true"] { display: block; }
+  .bancos-cab.duas, .bancos-cols.duas { max-width: 1100px; } /* o "+" do topo alinha com a borda direita da coluna da direita */
+  .bancos-cols.duas { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); column-gap: 24px; align-items: start; }
+}
 .banco-grupo { display: grid; min-width: 0; border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--plane-1); overflow: hidden; }
 .banco-grupo > li { min-width: 0; }
 .banco-grupo > li + li { border-top: .5px solid var(--rule-strong); }
-.banco-rotulo { margin: 0 0 8px; padding: 0 4px; font-size: 13px; font-weight: 500; letter-spacing: 0; line-height: 1.3; color: var(--ink-3); }
+.banco-rotulo { margin: 0 0 8px; font-size: 13px; font-weight: 500; letter-spacing: 0; line-height: 1.3; color: var(--ink-3); }
 
 /* A linha do banco: o botão inteiro é o alvo (>= 44 px) e abre o detalhe. */
 .banco-card { display: grid; min-width: 0; }

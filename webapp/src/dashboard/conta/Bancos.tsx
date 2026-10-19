@@ -6,10 +6,11 @@ import { bancosValidos, disponiveis } from "../lib/bancos";
 import { ICON } from "../lib/brand";
 import { route } from "../router";
 import { ContaTrocada, bancosQuery, comPrazoLeitura, conectoresQuery, conexoesQuery, desconectarBanco, limiteQuery, uidValido, type Conexao } from "./api";
-import { BancoCard, nomeDoBanco } from "./BancoCard";
+import { BancoCard, SEM_RECONEXAO, nomeDoBanco } from "./BancoCard";
 import { BancoDetalhe } from "./BancoDetalhe";
 import { Confirma } from "./Confirma";
 import { ConectarLink, Disponiveis, seletorOF } from "./Disponiveis";
+import { iniciar, textoDaFalha, textoDoServidor, type Resultado, type Sessao } from "./reconectar";
 
 type Alvo = { uid: number; id: number; nome: string };
 
@@ -19,6 +20,8 @@ type Alvo = { uid: number; id: number; nome: string };
 // Desconectar um banco (DELETE /open-finance/{uid}/connections/{id}, um por vez; o `uid` é o do clique). Resposta perdida ou erro: a
 // verdade é o snapshot relido (sem o id = foi). Plano e tabela de estados: docs/plano-bancos-conectados-painel.md, W2.
 // Conectar: o seletor é o módulo legado /open-finance-connect.js (iniciado aqui ao montar, destruído ao desmontar); sem ele o link vai ao /settings.
+// Reconectar (W3, `conta/reconectar.ts`): o MESMO `init`; os callbacks do módulo vão à reconexão em curso (`emCurso`) quando há uma, senão ao seletor. O detalhe fecha
+// ANTES de o widget abrir (o <dialog> modal, na top layer, o cobriria); o resultado aparece na lista. Uma conexão por vez, contra o Desconectar e o seletor também.
 export function ContaBancos() {
   // Foco relê a conta (como o Perfil): trocar de conta em outra aba muda o uid, e o do cache velho pediria o /open-finance de outra pessoa.
   const conta = useQuery({ ...contaQuery, refetchOnWindowFocus: true });
@@ -30,11 +33,21 @@ export function ContaBancos() {
   const qc = useQueryClient();
   const [alvo, setAlvo] = useState<Alvo | null>(null); // diálogo aberto; cobre também o voo e a releitura
   const [aviso, setAviso] = useState("");
-  const [falha, setFalha] = useState<{ texto: string; id?: number } | null>(null);
+  const [falha, setFalha] = useState<{ texto: string; id?: number; uid?: number } | null>(null); // `uid`: a falha de uma RECONEXÃO é da conta do clique e não aparece na conta que a substituir
   const [fim, setFim] = useState(false); // 401 no DELETE: a sessão acabou
   const abriu = useRef<HTMLButtonElement | null>(null);
   const [det, setDet] = useState<number | null>(null); // o banco com o detalhe aberto
   const linha = useRef<HTMLButtonElement | null>(null); // a linha que abriu o detalhe: o foco volta a ela
+  const emCurso = useRef<Sessao | null>(null); // a reconexão em curso (síncrona: dois cliques no mesmo tick); vai a null depois da releitura
+  const [recon, setRecon] = useState(false); // o mesmo, para pintar: trava as ações do detalhe
+  const dialogo = useRef(false); // idem para o diálogo do Desconectar: `alvo` (estado) está velho no mesmo tick; ligada em `abrir`, desligada em `fechar`
+  const montada = useRef(true); // a reconexão de uma montagem antiga não mexe no foco da página nova
+  const pendente = useRef<boolean | null>(null); // fim com o widget ainda por cima: o foco volta (à linha, ou ao título se `true`) quando o widget sair (o `onClose` tardio)
+  const focar = (titulo: boolean) => { // só refs: o efeito do seletor guarda a 1ª render
+    if (!montada.current) return;
+    if (!titulo && linha.current?.isConnected) linha.current.focus(); else document.getElementById("page-title")?.focus();
+  };
+  useEffect(() => { montada.current = true; return () => { montada.current = false; }; }, []);
 
   // `/bancos` e `/limite` são opcionais, menos no 401 (a sessão acabou) e na conta trocada: nos dois, nada do cache fica na tela.
   const erro = [conta.error, conexoes.error].find((e) => e)
@@ -49,14 +62,25 @@ export function ContaBancos() {
     // então o `destroy()` (que descarta os callbacks do widget) só vem sem conexão em curso. Os callbacks daquela conexão seguem valendo,
     // sem mexer em estado da página desmontada (`vivo`); a releitura é do cache global e vale.
     const vivo = { on: true };
+    const viva = () => (emCurso.current && !emCurso.current.acabou() ? emCurso.current : null); // a reconexão que já terminou (releitura em voo) não engole o que vem do seletor
     seletor.init({
       apiBase: location.origin, userId: uid, guardaDuploClique: true,
-      onConnectStart: () => { if (vivo.on) setErroOF(""); },
-      onConnected: () => { mudou(); if (vivo.on) { setErroOF(""); document.getElementById("page-title")?.focus(); } }, // o "+" que abriu o seletor pode ter saído da lista: o foco vai ao título
-      onError: (msg: string) => { if (vivo.on) setErroOF(msg || "Não foi possível conectar o banco."); },
-      notify: (msg: string, tipo: string) => { if (vivo.on) (tipo === "error" ? setErroOF(msg) : setAviso(msg)); },
+      onConnectStart: () => { pendente.current = null; if (vivo.on) setErroOF(""); }, // toda conexão nova (seletor ou reconexão) zera o foco que a anterior deixou pendente
+      onOpen: () => viva()?.onOpen(),
+      onClose: () => { const s = viva(); if (s) s.onClose(); else if (pendente.current !== null) { focar(pendente.current); pendente.current = null; } },
+      onConnected: () => { const s = viva(); if (s) return s.onConnected(); mudou(); if (vivo.on) { setErroOF(""); if (pendente.current === null) document.getElementById("page-title")?.focus(); } }, // o "+" que abriu o seletor pode ter saído da lista: o foco vai ao título (com `pendente` o widget de uma reconexão ainda está por cima: o `onClose` dele devolve o foco)
+      onError: (msg: string, status?: number) => { const s = viva(); if (s) s.onError(msg, status); else if (vivo.on) setErroOF((status === undefined ? msg : textoDoServidor({ status, msg })) || "Não foi possível conectar o banco."); }, // com status o texto é o do servidor: só o de pessoa (a mesma regra da reconexão); sem status é do próprio módulo
+      notify: (msg: string, tipo: string) => { if (vivo.on) (tipo === "error" ? setErroOF(msg) : setAviso(msg)); }, // o "ok" da reconexão é coberto pelo aviso do `terminou`, que vem depois da releitura
     });
-    return () => { vivo.on = false; if (!seletor.busy()) seletor.destroy(); };
+    return () => {
+      vivo.on = false;
+      setAviso(""); setErroOF(""); pendente.current = null; // o que era da conta (ou da tela) que saiu não fica no status da nova (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta; a de reconexão tem `uid` e some sozinha na conta nova)
+      if (seletor.busy()) return;
+      seletor.destroy(); // aborta o connect-token em voo: a reconexão que ainda não abriu o widget não chega ao fim
+      emCurso.current?.cancelar();
+      emCurso.current = null;
+      setRecon(false);
+    };
   }, [uid]);
   useEffect(() => { // o aviso do seletor some sozinho (ou ao tocar nele)
     if (!erroOF) return;
@@ -75,11 +99,15 @@ export function ContaBancos() {
   // eles voltam (o /limite é opcional), sem esperar as novas tentativas.
   const pode = !(limite.isLoading && limite.failureCount === 0) && lim?.pode_adicionar !== false;
   const avisoVaga = !pode && typeof lim?.message === "string" && lim.message.trim() ? <p className="faint">{lim.message}</p> : null;
-  const conectar = pode ? <ConectarLink className="btn btn-primary btn-conectar" aoAbrir={() => setErroOF("")}>Conectar banco</ConectarLink> : avisoVaga;
+  // O gesto de abrir o seletor ("+", "Conectar banco", "Ver todos", o de cada disponível): sai o toast da tentativa anterior e o foco que uma reconexão deixou pendente (o `onClose`
+  // tardio dela não pode mover o foco para a linha atrás do overlay do seletor). O `onConnectStart` repete o zeramento para quem não passa por aqui.
+  const aoAbrirSeletor = () => { setErroOF(""); pendente.current = null; };
+  const conectar = pode ? <ConectarLink className="btn btn-primary btn-conectar" aoAbrir={aoAbrirSeletor}>Conectar banco</ConectarLink> : avisoVaga;
   // Catálogo opcional: só lê com vaga e a lista na tela; falha = sem seção, nunca erro de página. "Já conectado" é por id (institution_id × id do conector).
   const mostra = pode && !!lista && !sessao && !erro;
   const catalogo = useQuery(conectoresQuery(uid, mostra));
   const lojas = mostra && !catalogo.isError ? disponiveis(catalogo.data ?? [], (lista ?? []).map((c) => c.institution_id)) : [];
+  const duas = lojas.length > 0 ? " duas" : ""; // com "Disponíveis" a tela larga tem duas colunas (bancos | disponíveis); o cabeçalho acompanha a largura do conjunto
   const vDe = (c: Conexao) => (bancos.isPending ? "…" : porId.get(c.id) ?? "—");
   const iDet = lista && !sessao ? lista.findIndex((c) => c.id === det) : -1;
   const sel = iDet >= 0 && lista ? lista[iDet] : undefined; // a conexão que sai (desconectada, ou lista nova) leva o detalhe junto
@@ -94,7 +122,8 @@ export function ContaBancos() {
   const fecharDet = () => { setDet(null); if (linha.current?.isConnected) linha.current.focus(); }; // o Safari não foca o botão ao clicar: o foco volta explícito
 
   const abrir = (c: Conexao, botao: HTMLButtonElement) => {
-    if (alvo || !uidValido(uid)) return;
+    if (alvo || emCurso.current || !uidValido(uid)) return;
+    dialogo.current = true;
     abriu.current = botao;
     setAviso("");
     setFalha(null);
@@ -126,17 +155,55 @@ export function ContaBancos() {
       setFalha({ texto: (e instanceof ErroApi && e.detalhe) || `Não deu para desconectar ${a.nome}. Tente de novo.`, id: a.id });
     }
   };
-  const fechar = () => setAlvo(null);
-  const falhaVisivel = falha && (falha.id === undefined || lista?.some((c) => c.id === falha.id)) ? falha : null; // falha de um card que sumiu não fica; a com id só aparece no detalhe daquele banco (ou acima da lista, sem detalhe aberto), a sem id em qualquer um
+  const fechar = () => { dialogo.current = false; setAlvo(null); };
+  // Fim da reconexão (NUNCA lança). 401 = sessão; 403 = o uid é velho (nada de reler com ele); a conta trocada no meio cai no mesmo ramo (o POST do save vai à conta do clique e,
+  // com a sessão já de outra conta, o servidor o recusa; aqui nada é dito sobre a nova). Prazo/"ocupado": o servidor nem viu, não relê. O resto relê as leituras e só então libera os botões.
+  // `semFoco`: o widget segue aberto por cima da página, o foco fica onde está e volta no `onClose` tardio do widget (`pendente`). O foco volta à linha; ao título se o banco sumiu, 401 ou 403.
+  const terminou = async (a: Alvo, r: Resultado, semFoco: boolean, eu: Sessao) => {
+    const contaMudou = () => qc.getQueryData<{ user_id?: number }>(contaQuery.queryKey)?.user_id !== a.uid;
+    const status = r && !r.ok ? r.status : undefined;
+    const trocada = contaMudou();
+    let titulo = status === 401 || status === 403;
+    if (semFoco && !trocada) pendente.current = titulo; // (só se a conta ainda é a do clique: na nova o foco não é nosso) antes do await: o `onClose` tardio pode chegar durante a releitura
+    if (status === 401) setFim(true);
+    if (status === 403 || trocada) conta.refetch();
+    else if (!titulo && !(r && !r.ok && r.tipo)) {
+      const chave = conexoesQuery(a.uid).queryKey;
+      [bancosQuery, limiteQuery].forEach((q) => qc.invalidateQueries({ queryKey: q(a.uid).queryKey }));
+      qc.invalidateQueries({ queryKey: contasQuery.queryKey });
+      await comPrazoLeitura(qc.invalidateQueries({ queryKey: chave }));
+      titulo = !qc.getQueryData<Conexao[]>(chave)?.some((c) => c.id === a.id); // o banco sumiu na releitura
+    }
+    if (!contaMudou() && montada.current) { // a releitura pode ter durado: com a conta trocada (ou a página fora) nada é dito, e o foco não é tocado
+      setAviso(r?.ok ? `${a.nome} reconectado.` : ""); // sai o "Reconectando…"
+      if (r && !r.ok && status !== 401) { const f = textoDaFalha(r, a.nome); setFalha({ texto: f.texto, id: f.semId ? undefined : a.id, uid: a.uid }); }
+      if (!semFoco) focar(titulo);
+    }
+    if (emCurso.current === eu) { emCurso.current = null; setRecon(false); } // defensiva: a releitura desta sessão não solta a trava de uma reconexão mais nova (a da conta nova)
+  };
+  const reconectarBanco = (c: Conexao) => {
+    const seletor = seletorOF();
+    if (alvo || dialogo.current || emCurso.current || !seletor || !uidValido(uid) || !c.provider_item_id) return;
+    const a = { uid, id: c.id, nome: nomeDoBanco(c) };
+    const s = emCurso.current = iniciar((r, semFoco) => { terminou(a, r, semFoco, s); }, () => seletor.destroy());
+    setRecon(true);
+    setAviso(`Reconectando ${a.nome}…`);
+    setFalha(null);
+    fecharDet(); // antes do widget: o <dialog> modal o cobriria
+    if (seletor.reconnect(c.provider_item_id) === false) s.ocupado(); // há conexão de outro mount ou do seletor: ela segue, e o save dela também
+  };
+  // Reconectar não gasta vaga (P1 do `/limite`): a regra é a do app (`provider_item_id`, `of_banks_max !== 0`, estado fora de SEM_RECONEXAO), e o módulo tem de estar carregado.
+  const reconectavel = (c: Conexao) => !!c.provider_item_id && lim?.of_banks_max !== 0 && !SEM_RECONEXAO.includes(c.ui.state) && !!seletorOF();
+  const falhaVisivel = falha && (falha.uid === undefined || falha.uid === uid) && (falha.id === undefined || lista?.some((c) => c.id === falha.id)) ? falha : null; // falha de um card que sumiu não fica; a com id só aparece no detalhe daquele banco (ou acima da lista, sem detalhe aberto), a sem id em qualquer um
 
   return (
     <>
-      <header className="page-head bancos-cab">
+      <header className={`page-head bancos-cab${duas}`}>
         <div className="bancos-tit">
           <h1 id="page-title" tabIndex={-1}>{route("/conta/bancos").title}</h1>
           <p className="page-lede">Gerencie as conexões via Open Finance.</p>
         </div>
-        {pode && lista && lista.length > 0 && !sessao && <ConectarLink className="banco-mais" label="Conectar banco" aoAbrir={() => setErroOF("")}><i className="ph ph-plus" aria-hidden="true" /></ConectarLink>}
+        {pode && lista && lista.length > 0 && !sessao && <ConectarLink className="banco-mais" label="Conectar banco" aoAbrir={aoAbrirSeletor}><i className="ph ph-plus" aria-hidden="true" /></ConectarLink>}
       </header>
       <div className="page-grid">
         {!lista && !semUid && !erro ? <p role="status" className="faint span-12">Carregando…</p>
@@ -147,30 +214,32 @@ export function ContaBancos() {
                 : <button type="button" className="btn btn-ghost retry" onClick={() => { conta.refetch(); if (uidValido(uid)) { conexoes.refetch(); bancos.refetch(); limite.refetch(); } }}>Tentar de novo</button>}
             </section>
           ) : (
-            <>
-              {vagas && <p className="faint span-12">{vagas}</p>}
+            <div className={`span-12 bancos-cols${duas}`}>
+              <div className="bancos-esq">
+              {(vagas || duas) && <p className="banco-rotulo" aria-hidden={!vagas}>{vagas || "\u00A0"}</p>} {/* o mesmo rótulo do "Disponíveis": os dois grupos começam na mesma altura (sem vagas, com a outra coluna, a linha fica vazia) */}
               {lista.length === 0 ? (
-                <section className="panel span-12 empty">
+                <section className="panel empty">
                   <img src={ICON} alt="" width={48} height={48} />
                   <p>Nenhum banco conectado.</p>
                   {conectar}
                 </section>
               ) : (
                 <>
-                  {falhaVisivel && !sel && <p role="alert" className="span-12 warn">{falhaVisivel.texto}</p>}
-                  <ul className="span-12 bancos-col banco-grupo" aria-label="Bancos">
-                    {lista.map((c, i) => <BancoCard key={c.id} c={c} i={i} onAbrir={(b) => { if (alvo) return; linha.current = b; setDet(c.id); }} />)}
+                  {falhaVisivel && !sel && <p role="alert" className="warn">{falhaVisivel.texto}</p>}
+                  <ul className="bancos-col banco-grupo" aria-label="Bancos">
+                    {lista.map((c, i) => <BancoCard key={c.id} c={c} i={i} onAbrir={(b) => { if (alvo || emCurso.current) return; linha.current = b; setDet(c.id); }} />)}
                   </ul>
-                  {avisoVaga && <div className="span-12 bancos-conectar">{avisoVaga}</div>}
+                  {avisoVaga && <div className="bancos-conectar">{avisoVaga}</div>}
                 </>
               )}
-              <Disponiveis lista={lojas} aoAbrir={() => setErroOF("")} />
-            </>
+              </div>
+              <Disponiveis lista={lojas} aoAbrir={aoAbrirSeletor} />
+            </div>
           )}
       </div>
       <p role="status" className="sr-only">{aviso}</p>
       {erroOF && createPortal(<div role="alert" className="banco-toast"><span>{erroOF}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setErroOF("")}><i className="ph ph-x" aria-hidden="true" /></button></div>, document.body)}
-      {sel && <BancoDetalhe c={sel} i={iDet} v={vDe(sel)} bloqueado={!!alvo} falha={falhaVisivel && (falhaVisivel.id === undefined || falhaVisivel.id === sel.id) ? falhaVisivel.texto : undefined} onDesconectar={(b) => abrir(sel, b)} fechar={fecharDet} />}
+      {sel && <BancoDetalhe c={sel} i={iDet} v={vDe(sel)} bloqueado={!!alvo || recon} falha={falhaVisivel && (falhaVisivel.id === undefined || falhaVisivel.id === sel.id) ? falhaVisivel.texto : undefined} onDesconectar={(b) => abrir(sel, b)} onReconectar={reconectavel(sel) ? () => reconectarBanco(sel) : undefined} fechar={fecharDet} />}
       {alvo && <Confirma titulo={`Desconectar ${alvo.nome}?`} texto="Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados."
         botao="Desconectar" pendente="Desconectando…" cancelar="Manter banco" agir={() => desconectar(alvo)} fechar={fechar} />}
     </>

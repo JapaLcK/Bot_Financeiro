@@ -11,8 +11,9 @@ const quando = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit"
 // O detalhe de um banco: <dialog> modal (tela cheia no celular, painel à direita no desktop). Fecha com X, Esc e clique no fundo; o pai o desmonta
 // quando a conexão some. `bloqueado` (há um diálogo/DELETE em andamento) trava o fechar e desabilita as ações; elas ficam em `.banco-det-acoes`
 // (grid de uma coluna): outra ação entra ali como um irmão do botão, sem CSS novo. `onDesconectar` recebe o botão para o foco voltar a ele.
+// `onReconectar` só vem quando o banco é reconectável (Bancos.tsx); quem o trata fecha este detalhe ANTES de abrir o widget da Pluggy (o <dialog> modal cobriria o widget).
 // ponytail: no Safari < 15.4 (sem <dialog>) o Confirma por cima solta a trava de foco deste painel (parts/dialog.ts: uma trava por vez).
-export function BancoDetalhe({ c, i, v, bloqueado, falha, onDesconectar, fechar }: { c: Conexao; i: number; v: Linha; bloqueado: boolean; falha?: string; onDesconectar: (botao: HTMLButtonElement) => void; fechar: () => void }) {
+export function BancoDetalhe({ c, i, v, bloqueado, falha, onDesconectar, onReconectar, fechar }: { c: Conexao; i: number; v: Linha; bloqueado: boolean; falha?: string; onDesconectar: (botao: HTMLButtonElement) => void; onReconectar?: () => void; fechar: () => void }) {
   const id = useId();
   const trava = useRef(false);
   trava.current = bloqueado; // lido pelo Esc/cancel/fundo de useDialogo, que guarda a função da 1ª render
@@ -49,6 +50,7 @@ export function BancoDetalhe({ c, i, v, bloqueado, falha, onDesconectar, fechar 
           {falha && <p role="alert" className="warn">{falha}</p>}
         </div>
         <div className="banco-det-acoes">
+          {onReconectar && <button type="button" className={`btn ${c.ui.state === "needs_user_action" ? "btn-primary" : "btn-ghost"}`} disabled={bloqueado} onClick={onReconectar}><i className="ph ph-arrows-clockwise" aria-hidden="true" />Reconectar banco</button>}
           <button type="button" className="btn banco-det-desc" disabled={bloqueado} onClick={(e) => onDesconectar(e.currentTarget)}><i className="ph ph-trash" aria-hidden="true" />Desconectar banco</button>
         </div>
       </div>

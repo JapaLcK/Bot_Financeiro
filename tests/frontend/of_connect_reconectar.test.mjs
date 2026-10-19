@@ -21,7 +21,12 @@
  *    (ou o bloco inteiro `if (aberto && typeof aberto.then === "function")`).
  *  - A21 (destroy no onConnectStart): tirar o `if (!vivo()) return;` logo depois do onConnectStart.
  *  - A22 (destroy no onError do init): trocar `if (vivo()) conf("onClose", host)();` por `conf("onClose", host)();`.
- *  - A23 (ocupado antes de validar): tirar o `if (ocupado) return;` do topo de reconnect().
+ *  - A23 (ocupado antes de validar): tirar o `if (ocupado) return false;` do topo de reconnect().
+ *  - A24 (reconnect ocupado devolve false): trocar `if (ocupado) return false;` por `if (ocupado) return;` no topo de reconnect().
+ *    O positivo é o mesmo caso: a 1ª chamada NÃO devolve `false`, e depois do onClose a seguinte também não.
+ *  - A25 (widget velho): tirar `|| velha()` do `onClose` ou do `onError` de openWidget() (cada um deixa o A25 vermelho); A25c: trocar `ultima !== sessao` por
+ *    `!!ocupado && ocupado !== sessao` (a guarda volta a null no fim do save de B e o callback tardio de A passa); A25d: tirar `|| velha()` do `.then(null, ...)` do init.
+ *  - A25e/A25f (onSuccess de widget velho em silêncio): em openWidget() trocar `const fala = function () { return vivo() && !velha(); };` por `... return vivo(); ...`. O positivo é o A25b: sem outra conexão o onClose/onError do A chegam.
  *
  * Rodar: node --test tests/frontend/of_connect_reconectar.test.mjs
  */
@@ -96,6 +101,7 @@ async function abrir({ token = () => json({ accessToken: "tok-123" }),
       onError: (m, s) => window.__ev.push(["error", m, s]),
       // Com argumento vira ["close", ...args]: é como o teste vê um onClose que vaza o valor do .then.
       onClose: (...a) => window.__ev.push(a.length ? ["close", ...a] : "close"),
+      notify: (m, t) => (window.__nt ||= []).push([m, t]),
     });
   });
   page.__ctx = ctx; page.__posts = posts;
@@ -482,5 +488,126 @@ test("A23 reconnect com id inválido durante uma conexão em curso: ignorado em 
   await sleep(200);
   assert.deepEqual(await ev(page), ["open"]);
   assert.equal(await page.evaluate(() => window.__n), 1);
+  await page.__ctx.close();
+});
+
+test("A24 reconnect com conexão em curso devolve false (sem callback nem pedido); a 1ª e a seguinte ao onClose não", async () => {
+  const page = await abrir();
+  const r1 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  const r2 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await sleep(200);
+  assert.equal(r1, undefined); // o evaluate espera a promessa do connect (resolve undefined): o que importa é que NÃO é false
+  assert.equal(r2, false);
+  assert.equal(page.__posts.length, 1);
+  assert.deepEqual(await ev(page), ["open"]);
+  await page.evaluate(() => window.__w.onClose());
+  const r3 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  assert.notEqual(r3, false);
+  await page.__ctx.close();
+});
+
+/** A reconecta e conclui (save), B começa: devolve a página com `window.__wA` = o widget de A e `window.__w` = o de B. */
+async function aDepoisB() {
+  const page = await abrir();
+  await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  await page.evaluate(() => { window.__wA = window.__w; window.__w.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(async () => (await ev(page)).includes("connected"));
+  await page.evaluate(() => { window.__w = null; window.PBOpenFinance.reconnect("item-12"); }); // a guarda foi solta pelo save
+  await widgetPronto(page);
+  return page;
+}
+
+test("A25 o onClose e o onError TARDIOS do widget A, com a conexão B em curso, NÃO chegam ao host; o de B chega", async () => {
+  const page = await aDepoisB();
+  assert.deepEqual(await tipos(page), ["open", "connected", "open"]);
+  await page.evaluate(() => { window.__wA.onError({ message: "tardio" }); window.__wA.onClose(); });
+  await sleep(300);
+  assert.deepEqual(await tipos(page), ["open", "connected", "open"]);
+  await page.evaluate(() => window.__w.onClose());
+  await waitFor(async () => (await ev(page)).includes("close"));
+  assert.deepEqual(await tipos(page), ["open", "connected", "open", "close"]);
+  await page.__ctx.close();
+});
+
+test("A25b sem outra conexão em curso o onClose e o onError de A chegam ao host (o fim normal)", async () => {
+  const page = await reconectada();
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(async () => (await ev(page)).includes("connected"));
+  await page.evaluate(() => { window.__w.onClose(); });
+  await waitFor(async () => (await ev(page)).includes("close"));
+  await page.evaluate(() => { window.__w.onError({ message: "x" }); });
+  await waitFor(async () => (await tipos(page)).includes("error"));
+  assert.deepEqual(await tipos(page), ["open", "connected", "close", "error"]);
+  await page.__ctx.close();
+});
+
+test("A25c B salva (ocupado volta a null) com o widget de B ainda aberto: o onClose e o onError TARDIOS de A continuam NÃO chegando ao host; o onClose de B chega", async () => {
+  const page = await aDepoisB();
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-12" } }); });
+  await waitFor(async () => (await tipos(page)).filter((t) => t === "connected").length === 2);
+  await page.evaluate(() => { window.__wA.onError({ message: "tardio" }); window.__wA.onClose(); });
+  await sleep(300);
+  assert.deepEqual(await tipos(page), ["open", "connected", "open", "connected"]);
+  await page.evaluate(() => window.__w.onClose());
+  await waitFor(async () => (await ev(page)).includes("close"));
+  assert.deepEqual(await tipos(page), ["open", "connected", "open", "connected", "close"]);
+  await page.__ctx.close();
+});
+
+test("A25d o init de A que rejeita DEPOIS de B ter nascido não chega ao host (nem onError nem onClose)", async () => {
+  const page = await abrir();
+  await page.evaluate(() => {
+    window.PluggyConnect = function (o) { window.__w = o; window.__n = (window.__n || 0) + 1; this.init = () => (window.__n === 1 ? new Promise((_, rej) => { window.__rej = rej; }) : undefined); };
+  });
+  await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  await page.evaluate(() => { window.__wA = window.__w; window.__w.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(async () => (await ev(page)).includes("connected"));
+  await page.evaluate(() => { window.__w = null; window.PBOpenFinance.reconnect("item-12"); });
+  await widgetPronto(page);
+  await page.evaluate(() => window.__rej(new Error("init de A")));
+  await sleep(300);
+  assert.deepEqual(await tipos(page), ["open", "connected", "open"]);
+  await page.__ctx.close();
+});
+
+/** A emite onError (a guarda é solta), B começa; devolve a página com `window.__wA` = o widget de A. */
+async function aErroDepoisB(opcoes) {
+  const page = await abrir(opcoes);
+  await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  await page.evaluate(() => { window.__wA = window.__w; window.__w.onError({ message: "x" }); });
+  await waitFor(async () => (await tipos(page)).includes("error"));
+  await page.evaluate(() => { window.__w = null; window.PBOpenFinance.reconnect("item-12"); });
+  await widgetPronto(page);
+  return page;
+}
+const itens = (page) => page.__posts.filter((p) => p[0] === "item");
+
+test("A25e o onSuccess TARDIO do widget velho A (B já nasceu) salva o item, mas o host não recebe onConnected nem notify; o do widget mais novo continua falando", async () => {
+  const page = await aErroDepoisB();
+  await page.evaluate(() => { window.__wA.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(() => itens(page).length === 1);
+  await sleep(300);
+  assert.match(itens(page)[0][2], /item-11/);
+  assert.deepEqual(await tipos(page), ["open", "error", "open"]);
+  assert.deepEqual(await page.evaluate(() => window.__nt || []), []);
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-12" } }); }); // positivo: o widget mais novo
+  await waitFor(async () => (await tipos(page)).includes("connected"));
+  assert.deepEqual(await page.evaluate(() => window.__nt), [["Banco conectado com sucesso!", "ok"]]);
+  await page.__ctx.close();
+});
+
+test("A25f o onSuccess TARDIO de A com o save FALHANDO (402) não chega ao host como onError e a conexão B segue em curso; o do widget mais novo continua chegando", async () => {
+  const page = await aErroDepoisB({ item: () => json({ detail: { code: "OF_BANK_LIMIT", message: "Limite." } }, 402) });
+  await page.evaluate(() => { window.__wA.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(() => itens(page).length === 1);
+  await sleep(300);
+  assert.deepEqual(await tipos(page), ["open", "error", "open"]); // o único "error" é o do próprio onError de A
+  assert.equal(await page.evaluate(() => window.PBOpenFinance.reconnect("item-13")), false); // B continua dona da guarda
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-12" } }); }); // positivo: o widget mais novo, save falhando
+  await waitFor(async () => (await tipos(page)).filter((t) => t === "error").length === 2);
   await page.__ctx.close();
 });
