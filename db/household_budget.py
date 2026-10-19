@@ -10,6 +10,16 @@ por categoria; aqui é PERCENTUAL da renda do mês por pote. Decisões:
 - EXCEÇÃO: aportes são `is_internal_movement = true` (ver db/accounts.py), mas
   ENTRAM no gasto daqui — o aporte É a alocação do pote Liberdade financeira;
   sem a exceção o pote ficaria sempre em R$ 0. Resgate continua fora.
+- Mesma lógica para o resto do que o dono quer ver nos potes (todos são
+  `is_internal_movement = true`, mas SÃO a alocação): criptomoedas
+  (`is_internal_category` as trata como internas) → Liberdade financeira;
+  launches `tipo = 'aporte_investimento'` (db/investments.py, sem categoria,
+  `alvo` = investimento) → Liberdade financeira; launches
+  `tipo = 'deposito_caixinha'` (db/pockets.py, sem categoria) → Metas.
+  Saque de caixinha e resgate de investimento ficam fora. A categoria
+  'investimentos' (genérica) segue fora: é interna e o dono não a mapeou.
+- A leitura é em nível de LINHA (`_month_rows`) e o `spent` de cada pote é a
+  soma dessas mesmas linhas que vão em `launches` — card e lista não divergem.
 - Gasto do mês = critério de `get_budgets_status_for_month` (launches por
   criado_em + credit_transactions pela fatura do mês, `cat_key_sql`).
 - `save_config` é tudo-ou-nada: valida ANTES, upsert das 6 rows numa transação.
@@ -24,7 +34,7 @@ from typing import Any
 from utils_text import TETO_ENTRADA, valor_finito
 
 from .connection import (
-    get_conn, cat_key_sql, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
+    CAT_VAZIA_LABEL, get_conn, cat_key_sql, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
 from .users import ensure_user
 
@@ -59,6 +69,7 @@ _CATEGORY_BUCKET_DISPLAY: dict[str, str] = {
     "lazer":               "prazeres",
     "educação":            "conhecimento",
     "investimento_aporte": "liberdade_financeira",
+    "criptomoedas":        "liberdade_financeira",
 }
 _CAT_ACCENTS_TR = str.maketrans(
     "áàâãäéèêëíìîïóòôõöúùûüç", "aaaaaeeeeiiiiooooouuuuc"
@@ -67,11 +78,19 @@ CATEGORY_BUCKET: dict[str, str] = {
     k.lower().translate(_CAT_ACCENTS_TR): v
     for k, v in _CATEGORY_BUCKET_DISPLAY.items()
 }
+_DISPLAY_BY_KEY = {k.lower().translate(_CAT_ACCENTS_TR): k for k in _CATEGORY_BUCKET_DISPLAY}
 DEFAULT_BUCKET = "conforto"
 
-# Aporte é a ÚNICA categoria de movimento interno que conta como gasto aqui
-# (ver docstring do módulo). Comparada pela mesma chave normalizada do resto.
+# Categorias de movimento interno que contam como gasto aqui (ver docstring do
+# módulo). Comparadas pela mesma chave normalizada do resto.
 _APORTE_KEY = "investimento_aporte"
+_INTERNAS_QUE_CONTAM = (_APORTE_KEY, "criptomoedas")
+
+# Launches sem categoria que caem num pote pelo TIPO (rótulo exibido incluso).
+_TIPO_BUCKET = {"deposito_caixinha": "metas", "aporte_investimento": "liberdade_financeira"}
+_TIPO_LABEL = {"deposito_caixinha": "Depósitos em caixinhas",
+               "aporte_investimento": "Aportes em investimentos"}
+_CAT_LABEL = {"investimento_aporte": "investimentos", "investments": "investimentos"}  # nome de exibição ≠ chave
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
@@ -232,11 +251,12 @@ def get_monthly_income(user_id: int, month: str | None = None) -> tuple[float, s
 
 # ─── Status do mês ───────────────────────────────────────────────────────────
 
-def _spent_by_bucket(user_id: int, year: int, mon: int) -> dict[str, float]:
-    """Gasto do mês agregado por pote (launches + cartão), via CATEGORY_BUCKET.
+def _month_rows(user_id: int, year: int, mon: int) -> list[dict[str, Any]]:
+    """Linhas do mês que contam nos potes (launches + cartão), com o pote de cada.
 
-    O filtro de movimento interno tem a exceção do aporte: entra
-    `is_internal_movement = false` OU categoria = investimento_aporte.
+    Filtro de movimento interno: `is_internal_movement = false` OU categoria em
+    `_INTERNAS_QUE_CONTAM`, e os launches de tipo `_TIPO_BUCKET` (sempre
+    internos). Tudo filtrado por user_id, inclusive credit_transactions/bills.
     """
     # OF: "Investments" virou investimento_aporte (#149), mas no pote segue como antes.
     k = lambda t: f"case when {t}source = 'open_finance' and {cat_key_sql(t + 'categoria')} = '{_APORTE_KEY}' then 'investments' else {cat_key_sql(t + 'categoria')} end"  # noqa: E731
@@ -245,35 +265,48 @@ def _spent_by_bucket(user_id: int, year: int, mon: int) -> dict[str, float]:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                select cat, sum(total)::float as total from (
-                  select {cat_l} as cat, sum(valor)::numeric as total
-                  from launches
-                  where user_id=%s
-                    and {TIPO_DESPESA_SQL}
-                    and (is_internal_movement = false
-                         or {cat_l} = %s)
-                    and date_part('year',  criado_em) = %s
-                    and date_part('month', criado_em) = %s
-                  group by {cat_l}
-                  union all
-                  select {cat_ct} as cat, sum(ct.valor)::numeric as total
-                  from credit_transactions ct
-                  join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
-                  where ct.user_id=%s
-                    and ct.is_refund = false
-                    and date_part('year',  b.period_end) = %s
-                    and date_part('month', b.period_end) = %s
-                  group by {cat_ct}
-                ) s group by cat
+                select criado_em::date as dia, coalesce(nullif(alvo, ''), nota, '') as descricao,
+                       categoria, {cat_l} as cat, tipo, valor, 'conta' as origem
+                from launches
+                where user_id=%s
+                  and date_part('year',  criado_em) = %s
+                  and date_part('month', criado_em) = %s
+                  and (({TIPO_DESPESA_SQL}
+                        and (is_internal_movement = false or {cat_l} = any(%s)))
+                       or tipo = any(%s))
+                union all
+                select ct.purchased_at as dia, coalesce(ct.nota, '') as descricao,
+                       ct.categoria, {cat_ct} as cat, 'credito' as tipo, ct.valor, 'cartao' as origem
+                from credit_transactions ct
+                join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
+                where ct.user_id=%s
+                  and ct.is_refund = false
+                  and date_part('year',  b.period_end) = %s
+                  and date_part('month', b.period_end) = %s
                 """,
-                (user_id, _APORTE_KEY, year, mon, user_id, year, mon),
+                (user_id, year, mon, list(_INTERNAS_QUE_CONTAM), list(_TIPO_BUCKET),
+                 user_id, year, mon),
             )
             rows = cur.fetchall()
-    out: dict[str, float] = {}
+    out = []
     for r in rows:
-        bucket = CATEGORY_BUCKET.get(r["cat"], DEFAULT_BUCKET)
-        out[bucket] = out.get(bucket, 0.0) + float(r["total"] or 0)
+        por_tipo = r["tipo"] in _TIPO_BUCKET
+        key = r["tipo"] if por_tipo else r["cat"]
+        label = _TIPO_LABEL[r["tipo"]] if por_tipo else (
+            _CAT_LABEL.get(key) or _DISPLAY_BY_KEY.get(key) or r["categoria"] or CAT_VAZIA_LABEL).capitalize()
+        out.append({
+            "bucket": _TIPO_BUCKET.get(r["tipo"]) or CATEGORY_BUCKET.get(key, DEFAULT_BUCKET),
+            "key": key, "categoria": label, "dia": r["dia"],
+            "descricao": r["descricao"], "valor": round(float(r["valor"] or 0), 2),
+            "origem": r["origem"],
+        })
     return out
+
+
+def _bucket_categories(bucket: str) -> list[str]:
+    cats = [(_CAT_LABEL.get(k) or k).capitalize()
+            for k, v in _CATEGORY_BUCKET_DISPLAY.items() if v == bucket]
+    return cats + [_TIPO_LABEL[t] for t, v in _TIPO_BUCKET.items() if v == bucket]
 
 
 def get_household_budget_status(
@@ -282,7 +315,9 @@ def get_household_budget_status(
     """Status do mês: por pote, quanto da renda cabe a ele vs quanto já se gastou.
 
     Retorna {"month", "income": {amount, source}, "buckets": [{key, label,
-    color, pct, budget_amount, spent, remaining, used_pct}], "totals": {spent,
+    color, pct, budget_amount, spent, remaining, used_pct, categories,
+    by_category[{categoria,total}], launches[{data,descricao,categoria,valor,
+    origem}]}], "totals": {spent,
     budget_amount, remaining, used_pct}} — used_pct=None se budget_amount == 0.
     """
     ensure_user(user_id)
@@ -291,7 +326,7 @@ def get_household_budget_status(
 
     config = get_config(user_id)
     income_amount, income_source = get_monthly_income(user_id, month)
-    spent = _spent_by_bucket(user_id, year, mon)
+    rows = _month_rows(user_id, year, mon)
 
     buckets_out: list[dict[str, Any]] = []
     total_budget = 0.0
@@ -299,7 +334,12 @@ def get_household_budget_status(
     for b in BUCKETS:
         pct = float(config.get(b["key"], b["default_pct"]))
         budget_amount = round(income_amount * pct / 100.0, 2)
-        bucket_spent = round(spent.get(b["key"], 0.0), 2)
+        mine = [r for r in rows if r["bucket"] == b["key"]]
+        bucket_spent = round(sum(r["valor"] for r in mine), 2)
+        by_cat: dict[str, dict[str, Any]] = {}
+        for r in mine:
+            c = by_cat.setdefault(r["key"], {"categoria": r["categoria"], "total": 0.0})
+            c["total"] = round(c["total"] + r["valor"], 2)
         used_pct = (
             round(bucket_spent / budget_amount * 100.0, 2)
             if budget_amount > 0 else None
@@ -315,6 +355,13 @@ def get_household_budget_status(
             "spent": bucket_spent,
             "remaining": round(budget_amount - bucket_spent, 2),
             "used_pct": used_pct,
+            "categories": _bucket_categories(b["key"]),
+            "by_category": sorted(by_cat.values(), key=lambda c: -c["total"]),
+            "launches": [
+                {"data": r["dia"].isoformat(), "descricao": r["descricao"],
+                 "categoria": r["categoria"], "valor": r["valor"], "origem": r["origem"]}
+                for r in sorted(mine, key=lambda r: (r["dia"], r["valor"]), reverse=True)
+            ],
         })
 
     total_budget = round(total_budget, 2)
