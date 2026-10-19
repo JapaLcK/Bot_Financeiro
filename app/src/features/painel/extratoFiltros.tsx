@@ -14,18 +14,22 @@ import { ButtonPainel as Button, ChipPainel as Chip, TextoPainel as Texto } from
 // "Registro antigo" só rotula o detalhe da linha: o filtro de origem não o oferece.
 export const ORIGENS = [["banco", "Banco"], ["cartao", "Cartão"], ["carteira", "Carteira"], ["registro_antigo", "Registro antigo"]] as const;
 const TIPOS = [["", "Tudo"], ["entrada", "Entradas"], ["saida", "Saídas"]] as const;
+/** Atalhos da tela (tipo, origem, rótulo). Espelho do `ATALHOS` do /painel (`webapp/src/dashboard/lib/extrato-dias.ts`): um teste do frontend compara os dois. */
+export const ATALHOS = [["", "", "Tudo"], ["entrada", "", "Entradas"], ["saida", "", "Saídas"], ["", "cartao", "Cartão"]] as const;
+/** O atalho que representa EXATAMENTE o par (tipo, origem) atual; combinação fora deles (ex.: saída + banco) não seleciona nenhum. */
+export const atalhoDe = (f: Pick<FiltrosExtrato, "tipo" | "origem">) => ATALHOS.find(([tipo, origem]) => tipo === f.tipo && origem === f.origem);
 /** `dia` é "AAAA-MM-DD" ou ""; `min`/`max` em centavos, 0 = sem limite. */
 export type FiltrosExtrato = { tipo: string; origem: string; dia: string; min: number; max: number };
 export const SEM_FILTROS: FiltrosExtrato = { tipo: "", origem: "", dia: "", min: 0, max: 0 };
 
 type Ficha = { rotulo: string; texto: string; tirar: () => void };
-/** Os filtros ativos, um por ficha; `f.length` é a contagem do botão. A busca e o mês não contam. `categoria` (route param) entra com o rótulo já resolvido. Com `oculto`, a ficha de valor não mostra a faixa. */
+/** Os filtros ativos, um por ficha; `f.length` é a contagem do botão. A busca e o mês não contam. Tipo/origem que um atalho já mostra não geram ficha. `categoria` (route param) entra com o rótulo já resolvido. Com `oculto`, a ficha de valor não mostra a faixa. */
 export function fichasAtivas(f: FiltrosExtrato, aplicar: (n: FiltrosExtrato) => void, categoria?: { nome: string; tirar: () => void }, oculto = false): Ficha[] {
-  const tipo = TIPOS.find(([id]) => id === f.tipo)?.[1], origem = ORIGENS.find(([id]) => id === f.origem)?.[1] ?? f.origem;
+  const atalho = atalhoDe(f), tipo = TIPOS.find(([id]) => id === f.tipo)?.[1], origem = ORIGENS.find(([id]) => id === f.origem)?.[1] ?? f.origem;
   const valor = oculto ? "Valor" : f.min && f.max ? `${brl(f.min)} a ${brl(f.max)}` : f.min ? `A partir de ${brl(f.min)}` : `Até ${brl(f.max)}`;
   return [
-    ...(f.tipo ? [{ rotulo: `Limpar filtro de ${tipo}`, texto: tipo!, tirar: () => aplicar({ ...f, tipo: "" }) }] : []),
-    ...(f.origem ? [{ rotulo: `Limpar filtro de origem ${origem}`, texto: origem, tirar: () => aplicar({ ...f, origem: "" }) }] : []),
+    ...(f.tipo && !atalho ? [{ rotulo: `Limpar filtro de ${tipo}`, texto: tipo!, tirar: () => aplicar({ ...f, tipo: "" }) }] : []),
+    ...(f.origem && !atalho ? [{ rotulo: `Limpar filtro de origem ${origem}`, texto: origem, tirar: () => aplicar({ ...f, origem: "" }) }] : []),
     ...(f.dia ? [{ rotulo: `Limpar filtro do dia ${dataPtBr(f.dia)}`, texto: dataPtBr(f.dia), tirar: () => aplicar({ ...f, dia: "" }) }] : []),
     ...(f.min || f.max ? [{ rotulo: "Limpar filtro de valor", texto: valor, tirar: () => aplicar({ ...f, min: 0, max: 0 }) }] : []),
     ...(categoria ? [{ rotulo: `Limpar filtro de ${categoria.nome}`, texto: categoria.nome, tirar: categoria.tirar }] : []),

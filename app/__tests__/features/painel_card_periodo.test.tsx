@@ -71,4 +71,8 @@ it("categoria com `maiores: []` NÃO é expansível; com `maiores`, é", async (
   await mostrar({ categorias: [{ ...cat("mercado", "100.00", 50), maiores: [PERIODO.categorias[0].maiores[0]] }, cat("transporte", "50.00", 50)] });
   expect(card().getByRole("button", { name: /Mercado/ })).toBeTruthy(); expect(card().getByText("Transporte")).toBeTruthy(); expect(card().queryByRole("button", { name: /Transporte/ })).toBeNull();
 });
+it("a linha das maiores de uma categoria MANTÉM a data (só o Extrato a omite)", async () => {
+  await mostrar({}); fireEvent.press(card().getByRole("button", { name: /Mercado/ }));
+  expect(card().getByText(/^03\/09\/2026 · Nubank · Mercado/)).toBeTruthy();
+});
 it("o Saldo é o do servidor, não Entrou − Saiu", async () => { await mostrar({ saldo: "1234.56" }); expect(card().getByText("R$ 1.234,56")).toBeTruthy(); expect(card().queryByText("R$ 1.699,50")).toBeNull(); });

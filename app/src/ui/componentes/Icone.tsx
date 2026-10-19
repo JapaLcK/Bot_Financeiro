@@ -55,7 +55,9 @@ export type NomeIcone =
   | "TrendUp"
   | "ShieldCheck"
   | "Phone"
-  | "WhatsappLogo";
+  | "WhatsappLogo"
+  | "MagnifyingGlass"
+  | "ArrowDownLeft";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -115,6 +117,8 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   ShieldCheck: resolver(require("phosphor-react-native/src/icons/ShieldCheck"), "ShieldCheckIcon"),
   Phone: resolver(require("phosphor-react-native/src/icons/Phone"), "PhoneIcon"),
   WhatsappLogo: resolver(require("phosphor-react-native/src/icons/WhatsappLogo"), "WhatsappLogoIcon"),
+  MagnifyingGlass: resolver(require("phosphor-react-native/src/icons/MagnifyingGlass"), "MagnifyingGlassIcon"),
+  ArrowDownLeft: resolver(require("phosphor-react-native/src/icons/ArrowDownLeft"), "ArrowDownLeftIcon"),
 
   CaretLeft: resolver(require("phosphor-react-native/src/icons/CaretLeft"), "CaretLeftIcon"),
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
