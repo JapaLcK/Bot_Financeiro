@@ -325,6 +325,115 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: a conta muda com o chat aberto: o anúncio da resposta da conta anterior não reaparece para a nova`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await page.waitForFunction(() => /do detetive\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""));
+    await paraConta43(ctx);
+    let solta;
+    const presa = new Promise((ok) => { solta = ok; });
+    await ctx.route(/\/agents\/43\/detetive\/chat$/, async (r) => { await presa; return r.fallback(); }); // a resposta da conta nova demora
+    const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); });
+    await relida;
+    await page.locator(".chat-empty").waitFor();
+    await enviar(page, "@Detetive e agora?"); // a conta nova abre a conversa; a resposta dela ainda não chegou
+    await page.locator(".chat > .msg-user", { hasText: "e agora?" }).waitFor();
+    await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""), "");
+    solta();
+    await ctx.close();
+  });
+
+  // Só no desktop: no celular a barra só existe no /piggy, onde o chat já confere a conta ao montar.
+  test(`${width}: a conta muda noutra aba e uma pergunta SEM menção sai de outra página: ela fica, a conversa anterior some`, { skip: width < 768 && "no celular a barra some fora do /piggy" }, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    await paraConta43(ctx);
+    await enviar(page, "quanto gastei?");
+    await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).waitFor();
+    await page.waitForTimeout(300); // a conferência do chat ao montar não apaga a pergunta nova
+    assert.equal(await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).count(), 1);
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
+  test(`${width}: a conta muda: o dado em cache da anterior (investido) não responde à conta nova`, async () => {
+    const { ctx, page } = await abrir({ width });
+    const investido = (total) => ({ json: { total, motivos: [], por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: total, motivos: [] }], por_banco: [{ banco: "Nubank", valor: total, motivos: [] }] } });
+    let total = "11111.11";
+    await ctx.route("**/api/v2/investido", (r) => r.fulfill(investido(total)));
+    await enviar(page, "quanto tenho aplicado?");
+    await page.locator(".chat > .msg-piggy", { hasText: "11.111,11" }).first().waitFor();
+    total = "99999.99";
+    await paraConta43(ctx);
+    const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); });
+    await relida;
+    await page.locator(".chat-empty").waitFor();
+    await enviar(page, "quanto tenho aplicado?");
+    await page.locator(".chat > .msg-piggy", { hasText: "99.999,99" }).first().waitFor();
+    assert.equal(await page.getByText("11.111,11").count(), 0);
+    await ctx.close();
+  });
+
+  test(`${width}: com a conta ainda sendo conferida, uma 2ª pergunta não some: o texto fica na barra`, async () => {
+    const { ctx, page } = await abrir({ width });
+    let soltaPerfil;
+    const perfilPreso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await perfilPreso; return r.fallback(); });
+    await enviar(page, "primeira");
+    await enviar(page, "segunda");
+    assert.equal(await campo(page).inputValue(), "segunda");
+    soltaPerfil();
+    await page.locator(".chat > .msg-user", { hasText: "primeira" }).waitFor();
+    assert.equal(await campo(page).inputValue(), "segunda");
+    await ctx.close();
+  });
+
+  test(`${width}: a conta muda e a lista do @ não mostra os agentes da anterior enquanto a conta é relida`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?"); // conta e catálogo da 42 no cache
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await paraConta43(ctx);
+    let soltaPerfil;
+    const perfilPreso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await perfilPreso; return r.fallback(); });
+    await digitar(page, "@");
+    await page.waitForTimeout(300);
+    assert.equal(await lista(page).count(), 0, "nada do catálogo da 42");
+    soltaPerfil();
+    await lista(page).waitFor();
+    assert.equal((await nomes(page)).length, 7, "o catálogo da 43: os sete ativos");
+    await ctx.close();
+  });
+
+  test(`${width}: a conta muda durante "Ativar e responder": a pergunta da conta anterior não sai`, async () => {
+    let solta;
+    const { ctx, page, chats } = await abrir({ width, soltaAtivar: new Promise((ok) => { solta = ok; }) });
+    await digitar(page, "@rep");
+    await lista(page).waitFor();
+    await campo(page).pressSequentially("órter resume");
+    await campo(page).press("Enter");
+    const r = resposta(page);
+    await r.getByRole("button", { name: "Ativar e responder" }).click();
+    await r.getByRole("button", { name: "Ativando…" }).waitFor();
+    await paraConta43(ctx);
+    const relida = page.waitForResponse((x) => x.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); });
+    await relida;
+    await page.locator(".chat-empty").waitFor();
+    const ativou = page.waitForResponse((x) => /\/agents\/42\/reporter\/activate$/.test(x.url()));
+    solta();
+    await ativou;
+    await page.waitForTimeout(300);
+    assert.deepEqual(chats, [], "nada ao /agents/42/.../chat");
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");

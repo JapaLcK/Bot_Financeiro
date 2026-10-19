@@ -32,8 +32,9 @@ export function AskBar({ path }: { path: Path }) {
   // O catálogo só é lido quando há um "@" em edição: sem ele, nenhuma requisição a /auth nem a /agents.
   // Também com a menção já escrita fora do cursor (texto colado): quem digita o nome inteiro passa pelo token, mas o catálogo tem de estar lido no envio.
   const token = tokenEm(text, cursor), quer = /(^|\s)@/.test(text);
-  const conta = useQuery({ ...contaQuery, enabled: contaQuery.enabled && quer }).data;
-  const uid = conta?.user_id;
+  const conta = useQuery({ ...contaQuery, enabled: contaQuery.enabled && quer });
+  // Enquanto a conta é relida, nada do cache: se a sessão virou outra noutra aba, a lista mostraria os agentes da anterior.
+  const uid = conta.isFetching ? undefined : conta.data?.user_id;
   const dados = useQuery(agentesQuery(uid, quer)).data; // falhou/404/beta desligado: sem dados, a lista não abre e tudo vai ao Piggy
 
   const itens: ItemMencao[] = [];
@@ -104,7 +105,7 @@ export function AskBar({ path }: { path: Path }) {
           if (m) {
             const acesso = acessoDe(d!, m.kind)!;
             if (!m.texto || !perguntarAoAgente({ kind: m.kind, original: t, texto: m.texto, uid: u ?? 0, acesso, energia: energiaDe(d!, m.kind) })) return; // só a menção, ou já há pergunta em voo a ele: o texto fica
-          } else ask({ text: t });
+          } else if (!ask({ text: t })) return; // outra pergunta ainda confere a conta: o texto fica
           setText("");
         } finally { enviando.current = false; }
       }}>

@@ -89,6 +89,12 @@ export function PiggyChat() {
   const fila = useRef<ReactNode[]>([]);
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
+    if (!msgs.length) { // conversa limpa (troca de conta): o anúncio pendente ou o último dito eram dela e não podem reaparecer (Codex no #1157)
+      clearTimeout(timer.current);
+      fila.current = [];
+      setSaid(null);
+      return;
+    }
     let novas = 0;
     for (const m of msgs) {
       if (m.role !== "piggy") continue;

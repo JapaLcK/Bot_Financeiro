@@ -30,13 +30,27 @@ const investido = (t: string) => /investid|aplicad/.test(semAcento(t));
 const ESCRITA = /\b(?:(?:cri|cadastr|registr|apag|delet|remov|mud|alter|edit|troc|aument|atualiz|mont|defin)(?:a|e|ar|er|ue|ir)|exclu(?:i|a|ir)|diminu(?:i|a|ir)|renome(?:ia|ie|ar)|faz(?:er)?)\b|\bquero (?:uma|outra) /;
 const metas = (t: string) => { const n = semAcento(t); return /\bmetas?\b/.test(n) && !ESCRITA.test(n); };
 
-/** Envia a pergunta e abre a conversa. Sem `topic`, o Piggy responde com os atalhos. */
+// Confere a conta da sessão antes de uma pergunta nova entrar na conversa: main.tsx liga a uma leitura de /auth/dashboard-profile
+// (que passa pelo `contaDaSessao`); no protótipo, nada a conferir.
+let conferirConta: () => Promise<unknown> = () => Promise.resolve();
+export const aoConferirConta = (f: () => Promise<unknown>) => { conferirConta = f; };
+let perguntando = false; // a conferência em voo segura um 2º toque (chip, faixa do Piggy) até a pergunta entrar
+
+/** Envia a pergunta e abre a conversa. Sem `topic`, o Piggy responde com os atalhos. A pergunta entra depois de conferir a conta:
+ * se a sessão virou outra noutra aba, a conversa anterior some ANTES e a pergunta nova fica (Codex no #1157). Sem conseguir
+ * conferir, entra assim mesmo: o PiggyChat não mostra a conversa sem conta conferida. */
 export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string }) {
-  const topic = q.topic ?? (investido(q.text) ? "investido" : metas(q.text) ? "metas" : null);
-  const a = topic ? answer(topic, q.cat ?? null, q.key) : DEMO;
-  msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
-  subs.forEach((f) => f());
-  go("/piggy");
+  if (perguntando) return false; // falso = a pergunta não entrou (o texto fica na barra)
+  perguntando = true;
+  void conferirConta().catch(() => {}).then(() => {
+    perguntando = false;
+    const topic = q.topic ?? (investido(q.text) ? "investido" : metas(q.text) ? "metas" : null);
+    const a = topic ? answer(topic, q.cat ?? null, q.key) : DEMO;
+    msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
+    subs.forEach((f) => f());
+    go("/piggy");
+  });
+  return true;
 }
 
 // --- Conversa com um agente (@Nome na barra) ---
@@ -145,6 +159,7 @@ export async function ativarEResponder(id: number, depois: () => void) {
     return;
   }
   depois(); // a lista do @ relê o catálogo
+  if (!msgs.some((x) => x.id === id)) { emVoo.delete(`${m.uid}:${m.agente}`); return; } // a conversa foi limpa (troca de conta) durante a ativação: a pergunta da conta anterior não sai
   patch(id, { ativando: false });
   await enviar(id, m.agente, m.pergunta, m.uid);
 }

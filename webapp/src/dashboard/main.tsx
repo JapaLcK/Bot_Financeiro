@@ -6,7 +6,7 @@ import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { contaDaSessao } from "./lib/conversation";
+import { aoConferirConta, contaDaSessao } from "./lib/conversation";
 import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico } from "./lib/api-v2.gen";
 import "./styles/index.css";
@@ -15,9 +15,23 @@ declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
 
 const qc = new QueryClient();
 // Toda leitura de /auth/dashboard-profile, de qualquer tela, diz de quem é a sessão: a conversa do Piggy é da conta que a fez.
+// Se a sessão virou outra conta (noutra aba), todo o cache era da anterior (as chaves não levam o uid). O que ninguém mostra
+// sai do cache (a próxima tela lê do zero); o que está na tela relê já, mantendo o dado até chegar: zerar o `me` derrubaria
+// quem conta com ele carregado (o portão da Entrada). O microtask roda antes de quem esperava essa leitura (`ask`, a menção).
+let uidVisto: number | undefined;
 qc.getQueryCache().subscribe((e) => {
-  if (e.type === "updated" && e.query.queryKey[0] === contaQuery.queryKey[0]) contaDaSessao((e.query.state.data as { user_id?: number } | undefined)?.user_id);
+  if (e.type !== "updated" || e.query.queryKey[0] !== contaQuery.queryKey[0]) return;
+  const uid = (e.query.state.data as { user_id?: number } | undefined)?.user_id;
+  contaDaSessao(uid);
+  if (uid == null) return;
+  if (uidVisto != null && uid !== uidVisto) queueMicrotask(() => {
+    const daConta = (q: { queryKey: readonly unknown[] }) => q.queryKey[0] !== contaQuery.queryKey[0];
+    qc.removeQueries({ predicate: (q) => daConta(q) && q.getObserversCount() === 0 });
+    void qc.invalidateQueries({ predicate: daConta });
+  });
+  uidVisto = uid;
 });
+if (!DEMO) aoConferirConta(() => qc.fetchQuery(contaQuery)); // toda pergunta nova ao Piggy relê a conta antes de entrar
 // O protótipo (dashboard-v2/index.html) define o plano da demonstração e não fala com a
 // API: o cache nasce com os dados sintéticos e o perfil salvo no navegador. O bundle nunca
 // lê a URL: quem decide o plano é o /api/v2/me.

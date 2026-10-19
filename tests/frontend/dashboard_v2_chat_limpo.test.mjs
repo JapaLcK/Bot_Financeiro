@@ -222,6 +222,8 @@ test("375: duplo toque numa pílula manda uma pergunta; o toque depois da janela
     await page.waitForTimeout(intervalo);
     await page.touchscreen.tap(x, y); // o mesmo ponto: agora cai numa pílula da fileira nova
     await page.waitForTimeout(300);
+    // A pergunta entra depois de conferir a conta (`ask`): sob carga a leitura passa dos 300 ms, então a 2ª pode demorar a aparecer.
+    if (intervalo === 700) await page.locator(".chat > .msg-user").nth(1).waitFor({ timeout: 3000 }).catch(() => {});
     vistos[intervalo] = await page.locator(".chat > .msg-user").count();
     await ctx.close();
     assert.deepEqual(erros, []);
@@ -296,8 +298,9 @@ test("1280: display_name que não é texto não derruba a página (cai no e-mail
   assert.deepEqual(vistos, Array(4).fill(["Olá, marina", []]));
 });
 
-// Com a conversa aberta o perfil também é lido (uma vez): é como a troca de conta noutra aba chega ao `contaDaSessao` (Codex no #1157).
-test("1280: o perfil é lido uma vez no estado vazio e uma vez ao abrir a rota com a conversa já aberta", async () => {
+// Com a conversa aberta o perfil também é lido: é como a troca de conta noutra aba chega ao `contaDaSessao` (Codex no #1157).
+// Perguntar de outra página lê duas vezes: a pergunta confere a conta antes de entrar (`ask`) e o chat confere ao montar.
+test("1280: o perfil é lido uma vez no estado vazio; perguntar de outra página o lê na pergunta e ao abrir o chat", async () => {
   const vazio = await abrir({ width: 1280, height: 800 });
   await vazio.page.waitForFunction(() => /^Olá, /.test(document.querySelector(".chat-empty h2")?.textContent ?? ""));
   const noVazio = vazio.pedidos.length;
@@ -308,7 +311,7 @@ test("1280: o perfil é lido uma vez no estado vazio e uma vez ao abrir a rota c
   await page.waitForTimeout(300);
   await ctx.close();
   assert.equal(noVazio, 1);
-  assert.equal(pedidos.length, 1);
+  assert.equal(pedidos.length, 2);
   assert.deepEqual(erros, []);
 });
 
