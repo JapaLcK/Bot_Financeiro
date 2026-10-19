@@ -66,6 +66,8 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     if (url.origin === "https://cdn.pluggy.ai" && url.pathname.startsWith("/pluggy-connect/")) return r.fulfill({ contentType: "application/javascript", body: "" });
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
+    // A conta da sessão: o chat só mostra a conversa depois de conferi-la (PiggyChat, `conferida`). Sem nome nem e-mail: a saudação é "Olá, Você"; o teste que quer outro corpo sobrescreve com `ctx.route`.
+    if (url.pathname === "/auth/dashboard-profile") return r.fulfill({ json: { user_id: 1, display_name: null, email: null, whatsapp_linked: true } });
     if (url.pathname === "/api/v2/eventos") return;
     if (url.pathname === "/api/v2/perfil") {
       if (r.request().method() === "PUT") atual = r.request().postDataJSON().perfil;

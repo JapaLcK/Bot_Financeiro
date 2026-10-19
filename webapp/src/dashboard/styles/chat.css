@@ -35,10 +35,10 @@
 .msg-text b { color: var(--ink); font-weight: 600; }
 
 /* Estado vazio: logo e saudação no centro da coluna (vh e não dvh: o Safari 14 não tem). */
-.chat-empty { display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; min-height: calc(100vh - var(--askbar-bottom) - 280px); }
+.chat-empty, .chat-espera { display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; min-height: calc(100vh - var(--askbar-bottom) - 280px); }
 .chat-empty img { margin-bottom: 8px; }
 .chat-empty h2 { max-width: 100%; overflow-wrap: break-word; word-break: break-word; /* nome sem espaço (o e-mail inteiro): quebra em vez de rolar a página; break-word porque o anywhere é do Safari 15.4 */ font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
-.chat-empty p { font-size: 16px; color: var(--ink-2); }
+.chat-empty p, .chat-espera p { font-size: 16px; color: var(--ink-2); }
 
 /* A fileira de perguntas: uma linha só, fixa logo acima da barra, na mesma coluna dela. Grid em coluna e
    não flex gap (Safari 14). Cada pílula tem 44 px de alto (alvo de toque) e se vê com 36: a borda de 4 px é transparente. */

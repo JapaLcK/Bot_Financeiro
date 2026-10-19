@@ -65,7 +65,10 @@ export function PiggyChat() {
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
   // Relida também com a conversa aberta e na volta do foco: se a sessão virou outra conta noutra aba, a leitura chega ao
   // `contaDaSessao` (main.tsx) e a conversa da anterior some. O corpo vem do servidor: o que não é texto vira vazio (como conta/Ponte.tsx).
-  const conta = useQuery({ ...contaQuery, refetchOnWindowFocus: true }).data;
+  const contaQ = useQuery({ ...contaQuery, refetchOnWindowFocus: true }), conta = contaQ.data;
+  // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
+  // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
+  const conferida = DEMO || (contaQ.isFetchedAfterMount && contaQ.isSuccess);
   const txt = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const nome = conta && (txt(conta.display_name) || txt(conta.email).split("@")[0] || "Você");
   const end = useRef<HTMLLIElement>(null);
@@ -81,21 +84,26 @@ export function PiggyChat() {
   // antiga pode terminar enquanto a mais nova ainda está "Preparando…" (Codex no #1157).
   const estados = useRef(new Map<number, string>());
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fila = useRef<ReactNode[]>([]);
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
-    let nova: (typeof msgs)[number] | undefined;
+    let novas = 0;
     for (const m of msgs) {
       if (m.role !== "piggy") continue;
       const agora = m.estado ?? "pronto";
       if (estados.current.get(m.id) === agora) continue;
       estados.current.set(m.id, agora);
-      if (agora !== "enviando") nova = m;
+      if (agora !== "enviando") { fila.current.push(m.text ?? null); novas++; }
     }
-    if (!nova) return; // sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente
-    const texto = nova.text ?? null;
+    if (!novas) return; // sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente
+    // Respostas que terminam juntas (menos de 60 ms) saem no MESMO anúncio, em ordem: uma não apaga a outra (Codex no #1157).
     setSaid(null);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setSaid(texto), 60);
+    timer.current = setTimeout(() => {
+      const textos = fila.current;
+      fila.current = [];
+      setSaid(<>{textos.map((t, i) => <span key={i}>{i ? " " : ""}{t}</span>)}</>);
+    }, 60);
   }, [msgs]);
 
   // Título só para o leitor de tela e o foco da rota (App.tsx); o que se vê é a conversa.
@@ -128,6 +136,17 @@ export function PiggyChat() {
           <p>Como posso te ajudar?</p>
         </section>
         {fileira}
+      </>
+    );
+  }
+
+  if (!conferida) {
+    return (
+      <>
+        {head}
+        <section className="chat-espera" aria-busy={!contaQ.isError || undefined}>
+          <p>{contaQ.isError ? "Não foi possível confirmar sua conta. Recarregue a página." : "Carregando a conversa…"}</p>
+        </section>
       </>
     );
   }

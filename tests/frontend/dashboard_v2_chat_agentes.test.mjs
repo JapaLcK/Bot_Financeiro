@@ -255,6 +255,61 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: duas respostas que terminam juntas: as duas chegam ao leitor de tela, nenhuma apaga a outra`, async () => {
+    const solta = {}, presas = { detetive: new Promise((ok) => { solta.detetive = ok; }), xerife: new Promise((ok) => { solta.xerife = ok; }) };
+    const { ctx, page } = await abrir({ width, segura: (kind) => presas[kind] });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await enviar(page, "@Xerife algo fora do padrão?");
+    await page.locator(".chat > .msg-piggy").nth(1).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await page.evaluate(() => { // tudo o que a região viva chegou a dizer
+      window.__ditos = [];
+      const st = document.querySelector("[role=status]:not(.guia-status)");
+      new MutationObserver(() => window.__ditos.push(st.textContent)).observe(st, { childList: true, subtree: true, characterData: true });
+    });
+    solta.detetive(); solta.xerife(); // no mesmo tick
+    await page.locator(".chat > .msg-piggy").nth(1).locator(".msg-text", { hasText: "do xerife." }).waitFor();
+    await resposta(page, 0).locator(".msg-text", { hasText: "do detetive." }).waitFor();
+    await page.waitForTimeout(300);
+    const ditos = (await page.evaluate(() => window.__ditos)).join("|");
+    assert.match(ditos, /do detetive\./, ditos);
+    assert.match(ditos, /do xerife\./, ditos);
+    await ctx.close();
+  });
+
+  test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    await paraConta43(ctx);
+    let soltaPerfil;
+    const perfilPreso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await perfilPreso; return r.fallback(); }); // o perfil da conta nova demora
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.locator(".chat-espera", { hasText: "Carregando a conversa…" }).waitFor();
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    assert.equal(await page.getByText("Resposta 1 do detetive.").count(), 0);
+    soltaPerfil();
+    await page.locator(".chat-empty").waitFor(); // conferida: era outra conta, a conversa foi limpa
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
+  test(`${width}: sem conseguir conferir a conta (perfil 401) ao abrir o /piggy, a conversa não aparece`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ status: 401, json: { detail: "Não autenticado." } }));
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.locator(".chat-espera", { hasText: "Não foi possível confirmar sua conta. Recarregue a página." }).waitFor();
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda noutra aba: a 1ª pergunta da conta nova ao mesmo agente vai sem o context da anterior`, async () => {
     const { ctx, page, chats } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");
@@ -306,6 +361,11 @@ for (const width of TELAS) {
     await idaEVoltaPelaConta(page);
     await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
     assert.equal(await page.locator(".chat-empty").count(), 0);
+    await page.evaluate(() => { location.hash = "#/"; }); // e pela Início, sem passar pela Conta: conferida, a conversa volta
+    await page.locator("#board-profile").waitFor();
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.equal(await page.locator(".chat-espera").count(), 0);
     await ctx.close();
   });
 
