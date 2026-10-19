@@ -293,6 +293,8 @@ export function guardarCredenciaisSe(
 
 // Marcador de retorno bancário: sem token Pluggy, saldos ou dados bancários.
 const TENTATIVA_OF = "pb.of.tentativa";
+/** Passado esse prazo o marcador vale como inexistente (leitura, captura, nova tentativa); o POST do `volta.ts` já usava o mesmo limite. */
+export const PRAZO_TENTATIVA_MS = 60 * 60_000;
 const tentativaSchema = z.object({
   user_id: z.number().int().positive(), sessao: z.string().min(1), tentativa_id: z.string(),
   iniciada_em: z.number(), modo: z.enum(["nova", "reconectar"]),
@@ -324,7 +326,10 @@ async function apagarSessaoNoCofre(): Promise<void> {
 async function tentativaNoCofre(): Promise<TentativaBancaria | null> {
   const bruto = await SecureStore.getItemAsync(TENTATIVA_OF);
   if (!bruto) return null;
-  try { return tentativaSchema.parse(JSON.parse(bruto)); } catch { return null; }
+  try {
+    const t = tentativaSchema.parse(JSON.parse(bruto));
+    return Date.now() - t.iniciada_em > PRAZO_TENTATIVA_MS ? null : t;
+  } catch { return null; }
 }
 
 async function sessaoNoCofre(): Promise<string | null> {
@@ -372,6 +377,7 @@ export function capturarItemBancario(item_id: string, tentativa_id: string | und
   });
 }
 
+/** Também é o "Descartar" do aviso de conexão pendente: compara o `tentativa_id` e a sessão na fila, então nunca apaga a tentativa de outro. */
 export function concluirTentativaBancaria(tentativa_id: string): Promise<void> {
   return naFila(async () => {
     const t = await tentativaNoCofre();

@@ -11,7 +11,7 @@ import { useBloqueio } from "@/features/bloqueio/bloqueio";
 import { temTampa } from "@/features/bloqueio/tampa";
 import { carregarAcessoBancario, conferirSessao } from "@/features/openFinance/acesso";
 import { useForeground } from "@/features/openFinance/useForeground";
-import { lerCredenciais, lerTentativaBancaria, type Credenciais } from "@/storage/secure";
+import { concluirTentativaBancaria, lerCredenciais, lerTentativaBancaria, type Credenciais } from "@/storage/secure";
 import { lerRecurso, salvarPerfil } from "@/services/painel";
 import { usePrivacidade } from "./privacidade";
 import { Screen } from "@/ui/componentes/Screen";
@@ -26,7 +26,7 @@ const MENSAIS: Recurso[] = ["resumo", "detalhes", "detalhesAnterior"];
 export type Dados = { [K in Recurso]: z.output<typeof schemas[K]> };
 export type Resultado<T> = { fase: "carregando" } | { fase: "pronto"; dado: T } | { fase: "erro" | "negado"; mensagem: string };
 type Resultados = { [K in Recurso]?: Resultado<Dados[K]> };
-type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; relerPrevisao: () => void; relerMetas: (forcar?: boolean) => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
+type Painel = { usuario: Perfil | null; gate: "carregando" | "liberado" | "negado" | "erro"; erroGate: string; ativo: boolean; travado: boolean; voltarAoPortao: () => void; pendente: boolean; descartarPendente: () => Promise<boolean>; mes: string; mudarMes: (m: string) => void; oculto: boolean; alternarPrivacidade: () => void; perfil: S.PerfilPainel; escolhendo: boolean; salvandoPerfil: boolean; mudarPerfil: (p: S.PerfilPainel) => Promise<void>; layout: Widget[]; organizar: (ids: Widget[] | null) => void; dados: Resultados; aviso: string | null; atualizar: () => void; atualizando: boolean; dias?: number; mudarDias: (d: number) => void; relerPrevisao: () => void; relerMetas: (forcar?: boolean) => void; versao: number; operacao: () => { controlador: AbortController; atual: () => boolean }; falhou: (e: unknown) => void };
 const Contexto = createContext<Painel | null>(null);
 export function useEstadoPainel() { const p = useContext(Contexto); if (!p) throw new Error("Painel indisponível"); return p; }
 export function usePainel() { const p = useEstadoPainel(); if (!p.usuario || p.gate !== "liberado") throw new Error("Painel não autorizado"); return { ...p, usuario: p.usuario }; }
@@ -47,7 +47,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Perfil | null>(null);
   const [gate, setGate] = useState<"carregando" | "liberado" | "negado" | "erro">("carregando");
   const [erroGate, setErroGate] = useState("");
-  const [pendente, setPendente] = useState(false);
+  const [pendente, setPendente] = useState<string | null>(null); // tentativa_id do marcador lido no cofre
   const [mes, setMes] = useState(mesAtual);
   const { oculto, alternar: alternarPrivacidade, mostrar: mostrarValores } = usePrivacidade();
   const [perfil, setPerfil] = useState<S.PerfilPainel>("padrao");
@@ -110,7 +110,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       }
       credencialValidada.current = cred;
       silenciosa.current = refoco && mesmo && !pediuAtualizar.current;
-      acessoValidando.current = false; setPendente(!!tentativa); setUsuario(a.perfil); setGate("liberado"); setVersao((v) => v + 1);
+      acessoValidando.current = false; setPendente(tentativa?.tentativa_id ?? null); setUsuario(a.perfil); setGate("liberado"); setVersao((v) => v + 1);
     }).catch((e: unknown) => {
       if (cancelado || g !== geracaoAcesso.current) return;
       if (e instanceof RequisicaoSuperada) { if (refoco) setGate("carregando"); return; }
@@ -209,10 +209,24 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const uid = usuario.user_id;
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
+  // "Descartar" do aviso de conexão pendente. Apaga só o marcador que o aviso mostrou (`concluirTentativaBancaria` confere o id e a sessão na fila) e RELÊ o cofre: uma tentativa B gravada depois continua aparecendo.
+  const descartarPendente = async () => {
+    const id = pendente, uid = dono.current;
+    if (id === null) return false;
+    try {
+      await concluirTentativaBancaria(id);
+      const relida = await lerTentativaBancaria(uid ?? undefined);
+      if (dono.current === uid) setPendente(relida?.tentativa_id ?? null);
+      return true;
+    } catch {
+      if (dono.current === uid) setAviso("Não conseguimos descartar agora. Tente de novo.");
+      return false;
+    }
+  };
   // Chave nova com a revalidação do refoco em voo: o efeito de carga espera o acesso, então o dado velho sairia sob o rótulo novo. Marca "carregando"; a carga que vem depois lê o novo.
   const trocouChave = (recursos: Recurso[]) => { if (acessoValidando.current) setDados((d) => ({ ...d, ...Object.fromEntries(recursos.map((k) => [k, { fase: "carregando" }])) })); };
   // atualizar cancela no pedido, não no efeito: o efeito do pai roda depois do dos filhos e mataria a página recém-pedida (#849).
-  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente, mes, mudarMes: (m) => { setMes(m); if (m !== mes) trocouChave(MENSAIS); }, oculto, alternarPrivacidade, perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); pediuAtualizar.current = true; setVersao((v) => v + 1); }, atualizando, dias, mudarDias: (d) => { setDias(d); if (d !== dias) trocouChave(["previsao"]); }, relerPrevisao: () => setReleitura((v) => v + 1), relerMetas, versao, operacao, falhou }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ usuario, gate, erroGate, ativo, travado, voltarAoPortao: () => setGate("negado"), pendente: pendente !== null, descartarPendente, mes, mudarMes: (m) => { setMes(m); if (m !== mes) trocouChave(MENSAIS); }, oculto, alternarPrivacidade, perfil, escolhendo, salvandoPerfil, mudarPerfil, layout, organizar, dados, aviso, atualizar: () => { cancelar(); pediuAtualizar.current = true; setVersao((v) => v + 1); }, atualizando, dias, mudarDias: (d) => { setDias(d); if (d !== dias) trocouChave(["previsao"]); }, relerPrevisao: () => setReleitura((v) => v + 1), relerMetas, versao, operacao, falhou }}>{children}</Contexto.Provider>;
 }
 /** Navigator permanece montado; nenhuma tela financeira monta antes do portão. */
 export function PortaoPainel({ children }: { children: ReactNode }) {

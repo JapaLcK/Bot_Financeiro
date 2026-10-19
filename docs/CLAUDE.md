@@ -634,7 +634,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Em `/` o anfitrião espera o `/perfil` para saber se o card está no layout (`comCardPrevisao`, do Board): se está, não abre consulta nenhuma (UM GET por carga, testado com `/perfil` a 0, 150 e 600 ms);
   só quando o Resumo NÃO tem o card (ex.: Economizar, ou o bloco tirado no Organizar) a pilha lê a chave `["previsao", null]` sozinha. Tirar o card no Organizar: ele desmonta e limpa a lista, o que re-renderiza a pilha, que passa a ler sozinha (NÃO coberto por teste; se o card nunca tinha publicado a lista, a leitura própria só abre no próximo render da pilha). Nas outras
   telas a pilha só tem o banco e não há GET `/previsao`); `/piggy`, a Conta e o
-  protótipo não têm pilha. "Conexão com o banco pendente" do app NÃO existe no web (no app vem do cofre do aparelho; sem fonte equivalente aqui). As
+  protótipo não têm pilha. "Conexão com o banco pendente" do app NÃO existe no web (no app vem do cofre do aparelho, onde o marcador expira em 60 min e o aviso tem "Descartar"; sem fonte equivalente aqui). As
   RESPONDIDAS (Desfazer) ficam na seção "Receitas na previsão" no fim da `/previsao` (`RespondidasDoBanco`). A lógica da mutação é o hook `useReceitas`
   (uma instância por ponta, mesma `mutationKey`); o alerta "Não deu para salvar" é UM só (contexto `ReceitasProvider`), fica FORA da pilha, acima dela, e
   não atravessa telas. Lê
