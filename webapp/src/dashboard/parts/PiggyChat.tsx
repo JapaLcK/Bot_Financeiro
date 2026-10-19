@@ -74,13 +74,15 @@ export function PiggyChat() {
   // DOM: a rolagem fica), sem leitor de tela e sem clique — a sessão pode ter virado outra conta noutra aba (Codex no #1157).
   // Só o foco esconde: as releituras do envio (`ask`, a menção) não piscam a conversa.
   const [relendo, setRelendo] = useState(false);
+  const relendoRef = useRef(false);
+  relendoRef.current = relendo;
   const { refetch } = contaQ;
   useEffect(() => DEMO ? undefined : focusManager.subscribe((focado) => {
     if (!focado) return;
+    relendoRef.current = true; // já, antes do render: um anúncio que dispare neste meio tempo também espera
     setRelendo(true);
     void refetch({ cancelRefetch: false }).finally(() => setRelendo(false)); // reaproveita uma leitura em voo
   }), [refetch]);
-  // A região viva fica como está: esvaziar e encher de novo releria a última resposta; na troca de conta ela já é zerada.
   const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
   // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
@@ -100,6 +102,18 @@ export function PiggyChat() {
   // antiga pode terminar enquanto a mais nova ainda está "Preparando…" (Codex no #1157).
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // Respostas que terminam juntas (menos de 60 ms) saem no MESMO anúncio, em ordem: uma não apaga a outra (Codex no #1157).
+  // Durante a releitura da volta do foco nada é anunciado: a resposta pode ser da conta que a sessão deixou de ser (Codex no #1157).
+  const anunciar = () => {
+    setSaid(null);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = undefined;
+      if (relendoRef.current) return; // fica na fila até a conta ser conferida
+      const textos = fila.splice(0);
+      setSaid(<>{textos.map((t, i) => <span key={i}>{i ? " " : ""}{t}</span>)}</>);
+    }, 60);
+  };
   useEffect(() => {
     if (!msgs.length) { // conversa limpa (troca de conta): o anúncio pendente ou o último dito eram dela e não podem reaparecer (Codex no #1157)
       clearTimeout(timer.current);
@@ -119,15 +133,10 @@ export function PiggyChat() {
     // Sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente. Sem novidade, só sai
     // a fila que sobrou de uma desmontagem (a resposta terminou e o usuário saiu antes dos 60 ms).
     if (!novas && (timer.current !== undefined || !fila.length)) return;
-    // Respostas que terminam juntas (menos de 60 ms) saem no MESMO anúncio, em ordem: uma não apaga a outra (Codex no #1157).
-    setSaid(null);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      timer.current = undefined;
-      const textos = fila.splice(0);
-      setSaid(<>{textos.map((t, i) => <span key={i}>{i ? " " : ""}{t}</span>)}</>);
-    }, 60);
-  }, [msgs]);
+    anunciar();
+  }, [msgs]); // `anunciar` só lê refs e o setState
+  // Terminada a releitura da volta do foco, sai o que esperou por ela (se a conta mudou, a limpeza já esvaziou a fila).
+  useEffect(() => { if (!relendo && fila.length && timer.current === undefined) anunciar(); }, [relendo]);
 
   // Título só para o leitor de tela e o foco da rota (App.tsx); o que se vê é a conversa.
   const head = <h1 id="page-title" tabIndex={-1} className="sr-only">Converse com o Piggy</h1>;
@@ -178,7 +187,8 @@ export function PiggyChat() {
     <>
       {head}
       {/* A resposta nova entra acima da barra, onde o foco fica: o leitor de tela a lê daqui. */}
-      <p className="sr-only" role="status"><Anuncio.Provider value>{said}</Anuncio.Provider></p>
+      {/* Na releitura da volta do foco a região sai da árvore de acessibilidade sem mudar o conteúdo: voltar não relê a última resposta. */}
+      <p className="sr-only" role="status" hidden={reconferindo}><Anuncio.Provider value>{said}</Anuncio.Provider></p>
       <ol className="chat" aria-label="Conversa" inert={reconferindo} data-reconferindo={reconferindo || undefined}>
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}

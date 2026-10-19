@@ -497,6 +497,50 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: na volta do foco a região viva sai de cena até a conta ser relida; uma resposta antiga que chega nesse meio não é anunciada`, async () => {
+    let soltaX;
+    const { ctx, page } = await abrir({ width, segura: (kind) => (kind === "xerife" ? new Promise((ok) => { soltaX = ok; }) : undefined) });
+    const regiao = () => page.locator("[role=status]:not(.guia-status)");
+    await enviar(page, "@Detetive tem duplicada?");
+    await page.waitForFunction(() => /do detetive\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""));
+    await enviar(page, "@Xerife algo fora do padrão?"); // da 42, ainda em voo
+    await page.locator(".chat > .msg-piggy").nth(1).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await paraConta43(ctx);
+    let soltaPerfil;
+    const preso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fallback(); });
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+    await page.locator("[role=status][hidden]:not(.guia-status)").waitFor({ state: "attached" });
+    const respondeu = page.waitForResponse((r) => /\/agents\/42\/xerife\/chat$/.test(r.url()));
+    soltaX(); // a resposta da 42 chega durante a releitura
+    await respondeu;
+    await page.waitForTimeout(300);
+    assert.doesNotMatch(await regiao().textContent(), /xerife/, "nada da 42 é anunciado durante a releitura");
+    soltaPerfil();
+    await page.locator(".chat-empty").waitFor(); // era a 43: tudo limpo, nada a anunciar
+    await ctx.close();
+  });
+
+  test(`${width}: mesma conta: a resposta que chegou durante a releitura do foco é anunciada quando ela termina`, async () => {
+    let soltaX;
+    const { ctx, page } = await abrir({ width, segura: (kind) => (kind === "xerife" ? new Promise((ok) => { soltaX = ok; }) : undefined) });
+    await enviar(page, "@Xerife algo fora do padrão?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    let soltaPerfil;
+    const preso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fallback(); });
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+    await page.locator("[role=status][hidden]:not(.guia-status)").waitFor({ state: "attached" });
+    const respondeu = page.waitForResponse((r) => /\/agents\/42\/xerife\/chat$/.test(r.url()));
+    soltaX();
+    await respondeu;
+    await page.waitForTimeout(300);
+    assert.doesNotMatch(await page.locator("[role=status]:not(.guia-status)").textContent(), /xerife/);
+    soltaPerfil();
+    await page.waitForFunction(() => /do xerife\.$/.test(document.querySelector("[role=status]:not([hidden]):not(.guia-status)")?.textContent ?? ""), null, { timeout: 3000 });
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");
