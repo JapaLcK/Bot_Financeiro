@@ -531,11 +531,14 @@ test("card só com outras: \"N cobranças recorrentes para revisar\"", async () 
 test("protótipo com Economizar: zero pedidos à /api/v2 (fora o /me, que ele também não faz)", async () => {
   const { ctx, page, tudo } = await abrir({ url: PROTOTIPO, raiz: RAIZ });
   await page.locator("#w-assinaturas .empty").waitFor();
+  // O protótipo não tem as rotas da Conta (ATIVAS): "Conectar banco" fica no destino antigo, não em #/conta/bancos (que viraria #/).
+  const cta = await page.locator("#w-assinaturas .empty a").getAttribute("href");
   await page.evaluate(() => { location.hash = "#/assinaturas"; });
   await page.locator(".page .empty").waitFor();
   await page.waitForLoadState("networkidle");
   await ctx.close();
   assert.deepEqual(tudo, []);
+  assert.equal(cta, "/settings?view=open-finance");
 });
 
 // ── Ignoradas (#751) ─────────────────────────────────────────────────────────

@@ -194,9 +194,11 @@ test("sem dados, pela Ajuda: o link do balão leva à página Bancos conectados 
   await page.evaluate(() => { window.__mesmaPagina = true; });
   await page.locator('.guia-balao a[href="#/conta/bancos"]').click();
   await page.waitForFunction(() => location.hash === "#/conta/bancos");
-  const r = { recarregou: await page.evaluate(() => window.__mesmaPagina !== true), titulo: await page.locator("#page-title").textContent() };
+  await page.waitForTimeout(600);
+  // O guia fecha ao seguir o link: senão o véu do passo cobriria a página nova (estado `fora`).
+  const r = { recarregou: await page.evaluate(() => window.__mesmaPagina !== true), titulo: await page.locator("#page-title").textContent(), balao: await page.locator(".guia-balao").count(), veu: await page.locator(".guia-veu").count() };
   await ctx.close();
-  assert.deepEqual(r, { recarregou: false, titulo: "Bancos conectados" });
+  assert.deepEqual(r, { recarregou: false, titulo: "Bancos conectados", balao: 0, veu: 0 });
 });
 
 test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o servidor segue em_andamento); Fechar não dispensa", async () => {

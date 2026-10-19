@@ -5,7 +5,7 @@ import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/
 import type { Assinatura, Assinaturas, MarcaIn } from "../lib/api-v2.gen";
 import { dayMonth, isoDay, money, money0, monthYear } from "../lib/format.js";
 import { ErroApi, apiPost, assinaturasQuery } from "../lib/v2";
-import { href } from "../router";
+import { conectarBanco } from "../router";
 import { Frame } from "../parts/Frame";
 
 // Estados comuns ao card e à página, com texto fixo: a `message` do servidor não vai à tela.
@@ -53,7 +53,7 @@ function useAssinaturas(): { data?: Assinaturas; estado: ReactNode } {
         <div className="empty">
           <i className="ph ph-bank" aria-hidden="true" />
           <p>Nenhuma assinatura por aqui ainda. Elas aparecem sozinhas a partir das contas e cartões conectados pelo Open Finance.</p>
-          <a className="btn btn-ghost" href={href("/conta/bancos")}>Conectar banco</a>
+          <a className="btn btn-ghost" href={conectarBanco()}>Conectar banco</a>
         </div>
       ),
     };
