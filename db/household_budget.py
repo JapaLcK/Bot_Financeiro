@@ -7,19 +7,15 @@ por categoria; aqui é PERCENTUAL da renda do mês por pote. Decisões:
 - Percentuais globais por usuário; só a renda tem override por mês ('YYYY-MM').
 - 6 potes fixos, defaults inspirados no método de T. Harv Eker; mapeamento
   categoria → pote fixo (`CATEGORY_BUCKET`), sem mapeamento cai em 'conforto'.
-- EXCEÇÃO: aportes são `is_internal_movement = true` (ver db/accounts.py), mas
-  ENTRAM no gasto daqui — o aporte É a alocação do pote Liberdade financeira;
-  sem a exceção o pote ficaria sempre em R$ 0. Resgate continua fora.
-- Mesma lógica para o resto do que o dono quer ver nos potes (todos são
-  `is_internal_movement = true`, mas SÃO a alocação): criptomoedas
-  (`is_internal_category` as trata como internas) → Liberdade financeira;
-  launches `tipo = 'aporte_investimento'` (db/investments.py, sem categoria,
-  `alvo` = investimento) → Liberdade financeira; launches
-  `tipo = 'deposito_caixinha'` (db/pockets.py, sem categoria) → Metas.
-  Saque de caixinha e resgate de investimento ficam fora. Toda categoria que
-  `is_internal_category` trata como investimento (`INVESTMENT_CATEGORY_HINTS`:
-  investimentos, cripto, bitcoin, fii...) também → Liberdade financeira, no
-  launch e no cartão. `rendimentos` continua fora.
+- Pote de cada linha (`_pote`, ÚNICO lugar; launches e cartão), em ordem:
+  1. tipo `deposito_caixinha` → metas; `aporte_investimento` → liberdade.
+  2. chave de investimento (`investimento_aporte` ou `contains_word` com
+     `INVESTMENT_CATEGORY_HINTS`, como `is_internal_category`) → liberdade,
+     interna ou não (o aporte É a alocação do pote; 'Tesouro Selic' idem).
+  3. interna e não investimento (ajuste_saldo, transferências...) → fora.
+  4. não interna e em `CATEGORY_BUCKET` → o pote do mapa.
+  5. não interna e fora do mapa → conforto.
+  Saque de caixinha, resgate e `rendimentos` (não é despesa) ficam fora.
 - A leitura é em nível de LINHA (`_month_rows`) e o `spent` de cada pote é a
   soma dessas mesmas linhas que vão em `launches` — card e lista não divergem.
 - Gasto do mês = critério de `get_budgets_status_for_month` (launches por
@@ -33,7 +29,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from utils_text import INVESTMENT_CATEGORY_HINTS, TETO_ENTRADA, valor_finito
+from utils_text import INVESTMENT_CATEGORY_HINTS, TETO_ENTRADA, contains_word, valor_finito
 
 from .connection import (
     CAT_VAZIA_LABEL, get_conn, cat_key_sql, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
@@ -82,15 +78,7 @@ CATEGORY_BUCKET: dict[str, str] = {
 }
 _DISPLAY_BY_KEY = {k.lower().translate(_CAT_ACCENTS_TR): k for k in _CATEGORY_BUCKET_DISPLAY}
 DEFAULT_BUCKET = "conforto"
-# Fonte única: as mesmas dicas que `is_internal_category` usa. Chave exata
-# (ponytail: 'Tesouro Selic' ou 'ações brasil' não casam; contains_word se o dono pedir).
 _APORTE_KEY = "investimento_aporte"
-_LIBERDADE_KEYS = (_APORTE_KEY, *sorted(INVESTMENT_CATEGORY_HINTS))
-CATEGORY_BUCKET.update({k: "liberdade_financeira" for k in _LIBERDADE_KEYS})
-
-# Categorias de movimento interno que contam como gasto aqui (ver docstring do
-# módulo). Comparadas pela mesma chave normalizada do resto.
-_INTERNAS_QUE_CONTAM = _LIBERDADE_KEYS
 
 # Launches sem categoria que caem num pote pelo TIPO (rótulo exibido incluso).
 _TIPO_BUCKET = {"deposito_caixinha": "metas", "aporte_investimento": "liberdade_financeira"}
@@ -257,12 +245,22 @@ def get_monthly_income(user_id: int, month: str | None = None) -> tuple[float, s
 
 # ─── Status do mês ───────────────────────────────────────────────────────────
 
+def _pote(tipo: str, key: str, interno: bool) -> str | None:
+    """Pote da linha, ou None se não conta. Tabela no docstring do módulo."""
+    if tipo in _TIPO_BUCKET:
+        return _TIPO_BUCKET[tipo]
+    if key == _APORTE_KEY or any(contains_word(key, h) for h in INVESTMENT_CATEGORY_HINTS):
+        return "liberdade_financeira"
+    if interno:
+        return None
+    return CATEGORY_BUCKET.get(key, DEFAULT_BUCKET)
+
+
 def _month_rows(user_id: int, year: int, mon: int) -> list[dict[str, Any]]:
     """Linhas do mês que contam nos potes (launches + cartão), com o pote de cada.
 
-    Filtro de movimento interno: `is_internal_movement = false` OU categoria em
-    `_INTERNAS_QUE_CONTAM`, e os launches de tipo `_TIPO_BUCKET` (sempre
-    internos). Tudo filtrado por user_id, inclusive credit_transactions/bills.
+    O SQL traz `is_internal_movement` e o filtro é `_pote` (None = fora). Tudo
+    filtrado por user_id, inclusive credit_transactions/bills.
     """
     # OF: "Investments" virou investimento_aporte (#149), mas no pote segue como antes.
     k = lambda t: f"case when {t}source = 'open_finance' and {cat_key_sql(t + 'categoria')} = '{_APORTE_KEY}' then 'investments' else {cat_key_sql(t + 'categoria')} end"  # noqa: E731
@@ -272,17 +270,15 @@ def _month_rows(user_id: int, year: int, mon: int) -> list[dict[str, Any]]:
             cur.execute(
                 f"""
                 select criado_em::date as dia, coalesce(nullif(alvo, ''), nota, '') as descricao,
-                       categoria, {cat_l} as cat, tipo, valor, 'conta' as origem
+                       categoria, {cat_l} as cat, tipo, valor, 'conta' as origem, is_internal_movement as interno
                 from launches
                 where user_id=%s
                   and date_part('year',  criado_em) = %s
                   and date_part('month', criado_em) = %s
-                  and (({TIPO_DESPESA_SQL}
-                        and (is_internal_movement = false or {cat_l} = any(%s)))
-                       or tipo = any(%s))
+                  and ({TIPO_DESPESA_SQL} or tipo = any(%s))
                 union all
                 select ct.purchased_at as dia, coalesce(ct.nota, '') as descricao,
-                       ct.categoria, {cat_ct} as cat, 'credito' as tipo, ct.valor, 'cartao' as origem
+                       ct.categoria, {cat_ct} as cat, 'credito' as tipo, ct.valor, 'cartao' as origem, false as interno
                 from credit_transactions ct
                 join credit_bills b on b.id = ct.bill_id and b.user_id = ct.user_id
                 where ct.user_id=%s
@@ -290,7 +286,7 @@ def _month_rows(user_id: int, year: int, mon: int) -> list[dict[str, Any]]:
                   and date_part('year',  b.period_end) = %s
                   and date_part('month', b.period_end) = %s
                 """,
-                (user_id, year, mon, list(_INTERNAS_QUE_CONTAM), list(_TIPO_BUCKET),
+                (user_id, year, mon, list(_TIPO_BUCKET),
                  user_id, year, mon),
             )
             rows = cur.fetchall()
@@ -298,10 +294,13 @@ def _month_rows(user_id: int, year: int, mon: int) -> list[dict[str, Any]]:
     for r in rows:
         por_tipo = r["tipo"] in _TIPO_BUCKET
         key = r["tipo"] if por_tipo else r["cat"]
+        bucket = _pote(r["tipo"], key, r["interno"])
+        if bucket is None:
+            continue
         label = _TIPO_LABEL[r["tipo"]] if por_tipo else (
             _CAT_LABEL.get(key) or _DISPLAY_BY_KEY.get(key) or r["categoria"] or CAT_VAZIA_LABEL).capitalize()
         out.append({
-            "bucket": _TIPO_BUCKET.get(r["tipo"]) or CATEGORY_BUCKET.get(key, DEFAULT_BUCKET),
+            "bucket": bucket,
             "key": key, "categoria": label, "dia": r["dia"],
             "descricao": r["descricao"], "valor": round(float(r["valor"] or 0), 2),
             "origem": r["origem"],

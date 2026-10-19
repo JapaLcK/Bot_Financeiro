@@ -281,6 +281,23 @@ def test_categorias_de_investimento_cripto_e_aliases_caem_em_liberdade(user_id):
     assert _bucket(st, "conforto")["spent"] == 0.0
 
 
+def test_tabela_de_decisao_do_pote_por_linha(user_id):
+    """Cada linha da tabela do docstring de db/household_budget.py."""
+    _receita(user_id, 5000.0)
+    _gasto(user_id, "Tesouro Selic", 10.0, interno=True)      # 2: composta interna → liberdade
+    _gasto(user_id, "Ações Brasil", 20.0, interno=True)       # 2
+    _gasto_cartao(user_id, "Tesouro Direto", 40.0)            # 2: cartão
+    _gasto(user_id, "ajuste_saldo", 999.0, interno=True)      # 3: interna não-investimento → fora
+    _gasto(user_id, "lazer", 100.0)                           # 4 → prazeres
+    _gasto(user_id, "Presentes", 200.0)                       # 5 → conforto
+
+    st = get_household_budget_status(user_id, _mes_atual())
+    assert _bucket(st, "liberdade_financeira")["spent"] == 70.0
+    assert _bucket(st, "prazeres")["spent"] == 100.0
+    assert _bucket(st, "conforto")["spent"] == 200.0
+    assert st["totals"]["spent"] == 370.0
+
+
 def test_launches_somam_o_spent_de_cada_pote_e_nao_vazam_entre_usuarios(user_id):
     outro = int(uuid.uuid4().int % 10_000_000_000)
     ensure_user(outro)
