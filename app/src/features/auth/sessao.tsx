@@ -24,7 +24,9 @@ interface Sessao {
   expirou: (aviso: string) => void;
   /**
    * Toque duplo é ignorado (guarda por `ref`, único provider da árvore), e
-   * `expirou()` também, enquanto a saída estiver em voo.
+   * `expirou()` também, enquanto a saída estiver em voo. Só o Sair comum: a
+   * saída de uma sessão `capturada` não usa a guarda (outra conta pode entrar
+   * e tocar Sair no meio), e um `expirou()` nela leva a anônimo, o desejado.
    *
    * Resolve `true` quando a saída terminou — depois da resposta da revogação
    * no servidor ou do tempo limite dela — ou quando o toque foi ignorado
@@ -85,7 +87,7 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
       estado,
       autenticar: () => setEstado({ fase: "autenticado" }),
       expirou: (aviso) => {
-        // Com a saída em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
+        // Com a saída comum em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
         // limpo): virar anônimo aqui abriria Entrar antes de `sair()` terminar,
         // e o `.then` abaixo apagaria o estado de quem entrasse nesse meio.
         // E só age a partir de `autenticado`: um `SessaoExpirada` que chega
@@ -94,8 +96,13 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
         setEstado((s) => (s.fase === "autenticado" ? { fase: "anonimo", aviso } : s));
       },
       sair: (capturada) => {
-        if (saindoEmVoo.current) return Promise.resolve(true);
-        saindoEmVoo.current = true;
+        // `capturada` é a limpeza de UMA sessão antiga (exclusão de conta), não o Sair da pessoa: não usa
+        // a guarda, senão engole o Sair da conta que entrou durante a espera do /auth/logout dela.
+        const comum = capturada === undefined;
+        if (comum) {
+          if (saindoEmVoo.current) return Promise.resolve(true);
+          saindoEmVoo.current = true;
+        }
         return sairNoServidor(capturada)
           .then((outraSessao) => {
             if (outraSessao) return "outra" as const;
@@ -112,7 +119,7 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
             return false;
           })
           .finally(() => {
-            saindoEmVoo.current = false;
+            if (comum) saindoEmVoo.current = false;
           });
       },
       tentarDeNovo: () => setTentativa((t) => t + 1),

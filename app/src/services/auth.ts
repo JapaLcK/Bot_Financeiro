@@ -322,8 +322,9 @@ export async function temSessao(): Promise<boolean> {
 export async function sair(capturada?: Credenciais | null): Promise<"outra" | undefined> {
   // Toda entrada em voo fica inválida: sair é a intenção mais recente, e um
   // login que terminasse depois gravaria credencial numa sessão que o usuário
-  // acabou de encerrar.
-  ultimaTentativa += 1;
+  // acabou de encerrar. Com `capturada` não: é a limpeza de UMA sessão antiga, e um
+  // login começado depois dela (a pessoa já entrando em outra conta) não é seu para superar.
+  if (capturada === undefined) ultimaTentativa += 1;
   // `capturada`: quem já sabe de que sessão está saindo (a que iniciou uma ação longa) a passa, em vez de
   // reler um cofre onde outra conta pode ter entrado. `null` = não havia sessão: nada a revogar.
   const daSaida = capturada === undefined ? await lerCredenciais() : capturada;
