@@ -13,7 +13,7 @@ type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
-/** Recolhido: horizonte, data e saldo previsto (mais os estados de erro). O resto abre com o toque no card INTEIRO (`Bloco`, `hero`), inline. */
+/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e a curva, sempre. O resto abre numa folha ao toque no card INTEIRO. */
 /** Montado só com a previsão na tela: avisa o card (`Bloco`) que há o que abrir. */
 function Pronto() { const { avisar } = useCardAberto(); useEffect(() => { avisar(true); return () => avisar(false); }, [avisar]); return null; }
 export function Previsao() {
@@ -27,9 +27,9 @@ export function Previsao() {
       <Valor valor={d.marcos.find((m) => m.dias === d.dias)?.saldo ?? null} destaque />
       {d.estado === "indisponivel" && <Texto variante="rotulo" tom="warning">Previsão indisponível</Texto>}
       {d.base.bancos_excluidos && <Texto variante="legenda" tom="warning">Bancos conectados fora do cálculo</Texto>}
+      {/* A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Sempre visível. */}
+      {d.trajetoria ? <Curva valores={[...(d.ancora ? [d.ancora.saldo] : []), ...d.trajetoria.map((t) => t.saldo)]} /> : <Vazio texto="Trajetória indisponível no seu plano." />}
       {aberto && <View style={{ gap: 8 }}>
-        {/* A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. */}
-        {d.trajetoria ? <Curva valores={[...(d.ancora ? [d.ancora.saldo] : []), ...d.trajetoria.map((t) => t.saldo)]} /> : <Vazio texto="Trajetória indisponível no seu plano." />}
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}
         {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
         {pior && (pior.causas.length ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}</View></LinhaExpansivel> : piorLinha)}
