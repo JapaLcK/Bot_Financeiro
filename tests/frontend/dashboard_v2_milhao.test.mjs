@@ -110,14 +110,18 @@ test("sem banco: convite com link para os bancos, sem slider nem gráfico", asyn
   assert.equal(n, 0);
 });
 
-test("passou do milhão: título, próximo marco R$ 2 mi e a falta até ele", async () => {
+test("passou do milhão: título, próximo marco R$ 2 milhões e a falta até ele", async () => {
   const { ctx, page } = await pronto({ milhao: "passou" });
   const t = await texto(page);
+  const aria = await page.locator("#w-milhao svg[role=img]").getAttribute("aria-label");
   await ctx.close();
+  assert.match(t, /Rumo ao próximo milhão/);
+  assert.doesNotMatch(t, /Rumo ao primeiro milhão/);
   assert.match(t, /Você já passou do milhão/);
-  assert.match(t, /Próximo marco: R\$\s2\smi\. Faltam R\$ 750\.000\./);
+  assert.match(t, /Próximo marco: R\$ 2 milhões\. Faltam R\$ 750\.000\./);
+  assert.match(aria, /até R\$ 2 milhões em /);
   assert.match(t, /Hoje R\$ 1\.250\.000,00 · 62%/);
-  assert.match(t, /Você chega aos R\$\s2\smi em \w+ de \d{4}/);
+  assert.match(t, /Você chega aos R\$ 2 milhões em \w+ de \d{4}/);
 });
 
 test("R$ 500 a 10% e sem aporte: sem previsão", async () => {
@@ -162,23 +166,38 @@ test("403 numa releitura: o número guardado some e aparece o convite do Plus", 
   assert.doesNotMatch(t, /48\.250/);
 });
 
-test("4xx sem ser plano: senha por criar, sessão terminada e erro genérico, cada um com o seu texto e ação", async () => {
-  const casos = [
-    [403, "password_required", /Crie sua senha para ver o progresso ao milhão/, "Criar senha"],
-    [401, "unauthorized", /Sua sessão terminou\./, "Recarregar"],
-    [404, "not_found", /Não deu para abrir o progresso ao milhão/, "Recarregar"],
-  ];
-  for (const [status, code, re, acao] of casos) {
+for (const [status, code, re, acao] of [
+  [403, "password_required", /Crie sua senha para ver o progresso ao milhão/, "Criar senha"],
+  [401, "unauthorized", /Sua sessão terminou\./, "Recarregar"],
+  [404, "not_found", /Não deu para abrir o progresso ao milhão/, "Recarregar"],
+]) {
+  test(`${status} ${code}: texto e ação "${acao}"`, async () => {
     const { ctx, page } = await abrir({ resposta: (r) => r.fulfill({ status, json: { error: { code, message: "x" } } }) });
     const alerta = card(page).getByRole("alert");
     await alerta.waitFor();
     const t = await alerta.innerText();
     const el = alerta.getByRole(acao === "Criar senha" ? "link" : "button", { name: acao });
+    const n = await el.count();
     const href = acao === "Criar senha" ? await el.getAttribute("href") : null;
     await ctx.close();
     assert.match(t, re, `${status}: ${t}`);
+    assert.equal(n, 1);
     assert.equal(href, acao === "Criar senha" ? "/home" : null);
-  }
+  });
+}
+
+test("500 numa releitura: o número guardado continua, com o aviso", async () => {
+  let cai = false;
+  const { ctx, page, ir } = await abrir({ resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });
+  await card(page).locator(".mi-titulo").first().waitFor();
+  cai = true;
+  await ir("/ferramentas");
+  await ir("/milhao");
+  await card(page).locator(".prev-antigo").waitFor(); // o retry (1 s + 2 s) corre antes do aviso
+  const t = await texto(page);
+  await ctx.close();
+  assert.match(t, /48\.250,37/);
+  assert.match(t, /Não deu para atualizar\. Mostrando o que carregou antes\./);
 });
 
 test("500: \"Tentar de novo\" refaz o pedido e mostra o número", async () => {

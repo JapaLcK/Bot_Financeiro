@@ -4,7 +4,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ProgressoMilhao } from "../lib/api-v2.gen";
-import { axisMoney, money0, moneyText } from "../lib/format.js";
+import { money0, moneyText } from "../lib/format.js";
 import { duracao, projetar } from "../lib/milhao";
 import { mesAno } from "../lib/metas-textos";
 import { ErroApi, mesAtual, milhaoQuery } from "../lib/v2";
@@ -17,6 +17,7 @@ import { MilhaoGrafico } from "./MilhaoGrafico";
 const APORTE = { min: 0, max: 10000, passo: 50, padrao: 0 }; // ponytail: teto declarado de R$ 10 mil por mês
 const TAXA = { min: 0, max: 15, passo: 0.5, padrao: 10 };
 const pctDe = (v: number, c: { min: number; max: number }) => `${((v - c.min) / (c.max - c.min)) * 100}%`;
+const milhoes = new Intl.NumberFormat("pt-BR");
 const virgula = (n: number) => String(n).replace(".", ",");
 
 function Corpo({ d, antigo, busy }: { d: ProgressoMilhao; antigo: ReactNode; busy: boolean }) {
@@ -26,7 +27,7 @@ function Corpo({ d, antigo, busy }: { d: ProgressoMilhao; antigo: ReactNode; bus
   const p = projetar({ patrimonio: Number(d.patrimonio), aporte, taxaAnual: taxa, inicio });
   const passou = p.meta > 1e6;
   const nos = aporte === APORTE.padrao && taxa === TAXA.padrao;
-  const alvo = passou ? axisMoney(p.meta) : "R$ 1 milhão";
+  const alvo = passou ? `R$ ${milhoes.format(p.meta / 1e6)} milhões` : "R$ 1 milhão";
   const resumo = p.chegada
     ? `Patrimônio projetado de ${money0(p.pontos[0])} hoje até ${alvo} em ${mesAno(p.chegada)}.`
     : `Patrimônio projetado de ${money0(p.pontos[0])} hoje: não chega a ${alvo} em 50 anos.`;
@@ -82,7 +83,7 @@ export function MilhaoPainel() {
   const d = !e4 ? q.data : undefined;
   return (
     <div className="panel span-12">
-      <Frame id="milhao" title="Rumo ao primeiro milhão" real>
+      <Frame id="milhao" title={Number(d?.patrimonio) >= 1e6 ? "Rumo ao próximo milhão" : "Rumo ao primeiro milhão"} real>
         {e4 ? <Bloqueio e={e4} convite="O Progresso ao milhão é do Plus e do Pro." o="o progresso ao milhão" />
           : !d ? (q.isError && !q.isFetching
             ? (
