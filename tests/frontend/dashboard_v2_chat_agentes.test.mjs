@@ -565,6 +565,31 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: A→B→A com uma pergunta da A em voo: o context dela não volta para a conversa nova`, async () => {
+    let solta;
+    const { ctx, page, chats } = await abrir({ width, segura: (kind) => (chats.length === 1 ? new Promise((ok) => { solta = ok; }) : undefined) });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    const relerNoFoco = async () => {
+      const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+      await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+      await relida;
+    };
+    await paraConta43(ctx);
+    await relerNoFoco(); // virou a 43: a conversa some
+    await page.locator(".chat-empty").waitFor();
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } }));
+    await relerNoFoco(); // voltou a ser a 42
+    const respondeu = page.waitForResponse((r) => /\/agents\/42\/detetive\/chat$/.test(r.url()));
+    solta(); // a pergunta abandonada termina agora
+    await respondeu;
+    await page.waitForTimeout(200);
+    await enviar(page, "@Detetive e agora?");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "do detetive." }).waitFor();
+    assert.deepEqual(chats.map((c) => c.context), [null, null], "a 2ª pergunta não leva o context da abandonada");
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");

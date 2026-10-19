@@ -98,6 +98,7 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
   try {
     const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null);
     if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
+    if (!msgs.some((x) => x.id === id)) return; // a conversa foi limpa (troca de conta) com a pergunta em voo: o context dela não volta (Codex no #1157)
     contextos.set(`${uid}:${kind}`, r.context ?? null);
     const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
     patch(id, { estado: "pronto", text: r.reply, redirects });
