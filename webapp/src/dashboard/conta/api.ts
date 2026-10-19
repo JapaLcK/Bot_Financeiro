@@ -62,10 +62,11 @@ const itemDe = (i: unknown) => {
     reason: (i.reason ?? null) as string | null, still_updating: i.still_updating };
 };
 const refreshDe = (r: { connections?: unknown; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
-  if (!Array.isArray(r.sync?.items)) throw contrato();
+  // `sync.ok` é opcional, mas presente tem de ser booleano (`"false"` descartado faria o `items: []` com falha virar "em dia").
+  if (!Array.isArray(r.sync?.items) || (r.sync.ok !== undefined && typeof r.sync.ok !== "boolean")) throw contrato();
   return {
     connections: conexoesDe(r.connections, true),
-    sync: { ...(typeof r.sync.ok === "boolean" ? { ok: r.sync.ok } : {}), items: r.sync.items.map(itemDe) },
+    sync: { ...(r.sync.ok !== undefined ? { ok: r.sync.ok } : {}), items: r.sync.items.map(itemDe) },
   };
 };
 export const atualizarBancos = (uid: number, signal: AbortSignal) => escrever<Parameters<typeof refreshDe>[0]>("POST", `/open-finance/${uid}/refresh`, {}, signal).then(refreshDe);
