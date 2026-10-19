@@ -101,6 +101,8 @@ def test_renda_resume_pela_soma_das_linhas_do_bloco_e_o_calendario_so_traz_o_mai
     com = [l for l in linhas if l["income"] or l["expense"]]
     assert v["maior_mes"] == {"mes": max(com, key=lambda l: l["expense"])["month"], "saiu": max(l["expense"] for l in com)}
     assert v["menor_mes"]["saiu"] == min(l["expense"] for l in com)
+    # o valor de UM mês ("quanto entrou em setembro") sai daqui: sem `por_mes` o modelo só tem a soma da janela inteira
+    assert [(m["mes"], m["receita"], m["despesa"]) for m in v["por_mes"]] == [(l["month"], float(Decimal(str(l["income"]))), float(Decimal(str(l["expense"])))) for l in linhas]
 
     r, (bloco,), _ = mostrar(a, card="calendario", meses=[M])
     dias, v = bloco["abas"][0]["recursos"]["detalhes"]["dias"], r["abas"][0]
