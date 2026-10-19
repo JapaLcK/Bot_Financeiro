@@ -541,6 +541,30 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  // Só no desktop: no celular a barra só existe no /piggy.
+  test(`${width}: resposta na fila ao sair do chat e a conta muda com ele fechado: a conta nova não ouve a da anterior`, { skip: width < 768 && "no celular a barra some fora do /piggy" }, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: () => new Promise((ok) => { solta = ok; }) });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await page.evaluate(() => { // sai no instante em que a resposta aparece: ela fica na fila do anúncio
+      new MutationObserver((_, mo) => {
+        if (!document.querySelector(".chat")?.textContent.includes("do detetive.")) return;
+        mo.disconnect();
+        location.hash = "#/";
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    solta();
+    await page.waitForFunction(() => location.hash === "#/");
+    await page.locator("#board-profile").waitFor();
+    await paraConta43(ctx);
+    await enviar(page, "quanto gastei?"); // a conta nova abre a conversa (e o chat) de outra página
+    await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).waitFor();
+    await page.waitForTimeout(300);
+    assert.doesNotMatch(await page.locator("[role=status]:not(.guia-status)").textContent(), /detetive/);
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");

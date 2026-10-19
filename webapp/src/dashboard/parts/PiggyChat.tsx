@@ -30,7 +30,9 @@ const ETIQUETA = { inativo: "NÃO ATIVO", sem_energia: "SEM ENERGIA" } as const;
 // O último estado anunciado de cada resposta, fora do componente: sair do /piggy e voltar não anuncia de novo a conversa
 // inteira; uma resposta que terminou longe do chat é anunciada ao voltar (Codex no #1157).
 const estados = new Map<number, string>();
-const fila: ReactNode[] = []; // o que falta anunciar: também fora do componente, para não se perder se o chat desmonta antes dos 60 ms
+// O que falta anunciar, com o id da resposta: também fora do componente, para não se perder se o chat desmonta antes dos 60 ms.
+// Ao montar, sai o que não é mais da conversa (a sessão trocou de conta com o chat fechado: a resposta era da anterior; Codex no #1157).
+const fila: { id: number; text: ReactNode }[] = [];
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
 // próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
@@ -111,7 +113,7 @@ export function PiggyChat() {
       timer.current = undefined;
       if (relendoRef.current) return; // fica na fila até a conta ser conferida
       const textos = fila.splice(0);
-      setSaid(<>{textos.map((t, i) => <span key={i}>{i ? " " : ""}{t}</span>)}</>);
+      setSaid(<>{textos.map((t, i) => <span key={t.id}>{i ? " " : ""}{t.text}</span>)}</>);
     }, 60);
   };
   useEffect(() => {
@@ -122,13 +124,14 @@ export function PiggyChat() {
       setSaid(null);
       return;
     }
+    for (let i = fila.length; i--;) if (!msgs.some((m) => m.id === fila[i].id)) fila.splice(i, 1);
     let novas = 0;
     for (const m of msgs) {
       if (m.role !== "piggy") continue;
       const agora = m.estado ?? "pronto";
       if (estados.get(m.id) === agora) continue;
       estados.set(m.id, agora);
-      if (agora !== "enviando") { fila.push(m.text ?? null); novas++; }
+      if (agora !== "enviando") { fila.push({ id: m.id, text: m.text ?? null }); novas++; }
     }
     // Sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente. Sem novidade, só sai
     // a fila que sobrou de uma desmontagem (a resposta terminou e o usuário saiu antes dos 60 ms).
