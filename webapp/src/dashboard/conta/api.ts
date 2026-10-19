@@ -144,6 +144,32 @@ export const encerrarOutras = (uid: number) => comPrazo((sinal) => escrever<{ ok
 // Desconectar um banco (rota antiga). O 2º DELETE do mesmo id é 404, então abortar no prazo não perde nada: a releitura do snapshot decide.
 export const desconectarBanco = (uid: number, id: number) => comPrazo((s) => escrever<{ ok: boolean; deleted?: number }>("DELETE", `/open-finance/${uid}/connections/${id}`, undefined, s));
 
+// Preferências de notificação (rotas antigas /settings/{uid}/notifications). Mesma borda das sessões: booleano só `=== true`;
+// hora/minuto fora do intervalo (ou corpo que não é objeto) = ERRO de carga, nunca "09:00" inventado.
+const NOTIF_BOOL = ["email_notifications_available", "whatsapp_updates_available", "tip_email_enabled", "insight_email_enabled", "whatsapp_updates_enabled",
+  "daily_report_enabled", "weekly_report_enabled", "weekly_report_stored_enabled", "weekly_report_available", "monthly_report_enabled"] as const;
+export type Notificacoes = Record<(typeof NOTIF_BOOL)[number], boolean> & { email: string | null; whatsapp_destination: string | null; daily_report_hour: number; daily_report_minute: number };
+export type CorpoNotificacoes = Partial<Pick<Notificacoes, (typeof NOTIF_BOOL)[number] | "daily_report_hour" | "daily_report_minute">>;
+const notificacoesDe = (r: unknown): Notificacoes => {
+  const o = objeto(r) ? r : {};
+  const [h, m] = [o.daily_report_hour, o.daily_report_minute];
+  const dentro = (v: unknown, max: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max;
+  if (!dentro(h, 23) || !dentro(m, 59)) throw new ErroApi(200, "contrato");
+  const bools = Object.fromEntries(NOTIF_BOOL.map((k) => [k, o[k] === true])) as Record<(typeof NOTIF_BOOL)[number], boolean>;
+  return { ...bools, email: txt(o.email) || null, whatsapp_destination: txt(o.whatsapp_destination) || null, daily_report_hour: h, daily_report_minute: m };
+};
+export const notificacoesQuery = (uid: number) => queryOptions({
+  queryKey: ["conta", "notificacoes", uid],
+  queryFn: ({ signal }) => chamar<unknown>(`/settings/${uid}/notifications`, GET(signal)).then(notificacoesDe),
+  staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry,
+  enabled: !DEMO,
+});
+// Idempotente (grava valores, não alterna): abortar no prazo não perde nada, e a tela relê depois.
+export const salvarNotificacoes = (uid: number, corpo: CorpoNotificacoes) =>
+  comPrazo((sinal) => escrever<unknown>("PATCH", `/settings/${uid}/notifications`, corpo, sinal)).then(notificacoesDe);
+// Cópia dos <option> de #notif-daily-hour (settings.html): o teste dashboard_v2_conta_notificacoes compara as duas (§0.7).
+export const HORAS = [6, 7, 8, 9, 10, 11, 12, 18, 19, 20, 21];
+
 // Cópia de `formatActivityTime` (settings.html): o teste dashboard_v2_conta_sessoes compara as duas (§0.7). Duas diferenças, de propósito:
 // `instante` em vez de `new Date` (o ISO de 6 casas é NaN no Safari 14) e a data antiga no FUSO do painel, não no do aparelho.
 const dataAntiga = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit", year: "numeric" });
