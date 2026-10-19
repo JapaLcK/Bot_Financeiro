@@ -42,6 +42,10 @@ describe("app.config — iOS", () => {
     ]);
   });
 
+  it.each(["production", "staging", "development"])("%s: plugin do expo-notifications (capability de push)", (ambiente) => {
+    expect(configEm(ambiente).plugins).toContain("expo-notifications");
+  });
+
   it.each(["production", "development"])("%s: time, build e criptografia isenta", (ambiente) => {
     expect(configEm(ambiente).ios).toMatchObject({
       appleTeamId: "S849YDA49P",

@@ -19,6 +19,7 @@ export const BASE: Notificacoes = {
   tip_email_enabled: true,
   insight_email_enabled: true,
   whatsapp_updates_enabled: true,
+  push_bank_reconnect_enabled: true,
   daily_report_enabled: true,
   daily_report_hour: 9,
   daily_report_minute: 0,
@@ -37,7 +38,7 @@ export function servidor(inicial: Partial<Notificacoes> = {}, opcoes: { gancho?:
   const aplicar = (c: Corpo) => {
     if (c.weekly_report_enabled === true && !s.weekly_report_available) return resposta(403, { detail: { error: "pro_required" } });
     if ("whatsapp_updates_enabled" in c && !s.whatsapp_destination) return resposta(400, { detail: "Vincule um WhatsApp para receber atualizações." });
-    for (const k of ["tip_email_enabled", "insight_email_enabled", "whatsapp_updates_enabled", "monthly_report_enabled"] as const) if (typeof c[k] === "boolean") s[k] = c[k];
+    for (const k of ["tip_email_enabled", "insight_email_enabled", "whatsapp_updates_enabled", "push_bank_reconnect_enabled", "monthly_report_enabled"] as const) if (typeof c[k] === "boolean") s[k] = c[k];
     if (c.daily_report_hour !== undefined || c.daily_report_minute !== undefined) {
       s.daily_report_hour = (c.daily_report_hour as number | undefined) ?? s.daily_report_hour;
       s.daily_report_minute = (c.daily_report_minute as number | undefined) ?? s.daily_report_minute;

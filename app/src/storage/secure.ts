@@ -2,6 +2,8 @@ import { z } from "zod";
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
 
+import { desregistrarAparelho } from "@/features/push/aparelho";
+
 /**
  * Guarda de credencial, atrás de uma interface de um arquivo.
  *
@@ -309,6 +311,10 @@ export class TentativaBancariaPendente extends Error {
 
 async function apagarSessaoNoCofre(): Promise<void> {
   await SecureStore.deleteItemAsync(PAR);
+  // Toda limpeza de sessão passa por aqui, então o aparelho deixa de receber o
+  // push da conta que saiu mesmo quando o logout não chega ao servidor. Só se o
+  // PAR foi apagado: se falhou, a sessão continua e o push também.
+  desregistrarAparelho();
   // Só depois de apagar a credencial o marcador fica obsoleto. Se PAR falhar,
   // preserva a tentativa; sem PAR, a guarda de sessão impede adotá-la mesmo
   // quando o cleanup falha. Essa falha não pode desfazer um logout concluído.

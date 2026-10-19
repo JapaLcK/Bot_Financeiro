@@ -98,6 +98,10 @@ const config: ExpoConfig = {
       "expo-local-authentication",
       { faceIDPermission: "O PigBank usa o Face ID para proteger seu app quando você volta para ele." },
     ],
+    // Push (APNs): grava a capability e `aps-environment`, que sai `development`
+    // em todo build. A exportação de distribuição assina com o perfil da loja,
+    // que troca para `production`. Só se prova num build real.
+    "expo-notifications",
     // Grava o entitlement da Apple e deixa o botão do sistema em português
     // (`CFBundleAllowMixedLocalizations`). Só produção, como o `usesAppleSignIn`.
     ...(AMBIENTE === "production" ? ["expo-apple-authentication"] : []),
