@@ -57,7 +57,7 @@ def _resumo_renda(v: dict, categoria: str | None) -> dict:
     entrou, saiu = (sum((_dec(m[k]) for m in ev), Decimal(0)) for k in ("income", "expense"))
     return {"months": v["months"], "tendencia": v["tendencia"], "entrou": float(entrou), "saiu": float(saiu),
             "saldo": float(entrou - saiu),
-            "por_mes": [{"mes": m["month"], "entrou": float(_dec(m["income"])), "saiu": float(_dec(m["expense"]))} for m in ev],
+            "por_mes": [{"mes": m["month"], "receita": float(_dec(m["income"])), "despesa": float(_dec(m["expense"]))} for m in ev],  # `receita`/`despesa`: chaves que o `ai_guard` reconhece como dinheiro
             } | _extremos([(m["month"], m["income"], m["expense"]) for m in ev])
 
 
