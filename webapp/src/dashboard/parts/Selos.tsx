@@ -21,6 +21,8 @@ const MOTIVO: Record<string, string> = {
   inicio_do_historico: "início do histórico",
   arredondamento_por_grupo: "soma arredondada",
   sem_banco_conectado: "sem banco conectado",
+  manual_e_banco: "manual e banco juntos",
+  caixinha_espelhada_fora: "caixinha do banco fora da soma",
   // metas
   fonte_indisponivel: "fonte sumiu",
   custo_desconhecido: "contas fixas desconhecidas",

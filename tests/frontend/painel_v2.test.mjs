@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const ROTAS = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos", "/orcamento", "/orcamentos-categoria", "/ferramentas", "/piggy"];
+const ROTAS = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos", "/orcamento", "/orcamentos-categoria", "/milhao", "/ferramentas", "/piggy"];
 const PAGINAS = [["/painel", PAINEL, undefined], ["protótipo", PROTOTIPO, RAIZ]];
 
 let browser;
