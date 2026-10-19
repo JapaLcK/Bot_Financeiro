@@ -22,8 +22,8 @@ afterEach(() => jest.restoreAllMocks());
 const F = fixture["/api/app/previsao"], base = F.compromissos[0]!.ocorrencias[0]!;
 const oc = (chave: string, ciclo: string, data: string | null, valor: string | null, extra: object = {}) => ({ ...base, chave, ciclo, data, valor, ...extra });
 async function apertar(alvo: ReturnType<typeof screen.getByTestId>) { await act(async () => { fireEvent.press(alvo); await drenar(); }); }
-const hero = () => within(screen.getByTestId("bloco-hero"));
-async function abrirResumo() { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy()); await apertar(hero().getByRole("button", { name: "Saldo previsto" })); }
+const hero = () => within(screen.getByTestId("folha-sheet")); // o detalhe do Saldo previsto mora na folha que o toque no card abre
+async function abrirResumo() { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy()); await apertar(screen.getByTestId("bloco-hero")); }
 
 it("mostra o saldo de hoje com as premissas (âncora)", async () => {
  previsao = { ...F, ancora: { data: "2026-10-06", saldo: "9123.45" } };

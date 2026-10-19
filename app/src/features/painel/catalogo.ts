@@ -1,3 +1,5 @@
+import * as SecureStore from "expo-secure-store";
+
 import type { PerfilPainel } from "@/api/schemas/painel";
 export const TITULOS = { contas: "Contas", hero: "Saldo previsto", resumo: "Resumo do mês", categorias: "Para onde vai", calendario: "Dia a dia", simulador: "Simulador", compromissos: "Próximos 30 dias", piggy: "Piggy notou", metas: "Metas", patrimonio: "Patrimônio", fatura: "Fatura do cartão", wealth: "Onde está o dinheiro", renda: "Renda mês a mês", rendimento: "Taxa contratada", parcelas: "Parcelas futuras", assinaturas: "Assinaturas" };
 export type Widget = keyof typeof TITULOS;
@@ -18,6 +20,8 @@ export function sanitizarLayout(raw: unknown, p: PerfilPainel): Widget[] {
   return [...new Set(raw)].filter((v): v is Widget => typeof v === "string" && BLOCOS_HOME.includes(v as Widget));
 }
 export const chaveLayout = (uid: number, p: PerfilPainel) => `pigbank.painel.v1.u${uid}.${p}`;
+/** Conta excluída: some a organização guardada no aparelho, de todos os perfis. Melhor esforço (o cofre recusar não pode travar a saída). */
+export const apagarLayouts = (uid: number) => Promise.allSettled(PERFIS.map((p) => SecureStore.deleteItemAsync(chaveLayout(uid, p.id)))).then(() => undefined);
 /** Hoje em "AAAA-MM-DD", no fuso de Brasília (o `sv-SE` formata em ISO). */
 export const hojeSP = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 export const mesAtual = () => hojeSP().slice(0, 7);

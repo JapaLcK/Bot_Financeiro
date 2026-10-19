@@ -34,7 +34,7 @@ export async function abrir({ width = 1440, metas = "varios", perfil = "padrao",
   return { ctx, page, gets, erros };
 }
 export const ultima = (page) => page.locator(".chat > .msg-piggy").last();
-export const chip = (page, texto) => page.locator(".chat-empty .chat-follow button", { hasText: texto }).click();
+export const chip = (page, texto) => page.locator(".chat-follow button", { hasText: texto }).click();
 export async function perguntar(page, texto) {
   const antes = await page.locator(".chat > .msg-piggy").count();
   await page.locator("#askbar-input").fill(texto);

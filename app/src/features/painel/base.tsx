@@ -53,10 +53,10 @@ export function tituloWidget(id: Widget, dias?: number) { return id === "comprom
 export function diasDoProvider(dados: ReturnType<typeof usePainel>["dados"]) { const r = dados.previsao; return r?.fase === "pronto" ? r.dado.dias : undefined; }
 const ContextoAberto = createContext<{ aberto: boolean; avisar: (pronto: boolean) => void }>({ aberto: true, avisar: () => undefined });
 /**
- * O card `hero` ("Saldo previsto") do Resumo (`recolhivel`) nasce recolhido e o card INTEIRO abre/fecha os detalhes ao toque (inline, nunca folha): quem está dentro lê `aberto` aqui.
- * Fora dele (o card do chat, os outros blocos) `aberto` é sempre `true`: nada recolhe, o chat segue como era.
+ * O card `hero` ("Saldo previsto") do Resumo leva `detalhes`: fica compacto (`aberto` = false: gráfico, horizonte e saldo) e o card INTEIRO abre a folha com o resto ao toque. Quem está dentro lê `aberto` aqui.
+ * Sem `detalhes` (o card do chat, a própria folha, os outros blocos) `aberto` é `true`: tudo inline, sem folha.
  * `avisar(true)` (o `Pronto` de `futuro.tsx`, montado só com o dado na tela) liga a seta e o toque: carregando, erro e negado não têm o que abrir. O `Pressable` fica SEMPRE montado
- * (só `disabled`): trocá-lo por uma `View` remontaria o card na troca de horizonte e no Desfazer e perderia o foco e o `aberto`.
+ * (só `disabled`): trocá-lo por uma `View` remontaria o card na troca de horizonte e perderia o foco.
  */
 export const useCardAberto = () => useContext(ContextoAberto);
 /**
@@ -65,14 +65,14 @@ export const useCardAberto = () => useContext(ContextoAberto);
  * Segurar no gráfico abre a bolha do dia (`CurvaAcumulada`): o gráfico não consegue tomar o toque do card (o RN só passa o responder a antepassados),
  * então avisa por `SegurouContext` e o card, ao soltar, engole esse toque em vez de navegar. Todo `onPressIn` zera o aviso: um toque novo começa limpo
  * (scrub cancelado por rolagem não solta `onPress`, mas o aviso não fica preso). Toque sem scrub, curto ou lento, navega.
- * `hero` (`recolhivel`) usa o mesmo molde, mas o toque alterna `aberto` em vez de navegar; botões e chips de dentro tomam o próprio toque. O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
+ * `hero` (`detalhes`) usa o mesmo molde, mas o toque chama `detalhes` (abre a folha) em vez de navegar; botões e chips de dentro tomam o próprio toque. O card do chat não leva `ir`: nada nele abre outra tela. `titulo` substitui o do catálogo (aba com mês, card `periodo`).
  */
-export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao, recolhivel }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; recolhivel?: boolean; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
-  const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const [pronto, avisar] = useState(false), expansivel = !!recolhivel && pronto, [aberto, setAberto] = useState(false), alternar = () => setAberto((a) => !a); const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
+export function Bloco({ id, titulo: tituloDado, children, abrir, ir, acao, detalhes }: { id: CardChat; titulo?: string; children: ReactNode; abrir?: () => void; detalhes?: () => void; ir?: { destino: string; rota: Href }; acao?: ReactNode }) {
+  const dias = diasDoProvider(usePainel().dados), titulo = tituloDado ?? tituloWidget(id as Widget, dias); const [pronto, avisar] = useState(false), expansivel = !!detalhes && pronto; const { navegar } = useNavegacaoPainel(); const segurou = useRef(false), zerar = () => { segurou.current = false; };
   const aoIr = () => { if (!ir) return; if (segurou.current) { segurou.current = false; return; } navegar(ir.rota); };
-  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{expansivel && <View style={{ transform: [{ rotate: aberto ? "180deg" : "0deg" }] }}><Icone nome="CaretDown" tamanho={20} tom="inkMuted" /></View>}</View>; // `CaretUp` não está no subset: a mesma seta gira 180°
-  const card = <SegurouContext.Provider value={segurou}><ContextoAberto.Provider value={{ aberto: recolhivel ? aberto : true, avisar }}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir || recolhivel ? <Pressable accessibilityRole="button" disabled={!ir && !expansivel} accessibilityLabel={ir ? `${titulo}, abrir ${ir.destino}` : titulo} accessibilityState={expansivel ? { expanded: aberto } : undefined} onPressIn={zerar} onPress={ir ? aoIr : alternar} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{acao}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></ContextoAberto.Provider></SegurouContext.Provider>;
-  return ir || recolhivel ? <Pressable testID={`bloco-${id}`} accessible={false} disabled={!ir && !expansivel} onPressIn={zerar} onPress={ir ? aoIr : alternar} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : <View testID={`bloco-${id}`}>{card}</View>;
+  const cabecalho = <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 8 }}><Texto variante="rotulo" tom="inkMuted" style={{ flex: 1, minWidth: 0 }}>{titulo}</Texto>{expansivel && <Icone nome="CaretRight" tamanho={20} tom="inkMuted" />}</View>;
+  const card = <SegurouContext.Provider value={segurou}><ContextoAberto.Provider value={{ aberto: !detalhes, avisar }}><Card><View style={{ gap: 8 }}><View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }}>{ir || detalhes ? <Pressable accessibilityRole="button" disabled={!ir && !expansivel} accessibilityLabel={ir ? `${titulo}, abrir ${ir.destino}` : `${titulo}, ver detalhes`} onPressIn={zerar} onPress={ir ? aoIr : detalhes} style={{ flex: 1, minHeight: 44, justifyContent: "center" }}>{cabecalho}</Pressable> : cabecalho}{acao}{abrir && <Pressable accessibilityRole="button" accessibilityLabel={`Abrir ${titulo}`} onPress={abrir} style={{ minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: "flex-end", justifyContent: "center" }}><Icone nome="ArrowSquareOut" tamanho={20} tom="inkMuted" /></Pressable>}</View>{children}</View></Card></ContextoAberto.Provider></SegurouContext.Provider>;
+  return ir || detalhes ? <Pressable testID={`bloco-${id}`} accessible={false} disabled={!ir && !expansivel} onPressIn={zerar} onPress={ir ? aoIr : detalhes} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>{card}</Pressable> : <View testID={`bloco-${id}`}>{card}</View>;
 }
 export function RecursoDados<K extends Recurso>({ nome, children }: { nome: K; children: (d: Dados[K]) => ReactNode }) {
   const p = usePainel(), bloco = useBloco(); const r = p.dados[nome];
@@ -89,6 +89,7 @@ const MOTIVOS: Record<string, string> = {
  especie_incompleta: "O dinheiro em espécie pode estar incompleto.", banco_desatualizado: "Os dados do banco precisam ser atualizados.",
  saldo_ausente: "O banco não informou um dos saldos.", moeda_presumida: "A moeda de uma conta ainda precisa ser confirmada.",
  conta_fora_do_ultimo_sync: "Uma conta não apareceu na última sincronização.", conexao_pausada: "Há uma conexão bancária pausada.",
+ categorias_indisponiveis: "Não deu para ler as categorias agora.",
  inicio_do_historico: "O histórico do seu plano tem uma data de início: o que vem antes dela não entra nos números do período nem na comparação.",
 };
 /** Estado do banco: vai só no aviso único do topo (`TelaPainel`), nunca repetido nos cards. */
@@ -129,7 +130,7 @@ export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, childr
       </View>
     </View>
   </Modal>;
-  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}>{cabecalho}{children}</View></Screen></View></Modal>;
+  return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View testID="folha-sheet" style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}>{cabecalho}{children}</View></Screen></View></Modal>;
 }
 export function Curva({ valores }: { valores: (number | null)[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();

@@ -6,9 +6,19 @@ const legado = z.number().finite().transform((v, ctx) => { try { return numeroLe
 const motivos = z.array(z.string());
 const texto = z.string().nullable();
 export const perfilPainelSchema = z.object({ perfil: z.enum(["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"]).nullable() });
-export const categoriasSchema = z.object({ categorias: z.array(z.object({ chave: z.string(), nome: z.string() })) });
+export const categoriasSchema = z.object({ categorias: z.array(z.object({ chave: z.string(), nome: z.string(), icone: z.string().catch("tag") })) }); // `icone`: o card `comparacao` desenha o ícone de categorias que podem não ter gasto no mês (o `/gastos` só devolve as com gasto)
 export const planoSchema = z.object({ plan_tier: z.enum(["free", "essencial", "plus", "pro"]) });
 export const contasSchema = z.object({ total: dinheiro, motivos, fora_do_total: z.number().int(), carteira: z.object({ saldo: dinheiro, motivos }), contas: z.array(z.object({ id: z.number().int(), instituicao: texto, nome: texto, saldo: dinheiro.nullable(), moeda: z.string(), no_total: z.boolean(), conexao: z.string(), sincronizado_em: texto, motivos })) });
+/**
+ * `GET /api/app/bancos` (`api/v2/bancos.py`): o que cada banco vale, calculado no servidor (o app NÃO soma dinheiro). `null` ≠ zero. Tolerante POR ITEM: um banco que não passa
+ * (p.ex. dinheiro em notação científica, "1E-7", que `decimalParaCentavos` recusa) sai da lista e a tela mostra "—" para ele; o topo que não passa vira `null`.
+ */
+const bancoSchema = z.object({ conexao_id: z.number().int(), saldo_conta: dinheiro.nullable(), investido: dinheiro.nullable(), total: dinheiro.nullable(), contas: z.number().int().nonnegative(), cartoes: z.number().int().nonnegative(), investimentos: z.number().int().nonnegative().nullable(), motivos });
+export const bancosSchema = z.object({
+  total: dinheiro.nullable().catch(null), motivos: motivos.catch([]),
+  bancos: z.array(z.unknown()).transform((itens) => itens.flatMap((i) => { const b = bancoSchema.safeParse(i); return b.success ? [b.data] : []; })),
+});
+export type BancoLido = z.output<typeof bancoSchema>;
 export const resumoSchema = z.object({ mes: z.string(), ate: z.string(), entrou: dinheiro, saiu: dinheiro, anterior: z.object({ mes: z.string(), entrou: dinheiro, saiu: dinheiro }).nullable(), motivos });
 export const lancamentoSchema = z.object({ id: z.string(), data: z.string(), hora: texto, tipo: z.enum(["entrada", "saida"]), interno: z.boolean(), valor: dinheiro, moeda: z.string(), descricao: texto, mensagem: texto, categoria: texto, origem: z.enum(["carteira", "banco", "cartao", "registro_antigo"]), fundido: z.boolean(), instituicao: texto, conta_id: z.number().int().nullable(), cartao_id: z.number().int().nullable(), parcela: z.object({ n: z.number().int(), total: z.number().int() }).nullable(), fatura: texto, pode: z.array(z.string()), motivos });
 export const lancamentosSchema = z.object({ mes: z.string(), itens: z.array(lancamentoSchema), proximo: texto, motivos });
@@ -31,7 +41,7 @@ export const insightsSchema = z.object({ ok: z.literal(true), insights: z.array(
 const usage = z.object({ used: z.number().int(), limit: z.number().int() });
 export const conversaSchema = z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string(), created_at: texto })), usage });
 const mesAAAAMM = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/); // `tituloPeriodo` lança em "" (nomeMes): mês malformado invalida o bloco
-/** Os cards que a PRÓPRIA tool do servidor emite (`cards.DA_TOOL` em `core/services/ai_chat/cards.py`, sem `show_card`): só do chat, fora do `TITULOS`. O schema valida o contrato do servidor (inclusive chaves opcionais que o card não desenha); fixtures: `tests/fixtures/ai_chat_bloco_{maiores_gastos,fim_do_mes,ultimos_lancamentos,sem_categoria}.json`. Esta é a fonte da lista `cards` que o app manda no POST (`CARDS_DA_TOOL`): `tests/test_ai_chat_cards_ids_app.py` a compara com o Python. */
+/** Os cards que a PRÓPRIA tool do servidor emite (`cards.DA_TOOL` em `core/services/ai_chat/cards.py`, sem `show_card`): só do chat, fora do `TITULOS`. O schema valida o contrato do servidor (inclusive chaves opcionais que o card não desenha); fixtures: `tests/fixtures/ai_chat_bloco_{maiores_gastos,fim_do_mes,comparacao,ultimos_lancamentos,sem_categoria}.json`. Esta é a fonte da lista `cards` que o app manda no POST (`CARDS_DA_TOOL`): `tests/test_ai_chat_cards_ids_app.py` a compara com o Python. */
 const maioresGastosSchema = z.object({
   start_date: z.string(), end_date: z.string(),
   expenses: z.array(z.object({ valor: legado, categoria: texto, descricao: texto, data: z.string(), instituicao: texto, parcelamento: texto })),
@@ -40,7 +50,18 @@ const maioresGastosSchema = z.object({
 const fimDoMesSchema = z.object({ mes: mesAAAAMM, dias_corridos: z.number().int(), dias_no_mes: z.number().int(), receita: legado, despesa: legado, despesa_projetada: legado, saldo_projetado: legado, vai_fechar_negativo: z.boolean(), motivos });
 /** `ultimos_lancamentos` e `sem_categoria`: a mesma linha do Extrato (`lancamentoSchema`), até 10 itens (o servidor corta; o app não recusa lista maior). */
 const listaLancamentosSchema = z.object({ itens: z.array(lancamentoSchema), motivos });
-const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema, ultimos_lancamentos: listaLancamentosSchema, sem_categoria: listaLancamentosSchema };
+/** `comparacao` (`compare_periods`, `core/services/comparacao_periodos.py`): dinheiro em float → centavos; `pct` null sem base. Fixture: `tests/fixtures/ai_chat_bloco_comparacao.json`. Tolerante onde o servidor varia: `estado` é texto livre, `serie` de forma inesperada vira `null` (o card sai sem gráfico) e o que o card não desenha (`base`, `receita`, `resultado`) não derruba o bloco. */
+const linhaComparacao = z.object({ total_atual: legado, total_anterior: legado, total_delta: legado, pct: z.number().finite().nullable(), estado: z.string() });
+const janelaComparacao = z.object({ inicio: z.string(), fim: z.string(), dias: z.number().int().positive() });
+const comparacaoSchema = z.object({
+  modo: z.string(), atual: janelaComparacao, anterior: janelaComparacao,
+  mesmo_tamanho: z.boolean().optional(), anterior_encurtado: z.boolean().optional(), base: z.unknown().optional(),
+  despesa: linhaComparacao.nullable(), receita: linhaComparacao.nullable().optional().catch(undefined), resultado: linhaComparacao.nullable().optional().catch(undefined),
+  categorias: z.array(linhaComparacao.extend({ categoria: z.string() })), categorias_omitidas: z.number().int().optional(),
+  motivo: texto.optional(), motivos, dias_corridos: z.number().int().optional(), dias_no_mes: z.number().int().optional(),
+  serie: z.object({ atual: z.array(legado), anterior: z.array(legado) }).nullable().optional().catch(null),
+});
+const schemasDaTool = { maiores_gastos: maioresGastosSchema, fim_do_mes: fimDoMesSchema, comparacao: comparacaoSchema, ultimos_lancamentos: listaLancamentosSchema, sem_categoria: listaLancamentosSchema };
 export const CARDS_DA_TOOL = Object.keys(schemasDaTool) as (keyof typeof schemasDaTool)[];
 /** `periodo` e `caixinhas` existem só no chat (card sem widget): ficam FORA do `TITULOS` (ids e títulos de widget). O catálogo de "Adicionar blocos" e `lerLayout` é `BLOCOS_HOME` (`catalogo.ts`), que também deixa o `metas` de fora. */
 export type CardChat = keyof typeof TITULOS | "periodo" | "caixinhas" | (typeof CARDS_DA_TOOL)[number];
@@ -65,7 +86,7 @@ const dinheiroBruto = z.string().transform((v, ctx) => { try { return { centavos
 export const gastosSchema = z.object({
   hoje: z.string(), disponivel: z.boolean(), historico_desde: texto,
   dias: z.array(z.object({ dia: z.string(), total: dinheiroBruto, quantidade: z.number().int(), maiores: z.array(z.object({ descricao: z.string(), valor: dinheiro, categoria: z.string() })), categorias: z.array(z.object({ chave: z.string(), valor: dinheiroBruto })) })),
-  categorias: z.array(z.object({ chave: z.string(), nome: z.string(), emoji: z.string() })),
+  categorias: z.array(z.object({ chave: z.string(), nome: z.string(), emoji: z.string(), icone: z.string().catch("tag") })),
   motivos,
 });
 export type Gastos = z.output<typeof gastosSchema>;

@@ -1,5 +1,5 @@
 import { SessaoExpirada, TEMPO_LIMITE_AUTH_MS } from "@/api/client";
-import { perfil, sair } from "@/services/auth";
+import { entrar, perfil, sair } from "@/services/auth";
 import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
 
 /**
@@ -147,4 +147,43 @@ describe("sair() espera a revogação no servidor (#458)", () => {
     await expect(sair()).resolves.toBeUndefined();
     await expect(lerCredenciais()).resolves.toBeNull();
   });
+});
+
+/**
+ * Terceira rodada do Codex em `sair(capturada)`: a limpeza de uma sessão antiga
+ * (exclusão de conta) não supera o login de OUTRA conta já em voo.
+ */
+it("sair(capturada) não supera o login de outra conta em voo; sair() sem argumento supera", async () => {
+  const gate = () => {
+    let soltar: () => void = () => {};
+    return { espera: new Promise<void>((r) => (soltar = r)), soltar };
+  };
+  const rodar = async (capturada?: { access: string; refresh: string }) => {
+    cofre.clear();
+    await guardarCredenciais({ access: ACCESS_A, refresh: "rt_A" });
+    const login = gate();
+    const logout = gate();
+    fetchFalso.mockImplementation(async (u: string) => {
+      if (String(u).includes("/auth/login")) {
+        await login.espera;
+        return resposta(200, { user_id: 2, email: "b@x.com", access_token: "acc_B", refresh_token: "rt_B", dashboard_token: "d", expires_in: 900 });
+      }
+      await logout.espera;
+      return resposta(200, {});
+    });
+    const entrando = entrar("b@x.com", "s");
+    const entrou = entrando.then(() => "pronta", (e: Error) => e.name);
+    const saindo = sair(capturada);
+    await Promise.resolve();
+    login.soltar(); // a resposta de B chega DURANTE a espera do /auth/logout de A
+    const desfecho = await entrou;
+    logout.soltar();
+    return { desfecho, saida: await saindo, cofreFinal: await lerCredenciais() };
+  };
+
+  const capt = await rodar({ access: ACCESS_A, refresh: "rt_A" });
+  expect(capt).toEqual({ desfecho: "pronta", saida: "outra", cofreFinal: { access: "acc_B", refresh: "rt_B" } });
+
+  const comum = await rodar();
+  expect(comum).toEqual({ desfecho: "EntradaSuperada", saida: undefined, cofreFinal: null });
 });

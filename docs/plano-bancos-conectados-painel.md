@@ -173,7 +173,7 @@ também no app), reordenar bancos, mexer na aba Open Finance do `settings.html` 
   snapshot; id só em `/bancos` é ignorado.
 - **Isolamento por usuário:** o `uid` do caminho sai do `me` da sessão, e as três rotas legadas passam por
   `authorize_dashboard_access` (403 se não for a sessão). Nenhum id de outro usuário entra por URL do painel.
-  O W2 prova que DELETE com id alheio não apaga nada (a rota responde `deleted: 0`).
+  O DELETE com id alheio ou inexistente não apaga nada e responde 404 `OF_CONNECTION_NOT_FOUND` (uniforme; provado por `tests/test_fase4_open_finance.py::test_delete_individual_inexistente_ou_alheio_404_uniforme` e pelo teste do próprio id, que apaga só o dele e devolve 404 no 2º DELETE). O W2 não escreve pytest novo.
 - **Prefixo do `chamar`:** acrescentar `open-finance` à exceção muda o roteamento de qualquer chamada futura com esse
   começo. Varrer `git grep -n 'chamar\|apiGet' webapp/src` antes; hoje não há.
 - **Artefato do webapp:** sem rebuild commitado o CI reprova (`exigeArtefatoEmDia`).
@@ -218,6 +218,15 @@ W3:
 
 Só depois do deploy (todos os PRs): números reais com a conta demo, painel e app lado a lado mostrando o mesmo topo e os
 mesmos bancos; Safari do iPhone no `/painel`.
+
+Decisões de execução do W2 (2026-10-18), implementado em `conta/Bancos.tsx`, `conta/Confirma.tsx` (extraído de `Sessoes.tsx`), `conta/BancoCard.tsx`, `tests/frontend/dashboard_v2_bancos_desconectar.test.mjs`, `tests/frontend/dashboard_v2_bancos_desconectar_bordas.test.mjs` e o helper `tests/frontend/_bancos_desconectar.mjs`:
+- **D1:** o `<summary>` diz "Gerenciar" (o nome do banco só para leitor de tela) e fica a 44 px; o botão "Desconectar <banco>" mora dentro.
+- **D2:** textos do app (`conexoes.tsx`): "Desconectar <banco>?", "Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados.", "Manter banco" / "Desconectar" / "Desconectando…".
+- **D3:** o sucesso só é anunciado ao leitor de tela (`role="status"` `sr-only`), sem toast; a falha é um `role="alert"` visível acima da lista.
+- **D4:** quando o card some (sucesso, 401, erro de releitura) o foco vai ao título da página; com o card ainda presente, volta ao botão que abriu. No ramo do 403 (e quando o card some com o botão já fora do DOM, o caso B1) o foco também vai ao título (`#page-title`).
+- **D5:** o botão de confirmar herda o `btn-primary` do `Confirma` (o mesmo das sessões); não há variante destrutiva no design system do painel.
+- Só um DELETE por vez, POR MONTAGEM da página (remontar a tela zera a trava), com o `uid` capturado no clique; resposta perdida, 404, 5xx e prazo relêem o snapshot (sem o id = foi, com o id = falha); 403 não relê com o `uid` velho, relê o perfil; qualquer erro, menos o 401 (que vai a "sessão terminou"), com a conta trocada (o `uid` da sessão no cache difere do `uid` do pedido) cai no ramo do 403.
+- Limites: sair da rota com o DELETE no ar não anuncia; dois bancos com o mesmo nome têm rótulos iguais; troca de conta com o DELETE já processado anuncia "desconectado" sobre a conta antiga; uma remoção por vez só vale por montagem; o alerta do 403 persiste até a próxima ação e não aparece se a conta nova não tem bancos (conta nova com 0 bancos nunca mostra o alerta); um `detail` em texto vindo do servidor vai literal ao alerta; duplo clique rápido no Desconectar tira o foco do botão.
 
 ## Decisões do dono (fechadas em 2026-10-18: "pode seguir com as suas recomendações")
 

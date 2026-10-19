@@ -217,7 +217,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   da resposta sai (`streaming.executar`/`completar`); o histórico gravado mantém o 🐷. O texto curto junto do card é só
   um pedido no prompt (`prompt_do_usuario(app=True)`), sem código que o imponha: quem mede é o staging. Tool de leitura sem card: `tests/test_ai_chat_tool_card.py` (`AUDITORIA`) lista uma a uma. Web: o /painel
   ainda não chama o stream (Etapa 7 do web).
-  `comparacao` (onda 2, PR A): o bloco é o resultado de `compare_periods` sem `escolha` e `nota` (`modo`, `atual`/`anterior`, `base`, `despesa`/`receita`/`resultado` em `total_atual`/`total_anterior`/`total_delta`/`pct`/`estado`, até 10 `categorias` por |delta|, `categorias_omitidas`, `motivo`, `motivos`; só no `modo: mes_aberto`, `dias_corridos` (o dia de hoje) e `dias_no_mes`, para a legenda "dia 17 de 31", porque `atual.fim` é o fim do mês; dinheiro em float); o modelo recebe `cards_resumos.resumo_comparacao` (o mesmo resultado, só a 1ª categoria, com `escolha`, `nota` e `card_na_tela`). Sem card: `pro_required`, `error`, `inicio_do_historico` e `sem_base`; dois meses passados seguem a recusa para `categorias`. `serie` (só no card; o modelo e o `ai_guard` nunca a recebem): `{atual, anterior}` com o gasto (DESPESA, sem receita) acumulado por dia, `serie.atual[i]`/`anterior[i]` = dia `inicio + i`, reais em float, do mesmo filtro do `dias[]` do Resumo (`db.lancamentos.listar` sem interno e sem outra moeda). Garantia: a última posição é o `total` da `despesa` do lado, senão `serie: null` (outra moeda, falha da leitura, ou período livre, que lê o cartão pela data da compra e não tem série). Compra de cartão anterior ao período, na fatura dele, cai no dia 1; a compra dentro da janela entra no dia da compra. O lado que contém hoje (o `atual` ou o `anterior`, conforme a ordem em que o modelo pediu) para em hoje e sobe em degrau até um lançamento de data futura, então o app não pode assumir `len == dias_corridos`; o outro lado tem `dias` posições. O app ainda não o desenha (`PENDENTE_DA_TOOL` em `tests/test_ai_chat_cards_ids_app.py`; vem em outro PR, como gráfico de linha): o servidor só o emite a quem o declara em `cards`. Fixture: `tests/fixtures/ai_chat_bloco_comparacao.json`.
+  `comparacao` (onda 2, PR A): o bloco é o resultado de `compare_periods` sem `escolha` e `nota` (`modo`, `atual`/`anterior`, `base`, `despesa`/`receita`/`resultado` em `total_atual`/`total_anterior`/`total_delta`/`pct`/`estado`, até 10 `categorias` por |delta|, `categorias_omitidas`, `motivo`, `motivos`; só no `modo: mes_aberto`, `dias_corridos` (o dia de hoje) e `dias_no_mes`, para a legenda "dia 17 de 31", porque `atual.fim` é o fim do mês; dinheiro em float); o modelo recebe `cards_resumos.resumo_comparacao` (o mesmo resultado, só a 1ª categoria, com `escolha`, `nota` e `card_na_tela`). Sem card: `pro_required`, `error`, `inicio_do_historico` e `sem_base`; dois meses passados seguem a recusa para `categorias`. `serie` (só no card; o modelo e o `ai_guard` nunca a recebem): `{atual, anterior}` com o gasto (DESPESA, sem receita) acumulado por dia, `serie.atual[i]`/`anterior[i]` = dia `inicio + i`, reais em float, do mesmo filtro do `dias[]` do Resumo (`db.lancamentos.listar` sem interno e sem outra moeda). Garantia: a última posição é o `total` da `despesa` do lado, senão `serie: null` (outra moeda, falha da leitura, ou período livre, que lê o cartão pela data da compra e não tem série). Compra de cartão anterior ao período, na fatura dele, cai no dia 1; a compra dentro da janela entra no dia da compra. O lado que contém hoje (o `atual` ou o `anterior`, conforme a ordem em que o modelo pediu) para em hoje e sobe em degrau até um lançamento de data futura, então o app não pode assumir `len == dias_corridos`; o outro lado tem `dias` posições. O app o desenha em `app/src/features/painel/cardComparacao.tsx`: o delta de despesa com sinal, o chip de %, as duas linhas acumuladas sobrepostas (reaproveita `CurvaAcumulada`; o eixo X é o MAIOR dos dois períodos e a série mais curta só acaba antes) e as 3 categorias que mais mudaram, com o ícone vindo do catálogo do usuário (`/api/app/categorias`, o `dados.categorias` do provider), inclusive o da categoria que zerou; `serie: null` desenha o card sem gráfico. O servidor só o emite a quem o declara em `cards`. Fixture: `tests/fixtures/ai_chat_bloco_comparacao.json`.
   `ultimos_lancamentos` e `sem_categoria` (onda 2, PR C2): o bloco é `{itens, motivos}`, sem total, com até 10 itens (o app mostra 5 e um "+5") no formato `Lancamento` de `/api/v2/lancamentos`
   (`mostrar_itens` em `core/services/ai_chat/tools/listas_ia.py`; fixtures `tests/fixtures/ai_chat_bloco_{ultimos_lancamentos,sem_categoria}.json`). O modelo recebe a lista INTEIRA (até `limit`, 50) com `card_na_tela: true`,
   porque precisa do `id` para "apaga o segundo"; o item dele é `_para_ia` (`valor` float, `tipo` receita/despesa ou entrada/saída para o interno, `categoria` pelo nome do catálogo (fora dele, como foi gravada), `parcelamento` em texto pronto (nunca o `parcela` cru), `user_seq` só nos `l`). A confirmação de APAGAR
@@ -410,18 +410,22 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   do estado e o que a IA ainda faz; o resumo da pergunta vem do banco (`_item` na pendência) e o "sim" relê: item
   sumido, fora do `pode` ou editado depois da pergunta não executa. Registro que o Extrato não lista (criar/apagar
   caixinha e investimento) é recusado com frase própria. `c<id>` nunca apaga.
-- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, cor}]}`, o
+- `GET /api/v2/categorias` (`api/v2/categorias.py`): `{categorias: [{chave, nome, emoji, icone, cor}]}`, o
   catálogo do usuário pelo `CAT_META_SQL` (chave = `cat_norm_sql(name)`, nome = a grafia que
   vence entre gêmeas, `emoji`/`cor` da mesma linha, nunca vazios), semeado como o `/categories` do
   /app. Só o catálogo: a categoria que só aparece nos lançamentos e a "sem categoria" não têm entrada aqui
   (o fallback neutro é do `/gastos`).
+  `icone` (também em `/gastos` e `/gastos/categoria`, campo aditivo) é o nome Phosphor derivado do `emoji` por
+  `icone_da_categoria` (`db/cat_icones.py`, o mesmo mapa do `EMOJI_TO_PH` do `dashboard.js`, comparado por
+  `tests/test_cat_icones.py`); emoji sem par cai em `tag`. O `emoji` segue no payload (app instalado não atualiza)
+  e o /painel e o app desenham o `icone`, nunca o emoji.
 - `GET /api/v2/gastos?mes=AAAA-MM` (`api/v2/gastos.py`, regra em `db/gastos.py`; também em `/api/app/gastos`,
   porque `criar_app` monta o mesmo router nos dois: rota nova não afeta o app instalado): "Para onde vai",
   a visão do mês, só leitura (plano em `docs/plano-etapa5-gastos.md`). `mes` como em `resumo-do-mes` (sem
   ele o corrente; futuro ou fora do formato = 422). Resposta: `mes`, `disponivel`, `hoje` (AAAA-MM-DD no
   fuso do app), `dia_de_corte`, `historico_desde` (o corte do plano, se cai depois do dia 1 do mês; senão
   `null`), `total` (Σ das categorias, em reais; `null` se `!disponivel`), `categorias[]` (`chave`, `nome`,
-  `emoji`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
+  `emoji`, `icone`, `cor`, `valor` = mês inteiro, `quantidade`, `valor_ate_corte`, `anterior_ate_corte`), `dias[]`
   (só dias com saída dentro da grade, crescente: `dia`, `total`, `maiores` = até 3 por `valor`, a mais
   recente primeiro no empate, `{descricao, valor, categoria}`; `quantidade` = quantas saídas somam o `total` do dia
   e `categorias` = `[{chave, valor}]` do dia, Σ `valor` = `total`, em `(-valor, chave)`, das MESMAS linhas do `total`:
@@ -475,7 +479,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `db/gastos.py::ler_categoria` e `db/estabelecimentos.py`; também em `/api/app/gastos/categoria`): o detalhe de UMA
   categoria do mês, só leitura. `mes` como em `/gastos`; `categoria` obrigatória (1 a `CATEGORY_NAME_MAX_LEN` caracteres,
   senão 422). A chave é o `cat_key_sql` do parâmetro (no banco, no mesmo snapshot): "Alimentação" casa com `alimentacao` e
-  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, cor}` pelo catálogo (o catálogo vence; senão
+  `sem categoria` junta `NULL` e vazio; `categoria {chave, nome, emoji, icone, cor}` pelo catálogo (o catálogo vence; senão
   neutro, nome = chave). Resposta: `mes`, `disponivel`, `hoje`, `historico_desde`, `total` e `compras` (as saídas da
   chave no mês pedido, as MESMAS linhas do `/gastos`; categoria sem gasto = `0`/`0`, nunca 404), `valor_medio`
   (`total ÷ compras` HALF_UP a centavos, `null` sem compras), `ultimas` (as 6 primeiras na ordem do `listar`, a mais
@@ -803,7 +807,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
 - `GET /api/v2/bancos` (`api/v2/bancos.py`, regra em `db/bancos.py`; também `/api/app/bancos`): o que cada banco
   conectado vale — `{total, motivos, bancos: [{conexao_id, saldo_conta, investido, total, contas, cartoes,
   investimentos, motivos}]}`, dinheiro em texto, `null` ≠ zero. **Ressalva do plano:** sem o recurso `investments`, a
-  conexão que só tem posição (sem conta) fica fora de `bancos` (o app deve mostrar "—" para ela, PR 3). Uma entrada por CONEXÃO (`conexao_id` é o id local, na
+  conexão que só tem posição (sem conta) fica fora de `bancos` (o app mostra "—" para ela). Uma entrada por CONEXÃO (`conexao_id` é o id local, na
   ordem crescente dele; duas "Nubank" são duas), e o app não soma. Nenhuma regra de dinheiro nova, tudo num snapshot
   (repeatable read, só leitura): `saldo_conta` = Σ das contas `no_total` de `contas_hoje.listar` (`null` se nenhuma
   entra; outra moeda, conexão pausada e saldo ausente ficam fora, com o motivo); `investido` =
@@ -823,14 +827,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   completo (da entrada e do topo). Só ocorre com o freio `PLANS_V2_ENABLED=0` / plano sem `investments`; testado
   em `tests/test_api_v2_bancos.py` só no nível da entrada.
   **Quem não vem em `bancos`:** conexão sem nenhuma conta, cartão e posição no espelho (DELETED sem linhas, reconexão
-  cujas identidades migraram para a nova, viva recém-conectada sem dado). O app deve mostrar "—" quando a conexão não
-  vem aqui (requisito do PR 3; consumidor: `/painel#/conta/bancos`, em `conta/Bancos.tsx` e `lib/bancos.ts`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
+  cujas identidades migraram para a nova, viva recém-conectada sem dado). O app mostra "—" quando a conexão não
+  vem aqui (`open_finance_bancos_tela.test.tsx`); o `/painel` faz o mesmo em `/painel#/conta/bancos` (`conta/Bancos.tsx`, `lib/bancos.ts`). Conexão pausada COM linhas continua listada, com valores `null` e `conexao_pausada`.
   **Contagens:** `contas`, `cartoes`, `investimentos` são as linhas do espelho da conexão (sem duplicata de reconexão,
   `distinct on` pela identidade do provedor) — o que o banco mostra, e NÃO o que entra no valor: contam também conexão
   pausada, outra moeda e posição resgatada (uma pausada pode ter `cartoes: 1` com tudo `null`). Carteira, cartão e
   fatura ficam fora dos valores. **Texto decimal:** a escala é a da fonte, a mesma de `/contas` (`"0"`, `"0.00"`,
   `"1000"`): o cliente interpreta o decimal, não compara texto. Limites: conta com `raw` sem `balance` e coluna ≠ 0
   entra no `total` de `/contas` e sai `null` aqui (`patrimonio.sem_saldo`). Fixture do app: `tests/fixtures/app_bancos.json`.
+  **Consumidor (app):** `app/app/(app)/conexoes.tsx` + `app/src/features/openFinance/conexoes/`. A leitura é paralela ao
+  snapshot e OPCIONAL: qualquer falha (403, 404, 5xx, rede, schema) deixa a tela sem números, nunca sem a lista nem
+  as ações. `bancosSchema` é tolerante por item (um item inválido não derruba os outros); a junção é por `conexao_id`
+  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. O topo é o `total` do
+  servidor, sem soma no app; a barra e a legenda em % usam só as partes positivas e o cálculo é do cliente, sem R$.
+  Limite declarado: os `motivos` do topo NÃO são desenhados. "Ocultar valores" é agora contexto do app inteiro
+  (`PrivacidadeProvider`, `app/src/features/painel/privacidade.tsx`), não mais estado local do Painel.
 
 - `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
   regra em `db/metas.py`, tabela `metas`; também em `/api/app/metas`): metas do `/painel`. Meta não
@@ -1608,6 +1619,8 @@ trocar de página ou o portão cair não os apagam; só o "Concluído". `enable`
 servidor comita e a resposta é a única cópia dos códigos); resposta perdida relê o status (T2 "gerar novos códigos" se o MFA ligou;
 o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu. O C1b pôs os "Dispositivos conectados" na mesma página (`conta/Sessoes.tsx`), pelas rotas antigas `GET /settings/{uid}/sessions`, `DELETE /settings/{uid}/sessions/{jti}` e `DELETE /settings/{uid}/sessions` (encerrar as outras): os DELETE têm `comPrazo` (30 s); a releitura depois de falha usa `comPrazoLeitura` (`conta/api.ts`, compartilhado com `lerStatusMfa`); depois do DELETE a linha sai do cache e o `invalidateQueries` relê (o `cancelRefetch` dele cancela o GET em voo); a sessão atual (`is_current` ou `current_jti`) nunca tem botão; resposta fora do contrato cai no erro com "Tentar de novo" (`sessoesDe`). Limite: com `current_jti` null (só token legado sem jti) "encerrar as outras" revoga todas as linhas de `auth_sessions`, igual à `/settings` (`core/sessions.py:revoke_other_sessions`); o token legado não é linha, então a atual segue válida. O app não tem lista de sessões (`app/app/(app)/seguranca.tsx`).
 
+**Configurações do /painel mostram as Notificações (C2).** `conta/Notificacoes.tsx`, pelas rotas antigas `GET`/`PATCH /settings/{uid}/notifications`: os mesmos 7 controles da `/settings`, cada um salva sozinho (corpo só com o campo tocado, no máximo 1 PATCH em voo por página: a trava é do módulo, então sair da rota e voltar não a solta; várias abas são independentes; a tela segue a resposta e o `invalidateQueries` relê). O horário manda o `daily_report_enabled` atual junto: o servidor liga o diário ao gravar a hora (`set_daily_report_hour`), então sem o campo mexer no horário religaria um diário desligado (a própria `/settings` ainda faz isso: issue #1122). `whatsapp_updates_enabled` é consentimento e só vai com o clique no interruptor dele. `HORAS` (`conta/api.ts`) copia as opções de `#notif-daily-hour` do `settings.html`; o teste compara as duas. Par no app: `app/app/(app)/notificacoes.tsx` (#1121), com horário de qualquer hora e minuto e a seção "No celular" para o push de `plano-push-app.md`.
+
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
 linhas cujo `pricing.price_details.price` está entre os preços da foto da metadata da
@@ -1748,7 +1761,19 @@ não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhoo
 Aceita também `item_id` opcional (reconectar banco já conectado; vai como `itemId` ao lado de
 `options`): só item não pausado do próprio usuário no nosso banco e com o `clientUserId` dele
 na Pluggy; não-string ou vazio é 400, todo o resto é o mesmo 404 `OF_ITEM_NAO_ENCONTRADO`.
-`item_id: null` conta como ausente (token de banco novo). O campo opcional `attempt_id`
+`item_id: null` conta como ausente (token de banco novo). No site, o legado
+`frontend/open-finance-connect.js` expõe `PBOpenFinance.reconnect(itemId)`: manda `item_id`, abre o
+widget com `updateItem` e sem `selectedConnectorId`, e não passa pelo picker nem pelo `refreshLimits`.
+Callbacks do host: `onOpen()` quando o widget foi iniciado (síncrono, não quando terminou de abrir); `onError(msg, status)` (status HTTP quando
+vem do servidor, ausente no erro do SDK); `onClose()` só depois de o `/pluggy-item` terminar, e
+SÓ na reconexão (o picker chama na hora, como sempre). `itemId` vazio ou não-string => `onError`,
+nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados em
+silêncio (guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
+Pluggy não garante `onClose` depois dele), no `init()` do SDK que rejeita (`onError` e em seguida
+`onClose()`) e no `destroy()`), e depois do `destroy()` nenhum callback do host dispara. Limites:
+depois de um `onError` do SDK com o widget ainda na tela, um novo clique abre outro widget (como antes
+da guarda); o `onClose` tardio de uma conexão cujo save já terminou pode chegar durante a conexão seguinte e o
+host não o distingue (hoje nenhum dos dois hosts deixa clicar nesse intervalo). Testes: `tests/frontend/of_connect_reconectar.test.mjs`. O campo opcional `attempt_id`
 exige UUID canônico em minúsculas e `app_scheme` permitido; o servidor monta a URI
 `<scheme>://open-finance-volta/<attempt_id>`. Sem esse campo, pedidos legados válidos
 mantêm a URI anterior. Após os gates de sessão e acesso, JSON malformado, campos
@@ -1760,6 +1785,10 @@ Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.
 `https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
 (`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
 e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
+No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG
+vem por `fetch` + `parse` + `SvgAst` (uma vez por URI, sem `Authorization`) e o `Avatar` cai na inicial em falha, `!ok` ou
+corpo que não é SVG. Limites: sem teto de tamanho do corpo; `<image href>` e `<use href>` dentro do SVG são renderizados;
+o `fetch` segue redirecionamento (o host fixo vale só no 1º salto). Sem `expo-updates`: a tela só chega com build novo.
 Serviços em `core/services/pluggy*.py` e
 `open_finance*.py`; tabelas `open_finance_connections/accounts/transactions/investments`,
 `open_finance_investment_snapshots` (foto diária por posição, `db/of_snapshots.py`) e
@@ -2004,6 +2033,47 @@ APNs direto, sem serviço intermediário: `core/services/push_service.py` +
 `frontend/routes/push.py`, tabela `push_tokens` (token único por aparelho, com
 `environment` separando sandbox de produção — o mesmo token não vale nos dois).
 Configuração em `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY`, `APNS_TOPIC`.
+Sem as quatro o envio só loga e devolve 0: **`APNS_TOPIC` não tem padrão** (o id do app Expo é
+`com.pigbankai.mobile`, `.staging` no staging e `.dev` no desenvolvimento, `app/app.config.ts`; um padrão errado apagaria tokens válidos).
+O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`/`Unregistered`
+(só ele; `TopicDisallowed`/`BadTopic`/`MissingTopic` são nossos e não apagam).
+
+- **Token amarrado à sessão.** `push_tokens.session_jti` recebe o `jti` da sessão que fez o
+  `POST /api/push/register`. `db.list_push_tokens` (leitor do sender, do teste do admin e de
+  `scripts/push_test.py`) só devolve token de sessão não revogada **e** com um
+  `auth_refresh_tokens` daquele `session_jti` utilizável. `session_jti` NULL (registro antigo)
+  nunca recebe até o aparelho registrar de novo. Não fecha o logout sem rede (PR 2, no aparelho).
+- **Baixa com dono.** `POST /api/push/unregister` só apaga token do próprio usuário (200 sempre).
+- **Push "banco precisa de atenção".** `core/services/open_finance_proactive.py::run_reconnect_push`,
+  no tique do Open Finance. Mesma regra do aviso do WhatsApp (`list_connections_needing_reconnect`).
+  Trava por conexão `open_finance_connections.push_reconectar_em` (NULL = nenhum push neste
+  episódio; limpa só quando a conexão volta a ficar saudável na tela, atualizada ou parcial (LOGIN_ERROR → ERROR → LOGIN_ERROR é um episódio só); solta se nenhum aparelho recebeu).
+  Um push por usuário por varredura, sem nome de banco; `data={"rota": "conexoes"}`. Barras
+  antes de reivindicar: `filtrar_por_acesso`, preferência, algum token entregável.
+- **Preferência.** `auth_accounts.push_bank_reconnect_opt_out` (default `false`), exposta como
+  `push_bank_reconnect_enabled` em `/settings/{uid}/notifications` (GET e PATCH); leitura direta
+  `db.push_bank_reconnect_bloqueado`, sem o cache do `get_auth_user`.
+
+Atraso: o push só sai na varredura do tique (~6 h). Plano do push no app e decisões do dono:
+[`plano-push-app.md`](plano-push-app.md).
+
+Limites declarados do PR 1 (servidor):
+
+- A reconexão pelo widget não solta a trava: se o banco quebrar de novo antes de uma varredura ver a
+  conexão Atualizada ou Parcial, esse episódio fica sem push (reconexão que fica em updating/erro
+  temporário mantém a trava sem prazo).
+- Só Atualizado/Parcial reabre a trava: oscilação, reconexão sem sync, pausado ou removido que voltam a
+  quebrar não geram 2º push.
+- Banco curado no mesmo instante da varredura ainda pode receber 1 push (intervalo entre a leitura e a
+  reivindicação, igual ao aviso do WhatsApp).
+- Requisito para o PR 2: tokens existentes ficam com `session_jti` NULL e param de receber no deploy; o
+  app precisa chamar o register depois de CADA login.
+- Re-registro sem `jti` (cliente legado) zera o `session_jti` do token, que para de receber.
+- A varredura não tem prazo próprio: com o APNs fora, cada token espera até 10 s em série e atrasa o
+  PATCH do mesmo tique.
+- Ao ligar as envs (PR 3), todo usuário com banco já quebrado e token entregável recebe 1 push. Um
+  `APNS_TOPIC` digitado errado apaga os tokens no 1º envio (`DeviceTokenNotForTopic`); eles voltam
+  quando o app registrar de novo. Conferir a env antes de ligar.
 
 ### Admin e afiliados
 
@@ -2376,10 +2446,11 @@ finito em toda coluna numérica (`_tarefa_finito_checks` →
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **quatro** trabalhos: expiração de trial
-(`_open_finance_trial_expiry`), **job de saúde**, **retentativa** e refresh proativo —
-os três últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
-roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde e retentativa (GET); o
+O Open Finance tem **cinco** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **job de saúde**, **retentativa**, **push de reconectar**
+(`run_reconnect_push`, ver "Push (app iOS)") e refresh proativo —
+os quatro últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
+roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde, retentativa e push (GET); o
 PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
 `OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
 proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde

@@ -5,6 +5,7 @@ import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import { fluxoFim } from "./conversa_apoio";
+import { ficha, filtrar } from "./extrato_filtros_apoio";
 type No = ReturnType<typeof screen.getByText>;
 const janelaOriginal = Dimensions.get("window");
 async function fonte(fontScale: number) {
@@ -60,13 +61,13 @@ it("mudança live remede texto e dinheiro sem remontar providers ou requisitar d
 it("filtros refluem na troca live sem perder seleção, busca ou instância do campo", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  const campo = screen.getByLabelText("Buscar lançamento");
- await act(async () => { fireEvent.changeText(campo, "mercado"); fireEvent.press(screen.getByRole("button", { name: "Banco" })); await drenar(); });
+ await act(async () => { fireEvent.changeText(campo, "mercado"); await drenar(); }); await filtrar({ origem: "Banco" });
  await waitFor(() => expect(fetchFalso.mock.calls.some(([u]) => new URL(String(u)).searchParams.get("q") === "mercado")).toBe(true));
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
  expect(screen.getByLabelText("Buscar lançamento")).toBe(campo); expect(campo.props.value).toBe("mercado");
- expect(temColuna(screen.getByRole("button", { name: "Banco", selected: true }))).toBe(true);
- expect(temColuna(screen.getByRole("button", { name: "Tudo", selected: true }))).toBe(true);
+ expect(temColuna(ficha("origem Banco")!)).toBe(true);
+ expect(temColuna(screen.getByRole("button", { name: "Filtros" }))).toBe(true);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
 it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do mesmo usuário", async () => {
@@ -90,9 +91,9 @@ it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do 
  expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("900 de 1000 mensagens utilizadas")).toBeTruthy();
 });
 it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e embaixo dela com fonte ampliada", async (escala) => {
- await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Saídas" })).toBeTruthy());
+ await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Filtros" })).toBeTruthy());
  // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
- await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Saídas" })); await drenar(); });
+ await filtrar({ tipo: "Saídas" });
  await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
  const titulo = screen.getByText("Mercado"), valor = screen.getByLabelText("menos 120 reais");
  expect(escala > 1 ? paiVisual(titulo) : paiVisual(paiVisual(titulo)!)).toBe(paiVisual(valor));

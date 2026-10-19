@@ -25,6 +25,8 @@ const conexaoSchema = z.object({
   reconnected_at: z.string().datetime({ offset: true }).nullable(),
   provider_item_id: z.string().nullable(),
   institution_name: z.string().nullable(),
+  // https ou null; o host é fixado em `features/openFinance/conexoes/juntar.ts` antes de buscar. Servidor velho (sem o campo) e valor de forma estranha viram sem logo.
+  logo_url: z.string().nullable().optional().catch(null),
   ui: z.object({ state: z.string(), label: z.string(), detail: z.string().nullable().optional() }),
 });
 

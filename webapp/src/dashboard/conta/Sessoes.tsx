@@ -1,39 +1,10 @@
 import { useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErroApi } from "../lib/v2";
-import { NATIVE, useDialogo } from "../parts/dialog";
+import { Confirma } from "./Confirma";
 import { DETALHES, comPrazoLeitura, encerrarOutras, encerrarSessao, falhaDe, horaRelativa, sessoesQuery, type Falha, type Sessao, type SessoesAtivas } from "./api";
 
 const MOVEL = /iOS|iPadOS|Android|PigBank app/; // o rótulo do servidor (core/sessions.py: device_label); sem critério melhor, o resto é computador
-
-// O diálogo de confirmação. `agir` NUNCA lança (o pai guarda a falha); terminado, o diálogo sempre fecha.
-function Confirma({ titulo, texto, botao, agir, fechar }: { titulo: string; texto: string; botao: string; agir: () => Promise<void>; fechar: () => void }) {
-  const id = useId();
-  const voando = useRef(false); // síncrona: dois cliques/Enter no mesmo tick não passam por `pendente`; também trava o fechar
-  const [pendente, setPendente] = useState(false);
-  const { dlg, fecharDialog, fundo, props } = useDialogo(fechar, () => voando.current);
-  const ir = async () => {
-    if (voando.current) return;
-    voando.current = true;
-    setPendente(true);
-    await agir();
-    voando.current = false; // o fechar está travado em voo
-    if (dlg.current?.isConnected) fecharDialog();
-  };
-  return <>
-    <dialog {...props} className={`lanc-form${NATIVE ? "" : " lanc-form-fb"}`} aria-labelledby={`${id}-t`}>
-      <div className="cofre">
-        <h2 id={`${id}-t`}>{titulo}</h2>
-        <p>{texto}</p>
-        <footer>
-          <button className="btn btn-ghost" type="button" onClick={fecharDialog} disabled={pendente}>Cancelar</button>
-          <button className="btn btn-primary" type="button" onClick={ir} disabled={pendente}>{pendente ? "Encerrando…" : botao}</button>
-        </footer>
-      </div>
-    </dialog>
-    {!NATIVE && <div className="lanc-scrim" aria-hidden="true" onClick={fundo} />}
-  </>;
-}
 
 // Dispositivos conectados (dentro de /conta/configuracoes): as sessões ativas, o encerrar de cada uma e o das outras. Só rotas antigas
 // (/settings/{uid}/sessions); o `uid` já chega validado. A sessão atual não tem botão (o servidor também recusa: 400).
@@ -109,7 +80,7 @@ export function Sessoes({ uid }: { uid: number }) {
       {falha && <div role="alert" className="sess-falha"><span className="warn">{falha.texto}</span>
         {falha.acao === "recarregar" && <button type="button" className="btn btn-ghost" onClick={() => location.reload()}>Recarregar</button>}</div>}
       <p role="status" className="sr-only">{aviso}</p>
-      {confirmar && <Confirma {...confirmar} fechar={() => { setConfirma(null); if (foi.current) { foi.current = false; titulo.current?.focus(); } }} />}
+      {confirmar && <Confirma {...confirmar} pendente="Encerrando…" fechar={() => { setConfirma(null); if (foi.current) { foi.current = false; titulo.current?.focus(); } }} />}
     </section>
   );
 }

@@ -1,0 +1,8 @@
+<!-- @dsCard group="Inputs" height=170 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {AmountInput}=PigBank;const [c,set]=React.useState(4590);return e("div",{style:{display:"grid",gap:16}},
+ e(AmountInput,{label:"Quanto você gastou?",cents:c,onChange:set}),e(AmountInput,{label:"Limite da meta",cents:0,onChange(){},error:"Digite um valor maior que zero."}))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>
