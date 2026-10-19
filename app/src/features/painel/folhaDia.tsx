@@ -2,10 +2,11 @@ import { useEffect, useRef } from "react";
 import { AccessibilityInfo, ActivityIndicator, View } from "react-native";
 import { BarraComposicao } from "@/ui/componentes/BarraComposicao";
 import { Icone } from "@/ui/componentes/Icone";
+import { IconeCategoria } from "@/ui/componentes/IconeCategoria";
 import { falado, faladoComSinal, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
 import { CORES_CATEGORIA } from "@/ui/tokens";
 import { ButtonPainel, TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
-import { nomeMes } from "./catalogo";
+import { nomeMes, semana } from "./catalogo";
 import { Acao, Folha, Linha, Valor } from "./base";
 import { usePainel } from "./provider";
 import { useGastosMes } from "./gastosMes";
@@ -14,14 +15,12 @@ import type { Resultado } from "./provider";
 import { contraMediaDoDia, mediaDoPeriodo, vizinho } from "./gastosDia";
 import { irAoExtrato, useNavegacaoPainel } from "./navegacao";
 /**
- * A folha do "Seu dia" (aba Gastos): total do dia, pílula contra a média, contador, barra de categorias com emojis, 3 maiores (sem sinal "−", decisão do dono 2026-10-18: negativo na frente induz sensação de prejuízo) e o botão do extrato. Mínimo de texto: o dado é número e ícone.
+ * A folha do "Seu dia" (aba Gastos): total do dia, pílula contra a média, contador, barra de categorias com o ícone de cada fatia (na cor dela), 3 maiores (sem sinal "−", decisão do dono 2026-10-18: negativo na frente induz sensação de prejuízo) e o botão do extrato. Mínimo de texto: o dado é número e ícone.
  * Decisão SÍNCRONA de abrir (antes de qualquer leitura): o dia está no mês exibido e não antes do corte do plano. A linha tocada vem de `detalhes`, então o dia tem lançamento;
  * dia de outro mês/ano (parcela) ou antes do corte não existe em `/gastos` e vai ao extrato (nunca R$ 0,00). Não usa `saiu`, `hojeSP()` nem o `diaAbrivel`, que dependem do `/gastos`.
  */
 export const abreFolha = (dia: string, mes: string, historicoDesde?: string | null) => dia.startsWith(mes) && !(historicoDesde && dia < historicoDesde);
-const SEMANA = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 const TOM_PILULA = { gain: "positive", warn: "warning", "": "inkMuted" } as const; // tons do web (`gastosDia.ts`) → paleta do app
-const semana = (dia: string) => SEMANA[new Date(`${dia}T12:00:00Z`).getUTCDay()]!;
 /** "qui, 16 out" (título) e "quinta-feira, 16 de outubro" (VoiceOver). Datas civis: nunca passam pelo fuso do aparelho. */
 export const dataCurta = (dia: string) => `${semana(dia).slice(0, 3)}, ${Number(dia.slice(8))} ${nomeMes(dia.slice(0, 7)).slice(0, 3)}`;
 export const dataFalada = (dia: string) => `${semana(dia)}, ${Number(dia.slice(8))} de ${nomeMes(dia.slice(0, 7)).split(" de ")[0]}`;
@@ -40,7 +39,7 @@ function Corpo({ dia, g, trocar, fechar }: { dia: string; g: Resultado<Gastos> &
   // Barra: a decisão "fatia > 0" e a proporção usam o texto BRUTO (`Number`), nunca os centavos (0.004 + 0.006 = 40/60); só com ≥ 2 fatias. Cor pela posição da chave no catálogo; chave fora dele, a neutra.
   const fatias = (dado && entrada && !oculto ? entrada.categorias.filter((c) => Number(c.valor.bruto) > 0) : []).map((c) => {
     const i = dado!.categorias.findIndex((x) => x.chave === c.chave), cat = dado!.categorias[i];
-    return { ...c, nome: cat?.nome ?? c.chave, emoji: cat?.emoji ?? "•", cor: CORES_CATEGORIA[i < 0 ? 6 : i % CORES_CATEGORIA.length]! };
+    return { ...c, nome: cat?.nome ?? c.chave, icone: cat?.icone ?? "tag", cor: CORES_CATEGORIA[i < 0 ? 6 : i % CORES_CATEGORIA.length]! };
   });
   // Anuncia só a troca pelas setas (a abertura já cai no título); com valores ocultos, só a data. Espera o dado do dia chegar.
   useEffect(() => {
@@ -68,7 +67,7 @@ function Corpo({ dia, g, trocar, fechar }: { dia: string; g: Resultado<Gastos> &
       : <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>{voltar}{centro}{avancar}</View>}
     {fatias.length > 1 && <View accessible accessibilityLabel={fatias.map((f) => `${f.nome}, ${falado(f.valor.centavos) ?? VALOR_INDISPONIVEL_FALADO}`).join("; ")} style={{ gap: 8 }}>
       {!ampliado && <BarraComposicao segmentos={fatias.map((f) => ({ valor: Number(f.valor.bruto), cor: f.cor }))} />}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>{fatias.slice(0, 4).map((f, i) => <Texto key={i}>{f.emoji}</Texto>)}{fatias.length > 4 && <Texto variante="rotulo" tom="inkMuted">+{fatias.length - 4}</Texto>}</View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>{fatias.slice(0, 4).map((f, i) => <IconeCategoria key={i} icone={f.icone} cor={f.cor} />)}{fatias.length > 4 && <Texto variante="rotulo" tom="inkMuted">+{fatias.length - 4}</Texto>}</View>
     </View>}
     {dado && entrada && entrada.maiores.length > 0 && <View>{entrada.maiores.map((m, i) => <Linha key={i} titulo={oculto ? "Lançamento" : m.descricao.trim() || "Lançamento"} valor={m.valor} />)}</View>}
     <ButtonPainel rotulo="Ver extrato do dia" onPress={() => { fechar(); irAoExtrato(navegar, { dia }); }} />

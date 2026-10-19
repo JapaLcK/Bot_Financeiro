@@ -110,8 +110,8 @@ externa, sem catálogo frio, e conector direto que some do `/connectors` não im
 **Condição do PR, MEDIDA em produção em 2026-10-18 (o staging tem 0 conexões Pluggy):** `n=8`,
 `com_logo=4`, `svg=4` (todo logo medido é SVG, em `https://cdn.pluggy.ai/assets/connector-icons/…`). As 4 sem
 logo são as mais antigas (ids 161 a 179; 2 ACTIVE, 2 PAUSED) e o `raw` delas NÃO tem `connector`; o sync não
-reescreve o `raw`, então as antigas só ganham logo ao reconectar. O dono decidiu abrir o PR assim (o app cai na
-inicial onde não há logo); o plano B abaixo fica como follow-up. O texto original da condição:
+reescreve o `raw`. O PR 2 abriu assim (o app cai na inicial onde não há logo) e o plano B abaixo, já feito,
+dá logo a essas pelo catálogo. O texto original da condição:
 - se o `connector` embutido no item traz `imageUrl` (no repositório `imageUrl` só aparece lido do
   **catálogo**, `frontend/routes/open_finance.py:1675`);
 - o formato da imagem (lembrança não conferida: SVG no CDN da Pluggy). O `Image` do React Native não
@@ -122,6 +122,10 @@ inicial onde não há logo); o plano B abaixo fica como follow-up. O texto origi
   from open_finance_connections where provider='pluggy';` e depois hosts distintos e o `content-type` de um exemplo.
 - Se `com_logo` ficar bem abaixo de `n`: plano B = consulta ao catálogo **só em cache**, sem buscar nada
   dentro do snapshot.
+- **Plano B: feito** (#1142). `logo_do_conector` (`core/services/pluggy_catalogo.py`) lê o catálogo
+  em memória pelo `institution_id`, só em `provider='pluggy'`; o aquecimento roda no boot e no tique do Open Finance
+  (`docs/CLAUDE.md`, parágrafo do `logo_url`). O app ganha o logo das antigas sem código novo, no build que tiver a tela.
+  Falta provar depois do deploy: o catálogo real lista 611, 612, 651 e 775, e o host é `cdn.pluggy.ai`.
 
 ## PR 3 — app: a tela
 
@@ -182,6 +186,33 @@ fazem `push` **[Arquiteto]**; o Coder reconfere as sete antes de remover.
   a lado com a mesma conta; desconectar e reconectar de verdade em staging (conta demo).
 - O app não tem atualização pelo ar (`expo-updates` ausente do `package.json` **[conferi]**): a tela só
   chega com build novo. App instalado ignora campo novo; app novo contra servidor velho cai no caminho sem números.
+
+**O que o código fez diferente do plano acima:**
+- `SvgUri` virou `fetch` + `parse` + `SvgAst` (achados A2/A3 do Tester: host fixo e sem `Authorization`, uma busca por URI).
+- "Acompanhar" e o "Reconectar" em destaque (`needs_user_action`) ficam FORA do que abre no cartão; o plano os punha dentro.
+- A rota NÃO entrou em `painel.fixture.json`: o `rotear` de `auth_apoio.ts` lê `tests/fixtures/app_bancos.json` (§0.7, uma fonte).
+- "Conferir de novo" virou ícone no topo (`ResumoBancos`) e botão só no estado de erro sem dados.
+- `ui.detail` some quando o estado é "atualizado".
+- Os números somem em TODA nova leitura (foco da tela, volta do segundo plano, volta do Reconectar, Conferir de novo,
+  Desconectar) até `/bancos` responder (`useFocusEffect` com `[ativo, travado, rodada]` e `setDados({..., numeros: null})`
+  em `conexoes.tsx`), por escolha: número velho poderia incluir banco removido.
+- Limites: render nativo, VoiceOver, Dynamic Type e SVG real NÃO foram verificados. `institution_name` vazio ('') não
+  é tratado. Os `motivos` do topo não aparecem e a barra de composição aparece mesmo com motivo incerto (decisão do dono pendente).
+
+## PR 4 — app: a lista vira um grupo e o detalhe abre numa folha (par do /painel, PR #1142)
+
+Decisão do dono: a linha do banco NÃO expande no lugar; tocar abre o DETALHE. Substitui a expansão e o topo (`ResumoBancos`) do PR 3.
+
+- **Lista:** `GrupoDeLinhas` com `BancoCard` = linha (logo, nome, `ConnectionStatus`, seta). Nenhum R$, barra ou total; o nome acessível é "banco, estado". "N/M" das vagas (`Vagas.tsx`) fica acima do grupo.
+- **Detalhe:** `BancoDetalhe` dentro da `Folha` (`app/src/features/painel/base.tsx`, `pageSheet`) aberta por ESTADO de `conexoes.tsx` (`detalheId`), sem rota nem link. Total do servidor (o app não soma), barra
+  e "a conferir" (somem com "ocultar valores"), Última atualização, Em conta, Investido (`null` ou banco fora de `/bancos` = "—", nunca R$ 0,00), contagens, faixa do Banco Central e as ações de antes
+  (Reconectar, Acompanhar sincronização, Desconectar) sem mudança de regra. Sem `/bancos`: sem valores e as ações seguem. O detalhe lê só de `dados`; banco que some (releitura, outra sessão)
+  fecha a folha e a tela avisa; troca de conta fecha a folha; sair da tela (blur) a fecha. A falha de uma ação aparece DENTRO da folha (`falha`).
+- **Disponíveis para conectar:** até 5 populares de `GET /open-finance/{uid}/connectors`, só com vaga (`pode_adicionar`), por `institution_id` e nunca por nome; a seção some se o catálogo falhar
+  (e aparece "Conectar outro banco"). "+" abre `/autorizando?conector=<id>` e o `PluggyConnect` recebe `selectedConnectorId`; "Ver todos os bancos" abre sem escolha. `conector` do link só vale com 1 a 9 dígitos
+  e nunca junto de `itemId`. A lista de populares e a faixa do Banco Central são cópias do `/painel`, comparadas por `tests/frontend/bancos_paridade.test.mjs`.
+- **Limites declarados:** gêmeo direto × Open Finance (conexão direta aparece como o conector Open Finance em Disponíveis; decisão do dono pendente); sem banco real em staging, a pré-seleção e o logo reais
+  não foram verificados; o app não tem `expo-updates`, então só chega com build novo; o `Alert` por cima do `Modal` `pageSheet` só se confirma no iPhone.
 
 ## Decisões do dono, 2ª rodada (2026-10-18)
 

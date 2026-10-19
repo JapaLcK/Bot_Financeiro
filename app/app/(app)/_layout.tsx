@@ -1,5 +1,6 @@
 import { Stack, type NativeStackNavigationOptions } from "expo-router";
 
+import { PrivacidadeProvider } from "@/features/painel/privacidade";
 import { OPCOES_SHEET } from "@/ui/componentes/Sheet";
 import { useTema } from "@/ui/tema";
 import { texto } from "@/ui/tokens";
@@ -15,7 +16,7 @@ export const unstable_settings = { initialRouteName: "index" };
 /** Os códigos de backup não cabem em meia tela: sheet só inteira, e sem alça (não há o que arrastar). */
 const SHEET_INTEIRA: NativeStackNavigationOptions = { ...OPCOES_SHEET, sheetAllowedDetents: [1], sheetGrabberVisible: false };
 
-export default function LayoutApp() {
+function PilhaApp() {
   const { cores } = useTema();
   const CABECALHO: NativeStackNavigationOptions = {
     headerShown: true,
@@ -34,14 +35,26 @@ export default function LayoutApp() {
       <Stack.Screen name="open-finance-volta" />
       <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
-      <Stack.Screen name="teste-pluggy" options={{ headerShown: true, title: "Teste Open Finance", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
       <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
+      <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
       {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
       <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
+      <Stack.Screen name="simulador-compra" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-novos-codigos" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-desativar" options={SHEET_INTEIRA} />
+      <Stack.Screen name="excluir-conta" options={SHEET_INTEIRA} />
+      <Stack.Screen name="exportar-dados" options={SHEET_INTEIRA} />
     </Stack>
+  );
+}
+
+/** "Ocultar valores" vive aqui, acima do Painel: Bancos conectados (fora dele) respeita a mesma escolha. */
+export default function LayoutApp() {
+  return (
+    <PrivacidadeProvider>
+      <PilhaApp />
+    </PrivacidadeProvider>
   );
 }

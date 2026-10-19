@@ -1,0 +1,8 @@
+<!-- @dsCard group="Layout" height=210 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {Screen,Text,Card,Money}=PigBank;return e("div",{style:{border:"1px solid var(--border)",borderRadius:16,overflow:"hidden",height:180}},
+ e(Screen,null,e("div",{style:{display:"grid",gap:12,paddingTop:16}},e(Text,{variant:"title",as:"div"},"Início"),e(Card,null,e(Text,{variant:"label",tone:"ink-muted",as:"div"},"Saldo previsto"),e(Money,{cents:428050,variant:"display"})))))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

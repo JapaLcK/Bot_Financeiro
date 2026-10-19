@@ -34,7 +34,7 @@ it("busca global explicita o histórico permitido sem esconder registros fora do
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  await buscar("Loja");
  await waitFor(() => expect(screen.getByText("Loja de setembro")).toBeTruthy());
- expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("01/09/2026 · Banco")).toBeTruthy();
+ expect(screen.getByText(escopo)).toBeTruthy(); expect(screen.getByText("Nubank · Renda")).toBeTruthy(); expect(screen.getByText(/^Ter · 01\/09/)).toBeTruthy(); // sem data na linha: o dia está no cabeçalho do grupo
  expect(screen.getByRole("button", { name: "Carregar mais lançamentos" })).toBeTruthy(); expect(screen.queryByText(/Existem mais páginas/)).toBeNull();
  await apertar("Carregar mais lançamentos"); expect(screen.getByText("Loja de setembro")).toBeTruthy(); expect(screen.getByText("Loja de agosto")).toBeTruthy();
  expect(screen.queryByText("Todos os resultados deste filtro foram carregados.")).toBeNull(); expect(screen.queryByRole("button", { name: "Carregar mais lançamentos" })).toBeNull();

@@ -7,6 +7,9 @@ amarrado ao usuário logado sem o app precisar lidar com autenticação.
 Push é liberado pra todos os planos — por isso o auth aqui usa
 `resolve_dashboard_user_id` (identidade) e NÃO `authorize_dashboard_access`
 (que aplicaria o gate de assinatura).
+
+O token fica amarrado à SESSÃO que o registrou (`request.state.session_jti`): push
+só vai a aparelho de sessão ativa. A baixa só apaga token do próprio usuário.
 """
 import asyncio
 
@@ -49,7 +52,8 @@ async def push_register_route(request: Request, payload: PushRegisterPayload):
     if environment not in _VALID_ENVS:
         environment = "production"
     await asyncio.to_thread(
-        register_push_token, user_id, token, platform, environment
+        register_push_token, user_id, token, platform, environment,
+        getattr(request.state, "session_jti", None),
     )
     return {"ok": True}
 
@@ -57,9 +61,10 @@ async def push_register_route(request: Request, payload: PushRegisterPayload):
 @router.post("/api/push/unregister")
 @shared.limiter.limit("30/minute")
 async def push_unregister_route(request: Request, payload: PushUnregisterPayload):
-    # Exige sessão válida, mas a baixa é por token (idempotente).
-    shared.resolve_dashboard_user_id(request)
+    # Exige sessão válida; a baixa só vale para token do próprio usuário
+    # (idempotente: token alheio ou inexistente também devolve ok).
+    user_id = shared.resolve_dashboard_user_id(request)
     token = (payload.token or "").strip()
     if token:
-        await asyncio.to_thread(delete_push_token, token)
+        await asyncio.to_thread(delete_push_token, token, user_id=user_id)
     return {"ok": True}

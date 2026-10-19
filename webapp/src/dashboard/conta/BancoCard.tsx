@@ -1,34 +1,44 @@
-import { FUSO, instante } from "../lib/v2";
-import { haQuanto, moneyText } from "../lib/format.js";
+import { useState } from "react";
+import { moneyText } from "../lib/format.js";
 import { corDoBanco, tomDoEstado } from "../lib/bancos";
 import type { Banco } from "../lib/api-v2.gen";
 import type { Conexao } from "./api";
 
-const quando = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); // sem dateStyle: Safari 14.0
-const plural = (n: number | null, um: string, varios: string) => (n && n > 0 ? [`${n} ${n === 1 ? um : varios}`] : []);
+export const nomeDoBanco = (c: Conexao) => c.institution_name?.trim() || "Banco";
+// Cópia da regra do app (app/src/features/openFinance/conexoes/BancoCard.tsx): o teste bancos_paridade compara as duas listas (§0.7).
+export const SEM_RECONEXAO = ["removed", "item_missing", "paused"];
+export const plural = (n: number | null, um: string, varios: string) => (n && n > 0 ? [`${n} ${n === 1 ? um : varios}`] : []);
+// `v` é a linha do banco, ou o que a tela mostra no lugar dela: "…" (lendo) e "—" (sem linha, ou a leitura falhou). Null do servidor também é "—", nunca "R$ 0,00".
+export type Linha = Banco | "…" | "—";
+export const dinheiro = (v: Linha, x: string | null) => (typeof v === "string" ? v : moneyText(x) ?? "—");
 
-// Um banco conectado: o estado vem do snapshot e os valores de `/bancos` (juntados por id, nunca por nome). `v` é a linha do banco, ou
-// o que a tela mostra no lugar dela: "…" (lendo) e "—" (sem linha, ou a leitura falhou). Null do servidor também é "—", nunca "R$ 0,00".
-export function BancoCard({ c, i, v }: { c: Conexao; i: number; v: Banco | "…" | "—" }) {
-  const nome = c.institution_name?.trim() || "Banco";
-  const val = (x: string | null) => (typeof v === "string" ? v : moneyText(x) ?? "—");
-  const ms = instante(c.last_sync_at);
-  const quantos = typeof v === "string" ? [] : [...plural(v.contas, "conta", "contas"), ...plural(v.cartoes, "cartão", "cartões"), ...plural(v.investimentos, "investimento", "investimentos")];
-  const linha = typeof v === "string" ? null : v;
+// O ladrilho do banco: o logo (quadrado de fundo claro neutro) ou a inicial na cor do banco. A URL que não carregou fica anotada: uma URL nova é tentada de novo.
+// Serve ao banco conectado e ao conector do "Disponíveis": quem chama já deu `logo` (só da regra do CDN) e `cor` (já validada).
+export function Ladrilho({ nome, logo: url, cor, grande }: { nome: string; logo: string | null; cor: string; grande?: boolean }) {
+  const [falhou, setFalhou] = useState<string | null>(null);
+  const logo = url && url !== falhou ? url : null;
   return (
-    <li className="panel banco-card">
-      <span className="banco-ini" aria-hidden="true" style={{ background: corDoBanco(c.institution_name ?? "", i) }}>{Array.from(nome)[0].toUpperCase()}</span>
-      <div className="banco-id">
-        <h2>{nome}</h2>
-        <span className={`selo selo-${tomDoEstado(c.ui.state)}`}>{c.ui.label || "Pendente"}</span>
-      </div>
-      <b className="num banco-total">{val(linha?.total ?? null)}</b>
-      <div className="banco-resto">
-        {c.ui.detail && <p>{c.ui.detail}</p>}
-        <p>Conta {val(linha?.saldo_conta ?? null)} · Investido {val(linha?.investido ?? null)}</p>
-        {quantos.length > 0 && <p>{quantos.join(" · ")}</p>}
-        {Number.isFinite(ms) && <time dateTime={c.last_sync_at!} title={quando.format(new Date(ms))}>{haQuanto(ms)}</time>}
-      </div>
+    <span className={`banco-ini${logo ? " com-logo" : ""}${grande ? " grande" : ""}`} aria-hidden="true" style={logo ? undefined : { background: cor }}>
+      {logo ? <img src={logo} alt="" referrerPolicy="no-referrer" decoding="async" onError={() => setFalhou(logo)} /> : Array.from(nome)[0].toUpperCase()}
+    </span>
+  );
+}
+
+// Pontinho no tom do estado + o rótulo do servidor: o rótulo diz o estado, a cor só acompanha.
+export const Estado = ({ c }: { c: Conexao }) => (
+  <span className={`banco-estado estado-${tomDoEstado(c.ui.state)}`}><span className="ponto" aria-hidden="true" />{c.ui.label || "Pendente"}</span>
+);
+
+// Um banco conectado, em linha: tocar abre o detalhe (BancoDetalhe), onde estão os valores (`/bancos`, juntados por id, nunca por nome).
+// O botão que abriu entra no `onAbrir` para o foco voltar a ele quando o detalhe fechar.
+export function BancoCard({ c, i, onAbrir }: { c: Conexao; i: number; onAbrir: (botao: HTMLButtonElement) => void }) {
+  return (
+    <li className="banco-card">
+      <button type="button" className="banco-linha" aria-haspopup="dialog" onClick={(e) => onAbrir(e.currentTarget)}>
+        <Ladrilho nome={nomeDoBanco(c)} logo={c.logo_url} cor={corDoBanco(c.institution_name ?? "", i)} />
+        <span className="banco-id"><span className="banco-nome">{nomeDoBanco(c)}</span><Estado c={c} /></span>
+        <i className="ph ph-caret-right" aria-hidden="true" />
+      </button>
     </li>
   );
 }

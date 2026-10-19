@@ -288,6 +288,11 @@ from .push import (
     register_push_token,
     delete_push_token,
     list_push_tokens,
+    set_push_bank_reconnect_opt_out,
+    push_bank_reconnect_bloqueado,
+    limpar_push_reconectar,
+    reivindicar_push_reconectar,
+    soltar_push_reconectar,
 )
 
 # ── Agentes do Piggy ──────────────────────────────────────────────────────────
@@ -544,6 +549,8 @@ __all__ = [
     "sync_open_finance_caixinhas",
     "list_rv_positions", "rv_portfolio_summary", "pluggy_rv_kind", "RV_KIND_LABELS",
     "register_push_token", "delete_push_token", "list_push_tokens",
+    "set_push_bank_reconnect_opt_out", "push_bank_reconnect_bloqueado",
+    "limpar_push_reconectar", "reivindicar_push_reconectar", "soltar_push_reconectar",
     "list_of_fixed_income", "of_fixed_income_summary",
     "list_caixinha_candidates", "bind_pocket_to_caixinha",
     "list_banqueiro_pockets", "banqueiro_pocket_pace", "update_pocket_of_last_seen",

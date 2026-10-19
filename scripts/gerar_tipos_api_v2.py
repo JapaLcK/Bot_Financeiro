@@ -29,7 +29,8 @@ def _recusa(o) -> ValueError:
 
 
 def _tipo(s: dict) -> str:
-    chaves = set(s) - _META
+    # `extra="forbid"` (additionalProperties: false) é regra de validação do servidor; o TS só vê os campos.
+    chaves = set(s) - _META - ({"additionalProperties"} if s.get("additionalProperties") is False else set())
     t = s.get("type")
     if chaves == {"$ref"} and s["$ref"].startswith(_REF):
         return s["$ref"][len(_REF):]
@@ -48,7 +49,7 @@ def _tipo(s: dict) -> str:
     # Inteiro com teto/piso (`ge`/`le`): o TS só vê `number`.
     if t == "integer" and chaves - {"minimum", "maximum"} == {"type"}:
         return "number"
-    if chaves == {"type", "items"} and t == "array":
+    if chaves - {"minItems", "maxItems"} == {"type", "items"} and t == "array":  # tamanho é do servidor
         return f"Array<{_tipo(s['items'])}>"
     if t == "object" and chaves in ({"type", "properties"}, {"type", "properties", "required"}):
         req = s.get("required", [])

@@ -10,6 +10,7 @@ import { gastosQuery } from "../lib/v2";
 import type { DashState } from "../lib/types";
 import { Frame, FrameLink } from "../parts/Frame";
 import { AvisoMoeda, estadoGastos } from "../parts/GastosEstado";
+import { IconeCategoria } from "../parts/IconeCategoria";
 import { Selos } from "../parts/Selos";
 
 // Variação contra o anterior; null = sem base (o servidor não tem o mês anterior, ou o gasto de lá foi zero).
@@ -67,7 +68,7 @@ export function GastosCategorias({ s }: { s: DashState }) {
               <button type="button" className="cat" aria-pressed={on} data-guia={c.chave === alvo ? "categorias.item" : undefined} data-dim={noMes && !on ? "true" : undefined}
                 onClick={() => setFilter({ category: on ? null : c.chave })}
                 aria-label={`${c.nome}: ${moneyText(c.valor)}, ${dl.fala}. Filtrar lançamentos.`}>
-                <span className="cat-name"><span className="cat-emoji" aria-hidden="true">{c.emoji}</span><span className="cat-nome">{c.nome}</span></span>
+                <span className="cat-name"><IconeCategoria icone={c.icone} /><span className="cat-nome">{c.nome}</span></span>
                 <span className="cat-val num">{moneyText(c.valor)}</span>
                 <span className={`cat-delta num ${dl.tom}`}>{dl.seta && <i className={`ph ${dl.seta}`} aria-hidden="true" />}{dl.texto}</span>
                 <span className="cat-track" aria-hidden="true">

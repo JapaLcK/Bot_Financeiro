@@ -9,6 +9,7 @@ import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { AvisoMoeda, estadoGastos } from "../parts/GastosEstado";
 import { ORIGENS } from "../parts/LancamentoLinha";
+import { IconeCategoria } from "../parts/IconeCategoria";
 import { Selos } from "../parts/Selos";
 
 export function GastosDetalhe({ s }: { s: DashState }) {
@@ -30,7 +31,7 @@ export function GastosDetalhe({ s }: { s: DashState }) {
   const picoLoja = Math.max(...d.estabelecimentos.map((p) => Number(p.valor)), 1);
   return (
     <Frame id="cat-detalhe" real
-      title={<span className="detail-title"><span aria-hidden="true">{c.emoji}</span><span className="detail-nome">{c.nome}</span>{!escolhida && <span className="faint detail-auto">maior gasto do mês</span>}</span>}
+      title={<span className="detail-title"><IconeCategoria icone={c.icone} /><span className="detail-nome">{c.nome}</span>{!escolhida && <span className="faint detail-auto">maior gasto do mês</span>}</span>}
       aside={<button type="button" className="link" aria-expanded={aberto} aria-controls={aberto ? "gastos-compras" : undefined} onClick={() => set({ gastosAberto: aberto ? null : { categoria: chave } })}>Ver compras</button>}>
       <dl className="detail-facts">
         <div><dt>No mês{parcial && <span className="faint"> · parcial</span>}</dt><dd className="num">{moneyText(d.total) ?? "—"}</dd></div>

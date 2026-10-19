@@ -18,6 +18,7 @@ import core.admin_dashboard as admin_dashboard
 import core.services.pluggy_sync as ps
 import frontend.finance_bot_websocket_custom as dashboard
 from test_of_refresh_schedule import _conexao
+from test_of_retentativa import sem_catalogo
 
 
 def test_tick_do_refresh_nao_grava_uid_dos_donos(user_id, monkeypatch):
@@ -27,6 +28,7 @@ def test_tick_do_refresh_nao_grava_uid_dos_donos(user_id, monkeypatch):
     monkeypatch.setattr(ps, "update_pluggy_item", lambda item, key=None: True)
     monkeypatch.setattr(ps, "_hold_aggregate_emails", lambda uid, origem: None)
     monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: {})
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", sem_catalogo)
 
     async def _sem_retentativa(**kw):   # a retentativa varreria as conexões de outros testes
         return {}

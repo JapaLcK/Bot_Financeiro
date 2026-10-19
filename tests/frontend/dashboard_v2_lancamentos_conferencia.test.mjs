@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
+import { abrirFiltros, abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
 let browser, screenshots;
 before(async () => {
   exigeArtefatoEmDia();
@@ -62,14 +62,14 @@ async function recuperar(page, toolbar = false) {
 for (const filtro of ["origem", "conta", "categoria", "tipo", "q", "mes"]) test(`conferência incerta / ${filtro}: GET sem recortes, guarda até confirmação e novo POST voluntário`, async () => {
   const { ctx, page, state } = await preparado();
   try {
-    if (filtro === "q") { await page.getByLabel("Buscar", { exact: true }).fill("oculto"); await page.getByText("Busca no histórico disponível:", { exact: false }).waitFor(); }
+    if (filtro === "q") { await page.getByLabel("Buscar lançamento", { exact: true }).fill("oculto"); await page.getByText("Busca no histórico disponível:", { exact: false }).waitFor(); }
     else if (filtro === "mes") await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
-    else await page.getByRole("combobox", { name: new RegExp(`^${{ origem: "Origem", conta: "Conta", categoria: "Categoria", tipo: "Tipo" }[filtro]}`) }).selectOption({ origem: "banco", conta: "7", categoria: "alimentacao", tipo: "entrada" }[filtro]);
+    else { await abrirFiltros(page); await page.getByRole("combobox", { name: new RegExp(`^${{ origem: "Origem", conta: "Conta", categoria: "Categoria", tipo: "Tipo" }[filtro]}`) }).selectOption({ origem: "banco", conta: "7", categoria: "alimentacao", tipo: "entrada" }[filtro]); }
     await novo(page); await save(page).click(); await page.locator(".lanc-conferir").waitFor();
     await recuperar(page, filtro === "mes");
     assert.ok(state.gets.some((g) => !Object.keys(g).length), "data omitida consulta mês autoritativo do servidor");
     assert.deepEqual(state.gets.at(-1), { mes: "2026-10" });
-    assert.equal(await page.getByLabel("Buscar", { exact: true }).inputValue(), "");
+    assert.equal(await page.getByLabel("Buscar lançamento", { exact: true }).inputValue(), "");
     assert.equal(await page.locator('[data-id="l999"]').count(), 1);
     await novo(page); assert.equal(await save(page).isDisabled(), true, "GET fresco não é conferência manual");
     await page.getByRole("button", { name: "Fechar detalhes" }).click();
@@ -119,6 +119,7 @@ test("conferência página 2, GET falho/cache antigo e filtros: só confirmaçã
     state.proximaFalha = false;
     await page.locator('.lanc-mais').getByRole("button", { name: "Tentar novamente" }).click();
     await page.locator('[data-id="l999"]').waitFor();
+    await abrirFiltros(page);
     await page.getByRole("combobox", { name: /^Origem/ }).selectOption("banco");
     assert.equal(await page.getByRole("button", { name: "Conferi os lançamentos", exact: true }).isDisabled(), true);
     await page.getByRole("button", { name: "Retomar conferência" }).click();
@@ -138,9 +139,11 @@ test("conferência pronta: categoria ou dia escolhidos depois (filtro global) tr
     await recuperar(page);
     const conferi = page.getByRole("button", { name: "Conferi os lançamentos", exact: true });
     assert.equal(await conferi.isEnabled(), true, "sem filtro a conferência fecha");
+    await abrirFiltros(page);
     await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("alimentacao");
     await page.getByText("Nenhum lançamento encontrado.").waitFor(); // a lista já assentou com o filtro
     assert.equal(await conferi.isDisabled(), true, "categoria");
+    await abrirFiltros(page);
     await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("");
     await habilitado(page); // a lista do cache aparece antes do refetch assentar
     // o dia chega ao filtro global por "Ver em Lançamentos" do card do dia (/gastos); a conferência sobrevive à ida e volta
@@ -187,7 +190,7 @@ for (const cenario of ["historica", "pagina2", "fatura"]) test(`conferência edi
       return r.fulfill({ json: { ...base, mes: u.searchParams.get("mes") ?? "2026-10", itens: pagina2 && !u.searchParams.has("cursor") ? [base.itens[0]] : [item], proximo: pagina2 && !u.searchParams.has("cursor") ? "opaco" : null } });
     });
     await p.ir("/lancamentos");
-    if (!cartao && !pagina2) { await p.page.getByLabel("Buscar", { exact: true }).fill("mercado"); await p.page.getByText("Busca no histórico disponível:", { exact: false }).waitFor(); }
+    if (!cartao && !pagina2) { await p.page.getByLabel("Buscar lançamento", { exact: true }).fill("mercado"); await p.page.getByText("Busca no histórico disponível:", { exact: false }).waitFor(); }
     if (pagina2) { await p.page.getByRole("button", { name: "Carregar mais", exact: true }).click(); await p.page.locator('[data-id="l999"]').waitFor(); }
     await p.page.locator(`[data-id="${item.id}"]`).getByRole("button").click();
     if (cartao) await p.page.locator('[name="descricao"]').fill("Compra revista");
@@ -209,17 +212,18 @@ for (const width of [1440, 390, 320]) test(`anos na busca histórica efetiva / $
     const itens = [2025, 2026].map((ano) => ({ ...base.itens[0], id: `l${ano}`, data: `${ano}-09-20`, descricao: "Mesmo mercado" }));
     await p.ctx.route("**/api/v2/lancamentos?*", (r) => r.fulfill({ json: { ...base, itens, proximo: null } }));
     await p.ir("/lancamentos");
-    await p.page.getByLabel("Buscar", { exact: true }).fill("mercado"); await p.page.getByText("Busca no histórico disponível:", { exact: false }).waitFor();
+    await p.page.getByLabel("Buscar lançamento", { exact: true }).fill("mercado"); await p.page.getByText("Busca no histórico disponível:", { exact: false }).waitFor();
     for (const ano of [2025, 2026]) {
-      assert.ok((await p.page.locator('.lanc-dia h3').allTextContents()).some((s) => s.includes(String(ano))), "cabeçalho informa ano");
-      assert.equal(await p.page.locator(`.lanc-dia[aria-label*="${ano}"]`).count(), 1);
-      assert.match(await p.page.locator(`[data-id="l${ano}"] .lanc-abrir span`).textContent(), new RegExp(String(ano)), "linha informa ano");
+      // o cabeçalho põe "/aa" só em ano diferente do de hoje (2026); o aria-label do grupo sempre diz o ano; a linha não repete a data
+      const cab = await p.page.locator(`.lanc-dia[aria-label*="${ano}"] h3 > span:first-child`).textContent();
+      assert.equal(cab, ano === 2026 ? "Dom · 20/09" : "Sáb · 20/09/25", "cabeçalho informa ano");
+      assert.doesNotMatch(await p.page.locator(`[data-id="l${ano}"] .lanc-abrir span`).textContent(), new RegExp(String(ano)), "linha sem data");
     }
     const overflow = await p.page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(overflow <= 0);
-    await p.page.getByLabel("Buscar", { exact: true }).fill("a"); await p.page.getByText("Use pelo menos uma palavra", { exact: false }).waitFor();
-    assert.ok((await p.page.locator('.lanc-dia h3').allTextContents()).every((s) => !/202[56]/.test(s)));
-    await p.page.getByLabel("Buscar", { exact: true }).fill(""); await p.page.waitForTimeout(300);
+    await p.page.getByLabel("Buscar lançamento", { exact: true }).fill("a"); await p.page.getByText("Use pelo menos uma palavra", { exact: false }).waitFor();
+    assert.ok((await p.page.locator('.lanc-dia[aria-label]').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).every((s) => !/202[56]/.test(s)));
+    await p.page.getByLabel("Buscar lançamento", { exact: true }).fill(""); await p.page.waitForTimeout(300);
     assert.ok((await p.page.locator('.lanc-abrir span').allTextContents()).every((s) => !/202[56]/.test(s)));
   } finally { await p.ctx.close(); }
 });

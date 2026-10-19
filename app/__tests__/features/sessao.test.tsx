@@ -35,7 +35,7 @@ function Harness({ onEstado }: { onEstado: (e: EstadoSessao) => void }) {
   onEstado(sessao.estado);
   return (
     <>
-      <Pressable testID="sair" onPress={sessao.sair} />
+      <Pressable testID="sair" onPress={() => void sessao.sair()} />
       <Pressable testID="tentar" onPress={sessao.tentarDeNovo} />
       <Pressable testID="autenticar" onPress={sessao.autenticar} />
     </>

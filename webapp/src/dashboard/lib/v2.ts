@@ -24,6 +24,9 @@ export const MESES: string[] = DEMO ? MONTHS : (() => {
   return Array.from({ length: 6 }, (_, i) => mesAtual(new Date(Date.UTC(y, m - 6 + i, 15))));
 })();
 
+// O nome do plano na tela, por tier: a fonte única do painel (o servidor não manda nome de exibição).
+export const NOME_DO_PLANO: Record<string, string> = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
+
 // Sem envelope (o `{"detail"}` do CSRF, HTML, JSON inválido) o code é `http_<status>`;
 // sem resposta, status 0 e code "network". A `message` do envelope não vai para a tela:
 // em 402/404 ela é o texto padrão do HTTP em inglês ("Payment Required", "Not Found").
@@ -47,13 +50,14 @@ export class ErroApi extends Error {
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((/^\/(auth|settings|open-finance)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings|open-finance|billing)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
   }
   let body: unknown;
-  try { body = await r.json(); } catch { body = undefined; }
+  // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
+  try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
   if (r.ok && body !== undefined) return body as T;
   const erro = (body as Partial<ErroV2> | undefined)?.error;
   if (!r.ok && erro && typeof erro.code === "string") {
@@ -126,11 +130,38 @@ export const contasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
   ...vivo,
 };
+// Os bancos conectados (`GET /api/v2/bancos`): só o `motivos` de cima alimenta o aviso do topo (parts/AvisosDoTopo.tsx).
+// Não é o `bancosQuery(uid)` da Conta (conta/api.ts): aquele mostra valores em R$ e por isso confere a conta depois da resposta (um GET
+// a mais de /auth/dashboard-profile e o `uid` do contaQuery, que fora da Conta ninguém lê). O aviso só lê `motivos`, como `contasQuery`
+// e `perfilQuery`, e não monta em /conta/* (SEM_PILHA): os dois nunca pedem /bancos ao mesmo tempo (dashboard_v2_pilha_avisos, "sem GET duplicado").
+export const avisoDeBancoQuery = {
+  queryKey: ["bancos"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/bancos", signal),
+  ...vivo,
+};
 // As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.
 // Lida pela página Metas e pelo assunto `metas` do chat (parts/MetasResposta.tsx).
 export const metasQuery = {
   queryKey: ["metas"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/metas", signal),
+  ...vivo,
+};
+// O orçamento doméstico do mês (`GET /api/v2/orcamento-domestico`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentoQuery = (mes: string) => queryOptions({
+  queryKey: ["orcamento-domestico", mes],
+  queryFn: ({ signal }) => apiGet("/orcamento-domestico", signal, { mes }),
+  ...vivo,
+});
+// O patrimônio de hoje para o Progresso ao milhão (`GET /api/v2/progresso-milhao`); a projeção é do cliente (lib/milhao.ts).
+export const milhaoQuery = {
+  queryKey: ["progresso-milhao"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
+  ...vivo,
+};
+// Os orçamentos por categoria do mês corrente (`GET /api/v2/orcamentos-categoria`, sem `mes`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentosCategoriaQuery = {
+  queryKey: ["orcamentos-categoria"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/orcamentos-categoria", signal),
   ...vivo,
 };
 export const guiaQuery = {

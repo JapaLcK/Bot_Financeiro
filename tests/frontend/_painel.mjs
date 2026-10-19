@@ -44,7 +44,7 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * `cheia` no Plus e no Pro e o 403 `pro_required` nos outros; o `/api/v2/eventos` (SSE) fica
  * pendente para sempre: stream aberto e mudo. O `/api/v2/perfil` guarda o que o PUT gravou
  * (começa em `perfil`; `null` = nunca escolheu, o modal abre); `/contas` e `/resumo-do-mes`
- * respondem as fixtures de nome `contas` e `resumo`; o GET `/guia`, a de nome `guia` (padrão
+ * respondem as fixtures de nome `contas` e `resumo`; o `/bancos` (o aviso do topo), a de nome `bancos` (padrão `em_dia`: sem motivo, então SEM pilha nas telas que não são dela); o GET `/guia`, a de nome `guia` (padrão
  * `concluido`: o convite do guia não aparece nos testes que não são dele). O GET `/previsao` responde
  * a fixture `previsao` quando dada; sem ela, como o servidor: Pro → `pro<dias, padrão 30>`, Plus →
  * `plus30` (sem `dias` ou 30) e 403 `forecast_horizon_not_allowed` em 60/90, os outros → 403
@@ -52,16 +52,18 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * no `free`, como o servidor (gate `investments`, Essencial+), o 403 `pro_required`. O GET `/gastos` e o
  * `/gastos/categoria` respondem as fixtures `gastos` e `gastosCategoria` (padrão `padrao`, de um mês só: o
  * `mes` do pedido não as reescreve). O GET `/metas` responde a fixture de nome `metas` (padrão `varios`); os POST `/metas`, `/metas/editar` e
- * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O GET `/bancos` responde a fixture de nome `bancos` (padrão `padrao`).
+ * `/metas/apagar` respondem `{id}` (o teste sobrescreve com `ctx.route` para erro ou para espiar). O `/orcamentos-categoria` (GET e os 2 POST): fixture `orcamentosCategoria` (padrão `padrao`), sem gate de plano. O `/orcamento-domestico` (GET e os 2 POST): fixture `orcamento` (padrão `padrao`) no Plus e no Pro, 403 `pro_required` nos outros.
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao", orcamentosCategoria = "padrao" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
+    // O SDK da Pluggy do painel.html (o widget que o seletor de bancos abre): vazio e atendido, não abortado (um aborto é "requisição com falha"); nenhum teste o executa.
+    if (url.origin === "https://cdn.pluggy.ai" && url.pathname.startsWith("/pluggy-connect/")) return r.fulfill({ contentType: "application/javascript", body: "" });
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
     if (url.pathname === "/api/v2/eventos") return;
@@ -79,8 +81,20 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
       const e = RESPOSTAS.erros["403_pro_required"];
       return plano === "free" ? r.fulfill({ status: e.status, json: e.body }) : r.fulfill({ json: RESPOSTAS.investido[investido] });
     }
+    // O Progresso ao milhão: Plus e Pro leem a fixture `milhao` (padrão `padrao`); os outros, 403 `pro_required`. Os demais estados, por `ctx.route` no teste.
+    if (url.pathname === "/api/v2/progresso-milhao") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.progresso_milhao[milhao] }) : r.fulfill({ status: e.status, json: e.body });
+    }
     if (url.pathname === "/api/v2/metas" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.metas[metas] });
     if (/^\/api\/v2\/metas(\/editar|\/apagar)?$/.test(url.pathname) && r.request().method() === "POST") return r.fulfill({ json: { id: r.request().postDataJSON().id ?? 99 } });
+    // O orçamento doméstico: Plus e Pro leem a fixture `orcamento` (de um mês só: o `mes` do pedido não a reescreve); os outros, 403 `pro_required`. Os 2 POST devolvem a mesma fixture (o teste sobrescreve com `ctx.route` para erro ou para espiar).
+    if (/^\/api\/v2\/orcamento-domestico(\/potes|\/renda)?$/.test(url.pathname)) {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.orcamento_domestico[orcamento] }) : r.fulfill({ status: e.status, json: e.body });
+    }
+    // Os orçamentos por categoria (GET e os 2 POST, sem gate de plano): sempre a fixture `orcamentosCategoria` (padrão `padrao`; o teste sobrescreve com `ctx.route` para erro ou para espiar).
+    if (/^\/api\/v2\/orcamentos-categoria(\/apagar)?$/.test(url.pathname)) return r.fulfill({ json: RESPOSTAS.orcamentos_categoria[orcamentosCategoria] });
     // As fixtures de `gastos`/`gastos_categoria` são de um mês só: o `mes` do pedido não as reescreve.
     if (url.pathname === "/api/v2/gastos") return r.fulfill({ json: RESPOSTAS.gastos[gastos] });
     if (url.pathname === "/api/v2/gastos/categoria") return r.fulfill({ json: RESPOSTAS.gastos_categoria[gastosCategoria] });
@@ -110,15 +124,28 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
  * Contexto do /painel (ou do protótipo, com `demo`) para os testes `dashboard_v2_resumo_real*`:
  * o relógio congela em `agora` (padrão: 2 de outubro de 2026, 12h em SP) e `tz` é o fuso do
  * aparelho; o resto das opções vai para o `servir`. `ir(rota)` navega e espera `espera`.
+ * `relogio`: "fixo" (padrão, `setFixedTime`: os timers andam em tempo real) ou "instalado" (`clock.install`: os timers também são falsos e `page.clock.runFor` os adianta;
+ * é o que mede a cadência de acompanhamento e o prazo do POST do "Atualizar agora").
  */
-export async function abrirPainel(browser, { width = 1440, espera = "#board-profile", agora = "2026-10-02T15:00:00Z", tz = "America/Sao_Paulo", demo = false, ...opts } = {}) {
+export async function abrirPainel(browser, { width = 1440, espera = "#board-profile", agora = "2026-10-02T15:00:00Z", tz = "America/Sao_Paulo", demo = false, relogio = "fixo", ...opts } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, reducedMotion: "reduce", timezoneId: tz });
   await servir(ctx, demo ? RAIZ : undefined, opts);
   await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: ORIGIN }]);
   const page = await ctx.newPage();
-  await page.clock.setFixedTime(new Date(agora));
+  if (relogio === "instalado") await page.clock.install({ time: new Date(agora) });
+  else await page.clock.setFixedTime(new Date(agora));
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
   const ir = async (rota = "/") => { await page.goto(`${demo ? PROTOTIPO : PAINEL}#${rota}`); if (espera) await page.locator(espera).waitFor(); };
   return { ctx, page, erros, ir };
+}
+
+// A fileira de próximas perguntas ignora o toque por ~500 ms depois de trocar (PiggyChat.tsx: TRAVA_MS, contra o duplo toque):
+// o teste que clica uma pergunta logo depois da resposta espera isto antes.
+export const passouATrava = (page) => page.waitForTimeout(600);
+
+// O painel dos 4 selects do Extrato (Origem, Tipo, Categoria, Conta) nasce fechado atrás do botão de filtros: abre se estiver fechado.
+export async function abrirFiltros(page) {
+  const botao = page.getByRole("button", { name: "Filtros", exact: true });
+  if ((await botao.getAttribute("aria-expanded")) !== "true") await botao.click();
 }

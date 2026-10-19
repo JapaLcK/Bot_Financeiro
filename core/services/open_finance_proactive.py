@@ -13,11 +13,18 @@ from core.observability import log_system_event_sync, recent_event_exists
 from core.reports.reports_daily import filtrar_por_acesso
 from utils_text import fmt_brl
 
+from core.services import push_service
+
 from db import (
     detect_open_finance_salary,
+    limpar_push_reconectar,
     list_connections_needing_reconnect,
     list_identities_by_user,
     list_open_finance_user_ids,
+    list_push_tokens,
+    push_bank_reconnect_bloqueado,
+    reivindicar_push_reconectar,
+    soltar_push_reconectar,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,9 @@ OF_RECONNECT_EVENT = "of_reconnect_template_sent"
 OF_RECONNECT_DEDUPE_DAYS = 7.0
 OF_SALARY_EVENT = "of_salary_template_sent"
 OF_SALARY_DEDUPE_DAYS = 25.0
+# Push do app (APNs): texto genérico, sem nome de banco (regra da Apple, push_service).
+PUSH_TITULO = "PigBank"
+PUSH_CORPO = "Um banco precisa de atenção. Toque para ver."
 # Parâmetros NOMEADOS do corpo ({{banks}}, {{valor}}): têm de bater com o template aprovado na Meta.
 OF_RECONNECT_PARAM = "banks"
 OF_SALARY_PARAM = "valor"  # template de salário ainda não existe na Meta; criar com este nome.
@@ -143,3 +153,49 @@ def run_reconnect_notifications() -> dict:
                 details={"template_name": cfg["name"], "connections": len(need)},
             )
     return {"ok": True, "dormant": False, "sent": sent}
+
+
+def run_reconnect_push() -> dict:
+    """Push "um banco precisa de atenção" no app, UM por usuário por episódio.
+
+    Mesma regra do aviso do WhatsApp (`list_connections_needing_reconnect`). A
+    trava `open_finance_connections.push_reconectar_em` garante um push por
+    transição (a conexão tem vários escritores e a transição também acontece só
+    com o tempo); ela volta a NULL quando a conexão volta a ficar saudável na tela
+    (não basta deixar de pedir reconexão: LOGIN_ERROR → ERROR → LOGIN_ERROR é um
+    episódio só), ou quando o envio não chega a aparelho nenhum. Dormente sem as envs do APNs.
+    """
+    if not push_service.is_configured():
+        return {"dormant": True}
+    sent = 0
+    for uid in list_open_finance_user_ids():
+        try:
+            # Limpa ANTES de ler: quem foi curado entre a leitura e a limpeza seria
+            # lido como quebrado e reivindicado de novo (2º push no mesmo episódio).
+            limpar_push_reconectar(uid)
+            need = list_connections_needing_reconnect(uid)
+            ids = [int(c["id"]) for c in need]
+            if not ids:
+                continue
+            # Barras ANTES de reivindicar: quem não pode receber agora não gasta a trava.
+            if not filtrar_por_acesso([uid]):
+                continue
+            if push_bank_reconnect_bloqueado(uid) or not list_push_tokens(uid):
+                continue
+            claimed = reivindicar_push_reconectar(uid, ids)
+            if not claimed:
+                continue
+            n = 0
+            try:
+                n = push_service.send_push_to_user(
+                    uid, PUSH_TITULO, PUSH_CORPO,
+                    data={"rota": "conexoes"}, collapse_id="of-reconectar",
+                )
+            finally:
+                if n == 0:  # nada chegou (ou o envio levantou): a próxima varredura tenta
+                    soltar_push_reconectar(uid, claimed)
+            sent += n
+        except Exception as exc:
+            logger.warning("[of_proactive] push reconnect falhou user_id=%s erro=%s",
+                           uid, type(exc).__name__, extra={"user_id": uid})
+    return {"dormant": False, "sent": sent}

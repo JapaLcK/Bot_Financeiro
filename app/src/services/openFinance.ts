@@ -1,7 +1,9 @@
 import Constants, { ExecutionEnvironment } from "expo-constants";
 
 import { chamar, comLimite } from "@/api/client";
-import { conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema, refreshSchema } from "@/api/schemas/openFinance";
+import { bancosSchema } from "@/api/schemas/painel";
+import { lerRecurso } from "@/services/painel";
+import { conectoresSchema, conexoesSchema, connectTokenSchema, onboardingBancarioSchema, limiteBancarioSchema, desconectadoSchema, refreshSchema } from "@/api/schemas/openFinance";
 
 /**
  * As rotas de Open Finance de `frontend/routes/open_finance.py`. O `uid` vem
@@ -44,6 +46,10 @@ async function comCancelamento<T>(pai: AbortController | undefined, operacao: (s
 export const conexoes = (uid: number, controlador?: AbortController) =>
   comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}`, conexoesSchema, { sinal }));
 
+/** O catálogo de bancos da Pluggy: OPCIONAL para quem chama (a seção "Disponíveis para conectar" some se falhar). */
+export const conectores = (uid: number, controlador?: AbortController) =>
+  comCancelamento(controlador, (sinal) => chamar(`/open-finance/${uid}/connectors`, conectoresSchema, { sinal }));
+
 /** Mesmo prazo do `OF_REFRESH_PRAZO_MS` do settings.html (`tests/test_app_espelhos.py` compara): o servidor leva até ~40 s (PATCH, espera de até 18 s, sync), e os 15 s padrão cortariam um refresh que deu certo. */
 const PRAZO_REFRESH_MS = 60_000;
 /** Pede ao banco dados novos (`refresh_and_sync_pluggy_user`); o cooldown de 120 s por item é do servidor. */
@@ -61,3 +67,6 @@ export const registrarItem = (uid: number, itemId: string, controlador?: AbortCo
 export const onboardingBancario = () => chamar("/onboarding/open-finance", onboardingBancarioSchema, { sinal: comLimite() });
 export const limiteBancario = (uid: number) => chamar(`/open-finance/${uid}/limite`, limiteBancarioSchema, { sinal: comLimite() });
 export const desconectarBanco = (uid: number, id: number) => chamar(`/open-finance/${uid}/connections/${id}`, desconectadoSchema, { metodo: "DELETE", sinal: comLimite() });
+
+/** O que cada banco vale (`GET /api/app/bancos`). OPCIONAL para quem chama: 403 (onboarding), 404 (servidor velho), 5xx, rede e abort são "sem números". */
+export const bancos = (controlador: AbortController) => lerRecurso("/api/app/bancos", bancosSchema, controlador);

@@ -1723,10 +1723,23 @@ manager = ConnectionManager()
 _PRIMEIRO_TIQUE_SEC = 600
 
 
+async def _aquece_catalogo() -> None:
+    """Enche o cache do catálogo de conectores da Pluggy (o que dá logo às conexões sem `raw.connector`).
+    MESMA função e MESMA chave do modal "Conectar banco". Fail-soft: só o tipo da exceção (a mensagem
+    pode trazer dado), e nunca segura quem chama."""
+    try:
+        from core.services.pluggy_catalogo import list_pluggy_connectors  # noqa: PLC0415
+        from frontend.routes.open_finance import PLUGGY_INCLUDE_SANDBOX  # noqa: PLC0415
+        await asyncio.to_thread(list_pluggy_connectors, None, include_sandbox=PLUGGY_INCLUDE_SANDBOX)
+    except Exception as exc:
+        print(f"[pluggy_catalogo] erro: {type(exc).__name__}", file=sys.stderr)
+
+
 async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
-    """Um tique: saúde, retentativa e, só com `com_patch`, o PATCH periódico."""
+    """Um tique: catálogo, saúde, retentativa e, só com `com_patch`, o PATCH periódico."""
     from core.services.pluggy_sync import request_pluggy_refresh, run_of_health_check
     from frontend.routes.of_retentativa import retentar_leituras
+    await _aquece_catalogo()
     saude = await asyncio.to_thread(run_of_health_check)
     print(f"[open_finance_health] {saude}", flush=True)
     # Depois da saúde de propósito: o 404 e o `needs_user` que ela acabou
@@ -1738,6 +1751,13 @@ async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
         # Falha da retentativa não segura o PATCH periódico logo abaixo. Só o
         # tipo: a mensagem pode trazer dado de usuário (FK/CHECK do Postgres).
         print(f"[open_finance_retry] erro: {type(exc).__name__}", file=sys.stderr)
+    # Push de "reconectar" no app, depois da saúde e da retentativa (que acabam de
+    # gravar o estado) e sem segurar o PATCH.
+    try:
+        from core.services.open_finance_proactive import run_reconnect_push
+        print(f"[open_finance_push] {await asyncio.to_thread(run_reconnect_push)}", flush=True)
+    except Exception as exc:
+        print(f"[open_finance_push] erro: {type(exc).__name__}", file=sys.stderr)
     if com_patch:
         res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
         print(f"[open_finance_refresh] {res}", flush=True)
@@ -1771,8 +1791,8 @@ async def _open_finance_refresh():
     # deploy — medido, 15 rodadas em 48h, 10 delas nos 5 min seguintes a um
     # deploy. O cooldown real vive em `next_refresh_at` (persistido), então
     # reiniciar o processo não adianta nada pra quem quer forçar refresh.
-    # O 1º tique roda `_PRIMEIRO_TIQUE_SEC` depois do boot, SÓ com a saúde e a
-    # retentativa (que só fazem GET): com merges diários o processo quase nunca
+    # O 1º tique roda `_PRIMEIRO_TIQUE_SEC` depois do boot, SÓ com o catálogo, a saúde
+    # e a retentativa (que só fazem GET): com merges diários o processo quase nunca
     # chegava aos 6 h, e a retentativa nunca disparava. O PATCH só entra do 2º tique
     # em diante, a cada `OF_REFRESH_INTERVAL_SEC`.
     #
@@ -2236,6 +2256,7 @@ async def lifespan(app: FastAPI):
         tasks.extend(
             [
                 asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
+                asyncio.create_task(_aquece_catalogo(), name="pluggy_catalogo"),
                 asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
                 asyncio.create_task(_open_finance_trial_expiry(), name="open_finance_trial_expiry"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),
@@ -7292,14 +7313,21 @@ async def _create_billing_portal(user_id: int, customer_id: str, return_path: st
         ) from None
 
 
+# Para onde o Stripe devolve quem sai do portal. O cliente só ESCOLHE uma chave: o valor dele nunca entra na URL.
+_PORTAL_VOLTAR = {"/painel": "/painel", "/app": "/app"}
+
+
 @app.post("/billing/portal")
 @limiter.limit("30/hour")
-async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
+async def billing_portal(request: Request, voltar: str | None = None, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
+    `?voltar=` (opcional) escolhe a volta entre as chaves de `_PORTAL_VOLTAR`; sem ele, `/app`.
     """
     await asyncio.to_thread(_exigir_credencial, user_id)
+    if voltar is not None and voltar not in _PORTAL_VOLTAR:
+        raise HTTPException(status_code=400, detail="Destino de retorno inválido.")
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -7312,7 +7340,7 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
         raise HTTPException(status_code=404, detail="Sem assinatura ativa.")
 
     portal = await _create_billing_portal(
-        user_id, user["stripe_customer_id"], "/app", "/billing/portal",
+        user_id, user["stripe_customer_id"], _PORTAL_VOLTAR.get(voltar, "/app"), "/billing/portal",
     )
     return {"portal_url": portal.url}
 
@@ -8578,9 +8606,6 @@ class BudgetPayload(BaseModel):
     categoria: str
     budget: float
 
-FREE_BUDGETS_LIMIT = 3
-
-
 @app.post("/budgets/{user_id}")
 async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     _authorize_dashboard_access(request, user_id)
@@ -8588,48 +8613,21 @@ async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     if payload.budget <= 0 or not valor_valido(payload.budget):  # `nan <= 0` é False
         raise HTTPException(status_code=400, detail="budget must be > 0 and finite")
 
-    from core.services.plan_service import plan_gate_ok
+    from core.services.plan_limits import PlanLimitExceeded
+    from core.services.plan_service import get_user_limits
+    from db.budgets import upsert_budget
 
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            # Pro gate: Free pode ter até FREE_BUDGETS_LIMIT orçamentos.
-            # Update de orçamento existente não conta — só novo INSERT.
-            if not plan_gate_ok(user_id, "generic"):
-                await cur.execute(
-                    "SELECT 1 FROM category_budgets "
-                    "WHERE user_id=%s AND lower(categoria)=lower(%s)",
-                    (user_id, payload.categoria),
-                )
-                is_existing = await cur.fetchone() is not None
-                if not is_existing:
-                    await cur.execute(
-                        "SELECT COUNT(*) AS n FROM category_budgets WHERE user_id=%s",
-                        (user_id,),
-                    )
-                    row = await cur.fetchone()
-                    current = int((row.get("n") if isinstance(row, dict) else row[0]) or 0)
-                    if current >= FREE_BUDGETS_LIMIT:
-                        raise HTTPException(
-                            status_code=403,
-                            detail={
-                                "error": "pro_required",
-                                "feature": "budgets_limit",
-                                "limit": FREE_BUDGETS_LIMIT,
-                            },
-                        )
-
-            await cur.execute(
-                """
-                INSERT INTO category_budgets (user_id, categoria, budget)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id, categoria)
-                DO UPDATE SET budget = EXCLUDED.budget
-                """,
-                (user_id, payload.categoria, payload.budget),
-            )
-        await conn.commit()
+    # Mesma regra do /api/v2/orcamentos-categoria: o teto vem de plan_limits.budgets_max
+    # e o upsert casa a categoria sem caixa/acento (não nasce gêmea).
+    limite = (await asyncio.to_thread(get_user_limits, user_id))["budgets_max"]
+    try:
+        canon, _ = await asyncio.to_thread(upsert_budget, user_id, payload.categoria, payload.budget, limite=limite)
+    except PlanLimitExceeded:
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "budgets_limit", "limit": limite})
+    except ValueError:
+        raise HTTPException(status_code=400, detail="budget must be > 0 and finite")
     _invalidate_dashboard_current_cache(user_id)
-    return {"ok": True, "categoria": payload.categoria, "budget": payload.budget}
+    return {"ok": True, "categoria": canon, "budget": payload.budget}
 
 @app.delete("/budgets/{user_id}/{categoria}")
 async def delete_budget(request: Request, user_id: int, categoria: str):

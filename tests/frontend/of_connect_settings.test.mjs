@@ -505,3 +505,68 @@ test("conexão PAUSED não consome o teto do plano", async () => {
     "com a única conexão pausada, o teto não está atingido");
   await page.__ctx.close();
 });
+
+// ── Pré-escolha: open({id, name}) (o /painel, "Disponíveis para conectar") ──
+
+const MUITOS = Array.from({ length: 40 }, (_, i) => ({ id: 1000 + i, name: `Banco ${String(i).padStart(2, "0")}`, color: "123456", logo: "", inv: false }));
+const abrirComPre = async (page, pre) => {
+  await page.evaluate((p) => window.PBOpenFinance.open(p), pre);
+  await page.waitForFunction(() => document.querySelectorAll("#bankpick-list .bank-row").length > 0);
+};
+
+test("open({id, name}) abre o picker com esse banco já selecionado e à vista; o usuário ainda toca em Conectar", async () => {
+  const page = await abrirSettings({ conectores: MUITOS });
+  await abrirComPre(page, { id: 1035, name: "Banco 35" });
+
+  const r = await page.evaluate(() => {
+    const lista = document.getElementById("bankpick-list").getBoundingClientRect(), on = document.querySelector("#bankpick-list .bank-row.active");
+    const b = on?.getBoundingClientRect();
+    return { ativos: document.querySelectorAll("#bankpick-list .bank-row.active").length, nome: on?.getAttribute("data-name"), cta: document.getElementById("bankpick-go").disabled,
+      rotulo: document.getElementById("bankpick-count").textContent, aVista: !!b && b.top >= lista.top - 1 && b.bottom <= lista.bottom + 1 };
+  });
+  assert.deepEqual(r, { ativos: 1, nome: "Banco 35", cta: false, rotulo: "Selecionado: Banco 35", aVista: true });
+  assert.equal(await pickerAberto(page), true, "abrir não conecta: o picker fica aberto até o usuário tocar em Conectar");
+  await page.__ctx.close();
+});
+
+test("open() sem argumento, com um Event ou com id fora da lista não pré-seleciona nada", async () => {
+  const page = await abrirSettings({ conectores: MUITOS });
+  for (const pre of [undefined, { type: "click" }, { id: 7, name: "Banco que não existe" }, { id: "1001", name: "Banco 01" }, { id: 1001 }]) {
+    await abrirComPre(page, pre);
+    const r = await page.evaluate(() => ({ ativos: document.querySelectorAll("#bankpick-list .bank-row.active").length, cta: document.getElementById("bankpick-go").disabled, rotulo: document.getElementById("bankpick-count").textContent }));
+    assert.deepEqual(r, { ativos: 0, cta: true, rotulo: "Nenhum banco selecionado" }, JSON.stringify(pre));
+    await page.keyboard.press("Escape");
+  }
+  await page.__ctx.close();
+});
+
+test("a pré-escolha passa pelo mesmo teto do plano: banco novo com o teto cheio não abre a Pluggy; o já conectado (reconexão) abre", async () => {
+  const conexoes = [{ id: 9, provider: "pluggy", institution_name: "Nubank", institution_id: "612", status: "UPDATED" }];
+  const novo = await abrirSettings({ banksMax: 1, conexoes });
+  await abrirComPre(novo, { id: 601, name: "Itaú" });
+  await novo.click("#bankpick-go");
+  await sleep(500);
+  assert.equal(await pickerAberto(novo), true, "teto cheio e banco novo: o picker segue aberto, nada de widget");
+  await novo.__ctx.close();
+  const mesmo = await abrirSettings({ banksMax: 1, conexoes }); // controle positivo: a reconexão passa
+  await abrirComPre(mesmo, { id: 612, name: "Nubank" });
+  await mesmo.click("#bankpick-go");
+  await mesmo.waitForFunction(() => !document.getElementById("bankpick-overlay").classList.contains("open"));
+  await mesmo.__ctx.close();
+});
+
+test("clique no fundo logo depois de abrir (o 2º de um duplo clique no botão) é ignorado; passados 350 ms ele fecha o picker como sempre", async () => {
+  const page = await abrirSettings();
+  const aberto = await page.evaluate(() => {
+    window.PBOpenFinance.open();
+    document.getElementById("bankpick-overlay").click(); // alvo = o próprio fundo, no mesmo instante
+    const el = document.getElementById("bankpick-overlay");
+    return getComputedStyle(el).display !== "none";
+  });
+  await sleep(450);
+  await page.evaluate(() => document.getElementById("bankpick-overlay").click());
+  const depois = await pickerAberto(page);
+  await page.__ctx.close();
+  assert.equal(aberto, true, "o clique de dentro da janela fechou o picker");
+  assert.equal(depois, false, "passada a janela, o fundo tem de fechar");
+});

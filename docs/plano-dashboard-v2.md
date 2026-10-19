@@ -43,8 +43,7 @@ Piggy com IA real e blocos. Pix, conexão do Open Finance e notificações conti
 Perfil, Cobrança, Configurações e Bancos conectados, mais o botão Sair (sem atalhos de teclado). O conteúdo
 vem em PRs, uma página por vez. O **Perfil** já é página de verdade (`conta/Perfil.tsx`: nome,
 e-mail e telefone editáveis em modal, WhatsApp e "Desde"; só ícone e valor, a palavra é para o
-leitor de tela); **Bancos conectados** também é página real, só leitura (`conta/Bancos.tsx`: total, barra por banco, estado de cada conexão); só a Cobrança segue página-ponte (nome, e-mail e um link para a tela
-antiga); as Configurações mostram a Segurança (senha por link de e-mail e MFA) e os dispositivos conectados e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
+leitor de tela); **Bancos conectados** também é página real (`conta/Bancos.tsx`: total, barra por banco, estado de cada conexão e desconectar um banco); a **Cobrança** também é página real (`conta/Cobranca.tsx`: plano, intervalo, "Período atual até", portal do Stripe, desfazer a troca agendada e o link para a `/precos`); as Configurações mostram a Segurança (senha por link de e-mail e MFA), os dispositivos conectados, as preferências de notificação e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
 `/settings` antiga fica como saída de emergência. A tela "Assinaturas"
 (Netflix etc.) é outra coisa e já existe.
 
@@ -854,6 +853,15 @@ PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
 aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
 calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.
 
+### Etapa 3 — simulador de compra v2 (API + tela web, 19/10/2026)
+
+Implementação local (2026-10-19): `POST /api/v2/simulador` (e `/api/app/simulador`) e a tela `#/simulador/compra`: 1 a 3 cenários
+de compra, números e a curva de 90 dias "sem × com a compra". Decisões do dono: compra primeiro (P1);
+curva na resposta (P3); API + web neste PR, app depois (P4). **Seguem abertos:** o corte de hábito real
+(P2: usa a média de 3 meses, que é estimativa variável; método a decidir, PR condicionado), a estimativa
+variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas e horizonte > 90.
+A tela do app está feita (folha na aba Gastos, só Pro). O bloco de hábitos em `/simulador` continua demonstrativo.
+
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 
 Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a
@@ -876,7 +884,7 @@ reserva em meta comum e apagar. Decisões do dono: o card "Metas e caixinhas" SA
 hook `useDialogo` (`parts/dialog.ts`) é o esqueleto de modal do `LancamentoForm` e do
 `MetaForm`: o clique no fundo só vale passada a `JANELA_DO_FUNDO`, então o 2º clique de um
 duplo clique no botão que abriu o diálogo não o fecha (vale também para o lançamento da
-Carteira). Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
+Carteira). O mesmo clique também só vale se o ponteiro DESCEU no fundo (`onPointerDown`): apertar dentro do painel, arrastar a seleção e soltar no fundo não fecha nem perde o digitado. Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
 fonte padrão da meta nova é a conta (`MetaFonte`). Validação e mensagem do valor em dinheiro
 são uma só para lançamento e meta (`lib/format.js`); `DIAS_MINIMOS` e `MESES_PADRAO` de
 `lib/metas-textos.ts` copiam constantes do servidor e `tests/test_metas_textos_constantes.py`

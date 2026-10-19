@@ -162,6 +162,9 @@ def init_db():
         )
         """,
         """create index if not exists idx_push_tokens_user on push_tokens(user_id)""",
+        # Sessão que registrou o token (auth_sessions.jti): push só vai a aparelho
+        # de sessão ativa. NULL = registro antigo, nunca recebe até re-registrar.
+        """alter table push_tokens add column if not exists session_jti text""",
         """
         create table if not exists pockets (
           id bigserial primary key,
@@ -612,6 +615,11 @@ def init_db():
         # atual assim que o job de saúde media o item novo como saudável.
         """
         alter table open_finance_connections add column if not exists reconnected_at timestamptz
+        """,
+        # Trava do push "reconectar": NULL = nenhum push dado neste episódio; preenchida
+        # = já avisado. Volta a NULL se a conexão fica Atualizada/Parcial ou o envio não entrega.
+        """
+        alter table open_finance_connections add column if not exists push_reconectar_em timestamptz
         """,
         """
         create index if not exists idx_of_conn_refresh_due
@@ -1403,6 +1411,10 @@ def init_db():
         """
         alter table auth_accounts add column if not exists
           whatsapp_updates_opt_out boolean not null default false
+        """,
+        """
+        alter table auth_accounts add column if not exists
+          push_bank_reconnect_opt_out boolean not null default false
         """,
         """
         alter table auth_accounts add column if not exists deletion_requested_at timestamptz

@@ -51,7 +51,7 @@ test("cada estado da tabela de cópia sai com a frase e o botão certos", async 
   assert.match(t["Conta pausada"], /R\$ 0,00 de R\$ 4\.000,00\s+a conferir/);
   assert.match(t["Conta pausada"], /A conexão com o banco está pausada\. Reconecte pra eu voltar a ler\.[\s\S]*Conectar banco/);
   // os links: Conectar banco vai para o Open Finance
-  assert.deepEqual(await cartao(page, "Moto").getByRole("link", { name: "Conectar banco" }).getAttribute("href"), "/settings?view=open-finance");
+  assert.deepEqual(await cartao(page, "Moto").getByRole("link", { name: "Conectar banco" }).getAttribute("href"), "#/conta/bancos");
   assert.deepEqual(erros, []);
   await ctx.close();
 });

@@ -51,13 +51,13 @@ async function resposta(page) {
 for (const width of [1440, 390]) {
   test(`${width}: o chip responde o total real, uma requisição, sem selo; a resposta de exemplo vizinha tem selo`, async () => {
     const { ctx, page, gets, erros } = await abrir({ width });
-    await page.locator(".chat-empty .chat-follow button", { hasText: "Quanto eu tenho investido?" }).click();
+    await page.locator(".chat-follow button", { hasText: "Quanto eu tenho investido?" }).click();
     const texto = await resposta(page);
     await page.waitForTimeout(300); // o role=status monta a mesma resposta 60 ms depois
     const real = await page.locator('.chat > li[data-dado="real"]').evaluateAll((lis) => lis.map((li) => li.textContent));
     const estoura = await ultima(page).evaluate((li) => [li.scrollWidth > li.clientWidth, li.querySelector(".msg-text").scrollWidth > li.querySelector(".msg-text").clientWidth]);
     await perguntar(page, "oi");
-    const exemplo = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by").textContent]);
+    const exemplo = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by")?.textContent.trim() ?? null]);
     const docLargo = await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
     await ctx.close();
     assert.match(texto, /Você tem R\$ 57\.123,45 investidos nos bancos conectados\./);
@@ -66,7 +66,7 @@ for (const width of [1440, 390]) {
     assert.deepEqual(gets, ["GET"]);
     assert.equal(real.length, 1);
     assert.doesNotMatch(real[0], /demonstração/);
-    assert.deepEqual(exemplo, ["exemplo", "Piggy demonstração"]);
+    assert.deepEqual(exemplo, ["exemplo", "demonstração"]);
     assert.deepEqual(estoura, [false, false]);
     assert.equal(docLargo, 0);
     assert.deepEqual(erros, []);
@@ -76,7 +76,7 @@ for (const width of [1440, 390]) {
 test("texto livre: 'aplicado' e 'INVESTIDO' vão para o real; 'investimentos' segue no exemplo, sem requisição", async () => {
   const { ctx, page, gets } = await abrir();
   await perguntar(page, "como estão meus investimentos?");
-  const exemplo = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by").textContent]);
+  const exemplo = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by")?.textContent.trim() ?? null]);
   const antes = gets.length;
   await perguntar(page, "quanto tenho aplicado?");
   const aplicado = await resposta(page);
@@ -84,7 +84,7 @@ test("texto livre: 'aplicado' e 'INVESTIDO' vão para o real; 'investimentos' se
   const caixa = await resposta(page);
   const dados = await page.locator(".chat > li.msg-piggy").evaluateAll((lis) => lis.map((li) => li.dataset.dado));
   await ctx.close();
-  assert.deepEqual(exemplo, ["exemplo", "Piggy demonstração"]);
+  assert.deepEqual(exemplo, ["exemplo", "demonstração"]);
   assert.equal(antes, 0);
   assert.match(aplicado, /^Você tem R\$ 57\.123,45/);
   assert.match(caixa, /^Você tem R\$ 57\.123,45/);
@@ -224,9 +224,9 @@ test("protótipo: o valor semeado, nenhuma requisição", async () => {
   const { ctx, page, gets } = await abrir({ demo: true });
   await perguntar(page, "quanto tenho investido?");
   const t = await resposta(page);
-  const dado = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by").textContent]);
+  const dado = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by")?.textContent.trim() ?? null]);
   await ctx.close();
   assert.match(t, /^Você tem R\$ 23\.480,00 investidos nos bancos conectados\.\s*Por tipo: Renda fixa R\$ 20\.000,00 · Ações R\$ 3\.480,00\.\s*Por banco: Nubank R\$ 23\.480,00\./);
   assert.deepEqual(gets, []);
-  assert.deepEqual(dado, ["exemplo", "Piggy"]); // protótipo: sem selo por mensagem e tudo é exemplo (como o Frame)
+  assert.deepEqual(dado, ["exemplo", null]); // protótipo: sem selo por mensagem e tudo é exemplo (como o Frame)
 });

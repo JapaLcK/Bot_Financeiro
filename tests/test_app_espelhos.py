@@ -28,6 +28,11 @@ CONNECTION_STATUS_TS = RAIZ / "app" / "src" / "ui" / "componentes" / "Connection
 APP_CONFIG_TS = RAIZ / "app" / "app.config.ts"
 VOLTA_OF_TS = RAIZ / "app" / "src" / "features" / "openFinance" / "volta.ts"
 ATUALIZAR_BANCO_TS = RAIZ / "app" / "src" / "features" / "painel" / "atualizarBanco.ts"
+# O porto da mesma máquina no /painel (#1076 PR 2): sem imports, então as constantes moram nele. O traço igual é do `app/__tests__/features/atualizar_banco_paridade.test.ts`.
+WEBAPP_ATUALIZAR_BANCO_TS = RAIZ / "webapp" / "src" / "dashboard" / "lib" / "atualizarBanco.ts"
+AVISOS_DO_TOPO_TSX = RAIZ / "webapp" / "src" / "dashboard" / "parts" / "AvisosDoTopo.tsx"
+BASE_PAINEL_TSX = RAIZ / "app" / "src" / "features" / "painel" / "base.tsx"
+CLIENT_TS = RAIZ / "app" / "src" / "api" / "client.ts"
 SERVICO_OF_TS = RAIZ / "app" / "src" / "services" / "openFinance.ts"
 OF_STATUS_POLL_JS = RAIZ / "frontend" / "of-status-poll.js"
 SETTINGS_HTML = RAIZ / "frontend" / "settings.html"
@@ -221,11 +226,12 @@ def test_detalhes_do_atualizar_do_banco_sao_os_do_servidor():
     errado aparece sem erro de build (CLAUDE.md §0.7)."""
     from core.services.pluggy_health import _AUTORIZE_NO_APP, _DETALHE_COLETA_VENCIDA
 
-    texto = ATUALIZAR_BANCO_TS.read_text()
-    for nome, servidor in (("AUTORIZE_NO_APP", _AUTORIZE_NO_APP), ("COLETA_VENCIDA", _DETALHE_COLETA_VENCIDA)):
-        m = re.search(rf'export const {nome} = "(.*?)";', texto)
-        assert m, f"`export const {nome} = \"...\";` não encontrado em {ATUALIZAR_BANCO_TS}"
-        assert m.group(1) == servidor, f"{nome} TS: {m.group(1)!r} × Python: {servidor!r}"
+    for arquivo in (ATUALIZAR_BANCO_TS, WEBAPP_ATUALIZAR_BANCO_TS):
+        texto = arquivo.read_text()
+        for nome, servidor in (("AUTORIZE_NO_APP", _AUTORIZE_NO_APP), ("COLETA_VENCIDA", _DETALHE_COLETA_VENCIDA)):
+            m = re.search(rf'export const {nome} = "(.*?)";', texto)
+            assert m, f"`export const {nome} = \"...\";` não encontrado em {arquivo}"
+            assert m.group(1) == servidor, f"{nome} em {arquivo.name}: {m.group(1)!r} × Python: {servidor!r}"
 
 
 def _achar(arquivo: pathlib.Path, padrao: str) -> str:
@@ -244,16 +250,33 @@ def test_cadencia_e_prazo_do_atualizar_do_banco_sao_os_do_web():
     numeros = lambda t: [int(x.replace("_", "")) for x in re.findall(r"[\d_]+", t)]
     nomes = lambda t: re.findall(r'"([^"]+)"', t)
 
-    assert numeros(_achar(ATUALIZAR_BANCO_TS, r"const CADENCIA_MS = \[(.*?)\];")) == numeros(
-        _achar(OF_STATUS_POLL_JS, r"const CADENCIA = \[(.*?)\];"))
-    assert numeros(_achar(ATUALIZAR_BANCO_TS, r"const DEPOIS_MS = ([\d_]+);")) == numeros(
-        _achar(OF_STATUS_POLL_JS, r"const DEPOIS = (\d+);"))
-    assert nomes(_achar(ATUALIZAR_BANCO_TS, r"const SEGUE = new Set\(\[(.*?)\]\)")) == nomes(
-        _achar(OF_STATUS_POLL_JS, r"const SEGUE_ESPERANDO = \[(.*?)\];"))
-    # `updating` só é coleta com estes motivos; `""` conta, por isso a regex aceita aspas vazias.
     com_vazio = lambda t: re.findall(r'"([^"]*)"', t)
-    assert com_vazio(_achar(ATUALIZAR_BANCO_TS, r"const MOTIVOS_COLETANDO = \[(.*?)\];")) == com_vazio(
-        _achar(SETTINGS_HTML, r"const OF_REASONS_OK = \[(.*?)\];")) + com_vazio(
-        _achar(SETTINGS_HTML, r"const OF_REASONS_COLETANDO = \[(.*?)\];"))
-    assert numeros(_achar(SERVICO_OF_TS, r"const PRAZO_REFRESH_MS = ([\d_]+);")) == numeros(
-        _achar(SETTINGS_HTML, r"const OF_REFRESH_PRAZO_MS = (\d+);"))
+    for arquivo in (ATUALIZAR_BANCO_TS, WEBAPP_ATUALIZAR_BANCO_TS):
+        assert numeros(_achar(arquivo, r"const CADENCIA_MS = \[(.*?)\];")) == numeros(
+            _achar(OF_STATUS_POLL_JS, r"const CADENCIA = \[(.*?)\];")), arquivo.name
+        assert numeros(_achar(arquivo, r"const DEPOIS_MS = ([\d_]+);")) == numeros(
+            _achar(OF_STATUS_POLL_JS, r"const DEPOIS = (\d+);")), arquivo.name
+        assert nomes(_achar(arquivo, r"const SEGUE = new Set\(\[(.*?)\]\)")) == nomes(
+            _achar(OF_STATUS_POLL_JS, r"const SEGUE_ESPERANDO = \[(.*?)\];")), arquivo.name
+        # `updating` só é coleta com estes motivos; `""` conta, por isso a regex aceita aspas vazias.
+        assert com_vazio(_achar(arquivo, r"const MOTIVOS_COLETANDO = \[(.*?)\];")) == com_vazio(
+            _achar(SETTINGS_HTML, r"const OF_REASONS_OK = \[(.*?)\];")) + com_vazio(
+            _achar(SETTINGS_HTML, r"const OF_REASONS_COLETANDO = \[(.*?)\];")), arquivo.name
+    prazo = numeros(_achar(SETTINGS_HTML, r"const OF_REFRESH_PRAZO_MS = (\d+);"))
+    assert numeros(_achar(SERVICO_OF_TS, r"const PRAZO_REFRESH_MS = ([\d_]+);")) == prazo
+    assert numeros(_achar(WEBAPP_ATUALIZAR_BANCO_TS, r"const PRAZO_POST_MS = ([\d_]+);")) == prazo
+    # O prazo de cada leitura do snapshot no /painel é o que o app já dá a toda chamada (`comLimite()`), para os dois terem a mesma paciência.
+    assert numeros(_achar(WEBAPP_ATUALIZAR_BANCO_TS, r"const PRAZO_LEITURA_MS = ([\d_]+);")) == numeros(
+        _achar(CLIENT_TS, r"const TEMPO_LIMITE_AUTH_MS = ([\d_]+);"))
+
+
+def test_textos_e_janela_do_atualizar_do_banco_iguais_no_app_e_no_painel():
+    """Os textos que a pessoa lê e o teto do acompanhamento são UMA decisão com duas cópias (o app e o porto do /painel),
+    e o gatilho do aviso (`MOTIVOS_BANCO`) também: o /painel avisa por onde o app avisa. Mudar um lado só e os dois
+    discordam em silêncio (§0.7). O traço da máquina é do teste de paridade do jest."""
+    for nome in ("ATUALIZANDO_SOZINHO", "FALHA", "AINDA"):
+        padrao = rf'export const {nome} = "(.*?)";'
+        assert _achar(WEBAPP_ATUALIZAR_BANCO_TS, padrao) == _achar(ATUALIZAR_BANCO_TS, padrao), nome
+    assert _achar(WEBAPP_ATUALIZAR_BANCO_TS, r"const JANELA_MS = ([\d_]+);") == _achar(VOLTA_OF_TS, r"const JANELA_MS = ([\d_]+);")
+    assert re.findall(r'"([^"]+)"', _achar(AVISOS_DO_TOPO_TSX, r"const MOTIVOS_BANCO[^=]*= \[(.*?)\];")) == re.findall(
+        r'"([^"]+)"', _achar(BASE_PAINEL_TSX, r"const MOTIVOS_BANCO = new Set\(\[(.*?)\]\);"))

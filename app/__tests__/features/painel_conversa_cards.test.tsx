@@ -47,6 +47,13 @@ describe("só leitura no chat; as abas do painel seguem como eram", () => {
     expect(within(screen.getByTestId("bloco-hero")).queryByRole("button", { name: "30 dias" })).toBeNull();
     await ir("/resumo"); await waitFor(() => expect(screen.getByRole("button", { name: "30 dias" })).toBeTruthy());
   });
+  it("hero no chat mostra tudo inline (âncora, marcos, curva) e tocar nele não abre folha", async () => {
+    instalarCards(true); comBlocos(bloco("hero")); await perguntar();
+    const c = within(screen.getByTestId("bloco-hero"));
+    expect(c.getByText("Hoje, com as premissas")).toBeTruthy(); expect(c.getByText(/^30 dias · /)).toBeTruthy(); expect(c.getByLabelText(/^Saldo previsto ao longo do período/)).toBeTruthy();
+    fireEvent.press(screen.getByTestId("bloco-hero")); expect(screen.queryByTestId("folha-sheet")).toBeNull(); expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull();
+    expect(c.queryByRole("button", { name: /ver detalhes/ })).toBeNull();
+  });
   it("hero no chat não leva a seção 'Receitas na previsão', mesmo com respondidas no bloco; na aba (Resumo) ela é do card", async () => {
     const respondidas = [{ chave: "extrato#alu", nome: "Aluguel Carla", valor: "1200.00", dia: 10, status: "confirmada" }];
     instalarCards(true); comBlocos(bloco("hero", { previsao: { ...F["/api/app/previsao"], receitas_do_banco: respondidas } })); await perguntar();

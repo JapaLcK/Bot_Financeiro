@@ -1,6 +1,5 @@
-import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import type { Conexao, Refresh } from "@/api/schemas/openFinance";
-import { JANELA_MS, transitoria } from "@/features/openFinance/volta";
+import { JANELA_MS } from "@/features/openFinance/volta";
 
 /**
  * O "Atualizar agora" do aviso de banco, sem JSX: a classificação do que o botão faz e a máquina do pedido, com o relógio e a rede INJETADOS (`Deps`) para o Jest.
@@ -16,14 +15,14 @@ export const FALHA = "Não conseguimos atualizar agora. Tente de novo.";
 export const AINDA = "O banco está demorando. Seus dados aparecem aqui quando terminar.";
 
 /** Mesma cadência do `of-status-poll.js` (`tests/test_app_espelhos.py` compara): 5/10/20/40 s e depois 60 s, do FIM de uma leitura ao pedido seguinte (sequencial, sem sobreposição). O TETO é diferente DE PROPÓSITO: 5 min aqui (`JANELA_MS`, o da volta do OAuth), 30 min no web. */
-const CADENCIA_MS = [5_000, 10_000, 20_000, 40_000];
-const DEPOIS_MS = 60_000;
+export const CADENCIA_MS = [5_000, 10_000, 20_000, 40_000];
+export const DEPOIS_MS = 60_000;
 /** Estados em que um item "em coleta" segue esperando; os outros (erro, ação necessária, estado novo) encerram. Mesma lista do `SEGUE_ESPERANDO` do web (o teste espelho compara). */
-const SEGUE = new Set(["updated", "updating", "partial", "no_accounts"]);
+export const SEGUE = new Set(["updated", "updating", "partial", "no_accounts"]);
 /** Estados do veredito que NÃO são problema (`rate_limited` é só do POST: "acabou de atualizar"). */
-const OK = new Set(["updated", "rate_limited", "updating"]);
+export const OK = new Set(["updated", "rate_limited", "updating"]);
 /** `updating` só é coleta (e não falha) com estes motivos: o backend devolve `updating` também para a 1ª conexão cujo sync FALHOU. Mesma lista do `OF_REASONS_COLETANDO` do settings.html (o teste espelho compara). */
-const MOTIVOS_COLETANDO = ["", "ok", "no_accounts"];
+export const MOTIVOS_COLETANDO = ["", "ok", "no_accounts"];
 
 export type AcaoBanco =
   | { tipo: "atualizar" } // (a) pedido sem o usuário: POST /refresh
@@ -51,14 +50,18 @@ export type Deps = {
   recarregar: () => void;
   /** `p.falhou`: 401 vira login; 402 e 403 do onboarding, o portão. */
   falhou: (e: unknown) => void;
+  /** Falha que não diz nada sobre o item (rede, tempo limite, 5xx, 429): só segue a cadência. Injetada para o porto do /painel ser igual linha a linha (`webapp/src/dashboard/lib/atualizarBanco.ts`). */
+  transitoria: (e: unknown) => boolean;
+  /** Erro de sessão ou de requisição superada: a rodada para em silêncio (o `falhou` já decidiu o que fazer). */
+  silencioso: (e: unknown) => boolean;
   sucesso: () => void;
   aviso: () => void;
   anunciar: (t: string) => void;
 };
 
 const nomeDe = (c: Conexao) => c.institution_name ?? "banco";
-const semPonto = (t: string) => t.replace(/\.+$/, "");
-const frase = (banco: string | null, detalhe: string) => `${banco ?? "Seu banco"}: ${semPonto(detalhe)}.`;
+/** O aviso é curto de propósito: o porquê de cada banco mora em "Bancos conectados" (o botão ao lado). */
+const erroEm = (bancos: (string | null)[]) => `Erro em ${[...new Set(bancos.map((b) => b || "seu banco"))].join(", ")}.`;
 
 /** Prioridade (b) > (a) > (a0) > (c): reautenticar vence, depois pedir, depois só esperar. `podeReconectar` = `of_banks_max !== 0` (como o `conexoes.tsx`). */
 export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoBanco {
@@ -66,7 +69,8 @@ export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoB
     const { state, detail } = c.ui;
     if (state === "needs_user_action") return detail === AUTORIZE_NO_APP || !c.provider_item_id || !podeReconectar ? "c" : "b";
     if (["updated", "partial", "error_recoverable", "no_accounts"].includes(state)) return "a";
-    if (state === "updating") return detail === COLETA_VENCIDA ? "a" : "a0";
+    // (a0) só com id: o acompanhamento (`baseDe`) é por `provider_item_id`; sem id não há o que acompanhar e a rodada concluiria na hora, recarregando em laço (#1076, A1). Sem id: nada a acompanhar e nada errado, então "c0" (fora do (c)) vale o texto padrão, sem "Erro em".
+    if (state === "updating") return detail === COLETA_VENCIDA ? "a" : c.provider_item_id ? "a0" : "c0";
     return "c"; // item_missing, paused, removed e estado que este arquivo não conhece
   };
   const grupos = conexoes.map((c) => [cat(c), c] as const);
@@ -74,24 +78,24 @@ export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoB
   if (b) return { tipo: "reconectar", itemId: b.provider_item_id!, banco: nomeDe(b) };
   if (grupos.some(([g]) => g === "a")) return { tipo: "atualizar" };
   if (grupos.some(([g]) => g === "a0")) return { tipo: "acompanhar" };
-  const frases = grupos.filter(([g]) => g === "c").map(([, c]) => frase(c.institution_name, c.ui.detail ?? c.ui.label));
-  return { tipo: "ver", texto: frases.length ? frases.join(" ") : null };
+  const sem = grupos.filter(([g]) => g === "c").map(([, c]) => c.institution_name);
+  return { tipo: "ver", texto: sem.length ? erroEm(sem) : null };
 }
 
 /** `motivo` só vem do POST; a lista do snapshot já traz o `ui.state` resolvido pelo servidor (sem motivo = coleta). */
-type Item = { banco: string | null; estado: string; detalhe: string; motivo?: string | null };
+type Item = { banco: string | null; estado: string; motivo?: string | null };
 const ruim = (i: Item) => !OK.has(i.estado) || (i.estado === "updating" && !MOTIVOS_COLETANDO.includes(String(i.motivo ?? "").toLowerCase()));
-/** `null` = tudo em dia; senão, uma frase por banco com a instrução do servidor. */
+/** `null` = tudo em dia; senão, uma frase curta com os bancos que falharam. */
 function julgar(itens: Item[]): string | null {
   const ruins = itens.filter(ruim);
-  return ruins.length ? ruins.map((i) => frase(i.banco, i.detalhe)).join(" ") : null;
+  return ruins.length ? erroEm(ruins.map((i) => i.banco)) : null;
 }
 
 const parar = (d: Deps) => d.aoMudar(OCIOSO);
 
 function falhar(d: Deps, e: unknown, comoResultado: boolean) {
   d.falhou(e);
-  if (!d.atual() || e instanceof SessaoExpirada || e instanceof RequisicaoSuperada) return parar(d);
+  if (!d.atual() || d.silencioso(e)) return parar(d);
   d.aoMudar(comoResultado ? { fase: "resultado", texto: FALHA } : { fase: "ocioso", falha: true });
   d.aviso(); d.anunciar(FALHA);
 }
@@ -106,7 +110,7 @@ function concluir(d: Deps, texto: string | null) {
   d.recarregar();
   if (texto === null) { parar(d); d.sucesso(); } else { d.aoMudar({ fase: "resultado", texto }); d.aviso(); d.anunciar(texto); }
 }
-const daLista = (lista: Conexao[]) => julgar(lista.map((c) => ({ banco: c.institution_name, estado: c.ui.state, detalhe: c.ui.detail ?? c.ui.label })));
+const daLista = (lista: Conexao[]) => julgar(lista.map((c) => ({ banco: c.institution_name, estado: c.ui.state })));
 
 /** Para quando todo item acompanhado sumiu, mudou o `last_sync_at` (o sync do fim da coleta) ou saiu dos estados de espera. */
 const terminou = (lista: Conexao[], base: Map<string, string | null>) =>
@@ -126,7 +130,7 @@ export async function acompanhar(d: Deps, base: Map<string, string | null>): Pro
     let lista: Conexao[] | null = null;
     try { lista = await d.ler(); confirmou = true; } catch (e) {
       if (!d.atual()) return parar(d);
-      if (!transitoria(e)) return falhar(d, e, true); // rede, 5xx e 429 só seguem a cadência
+      if (!d.transitoria(e)) return falhar(d, e, true); // rede, 5xx e 429 só seguem a cadência
     }
     if (!d.atual()) return parar(d);
     if (lista && terminou(lista, base)) return concluir(d, daLista(lista));
@@ -139,7 +143,7 @@ export async function acompanhar(d: Deps, base: Map<string, string | null>): Pro
 
 const baseDe = (conexoes: Conexao[]) => new Map(conexoes.flatMap((c) => c.provider_item_id ? [[c.provider_item_id, c.last_sync_at] as const] : []));
 
-/** (a0) e o estouro de 60 s do POST: acompanha quem está em `updating` na lista lida. Sem ninguém coletando, a lista já é o veredito. */
+/** (a0) e o estouro de 60 s do POST: acompanha quem está em `updating` na lista lida. Sem ninguém coletando, a lista já é o veredito (só o estouro do POST chega aqui assim: `classificar` só dá (a0) com um `updating` COM id, então a (a0) nunca cai neste `concluir` nem recarrega em laço). */
 export async function acompanharLista(d: Deps, lista: Conexao[]): Promise<void> {
   const base = baseDe(lista.filter((c) => c.ui.state === "updating"));
   if (base.size) return acompanhar(d, base);
@@ -156,11 +160,14 @@ export async function atualizar(d: Deps): Promise<void> {
       return acompanharLista(d, await d.ler()); // o prazo de 60 s cortou o POST, mas o servidor pode ter terminado
     }
     if (!d.atual()) return parar(d);
-    const coletando = r.sync.items.filter((i) => i.still_updating);
+    // Coletando = o servidor disse `still_updating` OU o item está em `updating` com motivo de coleta (como o `refreshVerdict` do web): `still_updating: false` num `updating` neutro não é "em dia" (#1100, D1).
+    const coletando = r.sync.items.filter((i) => i.still_updating || (i.state === "updating" && MOTIVOS_COLETANDO.includes(String(i.reason ?? "").toLowerCase())));
     // Erro antes do neutro (como o `refreshVerdict` do web), em TODOS os itens: a falha de um banco só existe nesta resposta (o `partial` do PATCH não vai para o snapshot), então um banco ainda coletando não pode escondê-la;
     // e o `still_updating` do servidor é independente do `state` (pluggy_sync.py), então o item que ainda coleta também é julgado pelo estado dele.
-    const texto = julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason, detalhe: i.detail ?? (i.state === "updating" ? FALHA : i.label) })));
+    const texto = julgar(r.sync.items.map((i) => ({ banco: i.institution, estado: i.state, motivo: i.reason })));
     if (texto === null && coletando.length) return acompanhar(d, new Map(coletando.map((i) => [i.item_id, r.connections.find((c) => c.provider_item_id === i.item_id)?.last_sync_at ?? null])));
+    // Sem item nenhum e `ok: false`, o servidor não conseguiu atualizar: é falha (o botão volta), não "em dia" (#1100, D2; o web faz o mesmo no `refreshVerdict`).
+    if (texto === null && !r.sync.items.length && r.sync.ok === false) { d.aoMudar({ fase: "ocioso", falha: true }); d.aviso(); d.anunciar(FALHA); return; }
     concluir(d, texto);
   } catch (e) {
     if (!d.atual()) return parar(d);

@@ -62,11 +62,12 @@ const topo = (page) => page.evaluate(() => {
     data: q(".dia-data")?.textContent, rotulo: q(".dia-rotulo")?.textContent ?? null, total: q(".dia-total")?.textContent ?? null,
     pilula: pil ? pil.textContent.replace(/\s+/g, " ").trim() : null, tom: pil?.dataset.tom ?? null,
     media: q(".dia-media .faint")?.textContent ?? null,
-    fatos: [...document.querySelectorAll("#gastos-compras .dia-facts > div")].map((d) => `${d.querySelector("dt").textContent} ${d.querySelector("dd").textContent}`),
+    fatos: [...document.querySelectorAll("#gastos-compras .dia-facts > div")].map((d) => `${d.querySelector("dt").textContent} ${d.querySelector("dd").textContent}`.replace(/\s+/g, " ").trim()),
     fatias: document.querySelectorAll("#gastos-compras .comp-bar span").length,
     legenda: [...document.querySelectorAll("#gastos-compras .dia-legend li")].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
     vazio: [...document.querySelectorAll("#gastos-compras .faint")].some((p) => p.textContent === "Nenhum gasto neste dia."),
     faixa: !!q(".dia-faixa"),
+    icones: { fato: [...document.querySelectorAll("#gastos-compras .dia-facts i")].map((i) => i.className), legenda: [...document.querySelectorAll("#gastos-compras .dia-legend li i")].map((i) => i.className) },
   };
 });
 
@@ -155,9 +156,11 @@ test("fatos: Compras, Maior compra e Mais em (emoji e nome do catálogo; chave f
   await abrirDia(page, 8);
   const b = await topo(page);
   await ctx.close();
-  assert.deepEqual(a.fatos, ["Compras 3", "Maior compra R$ 60,00", "Mais em 🍽️ alimentação"]);
-  assert.deepEqual(b.fatos, ["Compras 4", "Maior compra R$ 100,00", "Mais em 🍽️ alimentação"]);
-  assert.deepEqual(b.legenda, ["🍽️ alimentação · R$ 100,00", "🏷️ transporte · R$ 80,00"]);
+  assert.deepEqual(a.fatos, ["Compras 3", "Maior compra R$ 60,00", "Mais em alimentação"]);
+  assert.deepEqual(b.fatos, ["Compras 4", "Maior compra R$ 100,00", "Mais em alimentação"]);
+  assert.deepEqual(b.legenda, ["alimentação · R$ 100,00", "transporte · R$ 80,00"]);
+  // o ícone vem do `icone` do servidor (nunca o emoji): o do catálogo na legenda e no fato; chave fora do catálogo = `tag`
+  assert.deepEqual(b.icones, { fato: ["ph ph-fork-knife"], legenda: ["ph ph-fork-knife", "ph ph-tag"] });
 });
 
 test("barra: só fatias > 0 (a de zero e a negativa saem), com ≥ 2 fatias; legenda com valor e sem percentual; uma fatia não desenha barra", async () => {
@@ -170,10 +173,10 @@ test("barra: só fatias > 0 (a de zero e a negativa saem), com ≥ 2 fatias; leg
   await abrirDia(page, 3);
   const so = await topo(page);
   await ctx.close();
-  assert.deepEqual([duas.fatias, duas.legenda], [2, ["🍽️ alimentação · R$ 60,00", "🏷️ sem categoria · R$ 40,00"]]);
+  assert.deepEqual([duas.fatias, duas.legenda], [2, ["alimentação · R$ 60,00", "sem categoria · R$ 40,00"]]);
   assert.deepEqual(flex, [["60", "rgb(249, 115, 22)"], ["40", "rgb(148, 163, 184)"]]); // a largura é o próprio valor; a cor, a do catálogo
   assert.deepEqual([uma.fatias, uma.legenda, so.fatias, so.legenda], [0, [], 0, []]);
-  assert.deepEqual(uma.fatos.slice(-1), ["Mais em 🍽️ alimentação"]); // a de zero nunca é "Mais em"
+  assert.deepEqual(uma.fatos.slice(-1), ["Mais em alimentação"]); // a de zero nunca é "Mais em"
 });
 
 test("categoria escolhida: o card segue a categoria (tag 'Só …'), sem barra nem 'Mais em'; a pílula fica (compara com a média da categoria, a do calendário)", async () => {
@@ -265,12 +268,12 @@ test("modo categoria compacto: título com emoji, uma linha 'R$ … · N compras
   await page.locator("#w-compras-h", { hasText: "· outubro" }).waitFor();
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
   const r = await page.evaluate(() => ({
-    titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent,
+    titulo: document.querySelector("#w-compras-h").textContent.trim(), icone: document.querySelector("#w-compras-h i")?.className, lede: document.querySelector("#gastos-compras .w-lede").textContent,
     ausentes: [".dia-nav", ".dia-seta", ".dia-faixa", ".dia-pilula", ".dia-facts", ".comp-bar", ".dia-lista-t"].filter((s) => document.querySelector(`#gastos-compras ${s}`)),
     pe: [...document.querySelectorAll("#gastos-compras .compras-pe .link")].map((b) => b.textContent),
   }));
   await ctx.close();
-  assert.deepEqual(r, { titulo: "🍽️ Alimentação · outubro", lede: "R$ 300,00 · 2 compras", ausentes: [], pe: ["Ver em Lançamentos", "Fechar"] });
+  assert.deepEqual(r, { titulo: "Alimentação · outubro", icone: "ph ph-fork-knife", lede: "R$ 300,00 · 2 compras", ausentes: [], pe: ["Ver em Lançamentos", "Fechar"] });
 });
 
 test("modo categoria: uma compra é 'compra' (singular)", async () => {
@@ -328,8 +331,11 @@ for (const width of [1440, 390]) {
 const medeSeta = (page) => page.evaluate(() => ({ sy: Math.round(scrollY), top: Math.round(document.querySelector("#gastos-compras .dia-seta").getBoundingClientRect().top), card: Math.round(document.querySelector("#gastos-compras").getBoundingClientRect().height) }));
 
 for (const [width, height] of [[390, 844], [1440, 900]]) {
-  test(`${width}x${height}: apertar a seta de dia não rola a página (card com 4 linhas, mais alto que a janela) e o botão fica onde estava`, async () => {
+  test(`${width}x${height}: apertar a seta de dia não rola a página (card com muitas linhas, mais alto que a janela) e o botão fica onde estava`, async () => {
     const { ctx, page } = await abrir({ width, height });
+    // a linha limpa (sem contexto) é mais baixa: dobra as linhas da fixture para o card seguir mais alto que a janela
+    const pagina = RESPOSTAS.lancamentos.estados;
+    await ctx.route((u) => u.pathname === "/api/v2/lancamentos", (r) => r.fulfill({ json: { ...pagina, itens: [...pagina.itens, ...pagina.itens.map((i) => ({ ...i, id: `${i.id}-b` }))], proximo: null } }));
     await abrirDia(page, 5);
     await page.locator("#gastos-compras .lanc-linha").first().waitFor();
     await page.waitForTimeout(500);
@@ -372,7 +378,7 @@ test("região: o nome acessível é o título + a data no modo dia; no modo cate
   const dia4 = await page.getByRole("region", { name: "Seu dia dom, 4 de outubro", exact: true }).count();
   await page.getByRole("button", { name: "Ver compras" }).click();
   await page.locator("#w-compras-h", { hasText: "· outubro" }).waitFor();
-  const categoria = await page.getByRole("region", { name: "🍽️ Alimentação · outubro", exact: true }).count();
+  const categoria = await page.getByRole("region", { name: "Alimentação · outubro", exact: true }).count();
   await ctx.close();
   assert.deepEqual([dia5, dia4, categoria], [1, 1, 1]);
 });
@@ -418,7 +424,7 @@ test("'Maior compra' é a primeira de `maiores` (o servidor manda a maior primei
   await abrirDia(page, 2);
   const t = await topo(page);
   await ctx.close();
-  assert.deepEqual(t.fatos, ["Compras 3", "Maior compra R$ 70,00", "Mais em 🍽️ alimentação"]);
+  assert.deepEqual(t.fatos, ["Compras 3", "Maior compra R$ 70,00", "Mais em alimentação"]);
 });
 
 test("com `historico_desde` no meio do mês, a média do card é a do calendário e a pílula parte dela (não da média do mês inteiro)", async () => {

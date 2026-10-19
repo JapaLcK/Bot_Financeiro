@@ -52,8 +52,12 @@ export type NomeIcone =
   | "CreditCard"
   | "Bank"
   | "ClockCounterClockwise"
+  | "TrendUp"
+  | "ShieldCheck"
   | "Phone"
-  | "WhatsappLogo";
+  | "WhatsappLogo"
+  | "MagnifyingGlass"
+  | "ArrowDownLeft";
 
 /** Forma mínima que todo ícone do Phosphor e o stub de teste têm em comum. */
 type ComponenteIcone = ComponentType<{ size?: number; color?: string; weight?: string }>;
@@ -109,8 +113,12 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   CreditCard: resolver(require("phosphor-react-native/src/icons/CreditCard"), "CreditCardIcon"),
   Bank: resolver(require("phosphor-react-native/src/icons/Bank"), "BankIcon"),
   ClockCounterClockwise: resolver(require("phosphor-react-native/src/icons/ClockCounterClockwise"), "ClockCounterClockwiseIcon"),
+  TrendUp: resolver(require("phosphor-react-native/src/icons/TrendUp"), "TrendUpIcon"),
+  ShieldCheck: resolver(require("phosphor-react-native/src/icons/ShieldCheck"), "ShieldCheckIcon"),
   Phone: resolver(require("phosphor-react-native/src/icons/Phone"), "PhoneIcon"),
   WhatsappLogo: resolver(require("phosphor-react-native/src/icons/WhatsappLogo"), "WhatsappLogoIcon"),
+  MagnifyingGlass: resolver(require("phosphor-react-native/src/icons/MagnifyingGlass"), "MagnifyingGlassIcon"),
+  ArrowDownLeft: resolver(require("phosphor-react-native/src/icons/ArrowDownLeft"), "ArrowDownLeftIcon"),
 
   CaretLeft: resolver(require("phosphor-react-native/src/icons/CaretLeft"), "CaretLeftIcon"),
   CaretRight: resolver(require("phosphor-react-native/src/icons/CaretRight"), "CaretRightIcon"),
@@ -132,7 +140,8 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
 
 interface Props {
   nome: NomeIcone;
-  tamanho?: 20 | 24;
+  /** 16: ícone de linha de dado (contagem, relógio), colado ao texto de 12–13pt. */
+  tamanho?: 16 | 20 | 24;
   /** Nunca ícone em quadrado colorido (identidade pigbank-frontend): a cor é sempre um tom neutro do texto, nunca `brand`/`acao` soltos. */
   tom?: keyof Paleta;
   /** Cor de série de dado (pílula de meta); vence o `tom`. Só para cor de dado (série da pílula de meta, o verde da batida), nunca para chrome. */

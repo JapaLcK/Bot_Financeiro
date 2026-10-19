@@ -13,8 +13,13 @@ import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
 import { espaco } from "@/ui/tokens";
 
+/** O `conector` do link é dado de fora: só 1 a 9 dígitos, sem zero à esquerda e maior que zero, vira número (o id do conector da Pluggy); o resto é "sem banco escolhido". */
+const conectorDoLink = (v: unknown): number | undefined => (typeof v === "string" && /^[1-9]\d{0,8}$/.test(v) ? Number(v) : undefined);
+
 export default function Autorizando() {
-  const itemId = itemDoLink(useLocalSearchParams().itemId) ?? undefined;
+  const params = useLocalSearchParams();
+  const itemId = itemDoLink(params.itemId) ?? undefined;
+  const conector = conectorDoLink(params.conector);
   const sessao = useSessao();
   const [token, setToken] = useState<Awaited<ReturnType<typeof iniciarConexaoBancaria>> | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -95,7 +100,7 @@ export default function Autorizando() {
       <Button rotulo="Iniciar nova tentativa" variante="secondary" onPress={() => escolher(true)} />
       <Button rotulo="Cancelar" variante="ghost" onPress={() => escolher(false)} />
     </> : token ? <View style={{ flex: 1 }}><PluggyConnect connectToken={token.accessToken} includeSandbox={token.includeSandbox} products={token.products}
-      language="pt" connectorTypes={["PERSONAL_BANK"]} updateItem={itemId} forceOauthInBrowser
+      language="pt" connectorTypes={["PERSONAL_BANK"]} updateItem={itemId} selectedConnectorId={itemId ? undefined : conector} forceOauthInBrowser
       onSuccess={(d) => { void fechar(d.item?.id); }} onError={(d) => { void fechar(d?.data?.item?.id); }} onClose={() => { void fechar(); }} />
     </View> : !erro && <Texto tom="inkMuted">Preparando uma conexão segura…</Texto>}
     {!pendente && <Button rotulo={erro ? "Voltar e tentar de novo" : "Fechar e conferir conexão"} variante="secondary" onPress={() => { if (erro && !token) router.back(); else void fechar(); }} />}

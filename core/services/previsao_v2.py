@@ -34,6 +34,11 @@ def _ocorrencia(uid: int, e: Ocorrencia) -> dict:
                                  for m in e.motivos])}
 
 
+def apresentar_base(base: dict) -> dict:
+    return {"saldo": base["saldo"], "origem": base["balance_source"], "contas_bancarias": base["of_bank_count"],
+            "bancos_excluidos": base["banks_excluded"], "motivos": base["motivos"]}
+
+
 def apresentar(snapshot: Snapshot, uid: int, dias: int,
                permitidos: tuple[int, ...], detalhes: bool) -> dict:
     hoje = snapshot.hoje
@@ -44,9 +49,7 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
     dados = {**qualidade, "motivos": _motivos(qualidade["motivos"]),
              "hoje": hoje.isoformat(), "dias": dias, "dias_permitidos": list(permitidos),
              "capacidades": ["marcos"],
-             "base": {"saldo": base["saldo"], "origem": base["balance_source"],
-                      "contas_bancarias": base["of_bank_count"],
-                      "bancos_excluidos": base["banks_excluded"], "motivos": base["motivos"]},
+             "base": apresentar_base(base),
              "marcos": [{"dias": n, "data": marcos[str(n)]["target"],
                          "saldo": marcos[str(n)]["projetado"]} for n in horizontes],
              "periodo": None, "ancora": None, "trajetoria": None,
@@ -92,11 +95,15 @@ def apresentar(snapshot: Snapshot, uid: int, dias: int,
     return dados
 
 
-def ler_previsao(uid: int, dias: int, permitidos: tuple[int, ...], detalhes: bool) -> dict:
+def ler_snapshot(uid: int, dias: int) -> Snapshot:
     agora = now_tz()
     hoje = agora.date()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("set transaction isolation level repeatable read, read only")
         snapshot = cashflow_snapshot.ler(cur, uid, hoje, hoje + timedelta(days=dias), agora, True)
         conn.rollback()
-    return apresentar(snapshot, uid, dias, permitidos, detalhes)
+    return snapshot
+
+
+def ler_previsao(uid: int, dias: int, permitidos: tuple[int, ...], detalhes: bool) -> dict:
+    return apresentar(ler_snapshot(uid, dias), uid, dias, permitidos, detalhes)

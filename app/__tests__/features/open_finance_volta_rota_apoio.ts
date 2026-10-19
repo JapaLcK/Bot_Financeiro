@@ -1,6 +1,6 @@
 /** Apoio dos dois arquivos da rota `open-finance-volta` (`renderRouter("./app")`). */
 import * as LA from "expo-local-authentication";
-import { act, screen } from "expo-router/testing-library";
+import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
 import { INTERVALO_MS } from "@/features/openFinance/volta";
 
@@ -29,6 +29,15 @@ export function titulo(espera: boolean, opcoes?: { includeHiddenElements: boolea
 export const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
+
+/** A lista de `/conexoes` só tem a linha do banco; `Reconectar`/`Desconectar` moram no detalhe (uma `Folha`). Espera a lista, aperta a linha `^nome,` (a `indice`-ésima, se houver gêmeos) e espera a folha. */
+export async function abrirBanco(nome = "Nubank", indice = 0) {
+  const linha = () => screen.getAllByRole("button", { name: new RegExp(`^${nome},`) })[indice]!;
+  await waitFor(() => expect(linha()).toBeTruthy());
+  fireEvent.press(linha());
+  await waitFor(() => expect(screen.getByTestId("folha-sheet")).toBeTruthy());
+  await act(async () => { await drenar(); });
+}
 
 export const deOpenFinance = () => chamadas().filter((c) => c.caminho.startsWith("/open-finance"));
 export const contarGets = () => deOpenFinance().filter((c) => c.caminho === "/open-finance/1").length;

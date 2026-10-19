@@ -27,6 +27,9 @@ from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.metas import Metas
+from api.v2.orcamento_domestico import OrcamentoDomestico
+from api.v2.orcamentos_categoria import OrcamentosCategoria
+from api.v2.progresso_milhao import ProgressoMilhao
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
@@ -37,6 +40,15 @@ from scripts.gerar_tipos_api_v2 import CABECALHO, SAIDA, gerar
 from test_api_v2_erros import Login, _corpo_do_422, rota_temporaria  # noqa: F401 (fixture)
 
 FIXTURES = json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"))
+
+
+def test_fixtures_nao_tem_chave_repetida():
+    """`json.loads` guarda só a ÚLTIMA chave repetida: duas `"bancos"` no arquivo escondiam metade das fixtures (e dos testes)."""
+    def sem_repeticao(pares):
+        assert len({k for k, _ in pares}) == len(pares), [k for k, _ in pares]
+        return dict(pares)
+
+    json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"), object_pairs_hook=sem_repeticao)
 
 
 def test_tipos_gerados_em_dia():
@@ -335,6 +347,19 @@ def test_fixture_de_metas_segue_o_modelo(nome):
         assert m["prazo_passou"] <= bool(m["data_alvo"]) and not (m["prazo_passou"] and m["por_mes"])
 
 
+@pytest.mark.parametrize("nome", sorted(FIXTURES["orcamento_domestico"]))
+def test_fixture_do_orcamento_domestico_segue_o_modelo(nome):
+    f = FIXTURES["orcamento_domestico"][nome]
+    assert OrcamentoDomestico.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
+    assert [p["chave"] for p in f["potes"]] == ["custos_fixos", "conforto", "metas", "prazeres", "liberdade_financeira", "conhecimento"]
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["progresso_milhao"]))
+def test_fixture_do_progresso_milhao_segue_o_modelo(nome):
+    f = FIXTURES["progresso_milhao"][nome]
+    assert ProgressoMilhao.model_validate(f).model_dump(mode="json") == f  # patrimônio é texto de 2 casas
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))
 def test_fixture_do_resumo_do_mes_segue_o_modelo(nome):
     f = FIXTURES["resumo_do_mes"][nome]
@@ -458,3 +483,30 @@ def test_fixture_de_previsao_segue_modelo_e_precisao(nome):
     else:
         assert p.capacidades == ["marcos"]
         assert p.periodo is p.ancora is p.pior_dia is p.compromissos is None
+
+
+def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
+    import re
+    from datetime import date, timedelta
+    from api.v2.simulador import CODIGO_GENERICO, CODIGOS_ERRO, PREMISSAS_V2, Simulador
+    f = FIXTURES["simulador"]["compra"]
+    s = Simulador.model_validate(f)
+    assert s.model_dump(mode="json") == f
+    # a regra de tamanho da API: hoje..hoje+dias, uma data por dia, em `atual` e em cada cenário
+    esperado = [(date.fromisoformat(f["hoje"]) + timedelta(days=i)).isoformat() for i in range(f["dias"] + 1)]
+    for t in (s.atual.trajetoria, *(c.resumo.trajetoria for c in s.cenarios)):
+        assert [p.data for p in t] == esperado
+    assert f["premissas"][-len(PREMISSAS_V2):] == PREMISSAS_V2 and len(f["premissas"]) == 4 + len(PREMISSAS_V2)  # as 4 da Previsão + as da pessoa
+    assert not [t for t in f["premissas"] if re.search(r"\b[a-z]+_[a-z_]+\b", t)]
+    # os códigos de 422 que a tela cobre (`dashboard_v2_simulador_compra.test.mjs`) são os do servidor
+    assert FIXTURES["simulador"]["codigos_422"] == sorted({c for c, _ in CODIGOS_ERRO.values()} | {CODIGO_GENERICO})
+    assert s.cabe_nas_premissas is s.cobertura.inclui_estimativa_variavel is False and s.orientacao == "abster"
+    ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/api-v2.gen.ts").read_text(encoding="utf-8")
+    bloco = "\n".join(l for l in ts.splitlines() if l.startswith(("export type Simulador", "export type ResumoCenario", "export type ContratoSimulador", "export type PontoSimulador")))
+    assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["orcamentos_categoria"]))
+def test_fixture_dos_orcamentos_por_categoria_segue_o_modelo(nome):
+    f = FIXTURES["orcamentos_categoria"][nome]
+    assert OrcamentosCategoria.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
