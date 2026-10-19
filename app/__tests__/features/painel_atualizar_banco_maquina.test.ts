@@ -52,9 +52,11 @@ describe("classificar: o ui.state do servidor vira uma ação (b > a > a0 > c)",
     ["a vence a0 e c", [con("a", "updating"), con("b", "paused"), con("c", "partial")], "atualizar"],
     ["a0 vence c", [con("a", "paused"), con("b", "updating")], "acompanhar"],
   ] as const)("%s", (_, lista, tipo) => { expect(classificar([...lista], true).tipo).toBe(tipo); });
-  it("updating SEM provider_item_id não tem o que acompanhar: (c), e NUNCA (a0) (o acompanhamento é por id; sem id a rodada concluía na hora e recarregava em laço)", () => {
-    expect(classificar([con("x", "updating", null, { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: "Nubank: updating." });
+  it("updating SEM provider_item_id não tem o que acompanhar: NUNCA (a0), e não é erro (texto padrão, sem 'Erro em') (o acompanhamento é por id; sem id a rodada concluía na hora e recarregava em laço)", () => {
+    expect(classificar([con("x", "updating", null, { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: null });
     expect(classificar([con("x", "updating", null, { provider_item_id: "" })], true).tipo).toBe("ver");
+    // lista mista: só o (c) de verdade nomeia banco (o updating sem id não entra na frase)
+    expect(classificar([con("x", "updating", null, { provider_item_id: null }), con("y", "paused", "x", { institution_name: "Itaú" })], true)).toEqual({ tipo: "ver", texto: "Erro em Itaú." });
     // com outro updating COM id, o (a0) vale pelo que tem id
     expect(classificar([con("x", "updating", null, { provider_item_id: null }), con("y", "updating")], true).tipo).toBe("acompanhar");
     // a coleta vencida pede o POST, que não depende de id
@@ -121,7 +123,7 @@ describe("atualizar (a): o POST", () => {
   });
   it("D1b (a lição 3 não regride): updating com motivo de falha e still_updating:false segue sendo resultado, sem leitura", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, "read_failed")]) });
-    await atualizar(d); expect(ultimo()!.fase).toBe("resultado"); expect(w.leituras).toEqual([]); expect(w.sucessos).toBe(0);
+    await atualizar(d); expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.leituras).toEqual([]); expect(w.sucessos).toBe(0);
   });
   it("D2: items:[] com ok:false é falha (o botão volta, aviso() e a fala), não 'em dia' (o web: refreshVerdict)", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([], [], false) });

@@ -69,8 +69,8 @@ export function classificar(conexoes: Conexao[], podeReconectar: boolean): AcaoB
     const { state, detail } = c.ui;
     if (state === "needs_user_action") return detail === AUTORIZE_NO_APP || !c.provider_item_id || !podeReconectar ? "c" : "b";
     if (["updated", "partial", "error_recoverable", "no_accounts"].includes(state)) return "a";
-    // (a0) só com id: o acompanhamento (`baseDe`) é por `provider_item_id`; sem id não há o que acompanhar e a rodada concluiria na hora, recarregando em laço (#1076, A1).
-    if (state === "updating") return detail === COLETA_VENCIDA ? "a" : c.provider_item_id ? "a0" : "c";
+    // (a0) só com id: o acompanhamento (`baseDe`) é por `provider_item_id`; sem id não há o que acompanhar e a rodada concluiria na hora, recarregando em laço (#1076, A1). Sem id: nada a acompanhar e nada errado, então "c0" (fora do (c)) vale o texto padrão, sem "Erro em".
+    if (state === "updating") return detail === COLETA_VENCIDA ? "a" : c.provider_item_id ? "a0" : "c0";
     return "c"; // item_missing, paused, removed e estado que este arquivo não conhece
   };
   const grupos = conexoes.map((c) => [cat(c), c] as const);

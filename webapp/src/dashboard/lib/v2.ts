@@ -53,7 +53,8 @@ export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
     throw new ErroApi(0, "network");
   }
   let body: unknown;
-  try { body = await r.json(); } catch { body = undefined; }
+  // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
+  try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
   if (r.ok && body !== undefined) return body as T;
   const erro = (body as Partial<ErroV2> | undefined)?.error;
   if (!r.ok && erro && typeof erro.code === "string") {

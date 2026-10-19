@@ -21,7 +21,7 @@ const NECESSARIA = (detalhe) => con(11, "Nubank", "needs_user_action", "Ação n
 const erro = (status) => (r) => r.fulfill({ status, json: { error: { code: "x", message: "x" } } });
 const BOTAO = "#avisos-topo .pilha-corpo button";
 
-test("A1: 'updating' SEM provider_item_id não é (a0): nada recarrega em laço (relógio correndo, 3 s) e o corpo é (c); COM id é (a0) e acompanha (controle)", async () => {
+test("A1: 'updating' SEM provider_item_id não é (a0): nada recarrega em laço (relógio correndo, 3 s) e o corpo é o texto padrão (c0); COM id é (a0) e acompanha (controle)", async () => {
   const medir = async (id) => {
     const { ctx, page, abrir } = await abre({ conexoes: [{ ...UPDATING(), provider_item_id: id }] });
     await abrir(false);
@@ -36,6 +36,8 @@ test("A1: 'updating' SEM provider_item_id não é (a0): nada recarrega em laço 
   const sem = await medir(null);
   assert.ok(sem.pedidos.length <= 2, `laço: ${sem.pedidos.length} pedidos em 3 s: ${sem.pedidos.slice(0, 6)}`);
   assert.match(sem.corpo, /Ver bancos conectados/);
+  assert.match(sem.corpo, /precisam ser atualizados/, "sem id: o texto padrão do aviso");
+  assert.doesNotMatch(sem.corpo, /Erro em/, "sem id não há nada errado: não é (c)");
   assert.ok(!sem.corpo.includes(ATUALIZANDO), sem.corpo);
   const vazio = await medir("");
   assert.ok(vazio.pedidos.length <= 2, `id vazio: ${vazio.pedidos.length} pedidos em 3 s`);
@@ -88,9 +90,9 @@ test("A3: o anúncio da conta 7 não sobrevive à troca para a conta 8: nada do 
   s.refresh = (r) => r.fulfill({ json: refreshDe([item("item-11", "partial", false, "Segredo do banco da Ana", "ok", "BancoDaAna")], []) });
   await abrir();
   await botao.click();
-  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Segredo do banco da Ana"));
+  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Erro em BancoDaAna."));
   await assentar(page);
-  assert.ok((await falado(page)).includes("Segredo do banco da Ana"), "controle: o anúncio da conta 7 existe antes da troca");
+  assert.ok((await falado(page)).includes("Erro em BancoDaAna."), "controle: o anúncio da conta 7 existe antes da troca");
   uid = 8;
   await focar(page);
   await ate(page, () => document.querySelector("#avisos-topo .pilha-corpo button")?.textContent === "Atualizar agora");
@@ -98,11 +100,11 @@ test("A3: o anúncio da conta 7 não sobrevive à troca para a conta 8: nada do 
   const regiao = await page.locator(REGIAO).innerText();
   const html = await page.locator("#avisos-topo").innerHTML();
   await ctx.close();
-  assert.ok(!html.includes("Segredo do banco da Ana") && !html.includes("BancoDaAna"), `vazou: ${regiao}`);
+  assert.ok(!html.includes("BancoDaAna"), `vazou: ${regiao}`);
   assert.equal(regiao, "");
 });
 
-test("A5: com o /limite ainda pendurado, o aviso (b) mostra o corpo de LEITURA (texto padrão + 'Ver bancos'), nunca a frase (c) 'Nubank: Reautorize…'; solto, vira 'Reconectar Nubank'", async () => {
+test("A5: com o /limite ainda pendurado, o aviso (b) mostra o corpo de LEITURA (texto padrão + 'Ver bancos'), nunca a frase (c) 'Erro em Nubank.'; solto, vira 'Reconectar Nubank'", async () => {
   const portao = porta();
   const { ctx, page, ir } = await abre({ conexoes: [NECESSARIA("Reautorize o banco")], limiteRes: async (r) => { await portao.p; await r.fulfill({ json: LIMITE() }); } });
   await ir("/"); // sem `abrir`: ele espera a página assentar, e o /limite fica preso de propósito
@@ -216,7 +218,10 @@ test("M32 (borda): item do POST sem item_id não é casado a NENHUMA conexão (n
 
 // ---- 2a passada do Tester: o prazo que vence DEPOIS dos headers (corpo travado) e a leitura cortada (A2c) ----
 const FIM = "2026-10-02T14:59:00Z";
-/** Responde 200 com os headers e um corpo que nunca fecha, enquanto `window.__trava` for verdadeiro; o abort do pedido erra o stream (como o fetch real no meio do `.json()`). */
+/**
+ * Responde (200, ou `rota.status`) com os headers e um corpo que nunca fecha, enquanto `window.__trava` for verdadeiro; o abort do pedido rejeita o `.json()` com o AbortError do sinal (o que o fetch real faz no meio do corpo).
+ * Um OBJETO e não um `Response` de stream: no Chromium, o stream de um `Response` sintético que erra vira `TypeError: Failed to fetch` no `.json()` (medido), e isso não é o que o fetch real entrega.
+ */
 const travar = (page, rota) => page.evaluate((rota) => {
   window.__trava = true;
   const real = window.fetch;
@@ -224,9 +229,9 @@ const travar = (page, rota) => page.evaluate((rota) => {
     const url = new URL(String((u && u.url) || u), location.href), m = ((o && o.method) || "GET").toUpperCase();
     if (!window.__trava || url.pathname !== rota.p || m !== rota.m) return real.apply(this, arguments);
     window.__req.push([m, url.pathname, Date.now()]);
-    const sig = o && o.signal;
-    const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"ok":true,')); if (sig) sig.addEventListener("abort", () => c.error(new DOMException("The operation was aborted.", "AbortError"))); } });
-    return Promise.resolve(new Response(body, { status: 200, headers: { "content-type": "application/json" } }));
+    const sig = o && o.signal, status = rota.status ?? 200;
+    const json = () => new Promise((_, rej) => { if (sig) sig.addEventListener("abort", () => { (window.__cortes ??= []).push(m); rej(new DOMException("The operation was aborted.", "AbortError")); }); });
+    return Promise.resolve({ ok: status < 300, status, headers: new Headers({ "content-type": "application/json" }), json });
   };
 }, rota);
 const acompanhando = (page) => page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("O banco está atualizando"));
@@ -293,6 +298,23 @@ test("A2e: POST com headers e CORPO travado: o prazo de 60 s corta no meio do .j
   assert.equal(fim, 0);
 });
 
+test("A2g (controle do 4xx): POST 403 com headers e CORPO travado: aos 60 s o status SOBRA (FALHA + botão, +1 GET /auth/dashboard-profile e NENHUM GET do snapshot), o corte não vira AbortError", async () => {
+  const { ctx, page, abrir, botao, s } = await abre();
+  await abrir();
+  s.conexoes = [UPDATING()];
+  await congelar(page);
+  await travar(page, { p: "/open-finance/7/refresh", m: "POST", status: 403 });
+  const base = await marca(page);
+  await botao.click();
+  await avancar(page, 62_000, 2000, { preso: true });
+  const depois = await pedidos(page, base);
+  const r = { corpo: await texto(page), botao: await botao.textContent(), conta: depois.filter((p) => p === "GET /auth/dashboard-profile").length, snapshots: depois.filter((p) => p === "GET /open-finance/7").length };
+  await ctx.close();
+  assert.ok(r.corpo.includes(FALHA), r.corpo);
+  assert.deepEqual({ botao: r.botao, conta: r.conta }, { botao: "Atualizar agora", conta: 1 });
+  assert.equal(r.snapshots, 0, "o 403 não lê o snapshot (só o AbortError lê)");
+});
+
 test("A2f (controle do abort externo): corpo travado e depois o X (GET aos 6 s; POST aos 10 s): zero pedidos depois do X, o prazo não é confundido com o abort do usuário", async () => {
   for (const caso of ["GET", "POST"]) {
     const { ctx, page, abrir, botao, s } = await abre();
@@ -304,9 +326,11 @@ test("A2f (controle do abort externo): corpo travado e depois o X (GET aos 6 s; 
     else { await botao.click(); await acompanhando(page); await travar(page, { p: "/open-finance/7", m: "GET" }); await avancar(page, 6_000, 1000, { preso: true }); }
     const base = await marca(page);
     await page.getByRole("button", { name: "Fechar aviso" }).click();
+    const cortes = await page.evaluate(() => window.__cortes); // o X corta o pedido em voo (o `comPrazo` liga o sinal da rodada); o prazo só vence bem depois
     await avancar(page, 120_000, 10_000, { preso: true });
     const r = { pedidos: await pedidos(page, base), aviso: await page.locator(AVISO).count() };
     await ctx.close();
+    assert.deepEqual(cortes, [caso], `${caso}: o X abortou o pedido em voo`);
     assert.deepEqual(r.pedidos, [], `${caso}: nada depois do X`);
     assert.equal(r.aviso, 0, caso);
   }

@@ -56,6 +56,13 @@ export class ContratoInvalido extends ErroDeApi {
   }
 }
 
+/**
+ * O corte do `sinal` (prazo do `comLimite` ou cancelamento de quem chamou) sai SEMPRE como `AbortError`.
+ * `Object.assign` e não `DOMException`: o Hermes pode não ter `DOMException`, e o `FetchResponse.abort` do expo faz assim.
+ * Sem isto, o corte no corpo virava `ContratoInvalido` e o corte antes dos headers virava o `FetchError` do expo/fetch (`name: "Error"`).
+ */
+const abortado = () => Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+
 export function baseUrl(): string {
   const url = Constants.expoConfig?.extra?.apiUrl;
   if (typeof url !== "string" || !url) {
@@ -351,6 +358,8 @@ async function enviar(rota: string, opcoes: Opcoes, access: string | null, busca
     // servidor então volta a exigir o par cookie+header do CSRF, que o app não
     // tem, e a escrita seguinte falha com 403.
     credentials: "omit",
+  }).catch((e) => {
+    throw opcoes.sinal?.aborted ? abortado() : e;
   });
 }
 
@@ -419,7 +428,11 @@ async function executar<T>(
   guardadas: { access: string; refresh: string } | null,
 ): Promise<T> {
   const resposta = await responder(rota, opcoes, guardadas);
-  const bruto = await resposta.json().catch(() => null);
+  // Só o 2xx chega aqui (`responder` já lançou o `!ok`): corpo cortado pelo sinal é prazo, não contrato quebrado.
+  const bruto = await resposta.json().catch(() => {
+    if (opcoes.sinal?.aborted) throw abortado();
+    return null;
+  });
   const conferido = schema.safeParse(bruto);
   if (!conferido.success) throw new ContratoInvalido(rota, conferido.error);
   return conferido.data;

@@ -78,10 +78,14 @@ export const temSenhaQuery = (ativo: boolean) => queryOptions({
 
 // A escrita que nunca responde não pode prender o modal (o Esc não o fecha em voo). Sem `AbortSignal.timeout`: o Safari < 16 não o tem (dashboard_v2_safari14).
 // NÃO vale para o que o servidor comita e só devolve uma vez (enable, regenerate-backup-codes): abortar perderia os códigos.
-const comPrazo = <T,>(f: (sinal: AbortSignal) => Promise<T>) => {
-  const parar = new AbortController();
-  const prazo = setTimeout(() => parar.abort(), 30000);
-  return f(parar.signal).finally(() => clearTimeout(prazo));
+// `pai`: o cancelamento de quem chamou (a rodada do Atualizar agora) corta junto. `abort()` SEM `reason`: com ele o fetch rejeita com esse objeto e o `name` deixa de ser "AbortError".
+// O corte (prazo ou pai) sai como AbortError na raiz (`chamar` em lib/v2.ts, que só engole o corpo cortado quando a resposta NÃO era 2xx).
+export const comPrazo = <T,>(f: (sinal: AbortSignal) => Promise<T>, ms = 30_000, pai?: AbortSignal) => {
+  const parar = new AbortController(), corta = () => parar.abort();
+  if (pai?.aborted) corta();
+  pai?.addEventListener("abort", corta, { once: true });
+  const prazo = setTimeout(corta, ms);
+  return f(parar.signal).finally(() => { clearTimeout(prazo); pai?.removeEventListener("abort", corta); });
 };
 export const salvarContato = (uid: number, corpo: CorpoContato) => comPrazo((sinal) => escrever<Seguranca>("PATCH", `/settings/${uid}/security/contact`, corpo, sinal));
 export const gerarLinkWhatsApp = () => escrever<{ whatsapp_link?: string }>("POST", "/auth/link-code", {});

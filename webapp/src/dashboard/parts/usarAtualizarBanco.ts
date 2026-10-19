@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, contaQuery, meQuery } from "../lib/v2";
-import { atualizarBancos, conexoesQuery, lerConexoes, limiteQuery, uidValido } from "../conta/api";
+import { atualizarBancos, comPrazo, conexoesQuery, lerConexoes, limiteQuery, uidValido } from "../conta/api";
 import { PRAZO_LEITURA_MS, PRAZO_POST_MS, acompanharLista, atualizar, classificar, OCIOSO, type AcaoBanco, type Deps, type EstadoAtualizar } from "../lib/atualizarBanco";
 
 // Rede, tempo limite, 5xx e 429 só seguem a cadência; o resto (4xx, contrato) encerra a rodada.
@@ -69,21 +69,12 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro }: { ativo: boolean
     const ctrl = new AbortController();
     vivo.current = ctrl;
     const atual = () => vivo.current === ctrl && !ctrl.signal.aborted;
-    // Prazo próprio de cada pedido, sem `AbortSignal.timeout`/`any` (Safari 14). `abort()` SEM `reason`: com ele o fetch rejeita com esse objeto e o `name` deixa de ser "AbortError".
-    const comPrazo = <T,>(ms: number, f: (s: AbortSignal) => Promise<T>) => {
-      const prazo = new AbortController(), corta = () => prazo.abort();
-      let venceu = false;
-      ctrl.signal.addEventListener("abort", corta, { once: true });
-      const t = setTimeout(() => { venceu = true; corta(); }, ms);
-      // Prazo vencido no meio do `r.json()`: o `chamar` engole o AbortError e lança `ErroApi(200)` (não transitória). Qualquer erro depois do prazo é, de fato, o prazo: relança como AbortError (rede). O X/troca de conta não liga `venceu`.
-      return f(prazo.signal).catch((e) => { throw venceu ? new DOMException("The operation was aborted.", "AbortError") : e; }).finally(() => { clearTimeout(t); ctrl.signal.removeEventListener("abort", corta); });
-    };
     const d: Deps = {
       agora: Date.now,
       esperar: (ms) => new Promise<void>((r) => { const t = setTimeout(r, ms); ctrl.signal.addEventListener("abort", () => { clearTimeout(t); r(); }, { once: true }); }), // acorda ao abortar: a máquina para em vez de dormir até 60 s
       atual,
-      enviar: () => comPrazo(PRAZO_POST_MS, (s) => atualizarBancos(uidDaRodada, s)),
-      ler: () => comPrazo(PRAZO_LEITURA_MS, (s) => lerConexoes(uidDaRodada, s)), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
+      enviar: () => comPrazo((s) => atualizarBancos(uidDaRodada, s), PRAZO_POST_MS, ctrl.signal),
+      ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
       aoMudar: (maquina) => { if (atual()) setEstado({ uid: uidDaRodada, maquina }); },
       recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(); } }, // o mesmo que um aviso do SSE: o aviso some porque o servidor deixa de mandar o motivo
       falhou: (e) => {

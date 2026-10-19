@@ -27,13 +27,13 @@ test("W10 (lição 3): o POST traz um item 'updating' com motivo de FALHA (read_
   const base = await marca(page);
   await congelar(page);
   await botao.click();
-  await page.waitForFunction((b) => !document.querySelector(b) && document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Nubank:"), BOTAO);
+  await page.waitForFunction((b) => !document.querySelector(b) && document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Erro em Nubank."), BOTAO);
   await assentar(page);
   const corpo = await texto(page);
   await avancar(page, 120_000, 10_000);
   const l = await gets(page, base);
   await ctx.close();
-  assert.match(corpo, /Nubank: Não conseguimos atualizar agora\. Tente de novo\./);
+  assert.match(corpo, /Erro em Nubank\. Ver bancos conectados/, "a frase é só o banco: nada entre ela e o link");
   assert.match(corpo, /Ver bancos conectados/);
   assert.equal(l.length, 1, "só a releitura da recarga; nenhuma leitura de acompanhamento");
 });
@@ -45,14 +45,15 @@ test("W11 (lição 4): dois itens, A 'updating' neutro com still_updating e B co
   const base = await marca(page);
   await congelar(page);
   await botao.click();
-  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Inter: Reconecte mais tarde."));
+  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Erro em Inter."));
   await assentar(page);
   await avancar(page, 60_000, 10_000);
   const l = await gets(page, base);
   const r = { botao: await page.locator(BOTAO).count(), corpo: await texto(page) };
   await ctx.close();
   assert.equal(r.botao, 0);
-  assert.ok(r.corpo.includes("Inter: Reconecte mais tarde."), r.corpo);
+  assert.match(r.corpo, /Erro em Inter\. Ver bancos conectados/, r.corpo);
+  assert.ok(!r.corpo.includes("Nubank"), `o neutro (A, ainda coletando) não é erro e não entra na frase: ${r.corpo}`);
   assert.equal(l.length, 1, "a releitura da recarga e mais nada");
 });
 
@@ -95,7 +96,7 @@ test("W13 ((b) e (c)): needs_user_action reautorizável vira o link 'Reconectar 
   const quadro = async (conexoes, limite) => {
     const { ctx, page, abrir, srv } = await abre({ conexoes, limite });
     await abrir(false);
-    await page.waitForFunction(() => /Reconectar|Nubank:/.test(document.querySelector("#avisos-topo .pilha-corpo")?.textContent ?? ""));
+    await page.waitForFunction(() => /Reconectar|Erro em Nubank/.test(document.querySelector("#avisos-topo .pilha-corpo")?.textContent ?? ""));
     await assentar(page);
     const r = { corpo: await texto(page), link: await page.locator(`${AVISO} a`).first().getAttribute("href"), posts: srv.posts.length, limites: srv.reqs.filter((p) => p === "/open-finance/7/limite").length };
     await ctx.close();
@@ -105,11 +106,11 @@ test("W13 ((b) e (c)): needs_user_action reautorizável vira o link 'Reconectar 
   assert.match(b.corpo, /Reconectar Nubank/);
   assert.deepEqual([b.link, b.posts, b.limites], ["/settings?view=open-finance", 0, 1]);
   const semVaga = await quadro([NECESSARIA("Reautorize o banco")], LIMITE({ of_banks_max: 0 }));
-  assert.match(semVaga.corpo, /Nubank: Reautorize o banco\./);
+  assert.match(semVaga.corpo, /Erro em Nubank\. Ver bancos conectados/);
   assert.match(semVaga.corpo, /Ver bancos conectados/);
   assert.equal(semVaga.link, "#/conta/bancos");
   const dispositivo = await quadro([NECESSARIA("Autorize o acesso no app do banco")], LIMITE());
-  assert.match(dispositivo.corpo, /Nubank: Autorize o acesso no app do banco\./);
+  assert.match(dispositivo.corpo, /Erro em Nubank\. Ver bancos conectados/);
   assert.deepEqual([dispositivo.link, dispositivo.limites], ["#/conta/bancos", 0]);
 });
 
@@ -238,7 +239,7 @@ test("W17 (vista): o resultado fica sem 'Atualizar' (sem laço) até a aba volta
   s.refresh = (r) => r.fulfill({ json: refreshDe([item("item-11", "partial", false, "Parte dos dados ainda não veio")], []) });
   await abrir();
   await botao.click();
-  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Parte dos dados ainda não veio"));
+  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("Erro em Nubank."));
   await assentar(page);
   const antes = await page.locator(BOTAO).count();
   await focar(page);
