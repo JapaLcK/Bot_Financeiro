@@ -99,7 +99,10 @@ export function ContaBancos() {
   // eles voltam (o /limite é opcional), sem esperar as novas tentativas.
   const pode = !(limite.isLoading && limite.failureCount === 0) && lim?.pode_adicionar !== false;
   const avisoVaga = !pode && typeof lim?.message === "string" && lim.message.trim() ? <p className="faint">{lim.message}</p> : null;
-  const conectar = pode ? <ConectarLink className="btn btn-primary btn-conectar" aoAbrir={() => setErroOF("")}>Conectar banco</ConectarLink> : avisoVaga;
+  // O gesto de abrir o seletor ("+", "Conectar banco", "Ver todos", o de cada disponível): sai o toast da tentativa anterior e o foco que uma reconexão deixou pendente (o `onClose`
+  // tardio dela não pode mover o foco para a linha atrás do overlay do seletor). O `onConnectStart` repete o zeramento para quem não passa por aqui.
+  const aoAbrirSeletor = () => { setErroOF(""); pendente.current = null; };
+  const conectar = pode ? <ConectarLink className="btn btn-primary btn-conectar" aoAbrir={aoAbrirSeletor}>Conectar banco</ConectarLink> : avisoVaga;
   // Catálogo opcional: só lê com vaga e a lista na tela; falha = sem seção, nunca erro de página. "Já conectado" é por id (institution_id × id do conector).
   const mostra = pode && !!lista && !sessao && !erro;
   const catalogo = useQuery(conectoresQuery(uid, mostra));
@@ -200,7 +203,7 @@ export function ContaBancos() {
           <h1 id="page-title" tabIndex={-1}>{route("/conta/bancos").title}</h1>
           <p className="page-lede">Gerencie as conexões via Open Finance.</p>
         </div>
-        {pode && lista && lista.length > 0 && !sessao && <ConectarLink className="banco-mais" label="Conectar banco" aoAbrir={() => setErroOF("")}><i className="ph ph-plus" aria-hidden="true" /></ConectarLink>}
+        {pode && lista && lista.length > 0 && !sessao && <ConectarLink className="banco-mais" label="Conectar banco" aoAbrir={aoAbrirSeletor}><i className="ph ph-plus" aria-hidden="true" /></ConectarLink>}
       </header>
       <div className="page-grid">
         {!lista && !semUid && !erro ? <p role="status" className="faint span-12">Carregando…</p>
@@ -230,7 +233,7 @@ export function ContaBancos() {
                 </>
               )}
               </div>
-              <Disponiveis lista={lojas} aoAbrir={() => setErroOF("")} />
+              <Disponiveis lista={lojas} aoAbrir={aoAbrirSeletor} />
             </div>
           )}
       </div>

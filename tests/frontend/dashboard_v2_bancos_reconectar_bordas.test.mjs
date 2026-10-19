@@ -21,6 +21,7 @@
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
 //  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
 //  - E20 (onSuccess de widget velho): em frontend/open-finance-connect.js, `fala` (no onSuccess de openWidget) por `vivo()` (o save falho de A termina a reconexão B).
+//  - E22 (abrir o seletor): em Bancos.tsx, tirar `pendente.current = null;` de `aoAbrirSeletor` (o `onConnectStart` sozinho não cobre: ainda não rodou, o usuário só abriu o picker).
 //  - E21 (foco pendente × seletor): em Bancos.tsx, tirar `pendente.current = null;` do `onConnectStart`.
 //  - E11 (onClose antes do onSuccess): em `iniciar`, `onClose`, nada a desligar: o positivo é o módulo real (o save acontece e o `onConnected` tardio relê).
 import { test } from "node:test";
@@ -580,4 +581,20 @@ test("E21 reconexão A conclui com o widget por cima (foco pendente, sem onClose
   const foco = await focoEm(page);
   await ctx.close();
   assert.equal(foco, "page-title");
+});
+
+test("E22 reconexão A conclui com o widget por cima (foco pendente, sem onClose); o usuário ABRE o seletor (ainda sem confirmar) e o onClose tardio de A chega: o foco NÃO vai para a linha de A atrás do overlay", async () => {
+  const { ctx, page } = await telaRecon();
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  await sucesso(page, "item-11");
+  await aviso(page).filter({ hasText: "Nubank reconectado." }).waitFor({ state: "attached" });
+  await page.evaluate(() => document.getElementById("pluggy-falso").remove()); // o iframe de A saiu, sem onClose
+  await page.getByRole("link", { name: "Conectar Bradesco", exact: true }).click(); // só abre o picker: o `onConnectStart` ainda não rodou
+  await page.locator("#bankpick-overlay.open").waitFor();
+  await fechaWidget(page); // o onClose atrasado de A
+  await page.waitForTimeout(500);
+  const r = { naLinha: await naLinha(page, "Nubank"), pickerAberto: await page.evaluate(() => !!document.querySelector("#bankpick-overlay.open")) };
+  await ctx.close();
+  assert.deepEqual(r, { naLinha: false, pickerAberto: true });
 });
