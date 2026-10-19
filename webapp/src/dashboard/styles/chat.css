@@ -104,3 +104,5 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
   .chat-follow { --follow-w: calc(100vw - 2 * var(--gutter)); } /* ponytail: 100vw inclui a barra de rolagem clássica (alguns px a mais); a pílula só passaria da fileira nesse caso */
   .askbar[data-here], .chat-follow, .mencoes[data-here] { left: var(--gutter); right: var(--gutter); width: auto; transform: none; }
 }
+/* Na volta do foco, até a conta ser relida (PiggyChat): a conversa não aparece, mas fica no lugar (sem pular a rolagem). */
+[data-reconferindo] { visibility: hidden; }

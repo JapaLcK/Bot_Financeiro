@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { focusManager, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, type Msg } from "../lib/conversation";
 import { agenteDe, agentesQuery, mencoes } from "../lib/agentes";
@@ -68,7 +68,19 @@ export function PiggyChat() {
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
   // Relida também com a conversa aberta e na volta do foco: se a sessão virou outra conta noutra aba, a leitura chega ao
   // `contaDaSessao` (main.tsx) e a conversa da anterior some. O corpo vem do servidor: o que não é texto vira vazio (como conta/Ponte.tsx).
-  const contaQ = useQuery({ ...contaQuery, refetchOnWindowFocus: true }), conta = contaQ.data;
+  const contaQ = useQuery(contaQuery), conta = contaQ.data;
+  // Na volta do foco a conta é relida, e até chegar uma leitura mais nova que o foco a conversa fica escondida (sem sair do
+  // DOM: a rolagem fica), sem leitor de tela e sem clique — a sessão pode ter virado outra conta noutra aba (Codex no #1157).
+  // Só o foco esconde: as releituras do envio (`ask`, a menção) não piscam a conversa.
+  const [relendo, setRelendo] = useState(false);
+  const { refetch } = contaQ;
+  useEffect(() => DEMO ? undefined : focusManager.subscribe((focado) => {
+    if (!focado) return;
+    setRelendo(true);
+    void refetch({ cancelRefetch: false }).finally(() => setRelendo(false)); // reaproveita uma leitura em voo
+  }), [refetch]);
+  // A região viva fica como está: esvaziar e encher de novo releria a última resposta; na troca de conta ela já é zerada.
+  const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
   // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
   const conferida = DEMO || (contaQ.isFetchedAfterMount && contaQ.isSuccess);
@@ -129,7 +141,7 @@ export function PiggyChat() {
   // Uma fileira fixa acima da barra (chat.css), com as sugestões do chat vazio ou as próximas perguntas da última resposta.
   // `key` por resposta: a fileira nova começa do início, sem herdar a rolagem lateral da anterior (Codex no #1136).
   const fileira = !!chips.length && (
-    <ul key={msgs.length} className="chat-follow" aria-label={msgs.length ? "Próximas perguntas" : "Sugestões"}>
+    <ul key={msgs.length} className="chat-follow" aria-label={msgs.length ? "Próximas perguntas" : "Sugestões"} inert={reconferindo} data-reconferindo={reconferindo || undefined}>
       {chips.map((c) => <li key={c.label}><button type="button" className="chip" data-guia={c.guia ? "piggy.chip" : undefined} onClick={() => { if (performance.now() - desde.current >= TRAVA_MS) ask({ text: c.label, topic: c.topic, cat: c.cat, key: c.key }); }}>{c.label}</button></li>)}
     </ul>
   );
@@ -164,7 +176,7 @@ export function PiggyChat() {
       {head}
       {/* A resposta nova entra acima da barra, onde o foco fica: o leitor de tela a lê daqui. */}
       <p className="sr-only" role="status"><Anuncio.Provider value>{said}</Anuncio.Provider></p>
-      <ol className="chat" aria-label="Conversa">
+      <ol className="chat" aria-label="Conversa" inert={reconferindo} data-reconferindo={reconferindo || undefined}>
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
             data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>

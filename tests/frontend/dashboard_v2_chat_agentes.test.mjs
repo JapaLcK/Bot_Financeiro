@@ -434,6 +434,38 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: na volta do foco a conversa some até a conta ser relida; mesma conta, volta; conta nova, fica limpa`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    const foco = () => page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+    const segura = async () => {
+      let solta;
+      const preso = new Promise((ok) => { solta = ok; });
+      await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fallback(); });
+      return solta;
+    };
+    const velha = () => page.locator(".chat > .msg-user", { hasText: "tem duplicada?" });
+    let solta = await segura(); // a mesma conta, relida devagar
+    await foco();
+    await page.locator(".chat[inert]").waitFor({ state: "attached" });
+    await velha().waitFor({ state: "hidden", timeout: 2000 }); // escondida enquanto relê
+    solta();
+    await page.locator(".chat:not([inert])").waitFor({ state: "attached" });
+    await page.locator(".chat > .msg-user", { hasText: "tem duplicada?" }).waitFor();
+    await ctx.unroute("**/auth/dashboard-profile");
+    await paraConta43(ctx);
+    solta = await segura(); // agora a sessão é outra conta
+    await foco();
+    await page.locator(".chat[inert]").waitFor({ state: "attached" });
+    await velha().waitFor({ state: "hidden", timeout: 2000 }); // a conversa da 42 não aparece enquanto a 43 é conferida
+    await page.waitForTimeout(200);
+    assert.equal(await velha().isVisible(), false, "segue escondida enquanto a leitura não volta");
+    solta();
+    await page.locator(".chat-empty").waitFor();
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");
