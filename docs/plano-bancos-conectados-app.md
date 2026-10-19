@@ -199,6 +199,21 @@ fazem `push` **[Arquiteto]**; o Coder reconfere as sete antes de remover.
 - Limites: render nativo, VoiceOver, Dynamic Type e SVG real NÃO foram verificados. `institution_name` vazio ('') não
   é tratado. Os `motivos` do topo não aparecem e a barra de composição aparece mesmo com motivo incerto (decisão do dono pendente).
 
+## PR 4 — app: a lista vira um grupo e o detalhe abre numa folha (par do /painel, PR #1142)
+
+Decisão do dono: a linha do banco NÃO expande no lugar; tocar abre o DETALHE. Substitui a expansão e o topo (`ResumoBancos`) do PR 3.
+
+- **Lista:** `GrupoDeLinhas` com `BancoCard` = linha (logo, nome, `ConnectionStatus`, seta). Nenhum R$, barra ou total; o nome acessível é "banco, estado". "N/M" das vagas (`Vagas.tsx`) fica acima do grupo.
+- **Detalhe:** `BancoDetalhe` dentro da `Folha` (`app/src/features/painel/base.tsx`, `pageSheet`) aberta por ESTADO de `conexoes.tsx` (`detalheId`), sem rota nem link. Total do servidor (o app não soma), barra
+  e "a conferir" (somem com "ocultar valores"), Última atualização, Em conta, Investido (`null` ou banco fora de `/bancos` = "—", nunca R$ 0,00), contagens, faixa do Banco Central e as ações de antes
+  (Reconectar, Acompanhar sincronização, Desconectar) sem mudança de regra. Sem `/bancos`: sem valores e as ações seguem. O detalhe lê só de `dados`; banco que some (releitura, outra sessão)
+  fecha a folha e a tela avisa; troca de conta fecha a folha; sair da tela (blur) a fecha. A falha de uma ação aparece DENTRO da folha (`falha`).
+- **Disponíveis para conectar:** até 5 populares de `GET /open-finance/{uid}/connectors`, só com vaga (`pode_adicionar`), por `institution_id` e nunca por nome; a seção some se o catálogo falhar
+  (e aparece "Conectar outro banco"). "+" abre `/autorizando?conector=<id>` e o `PluggyConnect` recebe `selectedConnectorId`; "Ver todos os bancos" abre sem escolha. `conector` do link só vale com 1 a 9 dígitos
+  e nunca junto de `itemId`. A lista de populares e a faixa do Banco Central são cópias do `/painel`, comparadas por `tests/frontend/bancos_paridade.test.mjs`.
+- **Limites declarados:** gêmeo direto × Open Finance (conexão direta aparece como o conector Open Finance em Disponíveis; decisão do dono pendente); sem banco real em staging, a pré-seleção e o logo reais
+  não foram verificados; o app não tem `expo-updates`, então só chega com build novo; o `Alert` por cima do `Modal` `pageSheet` só se confirma no iPhone.
+
 ## Decisões do dono, 2ª rodada (2026-10-18)
 
 1. **Ocultar valores: a tela respeita.** `oculto` é estado local do `PainelProvider`

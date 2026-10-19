@@ -694,7 +694,7 @@ test("a linha é um <button> de 44 px+ com o chevron; sem <details>/<summary> ne
   assert.equal(r.barra, null);
 });
 
-test("o detalhe: nome, estado, ui.detail, total grande, linhas Última atualização / Em conta / Investido e só as contagens > 0 com ícone; 'Desconectar banco' no fim; nada de Reconectar, nem card dentro de card", async () => {
+test("o detalhe: nome, estado, ui.detail, total grande, linhas Última atualização / Em conta / Investido e só as contagens > 0 com ícone; 'Reconectar banco' e 'Desconectar banco' no fim (o Reconectar em destaque só em needs_user_action); nem card dentro de card", async () => {
   const conexoes = [con(11, "Nubank", "needs_user_action", "Reconectar", undefined, "O banco pediu novo login."), con(12, "Inter")];
   const { ctx, page } = await bancos({ conexoes, bancos: "barra" });
   await esperaCards(page, 2);
@@ -719,9 +719,9 @@ test("o detalhe: nome, estado, ui.detail, total grande, linhas Última atualiza�
   assert.deepEqual([r.estado, r.nota, r.total], ["Reconectar", "O banco pediu novo login.", "R$ 45.000,00"]);
   assert.deepEqual(r.linhas.map((l) => l.replace(/há .*/, "há …")), ["Última atualização há …", "Em conta R$ 5.000,00", "Investido R$ 40.000,00"]);
   assert.deepEqual(r.contagens, [["ph-bank", "2", "2 contas"], ["ph-credit-card", "1", "1 cartão"], ["ph-chart-line-up", "3", "3 investimentos"]]);
-  assert.deepEqual(r.botoes, ["Fechar", "Desconectar banco"]);
+  assert.deepEqual(r.botoes, ["Fechar", "Reconectar banco", "Desconectar banco"]);
   assert.deepEqual(r.seguro, { noDetalhe: true, naLista: false, depoisDasLinhas: true, antesDoBotao: true, link: 0, contraste: true }); // faixa estática, só no detalhe
-  assert.deepEqual([r.paineis, r.reconectar], [0, false]);
+  assert.deepEqual([r.paineis, r.reconectar], [0, true]);
 });
 
 test("o detalhe só lista as contagens > 0 (o Inter não tem cartão)", async () => {

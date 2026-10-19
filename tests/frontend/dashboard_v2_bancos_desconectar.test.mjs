@@ -228,7 +228,7 @@ test("layout: linha, X e botões a 44 px, sem rolagem lateral e tudo dentro da j
     const pergunta = await medida("dialog.lanc-form[open]");
     await ctx.close();
     assert.ok(lista.lateral === 0 && lista.linha >= 44, `${width}: ${JSON.stringify(lista)}`);
-    assert.ok(painel.lateral === 0 && painel.cortado === 0 && painel.dentro && painel.botoes.length === 2 && painel.botoes.every((h) => h >= 44), `${width}: ${JSON.stringify(painel)}`);
+    assert.ok(painel.lateral === 0 && painel.cortado === 0 && painel.dentro && painel.botoes.length === 3 && painel.botoes.every((h) => h >= 44), `${width}: ${JSON.stringify(painel)}`);
     assert.deepEqual([painel.largura, painel.altura], [width < 900 ? width : 440, height], `${width}: celular tela cheia / desktop painel de 440`);
     assert.ok(pergunta.lateral === 0 && pergunta.cortado === 0 && pergunta.dentro && pergunta.botoes.length === 2 && pergunta.botoes.every((h) => h >= 44), `${width}: ${JSON.stringify(pergunta)}`);
   }

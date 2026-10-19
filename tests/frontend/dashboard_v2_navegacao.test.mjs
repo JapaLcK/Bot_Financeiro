@@ -61,7 +61,8 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   assert.deepEqual(cards[2], ["Orçamento doméstico", "#/orcamento"]);
   assert.equal(cards.length, 8);
   assert.deepEqual(cards[7], ["Guia do painel", "botão"]); // abre o guia
-  assert.ok(cards.slice(3, 7).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
+  assert.deepEqual(cards[4], ["Vale a pena comprar?", "#/simulador/compra"]); // simulador de compra v2
+  assert.ok([3, 5, 6].every((i) => cards[i][1] === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
 });
 
 test("o nome antigo \"E se…\" não aparece mais", async () => {

@@ -17,7 +17,7 @@ import { TrajectoryChart } from "./TrajectoryChart";
 
 type Dias = 30 | 60 | 90;
 const ESTADO: Record<Previsao["estado"], string> = { condicional: "Previsão condicional", a_conferir: "A conferir", indisponivel: "Indisponível" };
-const hora = (d: Previsao) => d.calculado_em.slice(11, 16); // hora do servidor, no fuso do app
+export const hora = (d: { calculado_em: string }) => d.calculado_em.slice(11, 16); // hora do servidor, no fuso do app
 
 function usePrevisao() {
   const [dias, setDias] = useState<Dias | null>(null);

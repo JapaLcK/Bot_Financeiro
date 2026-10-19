@@ -73,8 +73,8 @@ Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o
      "R$ 0,00"), cada uma com um pontinho na cor do segmento da barra (`.marca` + `.cor-conta`/`.cor-inv`) e as contagens de `/bancos` com ícone, só as maiores que zero; uma faixa estática "Conexão regulamentada
      pelo Banco Central, oficial pelo Open Finance." (decisão do dono, só no detalhe, no padrão do Banner do design system,
      sem link); a `falha` do desconectar; e as ações em `.banco-det-acoes` (grid de uma coluna, 44 px por botão, recebem
-     `bloqueado`), hoje só "Desconectar banco". O W3 encaixa Reconectar e Acompanhar sincronização como irmãos do botão
-     dentro desse contêiner, sem CSS novo.
+     `bloqueado`), "Reconectar banco" (W3, só quando o banco é reconectável) e "Desconectar banco", nesta ordem, sem CSS novo. "Acompanhar
+     sincronização" NÃO existe no painel (decisão 4): só a pílula do estado.
    - **Conectar:** com bancos na lista, o botão redondo "+" (`.banco-mais`, `aria-label="Conectar banco"`) no cabeçalho; o estado vazio (item 5) mantém o botão de texto. Os dois (e o de cada disponível) são `<a href="/settings?view=open-finance">` com `onClick`: com `window.PBOpenFinance` abrem o seletor ali mesmo, sem ele o href segue.
    - **Disponíveis para conectar** (`conta/Disponiveis.tsx`, `lib/bancos.ts::disponiveis`; o PR #1142): `GET /open-finance/{uid}/connectors`, leitura opcional (falha = a seção some). Até 5 dos populares, na ordem fixa Itaú, Bradesco, Banco do Brasil, Santander,
      Caixa, Inter, C6, Nubank, BTG, Mercado Pago (casamento por nome normalizado só para a ORDEM), que ainda não estão conectados: "já conectado" é por ID (`institution_id` do snapshot × `id` do conector; o gêmeo Open Finance de mesmo nome e id
@@ -149,14 +149,14 @@ Decisões de execução do W1 (2026-10-18), além das já anotadas acima (barra,
 - Depois: invalida `conexoes`, `bancos`, `limite` e `contas` (o Resumo também muda).
 - O botão "Remover todas as conexões" do settings fica onde está (o app não o tem; a paridade já registra).
 
-### W3 — Reconectar e Acompanhar (Completo; depende de staging)
+### W3 — Reconectar (FEITO; Completo; a prova com banco real é em PRODUÇÃO). "Acompanhar" ficou de fora (decisão 4)
 
 - O widget da Pluggy só existe no legado (`open-finance-connect.js`, IIFE, `window.PBOpenFinance`). Decidido (decisão 3):
   `PBOpenFinance` ganha um parâmetro opcional `itemId` que vai no corpo do
-  `connect-token` e no `updateItem` do `PluggyConnect`; o painel carrega o script e o SDK da Pluggy só ao clicar.
+  `connect-token` e no `updateItem` do `PluggyConnect` (feito no PR A, #1139, `reconnect(itemId)`); o painel usa o módulo e o SDK que o `painel.html` já carrega (#1142), sem carga sob demanda.
   Quem não passa `itemId` (o settings) recebe o mesmo comportamento de hoje.
 - **Não verificado, condição para começar:** que o SDK da Pluggy na versão carregada aceita `updateItem` com um token
-  criado com `itemId`. Só se prova em staging (conta demo), com um banco real.
+  criado com `itemId`. Só se prova com um banco real, em PRODUÇÃO (não há staging para esta prova).
 - "Acompanhar sincronização" quando `ui.state === "updating"`: reaproveitar `PBColetaOF` (`frontend/of-status-poll.js`)
   se ele aceitar um item; senão, só reler o snapshot pelo `vivo` (foco de aba) e mostrar "Atualizando…" (decisão 4: só a pílula).
 - Regras de quando mostrar Reconectar: as do app (`provider_item_id` presente, `of_banks_max !== 0`, estado fora de
@@ -167,8 +167,8 @@ Decisões de execução do W1 (2026-10-18), além das já anotadas acima (barra,
 - Lista num grupo só, sem valor (item 1 e 2 acima); `BancoCard` perde `v` e a barra; `Ladrilho` passa a receber `nome`/`logo`/`cor` (serve ao banco e ao conector).
 - `conexoesQuery` lê `institution_id` (o servidor já o devolve; fora do contrato = `null`); `conectoresQuery` (`conta/api.ts`).
 - `open-finance-connect.js`: `open({id, name})` opcional (pré-escolha). Sem caminho paralelo de connect.
-- `painel.html`: css/js do seletor e o SDK da Pluggy (`async`, mesma versão e SRI do settings). **Divergência do W3 acima:** lá o plano era carregar o script só ao clicar; aqui carrega em todo carregamento do /painel (pedido do PR). Carga sob demanda é follow-up.
-- Reconectar (W3) segue de fora; o contêiner `.banco-det-acoes` do detalhe não mudou.
+- `painel.html`: css/js do seletor e o SDK da Pluggy (`async`, mesma versão e SRI do settings). O W3 usa esse mesmo carregamento (o plano antigo de carregar o script só ao clicar caiu; carga sob demanda continua follow-up).
+- Reconectar (W3) entrou depois, no contêiner `.banco-det-acoes` do detalhe.
 - Par no app: o "Disponíveis" é plano futuro (PR próprio, `paridade-app-dashboard.md`).
 
 ### Fora do escopo
@@ -230,7 +230,7 @@ W2:
 W3:
 - O corpo do `connect-token` leva `item_id` quando vem do painel e `{}` quando vem do settings (os testes do settings
   ficam como estão: controle positivo).
-- **Só em staging:** reconectar um banco de verdade com a conta demo e ver a conexão voltar a "Atualizado" sem gastar vaga.
+- **Só em produção:** reconectar um banco de verdade e ver a conexão voltar a "Atualizado" sem gastar vaga.
 
 Só depois do deploy (todos os PRs): números reais com a conta demo, painel e app lado a lado mostrando o mesmo topo e os
 mesmos bancos; Safari do iPhone no `/painel`.
@@ -244,12 +244,27 @@ Decisões de execução do W2 (2026-10-18), implementado em `conta/Bancos.tsx`, 
 - Só um DELETE por vez, POR MONTAGEM da página (remontar a tela zera a trava), com o `uid` capturado no clique; resposta perdida, 404, 5xx e prazo relêem o snapshot (sem o id = foi, com o id = falha); 403 não relê com o `uid` velho, relê o perfil; qualquer erro, menos o 401 (que vai a "sessão terminou"), com a conta trocada (o `uid` da sessão no cache difere do `uid` do pedido) cai no ramo do 403.
 - Limites: sair da rota com o DELETE no ar não anuncia; dois bancos com o mesmo nome têm rótulos iguais; troca de conta com o DELETE já processado anuncia "desconectado" sobre a conta antiga; uma remoção por vez só vale por montagem; o alerta do 403 persiste até a próxima ação e não aparece se a conta nova não tem bancos (conta nova com 0 bancos nunca mostra o alerta); um `detail` em texto vindo do servidor vai literal ao alerta; duplo clique rápido no Desconectar tira o foco do botão.
 
+Decisões de execução do W3 (2026-10-19), em `conta/reconectar.ts` (novo: `iniciar`, a máquina de UM fim por reconexão, e `textoDaFalha`), `conta/Bancos.tsx`, `conta/BancoDetalhe.tsx`, `conta/BancoCard.tsx` (`SEM_RECONEXAO`), `conta/Disponiveis.tsx` (tipo `SeletorOF.reconnect`), `frontend/open-finance-connect.js` (`reconnect()` devolve `false` se há conexão em curso) e `tests/frontend/dashboard_v2_bancos_reconectar*.test.mjs` (+ `_bancos_reconectar.mjs`):
+- **Um `init` só.** `Bancos.tsx` roteia os callbacks do módulo (`onOpen`, `onConnected`, `onError`, `onClose`) para a reconexão em curso (`emCurso`, ref) e, sem ela, para o seletor de sempre; `open()` e `reconnect()` ignoram um ao outro pela guarda "uma conexão por vez" do módulo. Nenhum caminho paralelo.
+- **O detalhe fecha ANTES do widget** (o `<dialog>` modal, na top layer, cobriria o widget da Pluggy, que vai no `body`); o resultado (aviso sr-only "<banco> reconectado.", ou o alerta de falha) aparece NA LISTA, com o foco devolvido à linha (ao título se o banco sumiu, 401 ou 403). Provado com o módulo real e um SDK falso que anexa uma camada em tela cheia: `elementFromPoint` no centro cai no widget.
+- **Regra do botão:** a do app (`provider_item_id`, estado fora de `SEM_RECONEXAO` = `removed`/`item_missing`/`paused`, lista comparada com o app em `bancos_paridade.test.mjs`) e `of_banks_max !== 0`; sem o módulo carregado não há botão. NÃO usa `pode_adicionar`: reconectar não gasta vaga (`test_b_p1_reconexao_passa_no_teto`). `btn-primary` só em `needs_user_action` (como o app), senão `btn-ghost`.
+- **Uma ação por vez**, por montagem: `emCurso` e `dialogo` (refs síncronas, para dois cliques no mesmo tick) mais `bloqueado` no detalhe; linha e Desconectar ficam inertes durante a reconexão. Prazo de 30 s do clique até o widget abrir (então `destroy()`, que aborta o connect-token em voo); depois de aberto não há prazo.
+- **Fim único** (ver o comentário de `iniciar`): `onClose` termina com `null`; `onConnected` e `onError` com o widget aberto terminam na hora e sem mexer no foco (o widget segue por cima; o SDK real pode não mandar `onClose`); `reconnect()` que devolve `false` termina "ocupado" sem destruir a conexão alheia. O `onConnected` que chega depois do fim cai no handler do seletor e relê as listas.
+- **Textos:** o do servidor só nos status 400/402/404/409/429 e só se for texto de pessoa (sem `<`, `{`, `[`; até 300 caracteres); 403 e 5xx/rede têm texto fixo; 401 = "Sua sessão terminou.".
+- **Isolamento:** o `uid` é o da sessão, fixado no clique; o módulo fixa o `uid` no `connect()`: com troca de conta no meio o POST do save vai à conta do clique (teste E7: `/open-finance/7/pluggy-item`) e, com a sessão já de outra conta, o servidor o recusa (403) e nada é gravado; com a conta trocada o `terminou` não anuncia nem relê nada na conta nova e pede o perfil de novo.
+- **Layout (corrige o #1142, misturado aqui por tocar os mesmos arquivos):** o cabeçalho ocupava a página inteira enquanto a coluna da lista tinha 720 px, e o "+" ficava colado na borda da página. Agora, com "Disponíveis para conectar" e viewport >= 1101 px (o ponto em que o `.page-grid` deixa de ser uma coluna só), DUAS colunas (bancos | disponíveis, `1.4fr 1fr`, conjunto de até 1100 px, topos alinhados) e o "+" na borda direita da coluna da direita; abaixo disso, ou sem "Disponíveis", uma coluna de até 720 px (conectados primeiro, na ordem do DOM) e o "+" na borda direita dela. O rótulo "Disponíveis para conectar" perdeu o recuo de 4 px. Medido em `dashboard_v2_bancos_alinhamento.test.mjs` (1440, 1280, 1024, 390 e a tela sem "Disponíveis"); o detalhe (fixo, 440 px à direita) não desloca as colunas.
+- Não feito (fora do pedido): os "Conectar banco" de outras telas do painel (`parts/MetaCartao.tsx`, `MetaFonte.tsx`, `Subscriptions.tsx`) e o `OF` do guia seguem para `/settings?view=open-finance` (decisão 1 pedia a página nova quando o W3 entrasse).
+- **Só em produção:** o SDK v2.7.0 aceitar `updateItem` com o token criado com `itemId` e a conexão voltar a "Atualizado" sem mudar "N de M"; o overlay REAL da Pluggy ficar acima do detalhe/lateral/Menu (o teste usa uma camada falsa); a ordem real de `onClose`/`onSuccess`/`onError` do SDK.
+- **Foco com o widget por cima:** nos fins `onConnected` e `onError` o foco não é roubado; ele volta à linha (ao título se o banco sumiu, 401 ou 403) no `onClose` tardio do widget (`pendente` em `Bancos.tsx`). Se o SDK real nunca mandar `onClose`, o foco fica onde estava (limite). A reconexão que já terminou não engole mais o que vem do seletor (`acabou()`); trocar de conta limpa o aviso sr-only e o toast da conta que saiu (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta; a de reconexão guarda o `uid` do clique e só aparece nessa conta).
+- Limites (B2-B4): (B2) o alerta de falha acima da lista, na coluna da esquerda, empurra o grupo para baixo e desalinha os topos das colunas enquanto existir (41 px a 1280); (B3) com `of_banks_max` nulo e "Disponíveis" há uma linha vazia (nbsp, 25 px) acima da lista da esquerda, só nas duas colunas (>= 1101 px; em uma coluna ela some por CSS); (B4) o aviso do resultado ("<banco> reconectado.") só sai depois da releitura (até 30 s se lenta); um `onClose` que chega antes do fim da releitura, com o card sumindo nela, perde o foco; o foco do clique (`fecharDet`) cai no `<body>` porque o `<dialog>` ainda deixa a linha inerte, e só volta no fim.
+- Limites: sair da rota com o widget JÁ aberto não cancela o save (de propósito), mas o anúncio se perde, e um novo clique depois de voltar mostra "Já tem uma conexão com banco aberta..." até o widget terminar; o aviso "ocupado" fica até a próxima ação; com o `/limite` carregando ou em falha o botão aparece (o servidor recusa com 402 em português); retentar na mesma janela do widget depois de um `onError` salva o banco, mas só relê a lista no `onConnected` que cair no seletor.
+
 ## Decisões do dono (fechadas em 2026-10-18: "pode seguir com as suas recomendações")
 
-1. **A tela mora no `/painel`** (`#/conta/bancos`, seção Conta). Os links "Conectar banco" do painel passam a apontar
-   para a página nova quando o W3 entrar; até lá seguem no `/settings?view=open-finance`.
+1. **A tela mora no `/painel`** (`#/conta/bancos`, seção Conta). Os links "Conectar banco" dos outros pontos do painel
+   passam a apontar para a página nova; isso sai em PR seguinte (NÃO no PR do W3), e até lá seguem no `/settings?view=open-finance`.
 2. **Total do topo = saldo em conta + investimentos**, como o app e como `/bancos` devolve.
-3. **Reconectar estende `PBOpenFinance`** com `itemId` e o painel o carrega (um widget só). É o W3.
+3. **Reconectar estende `PBOpenFinance`** com `itemId` e o painel o usa (um widget só, um `init` só). É o W3 (feito).
 4. **Acompanhar sincronização:** só a pílula "Atualizando…", relida pelo SSE e pelo foco da aba. Sem `PBColetaOF` no
    painel; o W3 fica sem esse botão.
 5. **"↻ Atualizar" e "Remover todas as conexões" ficam no settings.** O app não os tem; a página nova não os ganha.

@@ -22,10 +22,13 @@
  * o fluxo do picker.
  *
  * Uma conexão por vez: do início do connect (picker ou reconexão) até o onClose,
- * o erro ou o fim do save, `open()` e `reconnect()` são IGNORADOS EM SILÊNCIO —
+ * o erro ou o fim do save, `open()` e `reconnect()` são IGNORADOS SEM CALLBACK
+ * (`reconnect()` devolve `false` nesse caso; senão devolve a promessa do connect) —
  * duplo clique não vira dois connect-tokens e dois widgets, e `onError` aqui
  * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
  * callback do host dispara para a conexão que estava em curso.
+ * O `onError`/`onClose`/init rejeitado de um widget VELHO (já nasceu uma conexão mais nova, mesmo depois de ela terminar) não chegam ao host: só a mais nova é dona dele (`ultima`).
+ * O `onSuccess` de um widget velho ainda SALVA o item, mas em silêncio: nem `onConnected`, nem `notify`, nem `onError` do save.
  * `init()` do SDK que rejeita: `onError` e em seguida `onClose()`, e a guarda é liberada.
  * `onError` do SDK também libera a guarda: a Pluggy não garante `onClose` depois dele, e
  * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
@@ -83,6 +86,9 @@
   // connect() fixa a geração em que nasceu e, se ela mudou, é um fluxo morto —
   // seus callbacks (widget e save) não chegam mais ao host.
   let ocupado = null;
+  // A conexão mais NOVA (a última sessão criada em connect()), mesmo depois de `ocupado` voltar a null: só ela é dona do host. Os callbacks de um widget
+  // anterior (onError, onClose, init que rejeita) são ignorados; o onSuccess de qualquer widget salva sempre. O destroy() invalida tudo por `geracao`.
+  let ultima = null;
   let geracao = 0;
 
   function noop() {}
@@ -610,13 +616,13 @@
    * init() trocasse de usuário enquanto o widget estava aberto — e isolamento
    * por usuário é regra dura deste repositório.
    */
-  async function savePluggyItem(itemData, uid, host, vivo) {
+  async function savePluggyItem(itemData, uid, host, fala) {   // `fala()`: o host ainda é dono desta conexão?
     const item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
     const data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
-    if (vivo()) conf("onConnected", host)(data);
+    if (fala()) conf("onConnected", host)(data);
     return data;
   }
 
@@ -624,6 +630,9 @@
   async function openWidget(uid, host, itemId, sessao, vivo) {
     // Libera a guarda só se ainda for a desta conexão (não a de uma mais nova).
     const liberar = function () { if (ocupado === sessao) ocupado = null; };
+    // O widget é de uma conexão VELHA quando já nasceu outra depois dele (pelo tempo de vida, não pela guarda `ocupado`, que volta a null no fim do save): o
+    // onError/onClose/init rejeitado dele já não são do host. O onSuccess segue valendo: o item autorizado é sempre salvo.
+    const velha = function () { return ultima !== sessao; };
     const data = await post("/open-finance/" + uid + "/connect-token", itemId ? { item_id: itemId } : {});
     const accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
@@ -648,13 +657,14 @@
       language: "pt",
       theme: "dark",
       onSuccess: function (itemData) {
-        if (!vivo()) return;
+        if (!vivo()) return;   // salvar é sempre (o item autorizado nunca se perde)...
+        const fala = function () { return vivo() && !velha(); };   // ...mas o que o save diz ao host (onConnected, notify, onError) só vale para a conexão mais nova
         salvando = (async function () {
           try {
-            await savePluggyItem(itemData, uid, host, vivo);
-            if (vivo()) conf("notify", host)("Banco conectado com sucesso!", "ok");
+            await savePluggyItem(itemData, uid, host, fala);
+            if (fala()) conf("notify", host)("Banco conectado com sucesso!", "ok");
           } catch (err) {
-            if (!vivo() || foiAbortado(err)) return;
+            if (!fala() || foiAbortado(err)) return;
             // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
             // autorizado na Pluggy mas o plano não comporta mais conexões.
             conf("onError", host)(String((err && err.message) || err) || "Não foi possível salvar a conexão.",
@@ -668,7 +678,7 @@
       },
       onError: function (error) {
         console.error("Pluggy Connect error", error);
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         // A Pluggy não garante onClose depois de onError: sem liberar aqui, o botão
         // do settings (que se reabilita no onError) ficaria mudo até recarregar.
         liberar();
@@ -677,7 +687,7 @@
       onClose: function () {
         // Reconexão: o host relê a lista no onClose, então ele só vem depois do
         // save — senão relê antes de o /pluggy-item gravar. O picker segue como era.
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         const fim = function () {
           if (!vivo()) return;
           liberar();
@@ -699,7 +709,7 @@
     if (aberto && typeof aberto.then === "function") {
       aberto.then(null, function (err) {
         console.error("Pluggy init falhou", err);
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         liberar();
         conf("onError", host)("Não foi possível concluir a conexão.");
         // o SDK não manda onClose depois de um init que rejeita; o onError do host pode ter chamado destroy()
@@ -722,7 +732,7 @@
     const host = cfg;
     const uid = host && host.userId;
     if (!uid) { conf("onError", host)("Sessão inválida. Faça login novamente"); return; }
-    const sessao = ocupado = {};
+    const sessao = ocupado = ultima = {};
     const g = geracao;
     const vivo = function () { return g === geracao; };
     // Isolado como o onOpen: um host que lança aqui não pode deixar a guarda presa.
@@ -748,9 +758,10 @@
   }
 
   /** Reconecta um banco já conectado, sem picker. Não passa por refreshLimits:
-   *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto). */
+   *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto).
+   *  Devolve `false` se há conexão em curso (ignorado, sem callback): o host não é dono dela. */
   function reconnect(itemId) {
-    if (ocupado) return;   // em curso: ignora em silêncio, antes de validar (a regra vale para todo chamador)
+    if (ocupado) return false;   // em curso: ignora sem callback, antes de validar (a regra vale para todo chamador)
     if (typeof itemId !== "string" || !itemId) {
       conf("onError")("Conexão inválida para reconectar.");
       return;

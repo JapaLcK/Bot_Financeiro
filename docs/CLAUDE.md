@@ -103,8 +103,10 @@ o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
 bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
 Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
 decimais; frações de centavo são recusadas na validação comum da API e da tool.
-Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
-Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
+Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos (na rota legada e na tool; a v2 aceita juros com no máximo 4 casas, ver "API v2").
+Sem persistência; lógica em `core/services/decision_simulator.py` (`simular` sobre uma snapshot, em Decimal;
+`simulate` é o adaptador legado em float, sem a trajetória diária). Esta rota é a legada (tool e card);
+a tela web usa `POST /api/v2/simulador` (ver "API v2").
 
 **Rota nova vai para um router de `frontend/routes/`**, não para o monólito — exceto
 rota da `/api/v2`, que vai para `api/v2/` (ver "API v2" abaixo). Ao procurar uma rota
@@ -564,6 +566,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
   dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
 
+- `POST /api/v2/simulador` (`api/v2/simulador.py`; também `/api/app/simulador`): simulador de compra do
+  Pro, o mesmo `simular` da rota legada sobre `previsao_v2.ler_snapshot(uid, 90)` (a mesma leitura da
+  Previsão). Gate `pro_required` (recurso `simulator`) antes de qualquer leitura financeira e antes da
+  validação do corpo (Plus com corpo inválido recebe 403, não 422). Limite declarado: Plus com JSON malformado (não parseável) recebe 422 `json_invalid` antes do 403 do gate (provado pelo Tester); só o JSON bem formado e inválido chega ao 403. Entrada em texto (`_VALOR`, `_DATA`,
+  juros `0..20`), `extra=forbid`, sem `user_id`; a conversão para float acontece só na fronteira de
+  `decision_simulator.Simulacao` (fonte única da validação) e o erro dela vira 422 `validation_error` com
+  `loc` prefixado por `body`, só `loc`/`msg`/`type`. Juros: texto com no máximo 4 casas decimais (`_JUROS`; a tela
+  diz isso). Cada `value_error` do `Simulacao` sai com `type` = código estável e o campo no `loc` (tabela
+  `CODIGOS_ERRO`, chaveada pelas constantes `ERRO_*` de `decision_simulator.py`, que a tool de IA continua recebendo
+  com o texto de sempre): `entrada_maior_que_preco` e `entrada_igual_ao_preco` (loc `entrada`),
+  `entrada_parcial_sem_parcelas`, `juros_sem_parcelas` e `financiado_pequeno_demais` (loc `parcelas`),
+  `data_no_passado` e `data_fora_do_calendario` (loc `data_compra`), `dinheiro_casas` (campo do `loc`),
+  `nomes_repetidos` (loc `["body"]`); `value_error` sem código mapeado sai `valor_invalido`, sem o `msg` original
+  (`msg` fixo "Valor inválido."). Um teste enumera os `raise ValueError` do modelo e falha se algum não tiver código.
+  As `premissas` da resposta são as da snapshot (as mesmas da Previsão, inclusive a do banco quando há) mais `PREMISSAS_V2` (escritas para a pessoa), não a `PREMISSAS` da tool; um teste liga as duas listas regra a regra (§0.7). Resposta: dinheiro em texto, `atual` e cada cenário com
+  `saldo_final`, `pior_dia`, dias abaixo da reserva e `trajetoria` diária (hoje..hoje+90, 91 pontos: um a mais
+  que a da Previsão, que começa amanhã), `delta_vs_atual`, `contrato`. `cabe_nas_premissas` é sempre false e
+  `orientacao` sempre `abster`: sem veredito. Não grava nada. A tela é `#/simulador/compra`
+  (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
+  comprar?"). Em aberto: o corte de hábito real (média de 3 meses, estimativa variável: decisão P2 do dono,
+  PR à parte) e a tela do app.
 - `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
   condicional do motor único, usuário da sessão e gates antes da leitura financeira.
   Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
@@ -839,9 +862,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   **Consumidor (app):** `app/app/(app)/conexoes.tsx` + `app/src/features/openFinance/conexoes/`. A leitura é paralela ao
   snapshot e OPCIONAL: qualquer falha (403, 404, 5xx, rede, schema) deixa a tela sem números, nunca sem a lista nem
   as ações. `bancosSchema` é tolerante por item (um item inválido não derruba os outros); a junção é por `conexao_id`
-  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. O topo é o `total` do
-  servidor, sem soma no app; a barra e a legenda em % usam só as partes positivas e o cálculo é do cliente, sem R$.
-  Limite declarado: os `motivos` do topo NÃO são desenhados. "Ocultar valores" é agora contexto do app inteiro
+  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. A lista não mostra valor;
+  o total do detalhe (uma `Folha` aberta pela linha) é o `total` do servidor, sem soma no app, e a barra só entra com
+  Em conta e Investido positivos (cálculo do cliente, sem R$). "Ocultar valores" é agora contexto do app inteiro
   (`PrivacidadeProvider`, `app/src/features/painel/privacidade.tsx`), não mais estado local do Painel.
 
 - `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,
@@ -1772,8 +1795,8 @@ widget com `updateItem` e sem `selectedConnectorId`, e não passa pelo picker ne
 Callbacks do host: `onOpen()` quando o widget foi iniciado (síncrono, não quando terminou de abrir); `onError(msg, status)` (status HTTP quando
 vem do servidor, ausente no erro do SDK); `onClose()` só depois de o `/pluggy-item` terminar, e
 SÓ na reconexão (o picker chama na hora, como sempre). `itemId` vazio ou não-string => `onError`,
-nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados em
-silêncio (guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
+nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados sem
+callback (`reconnect()` devolve `false`; o `onError`/`onClose`/init rejeitado de um widget VELHO (já nasceu uma conexão mais nova, pelo tempo de vida, não pela guarda `ocupado`) não chegam ao host: só a mais nova é dona dele. O `onSuccess` de qualquer widget ainda salva o item, mas o de um widget VELHO o faz em silêncio (nem `onConnected`, nem `notify`, nem `onError` do save chegam ao host): o item salvo por ele só aparece na lista na próxima releitura (a da conexão mais nova ao terminar, ou ao recarregar) (limite declarado); guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
 Pluggy não garante `onClose` depois dele), no `init()` do SDK que rejeita (`onError` e em seguida
 `onClose()`) e no `destroy()`), e depois do `destroy()` nenhum callback do host dispara. Limites:
 depois de um `onError` do SDK com o widget ainda na tela, um novo clique abre outro widget (como antes
@@ -1826,10 +1849,11 @@ Opção do módulo `init({ guardaDuploClique: true })` (só o /painel a liga): n
 "fechar" explícito vale), para o 2º clique de um duplo clique no "+" não escolher outro banco. O clique no fundo é ignorado sempre nesse prazo, também no /settings.
 O /settings NÃO liga a opção, de propósito: ali a classe de bug irmã continua (o 2º clique de um duplo clique no botão que abre o picker pode escolher outra linha),
 para não mudar o comportamento que `of_connect_settings.test.mjs` fixa. Testes: `dashboard_v2_bancos_seletor.test.mjs` e `of_connect_settings.test.mjs`.
+Reconectar (W3, `conta/reconectar.ts`, `BancoDetalhe.tsx`): o detalhe do banco tem "Reconectar banco" (acima do "Desconectar banco") quando há `provider_item_id`, o estado não é `removed`/`item_missing`/`paused` (`SEM_RECONEXAO`, igual ao app, comparado em `bancos_paridade.test.mjs`), `of_banks_max !== 0` e o módulo carregou; não usa `pode_adicionar` (reconectar não gasta vaga). Usa o MESMO `init` da página: os callbacks do módulo vão à reconexão em curso (`emCurso`) ou, sem ela, ao seletor. O detalhe fecha ANTES do widget (o `<dialog>` modal cobriria o widget da Pluggy); o resultado vai à lista (aviso sr-only "<banco> reconectado." ou alerta, texto do servidor só em 400/402/404/409/429 e só se for texto de pessoa) e o foco volta à linha. Uma conexão por vez (Reconectar, Desconectar, "+"), prazo de 30 s até o widget abrir. O `uid` é o do clique. `PBOpenFinance.reconnect()` devolve `false` quando há conexão em curso. Com "Disponíveis" e viewport >= 1101 px a tela tem duas colunas (bancos | disponíveis); abaixo disso, uma. Testes: `dashboard_v2_bancos_reconectar.test.mjs`, `..._reconectar_bordas.test.mjs`, `dashboard_v2_bancos_alinhamento.test.mjs`, `of_connect_reconectar.test.mjs` (A24). NÃO provado aqui: o SDK real aceitar `updateItem` com token de `itemId`, o overlay real da Pluggy acima do detalhe e a ordem real dos callbacks (só em produção). Plano e decisões: `plano-bancos-conectados-painel.md`, W3. Foco: com o widget por cima ele só volta (à linha) no `onClose` tardio do widget; sem esse `onClose` fica onde estava. Limites: o alerta de falha acima da lista desalinha os topos das duas colunas enquanto existir (41 px a 1280); com `of_banks_max` nulo e "Disponíveis" há uma linha vazia (25 px) acima da lista da esquerda só nas duas colunas (em uma coluna ela some por CSS); o toast do "+" do seletor só mostra texto do servidor de pessoa (`textoDoServidor`, a mesma regra do Reconectar: 400/402/404/409/429, sem `<{[`, até 300 caracteres); o aviso do resultado só sai depois da releitura (até 30 s se lenta). Limite declarado (cadeia de 4 condições, só no SDK real): o widget A emite `onError` e ainda manda um `onSuccess` tardio; a reconexão B nasce com A na tela; o `connect-token` de B passa dos 30 s; e o save de A está em voo nesse instante. O prazo de B chama `destroy()` do módulo, que aborta o fetch compartilhado e A não grava o item (consentimento fica na Pluggy; reconectar de novo refaz). Fechar pede o módulo abortar só o fetch da própria sessão; não feito.
 Limites declarados dessa tela (decisão do dono pendente, nenhum código para eles): (1) o gêmeo direto × Open Finance: um banco conectado pelo conector
 direto (ex.: Caixa, id 219) e o mesmo banco no Open Finance (id 619) são conectores diferentes; "já conectado" é por id, então o 619 aparece em
 "Disponíveis" como se o banco não estivesse conectado (o teto de vagas e o `connections` do servidor valem igual); (2) o SDK da Pluggy carrega em
-todo /painel, não só no clique; (3) sair da página com o widget já aberto não o destrói (`busy()` só vale depois de o widget ser criado; antes, durante o `/connect-token`, sair ainda chama `destroy()` e aborta): o `onSuccess` ainda salva o item, mas uma falha ao salvar (teto do plano, rede) fica muda, porque a tela já saiu, e o item/consentimento ficam na Pluggy sem conexão no PigBank; voltar à página com o widget antigo ainda aberto deixa o "+" sem efeito até o widget fechar (`open()` é ignorado em silêncio pela guarda "uma conexão por vez"; o overlay da Pluggy cobre a página, então só dá para alcançar pelo teclado); (4) o aviso do seletor (toast) fica sob um `<dialog>` aberto em top layer (o detalhe do banco, o Confirma): o `z-index` não vence o top layer; (5) o StrictMode (montar, desmontar, montar) só foi provado por leitura: o build de teste é de produção.
+todo /painel, não só no clique (o Reconectar usa esse mesmo carregamento); (3) sair da página com o widget já aberto não o destrói (`busy()` só vale depois de o widget ser criado; antes, durante o `/connect-token`, sair ainda chama `destroy()` e aborta): o `onSuccess` ainda salva o item, mas uma falha ao salvar (teto do plano, rede) fica muda, porque a tela já saiu, e o item/consentimento ficam na Pluggy sem conexão no PigBank; voltar à página com o widget antigo ainda aberto deixa o "+" sem efeito até o widget fechar (`open()` é ignorado em silêncio pela guarda "uma conexão por vez"; o overlay da Pluggy cobre a página, então só dá para alcançar pelo teclado); (4) o aviso do seletor (toast) fica sob um `<dialog>` aberto em top layer (o detalhe do banco, o Confirma): o `z-index` não vence o top layer; (5) o StrictMode (montar, desmontar, montar) só foi provado por leitura: o build de teste é de produção.
 `PBOpenFinance.open({id, name})` (opcional; `open()` sem argumento segue idêntico para o /settings): abre com esse banco
 selecionado e à vista; id que não está na lista, ou argumento que não é `{id inteiro, name}` (um Event), é ignorado.
 No /painel (`conta/BancoCard.tsx`, `Ladrilho`) o ladrilho quadrado arredondado (44 px na linha, 64 px no detalhe) troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,

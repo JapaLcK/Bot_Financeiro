@@ -26,7 +26,7 @@ export const CDN_OK = (r) => r.fulfill({ status: 200, contentType: "image/svg+xm
 export const PADRAO = () => [con(11, "Nubank"), con(12, "Inter"), con(13, "Itaú", "paused", "Pausado")];
 // O módulo legado /open-finance-connect.js em stub: registra o que a página faz com ele em `window.__of` (`init` com os callbacks em `cb`, `open(arg)`, `destroy`).
 const STUB = `window.__of = { inits: 0, opens: [], destroys: 0, cb: null };
-window.PBOpenFinance = { init(o) { __of.inits++; __of.cb = o; return this; }, open(a) { __of.opens.push(a === undefined ? null : a); }, destroy() { __of.destroys++; }, busy() { return false; } };`;
+window.PBOpenFinance = { init(o) { __of.inits++; __of.cb = o; return this; }, open(a) { __of.opens.push(a === undefined ? null : a); }, destroy() { __of.destroys++; }, busy() { return false; }, reconnect() {} };`;
 // A resposta do POST /open-finance/{uid}/refresh (forma de `pluggy_sync.py`: `sync.items[]` por item, `still_updating` a soma, e o snapshot de depois em `connections`).
 export const item = (item_id, state = "updated", still_updating = false, detail = null, reason = "ok", institution = "Nubank") =>
   ({ item_id, institution, state, label: state, detail, reason, still_updating });
@@ -43,17 +43,21 @@ export const LIMITE = (o = {}) => ({ ok: true, of_banks_max: 3, em_uso: 2, pode_
  * `s.reqs`: os caminhos pedidos (das três leituras e do perfil) na ordem; o DELETE entra como "DELETE <caminho>".
  * `del(r, s)`: responde o DELETE de uma conexão (padrão: 200 e tira o id de `s.conexoes`, que é o que o snapshot devolve);
  * `s.dels`: um [método, caminho, x-csrf-token, corpo] por DELETE. `perfil` pode ser uma função (o perfil muda no meio do teste).
+ * Reconectar (dashboard_v2_bancos_reconectar*.test.mjs): `tokenRes(r, s)` e `itemRes(r, s)` respondem o POST de /open-finance/7/connect-token e de /open-finance/7/pluggy-item
+ * (padrão: 200 com um accessToken / `{ok:true}`); `s.conex`: um [método, caminho, x-csrf-token, corpo] por POST deles.
  * `refresh`: `(r) => r.fulfill(...)` do POST /open-finance/7/refresh (padrão: 200, tudo em dia); `s.posts`: um `{ headers }` por POST recebido.
  */
-export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, conectores = CONECTORES, conectoresRes, semSeletor = false, seletorReal = false, del, refresh, cdn = CDN_OK, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
-  const s = { reqs: [], dels: [], posts: [], cdn: [], conexoes };
+export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, conectores = CONECTORES, conectoresRes, semSeletor = false, seletorReal = false, del, tokenRes, itemRes, refresh, cdn = CDN_OK, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
+  const s = { reqs: [], dels: [], posts: [], conex: [], cdn: [], conexoes };
   s.antes = async (ctx) => {
     ctx.__fim = { bancos: 0, perfil: 0 }; // respostas já entregues (ver `semReticencias`)
     ctx.on("requestfinished", (q) => { const p = new URL(q.url()).pathname; if (p === "/api/v2/bancos") ctx.__fim.bancos++; if (p === "/auth/dashboard-profile") ctx.__fim.perfil++; });
-    ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (!/open-finance|bancos|dashboard-profile/.test(p)) return; s.reqs.push(q.method() === "DELETE" ? `DELETE ${p}` : p); if (q.method() === "DELETE") s.dels.push([q.method(), p, q.headers()["x-csrf-token"] ?? null, q.postData()]); });
+    ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (!/open-finance|bancos|dashboard-profile/.test(p)) return; s.reqs.push(q.method() === "DELETE" ? `DELETE ${p}` : p); if (q.method() === "DELETE") s.dels.push([q.method(), p, q.headers()["x-csrf-token"] ?? null, q.postData()]); if (/^\/open-finance\/7\/(connect-token|pluggy-item)$/.test(p)) s.conex.push([q.method(), p, q.headers()["x-csrf-token"] ?? null, q.postData()]); });
     await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: typeof perfil === "function" ? perfil() : perfil }));
     await ctx.route((u) => u.pathname === "/open-finance/7", (r) => snap ? snap(r) : r.fulfill({ json: { ok: true, connections: s.conexoes } }));
     await ctx.route((u) => u.pathname === "/open-finance/7/refresh", (r) => { s.posts.push({ headers: r.request().headers() }); return refresh ? refresh(r) : r.fulfill({ json: refreshDe([item("item-11")]) }); });
+    await ctx.route((u) => u.pathname === "/open-finance/7/connect-token", (r) => tokenRes ? tokenRes(r, s) : r.fulfill({ json: { accessToken: "acesso-xyz", includeSandbox: false } }));
+    await ctx.route((u) => u.pathname === "/open-finance/7/pluggy-item", (r) => itemRes ? itemRes(r, s) : r.fulfill({ json: { ok: true } }));
     await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => limiteRes ? limiteRes(r) : r.fulfill({ json: limite }));
     await ctx.route((u) => u.pathname === "/open-finance/7/connectors", (r) => conectoresRes ? conectoresRes(r) : r.fulfill({ json: { ok: true, connectors: conectores } }));
     await ctx.route((u) => u.pathname === "/open-finance-connect.js", (r) => semSeletor ? r.fulfill({ status: 404, body: "" }) : seletorReal ? r.fulfill({ path: join(FRONTEND, "open-finance-connect.js"), contentType: "application/javascript" }) : r.fulfill({ contentType: "application/javascript", body: STUB }));
