@@ -41,13 +41,34 @@ function naFila<T>(operacao: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * O último token que o app mandou ao servidor, para o ouvinte de troca de token (`services/push.ts::registrarToken`)
+ * não repetir o POST. Mora aqui, na folha, e não em `services/push.ts`, porque o desregistro (chamado pelo
+ * `secure.ts`) precisa zerá-lo e a folha não pode importar quem a importa.
+ */
+let ultimoToken: string | null = null;
+export const lembrarToken = (token: string | null) => void (ultimoToken = token);
+export const tokenJaEnviado = (token: string) => ultimoToken === token;
+
+/** Solta a espera do token em voo (`null`); só existe enquanto um `tokenSe` aguarda o nativo. */
+let soltarEspera: (() => void) | null = null;
+/** Conta os desregistros: um `tokenSe` que decidia (lendo o cofre) enquanto um aconteceu desiste. */
+let desregistros = 0;
+
+/**
  * Desregistra o aparelho no APNs. Enfileira de forma SÍNCRONA (por isso devolve
  * `void`): quem chama é a limpeza do cofre, e nenhum registro pedido depois dela
  * pode entrar na fila antes. Falha é engolida — a limpeza da sessão não depende
  * disto.
+ *
+ * Antes de enfileirar, CANCELA a espera do token em voo: sem isso o desregistro ficaria até `TEMPO_TOKEN_MS`
+ * atrás de um token pendurado (offline), e fechar o app nesse intervalo o perderia. O desregistro roda depois da
+ * CHAMADA nativa em voo, mas pode rodar antes da RESPOSTA dela (efeito no APNs: só no iPhone).
  */
 export function desregistrarAparelho(): void {
   if (Platform.OS !== "ios") return;
+  desregistros++;
+  ultimoToken = null;
+  soltarEspera?.();
   naFila(() => Notifications.unregisterForNotificationsAsync()).catch(() => undefined);
 }
 
@@ -65,14 +86,19 @@ const TEMPO_TOKEN_MS = 10_000;
  */
 export function tokenSe(haSessao: () => Promise<boolean>): Promise<string | null> {
   return naFila(async () => {
-    if (!(await haSessao())) return null;
+    const antes = desregistros;
+    if (!(await haSessao()) || antes !== desregistros) return null;
     let cronometro: ReturnType<typeof setTimeout> | undefined;
-    const limite = new Promise<null>((resolve) => (cronometro = setTimeout(resolve, TEMPO_TOKEN_MS, null)));
+    const limite = new Promise<null>((resolve) => {
+      cronometro = setTimeout(resolve, TEMPO_TOKEN_MS, null);
+      soltarEspera = () => resolve(null);
+    });
     try {
       // Estourou o prazo: `null`, a fila segue e o token que chegar DEPOIS é ignorado (ninguém espera por ele, então nenhum POST sai).
       const token = await Promise.race([Notifications.getDevicePushTokenAsync(), limite]);
       return typeof token?.data === "string" && token.data ? token.data : null;
     } finally {
+      soltarEspera = null;
       clearTimeout(cronometro);
     }
   });

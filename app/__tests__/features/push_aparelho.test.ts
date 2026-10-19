@@ -7,7 +7,7 @@
 import * as Application from "expo-application";
 import * as Notifications from "expo-notifications";
 
-import { ambienteApns, tokenSe } from "@/features/push/aparelho";
+import { ambienteApns, desregistrarAparelho, tokenSe } from "@/features/push/aparelho";
 import { sair } from "@/services/auth";
 import { registrarAparelho } from "@/services/push";
 import { Platform } from "react-native";
@@ -120,25 +120,56 @@ describe("registro e troca de conta", () => {
 });
 
 describe("o token que nunca resolve (offline, simulador)", () => {
-  it("depois do prazo a fila segue: o Sair desregistra 1 vez e o token tardio não gera POST", async () => {
-    jest.useFakeTimers();
+  const pendente = () => {
     let chegou!: (t: { type: string; data: string }) => void;
     jest.mocked(Notifications.getDevicePushTokenAsync).mockImplementationOnce(() => new Promise((r) => (chegou = r)) as never);
+    return (token: string) => chegou({ type: "ios", data: token });
+  };
+
+  it("passado o prazo a fila segue: o registro seguinte pede o token e o token tardio não gera POST", async () => {
+    jest.useFakeTimers();
+    const chegar = pendente();
+    await guardarCredenciais(A);
+    const primeiro = registrarAparelho();
+    await jest.advanceTimersByTimeAsync(0);
+    const segundo = registrarAparelho(); // fica atrás do primeiro, que espera o nativo
+    await jest.advanceTimersByTimeAsync(9_000);
+    expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(2_000); // passou do prazo
+    await Promise.all([primeiro, segundo]);
+    expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(2);
+    expect(registros()).toHaveLength(1);
+    chegar("token-tardio");
+    await jest.advanceTimersByTimeAsync(0);
+    expect(registros()).toHaveLength(1); // só o do segundo
+  });
+
+  it("o Sair CANCELA a espera: o desregistro roda na hora, sem esperar o prazo, e nenhum POST sai", async () => {
+    jest.useFakeTimers();
+    const chegar = pendente();
     await guardarCredenciais(A);
     const emVoo = registrarAparelho();
     await jest.advanceTimersByTimeAsync(0);
     expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
 
-    await limparCredenciais(); // o Sair: o cofre limpa e o desregistro entra na fila, atrás do token
-    await jest.advanceTimersByTimeAsync(9_000);
-    expect(Notifications.unregisterForNotificationsAsync).not.toHaveBeenCalled();
-
-    await jest.advanceTimersByTimeAsync(2_000); // passou dos 10 s
+    await limparCredenciais(); // o Sair: limpa o cofre e desregistra
+    await jest.advanceTimersByTimeAsync(0); // só microtarefas: o relógio não anda até o prazo
     expect(Notifications.unregisterForNotificationsAsync).toHaveBeenCalledTimes(1);
     await emVoo;
-    chegou({ type: "ios", data: "token-tardio" });
+    chegar("token-tardio");
     await jest.advanceTimersByTimeAsync(0);
     expect(registros()).toEqual([]);
+  });
+
+  it("o Sair que acontece enquanto o registro ainda lê o cofre: desiste, sem pedir o token", async () => {
+    let lido!: (v: boolean) => void;
+    const emVoo = tokenSe(() => new Promise<boolean>((r) => (lido = r)));
+    await respirar();
+    desregistrarAparelho();
+    lido(true); // o cofre dizia "há sessão" quando o Sair chegou
+    expect(await emVoo).toBeNull();
+    expect(Notifications.getDevicePushTokenAsync).not.toHaveBeenCalled();
   });
 });
 

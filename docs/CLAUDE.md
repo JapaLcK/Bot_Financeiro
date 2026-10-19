@@ -2051,16 +2051,24 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
   `/api/push/unregister` (decisão do dono). `aparelho.ts` é folha (nunca importa `client`/`secure`) e tem uma
   fila que põe o desregistro antes de qualquer token pedido depois, e o `getDevicePushTokenAsync` tem prazo
   (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`; o nativo só resolve em didRegister/didFail; offline ou no simulador pode nunca resolver e travaria o
-  desregistro do Sair): estourou, o registro desiste e o token que chegar depois é ignorado (nenhum POST);
+  desregistro do Sair): estourou, o registro desiste e o token que chegar depois é ignorado (nenhum POST). O
+  desregistro CANCELA a espera do token em voo antes de enfileirar (roda na hora: depois da chamada nativa que já
+  estava em voo, mas possivelmente antes da resposta dela), e um registro que decidia enquanto o Sair chegava desiste sem pedir o token;
   sem sessão no cofre nunca se chama `getDevicePushTokenAsync`. O toque lê `notification.request.trigger.payload.rota` (o iOS não copia a raiz do
   payload para `content.data`) numa tabela própria (`Map`), espera a sessão e a trava e descarta se anônimo. Cada
   resposta vale uma vez, por `identifier:date` (o servidor manda `apns-collapse-id` e, no iOS, o identificador de
   um push remoto com collapse id é o próprio collapse id, igual em todos).
+  Token que rola com o app aberto: `Push.tsx` assina `addPushTokenListener` só com sessão e trava livres, e o
+  ouvinte (`services/push.ts::registrarToken`) registra o token do evento sem NUNCA pedi-lo ao nativo (o evento
+  dispara a cada `didRegister`, inclusive os do nosso `getDevicePushTokenAsync`: pedir de novo faria laço). Ele
+  confere o `ultimoToken` (em `aparelho.ts`, zerado em todo desregistro e quando o POST falha); o
+  `registrarAparelho` continua postando sempre, porque o login novo precisa amarrar o token à sessão nova. Pode
+  sair um POST repetido entre os dois (upsert no servidor).
   **Limites só do iPhone.** (a) O `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
   nativo de novo enquanto ela está pendente: se o iOS nunca responder ao pedido pendente depois do
-  `unregisterForRemoteNotifications` (Sair offline, passado o `TEMPO_TOKEN_MS`), todo registro seguinte nesse processo estoura o
-  prazo e devolve `null` até o app reiniciar. Conferir: modo avião, abrir o app, Sair, logar como B, tirar do
-  modo avião. (b) A dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id`
+  `unregisterForRemoteNotifications` (Sair offline), todo registro seguinte nesse processo estoura o
+  prazo (`TEMPO_TOKEN_MS`) e devolve `null` até o app reiniciar. O desregistro em si não espera mais o prazo. Conferir: modo avião, abrir o app, Sair, logar como B, tirar do
+  modo avião; o push de A não pode mais chegar (se a resposta tardia re-registrar o aparelho no APNs, chega). (b) A dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id`
   traz um `date` novo (a data de entrega).
   **Limite:** `expo-notifications` entra no import de todo o app pelo `secure.ts` (gancho do desregistro): um dev
   client antigo, sem o módulo nativo, cai nesse import; o build da loja traz o módulo e não corre o risco.

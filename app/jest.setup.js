@@ -13,7 +13,7 @@ function mockEstado() {
     fonte: { carregado: true, erro: null },
     acessibilidade: { valor: false, ouvintes: new Set() },
     app: { atual: "active", ouvintes: new Set() },
-    push: { permissao: "denied", promptResponde: "granted", token: "apns-teste", ambiente: null, resposta: null, ouvintes: new Set(), atrasoDesregistro: null },
+    push: { permissao: "denied", promptResponde: "granted", token: "apns-teste", ambiente: null, resposta: null, ouvintes: new Set(), ouvintesToken: new Set(), atrasoDesregistro: null },
   });
 }
 
@@ -258,10 +258,11 @@ jest.mock("./app/+native-intent", () => {
 // expo-notifications e expo-application são nativos. Global porque `storage/secure.ts`
 // importa a folha do push (`features/push/aparelho.ts`): todo teste que toca o cofre passa por
 // aqui. Estado controlável por `__definirPush({ permissao, promptResponde, token, ambiente,
-// atrasoDesregistro })` e `__responderNotificacao(resposta)` (o toque); as espiãs são as do módulo.
+// atrasoDesregistro })`, `__responderNotificacao(resposta)` (o toque) e `__emitirToken(data)` (o token rolou); as espiãs são as do módulo.
 // Padrão: permissão NEGADA (nem prompt nem registro: o resto da suíte não vê chamada de push), o
 // prompt concede, o simulador (`ambiente: null`).
 global.__definirPush = (v) => Object.assign(mockEstado().push, v);
+global.__emitirToken = (data) => mockEstado().push.ouvintesToken.forEach((fn) => fn({ type: "ios", data }));
 global.__responderNotificacao = (r) => {
   mockEstado().push.resposta = r;
   mockEstado().push.ouvintes.forEach((fn) => fn(r));
@@ -282,6 +283,11 @@ jest.mock("expo-notifications", () => ({
   getDevicePushTokenAsync: jest.fn(async () => ({ type: "ios", data: mockEstado().push.token })),
   unregisterForNotificationsAsync: jest.fn(async () => {
     if (mockEstado().push.atrasoDesregistro) await mockEstado().push.atrasoDesregistro;
+  }),
+  // Troca de token com o app aberto: `__emitirToken(data)` dispara os ouvintes.
+  addPushTokenListener: jest.fn((fn) => {
+    mockEstado().push.ouvintesToken.add(fn);
+    return { remove: () => mockEstado().push.ouvintesToken.delete(fn) };
   }),
   // Como o real: o `clear` emite o evento e o hook volta a `null`.
   clearLastNotificationResponse: jest.fn(() => {

@@ -159,15 +159,20 @@ sem badge (P2-A). Só iOS.
 **Prazo do token e limites.** O `getDevicePushTokenAsync` tem prazo (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`) dentro da fila: o
 nativo só resolve em didRegister/didFail, e offline ou no simulador ele pode nunca resolver, o que travaria o
 desregistro do Sair e todo registro seguinte. Estourou o prazo, o registro desiste (sem POST) e a fila segue; o
-token que chegar depois é ignorado. O toque é deduplicado por `identifier:date`, porque o servidor manda
+token que chegar depois é ignorado. O desregistro cancela a espera do token em voo antes de enfileirar (sem isso
+ele ficaria até o prazo atrás de um token pendurado, e fechar o app nesse intervalo o perderia). Com o app aberto, o
+token pode rolar: `Push.tsx` assina `addPushTokenListener` (só com sessão e trava livres) e `registrarToken` registra o
+token do evento sem nunca pedi-lo ao nativo (o evento dispara também nos `didRegister` do nosso próprio pedido: pedir
+de novo faria laço), conferindo o `ultimoToken` de `aparelho.ts` (zerado em todo desregistro e na falha do POST). O toque é deduplicado por `identifier:date`, porque o servidor manda
 `apns-collapse-id` e o identificador de um push remoto com collapse id é o próprio collapse id. Limite: o
 `secure.ts` importa `expo-notifications` (via `features/push/aparelho.ts`), então ele entra no import de todo o
 app: um dev client antigo, sem o módulo nativo, cai nesse import. O build da loja traz o módulo e não corre o risco.
 
 Limites só do iPhone: (a) o `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
 nativo de novo enquanto ela está pendente; se o iOS nunca responder ao pedido pendente depois do
-`unregisterForRemoteNotifications` (Sair offline, passado o `TEMPO_TOKEN_MS`), todo registro seguinte nesse processo estoura o prazo e
-devolve `null` até o app reiniciar (conferir: modo avião, abrir o app, Sair, logar como B, tirar do modo avião);
+`unregisterForRemoteNotifications` (Sair offline), todo registro seguinte nesse processo estoura o prazo (`TEMPO_TOKEN_MS`) e
+devolve `null` até o app reiniciar; o desregistro em si não espera mais o prazo (conferir: modo avião, abrir o app, Sair, logar como B, tirar do modo avião; o push de A não pode mais chegar, já que o
+desregistro pode rodar antes da resposta do pedido em voo);
 (b) a dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id` traz um `date` novo
 (a data de entrega).
 

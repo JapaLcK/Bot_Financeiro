@@ -6,7 +6,7 @@ import { Platform } from "react-native";
 import { useSessao } from "@/features/auth/sessao";
 import { useBloqueio } from "@/features/bloqueio/bloqueio";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
-import { pedirPermissaoPush, registrarAparelho } from "@/services/push";
+import { pedirPermissaoPush, registrarAparelho, registrarToken } from "@/services/push";
 
 /**
  * Com o app aberto: aviso no topo e som, sem badge (decisão do dono). Sem isto o
@@ -78,6 +78,12 @@ export function Push() {
   const registravel = autenticado && livre;
   useEffect(() => {
     if (registravel) void registrarAparelho();
+  }, [registravel]);
+  // O token pode rolar com o app aberto: registra o novo, só com sessão e trava livres, e nunca o pede de novo.
+  useEffect(() => {
+    if (!registravel) return;
+    const assinatura = Notifications.addPushTokenListener((t) => void registrarToken(t.data));
+    return () => assinatura.remove();
   }, [registravel]);
   // A volta do fundo só CONTA a volta; quem registra é o efeito, que lê o `registravel` do render JÁ
   // atualizado. No callback do AppState ele ainda é o de antes: a trava (`maquina.ts`, caso `livre`) só
