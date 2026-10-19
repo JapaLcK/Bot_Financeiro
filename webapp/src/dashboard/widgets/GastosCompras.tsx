@@ -15,6 +15,7 @@ import { Frame } from "../parts/Frame";
 import { estadoGastos } from "../parts/GastosEstado";
 import { GastosDiaTopo } from "../parts/GastosDiaTopo";
 import { LancamentoLinha } from "../parts/LancamentoLinha";
+import { IconeCategoria } from "../parts/IconeCategoria";
 import { Selos } from "../parts/Selos";
 
 const marcada = (i: Lancamento) => i.interno || i.motivos.includes("outra_moeda"); // guardado implica interno
@@ -88,7 +89,7 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const nome = daCat.data?.categoria.nome;
   const [y, m] = mes.split("-").map(Number);
   const entrada = dia && d ? d.dias.find((x) => x.dia === dia) : undefined;
-  const titulo = dia ? "Seu dia" : nome ? `${daCat.data!.categoria.emoji} ${nome[0].toUpperCase()}${nome.slice(1)} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
+  const titulo = dia ? "Seu dia" : nome ? <><IconeCategoria icone={daCat.data!.categoria.icone} /> {nome[0].toUpperCase()}{nome.slice(1)} · {monthName(new Date(y, m - 1, 1))}</> : "Compras";
   const compras = daCat.data?.compras ?? 0;
   const comTotal = dia ? !!entrada : Number(compras) > 0;
 

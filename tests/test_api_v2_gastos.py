@@ -133,10 +133,12 @@ def test_categoria_fora_do_catalogo_sai_neutra_e_no_primeiro_acesso_o_seed_vem_a
     _l(a, 20, INICIO.replace(day=4), categoria="viagem a lisboa")
     por = _por_chave(_ler(a))  # 1º acesso: nenhum /categorias antes
     assert (por["alimentacao"]["emoji"], por["alimentacao"]["cor"]) == ("🍔", "#f59e0b")
+    assert por["alimentacao"]["icone"] == "hamburger"  # derivado do emoji no servidor (`db/cat_icones.py`)
     # fora do catálogo o seed importa só o que já estava nos lançamentos: aqui entrou depois
     _l(a, 5, INICIO.replace(day=5), categoria="categoria nova")
     nova = _por_chave(_ler(a))["categoria nova"]
     assert (nova["nome"], nova["emoji"], nova["cor"]) == ("categoria nova", CAT_NEUTRA_EMOJI, CAT_NEUTRA_COR)
+    assert nova["icone"] == "tag"
 
 
 # ── 5 A × B ──────────────────────────────────────────────────────────────────

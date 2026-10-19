@@ -40,9 +40,13 @@ describe("gastosSchema (/api/app/gastos)", () => {
     ]);
     expect(lido.dias[2]!.categorias).toEqual([{ chave: "alimentacao", valor: { centavos: 1, bruto: "0.006" } }, { chave: "transporte", valor: { centavos: 0, bruto: "0.004" } }]); // sub-centavo: o bruto decide, os centavos só exibem
     expect(lido.dias[1]!.maiores[0]).toEqual({ descricao: "Mercado", valor: 9001, categoria: "mercado" }); // 90.005 → 90,01
-    expect(lido.categorias[0]).toEqual({ chave: "lazer", nome: "Lazer", emoji: "🎮" });
+    expect(lido.categorias[0]).toEqual({ chave: "lazer", nome: "Lazer", emoji: "🎮", icone: "game-controller" });
     expect(lido).toMatchObject({ hoje: "2026-10-14", disponivel: true, historico_desde: null, motivos: ["banco_desatualizado", "arredondamento_por_grupo"] });
     expect(Object.keys(lido).sort()).toEqual(["categorias", "dias", "disponivel", "historico_desde", "hoje", "motivos"]); // nada de mes, total, cor...
+  });
+  it("servidor velho (sem `icone`): cai em `tag`, nunca quebra o contrato", () => {
+    const velho = gastosSchema.parse({ ...fixture, categorias: fixture.categorias.map(({ icone: _i, ...c }) => c) });
+    expect(velho.categorias.map((c) => c.icone)).toEqual(fixture.categorias.map(() => "tag"));
   });
   it("campo a mais do servidor é ignorado (sem .strict())", () => { expect(gastosSchema.safeParse({ ...fixture, campo_novo: 1, dias: fixture.dias.map((d) => ({ ...d, novo: true })) }).success).toBe(true); });
   it("os campos lidos versionados (conferidos no servidor por tests/test_api_v2_gastos.py) são os do schema", () => {
