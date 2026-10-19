@@ -90,7 +90,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 - Cmd-K e atalhos de teclado (`Command.tsx`): não têm par em toque.
 - Compras Apple e restauração: regra da loja; o `app/README.md` as dá como "entrega separada".
 - Tempo real: o web recebe SSE (`/eventos`); o app não tem cliente dele, e `docs/api-app-painel.md` registra o SSE só no namespace web.
-- Push: o servidor já envia por APNs (dormente sem as envs, e nenhum evento de produto dispara push) e tem as rotas de registro, feitas para o app Capacitor antigo; o app Expo não registra token (`expo-notifications` não está em `app/package.json`); o `/painel` não tem web push, e fica sem. Plano e decisões do dono em [`plano-push-app.md`](plano-push-app.md).
+- Push: o servidor já envia por APNs (dormente sem as envs, e nenhum evento de produto dispara push) e tem as rotas de registro, feitas para o app Capacitor antigo; o app Expo passa a registrar o token (PR 2 do push, `app/src/features/push/`; a tela de Notificações tem a chave "Banco precisa de atenção"); o `/painel` não tem web push, e fica sem. Plano e decisões do dono em [`plano-push-app.md`](plano-push-app.md).
 
 ## Como medi
 
