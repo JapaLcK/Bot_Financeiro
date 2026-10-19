@@ -505,13 +505,17 @@ def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         if sum(1 for e in eventos_ if isinstance(e, tuple)) > 2:
             raise asyncio.CancelledError
 
+    async def _catalogo():
+        eventos_.append("catalogo")
+
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", _catalogo)
     monkeypatch.setattr(orq, "retentar_leituras", _retentativa)
     monkeypatch.setattr(asyncio, "sleep", _sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(dashboard._open_finance_refresh())
     assert dashboard._PRIMEIRO_TIQUE_SEC == 600
-    assert eventos_ == [("sleep", 600), "saude", "retentativa",
-                        ("sleep", 4321), "saude", "retentativa",
+    assert eventos_ == [("sleep", 600), "catalogo", "saude", "retentativa",
+                        ("sleep", 4321), "catalogo", "saude", "retentativa",
                         *(["patch"] if refresh_ligado == "1" else []),
                         ("sleep", 4321)]
 

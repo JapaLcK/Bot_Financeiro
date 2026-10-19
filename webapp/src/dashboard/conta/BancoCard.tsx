@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FUSO, instante } from "../lib/v2";
 import { haQuanto, moneyText } from "../lib/format.js";
 import { corDoBanco, tomDoEstado } from "../lib/bancos";
@@ -15,9 +16,13 @@ export function BancoCard({ c, i, v }: { c: Conexao; i: number; v: Banco | "…"
   const ms = instante(c.last_sync_at);
   const quantos = typeof v === "string" ? [] : [...plural(v.contas, "conta", "contas"), ...plural(v.cartoes, "cartão", "cartões"), ...plural(v.investimentos, "investimento", "investimentos")];
   const linha = typeof v === "string" ? null : v;
+  const [falhou, setFalhou] = useState<string | null>(null); // a URL que não carregou: uma URL nova é tentada de novo
+  const logo = c.logo_url && c.logo_url !== falhou ? c.logo_url : null;
   return (
     <li className="panel banco-card">
-      <span className="banco-ini" aria-hidden="true" style={{ background: corDoBanco(c.institution_name ?? "", i) }}>{Array.from(nome)[0].toUpperCase()}</span>
+      <span className={logo ? "banco-ini com-logo" : "banco-ini"} aria-hidden="true" style={logo ? undefined : { background: corDoBanco(c.institution_name ?? "", i) }}>
+        {logo ? <img src={logo} alt="" referrerPolicy="no-referrer" decoding="async" onError={() => setFalhou(logo)} /> : Array.from(nome)[0].toUpperCase()}
+      </span>
       <div className="banco-id">
         <h2>{nome}</h2>
         <span className={`selo selo-${tomDoEstado(c.ui.state)}`}>{c.ui.label || "Pendente"}</span>

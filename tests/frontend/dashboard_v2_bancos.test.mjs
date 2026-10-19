@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RESPOSTAS } from "./_painel.mjs";
 import { abrir, navegador } from "./_guia.mjs";
-import { ERRO_404, ERRO_500, LIMITE, PADRAO, con, servidorBancos } from "./_bancos.mjs";
+import { CDN_OK, ERRO_404, ERRO_500, LIMITE, LOGO, PADRAO, con, servidorBancos } from "./_bancos.mjs";
 
 const browser = navegador();
 void browser;
@@ -618,4 +618,90 @@ test("troca de conta com TODA releitura do perfil presa (só a conferência do /
   await ctx.close();
   assert.equal(r.cards, 0, r.corpo);
   assert.match(r.corpo, /Não deu para carregar seus bancos\./);
+});
+
+// ---- logo do banco (`logo_url` do snapshot; plano B: o servidor o empresta do catálogo da Pluggy) ----
+const naoCarregou = (r) => r.fulfill({ status: 404, body: "" });
+const comLogo = (opts = {}) => bancos({ conexoes: [con(11, "Itaú Unibanco", "updated", "Atualizado", undefined, null, LOGO), con(12, "Inter")], bancos: "padrao", ...opts });
+const ini = (page, n) => page.locator(".banco-card").nth(n).locator(".banco-ini");
+const bg = (loc) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
+
+test("logo: com logo_url o círculo traz a imagem (alt vazio, src do servidor, carregada), sem a letra, em fundo claro neutro; o banco sem logo segue com letra e cor", async () => {
+  const { ctx, page, srv, erros } = await comLogo();
+  await esperaCards(page, 2);
+  await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
+  const img = ini(page, 0).locator("img");
+  const r = {
+    alt: await img.getAttribute("alt"), src: await img.getAttribute("src"), referrer: await img.getAttribute("referrerpolicy"), imgs: await page.locator(".banco-ini img").count(),
+    letra: await ini(page, 0).innerText(), aria: await ini(page, 0).getAttribute("aria-hidden"), fundo: await bg(ini(page, 0)), corte: await ini(page, 0).evaluate((e) => getComputedStyle(e).overflow),
+    outra: await ini(page, 1).innerText(), outraCor: await bg(ini(page, 1)),
+  };
+  await ctx.close();
+  assert.deepEqual({ ...r, cdn: srv.cdn }, { alt: "", src: LOGO, referrer: "no-referrer", imgs: 1, letra: "", aria: "true", fundo: "rgb(244, 244, 246)", corte: "hidden", outra: "I", outraCor: r.outraCor, cdn: [LOGO] });
+  assert.notEqual(r.outraCor, "rgb(244, 244, 246)"); // o banco sem logo não herda o fundo claro por engano
+  assert.deepEqual(erros, []);
+});
+
+test("logo: a imagem que não carrega (404) sai e a letra volta, com a cor do banco (Itaú: laranja da marca)", async () => {
+  const { ctx, page } = await bancos({ conexoes: [con(11, "Itaú Unibanco", "updated", "Atualizado", undefined, null, LOGO)], bancos: "padrao", cdn: naoCarregou });
+  await esperaCards(page, 1);
+  await page.waitForFunction(() => document.querySelector(".banco-ini")?.textContent === "I", null, { timeout: 8000 });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector(".banco-ini")).backgroundColor === "rgb(236, 112, 0)", null, { timeout: 8000 }); // o fundo tem transição curta
+  const r = { imgs: await page.locator(".banco-ini img").count(), letra: await ini(page, 0).innerText(), fundo: await bg(ini(page, 0)), classe: await ini(page, 0).getAttribute("class") };
+  await ctx.close();
+  assert.deepEqual(r, { imgs: 0, letra: "I", fundo: "rgb(236, 112, 0)", classe: "banco-ini" });
+});
+
+test("logo: depois de uma URL que falhou, uma URL NOVA do mesmo banco é tentada (a falha é da URL, não do cartão)", async () => {
+  const nova = "https://cdn.pluggy.ai/assets/connector-icons/613.svg";
+  let url = LOGO;
+  const { ctx, page } = await bancos({
+    snap: (r) => r.fulfill({ json: { ok: true, connections: [con(11, "Nubank", "updated", "Atualizado", undefined, null, url)] } }), bancos: "padrao",
+    cdn: (r) => (r.request().url() === LOGO ? naoCarregou(r) : CDN_OK(r)),
+  });
+  await esperaCards(page, 1);
+  await page.waitForFunction(() => document.querySelector(".banco-ini")?.textContent === "N", null, { timeout: 8000 });
+  url = nova;
+  await refoco(page);
+  await page.waitForFunction((u) => document.querySelector(".banco-ini img")?.getAttribute("src") === u, nova, { timeout: 8000 });
+  await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
+  await ctx.close();
+});
+
+test("logo: sem logo_url (null, ausente, número) ou com URL fora da regra (http, outro host, query, user@) é a letra, e o navegador nem pede a imagem", async () => {
+  const ruins = [null, undefined, 123, "http://cdn.pluggy.ai/a.svg", "https://evil.example/a.svg", "https://cdn.pluggy.ai/a.svg?x=1", "https://u@cdn.pluggy.ai/a.svg", "https://cdn.pluggy.ai.evil.example/a.svg", "javascript:alert(1)"];
+  const conexoes = ruins.map((l, i) => con(20 + i, "Alfa", "updated", "Atualizado", undefined, null, l));
+  const { ctx, page, srv, erros } = await bancos({ conexoes, bancos: "padrao" });
+  await esperaCards(page, ruins.length);
+  await page.waitForTimeout(300); // uma imagem indevida teria sido pedida a esta altura
+  const r = { imgs: await page.locator(".banco-ini img").count(), letras: await page.locator(".banco-ini").allInnerTexts() };
+  await ctx.close();
+  assert.deepEqual({ ...r, cdn: srv.cdn }, { imgs: 0, letras: ruins.map(() => "A"), cdn: [] });
+  assert.deepEqual(erros, []);
+});
+
+test("logo: nenhum texto novo (o nome é o mesmo h2; o resto do card é idêntico ao do banco sem logo) e o círculo segue aria-hidden", async () => {
+  const { ctx, page } = await bancos({ conexoes: [con(11, "Alfa", "updated", "Atualizado", undefined, null, LOGO), con(11, "Alfa")], bancos: "padrao" });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  const lado = (n) => page.locator(".banco-card").nth(n).evaluate((c) => [".banco-id", ".banco-total", ".banco-resto"].map((s) => c.querySelector(s).innerText));
+  const r = { a: await lado(0), b: await lado(1), h2: await page.locator(".banco-card h2").allInnerTexts(), aria: await page.locator(".banco-ini").evaluateAll((l) => l.map((e) => e.getAttribute("aria-hidden"))) };
+  await ctx.close();
+  assert.deepEqual(r.a, r.b);
+  assert.deepEqual(r.h2, ["Alfa", "Alfa"]);
+  assert.deepEqual(r.aria, ["true", "true"]);
+});
+
+test("logo: a imagem cabe no círculo de 36×36 em 1280×800 e em 390×844, sem rolagem lateral", async () => {
+  for (const [width, height] of [[1280, 800], [390, 844]]) {
+    const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank", "updated", "Atualizado", undefined, null, LOGO)], bancos: "padrao" }, { width, height });
+    await esperaCards(page, 1);
+    await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
+    const r = await page.evaluate(() => {
+      const c = document.querySelector(".banco-ini").getBoundingClientRect(), i = document.querySelector(".banco-ini img").getBoundingClientRect();
+      return { c: [c.width, c.height], i: [i.width, i.height], dentro: i.left >= c.left && i.top >= c.top && i.right <= c.right && i.bottom <= c.bottom, lateral: document.documentElement.scrollWidth > innerWidth };
+    });
+    await ctx.close();
+    assert.deepEqual(r, { c: [36, 36], i: [36, 36], dentro: true, lateral: false }, `${width}x${height}`);
+  }
 });

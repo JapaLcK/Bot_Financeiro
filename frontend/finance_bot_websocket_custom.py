@@ -1723,10 +1723,23 @@ manager = ConnectionManager()
 _PRIMEIRO_TIQUE_SEC = 600
 
 
+async def _aquece_catalogo() -> None:
+    """Enche o cache do catálogo de conectores da Pluggy (o que dá logo às conexões sem `raw.connector`).
+    MESMA função e MESMA chave do modal "Conectar banco". Fail-soft: só o tipo da exceção (a mensagem
+    pode trazer dado), e nunca segura quem chama."""
+    try:
+        from core.services.pluggy_catalogo import list_pluggy_connectors  # noqa: PLC0415
+        from frontend.routes.open_finance import PLUGGY_INCLUDE_SANDBOX  # noqa: PLC0415
+        await asyncio.to_thread(list_pluggy_connectors, None, include_sandbox=PLUGGY_INCLUDE_SANDBOX)
+    except Exception as exc:
+        print(f"[pluggy_catalogo] erro: {type(exc).__name__}", file=sys.stderr)
+
+
 async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
-    """Um tique: saúde, retentativa e, só com `com_patch`, o PATCH periódico."""
+    """Um tique: catálogo, saúde, retentativa e, só com `com_patch`, o PATCH periódico."""
     from core.services.pluggy_sync import request_pluggy_refresh, run_of_health_check
     from frontend.routes.of_retentativa import retentar_leituras
+    await _aquece_catalogo()
     saude = await asyncio.to_thread(run_of_health_check)
     print(f"[open_finance_health] {saude}", flush=True)
     # Depois da saúde de propósito: o 404 e o `needs_user` que ela acabou
@@ -2236,6 +2249,7 @@ async def lifespan(app: FastAPI):
         tasks.extend(
             [
                 asyncio.create_task(_open_finance_refresh(), name="open_finance_refresh"),
+                asyncio.create_task(_aquece_catalogo(), name="pluggy_catalogo"),
                 asyncio.create_task(_open_finance_proactive(), name="open_finance_proactive"),
                 asyncio.create_task(_open_finance_trial_expiry(), name="open_finance_trial_expiry"),
                 asyncio.create_task(_wa_worker(), name="wa_worker"),

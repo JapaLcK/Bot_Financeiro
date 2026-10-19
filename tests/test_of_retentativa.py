@@ -311,10 +311,16 @@ class _Pluggy:
         return []
 
 
+async def sem_catalogo():
+    """O aquecimento do catálogo do tique (`_aquece_catalogo`) vai à rede da Pluggy: aqui não."""
+
+
 @pytest.fixture()
 def amb(user_id, monkeypatch, eventos):  # noqa: F811
     import frontend.routes.of_retentativa as orq
     from db.open_finance_state import list_connections_para_retentar
+
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", sem_catalogo)
 
     promote_to_pro(user_id)
     meus = {user_id}

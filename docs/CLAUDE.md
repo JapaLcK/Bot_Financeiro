@@ -1754,8 +1754,23 @@ repetidos, corpo acima de 4096 bytes ou lento retornam 400 antes de qualquer cha
 Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.../sync`, `.../refresh`,
 `.../mock-connect`: todas as rotas que devolvem `**snapshot`) traz `logo_url`:
 `https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
-(`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
-e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
+(`db/open_finance_state.py`); o `raw` não sai. Sem `connector` no `raw` (as conexões antigas, e toda
+conexão depois de `item/deleted`, que substitui o `raw`), o snapshot empresta o logo do catálogo de
+conectores da Pluggy que já vive em memória (`core/services/pluggy_catalogo.py`, `logo_do_conector`):
+casa só pelo id do conector (`institution_id`, `str` dos dois lados; nunca pelo nome), só em
+`provider='pluggy'`, ignora o TTL (logo velho serve) e nunca vai à rede nem levanta, então o caminho
+do snapshot não espera a Pluggy. O `raw` vence o catálogo. O cache é aquecido por
+`_aquece_catalogo` (monólito) no boot, como tarefa de fundo, e no começo de cada tique do Open Finance,
+com a mesma função e a mesma chave do modal "Conectar banco"; falha vira uma linha com o tipo da exceção.
+Continua `null`: cache frio (segundos depois do boot, ou até o 1º tique, em até 10 min, se o
+aquecimento do boot falhar; só com `RUN_BACKGROUND_TASKS`; ou Pluggy fora do ar), conector que saiu do
+catálogo, `mock_pluggy` e `institution_id = "pluggy"` (item sem `connector` nem `connectorId`).
+Ids de produção das 4 antigas, medidos pelo dono em 2026-10-18: 611, 612, 651, 775; que o catálogo
+real os liste só se prova depois do deploy. O servidor NÃO fixa o host (`logo_url_valida` segue
+aceitando qualquer https); quem fixa é o cliente.
+No /painel (`conta/BancoCard.tsx`) o círculo troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,
+`overflow: hidden`; o painel só tem tema escuro); `logoSeguro` (`conta/api.ts`) é a cópia da regra do app e
+`tests/frontend/logo_banco_paridade.test.mjs` as compara; imagem que falha volta à inicial na cor do banco.
 No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG
 vem por `fetch` + `parse` + `SvgAst` (uma vez por URI, sem `Authorization`) e o `Avatar` cai na inicial em falha, `!ok` ou
 corpo que não é SVG. Limites: sem teto de tamanho do corpo; `<image href>` e `<use href>` dentro do SVG são renderizados;
@@ -2380,10 +2395,13 @@ finito em toda coluna numérica (`_tarefa_finito_checks` →
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **quatro** trabalhos: expiração de trial
-(`_open_finance_trial_expiry`), **job de saúde**, **retentativa** e refresh proativo —
-os três últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
-roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde e retentativa (GET); o
+O Open Finance tem **cinco** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **aquecimento do catálogo** (`_aquece_catalogo`), **job de
+saúde**, **retentativa** e refresh proativo — os quatro últimos no mesmo tick de
+`_open_finance_refresh`, nessa ordem (o tick começa pelo aquecimento). O lifespan sobe também a
+tarefa `pluggy_catalogo`, que aquece o catálogo uma vez no boot (só com `RUN_BACKGROUND_TASKS`).
+O 1º tick roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com aquecimento, saúde e
+retentativa (GET); o
 PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
 `OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
 proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde
@@ -2394,8 +2412,10 @@ nada mais faria essa verificação. A retentativa (Onda 5, PR-B2,
 `frontend/routes/of_retentativa.py`) vem logo depois: relê a Pluggy, também só com GET,
 para até `OF_RETRY_MAX_PER_TICK` conexões com dado atrás (default 20; só `0` ou
 negativo desliga só ela, valor que não é inteiro cai no padrão), uma de cada vez, pelo mesmo caminho de sync do webhook. Quem entra e por quê:
-`docs/open_finance_estados.md` §2.2. Kill switch dos dois: `OF_HEALTH_CHECK_ENABLED=0`
-(default `1`).
+`docs/open_finance_estados.md` §2.2. Kill switch da saúde e da retentativa:
+`OF_HEALTH_CHECK_ENABLED=0` (default `1`). O aquecimento do catálogo NÃO tem kill switch (esse
+flag não o desliga); sua falha só loga o tipo da exceção e nunca bloqueia saúde, retentativa
+nem PATCH.
 (Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---

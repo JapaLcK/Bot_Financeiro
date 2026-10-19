@@ -19,7 +19,7 @@ Servidor, todo pronto:
   Nenhuma tela o consome ainda.
 - `GET /open-finance/{uid}` (snapshot, `frontend/routes/open_finance.py`, `open_finance_snapshot_route`): cada conexão
   traz `id`, `institution_name`, `provider_item_id`, `last_sync_at`, `status` e `ui = {state, label, detail,
-  stale_products, dados_de}`. O PR 2 do app acrescenta `logo_url` (em andamento noutra worktree, ainda fora da `main`).
+  stale_products, dados_de}`. O PR 2 do app (#1106) acrescentou `logo_url`.
 - `GET /open-finance/{uid}/limite` → `{of_banks_max, em_uso, pode_adicionar, code, message}`. `of_banks_max: null` =
   sem teto. O app usa; a web nunca chamou.
 - `DELETE /open-finance/{uid}/connections/{connection_id}` (desconectar um). Existe, o app usa, **nada na web chama**.
@@ -66,7 +66,7 @@ Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o
 3. **Vagas do plano:** "2 de 3 bancos" de `/limite` (`em_uso`, `of_banks_max`). `of_banks_max: null` = nada (sem teto).
    Com `pode_adicionar: false`, mostra a `message` do servidor no lugar do botão de conectar.
 4. **Card por banco** (um por conexão do snapshot, na ordem do snapshot):
-   - logo (`logo_url` quando o PR 2 entrar; até lá, inicial num círculo com a cor do banco), nome
+   - logo (`logo_url` quando há; sem ele, inicial num círculo com a cor do banco), nome
      (`institution_name`), total do banco;
    - pílula do estado (`ui.label`, classe por `ui.state`, mesmo mapa de `OF_PILL_CLASS` do settings);
    - linha curta: saldo em conta · investido · "1 conta · 1 cartão · 4 investimentos" (contagens de `/bancos`);
@@ -229,7 +229,9 @@ mesmos bancos; Safari do iPhone no `/painel`.
    painel; o W3 fica sem esse botão.
 5. **"↻ Atualizar" e "Remover todas as conexões" ficam no settings.** O app não os tem; a página nova não os ganha.
 6. **Esconder valores:** a tela nasce sem, como o resto do painel. Fica a linha própria na paridade.
-7. **Logo:** o W1 sai com a inicial colorida; o logo entra num PR pequeno quando o `logo_url` (PR 2 do app) estiver na `main`.
+7. **Logo: feito** (#PR-LOGO, junto do plano B do servidor). O W1 saiu com a inicial colorida; agora o círculo traz o
+   `logo_url` quando há (host fixado no cliente, cópia da regra do app, com teste de paridade) e volta à inicial se a
+   imagem falhar. Prova do logo real da Pluggy só depois do deploy.
 
 Ajuste de execução: o W0 (cores) entra dentro do W1, para um ciclo de revisão a menos. O teste de paridade das cores
 continua obrigatório.

@@ -22,8 +22,12 @@ export const segurancaQuery = (uid: number | undefined) => queryOptions({
 
 // Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
 // contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
-export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; logo_url: string | null; ui: { state: string; label: string; detail: string | null } };
 export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
+// `logo_url` é dado de terceiro e o navegador o busca: só https no CDN de ícones da Pluggy; outro host, http, `user@host`, porta ou query = null
+// (a inicial). A MESMA regra do app (app/src/features/openFinance/conexoes/juntar.ts::logoSeguro): tests/frontend/logo_banco_paridade.test.mjs as compara.
+const LOGO_PLUGGY = /^https:\/\/cdn\.pluggy\.ai\/[\w.~/-]+$/;
+export const logoSeguro = (url: unknown): string | null => (typeof url === "string" && LOGO_PLUGGY.test(url) ? url : null);
 const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry } as const;
 
 export const conexoesQuery = (uid: unknown) => queryOptions({
@@ -31,7 +35,7 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
   queryFn: async ({ signal }): Promise<Conexao[]> => {
     const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, GET(signal));
     const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
-    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at),
+    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), logo_url: logoSeguro(c.logo_url),
       ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } }));
   },
   ...aberto, enabled: !DEMO && uidValido(uid),
