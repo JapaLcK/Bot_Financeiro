@@ -6,29 +6,19 @@ import { ChipPainel as Chip, TextoPainel as Texto } from "./tipografia";
 import { dataPtBr, nomeLegivel } from "./catalogo";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
-import { RecursoDados, Valor, Linha, Vazio, Filtros, useCardAberto } from "./base";
-import { BarrasMensais } from "@/ui/componentes/BarrasMensais";
-import { rotuloCompacto } from "@/ui/componentes/CurvaAcumulada";
+import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros, useCardAberto } from "./base";
 import { LinhaExpansivel } from "./expansao";
 import { useRespondidas } from "./receitas";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
-const COLUNAS = 6; // 6 × 40pt (`COLUNA_MIN`) = 240pt cabe nos 252pt de um card em tela de 320pt; é também o número de meses do "Resumo do mês"
-/** As mesmas colunas do "Resumo do mês" (`BarrasMensais`): o saldo previsto de hoje ao fim do horizonte em até 6 pontos (a curva diária não tinha eixo nem valor); a última, o saldo do horizonte, em destaque. Saldo <= 0 fica só o trilho (a barra não tem lado negativo: o "Menor saldo previsto" da folha cobre). */
-function ColunasPrevisao({ d }: { d: DadosPrevisao }) {
-  const { oculto } = usePainel();
-  if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
+/** A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Os eixos (valores e datas) ficam por conta da `Curva`. */
+function CurvaPrevisao({ d }: { d: DadosPrevisao }) {
   const serie = [...(d.ancora ? [{ data: d.ancora.data, saldo: d.ancora.saldo }] : []), ...(d.trajetoria ?? [])];
-  if (!serie.length || serie.some((s) => s.saldo === null)) return <Vazio texto="Trajetória indisponível." />;
-  const idx = [...new Set(Array.from({ length: Math.min(COLUNAS, serie.length) }, (_, k) => Math.round(k * (serie.length - 1) / Math.max(1, Math.min(COLUNAS, serie.length) - 1))))];
-  const pontos = idx.map((i) => serie[i]!);
-  return <View accessible accessibilityLabel={`Saldo previsto ao longo do período: ${pontos.map((s) => `${ddmm(s.data)}, ${rotuloCompacto(s.saldo!)}`).join("; ")}`}>
-    <BarrasMensais parcial={false} meses={pontos.map((s, n) => ({ chave: `${n}`, rotulo: ddmm(s.data), valor: s.saldo!, atual: n === pontos.length - 1 }))} rotuloValor={rotuloCompacto} />
-  </View>;
+  return <Curva valores={serie.map((s) => s.saldo)} datas={serie.map((s) => ddmm(s.data))} />;
 }
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
-/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e as colunas, sempre. O resto abre numa folha ao toque no card INTEIRO. */
+/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e a curva, sempre. O resto abre numa folha ao toque no card INTEIRO. */
 /** Montado só com a previsão na tela: avisa o card (`Bloco`) que há o que abrir. */
 function Pronto() { const { avisar } = useCardAberto(); useEffect(() => { avisar(true); return () => avisar(false); }, [avisar]); return null; }
 export function Previsao() {
@@ -42,8 +32,7 @@ export function Previsao() {
       <Valor valor={d.marcos.find((m) => m.dias === d.dias)?.saldo ?? null} destaque />
       {d.estado === "indisponivel" && <Texto variante="rotulo" tom="warning">Previsão indisponível</Texto>}
       {d.base.bancos_excluidos && <Texto variante="legenda" tom="warning">Bancos conectados fora do cálculo</Texto>}
-      {/* As colunas partem da âncora (hoje), se houver: a trajetória da API começa amanhã. Sempre visíveis. */}
-      {d.trajetoria ? (d.estado === "indisponivel" ? null : <ColunasPrevisao d={d} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
+      {d.trajetoria ? (d.estado === "indisponivel" ? null : <CurvaPrevisao d={d} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
       {aberto && <View style={{ gap: 8 }}>
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}
         {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
