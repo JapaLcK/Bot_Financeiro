@@ -34,9 +34,8 @@ def test_controle_id_novo_no_python_sem_o_app_fica_vermelho(monkeypatch):
     assert set(cards.IDS) - ids_lidos() == PENDENTE_NO_APP | {"novo_card"} != PENDENTE_NO_APP
 
 
-# Cards da tool que o Python já emite (`cards.DA_TOOL`) e o app ainda não desenha. `ultimos_lancamentos` e `sem_categoria` entraram
-# no `schemasDaTool` no PR B da onda 2; a `comparacao` vem em outro PR, como gráfico de linha. Esvazie quando ela entrar.
-PENDENTE_DA_TOOL = {"comparacao"}
+# Cards da tool que o Python já emite (`cards.DA_TOOL`) e o app ainda não desenha. Vazia desde que a `comparacao` entrou no `schemasDaTool`.
+PENDENTE_DA_TOOL: set[str] = set()
 
 
 def ids_da_tool_do_app(painel_ts: str) -> set[str]:

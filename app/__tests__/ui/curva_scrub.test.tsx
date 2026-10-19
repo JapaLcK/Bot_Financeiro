@@ -96,6 +96,11 @@ describe("CurvaAcumulada: segurar para ver o dia", () => {
     segurar(r, noX(1));
     expect(r.getByText("mês passado R$ 2.110,00", H)).toBeTruthy();
   });
+  it("`rotulos` nomeia a legenda e a 2ª linha da bolha (a comparação de dois períodos quaisquer)", async () => {
+    const r = await desenhada({ anterior: ANT, rotulos: { atual: "out", anterior: "set" } });
+    expect(r.getAllByTestId("curva-legenda", H)).toHaveLength(2); expect(r.getByText("out", H)).toBeTruthy(); expect(r.queryByText("Mês passado", H)).toBeNull();
+    segurar(r, noX(1)); expect(r.getByText("set R$ 2.110,00", H)).toBeTruthy();
+  });
   it("arrastar troca o dia (haptics a cada troca, não a cada move) e nunca passa de hoje", async () => {
     const r = await desenhada();
     segurar(r, noX(1));
