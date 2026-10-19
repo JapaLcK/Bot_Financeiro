@@ -8,7 +8,7 @@ import { NOVO, type Turno } from "./conversaEstado";
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string };
 export type TurnoAgente = { kind: string; mensagem: string; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
-type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
+type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; oculto: MutableRefObject<boolean>; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e: Energia | null): Partial<TurnoAgente> =>
@@ -24,7 +24,7 @@ const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: 
 const SEM_SENHA = "Crie a senha da sua conta pelo link que enviamos por e-mail para conversar com os agentes.";
 const semSenha = (e: unknown) => e instanceof ErroDeApi && (detalheDe(e).error === "password_required" || (e.corpo as { code?: unknown } | null | undefined)?.code === "password_required");
 
-export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso, esgotarCota, falhou }: Deps) {
+export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, oculto, aplicarUso, esgotarCota, falhou }: Deps) {
   const [catalogo, setCatalogo] = useState<{ uid: number; dados: Agentes } | null>(null);
   const contextos = useRef(new Map<string, string | null>()), emVoo = useRef(new Map<string, AbortController>()), epoca = useRef(0);
   const lendo = useRef<Promise<Agentes | null> | null>(null), esperando = useRef(false), leitura = useRef(0); // esperando: o 2º toque durante a espera do catálogo não duplica o envio
@@ -99,7 +99,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     if (!TEM_ARROBA.test(texto)) return "piggy";
     const alvo = dono.current; if (alvo === null || esperando.current) return alvo === null ? "piggy" : "fica";
     let dados = atual; const e0 = epoca.current;
-    if (!dados) { esperando.current = true; try { dados = await ler(); } finally { esperando.current = false; } if (dono.current !== alvo || epoca.current !== e0) return "fica"; if (!dados) return "piggy"; }
+    if (!dados) { esperando.current = true; try { dados = await ler(); } finally { esperando.current = false; } if (dono.current !== alvo || epoca.current !== e0 || oculto.current) return "fica"; if (!dados) return "piggy"; } // valores ocultos durante a espera: não envia, como o envio do Piggy
     const m = mencaoDe(texto, dados);
     if (!m) return "piggy";
     if (!m.texto || !perguntar(m.kind, texto.trim(), m.texto, acessoDe(dados, m.kind)!, energiaDe(dados, m.kind))) return "fica";

@@ -229,6 +229,12 @@ it("nova tentativa do Piggy (depois de erro) com a cota lida descartada: vale a 
   await act(async () => { g1.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Do agente")).toBeTruthy());
   await act(async () => { g2.soltar(); await drenar(); }); expect(posts()).toHaveLength(1);
 });
+it("valores ocultos durante a espera do catálogo: a pergunta não vai ao agente (nem ao Piggy) e fica no campo", async () => {
+  const g = segurar(); ag.segurarGet = g; await abrir(); await enviar("@Xerife quanto gastei?"); await act(drenar);
+  await apertar("Ocultar valores"); await act(async () => { g.soltar(); await drenar(); });
+  expect(ag.nChat).toBe(0); expect(posts()).toHaveLength(0);
+  await apertar("Mostrar valores"); expect(campo().props.value).toBe("@Xerife quanto gastei?");
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
