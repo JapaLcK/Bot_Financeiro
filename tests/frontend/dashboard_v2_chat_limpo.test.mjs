@@ -229,6 +229,23 @@ test("375: duplo toque numa pílula manda uma pergunta; o toque depois da janela
   assert.deepEqual(vistos, { 120: 1, 250: 1, 400: 1, 700: 2 });
 });
 
+test("375: a fileira de cada resposta começa do início, sem herdar a rolagem lateral da anterior", async () => {
+  const { ctx, page, erros } = await abrir({ width: 375, height: 812 });
+  const fileira = page.locator(".chat-follow");
+  await page.locator(".chat-follow button").first().click(); // "Onde eu consigo economizar este mês?"
+  await page.locator(".chat > .msg-user").first().waitFor();
+  await passouATrava(page);
+  const rolou = await fileira.evaluate((ul) => { ul.scrollLeft = ul.scrollWidth; return ul.scrollLeft; }); // quem rolou até o fim para ler as outras
+  await page.locator(".chat-follow button").nth(1).click(); // a do meio: a fileira seguinte também rola de lado
+  await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-user").length === 2);
+  await page.waitForTimeout(50);
+  const r = await fileira.evaluate((ul) => ({ left: ul.scrollLeft, rola: ul.scrollWidth > ul.clientWidth }));
+  await ctx.close();
+  assert.ok(rolou > 0 && r.rola, `o caso só mede com as duas fileiras roláveis (rolou ${rolou}, rola ${r.rola})`);
+  assert.equal(r.left, 0, `a fileira nova herdou scrollLeft ${r.left} e esconde as primeiras perguntas`);
+  assert.deepEqual(erros, []);
+});
+
 for (const [width, height] of [[1280, 800], [375, 812]]) {
   test(`${width}: o anel de foco da pílula cabe na fileira (o overflow não o corta)`, async () => {
     const { ctx, page } = await abrir({ width, height });
