@@ -300,7 +300,7 @@ it("X enquanto o limite do plano é lido (candidato (b) + outro banco coletando)
   expect(gets() - g0).toBe(0); expect(haptico("warning") + haptico("success")).toBe(0);
 });
 
-it("(a0) que termina com problema também é calada: o texto do servidor aparece, sem aviso() nem anúncio", async () => {
+it("(a0) que termina com problema também é calada: o aviso curto do banco aparece, sem aviso() nem anúncio", async () => {
   srv.estado = "updating"; srv.snapshot = () => { if (srv.leituras.length >= 2) { srv.estado = "partial"; srv.detalhe = "Parte dos dados ainda não veio"; srv.sync = NOVO; } return resposta(200, { ok: true, connections: [con()] }); };
   await abrir(); expect(screen.getByText(SOZINHO)).toBeTruthy(); await avancar(10_000);
   await waitFor(() => expect(screen.getByText(PARCIAL_TEXTO)).toBeTruthy()); expect(haptico("warning") + haptico("success")).toBe(0); expect(anuncios()).toEqual([]);
