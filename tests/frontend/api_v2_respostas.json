@@ -5860,6 +5860,233 @@
       ]
     }
   },
+  "orcamento_domestico": {
+    "padrao": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "5000.00",
+        "origem": "calculada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "55.00",
+          "teto": "2750.00",
+          "gasto": "2000.00",
+          "restante": "750.00",
+          "usado_pct": "72.73"
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "5.00",
+          "teto": "250.00",
+          "gasto": "310.00",
+          "restante": "-60.00",
+          "usado_pct": "124.00"
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "0.00",
+          "restante": "500.00",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "125.00",
+          "restante": "375.00",
+          "usado_pct": "25.00"
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "500.00",
+          "restante": "0.00",
+          "usado_pct": "100.00"
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "50.00",
+          "restante": "450.00",
+          "usado_pct": "10.00"
+        }
+      ],
+      "total": {
+        "teto": "5000.00",
+        "gasto": "2985.00",
+        "restante": "2015.00",
+        "usado_pct": "59.70"
+      }
+    },
+    "informada": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "1234.56",
+        "origem": "informada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "50.00",
+          "teto": "617.28",
+          "gasto": "600.00",
+          "restante": "17.28",
+          "usado_pct": "97.20"
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "10.00",
+          "restante": "113.46",
+          "usado_pct": "8.10"
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        }
+      ],
+      "total": {
+        "teto": "1234.58",
+        "gasto": "610.00",
+        "restante": "624.58",
+        "usado_pct": "49.41"
+      }
+    },
+    "renda_zero": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "0.00",
+        "origem": "informada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "55.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "5.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        }
+      ],
+      "total": {
+        "teto": "0.00",
+        "gasto": "0.00",
+        "restante": "0.00",
+        "usado_pct": null
+      }
+    }
+  },
   "simulador": {
     "compra": {
       "hoje": "2026-10-06",
