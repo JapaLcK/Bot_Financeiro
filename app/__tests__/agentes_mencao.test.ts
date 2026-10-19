@@ -16,6 +16,8 @@ it.each([
   ["@Xerife", "xerife", ""],
   ["@Xerife ?", "xerife", ""],
   ["한국어 @Xerife oi", "xerife", "한국어 oi"], // Hangul vira jamos no NFD: os índices não podem andar
+  ["@Repo\u0301rter resumo", "reporter", "resumo"], // nome colado em NFD: a marca solta some na comparação
+  ["한국어 @Repo\u0301rter oi", "reporter", "한국어 oi"],
 ])("mencaoDe(%j)", (texto, kind, resto) => { expect(mencaoDe(texto, cat())).toEqual({ kind, texto: resto }); });
 it.each(["x@gmail.com", "@Xerifex oi", "@Fulano oi", "sem arroba"])("mencaoDe(%j) é nula", (t) => { expect(mencaoDe(t, cat())).toBeNull(); });
 it("agente indisponível não vira menção quando o catálogo é dado", () => {
@@ -24,7 +26,7 @@ it("agente indisponível não vira menção quando o catálogo é dado", () => {
 });
 it("tokenEm: só o @ no começo ou depois de espaço, até o cursor", () => {
   expect(tokenEm("@rep", 4)).toEqual({ ini: 0, q: "rep" });
-  expect(tokenEm("oi @Repó", 8)).toEqual({ ini: 3, q: "repo" });
+  expect(tokenEm("oi @Repó", 8)).toEqual({ ini: 3, q: "repo" }); expect(tokenEm("oi @Repo\u0301", 9)).toEqual({ ini: 3, q: "repo" });
   expect(tokenEm("x@gmail", 7)).toBeNull(); expect(tokenEm("@rep oi", 7)).toBeNull(); expect(tokenEm("@rep oi", 4)).toEqual({ ini: 0, q: "rep" });
 });
 it("acessoDe: upgrade, no_energy, ready, activate e indisponível", () => {
