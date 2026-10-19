@@ -11,9 +11,9 @@
 //    ou em Bancos.tsx `aberto={menu === c.id}` por `aberto={menu !== null}` (vários menus abertos juntos).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navegador } from "./_guia.mjs";
+import { abrir, navegador } from "./_guia.mjs";
 import { ate } from "./_conta_perfil.mjs";
-import { ERRO_500, con, item, refreshDe } from "./_bancos.mjs";
+import { ERRO_500, con, item, refreshDe, semReticencias, servidorBancos } from "./_bancos.mjs";
 import { aviso, card, confirmar, dlg, manter, esperaCards } from "./_bancos_desconectar.mjs";
 import { depoisDo, fechaWidget, saves, sucesso, telaRecon, tokens, widgetAberto } from "./_bancos_reconectar.mjs";
 
@@ -136,10 +136,17 @@ test("SYN banco ainda coletando (still_updating): a rodada acompanha, os botões
   assert.equal(r.posts, 1);
 });
 
-test("SYN a página NÃO parte rodada sozinha: com um banco em 'updating' (que no aviso do topo seria acompanhado) os botões seguem livres e nada de texto", async () => {
-  const { ctx, page, srv } = await telaRecon({ conexoes: [con(11, "Nubank", "updating", "Atualizando…"), con(12, "Inter")] }, SEM_VAGAS);
-  await page.waitForTimeout(1000);
-  const r = { botoes: await estadoDosBotoes(page), texto: await page.locator(".banco-sync").count(), posts: srv.posts.length };
+test("SYN a página NÃO parte rodada sozinha: com todos os bancos em 'updating' (no aviso do topo uma leitura nova os acompanha sem clique) os botões seguem livres e nada de texto", async () => {
+  const s = servidorBancos({ conexoes: [con(11, "Nubank", "updating", "Atualizando…"), con(12, "Inter", "updating", "Atualizando…")], bancos: "padrao" });
+  const { ctx, page } = await abrir({ guia: "concluido", rota: "/conta/bancos", antes: s.antes });
+  await esperaCards(page, 2);
+  await semReticencias(page);
+  // O relógio do harness é fixo, e a (a0) só parte de uma leitura POSTERIOR ao marco: anda o relógio e faz o "onConnected" do seletor reler o snapshot (invalida as consultas sem mexer no marco).
+  await page.clock.setFixedTime(new Date("2026-10-02T15:05:00Z"));
+  await page.evaluate(() => window.__of.cb.onConnected({}));
+  await ate(page, () => s.reqs.filter((q) => q === "/open-finance/7").length >= 2, "a releitura do snapshot");
+  await page.waitForTimeout(800);
+  const r = { botoes: await estadoDosBotoes(page), texto: await page.locator(".banco-sync").count(), posts: s.posts.length };
   await ctx.close();
   assert.deepEqual(r, { botoes: Array(2).fill(["false", null, "Sincronizar", "Sincronizar todos os bancos"]), texto: 0, posts: 0 });
 });

@@ -57,7 +57,9 @@ Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o
 1. **Topo e barra por banco: removidos no redesenho B (2026-10-19).** A lista não mostra valor nenhum (nem `total` do topo, nem
    selos de motivos do topo, nem a barra por banco, nem o total de cada banco): os números moram só no detalhe. Saíram do
    código `barraDosBancos` e o resto que só servia a eles. Decisão do dono (mockup B): menos texto e menos dado na lista.
-2. **Redesenho B:** título "Bancos conectados" + "Gerencie as conexões via Open Finance." e o "+" rosa no topo; os bancos
+2. **Redesenho C (2026-10-19, referência do dono; substitui o B):** uma coluna de cards (resumo, "Meus bancos conectados", "Disponíveis para conectar", segurança); em cada banco "Detalhes", "Sincronizar"
+   (todos os bancos, a rodada do "Atualizar agora") e o menu "…" (Reconectar, Desconectar); título "Gerencie suas conexões via Open Finance."; o "+" redondo do topo e as duas colunas saíram. Detalhe em `docs/CLAUDE.md` ("Tela Bancos conectados do /painel"). O texto abaixo sobre o B vale onde não for contrariado por este item.
+2b. **Redesenho B:** título "Bancos conectados" + "Gerencie as conexões via Open Finance." e o "+" rosa no topo; os bancos
    num único grupo (`.banco-grupo`: uma superfície `--plane-1`, cantos de 16 px, divisor de 0,5 px entre as linhas, sem card por banco).
 3. **Vagas do plano:** "2 de 3 bancos" de `/limite` (`em_uso`, `of_banks_max`). `of_banks_max: null` = nada (sem teto).
    Com `pode_adicionar: false`, mostra a `message` do servidor no lugar do botão de conectar.

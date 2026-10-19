@@ -1,4 +1,4 @@
-// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado e os bancos disponíveis para conectar.
+// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado, os bancos disponíveis para conectar e o "quando" da última sincronização.
 import type { Bancos } from "./api-v2.gen";
 import { FUSO, instante } from "./v2";
 

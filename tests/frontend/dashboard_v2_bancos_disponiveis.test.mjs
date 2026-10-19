@@ -2,7 +2,7 @@
 // /open-finance-connect.js, aqui em STUB: `window.__of` registra init/open/destroy). Plano: docs/plano-bancos-conectados-painel.md.
 //   · "já conectado" é pelo ID do conector (institution_id do snapshot × id do /connectors), nunca pelo nome;
 //   · os populares em ordem fixa, no máximo 5, mais "Ver todos os bancos"; a seção só existe com vaga (`pode`), e falha do /connectors a esconde sozinha;
-//   · o "+" abre o seletor com `open({id, name})`; sem o script, o href do /settings segue valendo.
+//   · o "Conectar" de cada um abre o seletor com `open({id, name})`; sem o script, o href do /settings segue valendo.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { abrir, navegador } from "./_guia.mjs";
