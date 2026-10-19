@@ -1772,7 +1772,7 @@ Callbacks do host: `onOpen()` quando o widget foi iniciado (síncrono, não quan
 vem do servidor, ausente no erro do SDK); `onClose()` só depois de o `/pluggy-item` terminar, e
 SÓ na reconexão (o picker chama na hora, como sempre). `itemId` vazio ou não-string => `onError`,
 nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados sem
-callback (`reconnect()` devolve `false`; o `onError`/`onClose`/init rejeitado de um widget VELHO (já nasceu uma conexão mais nova, pelo tempo de vida, não pela guarda `ocupado`) não chegam ao host: só a mais nova é dona dele. O `onSuccess` de qualquer widget ainda salva o item, mas o `onConnected` dele cai na sessão atual (limite declarado); guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
+callback (`reconnect()` devolve `false`; o `onError`/`onClose`/init rejeitado de um widget VELHO (já nasceu uma conexão mais nova, pelo tempo de vida, não pela guarda `ocupado`) não chegam ao host: só a mais nova é dona dele. O `onSuccess` de qualquer widget ainda salva o item, mas o de um widget VELHO o faz em silêncio (nem `onConnected`, nem `notify`, nem `onError` do save chegam ao host): o item salvo por ele só aparece na lista na próxima releitura (a da conexão mais nova ao terminar, ou ao recarregar) (limite declarado); guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
 Pluggy não garante `onClose` depois dele), no `init()` do SDK que rejeita (`onError` e em seguida
 `onClose()`) e no `destroy()`), e depois do `destroy()` nenhum callback do host dispara. Limites:
 depois de um `onError` do SDK com o widget ainda na tela, um novo clique abre outro widget (como antes

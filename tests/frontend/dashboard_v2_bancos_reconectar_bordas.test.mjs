@@ -20,6 +20,7 @@
 //  - E16 (toast do seletor): tirar `setErroOF("");` do cleanup do efeito do seletor. E17: tirar `pendente.current = null;` de `reconectarBanco` (um `onClose` tardio da 1ª sessão puxa o foco para a linha depois que a 2ª já terminou).
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
 //  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
+//  - E20 (onSuccess de widget velho): em frontend/open-finance-connect.js, `fala` (no onSuccess de openWidget) por `vivo()` (o save falho de A termina a reconexão B).
 //  - E11 (onClose antes do onSuccess): em `iniciar`, `onClose`, nada a desligar: o positivo é o módulo real (o save acontece e o `onConnected` tardio relê).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -538,4 +539,23 @@ test("E19b depois do save de B (a guarda do módulo já voltou a null) o onClose
   await ctx.close();
   assert.deepEqual(meio, { toasts: 0, foco: "page-title" });
   assert.ok(fim, "o onClose de B devolve o foco à linha");
+});
+
+test("E20 o save FALHO do onSuccess tardio do widget velho A NÃO termina a reconexão B: o 'Reconectando…' fica e o sucesso de B é dele", async () => {
+  const { ctx, page } = await telaRecon({ itemRes: (r) => (r.request().postData().includes("item-11") ? JSON_ERRO(500, "boom")(r) : r.fulfill({ json: { ok: true } })) });
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  await page.evaluate(() => { window.__w1 = window.__w; });
+  await erroDoSdk(page); // A falha (o widget segue na tela)
+  await alertaCom(page, "Não deu para concluir");
+  await page.evaluate(() => document.getElementById("pluggy-falso").remove());
+  await reconectar(page, "Inter"); // B começa
+  await page.waitForFunction(() => window.__n === 2, null, { timeout: 8000 });
+  await page.evaluate(() => { window.__w1.onSuccess({ item: { id: "item-11" } }); }); // o sucesso tardio de A, com o save falhando
+  await page.waitForTimeout(800);
+  const meio = { aviso: await aviso(page).innerText(), alertas: await alerta(page).count(), toasts: await page.locator(".banco-toast").count() };
+  await sucesso(page, "item-12");
+  await aviso(page).filter({ hasText: "Inter reconectado." }).waitFor({ state: "attached", timeout: 5000 });
+  await ctx.close();
+  assert.deepEqual(meio, { aviso: "Reconectando Inter…", alertas: 0, toasts: 0 });
 });

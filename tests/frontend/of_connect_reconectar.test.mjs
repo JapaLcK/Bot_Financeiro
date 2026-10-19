@@ -25,7 +25,8 @@
  *  - A24 (reconnect ocupado devolve false): trocar `if (ocupado) return false;` por `if (ocupado) return;` no topo de reconnect().
  *    O positivo é o mesmo caso: a 1ª chamada NÃO devolve `false`, e depois do onClose a seguinte também não.
  *  - A25 (widget velho): tirar `|| velha()` do `onClose` ou do `onError` de openWidget() (cada um deixa o A25 vermelho); A25c: trocar `ultima !== sessao` por
- *    `!!ocupado && ocupado !== sessao` (a guarda volta a null no fim do save de B e o callback tardio de A passa); A25d: tirar `|| velha()` do `.then(null, ...)` do init. O positivo é o A25b: sem outra conexão o onClose/onError do A chegam.
+ *    `!!ocupado && ocupado !== sessao` (a guarda volta a null no fim do save de B e o callback tardio de A passa); A25d: tirar `|| velha()` do `.then(null, ...)` do init.
+ *  - A25e/A25f (onSuccess de widget velho em silêncio): em openWidget() trocar `const fala = function () { return vivo() && !velha(); };` por `... return vivo(); ...`. O positivo é o A25b: sem outra conexão o onClose/onError do A chegam.
  *
  * Rodar: node --test tests/frontend/of_connect_reconectar.test.mjs
  */
@@ -100,6 +101,7 @@ async function abrir({ token = () => json({ accessToken: "tok-123" }),
       onError: (m, s) => window.__ev.push(["error", m, s]),
       // Com argumento vira ["close", ...args]: é como o teste vê um onClose que vaza o valor do .then.
       onClose: (...a) => window.__ev.push(a.length ? ["close", ...a] : "close"),
+      notify: (m, t) => (window.__nt ||= []).push([m, t]),
     });
   });
   page.__ctx = ctx; page.__posts = posts;
@@ -568,5 +570,44 @@ test("A25d o init de A que rejeita DEPOIS de B ter nascido não chega ao host (n
   await page.evaluate(() => window.__rej(new Error("init de A")));
   await sleep(300);
   assert.deepEqual(await tipos(page), ["open", "connected", "open"]);
+  await page.__ctx.close();
+});
+
+/** A emite onError (a guarda é solta), B começa; devolve a página com `window.__wA` = o widget de A. */
+async function aErroDepoisB(opcoes) {
+  const page = await abrir(opcoes);
+  await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  await page.evaluate(() => { window.__wA = window.__w; window.__w.onError({ message: "x" }); });
+  await waitFor(async () => (await tipos(page)).includes("error"));
+  await page.evaluate(() => { window.__w = null; window.PBOpenFinance.reconnect("item-12"); });
+  await widgetPronto(page);
+  return page;
+}
+const itens = (page) => page.__posts.filter((p) => p[0] === "item");
+
+test("A25e o onSuccess TARDIO do widget velho A (B já nasceu) salva o item, mas o host não recebe onConnected nem notify; o do widget mais novo continua falando", async () => {
+  const page = await aErroDepoisB();
+  await page.evaluate(() => { window.__wA.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(() => itens(page).length === 1);
+  await sleep(300);
+  assert.match(itens(page)[0][2], /item-11/);
+  assert.deepEqual(await tipos(page), ["open", "error", "open"]);
+  assert.deepEqual(await page.evaluate(() => window.__nt || []), []);
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-12" } }); }); // positivo: o widget mais novo
+  await waitFor(async () => (await tipos(page)).includes("connected"));
+  assert.deepEqual(await page.evaluate(() => window.__nt), [["Banco conectado com sucesso!", "ok"]]);
+  await page.__ctx.close();
+});
+
+test("A25f o onSuccess TARDIO de A com o save FALHANDO (402) não chega ao host como onError e a conexão B segue em curso; o do widget mais novo continua chegando", async () => {
+  const page = await aErroDepoisB({ item: () => json({ detail: { code: "OF_BANK_LIMIT", message: "Limite." } }, 402) });
+  await page.evaluate(() => { window.__wA.onSuccess({ item: { id: "item-11" } }); });
+  await waitFor(() => itens(page).length === 1);
+  await sleep(300);
+  assert.deepEqual(await tipos(page), ["open", "error", "open"]); // o único "error" é o do próprio onError de A
+  assert.equal(await page.evaluate(() => window.PBOpenFinance.reconnect("item-13")), false); // B continua dona da guarda
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-12" } }); }); // positivo: o widget mais novo, save falhando
+  await waitFor(async () => (await tipos(page)).filter((t) => t === "error").length === 2);
   await page.__ctx.close();
 });
