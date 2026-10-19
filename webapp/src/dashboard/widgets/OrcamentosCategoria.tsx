@@ -9,7 +9,7 @@ import { DEMO, ErroApi, orcamentosCategoriaQuery } from "../lib/v2";
 import { Frame } from "../parts/Frame";
 import { IconeCategoria } from "../parts/IconeCategoria";
 import { CHAVE_ESCRITA, OrcamentoCategoriaForm } from "../parts/OrcamentoCategoriaForm";
-import { Bloqueio } from "./OrcamentoDomestico";
+import { Bloqueio } from "../parts/Bloqueio";
 
 const pctTxt = (v: string) => `${Math.round(Number(v))}%`;
 const largura = (v: string) => Math.min(Math.max(Number(v), 0), 100);
@@ -85,7 +85,7 @@ export function OrcamentosCategoriaPainel() {
   return (
     <div className="panel span-12">
       <Frame id="orcamentos-categoria" title={d ? `Orçamentos de ${mesAno(d.mes)}` : "Orçamentos do mês"} real>
-        {e4 ? <Bloqueio e={e4} pro="Os Orçamentos por categoria não estão no seu plano." />
+        {e4 ? <Bloqueio e={e4} convite="Os Orçamentos por categoria não estão no seu plano." o="os orçamentos por categoria" />
           : !d ? (q.isError && !q.isFetching
             ? (
               <div className="empty" role="alert">

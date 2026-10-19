@@ -437,6 +437,13 @@
     "nunca_lida": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"] },
     "nenhum_investimento": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["nenhum_investimento"] }
   },
+  "progresso_milhao": {
+    "padrao": { "patrimonio": "48250.37", "motivos": [] },
+    "sem_banco": { "patrimonio": "300.00", "motivos": ["sem_banco_conectado"] },
+    "passou": { "patrimonio": "1250000.00", "motivos": [] },
+    "pouco": { "patrimonio": "500.00", "motivos": [] },
+    "com_motivos": { "patrimonio": "48250.37", "motivos": ["banco_desatualizado", "manual_e_banco", "caixinha_espelhada_fora"] }
+  },
   "previsao": {
     "plus30": {
       "hoje": "2026-10-06",
