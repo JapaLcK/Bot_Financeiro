@@ -18,8 +18,9 @@ import { DEMO, ErroApi, contaQuery, meQuery } from "../lib/v2";
 import { atualizarBancos, comPrazo, conexoesQuery, lerConexoes, limiteQuery, uidValido } from "../conta/api";
 import { PRAZO_LEITURA_MS, PRAZO_POST_MS, acompanharLista, atualizar, classificar, OCIOSO, type AcaoBanco, type Deps, type EstadoAtualizar } from "../lib/atualizarBanco";
 
-// Rede, tempo limite, 5xx e 429 só seguem a cadência; o resto (4xx, contrato) encerra a rodada.
-const transitoria = (e: unknown) => !(e instanceof ErroApi) || e.status === 0 || e.status >= 500 || e.status === 429;
+// Rede, tempo limite, 5xx e 429 só seguem a cadência; o resto (4xx, contrato) encerra a rodada. Rede é `ErroApi(0)` e o corte é `AbortError` (`chamar`);
+// qualquer outra exceção é o decodificador recusando a forma da resposta (o `ContratoInvalido` do app), que não é transitória.
+const transitoria = (e: unknown) => e instanceof ErroApi ? e.status === 0 || e.status >= 500 || e.status === 429 : (e as Error | null)?.name === "AbortError";
 // 401 e 402 já foram para o portão (`falhou`): a rodada para em silêncio.
 const silencioso = (e: unknown) => e instanceof ErroApi && (e.status === 401 || e.status === 402);
 

@@ -124,7 +124,9 @@ test("A5: com o /limite ainda pendurado, o aviso (b) mostra o corpo de LEITURA (
   assert.match(depois, /Reconectar Nubank/);
 });
 
-for (const [nome, status, segue] of [["500", 500, true], ["429", 429, true], ["404", 404, false], ["403", 403, false]]) {
+// "contrato": JSON válido com forma errada (`connections` objeto) — o decodificador lança TypeError, que encerra como no app (`ContratoInvalido`), nunca segue a cadência.
+const contrato = (r) => r.fulfill({ json: { ok: true, connections: { x: 1 } } });
+for (const [nome, falha, segue] of [["500", erro(500), true], ["429", erro(429), true], ["404", erro(404), false], ["403", erro(403), false], ["contrato", contrato, false]]) {
   test(`M20 (GET ${nome} no acompanhamento): ${segue ? "segue a cadência (5, 15 s) e conclui quando o servidor volta" : "encerra a rodada com a falha e nenhum GET depois"}`, async () => {
     const { ctx, page, abrir, botao, s } = await abre();
     s.refresh = (r) => r.fulfill({ json: refreshDe([item("item-11", "updated", true)], [UPDATING()]) });
@@ -134,7 +136,7 @@ for (const [nome, status, segue] of [["500", 500, true], ["429", 429, true], ["4
     await botao.click();
     await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("O banco está atualizando"));
     const t0 = await instantePost(page), base = await marca(page);
-    s.falha = erro(status);
+    s.falha = falha;
     await avancar(page, 6_000);
     const corpo5 = await texto(page);
     if (segue) {
