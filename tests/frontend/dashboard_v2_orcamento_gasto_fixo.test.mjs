@@ -118,6 +118,35 @@ test("com o POST em voo nada fecha o formulário e só sai um POST; resolvido, o
   assert.equal(pedidos, 1);
 });
 
+// O gasto fixo é do Essencial e o orçamento é do Plus: o botão e o formulário não dependem da leitura do orçamento.
+const SITUACOES = [
+  ["Essencial (GET do orçamento em 403 pro_required, com o convite do plano)", { plano: "essencial" }, null],
+  ["GET do orçamento em 500", {}, { status: 500, json: { error: { code: "internal_error", message: "x" } } }],
+  ["GET do orçamento ainda carregando", {}, "pendente"],
+];
+for (const [nome, opts, get] of SITUACOES) {
+  test(`${nome}: "Gasto fixo" aparece, "Editar percentuais" não, e o cadastro funciona`, async () => {
+    const p = await abrirPainel(browser, { espera: null, ...opts });
+    const { ctx, page } = p;
+    const posts = [];
+    await ctx.route("**/api/v2/gastos-fixos", (r) => { posts.push(r.request().postData()); return r.fulfill({ json: CRIADO }); });
+    if (get) await ctx.route("**/api/v2/orcamento-domestico*", (r) => r.request().method() === "GET" ? (get === "pendente" ? new Promise(() => {}) : r.fulfill(get)) : r.fallback());
+    await p.ir("/orcamento");
+    const botao = page.getByRole("button", { name: "Gasto fixo", exact: true });
+    await botao.waitFor();
+    if (!get) await page.getByRole("link", { name: "Ver planos" }).waitFor(); // o Bloqueio do orçamento
+    const editar = await page.getByRole("button", { name: "Editar percentuais" }).count();
+    await abrirForm(page);
+    await preenche(page);
+    await cadastrar(page).click();
+    await page.locator("dialog.orc-form").waitFor({ state: "detached" });
+    await page.getByRole("status").filter({ hasText: "Gasto fixo cadastrado" }).waitFor();
+    await ctx.close();
+    assert.equal(editar, 0);
+    assert.equal(posts.length, 1);
+  });
+}
+
 test("403 pro_required mostra o convite do plano no formulário", async () => {
   const e = RESPOSTAS.erros["403_pro_required"];
   const { ctx, page } = await aberto({}, { status: e.status, json: e.body });

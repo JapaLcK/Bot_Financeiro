@@ -21,23 +21,19 @@ import { CHAVE_ESCRITA, OrcamentoForm, useEscrita, type Modo } from "../parts/Or
 function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: string; busy: boolean; antigo: ReactNode; slot: HTMLElement | null }) {
   const [aberto, setAberto] = useState<Modo | null>(null);
   const [poteAberto, setPoteAberto] = useState<string | null>(null);
-  const [gastoFixo, setGastoFixo] = useState<"form" | "feito" | null>(null);
   const escrita = useEscrita(mes);
   const trava = useIsMutating({ mutationKey: CHAVE_ESCRITA }) > 0;
   const sem = d.total.usado_pct === null;
   const informada = d.renda.origem === "informada";
   const doModal = d.potes.find((p) => p.chave === poteAberto);
-  const avisos = antigo || gastoFixo === "feito" || escrita.isError || sem;
+  const avisos = antigo || escrita.isError || sem;
   return <div className="orc-conteudo" aria-busy={busy}>
-    {/* Os dois botões do cabeçalho da página (pages.tsx dá o lugar); no protótipo não há escrita. */}
-    {!DEMO && slot && createPortal(<>
-      <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setGastoFixo("form")}><i className="ph ph-plus" aria-hidden="true" /> Gasto fixo</button>
-      <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setAberto("potes")}><i className="ph ph-sliders-horizontal" aria-hidden="true" /> Editar percentuais</button>
-    </>, slot)}
+    {/* "Editar percentuais" no cabeçalho da página (pages.tsx dá o lugar); no protótipo não há escrita. */}
+    {!DEMO && slot && createPortal(
+      <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setAberto("potes")}><i className="ph ph-sliders-horizontal" aria-hidden="true" /> Editar percentuais</button>, slot)}
     {avisos && (
       <div className="span-12 orc-avisos">
         {antigo}
-        {gastoFixo === "feito" && <p role="status" className="orc-dica">Gasto fixo cadastrado. Ele entra na Previsão.</p>}
         {escrita.isError && <p role="alert" className="warn">{escrita.erro}</p>}
         {sem && <p className="orc-dica" role="status">Sem renda neste mês: informe a renda para dividir nos potes.</p>}
       </div>
@@ -61,7 +57,6 @@ function Corpo({ d, mes, busy, antigo, slot }: { d: OrcamentoDomestico; mes: str
     </div>
     <PotesTabela potes={d.potes} abrir={setPoteAberto} />
     {doModal && <PoteLancamentos p={doModal} mes={mes} guarda={doModal.guardado} fechar={() => setPoteAberto(null)} />}
-    {gastoFixo === "form" && <GastoFixoForm feito={() => setGastoFixo("feito")} fechar={() => setGastoFixo((g) => g === "form" ? null : g)} />}
     {aberto && <OrcamentoForm key={aberto} modo={aberto} mes={mes} d={d} fechar={() => setAberto(null)} />}
   </div>;
 }
@@ -72,16 +67,23 @@ export function OrcamentoPainel({ s, slot }: { s: DashState; slot: HTMLElement |
   const e = q.error instanceof ErroApi ? q.error : null;
   const e4 = e && e.status >= 400 && e.status < 500 ? e : null;
   const d = !e4 ? q.data : undefined;
+  // O gasto fixo tem plano próprio (Essencial, e o orçamento é Plus): fica de pé com o orçamento carregando, com erro ou bloqueado.
+  const [gastoFixo, setGastoFixo] = useState<"form" | "feito" | null>(null);
+  const gasto = !DEMO && <>
+    {slot && createPortal(<button type="button" className="btn btn-ghost" onClick={() => setGastoFixo("form")}><i className="ph ph-plus" aria-hidden="true" /> Gasto fixo</button>, slot)}
+    {gastoFixo === "feito" && <div className="span-12 orc-avisos"><p role="status" className="orc-dica">Gasto fixo cadastrado. Ele entra na Previsão.</p></div>}
+    {gastoFixo === "form" && <GastoFixoForm feito={() => setGastoFixo("feito")} fechar={() => setGastoFixo((g) => g === "form" ? null : g)} />}
+  </>;
   if (d) {
-    return <Corpo key={mes} d={d} mes={mes} busy={q.isFetching} slot={slot} antigo={q.isRefetchError && (
+    return <>{gasto}<Corpo key={mes} d={d} mes={mes} busy={q.isFetching} slot={slot} antigo={q.isRefetchError && (
       <div className="prev-antigo" role="status">
         <p>Não deu para atualizar. Mostrando o que carregou antes.</p>
         <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
       </div>
-    )} />;
+    )} /></>;
   }
   return (
-    <div className="panel span-12">
+    <>{gasto}<div className="panel span-12">
       <Frame id="orcamento" title={`Potes de ${mesAno(mes)}`} real>
         {e4 ? <Bloqueio e={e4} convite="O Orçamento doméstico é do Plus e do Pro." o="o orçamento" />
           : q.isError && !q.isFetching
@@ -93,6 +95,6 @@ export function OrcamentoPainel({ s, slot }: { s: DashState; slot: HTMLElement |
             )
             : <p role="status" className="faint">Carregando…</p>}
       </Frame>
-    </div>
+    </div></>
   );
 }
