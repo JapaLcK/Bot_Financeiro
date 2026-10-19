@@ -35,7 +35,6 @@ function PilhaApp() {
       <Stack.Screen name="open-finance-volta" />
       <Stack.Screen name="configuracoes" options={{ headerShown: true, title: "Configurações", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
-      <Stack.Screen name="teste-pluggy" options={{ headerShown: true, title: "Teste Open Finance", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
       <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
       <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />

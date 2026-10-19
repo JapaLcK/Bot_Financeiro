@@ -95,16 +95,6 @@ it.each([
   expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });
 
-it.each(["Retomar retorno do banco", "Conectar para testar", "Ver bancos conectados"])("diagnóstico Retomar antes de %s guarda uma recuperação", async (irma) => {
-  servidor(); const r = renderRouter("./app", { initialUrl: "/teste-pluggy" });
-  await waitFor(() => expect(screen.getByText("Servidor: 2 conexão(ões)")).toBeTruthy());
-  const a = screen.getByRole("button", { name: "Retomar retorno do banco" }); const b = screen.getByRole("button", { name: irma });
-  const antes = gets();
-  await act(async () => { fireEvent.press(a); fireEvent.press(b); await drenar(); });
-  expect(pilha(r)?.map((p) => p.nome)).toEqual(["index", "teste-pluggy", "open-finance-volta"]);
-  expect(gets() - antes).toBe(1); expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
-});
-
 it("Acompanhar antes de Reconectar irmão não emite token por trás da recuperação", async () => {
   servidor(); const r = renderRouter("./app", { initialUrl: "/conexoes" });
   await waitFor(() => expect(screen.getAllByRole("button", { name: "Acompanhar sincronização" })).toHaveLength(2));
@@ -178,7 +168,7 @@ it("observador B pausa/refoca sem consumir tentativa A e mostra resultado própr
   expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });
 
-it.each([["/", "Retomar conexão"], ["/teste-pluggy", "Retomar retorno do banco"]])("foco em %s libera reserva para nova recuperação após back", async (origem, rotulo) => {
+it.each([["/", "Retomar conexão"]])("foco em %s libera reserva para nova recuperação após back", async (origem, rotulo) => {
   servidor(); const r = renderRouter("./app", { initialUrl: origem });
   await apertar(rotulo); await waitFor(() => expect(screen.getByRole("button", { name: "Sair" })).toBeTruthy());
   const marcador = await lerTentativaBancaria(1);
@@ -191,7 +181,7 @@ it.each([["/", "Retomar conexão"], ["/teste-pluggy", "Retomar retorno do banco"
   expect(posts()).toHaveLength(0); expect(tokens()).toHaveLength(0);
 });
 
-it.each([["/", "Retomar conexão"], ["/teste-pluggy", "Retomar retorno do banco"], ["/conexoes", "Acompanhar sincronização"], ["/conectar-banco", "Ver meus bancos"]])("falha injetada no push de %s libera reserva para próximo push real", async (origem, rotulo) => {
+it.each([["/", "Retomar conexão"], ["/conexoes", "Acompanhar sincronização"], ["/conectar-banco", "Ver meus bancos"]])("falha injetada no push de %s libera reserva para próximo push real", async (origem, rotulo) => {
   servidor(); renderRouter("./app", { initialUrl: origem });
   await waitFor(() => expect(screen.getAllByRole("button", { name: rotulo })[0]).toBeEnabled());
   jest.spyOn(router, "push").mockImplementationOnce(() => { throw new Error("falha de navegação"); });

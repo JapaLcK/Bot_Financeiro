@@ -21,7 +21,6 @@ export default function Configuracoes() {
       <ListRow titulo="Segurança" chevron onPress={() => router.push("/seguranca")} />
     </GrupoDeLinhas>
     <GrupoDeLinhas>
-      <ListRow titulo="Teste Open Finance" chevron onPress={() => router.push("/teste-pluggy")} />
       <ListRow titulo="Falar com o suporte" trailing={<Icone nome="ArrowSquareOut" tamanho={20} tom="inkFaint" />} onPress={() => { void Linking.openURL(`${baseUrl()}/suporte`).catch(() => setErro("Não conseguimos abrir o suporte. Tente de novo.")); }} />
     </GrupoDeLinhas>
     <GrupoDeLinhas>
