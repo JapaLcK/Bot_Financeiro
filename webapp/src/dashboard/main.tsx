@@ -26,11 +26,13 @@ qc.getQueryCache().subscribe((e) => {
   const uid = (e.query.state.data as { user_id?: number } | undefined)?.user_id;
   contaDaSessao(uid);
   if (uid == null) return;
-  if (uidVisto != null && uid !== uidVisto) queueMicrotask(() => {
+  if (uidVisto != null && uid !== uidVisto) { const antigo = uidVisto; queueMicrotask(() => {
     const daConta = (q: { queryKey: readonly unknown[] }) => !ehPerfil(q.queryKey);
     qc.removeQueries({ predicate: (q) => daConta(q) && q.getObserversCount() === 0 });
-    void qc.invalidateQueries({ predicate: daConta });
-  });
+    // A chave que termina no uid antigo (["conta", "bancos", 7]) já é da conta anterior: quem a mostra troca de chave sozinho, e
+    // relê-la agora seria ler a conta anterior com a sessão nova.
+    void qc.invalidateQueries({ predicate: (q) => daConta(q) && q.queryKey[q.queryKey.length - 1] !== antigo });
+  }); }
   uidVisto = uid;
 });
 if (!DEMO) aoConferirConta(() => lerContaFresca(qc)); // toda pergunta nova ao Piggy relê a conta antes de entrar

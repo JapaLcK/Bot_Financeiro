@@ -26,19 +26,20 @@ import { nomeDe } from "./cabecalho";
 import { cotaCheia, useConversa, type Turno } from "./conversaEstado";
 import { MotivoFeedback } from "./motivoFeedback";
 import { WidgetConteudo } from "./widgets";
+import { Autor, ComMencoes, FalaAgente } from "./falaAgente";
 export const OCULTA = "Mensagem oculta enquanto os valores estão privados.";
 /** O servidor usa o negrito do WhatsApp (`*x*`): o conteúdo começa e termina com não-espaço, colado aos asteriscos; dígito colado não vale (`5*3*4` é conta). */
 const NEGRITO = /(?<![0-9*])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![0-9*])/; // `**x**` fica como veio
 export function ComNegrito({ texto }: { texto: string }) {
   return <Texto>{texto.split(NEGRITO).map((parte, i) => i % 2 ? <Texto key={i} style={{ fontFamily: escalas.secao.fontFamily }}>{parte}</Texto> : parte)}</Texto>;
 }
-export function BolhaUsuario({ texto }: { texto: string }) {
+export function BolhaUsuario({ texto, mencoes = false }: { texto: string; mencoes?: boolean }) {
   const { cores } = useTema(); const entrada = useEntrada();
-  return <Animated.View entering={entrada} testID="bolha-usuario" style={{ alignSelf: "flex-end", maxWidth: "80%", backgroundColor: cores.surfaceControl, borderRadius: raio.bloco, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10 }}><Texto>{texto}</Texto></Animated.View>;
+  return <Animated.View entering={entrada} testID="bolha-usuario" style={{ alignSelf: "flex-end", maxWidth: "80%", backgroundColor: cores.surfaceControl, borderRadius: raio.bloco, borderBottomRightRadius: 4, paddingHorizontal: 14, paddingVertical: 10 }}>{mencoes ? <ComMencoes texto={texto} /> : <Texto>{texto}</Texto>}</Animated.View>;
 }
 export function FalaPiggy({ children }: { children: ReactNode }) {
   const entrada = useEntrada();
-  return <Animated.View entering={entrada} testID="fala-piggy" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}>{children}</Animated.View>;
+  return <Animated.View entering={entrada} testID="fala-piggy" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}><Autor />{children}</Animated.View>;
 }
 const FRASES_PIGGY = ["Contando as moedinhas…", "Abrindo o cofrinho…", "Fuçando seus gastos…", "Farejando os números…", "Separando as notinhas…", "Dando uma olhada no extrato…", "Calculando aqui, um segundinho…"];
 /** Em voo, antes do texto: a frase divertida troca a cada 2 s até chegar o 1º passo; depois, só o último passo. O rótulo não anuncia a frase divertida; com passo real, anuncia o passo. */
@@ -115,6 +116,7 @@ export function CardChat({ bloco }: { bloco: BlocoChat }) {
 export function TurnoChat({ turno: t, ultimo, onLayout }: { turno: Turno; ultimo: boolean; onLayout?: (y: number) => void }) {
   const p = usePainel(); const entrada = useEntrada();
   const emVoo = t.resposta === undefined && !t.erro && !t.interrompida, status = emVoo && !t.parcial;
+  if (t.agente && !p.oculto) return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}><BolhaUsuario texto={t.pergunta} mencoes /><FalaAgente turno={t} /></View>; // turno de agente (@): o oculto cai no caminho de sempre, que mostra só OCULTA
   const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto enquanto a resposta chega; enquanto o status os mostra, não duplica; com a resposta pronta, somem
   return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}>
     {p.oculto ? <Texto tom="inkMuted">{OCULTA}</Texto> : <>

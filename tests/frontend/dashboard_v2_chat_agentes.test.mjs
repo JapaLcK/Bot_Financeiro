@@ -881,6 +881,20 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: a releitura da conta falha: a lista do "@" não volta com o catálogo guardado da anterior`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await digitar(page, "@det");
+    await lista(page).waitFor(); // a lista da 42, lida
+    await campo(page).fill("");
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ status: 401, json: { detail: "Não autenticado." } })); // a sessão mudou e a releitura falha
+    const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    await digitar(page, "@det");
+    await relida;
+    await page.waitForTimeout(300);
+    assert.equal(await lista(page).count(), 0, "sem conta conferida, nada da lista da 42");
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

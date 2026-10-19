@@ -34,7 +34,8 @@ export function AskBar({ path }: { path: Path }) {
   const token = tokenEm(text, cursor), quer = /(^|\s)@/.test(text);
   const conta = useQuery({ ...contaQuery, enabled: contaQuery.enabled && quer });
   // Enquanto a conta é relida, nada do cache: se a sessão virou outra noutra aba, a lista mostraria os agentes da anterior.
-  const uid = conta.isFetching ? undefined : conta.data?.user_id;
+  // Nem depois de uma releitura que falhou: o dado guardado ainda seria o da conta anterior (Codex no #1157).
+  const uid = conta.isFetching || conta.isError ? undefined : conta.data?.user_id;
   const dados = useQuery(agentesQuery(uid, quer)).data; // falhou/404/beta desligado: sem dados, a lista não abre e tudo vai ao Piggy
 
   const itens: ItemMencao[] = [];

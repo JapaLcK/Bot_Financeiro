@@ -1,102 +1,105 @@
-// Bancos conectados: o desenho em colunas (conserto do #1142: o `.bancos-cab` ocupava a página inteira, o "+" ficava colado na borda da PÁGINA e a tela larga
-// deixava a metade direita vazia). Com "Disponíveis para conectar" e viewport >= 1101 px: duas colunas, bancos à esquerda e disponíveis à direita, de topos alinhados;
-// abaixo disso (e no celular) uma coluna, conectados primeiro. O "+" do topo alinha com a borda direita da coluna da direita (ou da única coluna), e o rótulo
-// "Disponíveis para conectar" começa onde começa a coluna dele (sem o recuo de 4 px de antes).
-//
-// Controles negativos (desligue, rebuild `npm --prefix webapp run build`, o grupo tem de ficar vermelho; restaure e rebuild): em styles/bancos.css (a) tirar
-// `max-width: 1100px` de `.bancos-cab.duas` (o "+" some longe da coluna da direita), (b) trocar `min-width: 1101px` por `min-width: 5000px` (nunca duas colunas),
-// (f) tirar a regra `.bancos-esq > .banco-rotulo[aria-hidden="true"] { display: none; }` (a linha vazia ocupa 25 px em uma coluna), (c) pôr `padding: 0 4px` de volta em `.banco-rotulo`, (e) trocar `.bancos-esq > .banco-rotulo + * { margin-top: 0; }` por `margin-top: 20px` (o grupo da esquerda desce 20 px e os topos dos grupos não batem), (d) tirar `max-width: 720px` de `.bancos-cab` (o "+" some longe da lista em 1024 e sem "Disponíveis").
-// Positivos: 1024 e 390 seguem em UMA coluna, sem rolagem horizontal; sem "Disponíveis" a coluna de bancos fica sozinha, sem buraco.
+// Bancos conectados: o desenho em UMA coluna de cards (resumo, "Meus bancos conectados", "Disponíveis para conectar" e segurança), igual à referência do dono.
+// Antes eram duas colunas (bancos | disponíveis) a partir de 1101 px; agora o que muda com a largura é o INTERIOR dos cards:
+//   · >= 1181 px (trilho do painel aberto): o resumo em 3 zonas lado a lado; cada banco numa linha só (ladrilho, nome, estado, última atualização, ações), com as colunas alinhadas entre os bancos;
+//   · abaixo disso e no celular: o resumo empilha e cada banco vira blocos (nome/estado em cima; última atualização e ações embaixo); a <= 480 px os botões viram só ícone (44 px, com aria-label).
+// Controles negativos (desligue, rebuild `npm --prefix webapp run build`, o grupo tem de ficar vermelho; restaure e rebuild), em styles/bancos.css: (a) trocar os dois `min-width: 1181px` por `min-width: 5000px`
+// (a tela larga fica empilhada: 1280 e 1440 reprovam), (b) tirar a regra `.banco-bt { display: none; }` de `max-width: 480px` (os rótulos voltam no celular: 390 reprova), (c) tirar
+// `grid-template-areas` da linha de `.banco-card` (as colunas deixam de alinhar entre os bancos no desktop e o bloco do celular desmonta), (d) tirar `.banco-resumo` de `grid-template-columns: ... auto` do bloco >= 1181 (o resumo não vira 3 zonas).
+// Positivos: 1024 e 390 seguem em UMA coluna de cards sem rolagem horizontal, nomes de 70 letras sem espaço também (320, 375, 1280).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { navegador } from "./_guia.mjs";
-import { regiao } from "./_bancos.mjs";
+import { con } from "./_bancos.mjs";
 import { telaRecon } from "./_bancos_reconectar.mjs";
-import { linha, det } from "./_bancos_desconectar.mjs";
 
 const browser = navegador();
 void browser;
 const TELAS = process.env.PB_TELAS; // opcional: pasta para os screenshots
 
 const medidas = (page) => page.evaluate(() => {
-  const r = (e) => { const b = e?.getBoundingClientRect(); return b && { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; };
-  const texto = (e) => { const g = document.createRange(); g.selectNodeContents(e); return g.getBoundingClientRect().left; };
-  const grupo = document.querySelector("ul.banco-grupo[aria-label=Bancos]"), sec = document.querySelector("section.bancos-col"), rotulo = document.querySelector("section.bancos-col .banco-rotulo"), titulo = document.getElementById("page-title"), cols = document.querySelector(".bancos-cols");
-  return { mais: r(document.querySelector(".bancos-cab .banco-mais")), grupo: r(grupo), sec: r(sec), cols: r(cols), vagas: r(document.querySelector(".bancos-esq > .banco-rotulo")), grupoDir: r(sec?.querySelector("ul.banco-grupo")), rotuloTexto: rotulo && texto(rotulo), tituloTexto: texto(titulo), rotuloEsq: rotulo && r(rotulo).left, rotuloTopo: rotulo && r(rotulo).top,
-    ordem: !!sec && !!(grupo.compareDocumentPosition(sec) & Node.DOCUMENT_POSITION_FOLLOWING), largura: [document.documentElement.scrollWidth, innerWidth] };
+  const r = (e) => { const b = e?.getBoundingClientRect(); return b && { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height }; };
+  const cards = [...document.querySelectorAll(".bancos-pag > section")];
+  const linhas = [...document.querySelectorAll(".banco-card")].map((c) => ({ card: r(c), ini: r(c.querySelector(".banco-ini")), nome: r(c.querySelector(".banco-nome")), estado: r(c.querySelector(".banco-estado")), quando: r(c.querySelector(".banco-quando")), acoes: r(c.querySelector(".banco-acoes")),
+    rotulos: [...c.querySelectorAll(".banco-bt")].map((e) => getComputedStyle(e).display), botoes: [...c.querySelectorAll("button")].map((b) => [b.getAttribute("aria-label"), Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)]) }));
+  const zonas = [...document.querySelectorAll(".banco-resumo > *")].map(r);
+  return { cards: cards.map(r), linhas, zonas, saiba: r(document.querySelector(".banco-saiba")), seguro: r(document.querySelector(".banco-seguro")), lateral: [document.documentElement.scrollWidth, innerWidth] };
 });
 const perto = (a, b, rotulo) => assert.ok(Math.abs(a - b) <= 1, `${rotulo}: ${a} × ${b}`);
-async function foto(page, nome) { if (!TELAS) return; mkdirSync(TELAS, { recursive: true }); await page.screenshot({ path: join(TELAS, `${nome}.png`) }); }
+async function foto(page, nome) { if (!TELAS) return; mkdirSync(TELAS, { recursive: true }); await page.screenshot({ path: join(TELAS, `${nome}.png`), fullPage: true }); }
+const tres = () => [con(11, "Nubank"), con(12, "Inter"), con(13, "Itaú", "needs_user_action", "Atenção")];
 
 for (const [width, height] of [[1440, 900], [1280, 800]]) {
-  test(`${width}x${height}: duas colunas (bancos | disponíveis), topos alinhados, o '+' na borda direita da coluna da direita, o detalhe não desloca nada`, async () => {
-    const { ctx, page } = await telaRecon({}, { width, height });
-    await regiao(page).waitFor();
+  test(`${width}x${height}: uma coluna de 4 cards; resumo em 3 zonas lado a lado; cada banco numa linha só, com as colunas alinhadas entre os bancos; 'Saiba mais' na borda direita`, async () => {
+    const { ctx, page } = await telaRecon({ conexoes: tres() }, { width, height });
     const m = await medidas(page);
-    await foto(page, `colunas-${width}`);
-    await linha(page, "Nubank").click();
-    await det(page).waitFor();
-    const depois = await medidas(page);
-    await foto(page, `colunas-${width}-detalhe`);
+    await foto(page, `layout-${width}`);
     await ctx.close();
-    assert.ok(m.grupo.right < m.sec.left, `lado a lado: grupo até ${m.grupo.right}, disponíveis desde ${m.sec.left}`);
-    perto(m.vagas.top, m.rotuloTopo, "topo das colunas (a linha de cima)");
-    perto(m.grupo.top, m.grupoDir.top, "topo do grupo da esquerda × o da direita");
-    perto(m.mais.right, m.sec.right, "+ × borda direita da coluna da direita");
-    perto(m.rotuloEsq, m.sec.left, "rótulo × início da coluna");
-    perto(m.rotuloTexto, m.sec.left, "texto do rótulo × início da coluna");
-    assert.ok(m.grupo.width >= 480 && m.grupo.width <= 720 && m.sec.width >= 340, `larguras ${m.grupo.width} / ${m.sec.width}`);
-    assert.ok(m.ordem, "conectados antes dos disponíveis no DOM");
-    assert.ok(m.largura[0] <= m.largura[1], `rolagem horizontal ${m.largura}`);
-    for (const k of ["grupo", "sec", "mais"]) { perto(depois[k].left, m[k].left, `${k} com o detalhe aberto`); perto(depois[k].top, m[k].top, `${k} topo com o detalhe aberto`); }
+    assert.equal(m.cards.length, 4);
+    for (const c of m.cards) { perto(c.left, m.cards[0].left, "mesma borda esquerda"); perto(c.width, m.cards[0].width, "mesma largura"); }
+    assert.ok(m.cards.every((c, i) => i === 0 || c.top >= m.cards[i - 1].bottom), "empilhados, sem sobreposição");
+    // resumo: as 3 zonas na mesma linha, em ordem, com a de "Conectar banco" à direita
+    assert.equal(m.zonas.length, 3);
+    assert.ok(m.zonas[0].right <= m.zonas[1].left + 1 && m.zonas[1].right <= m.zonas[2].left + 1, `zonas lado a lado: ${JSON.stringify(m.zonas.map((z) => [z.left, z.right]))}`);
+    assert.ok(m.zonas.every((z) => Math.abs(z.top - m.zonas[0].top) <= 1), "zonas na mesma linha");
+    assert.ok(m.cards[0].right - m.zonas[2].right <= 32, "o 'Conectar banco' fica na borda direita do resumo");
+    // cada banco: uma linha só (ordem da esquerda para a direita) e as colunas na mesma posição nos 3 bancos
+    for (const l of m.linhas) {
+      assert.ok(l.card.height < 100, `uma linha só: ${l.card.height}px`);
+      assert.ok(l.ini.right <= l.nome.left + 1 && l.nome.right <= l.estado.left + 1 && l.estado.right <= l.quando.left + 1 && l.quando.right <= l.acoes.left + 1, "ladrilho, nome, estado, atualização e ações, nesta ordem");
+    }
+    for (const k of ["nome", "estado", "quando", "acoes"]) for (const l of m.linhas) perto(l[k].left, m.linhas[0][k].left, `coluna ${k}`);
+    assert.ok(m.linhas.every((l) => l.rotulos.every((d) => d !== "none")), "rótulos Detalhes/Sincronizar visíveis");
+    assert.ok(m.seguro.right - m.saiba.right <= 28, `'Saiba mais' na borda direita: ${m.seguro.right} × ${m.saiba.right}`);
+    assert.ok(m.lateral[0] <= m.lateral[1], `rolagem horizontal ${m.lateral}`);
   });
 }
 
 for (const [width, height] of [[1024, 768], [390, 844]]) {
-  test(`${width}x${height}: uma coluna (conectados e depois disponíveis), o '+' na borda direita da lista, rótulo alinhado ao título, sem rolagem horizontal`, async () => {
-    const { ctx, page } = await telaRecon({}, { width, height });
-    await regiao(page).waitFor();
+  test(`${width}x${height}: uma coluna de 4 cards; resumo e cada banco empilhados; ${width < 481 ? "botões só com ícone (44 px, aria-label)" : "botões com rótulo"}; sem rolagem horizontal`, async () => {
+    const { ctx, page } = await telaRecon({ conexoes: tres() }, { width, height });
     const m = await medidas(page);
-    await foto(page, `coluna-${width}`);
+    await foto(page, `layout-${width}`);
     await ctx.close();
-    assert.ok(m.sec.top >= m.grupo.bottom, `empilhadas: grupo até ${m.grupo.bottom}, disponíveis desde ${m.sec.top}`);
-    perto(m.sec.left, m.grupo.left, "mesma borda esquerda");
-    perto(m.mais.right, m.grupo.right, "+ × borda direita da lista");
-    perto(m.rotuloTexto, m.tituloTexto, "texto do rótulo × texto do título");
-    assert.ok(m.mais.left >= 0 && m.mais.right <= m.largura[1], `+ ${m.mais.left}..${m.mais.right} em ${m.largura[1]}`);
-    assert.ok(m.ordem && m.largura[0] <= m.largura[1], `ordem ${m.ordem}, rolagem horizontal ${m.largura}`);
+    for (const c of m.cards) { perto(c.left, m.cards[0].left, "mesma borda esquerda"); perto(c.width, m.cards[0].width, "mesma largura"); }
+    assert.ok(m.zonas.every((z, i) => i === 0 || z.top >= m.zonas[i - 1].bottom - 1), `zonas do resumo empilhadas: ${JSON.stringify(m.zonas.map((z) => [z.top, z.bottom]))}`);
+    for (const l of m.linhas) {
+      assert.ok(l.quando.top >= l.estado.bottom - 1, "a última atualização fica abaixo do nome e do estado");
+      assert.ok(l.acoes.right <= l.card.right + 1 && l.acoes.left >= l.card.left, "as ações cabem no bloco do banco");
+      assert.ok(l.botoes.every(([, w, h]) => w >= 44 && h >= 44), `alvos de 44 px: ${JSON.stringify(l.botoes)}`);
+      assert.deepEqual(l.rotulos.every((d) => d === "none"), width < 481, `rótulos: ${l.rotulos}`);
+    }
+    assert.ok(m.lateral[0] <= m.lateral[1], `rolagem horizontal ${m.lateral}`);
   });
 }
 
-test("1440x900 sem 'Disponíveis' (o /connectors falhou): a coluna de bancos fica sozinha à esquerda, sem buraco, e o '+' na borda direita dela", async () => {
-  const { ctx, page } = await telaRecon({ conectoresRes: (r) => r.fulfill({ status: 500, json: { detail: "x" } }) }, { width: 1440, height: 900 });
-  await page.waitForTimeout(600);
-  const m = await medidas(page);
-  await foto(page, "sozinha-1440");
-  await ctx.close();
-  assert.equal(m.sec, undefined);
-  assert.ok(m.grupo.width <= 720 && m.grupo.width >= 600, `grupo ${m.grupo.width}`);
-  perto(m.cols.width, m.grupo.width, "o conjunto tem a largura da coluna (sem buraco)");
-  perto(m.mais.right, m.grupo.right, "+ × borda direita da lista");
-  perto(m.grupo.left, m.tituloTexto, "grupo × título");
-});
-
-test("1440x900 sem vagas ('of_banks_max' nulo, a linha 'N de M' some): com a outra coluna, os grupos ainda começam na mesma altura", async () => {
-  const { ctx, page } = await telaRecon({ limite: { ok: true, of_banks_max: null, em_uso: 2, pode_adicionar: true, code: null, message: null } }, { width: 1440, height: 900, vagas: "" });
-  await regiao(page).waitFor();
-  const m = await medidas(page);
-  await ctx.close();
-  perto(m.grupo.top, m.grupoDir.top, "topo do grupo da esquerda × o da direita");
-});
-
-for (const [width, height] of [[1024, 768], [390, 844]]) {
-  test(`${width}x${height} sem vagas e com 'Disponíveis' (uma coluna): a linha vazia que alinha as duas colunas não ocupa espaço`, async () => {
-    const { ctx, page } = await telaRecon({ limite: { ok: true, of_banks_max: null, em_uso: 2, pode_adicionar: true, code: null, message: null } }, { width, height, vagas: "" });
-    await regiao(page).waitFor();
-    const r = await page.evaluate(() => { const e = document.querySelector(".bancos-esq > .banco-rotulo"); return { display: getComputedStyle(e).display, altura: e.getBoundingClientRect().height }; });
+test("nome de 70 letras sem espaço e 'Disponíveis' longos não geram rolagem horizontal em 320, 375 e 1280", async () => {
+  for (const width of [320, 375, 1280]) {
+    const { ctx, page } = await telaRecon({ conexoes: [con(11, "W".repeat(70)), con(12, "Inter"), con(13, "Itaú", "needs_user_action", "Atenção redobrada para este banco")] }, { width, height: 800 });
+    const m = await medidas(page);
     await ctx.close();
-    assert.deepEqual(r, { display: "none", altura: 0 });
+    assert.ok(m.lateral[0] <= m.lateral[1], `${width}: rolagem horizontal ${m.lateral}`);
+    assert.ok(m.cards.every((c) => c.right <= m.lateral[1] + 1), `${width}: card fora da tela`);
+  }
+});
+
+// O menu "…" da ÚLTIMA linha de uma lista longa não pode ser cortado por `overflow` de um ancestral (o card `.banco-sec`): o menu desce além do card, por cima do seguinte.
+// Controle negativo: `overflow: hidden` em `.banco-sec` (styles/bancos.css), rebuild: os dois tamanhos ficam vermelhos (o último item sai do alcance do clique).
+for (const [width, height] of [[1280, 800], [390, 844]]) {
+  test(`${width}x${height}: o '…' da última de 10 bancos abre um menu clicável (elementFromPoint no 1º e no último item) e dentro da tela`, async () => {
+    const conexoes = Array.from({ length: 10 }, (_, i) => con(11 + i, `Banco ${i + 1}`));
+    const { ctx, page } = await telaRecon({ conexoes }, { width, height, vagas: "" });
+    const mais = page.getByRole("button", { name: "Mais ações de Banco 10" });
+    await mais.evaluate((e) => e.scrollIntoView({ block: "center" })); // o botão no meio da tela (rolar o menu depois rolaria o próprio `overflow: hidden` e esconderia o corte)
+    await mais.click();
+    const itens = page.getByRole("menuitem");
+    const m = await itens.evaluateAll((l) => l.map((e) => {
+      const b = e.getBoundingClientRect(), topo = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return { texto: e.textContent, clicavel: !!topo && e.contains(topo), dentro: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight };
+    }));
+    await ctx.close();
+    assert.deepEqual(m.map((x) => x.texto), ["Reconectar", "Desconectar"]);
+    assert.deepEqual(m.map((x) => [x.clicavel, x.dentro]), [[true, true], [true, true]]);
   });
 }
