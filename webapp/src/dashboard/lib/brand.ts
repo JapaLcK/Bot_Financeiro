@@ -4,3 +4,5 @@
 // `currentScript` só existe enquanto o script roda, por isso é lido aqui, no topo do módulo.
 const SCRIPT = (document.currentScript as HTMLScriptElement | null)?.src || location.href;
 export const ICON = new URL("brand/icon.png", SCRIPT).href;
+// O retrato de cada agente (frontend/brand/agents/{kind}.png), resolvido como o ICON.
+export const agenteImg = (kind: string) => new URL(`brand/agents/${kind}.png`, SCRIPT).href;

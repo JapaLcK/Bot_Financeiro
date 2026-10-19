@@ -2,7 +2,7 @@
 //   · o título "Converse com o Piggy" só existe para leitor de tela e para o foco da rota;
 //   · estado vazio: logo, "Olá, {nome}" e "Como posso te ajudar?" no centro da coluna;
 //   · as perguntas (sugestões e próximas) ficam numa fileira só, fixa, logo acima da barra;
-//   · a resposta não leva ícone nem a palavra "Piggy"; só a de exemplo leva a linha do selo;
+//   · a resposta leva o autor (ícone e "Piggy", parts/PiggyChat.tsx), fora do .msg-by; só a de exemplo leva a linha do selo;
 //   · o guia destaca o chip da fileira sem o balão nem o Piggy cobrirem a barra.
 // Só a aparência: o conteúdo das respostas é de dashboard_v2_chat*.test.mjs.
 import { test, before, after } from "node:test";
@@ -120,7 +120,7 @@ for (const [width, height] of TELAS) {
     assert.equal(r.docLargo, 0);
   });
 
-  test(`${width}: depois de perguntar, a resposta não leva ícone nem "Piggy"; só a de exemplo leva o selo; as perguntas saem da conversa`, async () => {
+  test(`${width}: depois de perguntar, o .msg-by é só o selo (o autor é outra linha); só a de exemplo leva o selo; as perguntas saem da conversa`, async () => {
     const { ctx, page, erros } = await abrir({ width, height });
     await perguntar(page, "como estão minhas metas?"); // real
     await page.locator(".chat > .msg-piggy").last().locator(".pilula").first().waitFor();
@@ -140,7 +140,7 @@ for (const [width, height] of TELAS) {
         dentroDoChat: document.querySelectorAll(".chat .chat-follow").length,
         fileiras: document.querySelectorAll(".chat-follow").length,
         rotulo: document.querySelector(".chat-follow").getAttribute("aria-label"),
-        // o autor da resposta, só para leitor de tela: primeiro filho, de 1 px, sem aparecer
+        // o autor da resposta (ícone, "Piggy"): primeiro filho, visível, separado do .msg-by
         autor: lis.map((li) => { const e = li.firstElementChild, b = e.getBoundingClientRect(); return [e.className, e.textContent, b.width <= 1 && b.height <= 1]; }),
       };
     });
@@ -160,7 +160,7 @@ for (const [width, height] of TELAS) {
     assert.equal(r.dentroDoChat, 0);
     assert.equal(r.fileiras, 1);
     assert.equal(r.rotulo, "Próximas perguntas");
-    assert.deepEqual(r.autor, [["sr-only", "Piggy: ", true], ["sr-only", "Piggy: ", true]]);
+    assert.deepEqual(r.autor, [["msg-autor", "Piggy", false], ["msg-autor", "Piggy", false]]);
     assert.ok(folga[2] && folga[0] <= folga[1], `a última mensagem termina em ${folga[0]}px e a fileira começa em ${folga[1]}px`);
     assert.deepEqual(erros, []);
   });

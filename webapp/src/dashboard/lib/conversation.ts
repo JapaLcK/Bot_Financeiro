@@ -1,10 +1,18 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
+import { agenteDe, ativar, conversar, type Acesso, type Redirect } from "./agentes";
+import { ErroApi } from "./v2";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
 // recarregar começa de novo). Guardar histórico é fase posterior, com backend.
-export interface Msg extends Partial<Omit<Answer, "text">> { id: number; role: "user" | "piggy"; text: ReactNode }
+export type EstadoAgente = "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano";
+export interface Msg extends Partial<Omit<Answer, "text">> {
+  id: number; role: "user" | "piggy"; text: ReactNode;
+  // Conversa com um agente (@): `agente` é o kind (na bolha do usuário, o que ela destaca); o resto é o estado da resposta.
+  agente?: string; estado?: EstadoAgente; redirects?: Redirect[]; pergunta?: string; repetir?: boolean;
+  uid?: number; custo?: number; livre?: number; ativando?: boolean; falhaAtivar?: boolean;
+}
 
 let msgs: Msg[] = [];
 let seq = 0;
@@ -29,4 +37,103 @@ export function ask(q: { text: string; topic?: TopicId | null; cat?: string | nu
   msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
   subs.forEach((f) => f());
   go("/piggy");
+}
+
+// --- Conversa com um agente (@Nome na barra) ---
+// O context de cada agente e os que estão em voo vivem aqui, fora do React, com o `msgs`: a troca de página não os apaga.
+const contextos = new Map<string, string | null>();
+const emVoo = new Set<string>();
+const notifica = () => subs.forEach((f) => f());
+const patch = (id: number, p: Partial<Msg>) => { msgs = msgs.map((m) => (m.id === id ? { ...m, ...p } : m)); notifica(); };
+
+const nomeDe = (kind: string) => agenteDe(kind)?.nome ?? "agente";
+const SEM_ENERGIA = (kind: string, e?: { custo: number; livre: number }) => e
+  ? `O ${nomeDe(kind)} usa ⚡${e.custo} de energia e você tem ${e.livre} livre.` : `Você está sem energia livre para ativar o ${nomeDe(kind)}.`;
+const INATIVO = (kind: string, e?: { custo: number; livre: number }) => e
+  ? `Ativar o ${nomeDe(kind)} usa ⚡${e.custo} de energia. Você tem ${e.livre} livre.` : `O ${nomeDe(kind)} ainda não está ativo.`;
+const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e?: { custo: number; livre: number }): Partial<Msg> =>
+  acesso === "upgrade" ? { estado: "sem_plano", text: `Conversar com o ${nomeDe(kind)} faz parte do PigBank+.` }
+  : acesso === "no_energy" ? { estado: "sem_energia", text: SEM_ENERGIA(kind, e) }
+  : { estado: "inativo", text: INATIVO(kind, e) };
+
+const CODIGO_ACESSO: Record<string, Exclude<Acesso, "ready">> = { activate: "activate", upgrade: "upgrade", no_energy: "no_energy" };
+const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: boolean } => {
+  const d = (e instanceof ErroApi ? (e.corpo as { detail?: unknown } | undefined)?.detail : undefined);
+  return d && typeof d === "object" ? d : {};
+};
+
+const SEM_SENHA = "Crie sua senha para conversar com os agentes. Depois de criar, volte para o painel novo.";
+/** `/agents/*` fica fora do `/api/v2`: o corpo real é `{"detail":{"error":"password_required"}}`; `code` cobre o envelope v2. */
+const semSenha = (e: unknown) => e instanceof ErroApi && (e.code === "password_required" || detalheDe(e).error === "password_required");
+
+async function enviar(id: number, kind: string, texto: string, uid: number) {
+  emVoo.add(kind);
+  patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
+  try {
+    const r = await conversar(uid, kind, texto, contextos.get(kind) ?? null);
+    if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
+    contextos.set(kind, r.context ?? null);
+    const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
+    patch(id, { estado: "pronto", text: r.reply, redirects });
+  } catch (e) {
+    const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;
+    const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
+    if (d.error === "invalid_context") contextos.delete(kind); // o próximo envio recomeça a conversa
+    // Sessão/CSRF/senha: o mesmo TEXTO de MetasResposta/InvestidoResposta, critério próprio (401, `password_required` e 403 sem `error` de objeto, que cobre o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado para este usuário" da troca de conta em outra aba). Repetir não adianta.
+    const sessao = e instanceof ErroApi && (status === 401 || (status === 403 && !d.error));
+    if (acesso) patch(id, estadoSemChat(kind, acesso));
+    else if (semSenha(e) || sessao) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : "Sua sessão terminou. Recarregue a página.", repetir: false });
+    else patch(id, {
+      estado: "erro",
+      text: typeof d.message === "string" ? d.message
+        : status === 0 ? "A conexão foi interrompida antes de recebermos a resposta. Sua pergunta continua aqui."
+        : status === 429 ? "Muitas mensagens em pouco tempo. Aguarde um instante antes de tentar novamente."
+        : "Não foi possível obter a resposta agora. Tente novamente em instantes.",
+      repetir: d.retryable === true || status === 0, // só se o servidor marcou, ou se nem houve resposta (rede)
+    });
+  } finally {
+    emVoo.delete(kind);
+  }
+}
+
+/** Pergunta a um agente: bolha do usuário (`original`, com as menções) e a resposta, que se atualiza por id. Falso = já há uma pergunta em voo a esse agente (o texto fica na barra). */
+export function perguntarAoAgente(a: { kind: string; original: string; texto: string; uid: number; acesso: Acesso; energia?: { custo: number; livre: number } | null }) {
+  if (a.acesso === "ready" && emVoo.has(a.kind)) return false;
+  const e = a.energia ?? undefined;
+  const bolha = ++seq, resp = ++seq;
+  msgs = [...msgs,
+    { id: bolha, role: "user", text: a.original, agente: a.kind },
+    { id: resp, role: "piggy", agente: a.kind, real: true, uid: a.uid, pergunta: a.texto, custo: e?.custo, livre: e?.livre, text: "", ...(a.acesso === "ready" ? {} : estadoSemChat(a.kind, a.acesso, e)) }];
+  notifica();
+  go("/piggy");
+  if (a.acesso === "ready") void enviar(resp, a.kind, a.texto, a.uid);
+  return true;
+}
+
+/** "Tentar de novo" de um erro que o servidor marcou como repetível. */
+export function tentarDeNovo(id: number) {
+  const m = msgs.find((x) => x.id === id);
+  if (m?.estado === "erro" && m.repetir && m.agente && m.pergunta && m.uid != null && !emVoo.has(m.agente)) void enviar(id, m.agente, m.pergunta, m.uid);
+}
+
+/** "Ativar e responder": ativa o agente e manda a pergunta guardada. Enquanto a ativação/o envio desse agente está em voo, o `emVoo` por kind segura os outros cliques; duas bolhas inativas clicadas em sequência fazem duas ativações (o servidor aceita reativar). */
+export async function ativarEResponder(id: number, depois: () => void) {
+  const m = msgs.find((x) => x.id === id);
+  if (!m || m.estado !== "inativo" || !m.agente || !m.pergunta || m.uid == null || emVoo.has(m.agente)) return;
+  emVoo.add(m.agente); // o mesmo bloqueio por kind do perguntarAoAgente, também durante a ativação
+  patch(id, { ativando: true, falhaAtivar: false });
+  try {
+    await ativar(m.uid, m.agente);
+  } catch (e) {
+    const d = detalheDe(e), acesso = d.error === "no_energy" ? "no_energy" : d.error === "pro_required" ? "upgrade" : null;
+    const energia = m.custo != null && m.livre != null ? { custo: m.custo, livre: m.livre } : undefined;
+    patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso, energia) }
+      : semSenha(e) ? { ativando: false, estado: "erro", text: SEM_SENHA, repetir: false }
+      : { ativando: false, falhaAtivar: true });
+    emVoo.delete(m.agente);
+    return;
+  }
+  depois(); // a lista do @ relê o catálogo
+  patch(id, { ativando: false });
+  await enviar(id, m.agente, m.pergunta, m.uid);
 }

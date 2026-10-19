@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ask, useConversation, type Msg } from "../lib/conversation";
+import { useQueryClient } from "@tanstack/react-query";
+import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, type Msg } from "../lib/conversation";
+import { agenteDe, agentesQuery, mencoes } from "../lib/agentes";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
 import { LiveAnswer } from "./LiveAnswer";
-import { ICON } from "../lib/brand";
+import { ICON, agenteImg } from "../lib/brand";
 import { DEMO, contaQuery, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
 import { Anuncio } from "./InvestidoResposta";
@@ -13,14 +15,43 @@ import { Anuncio } from "./InvestidoResposta";
 const TRAVA_MS = 500; // a fileira nova ignora o toque por esse tempo: mais que o intervalo de um duplo toque, menos que ler a resposta
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
 
-// Resposta do Piggy: texto e os blocos (vivos, com o estado próprio da resposta). Só o exemplo leva a
-// linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
+// A bolha do usuário numa conversa com agente: o texto original, com cada menção válida em rosa.
+function ComMencoes({ t }: { t: string }) {
+  let i = 0;
+  const partes: ReactNode[] = [];
+  for (const m of mencoes(t)) {
+    partes.push(t.slice(i, m.ini), <span key={m.ini} className="mencao">{t.slice(m.ini, m.fim)}</span>);
+    i = m.fim;
+  }
+  return <>{partes}{t.slice(i)}</>;
+}
+
+const ETIQUETA = { inativo: "NÃO ATIVO", sem_energia: "SEM ENERGIA" } as const;
+
+// Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
+// próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
 function PiggySays({ m }: { m: Msg }) {
+  const qc = useQueryClient();
+  const a = m.agente ? agenteDe(m.agente) : undefined;
+  const etiqueta = a && (ETIQUETA[m.estado as keyof typeof ETIQUETA] ?? "AGENTE");
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
-      <span className="sr-only">Piggy: </span>
+      <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
       {!DEMO && !m.real && <p className="msg-by"><Demonstracao /></p>}
-      <p className="msg-text">{m.text}</p>
+      <p className={a ? "msg-text msg-pre" : "msg-text"} aria-busy={m.estado === "enviando" || undefined}>{m.text}</p>
+      {m.estado === "inativo" && (
+        <div className="msg-acoes">
+          <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>
+          {m.falhaAtivar && <p className="msg-text" role="alert">Não foi possível ativar o agente. Tente novamente.</p>}
+        </div>
+      )}
+      {m.estado === "erro" && m.repetir && <div className="msg-acoes"><button type="button" className="btn btn-ghost" onClick={() => tentarDeNovo(m.id)}>Tentar de novo</button></div>}
+      {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
+      {m.estado === "pronto" && !!m.redirects?.length && (
+        <div className="msg-acoes">
+          {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" onClick={() => perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso: r.access === "ready" ? "ready" : r.access === "no_energy" ? "no_energy" : r.access === "upgrade" ? "upgrade" : "activate" })}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
+        </div>
+      )}
       {m.card}
       {m.blocks?.length && m.s0 && m.page ? <LiveAnswer blocks={m.blocks} s0={m.s0} page={m.page} /> : null}
     </FrameScope.Provider>
@@ -46,11 +77,12 @@ export function PiggyChat() {
   // Esvazia e preenche de novo a cada resposta: duas respostas iguais seguidas (o texto
   // livre no protótipo) também são anunciadas.
   const [said, setSaid] = useState<ReactNode>(null);
+  // Depende da última resposta e do estado dela: a do agente muda de "Preparando…" para o texto sem mudar o tamanho da lista.
   useEffect(() => {
     setSaid(null);
     const t = setTimeout(() => setSaid(last?.text ?? null), 60);
     return () => clearTimeout(t);
-  }, [msgs.length]);
+  }, [last?.id, last?.estado]);
 
   // Título só para o leitor de tela e o foco da rota (App.tsx); o que se vê é a conversa.
   const head = <h1 id="page-title" tabIndex={-1} className="sr-only">Converse com o Piggy</h1>;
@@ -95,7 +127,7 @@ export function PiggyChat() {
         {msgs.map((m, i) => (
           <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
             data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>
-            {m.role === "user" ? m.text : <PiggySays m={m} />}
+            {m.role === "piggy" ? <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
           </li>
         ))}
       </ol>
