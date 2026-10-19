@@ -69,7 +69,8 @@ export function AskBar({ path }: { path: Path }) {
     if (!token) return;
     const nova = `${text.slice(0, token.ini)}@${a.nome} `;
     depois.current = nova.length;
-    setText(nova + text.slice(cursor));
+    // Troca o token inteiro, também o que está depois do cursor ("@Det|etive"), e não dobra o espaço que já vinha (Codex no #1157).
+    setText(nova + text.slice(cursor).replace(/^\S*\s?/, ""));
     setFechada(false);
     setAtivo(0);
   };

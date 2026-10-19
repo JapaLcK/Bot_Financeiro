@@ -702,6 +702,23 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: escolher na lista com o cursor no meio de uma menção troca o token inteiro`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await campo(page).fill("@Detetive pergunta");
+    await campo(page).press("Home");
+    for (let i = 0; i < 4; i++) await campo(page).press("ArrowRight"); // cursor em "@Det|etive"
+    await lista(page).waitFor();
+    await campo(page).press("Enter");
+    assert.equal(await campo(page).inputValue(), "@Detetive pergunta");
+    await campo(page).fill("@det resto");
+    await campo(page).press("Home");
+    for (let i = 0; i < 4; i++) await campo(page).press("ArrowRight"); // cursor no fim de "@det", antes do espaço
+    await lista(page).waitFor();
+    await campo(page).press("Enter");
+    assert.equal(await campo(page).inputValue(), "@Detetive resto"); // caminho comum: o resto fica, com um espaço só
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas
