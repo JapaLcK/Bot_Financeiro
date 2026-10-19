@@ -603,15 +603,29 @@ def test_checkout_concorrente_reutiliza_uma_unica_sessao(user_id, monkeypatch, c
     monkeypatch.setattr(dashboard, "STRIPE_PUBLISHABLE_KEY", "pk_test_abc")
     fake = _patch_stripe(monkeypatch)
 
-    # O teste só discrimina o `_billing_user_lock` com 2 conexões no pool e uma janela de corrida.
-    # Um pool aquecido por `asyncio.run(_get_db_pool())` simples fica com 1 conexão (min_size=1) e
-    # serializa os pedidos ANTES do lock, deixando verde até um lock que segura a conexão. Por isso
-    # cresce o pool (2 simultâneas, loop vivo) e o `Session.list` dorme 0,3 s depois de olhar (#829).
-    lista = fake.checkout.Session.list  # foto ANTES de dormir: o pedido que chega 0,3 s depois ainda vê vazio
+    # O teste só discrimina o `_billing_user_lock` com 2 conexões no pool e a corrida garantida. Um pool
+    # aquecido por `asyncio.run(_get_db_pool())` simples fica com 1 conexão (min_size=1) e serializa os
+    # pedidos ANTES do lock, deixando verde até um lock que segura a conexão (#829). A corrida não vem de
+    # relógio: depois da foto de `Session.list`, o pedido espera até o OUTRO ter tirado a dele (sem lock,
+    # as duas veem vazio e criam) ou ficar parado no `pg_advisory_lock` (com lock, é a prova de que
+    # serializou). Atraso da 2ª requisição só alonga a espera; não muda o veredito (Codex P2 do #1037).
+    lista = fake.checkout.Session.list
+    fotos, outra_viu = [], threading.Event()
+
+    def alguem_espera_o_lock():
+        with db.get_conn() as conn:
+            return conn.execute(
+                "select 1 from pg_locks where locktype = 'advisory' and not granted and database ="
+                " (select oid from pg_database where datname = current_database())").fetchone() is not None
 
     def lista_lenta(**kw):
-        r = lista(**kw)
-        time.sleep(0.3)
+        r = lista(**kw)  # a foto ANTES de esperar: ninguém ainda criou nada
+        fotos.append(r)
+        if len(fotos) == 2:
+            outra_viu.set()
+        fim = time.monotonic() + 10  # teto p/ não prender a 1ª se algo mais quebrar; o assert abaixo acusa
+        while not outra_viu.wait(0.05) and not alguem_espera_o_lock() and time.monotonic() < fim:
+            pass
         return r
     fake.checkout.Session.list = staticmethod(lista_lenta)
     shared.reset_db_pool()  # pool de teste anterior (loop morto) não cresce; recomeça num loop vivo
