@@ -35,6 +35,8 @@ const metas = (t: string) => { const n = semAcento(t); return /\bmetas?\b/.test(
 let conferirConta: () => Promise<unknown> = () => Promise.resolve();
 export const aoConferirConta = (f: () => Promise<unknown>) => { conferirConta = f; };
 let perguntando = false; // a conferência em voo segura um 2º toque (chip, faixa do Piggy) até a pergunta entrar
+/** Há uma pergunta esperando a conta ser conferida: o chat mostra "Carregando a conversa…" em vez de nada (Codex no #1157). */
+export const usePerguntando = () => useSyncExternalStore((f) => { subs.add(f); return () => subs.delete(f); }, () => perguntando);
 
 /** Envia a pergunta e abre a conversa. Sem `topic`, o Piggy responde com os atalhos. A pergunta entra depois de conferir a conta:
  * se a sessão virou outra noutra aba, a conversa anterior some ANTES e a pergunta nova fica (Codex no #1157). Sem conseguir
@@ -42,13 +44,15 @@ let perguntando = false; // a conferência em voo segura um 2º toque (chip, fai
 export function ask(q: { text: string; topic?: TopicId | null; cat?: string | null; key?: string }) {
   if (perguntando) return false; // falso = a pergunta não entrou (o texto fica na barra)
   perguntando = true;
-  void conferirConta().catch(() => {}).then(() => {
+  const conferindo = conferirConta().catch(() => {});
+  subs.forEach((f) => f());
+  go("/piggy"); // já: com a conta lenta, o chat mostra que a pergunta está a caminho
+  void conferindo.then(() => {
     perguntando = false;
     const topic = q.topic ?? (investido(q.text) ? "investido" : metas(q.text) ? "metas" : null);
     const a = topic ? answer(topic, q.cat ?? null, q.key) : DEMO;
     msgs = [...msgs, { id: ++seq, role: "user", text: q.text }, { id: ++seq, role: "piggy", ...a }];
     subs.forEach((f) => f());
-    go("/piggy");
   });
   return true;
 }
@@ -56,7 +60,10 @@ export function ask(q: { text: string; topic?: TopicId | null; cat?: string | nu
 // --- Conversa com um agente (@Nome na barra) ---
 // O context de cada agente (chave `uid:kind`: o servidor amarra o context ao usuário e ao agente, e a conta pode mudar noutra aba) e os que estão em voo vivem aqui, fora do React, com o `msgs`: a troca de página não os apaga.
 const contextos = new Map<string, string | null>();
-const emVoo = new Set<string>(); // chave `uid:kind`: uma pergunta da conta anterior ainda em voo não trava a conta nova
+// chave `uid:kind` → id da bolha que segura: uma pergunta da conta anterior ainda em voo não trava a conta nova.
+// A troca de conta solta tudo (A→B→A não deixa a trava velha de A), e cada envio só solta a própria trava (Codex no #1157).
+const emVoo = new Map<string, number>();
+const solta = (k: string, id: number) => { if (emVoo.get(k) === id) emVoo.delete(k); };
 const notifica = () => subs.forEach((f) => f());
 const patch = (id: number, p: Partial<Msg>) => { msgs = msgs.map((m) => (m.id === id ? { ...m, ...p } : m)); notifica(); };
 
@@ -65,7 +72,7 @@ const patch = (id: number, p: Partial<Msg>) => { msgs = msgs.map((m) => (m.id ==
 let dono: number | undefined;
 export function contaDaSessao(uid: number | undefined) {
   if (uid == null) return;
-  if (dono != null && dono !== uid) { msgs = []; contextos.clear(); notifica(); }
+  if (dono != null && dono !== uid) { msgs = []; contextos.clear(); emVoo.clear(); notifica(); }
   dono = uid;
 }
 
@@ -93,7 +100,7 @@ const SESSAO = "Sua sessão terminou. Recarregue a página.";
 const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
 async function enviar(id: number, kind: string, texto: string, uid: number) {
-  emVoo.add(`${uid}:${kind}`);
+  emVoo.set(`${uid}:${kind}`, id);
   patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
   try {
     const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null);
@@ -117,7 +124,7 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
       repetir: d.retryable === true || status === 0, // só se o servidor marcou, ou se nem houve resposta (rede)
     });
   } finally {
-    emVoo.delete(`${uid}:${kind}`);
+    solta(`${uid}:${kind}`, id);
   }
 }
 
@@ -146,7 +153,7 @@ export function tentarDeNovo(id: number) {
 export async function ativarEResponder(id: number, depois: () => void) {
   const m = msgs.find((x) => x.id === id);
   if (!m || m.estado !== "inativo" || !m.agente || !m.pergunta || m.uid == null || emVoo.has(`${m.uid}:${m.agente}`)) return;
-  emVoo.add(`${m.uid}:${m.agente}`); // o mesmo bloqueio por conta e agente do perguntarAoAgente, também durante a ativação
+  emVoo.set(`${m.uid}:${m.agente}`, id); // o mesmo bloqueio por conta e agente do perguntarAoAgente, também durante a ativação
   patch(id, { ativando: true, falhaAtivar: false });
   try {
     await ativar(m.uid, m.agente);
@@ -156,11 +163,11 @@ export async function ativarEResponder(id: number, depois: () => void) {
     patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso) }
       : semSenha(e) || sessaoDe(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false }
       : { ativando: false, falhaAtivar: true });
-    emVoo.delete(`${m.uid}:${m.agente}`);
+    solta(`${m.uid}:${m.agente}`, id);
     return;
   }
   depois(); // a lista do @ relê o catálogo
-  if (!msgs.some((x) => x.id === id)) { emVoo.delete(`${m.uid}:${m.agente}`); return; } // a conversa foi limpa (troca de conta) durante a ativação: a pergunta da conta anterior não sai
+  if (!msgs.some((x) => x.id === id)) { solta(`${m.uid}:${m.agente}`, id); return; } // a conversa foi limpa (troca de conta) durante a ativação: a pergunta da conta anterior não sai
   patch(id, { ativando: false });
   await enviar(id, m.agente, m.pergunta, m.uid);
 }

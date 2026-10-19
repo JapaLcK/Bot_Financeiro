@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { focusManager, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, type Msg } from "../lib/conversation";
+import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, usePerguntando, type Msg } from "../lib/conversation";
 import { agenteDe, agentesQuery, mencoes } from "../lib/agentes";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
@@ -66,6 +66,7 @@ function PiggySays({ m }: { m: Msg }) {
 
 export function PiggyChat() {
   const msgs = useConversation();
+  const perguntando = usePerguntando();
   // O perfil é o do Board: com backend, o do servidor; no protótipo, o que main.tsx semeou do navegador.
   const perfil = useQuery(perfilQuery);
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
@@ -161,6 +162,19 @@ export function PiggyChat() {
     </ul>
   );
 
+  // Esperando a conta: sem conversa ainda (1ª pergunta, de outra página), ou com ela ainda não conferida nesta montagem. Com a
+  // conversa já conferida à vista, a pergunta nova não a esconde (piscaria a cada envio).
+  if ((perguntando && !msgs.length) || (msgs.length && !conferida)) {
+    return (
+      <>
+        {head}
+        <section className="chat-espera" aria-busy={!contaQ.isError || undefined}>
+          <p>{contaQ.isError && !perguntando ? "Não foi possível confirmar sua conta. Recarregue a página." : "Carregando a conversa…"}</p>
+        </section>
+      </>
+    );
+  }
+
   if (!msgs.length) {
     return (
       <>
@@ -171,17 +185,6 @@ export function PiggyChat() {
           <p>Como posso te ajudar?</p>
         </section>
         {fileira}
-      </>
-    );
-  }
-
-  if (!conferida) {
-    return (
-      <>
-        {head}
-        <section className="chat-espera" aria-busy={!contaQ.isError || undefined}>
-          <p>{contaQ.isError ? "Não foi possível confirmar sua conta. Recarregue a página." : "Carregando a conversa…"}</p>
-        </section>
       </>
     );
   }

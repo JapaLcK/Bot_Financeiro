@@ -590,6 +590,45 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: A→B→A com uma pergunta da A ainda em voo: a A volta podendo perguntar ao mesmo agente`, async () => {
+    let solta;
+    const { ctx, page, chats } = await abrir({ width, segura: () => (chats.length === 1 ? new Promise((ok) => { solta = ok; }) : undefined) });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    const relerNoFoco = async () => {
+      const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+      await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+      await relida;
+    };
+    await paraConta43(ctx);
+    await relerNoFoco();
+    await page.locator(".chat-empty").waitFor();
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } }));
+    await relerNoFoco(); // voltou a ser a 42, com a 1ª pergunta ainda presa no servidor
+    await enviar(page, "@Detetive e agora?");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 2 do detetive." }).waitFor();
+    assert.equal(await campo(page).inputValue(), "", "a pergunta saiu: a trava da abandonada não ficou");
+    solta();
+    await ctx.close();
+  });
+
+  test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
+    const { ctx, page } = await abrir({ width });
+    if (width >= 768) { // no desktop a barra também fica nas outras páginas
+      await page.evaluate(() => { location.hash = "#/"; });
+      await page.locator("#board-profile").waitFor();
+    }
+    let soltaPerfil;
+    const preso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fallback(); });
+    await enviar(page, "quanto gastei?");
+    await page.waitForFunction(() => location.hash === "#/piggy");
+    await page.locator(".chat-espera", { hasText: "Carregando a conversa…" }).waitFor();
+    soltaPerfil();
+    await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).waitFor();
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");

@@ -299,8 +299,8 @@ test("1280: display_name que não é texto não derruba a página (cai no e-mail
 });
 
 // Com a conversa aberta o perfil também é lido: é como a troca de conta noutra aba chega ao `contaDaSessao` (Codex no #1157).
-// Perguntar de outra página lê duas vezes: a pergunta confere a conta antes de entrar (`ask`) e o chat confere ao montar.
-test("1280: o perfil é lido uma vez no estado vazio; perguntar de outra página o lê na pergunta e ao abrir o chat", async () => {
+// Perguntar de outra página lê uma vez: a pergunta confere a conta antes de entrar (`ask`) e abre o chat já, que reaproveita a mesma leitura.
+test("1280: o perfil é lido uma vez no estado vazio e uma vez ao perguntar de outra página (pergunta e chat dividem a leitura)", async () => {
   const vazio = await abrir({ width: 1280, height: 800 });
   await vazio.page.waitForFunction(() => /^Olá, /.test(document.querySelector(".chat-empty h2")?.textContent ?? ""));
   const noVazio = vazio.pedidos.length;
@@ -311,7 +311,7 @@ test("1280: o perfil é lido uma vez no estado vazio; perguntar de outra página
   await page.waitForTimeout(300);
   await ctx.close();
   assert.equal(noVazio, 1);
-  assert.equal(pedidos.length, 2);
+  assert.equal(pedidos.length, 1);
   assert.deepEqual(erros, []);
 });
 
