@@ -11,7 +11,7 @@ import { useBloco } from "./blocoContexto";
 import { somarCentavos } from "./decimal";
 import { LinhaExpansivel } from "./expansao";
 import { LinhaLancamento } from "./extrato";
-import { LinhaCategoria } from "./gastos";
+import { LinhaCategoria, rotuloPercentual } from "./gastos";
 import { EntrouSaiu } from "./numerosMes";
 import { usePainel } from "./provider";
 const MAIS = 5; // categorias visíveis antes do "+ N categorias"
@@ -45,7 +45,7 @@ export function CardPeriodo() {
       </View>}
     {!ordenadas.length ? <Vazio texto="Nenhum gasto em reais neste período." /> : <View>
       {visiveis.map((c, i) => {
-        const chave = c.categoria ?? "", linha = <LinhaCategoria titulo={nomeCategoria(c.categoria, catalogo)} detalhe={p.oculto ? undefined : `${c.percentual === 0 && c.valor > 0 ? "<1" : c.percentual}% dos gastos`} valor={c.valor} fracao={Math.max(0, c.valor) / Math.max(1, total)} cor={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} />;
+        const chave = c.categoria ?? "", linha = <LinhaCategoria titulo={nomeCategoria(c.categoria, catalogo)} detalhe={p.oculto ? undefined : rotuloPercentual(c.percentual, c.valor)} valor={c.valor} fracao={Math.max(0, c.valor) / Math.max(1, total)} cor={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} />;
         return c.maiores.length ? <LinhaExpansivel key={chave} linha={linha} aberta={aberta === chave} alternar={() => setAberta(aberta === chave ? null : chave)}>
           <Texto variante="legenda" tom="inkMuted">Maiores lançamentos</Texto>
           {c.maiores.map((l) => <LinhaLancamento key={l.id} item={l} comParcela aberto={aberto === l.id} alternar={() => setAberto(aberto === l.id ? null : l.id)} />)}

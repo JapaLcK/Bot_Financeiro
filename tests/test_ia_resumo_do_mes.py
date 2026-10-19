@@ -17,7 +17,8 @@ Controle POSITIVO: período livre, mês sem cartão, usuário B e mês futuro se
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+import math
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -28,8 +29,8 @@ from core.services.ai_chat.tools import get_tool
 from core.services.ai_guard import check
 from tests._ia_falsa_helpers import chamada, com_tools, liga_flag, openai_falso, texto
 from tests._pendencia_credito_helpers import diga
-from tests.test_resumo_mes_regra import FIM, INICIO, _lanc, semeia_a, semeia_b
-from utils_date import today_tz
+from tests.test_resumo_mes_regra import FIM, INICIO, _lanc, q, semeia_a, semeia_b
+from utils_date import _tz, today_tz
 
 _MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
           "setembro", "outubro", "novembro", "dezembro"]
@@ -60,17 +61,18 @@ def _semeia_corrente(uid):
     db.add_credit_purchase(uid, cartao, 100, "mercado", "no cartão", today_tz())
 
 
-def _conversa(monkeypatch, uid, frase, args):
+def _conversa(monkeypatch, uid, frase, args, tool="get_period_summary",
+              fala=lambda v: f"🐷 Despesas {v['despesa']} saldo {v['saldo_periodo']}"):
     """A frase pelo `handle_incoming` com o modelo falso: rodada 1 chama a tool, rodada 2 repete
-    o número que a tool entregou. Devolve (resposta, JSON da tool)."""
+    o número que a tool entregou (`fala`). Devolve (resposta, JSON da tool)."""
     liga_flag(monkeypatch)
     visto: dict = {}
 
     def le_a_tool(messages):
         visto.update(json.loads(next(m for m in reversed(messages) if m["role"] == "tool")["content"]))
-        return texto(f"🐷 Despesas {visto['despesa']} saldo {visto['saldo_periodo']}")
+        return texto(fala(visto))
 
-    openai_falso(monkeypatch, com_tools(chamada("get_period_summary", args)), le_a_tool)
+    openai_falso(monkeypatch, com_tools(chamada(tool, args)), le_a_tool)
     resposta = diga(uid, frase)
     assert visto, f"o modelo falso não foi chamado: {frase!r} ficou no roteador ({resposta!r})"
     return resposta, visto
@@ -265,9 +267,188 @@ def test_o_numero_da_tool_passa_pelo_ai_guard():
     assert claims and all(c.supported for c in claims), claims
 
 
-def test_projecao_avisa_que_nao_tem_o_cartao():
+def test_projecao_avisa_que_tem_o_cartao_pela_fatura():
     r = _tool("forecast_month_end", usuario_pagante())
-    assert r["cartao_incluido"] is False and "SEM as compras no cartão" in r["nota_metodologia"]
+    assert r["cartao_incluido"] is True and r["cartao_por"] == "fatura"
+
+
+def _semeia_projecao(uid, receita, gasto, cartao_valor, aporte, transferencia):
+    """Mês corrente: receita, gasto fora do cartão, compra no cartão que fecha no dia 31, o pagamento
+    da fatura, um aporte de investimento e uma transferência interna (esses três ficam fora do `saiu`)."""
+    cartao = db.create_card(uid, "Nubank", closing_day=31, due_day=10)
+    db.add_launch_and_update_balance(uid, "receita", receita, "salário", None)
+    db.add_launch_and_update_balance(uid, "despesa", gasto, "mercado", None, categoria="outros")
+    db.add_credit_purchase(uid, cartao, cartao_valor, "mercado", "no cartão", today_tz())
+    db.pay_bill_amount(uid, cartao, "Nubank", cartao_valor)
+    # `origens["cartao"]` do leitor é só a compra com source='open_finance'; a manual cai em registro_antigo
+    q("update credit_transactions set source='open_finance' where user_id=%s", (uid,))
+    db.add_launch_and_update_balance(uid, "despesa", aporte, "carteira", "aporte",
+                                     categoria="investimento_aporte", is_internal_movement=True)
+    db.add_launch_and_update_balance(uid, "despesa", transferencia, "conta", "transferência",
+                                     categoria="transferencia", is_internal_movement=True)
+
+
+def _card_categorias(uid):
+    """O que o card `categorias` / aba Gastos mostra: a rota de `/api/app/mes-detalhes`."""
+    from api.nativo.mes_detalhes import mes_detalhes
+    return mes_detalhes(None, uid)
+
+
+def test_projecao_usa_o_mesmo_entrou_e_saiu_do_card_e_so_extrapola_fora_do_cartao():
+    a, b = usuario_pagante(), usuario_pagante()
+    _semeia_projecao(a, 1000, 100, 200, 300, 50)
+    _semeia_projecao(b, 400, 30, 70, 500, 20)  # outros valores: um não pode vazar no outro
+    for uid, entrou, saiu, cartao in [(a, 1000.0, 300.0, 200.0), (b, 400.0, 100.0, 70.0)]:
+        r, card = _tool("forecast_month_end", uid), _card_categorias(uid)
+        assert (r["receita"], r["despesa"]) == (float(card.entrou), float(card.saiu)) == (entrou, saiu)
+        assert r["despesa_cartao"] == cartao and r["despesa_no_ritmo"] == saiu - cartao
+        ritmo = r["dias_no_mes"] / r["dias_corridos"]
+        assert r["despesa_projetada"] == round((saiu - cartao) * ritmo + cartao, 2)
+        assert r["saldo_projetado"] == round(entrou - r["despesa_projetada"], 2)
+        assert r["saldo_ate_agora"] == entrou - saiu
+    # float JSON (não Decimal) e chaves `receita`/`despesa*`/`saldo*`: é o que o ai_guard lê como dinheiro
+    r = _tool("forecast_month_end", a)
+    evidencia = json.dumps(r, ensure_ascii=False, default=str)
+    claims = check("🐷 Entrou R$ 1.000,00 e saiu R$ 300,00; até agora o saldo é R$ 700,00.", [evidencia], "projeção")
+    assert len(claims) >= 3 and all(c.supported for c in claims), claims
+
+
+def _congela(monkeypatch, ano, mes, dia, hora=12, minuto=30):
+    """Relógio da tool E o do card (`mes_pedido`, `mes_detalhes`) no mesmo instante, no fuso do app."""
+    quando = datetime(ano, mes, dia, hora, minuto, tzinfo=_tz())
+    for alvo in ("core.services.ai_chat.tools.launches.now_tz", "api.v2.resumo_mes.now_tz",
+                 "api.nativo.mes_detalhes.now_tz"):
+        monkeypatch.setattr(alvo, lambda: quando)
+
+
+def _lanca(uid, tipo, valor, ano, mes, dia):
+    q("insert into launches (user_id, tipo, valor, criado_em) values (%s, %s, %s, %s)",
+      (uid, tipo, valor, datetime(ano, mes, dia, 12, tzinfo=_tz())))
+
+
+@pytest.mark.parametrize("hoje, no_mes, corridos, projetada", [
+    ((2026, 2, 28, 12), 28, 28, 100.0),    # fevereiro, último dia
+    ((2028, 2, 29, 12), 29, 29, 100.0),    # bissexto
+    ((2026, 3, 1, 12), 31, 1, 3100.0),     # dia 1
+    ((2026, 4, 10, 12), 30, 10, 300.0),    # meio de mês de 30 dias
+    ((2026, 1, 31, 23), 31, 31, 100.0),    # 23h30 BRT já é o dia 1 em UTC: o mês não pode virar
+])
+def test_projecao_dias_do_mes_literais_com_relogio_congelado(monkeypatch, hoje, no_mes, corridos, projetada):
+    ano, mes, dia, hora = hoje
+    _congela(monkeypatch, ano, mes, dia, hora)
+    uid = usuario_pagante()
+    _lanca(uid, "despesa", 100, ano, mes, 1)
+    r = _tool("forecast_month_end", uid)
+    assert (r["hoje"], r["dias_no_mes"], r["dias_corridos"]) == (date(ano, mes, dia).isoformat(), no_mes, corridos)
+    assert (r["despesa"], r["despesa_agendada"], r["despesa_projetada"]) == (100.0, 0.0, projetada)
+
+
+def _semeia_agendada(uid, com_cartao=False):
+    """Relógio em 10/10/2026: receita 5000 no dia 2, gasto 100 no dia 5, aluguel 1500 datado do dia 28
+    (futuro) e uma receita de 1000 datada do dia 20 (futura); opcional: 200 no cartão do OF (dia 3)."""
+    _lanca(uid, "receita", 5000, 2026, 10, 2)
+    _lanca(uid, "despesa", 100, 2026, 10, 5)
+    _lanca(uid, "despesa", 1500, 2026, 10, 28)
+    _lanca(uid, "receita", 1000, 2026, 10, 20)
+    if com_cartao:
+        cartao = db.create_card(uid, "Nubank", closing_day=31, due_day=10)
+        db.add_credit_purchase(uid, cartao, 200, "mercado", "no cartão", date(2026, 10, 3))
+        q("update credit_transactions set source='open_finance' where user_id=%s", (uid,))
+
+
+def test_projecao_lancamento_futuro_entra_uma_vez_sem_esticar_pelo_ritmo(monkeypatch):
+    _congela(monkeypatch, 2026, 10, 10)
+    uid = usuario_pagante()
+    _semeia_agendada(uid)
+    r, card = _tool("forecast_month_end", uid), _card_categorias(uid)
+    assert (r["receita"], r["despesa"], r["saldo_ate_agora"]) == (float(card.entrou), float(card.saiu), 4400.0) \
+        == (6000.0, 1600.0, 4400.0)  # a receita futura já está em `receita`, como no card
+    assert (r["despesa_agendada"], r["despesa_no_ritmo"], r["despesa_cartao"]) == (1500.0, 100.0, 0.0)
+    assert r["despesa_projetada"] == 1810.0 and r["saldo_projetado"] == 6000 - 1810 == 4190.0
+
+
+def test_projecao_futuro_e_cartao_juntos_nao_contam_duas_vezes(monkeypatch):
+    _congela(monkeypatch, 2026, 10, 10)
+    uid = usuario_pagante()
+    _semeia_agendada(uid, com_cartao=True)
+    r, card = _tool("forecast_month_end", uid), _card_categorias(uid)
+    assert r["despesa"] == float(card.saiu) == 1800.0
+    assert (r["despesa_cartao"], r["despesa_agendada"], r["despesa_no_ritmo"]) == (200.0, 1500.0, 100.0)
+    assert r["despesa_cartao"] + r["despesa_agendada"] + r["despesa_no_ritmo"] == r["despesa"]
+    assert r["despesa_projetada"] == 2010.0 and r["saldo_projetado"] == 6000 - 2010 == 3990.0
+    # o ai_guard sustenta cada número da frase, e recusa um que não está no resultado
+    evidencia = json.dumps(r, ensure_ascii=False, default=str)
+    frase = ("🐷 Receita R$ 6.000,00, despesa R$ 1.800,00 (cartão R$ 200,00, agendado R$ 1.500,00, no ritmo "
+             "R$ 100,00); projeção de saída R$ 2.010,00, saldo projetado R$ 3.990,00, até agora R$ 4.200,00.")
+    claims = check(frase, [evidencia], "projeção")
+    assert len(claims) >= 7 and all(c.supported for c in claims), claims
+    assert not all(c.supported for c in check(frase.replace("2.010,00", "2.011,00"), [evidencia], "projeção"))
+
+
+def test_projecao_cartao_do_of_com_data_futura_nao_vira_agendado_nem_tira_do_ritmo(monkeypatch):
+    """Hoje 17/10: cartão do OF (fecha dia 25) com compra de 200 no dia 20, aluguel de 1500 no dia 28 e gasto
+    de 100 no dia 5. O cartão conta só em `despesa_cartao`; o aluguel é o único agendado; o ritmo é o gasto."""
+    _congela(monkeypatch, 2026, 10, 17)
+    uid = usuario_pagante()
+    cartao = db.create_card(uid, "Nubank", closing_day=25, due_day=10)
+    db.add_credit_purchase(uid, cartao, 200, "mercado", "no cartão", date(2026, 10, 20))
+    q("update credit_transactions set source='open_finance' where user_id=%s", (uid,))
+    _lanca(uid, "despesa", 1500, 2026, 10, 28)
+    _lanca(uid, "despesa", 100, 2026, 10, 5)
+    r = _tool("forecast_month_end", uid)
+    assert r["despesa"] == float(_card_categorias(uid).saiu) == r["despesa_cartao"] + 1600.0 == 1800.0
+    assert (r["despesa_cartao"], r["despesa_agendada"], r["despesa_no_ritmo"]) == (200.0, 1500.0, 100.0)
+    assert r["despesa_projetada"] == 1882.35
+
+
+def test_projecao_saldo_zero_arredondado_nao_sai_menos_zero_nem_negativo(monkeypatch):
+    """Receita 182,35, gasto 100 no dia 1, hoje dia 17 de 31: saída projetada 182,3529 > receita por 0,0029."""
+    _congela(monkeypatch, 2026, 10, 17)
+    uid = usuario_pagante()
+    _lanca(uid, "receita", 182.35, 2026, 10, 1)
+    _lanca(uid, "despesa", 100, 2026, 10, 1)
+    r = _tool("forecast_month_end", uid)
+    assert r["saldo_projetado"] == 0.0 and math.copysign(1, r["saldo_projetado"]) == 1
+    assert r["vai_fechar_negativo"] is False
+
+
+def test_projecao_cartao_manual_e_projetado_pelo_ritmo_limite_declarado():
+    """LIMITE DECLARADO, não o ideal: `origens["cartao"]` só conta cartão do Open Finance (produto agora é
+    só OF; cartão manual é legado). Compra manual de 200 + pagamento da fatura: `despesa` bate com o card,
+    `despesa_cartao` é 0 e a compra manual fica em `despesa_no_ritmo` (extrapolada), como diz a nota."""
+    uid = usuario_pagante()
+    cartao = db.create_card(uid, "Nubank", closing_day=31, due_day=10)
+    db.add_launch_and_update_balance(uid, "despesa", 100, "mercado", None, categoria="outros")
+    db.add_credit_purchase(uid, cartao, 200, "mercado", "no cartão", today_tz())
+    db.pay_bill_amount(uid, cartao, "Nubank", 200)
+    r = _tool("forecast_month_end", uid)
+    assert r["despesa"] == float(_card_categorias(uid).saiu) == 300.0
+    assert r["despesa_cartao"] == 0.0 and r["despesa_no_ritmo"] == 300.0
+    assert r["despesa_projetada"] == round(300 * r["dias_no_mes"] / r["dias_corridos"], 2)
+    assert "inclusive cartão lançado à mão" in r["nota_metodologia"]
+
+
+def test_projecao_sem_cartao_extrapola_tudo():
+    uid = usuario_pagante()
+    db.add_launch_and_update_balance(uid, "despesa", 100, "mercado", None, categoria="outros")
+    r = _tool("forecast_month_end", uid)
+    assert r["despesa_cartao"] == 0.0 and r["despesa_no_ritmo"] == r["despesa"] == 100.0
+    assert r["despesa_projetada"] == round(100 * r["dias_no_mes"] / r["dias_corridos"], 2)
+
+
+def test_projecao_sem_plano_segue_pro_required(monkeypatch):
+    monkeypatch.setattr("core.services.plan_service.plan_gate_ok", lambda *_a, **_k: False)
+    assert _tool("forecast_month_end", usuario_pagante())["error"] == "pro_required"
+
+
+def test_conversa_meu_mes_fecha_no_azul_chega_com_o_saiu_do_card(monkeypatch):
+    uid = usuario_pagante()
+    _semeia_projecao(uid, 1000, 100, 200, 300, 50)
+    resposta, d = _conversa(
+        monkeypatch, uid, "meu mês está fechando no azul?", {}, tool="forecast_month_end",
+        fala=lambda v: f"🐷 Até agora saiu {v['despesa']} e deve fechar em {v['saldo_projetado']}")
+    assert d["despesa"] == float(_card_categorias(uid).saiu) == 300.0
+    assert f"saiu {d['despesa']}" in resposta and f"{d['saldo_projetado']}" in resposta, resposta
 
 
 def test_category_spend_do_mes_corrente_inclui_a_fatura_que_fecha_depois_de_hoje():
@@ -396,8 +577,6 @@ def test_usuario_b_com_cartao_e_fatura_no_mesmo_mes_nao_mexe_nas_listas_de_a():
     assert antes[2]["total"] == 80.0  # só a compra à vista de A no cartão; nada dos 888 de B
 
 
-# No FIM do arquivo: o `get_largest_expenses` do teste do usuário B empata em 100.0 (lançamento x parcela) e a
-# ordem do empate muda com o volume de linhas que os testes anteriores deixam; estes não podem vir antes dele.
 def test_compare_traz_o_aviso_de_dado_incompleto_da_regra_do_mes():
     a, _ = _par()  # o par de conciliação pendente do semeia_a
     r = _tool("compare_periods", a, mes=f"{INICIO:%Y-%m}")

@@ -75,7 +75,7 @@ export function Button({
         style={[
           {
             minHeight: acesso ? ALTURA_ACESSO[tamanho] : ALTURA[tamanho],
-            borderRadius: raio.controle,
+            borderRadius: raio.pilula,
             paddingHorizontal: espaco.xl,
             alignItems: "center",
             justifyContent: "center",

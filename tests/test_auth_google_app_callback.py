@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import google_de_mentira, login_google
+from _apoio_auth_app import google_de_mentira, login_google, marca_exclusao
 
 SENHA = "senha-forte-123"
 COOKIES_DE_SESSAO = ("auth_token", "dashboard_token", "refresh_token")
@@ -105,7 +105,7 @@ def _erro(monkeypatch, app: int, caso: str) -> str:
     """Location do callback no erro `caso`, pelo fluxo real do `app`."""
     if caso == "exclusao":
         uid, email = _conta_existente()
-        db.schedule_account_deletion(uid, SENHA)
+        marca_exclusao(uid, SENHA)
     else:
         email = _email()
     google_de_mentira(monkeypatch, email, verificado=caso != "email_nao_verificado")

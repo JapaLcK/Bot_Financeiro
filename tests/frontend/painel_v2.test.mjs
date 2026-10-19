@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
 
-const ROTAS = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos", "/ferramentas", "/piggy"];
+const ROTAS = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos", "/orcamento", "/orcamentos-categoria", "/milhao", "/ferramentas", "/piggy"];
 const PAGINAS = [["/painel", PAINEL, undefined], ["protótipo", PROTOTIPO, RAIZ]];
 
 let browser;
@@ -29,6 +29,8 @@ after(() => browser?.close());
 async function abrir(url, raiz, width) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 760 ? 900 : 844 }, reducedMotion: "reduce" });
   await servir(ctx, raiz);
+  // O chat do Piggy lê o nome da conta para a saudação.
+  await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: 1, whatsapp_linked: false } }));
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   const falhas = [];

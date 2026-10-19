@@ -2,7 +2,7 @@ import { ActivityIndicator, View } from "react-native";
 import { CurvaAcumulada } from "@/ui/componentes/CurvaAcumulada";
 import { Icone } from "@/ui/componentes/Icone";
 import { useTema } from "@/ui/tema";
-import { ALFA_FUNDO_TOM, raio } from "@/ui/tokens";
+import { ALFA_FUNDO_TOM, raio, tingir } from "@/ui/tokens";
 import { ritmoDoMes, textoPct, variacao } from "./acumuladoMes";
 import { Avisos, Linha, RecursoDados, Valor } from "./base";
 import { hojeSP } from "./catalogo";
@@ -11,7 +11,6 @@ import { usePainel } from "./provider";
 import { TextoPainel as Texto } from "./tipografia";
 
 const TOM = { abaixo: "positive", acima: "warning", igual: "ink" } as const;
-const alfaHex = (esquema: "light" | "dark") => Math.round(ALFA_FUNDO_TOM[esquema] * 255).toString(16).padStart(2, "0");
 
 /**
  * "Ritmo de gastos": quanto este mês gastou a mais ou a menos que o mês passado NO MESMO DIA, a variação em % e as duas curvas
@@ -32,7 +31,7 @@ export function ResumoMes() {
           <Texto variante="corpo" tom={tom} style={{ paddingBottom: 6 }}>{v ? v.sentido : r.atual.indiceHoje === null ? "gasto no mês" : "gasto até hoje"}</Texto>
         </View>
         {v && <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          {v.pct !== null && <View testID="chip-pct" style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: raio.chip, backgroundColor: `${cores[tom]}${alfaHex(esquema)}` }}>
+          {v.pct !== null && <View testID="chip-pct" style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: raio.chip, backgroundColor: tingir(cores[tom], ALFA_FUNDO_TOM[esquema]) }}>
             {v.sentido !== "igual" && <Icone nome={v.sentido === "abaixo" ? "ArrowDown" : "ArrowUp"} tamanho={20} tom={tom} />}
             <Texto variante="rotulo" tom={tom}>{textoPct(v.pct)}</Texto>
           </View>}

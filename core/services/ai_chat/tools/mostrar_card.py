@@ -113,7 +113,7 @@ def _show_card(user_id: int, args: dict[str, Any]) -> dict[str, Any]:
     if len(meses) > (MAX_MESES if card == "categorias" else 1):
         if card == "periodo":
             return _erro("meses_demais", "periodo não usa meses: passe só de e ate (AAAA-MM)")
-        return _erro("meses_demais", f"categorias compara até {MAX_MESES} meses lado a lado; para mais "
+        return _erro("meses_demais", f"categorias compara até {MAX_MESES} meses (uma aba por mês); para mais "
                      "meses use show_card periodo com de/ate (até 12). resumo/calendario/simulador mostram 1 mês")
     dias = args.get("dias")
     if dias is not None and str(dias) not in ("30", "60", "90"):
@@ -187,11 +187,11 @@ SCHEMA = {
             f"Mostra no app um card do painel com os números do usuário. Chame UMA vez por card, "
             f"no máximo {MAX_POR_TURNO} por resposta, e escreva os números a partir do resultado desta tool. "
             "Cards: contas (saldo total e por conta: 'meu saldo'), hero (previsão de saldo), compromissos (próximos "
-            "pagamentos), resumo (entrou/saiu do mês), categorias (gastos por categoria; aceita "
-            "até 3 meses lado a lado), calendario (gastos por dia), simulador (Pro), patrimonio, "
+            "pagamentos), resumo (SÓ o gasto do mês e o ritmo contra o mês passado, não o que entrou), categorias (gastos por categoria; aceita "
+            "até 3 meses, uma aba por mês), calendario (gastos por dia), simulador (Pro), patrimonio, "
             "wealth (distribuição do patrimônio), rendimento (taxas contratadas), assinaturas, "
-            "metas (caixinhas com meta), fatura (cartões e limite), parcelas, renda (evolução "
-            "mensal, até 12 meses), piggy (insights), periodo (2 a 12 meses inteiros, 'março a agosto', "
+            "metas (caixinhas com meta), fatura (cartões e limite), parcelas, renda (o que ENTROU × saiu "
+            "mês a mês, até 12 meses; se recusar por plano, o dado de UM mês sai em texto pelo get_period_summary), piggy (insights), periodo (2 a 12 meses inteiros, 'março a agosto', "
             "'este ano': entrou, saiu, saldo, barras por mês e categorias somadas; use de/ate). Erro de plano: ofereça o upgrade, sem números."
         ),
         "parameters": {

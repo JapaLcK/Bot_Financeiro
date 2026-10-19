@@ -486,7 +486,7 @@ def test_risco_aceito_5xx_persistente_em_investments_nao_abre_o_disjuntor(
 @pytest.mark.parametrize("refresh_ligado", ["1", "0"])
 def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         monkeypatch, refresh_ligado):
-    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda saúde e retentativa, e SÓ do 2º
+    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda catálogo, saúde, retentativa e push, e SÓ do 2º
     tique em diante, depois do intervalo, o PATCH periódico (e só com `OF_REFRESH_ENABLED`):
     o PATCH no boot é o que o Railway repetia a cada deploy."""
     eventos_: list = []
@@ -505,15 +505,44 @@ def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         if sum(1 for e in eventos_ if isinstance(e, tuple)) > 2:
             raise asyncio.CancelledError
 
+    async def _catalogo():
+        eventos_.append("catalogo")
+
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", _catalogo)
+    import core.services.open_finance_proactive as ofp
+    monkeypatch.setattr(ofp, "run_reconnect_push", lambda: eventos_.append("push") or {})
     monkeypatch.setattr(orq, "retentar_leituras", _retentativa)
     monkeypatch.setattr(asyncio, "sleep", _sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(dashboard._open_finance_refresh())
     assert dashboard._PRIMEIRO_TIQUE_SEC == 600
-    assert eventos_ == [("sleep", 600), "saude", "retentativa",
-                        ("sleep", 4321), "saude", "retentativa",
+    assert eventos_ == [("sleep", 600), "catalogo", "saude", "retentativa", "push",
+                        ("sleep", 4321), "catalogo", "saude", "retentativa", "push",
                         *(["patch"] if refresh_ligado == "1" else []),
                         ("sleep", 4321)]
+
+
+def test_push_que_levanta_nao_segura_o_patch_do_tique(monkeypatch):
+    """`run_reconnect_push` levanta: o PATCH periódico do mesmo tique roda assim mesmo
+    (o `try/except` do push em `_open_finance_tick`). Controle: tirar esse `try/except`
+    deixa o `patch` fora de `eventos_`."""
+    eventos_: list = []
+    monkeypatch.setattr(ps, "run_of_health_check", lambda **kw: eventos_.append("saude") or {})
+    monkeypatch.setattr(ps, "request_pluggy_refresh",
+                        lambda **kw: eventos_.append("patch") or {"claimed": [], "failures": []})
+
+    async def _retentativa(**kw):
+        return {}
+
+    def _push():
+        eventos_.append("push")
+        raise RuntimeError("boom")
+
+    import core.services.open_finance_proactive as ofp
+    monkeypatch.setattr(ofp, "run_reconnect_push", _push)
+    monkeypatch.setattr(orq, "retentar_leituras", _retentativa)
+    asyncio.run(dashboard._open_finance_tick(interval=100, com_patch=True))
+    assert eventos_ == ["saude", "push", "patch"]
 
 
 def _roda_laco(monkeypatch, *, interval, ligado, tiques, tick_falha_no=()):

@@ -1,0 +1,268 @@
+{
+  "v": 3,
+  "assetGroups": {
+    "Agentes": {
+      "files": {
+        "agente-aviador.webp": {
+          "blob": "94d1463c57b593da4f7e668f07abba4c",
+          "name": "agente-aviador.webp",
+          "size": 68818,
+          "type": "image/webp"
+        },
+        "agente-barao.webp": {
+          "blob": "e1e1f6ebcf4d6fc1ec265db1987d2de1",
+          "name": "agente-barao.webp",
+          "size": 88758,
+          "type": "image/webp"
+        },
+        "agente-carteiro.webp": {
+          "blob": "cd2704e5f08c58a7156e1870fcb1576b",
+          "name": "agente-carteiro.webp",
+          "size": 21360,
+          "type": "image/webp"
+        },
+        "agente-cofre.webp": {
+          "blob": "b926d1f81fc1b3c4c025abad96354190",
+          "name": "agente-cofre.webp",
+          "size": 109988,
+          "type": "image/webp"
+        },
+        "agente-detetive.webp": {
+          "blob": "c4f1977db17df546ed78ac518072e19a",
+          "name": "agente-detetive.webp",
+          "size": 33308,
+          "type": "image/webp"
+        },
+        "agente-faria_limer.webp": {
+          "blob": "14035e5afc01ea96961cfef6cb8f90c7",
+          "name": "agente-faria_limer.webp",
+          "size": 97922,
+          "type": "image/webp"
+        },
+        "agente-reporter.webp": {
+          "blob": "cebf17a8e620c08b643b4e69f21a2d98",
+          "name": "agente-reporter.webp",
+          "size": 82022,
+          "type": "image/webp"
+        },
+        "agente-xerife.webp": {
+          "blob": "6987721da5b13cdccd9cb6f1400828ac",
+          "name": "agente-xerife.webp",
+          "size": 22624,
+          "type": "image/webp"
+        },
+        "agente-carteiro-hero.webp": {
+          "blob": "356b77d7623d1be42171a003ef2e062e",
+          "name": "agente-carteiro-hero.webp",
+          "size": 78100,
+          "type": "image/webp"
+        },
+        "agente-detetive-hero.webp": {
+          "blob": "12b5f9bd5f175856ad1cd0ef2807e190",
+          "name": "agente-detetive-hero.webp",
+          "size": 105622,
+          "type": "image/webp"
+        },
+        "agente-xerife-hero.webp": {
+          "blob": "b3c1fd458c87553921db2c00e4749231",
+          "name": "agente-xerife-hero.webp",
+          "size": 58396,
+          "type": "image/webp"
+        }
+      },
+      "name": "Agentes",
+      "order": [
+        "agente-aviador.webp",
+        "agente-barao.webp",
+        "agente-carteiro-hero.webp",
+        "agente-carteiro.webp",
+        "agente-cofre.webp",
+        "agente-detetive-hero.webp",
+        "agente-detetive.webp",
+        "agente-faria_limer.webp",
+        "agente-reporter.webp",
+        "agente-xerife-hero.webp",
+        "agente-xerife.webp"
+      ],
+      "tile": "l"
+    },
+    "Logos": {
+      "files": {
+        "icon.png": {
+          "blob": "8a3f4523dd11fd76f906d97b119bf1ce",
+          "name": "icon.png",
+          "size": 5836,
+          "type": "image/png"
+        },
+        "logo-dark-ground.png": {
+          "blob": "7dcade1b06a4f44e3683e09903736214",
+          "name": "logo-dark-ground.png",
+          "size": 658801,
+          "type": "image/png"
+        },
+        "simbolo.png": {
+          "blob": "c328390e33ed9a93b199fb398f797cf7",
+          "name": "simbolo.png",
+          "size": 29374,
+          "type": "image/png"
+        }
+      },
+      "name": "Logos",
+      "order": [
+        "simbolo.png",
+        "icon.png",
+        "logo-dark-ground.png"
+      ],
+      "tile": "l"
+    },
+    "Mascot": {
+      "files": {
+        "mascot.webp": {
+          "blob": "b1cb67ed3a6cf6a408393f8ebdb23a16",
+          "name": "mascot.webp",
+          "size": 34276,
+          "type": "image/webp"
+        },
+        "piggy-3d.png": {
+          "blob": "4903cbb276fca95555380612607322bf",
+          "name": "piggy-3d.png",
+          "size": 1422908,
+          "type": "image/png"
+        }
+      },
+      "name": "Mascot",
+      "order": [
+        "mascot.webp",
+        "piggy-3d.png"
+      ],
+      "tile": "l"
+    },
+    "Stickers": {
+      "files": {
+        "sticker-expense-alert.webp": {
+          "blob": "f306f26db345d21e191d04ac02f59604",
+          "name": "sticker-expense-alert.webp",
+          "size": 21200,
+          "type": "image/webp"
+        },
+        "sticker-goal.webp": {
+          "blob": "822b8bd9fab2460ad694fa1fd0c7825f",
+          "name": "sticker-goal.webp",
+          "size": 21548,
+          "type": "image/webp"
+        },
+        "sticker-hello.webp": {
+          "blob": "a50e86ec4ff068148abdc2f3a933b140",
+          "name": "sticker-hello.webp",
+          "size": 19218,
+          "type": "image/webp"
+        },
+        "sticker-income.webp": {
+          "blob": "5e0282bf467ecedc80162fae35cc9c06",
+          "name": "sticker-income.webp",
+          "size": 20458,
+          "type": "image/webp"
+        },
+        "sticker-point.webp": {
+          "blob": "3f13e4c07993ad501e450869852b6a21",
+          "name": "sticker-point.webp",
+          "size": 19264,
+          "type": "image/webp"
+        },
+        "sticker-report.webp": {
+          "blob": "1e8c74364c804227de4164c931f307d4",
+          "name": "sticker-report.webp",
+          "size": 22162,
+          "type": "image/webp"
+        },
+        "sticker-success.webp": {
+          "blob": "21e8abc6cad262ce324bfd69145c5647",
+          "name": "sticker-success.webp",
+          "size": 16742,
+          "type": "image/webp"
+        },
+        "sticker-thinking.webp": {
+          "blob": "bed94e36da2f2f4256515f0905b17147",
+          "name": "sticker-thinking.webp",
+          "size": 20892,
+          "type": "image/webp"
+        },
+        "sticker-approved.webp": {
+          "blob": "efb78dd1b58a6307211d4b26753575ba",
+          "name": "sticker-approved.webp",
+          "size": 22584,
+          "type": "image/webp"
+        },
+        "sticker-chill.webp": {
+          "blob": "8ec56a4a7879342e1f0dc6df09f99398",
+          "name": "sticker-chill.webp",
+          "size": 19086,
+          "type": "image/webp"
+        },
+        "sticker-loading.webp": {
+          "blob": "3adb5bcaa59346bfb68842965bcc534e",
+          "name": "sticker-loading.webp",
+          "size": 19638,
+          "type": "image/webp"
+        },
+        "sticker-ok.webp": {
+          "blob": "bb864b0a07ac035bdbb5f408a7789336",
+          "name": "sticker-ok.webp",
+          "size": 16720,
+          "type": "image/webp"
+        }
+      },
+      "name": "Stickers",
+      "order": [
+        "sticker-approved.webp",
+        "sticker-chill.webp",
+        "sticker-expense-alert.webp",
+        "sticker-goal.webp",
+        "sticker-hello.webp",
+        "sticker-income.webp",
+        "sticker-loading.webp",
+        "sticker-ok.webp",
+        "sticker-point.webp",
+        "sticker-report.webp",
+        "sticker-success.webp",
+        "sticker-thinking.webp"
+      ],
+      "tile": "m"
+    }
+  },
+  "blobs": {},
+  "createdOnFiles": {
+    "at": "2026-10-18T23:08:19Z",
+    "v": 1
+  },
+  "docs": {
+    "readme": "project/README.md",
+    "sections": []
+  },
+  "groups": [
+    "Logos",
+    "Mascot",
+    "Agentes",
+    "Stickers"
+  ],
+  "lastChange": {
+    "at": "2026-10-18T23:19:19Z",
+    "by": "Lucas",
+    "via": "Claude Code",
+    "note": "Os 24 componentes do app, ícones do app em SVG, escala de marketing, hairlines do painel, 4 stickers e 3 agentes"
+  },
+  "layout": "files",
+  "libraries": [
+    {
+      "name": "react",
+      "version": "18"
+    },
+    {
+      "name": "react-dom",
+      "version": "18"
+    }
+  ],
+  "namespace": "PigBank",
+  "sections": {},
+  "title": "PigBank"
+}

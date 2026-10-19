@@ -5,7 +5,7 @@
    Uso: <i class="ph ph-wallet"></i>  ·  cor via currentColor, tamanho via font-size. */
 @font-face {
   font-family: "Phosphor";
-  src: url("/fonts/Phosphor.woff2?v=2f963f24afc6") format("woff2");
+  src: url("/fonts/Phosphor.woff2?v=9267a7921b87") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: swap;
@@ -48,6 +48,9 @@
 .ph.ph-arrow-down:before {
   content: "\e03e";
 }
+.ph.ph-arrow-down-left:before {
+  content: "\e040";
+}
 .ph.ph-arrow-left:before {
   content: "\e058";
 }
@@ -62,9 +65,6 @@
 }
 .ph.ph-arrows-clockwise:before {
   content: "\e094";
-}
-.ph.ph-arrows-horizontal:before {
-  content: "\eb06";
 }
 .ph.ph-baby:before {
   content: "\e774";
@@ -113,6 +113,9 @@
 }
 .ph.ph-cake:before {
   content: "\e780";
+}
+.ph.ph-calendar-blank:before {
+  content: "\e10a";
 }
 .ph.ph-calendar-dots:before {
   content: "\e7b4";
@@ -345,14 +348,14 @@
 .ph.ph-paint-brush:before {
   content: "\e6f0";
 }
-.ph.ph-paper-plane-tilt:before {
-  content: "\e398";
-}
 .ph.ph-paw-print:before {
   content: "\e648";
 }
 .ph.ph-pencil-simple:before {
   content: "\e3b4";
+}
+.ph.ph-phone:before {
+  content: "\e3b8";
 }
 .ph.ph-piggy-bank:before {
   content: "\ea04";
@@ -402,8 +405,8 @@
 .ph.ph-sign-out:before {
   content: "\e42a";
 }
-.ph.ph-smiley:before {
-  content: "\e436";
+.ph.ph-sliders-horizontal:before {
+  content: "\e434";
 }
 .ph.ph-sneaker-move:before {
   content: "\ed60";
@@ -422,9 +425,6 @@
 }
 .ph.ph-sun:before {
   content: "\e472";
-}
-.ph.ph-sun-horizon:before {
-  content: "\e5b6";
 }
 .ph.ph-t-shirt:before {
   content: "\e670";

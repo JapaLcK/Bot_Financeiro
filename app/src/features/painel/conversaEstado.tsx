@@ -5,17 +5,23 @@ import { conversaSchema, lerEvento, type BlocoChat } from "@/api/schemas/painel"
 import { avaliarResposta, cancelarPendencia, conversarFluxo, lerRecurso } from "@/services/painel";
 import { mensagemRecurso, useEstadoPainel } from "./provider";
 import type { Pergunta } from "./perguntas";
+import type { Motivo } from "./motivoFeedback";
 /** `passos`/`previa`/`blocos` são só GUARDADOS aqui: quem os desenha é o D2/E1. `parcial` = texto do stream até o `fim`. */
-export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; interrompida: boolean; chips: string[] };
-const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, interrompida: false, chips: [] };
+export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; motivo: Motivo | null; interrompida: boolean; chips: string[] };
+const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
+export const cotaCheia = (u: Uso | null) => !!u && u.used >= u.limit;
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
 type Bloqueio = "abrindo" | "livre" | "falhou";
-type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean> };
+/** O estado inteiro da avaliação, como o servidor o grava: `motivo`/`texto` só valem com `nota: -1`. */
+export type Avaliacao = { nota: 1 | -1 | null; motivo?: Motivo; texto?: string };
+/** Modo comentário do "Outro": o texto mora aqui (separado do `rascunho` do chat) e só vale para o último turno enquanto ele estiver com 👎 + motivo "outro" (derivado em `useComentario`: reverter a avaliação desliga o modo sozinho). */
+export type Comentario = { turno: number; texto: string };
+type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean | null>; gravarAvaliacao: (turno: Turno, a: Avaliacao) => Promise<boolean | null>; avaliando: boolean; comentario: Comentario | null; comentar: (c: Comentario | null) => void };
 const Contexto = createContext<Conversa | null>(null);
 export function useConversa() { const c = useContext(Contexto); if (!c) throw new Error("Conversa indisponível"); return c; }
 /**
- * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela no segundo plano e o turno em voo tem de sobreviver.
+ * Mora no layout (dentro do PainelProvider) porque o PortaoPainel desmonta a tela quando a trava biométrica cobre (e a troca de conta a remonta) e o turno em voo tem de sobreviver.
  * Resposta em stream (`/ai/chat/stream`): TODO evento passa por `vivo()` (mesmo dono E mesmo voo); o `fim` encerra o voo, então o que vier depois cai nessa guarda. `parar()` aborta o voo e marca `parado`: é o que separa parar dos 60 s e da troca de conta.
  * O POST tem AbortController PRÓPRIO (fora de p.operacao()): o cancelar() do painel (segundo plano, trava, atualizar) não o toca;
  * só a troca de conta, o logout, o limite de 60 s do POST e a desmontagem do provider o abortam.
@@ -33,9 +39,11 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const [bloqueio, setBloqueio] = useState<Bloqueio>("abrindo");
   const [enviando, setEnviando] = useState(false);
   const [rascunho, setRascunho] = useState("");
+  const [comentario, comentar] = useState<Comentario | null>(null);
+  const [salvando, setSalvando] = useState(false); // POST de avaliação em voo: a UI desativa as pílulas
   // Estado atrelado ao dono: ajusta DURANTE o render (o React refaz o render antes de commitar), senão um quadro mostraria o turno de A com o uid de B; o useEffect abaixo segue abortando pedidos e limpando refs.
   const [de, setDe] = useState(uid);
-  if (de !== uid) { setDe(uid); setTurnos([]); setRascunho(""); setUso(null); setEnviando(false); setBloqueio("abrindo"); }
+  if (de !== uid) { setDe(uid); setTurnos([]); setRascunho(""); comentar(null); setUso(null); setEnviando(false); setBloqueio("abrindo"); }
   const aberta = useRef(false), enviou = useRef(false), sujo = useRef(false), erros = useRef(0), proximo = useRef(0), abertura = useRef(0), versaoUso = useRef(0); // versaoUso: o POST que grava o uso invalida a cota que um GET mais antigo ainda traz
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
@@ -75,7 +83,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (!aberta.current) return;
     aberta.current = false; for (const c of prep.current) c.abort(); prep.current = [];
     const emVoo = voo.current ? proximo.current : null; // o turno em voo é sempre o último
-    setRascunho(""); setTurnos((ts) => ts.filter((t) => t.id === emVoo));
+    setRascunho(""); comentar(null); setTurnos((ts) => ts.filter((t) => t.id === emVoo));
     const alvo = dono.current;
     if (enviou.current && !voo.current && alvo !== null) { enviou.current = false; sair(alvo); }
   }, [sair]);
@@ -122,17 +130,19 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     } finally { ativos.current.delete(ctrl); }
   };
   const parar = () => { const c = voo.current; if (!c || !aberta.current) return; parado.current = c; c.abort(); };
-  /** `false` = falhou e o toast é da UI. Otimista; tocar a nota já marcada manda `null`. Um POST por turno por vez. */
-  const avaliar = async (turno: Turno, nota: 1 | -1): Promise<boolean> => {
+  /** `true` = o POST foi 2xx (gravou de verdade); `false` = falhou e o toast é da UI; `null` = nada gravado nem falha: descartada (já há um POST deste turno, sem dono ou sem `messageId`) ou abortada pela troca de dono — quem chama não agradece nem avisa. Otimista, com reversão de nota E motivo. Um POST por turno por vez. */
+  const gravarAvaliacao = async (turno: Turno, { nota, motivo, texto }: Avaliacao): Promise<boolean | null> => {
     const alvo = dono.current, id = turno.messageId;
-    if (alvo === null || id === null || avaliando.current.has(turno.id)) return true;
-    const antes = turno.feedback, nova = antes === nota ? null : nota;
-    const gravar = (feedback: 1 | -1 | null) => setTurnos((ts) => ts.map((t) => t.id === turno.id ? { ...t, feedback } : t));
-    avaliando.current.add(turno.id); gravar(nova); const c = novo();
-    try { await avaliarResposta(id, nova, c); return true; }
-    catch (e) { if (dono.current !== alvo) return true; gravar(antes); falhou(e); return false; }
-    finally { ativos.current.delete(c); avaliando.current.delete(turno.id); }
+    if (alvo === null || id === null || avaliando.current.has(turno.id)) return null;
+    const { feedback: antes, motivo: motivoAntes } = turno;
+    const gravar = (feedback: 1 | -1 | null, motivo: Motivo | null) => setTurnos((ts) => ts.map((t) => t.id === turno.id ? { ...t, feedback, motivo } : t));
+    avaliando.current.add(turno.id); setSalvando(true); gravar(nota, nota === -1 ? motivo ?? null : null); const c = novo();
+    try { await avaliarResposta(id, { nota, motivo, texto }, c); return true; }
+    catch (e) { if (dono.current !== alvo) return null; gravar(antes, motivoAntes); falhou(e); return false; }
+    finally { ativos.current.delete(c); avaliando.current.delete(turno.id); setSalvando(avaliando.current.size > 0); }
   };
+  /** 👍👎: tocar a nota já marcada manda `null` (e zera o motivo no servidor). */
+  const avaliar = (turno: Turno, nota: 1 | -1) => gravarAvaliacao(turno, { nota: turno.feedback === nota ? null : nota });
   const antes = useRef(uid);
   useEffect(() => {
     const prev = antes.current; antes.current = uid;
@@ -140,9 +150,9 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     // Troca de conta (ou logout): aborta tudo e NÃO manda DELETE — a pendência do outro dono não é desta sessão.
     for (const c of ativos.current) c.abort();
     ativos.current.clear(); delecoes.current.clear(); prep.current = []; voo.current = null; sujo.current = false; enviou.current = false;
-    setTurnos([]); setRascunho(""); setUso(null); setEnviando(false); setBloqueio("abrindo");
+    setTurnos([]); setRascunho(""); comentar(null); setUso(null); setEnviando(false); setBloqueio("abrindo");
     if (aberta.current && uid !== null) void preparar();
   }, [uid, preparar]);
   useEffect(() => () => { for (const c of ativos.current) c.abort(); }, []);
-  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar, parar, avaliar }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar, parar, avaliar, gravarAvaliacao, avaliando: salvando, comentario, comentar }}>{children}</Contexto.Provider>;
 }

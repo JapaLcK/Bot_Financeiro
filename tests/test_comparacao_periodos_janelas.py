@@ -19,14 +19,15 @@ def d(s):
 
 
 @pytest.mark.parametrize("hoje,ano,mes,modo,a,p,encurtado,igual", [
-    ("2026-10-12", 2026, 10, "mes_aberto", ("10-01", "10-12"), ("09-01", "09-12"), False, True),
-    ("2026-10-31", 2026, 10, "mes_aberto", ("10-01", "10-31"), ("09-01", "09-30"), True, False),
-    ("2026-10-01", 2026, 10, "mes_aberto", ("10-01", "10-01"), ("09-01", "09-01"), False, True),
-    ("2026-03-30", 2026, 3, "mes_aberto", ("03-01", "03-30"), ("02-01", "02-28"), True, False),
-    ("2026-03-28", 2026, 3, "mes_aberto", ("03-01", "03-28"), ("02-01", "02-28"), False, True),
-    ("2028-03-29", 2028, 3, "mes_aberto", ("03-01", "03-29"), ("02-01", "02-29"), False, True),
-    ("2028-03-30", 2028, 3, "mes_aberto", ("03-01", "03-30"), ("02-01", "02-29"), True, False),
-    ("2028-02-29", 2028, 2, "mes_aberto", ("02-01", "02-29"), ("01-01", "01-29"), False, True),
+    # P1-B: mês aberto = mês inteiro × anterior inteiro, em qualquer dia de hoje (o dia não muda a janela)
+    ("2026-10-12", 2026, 10, "mes_aberto", ("10-01", "10-31"), ("09-01", "09-30"), False, False),
+    ("2026-10-31", 2026, 10, "mes_aberto", ("10-01", "10-31"), ("09-01", "09-30"), False, False),
+    ("2026-10-01", 2026, 10, "mes_aberto", ("10-01", "10-31"), ("09-01", "09-30"), False, False),
+    ("2026-03-30", 2026, 3, "mes_aberto", ("03-01", "03-31"), ("02-01", "02-28"), False, False),
+    ("2026-03-28", 2026, 3, "mes_aberto", ("03-01", "03-31"), ("02-01", "02-28"), False, False),
+    ("2028-03-29", 2028, 3, "mes_aberto", ("03-01", "03-31"), ("02-01", "02-29"), False, False),
+    ("2028-03-30", 2028, 3, "mes_aberto", ("03-01", "03-31"), ("02-01", "02-29"), False, False),
+    ("2028-02-29", 2028, 2, "mes_aberto", ("02-01", "02-29"), ("01-01", "01-31"), False, False),
     ("2026-10-12", 2026, 3, "mes_fechado", ("03-01", "03-31"), ("02-01", "02-28"), False, False),
     ("2026-10-12", 2026, 9, "mes_fechado", ("09-01", "09-30"), ("08-01", "08-31"), False, False),
 ])
@@ -42,8 +43,13 @@ def test_janelas_do_mes(hoje, ano, mes, modo, a, p, encurtado, igual):
         (d(f"{ano}-{a[1]}") - d(f"{ano}-{a[0]}")).days + 1, (d(f"{ano}-{p[1]}") - d(f"{ano}-{p[0]}")).days + 1)
 
 
+def test_escolha_do_mes_aberto_avisa_que_o_mes_nao_acabou_e_nao_diz_mesmos_dias():
+    e = cp.escolher_janelas(d("2026-10-12"), 2026, 10)["escolha"]
+    assert "O mês ainda não acabou" in e and "mesmos dias" not in e
+
+
 @pytest.mark.parametrize("hoje,ano,mes,a,p,encurtado", [
-    ("2027-01-15", 2027, 1, ("2027-01-01", "2027-01-15"), ("2026-12-01", "2026-12-15"), False),
+    ("2027-01-15", 2027, 1, ("2027-01-01", "2027-01-31"), ("2026-12-01", "2026-12-31"), False),
     ("2027-01-31", 2027, 1, ("2027-01-01", "2027-01-31"), ("2026-12-01", "2026-12-31"), False),
     ("2027-10-12", 2027, 1, ("2027-01-01", "2027-01-31"), ("2026-12-01", "2026-12-31"), False),  # fechado
 ])

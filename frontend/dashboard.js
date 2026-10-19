@@ -3198,6 +3198,11 @@ let _hbMonth = _mesCorrente();          // "YYYY-MM" — mês em exibição na v
 const _hbCache = new Map();             // mês → último payload do status
 const _hbChannel = makeFetchChannel();  // dedup + abort + geração
 let _hbChart = null;                    // donut Chart.js — destruir antes de recriar
+let _hbAlocChart = null;                // donut de alocação (budget_amount) — idem
+let _hbPayload = null;                  // último payload pintado (o modal do pote lê daqui)
+let _hbPoteKey = null;                  // pote aberto — acha o card atual se o grid re-renderizar
+let _hbPoteOpener = null;               // card que abriu o modal — recebe o foco na volta
+const _HB_GUARDA = new Set(["metas", "liberdade_financeira"]);  // potes "guardados": passar do alvo não é estouro
 let _hbIncomeRendered = null;           // renda pintada no input (pula PUT sem mudança)
 
 function _mesCorrente() {
@@ -3313,15 +3318,16 @@ function renderHouseholdBudgetView(payload) {
       : '<span class="hb-badge-auto">calculada automaticamente</span>';
   }
 
+  _hbPayload = payload;
+  _renderHbAloc(buckets, income);
   _renderHbDonut(buckets, totals);
   _renderHbLegenda(buckets);
   _renderHbResumo(buckets, totals);
-  _renderHbMetas(buckets);
 }
 
 // "Total" + valor no miolo do donut. Plugin inline e não registrado global:
-// só este gráfico tem centro de texto.
-function _hbPluginCentro(total, light) {
+// só os dois donuts do Orçamento (Alocação e Gasto) têm centro de texto.
+function _hbPluginCentro(total, light, titulo = "Total") {
   return {
     id: "hb-centro-total",
     afterDraw(chart) {
@@ -3335,7 +3341,7 @@ function _hbPluginCentro(total, light) {
       ctx.textBaseline = "middle";
       ctx.fillStyle = light ? "rgba(15,23,42,.55)" : "rgba(255,255,255,.5)";
       ctx.font = "600 10px sans-serif";
-      ctx.fillText("Total", x, y - 9);
+      ctx.fillText(titulo, x, y - 9);
       ctx.fillStyle = light ? "#0f172a" : "#ffffff";
       ctx.font = "700 14px sans-serif";
       ctx.fillText(_fmtBRLshort(total), x, y + 9);
@@ -3398,13 +3404,17 @@ function _renderHbResumo(buckets, totals) {
   if (!el) return;
   // used_pct vem null quando a renda do mês é 0 — "—", não "NaN%".
   const fmtPct = p => p == null ? "—" : Number(p).toFixed(1).replace(".", ",") + "%";
+  // Potes guardados passando do alvo não são estouro: Restante neutro; total negativo só vira vermelho se um pote NÃO guardado estiver negativo.
+  const tom = b => _toneMoney(_HB_GUARDA.has(b.key) && b.remaining < 0 ? 0 : b.remaining);
+  const totTom = Number(totals.remaining) < 0 && !buckets.some(b => !_HB_GUARDA.has(b.key) && Number(b.remaining) < 0)
+    ? _toneMoney(0) : _toneMoney(totals.remaining);
   const rows = buckets.map(b => `
     <tr>
       <td><span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>${escapeHtmlSafe(b.label)}</td>
       <td>${_fmtBRL(b.spent)}</td>
       <td>${_fmtBRL(b.budget_amount)}</td>
       <td>${fmtPct(b.used_pct)}</td>
-      <td style="color:${_toneMoney(b.remaining)}">${_fmtBRL(b.remaining)}</td>
+      <td style="color:${tom(b)}">${_fmtBRL(b.remaining)}</td>
     </tr>`).join("");
   el.innerHTML = `
     <table class="hb-table">
@@ -3415,21 +3425,110 @@ function _renderHbResumo(buckets, totals) {
         <td>${_fmtBRL(totals.spent)}</td>
         <td>${_fmtBRL(totals.budget_amount)}</td>
         <td>${fmtPct(totals.used_pct)}</td>
-        <td style="color:${_toneMoney(totals.remaining)}">${_fmtBRL(totals.remaining)}</td>
+        <td style="color:${totTom}">${_fmtBRL(totals.remaining)}</td>
       </tr></tfoot>
     </table>`;
 }
 
-function _renderHbMetas(buckets) {
-  const el = document.getElementById("hb-metas-list");
-  if (!el) return;
-  el.innerHTML = buckets.map(b => `
-    <div class="hb-meta-row">
-      <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
-      <span class="hb-meta-label">${escapeHtmlSafe(b.label)}</span>
-      <span class="hb-meta-pct">${Number(b.pct).toFixed(1).replace(".", ",")}%</span>
-    </div>`).join("");
+// Card "Alocação da renda": donut do que CADA pote recebe (budget_amount) + um
+// card-botão por pote. O clique é delegado (uma vez) pra não gerar onclick inline.
+function _renderHbAloc(buckets, income) {
+  const el = document.getElementById("hb-aloc-donut");
+  if (el) {
+    if (_hbAlocChart) { _hbAlocChart.destroy(); _hbAlocChart = null; }
+    if (!_chartVazio(el, _serieVazia(buckets.map(b => Number(b.budget_amount || 0))),
+                     "Sem renda neste mês",
+                     "Informe a renda do mês acima e veja quanto vai para cada pote.")) {
+      _hbAlocChart = new Chart(el, {
+        type: "doughnut",
+        data: {
+          labels: buckets.map(b => b.label),
+          datasets: [{
+            data: buckets.map(b => Number(b.budget_amount || 0)),
+            backgroundColor: buckets.map(b => b.color + "bb"),
+            borderColor: buckets.map(b => b.color),
+            borderWidth: 1.5,
+            hoverOffset: 8,
+          }],
+        },
+        options: {
+          cutout: "68%",
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "rgba(10,12,24,.88)", borderColor: "rgba(255,255,255,.1)", borderWidth: 1,
+              titleColor: "rgba(255,255,255,.9)", bodyColor: "rgba(255,255,255,.6)",
+              callbacks: { label: ctx => " " + _fmtBRL(ctx.parsed) },
+            },
+          },
+          animation: { duration: 700, easing: "easeInOutQuart" },
+        },
+        plugins: [_hbPluginCentro(Number(income.amount || 0), _isLightMode(), "Renda")],
+      });
+    }
+  }
+  const wrap = document.getElementById("hb-potes");
+  if (!wrap) return;
+  wrap.onclick = (e) => {
+    const card = e.target.closest("[data-hb-pote]");
+    if (card) openHbPote(card.dataset.hbPote, card);
+  };
+  wrap.innerHTML = buckets.map(b => {
+    const guarda = _HB_GUARDA.has(b.key);
+    const spent = Number(b.spent || 0), budget = Number(b.budget_amount || 0);
+    const over = !guarda && spent > budget;
+    const w = budget > 0 ? Math.min(100, spent / budget * 100) : (spent > 0 ? 100 : 0);
+    return `
+    <button type="button" class="hb-pote${over ? " over" : ""}" data-hb-pote="${escapeHtmlSafe(b.key)}">
+      <span class="hb-pote-top">
+        <span class="hb-dot" style="background:${escapeHtmlSafe(b.color)}"></span>
+        <span class="hb-pote-nome">${escapeHtmlSafe(b.label)}</span>
+        <span class="hb-pote-pct">${Number(b.pct).toFixed(1).replace(".", ",")}%</span>
+      </span>
+      <span class="hb-pote-aloc">${_fmtBRL(budget)}</span>
+      <span class="hb-pote-bar" aria-hidden="true"><span style="width:${w.toFixed(1)}%;background:${over ? "var(--red)" : escapeHtmlSafe(b.color)}"></span></span>
+      <span class="hb-pote-sub">${guarda ? "guardado" : "gasto"} ${_fmtBRL(spent)}${over ? " · estourou" : ""}</span>
+    </button>`;
+  }).join("");
 }
+
+// Modal do pote: lançamentos do mês que caem nele (mesmas linhas que somam o
+// `spent` do card — vêm do backend no mesmo payload). Markup estático no HTML.
+function openHbPote(key, opener) {
+  const b = ((_hbPayload && _hbPayload.buckets) || []).find(x => x.key === key);
+  if (!b) return;
+  _hbPoteOpener = opener || null;
+  _hbPoteKey = key;
+  const guarda = _HB_GUARDA.has(b.key);
+  const set = (id, html) => { document.getElementById(id).innerHTML = html; };
+  document.getElementById("hb-pote-title").textContent = `${b.label} · ${_hbMonthLong(_hbPayload.month)}`;
+  set("hb-pote-cats", "Categorias neste pote: " + (b.categories || []).map(escapeHtmlSafe).join(", "));
+  set("hb-pote-total", `${guarda ? "Guardado" : "Gasto"}: <strong>${_fmtBRL(b.spent)}</strong> de ${_fmtBRL(b.budget_amount)} alocados`);
+  set("hb-pote-chips", (b.by_category || []).map(c => `
+    <div class="chip"><div class="chip-lbl">${escapeHtmlSafe(c.categoria)}</div><div class="chip-val">${_fmtBRL(c.total)}</div></div>`).join(""));
+  const rows = b.launches || [];
+  set("hb-pote-list", rows.length ? rows.map(l => `
+    <div class="hb-pote-row">
+      <div class="hb-pote-row-main">
+        <span class="hb-pote-row-desc">${escapeHtmlSafe(l.descricao || l.categoria)}</span>
+        <span class="hb-pote-row-meta">${escapeHtmlSafe(l.categoria)} · ${fmtDateOnly(l.data)} · ${l.origem === "cartao" ? "Cartão" : "Conta"}</span>
+      </div>
+      <span class="hb-pote-row-val">${_fmtBRL(l.valor)}</span>
+    </div>`).join("")
+    : '<div class="empty" style="padding:18px">Nenhum lançamento neste pote em ' + escapeHtmlSafe(_hbMonthLong(_hbPayload.month)) + '.</div>');
+  document.getElementById("hb-pote-overlay").classList.add("open");
+  document.getElementById("hb-pote-close").focus();
+}
+
+function closeHbPote() {
+  const el = document.getElementById("hb-pote-overlay");
+  if (el) el.classList.remove("open");
+  const card = document.querySelector(`#hb-potes [data-hb-pote="${_hbPoteKey}"]`)
+    || (_hbPoteOpener && _hbPoteOpener.isConnected ? _hbPoteOpener : null);
+  if (card) card.focus();
+  _hbPoteOpener = _hbPoteKey = null;
+}
+window.pigModalKeys && pigModalKeys("hb-pote-overlay", closeHbPote);
 
 // ── Renda do mês (override manual × calculada) ────────────────────────
 

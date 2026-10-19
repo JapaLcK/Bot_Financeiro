@@ -1,6 +1,7 @@
 /**
- * Conta criada só via Google (/auth/me → has_password:false) em
- * frontend/settings.html.
+ * Conta sem credencial nenhuma (/auth/me → has_password:false e precisa_criar_senha:true) em
+ * frontend/settings.html. A conta só Google/Apple (sem a marca) NÃO entra aqui: desde o S1 ela
+ * abre exportar e excluir pelo código do e-mail.
  *
  * INVARIANTE: os 6 fluxos que re-autenticam por senha não podem MOSTRAR campo
  * de senha para quem não tem senha nenhuma — o abridor aborta e o diálogo manda
@@ -64,6 +65,11 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
                      browser = await chromium.launch(); });
 after(async () => { await browser?.close(); server?.kill(); });
 
+// Conta SEM credencial (quiz/funil): o servidor manda precisa_criar_senha:true e as rotas dela dão 409.
+// A conta só Google/Apple (has_password:false SEM esta marca) exclui e exporta pelo código do e-mail
+// desde o S1 (cobertura: settings_segurar_confirma_exclusao.test.mjs, X2).
+const SEM_CREDENCIAL = { has_password: false, precisa_criar_senha: true };
+
 const SECURITY_OK = { ok: true, user_id: 1, email: "a@b.com", plan: "pro", display_name: "Japa", identities: [] };
 
 /** `me` = corpo do /auth/me, ou função que o devolve (pra mudar entre um PTR e
@@ -123,7 +129,7 @@ const OS_SEIS = [
 test("sem senha: os 6 abridores não revelam campo de senha e abrem o diálogo", async () => {
   // ?view=data é a armadilha: exportar/recomeçar/excluir moram nesta aba, não
   // na security — um teste que só cobrisse a security passaria cego a ela.
-  const page = await abrePagina({ has_password: false }, "view=data", "data");
+  const page = await abrePagina(SEM_CREDENCIAL, "view=security", "security");
   try {
     for (const [fn, id, classe] of OS_SEIS) {
       assert.equal(await abre(page, fn, id, classe), false, `${fn} revelou o campo de senha`);
@@ -134,7 +140,7 @@ test("sem senha: os 6 abridores não revelam campo de senha e abrem o diálogo",
 });
 
 test("sem senha: o botão do diálogo leva para a aba de segurança, com a copy de DEFINIR", async () => {
-  const page = await abrePagina({ has_password: false }, "view=data", "data");
+  const page = await abrePagina(SEM_CREDENCIAL, "view=security", "security");
   try {
     await page.evaluate(() => showExportConfirm());
     await waitFor(() => modalAberto(page), "o diálogo de definir senha");
@@ -152,7 +158,7 @@ test("sem senha: o botão do diálogo leva para a aba de segurança, com a copy 
 test("sem senha: ?view=security&autoOpenMfa=1 (o caminho da /home) não abre o setup", async () => {
   // A /home manda esta URL e o initSettings chama openMfaSetupModal() DIRETO,
   // sem passar pelo onMfaToggleClick — por isso a guarda vive no abridor.
-  const page = await abrePagina({ has_password: false }, "view=security&autoOpenMfa=1", "security");
+  const page = await abrePagina(SEM_CREDENCIAL, "view=security&autoOpenMfa=1", "security");
   try {
     await waitFor(() => modalAberto(page), "o diálogo de definir senha do autoOpenMfa");   // setTimeout 400ms
     assert.equal(await temClasse(page, "mfa-setup-overlay", "open"), false,
@@ -162,20 +168,21 @@ test("sem senha: ?view=security&autoOpenMfa=1 (o caminho da /home) não abre o s
 
 // ── upgrade path: definiu a senha fora daqui e puxou a tela ─────────────────
 
-for (const view of ["data", "security"]) {
+for (const view of ["security"]) {
+  // A aba data não é alcançável com a marca (showSettingsSection manda à security): só ela resta.
   test(`PBRefresh rebusca has_password na aba ${view}: os 6 destravam sem reload`, async () => {
     // O PTR do app NÃO recarrega o documento (é o motivo do PBRefresh existir),
     // então sem rebuscar o /auth/me quem definiu a senha ficava preso. A aba
     // `data` é a armadilha: 3 dos 6 pontos moram nela e o branch dela era
     // `return Promise.resolve()`.
-    let me = { has_password: false };
-    const page = await abrePagina(() => me, `view=${view}`, view);
+    let me = SEM_CREDENCIAL;
+    const page = await abrePagina(() => me, "view=security", "security");
     try {
       assert.equal(await abre(page, "showExportConfirm", "export-confirm", "show"), false,
                    "boot com has_password:false devia bloquear");
       await fechaModal(page);
 
-      me = { has_password: true };   // a senha acabou de ser definida em outra aba
+      me = { has_password: true, precisa_criar_senha: true };   // senha definida em outra aba; a marca fica (mudá-la recarrega)
       await page.evaluate(() => window.PBRefresh());
 
       for (const [fn, id, classe] of OS_SEIS) {
@@ -220,11 +227,11 @@ async function osSeisDestravados(page, quando) {
 }
 
 test("dois refreshHasPassword sobrepostos: a resposta VELHA não sobrescreve a NOVA", async () => {
-  const page = await abrePagina({ has_password: false }, "view=data", "data");
+  const page = await abrePagina(SEM_CREDENCIAL, "view=security", "security");
   try {
     // #1 lenta com o estado VELHO (sem senha), #2 rápida com o NOVO (a senha
     // acabou de ser definida em outra aba). A VELHA assenta por último.
-    await sequenciaAuthMe(page, [[800, { has_password: false }], [0, { has_password: true }]]);
+    await sequenciaAuthMe(page, [[800, SEM_CREDENCIAL], [0, { has_password: true, precisa_criar_senha: true }]]);
     await page.evaluate(() => Promise.all([refreshHasPassword(), refreshHasPassword()]));
     await osSeisDestravados(page, "depois da resposta velha assentar por último");
   } finally { await page.close(); }
@@ -236,13 +243,13 @@ test("PTR durante o boot: o /auth/me do boot (emitido ANTES) não vence o do PTR
   // /auth/me em voo, e o do boot é o mais velho dos dois.
   const page = await newPage({});
   try {
-    const vistos = await sequenciaAuthMe(page, [[900, { has_password: false }], [0, { has_password: true }]]);
-    await page.goto(`${ORIGIN}/settings.html?view=data`);
+    const vistos = await sequenciaAuthMe(page, [[900, SEM_CREDENCIAL], [0, { has_password: true }]]);
+    await page.goto(`${ORIGIN}/settings.html?view=security`);
     await waitFor(() => vistos() >= 1, "o /auth/me do boot ser emitido");
     await page.evaluate(() => window.PBRefresh());
     // O boot só chega no showSettingsSection depois do /auth/me dele: esperar a
     // aba aparecer é esperar a escrita velha ter tido a chance de assentar.
-    await waitFor(() => page.evaluate(() => !document.getElementById("section-data").hidden),
+    await waitFor(() => page.evaluate(() => !document.getElementById("section-security").hidden),
                   "o boot passar do /auth/me lento");
     await osSeisDestravados(page, "depois do /auth/me do boot assentar por último");
   } finally { await page.close(); }

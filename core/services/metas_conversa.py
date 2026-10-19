@@ -3,7 +3,7 @@
 
 Uma fonte de verdade para o NÚMERO: `api.v2.metas.listar` (regra em `db/metas.py` e
 `db/metas_ritmo.py`); aqui só se escreve a frase. Dinheiro entra como string (o JSON da rota) e sai
-como texto pronto com "R$" (nunca float): é o que o `ai_guard` aceita como evidência e o que o gpt-4o-mini não confunde
+como texto pronto com "R$" (nunca float): é o que o `ai_guard` aceita como evidência e o que o modelo não confunde
 (`por_mes` × `ritmo.valor`, lição do #931). A cópia por motivo espelha
 `webapp/src/dashboard/lib/metas-textos.ts` (§0.7: `tests/test_ai_chat_metas.py` compara as
 chaves e a ordem), na voz da conversa. O nome da meta é texto do usuário: só vai como valor.
@@ -21,7 +21,7 @@ from utils_text import fmt_brl
 logger = logging.getLogger(__name__)
 
 MAX_METAS = 10
-ONDE_CRIAR = "Crie e edite suas metas no painel: pigbankai.com/painel (seção Metas). Pelo chat ainda não dá."
+ONDE_CRIAR = "Crie e edite suas metas no painel: pigbankai.com/painel (seção Metas), ou me peça aqui."
 # Explicam o alvo da reserva, não o saldo da fonte: a frase do custo cobre.
 DO_ALVO = ("custo_desconhecido", "plano_sem_custo_mensal")
 
@@ -165,7 +165,7 @@ def para_conversa(d: dict) -> dict:
 
 
 def texto_whatsapp(uid: int) -> str:
-    """O "minhas metas" do WhatsApp (leitura; escrita é o C4): o `resumo` e os `avisos` de
+    """O "minhas metas" do WhatsApp (leitura; a escrita é da IA, `ai_chat/tools/metas_escrita.py`): o `resumo` e os `avisos` de
     `para_conversa`, sem recalcular nada. Sem link mágico: o painel vai como URL simples. Cabe nos 4096
     do WhatsApp (com folga para o aviso que alguns caminhos põem antes): se não couber, tira metas do fim e anuncia ("e mais N no painel"). Nunca lança."""
     from core.handlers.launches import _WPP_MAX_CHARS, _wpp_len  # tardio: handler pesado, só aqui

@@ -183,15 +183,16 @@ def _porta_whatsapp_credito(monkeypatch):
 
 
 def _porta_ai_chat_um(monkeypatch):
-    """`tools/launches.py::_delete_launch_execute`, pelo runner do /ai/chat."""
+    """`tools/extrato_ia.py::apagar`, pelo runner do /ai/chat."""
     from core.services.ai_chat import chat
 
     uid = _uid()
-    _lid, seq, _bal = db.add_launch_and_update_balance(
+    lid, _seq, _bal = db.add_launch_and_update_balance(
         uid, "despesa", 300, "aluguel", "paguei 300 aluguel")
     monkeypatch.setattr(db, "delete_launch_and_rollback", _explode)
-    db.ai_set_pending_action(uid, "delete_launch", {"launch_id": str(seq)},
-                             f"apagar o lançamento #{seq}")
+    from core.services.ai_chat.tools.extrato_ia import ao_confirmar  # a pendência como o runner a arma (com `_item`)
+    db.ai_set_pending_action(uid, "delete_launch", ao_confirmar(uid, {"launch_id": f"l{lid}"}),
+                             "apagar o lançamento de aluguel")
 
     resp = chat(uid, "sim", monthly_limit=1000, platform="dashboard")
 

@@ -214,7 +214,7 @@ test("plano sem investimentos e sem conta em reais: diz que não há fonte e lev
   await page.getByRole("button", { name: "Nova meta" }).click();
   await form.getByText("Seu plano atual não inclui investimentos.").waitFor();
   await form.getByText("Você não tem conta em reais conectada.").waitFor();
-  assert.equal(await form.getByRole("link", { name: "Conectar banco" }).getAttribute("href"), "/settings?view=open-finance");
+  assert.equal(await form.getByRole("link", { name: "Conectar banco" }).getAttribute("href"), "#/conta/bancos");
   await ctx.close();
 });
 

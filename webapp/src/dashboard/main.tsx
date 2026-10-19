@@ -3,11 +3,12 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
-import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
+import { Cofre } from "./conta/Cofre";
+import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { COMPARACAO_EXEMPLO } from "./lib/data.js";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, comparacaoQuery, contasQuery, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas, Comparacao, Investido } from "./lib/api-v2.gen";
+import { DEMO, comparacaoQuery, contasQuery, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Comparacao, Investido, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -36,18 +37,47 @@ if (DEMO) {
       { tipo: "acoes", rotulo: "Ações", valor: "3480.00", motivos: [] }],
     por_banco: [{ banco: "Nubank", valor: "23480.00", motivos: [] }],
   });
+  const nw = netWorth();
+  qc.setQueryData(milhaoQuery.queryKey, { patrimonio: txt(nw[nw.length - 1].total), motivos: [] }); // sem .at (Safari 14)
+  // Orçamentos por categoria de exemplo (só o mês corrente, como o real): um por status.
+  const hoje = new Date();
+  const ORC = [["alimentação", "alimentacao", "fork-knife", "🍔", "#f59e0b", 800, 412.3], ["transporte", "transporte", "car", "🚗", "#38bdf8", 300, 255],
+    ["lazer", "lazer", "confetti", "🎉", "#f0abfc", 200, 236.5], ["saúde", "saude", "heartbeat", "💊", "#6ee7b7", 150, 0]] as const;
+  const orcs = ORC.map(([categoria, chave, icone, emoji, cor, teto, gasto]) => {
+    const uso = gasto / teto * 100;
+    return { categoria, chave, emoji, icone, cor, teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), usado_pct: txt(uso),
+      status: uso >= 100 ? "vermelho" as const : uso >= 80 ? "amarelo" as const : "verde" as const };
+  });
+  const somaO = (k: "teto" | "gasto") => orcs.reduce((a, o) => a + Number(o[k]), 0);
+  qc.setQueryData<OrcamentosCategoria>(orcamentosCategoriaQuery.queryKey, {
+    mes: `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`, limite: null, orcamentos: orcs,
+    total: { teto: txt(somaO("teto")), gasto: txt(somaO("gasto")), restante: txt(somaO("teto") - somaO("gasto")), usado_pct: txt(somaO("gasto") / somaO("teto") * 100), em_risco: 2 },
+  });
   for (const mes of MONTHS) {
     const m = summary(mes), prev = previousKey(mes);
     const anterior = prev && { mes: prev, entrou: txt(summary(prev).income), saiu: txt(summary(prev).expense) };
     const ate = `${mes}-${new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate()}`;
     qc.setQueryData(resumoMesQuery(mes).queryKey, { mes, ate, entrou: txt(m.income), saiu: txt(m.expense), anterior, motivos: [] });
     qc.setQueryData<Comparacao>(comparacaoQuery(mes).queryKey, COMPARACAO_EXEMPLO as Comparacao);
+    // Potes de exemplo: teto = % da renda do mês; o gasto é uma fração fixa do teto, só para a tela ter o que mostrar.
+    const POTES = [["custos_fixos", "Custos fixos", "#7dd3fc", 55, 0.9], ["conforto", "Conforto", "#6ee7b7", 5, 0.5], ["metas", "Metas", "#fde047", 10, 0.6],
+      ["prazeres", "Prazeres", "#f0abfc", 10, 1.2], ["liberdade_financeira", "Liberdade financeira", "#93c5fd", 10, 0.8], ["conhecimento", "Conhecimento", "#fdba74", 10, 0.3]] as const;
+    const potes = POTES.map(([chave, nome, cor, pct, uso]) => {
+      const teto = Math.round(m.income * pct) / 100, gasto = Math.round(teto * uso * 100) / 100;
+      return { chave, nome, cor, pct: txt(pct), teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), usado_pct: teto > 0 ? txt(uso * 100) : null };
+    });
+    const soma = (k: "teto" | "gasto") => potes.reduce((a, p) => a + Number(p[k]), 0);
+    qc.setQueryData<OrcamentoDomestico>(orcamentoQuery(mes).queryKey, {
+      mes, renda: { valor: txt(m.income), origem: "calculada" }, potes,
+      total: { teto: txt(soma("teto")), gasto: txt(soma("gasto")), restante: txt(soma("teto") - soma("gasto")), usado_pct: soma("teto") > 0 ? txt(soma("gasto") / soma("teto") * 100) : null },
+    });
   }
 }
 
 const root = document.getElementById("pigbank-dashboard");
 if (root) {
+  if (!DEMO) escutarLogout(); // sair em outra aba derruba o painel (o dashboard.js antigo faz o mesmo)
   createRoot(root).render(
-    <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada></QueryClientProvider></StrictMode>,
+    <StrictMode><QueryClientProvider client={qc}><Entrada><App /></Entrada>{/* irmão do portão: o /me falhar não apaga os códigos de backup do MFA */}<Cofre /></QueryClientProvider></StrictMode>,
   );
 }

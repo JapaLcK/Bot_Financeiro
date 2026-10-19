@@ -25,6 +25,10 @@ const conexaoSchema = z.object({
   reconnected_at: z.string().datetime({ offset: true }).nullable(),
   provider_item_id: z.string().nullable(),
   institution_name: z.string().nullable(),
+  // https ou null; o host é fixado em `features/openFinance/conexoes/juntar.ts` antes de buscar. Servidor velho (sem o campo) e valor de forma estranha viram sem logo.
+  logo_url: z.string().nullable().optional().catch(null),
+  // O id do conector da Pluggy (`pluggy_connector_id`): é por ele, e nunca pelo nome, que "Disponíveis para conectar" sabe o que já está conectado.
+  institution_id: z.string().nullable().optional().catch(null),
   ui: z.object({ state: z.string(), label: z.string(), detail: z.string().nullable().optional() }),
 });
 
@@ -32,6 +36,29 @@ const conexaoSchema = z.object({
 export const conexoesSchema = z.object({ connections: z.array(conexaoSchema) });
 
 export type Conexao = z.infer<typeof conexaoSchema>;
+
+/**
+ * `GET /open-finance/{uid}/connectors` (catálogo da Pluggy). Tolerante POR ITEM como o `bancosSchema`: item que não passa sai e os outros ficam; `connectors` ausente vira `[]`.
+ * `logo` vem como "" quando o conector não tem; o host é fixado no render (`logoSeguro`), não aqui.
+ */
+const conectorSchema = z.object({ id: z.number().int().positive(), name: z.string().trim().min(1), logo: z.string().nullable().catch(null) });
+export const conectoresSchema = z.object({
+  connectors: z.array(z.unknown()).catch([]).transform((itens) => itens.flatMap((i) => { const c = conectorSchema.safeParse(i); return c.success ? [c.data] : []; })),
+});
+export type Conector = z.output<typeof conectorSchema>;
+
+/**
+ * `POST /open-finance/{uid}/refresh` (`refresh_and_sync_pluggy_user`): `sync.items[]` é o veredito por item e `connections`, o snapshot de DEPOIS.
+ * `sync.still_updating` fica de fora de propósito: é a soma dos itens (o app lê os itens). `sync.ok` é lido só para `items: []` com `ok: false` (a falha que não tem item para mostrar, #1100 D2);
+ * é opcional para uma resposta sem o campo não virar contrato inválido.
+ */
+export const refreshSchema = conexoesSchema.extend({
+  sync: z.object({ ok: z.boolean().optional(), items: z.array(z.object({
+    item_id: z.string(), institution: z.string().nullable(), state: z.string(), label: z.string(),
+    detail: z.string().nullable().optional(), reason: z.string().nullable().optional(), still_updating: z.boolean(),
+  })) }),
+});
+export type Refresh = z.infer<typeof refreshSchema>;
 
 export const onboardingBancarioSchema = z.object({
   ok: z.literal(true), completed: z.boolean(), completed_at: z.string().datetime({ offset: true }).nullable(),

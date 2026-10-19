@@ -2,10 +2,12 @@ import { useId, type ReactNode } from "react";
 import type { CustoMensal, Meta } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { ehNegativo, ehZero, fraseChegada, fraseCusto, fraseRitmo, mesAno, type Frase } from "../lib/metas-textos";
+import { conectarBanco } from "../router";
 import { Selos } from "./Selos";
 
 // Motivos que explicam o alvo (não o saldo da fonte): não pedem "a conferir" no guardado.
 const DO_ALVO = ["custo_desconhecido", "plano_sem_custo_mensal"];
+export { DO_ALVO }; // a pílula do chat (MetaPilula.tsx) usa a mesma lista
 
 // A frase de um motivo com o botão que resolve (planos ou conectar banco).
 export function FraseComAcao({ f }: { f: Frase }) {
@@ -13,7 +15,7 @@ export function FraseComAcao({ f }: { f: Frase }) {
     <>
       <p className="meta-nota">{f.texto}</p>
       {f.acao === "planos" && <a className="btn btn-ghost" href="/precos">Ver planos</a>}
-      {f.acao === "banco" && <a className="btn btn-ghost" href="/settings?view=open-finance">Conectar banco</a>}
+      {f.acao === "banco" && <a className="btn btn-ghost" href={conectarBanco()}>Conectar banco</a>}
     </>
   );
 }

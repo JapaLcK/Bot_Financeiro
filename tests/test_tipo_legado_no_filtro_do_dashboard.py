@@ -204,7 +204,7 @@ def test_contagem_sob_filtro_bate_com_a_lista_pagina_a_pagina(pro_user_id):
     # apaga as linhas do seed DEPOIS, então `pg_statistic` segue descrevendo uma
     # `launches` que não existe mais, para todos os testes seguintes, até o
     # próximo autovacuum. Teto NÃO medido: quem ordena por `criado_em desc` SEM
-    # desempate (`get_uncategorized_launches` em db/categories.py,
+    # desempate (a lista "sem categoria" da IA, `recentes` em db/lancamentos_leitura.py,
     # `list_user_categories` em db/budgets.py) pode trocar de linha empatada
     # quando o plano muda.
     with db.get_conn() as conn, conn.cursor() as cur:

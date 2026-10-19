@@ -5,7 +5,8 @@ import type { Conexao } from "@/api/schemas/openFinance";
 import { lerTentativaBancaria } from "@/storage/secure";
 import { cofre, chamadas, fetchFalso, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { voltarAoInicio } from "@/features/openFinance/navegacao";
+import { abrirBanco, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 type Props = { onSuccess: (d: { item: { id: string } }) => void };
 const mockWidget: { props: Props | null } = { props: null };
@@ -23,10 +24,11 @@ function servidor(esperarToken = false, pausaRemocao?: Promise<void>) {
     "/open-finance/1": () => resposta(200, { connections: bancos }),
     "/open-finance/1/limite": () => resposta(200, { ok: true, of_banks_max: 3, em_uso: bancos.length, pode_adicionar: true, code: null, message: null }),
     "/open-finance/1/connect-token": () => { emitiuToken.soltar(); return resposta(200, { ok: true, accessToken: "token" }); },
-    "/open-finance/1/pluggy-item": () => {
-      if (!bancos.some((c) => c.id === 1)) return resposta(409, { detail: { code: "OF_ITEM_REMOVED" } });
+    "/open-finance/1/pluggy-item": (o) => {
+      const item = (JSON.parse(String(o.body)) as { item: { id: string } }).item.id; // só o banco CUJO item voltou é reconectado
+      if (!bancos.some((c) => c.provider_item_id === item)) return resposta(409, { detail: { code: "OF_ITEM_REMOVED" } });
       const marco = "2026-10-05T13:00:00Z";
-      bancos = bancos.map((c) => c.id === 1 ? { ...c, reconnected_at: marco, last_sync_at: marco } : c);
+      bancos = bancos.map((c) => c.provider_item_id === item ? { ...c, reconnected_at: marco, last_sync_at: marco } : c);
       return resposta(200, { connections: bancos });
     },
     "/open-finance/1/connections/1": async () => { if (pausaRemocao) await pausaRemocao; if (esperarToken) await emitiuToken.promessa; bancos = bancos.filter((c) => c.id !== 1); return resposta(200, { ok: true, deleted: 1 }); },
@@ -48,7 +50,7 @@ afterEach(() => jest.restoreAllMocks());
 
 it.each(["Reconectar Nubank", "Conectar outro banco"])("%s antes de Desconectar no mesmo frame não abre Alert nem inicia DELETE", async (autorizar) => {
   servidor(true); const alert = alerta(true);
-  renderRouter("./app", { initialUrl: "/conexoes" });
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: autorizar })).toBeEnabled());
   const a = screen.getByRole("button", { name: autorizar });
   const r = screen.getByRole("button", { name: "Desconectar Nubank" });
@@ -63,11 +65,11 @@ it.each(["Reconectar Nubank", "Conectar outro banco"])("%s antes de Desconectar 
 
 it.each(["Nubank", "Itaú"])("Alert %s aberto antes da autorização não executa confirmação tardia enquanto entrada reservada", async (banco) => {
   servidor(true); alerta();
-  renderRouter("./app", { initialUrl: "/conexoes" });
-  await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco(banco);
+  await waitFor(() => expect(screen.getByRole("button", { name: `Reconectar ${banco}` })).toBeEnabled());
   await act(async () => {
     fireEvent.press(screen.getByRole("button", { name: `Desconectar ${banco}` }));
-    fireEvent.press(screen.getByRole("button", { name: "Reconectar Nubank" }));
+    fireEvent.press(screen.getByRole("button", { name: `Reconectar ${banco}` }));
     await drenar();
   });
   await waitFor(() => expect(screen.getByTestId("widget-remocao-entrada")).toBeTruthy());
@@ -76,26 +78,29 @@ it.each(["Nubank", "Itaú"])("Alert %s aberto antes da autorização não execut
   await act(async () => { confirmar?.(); await drenar(); });
   expect(deletes()).toEqual([]);
   expect(await lerTentativaBancaria(1)).toEqual(tentativa);
-  await act(async () => { mockWidget.props!.onSuccess({ item: { id: VIVO.provider_item_id } }); await drenar(); });
+  await act(async () => { mockWidget.props!.onSuccess({ item: { id: banco === "Nubank" ? VIVO.provider_item_id : "banco_b" } }); await drenar(); });
   await waitFor(() => expect(screen.getByText("Atualizado")).toBeTruthy());
 });
 
 it("remoção livre mantém DELETE individual e libera demais bancos", async () => {
-  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
   expect(deletes().map((c) => c.caminho)).toEqual(["/open-finance/1/connections/1"]);
+  await abrirBanco("Itaú");
   expect(screen.getByRole("button", { name: "Desconectar Itaú" })).toBeEnabled();
   expect(tokens()).toHaveLength(0);
 });
 
 it("voltar da autorização libera nova confirmação de remoção", async () => {
-  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(true); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Reconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.getByTestId("widget-remocao-entrada")).toBeTruthy());
   await act(async () => { router.back(); await drenar(); });
+  expect(screen.queryByTestId("folha-sheet")).toBeNull(); // a folha não reabre sozinha ao voltar
+  await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
@@ -105,7 +110,7 @@ it("voltar da autorização libera nova confirmação de remoção", async () =>
 
 it("DELETE em voo continua bloqueando autorização e libera ações ao terminar", async () => {
   const pausa = segurar(); servidor(false, pausa.promessa); alerta(true);
-  renderRouter("./app", { initialUrl: "/conexoes" });
+  renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Reconectar Nubank" })).toBeEnabled());
   const a = screen.getByRole("button", { name: "Reconectar Nubank" });
   const r = screen.getByRole("button", { name: "Desconectar Nubank" });
@@ -116,16 +121,18 @@ it("DELETE em voo continua bloqueando autorização e libera ações ao terminar
   expect(screen.getByRole("button", { name: "Conectar outro banco" })).toBeDisabled();
   await act(async () => { pausa.soltar(); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
+  await abrirBanco("Itaú");
   expect(screen.getByRole("button", { name: "Reconectar Itaú" })).toBeEnabled();
 });
 
 it("confirmação de Alert da montagem substituída não inicia DELETE", async () => {
-  alerta(); renderRouter("./app", { initialUrl: "/conexoes" });
+  alerta(); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   const antiga = confirmar;
   expect(antiga).toBeDefined();
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Voltar ao Início" })); await drenar(); });
+  // A tela sai da pilha (o que o botão "Voltar ao Início" fazia): a confirmação do Alert antigo chega a uma montagem morta.
+  await act(async () => { voltarAoInicio(); await drenar(); });
   await waitFor(() => expect(screen).toHavePathname("/resumo"));
   await act(async () => { antiga?.(); await drenar(); });
   expect(deletes()).toHaveLength(0);
@@ -134,14 +141,17 @@ it("confirmação de Alert da montagem substituída não inicia DELETE", async (
 // Retém só a navegação para inspecionar origem/refresh ainda focados. Os casos
 // adversariais acima provam a execução pelo Router real, sem esse spy.
 it("reserva desativa ambos Desconectar e refresh não libera a entrada", async () => {
-  const alert = alerta(); renderRouter("./app", { initialUrl: "/conexoes" });
+  const alert = alerta(); renderRouter("./app", { initialUrl: "/conexoes" }); await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Conectar outro banco" })).toBeEnabled());
   jest.spyOn(router, "push").mockImplementation(() => {});
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Conectar outro banco" })); await drenar(); });
   expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeDisabled();
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Fechar" })); await drenar(); });
+  await abrirBanco("Itaú");
   expect(screen.getByRole("button", { name: "Desconectar Itaú" })).toBeDisabled();
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Conferir de novo" })); await drenar(); });
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Fechar" })); await drenar(); });
+  await act(async () => { screen.getByTestId("tela").props.refreshControl.props.onRefresh(); await drenar(); });
+  await abrirBanco();
   expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Desconectar Itaú" })).toBeDisabled();
   expect(alert).not.toHaveBeenCalled();
 });

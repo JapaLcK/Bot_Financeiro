@@ -524,7 +524,8 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   mesma passada (já registrado com o dono inteiro, sem consulta).
 - **Quando o tique roda:** o 1º, `min(_PRIMEIRO_TIQUE_SEC, OF_REFRESH_INTERVAL_SEC)`
   (10 min por padrão; com intervalo menor, o intervalo) depois do boot, só
-  com a saúde e a retentativa (as duas só fazem GET); o PATCH periódico NÃO roda no
+  com o aquecimento do catálogo, a saúde e a retentativa (as três só fazem GET; o
+  aquecimento lê `/connectors`); o PATCH periódico NÃO roda no
   boot e só entra do 2º tique em diante, a cada `OF_REFRESH_INTERVAL_SEC` (6 h, e só
   com `OF_REFRESH_ENABLED`). Sem isso, com merges diários o processo quase nunca
   chegava aos 6 h e a retentativa nunca disparava. Custo de um deploy: a saúde só
@@ -532,7 +533,8 @@ próximo. Só GET: nenhum PATCH, nenhuma cota de coleta.
   por conexão e o K seguram a retentativa em deploys seguidos. **Limite, não
   medido (Onda 8):** o tique só dispara depois de 10 min de processo vivo e depois a
   cada 6 h; deploy muito frequente ainda pode reiniciar o ciclo de 6 h.
-- **Interruptores:** `OF_HEALTH_CHECK_ENABLED=0` desliga saúde e retentativa;
+- **Interruptores:** `OF_HEALTH_CHECK_ENABLED=0` desliga saúde e retentativa (o
+  aquecimento do catálogo não tem interruptor; ver `docs/CLAUDE.md`, "Tarefas de fundo");
   `OF_RETRY_MAX_PER_TICK=0` só a retentativa; `RUN_BACKGROUND_TASKS=0` o tique
   inteiro. **A frase "Tentaremos de novo automaticamente" só é verdade com
   `OF_HEALTH_CHECK_ENABLED`, `OF_RETRY_MAX_PER_TICK` e `RUN_BACKGROUND_TASKS`

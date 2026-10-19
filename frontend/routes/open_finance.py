@@ -42,8 +42,8 @@ from core.services.pluggy import (
     create_pluggy_connect_token,
     delete_pluggy_item,
     get_pluggy_item,
-    list_pluggy_connectors,
 )
+from core.services.pluggy_catalogo import list_pluggy_connectors
 from core.services import billing_copy
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (

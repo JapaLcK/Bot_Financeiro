@@ -4,25 +4,29 @@
 de saídas em outra moeda derivado, "sem categoria" num balde só, o catálogo com fallback neutro (e o seed
 antes de ler), o corte do plano (comparação `null`, linha fora da grade, mês inteiro indisponível), o
 corte por dia (31/03 contra fevereiro; fevereiro contra janeiro), os 3 maiores do dia, o arredondamento,
-uma conexão só e o isolamento A × B. Cada correção tem o seu controle NEGATIVO medido à mão (a linha do
+uma conexão só e o isolamento A × B, e o contrato com o app nativo (`/api/app/gastos`, "Seu dia": fixture e campos lidos
+pelo zod do app, total do dia igual ao `saiu` do `/mes-detalhes`). Cada correção tem o seu controle NEGATIVO medido à mão (a linha do
 conserto desligada em `db/gastos.py`) e reportado no PR; o positivo mora no mesmo teste.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from psycopg.types.json import Jsonb
 
 import db
 import db.gastos as gastos
-from api.v2.gastos import Gastos
+from api.v2.gastos import GastoCategoria, GastoDia, GastoDiaCategoria, GastoMaior, Gastos
 from conftest import usuario_pagante
 from db import resumo_mes
 from db.categories import ensure_user_categories_seeded
 from db.connection import CAT_NEUTRA_COR, CAT_NEUTRA_EMOJI, get_conn
 from tests._patrimonio_helpers import conexao, conta, q, tx_banco
+from tests.test_api_app_sessao import cliente, completo
 from tests.test_api_v2_lancamentos import pede
 from tests.test_api_v2_resumo_mes import libera  # noqa: F401 (fixture)
 from tests.test_resumo_mes_regra import FIM, INICIO, SAIU, _lanc, semeia_a, semeia_b
@@ -129,10 +133,12 @@ def test_categoria_fora_do_catalogo_sai_neutra_e_no_primeiro_acesso_o_seed_vem_a
     _l(a, 20, INICIO.replace(day=4), categoria="viagem a lisboa")
     por = _por_chave(_ler(a))  # 1º acesso: nenhum /categorias antes
     assert (por["alimentacao"]["emoji"], por["alimentacao"]["cor"]) == ("🍔", "#f59e0b")
+    assert por["alimentacao"]["icone"] == "hamburger"  # derivado do emoji no servidor (`db/cat_icones.py`)
     # fora do catálogo o seed importa só o que já estava nos lançamentos: aqui entrou depois
     _l(a, 5, INICIO.replace(day=5), categoria="categoria nova")
     nova = _por_chave(_ler(a))["categoria nova"]
     assert (nova["nome"], nova["emoji"], nova["cor"]) == ("categoria nova", CAT_NEUTRA_EMOJI, CAT_NEUTRA_COR)
+    assert nova["icone"] == "tag"
 
 
 # ── 5 A × B ──────────────────────────────────────────────────────────────────
@@ -331,3 +337,44 @@ def test_rota_devolve_dinheiro_como_texto_e_isola_o_usuario(libera):
     assert g.total == SAIU and isinstance(corpo["total"], str) and isinstance(corpo["categorias"][0]["valor"], str)
     assert g.motivos == ["conciliacao_pendente"] and g.historico_desde is None
     assert D(pede(b, "/api/v2/gastos", mes=M).json()["total"]) == D(8665)
+
+
+# ── 15 contrato com o app nativo (`/api/app/gastos`, "Seu dia") ──────────────
+# O zod do app (`app/src/api/schemas/painel.ts::gastosSchema`) lê SÓ alguns campos; o Pydantic ignora campo a mais, então a fixture
+# validar não basta: o servidor REMOVER `quantidade` deixaria a fixture válida e o CI verde. Daí a lista de campos lidos (JSON
+# versionado ao lado da fixture, conferido contra o zod pelo jest do app) contra `model_fields` de CADA modelo aninhado.
+
+FIXTURES = Path(__file__).parent / "fixtures"
+APP_GASTOS = json.loads((FIXTURES / "app_gastos.json").read_text(encoding="utf-8"))
+LIDOS = json.loads((FIXTURES / "app_gastos_campos_lidos.json").read_text(encoding="utf-8"))
+MODELOS = {"Gastos": Gastos, "GastoDia": GastoDia, "GastoMaior": GastoMaior,
+           "GastoDiaCategoria": GastoDiaCategoria, "GastoCategoria": GastoCategoria}
+
+
+def test_fixture_do_app_e_exatamente_o_que_o_gastos_do_pydantic_devolve():
+    g = Gastos.model_validate(APP_GASTOS)
+    assert json.loads(g.model_dump_json()) == APP_GASTOS  # dinheiro em texto e na escala original ("1.137", "0.010", "91.010")
+    d = APP_GASTOS["dias"][0]
+    for nivel, modelo in ((APP_GASTOS, Gastos), (d, GastoDia), (d["maiores"][0], GastoMaior),
+                          (d["categorias"][0], GastoDiaCategoria), (APP_GASTOS["categorias"][0], GastoCategoria)):
+        assert set(nivel) == set(modelo.model_fields), modelo.__name__  # nem campo a menos nem a mais na fixture
+
+
+def test_campos_que_o_zod_do_app_le_existem_em_cada_modelo_aninhado():
+    assert set(LIDOS) == set(MODELOS)
+    for nome, campos in LIDOS.items():
+        assert set(campos) <= set(MODELOS[nome].model_fields), (nome, set(campos) - set(MODELOS[nome].model_fields))
+
+
+def test_total_do_dia_de_gastos_bate_com_o_saiu_do_dia_de_mes_detalhes():
+    """A linha que o app toca (`/mes-detalhes`) e o dia da folha (`/gastos`) dizem o mesmo número, dia a dia, na grade."""
+    a = completo(usuario_pagante())
+    semeia_a(a)
+    c = cliente(a)
+    g, md = c.get("/api/app/gastos", params={"mes": M}), c.get("/api/app/mes-detalhes", params={"mes": M})
+    assert g.status_code == md.status_code == 200, (g.text, md.text)
+    por_dia = {x["dia"]: D(x["total"]) for x in g.json()["dias"]}
+    saiu = {x["dia"]: D(x["saiu"]) for x in md.json()["dias"] if D(x["saiu"]) > 0}
+    assert por_dia and por_dia == {k: v for k, v in saiu.items() if k.startswith(M)}
+    # o que o calendário nativo tem a mais é o dia de outro mês (a parcela): fora da grade do /gastos, dentro do total
+    assert sum(v for k, v in saiu.items() if not k.startswith(M)) == D(g.json()["fora_da_grade"]["valor"]) > 0

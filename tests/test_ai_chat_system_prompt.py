@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from core.services.ai_chat import cards, runner, system_prompt
-from core.services.ai_chat.system_prompt import ADENDO_CARDS, ADENDO_CARDS_METAS, FORMATO_WHATSAPP, SYSTEM_PROMPT
+from core.services.ai_chat.system_prompt import ADENDO_CARDS, ADENDO_CARDS_METAS, FORMATO_WHATSAPP, SYSTEM_PROMPT, prompt_do_usuario
 from core.services.ai_chat.tools import OCULTAS_NO_APP, SCHEMAS, SCHEMAS_APP
 from core.services.ai_chat.tools.metas import schemas_com_metas
 
@@ -127,6 +127,16 @@ def test_campos_do_card_periodo_no_adendo_sao_do_modelo():
     assert set(NOME.findall(linha.replace("`saldo`", "`amount`"))) - NOMES_DE_TOOL - campos == {"amount"}  # negativo
 
 
+def test_textos_da_comparacao_dizem_mes_inteiro_e_o_card_na_tela():
+    """O que o modelo lê sobre `compare_periods` (onda 2): mês corrente INTEIRO (não "os mesmos dias") e o card sozinho."""
+    mostram = next(l for l in ADENDO_CARDS.splitlines() if "mostram o card sozinhas" in l)
+    assert "`compare_periods`" in mostram and "`card_na_tela: true`" in mostram
+    linha = next(l for l in SYSTEM_PROMPT.splitlines() if "compara o mês corrente inteiro" in l)
+    assert "mesmos dias" not in linha
+    desc = next(s["function"]["description"] for s in SCHEMAS if s["function"]["name"] == "compare_periods")
+    assert "mês inteiro" in desc and "mesmos dias" not in desc
+
+
 def test_error_msg_tem_uma_fonte_so():
     assert runner.ERROR_MSG is system_prompt.ERROR_MSG
     assert SYSTEM_PROMPT.count(system_prompt.ERROR_MSG) == 1
@@ -149,3 +159,17 @@ def test_catalogo_do_adendo_tem_os_mesmos_ids_do_cards_ids():
 
 def test_catalogo_do_adendo_das_metas_tem_todos_os_ids():
     assert _ids_do_catalogo(ADENDO_CARDS_METAS) == sorted(cards.IDS)
+
+
+def test_aviso_de_dado_velho_e_card_de_entrada_no_prompt():
+    """Feedback da build 38: toda resposta do app repetia "pode estar desatualizado ou incompleto" (o app já avisa na
+    tela) e "quanto entrou" abria o `resumo`, que só mostra gasto. O teste lê o texto; quem mede o modelo é a sonda com a OpenAI.
+    A supressão é SÓ do app (WhatsApp e /painel sem emissor não têm essa tela): vive no ADENDO_CARDS, nunca no SYSTEM_PROMPT."""
+    marca = "o app já avisa na tela e repetir só confunde"
+    assert marca in ADENDO_CARDS and "REGRA DO APP, vale por cima da regra 10" in ADENDO_CARDS
+    for canal in (False, True):  # sem `app` (WhatsApp, /painel) o prompt não cala o aviso
+        assert marca not in prompt_do_usuario(canal, False) and "o app já avisa" not in prompt_do_usuario(canal, False)
+        assert marca in prompt_do_usuario(canal, True)
+    assert "resumo (entrou e saiu" not in ADENDO_CARDS and "NÃO mostra o que entrou" in ADENDO_CARDS
+    assert "ÚNICO card que mostra o que entrou" in ADENDO_CARDS and "contando os dois (março estando em outubro = 8)" in ADENDO_CARDS and "`por_mes` do resultado do `show_card` renda" in ADENDO_CARDS
+    assert "se `motivos` não estiver vazio diga" in SYSTEM_PROMPT  # a linha de investimentos do WhatsApp segue como era

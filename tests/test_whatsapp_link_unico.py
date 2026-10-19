@@ -215,13 +215,15 @@ def test_wa_sem_numero_segue_funcionando_pelo_seletor(monkeypatch):
 
 
 def test_so_um_construtor_do_deep_link():
-    """`api.whatsapp.com`/`wa.me/` só aparecem em core/dashboard_links.py, em QUALQUER
-    arquivo rastreado (py, js, ts/tsx, html, mjs, md, json: app/ e webapp/ inclusos).
-    Ficam de fora `tests/` (que assertam a URL), `docs/` e `.time-dev/` (histórico e
-    planos, que citam o construtor antigo por nome)."""
+    """`api.whatsapp.com`/`wa.me/` só aparecem em core/dashboard_links.py (o construtor),
+    em QUALQUER arquivo rastreado (py, js, ts/tsx, html, mjs, md, json: app/ e webapp/
+    inclusos). Exceção única: app/src/features/conta/contato.ts, que só VALIDA o host do
+    link que o servidor monta antes do Linking.openURL, sem construir link nenhum.
+    Ficam de fora `tests/` e `app/__tests__` (que assertam a URL), `docs/` e
+    `.time-dev/` (histórico e planos, que citam o construtor antigo por nome)."""
     achados = subprocess.run(
         ["git", "grep", "-lIE", r"api\.whatsapp\.com|wa\.me/", "--", ".",
-         ":!tests", ":!docs", ":!.time-dev"],
+         ":!tests", ":!app/__tests__", ":!docs", ":!.time-dev"],
         cwd=RAIZ, capture_output=True, text=True,
     ).stdout.split()
-    assert achados == ["core/dashboard_links.py"], achados
+    assert achados == ["app/src/features/conta/contato.ts", "core/dashboard_links.py"], achados

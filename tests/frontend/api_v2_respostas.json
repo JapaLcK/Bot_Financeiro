@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Comparacao, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Comparacao, Bancos, OrcamentoDomestico, OrcamentosCategoria, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -93,14 +93,14 @@
     }
   },
   "categorias": {
-    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" }, { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a" }, { "chave": "casa", "nome": "Casa", "emoji": "🏷️", "cor": "#94A3B8" }] }
+    "padrao": { "categorias": [{ "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316" }, { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16a34a" }, { "chave": "casa", "nome": "Casa", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8" }] }
   },
   "gastos": {
     "padrao": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "440.00",
       "categorias": [
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
-        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "140.00", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8", "valor": "140.00", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
         { "dia": "2026-10-03", "total": "100.00", "maiores": [{ "descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "100.00" }] },
@@ -112,7 +112,7 @@
     "cortado": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": "2026-10-10", "total": "120.00",
       "categorias": [
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "120.00", "quantidade": 2, "valor_ate_corte": "120.00", "anterior_ate_corte": null }
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "120.00", "quantidade": 2, "valor_ate_corte": "120.00", "anterior_ate_corte": null }
       ],
       "dias": [
         { "dia": "2026-10-12", "total": "70.00", "maiores": [{ "descricao": "Mercado", "valor": "70.00", "categoria": "alimentacao" }], "quantidade": 1, "categorias": [{ "chave": "alimentacao", "valor": "70.00" }] }
@@ -122,8 +122,8 @@
     "centavos": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "440.00",
       "categorias": [
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.50", "quantidade": 2, "valor_ate_corte": "300.50", "anterior_ate_corte": "250.25" },
-        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "139.50", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "300.50", "quantidade": 2, "valor_ate_corte": "300.50", "anterior_ate_corte": "250.25" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8", "valor": "139.50", "quantidade": 2, "valor_ate_corte": "90.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
         {"dia": "2026-10-03", "total": "100.50", "maiores": [{"descricao": "Mercado", "valor": "100.50", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "100.50"}]},
@@ -135,8 +135,8 @@
     "outra_moeda": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "340.00",
       "categorias": [
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
-        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8", "valor": "40.00", "quantidade": 1, "valor_ate_corte": "40.00", "anterior_ate_corte": "0" }
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "300.00", "quantidade": 2, "valor_ate_corte": "300.00", "anterior_ate_corte": "250.00" },
+        { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8", "valor": "40.00", "quantidade": 1, "valor_ate_corte": "40.00", "anterior_ate_corte": "0" }
       ],
       "dias": [
         {"dia": "2026-10-03", "total": "100.00", "maiores": [{"descricao": "Mercado", "valor": "100.00", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "100.00"}]},
@@ -148,14 +148,14 @@
     "muitas": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "2723.89",
       "categorias": [
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "900.00", "quantidade": 1, "valor_ate_corte": "900.00", "anterior_ate_corte": "720.00" },
-        { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "cor": "#16a34a", "valor": "620.40", "quantidade": 1, "valor_ate_corte": "620.40", "anterior_ate_corte": "496.32" },
-        { "chave": "transporte", "nome": "transporte", "emoji": "🚕", "cor": "#2FA0C8", "valor": "410.00", "quantidade": 1, "valor_ate_corte": "410.00", "anterior_ate_corte": "328.00" },
-        { "chave": "lazer", "nome": "lazer", "emoji": "🍺", "cor": "#C98500", "valor": "300.00", "quantidade": 1, "valor_ate_corte": "300.00", "anterior_ate_corte": "240.00" },
-        { "chave": "saude", "nome": "saúde", "emoji": "💊", "cor": "#E66767", "valor": "210.99", "quantidade": 1, "valor_ate_corte": "210.99", "anterior_ate_corte": "168.79" },
-        { "chave": "educacao", "nome": "educação", "emoji": "📚", "cor": "#9085E9", "valor": "150.00", "quantidade": 1, "valor_ate_corte": "150.00", "anterior_ate_corte": "120.00" },
-        { "chave": "casa", "nome": "Casa", "emoji": "🏠", "cor": "#7C8391", "valor": "120.00", "quantidade": 1, "valor_ate_corte": "120.00", "anterior_ate_corte": "96.00" },
-        { "chave": "despesas gerais da casa e do condominio do predio novo", "nome": "Despesas gerais da casa e do condomínio do prédio novo", "emoji": "🏷️", "cor": "#94A3B8", "valor": "12.50", "quantidade": 1, "valor_ate_corte": "12.50", "anterior_ate_corte": "10.00" }
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "900.00", "quantidade": 1, "valor_ate_corte": "900.00", "anterior_ate_corte": "720.00" },
+        { "chave": "mercado", "nome": "mercado", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16a34a", "valor": "620.40", "quantidade": 1, "valor_ate_corte": "620.40", "anterior_ate_corte": "496.32" },
+        { "chave": "transporte", "nome": "transporte", "emoji": "🚕", "icone": "taxi", "cor": "#2FA0C8", "valor": "410.00", "quantidade": 1, "valor_ate_corte": "410.00", "anterior_ate_corte": "328.00" },
+        { "chave": "lazer", "nome": "lazer", "emoji": "🍺", "icone": "beer-stein", "cor": "#C98500", "valor": "300.00", "quantidade": 1, "valor_ate_corte": "300.00", "anterior_ate_corte": "240.00" },
+        { "chave": "saude", "nome": "saúde", "emoji": "💊", "icone": "pill", "cor": "#E66767", "valor": "210.99", "quantidade": 1, "valor_ate_corte": "210.99", "anterior_ate_corte": "168.79" },
+        { "chave": "educacao", "nome": "educação", "emoji": "📚", "icone": "books", "cor": "#9085E9", "valor": "150.00", "quantidade": 1, "valor_ate_corte": "150.00", "anterior_ate_corte": "120.00" },
+        { "chave": "casa", "nome": "Casa", "emoji": "🏠", "icone": "house", "cor": "#7C8391", "valor": "120.00", "quantidade": 1, "valor_ate_corte": "120.00", "anterior_ate_corte": "96.00" },
+        { "chave": "despesas gerais da casa e do condominio do predio novo", "nome": "Despesas gerais da casa e do condomínio do prédio novo", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8", "valor": "12.50", "quantidade": 1, "valor_ate_corte": "12.50", "anterior_ate_corte": "10.00" }
       ],
       "dias": [
         {"dia": "2026-10-01", "total": "900.00", "maiores": [{"descricao": "Compra 1", "valor": "900.00", "categoria": "alimentacao"}], "quantidade": 1, "categorias": [{"chave": "alimentacao", "valor": "900.00"}]},
@@ -186,8 +186,8 @@
     "maximo": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "dia_de_corte": 14, "historico_desde": null, "total": "999999999.99",
       "categorias": [
-        { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "cor": "#16a34a", "valor": "999999990.00", "quantidade": 1, "valor_ate_corte": "999999990.00", "anterior_ate_corte": "10000.00" },
-        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316", "valor": "9.99", "quantidade": 1, "valor_ate_corte": "9.99", "anterior_ate_corte": "9.00" }
+        { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16a34a", "valor": "999999990.00", "quantidade": 1, "valor_ate_corte": "999999990.00", "anterior_ate_corte": "10000.00" },
+        { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316", "valor": "9.99", "quantidade": 1, "valor_ate_corte": "9.99", "anterior_ate_corte": "9.00" }
       ],
       "dias": [
         { "dia": "2026-10-07", "total": "999999999.99", "maiores": [{ "descricao": "Mercado e padaria do bairro novo do centro", "valor": "999999990.00", "categoria": "mercado-longo" }, { "descricao": "Padaria", "valor": "9.99", "categoria": "alimentacao" }], "quantidade": 2, "categorias": [{ "chave": "mercado-longo", "valor": "999999990.00" }, { "chave": "alimentacao", "valor": "9.99" }] }
@@ -202,7 +202,7 @@
   "gastos_categoria": {
     "padrao": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
-      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316" },
       "total": "300.00", "compras": 2, "valor_medio": "150.00",
       "ultimas": [
         { "data": "2026-10-07", "descricao": "Restaurante", "mensagem": null, "origem": "banco", "valor": "200.00" },
@@ -218,7 +218,7 @@
     },
     "cortado": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
-      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316" },
       "total": "120.00", "compras": 2, "valor_medio": "60.00",
       "ultimas": [
         { "data": "2026-10-12", "descricao": "Mercado", "mensagem": null, "origem": "banco", "valor": "70.00" },
@@ -233,14 +233,14 @@
     },
     "zero": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
-      "categoria": { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "cor": "#94A3B8" },
+      "categoria": { "chave": "sem categoria", "nome": "sem categoria", "emoji": "🏷️", "icone": "tag", "cor": "#94A3B8" },
       "total": "0.00", "compras": 0, "valor_medio": null, "ultimas": [],
       "serie": [{ "mes": "2026-08", "valor": "0.00" }, { "mes": "2026-09", "valor": "0.00" }, { "mes": "2026-10", "valor": "0.00" }],
       "estabelecimentos": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" }, "saidas_em_outra_moeda": 0, "motivos": []
     },
     "maximo": {
       "mes": "2026-10", "disponivel": true, "hoje": "2026-10-14", "historico_desde": null,
-      "categoria": { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "cor": "#16a34a" },
+      "categoria": { "chave": "mercado-longo", "nome": "Mercado e padaria do bairro novo do centro", "emoji": "🛒", "icone": "shopping-cart", "cor": "#16a34a" },
       "total": "999999990.00", "compras": 1, "valor_medio": "999999990.00",
       "ultimas": [{ "data": "2026-10-07", "descricao": "Mercado e padaria do bairro novo do centro", "mensagem": null, "origem": "banco", "valor": "999999990.00" }],
       "serie": [{ "mes": "2026-08", "valor": "999999990.00" }, { "mes": "2026-09", "valor": "999999990.00" }, { "mes": "2026-10", "valor": "999999990.00" }],
@@ -250,7 +250,7 @@
     },
     "indisponivel": {
       "mes": "2026-06", "disponivel": false, "hoje": "2026-10-14", "historico_desde": "2026-10-10",
-      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "cor": "#f97316" },
+      "categoria": { "chave": "alimentacao", "nome": "alimentação", "emoji": "🍽️", "icone": "fork-knife", "cor": "#f97316" },
       "total": null, "compras": null, "valor_medio": null, "ultimas": [],
       "serie": [{ "mes": "2026-04", "valor": null }, { "mes": "2026-05", "valor": null }, { "mes": "2026-06", "valor": null }],
       "estabelecimentos": [], "dias": [], "fora_da_grade": { "quantidade": 0, "valor": "0" },
@@ -437,6 +437,13 @@
     "nunca_lida": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["banco_desatualizado"] },
     "nenhum_investimento": { "total": null, "por_tipo": [], "por_banco": [], "motivos": ["nenhum_investimento"] }
   },
+  "progresso_milhao": {
+    "padrao": { "patrimonio": "48250.37", "motivos": [] },
+    "sem_banco": { "patrimonio": "300.00", "motivos": ["sem_banco_conectado"] },
+    "passou": { "patrimonio": "1250000.00", "motivos": [] },
+    "pouco": { "patrimonio": "500.00", "motivos": [] },
+    "com_motivos": { "patrimonio": "48250.37", "motivos": ["banco_desatualizado", "manual_e_banco", "caixinha_espelhada_fora"] }
+  },
   "previsao": {
     "plus30": {
       "hoje": "2026-10-06",
@@ -522,6 +529,298 @@
       },
       "cabe_nas_premissas": false,
       "receitas_do_banco": [],
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "7.33"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "10.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "7.33",
+          "compromissos": [
+            {
+              "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "2.675",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "7.33",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "7.33",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-07",
+        "saldo": "7.33",
+        "desde": "2026-10-06",
+        "causas": [
+          {
+            "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+            "ciclo": "2026-10-07",
+            "data": "2026-10-07",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Aluguel",
+            "valor": "2.675",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "f94dbb7e6c46f6f6654d57cf37c8a2c2518e727219e299edb40252f1e8f19387",
+          "fonte": "gasto_recorrente",
+          "nome": "Aluguel",
+          "primeira_data": "2026-10-07",
+          "ultima_data": "2026-10-07",
+          "ocorrencias": [
+            {
+              "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
+              "ciclo": "2026-10-07",
+              "data": "2026-10-07",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "2.675",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        }
+      ]
+    },
+    "pro30_receitas": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "10.005",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "receitas_do_banco": [
+        {
+          "chave": "extrato#a1b2c3d4e5f60718",
+          "nome": "Empresa Alfa Ltda",
+          "valor": "4000.00",
+          "dia": 4,
+          "status": "pendente"
+        },
+        {
+          "chave": "extrato#0f1e2d3c4b5a6978",
+          "nome": "Maria Souza",
+          "valor": "1500.00",
+          "dia": 10,
+          "status": "confirmada"
+        },
+        {
+          "chave": "extrato#1122334455667788",
+          "nome": "Pix do João",
+          "valor": "250.50",
+          "dia": 20,
+          "status": "negada"
+        }
+      ],
       "marcos": [
         {
           "dias": 30,
@@ -5753,5 +6052,1392 @@
       "motivo": null,
       "motivos": []
     }
+  },
+  "bancos": {
+    "padrao": {
+      "total": "67000.00",
+      "motivos": [
+        "conexao_pausada"
+      ],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": []
+        },
+        {
+          "conexao_id": 13,
+          "saldo_conta": null,
+          "investido": null,
+          "total": null,
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 1,
+          "motivos": [
+            "conexao_pausada"
+          ]
+        }
+      ]
+    },
+    "barra": {
+      "total": "67000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": []
+        }
+      ]
+    },
+    "mesmo_nome": {
+      "total": "300.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 1,
+          "saldo_conta": "100.00",
+          "investido": null,
+          "total": "100.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        },
+        {
+          "conexao_id": 2,
+          "saldo_conta": "200.00",
+          "investido": null,
+          "total": "200.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "investido_nulo": {
+      "total": "5000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": null,
+          "total": "5000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "desatualizado": {
+      "total": "67000.00",
+      "motivos": [
+        "banco_desatualizado"
+      ],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "7000.00",
+          "investido": "15000.00",
+          "total": "22000.00",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 2,
+          "motivos": [
+            "banco_desatualizado"
+          ]
+        }
+      ]
+    },
+    "um_banco": {
+      "total": "45000.00",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "5000.00",
+          "investido": "40000.00",
+          "total": "45000.00",
+          "contas": 2,
+          "cartoes": 1,
+          "investimentos": 3,
+          "motivos": []
+        }
+      ]
+    },
+    "cientifico": {
+      "total": "1000.0000001",
+      "motivos": [],
+      "bancos": [
+        {
+          "conexao_id": 11,
+          "saldo_conta": "1E-7",
+          "investido": "0",
+          "total": "1E-7",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 1,
+          "motivos": []
+        },
+        {
+          "conexao_id": 12,
+          "saldo_conta": "1000",
+          "investido": null,
+          "total": "1000",
+          "contas": 1,
+          "cartoes": 0,
+          "investimentos": 0,
+          "motivos": []
+        }
+      ]
+    },
+    "vazio": {
+      "total": null,
+      "motivos": [],
+      "bancos": []
+    },
+    "em_dia": {
+      "total": "1200.00",
+      "motivos": [],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": []}
+      ]
+    },
+    "pilha_desatualizado": {
+      "total": "1200.00",
+      "motivos": ["banco_desatualizado"],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": ["banco_desatualizado"]}
+      ]
+    },
+    "pausada": {
+      "total": "1200.00",
+      "motivos": ["conexao_pausada"],
+      "bancos": [
+        {"conexao_id": 1, "saldo_conta": "1000.00", "investido": "200.00", "total": "1200.00", "contas": 1, "cartoes": 0, "investimentos": 1, "motivos": ["conexao_pausada"]}
+      ]
+    }
+  },
+  "orcamento_domestico": {
+    "padrao": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "5000.00",
+        "origem": "calculada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "55.00",
+          "teto": "2750.00",
+          "gasto": "2000.00",
+          "restante": "750.00",
+          "usado_pct": "72.73"
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "5.00",
+          "teto": "250.00",
+          "gasto": "310.00",
+          "restante": "-60.00",
+          "usado_pct": "124.00"
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "0.00",
+          "restante": "500.00",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "125.00",
+          "restante": "375.00",
+          "usado_pct": "25.00"
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "500.00",
+          "restante": "0.00",
+          "usado_pct": "100.00"
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "500.00",
+          "gasto": "50.00",
+          "restante": "450.00",
+          "usado_pct": "10.00"
+        }
+      ],
+      "total": {
+        "teto": "5000.00",
+        "gasto": "2985.00",
+        "restante": "2015.00",
+        "usado_pct": "59.70"
+      }
+    },
+    "informada": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "1234.56",
+        "origem": "informada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "50.00",
+          "teto": "617.28",
+          "gasto": "600.00",
+          "restante": "17.28",
+          "usado_pct": "97.20"
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "10.00",
+          "restante": "113.46",
+          "usado_pct": "8.10"
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "123.46",
+          "gasto": "0.00",
+          "restante": "123.46",
+          "usado_pct": "0.00"
+        }
+      ],
+      "total": {
+        "teto": "1234.58",
+        "gasto": "610.00",
+        "restante": "624.58",
+        "usado_pct": "49.41"
+      }
+    },
+    "renda_zero": {
+      "mes": "2026-10",
+      "renda": {
+        "valor": "0.00",
+        "origem": "informada"
+      },
+      "potes": [
+        {
+          "chave": "custos_fixos",
+          "nome": "Custos fixos",
+          "cor": "#7dd3fc",
+          "pct": "55.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "conforto",
+          "nome": "Conforto",
+          "cor": "#6ee7b7",
+          "pct": "5.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "metas",
+          "nome": "Metas",
+          "cor": "#fde047",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "prazeres",
+          "nome": "Prazeres",
+          "cor": "#f0abfc",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "liberdade_financeira",
+          "nome": "Liberdade financeira",
+          "cor": "#93c5fd",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        },
+        {
+          "chave": "conhecimento",
+          "nome": "Conhecimento",
+          "cor": "#fdba74",
+          "pct": "10.00",
+          "teto": "0.00",
+          "gasto": "0.00",
+          "restante": "0.00",
+          "usado_pct": null
+        }
+      ],
+      "total": {
+        "teto": "0.00",
+        "gasto": "0.00",
+        "restante": "0.00",
+        "usado_pct": null
+      }
+    }
+  },
+  "orcamentos_categoria": {
+    "padrao": {
+      "mes": "2026-10",
+      "limite": null,
+      "orcamentos": [
+        {
+          "categoria": "alimentação",
+          "chave": "alimentacao",
+          "emoji": "🍽️",
+          "icone": "fork-knife",
+          "cor": "#f97316",
+          "teto": "800.00",
+          "gasto": "412.30",
+          "restante": "387.70",
+          "usado_pct": "51.54",
+          "status": "verde"
+        },
+        {
+          "categoria": "mercado",
+          "chave": "mercado",
+          "emoji": "🛒",
+          "icone": "shopping-cart",
+          "cor": "#16a34a",
+          "teto": "300.00",
+          "gasto": "255.00",
+          "restante": "45.00",
+          "usado_pct": "85.00",
+          "status": "amarelo"
+        },
+        {
+          "categoria": "transporte",
+          "chave": "transporte",
+          "emoji": "🚗",
+          "icone": "car",
+          "cor": "#38bdf8",
+          "teto": "150.00",
+          "gasto": "150.00",
+          "restante": "0.00",
+          "usado_pct": "100.00",
+          "status": "vermelho"
+        },
+        {
+          "categoria": "lazer",
+          "chave": "lazer",
+          "emoji": "🎉",
+          "icone": "confetti",
+          "cor": "#f0abfc",
+          "teto": "200.00",
+          "gasto": "236.50",
+          "restante": "-36.50",
+          "usado_pct": "118.25",
+          "status": "vermelho"
+        }
+      ],
+      "total": {
+        "teto": "1450.00",
+        "gasto": "1053.80",
+        "restante": "396.20",
+        "usado_pct": "72.68",
+        "em_risco": 3
+      }
+    },
+    "vazio": {
+      "mes": "2026-10",
+      "limite": null,
+      "orcamentos": [],
+      "total": {
+        "teto": "0.00",
+        "gasto": "0.00",
+        "restante": "0.00",
+        "usado_pct": "0.00",
+        "em_risco": 0
+      }
+    },
+    "gratis_no_limite": {
+      "mes": "2026-10",
+      "limite": 3,
+      "orcamentos": [
+        {
+          "categoria": "alimentação",
+          "chave": "alimentacao",
+          "emoji": "🍽️",
+          "icone": "fork-knife",
+          "cor": "#f97316",
+          "teto": "800.00",
+          "gasto": "412.30",
+          "restante": "387.70",
+          "usado_pct": "51.54",
+          "status": "verde"
+        },
+        {
+          "categoria": "mercado",
+          "chave": "mercado",
+          "emoji": "🛒",
+          "icone": "shopping-cart",
+          "cor": "#16a34a",
+          "teto": "300.00",
+          "gasto": "255.00",
+          "restante": "45.00",
+          "usado_pct": "85.00",
+          "status": "amarelo"
+        },
+        {
+          "categoria": "lazer",
+          "chave": "lazer",
+          "emoji": "🎉",
+          "icone": "confetti",
+          "cor": "#f0abfc",
+          "teto": "200.00",
+          "gasto": "236.50",
+          "restante": "-36.50",
+          "usado_pct": "118.25",
+          "status": "vermelho"
+        }
+      ],
+      "total": {
+        "teto": "1300.00",
+        "gasto": "903.80",
+        "restante": "396.20",
+        "usado_pct": "69.52",
+        "em_risco": 2
+      }
+    }
+  },
+  "simulador": {
+    "compra": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 90,
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados.",
+        "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos previstos − boletos − faturas observadas), mais a compra simulada.",
+        "O pior dia e os dias abaixo da reserva contam hoje, depois dos compromissos e da compra, até o dia 90 inclusive (91 datas).",
+        "Na data da compra sai o preço cheio (à vista) ou a entrada (parcelado), mais os custos únicos.",
+        "A primeira parcela e a despesa mensal nova saem um mês depois, no mesmo dia (ajustado ao fim do mês).",
+        "Parcelado com juros usa a tabela Price; a diferença de centavos do arredondamento vai para a última parcela.",
+        "O total pago soma o que sai na compra e todas as parcelas, inclusive as que caem depois do dia 90. Não inclui a despesa mensal nova, que não tem fim definido.",
+        "Receitas fixas só entram quando mensais ou anuais; gastos fixos entram em todas as frequências.",
+        "Não inclui gastos avulsos futuros nem IOF, seguro ou tarifas que você não informou.",
+        "Valores em reais aceitam no máximo duas casas decimais; os juros, no máximo quatro."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": false
+      },
+      "cabe_nas_premissas": false,
+      "orientacao": "abster",
+      "base": {
+        "saldo": "1000.00",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "reserva_minima": "50.00",
+      "atual": {
+        "saldo_final": "700.00",
+        "pior_dia": {
+          "data": "2026-10-08",
+          "saldo": "700.00"
+        },
+        "dias_abaixo_da_reserva": 0,
+        "primeiro_dia_abaixo": null,
+        "trajetoria": [
+          {
+            "data": "2026-10-06",
+            "saldo": "1000.00"
+          },
+          {
+            "data": "2026-10-07",
+            "saldo": "1000.00"
+          },
+          {
+            "data": "2026-10-08",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-09",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-10",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-11",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-12",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-13",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-14",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-15",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-16",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-17",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-18",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-19",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-20",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-21",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-22",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-23",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-24",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-25",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-26",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-27",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-28",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-29",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-30",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-10-31",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-01",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-02",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-03",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-04",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-05",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-06",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-07",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-08",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-09",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-10",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-11",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-12",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-13",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-14",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-15",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-16",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-17",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-18",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-19",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-20",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-21",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-22",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-23",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-24",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-25",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-26",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-27",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-28",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-29",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-11-30",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-01",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-02",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-03",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-04",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-05",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-06",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-07",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-08",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-09",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-10",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-11",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-12",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-13",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-14",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-15",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-16",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-17",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-18",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-19",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-20",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-21",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-22",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-23",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-24",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-25",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-26",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-27",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-28",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-29",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-30",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2026-12-31",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2027-01-01",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2027-01-02",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2027-01-03",
+            "saldo": "700.00"
+          },
+          {
+            "data": "2027-01-04",
+            "saldo": "700.00"
+          }
+        ]
+      },
+      "cenarios": [
+        {
+          "nome": "À vista",
+          "resumo": {
+            "saldo_final": "600.00",
+            "pior_dia": {
+              "data": "2026-10-08",
+              "saldo": "600.00"
+            },
+            "dias_abaixo_da_reserva": 0,
+            "primeiro_dia_abaixo": null,
+            "trajetoria": [
+              {
+                "data": "2026-10-06",
+                "saldo": "900.00"
+              },
+              {
+                "data": "2026-10-07",
+                "saldo": "900.00"
+              },
+              {
+                "data": "2026-10-08",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-09",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-10",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-11",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-12",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-13",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-14",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-15",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-16",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-17",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-18",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-19",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-20",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-21",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-22",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-23",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-24",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-25",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-26",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-27",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-28",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-29",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-30",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-10-31",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-01",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-02",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-03",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-04",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-05",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-06",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-07",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-08",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-09",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-10",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-11",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-12",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-13",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-14",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-15",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-16",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-17",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-18",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-19",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-20",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-21",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-22",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-23",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-24",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-25",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-26",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-27",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-28",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-29",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-11-30",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-01",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-02",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-03",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-04",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-05",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-06",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-07",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-08",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-09",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-10",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-11",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-12",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-13",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-14",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-15",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-16",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-17",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-18",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-19",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-20",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-21",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-22",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-23",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-24",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-25",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-26",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-27",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-28",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-29",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-30",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2026-12-31",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2027-01-01",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2027-01-02",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2027-01-03",
+                "saldo": "600.00"
+              },
+              {
+                "data": "2027-01-04",
+                "saldo": "600.00"
+              }
+            ],
+            "delta_vs_atual": "-100.00",
+            "compra_fora_da_janela": false
+          },
+          "contrato": {
+            "data_compra": "2026-10-06",
+            "a_vista": true,
+            "entrada": "0.00",
+            "pago_na_compra": "100.00",
+            "valor_financiado": "0.00",
+            "parcelas": 1,
+            "parcela": "100.00",
+            "primeira_parcela": "2026-10-06",
+            "ultima_parcela": "2026-10-06",
+            "total_pago": "100.00",
+            "juros_totais": "0.00",
+            "custos_unicos": "0.00",
+            "despesa_mensal_nova": "0.00",
+            "parcelas_fora_do_horizonte": {
+              "quantidade": 0,
+              "valor": "0.00"
+            }
+          }
+        }
+      ]
+    },
+    "codigos_422": [
+      "data_fora_do_calendario",
+      "data_no_passado",
+      "dinheiro_casas",
+      "entrada_igual_ao_preco",
+      "entrada_maior_que_preco",
+      "entrada_parcial_sem_parcelas",
+      "financiado_pequeno_demais",
+      "juros_sem_parcelas",
+      "nomes_repetidos",
+      "valor_invalido"
+    ]
   }
 }

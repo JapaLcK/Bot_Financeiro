@@ -23,6 +23,7 @@ from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any, Callable
 
+PORCO = "🐷"
 EMISSOR: ContextVar[Callable[[dict], None] | None] = ContextVar("ai_chat_emissor", default=None)
 CANCELA: ContextVar[threading.Event | None] = ContextVar("ai_chat_cancela", default=None)
 
@@ -83,6 +84,8 @@ def completar(client, **kw):
     stream = client.chat.completions.create(stream=True, **kw)
     texto: list[str] = []
     chamadas: dict[int, dict] = {}
+    inicio = ""  # o texto do começo, até saber se ele abre com 🐷 (que o app não mostra; o histórico guarda o texto cru)
+    aberto = True
     try:
         for chunk in stream:
             if cancelado():  # (b) a cada chunk
@@ -103,7 +106,14 @@ def completar(client, **kw):
             if d.content:
                 texto.append(d.content)
                 if not chamadas:
-                    emitir({"tipo": "delta", "texto": d.content})
+                    out = d.content
+                    if aberto:
+                        inicio += d.content
+                        s = inicio.lstrip()
+                        out = s[1:].lstrip() if s.startswith(PORCO) else inicio if s else ""
+                        aberto = not out  # só espaço e/ou o 🐷 até agora: espera o próximo pedaço
+                    if out:
+                        emitir({"tipo": "delta", "texto": out})
     finally:
         fechar = getattr(stream, "close", None)
         if fechar:
@@ -114,19 +124,25 @@ def completar(client, **kw):
 
 
 def executar(user_id: int, texto: str, *, monthly_limit: int, emissor: Callable[[dict], None],
-             cancela: threading.Event):
+             cancela: threading.Event, cards: tuple[str, ...] = ()):
     """Roda UM turno do chat com emissor e cancelamento. Síncrona: o endpoint a
     chama em `to_thread` com `contextvars.copy_context()`. Devolve o `Resultado`
-    do runner; o `fim` (usage, chips) é montado pelo endpoint."""
+    do runner; o `fim` (usage, chips) é montado pelo endpoint. `cards` = os que o app sabe
+    mostrar (`CARDS_DO_APP`). O app não mostra o 🐷 do começo da resposta: o `fim.reply` sai sem ele
+    (o histórico gravado, compartilhado com o WhatsApp, fica como estava)."""
     from . import chips
+    from ._context import CARDS_DO_APP
     from .runner import chat_detalhado
 
-    t1, t2 = EMISSOR.set(emissor), CANCELA.set(cancela)
+    t1, t2, t3 = EMISSOR.set(emissor), CANCELA.set(cancela), CARDS_DO_APP.set(tuple(cards))
     try:
         r = chat_detalhado(user_id, texto, monthly_limit=monthly_limit, platform="dashboard")
     finally:
+        CARDS_DO_APP.reset(t3)
         CANCELA.reset(t2)
         EMISSOR.reset(t1)
+    if r.reply and r.reply.lstrip().startswith(PORCO):
+        r.reply = r.reply.lstrip()[1:].lstrip()
     if r.sugerivel and not cancela.is_set():  # (d)
         r.chips = chips.sugerir(texto, r.reply, r.cards)
     return r

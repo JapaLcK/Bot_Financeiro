@@ -22,7 +22,7 @@ it("presets preservam paridade com a fonte oficial web", () => {
  for (const p of PERFIS.filter((p) => p.id !== "padrao")) { const bloco = web.split(`id: "${p.id}"`)[1]!.split("preset: [")[1]!.split("]")[0]!; expect(bloco.match(/"([a-z]+)"/g)!.map((s) => s.slice(1,-1))).toEqual(p.preset); }
  const board = readFileSync(resolve(__dirname, "../../../webapp/src/dashboard/parts/Board.tsx"), "utf8"); const bloco = board.split("const DEFAULT:")[1]!.split("const EXTRA:")[0]!; expect([...bloco.matchAll(/id: "([a-z]+)"/g)].map((m) => m[1])).toEqual(PADRAO);
 });
-it("organização aceita todos ocultos, remove IDs desconhecidos/repetidos e isola usuário/perfil", () => { expect(sanitizarLayout([], "padrao")).toEqual([]); expect(sanitizarLayout(["contas", "bogus", "contas", "metas"], "padrao")).toEqual(["contas", "metas"]); expect(chaveLayout(1, "padrao")).not.toBe(chaveLayout(2, "padrao")); expect(chaveLayout(1, "padrao")).not.toBe(chaveLayout(1, "investir")); });
+it("organização aceita todos ocultos, remove IDs desconhecidos/repetidos e isola usuário/perfil", () => { expect(sanitizarLayout([], "padrao")).toEqual([]); expect(sanitizarLayout(["contas", "bogus", "contas", "metas"], "padrao")).toEqual(["contas"]); expect(chaveLayout(1, "padrao")).not.toBe(chaveLayout(2, "padrao")); expect(chaveLayout(1, "padrao")).not.toBe(chaveLayout(1, "investir")); });
 it("contratos reais transformam todos os valores monetários na fronteira", () => { expect(S.contasSchema.parse(fixture["/api/app/contas"]).total).toBe(940025); expect(S.detalhesMesSchema.parse(fixture["/api/app/mes-detalhes"]).guardado.liquido).toBe(120000); expect(S.previsaoSchema.parse(fixture["/api/app/previsao"]).base.saldo).toBe(940025); expect(S.patrimonioSchema.parse(fixture["/api/app/patrimonio"]).total).toBe(2600025); expect(S.rendimentoSchema.parse(fixture["/api/app/rendimento"]).itens[0]!.taxa).toBe("100"); });
 
 it("cortes 0/100 e centavo fracionário são exatos e reversíveis sem floats", () => { expect(percentualEmCentavos(1001, 0)).toBe(0); expect(percentualEmCentavos(1001, 100)).toBe(1001); expect(percentualEmCentavos(5, 10)).toBe(1); expect(percentualEmCentavos(Number.MAX_SAFE_INTEGER, 100)).toBe(Number.MAX_SAFE_INTEGER); });
@@ -32,4 +32,21 @@ it("nomeCategoria usa a grafia do catálogo, cai na chave capitalizada e nomeia 
  expect(nomeCategoria(null, catalogo)).toBe("Sem categoria"); expect(nomeCategoria("", catalogo)).toBe("Sem categoria");
  expect(nomeCategoria("transferencias", catalogo)).toBe("Transferências"); expect(nomeCategoria("compras", catalogo)).toBe("Compras"); expect(nomeCategoria("compras")).toBe("Compras");
  expect(nomeCategoria("lazer", [{ chave: "lazer", nome: "" }])).toBe("Lazer");
+});
+describe("receitas_do_banco na Previsão (PR 2b)", () => {
+ const prev = fixture["/api/app/previsao"], item = { chave: "extrato#a", nome: "Salário", valor: "5000.00", dia: 5, status: "pendente" };
+ it("item válido chega com o valor em centavos", () => expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: [item] }).receitas_do_banco).toEqual([{ ...item, valor: 500000 }]));
+ it.each([["campo ausente (servidor velho)", prev], ["status novo", { ...prev, receitas_do_banco: [{ ...item, status: "x" }] }], ["valor inválido", { ...prev, receitas_do_banco: [{ ...item, valor: "abc" }] }]])("%s: lista vazia e o resto da Previsão parseia", (_, bruto) => {
+  const r = S.previsaoSchema.safeParse(bruto); expect(r.success).toBe(true); expect(r.success && r.data.receitas_do_banco).toEqual([]); expect(r.success && r.data.dias).toBe(prev.dias);
+ });
+ it("tolerância por item: o inválido sai e os válidos ficam, em qualquer posição; campo que não é array dá []", () => {
+  const ok = { ...item, chave: "extrato#ok" }, ruim = { ...item, chave: "extrato#ruim", status: "expirada" };
+  for (const lista of [[ok, ruim], [ruim, ok], [ruim, { ...ok, valor: "abc" }, ok], [ok, null, "x", 3]]) expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: lista }).receitas_do_banco).toEqual([{ ...ok, valor: 500000 }]);
+  for (const bruto of ["x", null, {}, 3]) expect(S.previsaoSchema.parse({ ...prev, receitas_do_banco: bruto }).receitas_do_banco).toEqual([]);
+ });
+ it("bloco hero do chat com a lista (ou com item malformado) continua válido", () => {
+  for (const lista of [[item], [{ ...item, status: "x" }]]) {
+   const e = S.lerEvento({ tipo: "bloco", bloco: { card: "hero", abas: [{ mes: null, recursos: { previsao: { ...prev, receitas_do_banco: lista } } }] } }); expect(e?.tipo).toBe("bloco");
+  }
+ });
 });

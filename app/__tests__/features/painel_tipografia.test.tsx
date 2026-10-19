@@ -5,6 +5,7 @@ import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import { fluxoFim } from "./conversa_apoio";
+import { ficha, filtrar } from "./extrato_filtros_apoio";
 type No = ReturnType<typeof screen.getByText>;
 const janelaOriginal = Dimensions.get("window");
 async function fonte(fontScale: number) {
@@ -34,40 +35,45 @@ beforeEach(async () => { prepararCaso(); desligarTrava(); await fonte(1); await 
 afterEach(async () => { await act(async () => { Dimensions.set({ window: janelaOriginal }); }); jest.restoreAllMocks(); });
 it.each([1, 2])("cold start fontScale %s mantém teto e compõe label/valor conforme espaço", async (escala) => {
  await fonte(escala); renderRouter("./app", { initialUrl: "/metas" });
- await waitFor(() => expect(screen.getByText("Ritmo mensal necessário")).toBeTruthy());
- const label = screen.getByText("Ritmo mensal necessário"), valor = screen.getByLabelText("900 reais");
+ await waitFor(() => expect(screen.getByText("Carteira")).toBeTruthy());
+ const label = screen.getByText("Carteira"), valor = screen.getByLabelText("450 reais");
  expect(label.props.maxFontSizeMultiplier).toBe(1.3); expect(valor.props.maxFontSizeMultiplier).toBe(1.3);
  if (escala > 1) expect(paiVisual(label)).toBe(paiVisual(valor));
  else expect(paiVisual(label)).not.toBe(paiVisual(valor));
  expect(screen.getByText("PigBank")).toBeTruthy();
 });
+it.each([[1, 1], [2, undefined]])("pílula da meta com fontScale %s: nome com numberOfLines %s (sem corte quando ampliado)", async (escala, linhas) => {
+ await fonte(escala); renderRouter("./app", { initialUrl: "/metas" });
+ await waitFor(() => expect(screen.getByText("Viagem")).toBeTruthy());
+ expect(screen.getByText("Viagem").props.numberOfLines).toBe(linhas);
+});
 it("mudança live remede texto e dinheiro sem remontar providers ou requisitar dados", async () => {
- renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Ritmo mensal necessário")).toBeTruthy());
- const antes = screen.getByText("PigBank"), dinheiroAntes = screen.getByLabelText("900 reais");
+ renderRouter("./app", { initialUrl: "/metas" }); await waitFor(() => expect(screen.getByText("Carteira")).toBeTruthy());
+ const antes = screen.getByText("PigBank"), dinheiroAntes = screen.getByLabelText("450 reais");
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
- expect(screen.getByText("PigBank")).not.toBe(antes); expect(screen.getByLabelText("900 reais")).not.toBe(dinheiroAntes);
- expect(paiVisual(screen.getByText("Ritmo mensal necessário"))).toBe(paiVisual(screen.getByLabelText("900 reais")));
+ expect(screen.getByText("PigBank")).not.toBe(antes); expect(screen.getByLabelText("450 reais")).not.toBe(dinheiroAntes);
+ expect(paiVisual(screen.getByText("Carteira"))).toBe(paiVisual(screen.getByLabelText("450 reais")));
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
- await fonte(1); expect(paiVisual(screen.getByText("Ritmo mensal necessário"))).not.toBe(paiVisual(screen.getByLabelText("900 reais")));
+ await fonte(1); expect(paiVisual(screen.getByText("Carteira"))).not.toBe(paiVisual(screen.getByLabelText("450 reais")));
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
 it("filtros refluem na troca live sem perder seleção, busca ou instância do campo", async () => {
  renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  const campo = screen.getByLabelText("Buscar lançamento");
- await act(async () => { fireEvent.changeText(campo, "mercado"); fireEvent.press(screen.getByRole("button", { name: "Banco" })); await drenar(); });
+ await act(async () => { fireEvent.changeText(campo, "mercado"); await drenar(); }); await filtrar({ origem: "Banco" });
  await waitFor(() => expect(fetchFalso.mock.calls.some(([u]) => new URL(String(u)).searchParams.get("q") === "mercado")).toBe(true));
  const quantidade = fetchFalso.mock.calls.length;
  await fonte(2);
  expect(screen.getByLabelText("Buscar lançamento")).toBe(campo); expect(campo.props.value).toBe("mercado");
- expect(temColuna(screen.getByRole("button", { name: "Banco", selected: true }))).toBe(true);
- expect(temColuna(screen.getByRole("button", { name: "Tudo", selected: true }))).toBe(true);
+ expect(temColuna(ficha("origem Banco")!)).toBe(true);
+ expect(temColuna(screen.getByRole("button", { name: "Filtros" }))).toBe(true);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
 });
 it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do mesmo usuário", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; return fluxoFim("Resposta após reflow", 13, 1000); }
+  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; return fluxoFim("Resposta após reflow", 900, 1000); }
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
@@ -82,13 +88,14 @@ it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do 
  expect(screen.getByLabelText("Mensagem para o Piggy")).toBe(campo); expect(campo.props.value).toBe("Rascunho preservado"); expect(post[1].signal.aborted).toBe(false);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
  atraso.soltar(); await act(async () => { await drenar(); }); await waitFor(() => expect(screen.getByText("Resposta após reflow")).toBeTruthy());
- expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("13 de 1000 mensagens utilizadas")).toBeTruthy();
+ expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("900 de 1000 mensagens utilizadas")).toBeTruthy();
 });
 it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e embaixo dela com fonte ampliada", async (escala) => {
- await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Saídas" })).toBeTruthy());
+ await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Filtros" })).toBeTruthy());
  // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
- await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Saídas" })); await drenar(); });
+ await filtrar({ tipo: "Saídas" });
  await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
- const titulo = screen.getByText("Mercado"), valor = screen.getByLabelText("menos 120 reais");
+ const titulo = screen.getByText("Mercado"), valores = screen.getAllByLabelText("menos 120 reais"), valor = valores[1]!; // exatamente dois: [0] é o total do dia (cabeçalho), [1] o valor da linha
+ expect(valores).toHaveLength(2);
  expect(escala > 1 ? paiVisual(titulo) : paiVisual(paiVisual(titulo)!)).toBe(paiVisual(valor));
 });

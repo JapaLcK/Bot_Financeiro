@@ -224,6 +224,12 @@ class TestLimits:
         assert PLUS_LIMITS["agents_max"] == 3
         assert PRO_LIMITS["agents_max"] == 7
 
+    def test_orcamentos_por_categoria_por_plano(self):
+        assert FREE_LIMITS["budgets_max"] == 3
+        assert ESSENCIAL_LIMITS["budgets_max"] is None
+        assert PLUS_LIMITS["budgets_max"] is None
+        assert PRO_LIMITS["budgets_max"] is None
+
     def test_orcamento_de_energia_por_plano(self):
         # Modelo de energia: Grátis/Essencial 0 · Plus 4 · Pro 14 (cabe os 7 agentes).
         assert FREE_LIMITS["agents_energy_budget"] == 0

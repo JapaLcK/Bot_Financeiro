@@ -29,9 +29,13 @@ funcionamento em aparelho físico nem implantação em produção.
 ```bash
 cd app
 npm install
-npm run lint && npm run typecheck && npm test
+npm run lint && npm run typecheck
+npx jest __tests__/<arquivo>.test.tsx --maxWorkers=2   # só os testes da mudança
 npx expo start          # precisa de um backend acessível (ver .env.example)
 ```
+
+A suíte inteira roda no CI; como rodar jest na máquina:
+`.claude/skills/baseline-testes/SKILL.md`, seção "App".
 
 ## O que o app NÃO faz
 

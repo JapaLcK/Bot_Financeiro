@@ -265,7 +265,8 @@ simulador de outra tarefa). Se o teste morrer com `INTERNALERROR` no import, iss
 **Como rodar é assunto da skill `baseline-testes`, e só dela.** Invoque-a antes de
 qualquer `pytest` neste repositório: ela tem o interpretador certo, a única variável
 que você precisa exportar, e por que não passar `--ignore`. Este arquivo não repete
-os comandos de propósito — quando repetia, as duas versões divergiram (§0.7).
+os comandos de propósito — quando repetia, as duas versões divergiram (§0.7). O jest
+do app (`app/`) também tem seção nessa skill.
 
 **Frontend:** `npm run test:frontend` (`node --test tests/frontend/*.test.mjs`, com
 Playwright). O `package.json` da raiz existe só para isso e segue **sem script
@@ -445,6 +446,8 @@ do push, não depois do apontamento — é a diferença entre revisar e terceiri
 
 E **nunca sugira pular a revisão**. Parece economia de tempo; o efeito real é parar de
 olhar para nada ser encontrado.
+
+**Paridade app × /painel.** Toda feature de um lado declara no corpo do PR o par no outro: `Par no outro lado: já existe | plano/issue #N | específico da plataforma porque …`. Feature que muda dado ou rota nasce em `api/v2` e é montada nos dois namespaces; rota só do app (`api/nativo`) exige a razão. O servidor só acrescenta campo: app instalado não atualiza com o deploy.
 
 **Todo PR que você abrir, você acompanha até o fim — e pode mergear (autorização
 permanente do dono, desde 2026-10-01).** Ao abrir o PR: peça `@codex review` e fique de

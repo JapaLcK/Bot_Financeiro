@@ -33,6 +33,8 @@ export const perfilSchema = z.object({
   precisa_criar_senha: z.boolean().optional(),
   /** Só `false` conta (conta do Google/Apple sem senha); ausente = permissivo, como o settings.html. */
   has_password: z.boolean().optional(),
+  /** Decide se a exclusão pede o código do autenticador (`mfa_obrigatorio` cobre o resto). */
+  mfa_enabled: z.boolean().optional(),
 });
 
 /**

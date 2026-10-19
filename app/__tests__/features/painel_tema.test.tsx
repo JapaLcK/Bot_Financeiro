@@ -2,7 +2,7 @@
 const estadoDoEsquema: { valor: "light" | "dark" } = { valor: "light" };
 jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => estadoDoEsquema.valor }));
 
-import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
+import { renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { contraste } from "@/ui/contraste";
@@ -10,7 +10,6 @@ import { claro, escuro } from "@/ui/tokens";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
-import { fluxoFim } from "./conversa_apoio";
 beforeEach(async () => {
  prepararCaso(); desligarTrava(); await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" });
  fetchFalso.mockImplementation(async (url: string) => {
@@ -37,24 +36,22 @@ it.each([["light", claro], ["dark", escuro]] as const)("rótulo da aba ativa no 
  expect(cor).toBe(paleta.ink);
  expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
 });
-it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia no extrato (%s) é brandInk e passa 4,5:1", async (esquema, paleta) => {
+it.each([["light", claro], ["dark", escuro]] as const)("rótulo do filtro de dia no extrato (%s) é brandInk sobre brandSoft (par do Chip marcado) e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
  renderRouter("./app", { initialUrl: "/extrato?dia=2026-10-01" });
  await waitFor(() => expect(screen.getByText("01/10/2026")).toBeTruthy());
  const cor = corDe(screen.getByText("01/10/2026"));
  expect(cor).toBe(paleta.brandInk);
- expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
+ // o rótulo virou o botão de limpar (`Acao`): mede contra o fundo REAL do botão (primeiro ancestral com `backgroundColor`), não contra a constante do tema
+ let el: { props: { style?: unknown }; parent: unknown } | null = screen.getByText("01/10/2026"); let fundo: string | undefined;
+ while (el && !(fundo = (StyleSheet.flatten(el.props.style as object) as { backgroundColor?: string } | undefined)?.backgroundColor)) el = el.parent as typeof el;
+ expect(fundo).toBe(paleta.brandSoft); expect(contraste(cor, fundo!)).toBeGreaterThanOrEqual(4.5);
 });
-it.each([["light", claro], ["dark", escuro]] as const)("rótulo \"Piggy\" da fala do chat (%s) é inkMuted e passa 4,5:1", async (esquema, paleta) => {
+it.each([["light", claro], ["dark", escuro]] as const)("\"Como posso te ajudar?\" do chat novo (%s) é inkMuted e passa 4,5:1", async (esquema, paleta) => {
  estadoDoEsquema.valor = esquema;
- const impl = fetchFalso.getMockImplementation()!;
- fetchFalso.mockImplementation(async (url: string, req: RequestInit) => new URL(url).pathname === "/ai/chat/stream" ? fluxoFim("Oi", 1) : impl(url, req));
  renderRouter("./app", { initialUrl: "/piggy" });
- await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
- await act(async () => { fireEvent.changeText(screen.getByLabelText("Mensagem para o Piggy"), "Olá"); });
- await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Enviar mensagem" })); });
- await waitFor(() => expect(screen.getByText("Oi")).toBeTruthy());
- const cor = corDe(screen.getByTestId("fala-piggy-nome"));
+ await waitFor(() => expect(screen.getByText("Como posso te ajudar?")).toBeTruthy());
+ const cor = corDe(screen.getByText("Como posso te ajudar?"));
  expect(cor).toBe(paleta.inkMuted);
  expect(contraste(cor, paleta.bg)).toBeGreaterThanOrEqual(4.5);
 });

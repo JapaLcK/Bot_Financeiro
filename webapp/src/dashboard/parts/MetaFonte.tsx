@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Fonte } from "../lib/api-v2.gen";
 import { ErroApi, contasQuery, investidoQuery } from "../lib/v2";
+import { conectarBanco } from "../router";
 import { Selos } from "./Selos";
 
 // A fonte escolhida no formulário. `conta` é o id público de /contas, em texto (o <select>).
@@ -57,7 +58,7 @@ export function MetaFonte({ valor, onChange, desabilitado, erro, id, padraoConta
             {lista.map((c) => <option key={c.id} value={c.id}>{[c.instituicao, c.nome].filter(Boolean).join(" · ") || "Conta"}</option>)}
           </select>
           {escolhida && <Selos motivos={escolhida.motivos} />}
-          {contas.isSuccess && !lista.length && <p className="meta-nota">Você não tem conta em reais conectada. <a href="/settings?view=open-finance">Conectar banco</a></p>}
+          {contas.isSuccess && !lista.length && <p className="meta-nota">Você não tem conta em reais conectada. <a href={conectarBanco()}>Conectar banco</a></p>}
           {contas.isError && <p className="meta-nota" role="alert">Não deu para carregar suas contas. <button type="button" className="btn btn-quiet" onClick={() => contas.refetch()}>Tentar de novo</button></p>}
         </>
       )}

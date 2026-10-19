@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, passouATrava, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -35,7 +35,8 @@ async function atalho(page, nome) {
   await page.locator("#askbar-input").fill("oi");
   await page.locator("#askbar-input").press("Enter");
   await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
-  await respostas(page).last().locator(".chat-follow button", { hasText: nome }).click();
+  await passouATrava(page);
+  await page.locator(".chat-follow button", { hasText: nome }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n + 1, antes);
   const r = respostas(page).nth(antes + 1); // fixa esta resposta: `.last()` seguiria a próxima
   await r.locator(".msg-block").first().waitFor();
@@ -113,7 +114,8 @@ test("duas respostas iguais: mexer numa não mexe na outra, e os ids seguem úni
 test("\"Ver N lançamentos\" abre o extrato da categoria na própria resposta, sem sair da conversa", async () => {
   const { ctx, page } = await abrir();
   await atalho(page, "Pra onde vai meu dinheiro?");
-  await respostas(page).last().locator(".chat-follow button", { hasText: /^Me mostra o detalhe de/ }).click();
+  await passouATrava(page);
+  await page.locator(".chat-follow button", { hasText: /^Me mostra o detalhe de/ }).click();
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 3);
   const r = respostas(page).last();
   const ver = await r.locator("button.link", { hasText: /^Ver \d+ lançamentos/ }).textContent();
@@ -206,9 +208,10 @@ test("a resposta lê a simulação atual: zerar no Simulador tira \"Com a simula
   const { ctx, page, erros } = await abrir({ hash: "#/simulador" });
   await page.locator(".presets .chip").first().click();
   await page.locator(".sim-facts").waitFor();
-  const c = await atalho(page, "Pra onde vai meu dinheiro?");
+  await atalho(page, "Pra onde vai meu dinheiro?");
   const n = await respostas(page).count();
-  await c.locator(".chat-follow button", { hasText: "Vai sobrar até o fim do mês?" }).click();
+  await passouATrava(page);
+  await page.locator(".chat-follow button", { hasText: "Vai sobrar até o fim do mês?" }).click();
   await page.waitForFunction((k) => document.querySelectorAll(".chat > .msg-piggy").length > k, n);
   const r = respostas(page).nth(n);
   await r.locator(".w-hero").waitFor();

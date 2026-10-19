@@ -302,6 +302,77 @@
     "total_mensal": "39.90",
     "total_anual": "478.80"
   },
+  "/api/app/metas": {
+    "custo_mensal": {
+      "valor": null,
+      "recorrencias": 0,
+      "motivos": [
+        "plano_sem_custo_mensal"
+      ]
+    },
+    "metas": [
+      {
+        "id": 1,
+        "nome": "Reserva de emergência",
+        "tipo": "reserva",
+        "meses": 6,
+        "data_alvo": null,
+        "atual": "800.00",
+        "alvo": null,
+        "falta": null,
+        "percentual": null,
+        "por_mes": null,
+        "prazo_passou": false,
+        "ritmo": {
+          "valor": "50.00",
+          "dias_de_historico": 100,
+          "parcial": false,
+          "motivos": []
+        },
+        "chega_em": null,
+        "motivos": [
+          "plano_sem_custo_mensal"
+        ],
+        "fonte": {
+          "tipo": "investido",
+          "rotulo": "Tudo que tenho investido",
+          "conta_id": null,
+          "banco": null
+        }
+      },
+      {
+        "id": 2,
+        "nome": "Viagem",
+        "tipo": "meta",
+        "meses": null,
+        "data_alvo": null,
+        "atual": null,
+        "alvo": "6000.00",
+        "falta": null,
+        "percentual": null,
+        "por_mes": null,
+        "prazo_passou": false,
+        "ritmo": {
+          "valor": null,
+          "dias_de_historico": null,
+          "parcial": false,
+          "motivos": [
+            "plano_sem_investimentos"
+          ]
+        },
+        "chega_em": null,
+        "motivos": [
+          "plano_sem_investimentos"
+        ],
+        "fonte": {
+          "tipo": "investido",
+          "rotulo": "Tudo que tenho investido",
+          "conta_id": null,
+          "banco": null
+        }
+      }
+    ]
+  },
   "/goals/1/status": {
     "ok": true,
     "goals": [

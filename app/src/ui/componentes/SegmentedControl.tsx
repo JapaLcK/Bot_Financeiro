@@ -19,6 +19,8 @@ interface Props {
    * destaque permanece preso na primeira.
    */
   opcoes: string[];
+  /** Rótulo do VoiceOver de cada opção (mesma ordem de `opcoes`), quando o visível é abreviado ("out" lê "outubro de 2026"). */
+  acessiveis?: string[];
   valor: string;
   onChange: (v: string) => void;
 }
@@ -37,7 +39,7 @@ interface Props {
  * ativo). O índice do selecionado vem de `opcoes.indexOf(valor)` (o primeiro
  * que bate) — com rótulos únicos isso é exatamente o de sempre.
  */
-export function SegmentedControl({ opcoes, valor, onChange }: Props) {
+export function SegmentedControl({ opcoes, acessiveis, valor, onChange }: Props) {
   const { cores } = useTema();
   const indiceSelecionado = opcoes.indexOf(valor);
   const opacidades = useRef<Animated.Value[]>([]).current;
@@ -65,12 +67,13 @@ export function SegmentedControl({ opcoes, valor, onChange }: Props) {
   return (
     <View
       accessibilityRole="tablist"
-      style={{ flexDirection: "row", backgroundColor: cores.surfaceControl, borderRadius: raio.controle, padding: 3 }}
+      style={{ flexDirection: "row", backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, padding: 3 }}
     >
       {opcoes.map((opcao, indice) => (
         <Segmento
           key={indice}
           opcao={opcao}
+          acessivel={acessiveis?.[indice]}
           selecionado={indice === indiceSelecionado}
           opacidade={opacidades[indice]!}
           onPress={() => selecionar(indice)}
@@ -82,11 +85,13 @@ export function SegmentedControl({ opcoes, valor, onChange }: Props) {
 
 function Segmento({
   opcao,
+  acessivel,
   selecionado,
   opacidade,
   onPress,
 }: {
   opcao: string;
+  acessivel?: string;
   selecionado: boolean;
   opacidade: Animated.Value;
   onPress: () => void;
@@ -100,6 +105,7 @@ function Segmento({
       onPressIn={pressao.aoPressionar}
       onPressOut={pressao.aoSoltar}
       accessibilityRole="tab"
+      accessibilityLabel={acessivel}
       accessibilityState={{ selected: selecionado }}
       style={{ flex: 1, minHeight: 44 }}
     >
@@ -111,7 +117,7 @@ function Segmento({
             left: 0,
             right: 0,
             bottom: 0,
-            borderRadius: raio.celula,
+            borderRadius: raio.pilula,
             backgroundColor: cores.surfaceRaised,
             // Sem borda (PDF): o polegar `surfaceRaised` sobre o trilho
             // `surfaceControl` é sutil; quem marca o selecionado é o texto

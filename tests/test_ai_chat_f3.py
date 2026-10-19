@@ -93,7 +93,7 @@ def test_json_cru_vira_erro_padrao_sem_gravar_e_com_a_cota_de_volta(monkeypatch,
     openai_falso(monkeypatch, rodada(JSON_CRU))
     if canal == "app":
         r, _, _ = executar(pro_user_id, "gastei 50 no mercado")
-        assert r.reply == runner.ERROR_MSG and r.message_id is None and not r.sugerivel
+        assert r.reply == runner.ERROR_MSG.removeprefix("🐷 ") and r.message_id is None and not r.sugerivel
     else:
         assert runner.chat(pro_user_id, "gastei 50 no mercado", monthly_limit=100) == runner.ERROR_MSG
     assert db.count_launches(pro_user_id) == antes
@@ -115,9 +115,11 @@ def test_json_cru_cancela_a_pendencia_que_o_turno_armou(monkeypatch, pro_user_id
     openai_falso(monkeypatch, rodada(None, ("delete_all_launches", {})), rodada('{"x": 1}'))
     if canal == "app":
         reply = executar(pro_user_id, "apaga tudo")[0].reply
+        assert reply == runner.ERROR_MSG.removeprefix("🐷 ")
     else:
         reply = runner.chat(pro_user_id, "apaga tudo", monthly_limit=100)
-    assert reply == runner.ERROR_MSG and db.ai_get_pending_action(pro_user_id) is None
+        assert reply == runner.ERROR_MSG
+    assert db.ai_get_pending_action(pro_user_id) is None
     assert db.count_launches(pro_user_id) == 1
 
 
@@ -359,6 +361,18 @@ def test_falha_do_periodo_libera_o_resumo_de_varios_meses_e_nao_o_de_1_mes(mundo
     try:
         assert "error" not in _chama("get_period_summary", a, "varios", [])
         assert _chama("get_period_summary", a, "um", [])["error"] == "mes_inteiro_no_card"
+    finally:
+        FALHAS_DE_CARD_DO_TURNO.reset(t)
+
+
+def test_falha_do_renda_libera_o_dado_do_mes_em_texto_sem_abrir_o_resumo(mundo):
+    """"Quanto entrou em setembro" num plano sem `renda` (Plus+): o `get_period_summary` devolve o dado, não manda ao `resumo`
+    (que só mostra gasto). Controle: sem a falha do `renda`, o mesmo pedido segue indo ao card."""
+    a, _ = mundo
+    assert _chama("get_period_summary", a, "um", [])["error"] == "mes_inteiro_no_card"
+    t = FALHAS_DE_CARD_DO_TURNO.set(["renda"])
+    try:
+        assert "error" not in _chama("get_period_summary", a, "um", [])
     finally:
         FALHAS_DE_CARD_DO_TURNO.reset(t)
 

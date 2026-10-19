@@ -19,6 +19,8 @@ Toda tool exposta ao LLM é representada por um objeto `Tool` com:
   - confirmar_se: SÓ pra writes com requires_confirmation=False. Recebe
              (user_id, args); True = desta vez vira pending action como as de
              confirmação, com resposta fixa do runner. None = sempre executa.
+  - valor_do_usuario: nome do argumento de dinheiro que só vale se o usuário o
+             escreveu (ver o campo abaixo). None = sem conferência.
 
 Cada arquivo em tools/ exporta uma lista `TOOLS: list[Tool]`. O `__init__.py`
 do pacote tools/ agrega todas e expõe utilitários (schemas, lookup por nome).
@@ -61,12 +63,22 @@ class Tool:
     Bool = sempre/nunca; callable (user_id, args) = só quando aquela chamada
     armaria."""
     ao_confirmar: Optional[Callable[[int, dict[str, Any]], dict[str, Any]]] = None
-    """Só com `confirmar_se`: ajusta os args que vão para a pendência (e para
-    o resumo) — o que o "sim" grava é o que a pergunta mostrou."""
+    """Ajusta os args que vão para a pendência (e para o resumo) — o que o "sim"
+    grava é o que a pergunta mostrou. Roda com `confirmar_se` e, nas de
+    `requires_confirmation`, depois do `validate` e antes do `summary`."""
+    ao_armar: Optional[Callable[[int, dict[str, Any]], None]] = None
+    """Só nas de `requires_confirmation`: roda depois que a pendência foi de fato
+    armada (nunca com `_OUTRO_PEDIDO`), para o que aparece junto da pergunta — um
+    card — só existir se o "sim" tiver o que executar."""
 
     has_side_effects: bool = False
     """Consulta que sincroniza ou aplica juros. Não é comando de escrita,
     mas uma falha após sua tentativa não pode restituir a reserva da cota."""
+
+    valor_do_usuario: Optional[str] = None
+    """Nome do argumento de dinheiro que o usuário tem de ter escrito
+    (`valor_do_usuario.py`). Sem âncora no texto dele: argumento obrigatório no
+    schema → o runner recusa a chamada; opcional → o argumento é descartado."""
 
     @property
     def name(self) -> str:

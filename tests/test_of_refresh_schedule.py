@@ -67,7 +67,7 @@ def test_boot_nao_refresca(monkeypatch):
 
     asyncio.run(_corre())
 
-    # O 1º tique espera `_PRIMEIRO_TIQUE_SEC` (e não os 6 h): saúde e retentativa só fazem GET. O
+    # O 1º tique espera `_PRIMEIRO_TIQUE_SEC` (e não os 6 h): catálogo, saúde e retentativa só fazem GET. O
     # PATCH não roda no boot, e `tests/test_of_retentativa_tique.py` prende que ele só entra do 2º tique.
     assert dormidas == [dashboard._PRIMEIRO_TIQUE_SEC], "o tick tem que DORMIR antes de qualquer coisa"
     assert chamadas == [], f"nada podia ter rodado no boot: {chamadas}"

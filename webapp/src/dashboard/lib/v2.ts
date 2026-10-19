@@ -24,6 +24,9 @@ export const MESES: string[] = DEMO ? MONTHS : (() => {
   return Array.from({ length: 6 }, (_, i) => mesAtual(new Date(Date.UTC(y, m - 6 + i, 15))));
 })();
 
+// O nome do plano na tela, por tier: a fonte única do painel (o servidor não manda nome de exibição).
+export const NOME_DO_PLANO: Record<string, string> = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
+
 // Sem envelope (o `{"detail"}` do CSRF, HTML, JSON inválido) o code é `http_<status>`;
 // sem resposta, status 0 e code "network". A `message` do envelope não vai para a tela:
 // em 402/404 ela é o texto padrão do HTTP em inglês ("Payment Required", "Not Found").
@@ -31,30 +34,38 @@ export class ErroApi extends Error {
   status: number;
   code: string;
   details?: ErroV2["error"]["details"];
-  constructor(status: number, code: string, details?: ErroV2["error"]["details"]) {
+  // O `{"detail": "<texto PT>"}` das rotas antigas (/settings, /auth), já escrito para a tela. Fica de fora
+  // no 401 que carrega WWW-Authenticate: esse é o 401 de SESSÃO, e quem o recebe não pode confundi-lo com
+  // "Senha incorreta." (que não carrega).
+  detalhe?: string;
+  constructor(status: number, code: string, details?: ErroV2["error"]["details"], detalhe?: string) {
     super(code);
     this.status = status;
     this.code = code;
     this.details = details;
+    this.detalhe = detalhe;
   }
 }
 
-async function chamar<T>(path: string, init: RequestInit): Promise<T> {
+export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch("/api/v2" + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings|open-finance|billing)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
   }
   let body: unknown;
-  try { body = await r.json(); } catch { body = undefined; }
+  // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
+  try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
   if (r.ok && body !== undefined) return body as T;
   const erro = (body as Partial<ErroV2> | undefined)?.error;
   if (!r.ok && erro && typeof erro.code === "string") {
     throw new ErroApi(r.status, erro.code, erro.details);
   }
-  throw new ErroApi(r.status, `http_${r.status}`);
+  const d = (body as { detail?: unknown } | undefined)?.detail;
+  const sessao = r.status === 401 && !!r.headers.get("WWW-Authenticate");
+  throw new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined);
 }
 
 type Query<P> = P extends keyof QueryGet ? QueryGet[P] : never;
@@ -64,9 +75,10 @@ export function apiGet<P extends keyof RotasGet>(path: P, signal?: AbortSignal, 
 }
 
 // Escrita: o x-csrf-token sai do cookie `csrf_token` pelo helper do auth-refresh.js.
-function escrever<T>(method: "POST" | "PUT", path: string, corpo: unknown) {
-  const json = { Accept: "application/json", "Content-Type": "application/json" };
-  return chamar<T>(path, { method, body: JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json });
+// `corpo` undefined (o DELETE): sem corpo e sem Content-Type.
+export function escrever<T>(method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, corpo: unknown, signal?: AbortSignal) {
+  const json = { Accept: "application/json", ...(corpo === undefined ? {} : { "Content-Type": "application/json" }) };
+  return chamar<T>(path, { method, body: corpo === undefined ? undefined : JSON.stringify(corpo), headers: window.pbCsrfHeaders?.(json) ?? json, signal });
 }
 export const apiPost = <P extends keyof RotasPost>(path: P, corpo: RotasPost[P]["corpo"]) =>
   escrever<RotasPost[P]["resposta"]>("POST", path, corpo);
@@ -95,6 +107,17 @@ export const assinaturasQuery = {
   retry: meQuery.retry,
 };
 
+// Nome e e-mail da conta (`GET /auth/dashboard-profile`, fora da /api/v2): só em memória, nunca em localStorage.
+export const contaQuery = {
+  queryKey: ["conta"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => chamar<{ display_name: string | null; email: string | null; user_id: number; whatsapp_linked: boolean }>("/auth/dashboard-profile", { headers: { Accept: "application/json" }, signal }),
+  staleTime: 0,
+  refetchOnWindowFocus: false,
+  networkMode: "always" as const,
+  retry: meQuery.retry,
+  enabled: !DEMO,
+};
+
 // Dado que muda: relido a cada montagem, foco de aba e aviso do SSE.
 const vivo = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always" as const, retry: meQuery.retry, enabled: !DEMO };
 export const perfilQuery = {
@@ -107,10 +130,38 @@ export const contasQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas", signal),
   ...vivo,
 };
+// Os bancos conectados (`GET /api/v2/bancos`): só o `motivos` de cima alimenta o aviso do topo (parts/AvisosDoTopo.tsx).
+// Não é o `bancosQuery(uid)` da Conta (conta/api.ts): aquele mostra valores em R$ e por isso confere a conta depois da resposta (um GET
+// a mais de /auth/dashboard-profile e o `uid` do contaQuery, que fora da Conta ninguém lê). O aviso só lê `motivos`, como `contasQuery`
+// e `perfilQuery`, e não monta em /conta/* (SEM_PILHA): os dois nunca pedem /bancos ao mesmo tempo (dashboard_v2_pilha_avisos, "sem GET duplicado").
+export const avisoDeBancoQuery = {
+  queryKey: ["bancos"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/bancos", signal),
+  ...vivo,
+};
 // As metas e o custo mensal da reserva (`GET /api/v2/metas`); toda escrita invalida esta chave.
+// Lida pela página Metas e pelo assunto `metas` do chat (parts/MetasResposta.tsx).
 export const metasQuery = {
   queryKey: ["metas"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/metas", signal),
+  ...vivo,
+};
+// O orçamento doméstico do mês (`GET /api/v2/orcamento-domestico`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentoQuery = (mes: string) => queryOptions({
+  queryKey: ["orcamento-domestico", mes],
+  queryFn: ({ signal }) => apiGet("/orcamento-domestico", signal, { mes }),
+  ...vivo,
+});
+// O patrimônio de hoje para o Progresso ao milhão (`GET /api/v2/progresso-milhao`); a projeção é do cliente (lib/milhao.ts).
+export const milhaoQuery = {
+  queryKey: ["progresso-milhao"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
+  ...vivo,
+};
+// Os orçamentos por categoria do mês corrente (`GET /api/v2/orcamentos-categoria`, sem `mes`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentosCategoriaQuery = {
+  queryKey: ["orcamentos-categoria"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/orcamentos-categoria", signal),
   ...vivo,
 };
 export const guiaQuery = {
@@ -119,7 +170,7 @@ export const guiaQuery = {
   ...vivo,
 };
 // A conversa com o Piggy ainda responde com dado de exemplo (lib/topics.tsx), menos o assunto
-// `investido` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
+// `investido` e `metas` (resposta pronta do servidor, selo por mensagem em parts/PiggyChat.tsx): decide
 // o `data-dado` da barra de conversa. Vira true quando a conversa usar a API.
 export const CHAT_REAL = false;
 // O total investido nos bancos conectados (`GET /api/v2/investido`), o assunto real do chat.
@@ -173,7 +224,7 @@ export const categoriasQuery = {
 // abandonada tem o fetch abortado.
 // Reconsulta quando a resposta deixa de valer (`valido_ate`), medido no relógio do servidor.
 // ponytail: piso de 60 s contra laço; o teto é o do setTimeout (2³¹−1 ms).
-const instante = (s: string) => Date.parse(s.replace(/(\.\d{3})\d+/, "$1")); // 6 casas: NaN no Safari 14
+export const instante = (s: unknown) => typeof s === "string" ? Date.parse(s.replace(/(\.\d{3})\d+/, "$1")) : NaN; // 6 casas: NaN no Safari 14
 export const previsaoQuery = (dias: 30 | 60 | 90 | null) => queryOptions({
   queryKey: ["previsao", dias],
   queryFn: ({ signal }) => apiGet("/previsao", signal, dias ? { dias: String(dias) as "30" | "60" | "90" } : undefined),
@@ -196,3 +247,16 @@ export const lancamentosQuery = (filtros: Omit<QueryGet["/lancamentos"], "cursor
   getNextPageParam: (pagina) => pagina.proximo ?? undefined,
   ...vivo,
 });
+
+// Sair: o mesmo roteiro do `logoutSettings` (settings.html). O fetch é o GLOBAL, não o `apiPost`: o
+// auth-refresh.js reconhece o POST em /auth/logout e limpa o estado do aparelho, mesmo se ele REJEITAR.
+// A chave avisa as outras abas (`escutarLogout`); o redirecionamento sai do fetch, resolvido ou não.
+const LOGOUT_AT = "finbot_logout_at";
+const DEPOIS_DO_LOGOUT = "/?logout=1";
+export function sair(e: { currentTarget: HTMLButtonElement }) {
+  e.currentTarget.disabled = true; // o 2º clique não manda outro POST; a página sai de qualquer jeito (fim)
+  try { localStorage.setItem(LOGOUT_AT, String(Date.now())); } catch { /* storage bloqueado: o logout segue */ }
+  const fim = () => location.replace(DEPOIS_DO_LOGOUT);
+  fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: window.pbCsrfHeaders?.() ?? {} }).then(fim, fim);
+}
+export const escutarLogout = () => window.addEventListener("storage", (e) => { if (e.key === LOGOUT_AT) location.replace(DEPOIS_DO_LOGOUT); });

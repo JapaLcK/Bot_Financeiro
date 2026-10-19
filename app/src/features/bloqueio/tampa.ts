@@ -15,6 +15,9 @@ const nativo: Tampa | null =
     ? requireNativeModule<Tampa>("PigBankTampa")
     : null;
 
+/** Sem tampa (Android, Expo Go) quem cobre o app switcher é a tela, não o nativo. */
+export const temTampa = nativo !== null;
+
 /** Tira a tampa (se o app ainda estiver ativo quando o nativo for olhar). Não espera. */
 export function descobrir(): void {
   void nativo?.descobrir();

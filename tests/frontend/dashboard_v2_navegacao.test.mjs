@@ -58,9 +58,13 @@ test("desktop: menu com Simulador e Ferramentas, sem Piggy; o botão rosa abre F
   assert.equal(botao.trim(), "Ferramentas");
   assert.deepEqual(cards[0], ["Simulador", "#/simulador"]);
   assert.deepEqual(cards[1], ["Painel antigo", "/app"]); // sai do v2 para o dashboard de sempre
+  assert.deepEqual(cards[2], ["Orçamento doméstico", "#/orcamento"]);
+  assert.deepEqual(cards[3], ["Orçamentos por categoria", "#/orcamentos-categoria"]);
   assert.equal(cards.length, 8);
   assert.deepEqual(cards[7], ["Guia do painel", "botão"]); // abre o guia
-  assert.ok(cards.slice(2, 7).every(([, v]) => v === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
+  assert.deepEqual(cards[4], ["Vale a pena comprar?", "#/simulador/compra"]); // simulador de compra v2
+  assert.deepEqual(cards[5], ["Progresso ao milhão", "#/milhao"]);
+  assert.ok([6].every((i) => cards[i][1] === true), JSON.stringify(cards)); // o resto: "Em breve", sem link
 });
 
 test("o nome antigo \"E se…\" não aparece mais", async () => {
@@ -104,11 +108,11 @@ test("a aba do Piggy mostra quando é a página atual, como as outras", async ()
   assert.equal(dentro, "none|1");
 });
 
-// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral e a Ajuda.
+// O Menu da barra de baixo (parts/MenuTelas.tsx): uma folha com as 9 telas do menu lateral, a Ajuda e o grupo Conta (Perfil, Cobrança, Configurações, Bancos conectados, Sair).
 // Nativo e com o fallback do Safari 14 (sem showModal/close): o mesmo roteiro.
 const ROTULOS = ["Resumo", "Previsão", "Para onde vai", "Assinaturas", "Simulador", "Metas", "Patrimônio", "Lançamentos", "Ferramentas"];
 for (const semDialog of [false, true]) {
-  test(`celular 375 (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): o Menu abre a folha com as 9 telas; foco, Esc, toque fora, navegar e reabrir`, async () => {
+  test(`celular 375 (${semDialog ? "fallback sem <dialog>" : "<dialog> nativo"}): o Menu abre a folha com as 9 telas e o grupo Conta; foco, Esc, toque fora, navegar e reabrir`, async () => {
     const { ctx, page } = await abrir(375, "#/", { height: 812, semDialog });
     const botao = page.locator(".tabbar").getByRole("button", { name: "Menu" });
     const folha = page.locator(".menu-telas");
@@ -122,10 +126,10 @@ for (const semDialog of [false, true]) {
     r.atual = await textos(page, '.menu-telas a[aria-current="page"]');
     r.foco = await foco();
     r.guias = await page.locator(".menu-telas [data-guia]").count();
-    // 12 Tabs (fecha + 9 telas + Guia do painel = 11, então dá a volta): o foco nunca para num
+    // 17 Tabs (fecha + 9 telas + 4 da Conta + Sair + Guia do painel = 16, então dá a volta): o foco nunca para num
     // elemento de fora da folha. No nativo, a volta passa um Tab pelo navegador (document.body).
     r.tabs = [];
-    for (let i = 0; i < 12; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
+    for (let i = 0; i < 17; i++) { await page.keyboard.press("Tab"); r.tabs.push(await page.evaluate(() => { const a = document.activeElement; return a === document.body || a?.closest(".menu-telas") != null; })); }
     // Com a folha aberta o ⌘K não abre um segundo modal.
     await page.keyboard.press("Meta+k");
     r.cmdk = await page.locator(".cmdk[open]").count();
@@ -154,8 +158,8 @@ for (const semDialog of [false, true]) {
     r.ajuda = [await visivel(), await page.evaluate(() => window.__guia)];
     await ctx.close();
     assert.deepEqual(r, {
-      fechada: false, aberta: true, rotulos: ROTULOS, atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
-      tabs: Array(12).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
+      fechada: false, aberta: true, rotulos: [...ROTULOS, "Perfil", "Cobrança", "Configurações", "Bancos conectados"], atual: ["Resumo"], foco: [true, "Resumo"], guias: 0,
+      tabs: Array(17).fill(true), cmdk: 0, escFechou: true, escFoco: true, foraFechou: true, mesmaTela: true,
       navegou: [false, ["#/previsao", "page-title"]], atualDepois: ["Previsão"], ajuda: [false, 1],
     });
   });

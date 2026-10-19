@@ -87,10 +87,10 @@ def test_sessao_revogada_continua_dando_401(user_id):
 def test_conta_agendada_para_exclusao_continua_dando_403(user_id):
     """A guarda (b): `raise_if_account_scheduled_for_deletion` ficou DENTRO da
     função nova, e ANTES do 402 da escolha."""
-    from db import schedule_account_deletion
+    from _apoio_auth_app import marca_exclusao
     email = _conta(user_id, com_senha=True)
     _cortar(user_id)
-    schedule_account_deletion(user_id, SENHA)
+    marca_exclusao(user_id, SENHA)
     client, headers = _cliente(user_id, email)
 
     r = client.get(f"/settings/{user_id}/security", headers=headers)

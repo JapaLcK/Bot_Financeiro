@@ -80,6 +80,8 @@ const PAGE: Record<string, Path | null> = {
 
 const presetOf = (p: string): string[] => PROFILES.find((x) => x.id === p)?.preset ?? DEFAULT.map((w) => w.id);
 const layoutOf = (p: string, plan: string): string[] => readLayout(p, presetOf(p), KNOWN, plan);
+// A pilha de avisos do topo (parts/AvisosDoTopo.tsx) pergunta se o card "Saldo previsto" vai estar no Resumo: se vai, ela lê a lista de receitas dele em vez de abrir outra consulta da previsão.
+export const comCardPrevisao = (p: string, plan: string) => layoutOf(p, plan).includes("hero");
 const shownPreset = (p: string, plan: string) => presetOf(p).filter((id) => KNOWN.includes(id) && !locked(id, plan));
 
 const useColumns = () => (useMedia("(max-width: 640px)") ? 1 : 4);

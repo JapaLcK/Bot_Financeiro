@@ -18,6 +18,8 @@ type Props = {
    * área segura de cima, então somar `insets.top` de novo dobrava a margem.
    */
   sobCabecalho?: boolean;
+  /** Tela dentro de abas: a tab bar já cobre a área segura de baixo, então somar `insets.bottom` contava o inset duas vezes (vão sob o conteúdo). */
+  sobAbas?: boolean;
 } & (
   | {
       children: ReactNode;
@@ -74,7 +76,7 @@ export function Screen(props: Props) {
   const topo = props.sobCabecalho ? 0 : insets.top;
   const preenchimento = {
     paddingTop: topo,
-    paddingBottom: insets.bottom,
+    paddingBottom: props.sobAbas ? 0 : insets.bottom,
     paddingLeft: (acesso ? espaco.xl : espaco.lg) + insets.left,
     paddingRight: (acesso ? espaco.xl : espaco.lg) + insets.right,
     flexGrow: 1,

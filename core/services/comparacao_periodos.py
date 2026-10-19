@@ -4,15 +4,17 @@ Quem decide a janela e o delta é este módulo; os consumidores (a tool `compare
 `GET /api/v2/comparacao` e o KPI das Análises, com `meses=N`) só mostram. Dois caminhos, um formato
 de saída; só a base do cartão muda (`base.cartao`):
 - `mes` (aberto ou fechado): os números do "Entrou/Saiu do mês" (`db/resumo_mes`), cartão pela
-  FATURA; a janela parcial soma as faturas que fecham dentro dela.
+  FATURA.
 - datas informadas: se as DUAS janelas são meses-calendário inteiros (critério `_meses_inteiros` da tool), é o mesmo
   que `mes=`: cartão pela FATURA, mês todo. Senão é período livre, nas DUAS janelas: a regra das outras tools da IA (Q3), as de
   `get_top_categories`/`get_period_summary` (`db.get_top_expense_categories`, `db.get_summary_by_period`),
   cartão pela DATA DA COMPRA: a compra parcelada tem a mesma `purchased_at` em todas as parcelas e entra
   inteira no dia da compra. Essas leituras abrem a própria conexão (sem o snapshot único do caminho `mes`).
 
-Mês aberto compara os MESMOS N dias do mês anterior; se o anterior tem menos de N dias,
-compara com ele inteiro e marca `anterior_encurtado`. Mês fechado: mês inteiro × mês inteiro.
+Mês aberto: o mês corrente INTEIRO (o que já está lançado nele, inclusive fatura que fecha e lançamento com data
+futura) contra o anterior inteiro, o mesmo número do `resumo_do_mes`. Mês fechado: mês inteiro × mês inteiro.
+`anterior_encurtado` é sempre False (mantido: é contrato do bloco).
+Com `meses=N` (o KPI das Análises): os N meses até `ano`-`mes`, inteiros, contra os N antes deles.
 """
 from __future__ import annotations
 
@@ -20,13 +22,15 @@ import calendar
 import unicodedata
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from itertools import accumulate
 
 from core.observability import get_logger
 from core.reports.weekly import _categoria_em_uma_linha, _pct
 from core.services.plan_service import history_earliest_date, plan_gate_ok
 import db
-from db import resumo_mes
+from db import lancamentos, resumo_mes
 from db.connection import get_conn
+from db.mes_detalhes import _em_reais
 from utils_date import day_tz, now_tz
 
 logger = get_logger(__name__)
@@ -61,10 +65,9 @@ def _janela(inicio: date, fim: date) -> dict:
     return {"inicio": inicio, "fim": fim, "dias": (fim - inicio).days + 1}
 
 
-def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, encurtado: bool = False,
-             cartao: str = "fatura") -> dict:
+def _janelas(modo: str, escolha: str, atual: dict, anterior: dict, cartao: str = "fatura") -> dict:
     return {"modo": modo, "escolha": escolha, "atual": atual, "anterior": anterior, "cartao": cartao,
-            "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": encurtado}
+            "mesmo_tamanho": atual["dias"] == anterior["dias"], "anterior_encurtado": False}
 
 
 def escolher_janelas(hoje: date, ano: int, mes: int, meses: int = 1) -> dict:
@@ -75,27 +78,20 @@ def escolher_janelas(hoje: date, ano: int, mes: int, meses: int = 1) -> dict:
     idx, idx_hoje = ano * 12 + mes - 1, hoje.year * 12 + hoje.month - 1
     if idx > idx_hoje:
         raise ValueError(f"mês no futuro; o mês corrente é {hoje.year:04d}-{hoje.month:02d}.")
-    um = meses == 1
     ini, fim = _mes(idx - meses + 1)[0], _mes(idx)[1]
-    (ant_ini, _), (ult_ini, ant_fim) = _mes(idx - 2 * meses + 1), _mes(idx - meses)
+    ant_ini, ant_fim = _mes(idx - 2 * meses + 1)[0], _mes(idx - meses)[1]
+    a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
+    um = meses == 1
     if idx < idx_hoje:
-        a, p = _janela(ini, fim), _janela(ant_ini, ant_fim)
         return _janelas("mes_fechado", f"{_nome(ini).capitalize()} inteiro ({a['dias']} dias) contra "
                         f"{_nome(ant_ini)} inteiro ({p['dias']} dias)." if um else
                         f"{_nome(ini).capitalize()} a {_nome(fim)}, meses inteiros ({a['dias']} dias), contra "
                         f"{_nome(ant_ini)} a {_nome(ant_fim)} ({p['dias']} dias).", a, p)
-    n = hoje.day
-    dia = "1º" if n == 1 else str(n)  # só no texto de N meses; o de um mês é do PR A
-    de = f"Dias 1 a {n} de {_nome(ini)}" if um else f"De 1º de {_nome(ini)} a {dia} de {_nome(hoje)}"
-    if n > ant_fim.day:
-        a, p = _janela(ini, hoje), _janela(ant_ini, ant_fim)
-        return _janelas("mes_aberto", f"{de} contra {_nome(ant_ini)} inteiro, que tem só {p['dias']} dias." if um else
-                        f"{de} contra o mesmo trecho {meses} meses antes, de 1º de {_nome(ant_ini)} até o fim de "
-                        f"{_nome(ant_fim)}, que tem só {ant_fim.day} dias.", a, p, encurtado=True)
-    a, p = _janela(ini, hoje), _janela(ant_ini, ult_ini + timedelta(days=n - 1))
-    return _janelas("mes_aberto", f"{de} contra os mesmos {n} dias de {_nome(ant_ini)}." if um else
-                    f"{de} contra os mesmos dias {meses} meses antes: de 1º de {_nome(ant_ini)} "
-                    f"a {dia} de {_nome(ult_ini)}.", a, p)
+    return _janelas("mes_aberto", f"{MESES[mes - 1].capitalize()} até agora (o que já está lançado no mês, igual ao Resumo do mês) "
+                    f"contra {_nome(ant_ini)} inteiro. O mês ainda não acabou: a comparação tende a mostrar gasto menor." if um else
+                    f"{_nome(ini).capitalize()} a {_nome(fim)}, com {MESES[mes - 1]} até agora (o que já está lançado, igual ao "
+                    f"Resumo do mês), contra {_nome(ant_ini)} a {_nome(ant_fim)}, meses inteiros. O mês ainda não acabou: "
+                    "a comparação tende a mostrar gasto menor.", a, p)
 
 
 def _intervalos(hoje: date, atual: tuple[date, date], anterior: tuple[date, date], por_fatura: bool = False) -> dict:
@@ -139,6 +135,23 @@ def _dinheiro(v) -> Decimal:
     return Decimal(v).quantize(_CENT)
 
 
+def _serie(linhas: list[dict], janela: dict, hoje: date, total: Decimal) -> list[Decimal] | None:
+    """Gasto acumulado por dia da janela (o filtro do `dias[]` do Resumo; dia fora da janela, como compra de cartão
+    anterior a ela, prende na ponta); `None` se a última posição não fecha o `total`. Na janela que contém hoje corta em hoje (ou no último lançamento de data futura)."""
+    n, por_dia, ult = janela["dias"], [Decimal(0)] * janela["dias"], 0
+    for r in _em_reais(linhas, set())[0]:
+        if r["tipo"] == "saida":
+            i = min(max((r["dia"] - janela["inicio"]).days, 0), n - 1)
+            por_dia[i] += r["valor"]
+            ult = max(ult, i + 1)
+    acc = [_dinheiro(v) for v in accumulate(por_dia)]
+    if acc[-1] != total:
+        return None
+    if janela["inicio"] <= hoje <= janela["fim"]:  # sobe em degrau até o lançamento de data futura (a última posição = total)
+        n = max((hoje - janela["inicio"]).days + 1, ult)
+    return acc[:n]
+
+
 def _categorias(atual: list[dict], anterior: list[dict]) -> list[dict]:
     """Casa as duas janelas pela chave da categoria; o rótulo é a grafia do lado atual, senão do anterior (no
     período livre, a de maior total: as linhas vêm por total desc e a última a ser lida manda, daí o `reversed`)."""
@@ -178,7 +191,12 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     base = BASES[cartao]
     out = {**j, "base": {**{k: base[k] for k in ("regra", "cartao", "origem")}, "cartao_lancamentos": None},
            "despesa": None, "receita": None, "resultado": None,
-           "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None}
+           "categorias": [], "categorias_omitidas": 0, "motivo": None, "motivos": [], "nota": None, "serie": None}
+    # `mes=` com N meses (o KPI): "dia 15 de 92" não diz nada e a série diária de dois anos não tem leitor.
+    um_mes = (j["atual"]["inicio"].year, j["atual"]["inicio"].month) == (j["atual"]["fim"].year, j["atual"]["fim"].month)
+    n_meses = j["modo"] in ("mes_aberto", "mes_fechado") and not um_mes
+    if j["modo"] == "mes_aberto" and not n_meses:  # a legenda "dia 17 de 31" do app: `atual.fim` é o fim do mês, não hoje (mesmos nomes do forecast_month_end)
+        out["dias_corridos"], out["dias_no_mes"] = day_tz(agora).day, j["atual"]["dias"]
     corte = history_earliest_date(user_id, agora)
     if corte and corte > min(j["atual"]["inicio"], j["anterior"]["inicio"]):  # o modelo pode trocar A e B
         out["motivo"] = "inicio_do_historico"  # o plano não enxerga o período mais antigo inteiro
@@ -202,6 +220,14 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
                     cat_a, cat_p = resumo_mes.categorias(cur, user_id, ia, fa), resumo_mes.categorias(cur, user_id, ip, fp)
             except Exception as exc:
                 logger.warning("comparacao_periodos: categorias indisponíveis (%s)", type(exc).__name__)
+        if not por_compra and not n_meses:  # a série diária das duas janelas; extra como as categorias (savepoint). Período livre: sem linha
+            try:
+                with conn.transaction():
+                    serie = {lado: _serie(lancamentos.listar(cur, user_id, i, f, limite=None)[0], j[lado], day_tz(agora),
+                                          _dinheiro(t["saiu"])) for lado, i, f, t in (("atual", ia, fa, ta), ("anterior", ip, fp, tp))}
+                out["serie"] = None if None in serie.values() else serie
+            except Exception as exc:
+                logger.warning("comparacao_periodos: série indisponível (%s)", type(exc).__name__)
         try:
             vistos = set(listar(cur, user_id)["motivos"])  # os mesmos avisos do resumo do mês (último: sem savepoint)
         except Exception as exc:
@@ -212,7 +238,7 @@ def _comparar(user_id: int, j: dict, agora: datetime) -> dict:
     out["base"]["cartao_lancamentos"] = {"atual": int(ta["n_cartao"]), "anterior": int(tp["n_cartao"])}
     out["escolha"] += base["escolha"]
     if j["modo"] == "mes_aberto" and not ta["n_cartao"]:
-        out["escolha"] += " Nenhuma fatura de cartão fechou nesses dias."
+        out["escolha"] += " Nenhuma fatura de cartão no período." if n_meses else " Nenhuma fatura de cartão no mês."
     out["despesa"] = _linha(_dinheiro(ta["saiu"]), _dinheiro(tp["saiu"]))
     out["receita"] = _linha(_dinheiro(ta["entrou"]), _dinheiro(tp["entrou"]))
     (r, dsp) = out["receita"], out["despesa"]

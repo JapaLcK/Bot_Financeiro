@@ -6,10 +6,10 @@ import { useConversation } from "../lib/conversation";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { DEMO, ErroApi, apiPost, guiaQuery, perfilQuery } from "../lib/v2";
-import { go, type Path } from "../router";
+import { go, conectarBanco, type Path } from "../router";
 import { ROTA, aba, achar, caixa, cobrir, corte, guia, posicionar, trazer, type Caixa, type Tipo } from "./guia-posicao";
 import { avisarGuia } from "./Dica";
-import { MOTIVO, OF, destino } from "./guia-falas";
+import { MOTIVO, destino } from "./guia-falas";
 import { useTecladoDoVeu } from "./guia-teclado";
 import { TEMPO, partir, pular, quadro, tiltDe, type Voo } from "./guia-voo";
 
@@ -346,7 +346,7 @@ export function Guia({ s, path }: { s: DashState; path: Path }) {
       <h2 key="titulo" id="guia-titulo" tabIndex={-1}>{leva ?? <>{p.fala.titulo}{p.dado === "exemplo" && <> <span className="selo">exemplo</span></>}</>}</h2>
       {!leva && <>
         <p id="guia-texto">{mot ? mot.texto : etapa === "bloco" ? p.fala.apresenta : p.fala.texto}</p>
-        {mot?.link && <p><a href={OF}>{mot.link}</a></p>}
+        {mot?.link && <p><a href={conectarBanco()} onClick={() => fechar(false)}>{mot.link}</a></p>}
         {!mot && tipo === "ausente" && <p>Esse bloco não está no seu painel agora. Toca em Seguir; depois dá pra pôr ele de volta em Organizar.</p>}
       </>}
       {salvando && <p className="guia-dica">Salvando…</p>}

@@ -13,7 +13,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RESPOSTAS, abrirFiltros, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -22,6 +22,9 @@ after(() => browser?.close());
 const abrir = (opts) => abrirPainel(browser, { espera: "#w-categorias", ...opts });
 // Espera o dado: o bloco aparece antes do /gastos responder.
 const COM_DADO = { espera: "#w-cat-detalhe .detail-facts" };
+// Os três blocos saíram do "Carregando…" (que também é `.faint`, como os avisos finais: esperar `.faint` não basta).
+const semCarregando = (page) => page.waitForFunction(() => ["categorias", "calendario", "cat-detalhe"]
+  .every((id) => { const b = document.querySelector(`#w-${id} .w-body`); return b && !b.querySelector("[role=status]"); }), null, { timeout: 8000 });
 const centavos = (t) => Number(t.replace(/\D/g, ""));
 const numero = (loc) => loc.evaluate((v) => [...v.shadowRoot.querySelectorAll(".symbol__value, [part~=digit]")]
   .map((n) => (n.matches("[part~=digit]") ? n.style.getPropertyValue("--current").trim() : n.textContent)).join("").replace(/\s/g, " "));
@@ -47,6 +50,25 @@ test("critério do dono: Saiu do Resumo, lede do bloco e soma das linhas são os
   assert.equal(valores.reduce((a, v) => a + centavos(v), 0), centavos(saiu));
   assert.deepEqual(erros, []);
   assert.equal(urls.length, 1, urls.join()); // o Resumo pede uma vez: categorias e calendário dividem a consulta
+});
+
+test("ícone da categoria: o `icone` do servidor vira Phosphor na lista e no detalhe, sem emoji na tela; servidor velho (sem o campo) = `tag`", async () => {
+  const emoji = /\p{Extended_Pictographic}/u;
+  const { ctx, page, ir } = await abrir({ ...COM_DADO });
+  await ir("/gastos");
+  await page.locator("#w-categorias .cat").first().waitFor();
+  const ler = () => page.evaluate(() => ({ lista: [...document.querySelectorAll("#w-categorias .cat-name i")].map((i) => i.className),
+    detalhe: document.querySelector("#w-cat-detalhe .detail-title i")?.className, texto: document.querySelector("#w-categorias").textContent + document.querySelector("#w-cat-detalhe .detail-title").textContent }));
+  const novo = await ler();
+  assert.deepEqual([novo.lista, novo.detalhe, emoji.test(novo.texto)], [["ph ph-fork-knife", "ph ph-tag"], "ph ph-fork-knife", false]);
+  // `icone` que não é nome de ícone (espaço = 3 classes CSS) cai em `tag`; o vizinho válido segue (controle: sem a regex a 1ª sairia "ph ph-a b c").
+  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map((c, i) => ({ ...c, icone: i ? "shopping-cart" : "a b c" })) } }));
+  await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].map((i) => i.className).join("|") === "ph ph-tag|ph ph-shopping-cart");
+  await ctx.route((u) => u.pathname === "/api/v2/gastos", (r) => r.fulfill({ json: { ...RESPOSTAS.gastos.padrao, categorias: RESPOSTAS.gastos.padrao.categorias.map((c) => ({ ...c, icone: undefined })) } })); // undefined some do JSON: servidor velho, sem o campo
+  await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#w-categorias .cat-name i")].every((i) => i.className === "ph ph-tag"));
+  await ctx.close();
 });
 
 test("outra moeda: o aviso diz quantas saídas ficaram fora, o selo aparece e a lede (subtotal em reais) difere do Saiu", async () => {
@@ -82,7 +104,7 @@ test("escolher categoria pede o detalhe e o calendário dela (uma requisição);
   const { ctx, page, ir } = await abrir({ ...COM_DADO });
   await ctx.route((u) => u.pathname === "/api/v2/gastos/categoria", (r) => {
     const chave = new URL(r.request().url()).searchParams.get("categoria");
-    return r.fulfill({ json: { ...RESPOSTAS.gastos_categoria.padrao, categoria: { chave, nome: chave, emoji: "🏷️", cor: "#94A3B8" } } });
+    return r.fulfill({ json: { ...RESPOSTAS.gastos_categoria.padrao, categoria: { chave, nome: chave, emoji: "🏷️", icone: "tag", cor: "#94A3B8" } } });
   });
   const urls = pedidos(page, "/api/v2/gastos/categoria");
   await ir("/gastos");
@@ -96,7 +118,7 @@ test("escolher categoria pede o detalhe e o calendário dela (uma requisição);
   await page.locator("#w-cat-detalhe .detail-title", { hasText: "alimentacao" }).waitFor();
   await ctx.close();
   assert.match(antes, /alimentacao.*maior gasto do mês/);
-  assert.deepEqual(depois, ["🏷️sem categoria", "sem categoria", 1]);
+  assert.deepEqual(depois, ["sem categoria", "sem categoria", 1]);
   assert.deepEqual(urls, ["?mes=2026-10&categoria=alimentacao", "?mes=2026-10&categoria=sem+categoria", "?mes=2026-10&categoria=alimentacao"]);
 });
 
@@ -166,6 +188,7 @@ test("'Ver compras' e 'Ver em Lançamentos' do detalhe levam a categoria aos lan
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
+  await abrirFiltros(page);
   const r = [lanc.at(-1), await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), await page.locator('select option[value="sem categoria"]').textContent()];
   await ctx.close();
   assert.deepEqual(r, ["?mes=2026-10&categoria=sem+categoria&guardado=true", "sem categoria", "Sem categoria"]);
@@ -180,6 +203,7 @@ test("catálogo de categorias fora do ar com categoria já escolhida: o select s
   await page.getByRole("button", { name: "Ver compras" }).click();
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.getByText("Não foi possível carregar as categorias.").waitFor();
+  await abrirFiltros(page);
   const sel = page.getByRole("combobox", { name: /^Categoria/ });
   const habilitado = await sel.isEnabled();
   await sel.selectOption("");
@@ -211,7 +235,7 @@ test("erro: o 500 da /gastos mostra 'Não deu para carregar.' nos três blocos e
 test("mês fora do histórico: o aviso nos três blocos e nenhum R$ 0", async () => {
   const { ctx, page, ir } = await abrir({ gastos: "indisponivel", gastosCategoria: "indisponivel", espera: "#w-calendario" });
   await ir("/gastos");
-  await page.locator("#w-cat-detalhe .faint").waitFor();
+  await semCarregando(page);
   const r = await page.evaluate(() => ["categorias", "calendario", "cat-detalhe"].map((id) => document.querySelector(`#w-${id} .w-body`).textContent));
   await ctx.close();
   assert.deepEqual(r, Array(3).fill("Este mês está fora do seu histórico."));
@@ -253,7 +277,7 @@ test("mês sem gasto e categoria sem gasto: textos próprios, sem pedir o detalh
   const { ctx, page, ir } = await abrir({ gastos: "vazio", espera: "#w-categorias" });
   const urls = pedidos(page, "/api/v2/gastos/categoria");
   await ir("/gastos");
-  await page.locator("#w-cat-detalhe .faint").waitFor();
+  await semCarregando(page);
   const vazio = [await texto(page, "#w-categorias .w-body"), await texto(page, "#w-cat-detalhe .w-body"), await page.locator("#w-calendario .cal-day").count()];
   await ctx.close();
   assert.deepEqual(vazio, ["Nenhum gasto neste mês.", "Nenhum gasto neste mês.", 31]);
@@ -319,7 +343,8 @@ test("'Ver em Lançamentos' do detalhe larga o dia que estava escolhido: a lista
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
-  const r = [lanc.at(-1), await page.locator(".ledger-chips .chip").count()];
+  // a categoria vira ficha (painel fechado), o dia não: nenhuma ficha "dia N"
+  const r = [lanc.at(-1), (await page.locator(".ledger-chips .chip").allTextContents()).filter((t) => /^dia \d/.test(t)).length];
   await ctx.close();
   assert.deepEqual(r, ["?mes=2026-10&categoria=alimentacao&guardado=true", 0]);
 });
