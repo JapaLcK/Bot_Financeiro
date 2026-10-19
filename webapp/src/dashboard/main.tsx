@@ -6,13 +6,18 @@ import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { contaDaSessao } from "./lib/conversation";
+import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
 
 const qc = new QueryClient();
+// Toda leitura de /auth/dashboard-profile, de qualquer tela, diz de quem é a sessão: a conversa do Piggy é da conta que a fez.
+qc.getQueryCache().subscribe((e) => {
+  if (e.type === "updated" && e.query.queryKey[0] === contaQuery.queryKey[0]) contaDaSessao((e.query.state.data as { user_id?: number } | undefined)?.user_id);
+});
 // O protótipo (dashboard-v2/index.html) define o plano da demonstração e não fala com a
 // API: o cache nasce com os dados sintéticos e o perfil salvo no navegador. O bundle nunca
 // lê a URL: quem decide o plano é o /api/v2/me.

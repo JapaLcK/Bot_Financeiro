@@ -63,8 +63,9 @@ export function PiggyChat() {
   // O perfil é o do Board: com backend, o do servidor; no protótipo, o que main.tsx semeou do navegador.
   const perfil = useQuery(perfilQuery);
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
-  // Só no estado vazio: com a conversa aberta o nome não aparece, e a leitura iria à toa. O corpo vem do servidor: o que não é texto vira vazio (como conta/Ponte.tsx).
-  const conta = useQuery({ ...contaQuery, enabled: contaQuery.enabled && !msgs.length }).data;
+  // Relida também com a conversa aberta e na volta do foco: se a sessão virou outra conta noutra aba, a leitura chega ao
+  // `contaDaSessao` (main.tsx) e a conversa da anterior some. O corpo vem do servidor: o que não é texto vira vazio (como conta/Ponte.tsx).
+  const conta = useQuery({ ...contaQuery, refetchOnWindowFocus: true }).data;
   const txt = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const nome = conta && (txt(conta.display_name) || txt(conta.email).split("@")[0] || "Você");
   const end = useRef<HTMLLIElement>(null);

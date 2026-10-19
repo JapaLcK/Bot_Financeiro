@@ -15,6 +15,25 @@ const TELAS = [1440, 390];
 const CAT = [["xerife", "Xerife", 2], ["reporter", "Repórter", 1], ["carteiro", "Carteiro", 1], ["detetive", "Detetive", 3], ["cofre", "Banqueiro", 2], ["barao", "Barão", 3], ["faria_limer", "Faria Limer", 4]];
 
 // `lista`: sobrescreve o GET (status/json); `chat(corpo, n, kind)`: sobrescreve o POST de chat; `segura`: promise (ou `kind => promise`) que segura o chat; `ativos`: quem começa ativo.
+// A sessão vira a conta 43 noutra aba: o perfil passa a responder 43 e o /agents/43 existe. Devolve os POSTs de chat da 43.
+async function paraConta43(ctx) {
+  const da43 = [];
+  await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 43, display_name: "Outra", email: null, whatsapp_linked: true } }));
+  await ctx.route(/\/agents\/43(\/|$)/, (r) => {
+    const m = new URL(r.request().url()).pathname.match(/^\/agents\/43\/(\w+)\/chat$/);
+    if (!m) return r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
+    da43.push({ kind: m[1], context: r.request().postDataJSON().context });
+    return r.fulfill({ json: { reply: "Oi, conta nova.", context: "ctx-43", redirects: [] } });
+  });
+  return da43;
+}
+// A Conta relê /auth/dashboard-profile (staleTime 0) sem recarregar a página; depois volta ao chat.
+async function idaEVoltaPelaConta(page) {
+  await page.evaluate(() => { location.hash = "#/conta/perfil"; });
+  await page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+  await page.evaluate(() => { location.hash = "#/piggy"; });
+}
+
 async function abrir({ width, demo = false, ativos = ["detetive", "xerife"], lista, chat, segura, ativarErro, soltaAtivar, opts = {} }) {
   const { ctx, page, erros, ir } = await abrirPainel(browser, { width, demo, espera: "#askbar-input", ...opts });
   const pedidos = [], chats = [], ativacoes = [];
@@ -240,21 +259,53 @@ for (const width of TELAS) {
     const { ctx, page, chats } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");
     await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
-    const da43 = [];
-    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 43, display_name: "Outra", email: null, whatsapp_linked: true } }));
-    await ctx.route(/\/agents\/43(\/|$)/, (r) => {
-      const m = new URL(r.request().url()).pathname.match(/^\/agents\/43\/(\w+)\/chat$/);
-      if (!m) return r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
-      da43.push({ kind: m[1], context: r.request().postDataJSON().context });
-      return r.fulfill({ json: { reply: "Oi, conta nova.", context: "ctx-43", redirects: [] } });
-    });
-    await page.evaluate(() => { location.hash = "#/conta/perfil"; }); // a Conta relê /auth/dashboard-profile (staleTime 0) sem recarregar a página
-    await page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
-    await page.evaluate(() => { location.hash = "#/piggy"; });
+    const da43 = await paraConta43(ctx);
+    await idaEVoltaPelaConta(page);
+    await page.locator(".chat-empty").waitFor(); // a conversa da conta anterior não aparece para a nova
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    assert.equal(await page.getByText("Resposta 1 do detetive.").count(), 0);
     await enviar(page, "@Detetive e agora?");
     await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Oi, conta nova." }).waitFor();
     assert.deepEqual(da43, [{ kind: "detetive", context: null }]);
     assert.equal(chats.length, 1);
+    await ctx.close();
+  });
+
+  test(`${width}: a conta muda noutra aba e a aba volta ao foco no /piggy: a conversa da anterior some sem sair da página`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await paraConta43(ctx);
+    const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); });
+    await relida;
+    await page.locator(".chat-empty").waitFor();
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
+  test(`${width}: uma pergunta da conta anterior ainda em voo não trava a conta nova no mesmo agente`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }) });
+    await enviar(page, "@Detetive velha");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    const da43 = await paraConta43(ctx);
+    await idaEVoltaPelaConta(page);
+    await page.locator(".chat-empty").waitFor();
+    await enviar(page, "@Detetive nova");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Oi, conta nova." }).waitFor();
+    assert.deepEqual(da43, [{ kind: "detetive", context: null }]);
+    solta();
+    await ctx.close();
+  });
+
+  test(`${width}: com a MESMA conta, ir à Conta e voltar mantém a conversa`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await idaEVoltaPelaConta(page);
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.equal(await page.locator(".chat-empty").count(), 0);
     await ctx.close();
   });
 

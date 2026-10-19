@@ -42,9 +42,18 @@ export function ask(q: { text: string; topic?: TopicId | null; cat?: string | nu
 // --- Conversa com um agente (@Nome na barra) ---
 // O context de cada agente (chave `uid:kind`: o servidor amarra o context ao usuário e ao agente, e a conta pode mudar noutra aba) e os que estão em voo vivem aqui, fora do React, com o `msgs`: a troca de página não os apaga.
 const contextos = new Map<string, string | null>();
-const emVoo = new Set<string>();
+const emVoo = new Set<string>(); // chave `uid:kind`: uma pergunta da conta anterior ainda em voo não trava a conta nova
 const notifica = () => subs.forEach((f) => f());
 const patch = (id: number, p: Partial<Msg>) => { msgs = msgs.map((m) => (m.id === id ? { ...m, ...p } : m)); notifica(); };
+
+// A conta dona da conversa. Se a sessão muda de conta noutra aba (login sem logout), a conversa e os
+// contexts da anterior somem: as perguntas e respostas dela nunca aparecem para a conta nova (Codex no #1157).
+let dono: number | undefined;
+export function contaDaSessao(uid: number | undefined) {
+  if (uid == null) return;
+  if (dono != null && dono !== uid) { msgs = []; contextos.clear(); notifica(); }
+  dono = uid;
+}
 
 const nomeDe = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const SEM_ENERGIA = (kind: string, e?: { custo: number; livre: number }) => e
@@ -70,7 +79,7 @@ const SESSAO = "Sua sessão terminou. Recarregue a página.";
 const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
 async function enviar(id: number, kind: string, texto: string, uid: number) {
-  emVoo.add(kind);
+  emVoo.add(`${uid}:${kind}`);
   patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
   try {
     const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null);
@@ -93,13 +102,14 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
       repetir: d.retryable === true || status === 0, // só se o servidor marcou, ou se nem houve resposta (rede)
     });
   } finally {
-    emVoo.delete(kind);
+    emVoo.delete(`${uid}:${kind}`);
   }
 }
 
 /** Pergunta a um agente: bolha do usuário (`original`, com as menções) e a resposta, que se atualiza por id. Falso = já há uma pergunta em voo a esse agente (o texto fica na barra). */
 export function perguntarAoAgente(a: { kind: string; original: string; texto: string; uid: number; acesso: Acesso; energia?: { custo: number; livre: number } | null }) {
-  if (a.acesso === "ready" && emVoo.has(a.kind)) return false;
+  contaDaSessao(a.uid); // o uid da pergunta é o da sessão agora: se mudou, a conversa velha sai antes
+  if (a.acesso === "ready" && emVoo.has(`${a.uid}:${a.kind}`)) return false;
   const e = a.energia ?? undefined;
   const bolha = ++seq, resp = ++seq;
   msgs = [...msgs,
@@ -114,14 +124,14 @@ export function perguntarAoAgente(a: { kind: string; original: string; texto: st
 /** "Tentar de novo" de um erro que o servidor marcou como repetível. */
 export function tentarDeNovo(id: number) {
   const m = msgs.find((x) => x.id === id);
-  if (m?.estado === "erro" && m.repetir && m.agente && m.pergunta && m.uid != null && !emVoo.has(m.agente)) void enviar(id, m.agente, m.pergunta, m.uid);
+  if (m?.estado === "erro" && m.repetir && m.agente && m.pergunta && m.uid != null && !emVoo.has(`${m.uid}:${m.agente}`)) void enviar(id, m.agente, m.pergunta, m.uid);
 }
 
-/** "Ativar e responder": ativa o agente e manda a pergunta guardada. Enquanto a ativação/o envio desse agente está em voo, o `emVoo` por kind segura os outros cliques; duas bolhas inativas clicadas em sequência fazem duas ativações (o servidor aceita reativar). */
+/** "Ativar e responder": ativa o agente e manda a pergunta guardada. Enquanto a ativação/o envio desse agente está em voo, o `emVoo` (por conta e agente) segura os outros cliques; duas bolhas inativas clicadas em sequência fazem duas ativações (o servidor aceita reativar). */
 export async function ativarEResponder(id: number, depois: () => void) {
   const m = msgs.find((x) => x.id === id);
-  if (!m || m.estado !== "inativo" || !m.agente || !m.pergunta || m.uid == null || emVoo.has(m.agente)) return;
-  emVoo.add(m.agente); // o mesmo bloqueio por kind do perguntarAoAgente, também durante a ativação
+  if (!m || m.estado !== "inativo" || !m.agente || !m.pergunta || m.uid == null || emVoo.has(`${m.uid}:${m.agente}`)) return;
+  emVoo.add(`${m.uid}:${m.agente}`); // o mesmo bloqueio por conta e agente do perguntarAoAgente, também durante a ativação
   patch(id, { ativando: true, falhaAtivar: false });
   try {
     await ativar(m.uid, m.agente);
@@ -131,7 +141,7 @@ export async function ativarEResponder(id: number, depois: () => void) {
     patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso, energia) }
       : semSenha(e) || sessaoDe(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false }
       : { ativando: false, falhaAtivar: true });
-    emVoo.delete(m.agente);
+    emVoo.delete(`${m.uid}:${m.agente}`);
     return;
   }
   depois(); // a lista do @ relê o catálogo
