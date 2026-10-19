@@ -110,6 +110,24 @@ describe("Excluir conta — sessão morre com o DELETE em voo", () => {
     expect(screen.getByRole("button", { name: "Excluir conta" })).toBeTruthy(); // sheet solta, sessão de B de pé
   });
 
+  it("outra conta termina o login DURANTE o /auth/logout: o 'outra' sai do cofre depois da espera, B intacto e a sessão segue autenticada", async () => {
+    await abrirExcluir({
+      [DELETE]: () => resposta(200, { status: "deleted" }),
+      "/auth/logout": async () => { await guardarCredenciais(B); return resposta(200, {}); },
+    });
+    semearLayouts();
+    const alerta = responderAlerta("Excluir");
+
+    await excluir();
+    await act(async () => { await drenar(); });
+
+    await waitFor(() => expect(chamadasA("/auth/logout")).toHaveLength(1));
+    expect(semLogoutDeB()).toBe(true);
+    expect(alerta).not.toHaveBeenCalledWith("Conta excluída");
+    await expect(lerCredenciais()).resolves.toEqual(B);
+    expect(screen.getByRole("button", { name: "Excluir conta" })).toBeTruthy(); // não foi para Entrar
+  });
+
   it("a MESMA sessão rotaciona o refresh enquanto os layouts saem: sai mesmo assim (jti igual)", async () => {
     await abrirExcluir({ [DELETE]: () => resposta(200, { status: "deleted" }) });
     await guardarCredenciais({ access: ACCESS_A, refresh: "rt_s" });

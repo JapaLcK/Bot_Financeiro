@@ -327,7 +327,6 @@ export async function sair(capturada?: Credenciais | null): Promise<"outra" | un
   // `capturada`: quem já sabe de que sessão está saindo (a que iniciou uma ação longa) a passa, em vez de
   // reler um cofre onde outra conta pode ter entrado. `null` = não havia sessão: nada a revogar.
   const daSaida = capturada === undefined ? await lerCredenciais() : capturada;
-  let outraSessao: "outra" | undefined;
   // Sem sessão capturada não há logout a fazer, e TENTAR é pior que não fazer:
   // a requisição releria o cofre e poderia sair autenticada por uma conta que
   // entrou depois. Saída duplicada ou tardia cai exatamente aqui.
@@ -344,12 +343,7 @@ export async function sair(capturada?: Credenciais | null): Promise<"outra" | un
     // isso exigiria reentrância no dublê de rede, e o teste ficaria medindo o
     // andaime. A guarda fica porque é correta e custa uma condição; quem for
     // mexer aqui não deve confiar em vermelho para perceber que a quebrou.
-    if (await limparSessaoDe(daSaida.access, daSaida.refresh)) {
-      _esquecerRotacoes();
-    } else if (capturada) {
-      // Devolve se o cofre guarda OUTRA sessão: quem chamou não pode virar anônimo com ela lá.
-      if ((await lerCredenciais()) !== null) outraSessao = "outra";
-    }
+    if (await limparSessaoDe(daSaida.access, daSaida.refresh)) _esquecerRotacoes();
   } finally {
     // Esperada, mas com tempo limite: um `fetch` pendurado não prende a tela
     // além de `TEMPO_LIMITE_AUTH_MS`. O `.catch` engole a falha da revogação —
@@ -366,5 +360,6 @@ export async function sair(capturada?: Credenciais | null): Promise<"outra" | un
       credencial: { access: daSaida.refresh, refresh: daSaida.refresh },
     }).catch(() => undefined);
   }
-  return outraSessao;
+  // Depois da espera da rede: a sessão desta saída já saiu do cofre, então o que houver lá é de OUTRA conta.
+  return capturada && (await lerCredenciais()) !== null ? "outra" : undefined;
 }
