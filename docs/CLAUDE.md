@@ -2006,10 +2006,47 @@ APNs direto, sem serviço intermediário: `core/services/push_service.py` +
 `frontend/routes/push.py`, tabela `push_tokens` (token único por aparelho, com
 `environment` separando sandbox de produção — o mesmo token não vale nos dois).
 Configuração em `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_AUTH_KEY`, `APNS_TOPIC`.
-Sem as três primeiras o envio só loga. Nenhum evento de produto envia push ainda; o registro
-foi feito para o app Capacitor, e o `APNS_TOPIC` padrão (`com.pigbankai.app`) não é o id do app
-Expo (`com.pigbankai.mobile`). Plano do push no app e decisões do dono:
+Sem as quatro o envio só loga e devolve 0: **`APNS_TOPIC` não tem padrão** (o id do app Expo é
+`com.pigbankai.mobile`, `.staging` no staging e `.dev` no desenvolvimento, `app/app.config.ts`; um padrão errado apagaria tokens válidos).
+O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`/`Unregistered`
+(só ele; `TopicDisallowed`/`BadTopic`/`MissingTopic` são nossos e não apagam).
+
+- **Token amarrado à sessão.** `push_tokens.session_jti` recebe o `jti` da sessão que fez o
+  `POST /api/push/register`. `db.list_push_tokens` (leitor do sender, do teste do admin e de
+  `scripts/push_test.py`) só devolve token de sessão não revogada **e** com um
+  `auth_refresh_tokens` daquele `session_jti` utilizável. `session_jti` NULL (registro antigo)
+  nunca recebe até o aparelho registrar de novo. Não fecha o logout sem rede (PR 2, no aparelho).
+- **Baixa com dono.** `POST /api/push/unregister` só apaga token do próprio usuário (200 sempre).
+- **Push "banco precisa de atenção".** `core/services/open_finance_proactive.py::run_reconnect_push`,
+  no tique do Open Finance. Mesma regra do aviso do WhatsApp (`list_connections_needing_reconnect`).
+  Trava por conexão `open_finance_connections.push_reconectar_em` (NULL = nenhum push neste
+  episódio; limpa só quando a conexão volta a ficar saudável na tela, atualizada ou parcial (LOGIN_ERROR → ERROR → LOGIN_ERROR é um episódio só); solta se nenhum aparelho recebeu).
+  Um push por usuário por varredura, sem nome de banco; `data={"rota": "conexoes"}`. Barras
+  antes de reivindicar: `filtrar_por_acesso`, preferência, algum token entregável.
+- **Preferência.** `auth_accounts.push_bank_reconnect_opt_out` (default `false`), exposta como
+  `push_bank_reconnect_enabled` em `/settings/{uid}/notifications` (GET e PATCH); leitura direta
+  `db.push_bank_reconnect_bloqueado`, sem o cache do `get_auth_user`.
+
+Atraso: o push só sai na varredura do tique (~6 h). Plano do push no app e decisões do dono:
 [`plano-push-app.md`](plano-push-app.md).
+
+Limites declarados do PR 1 (servidor):
+
+- A reconexão pelo widget não solta a trava: se o banco quebrar de novo antes de uma varredura ver a
+  conexão Atualizada ou Parcial, esse episódio fica sem push (reconexão que fica em updating/erro
+  temporário mantém a trava sem prazo).
+- Só Atualizado/Parcial reabre a trava: oscilação, reconexão sem sync, pausado ou removido que voltam a
+  quebrar não geram 2º push.
+- Banco curado no mesmo instante da varredura ainda pode receber 1 push (intervalo entre a leitura e a
+  reivindicação, igual ao aviso do WhatsApp).
+- Requisito para o PR 2: tokens existentes ficam com `session_jti` NULL e param de receber no deploy; o
+  app precisa chamar o register depois de CADA login.
+- Re-registro sem `jti` (cliente legado) zera o `session_jti` do token, que para de receber.
+- A varredura não tem prazo próprio: com o APNs fora, cada token espera até 10 s em série e atrasa o
+  PATCH do mesmo tique.
+- Ao ligar as envs (PR 3), todo usuário com banco já quebrado e token entregável recebe 1 push. Um
+  `APNS_TOPIC` digitado errado apaga os tokens no 1º envio (`DeviceTokenNotForTopic`); eles voltam
+  quando o app registrar de novo. Conferir a env antes de ligar.
 
 ### Admin e afiliados
 
@@ -2382,10 +2419,11 @@ finito em toda coluna numérica (`_tarefa_finito_checks` →
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **quatro** trabalhos: expiração de trial
-(`_open_finance_trial_expiry`), **job de saúde**, **retentativa** e refresh proativo —
-os três últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
-roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde e retentativa (GET); o
+O Open Finance tem **cinco** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **job de saúde**, **retentativa**, **push de reconectar**
+(`run_reconnect_push`, ver "Push (app iOS)") e refresh proativo —
+os quatro últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
+roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde, retentativa e push (GET); o
 PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
 `OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
 proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde

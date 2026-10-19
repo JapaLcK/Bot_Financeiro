@@ -78,7 +78,8 @@ npx cap open ios     # abre no Xcode
       - **Pra ligar o envio**, setar envs no Railway (gerar a APNs Auth Key .p8
         no portal Apple → Keys → +): `APNS_KEY_ID`, `APNS_TEAM_ID`
         (= `S849YDA49P`), `APNS_AUTH_KEY` (conteúdo do .p8), `APNS_TOPIC`
-        (default `com.pigbankai.app`). Sem elas o sender é no-op.
+        (sem padrão: o app Expo é `com.pigbankai.mobile`; o Capacitor,
+        `com.pigbankai.app`, não recebe mais push). Sem elas o sender é no-op.
       - **Regra Apple**: o texto do push NÃO pode conter valor/saldo (Anexo 1
         §4) — mandar texto genérico, detalhe só dentro do app.
 - [ ] Conta de review da Apple: user demo com plano Pro ativo (grant manual).
