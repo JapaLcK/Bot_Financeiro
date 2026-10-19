@@ -230,7 +230,7 @@ def get_household_budget_status(
         bucket_spent = round(sum(r["valor"] for r in mine), 2)
         by_cat: dict[str, dict[str, Any]] = {}
         for r in mine:
-            c = by_cat.setdefault(r["key"], {"categoria": r["categoria"], "total": 0.0})
+            c = by_cat.setdefault(r["categoria"], {"categoria": r["categoria"], "total": 0.0})
             c["total"] = round(c["total"] + r["valor"], 2)
         used_pct = (
             round(bucket_spent / budget_amount * 100.0, 2)

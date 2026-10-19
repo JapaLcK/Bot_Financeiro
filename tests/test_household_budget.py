@@ -347,6 +347,16 @@ def test_rotulo_de_categoria_usa_o_nome_do_mapa_mesmo_sem_acento_na_origem(user_
     assert {l["categoria"] for l in cf["launches"]} == {"Alimentação"}
 
 
+def test_by_category_unico_por_rotulo_quando_chaves_distintas_compartilham_o_nome(user_id):
+    """investimento_aporte (rótulo do mapa) e 'investimentos' (digitada) exibem
+    'Investimentos': um item só, com a soma (chip e key React não duplicam)."""
+    _gasto(user_id, "investimento_aporte", 1000.0, interno=True)
+    _gasto(user_id, "investimentos", 250.5)
+    lf = _bucket(get_household_budget_status(user_id, _mes_atual()), "liberdade_financeira")
+    assert [(c["categoria"], c["total"]) for c in lf["by_category"]] == [("Investimentos", 1250.5)]
+    assert round(sum(c["total"] for c in lf["by_category"]), 2) == lf["spent"] == 1250.5
+
+
 # ── validação de month ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("mes", ["2026-13", "abc", "09-2026", "2026", "2026-00"])
