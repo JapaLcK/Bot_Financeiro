@@ -15,18 +15,21 @@ import { ConvitePro } from "./Compromissos";
 
 const pctTexto = (p: string) => `${p.replace("-", "").replace(".", ",")}%`;
 
-// `bom`: para que lado a variação é boa (gasto caindo, entrada subindo).
-function variacao(l: LinhaComparada, bom: 1 | -1) {
+// `bom`: para que lado a variação é boa (gasto caindo, entrada subindo). No mês aberto (P1-B: o mês
+// inteiro até agora contra o anterior inteiro) a queda ainda não se sabe e fica neutra; a alta já é fato
+// e mantém a cor (decisão do dono PB-1).
+function variacao(l: LinhaComparada, bom: 1 | -1, aberto: boolean) {
   if (l.estado === "nova") return { texto: "nova", tom: "faint", seta: null, fala: "não tinha no mês anterior" };
   if (l.estado === "vazio") return { texto: "—", tom: "faint", seta: null, fala: "nada nos dois períodos" };
   if (l.estado === "igual") return { texto: "igual", tom: "faint", seta: null, fala: "igual ao anterior" };
   const sobe = Number(l.total_delta) > 0;
   const texto = l.pct === null ? moneyText(l.total_delta.replace("-", "")) : pctTexto(l.pct); // a seta diz o sinal
-  return { texto, tom: (sobe ? 1 : -1) === bom ? "gain" : "warn", seta: sobe ? "ph-arrow-up" : "ph-arrow-down", fala: `${sobe ? "subiu" : "caiu"} ${texto}` };
+  const tom = aberto && !sobe ? "faint" : (sobe ? 1 : -1) === bom ? "gain" : "warn";
+  return { texto, tom, seta: sobe ? "ph-arrow-up" : "ph-arrow-down", fala: `${sobe ? "subiu" : "caiu"} ${texto}` };
 }
 
-function Linha({ nome, l, bom, antes }: { nome: string; l: LinhaComparada; bom: 1 | -1; antes: string }) {
-  const v = variacao(l, bom);
+function Linha({ nome, l, bom, antes, aberto }: { nome: string; l: LinhaComparada; bom: 1 | -1; antes: string; aberto: boolean }) {
+  const v = variacao(l, bom, aberto);
   return (
     <li className="cmp-linha" aria-label={`${nome}: ${moneyText(l.total_atual)}, em ${antes} ${moneyText(l.total_anterior)}, ${v.fala}`}>
       <span className="cat-name"><span className="cat-nome">{nome}</span></span>
@@ -42,6 +45,7 @@ function Linha({ nome, l, bom, antes }: { nome: string; l: LinhaComparada; bom: 
 function Corpo({ d }: { d: Dados }) {
   const antes = monthName(isoDay(d.anterior.inicio));
   const rola = useContext(FrameLink) !== null;
+  const aberto = d.modo === "mes_aberto";
   if (d.motivo === "inicio_do_historico" || !d.despesa || !d.receita || !d.resultado) {
     return <div className="empty"><i className="ph ph-clock-counter-clockwise" aria-hidden="true" /><p>O mês anterior está fora do histórico do seu plano.</p></div>;
   }
@@ -49,9 +53,9 @@ function Corpo({ d }: { d: Dados }) {
     <div className="cmp-corpo" tabIndex={rola ? 0 : undefined} aria-label={rola ? "Comparação do mês" : undefined}>
       <p className="w-lede cmp-lede">{d.escolha}</p>
       <ul className="cats cmp-totais" aria-label="Totais">
-        <Linha nome="Saiu" l={d.despesa} bom={-1} antes={antes} />
-        <Linha nome="Entrou" l={d.receita} bom={1} antes={antes} />
-        <Linha nome="Resultado" l={d.resultado} bom={1} antes={antes} />
+        <Linha nome="Saiu" l={d.despesa} bom={-1} antes={antes} aberto={aberto} />
+        <Linha nome="Entrou" l={d.receita} bom={1} antes={antes} aberto={aberto} />
+        <Linha nome="Resultado" l={d.resultado} bom={1} antes={antes} aberto={aberto} />
       </ul>
       {d.motivo === "sem_base" ? <p className="faint">Sem lançamentos em {antes} para comparar.</p>
         : d.motivo === "categorias_indisponiveis" ? <p className="faint">Não deu para carregar as categorias agora.</p>
@@ -59,7 +63,7 @@ function Corpo({ d }: { d: Dados }) {
           <>
             <h3 className="prev-h">Gastos por categoria</h3>
             <ul className="cats" aria-label="Gastos por categoria">
-              {d.categorias.map((c, i) => <Linha key={`${c.categoria}#${i}`} nome={c.categoria} l={c} bom={-1} antes={antes} />)}
+              {d.categorias.map((c, i) => <Linha key={`${c.categoria}#${i}`} nome={c.categoria} l={c} bom={-1} antes={antes} aberto={aberto} />)}
             </ul>
           </>
         )}

@@ -285,8 +285,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   **Comparação de períodos (PL-07, Plus+):** `core/services/comparacao_periodos.py` decide a janela e o
   delta; consumidores: a tool `compare_periods` da IA, o `GET /api/v2/comparacao` (bloco "Comparado ao mês
   anterior" da tela v2, no catálogo do Organizar) e o KPI "vs" das Análises do painel antigo (`meses=N`, abaixo). Lê a
-  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA; janela parcial
-  = faturas que fecham dentro dela). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
+  regra única só no caminho `mes=` (`totais` + `categorias` de `db/resumo_mes`, cartão pela FATURA). Com as 4 datas decide o adaptador, pelo mesmo critério da main (`_meses_inteiros`, depois de `_limita_periodo`):
   se AS DUAS janelas são meses-calendário inteiros (dia 1 até o último dia; no mês corrente, dia 1 até hoje ou
   depois, e então vale o mês TODO) é a mesma conta de `mes=` e do painel, cartão pela FATURA ("compara abril com
   maio" não diverge do painel); exceção: mês CORRENTE (dia 1 até hoje ou o mês todo) × o mês imediatamente anterior
@@ -301,8 +300,11 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
   do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
   KPI das Análises (`/analytics/{uid}/kpis`, Plus+): `comparar_mes(..., meses=N)` com N = os meses do seletor,
-  do dia 1 do 1º mês até hoje contra os mesmos dias N meses antes (cartão pela fatura; `delta_pct.income/expense` e
-  `delta_escolha`, a frase); gate antes de ler o anterior; `compute_kpis(..., com_anterior=False)` na rota (o `prev`
+  P1-B também aqui: os N meses até o corrente, inteiros, contra os N antes deles, a mesma janela dos totais da rota
+  (cartão pela fatura; `delta_pct.income/expense` e `delta_escolha`, a frase); `dias_corridos`/`dias_no_mes` e a
+  `serie` só com N=1 (com N meses não saem), e `anterior_encurtado` é sempre False também com N>1; o rótulo é "vs os N
+  meses anteriores" ("vs o mês anterior" com N=1) e, como o período inclui o mês aberto, a queda fica neutra e a alta
+  colorida (gasto âmbar, receita verde; decisão do dono PB-1, a mesma do bloco v2 no mês aberto); gate antes de ler o anterior; `compute_kpis(..., com_anterior=False)` na rota (o `prev`
   antigo, N dias corridos antes, só vai ao LLM de insights, PL-06); janela livre (`from` E `to`, a regra de
   `resolve_window`) fica sem delta; falha da comparação também (loga só a classe, os totais saem); no "12 meses" o
   Plus (o `history_days` dele em `core/services/plan_limits.py` não alcança o anterior) recebe `inicio_do_historico`,

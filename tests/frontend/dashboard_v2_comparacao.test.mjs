@@ -43,10 +43,9 @@ test("Plus: a escolha do servidor, os totais com o antes e as categorias", async
   await page.locator(`${W} .cmp-linha`).first().waitFor();
   const t = await texto(page);
   assert.ok(t.includes(RESPOSTAS.comparacao.aberto.escolha), t);
-  assert.match(await linha(page, "Saiu").innerText(), /R\$ 1\.235,00[\s\S]*20,3%[\s\S]*em setembro: R\$ 1\.550,00/);
-  assert.equal(await linha(page, "Saiu").locator(".cat-delta").getAttribute("class"), "cat-delta num gain"); // gasto caiu
+  assert.match(await linha(page, "Saiu").innerText(), /R\$ 2\.012,00[\s\S]*39,9%[\s\S]*em setembro: R\$ 3\.350,00/);
   assert.match(await linha(page, "Entrou").locator(".cat-delta").innerText(), /20,0%/);
-  assert.match(await linha(page, "Resultado").locator(".cat-delta").innerText(), /R\$ 815,00/);
+  assert.match(await linha(page, "Resultado").locator(".cat-delta").innerText(), /R\$ 1\.838,00/);
   assert.equal((await linha(page, "Streaming").locator(".cat-delta").innerText()).trim(), "nova");
   assert.equal((await linha(page, "Lazer").locator(".cat-delta").innerText()).trim(), "100,0%");
   assert.equal(await linha(page, "Lazer").locator(".cat-delta i").getAttribute("class"), "ph ph-arrow-down");
@@ -54,6 +53,26 @@ test("Plus: a escolha do servidor, os totais com o antes e as categorias", async
   assert.deepEqual(pedidos, ["2026-10"]);
   assert.deepEqual(erros, []);
   await ctx.close();
+});
+
+// Decisão do dono PB-1: no mês aberto (o mês inteiro até agora × o anterior inteiro) a queda ainda não se sabe
+// e fica neutra; a alta já é fato e mantém a cor. No mês fechado, as cores de sempre.
+test("cores: no mês aberto a queda é neutra e a alta colorida; no fechado, as de sempre", async () => {
+  const tons = async (comparacao, nomes) => {
+    const { ctx, page, ir } = await abrir({ plano: "plus", comparacao });
+    await ir();
+    await page.locator(`${W} .cmp-linha`).first().waitFor();
+    const r = {};
+    for (const nome of nomes) r[nome] = (await linha(page, nome).locator(".cat-delta").getAttribute("class")).replace("cat-delta num ", "");
+    await ctx.close();
+    return r;
+  };
+  // aberto: Saiu, Lazer e Alimentação caíram; Entrou e Resultado subiram (bom); em `muitas` o gasto subiu (ruim)
+  assert.deepEqual(await tons("aberto", ["Saiu", "Lazer", "Alimentação", "Entrou", "Resultado"]),
+    { Saiu: "faint", Lazer: "faint", "Alimentação": "faint", Entrou: "gain", Resultado: "gain" });
+  assert.deepEqual(await tons("muitas", ["Saiu", "Resultado"]), { Saiu: "warn", Resultado: "faint" });
+  // fechado: o gasto subiu (âmbar) e o Transporte caiu (verde, como sempre)
+  assert.deepEqual(await tons("fechado", ["Saiu", "Transporte", "Entrou"]), { Saiu: "warn", Transporte: "gain", Entrou: "gain" });
 });
 
 test("+N outras e sem base dizem o que falta", async () => {
@@ -87,7 +106,7 @@ test("downgrade na sessão: o refetch com 403 troca o número pelo convite", asy
   const { ctx, page, ir } = await abrir({ plano: "plus" });
   await ir();
   await page.locator(`${W} .cmp-linha`).first().waitFor();
-  assert.ok((await texto(page)).includes("R$ 1.235,00"));
+  assert.ok((await texto(page)).includes("R$ 2.012,00"));
   const e = RESPOSTAS.erros["403_pro_required"];
   await ctx.route("**/api/v2/comparacao*", (r) => r.fulfill({ status: e.status, json: e.body }));
   await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange"))); // o focusManager do TanStack ouve na window
@@ -182,7 +201,7 @@ test("protótipo: o bloco mostra o exemplo, sem Carregando eterno", async () => 
   await ir();
   await page.locator(`${W} .cmp-linha`).first().waitFor();
   const t = await texto(page);
-  assert.ok(t.includes(COMPARACAO_EXEMPLO.escolha) && t.includes("R$ 1.235,00") && !t.includes("Carregando"), t);
+  assert.ok(t.includes(COMPARACAO_EXEMPLO.escolha) && t.includes("R$ 2.012,00") && !t.includes("Carregando"), t);
   assert.deepEqual(pedidos, []);
   await ctx.close();
 });

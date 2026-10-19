@@ -7,7 +7,9 @@ Relógio congelado em 12/10/2026 (o `semeia` do PR A). Planos v2 ligados, como e
 """
 from __future__ import annotations
 
+import json
 from decimal import Decimal as D
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,7 +25,7 @@ from core.services.ai_chat.tools import launches
 from core.services.ai_chat.tools.launches import _compare_periods
 from db import resumo_mes
 from test_api_app_sessao import completo
-from test_comparacao_periodos import AGORA, semeia
+from test_comparacao_periodos import AGORA, _lanc, semeia
 
 URL = "/api/v2/comparacao"
 LINHAS = ("despesa", "receita", "resultado")
@@ -110,11 +112,11 @@ def test_dinheiro_e_pct_saem_como_texto_e_a_nota_do_llm_nao_sai(monkeypatch):
     semeia(uid)
     libera(monkeypatch, uid)
     r = ok(uid, mes="2026-10")
-    assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"], r["despesa"]["pct"]) == ("1235.00", "1550.00", "-20.3")
+    assert (r["despesa"]["total_atual"], r["despesa"]["total_anterior"], r["despesa"]["pct"]) == ("2012.00", "3350.00", "-39.9")
     assert r["resultado"]["pct"] is None and r["modo"] == "mes_aberto"
-    assert (r["atual"], r["anterior"]) == ({"inicio": "2026-10-01", "fim": "2026-10-12", "dias": 12},
-                                           {"inicio": "2026-09-01", "fim": "2026-09-12", "dias": 12})
-    assert "nota" not in r and r["escolha"].startswith("Dias 1 a 12 de outubro de 2026")
+    assert (r["atual"], r["anterior"]) == ({"inicio": "2026-10-01", "fim": "2026-10-31", "dias": 31},
+                                           {"inicio": "2026-09-01", "fim": "2026-09-30", "dias": 30})
+    assert "nota" not in r and r["escolha"].startswith("Outubro até agora")
 
 
 # ── gate antes da leitura, downgrade ─────────────────────────────────────────
@@ -134,7 +136,7 @@ def test_downgrade_na_sessao_corta_nos_dois_namespaces(monkeypatch):
     libera(monkeypatch, uid)
     c = TestClient(dashboard.app)
     c.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, sessao_de(uid)["dashboard"])
-    assert c.get(URL).json()["despesa"]["total_atual"] == "1235.00"                     # positivo: Plus lê
+    assert c.get(URL).json()["despesa"]["total_atual"] == "2012.00"                     # positivo: Plus lê
     app = pede(uid, "/api/app/comparacao", bearer=True)
     assert app.status_code == 200 and app.json() == c.get(URL).json()                   # o mesmo corpo no app
     promote_to_pro(uid, plan="essencial")
@@ -152,10 +154,10 @@ def test_cada_um_recebe_o_seu_e_user_id_na_query_nao_muda_nada(monkeypatch):
     semeia(b, fator=7)
     libera(monkeypatch, a, b)
     rb = ok(b, mes="2026-10", user_id=a, uid=a)
-    assert (rb["despesa"]["total_atual"], rb["despesa"]["total_anterior"]) == ("8645.00", "10850.00")
-    assert {c["categoria"]: c["total_atual"] for c in rb["categorias"]}["Alimentação"] == "6790.00"
+    assert (rb["despesa"]["total_atual"], rb["despesa"]["total_anterior"]) == ("14084.00", "23450.00")   # 7 × A
+    assert {c["categoria"]: c["total_atual"] for c in rb["categorias"]}["Alimentação"] == "12229.00"
     ra = ok(a, mes="2026-10", user_id=b)
-    assert (ra["despesa"]["total_atual"], ra["despesa"]["total_anterior"]) == ("1235.00", "1550.00")
+    assert (ra["despesa"]["total_atual"], ra["despesa"]["total_anterior"]) == ("2012.00", "3350.00")
 
 
 # ── bordas do endpoint (as do calendário são do serviço) ─────────────────────
@@ -183,3 +185,35 @@ def test_mes_anterior_fora_do_historico_do_plano_vem_sem_totais(monkeypatch):
     r = ok(uid, mes="2025-10")                         # setembro/2025 começa antes do corte do `history_days` do Plus
     assert r["motivo"] == "inicio_do_historico" and r["despesa"] is None and r["categorias"] == []
     assert ok(uid, mes="2026-09")["despesa"] is not None   # positivo: dentro da janela
+
+
+def test_mes_aberto_e_o_mesmo_numero_do_resumo_do_mes(monkeypatch):
+    """A promessa da P1-B na mesma tela: o bloco de comparação e o Resumo do mês dizem o mesmo Saiu/Entrou."""
+    uid = usuario_pagante("plus")
+    semeia(uid)
+    libera(monkeypatch, uid)
+    c = ok(uid, mes="2026-10")
+    r = pede(uid, "/api/v2/resumo-do-mes", mes="2026-10").json()
+    num = lambda *v: tuple(D(x) for x in v)  # noqa: E731  (o resumo não fixa a escala: "3000" × "3000.00")
+    assert num(c["despesa"]["total_atual"], c["receita"]["total_atual"]) == num(r["saiu"], r["entrou"])
+    assert num(c["despesa"]["total_anterior"], c["receita"]["total_anterior"]) == num(r["anterior"]["saiu"], r["anterior"]["entrou"])
+
+
+def respostas_reais(monkeypatch) -> dict:
+    """As respostas do endpoint para os cenários das fixtures `comparacao.*` (tests/frontend/api_v2_respostas.json)."""
+    a, b, c = usuario_pagante("plus"), usuario_pagante("plus"), usuario_pagante("plus")
+    semeia(a)
+    _lanc(b, "despesa", 80, 10, 3, "Mercado")
+    for i in range(12):
+        _lanc(c, "despesa", 10 + i, 10, 3, f"Categoria {i:02d}")
+    _lanc(c, "despesa", 1, 9, 3, "Base")
+    libera(monkeypatch, a, b, c)
+    return {"aberto": ok(a, mes="2026-10"), "fechado": ok(a, mes="2026-09"), "historico": ok(a, mes="2025-10"),
+            "sem_base": ok(b, mes="2026-10"), "muitas": ok(c, mes="2026-10")}
+
+
+def test_fixtures_de_comparacao_sao_a_resposta_real(monkeypatch):
+    """As fixtures dos testes de navegador (e o `COMPARACAO_EXEMPLO` do protótipo, igual à `aberto`) não envelhecem
+    em silêncio quando a regra muda: cada uma é a resposta do endpoint hoje."""
+    fixtures = json.loads((Path(__file__).parent / "frontend" / "api_v2_respostas.json").read_text(encoding="utf-8"))
+    assert respostas_reais(monkeypatch) == fixtures["comparacao"]

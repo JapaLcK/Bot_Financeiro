@@ -487,6 +487,9 @@ details.cc-details[open] summary .cc-card {
 .stat-tile .stat-delta { font-size:.72rem; margin-top:4px; }
 .stat-tile .stat-delta.up   { color:var(--green); }
 .stat-tile .stat-delta.down { color:var(--red); }
+.stat-tile .stat-delta.alta { color:var(--yellow); }  /* gasto subindo no período aberto (KPI das Análises) */
+.stat-tile .stat-delta.cai  { color:var(--text-3); }  /* queda no período aberto: ainda não se sabe, neutra */
+body.light .stat-tile .stat-delta.alta { color:#B45309; }  /* o --yellow some no fundo claro */
 
 /* CTA "Adicionar" inline */
 .mock-cta {

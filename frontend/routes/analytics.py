@@ -32,8 +32,8 @@ async def analytics_kpis_route(
     """KPIs do período: receita, despesa, líquido, taxa de poupança. Default = últimos 6 meses.
 
     Plus+ recebe `delta_pct` (income/expense), `delta_escolha` e `delta_meses` (o N usado) da regra única de comparação
-    (`comparar_mes` com N meses: do dia 1 do 1º mês até hoje contra os mesmos dias N meses antes,
-    cartão pela fatura). O gate vem antes da leitura do anterior; o Essencial não recebe nem lê.
+    (`comparar_mes` com N meses, P1-B: os N meses até o corrente, inteiros, contra os N antes deles; a mesma
+    janela dos totais desta rota; cartão pela fatura). O gate vem antes da leitura do anterior; o Essencial não recebe nem lê.
     Janela livre (`from` E `to`, a regra de `resolve_window`) fica sem delta: a regra só existe para meses
     terminando no corrente. Falha da comparação não derruba os KPIs: o delta sai nulo."""
     shared.authorize_dashboard_access(request, user_id)
@@ -56,7 +56,7 @@ async def analytics_kpis_route(
             logger.warning("analytics_kpis: comparação indisponível (%s)", type(exc).__name__)
             r = None
         if r is not None:
-            result["delta_meses"] = n  # o rótulo diz "N meses antes" com este N, não com o do seletor
+            result["delta_meses"] = n  # o rótulo diz "vs os N meses anteriores" com este N, não com o do seletor
             fora = r["motivo"] == "inicio_do_historico"
             result["delta_escolha"] = f"{FORA_DO_HISTORICO} {r['escolha']}" if fora else r["escolha"]
             for chave, linha in (("income", r["receita"]), ("expense", r["despesa"])):

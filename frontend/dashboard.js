@@ -6331,13 +6331,14 @@ function _fmtDateBR(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   return m ? `${m[3]}/${m[2]}` : iso;
 }
-// `meses`: o N que o servidor usou na comparação (`delta_meses`), não o do seletor.
-function _deltaLabel(pct, meses) {
+// `meses`: o N que o servidor usou na comparação (`delta_meses`), não o do seletor. O período inclui o
+// mês corrente, ainda aberto (PL-07, P1-B): a queda é provisória e fica neutra; a alta já é fato e ganha
+// `altaCls` (decisão do dono PB-1).
+function _deltaLabel(pct, meses, altaCls) {
   if (pct == null) return { text: "—", cls: "" };
   const sign = pct > 0 ? "+" : "";
-  const cls = pct > 0 ? "down" : (pct < 0 ? "up" : "");
-  const antes = meses === 1 ? "1 mês antes" : `${meses} meses antes`; // `?months=1` direto na API
-  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% vs os mesmos dias, ${antes}`, cls };
+  const vs = meses === 1 ? "vs o mês anterior" : `vs os ${meses} meses anteriores`; // 1: `?months=1` direto na API
+  return { text: `${sign}${pct.toFixed(1).replace(".", ",")}% ${vs}`, cls: pct > 0 ? altaCls : (pct < 0 ? "cai" : "") };
 }
 
 function renderAnalyticsKPIs(k, months) {
@@ -6350,12 +6351,10 @@ function renderAnalyticsKPIs(k, months) {
   const n = Math.max(1, months || 6);
   const avgExpense = k.total_expense / n;
   const avgIncome  = k.total_income  / n;
-  const dExpense = _deltaLabel(k.delta_pct?.expense ?? null, k.delta_meses);
-  const dIncome  = _deltaLabel(k.delta_pct?.income  ?? null, k.delta_meses);
+  const dExpense = _deltaLabel(k.delta_pct?.expense ?? null, k.delta_meses, "alta"); // mais gasto: âmbar
+  const dIncome  = _deltaLabel(k.delta_pct?.income  ?? null, k.delta_meses, "up");   // mais receita: verde
   // A regra (período e base do cartão) vem do servidor, a mesma frase do chat.
   const dTitle = k.delta_pct && k.delta_escolha ? ` title="${escapeHtmlSafe(k.delta_escolha)}"` : "";
-  // Inverte semântica do delta de despesa: mais despesa = ruim, então
-  // delta positivo deve ficar "down" (vermelho). Recebe assim do _deltaLabel.
   const savings = (k.savings_rate || 0) * 100;
   const savingsLabel = savings >= 15
     ? "acima da média BR (15%)"

@@ -1,6 +1,7 @@
 /** KPI "vs" das Análises do painel antigo na regra do PL-07 (`renderAnalyticsKPIs`, frontend/dashboard.js):
- *  o rótulo usa o N do servidor (`delta_meses`), o `title` repassa a `delta_escolha` escapada, e o "—"
- *  sem número também leva o `title`. A frase e o N são do servidor: tests/test_analytics_kpi_comparacao.py. */
+ *  o rótulo usa o N do servidor (`delta_meses`), o `title` repassa a `delta_escolha` escapada, o "—"
+ *  sem número também leva o `title`, e a cor segue a PB-1 (o período inclui o mês aberto: queda neutra,
+ *  alta de gasto âmbar, alta de receita verde). A frase e o N são do servidor: tests/test_analytics_kpi_comparacao.py. */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,7 +19,7 @@ async function deltas(kpis, months) {
     document.body.append(new DOMParser().parseFromString(html, "text/html").getElementById("analytics-view"));
     return kpis.map((k) => {
       renderAnalyticsKPIs(k, months);
-      return [[...document.querySelectorAll("#analytics-stats .stat-delta")].slice(0, 2).map((e) => [e.textContent, e.getAttribute("title")]),
+      return [[...document.querySelectorAll("#analytics-stats .stat-delta")].slice(0, 2).map((e) => [e.textContent, e.getAttribute("title"), e.className]),
         document.querySelectorAll("#analytics-stats b").length];
     });
   }, { html, kpis, months });
@@ -35,10 +36,18 @@ test("o rótulo usa o N do servidor, no singular com 1, e o title traz a escolha
     { ...K },                                                     // Essencial: sem delta, sem title
   ], 6);
   assert.deepEqual(r, [
-    [[["0,0% vs os mesmos dias, 3 meses antes", escolha], ["-20,0% vs os mesmos dias, 3 meses antes", escolha]], 0],
-    [[["—", escolha], ["+5,0% vs os mesmos dias, 1 mês antes", escolha]], 0],
-    [[["—", null], ["—", null]], 0],
+    [[["0,0% vs os 3 meses anteriores", escolha, "stat-delta "], ["-20,0% vs os 3 meses anteriores", escolha, "stat-delta cai"]], 0],
+    [[["—", escolha, "stat-delta "], ["+5,0% vs o mês anterior", escolha, "stat-delta up"]], 0],
+    [[["—", null, "stat-delta "], ["—", null, "stat-delta "]], 0],
   ]);
+});
+
+test("cor (PB-1): gasto subindo âmbar, caindo cinza; receita subindo verde, caindo cinza", async () => {
+  const r = await deltas([
+    { ...K, delta_pct: { expense: 12.5, income: -3 }, delta_escolha: "x", delta_meses: 3 },
+    { ...K, delta_pct: { expense: -16.7, income: 8 }, delta_escolha: "x", delta_meses: 3 },
+  ], 3);
+  assert.deepEqual(r.map(([d]) => d.map((x) => x[2])), [["stat-delta alta", "stat-delta cai"], ["stat-delta cai", "stat-delta up"]]);
 });
 
 test("o \"—\" sem número (fora do histórico) também leva o title", async () => {
@@ -46,5 +55,5 @@ test("o \"—\" sem número (fora do histórico) também leva o title", async ()
   // servidor, `FORA_DO_HISTORICO`).
   const frase = "frase do servidor sem número";
   const r = await deltas([{ ...K, delta_pct: { income: null, expense: null }, delta_escolha: frase, delta_meses: 12 }], 12);
-  assert.deepEqual(r, [[[["—", frase], ["—", frase]], 0]]);
+  assert.deepEqual(r, [[[["—", frase, "stat-delta "], ["—", frase, "stat-delta "]], 0]]);
 });

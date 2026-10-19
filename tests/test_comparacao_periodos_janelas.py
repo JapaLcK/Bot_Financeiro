@@ -60,32 +60,41 @@ def test_virada_de_ano(hoje, ano, mes, a, p, encurtado):
     assert j["anterior_encurtado"] is encurtado
 
 
-@pytest.mark.parametrize("hoje,ano,mes,meses,a,p,encurtado", [   # o KPI das Análises (N meses até o corrente)
-    ("2026-10-15", 2026, 10, 3, ("2026-08-01", "2026-10-15"), ("2026-05-01", "2026-07-15"), False),
-    ("2026-10-15", 2026, 10, 12, ("2025-11-01", "2026-10-15"), ("2024-11-01", "2025-10-15"), False),
-    ("2026-05-31", 2026, 5, 3, ("2026-03-01", "2026-05-31"), ("2025-12-01", "2026-02-28"), True),   # fevereiro no fim
-    ("2027-01-10", 2027, 1, 6, ("2026-08-01", "2027-01-10"), ("2026-02-01", "2026-07-10"), False),  # virada de ano
-    ("2026-10-15", 2026, 6, 3, ("2026-04-01", "2026-06-30"), ("2026-01-01", "2026-03-31"), False),  # fechado
+@pytest.mark.parametrize("hoje,ano,mes,meses,a,p", [   # o KPI das Análises (N meses até o corrente, P1-B)
+    ("2026-10-15", 2026, 10, 3, ("2026-08-01", "2026-10-31"), ("2026-05-01", "2026-07-31")),
+    ("2026-10-01", 2026, 10, 3, ("2026-08-01", "2026-10-31"), ("2026-05-01", "2026-07-31")),   # o dia não muda a janela
+    ("2026-10-15", 2026, 10, 12, ("2025-11-01", "2026-10-31"), ("2024-11-01", "2025-10-31")),
+    ("2026-05-31", 2026, 5, 3, ("2026-03-01", "2026-05-31"), ("2025-12-01", "2026-02-28")),    # fevereiro no fim
+    ("2028-04-10", 2028, 4, 2, ("2028-03-01", "2028-04-30"), ("2028-01-01", "2028-02-29")),    # bissexto
+    ("2027-01-10", 2027, 1, 6, ("2026-08-01", "2027-01-31"), ("2026-02-01", "2026-07-31")),    # virada de ano
+    ("2026-10-15", 2026, 6, 3, ("2026-04-01", "2026-06-30"), ("2026-01-01", "2026-03-31")),    # fechado
 ])
-def test_janelas_de_n_meses(hoje, ano, mes, meses, a, p, encurtado):
+def test_janelas_de_n_meses(hoje, ano, mes, meses, a, p):
     j = cp.escolher_janelas(d(hoje), ano, mes, meses)
     assert ((j["atual"]["inicio"], j["atual"]["fim"]), (j["anterior"]["inicio"], j["anterior"]["fim"])) == (
         (d(a[0]), d(a[1])), (d(p[0]), d(p[1])))
-    assert j["anterior_encurtado"] is encurtado and j["escolha"]
+    assert j["anterior_encurtado"] is False and j["escolha"]
     with pytest.raises(ValueError, match="AAAA-MM"):
         cp.escolher_janelas(d(hoje), ano, mes, 0)
 
 
 @pytest.mark.parametrize("hoje,ano,mes,texto", [
-    ("2027-01-01", 2027, 1, "De 1º de novembro de 2026 a 1º de janeiro de 2027 contra os mesmos dias 3 meses antes: "
-                            "de 1º de agosto de 2026 a 1º de outubro de 2026."),
-    ("2026-05-31", 2026, 5, "De 1º de março de 2026 a 31 de maio de 2026 contra o mesmo trecho 3 meses antes, de 1º de "
-                            "dezembro de 2025 até o fim de fevereiro de 2026, que tem só 28 dias."),
+    ("2027-01-01", 2027, 1, "Novembro de 2026 a janeiro de 2027, com janeiro até agora (o que já está lançado, igual ao "
+                            "Resumo do mês), contra agosto de 2026 a outubro de 2026, meses inteiros. O mês ainda não "
+                            "acabou: a comparação tende a mostrar gasto menor."),
     ("2026-10-15", 2026, 6, "Abril de 2026 a junho de 2026, meses inteiros (91 dias), contra janeiro de 2026 a março "
                             "de 2026 (90 dias)."),
 ])
 def test_texto_de_n_meses(hoje, ano, mes, texto):
-    assert cp.escolher_janelas(d(hoje), ano, mes, 3)["escolha"] == texto
+    e = cp.escolher_janelas(d(hoje), ano, mes, 3)["escolha"]
+    assert e == texto and "mesmos dias" not in e and " só " not in e
+
+
+def test_texto_do_mes_aberto_com_um_mes_e_o_da_p1b_sem_mudar():
+    """A guarda de que `meses=1` (o padrão) é a regra da main, byte a byte."""
+    assert cp.escolher_janelas(d("2026-10-12"), 2026, 10, 1)["escolha"] == (
+        "Outubro até agora (o que já está lançado no mês, igual ao Resumo do mês) contra setembro de 2026 inteiro. "
+        "O mês ainda não acabou: a comparação tende a mostrar gasto menor.")
 
 
 def test_mes_futuro_e_malformado_dao_erro_e_o_futuro_diz_o_mes_corrente():
