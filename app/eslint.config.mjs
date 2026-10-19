@@ -70,7 +70,7 @@ export default tseslint.config(
     // `_layout.tsx`: não existe declaração de módulo `*.webp` neste projeto,
     // então um `import` estático falharia no `tsc`. Metro resolve
     // `require()` de asset estático normalmente.
-    files: ["src/ui/stickers.ts"],
+    files: ["src/ui/stickers.ts", "src/features/painel/avatares.ts"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {

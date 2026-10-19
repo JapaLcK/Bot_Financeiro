@@ -218,3 +218,23 @@ def test_dinheiro_e_pct_saem_como_texto(a_e_b):
     for p in j["potes"]:
         assert all(isinstance(p[k], str) for k in ("pct", "teto", "gasto", "restante"))
     assert isinstance(j["renda"]["valor"], str) and isinstance(j["total"]["teto"], str)
+    assert isinstance(j["total"]["restante_livre"], str)
+    assert {p["chave"] for p in j["potes"] if p["guardado"]} == {"metas", "liberdade_financeira"}
+
+
+def test_lancamentos_do_pote_em_texto_somam_o_gasto_e_nao_vazam(a_e_b):
+    a, b = a_e_b
+    add_launch_and_update_balance(a, "receita", 1000.0, "t", "t")
+    add_launch_and_update_balance(a, "despesa", 100.5, "Aluguel", "t", categoria="Moradia")
+    add_launch_and_update_balance(a, "despesa", 30.0, "Pão de Açúcar", "t", categoria="Mercado")
+    add_launch_and_update_balance(b, "despesa", 999.0, "do B", "t", categoria="Moradia")
+    p = _pote(_get(a), "custos_fixos")
+    assert p["gasto"] == "130.50"
+    assert sum(float(x["valor"]) for x in p["lancamentos"]) == 130.5  # controle positivo: não vem vazio
+    assert sum(float(x["total"]) for x in p["por_categoria"]) == 130.5
+    assert {x["descricao"] for x in p["lancamentos"]} == {"Aluguel", "Pão de Açúcar"}
+    assert all(isinstance(x["valor"], str) and x["origem"] == "conta" for x in p["lancamentos"])
+    assert all(isinstance(x["total"], str) for x in p["por_categoria"])
+    assert p["categorias"] and all(isinstance(c, str) for c in p["categorias"])
+    assert "do B" not in {x["descricao"] for q in _get(a).json()["potes"] for x in q["lancamentos"]}
+    assert _pote(_get(b), "custos_fixos")["gasto"] == "999.00"
