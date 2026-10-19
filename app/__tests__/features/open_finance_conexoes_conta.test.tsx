@@ -4,7 +4,7 @@ import * as servicosOF from "@/services/openFinance";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, credencialDe, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
-import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBanco, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredenciais(S); });
 afterEach(() => jest.restoreAllMocks());
@@ -56,6 +56,34 @@ it.each(["limiteBancario", "conexoes"] as const)("a conta troca ENTRE o /auth/me
   expect(screen.queryByRole("button", { name: /^Nubank,/ })).toBeNull();
   expect(ne("/open-finance/2")).toBeGreaterThan(0);
   expect(screen.queryByText("Conferir de novo")).toBeNull();
+});
+
+it("a conta troca com o DETALHE aberto: a folha fecha e o nome do banco da anterior não aparece em lugar nenhum", async () => {
+  let conta = 1, trocarAntes = false, prender = false;
+  const presa = segurar();
+  servidor(() => conta, undefined, { "/auth/me": () => {
+    const r = () => resposta(200, { user_id: conta, email: "sofia@x.com", display_name: "Sofia", app_access: true });
+    return prender ? presa.promessa.then(r) : r();
+  } });
+  renderRouter("./app", { initialUrl: "/conexoes" });
+  await abrirBanco();
+  const real = servicosOF.conexoes as (...a: never[]) => Promise<unknown>;
+  jest.spyOn(servicosOF, "conexoes").mockImplementation(((...a: never[]) => {
+    if (trocarAntes) { trocarAntes = false; prender = true; cofre.set("pb.credenciais", JSON.stringify({ access: "access-b", refresh: "rt_b" })); conta = 2; }
+    return real(...a);
+  }) as never);
+  trocarAntes = true;
+  await appVai("background");
+  await appVai("active");
+  await act(async () => { for (let i = 0; i < 10; i++) await drenar(); });
+  await waitFor(() => expect(ne("/auth/me")).toBe(3));
+  expect(screen.queryByTestId("folha-sheet")).toBeNull();
+  expect(screen.queryAllByText("Nubank", { includeHiddenElements: true })).toHaveLength(0);
+  expect(screen.queryAllByLabelText(/Nubank/, { includeHiddenElements: true })).toHaveLength(0);
+  await act(async () => { presa.soltar(); for (let i = 0; i < 10; i++) await drenar(); });
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Itaú,/ })).toBeTruthy());
+  expect(screen.queryByTestId("folha-sheet")).toBeNull(); // a folha da conta anterior não reabre na nova
+  expect(screen.queryByText("Esse banco não está mais conectado.")).toBeNull();
 });
 
 it("403 sem troca de conta: erro com 'Conferir de novo' e o /auth/me é lido uma vez só (sem laço de recarga)", async () => {

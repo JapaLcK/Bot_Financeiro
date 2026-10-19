@@ -30,10 +30,12 @@ export const drenar = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
 
-/** Os cartões de `/conexoes` nascem FECHADOS e `Reconectar`/`Desconectar` moram dentro: espera a lista e abre todos (cada toque abre o seu). */
-export async function abrirBancos() {
-  await waitFor(() => expect(screen.getAllByRole("button", { expanded: false }).length).toBeGreaterThan(0));
-  for (const toggle of screen.getAllByRole("button", { expanded: false })) fireEvent.press(toggle);
+/** A lista de `/conexoes` só tem a linha do banco; `Reconectar`/`Desconectar` moram no detalhe (uma `Folha`). Espera a lista, aperta a linha `^nome,` (a `indice`-ésima, se houver gêmeos) e espera a folha. */
+export async function abrirBanco(nome = "Nubank", indice = 0) {
+  const linha = () => screen.getAllByRole("button", { name: new RegExp(`^${nome},`) })[indice]!;
+  await waitFor(() => expect(linha()).toBeTruthy());
+  fireEvent.press(linha());
+  await waitFor(() => expect(screen.getByTestId("folha-sheet")).toBeTruthy());
   await act(async () => { await drenar(); });
 }
 
