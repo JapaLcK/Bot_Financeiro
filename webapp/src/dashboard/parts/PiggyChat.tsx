@@ -30,6 +30,7 @@ const ETIQUETA = { inativo: "NÃO ATIVO", sem_energia: "SEM ENERGIA" } as const;
 // O último estado anunciado de cada resposta, fora do componente: sair do /piggy e voltar não anuncia de novo a conversa
 // inteira; uma resposta que terminou longe do chat é anunciada ao voltar (Codex no #1157).
 const estados = new Map<number, string>();
+const fila: ReactNode[] = []; // o que falta anunciar: também fora do componente, para não se perder se o chat desmonta antes dos 60 ms
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
 // próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
@@ -98,12 +99,12 @@ export function PiggyChat() {
   // Anuncia a resposta que acabou de mudar de estado, não só a última: com dois agentes em voo, a mais
   // antiga pode terminar enquanto a mais nova ainda está "Preparando…" (Codex no #1157).
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const fila = useRef<ReactNode[]>([]);
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
     if (!msgs.length) { // conversa limpa (troca de conta): o anúncio pendente ou o último dito eram dela e não podem reaparecer (Codex no #1157)
       clearTimeout(timer.current);
-      fila.current = [];
+      timer.current = undefined;
+      fila.length = 0;
       setSaid(null);
       return;
     }
@@ -113,15 +114,17 @@ export function PiggyChat() {
       const agora = m.estado ?? "pronto";
       if (estados.get(m.id) === agora) continue;
       estados.set(m.id, agora);
-      if (agora !== "enviando") { fila.current.push(m.text ?? null); novas++; }
+      if (agora !== "enviando") { fila.push(m.text ?? null); novas++; }
     }
-    if (!novas) return; // sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente
+    // Sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente. Sem novidade, só sai
+    // a fila que sobrou de uma desmontagem (a resposta terminou e o usuário saiu antes dos 60 ms).
+    if (!novas && (timer.current !== undefined || !fila.length)) return;
     // Respostas que terminam juntas (menos de 60 ms) saem no MESMO anúncio, em ordem: uma não apaga a outra (Codex no #1157).
     setSaid(null);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      const textos = fila.current;
-      fila.current = [];
+      timer.current = undefined;
+      const textos = fila.splice(0);
       setSaid(<>{textos.map((t, i) => <span key={i}>{i ? " " : ""}{t}</span>)}</>);
     }, 60);
   }, [msgs]);

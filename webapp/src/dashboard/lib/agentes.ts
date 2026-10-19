@@ -105,7 +105,7 @@ export function mencoes(texto: string, dados?: Agentes) {
   const { f, de } = dobra(texto), out: { ini: number; fim: number; kind: string }[] = [];
   for (const m of f.matchAll(/(^|\s)@/g)) {
     const ini = m.index! + m[1].length, resto = f.slice(ini + 1);
-    const a = MAIS_LONGO.find((x) => resto.startsWith(x.chave) && !/^[a-z0-9_]/.test(resto.slice(x.chave.length)) && (!dados || acessoDe(dados, x.kind)));
+    const a = MAIS_LONGO.find((x) => resto.startsWith(x.chave) && !/^[\p{L}\p{N}_]/u.test(resto.slice(x.chave.length)) && (!dados || acessoDe(dados, x.kind)));
     if (a) out.push({ ini: de[ini], fim: de[ini + 1 + a.chave.length], kind: a.kind });
   }
   return out;

@@ -466,6 +466,37 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: a resposta termina e o usuário sai do /piggy antes do anúncio (60 ms): ela é anunciada ao voltar`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: () => new Promise((ok) => { solta = ok; }) });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await page.evaluate(() => { // sai no mesmo instante em que a resposta aparece, antes dos 60 ms do anúncio
+      new MutationObserver((_, mo) => {
+        if (!document.querySelector(".chat")?.textContent.includes("do detetive.")) return;
+        mo.disconnect();
+        location.hash = "#/";
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    solta();
+    await page.waitForFunction(() => location.hash === "#/");
+    await page.locator("#board-profile").waitFor();
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.waitForFunction(() => /do detetive\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""), null, { timeout: 3000 });
+    await ctx.close();
+  });
+
+  test(`${width}: letra não ASCII colada ao nome (@XerifeЖ) não é menção: vai ao Piggy`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "@XerifeЖ amanhã");
+    await resposta(page).locator(".msg-autor").waitFor();
+    assert.equal(await resposta(page).locator(".msg-autor b").textContent(), "Piggy");
+    assert.deepEqual(chats, []);
+    await enviar(page, "@Xerife, amanhã"); // pontuação ainda delimita
+    await page.locator(".chat > .msg-piggy .msg-autor b", { hasText: "Xerife" }).waitFor();
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");
