@@ -24,6 +24,10 @@ export default function Configuracoes() {
       <ListRow titulo="Teste Open Finance" chevron onPress={() => router.push("/teste-pluggy")} />
       <ListRow titulo="Falar com o suporte" trailing={<Icone nome="ArrowSquareOut" tamanho={20} tom="inkFaint" />} onPress={() => { void Linking.openURL(`${baseUrl()}/suporte`).catch(() => setErro("Não conseguimos abrir o suporte. Tente de novo.")); }} />
     </GrupoDeLinhas>
+    <GrupoDeLinhas>
+      <ListRow titulo="Exportar meus dados" chevron onPress={() => router.push("/exportar-dados")} />
+      <ListRow titulo="Excluir conta" tom="danger" onPress={() => router.push("/excluir-conta")} />
+    </GrupoDeLinhas>
     {erro && <Banner tom="danger" mensagem={erro} />}
     <GrupoDeLinhas>
       <ListRow titulo="Sair" tom="danger" carregando={saindo} onPress={() => {

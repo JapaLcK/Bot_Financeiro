@@ -259,7 +259,9 @@ def test_cada_escritor_bumpa_a_versao(user_id, escritor):
 
 # UPDATEs de open_finance_connections que NÃO escrevem estado (status, motivo,
 # health, sync) e por isso não precisam bumpar: claims de refresh e recorrências.
-SEM_ESTADO = ("next_refresh_at", "last_refresh_requested_at", "recurring_")
+# `push_reconectar_em` é a trava do push "reconectar" (db/push.py): não é estado da
+# conexão e bumpar `updated_at` invalidaria o CAS por `updated_at` dos escritores reais.
+SEM_ESTADO = ("next_refresh_at", "last_refresh_requested_at", "recurring_", "push_reconectar_em")
 
 
 def test_todo_update_de_estado_da_conexao_bumpa_updated_at():

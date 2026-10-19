@@ -38,5 +38,17 @@ export const notificacoesSchema = z.object({
   monthly_report_enabled: bool,
 });
 
+/** `POST /auth/account/reauth-code`: o código nunca vem na resposta, só o e-mail mascarado. */
+export const codigoEnviadoSchema = z.object({ email_mascarado: z.string() });
+
+/** `POST /auth/account/export`: o link do ZIP vai por e-mail, não na resposta. */
+export const exportEnviadoSchema = z.object({ email_mascarado: z.string().optional() });
+
+/**
+ * `DELETE /auth/account`, TOLERANTE de propósito: qualquer 2xx quer dizer que a conta já foi apagada
+ * (ou está sendo), então um corpo de outra forma não pode virar `ContratoInvalido` com a conta já sem existir.
+ */
+export const exclusaoSchema = z.unknown().transform((b) => ((b as { status?: unknown } | null)?.status === "deleting" ? ("deleting" as const) : ("deleted" as const)));
+
 export type Contato = z.infer<typeof contatoSchema>;
 export type Notificacoes = z.infer<typeof notificacoesSchema>;
