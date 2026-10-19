@@ -1,6 +1,7 @@
-import { ErroDeApi, SessaoExpirada } from "@/api/client";
+import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import type { Conexao, Refresh } from "@/api/schemas/openFinance";
-import { acompanhar, atualizar, AUTORIZE_NO_APP, classificar, COLETA_VENCIDA, OCIOSO, type Deps, type EstadoAtualizar } from "@/features/painel/atualizarBanco";
+import { transitoria } from "@/features/openFinance/volta";
+import { acompanhar, acompanharLista, atualizar, AUTORIZE_NO_APP, classificar, COLETA_VENCIDA, OCIOSO, type Deps, type EstadoAtualizar } from "@/features/painel/atualizarBanco";
 
 // A máquina pura do "Atualizar agora", com relógio falso e rede injetada. A conversa pela rota está em `painel_atualizar_banco.test.tsx`.
 const con = (id: string, state: string, detail: string | null = null, extra: Partial<Conexao> = {}): Conexao => ({
@@ -8,7 +9,7 @@ const con = (id: string, state: string, detail: string | null = null, extra: Par
   ui: { state, label: state, detail }, ...extra,
 });
 const item = (id: string, state: string, still = false, detail: string | null = null, reason: string | null = null) => ({ item_id: id, institution: "Nubank", state, label: state, detail, reason, still_updating: still });
-const refresh = (items: ReturnType<typeof item>[], connections: Conexao[] = []): Refresh => ({ connections, sync: { items } });
+const refresh = (items: ReturnType<typeof item>[], connections: Conexao[] = [], ok?: boolean): Refresh => ({ connections, sync: { items, ...(ok === undefined ? {} : { ok }) } });
 
 /** Relógio falso: `esperar` avança o tempo; cada `ler` anota o instante (para provar cadência e ausência de sobreposição). */
 function mundo(opcoes: { enviar?: () => Promise<Refresh>; lista?: (n: number, t: number) => Conexao[] | Error } = {}) {
@@ -24,7 +25,7 @@ function mundo(opcoes: { enviar?: () => Promise<Refresh>; lista?: (n: number, t:
     },
     aoMudar: (e) => w.estados.push(e),
     recarregar: () => { w.recarregas++; },
-    falhou: (e) => w.falhas.push(e),
+    falhou: (e) => w.falhas.push(e), transitoria, silencioso: (e) => e instanceof SessaoExpirada || e instanceof RequisicaoSuperada,
     sucesso: () => { w.sucessos++; }, aviso: () => { w.avisos++; }, anunciar: (t) => w.falas.push(t),
   };
   return { w, d, ultimo: () => w.estados[w.estados.length - 1] };
@@ -51,6 +52,32 @@ describe("classificar: o ui.state do servidor vira uma ação (b > a > a0 > c)",
     ["a vence a0 e c", [con("a", "updating"), con("b", "paused"), con("c", "partial")], "atualizar"],
     ["a0 vence c", [con("a", "paused"), con("b", "updating")], "acompanhar"],
   ] as const)("%s", (_, lista, tipo) => { expect(classificar([...lista], true).tipo).toBe(tipo); });
+  it("updating SEM provider_item_id não tem o que acompanhar: NUNCA (a0), e não é erro (texto padrão, sem 'Erro em') (o acompanhamento é por id; sem id a rodada concluía na hora e recarregava em laço)", () => {
+    expect(classificar([con("x", "updating", null, { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: null });
+    expect(classificar([con("x", "updating", null, { provider_item_id: "" })], true).tipo).toBe("ver");
+    // lista mista: só o (c) de verdade nomeia banco (o updating sem id não entra na frase)
+    expect(classificar([con("x", "updating", null, { provider_item_id: null }), con("y", "paused", "x", { institution_name: "Itaú" })], true)).toEqual({ tipo: "ver", texto: "Erro em Itaú." });
+    // com outro updating COM id, o (a0) vale pelo que tem id
+    expect(classificar([con("x", "updating", null, { provider_item_id: null }), con("y", "updating")], true).tipo).toBe("acompanhar");
+    // a coleta vencida pede o POST, que não depende de id
+    expect(classificar([con("x", "updating", COLETA_VENCIDA, { provider_item_id: null })], true).tipo).toBe("atualizar");
+  });
+  it("toda lista que o classificar manda ACOMPANHAR acompanha de verdade: acompanharLista muda para 'acompanhando' e NÃO recarrega antes da 1ª espera", () => {
+    const sem = { provider_item_id: null };
+    const listas: Conexao[][] = [
+      [con("a", "updating")], [con("a", "updating", "Ainda não sincronizou")], [con("a", "updating", null, sem)], [con("a", "updating", null, { provider_item_id: "" })],
+      [con("a", "updating", null, sem), con("b", "updating")], [con("a", "updating", null, sem), con("b", "paused")], [con("a", "paused"), con("b", "updating")],
+    ];
+    let acompanhou = 0;
+    for (const l of listas) {
+      if (classificar(l, true).tipo !== "acompanhar") continue;
+      const { w, d } = mundo();
+      d.esperar = () => new Promise<void>(() => {}); // a 1ª espera nunca volta: só o que a máquina faz antes dela
+      void acompanharLista(d, l);
+      expect(w.estados).toEqual([{ fase: "acompanhando" }]); expect(w.recarregas).toBe(0); acompanhou++;
+    }
+    expect(acompanhou).toBe(4);
+  });
   it("needs_user_action SEM provider_item_id não tem como reautorizar: (c) com o nome do banco", () => {
     expect(classificar([con("x", "needs_user_action", "Reautorize o banco", { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: "Erro em Nubank." });
   });
@@ -89,9 +116,23 @@ describe("atualizar (a): o POST", () => {
     await atualizar(d);
     expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
-  it.each([[null], [""], ["ok"], ["no_accounts"], ["OK"]])("updating com motivo de coleta (%p) segue em dia (controle positivo)", async (reason) => {
-    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, reason)]) });
-    await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
+  it.each([[null], [""], ["ok"], ["no_accounts"], ["OK"]])("D1: updating com motivo de coleta (%p) e still_updating:false ACOMPANHA (como o web), não é 'em dia'; conclui no last_sync_at novo", async (reason) => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, reason)], [con("it_1", "updating")]), lista: (n) => [con("it_1", n < 2 ? "updating" : "updated", null, { last_sync_at: n < 2 ? "2026-10-10T12:00:00Z" : "2026-10-10T13:00:00Z" })] });
+    await atualizar(d);
+    expect(w.estados.map((e) => e.fase)).toEqual(["enviando", "acompanhando", "ocioso"]); expect(w.leituras).toEqual([5_000, 15_000]); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
+  });
+  it("D1b (a lição 3 não regride): updating com motivo de falha e still_updating:false segue sendo resultado, sem leitura", async () => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, "read_failed")]) });
+    await atualizar(d); expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.leituras).toEqual([]); expect(w.sucessos).toBe(0);
+  });
+  it("D2: items:[] com ok:false é falha (o botão volta, aviso() e a fala), não 'em dia' (o web: refreshVerdict)", async () => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([], [], false) });
+    await atualizar(d);
+    expect(ultimo()).toEqual({ fase: "ocioso", falha: true }); expect(w.avisos).toBe(1); expect(w.sucessos).toBe(0); expect(w.recarregas).toBe(0); expect(w.falas).toEqual(["Atualizando os dados do banco", "Não conseguimos atualizar agora. Tente de novo."]);
+  });
+  it.each([[true], [undefined]])("D2b (controle positivo): items:[] com ok:%p segue sendo sucesso", async (ok) => {
+    const { w, d, ultimo } = mundo({ enviar: async () => refresh([], [], ok) });
+    await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1); expect(w.avisos).toBe(0);
   });
   it("um banco ainda coletando NÃO esconde a falha de outro (erro antes do neutro, como o web): resultado na hora, sem acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", true), item("it_2", "partial", false, "Parte dos dados ainda não veio")]) });

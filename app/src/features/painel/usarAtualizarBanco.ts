@@ -1,8 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { AccessibilityInfo } from "react-native";
-import { RequisicaoSuperada } from "@/api/client";
+import { RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import type { Conexao } from "@/api/schemas/openFinance";
 import { aviso, sucesso } from "@/ui/haptics";
+import { transitoria } from "@/features/openFinance/volta";
 import { atualizarBancos, conexoes, limiteBancario } from "@/services/openFinance";
 import { acompanharLista, atualizar, classificar, OCIOSO, type AcaoBanco, type Deps, type EstadoAtualizar } from "./atualizarBanco";
 import { usePainel } from "./provider";
@@ -62,7 +63,7 @@ function correr(p: Painel, uid: number, entrada: (d: Deps) => Promise<void>, cal
     enviar: () => atualizarBancos(uid, op.controlador), ler: async () => (await conexoes(uid, op.controlador)).connections,
     aoMudar: (maquina) => { if (n === corrida) definir({ uid, vale: () => validade(), maquina }); }, // só a corrida mais nova escreve; o barulho (aviso, sucesso, anúncio, recarga) já some com `atual()`, que o abort do X ou da troca de conta derruba
     recarregar: () => { p.atualizar(); validade = p.operacao().atual; }, // a operação nasce DEPOIS do `cancelar()` da recarga: o estado final vale por ela, não pela que a recarga acabou de derrubar
-    falhou: p.falhou, sucesso: calada ? () => {} : sucesso, aviso: calada ? () => {} : aviso, anunciar: (t) => { if (!calada) AccessibilityInfo.announceForAccessibility(t); },
+    falhou: p.falhou, transitoria, silencioso: (e) => e instanceof SessaoExpirada || e instanceof RequisicaoSuperada, sucesso: calada ? () => {} : sucesso, aviso: calada ? () => {} : aviso, anunciar: (t) => { if (!calada) AccessibilityInfo.announceForAccessibility(t); },
   };
   void entrada(d).catch(() => d.aoMudar(OCIOSO)).finally(() => { ativos.delete(op.controlador); reavaliar(p, uid); });
 }

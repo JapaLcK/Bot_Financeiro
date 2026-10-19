@@ -4,6 +4,7 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
+import type { Refresh } from "../lib/atualizarBanco";
 
 export type Campo = "nome" | "email" | "telefone";
 export type Seguranca = { email: string | null; display_name: string | null; phone: string | null; created_at: string | null };
@@ -22,20 +23,53 @@ export const segurancaQuery = (uid: number | undefined) => queryOptions({
 
 // Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
 // contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
-export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; provider_item_id: string | null; ui: { state: string; label: string; detail: string | null } };
 export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
 const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry } as const;
 
+// O leitor do snapshot, UM só: o `conexoesQuery` (página Bancos, aviso do topo) e a máquina do "Atualizar agora" (lib/atualizarBanco.ts) o usam.
+const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
+const conexaoDe = (c: Partial<Conexao>): Conexao => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), provider_item_id: t(c.provider_item_id),
+  ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } });
+// `connections` fora de lista é contrato quebrado nos dois caminhos (lista vazia diria "nenhum banco", e na rodada "todos removidos" = em dia).
+// `estrito` (a rodada do "Atualizar agora" e o POST): a conexão segue o `conexaoSchema` do app nos campos que a máquina lê, porque o nulo
+// saneado (`provider_item_id` número virando null) faria um item acompanhado parecer removido. A página Bancos fica com a borda branda.
+const conexaoValida = (c: unknown) => objeto(c) && typeof c.id === "number" && textoOuNulo(c.provider_item_id) && textoOuNulo(c.institution_name)
+  && textoOuNulo(c.last_sync_at) && objeto(c.ui) && typeof c.ui.state === "string" && typeof c.ui.label === "string" && textoOuNulo(c.ui.detail, true);
+const conexoesDe = (v: unknown, estrito: boolean) => {
+  if (!Array.isArray(v) || (estrito && !v.every(conexaoValida))) throw contrato();
+  return (v as Partial<Conexao>[]).map(conexaoDe);
+};
+export async function lerConexoes(uid: number, signal?: AbortSignal, estrito = false): Promise<Conexao[]> {
+  const r = await chamar<{ connections?: unknown }>(`/open-finance/${uid}`, signal ? GET(signal) : { headers: { Accept: "application/json" } });
+  return conexoesDe(r.connections, estrito);
+}
 export const conexoesQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "conexoes", uid],
-  queryFn: async ({ signal }): Promise<Conexao[]> => {
-    const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, GET(signal));
-    const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
-    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at),
-      ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } }));
-  },
+  queryFn: ({ signal }) => lerConexoes(uid as number, signal), // `enabled` só deixa rodar com `uidValido`
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
+// `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. O veredito decide o desfecho, então a borda é a do
+// `refreshSchema` do app: `sync.items` ausente, fora de lista, ou com um item fora do contrato (não-objeto, `item_id`/`state`/`label` sem string,
+// `still_updating` sem booleano, `institution`/`detail`/`reason` fora de string ou null) é contrato quebrado, nunca "em dia" calado: falha como o `ContratoInvalido`.
+// O servidor sempre manda os campos. O snapshot do POST (`connections`) é o estrito de `conexoesDe`.
+const contrato = () => new ErroApi(200, "contrato");
+const textoOuNulo = (v: unknown, opcional = false) => typeof v === "string" || v === null || (opcional && v === undefined);
+const itemDe = (i: unknown) => {
+  if (!objeto(i) || typeof i.item_id !== "string" || typeof i.state !== "string" || typeof i.label !== "string" || typeof i.still_updating !== "boolean"
+    || !textoOuNulo(i.institution) || !textoOuNulo(i.detail, true) || !textoOuNulo(i.reason, true)) throw contrato();
+  return { item_id: i.item_id, institution: i.institution as string | null, state: i.state, label: i.label, detail: (i.detail ?? null) as string | null,
+    reason: (i.reason ?? null) as string | null, still_updating: i.still_updating };
+};
+const refreshDe = (r: { connections?: unknown; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
+  // `sync.ok` é opcional, mas presente tem de ser booleano (`"false"` descartado faria o `items: []` com falha virar "em dia").
+  if (!Array.isArray(r.sync?.items) || (r.sync.ok !== undefined && typeof r.sync.ok !== "boolean")) throw contrato();
+  return {
+    connections: conexoesDe(r.connections, true),
+    sync: { ...(r.sync.ok !== undefined ? { ok: r.sync.ok } : {}), items: r.sync.items.map(itemDe) },
+  };
+};
+export const atualizarBancos = (uid: number, signal: AbortSignal) => escrever<Parameters<typeof refreshDe>[0]>("POST", `/open-finance/${uid}/refresh`, {}, signal).then(refreshDe);
 export const limiteQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "limite", uid],
   queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
@@ -66,10 +100,14 @@ export const temSenhaQuery = (ativo: boolean) => queryOptions({
 
 // A escrita que nunca responde não pode prender o modal (o Esc não o fecha em voo). Sem `AbortSignal.timeout`: o Safari < 16 não o tem (dashboard_v2_safari14).
 // NÃO vale para o que o servidor comita e só devolve uma vez (enable, regenerate-backup-codes): abortar perderia os códigos.
-const comPrazo = <T,>(f: (sinal: AbortSignal) => Promise<T>) => {
-  const parar = new AbortController();
-  const prazo = setTimeout(() => parar.abort(), 30000);
-  return f(parar.signal).finally(() => clearTimeout(prazo));
+// `pai`: o cancelamento de quem chamou (a rodada do Atualizar agora) corta junto. `abort()` SEM `reason`: com ele o fetch rejeita com esse objeto e o `name` deixa de ser "AbortError".
+// O corte (prazo ou pai) sai como AbortError na raiz (`chamar` em lib/v2.ts, que só engole o corpo cortado quando a resposta NÃO era 2xx).
+export const comPrazo = <T,>(f: (sinal: AbortSignal) => Promise<T>, ms = 30_000, pai?: AbortSignal) => {
+  const parar = new AbortController(), corta = () => parar.abort();
+  if (pai?.aborted) corta();
+  pai?.addEventListener("abort", corta, { once: true });
+  const prazo = setTimeout(corta, ms);
+  return f(parar.signal).finally(() => { clearTimeout(prazo); pai?.removeEventListener("abort", corta); });
 };
 export const salvarContato = (uid: number, corpo: CorpoContato) => comPrazo((sinal) => escrever<Seguranca>("PATCH", `/settings/${uid}/security/contact`, corpo, sinal));
 export const gerarLinkWhatsApp = () => escrever<{ whatsapp_link?: string }>("POST", "/auth/link-code", {});
