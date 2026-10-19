@@ -1,11 +1,12 @@
 import { useFonts } from "expo-font";
 import { Stack } from "expo-router";
 import { useEffect } from "react";
-import { useColorScheme, View } from "react-native";
+import { Platform, useColorScheme, View } from "react-native";
 
 import { SessaoProvider, useSessao } from "@/features/auth/sessao";
 import { BloqueioProvider, useBloqueio } from "@/features/bloqueio/bloqueio";
 import { CoberturaPorCima, TelaDeBloqueio } from "@/features/bloqueio/TelaDeBloqueio";
+import { Push } from "@/features/push/Push";
 import { rastrear } from "@/services/analytics";
 import { Button } from "@/ui/componentes/Button";
 import { Texto } from "@/ui/componentes/Texto";
@@ -55,6 +56,7 @@ export default function Layout() {
       <SessaoProvider>
         <BloqueioProvider>
           <Roteador />
+          {Platform.OS === "ios" ? <Push /> : null}
         </BloqueioProvider>
       </SessaoProvider>
     </TemaProvider>

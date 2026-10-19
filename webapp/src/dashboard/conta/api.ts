@@ -2,7 +2,7 @@
 // Dado pessoal: só na memória do React Query, nunca em storage. O contrato é do servidor
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { DEMO, ErroApi, FUSO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
+import { DEMO, ErroApi, FUSO, NOME_DO_PLANO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
 import type { Refresh } from "../lib/atualizarBanco";
 
@@ -189,6 +189,40 @@ export const salvarNotificacoes = (uid: number, corpo: CorpoNotificacoes) =>
   comPrazo((sinal) => escrever<unknown>("PATCH", `/settings/${uid}/notifications`, corpo, sinal)).then(notificacoesDe);
 // Cópia dos <option> de #notif-daily-hour (settings.html): o teste dashboard_v2_conta_notificacoes compara as duas (§0.7).
 export const HORAS = [6, 7, 8, 9, 10, 11, 12, 18, 19, 20, 21];
+
+// Cobrança (rotas antigas /billing/*, fora da /api/v2). `GET /billing/subscription` não diz se é teste, carência ou cancelada no fim:
+// por isso a tela só mostra o que a rota garante (o plano, o intervalo e "Período atual até"). A borda: nome fora de NOME_DO_PLANO e data
+// fora de AAAA-MM-DD viram null (nunca o texto cru do servidor); corpo fora do contrato ou `degraded` = ERRO de carga, nunca "Sem plano".
+export type Cobranca = { vitalicio: boolean; pix: boolean; ativa: boolean; plano: string | null; intervalo: "monthly" | "annual" | null; ate: string | null; troca: { plano: string; intervalo: "monthly" | "annual" | null; em: string } | null };
+// Por split, nunca `new Date("AAAA-MM-DD")` (é UTC: 12/11 vira 11/11 no fuso de Brasília). Cópia de `fmtBrDate` (precos.html).
+const DATA_ISO = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const dataBR = (iso: unknown) => (typeof iso === "string" && DATA_ISO.test(iso) ? iso.split("-").reverse().join("/") : null);
+const intervaloDe = (v: unknown): Cobranca["intervalo"] => (v === "monthly" || v === "annual" ? v : null);
+const planoDe = (v: unknown) => (typeof v === "string" && Object.keys(NOME_DO_PLANO).includes(v) ? v : null);
+export const cobrancaDe = (r: unknown): Cobranca => {
+  const o = objeto(r) ? r : {};
+  if (typeof o.active !== "boolean" || o.degraded === true) throw new ErroApi(200, "contrato");
+  const t = objeto(o.scheduled_change) ? o.scheduled_change : {};
+  const troca = planoDe(t.plan) && dataBR(t.effective_at) ? { plano: planoDe(t.plan)!, intervalo: intervaloDe(t.interval), em: dataBR(t.effective_at)! } : null;
+  return { ativa: o.active, vitalicio: o.lifetime === true, pix: o.gateway === "pix", plano: planoDe(o.plan), ate: dataBR(o.current_period_end), troca,
+    intervalo: intervaloDe(o.interval) };
+};
+// Cada leitura chama o Stripe de 1 a 4 vezes: sem releitura por foco de aba.
+export const cobrancaQuery = queryOptions({
+  queryKey: ["conta", "cobranca"],
+  queryFn: ({ signal }) => chamar<unknown>("/billing/subscription", GET(signal)).then(cobrancaDe),
+  staleTime: 0, refetchOnWindowFocus: false, networkMode: "always", retry: meQuery.retry,
+  enabled: !DEMO,
+});
+// Só segue um link https (nunca javascript:/data:/http:). A volta do Stripe é a chave "/painel" do servidor (_PORTAL_VOLTAR).
+export const abrirPortal = () => comPrazo((s) => escrever<{ portal_url?: unknown }>("POST", "/billing/portal?voltar=%2Fpainel", undefined, s))
+  .then((r) => { if (typeof r.portal_url === "string" && /^https:\/\//i.test(r.portal_url)) return r.portal_url; throw new ErroApi(200, "contrato"); });
+// Abortar no prazo é seguro: o 2º release do mesmo schedule dá 400 `no_change`, que a tela trata como "já desfeito".
+export const desfazerTroca = () => comPrazo((s) => escrever<{ ok: boolean }>("POST", "/billing/cancel-change", undefined, s));
+// O 403 desta página é só o CSRF; o texto de `falhaDe` fala em "salvar" e não serve ao portal.
+export function falhaCobranca(e: unknown, reserva: string): Falha {
+  return e instanceof ErroApi && e.status === 403 ? { texto: "Recarregue a página e tente de novo." } : falhaDe(e, reserva, [404, 429, 502, 503]);
+}
 
 // Cópia de `formatActivityTime` (settings.html): o teste dashboard_v2_conta_sessoes compara as duas (§0.7). Duas diferenças, de propósito:
 // `instante` em vez de `new Date` (o ISO de 6 casas é NaN no Safari 14) e a data antiga no FUSO do painel, não no do aparelho.

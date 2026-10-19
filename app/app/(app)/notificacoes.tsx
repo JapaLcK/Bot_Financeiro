@@ -8,6 +8,7 @@ import type { Notificacoes } from "@/api/schemas/conta";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { semSenha, telefoneBR } from "@/features/conta/contato";
 import { algumResumo, corpoDaHora, hhmm, semanalNaTela, semanalTravado, textoDaEscrita } from "@/features/conta/notificacoes";
+import { usePermissaoPush } from "@/features/push/usePermissaoPush";
 import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
@@ -30,7 +31,7 @@ type Estado =
   | { fase: "senha"; email: string | null }
   | { fase: "pronto"; uid: number; dados: Notificacoes; emailDaConta: string | null };
 
-type CampoBool = "tip_email_enabled" | "insight_email_enabled" | "whatsapp_updates_enabled" | "daily_report_enabled" | "weekly_report_enabled" | "monthly_report_enabled";
+type CampoBool = "tip_email_enabled" | "insight_email_enabled" | "whatsapp_updates_enabled" | "daily_report_enabled" | "weekly_report_enabled" | "monthly_report_enabled" | "push_bank_reconnect_enabled";
 
 const dataDaHora = (h: number, m: number) => {
   const d = new Date();
@@ -107,8 +108,9 @@ export default function NotificacoesTela() {
     }
   };
 
-  useFocusEffect(useCallback(() => void carregar(), [])); // `[]` de propósito: `falha` muda a cada estado da sessão (ver perfil.tsx)
-  useVoltaDoFundo(() => void carregar());
+  const push = usePermissaoPush();
+  useFocusEffect(useCallback(() => { void carregar(); push.ler(); }, [])); // `[]` de propósito: `falha` muda a cada estado da sessão (ver perfil.tsx)
+  useVoltaDoFundo(() => { void carregar(); push.ler(); });
 
   const escrever = async (corpo: CorpoNotificacoes, adiantar: Partial<Notificacoes>) => {
     if (voando.current || agora.current.fase !== "pronto") return;
@@ -153,7 +155,7 @@ export default function NotificacoesTela() {
   const v = estado.fase === "pronto" ? { ...estado.dados, ...previa } : null;
 
   /** Um Switch = um PATCH com SÓ o campo tocado, montado aqui com o valor do toque (nunca a partir do estado da tela). */
-  const chave = (campo: CampoBool, rotulo: string, valor: boolean, opcoes: { travado?: boolean; selo?: string; adiantar?: (novo: boolean) => Partial<Notificacoes> } = {}) => (
+  const chave = (campo: CampoBool, rotulo: string, valor: boolean, opcoes: { travado?: boolean; selo?: string; adiantar?: (novo: boolean) => Partial<Notificacoes>; aoTrocar?: (novo: boolean) => void } = {}) => (
     <ListRow
       titulo={rotulo}
       desativado={opcoes.travado}
@@ -164,7 +166,11 @@ export default function NotificacoesTela() {
             accessibilityLabel={rotulo}
             value={valor}
             disabled={opcoes.travado || gravando}
-            onValueChange={(novo) => { if (!opcoes.travado) void escrever({ [campo]: novo }, opcoes.adiantar?.(novo) ?? { [campo]: novo }); }}
+            onValueChange={(novo) => {
+              if (opcoes.travado) return;
+              if (opcoes.aoTrocar) return opcoes.aoTrocar(novo);
+              void escrever({ [campo]: novo }, opcoes.adiantar?.(novo) ?? { [campo]: novo });
+            }}
             trackColor={{ true: cores.acao }}
           />
         </View>
@@ -239,8 +245,22 @@ export default function NotificacoesTela() {
                 }
               />
             </GrupoDeLinhas>
-            {/* Nasce vazio: a seção de push entra aqui (docs/plano-push-app.md §2). */}
-            <Destino icone="Bell" rotulo="Notificações no celular" valor="No celular" />
+            {/* iOS: o push é APNs. A chave liga a preferência só com a permissão do sistema concedida; negada manda aos Ajustes; indeterminada pede (docs/plano-push-app.md §2). */}
+            {!android && (
+              <>
+                <Destino icone="Bell" rotulo="Notificações no celular" valor="No celular" />
+                <GrupoDeLinhas>
+                  {chave("push_bank_reconnect_enabled", "Banco precisa de atenção", push.permissao === "granted" && v.push_bank_reconnect_enabled, {
+                    travado: push.permissao === null,
+                    selo: push.permissao === "denied" ? "Nos Ajustes" : undefined,
+                    aoTrocar: push.permissao === "granted"
+                      ? (novo) => void escrever({ push_bank_reconnect_enabled: novo }, { push_bank_reconnect_enabled: novo })
+                      // Tocou para LIGAR e concedeu: a preferência acompanha (se estava desligada no servidor, a chave não ficaria ligada).
+                      : () => void push.tocar().then((concedeu) => { if (concedeu && !v.push_bank_reconnect_enabled) void escrever({ push_bank_reconnect_enabled: true }, { push_bank_reconnect_enabled: true }); }),
+                  })}
+                </GrupoDeLinhas>
+              </>
+            )}
           </>
         )}
       </View>

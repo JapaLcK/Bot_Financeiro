@@ -15,7 +15,7 @@ export const ROUTES = [
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },
-  // A seção "Conta" da barra lateral (fora do RAIL): o Perfil já é página de verdade (conta/Perfil.tsx); só a Cobrança segue página-ponte para a tela antiga (conta/); as Configurações mostram a Segurança (conta/Seguranca.tsx), os dispositivos conectados (conta/Sessoes.tsx), as Notificações (conta/Notificacoes.tsx) e o link para a /settings; os Bancos conectados são página de verdade (conta/Bancos.tsx, só leitura).
+  // A seção "Conta" da barra lateral (fora do RAIL): o Perfil e a Cobrança (conta/Cobranca.tsx, lê /billing/subscription) já são páginas de verdade; as Configurações mostram a Segurança (conta/Seguranca.tsx), os dispositivos conectados (conta/Sessoes.tsx), as Notificações (conta/Notificacoes.tsx) e o link para a /settings; os Bancos conectados são página de verdade (conta/Bancos.tsx).
   { path: "/conta/perfil", label: "Perfil", short: "Perfil", icon: "ph-user", title: "Perfil" },
   { path: "/conta/cobranca", label: "Cobrança", short: "Cobrança", icon: "ph-credit-card", title: "Cobrança" },
   { path: "/conta/configuracoes", label: "Configurações", short: "Configurações", icon: "ph-gear", title: "Configurações" },

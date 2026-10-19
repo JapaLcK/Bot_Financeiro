@@ -51,7 +51,7 @@ test("exibição em 1440×900, 390×844 e 320×640: ícone e valor, palavras só
   }
 });
 
-test("Configurações: a Segurança vem antes e o link 'Abrir configurações' (/settings) continua embaixo; Cobrança segue ponte", async () => {
+test("Configurações: a Segurança vem antes e o link 'Abrir configurações' (/settings) continua embaixo", async () => {
   const p = await abrirSeguranca();
   const r = await p.page.evaluate(() => {
     const seg = document.querySelector(".conta-seguranca"), link = document.querySelector(".conta-ponte a");

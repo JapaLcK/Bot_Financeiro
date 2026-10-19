@@ -1288,6 +1288,8 @@ Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, 
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
+**`POST /billing/portal` aceita `?voltar=`** (query, opcional): o cliente só escolhe uma chave de `_PORTAL_VOLTAR` (`/painel` volta para `/painel`, `/app` para `/app`); valor fora da lista (inclusive vazio) é 400 "Destino de retorno inválido." antes de qualquer chamada ao Stripe, e o valor nunca entra na URL. Sem o parâmetro a volta é `/app`, como sempre; o `GET /conta` (que o resto do site e o WhatsApp usam) volta para `/settings` e não mudou. Consumidor: a Cobrança do `/painel`. O Stripe aceitar o `return_url` de produção só se prova no staging ou depois do deploy.
+
 **Funil (`checkout_funnel_events`):** além de `started`/`completed`, grava `viewed_pricing`
 (GET `/precos` de usuário logado, 1 por janela móvel de 24h) e `expired` (webhook
 `checkout.session.expired`). Esse evento também dispara quando o app troca/expira a sessão
@@ -1620,6 +1622,8 @@ servidor comita e a resposta é a única cópia dos códigos); resposta perdida 
 o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu. O C1b pôs os "Dispositivos conectados" na mesma página (`conta/Sessoes.tsx`), pelas rotas antigas `GET /settings/{uid}/sessions`, `DELETE /settings/{uid}/sessions/{jti}` e `DELETE /settings/{uid}/sessions` (encerrar as outras): os DELETE têm `comPrazo` (30 s); a releitura depois de falha usa `comPrazoLeitura` (`conta/api.ts`, compartilhado com `lerStatusMfa`); depois do DELETE a linha sai do cache e o `invalidateQueries` relê (o `cancelRefetch` dele cancela o GET em voo); a sessão atual (`is_current` ou `current_jti`) nunca tem botão; resposta fora do contrato cai no erro com "Tentar de novo" (`sessoesDe`). Limite: com `current_jti` null (só token legado sem jti) "encerrar as outras" revoga todas as linhas de `auth_sessions`, igual à `/settings` (`core/sessions.py:revoke_other_sessions`); o token legado não é linha, então a atual segue válida. O app não tem lista de sessões (`app/app/(app)/seguranca.tsx`).
 
 **Configurações do /painel mostram as Notificações (C2).** `conta/Notificacoes.tsx`, pelas rotas antigas `GET`/`PATCH /settings/{uid}/notifications`: os mesmos 7 controles da `/settings`, cada um salva sozinho (corpo só com o campo tocado, no máximo 1 PATCH em voo por página: a trava é do módulo, então sair da rota e voltar não a solta; várias abas são independentes; a tela segue a resposta e o `invalidateQueries` relê). O horário manda o `daily_report_enabled` atual junto: o servidor liga o diário ao gravar a hora (`set_daily_report_hour`), então sem o campo mexer no horário religaria um diário desligado (a própria `/settings` ainda faz isso: issue #1122). `whatsapp_updates_enabled` é consentimento e só vai com o clique no interruptor dele. `HORAS` (`conta/api.ts`) copia as opções de `#notif-daily-hour` do `settings.html`; o teste compara as duas. Par no app: `app/app/(app)/notificacoes.tsx` (#1121), com horário de qualquer hora e minuto e a seção "No celular" para o push de `plano-push-app.md`.
+
+**Cobrança do /painel (`/conta/cobranca`).** `conta/Cobranca.tsx` lê `GET /billing/subscription` (fora da `/api/v2`: `billing` está na lista do `chamar`, `lib/v2.ts`) e mostra o plano (`NOME_DO_PLANO`, `lib/v2.ts`, a fonte única do painel), o selo Mensal/Anual/Pix/Vitalício e a data. A rota não diz se é teste, carência ou cancelada no fim: por isso o cartão só diz "Período atual até DD/MM/AAAA", e o Pix "Válido até" (a data sai por split, nunca `new Date`). Ações: `POST /billing/portal?voltar=%2Fpainel` (abre o portal na mesma aba, só se a resposta for `https:`), `POST /billing/cancel-change` (a troca agendada; 400 `no_change` e 409 `no_subscription` só releem) e o link para a `/precos`. Uma trava no módulo para as duas escritas; `refetchOnWindowFocus` desligado (cada leitura chama o Stripe de 1 a 4 vezes), com releitura no `pageshow` do bfcache. Na carência o `plan_tier` do `/api/v2/me` é `free`: o nome vem da assinatura. Par no app: específico da plataforma (ver `paridade-app-dashboard.md`).
 
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
@@ -2053,6 +2057,44 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
 - **Preferência.** `auth_accounts.push_bank_reconnect_opt_out` (default `false`), exposta como
   `push_bank_reconnect_enabled` em `/settings/{uid}/notifications` (GET e PATCH); leitura direta
   `db.push_bank_reconnect_bloqueado`, sem o cache do `get_auth_user`.
+
+- **Lado do app (PR 2).** `app/src/services/push.ts::registrarAparelho` faz `POST /api/push/register` (só
+  iOS, só com permissão concedida e sessão no cofre; engole qualquer erro, sem retentativa própria) a cada
+  login, abertura e volta do fundo, disparado por `app/src/features/push/Push.tsx` (montado no `_layout`), sempre
+  com a trava biométrica livre: a volta do fundo só conta a volta e o registro roda no efeito com o `registravel` já
+  atualizado, então depois da carência ele espera o Face ID (a borda de subida registra uma vez). O
+  `environment` vem do `aps-environment` do perfil (`features/push/aparelho.ts::ambienteApns`), não do
+  `APP_ENV`: `development` = sandbox, `production` = production, sem perfil = production em aparelho real e
+  sandbox no simulador. O desregistro local no APNs é o gancho em `apagarSessaoNoCofre`
+  (`app/src/storage/secure.ts`): toda limpeza do cofre passa por ali; o Sair NÃO chama
+  `/api/push/unregister` (decisão do dono). `aparelho.ts` é folha (nunca importa `client`/`secure`) e tem uma
+  fila que põe o desregistro antes de qualquer token pedido depois, e o `getDevicePushTokenAsync` tem prazo
+  (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`; o nativo só resolve em didRegister/didFail; offline ou no simulador pode nunca resolver e travaria o
+  desregistro do Sair): estourou, o registro desiste e o token que chegar depois é ignorado (nenhum POST). O
+  desregistro CANCELA a espera do token em voo antes de enfileirar (roda na hora: depois da chamada nativa que já
+  estava em voo, mas possivelmente antes da resposta dela), e um registro que decidia enquanto o Sair chegava desiste sem pedir o token;
+  sem sessão no cofre nunca se chama `getDevicePushTokenAsync`. O toque lê `notification.request.trigger.payload.rota` (o iOS não copia a raiz do
+  payload para `content.data`) numa tabela própria (`Map`), espera a sessão e a trava e descarta se anônimo. Cada
+  resposta vale uma vez, por `identifier:date` (o servidor manda `apns-collapse-id` e, no iOS, o identificador de
+  um push remoto com collapse id é o próprio collapse id, igual em todos).
+  Token que rola com o app aberto: `Push.tsx` assina `addPushTokenListener` só com sessão e trava livres, e o
+  ouvinte (`services/push.ts::registrarToken`) registra o token do evento sem NUNCA pedi-lo ao nativo (o evento
+  dispara a cada `didRegister`, inclusive os do nosso `getDevicePushTokenAsync`: pedir de novo faria laço). Ele
+  confere o `ultimoToken` (em `aparelho.ts`, zerado em todo desregistro e quando o POST falha); o
+  `registrarAparelho` continua postando sempre, porque o login novo precisa amarrar o token à sessão nova. Pode
+  sair um POST repetido entre os dois (upsert no servidor).
+  **Limites só do iPhone.** (a) O `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
+  nativo de novo enquanto ela está pendente: se o iOS nunca responder ao pedido pendente depois do
+  `unregisterForRemoteNotifications` (Sair offline), todo registro seguinte nesse processo estoura o
+  prazo (`TEMPO_TOKEN_MS`) e devolve `null` até o app reiniciar. O desregistro em si não espera mais o prazo. Conferir: modo avião, abrir o app, Sair, logar como B, tirar do
+  modo avião; o push de A não pode mais chegar (se a resposta tardia re-registrar o aparelho no APNs, chega). (b) A dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id`
+  traz um `date` novo (a data de entrega).
+  **Limite:** `expo-notifications` entra no import de todo o app pelo `secure.ts` (gancho do desregistro): um dev
+  client antigo, sem o módulo nativo, cai nesse import; o build da loja traz o módulo e não corre o risco.
+  A chave da tela de Notificações ("Banco precisa de atenção", só iOS) é `push_bank_reconnect_enabled`:
+  com a permissão do sistema concedida escreve o PATCH (só esse campo); negada abre os Ajustes (zero PATCH);
+  indeterminada pede a permissão, registra e, se a preferência estava desligada no servidor, grava `true`
+  (`features/push/usePermissaoPush.ts`, `services/push.ts::pedirPermissaoPush`). Negada mostra o selo "Nos Ajustes".
 
 Atraso: o push só sai na varredura do tique (~6 h). Plano do push no app e decisões do dono:
 [`plano-push-app.md`](plano-push-app.md).
