@@ -2,6 +2,7 @@ import { useId, type ReactNode } from "react";
 import type { CustoMensal, Meta } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { ehNegativo, ehZero, fraseChegada, fraseCusto, fraseRitmo, mesAno, type Frase } from "../lib/metas-textos";
+import { href } from "../router";
 import { Selos } from "./Selos";
 
 // Motivos que explicam o alvo (não o saldo da fonte): não pedem "a conferir" no guardado.
@@ -14,7 +15,7 @@ export function FraseComAcao({ f }: { f: Frase }) {
     <>
       <p className="meta-nota">{f.texto}</p>
       {f.acao === "planos" && <a className="btn btn-ghost" href="/precos">Ver planos</a>}
-      {f.acao === "banco" && <a className="btn btn-ghost" href="/settings?view=open-finance">Conectar banco</a>}
+      {f.acao === "banco" && <a className="btn btn-ghost" href={href("/conta/bancos")}>Conectar banco</a>}
     </>
   );
 }
