@@ -1,5 +1,5 @@
 // A seção "Conta" do /painel (App.tsx, parts/MenuTelas.tsx, conta/): Perfil (página de verdade, testada em
-// dashboard_v2_conta_perfil.test.mjs), a Cobrança (ponte), as Configurações (a Segurança, testada em dashboard_v2_conta_seguranca*.test.mjs,
+// dashboard_v2_conta_perfil.test.mjs), a Cobrança (página de verdade, testada em dashboard_v2_conta_cobranca.test.mjs), as Configurações (a Segurança, testada em dashboard_v2_conta_seguranca*.test.mjs,
 // e o link para a tela antiga) e o Sair na própria barra lateral.
 //   · o Sair faz POST no /auth/logout com o fetch GLOBAL (o auth-refresh.js limpa o aparelho), com o
 //     CSRF, grava `finbot_logout_at` e vai para /?logout=1, inclusive com o fetch REJEITADO;
@@ -70,7 +70,7 @@ test("logout em outra aba derruba o painel; outra chave do storage não", async 
 
 test("nome e e-mail aparecem na página e ficam só em memória (nada no localStorage nem no sessionStorage)", async () => {
   const { s, antes } = conta();
-  const { ctx, page } = await abrir({ guia: "concluido", rota: "/conta/cobranca", antes });
+  const { ctx, page } = await abrir({ guia: "concluido", rota: "/conta/configuracoes", antes });
   await page.locator(".conta-ponte", { hasText: CONTA.email }).waitFor();
   const r = await page.evaluate(() => {
     const todos = [localStorage, sessionStorage].flatMap((st) => Object.keys(st).map((k) => k + "=" + st.getItem(k)));
@@ -79,7 +79,7 @@ test("nome e e-mail aparecem na página e ficam só em memória (nada no localSt
   await ctx.close();
   assert.match(r.texto, /Ana Teste/);
   assert.ok(!/Ana Teste|ana\.teste@exemplo\.com/.test(r.guardado), r.guardado);
-  assert.equal(r.link, "/conta");
+  assert.equal(r.link, "/settings");
   assert.deepEqual([...new Set(s.perfis)], ["/auth/dashboard-profile"]); // não /api/v2/auth/dashboard-profile
 });
 
@@ -93,7 +93,7 @@ for (const width of [320, 375]) {
     const lateral = [];
     for (const perfil of LONGOS) {
       const { antes } = conta({ perfil });
-      const { ctx, page } = await abrir({ guia: "concluido", width, height: 800, rota: "/conta/cobranca", antes });
+      const { ctx, page } = await abrir({ guia: "concluido", width, height: 800, rota: "/conta/configuracoes", antes });
       await page.locator(".conta-ponte span").waitFor();
       lateral.push(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth));
       await ctx.close();
@@ -104,7 +104,7 @@ for (const width of [320, 375]) {
 
 test("nome com espaços nas pontas é aparado e e-mail só de espaços não renderiza <span> vazio", async () => {
   const { antes } = conta({ perfil: { display_name: "  Ana  ", email: "   " } });
-  const { ctx, page } = await abrir({ guia: "concluido", rota: "/conta/cobranca", antes });
+  const { ctx, page } = await abrir({ guia: "concluido", rota: "/conta/configuracoes", antes });
   await page.locator(".conta-ponte b").waitFor();
   const r = await page.evaluate(() => ({ nome: document.querySelector(".conta-ponte b").textContent, spans: document.querySelectorAll(".conta-ponte span").length }));
   await ctx.close();
@@ -123,21 +123,22 @@ test("Sair: dois cliques seguidos mandam um POST só e o botão fica desabilitad
   assert.ok(desabilitado);
 });
 
-test("as duas páginas: título, aria-current no trilho e o link para a tela antiga (Cobrança é só ponte; Configurações mostra a Segurança antes do link; o Perfil tem teste próprio)", async () => {
+test("as duas páginas: título e aria-current no trilho; a Cobrança é página de verdade (sem ponte) e as Configurações têm a Segurança antes do link para a tela antiga", async () => {
   const { antes } = conta();
   const { ctx, page } = await abrir({ guia: "concluido", antes });
   const vistas = [];
-  const botoes = [];
-  for (const [rota, titulo, destino] of [["/conta/cobranca", "Cobrança", "/conta"], ["/conta/configuracoes", "Configurações", "/settings"]]) {
+  const pontes = [];
+  for (const [rota, titulo] of [["/conta/cobranca", "Cobrança"], ["/conta/configuracoes", "Configurações"]]) {
     await page.evaluate((h) => { location.hash = h; }, `#${rota}`);
     await page.locator("#page-title", { hasText: titulo }).waitFor();
-    vistas.push([await page.locator("#page-title").innerText(), await page.locator('.rail-conta [aria-current="page"]').innerText(), await page.locator(".conta-ponte a").getAttribute("href"), await page.title(), await page.locator(".topbar .month-switch").count()]);
-    assert.equal(destino, vistas.at(-1)[2]);
-    botoes.push([await page.locator(".conta-ponte a").innerText(), await page.locator(".page-lede").count(), await page.locator(".conta-seguranca").count()]); // dono 2026-10-17: sem subtítulo
+    vistas.push([await page.locator("#page-title").innerText(), await page.locator('.rail-conta [aria-current="page"]').innerText(), await page.title(), await page.locator(".topbar .month-switch").count()]);
+    pontes.push([await page.locator(".conta-ponte a").count(), await page.locator(".page-lede").count(), await page.locator(".conta-seguranca").count()]); // dono 2026-10-17: sem subtítulo
   }
+  const destino = await page.locator(".conta-ponte a").getAttribute("href");
   await ctx.close();
-  assert.deepEqual(vistas.map((v) => [v[0], v[1], v[3], v[4]]), [["Cobrança", "Cobrança", "PigBank · Cobrança", 0], ["Configurações", "Configurações", "PigBank · Configurações", 0]]);
-  assert.deepEqual(botoes, [["Abrir cobrança", 0, 0], ["Abrir configurações", 0, 1]]);
+  assert.deepEqual(vistas, [["Cobrança", "Cobrança", "PigBank · Cobrança", 0], ["Configurações", "Configurações", "PigBank · Configurações", 0]]);
+  assert.deepEqual(pontes, [[0, 0, 0], [1, 0, 1]]);
+  assert.equal(destino, "/settings");
 });
 
 test("⌘K lista as rotas da Conta", async () => {
@@ -252,8 +253,8 @@ test("janela baixa 769×500: clicar no centro de 'Como funciona esta tela' abre 
 // display_name/email que não são texto (123, {}) não derrubam o painel: a página abre sem nome nem e-mail.
 test("perfil com display_name número e email objeto: a página da Conta abre, sem nome nem e-mail e sem erro", async () => {
   const { antes } = conta({ perfil: { display_name: 123, email: {} } });
-  const { ctx, page, erros } = await abrir({ guia: "concluido", rota: "/conta/cobranca", antes });
-  await page.locator("#page-title", { hasText: "Cobrança" }).waitFor();
+  const { ctx, page, erros } = await abrir({ guia: "concluido", rota: "/conta/configuracoes", antes });
+  await page.locator("#page-title", { hasText: "Configurações" }).waitFor();
   await page.waitForTimeout(300);
   const r = await page.evaluate(() => ({ painel: document.querySelector(".conta-ponte a") != null, nome: document.querySelectorAll(".conta-ponte b").length, spans: document.querySelectorAll(".conta-ponte span").length }));
   await ctx.close();
@@ -302,4 +303,19 @@ test("protótipo (DEMO, mesmo bundle): sem seção Conta, sem Sair, rota da Cont
   assert.deepEqual(r, { hash: "#/", titulo: r.titulo, conta: 0, folha: 0, ficou: true });
   assert.match(r.titulo, /^Resumo/);
   assert.ok(!/Perfil|Cobrança|Configurações|Bancos conectados|Sair/.test(itens), itens);
+});
+
+test("protótipo (DEMO): #/conta/cobranca também cai no Resumo, sem 'Carregando…' e sem nenhum pedido a /billing", async () => {
+  const ctx = await browser().newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: "reduce" });
+  await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
+  const pedidos = [];
+  ctx.on("request", (q) => pedidos.push(new URL(q.url()).pathname));
+  await servir(ctx, RAIZ);
+  const page = await ctx.newPage();
+  await page.goto(`${PROTOTIPO}#/conta/cobranca`);
+  await page.locator("#page-title").waitFor();
+  await page.waitForTimeout(500);
+  const r = { hash: new URL(page.url()).hash, carregando: await page.getByText("Carregando…").count(), billing: pedidos.filter((p) => p.includes("billing")).length, secao: await page.locator(".conta-cobranca").count() };
+  await ctx.close();
+  assert.deepEqual(r, { hash: "#/", carregando: 0, billing: 0, secao: 0 });
 });

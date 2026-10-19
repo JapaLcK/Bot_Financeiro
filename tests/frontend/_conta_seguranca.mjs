@@ -41,16 +41,20 @@ function aplicaNotif(n, c) {
   n.weekly_report_enabled = n.weekly_report_available && n.weekly_report_stored_enabled;
   return { json: structuredClone(n) };
 }
+// A cobrança (GET /billing/subscription, POST /billing/portal e /billing/cancel-change; dashboard_v2_conta_cobranca.test.mjs).
+export const STRIPE_URL = "https://billing.stripe.test/p/session/teste";
+export const cobPadrao = () => ({ active: true, lifetime: false, gateway: "stripe", plan: "plus", interval: "monthly", current_period_end: "2026-11-12", scheduled_change: null });
 const mfaOff = () => ({ enabled: false, has_pending_secret: false, backup_codes_remaining: 0 });
 
 // O servidor de mentira (as rotas antigas /auth/mfa/*, /auth/me, /settings/7/password-reset). `s.reqs`: TODA requisição, com a URL
 // completa (query inclusa) e o corpo. `s.chamadas.<rota>`: os corpos que chegaram. Cada rota tem um gancho `s.<rota>(r, corpo)` que,
 // se posto, responde no lugar do padrão; `s.status` / `s.statusErro` fazem o mesmo com o GET do status. `s.sse()` solta um aviso do SSE.
+// Cobrança: `s.cob` (o corpo do GET), `s.cobGets`, `s.cobHold` (segura o GET), `s.cobGetErro(r)`, `s.portais` / `s.desfazem` (método, URL completa e CSRF de cada POST), ganchos `s.portal(r)` / `s.desfaz(r)`.
 // Sessões: `s.sessoes` (a lista), `s.sessGets` (os GET), `s.dels` (todo DELETE: método, URL completa, CSRF), `s.sessHold` (promise que segura o GET),
 // Notificações: `s.notif` (o estado), `s.nGets`, `s.nPatches` (método, URL, CSRF e corpo de cada PATCH), `s.nHold` (segura o GET), ganchos `s.nGetErro(r)` / `s.nPatch(r, corpo)`.
 // ganchos `s.sessGetErro(r)` / `s.sessDel(r, jti | null)` (jti null = "as outras") e `s.atual` (o jti da sessão que faz o pedido).
-export function servidor({ mfa = mfaOff(), temSenha = true, uid = 7, semUid = false, meRuim = false, sessoes = listaPadrao(), notif = notifPadrao() } = {}) {
-  const s = { notif, nGets: 0, nPatches: [], nHold: null, nGetErro: null, nPatch: null, mfa, temSenha, meRuim, sessoes, atual: ATUAL, sessGets: 0, dels: [], sessHold: null, sessGetErro: null, sessDel: null, reqs: [], refreshes: 0, statusHits: 0, apiMe: null, statusErro: null,
+export function servidor({ mfa = mfaOff(), temSenha = true, uid = 7, semUid = false, meRuim = false, sessoes = listaPadrao(), notif = notifPadrao(), cob = cobPadrao() } = {}) {
+  const s = { cob, cobGets: 0, cobHold: null, cobGetErro: null, portais: [], portal: null, desfazem: [], desfaz: null, notif, nGets: 0, nPatches: [], nHold: null, nGetErro: null, nPatch: null, mfa, temSenha, meRuim, sessoes, atual: ATUAL, sessGets: 0, dels: [], sessHold: null, sessGetErro: null, sessDel: null, reqs: [], refreshes: 0, statusHits: 0, apiMe: null, statusErro: null,
     chamadas: { setup: [], enable: [], disable: [], regerar: [], reset: [] }, setup: null, enable: null, disable: null, regerar: null, reset: null };
   const [segura, solta] = portao();
   s.sse = solta;
@@ -130,6 +134,21 @@ export function servidor({ mfa = mfaOff(), temSenha = true, uid = 7, semUid = fa
       if (s.nPatch) return s.nPatch(r, corpo);
       return r.fulfill(aplicaNotif(s.notif, corpo));
     });
+    await ctx.route((u) => u.pathname === "/billing/subscription", async (r) => {
+      s.cobGets++;
+      if (s.cobGetErro) return s.cobGetErro(r);
+      const foto = structuredClone(s.cob);
+      if (s.cobHold) await s.cobHold;
+      return ok(r, foto);
+    });
+    const post = (lista, gancho, padrao) => async (r) => {
+      const q = r.request();
+      lista.push({ metodo: q.method(), url: q.url(), csrf: q.headers()["x-csrf-token"], corpo: q.postData() });
+      return s[gancho] ? s[gancho](r) : padrao(r);
+    };
+    await ctx.route((u) => u.pathname === "/billing/portal", post(s.portais, "portal", (r) => ok(r, { portal_url: STRIPE_URL })));
+    await ctx.route((u) => u.pathname === "/billing/cancel-change", post(s.desfazem, "desfaz", (r) => { s.cob.scheduled_change = null; return ok(r, { ok: true }); }));
+    await ctx.route("https://billing.stripe.test/**", (r) => r.fulfill({ contentType: "text/html", body: "<title>stripe</title>" }));
     await ctx.route("**/api/v2/eventos", async (r) => {
       await segura;
       r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: 'retry: 600000\ndata: {"recurso":"tudo"}\n\n' }).catch(() => {});
