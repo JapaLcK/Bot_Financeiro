@@ -39,13 +39,13 @@ class ResumoDoMes(BaseModel):
 PADRAO_MES = r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])$"
 
 
-def mes_pedido(mes: str | None) -> tuple[int, int, datetime]:
+def mes_pedido(mes: str | None, onde: str = "query") -> tuple[int, int, datetime]:
     """(ano, mês, agora) do `mes` já validado pelo `PADRAO_MES`: sem ele, o corrente no fuso
-    do app; no futuro, 422 no envelope. Também da `GET /api/v2/lancamentos`."""
+    do app; no futuro, 422 no envelope (`onde` = "query" ou "body" no `loc`). Também da `GET /api/v2/lancamentos`."""
     agora = now_tz()
     ano, m = (int(mes[:4]), int(mes[5:])) if mes else (agora.year, agora.month)
     if (ano, m) > (agora.year, agora.month):
-        raise RequestValidationError([{"loc": ("query", "mes"), "msg": "Mês no futuro.",
+        raise RequestValidationError([{"loc": (onde, "mes"), "msg": "Mês no futuro.",
                                        "type": "value_error"}])
     return ano, m, agora
 

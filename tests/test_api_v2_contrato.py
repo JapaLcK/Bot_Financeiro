@@ -27,6 +27,7 @@ from api.v2.investido import Investido
 from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.metas import Metas
+from api.v2.orcamento_domestico import OrcamentoDomestico
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
@@ -342,6 +343,13 @@ def test_fixture_de_metas_segue_o_modelo(nome):
         if m["tipo"] == "reserva" and m["alvo"] and f["custo_mensal"]["valor"]:
             assert Decimal(m["alvo"]) == Decimal(f["custo_mensal"]["valor"]) * m["meses"]
         assert m["prazo_passou"] <= bool(m["data_alvo"]) and not (m["prazo_passou"] and m["por_mes"])
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["orcamento_domestico"]))
+def test_fixture_do_orcamento_domestico_segue_o_modelo(nome):
+    f = FIXTURES["orcamento_domestico"][nome]
+    assert OrcamentoDomestico.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
+    assert [p["chave"] for p in f["potes"]] == ["custos_fixos", "conforto", "metas", "prazeres", "liberdade_financeira", "conhecimento"]
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))
