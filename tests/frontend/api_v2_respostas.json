@@ -5876,7 +5876,64 @@
           "teto": "2750.00",
           "gasto": "2000.00",
           "restante": "750.00",
-          "usado_pct": "72.73"
+          "guardado": false,
+          "usado_pct": "72.73",
+          "categorias": [
+            "Alimentação",
+            "Mercado",
+            "Moradia",
+            "Transporte",
+            "Saúde",
+            "Assinaturas"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Moradia",
+              "total": "1534.10"
+            },
+            {
+              "categoria": "Mercado",
+              "total": "320.40"
+            },
+            {
+              "categoria": "Transporte",
+              "total": "89.60"
+            },
+            {
+              "categoria": "Assinaturas",
+              "total": "55.90"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-12",
+              "descricao": "Uber",
+              "categoria": "Transporte",
+              "valor": "89.60",
+              "origem": "conta"
+            },
+            {
+              "data": "2026-10-08",
+              "descricao": "Pão de Açúcar",
+              "categoria": "Mercado",
+              "valor": "320.40",
+              "origem": "cartao"
+            },
+            {
+              "data": "2026-10-06",
+              "descricao": "Netflix",
+              "categoria": "Assinaturas",
+              "valor": "55.90",
+              "origem": "cartao"
+            },
+            {
+              "data": "2026-10-05",
+              "descricao": "Aluguel",
+              "categoria": "Moradia",
+              "valor": "1534.10",
+              "origem": "conta"
+            }
+          ]
         },
         {
           "chave": "conforto",
@@ -5886,7 +5943,29 @@
           "teto": "250.00",
           "gasto": "310.00",
           "restante": "-60.00",
-          "usado_pct": "124.00"
+          "guardado": false,
+          "usado_pct": "124.00",
+          "categorias": [
+            "Compras online",
+            "Beleza",
+            "Pets",
+            "Outros"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Compras online",
+              "total": "310.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-09",
+              "descricao": "Fone de ouvido",
+              "categoria": "Compras online",
+              "valor": "310.00",
+              "origem": "cartao"
+            }
+          ]
         },
         {
           "chave": "metas",
@@ -5896,7 +5975,13 @@
           "teto": "500.00",
           "gasto": "0.00",
           "restante": "500.00",
-          "usado_pct": "0.00"
+          "guardado": true,
+          "usado_pct": "0.00",
+          "categorias": [
+            "Depósitos em caixinhas"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "prazeres",
@@ -5906,7 +5991,26 @@
           "teto": "500.00",
           "gasto": "125.00",
           "restante": "375.00",
-          "usado_pct": "25.00"
+          "guardado": false,
+          "usado_pct": "25.00",
+          "categorias": [
+            "Lazer"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Lazer",
+              "total": "125.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-10",
+              "descricao": "Cinema",
+              "categoria": "Lazer",
+              "valor": "125.00",
+              "origem": "cartao"
+            }
+          ]
         },
         {
           "chave": "liberdade_financeira",
@@ -5916,7 +6020,28 @@
           "teto": "500.00",
           "gasto": "500.00",
           "restante": "0.00",
-          "usado_pct": "100.00"
+          "guardado": true,
+          "usado_pct": "100.00",
+          "categorias": [
+            "Investimentos",
+            "Criptomoedas",
+            "Aportes em investimentos"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Aportes em investimentos",
+              "total": "500.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-07",
+              "descricao": "Tesouro Selic",
+              "categoria": "Aportes em investimentos",
+              "valor": "500.00",
+              "origem": "conta"
+            }
+          ]
         },
         {
           "chave": "conhecimento",
@@ -5926,13 +6051,33 @@
           "teto": "500.00",
           "gasto": "50.00",
           "restante": "450.00",
-          "usado_pct": "10.00"
+          "guardado": false,
+          "usado_pct": "10.00",
+          "categorias": [
+            "Educação"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Educação",
+              "total": "50.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-03",
+              "descricao": "Curso de inglês",
+              "categoria": "Educação",
+              "valor": "50.00",
+              "origem": "conta"
+            }
+          ]
         }
       ],
       "total": {
         "teto": "5000.00",
         "gasto": "2985.00",
         "restante": "2015.00",
+        "restante_livre": "2015.00",
         "usado_pct": "59.70"
       }
     },
@@ -5951,7 +6096,31 @@
           "teto": "617.28",
           "gasto": "600.00",
           "restante": "17.28",
-          "usado_pct": "97.20"
+          "guardado": false,
+          "usado_pct": "97.20",
+          "categorias": [
+            "Alimentação",
+            "Mercado",
+            "Moradia",
+            "Transporte",
+            "Saúde",
+            "Assinaturas"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Moradia",
+              "total": "600.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-05",
+              "descricao": "Aluguel",
+              "categoria": "Moradia",
+              "valor": "600.00",
+              "origem": "conta"
+            }
+          ]
         },
         {
           "chave": "conforto",
@@ -5961,7 +6130,29 @@
           "teto": "123.46",
           "gasto": "10.00",
           "restante": "113.46",
-          "usado_pct": "8.10"
+          "guardado": false,
+          "usado_pct": "8.10",
+          "categorias": [
+            "Compras online",
+            "Beleza",
+            "Pets",
+            "Outros"
+          ],
+          "por_categoria": [
+            {
+              "categoria": "Pets",
+              "total": "10.00"
+            }
+          ],
+          "lancamentos": [
+            {
+              "data": "2026-10-09",
+              "descricao": "Ração",
+              "categoria": "Pets",
+              "valor": "10.00",
+              "origem": "conta"
+            }
+          ]
         },
         {
           "chave": "metas",
@@ -5971,7 +6162,13 @@
           "teto": "123.46",
           "gasto": "0.00",
           "restante": "123.46",
-          "usado_pct": "0.00"
+          "guardado": true,
+          "usado_pct": "0.00",
+          "categorias": [
+            "Depósitos em caixinhas"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "prazeres",
@@ -5981,7 +6178,13 @@
           "teto": "123.46",
           "gasto": "0.00",
           "restante": "123.46",
-          "usado_pct": "0.00"
+          "guardado": false,
+          "usado_pct": "0.00",
+          "categorias": [
+            "Lazer"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "liberdade_financeira",
@@ -5991,7 +6194,15 @@
           "teto": "123.46",
           "gasto": "0.00",
           "restante": "123.46",
-          "usado_pct": "0.00"
+          "guardado": true,
+          "usado_pct": "0.00",
+          "categorias": [
+            "Investimentos",
+            "Criptomoedas",
+            "Aportes em investimentos"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "conhecimento",
@@ -6001,13 +6212,20 @@
           "teto": "123.46",
           "gasto": "0.00",
           "restante": "123.46",
-          "usado_pct": "0.00"
+          "guardado": false,
+          "usado_pct": "0.00",
+          "categorias": [
+            "Educação"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         }
       ],
       "total": {
         "teto": "1234.58",
         "gasto": "610.00",
         "restante": "624.58",
+        "restante_livre": "624.58",
         "usado_pct": "49.41"
       }
     },
@@ -6026,7 +6244,18 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": false,
+          "usado_pct": null,
+          "categorias": [
+            "Alimentação",
+            "Mercado",
+            "Moradia",
+            "Transporte",
+            "Saúde",
+            "Assinaturas"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "conforto",
@@ -6036,7 +6265,16 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": false,
+          "usado_pct": null,
+          "categorias": [
+            "Compras online",
+            "Beleza",
+            "Pets",
+            "Outros"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "metas",
@@ -6046,7 +6284,13 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": true,
+          "usado_pct": null,
+          "categorias": [
+            "Depósitos em caixinhas"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "prazeres",
@@ -6056,7 +6300,13 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": false,
+          "usado_pct": null,
+          "categorias": [
+            "Lazer"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "liberdade_financeira",
@@ -6066,7 +6316,15 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": true,
+          "usado_pct": null,
+          "categorias": [
+            "Investimentos",
+            "Criptomoedas",
+            "Aportes em investimentos"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         },
         {
           "chave": "conhecimento",
@@ -6076,13 +6334,20 @@
           "teto": "0.00",
           "gasto": "0.00",
           "restante": "0.00",
-          "usado_pct": null
+          "guardado": false,
+          "usado_pct": null,
+          "categorias": [
+            "Educação"
+          ],
+          "por_categoria": [],
+          "lancamentos": []
         }
       ],
       "total": {
         "teto": "0.00",
         "gasto": "0.00",
         "restante": "0.00",
+        "restante_livre": "0.00",
         "usado_pct": null
       }
     }

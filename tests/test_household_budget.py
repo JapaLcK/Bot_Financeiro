@@ -223,6 +223,19 @@ def test_budget_amount_e_used_pct_seguem_a_renda(user_id):
     assert b["used_pct"] == 50.0
 
 
+def test_guarda_so_em_metas_e_liberdade_e_restante_livre_ignora_excedente_guardado(user_id):
+    set_income_override(user_id, _mes_atual(), 10000.0)
+    _gasto(user_id, "sem_mapa_xyz", 560.0)                           # conforto (teto 500): -60
+    _gasto(user_id, "investimento_aporte", 3000.0, interno=True)     # liberdade (teto 1000): -2000, guardado
+
+    status = get_household_budget_status(user_id, _mes_atual())
+    assert {b["key"] for b in status["buckets"] if b["guarda"]} == {"metas", "liberdade_financeira"}
+    assert _bucket(status, "conforto")["remaining"] == -60.0
+    assert _bucket(status, "liberdade_financeira")["remaining"] == -2000.0
+    assert status["totals"]["remaining"] == 6440.0        # líquido: inclui o excedente guardado
+    assert status["totals"]["remaining_free"] == 8440.0   # 5500 - 60 + 1000 + 1000 + 0 + 1000
+
+
 def test_renda_zero_used_pct_none_sem_divisao_por_zero(user_id):
     _gasto(user_id, "lazer", 100.0)
     status = get_household_budget_status(user_id, _mes_atual())
@@ -237,7 +250,7 @@ def test_totals_tem_o_shape_fechado(user_id):
     set_income_override(user_id, _mes_atual(), 10000.0)
     _gasto(user_id, "moradia", 1000.0)
     status = get_household_budget_status(user_id, _mes_atual())
-    assert set(status["totals"]) == {"spent", "budget_amount", "remaining", "used_pct"}
+    assert set(status["totals"]) == {"spent", "budget_amount", "remaining", "remaining_free", "used_pct"}
     assert status["totals"]["budget_amount"] == 10000.0  # soma dos % = 100
     assert status["totals"]["spent"] == 1000.0
     assert status["totals"]["used_pct"] == 10.0
@@ -385,7 +398,7 @@ def test_rota_status_200_para_pro(user_id):
     corpo = r.json()
     assert corpo["ok"] is True
     assert len(corpo["buckets"]) == 6
-    assert set(corpo["totals"]) == {"spent", "budget_amount", "remaining", "used_pct"}
+    assert set(corpo["totals"]) == {"spent", "budget_amount", "remaining", "remaining_free", "used_pct"}
 
 
 def test_rota_income_override_e_amount_null_limpa(user_id):
