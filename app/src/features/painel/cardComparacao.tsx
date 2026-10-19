@@ -55,6 +55,6 @@ export function CardComparacao() {
         <Delta centavos={c.total_delta} oculto={oculto} />
       </View>)}
     </View>
-    <Avisos motivos={d.motivos} />
+    <Avisos motivos={d.motivo ? [...d.motivos, d.motivo] : d.motivos} />
   </View>;
 }

@@ -89,6 +89,7 @@ const MOTIVOS: Record<string, string> = {
  especie_incompleta: "O dinheiro em espécie pode estar incompleto.", banco_desatualizado: "Os dados do banco precisam ser atualizados.",
  saldo_ausente: "O banco não informou um dos saldos.", moeda_presumida: "A moeda de uma conta ainda precisa ser confirmada.",
  conta_fora_do_ultimo_sync: "Uma conta não apareceu na última sincronização.", conexao_pausada: "Há uma conexão bancária pausada.",
+ categorias_indisponiveis: "Não deu para ler as categorias agora.",
  inicio_do_historico: "O histórico do seu plano tem uma data de início: o que vem antes dela não entra nos números do período nem na comparação.",
 };
 /** Estado do banco: vai só no aviso único do topo (`TelaPainel`), nunca repetido nos cards. */

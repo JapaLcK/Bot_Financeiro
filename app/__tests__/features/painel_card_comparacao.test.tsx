@@ -62,9 +62,9 @@ describe("curvasDaComparacao", () => {
   it("mês aberto: atual para em hoje (17 pontos, marca o dia), anterior inteiro; o eixo X é o maior dos dois (31)", () => {
     const c = curvasDaComparacao(de())!; expect([c.pontos.length, c.anterior.length, c.diasNoMes, c.indiceHoje]).toEqual([17, 30, 31, 16]); expect(c.pontos.at(-1)).toBe(210050);
   });
-  it("o lado que contém hoje é o ANTERIOR: a atual vem inteira, sem marca de hoje", () => {
+  it("o lado que contém hoje é o ANTERIOR (período informado, sem `dias_corridos`): a atual vem inteira, sem marca de hoje", () => {
     const s = { atual: Array.from({ length: 31 }, (_, i) => i * 100), anterior: Array.from({ length: 10 }, (_, i) => i * 100) };
-    const c = curvasDaComparacao(de({ serie: { atual: s.atual.map((v) => v / 100), anterior: s.anterior.map((v) => v / 100) } }))!; expect([c.pontos.length, c.anterior.length, c.indiceHoje]).toEqual([31, 10, null]);
+    const c = curvasDaComparacao(de({ modo: "periodos_informados", dias_corridos: undefined, dias_no_mes: undefined, serie: { atual: s.atual.map((v) => v / 100), anterior: s.anterior.map((v) => v / 100) } }))!; expect([c.pontos.length, c.anterior.length, c.indiceHoje]).toEqual([31, 10, null]);
   });
   it("período mais curto que o outro: o eixo é o maior (fevereiro de 28 contra janeiro de 31)", () => {
     expect(curvasDaComparacao(de({ atual: { inicio: "2026-02-01", fim: "2026-02-28", dias: 28 }, anterior: { inicio: "2026-01-01", fim: "2026-01-31", dias: 31 }, serie: { atual: Array(28).fill(1), anterior: Array(31).fill(1) } }))!.diasNoMes).toBe(31);
@@ -74,6 +74,12 @@ describe("curvasDaComparacao", () => {
   });
   it("caso comum (a série para em hoje) marca o último ponto; `dias_corridos` incoerente com a série não inventa dia", () => {
     expect(curvasDaComparacao(de({ dias_corridos: 12, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
+    expect(curvasDaComparacao(de({ dias_corridos: 20, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
+  });
+  it("mês aberto com lançamento futuro no ÚLTIMO dia: a série cobre o mês todo (31 pontos) e a marca continua em `dias_corridos` (o scrub do gráfico para nela)", () => {
+    const c = curvasDaComparacao(de({ dias_corridos: 12, serie: { atual: Array(31).fill(10), anterior: Array(30).fill(10) } }))!; expect([c.pontos.length, c.diasNoMes, c.indiceHoje]).toEqual([31, 31, 11]);
+  });
+  it("mês aberto com `dias_corridos` maior que a série cai na regra antiga (fim da série)", () => {
     expect(curvasDaComparacao(de({ dias_corridos: 20, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
   });
   it("série cheia (período fechado): sem marca de hoje", () => {
@@ -161,6 +167,12 @@ describe("CardComparacao", () => {
   it("os `motivos` do bloco aparecem como ressalva; sem motivos, nada", () => {
     const v = direto(COMP); expect(screen.queryByLabelText("Ver ressalvas")).toBeNull();
     v.unmount(); direto(bloco({ motivos: ["cobertura_parcial"] })); expect(screen.getByLabelText("Ver ressalvas")).toBeTruthy();
+  });
+  it("`motivo` singular do bloco (categorias_indisponiveis, com categorias vazias) vira ressalva; sem motivo nenhum, nada; repetido em `motivos`, um aviso só", () => {
+    const aviso = "Não deu para ler as categorias agora.", abrir = () => fireEvent.press(screen.getByLabelText("Ver ressalvas"));
+    const v = direto(bloco({ motivo: "categorias_indisponiveis", categorias: [], motivos: [] })); abrir(); expect(screen.getAllByText(aviso)).toHaveLength(1);
+    v.unmount(); direto(bloco({ motivo: null, motivos: [] })); expect(screen.queryByLabelText("Ver ressalvas")).toBeNull();
+    v.unmount(); direto(bloco({ motivo: "categorias_indisponiveis", motivos: ["categorias_indisponiveis"] })); abrir(); expect(screen.getAllByText(aviso)).toHaveLength(1);
   });
   it("serie null: o card sai sem gráfico, com valor, chip e categorias; sem categorias: só o topo", () => {
     const v = direto(bloco({ serie: null })); expect(curva()).toBeNull(); expect(screen.getByText("−R$ 1.249,50")).toBeTruthy(); expect(screen.getByText("-37,3%")).toBeTruthy(); expect(screen.getByText("Alimentação")).toBeTruthy();
