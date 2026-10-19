@@ -51,18 +51,25 @@ describe("classificar: o ui.state do servidor vira uma ação (b > a > a0 > c)",
     ["a vence a0 e c", [con("a", "updating"), con("b", "paused"), con("c", "partial")], "atualizar"],
     ["a0 vence c", [con("a", "paused"), con("b", "updating")], "acompanhar"],
   ] as const)("%s", (_, lista, tipo) => { expect(classificar([...lista], true).tipo).toBe(tipo); });
-  it("needs_user_action SEM provider_item_id não tem como reautorizar: (c) com a instrução do servidor", () => {
-    expect(classificar([con("x", "needs_user_action", "Reautorize o banco", { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: "Nubank: Reautorize o banco." });
+  it("needs_user_action SEM provider_item_id não tem como reautorizar: (c) com o nome do banco", () => {
+    expect(classificar([con("x", "needs_user_action", "Reautorize o banco", { provider_item_id: null })], true)).toEqual({ tipo: "ver", texto: "Erro em Nubank." });
   });
-  it("reconectar leva o item e o nome do banco; sem limite no plano vira (c) com o detalhe do servidor", () => {
+  it("reconectar leva o item e o nome do banco; sem limite no plano vira (c) com o nome do banco", () => {
     const l = [con("it_1", "needs_user_action", "Reautorize o banco")];
     expect(classificar(l, true)).toEqual({ tipo: "reconectar", itemId: "it_1", banco: "Nubank" });
-    expect(classificar(l, false)).toEqual({ tipo: "ver", texto: "Nubank: Reautorize o banco." });
+    expect(classificar(l, false)).toEqual({ tipo: "ver", texto: "Erro em Nubank." });
   });
-  it("(c) de dispositivo traz a instrução do servidor; vários bancos viram uma frase por banco; sem ponto duplicado", () => {
-    expect(classificar([con("a", "needs_user_action", AUTORIZE_NO_APP)], true)).toEqual({ tipo: "ver", texto: "Nubank: Autorize o acesso no app do banco." });
+  it("(c) de dispositivo: texto curto só com o banco; vários bancos viram uma frase", () => {
+    expect(classificar([con("a", "needs_user_action", AUTORIZE_NO_APP)], true)).toEqual({ tipo: "ver", texto: "Erro em Nubank." });
     const dois = [con("a", "paused", "Plano pausado."), con("b", "item_missing", "Banco não encontrado", { institution_name: "Itaú" })];
-    expect(classificar(dois, true)).toEqual({ tipo: "ver", texto: "Nubank: Plano pausado. Itaú: Banco não encontrado." });
+    expect(classificar(dois, true)).toEqual({ tipo: "ver", texto: "Erro em Nubank, Itaú." });
+  });
+  it("a frase é curta: mesmo banco duas vezes aparece uma, 3 bancos entram todos, nome ausente ou vazio vira 'seu banco'", () => {
+    const c = (id: string, nome: string | null) => con(id, "paused", "x", { institution_name: nome as never });
+    const texto = (l: ReturnType<typeof con>[]) => (classificar(l, true) as { texto: string }).texto;
+    expect(texto([c("a", "Nubank"), c("b", "Nubank")])).toBe("Erro em Nubank.");
+    expect(texto([c("a", "A"), c("b", "B"), c("c", "C")])).toBe("Erro em A, B, C.");
+    expect(texto([c("a", ""), c("b", null)])).toBe("Erro em seu banco.");
   });
 });
 
@@ -77,10 +84,10 @@ describe("atualizar (a): o POST", () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "rate_limited")]) });
     await atualizar(d); expect(ultimo()).toEqual(OCIOSO); expect(w.sucessos).toBe(1);
   });
-  it("updating SEM coleta (motivo de falha, ex. read_failed na 1ª conexão): é problema, não sucesso; sem detalhe, a frase de falha", async () => {
+  it("updating SEM coleta (motivo de falha, ex. read_failed na 1ª conexão): é problema, não sucesso; a frase curta do banco", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, "read_failed")]) });
     await atualizar(d);
-    expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Não conseguimos atualizar agora. Tente de novo." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
+    expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
   it.each([[null], [""], ["ok"], ["no_accounts"], ["OK"]])("updating com motivo de coleta (%p) segue em dia (controle positivo)", async (reason) => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", false, null, reason)]) });
@@ -89,18 +96,18 @@ describe("atualizar (a): o POST", () => {
   it("um banco ainda coletando NÃO esconde a falha de outro (erro antes do neutro, como o web): resultado na hora, sem acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "updating", true), item("it_2", "partial", false, "Parte dos dados ainda não veio")]) });
     await atualizar(d);
-    expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
+    expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.sucessos).toBe(0); expect(w.avisos).toBe(1); expect(w.leituras).toEqual([]);
   });
   it("o item que ainda coleta também é julgado pelo estado (still_updating é independente do state no servidor): partial coletando é problema; rate_limited coletando acompanha", async () => {
     const a = mundo({ enviar: async () => refresh([item("it_1", "partial", true, "Parte dos dados ainda não veio")]) }); await atualizar(a.d);
-    expect(a.ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Parte dos dados ainda não veio." }); expect(a.w.leituras).toEqual([]);
+    expect(a.ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(a.w.leituras).toEqual([]);
     const b = mundo({ enviar: async () => refresh([item("it_1", "rate_limited", true)]), lista: () => [con("it_1", "updated", null, { last_sync_at: "2026-10-10T13:00:00Z" })] }); await atualizar(b.d);
     expect(b.w.leituras).toHaveLength(1); expect(b.w.sucessos).toBe(1);
   });
-  it("item com problema: resultado com a instrução do servidor, aviso(), recarga, e NADA de acompanhar", async () => {
+  it("item com problema: resultado com o nome do banco, aviso(), recarga, e NADA de acompanhar", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "partial", false, "Cartão desatualizado desde 12/08")]) });
     await atualizar(d);
-    expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Cartão desatualizado desde 12/08." }); expect(w.avisos).toBe(1); expect(w.sucessos).toBe(0); expect(w.recarregas).toBe(1); expect(w.leituras).toEqual([]);
+    expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.avisos).toBe(1); expect(w.sucessos).toBe(0); expect(w.recarregas).toBe(1); expect(w.leituras).toEqual([]);
   });
   it("sem laço: a rodada que termina com problema fica em 'resultado' (a tela não oferece o botão), não em ocioso", async () => {
     const { d, ultimo } = mundo({ enviar: async () => refresh([item("it_1", "partial", false, "Parte dos dados ainda não veio")]) });
@@ -187,9 +194,9 @@ describe("acompanhar: cadência 5/10/20/40/60 s, sequencial, teto de 5 min", () 
     const { w, d, ultimo } = mundo({ enviar: async () => comColeta, lista: () => new SessaoExpirada() });
     await atualizar(d); expect(w.falhas).toHaveLength(1); expect(ultimo()).toEqual(OCIOSO); expect(w.leituras).toHaveLength(1); expect(w.avisos).toBe(0);
   });
-  it("o item sai da coleta com problema: a instrução do servidor fica (resultado), aviso() e recarga", async () => {
+  it("o item sai da coleta com problema: o banco com erro fica (resultado), aviso() e recarga", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => comColeta, lista: () => [con("it_1", "needs_user_action", "Reautorize o banco")] });
-    await atualizar(d); expect(ultimo()).toEqual({ fase: "resultado", texto: "Nubank: Reautorize o banco." }); expect(w.avisos).toBe(1); expect(w.recarregas).toBe(1);
+    await atualizar(d); expect(ultimo()).toEqual({ fase: "resultado", texto: "Erro em Nubank." }); expect(w.avisos).toBe(1); expect(w.recarregas).toBe(1);
   });
   it("o item sumiu da lista: acompanhar para (nada a esperar) e recarrega", async () => {
     const { w, d, ultimo } = mundo({ enviar: async () => comColeta, lista: () => [] });

@@ -132,7 +132,9 @@ describe("editar", () => {
     await waitFor(() => expect(posts()[0]!.corpo).toEqual({ id: 1, meses: 7 }));
   });
   it("prazo: 'Tirar prazo' manda `data_alvo: null`; prazo já vencido e intocado não bloqueia salvar o nome", async () => {
-    await abrirAba(); await apertar(/^Viagem pro Japão.*editar$/); await folha("Editar meta"); await apertar("Tirar prazo"); await salvar();
+    await abrirAba(); await apertar(/^Viagem pro Japão.*editar$/); await folha("Editar meta");
+    expect(screen.getAllByTestId("grupo-separador")).toHaveLength(1); // Prazo e Fonte: "Tirar prazo" é botão FORA do grupo de linhas (com ele dentro seriam 2)
+    await apertar("Tirar prazo"); await salvar();
     await waitFor(() => expect(posts()[0]!.corpo).toEqual({ id: 2, data_alvo: null }));
   });
   it("meta com prazo vencido (2026-08-15): trocar só o nome envia, sem erro de data", async () => {
