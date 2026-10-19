@@ -156,7 +156,7 @@ export function ContaBancos() {
   // Fim da reconexão (NUNCA lança). 401 = sessão; 403 = o uid é velho (nada de reler com ele); a conta trocada no meio cai no mesmo ramo (o POST do save vai à conta do clique e,
   // com a sessão já de outra conta, o servidor o recusa; aqui nada é dito sobre a nova). Prazo/"ocupado": o servidor nem viu, não relê. O resto relê as leituras e só então libera os botões.
   // `semFoco`: o widget segue aberto por cima da página, o foco fica onde está e volta no `onClose` tardio do widget (`pendente`). O foco volta à linha; ao título se o banco sumiu, 401 ou 403.
-  const terminou = async (a: Alvo, r: Resultado, semFoco: boolean) => {
+  const terminou = async (a: Alvo, r: Resultado, semFoco: boolean, eu: Sessao) => {
     const contaMudou = () => qc.getQueryData<{ user_id?: number }>(contaQuery.queryKey)?.user_id !== a.uid;
     const status = r && !r.ok ? r.status : undefined;
     const trocada = contaMudou();
@@ -176,15 +176,14 @@ export function ContaBancos() {
       if (r && !r.ok && status !== 401) { const f = textoDaFalha(r, a.nome); setFalha({ texto: f.texto, id: f.semId ? undefined : a.id }); }
       if (!semFoco) focar(titulo);
     }
-    emCurso.current = null;
-    setRecon(false);
+    if (emCurso.current === eu) { emCurso.current = null; setRecon(false); } // defensiva: a releitura desta sessão não solta a trava de uma reconexão mais nova (a da conta nova)
   };
   const reconectarBanco = (c: Conexao) => {
     const seletor = seletorOF();
     if (alvo || dialogo.current || emCurso.current || !seletor || !uidValido(uid) || !c.provider_item_id) return;
     const a = { uid, id: c.id, nome: nomeDoBanco(c) };
     pendente.current = null;
-    const s = emCurso.current = iniciar((r, semFoco) => { terminou(a, r, semFoco); }, () => seletor.destroy());
+    const s = emCurso.current = iniciar((r, semFoco) => { terminou(a, r, semFoco, s); }, () => seletor.destroy());
     setRecon(true);
     setAviso(`Reconectando ${a.nome}…`);
     setFalha(null);
