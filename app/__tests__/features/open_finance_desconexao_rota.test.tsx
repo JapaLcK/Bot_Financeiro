@@ -3,7 +3,7 @@ import { Alert } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { VIVO } from "./open_finance_volta_apoio";
-import { abrirBancos, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { abrirBanco, appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 
 beforeEach(async () => { prepararCaso(); desligarTrava(); await guardarCredenciais(S); });
 afterEach(() => jest.restoreAllMocks());
@@ -15,12 +15,15 @@ it("confirma remoção individual sem afetar a segunda conexão ou enviar DELETE
   });
   const alert = jest.spyOn(Alert, "alert").mockImplementation((_title, _message, botoes) => { botoes?.find((b) => b.style === "destructive")?.onPress?.(); });
   renderRouter("./app", { initialUrl: "/conexoes" });
-  await abrirBancos();
+  await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
-  // A hora da última sincronização vira tempo relativo ("há N dias"), uma por banco; o formato em si é de `bancos_juntar.test.ts`.
-  expect(screen.getAllByText(/^há \d+ (min|h|dias?)$/)).toHaveLength(2);
+  // A hora da última sincronização vira tempo relativo ("há N dias") só no detalhe aberto; o formato em si é de `bancos_juntar.test.ts`.
+  expect(screen.getAllByText(/^há \d+ (min|h|dias?)$/)).toHaveLength(1);
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^Nubank,/ })).toBeNull());
+  expect(screen.getByText("Nubank desconectado.")).toBeTruthy();
+  await abrirBanco("Itaú");
   expect(screen.getByRole("button", { name: "Desconectar Itaú" })).toBeTruthy();
   expect(alert.mock.calls[0]?.[1]).toContain("dados importados deste banco serão removidos");
   expect(chamadas().filter((c) => c.caminho.includes("/connections/"))).toHaveLength(1);
@@ -35,13 +38,14 @@ it("DELETE concluído em background libera ações ao voltar ao foreground", asy
   });
   jest.spyOn(Alert, "alert").mockImplementation((_title, _message, botoes) => { botoes?.find((b) => b.style === "destructive")?.onPress?.(); });
   renderRouter("./app", { initialUrl: "/conexoes" });
-  await abrirBancos();
+  await abrirBanco();
   await waitFor(() => expect(screen.getByRole("button", { name: "Desconectar Nubank" })).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Desconectar Nubank" })); await drenar(); });
   await appVai("background");
   await act(async () => { pausa.soltar(); await drenar(); });
   await appVai("active");
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Desconectar Nubank" })).toBeNull());
-  expect(screen.getByRole("button", { name: "Reconectar Itaú" })).toBeEnabled();
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^Nubank,/ })).toBeNull());
   expect(screen.getByRole("button", { name: "Conectar outro banco" })).toBeEnabled();
+  await abrirBanco("Itaú");
+  expect(screen.getByRole("button", { name: "Reconectar Itaú" })).toBeEnabled();
 });

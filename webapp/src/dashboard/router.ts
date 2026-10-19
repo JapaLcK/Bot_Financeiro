@@ -10,6 +10,8 @@ export const ROUTES = [
   { path: "/gastos", label: "Para onde vai", short: "Gastos", icon: "ph-chart-bar", title: "Para onde vai o dinheiro" },
   { path: "/assinaturas", label: "Assinaturas", short: "Assinaturas", icon: "ph-arrows-clockwise", title: "Assinaturas" },
   { path: "/simulador", label: "Simulador", short: "Simulador", icon: "ph-lightning", title: "Simulador" },
+  // Subpágina da ferramenta "Vale a pena comprar?": fora do RAIL e do protótipo, como a Conta.
+  { path: "/simulador/compra", label: "Vale a pena comprar?", short: "Comprar", icon: "ph-shopping-cart", title: "Vale a pena comprar?" },
   { path: "/metas", label: "Metas", short: "Metas", icon: "ph-target", title: "Metas" },
   { path: "/patrimonio", label: "Patrimônio", short: "Patrimônio", icon: "ph-wallet", title: "Patrimônio" },
   { path: "/lancamentos", label: "Lançamentos", short: "Extrato", icon: "ph-receipt", title: "Lançamentos" },
@@ -28,12 +30,12 @@ export type Path = (typeof ROUTES)[number]["path"];
 export const TABBAR: Path[] = ["/", "/gastos", "/piggy", "/lancamentos"];
 // O Piggy não entra no menu lateral: no desktop o acesso é a barra de conversa.
 export const CONTA: Path[] = ["/conta/perfil", "/conta/cobranca", "/conta/configuracoes", "/conta/bancos"];
-export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && !CONTA.includes(p));
+export const RAIL: Path[] = ROUTES.map((r) => r.path).filter((p) => p !== "/piggy" && p !== "/simulador/compra" && !CONTA.includes(p));
 // O protótipo (DEMO) não tem conta: as rotas da Conta não existem nele (nem hash, nem ⌘K).
-export const ATIVAS = ROUTES.filter((r) => !(DEMO && CONTA.includes(r.path)));
+export const ATIVAS = ROUTES.filter((r) => !(DEMO && (CONTA.includes(r.path) || r.path === "/simulador/compra")));
 // Páginas que mostram só o presente (ignoram o mês escolhido): o topbar esconde o seletor.
 // A previsão real é de hoje em diante; a do protótipo segue o mês escolhido.
-export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/metas", "/patrimonio", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
+export const NO_MONTH: Path[] = ["/assinaturas", "/simulador", "/simulador/compra", "/metas", "/patrimonio", "/ferramentas", "/piggy", ...CONTA, ...(DEMO ? [] : ["/previsao" as const])];
 
 // Hash desconhecido (#/xyz) abre o Resumo e troca o endereço para "#/" sem criar entrada
 // no histórico; hash vazio continua valendo como Resumo.

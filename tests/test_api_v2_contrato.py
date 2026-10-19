@@ -467,3 +467,24 @@ def test_fixture_de_previsao_segue_modelo_e_precisao(nome):
     else:
         assert p.capacidades == ["marcos"]
         assert p.periodo is p.ancora is p.pior_dia is p.compromissos is None
+
+
+def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
+    import re
+    from datetime import date, timedelta
+    from api.v2.simulador import CODIGO_GENERICO, CODIGOS_ERRO, PREMISSAS_V2, Simulador
+    f = FIXTURES["simulador"]["compra"]
+    s = Simulador.model_validate(f)
+    assert s.model_dump(mode="json") == f
+    # a regra de tamanho da API: hoje..hoje+dias, uma data por dia, em `atual` e em cada cenário
+    esperado = [(date.fromisoformat(f["hoje"]) + timedelta(days=i)).isoformat() for i in range(f["dias"] + 1)]
+    for t in (s.atual.trajetoria, *(c.resumo.trajetoria for c in s.cenarios)):
+        assert [p.data for p in t] == esperado
+    assert f["premissas"][-len(PREMISSAS_V2):] == PREMISSAS_V2 and len(f["premissas"]) == 4 + len(PREMISSAS_V2)  # as 4 da Previsão + as da pessoa
+    assert not [t for t in f["premissas"] if re.search(r"\b[a-z]+_[a-z_]+\b", t)]
+    # os códigos de 422 que a tela cobre (`dashboard_v2_simulador_compra.test.mjs`) são os do servidor
+    assert FIXTURES["simulador"]["codigos_422"] == sorted({c for c, _ in CODIGOS_ERRO.values()} | {CODIGO_GENERICO})
+    assert s.cabe_nas_premissas is s.cobertura.inclui_estimativa_variavel is False and s.orientacao == "abster"
+    ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/api-v2.gen.ts").read_text(encoding="utf-8")
+    bloco = "\n".join(l for l in ts.splitlines() if l.startswith(("export type Simulador", "export type ResumoCenario", "export type ContratoSimulador", "export type PontoSimulador")))
+    assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco

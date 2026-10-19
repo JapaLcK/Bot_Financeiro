@@ -72,7 +72,7 @@ test("negativo: estado com outro tom (updated virando pendente) aparece como dif
 });
 
 const BANCO_CARD_WEB = () => ler("webapp", "src", "dashboard", "conta", "BancoCard.tsx");
-const BANCO_CARD_APP = () => ler("app", "src", "features", "openFinance", "conexoes", "BancoCard.tsx");
+const BANCO_CARD_APP = () => ler("app", "src", "features", "openFinance", "conexoes", "BancoDetalhe.tsx");
 const lista = (m, rotulo) => { assert.ok(m, `${rotulo} não encontrado: o formato mudou`); return m[1].split(",").map((x) => x.trim().replace(/"/g, "")).filter(Boolean).sort(); };
 const estadosDiff = (web, app) => {
   const w = lista(/SEM_RECONEXAO\s*=\s*\[([^\]]*)\]/.exec(web), "SEM_RECONEXAO");
@@ -84,4 +84,43 @@ test("estados sem Reconectar do painel == os do app", () => {
 });
 test("negativo: um estado a mais só no painel aparece como diferença", () => {
   assert.equal(estadosDiff(BANCO_CARD_WEB().replace('"paused"]', '"paused", "error"]'), BANCO_CARD_APP()).length, 1);
+});
+
+// Disponíveis para conectar e faixa do Banco Central: o app COPIA dois literais do /painel (webapp/src/dashboard/lib/bancos.ts e conta/BancoDetalhe.tsx).
+const APP_JUNTAR = () => ler("app", "src", "features", "openFinance", "conexoes", "juntar.ts");
+const WEB_DETALHE = () => ler("webapp", "src", "dashboard", "conta", "BancoDetalhe.tsx");
+const APP_DETALHE = () => ler("app", "src", "features", "openFinance", "conexoes", "BancoDetalhe.tsx");
+const populares = (texto) => {
+  const m = /POPULARES\s*=\s*\[([^\]]*)\]/.exec(texto);
+  assert.ok(m, "POPULARES não encontrado: o formato mudou");
+  const lista = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+  assert.ok(lista.length > 0, "POPULARES vazio: o formato mudou");
+  return lista;
+};
+const faixaWeb = (texto) => {
+  const m = /Conexão regulamentada[^<{]*/.exec(texto);
+  assert.ok(m, "faixa do Banco Central não encontrada no /painel: o formato mudou");
+  return m[0].trim();
+};
+const faixaApp = (texto) => {
+  const m = /FAIXA_BC\s*=\s*"([^"]+)"/.exec(texto);
+  assert.ok(m, "FAIXA_BC não encontrada no app: o formato mudou");
+  return m[1];
+};
+
+test("POPULARES do app == o do /painel (mesmos bancos, mesma ordem)", () => {
+  assert.deepEqual(populares(APP_JUNTAR()), populares(WEB()));
+});
+test("negativo: ordem trocada ou banco a menos num dos lados é visto", () => {
+  const web = WEB().replace('"itau", "bradesco"', '"bradesco", "itau"');
+  assert.notDeepEqual(populares(APP_JUNTAR()), populares(web));
+  assert.notDeepEqual(populares(APP_JUNTAR().replace('"btg", ', "")), populares(WEB()));
+});
+
+test("a faixa do Banco Central do app == a do /painel (texto idêntico)", () => {
+  assert.equal(faixaApp(APP_DETALHE()), faixaWeb(WEB_DETALHE()));
+});
+test("negativo: uma palavra trocada num dos lados é vista", () => {
+  assert.notEqual(faixaApp(APP_DETALHE().replace("oficial pelo", "oficializado pelo")), faixaWeb(WEB_DETALHE()));
+  assert.notEqual(faixaApp(APP_DETALHE()), faixaWeb(WEB_DETALHE().replace("Banco Central", "Banco Central do Brasil")));
 });

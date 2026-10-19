@@ -1,10 +1,10 @@
 import { router } from "expo-router";
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import type { Conexao } from "@/api/schemas/openFinance";
 import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
-import { abrirBancos, appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
+import { abrirBanco, appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
 // Só a fronteira WebView nativa é dublada; Router, autorização e HTTP são reais.
 jest.mock("react-native-pluggy-connect", () => ({ PluggyConnect: () => null }));
@@ -66,13 +66,14 @@ it("Volta coberta por outra rota pausa GET e retoma pelo mesmo marcador ao volta
   expect(await lerTentativaBancaria(1)).toEqual(marcador); expect(tokens()).toHaveLength(0);
 });
 
-it.each([[0, 0], [0, 1], [1, 0]])("Acompanhar %s→%s no mesmo frame guarda só banco do primeiro botão", async (primeiro, segundo) => {
+// Uma folha por vez: a corrida é no MESMO banco (Acompanhar duas vezes, ou Acompanhar e Reconectar), e só o primeiro botão guarda o banco.
+it.each([["Nubank", VIVO.provider_item_id, "Acompanhar sincronização"], ["Itaú", B, "Acompanhar sincronização"], ["Itaú", B, "Reconectar Itaú"]])("Acompanhar %s (%s) → %s no mesmo frame guarda só o primeiro botão", async (banco, item, segundo) => {
   servidor(); const marcador = await lerTentativaBancaria(1); const r = renderRouter("./app", { initialUrl: "/conexoes" });
-  await waitFor(() => expect(screen.getAllByRole("button", { name: "Acompanhar sincronização" })).toHaveLength(2));
-  const bs = screen.getAllByRole("button", { name: "Acompanhar sincronização" }); const antes = gets();
-  await act(async () => { fireEvent.press(bs[primeiro]!); fireEvent.press(bs[segundo]!); await drenar(); });
+  await abrirBanco(banco);
+  const primeiro = screen.getByRole("button", { name: "Acompanhar sincronização" }); const outro = screen.getByRole("button", { name: segundo }); const antes = gets();
+  await act(async () => { fireEvent.press(primeiro); fireEvent.press(outro); await drenar(); });
   await waitFor(() => expect(screen.getByRole("button", { name: "Sair" })).toBeTruthy());
-  expect({ pilha: pilha(r)?.filter((p) => p.nome === "open-finance-volta"), gets: gets() - antes }).toEqual({ pilha: [{ nome: "open-finance-volta", item: primeiro === 0 ? VIVO.provider_item_id : B }], gets: 1 });
+  expect({ pilha: pilha(r)?.filter((p) => p.nome === "open-finance-volta"), gets: gets() - antes }).toEqual({ pilha: [{ nome: "open-finance-volta", item }], gets: 1 });
   expect(r.getSearchParams().modo).toBe("acompanhar"); expect(await lerTentativaBancaria(1)).toEqual(marcador);
   expect(tokens()).toHaveLength(0); expect(posts()).toHaveLength(0);
 });
@@ -97,10 +98,9 @@ it.each([
 
 it("Acompanhar antes de Reconectar irmão não emite token por trás da recuperação", async () => {
   servidor(); const r = renderRouter("./app", { initialUrl: "/conexoes" });
-  await waitFor(() => expect(screen.getAllByRole("button", { name: "Acompanhar sincronização" })).toHaveLength(2));
-  await abrirBancos();
-  const a = screen.getAllByRole("button", { name: "Acompanhar sincronização" })[0]!;
-  const b = screen.getByRole("button", { name: "Reconectar Itaú" });
+  await abrirBanco();
+  const a = screen.getByRole("button", { name: "Acompanhar sincronização" });
+  const b = screen.getByRole("button", { name: "Reconectar Nubank" });
   await act(async () => { fireEvent.press(a); fireEvent.press(b); await drenar(); });
   await act(drenar);
   expect({ pilha: pilha(r)?.map((p) => p.nome), tokens: tokens().length }).toEqual({ pilha: ["index", "conexoes", "open-finance-volta"], tokens: 0 });
@@ -155,8 +155,8 @@ it("GET atrasado após blur não registra; refoco recupera A conhecido com GET a
 it("observador B pausa/refoca sem consumir tentativa A e mostra resultado próprio B", async () => {
   const e = servidor(); const marcador = await lerTentativaBancaria(1);
   renderRouter("./app", { initialUrl: "/conexoes" });
-  await waitFor(() => expect(screen.getAllByRole("button", { name: "Acompanhar sincronização" })).toHaveLength(2));
-  await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: "Acompanhar sincronização" })[1]!); await drenar(); });
+  await abrirBanco("Itaú");
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Acompanhar sincronização" })); await drenar(); });
   await waitFor(() => expect(screen.getByRole("button", { name: "Sair" })).toBeTruthy());
   const antes = gets();
   await act(async () => { router.push("/configuracoes"); await drenar(); });
@@ -183,10 +183,13 @@ it.each([["/", "Retomar conexão"]])("foco em %s libera reserva para nova recupe
 
 it.each([["/", "Retomar conexão"], ["/conexoes", "Acompanhar sincronização"], ["/conectar-banco", "Ver meus bancos"]])("falha injetada no push de %s libera reserva para próximo push real", async (origem, rotulo) => {
   servidor(); renderRouter("./app", { initialUrl: origem });
+  if (origem === "/conexoes") await abrirBanco();
   await waitFor(() => expect(screen.getAllByRole("button", { name: rotulo })[0]).toBeEnabled());
   jest.spyOn(router, "push").mockImplementationOnce(() => { throw new Error("falha de navegação"); });
   await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: rotulo })[0]!); await drenar(); });
-  expect(screen.getByText("Não conseguimos abrir a tela. Tente de novo.")).toBeTruthy();
+  // Em /conexoes o erro é da folha aberta (que cobre a tela): aparece DENTRO dela, uma vez.
+  expect(screen.getAllByText("Não conseguimos abrir a tela. Tente de novo.")).toHaveLength(1);
+  if (origem === "/conexoes") expect(within(screen.getByTestId("folha-sheet")).getByText("Não conseguimos abrir a tela. Tente de novo.")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: rotulo })[0]).toBeEnabled();
   await act(async () => { fireEvent.press(screen.getAllByRole("button", { name: rotulo })[0]!); await drenar(); });
   expect(screen).toHavePathname(origem === "/conectar-banco" ? "/conexoes" : "/open-finance-volta");

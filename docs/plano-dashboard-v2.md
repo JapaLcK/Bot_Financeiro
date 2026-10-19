@@ -853,6 +853,15 @@ PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
 aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
 calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.
 
+### Etapa 3 — simulador de compra v2 (API + tela web, 19/10/2026)
+
+Implementação local (2026-10-19): `POST /api/v2/simulador` (e `/api/app/simulador`) e a tela `#/simulador/compra`: 1 a 3 cenários
+de compra, números e a curva de 90 dias "sem × com a compra". Decisões do dono: compra primeiro (P1);
+curva na resposta (P3); API + web neste PR, app depois (P4). **Seguem abertos:** o corte de hábito real
+(P2: usa a média de 3 meses, que é estimativa variável; método a decidir, PR condicionado), a estimativa
+variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas, horizonte > 90 e
+a tela do app. O bloco de hábitos em `/simulador` continua demonstrativo.
+
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 
 Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a

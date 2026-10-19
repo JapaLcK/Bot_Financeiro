@@ -6,7 +6,7 @@ import { capturarItemBancario, lerTentativaBancaria } from "@/storage/secure";
 import { redirectSystemPath } from "../../app/+native-intent";
 import { chamadas, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf, VIVO } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
+import { abrirBanco, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
 const B = "banco_b";
 function servidor() {
@@ -22,6 +22,7 @@ function servidor() {
 }
 const posts = () => chamadas().filter((c) => c.caminho.endsWith("pluggy-item"));
 async function acompanhar() {
+  await abrirBanco("Itaú");
   await waitFor(() => expect(screen.getByRole("button", { name: "Acompanhar sincronização" })).toBeEnabled());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Acompanhar sincronização" })); await drenar(); });
 }
