@@ -11,6 +11,7 @@ import { AmountInput } from "@/ui/componentes/AmountInput";
 import { Button } from "@/ui/componentes/Button";
 import { Input } from "@/ui/componentes/Input";
 import { GrupoDeLinhas, ListRow } from "@/ui/componentes/ListRow";
+import { useRolarSheetAoTopo } from "@/ui/componentes/Sheet";
 import { useTema } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
 import { Acao, Vazio } from "./base";
@@ -58,7 +59,7 @@ function Cenario({ c, i, f, total, aberta, alternar, bloqueado, mudar, tirar }: 
 
 /** O corpo da folha: formulário → "Calcular" → resultado no lugar dele ("Editar" volta ao rascunho). Fechar descarta o rascunho. O POST só calcula: falha deixa o botão livre para tentar de novo. */
 export function SimuladorCompraFolha() {
-  const sessao = useSessao();
+  const sessao = useSessao(), aoTopo = useRolarSheetAoTopo();
   const [cens, setCens] = useState<Cen[]>([VAZIO]), [reserva, setReserva] = useState(0), [abertas, setAbertas] = useState<boolean[]>([false]);
   const [falha, setFalha] = useState<Falha | null>(null), [pendente, setPendente] = useState(false), [res, setRes] = useState<z.output<typeof S.simuladorSchema> | null>(null);
   const vivo = useRef(true), voando = useRef(false), controle = useRef<AbortController | null>(null); // `voando` síncrona: dois toques no mesmo tick não passam pelo `pendente`
@@ -71,7 +72,7 @@ export function SimuladorCompraFolha() {
     if (voando.current) return;
     voando.current = true; setPendente(true); setFalha(null);
     const n = cens.length, pai = (controle.current = new AbortController());
-    try { const r = await simularCompra(corpoDe(reserva, cens), pai); if (vivo.current) setRes(r); } catch (e) { // `vivo` aqui e no catch: defesa em profundidade (setState em desmontado não avisa; sem teste barato do `setRes`)
+    try { const r = await simularCompra(corpoDe(reserva, cens), pai); if (vivo.current) { setRes(r); aoTopo(); } } catch (e) { // `vivo` aqui e no catch: defesa em profundidade (setState em desmontado não avisa; sem teste barato do `setRes`)
       if (!vivo.current) return;
       if (e instanceof SessaoExpirada) return sessao.expirou(e.detalhe);
       const f = falhaDe(e, n);
@@ -88,7 +89,7 @@ export function SimuladorCompraFolha() {
     </View>
     {falha?.motivo === "plano" ? <Vazio texto={falha.geral} /> : res ? <>
       <SimuladorResultado d={res} />
-      <Button rotulo="Editar" variante="secondary" onPress={() => { setRes(null); setFalha(null); }} />
+      <Button rotulo="Editar" variante="secondary" onPress={() => { setRes(null); setFalha(null); aoTopo(); }} />
     </> : <>
       {cens.map((c, i) => <Cenario key={i} c={c} i={i} f={falha?.cenarios[i] ?? {}} total={cens.length} aberta={abertas[i]!} alternar={() => setAbertas((a) => a.map((v, j) => (j === i ? !v : v)))} bloqueado={pendente} mudar={(p) => mudar(i, p)} tirar={() => livre(() => { setCens((x) => x.filter((_, j) => j !== i)); setAbertas((a) => a.filter((_, j) => j !== i)); })} />)}
       {cens.length < 3 ? <Acao rotulo="Comparar com outro cenário" texto="Outro cenário" icone="Plus" desativado={pendente} onPress={() => livre(() => { setCens((x) => [...x, VAZIO]); setAbertas((a) => [...a, false]); })} /> : null}
