@@ -11,6 +11,7 @@ import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
 import { Bloqueio } from "../parts/Bloqueio";
 import { Frame } from "../parts/Frame";
+import { GastoFixoForm } from "../parts/GastoFixoForm";
 import { PoteLancamentos } from "../parts/PoteLancamentos";
 import { CHAVE_ESCRITA, OrcamentoForm, mostra, useEscrita, type Modo } from "../parts/OrcamentoForm";
 
@@ -51,6 +52,7 @@ function Donut({ d }: { d: OrcamentoDomestico }) {
 function Corpo({ d, mes, busy, antigo }: { d: OrcamentoDomestico; mes: string; busy: boolean; antigo: ReactNode }) {
   const [aberto, setAberto] = useState<Modo | null>(null);
   const [poteAberto, setPoteAberto] = useState<string | null>(null);
+  const [gastoFixo, setGastoFixo] = useState<"form" | "feito" | null>(null);
   const escrita = useEscrita(mes);
   const trava = useIsMutating({ mutationKey: CHAVE_ESCRITA }) > 0;
   const sem = d.total.usado_pct === null;
@@ -71,9 +73,11 @@ function Corpo({ d, mes, busy, antigo }: { d: OrcamentoDomestico; mes: string; b
             <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setAberto("renda")}>Editar renda</button>
             {informada && <button type="button" className="btn btn-quiet" disabled={trava} onClick={() => escrita.mutate({ renda: { mes, valor: null } })}>Usar a calculada</button>}
             <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setAberto("potes")}>Editar percentuais</button>
+            <button type="button" className="btn btn-ghost" disabled={trava} onClick={() => setGastoFixo("form")}>+ Gasto fixo</button>
           </div>
         )}
       </section>
+      {gastoFixo === "feito" && <p role="status" className="orc-dica">Gasto fixo cadastrado. Ele entra na Previsão.</p>}
       {escrita.isError && <p role="alert" className="warn">{escrita.erro}</p>}
       {sem && <p className="orc-dica" role="status">Sem renda neste mês: informe a renda para dividir nos potes.</p>}
       <div className="orc-grade">
@@ -110,6 +114,7 @@ function Corpo({ d, mes, busy, antigo }: { d: OrcamentoDomestico; mes: string; b
         <div><dt>Restante</dt><dd className={`num${livreNeg ? " warn" : ""}`}>{livreNeg ? `passou ${moneyText(d.total.restante_livre.slice(1))}` : moneyText(d.total.restante_livre)}</dd></div>
       </dl>
       {doModal && <PoteLancamentos p={doModal} mes={mes} guarda={doModal.guardado} fechar={() => setPoteAberto(null)} />}
+      {gastoFixo === "form" && <GastoFixoForm feito={() => setGastoFixo("feito")} fechar={() => setGastoFixo((g) => g === "form" ? null : g)} />}
       {aberto && <OrcamentoForm key={aberto} modo={aberto} mes={mes} d={d} fechar={() => setAberto(null)} />}
     </div>
   );
