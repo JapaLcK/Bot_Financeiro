@@ -32,15 +32,6 @@ export function moneyText(s) {
   const inteiro = (digitos.slice(0, ponto).replace(/^0+/, "") || "0").replace(/\B(?=(\d{3})+$)/g, ".");
   return `${m[1] ? "−" : ""}R$ ${inteiro},${digitos.slice(ponto).padEnd(2, "0")}`;
 }
-// O mesmo texto decimal como inteiro exato: valor = n / 10^escala (BigInt, sem float). Inválido → null.
-export function decimal(s) {
-  const m = typeof s === "string" && DECIMAL.exec(s);
-  if (!m) return null;
-  const frac = m[3] ?? "";
-  let n = BigInt(m[2] + frac), escala = frac.length - Number(m[4] ?? 0);
-  if (escala < 0) { n *= BigInt(10) ** BigInt(-escala); escala = 0; }
-  return { n: m[1] ? -n : n, escala };
-}
 // O valor que o usuário digita num formulário de escrita (Lançamento, Meta): vírgula vira ponto,
 // no máximo 9 dígitos e 2 casas, maior que zero. Texto, nunca float.
 export const ERRO_VALOR = "Use um valor maior que zero, até 9 dígitos e 2 casas decimais, sem separador de milhares.";

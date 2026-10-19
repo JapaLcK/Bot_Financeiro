@@ -19,7 +19,7 @@ Servidor, todo pronto:
   Nenhuma tela o consome ainda.
 - `GET /open-finance/{uid}` (snapshot, `frontend/routes/open_finance.py`, `open_finance_snapshot_route`): cada conexão
   traz `id`, `institution_name`, `provider_item_id`, `last_sync_at`, `status` e `ui = {state, label, detail,
-  stale_products, dados_de}`. O PR 2 do app acrescenta `logo_url` (em andamento noutra worktree, ainda fora da `main`).
+  stale_products, dados_de}`. O PR 2 do app (#1106) acrescentou `logo_url`.
 - `GET /open-finance/{uid}/limite` → `{of_banks_max, em_uso, pode_adicionar, code, message}`. `of_banks_max: null` =
   sem teto. O app usa; a web nunca chamou.
 - `DELETE /open-finance/{uid}/connections/{connection_id}` (desconectar um). Existe, o app usa, **nada na web chama**.
@@ -54,33 +54,39 @@ seletor de mês (`NO_MONTH` já inclui `...CONTA`). Decisão 1.
 
 Os mesmos 3 estados do mockup do app (tudo em dia, pede ação, nenhum banco); o painel é só escuro.
 
-1. **Topo:** `total` de `/bancos` (saldo em conta + investido, decisão 1 do dono no plano do app). Rótulo **não** é
-   "Disponível agora". Com `motivos` não vazio, selo "a conferir" pelos `Selos` existentes. `total: null` = "—".
-2. **Barra por banco** (`.comp-bar`), um segmento por banco com a cor de `corDoBanco`. Desenha só se: nenhum motivo,
-   no topo ou num banco (lista branca **vazia**: o `MOTIVOS_SEM_EFEITO_NO_SALDO` do app é de `/contas`, e em `/bancos`
-   `outra_moeda` tira dinheiro do valor); todo `total` de banco é não nulo e finito, nunca negativo; há ao menos 2
-   segmentos; e a soma em inteiros exatos (BigInt, não centavos) fecha **exatamente** com o `total` do topo. Banco com
-   total exatamente zero não vira segmento e não impede a barra (como o app, `composicaoContas.ts`). Senão, sem barra.
-   A barra compara, não mostra soma: o número na tela é sempre o do servidor. Menos de 2 segmentos não é composição.
-   `role="img"` com `aria-label` "Nubank 67%, Inter 33%", como em `Wealth.tsx`.
+1. **Topo e barra por banco: removidos no redesenho B (2026-10-19).** A lista não mostra valor nenhum (nem `total` do topo, nem
+   selos de motivos do topo, nem a barra por banco, nem o total de cada banco): os números moram só no detalhe. Saíram do
+   código `barraDosBancos` e o resto que só servia a eles. Decisão do dono (mockup B): menos texto e menos dado na lista.
+2. **Redesenho B:** título "Bancos conectados" + "Gerencie as conexões via Open Finance." e o "+" rosa no topo; os bancos
+   num único grupo (`.banco-grupo`: uma superfície `--plane-1`, cantos de 16 px, divisor de 0,5 px entre as linhas, sem card por banco).
 3. **Vagas do plano:** "2 de 3 bancos" de `/limite` (`em_uso`, `of_banks_max`). `of_banks_max: null` = nada (sem teto).
    Com `pode_adicionar: false`, mostra a `message` do servidor no lugar do botão de conectar.
-4. **Card por banco** (um por conexão do snapshot, na ordem do snapshot):
-   - logo (`logo_url` quando o PR 2 entrar; até lá, inicial num círculo com a cor do banco), nome
-     (`institution_name`), total do banco;
-   - pílula do estado (`ui.label`, classe por `ui.state`, mesmo mapa de `OF_PILL_CLASS` do settings);
-   - linha curta: saldo em conta · investido · "1 conta · 1 cartão · 4 investimentos" (contagens de `/bancos`);
-     `null` = "—", nunca "R$ 0,00";
-   - "há 12 min" de `last_sync_at` (texto inteiro no `title`/`<time datetime>`);
-   - **no W1 o card não tem `<details>`:** sem ação dentro só revelaria uma linha, e `ui.detail` já aparece no card. O
-     `<details>`/`<summary>` (inline, sem folha nem modal) entra no W2, com Desconectar; depois o W3 acrescenta
-     Acompanhar sincronização (estado `updating`) e Reconectar.
+4. **Banco por conexão** (uma por conexão do snapshot, na ordem do snapshot). Desenho atual (redesenhado depois do W2,
+   "cards mais interativos e com menos texto"; o desenho do W1/W2, com `<details>` "Gerenciar", saiu):
+   - **Linha clicável** (`conta/BancoCard.tsx`, um `<button>` de 44 px ou mais dentro de `li.banco-card`): ladrilho quadrado arredondado com o logo
+     (`logo_url` quando há; sem ele, a inicial na cor do banco), nome, o estado como pontinho no tom de `ui.state` (mesmo
+     mapa de `OF_PILL_CLASS` do settings) mais o `ui.label` (a cor só acompanha o texto) e um chevron. Sem valor, sem barra. A linha não traz "há N min", contagens nem `ui.detail`.
+     As classes `.cor-conta`/`.cor-inv` de `bancos.css` ficaram só para os pontinhos do detalhe (dado não leva o rosa; `--serie-1` vem de `metas.css`).
+   - **Detalhe** (`conta/BancoDetalhe.tsx`, `<dialog>` modal: tela cheia no celular, painel à direita a partir de 900 px;
+     fecha com X, Esc e clique no fundo, e não fecha se o mouse desceu dentro do painel e subiu no fundo; o X fica num cabeçalho `position: sticky` de fundo opaco, à vista com o painel rolado; fecha sozinho quando a conexão some): ladrilho grande, nome, estado, `ui.detail`,
+     total grande; linhas "Última atualização" (`<time datetime title>`), "Em conta" e "Investido" (`null` = "—", nunca
+     "R$ 0,00"), cada uma com um pontinho na cor do segmento da barra (`.marca` + `.cor-conta`/`.cor-inv`) e as contagens de `/bancos` com ícone, só as maiores que zero; uma faixa estática "Conexão regulamentada
+     pelo Banco Central, oficial pelo Open Finance." (decisão do dono, só no detalhe, no padrão do Banner do design system,
+     sem link); a `falha` do desconectar; e as ações em `.banco-det-acoes` (grid de uma coluna, 44 px por botão, recebem
+     `bloqueado`), hoje só "Desconectar banco". O W3 encaixa Reconectar e Acompanhar sincronização como irmãos do botão
+     dentro desse contêiner, sem CSS novo.
+   - **Conectar:** com bancos na lista, o botão redondo "+" (`.banco-mais`, `aria-label="Conectar banco"`) no cabeçalho; o estado vazio (item 5) mantém o botão de texto. Os dois (e o de cada disponível) são `<a href="/settings?view=open-finance">` com `onClick`: com `window.PBOpenFinance` abrem o seletor ali mesmo, sem ele o href segue.
+   - **Disponíveis para conectar** (`conta/Disponiveis.tsx`, `lib/bancos.ts::disponiveis`; o PR #1142): `GET /open-finance/{uid}/connectors`, leitura opcional (falha = a seção some). Até 5 dos populares, na ordem fixa Itaú, Bradesco, Banco do Brasil, Santander,
+     Caixa, Inter, C6, Nubank, BTG, Mercado Pago (casamento por nome normalizado só para a ORDEM), que ainda não estão conectados: "já conectado" é por ID (`institution_id` do snapshot × `id` do conector; o gêmeo Open Finance de mesmo nome e id
+     diferente continua disponível). Linhas num grupo igual ao de cima: ladrilho (logo pela regra `logoSeguro`; sem ele a inicial na cor do conector, hex de 6 dígitos com 3:1 sobre o card, senão a tinta neutra), nome, "Conecte sua conta" e o "+" cinza (`aria-label="Conectar <nome>"`, 44 px); por último "Ver todos os bancos" (o seletor inteiro). A seção só existe com vaga (`pode`) e some se não sobra banco.
+     O "+" chama `PBOpenFinance.open({id, name})` (o seletor abre com o banco escolhido; o usuário ainda toca em "Conectar", e o teto/plano/confirmação é o do módulo). O painel carrega `open-finance-connect.css/.js` e o SDK da Pluggy no `painel.html`, faz `init` ao montar e `destroy` ao desmontar, salvo com widget da Pluggy já aberto (`busy()`): aí o `destroy` não roda, para o `onSuccess` ainda salvar o item.
+   - Fora, por não termos dado nem promessa real: "Dados compartilhados" e "Validade da conexão".
 5. **Nenhum banco:** o Piggy (`ICON`) e um botão "Conectar banco". Sem frase longa.
 6. **Conexão sem linha em `/bancos`** (recém-conectada, só posição sem conta, `DELETED`): o card aparece pelo snapshot
    com "—" no valor. Junta-se por `conexao_id` = `connection.id`, **nunca** por nome nem por posição.
 
 Cara de web (onde difere do app de propósito): tooltip com data completa, foco por teclado nos cards, confirmação
-em `<dialog>` em vez de `Alert`, grade de 2 colunas no desktop (≥ 900 px) e uma coluna no celular.
+em `<dialog>` em vez de `Alert`, e o grupo de bancos numa coluna só (até 720 px de largura) no desktop e no celular.
 
 ## PRs
 
@@ -103,7 +109,7 @@ Arquivos, nesta ordem:
 2. `conta/api.ts`: `conexoesQuery(uid)` (snapshot) e `limiteQuery(uid)`, no molde de `segurancaQuery`
    (`enabled: !DEMO && !!uid`).
 3. `router.ts`: rota `/conta/bancos` em `ROUTES` e em `CONTA`. `pages.tsx`: a página no `PAGES`.
-4. `conta/Bancos.tsx` (página) e, só se passar do teto de linhas, `conta/BancoCard.tsx`. `juntar(conexoes, bancos)` por
+4. `conta/Bancos.tsx` (página), `conta/BancoCard.tsx` (a linha) e `conta/BancoDetalhe.tsx` (o detalhe). `juntar(conexoes, bancos)` por
    id, **sem aritmética de dinheiro** (o mesmo princípio do app).
 5. `lib/format.js`: estender o tempo relativo para minutos e horas ("há 12 min", "há 3 h"), ao lado de `relativeDays`.
    O "há N min" de `settings.html` (`formatActivityTime`) é JS inline e não se importa: não copiar, escrever uma vez aqui.
@@ -156,6 +162,15 @@ Decisões de execução do W1 (2026-10-18), além das já anotadas acima (barra,
 - Regras de quando mostrar Reconectar: as do app (`provider_item_id` presente, `of_banks_max !== 0`, estado fora de
   `removed`, `item_missing`, `paused`). Reconectar não conta vaga nova (P1 do `/limite`).
 
+### Redesenho B + Disponíveis para conectar (PR #1142, Completo: Open Finance)
+
+- Lista num grupo só, sem valor (item 1 e 2 acima); `BancoCard` perde `v` e a barra; `Ladrilho` passa a receber `nome`/`logo`/`cor` (serve ao banco e ao conector).
+- `conexoesQuery` lê `institution_id` (o servidor já o devolve; fora do contrato = `null`); `conectoresQuery` (`conta/api.ts`).
+- `open-finance-connect.js`: `open({id, name})` opcional (pré-escolha). Sem caminho paralelo de connect.
+- `painel.html`: css/js do seletor e o SDK da Pluggy (`async`, mesma versão e SRI do settings). **Divergência do W3 acima:** lá o plano era carregar o script só ao clicar; aqui carrega em todo carregamento do /painel (pedido do PR). Carga sob demanda é follow-up.
+- Reconectar (W3) segue de fora; o contêiner `.banco-det-acoes` do detalhe não mudou.
+- Par no app: o "Disponíveis" é plano futuro (PR próprio, `paridade-app-dashboard.md`).
+
 ### Fora do escopo
 
 Esconder valores (o painel não tem; linha própria na paridade), validade da autorização e fatura aberta (fora do v1
@@ -164,8 +179,8 @@ também no app), reordenar bancos, mexer na aba Open Finance do `settings.html` 
 ## Riscos
 
 - **Junção errada:** juntar por `institution_name` funde duas "Nubank". Junta-se por id; teste com dois "Nubank".
-- **Somar no cliente:** o topo pode não fechar com os cards se a web somar. O número do topo é o do servidor; a barra
-  só compara em centavos inteiros e some quando não fecha.
+- **Somar no cliente:** o redesenho B tirou o total do topo e a barra da lista (nenhum R$ nela); os valores só moram no
+  detalhe de cada banco, vindos do servidor (`/bancos`), e o cliente não soma nada.
 - **`null` virar zero:** `investido: null` com `motivos: []` é o caso normal de banco sem investimento; mostrar "—".
 - **Decimal em notação científica** (`"1E-7"`, risco que o Manager listou para o app): conferir que `moneyText` aceita ou
   trata por item, sem derrubar a tela.
@@ -193,14 +208,15 @@ W1:
   Negativo: trocar o topo pela soma dos cards mostra 45.000 e reprova.
 - **Mesmo nome:** dois "Nubank" com ids 1 e 2 e valores diferentes: cada card com o seu. Negativo: juntar por nome reprova.
 - **`null`:** banco com `investido: null` mostra "—" e nenhum "R$ 0,00". Negativo: tratar `null` como 0 reprova.
-- **Barra:** desenha com dois bancos que fecham; some com um `total` nulo e com motivo `banco_desatualizado`. Negativo:
-  tirar a checagem de fechamento desenha barra com total nulo e reprova.
+- **Sem valor na lista (redesenho B):** a lista não tem R$, total, barra nem selo de motivo; o valor só aparece no detalhe.
+  Substitui o teste da barra (que saiu com ela). Negativo: pôr o R$ de volta na linha reprova (`dinheiro` em
+  `dashboard_v2_bancos_disponiveis.test.mjs`, "grupos de uma superfície só").
 - **Positivo das leituras opcionais:** `/bancos` em 500 e em 404 = os cards aparecem com nomes e estados, sem números;
   `/limite` em 500 = sem a linha de vagas e o resto inteiro.
 - **Estado vazio:** snapshot sem conexão mostra o Piggy e "Conectar banco" com `href` para `/settings?view=open-finance`.
 - **Tempo relativo** com relógio congelado: 12 min, 3 h, 2 dias.
 - **Layout medido, não olhado:** no celular nenhum card passa da largura da janela (`scrollWidth <= innerWidth`), o alvo
-  dos botões ≥ 44 px; no desktop duas colunas. Pergunta "quanto daria sem a correção?" respondida em cada medida.
+  dos botões ≥ 44 px; no desktop a lista e os Disponíveis são dois grupos de uma coluna só, de até 720 px. Pergunta "quanto daria sem a correção?" respondida em cada medida.
 - **Rota:** `#/conta/bancos` aparece na seção Conta da lateral e no Menu do celular; não aparece no protótipo (`DEMO`).
 
 W2:
@@ -220,11 +236,11 @@ Só depois do deploy (todos os PRs): números reais com a conta demo, painel e a
 mesmos bancos; Safari do iPhone no `/painel`.
 
 Decisões de execução do W2 (2026-10-18), implementado em `conta/Bancos.tsx`, `conta/Confirma.tsx` (extraído de `Sessoes.tsx`), `conta/BancoCard.tsx`, `tests/frontend/dashboard_v2_bancos_desconectar.test.mjs`, `tests/frontend/dashboard_v2_bancos_desconectar_bordas.test.mjs` e o helper `tests/frontend/_bancos_desconectar.mjs`:
-- **D1:** o `<summary>` diz "Gerenciar" (o nome do banco só para leitor de tela) e fica a 44 px; o botão "Desconectar <banco>" mora dentro.
+- **D1 (substituída pelo redesenho):** o `<summary>` "Gerenciar" saiu; o botão "Desconectar banco" mora no detalhe do banco (`BancoDetalhe.tsx`), que a linha abre. Abrir o Confirma por cima do detalhe é o mesmo fluxo de antes.
 - **D2:** textos do app (`conexoes.tsx`): "Desconectar <banco>?", "Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados.", "Manter banco" / "Desconectar" / "Desconectando…".
-- **D3:** o sucesso só é anunciado ao leitor de tela (`role="status"` `sr-only`), sem toast; a falha é um `role="alert"` visível acima da lista.
-- **D4:** quando o card some (sucesso, 401, erro de releitura) o foco vai ao título da página; com o card ainda presente, volta ao botão que abriu. No ramo do 403 (e quando o card some com o botão já fora do DOM, o caso B1) o foco também vai ao título (`#page-title`).
-- **D5:** o botão de confirmar herda o `btn-primary` do `Confirma` (o mesmo das sessões); não há variante destrutiva no design system do painel.
+- **D3:** o sucesso só é anunciado ao leitor de tela (`role="status"` `sr-only`), sem toast; a falha é um `role="alert"` visível: dentro do detalhe quando ele está aberto (ele cobre a página), senão acima da lista, nunca nos dois. A falha COM id (erro ambíguo de um banco) só aparece no detalhe daquele banco; a SEM id (403, "recarregue a página") aparece em qualquer detalhe.
+- **D4:** quando o banco some (sucesso, 401, erro de releitura, outra aba o tirou) o detalhe fecha sozinho e o foco vai ao título da página; com o banco ainda presente (inclusive no 403 com a mesma conta) o detalhe segue aberto e o foco volta ao botão que abriu o Confirma. Fechado o detalhe por X, Esc ou fundo, o foco volta à linha que o abriu (explícito: o Safari não foca o botão ao clicar). Com um Confirma aberto ou em voo, o detalhe não fecha nem troca de banco.
+- **D5:** o botão de confirmar herda o `btn-primary` do `Confirma` (o mesmo das sessões); não há variante destrutiva no design system do painel. Decisão visual do redesenho: o "Desconectar banco" do detalhe (`.banco-det-desc`, `bancos.css`) é contorno na cor `--alert`, sem preenchimento.
 - Só um DELETE por vez, POR MONTAGEM da página (remontar a tela zera a trava), com o `uid` capturado no clique; resposta perdida, 404, 5xx e prazo relêem o snapshot (sem o id = foi, com o id = falha); 403 não relê com o `uid` velho, relê o perfil; qualquer erro, menos o 401 (que vai a "sessão terminou"), com a conta trocada (o `uid` da sessão no cache difere do `uid` do pedido) cai no ramo do 403.
 - Limites: sair da rota com o DELETE no ar não anuncia; dois bancos com o mesmo nome têm rótulos iguais; troca de conta com o DELETE já processado anuncia "desconectado" sobre a conta antiga; uma remoção por vez só vale por montagem; o alerta do 403 persiste até a próxima ação e não aparece se a conta nova não tem bancos (conta nova com 0 bancos nunca mostra o alerta); um `detail` em texto vindo do servidor vai literal ao alerta; duplo clique rápido no Desconectar tira o foco do botão.
 
@@ -238,7 +254,12 @@ Decisões de execução do W2 (2026-10-18), implementado em `conta/Bancos.tsx`, 
    painel; o W3 fica sem esse botão.
 5. **"↻ Atualizar" e "Remover todas as conexões" ficam no settings.** O app não os tem; a página nova não os ganha.
 6. **Esconder valores:** a tela nasce sem, como o resto do painel. Fica a linha própria na paridade.
-7. **Logo:** o W1 sai com a inicial colorida; o logo entra num PR pequeno quando o `logo_url` (PR 2 do app) estiver na `main`.
+7. **Logo: feito** (#1142, junto do plano B do servidor). O W1 saiu com a inicial colorida; agora o ladrilho traz o
+   `logo_url` quando há (host fixado no cliente, cópia da regra do app, com teste de paridade) e volta à inicial se a
+   imagem falhar. Prova do logo real da Pluggy só depois do deploy.
+8. **Faixa de segurança (2026-10-18):** entra só no detalhe do banco, entre as linhas e o botão, com o texto exato
+   "Conexão regulamentada pelo Banco Central, oficial pelo Open Finance.", estática, com cadeado (`ph-lock`, que existe no
+   subset), fundo de superfície e texto em `--ink-2` (contraste medido em teste, 4,5:1 ou mais). Não aparece na linha.
 
 Ajuste de execução: o W0 (cores) entra dentro do W1, para um ciclo de revisão a menos. O teste de paridade das cores
 continua obrigatório.

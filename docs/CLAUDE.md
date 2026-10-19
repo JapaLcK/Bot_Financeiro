@@ -605,7 +605,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Receitas do extrato (PR 2a, `widgets/ReceitasDoBanco.tsx`; #1076 PR 1 as moveu para a pilha): as PENDENTES são avisos da PILHA DE AVISOS do topo
   do `/painel` (`parts/AvisosDoTopo.tsx`, montada uma vez no `App.tsx`, um aviso por vez, pontos "Aviso k de n", rosa para decisão; o BANCO desatualizado,
   âmbar, vem antes; `GET /api/v2/bancos` lido por `avisoDeBancoQuery` (`lib/v2.ts`; NÃO é o `bancosQuery(uid)` da página Bancos, `conta/api.ts`, que mostra valores em R$ e confere a conta), `motivos` com `banco_desatualizado` ou `conexao_pausada`, "Ver bancos conectados" abre a página
-  `#/conta/bancos` (`href("/conta/bancos")`; o "Reconectar {banco}" do PR 2 irá ao Ajustes antigo, onde está o widget); o X vale até recarregar a página). As receitas só entram na pilha em `/` e em `/previsao`, e só nos planos com previsão (`locked("hero", plano)`: Essencial e Free não fazem GET). A lista é a que o card/a página
+  `#/conta/bancos` (`href("/conta/bancos")`) quando não há conserto pelo painel; "Atualizar agora" e "Reconectar {banco}" são do #1076 PR 2, parágrafo "Atualizar agora do aviso do banco" mais abaixo; o X vale até recarregar a página). As receitas só entram na pilha em `/` e em `/previsao`, e só nos planos com previsão (`locked("hero", plano)`: Essencial e Free não fazem GET). A lista é a que o card/a página
   leu quando o layout salvo diz que o card existe (exceção: limite (j)), no horizonte que ele mostra (`useListaDaPagina`, publicada por `usePrevisao`; durante a troca de horizonte ela mantém a última, e um 4xx a apaga: 4xx nunca mostra dado guardado, inclusive no downgrade com o card em 60/90 dias).
   Em `/` o anfitrião espera o `/perfil` para saber se o card está no layout (`comCardPrevisao`, do Board): se está, não abre consulta nenhuma (UM GET por carga, testado com `/perfil` a 0, 150 e 600 ms);
   só quando o Resumo NÃO tem o card (ex.: Economizar, ou o bloco tirado no Organizar) a pilha lê a chave `["previsao", null]` sozinha. Tirar o card no Organizar: ele desmonta e limpa a lista, o que re-renderiza a pilha, que passa a ler sozinha (NÃO coberto por teste; se o card nunca tinha publicado a lista, a leitura própria só abre no próximo render da pilha). Nas outras
@@ -637,6 +637,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   esvazia a pilha, com o foco solto no body, ainda leva o foco ao alvo "Nenhum aviso.";
   (j) o layout salvo e o card montado podem divergir. K5: o Pro está em `/` com o card em 90 dias; outra aba grava o layout salvo sem `hero` (Organizar); a pilha re-renderiza (p.ex. o `/bancos` muda) e passa a ler `["previsao", null]` sozinha mesmo com o card ainda montado, e no rebaixamento o card mostra o dado do Pro por um instante. K7, o inverso: no perfil Economizar, outra aba põe o `hero` no layout; a receita some da pilha até trocar de tela ou recarregar (sem perda de dado). Causa: `AvisosDoTopo.tsx` usa `comCardPrevisao`, que lê o layout salvo no localStorage em vez de observar se o card está montado. A correção estrutural é observar a montagem (contexto `undefined` = nada montado × `null` = montado sem lista); issue a abrir. Servidor
   sem o campo (deploy fora de ordem): a caixa não aparece.
+  **"Atualizar agora" do aviso do banco (#1076 PR 2; par do `usarAtualizarBanco.ts` do app, #1100)**: o corpo do aviso (`parts/CorpoAvisoBanco.tsx`) escolhe a ação pela CLASSIFICAÇÃO do snapshot `GET /open-finance/{uid}`
+  (`classificar` em `lib/atualizarBanco.ts`; prioridade (b) > (a) > (a0) > (c)): (a) `partial`/`updated`/`error_recoverable`/`no_accounts`/`updating` com coleta vencida: "Atualizar agora", que faz `POST /open-finance/{uid}/refresh`
+  e acompanha a coleta (GETs do snapshot em 5, 15, 35, 75 s e depois a cada 60 s, um de cada vez, teto de 300 s); (a0) já `updating`: parte SOZINHA e calada ("O banco está atualizando…"); (b) `needs_user_action` com vaga no plano (`/limite`):
+  link "Reconectar {banco}" para `/settings?view=open-finance` (`OF` de `parts/guia-falas.ts`); (c) o resto: `Erro em {bancos}.` (o #1127; o porquê de cada banco mora em "Bancos conectados") + "Ver bancos conectados" (`#/conta/bancos`); `updating` sem `provider_item_id`: o texto padrão do aviso, sem "Erro". A paridade compara o texto. Sem a leitura do snapshot (lendo, erro, conta trocada) fica o corpo do PR 1.
+  O `uid` sai SÓ do `contaQuery`; as duas rotas têm o `uid` no caminho e o servidor dá 403 se a sessão não for dele. O leitor do snapshot é UM (`lerConexoes` em `conta/api.ts`, usado pelo `conexoesQuery` e pela máquina).
+  A máquina existe duas vezes: `app/src/features/painel/atualizarBanco.ts` e o PORTO `webapp/src/dashboard/lib/atualizarBanco.ts` (SEM nenhum import: o typecheck do app segue a cadeia de imports de qualquer arquivo que o jest do app leia).
+  Presas por `app/__tests__/features/atualizar_banco_paridade.test.ts` (a MESMA tabela de cenários nos dois lados, traço inteiro igual) e por `tests/test_app_espelhos.py` (textos, cadência, motivos, prazo e janela). Mudou uma, mude a outra; o `.github/workflows/app.yml` roda a paridade quando só o porto muda.
+  O estado mora no hook `parts/usarAtualizarBanco.ts`, chamado por `AvisosDoTopo` (o único anfitrião sempre montado: o corpo do aviso desmonta a cada troca de ponto da pilha). A RODADA é a identidade de um `AbortController` (`vivo`), e toda escrita de estado e todo barulho passam por `atual()`.
+  O `marco` decide quando uma leitura pode PARTIR um (a0): só uma feita depois do último marco (montagem, aviso que entra ou sai da tela, partida, fim, abort, volta da aba). O POST tem prazo de 60 s próprio (`comPrazo` de `conta/api.ts`, que corta junto com a rodada), sem `AbortSignal.timeout`/`any` (Safari 14): estourou, lê o snapshot e acompanha. O corte do sinal sai como `AbortError` na raiz (`chamar` em `lib/v2.ts`, que só engole o corpo cortado quando a resposta NÃO é 2xx; `executar` e `enviar` em `app/src/api/client.ts`); 4xx e 5xx mantêm o status.
+  O X, o motivo que some do `/bancos`, a troca de `uid` e o desmonte abortam a rodada calados. Medido em `dashboard_v2_atualizar_banco*.test.mjs` (relógio instalado; cada caso leva o nome no teste). Dois julgamentos do app foram corrigidos junto, para bater com o `refreshVerdict` do `/settings` (`Origem: #1100`):
+  D1, `updating` neutro com `still_updating:false` ACOMPANHA (antes era "em dia"); D2, `items:[]` com `ok:false` é falha (antes era "em dia"; `schemas/openFinance.ts` passou a ler `sync.ok`, opcional). D2 não é alcançável pelo backend de hoje (`items:[]` só sai com `ok:true`); é paridade e defesa.
+  Limites aceitos: (k) o SUCESSO é calado (o app vibra; o web não tem par e anunciar pede texto aprovado pelo dono): o aviso some e o foco vai para o próximo aviso ou "Nenhum aviso." só se o usuário não o levou para fora (`agiu` do PR 1); com o motivo persistindo por OUTRA fonte,
+  "Atualizar agora" volta e o servidor responde `rate_limited` no cooldown de 120 s. (l) Com `acompanhando` o botão sai e o foco cai no `<body>`; o fim leva o foco ao próximo aviso só se a lista não mudou no meio. (m) A rodada viva NÃO para com a aba em segundo plano (no app, para): o POST já foi e abortar
+  não cancela o servidor; o teto é de relógio, então termina certo. (n) "Reconectar" leva ao `/settings`, onde o widget cria um item NOVO (sem modo update). (o) Entre o sucesso do POST e a releitura do `/bancos`, o botão volta ativo e um 2º clique faz um 2º POST: o servidor responde `rate_limited` (cooldown de 120 s por item), que conta como em dia, então não há dano nem cobrança dupla; fechar a janela custa estado (um "enviando" até a releitura) que não vale o ganho. A leitura do snapshot tem prazo de 15 s (o do app, `TEMPO_LIMITE_AUTH_MS`): o teto de 5 min só é checado entre leituras, então a rodada fecha em até 15 s depois dele. `updating` SEM `provider_item_id` não é (a0) nem (c) (é "c0": texto padrão sem "Erro" + "Ver bancos conectados"): `classificar` e `baseDe` têm de concordar, senão a rodada concluía na hora e recarregava em laço. Também: o fim de toda rodada faz `invalidateQueries()` (relê tudo, como um aviso do SSE); o snapshot traz contas e transações (só as conexões ficam no cache; é lido com o aviso na tela e a cadência de uma rodada);
+  `aria-disabled` e não `disabled` no botão em voo (o `disabled` mandaria o foco para o `<body>`). NÃO verificado aqui (só no staging/aparelho): a Pluggy real (PATCH, a espera de ~18 s, cota, `still_updating` de verdade), o widget/OAuth do "Reconectar", o SSE de outro processo, o estrangulamento real dos timers em aba oculta, VoiceOver/NVDA falando o anúncio, Safari/iOS real e o /painel publicado.
   **No app nativo (PR 2b, `app/src/features/painel/receitas.tsx`)**: uma caixa só, no TOPO do Resumo (`TelaResumo`), para todo
   usuário com Previsão liberada, tenha ou não o card "Saldo previsto" no layout (o provider lê a previsão sempre). Previsão
   `negado` ou `erro` sem falha de toque: sem caixa. Falha de um toque deixa o aviso até a próxima leitura boa; se a previsão está `erro`, a caixa
@@ -1772,8 +1787,53 @@ repetidos, corpo acima de 4096 bytes ou lento retornam 400 antes de qualquer cha
 Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.../sync`, `.../refresh`,
 `.../mock-connect`: todas as rotas que devolvem `**snapshot`) traz `logo_url`:
 `https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
-(`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
-e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
+(`db/open_finance_state.py`); o `raw` não sai. Sem `connector` no `raw` (as conexões antigas, e toda
+conexão depois de `item/deleted`, que substitui o `raw`), o snapshot empresta o logo do catálogo de
+conectores da Pluggy que já vive em memória (`core/services/pluggy_catalogo.py`, `logo_do_conector`):
+casa só pelo id do conector (`institution_id`, `str` dos dois lados; nunca pelo nome), só em
+`provider='pluggy'`, ignora o TTL (logo velho serve) e nunca vai à rede nem levanta, então o caminho
+do snapshot não espera a Pluggy. O `raw` vence o catálogo. O cache é aquecido por
+`_aquece_catalogo` (monólito) no boot, como tarefa de fundo, e no começo de cada tique do Open Finance,
+com a mesma função e a mesma chave do modal "Conectar banco"; falha vira uma linha com o tipo da exceção.
+Continua `null`: cache frio (segundos depois do boot, ou até o 1º tique, em até 10 min, se o
+aquecimento do boot falhar; só com `RUN_BACKGROUND_TASKS`; ou Pluggy fora do ar), conector que saiu do
+catálogo, `mock_pluggy` e `institution_id = "pluggy"` (item sem `connector` nem `connectorId`).
+Ids de produção das 4 antigas, medidos pelo dono em 2026-10-18: 611, 612, 651, 775; que o catálogo
+real os liste só se prova depois do deploy. O servidor NÃO fixa o host (`logo_url_valida` segue
+aceitando qualquer https); quem fixa é o cliente.
+Cada conexão do snapshot traz também `institution_id` (texto, o id do conector da Pluggy; é coluna `not null`, e o `pop` do
+laço de `_read_open_finance_connections` nunca o tirou: o gate de reconexão do picker já o lia, `ids` em `refreshLimits`):
+`tests/test_of_connection_state.py` (`CHAVES_DA_CONEXAO`) prende a chave e `tests/test_of_snapshot_institution_id.py` o valor e o
+isolamento por usuário. É por ele que o /painel decide "já conectado": `String(connector.id) === institution_id`, nunca pelo nome.
+**Tela Bancos conectados do /painel** (`#/conta/bancos`, `conta/Bancos.tsx`, `BancoCard.tsx`, `Disponiveis.tsx`, `BancoDetalhe.tsx`, `styles/bancos.css`):
+título e "Gerencie as conexões via Open Finance." com o "+" rosa no topo (a ação principal); os bancos conectados num grupo só
+(uma superfície, cantos de 16 px, divisor de 0,5 px, sem card por banco): ladrilho, nome, pontinho com o `ui.label` (a cor nunca é o
+único sinal), chevron; a linha inteira é um botão que abre o detalhe (os valores em R$ moram só nele; a lista não tem total, barra nem
+topo). "N de M bancos" (de `/limite`) segue como linha discreta. Abaixo, "Disponíveis para conectar": até 5 dos populares (Itaú,
+Bradesco, Banco do Brasil, Santander, Caixa, Inter, C6, Nubank, BTG, Mercado Pago, nessa ordem; o NOME só escolhe a ordem) de
+`GET /open-finance/{uid}/connectors` que ainda não estão conectados (por id) e "Ver todos os bancos". A seção só existe com vaga
+(`pode`, o gate do `/limite`) e some se o `/connectors` falha (leitura opcional, nunca derruba a tela) ou se não sobra banco.
+O "+" de cada um, o do topo e o botão do estado vazio são `<a href="/settings?view=open-finance">` com `onClick`: com
+`window.PBOpenFinance` presente abrem o seletor ali mesmo (`open({id, name})` pré-seleciona o banco; o usuário ainda toca em
+"Conectar", e todo o teto/plano/confirmação é o do módulo), sem ele o href segue. `Bancos.tsx` faz `init` ao montar (o `onConnected`
+relê snapshot, `/limite`, `/bancos`, `/connectors` e as contas) e `destroy` ao desmontar, salvo com widget da Pluggy já aberto (`busy()`): aí o `destroy` não roda, para o `onSuccess` ainda salvar o item. O `painel.html` carrega
+`open-finance-connect.css/.js` e o SDK da Pluggy (mesma versão e SRI do `settings.html`; `async`, em TODO carregamento do /painel
+— carga sob demanda é follow-up); os tokens do seletor saem do painel em `.bankpick-overlay` (`bancos.css`). Par no app: o "Disponíveis"
+é plano futuro (PR próprio). Testes: `tests/frontend/dashboard_v2_bancos*.test.mjs` (o seletor, em stub) e `of_connect_settings.test.mjs`
+(`open({id, name})` no módulo real).
+Opção do módulo `init({ guardaDuploClique: true })` (só o /painel a liga): nos 350 ms depois de abrir o picker, clique em linha e em "Conectar" é ignorado (só o
+"fechar" explícito vale), para o 2º clique de um duplo clique no "+" não escolher outro banco. O clique no fundo é ignorado sempre nesse prazo, também no /settings.
+O /settings NÃO liga a opção, de propósito: ali a classe de bug irmã continua (o 2º clique de um duplo clique no botão que abre o picker pode escolher outra linha),
+para não mudar o comportamento que `of_connect_settings.test.mjs` fixa. Testes: `dashboard_v2_bancos_seletor.test.mjs` e `of_connect_settings.test.mjs`.
+Limites declarados dessa tela (decisão do dono pendente, nenhum código para eles): (1) o gêmeo direto × Open Finance: um banco conectado pelo conector
+direto (ex.: Caixa, id 219) e o mesmo banco no Open Finance (id 619) são conectores diferentes; "já conectado" é por id, então o 619 aparece em
+"Disponíveis" como se o banco não estivesse conectado (o teto de vagas e o `connections` do servidor valem igual); (2) o SDK da Pluggy carrega em
+todo /painel, não só no clique; (3) sair da página com o widget já aberto não o destrói (`busy()` só vale depois de o widget ser criado; antes, durante o `/connect-token`, sair ainda chama `destroy()` e aborta): o `onSuccess` ainda salva o item, mas uma falha ao salvar (teto do plano, rede) fica muda, porque a tela já saiu, e o item/consentimento ficam na Pluggy sem conexão no PigBank; voltar à página com o widget antigo ainda aberto deixa o "+" sem efeito até o widget fechar (`open()` é ignorado em silêncio pela guarda "uma conexão por vez"; o overlay da Pluggy cobre a página, então só dá para alcançar pelo teclado); (4) o aviso do seletor (toast) fica sob um `<dialog>` aberto em top layer (o detalhe do banco, o Confirma): o `z-index` não vence o top layer; (5) o StrictMode (montar, desmontar, montar) só foi provado por leitura: o build de teste é de produção.
+`PBOpenFinance.open({id, name})` (opcional; `open()` sem argumento segue idêntico para o /settings): abre com esse banco
+selecionado e à vista; id que não está na lista, ou argumento que não é `{id inteiro, name}` (um Event), é ignorado.
+No /painel (`conta/BancoCard.tsx`, `Ladrilho`) o ladrilho quadrado arredondado (44 px na linha, 64 px no detalhe) troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,
+`overflow: hidden`; o painel só tem tema escuro); `logoSeguro` (`conta/api.ts`) é a cópia da regra do app e
+`tests/frontend/logo_banco_paridade.test.mjs` as compara; imagem que falha volta à inicial na cor do banco.
 No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG
 vem por `fetch` + `parse` + `SvgAst` (uma vez por URI, sem `Authorization`) e o `Avatar` cai na inicial em falha, `!ok` ou
 corpo que não é SVG. Limites: sem teto de tamanho do corpo; `<image href>` e `<use href>` dentro do SVG são renderizados;
@@ -2473,11 +2533,13 @@ finito em toda coluna numérica (`_tarefa_finito_checks` →
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **cinco** trabalhos: expiração de trial
-(`_open_finance_trial_expiry`), **job de saúde**, **retentativa**, **push de reconectar**
-(`run_reconnect_push`, ver "Push (app iOS)") e refresh proativo —
-os quatro últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
-roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde, retentativa e push (GET); o
+O Open Finance tem **seis** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **aquecimento do catálogo** (`_aquece_catalogo`), **job de
+saúde**, **retentativa**, **push de reconectar** (`run_reconnect_push`, ver "Push (app iOS)")
+e refresh proativo — os cinco últimos no mesmo tick de `_open_finance_refresh`, nessa ordem (o
+tick começa pelo aquecimento). O lifespan sobe também a tarefa `pluggy_catalogo`, que aquece o
+catálogo uma vez no boot (só com `RUN_BACKGROUND_TASKS`). O 1º tick roda 10 min depois do boot
+(`_PRIMEIRO_TIQUE_SEC`) só com aquecimento, saúde, retentativa e push (GET); o
 PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
 `OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
 proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde
@@ -2488,8 +2550,10 @@ nada mais faria essa verificação. A retentativa (Onda 5, PR-B2,
 `frontend/routes/of_retentativa.py`) vem logo depois: relê a Pluggy, também só com GET,
 para até `OF_RETRY_MAX_PER_TICK` conexões com dado atrás (default 20; só `0` ou
 negativo desliga só ela, valor que não é inteiro cai no padrão), uma de cada vez, pelo mesmo caminho de sync do webhook. Quem entra e por quê:
-`docs/open_finance_estados.md` §2.2. Kill switch dos dois: `OF_HEALTH_CHECK_ENABLED=0`
-(default `1`).
+`docs/open_finance_estados.md` §2.2. Kill switch da saúde e da retentativa:
+`OF_HEALTH_CHECK_ENABLED=0` (default `1`). O aquecimento do catálogo NÃO tem kill switch (esse
+flag não o desliga); sua falha só loga o tipo da exceção e nunca bloqueia saúde, retentativa
+nem PATCH.
 (Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---

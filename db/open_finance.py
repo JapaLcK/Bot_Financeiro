@@ -313,12 +313,17 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
     # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
     # função que o decide. O front deixou de derivar rótulo do `status`:
     # ele não sabe de produto atrasado nem de item que sumiu.
+    from core.services.pluggy_catalogo import logo_do_conector
     from core.services.pluggy_health import connection_ui_state
     for c in connections:
         c["ui"] = connection_ui_state(c)
         # `logo_url` é um escalar do `raw` que SAI, validado (`ui.detail` também deriva do execution_status);
-        # o `raw` em si continua fora. Ver `SQL_LOGO_URL`.
+        # o `raw` em si continua fora. Ver `SQL_LOGO_URL`. Sem ele (item/deleted troca o `raw`), o catálogo
+        # da Pluggy em memória, pelo id do conector (`institution_id`, nunca pelo nome); só `pluggy`: o id
+        # do `mock_pluggy` é de outro mundo. Sem rede aqui: cache frio = None = inicial.
         c["logo_url"] = logo_url_valida(c["logo_url"])
+        if c["logo_url"] is None and c.get("provider") == "pluggy":
+            c["logo_url"] = logo_url_valida(logo_do_conector(str(c.get("institution_id") or "")))
         # Campo de TRABALHO, não de contrato: entrou no select só para o
         # `connection_ui_state` acima e sai antes da serialização, para o
         # corpo HTTP ficar byte-idêntico em chaves ao de antes (exceto logo_url, PR 2). O `pop`

@@ -803,10 +803,12 @@ test("G1: sem GET duplicado de /api/v2/bancos: a pilha lê em `/` (1), a tela Ba
   await page.locator(PILHA).waitFor();
   await page.waitForTimeout(300);
   const emResumo = gets;
+  const leu = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v2/bancos"); // a leitura da tela Bancos, a 2ª
   await page.evaluate(() => { location.hash = "#/conta/bancos"; });
   await page.locator(".banco-card").waitFor();
-  await page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…"));
-  await page.waitForTimeout(500);
+  await leu;
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)))); // React assentou
   const pilha = await page.locator(PILHA).count();
   await ctx.close();
   assert.equal(emResumo, 1);
@@ -814,10 +816,11 @@ test("G1: sem GET duplicado de /api/v2/bancos: a pilha lê em `/` (1), a tela Ba
   assert.equal(pilha, 0);
 });
 
+// O snapshot é `paused`: sem conserto pelo app, então o aviso mostra o link (com um banco `updated`/`partial` o botão é o "Atualizar agora", #1076 PR 2).
 test("G2: 'Ver bancos conectados' no aviso do banco abre a página Bancos conectados do painel (#/conta/bancos), sem sair do /painel", async () => {
   const { ctx, page, ir } = await abrirPainel(browser, { espera: "#page-title", bancos: "pilha_desatualizado" });
   await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "a@b.c", user_id: 7, whatsapp_linked: false } }));
-  await ctx.route((u) => u.pathname === "/open-finance/7", (r) => r.fulfill({ json: { ok: true, connections: [con(1, "Nubank")] } }));
+  await ctx.route((u) => u.pathname === "/open-finance/7", (r) => r.fulfill({ json: { ok: true, connections: [con(1, "Nubank", "paused", "Pausado")] } }));
   await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => r.fulfill({ json: LIMITE() }));
   await ir("/");
   await page.locator(PILHA).waitFor();

@@ -486,7 +486,7 @@ def test_risco_aceito_5xx_persistente_em_investments_nao_abre_o_disjuntor(
 @pytest.mark.parametrize("refresh_ligado", ["1", "0"])
 def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         monkeypatch, refresh_ligado):
-    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda saúde, retentativa e push, e SÓ do 2º
+    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda catálogo, saúde, retentativa e push, e SÓ do 2º
     tique em diante, depois do intervalo, o PATCH periódico (e só com `OF_REFRESH_ENABLED`):
     o PATCH no boot é o que o Railway repetia a cada deploy."""
     eventos_: list = []
@@ -505,6 +505,10 @@ def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         if sum(1 for e in eventos_ if isinstance(e, tuple)) > 2:
             raise asyncio.CancelledError
 
+    async def _catalogo():
+        eventos_.append("catalogo")
+
+    monkeypatch.setattr(dashboard, "_aquece_catalogo", _catalogo)
     import core.services.open_finance_proactive as ofp
     monkeypatch.setattr(ofp, "run_reconnect_push", lambda: eventos_.append("push") or {})
     monkeypatch.setattr(orq, "retentar_leituras", _retentativa)
@@ -512,8 +516,8 @@ def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(dashboard._open_finance_refresh())
     assert dashboard._PRIMEIRO_TIQUE_SEC == 600
-    assert eventos_ == [("sleep", 600), "saude", "retentativa", "push",
-                        ("sleep", 4321), "saude", "retentativa", "push",
+    assert eventos_ == [("sleep", 600), "catalogo", "saude", "retentativa", "push",
+                        ("sleep", 4321), "catalogo", "saude", "retentativa", "push",
                         *(["patch"] if refresh_ligado == "1" else []),
                         ("sleep", 4321)]
 

@@ -131,7 +131,8 @@ SQL_EXECUTION_STATUS = (
 
 # ── O logo do banco, derivado do `raw` ───────────────────────────────────────
 # O `raw` é o item da Pluggy e pode trazer `connector.imageUrl` (a documentação da
-# Pluggy mostra o campo; presença real não medida; some depois de item/deleted).
+# Pluggy mostra o campo; presença real não medida; some depois de item/deleted). Sem ele, o
+# catálogo de conectores em memória empresta o logo (`_read_open_finance_connections`).
 # Só o escalar sai (o `raw` carrega `clientUserId`). `->>` devolve TEXTO mesmo de número/objeto/lista;
 # esses nunca começam com `https://`, então `logo_url_valida` os derruba (não há
 # `jsonb_typeof` no SQL: seria a mesma regra em dois lugares). Sem `%s`. O texto é

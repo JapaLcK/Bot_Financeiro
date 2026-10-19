@@ -1,7 +1,5 @@
-// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado e a barra por banco.
-// O painel não soma dinheiro para mostrar: o número do topo é o `total` do servidor. A barra só COMPARA, em inteiros exatos.
+// Bancos conectados (conta/Bancos.tsx): cor do banco, tom do estado e os bancos disponíveis para conectar.
 import type { Bancos } from "./api-v2.gen";
-import { decimal } from "./format.js";
 
 // Cópia de `coresBanco` (app/src/ui/tokens.ts): os dois projetos npm não se importam, e
 // tests/frontend/bancos_paridade.test.mjs compara o texto dos dois (§0.7).
@@ -25,12 +23,32 @@ const contraste = (a: string, b: string) => {
 
 const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const TINTA = ["var(--ink)", "var(--ink-2)", "var(--ink-3)"];
-// Cor do banco se for conhecido E passar 3:1 sobre o card; senão a escala de tinta, ciclando pelo índice (como o app).
+// A cor se passar 3:1 sobre o card; senão a escala de tinta, ciclando pelo índice (como o app).
+const corOuTinta = (cor: string | null | undefined, indice: number) => (cor && contraste(cor, SUPERFICIE) >= 3 ? cor : TINTA[indice % TINTA.length]);
 export function corDoBanco(instituicao: string, indice: number): string {
   const nome = semAcento(instituicao);
   const chave = Object.keys(CORES_BANCO).find((k) => new RegExp(`\\b${k}\\b`).test(nome));
-  const cor = chave && CORES_BANCO[chave];
-  return cor && contraste(cor, SUPERFICIE) >= 3 ? cor : TINTA[indice % TINTA.length];
+  return corOuTinta(chave && CORES_BANCO[chave], indice);
+}
+// A cor do conector (`color` do /connectors: hex sem '#', dado de terceiro que vai para o estilo): só 6 dígitos hex; qualquer outra coisa é a tinta.
+export const corDoConector = (hex: unknown, indice: number) => corOuTinta(typeof hex === "string" && /^[0-9a-fA-F]{6}$/.test(hex) ? `#${hex}` : null, indice);
+
+// Disponíveis para conectar: os populares, nesta ordem, que a conta ainda não tem. O NOME só escolhe a ordem de exibição; "já conectado" é
+// pelo ID (`institution_id` do snapshot × `id` do conector): o gêmeo Open Finance de um banco tem nome igual e id diferente, e é outra conexão.
+const POPULARES = ["itau", "bradesco", "banco do brasil", "santander", "caixa", "inter", "c6", "nubank", "btg", "mercado pago"];
+export type Conector = { id: number; name: string; color: string | null; logo: string | null };
+export function disponiveis(todos: Conector[], conectados: (string | null)[], max = 5): Conector[] {
+  const tem = new Set(conectados);
+  const porPosicao = new Map<number, Conector>(); // um por posição: o de nome exato vence o parecido ("Itaú" × "Itaú Personnalité")
+  for (const c of todos) {
+    if (tem.has(String(c.id))) continue;
+    const nome = semAcento(c.name).trim();
+    const pos = POPULARES.findIndex((k) => new RegExp(`\\b${k}\\b`).test(nome));
+    if (pos < 0) continue;
+    const atual = porPosicao.get(pos);
+    if (!atual || (nome === POPULARES[pos] && semAcento(atual.name).trim() !== POPULARES[pos])) porPosicao.set(pos, c);
+  }
+  return [...porPosicao.entries()].sort((a, b) => a[0] - b[0]).slice(0, max).map(([, c]) => c);
 }
 
 // O estado da conexão (`ui.state`, de connection_ui_state) em tom da pílula. Mesmo mapa do OF_PILL_CLASS do settings.html
@@ -47,25 +65,3 @@ export const bancosValidos = (b: unknown): b is Bancos => {
   const x = b as Bancos | null;
   return !!x && textos(x.motivos) && Array.isArray(x.bancos) && x.bancos.every((y) => !!y && textos(y.motivos));
 };
-
-export type Fatia = { conexao_id: number; nome: string; cor: string; total: string };
-// A barra por banco: um segmento por conexão com saldo > 0, na ordem e com a cor do card (índice no snapshot; como o app, que só
-// desenha segmento > 0). Banco com total EXATAMENTE zero fica fora da barra mas não a impede. [] (sem barra) se QUALQUER coisa deixar o
-// número incerto: motivo no topo ou no banco (lista branca vazia), total de banco nulo/negativo/inválido, banco que o snapshot não
-// conhece, id repetido, menos de 2 segmentos, ou soma (inteiros exatos) que não fecha com o topo.
-export function barraDosBancos(b: Bancos, conexoes: { id: number; institution_name: string | null }[]): Fatia[] {
-  const topo = decimal(b.total);
-  const ids = new Set(b.bancos.map((x) => x.conexao_id));
-  if (!topo || b.motivos.length || ids.size !== b.bancos.length || !Number.isFinite(Number(b.total))) return []; // "1E999" é decimal válido e Number() dá Infinity: a barra desenharia "NaN%" (as partes são >= 0 e somam o topo)
-  const partes = b.bancos.map((x) => (x.motivos.length ? null : decimal(x.total)));
-  if (partes.some((p) => !p || p.n < BigInt(0)) || !b.bancos.every((x) => conexoes.some((c) => c.id === x.conexao_id))) return [];
-  if (partes.filter((p) => p!.n > BigInt(0)).length < 2) return [];
-  const escala = Math.max(topo.escala, ...partes.map((p) => p!.escala));
-  const ate = (d: { n: bigint; escala: number }) => d.n * BigInt(10) ** BigInt(escala - d.escala);
-  if (partes.reduce((s, p) => s + ate(p!), BigInt(0)) !== ate(topo)) return [];
-  const comSaldo = new Set(b.bancos.filter((_, i) => partes[i]!.n > BigInt(0)).map((x) => x.conexao_id));
-  return conexoes.flatMap((c, i) => {
-    const x = b.bancos.find((y) => y.conexao_id === c.id);
-    return x && comSaldo.has(c.id) ? [{ conexao_id: c.id, nome: c.institution_name?.trim() || "Banco", cor: corDoBanco(c.institution_name ?? "", i), total: x.total! }] : [];
-  });
-}

@@ -37,10 +37,11 @@ export type Conexao = z.infer<typeof conexaoSchema>;
 
 /**
  * `POST /open-finance/{uid}/refresh` (`refresh_and_sync_pluggy_user`): `sync.items[]` é o veredito por item e `connections`, o snapshot de DEPOIS.
- * `sync.ok` e `sync.still_updating` ficam de fora de propósito: são a conjunção e a soma dos itens (o app lê os itens).
+ * `sync.still_updating` fica de fora de propósito: é a soma dos itens (o app lê os itens). `sync.ok` é lido só para `items: []` com `ok: false` (a falha que não tem item para mostrar, #1100 D2);
+ * é opcional para uma resposta sem o campo não virar contrato inválido.
  */
 export const refreshSchema = conexoesSchema.extend({
-  sync: z.object({ items: z.array(z.object({
+  sync: z.object({ ok: z.boolean().optional(), items: z.array(z.object({
     item_id: z.string(), institution: z.string().nullable(), state: z.string(), label: z.string(),
     detail: z.string().nullable().optional(), reason: z.string().nullable().optional(), still_updating: z.boolean(),
   })) }),
