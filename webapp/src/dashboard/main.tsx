@@ -7,7 +7,7 @@ import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
 import { aoConferirConta, contaDaSessao } from "./lib/conversation";
-import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { DEMO, contaQuery, contasQuery, lerContaFresca, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
@@ -31,7 +31,7 @@ qc.getQueryCache().subscribe((e) => {
   });
   uidVisto = uid;
 });
-if (!DEMO) aoConferirConta(() => qc.fetchQuery(contaQuery)); // toda pergunta nova ao Piggy relê a conta antes de entrar
+if (!DEMO) aoConferirConta(() => lerContaFresca(qc)); // toda pergunta nova ao Piggy relê a conta antes de entrar
 // O protótipo (dashboard-v2/index.html) define o plano da demonstração e não fala com a
 // API: o cache nasce com os dados sintéticos e o perfil salvo no navegador. O bundle nunca
 // lê a URL: quem decide o plano é o /api/v2/me.

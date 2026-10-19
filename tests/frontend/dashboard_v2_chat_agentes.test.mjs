@@ -719,6 +719,74 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  // Leituras do perfil presas na ordem em que saem: `presa(n)` devolve a função que solta a n-ésima. A 1ª responde a 42 (saiu com a
+  // sessão anterior); as outras já são da 43 (paraConta43 registrado antes).
+  const leiturasPresas = async (ctx, quantas) => {
+    const soltas = [], presas = [...Array(quantas)].map((_, i) => new Promise((ok) => { soltas[i] = ok; }));
+    let pedidos = 0;
+    await ctx.route("**/auth/dashboard-profile", async (r) => {
+      const n = ++pedidos;
+      if (n > quantas) return r.fallback();
+      await presas[n - 1];
+      if (n > 1) return r.fallback();
+      await r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } }).catch(() => {});
+    });
+    return { solta: (n) => soltas[n - 1](), pedidos: () => pedidos };
+  };
+
+  test(`${width}: dois focos seguidos com a releitura lenta: o fim da 1ª não mostra a conversa enquanto a do 2º não volta`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await paraConta43(ctx);
+    const l = await leiturasPresas(ctx, 2);
+    const foco = () => page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+    await foco(); // 1º foco: a leitura sai ainda com a sessão da 42
+    await page.waitForFunction(() => document.querySelector("[data-reconferindo]"));
+    await foco(); // a aba saiu e voltou de novo, com a sessão já na 43
+    const voltou = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    l.solta(1);
+    await voltou;
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByText("tem duplicada?").isVisible(), false, "o fim da releitura do 1º foco não libera a conversa");
+    l.solta(2);
+    await page.locator(".chat-empty").waitFor();
+    await ctx.close();
+  });
+
+  test(`${width}: a menção com uma leitura velha da conta em voo vai à conta da sessão atual`, async () => {
+    const { ctx, page } = await abrir({ width });
+    const da43 = await paraConta43(ctx);
+    const l = await leiturasPresas(ctx, 1);
+    const saiu = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await campo(page).fill("@Detetive oi"); // o "@" liga a leitura da conta: ela sai ainda com a sessão da 42
+    await saiu;
+    await campo(page).press("Enter");
+    l.solta(1);
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Oi, conta nova." }).waitFor();
+    assert.deepEqual(da43, [{ kind: "detetive", context: null }]);
+    await ctx.close();
+  });
+
+  if (width >= 768) test(`${width}: a pergunta ao Piggy de outra página com uma leitura velha da conta em voo não some quando o chat confere`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    await paraConta43(ctx);
+    const l = await leiturasPresas(ctx, 1);
+    const saiu = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await campo(page).fill("@"); // liga a leitura da conta: ela sai ainda com a sessão da 42
+    await saiu;
+    await campo(page).fill("quanto gastei?");
+    await campo(page).press("Enter");
+    await page.waitForFunction(() => location.hash === "#/piggy");
+    l.solta(1);
+    await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).waitFor();
+    await page.waitForTimeout(500); // a conferência do chat (já com a 43) não a apaga
+    assert.equal(await page.locator(".chat > .msg-user", { hasText: "quanto gastei?" }).count(), 1);
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

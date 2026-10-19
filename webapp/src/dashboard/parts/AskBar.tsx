@@ -5,7 +5,7 @@ import type { Path } from "../router";
 import { ICON } from "../lib/brand";
 import { AGENTES, acessoDe, agentesQuery, energiaDe, mencaoDe, semAcento, tokenEm } from "../lib/agentes";
 import { uidValido } from "../conta/api";
-import { CHAT_REAL, DEMO, contaQuery } from "../lib/v2";
+import { CHAT_REAL, DEMO, contaQuery, lerContaFresca } from "../lib/v2";
 import { GRUPO, Mencoes, type ItemMencao } from "./Mencoes";
 
 const GRUPOS = ["Agentes ativos", "Ativar para conversar", "No PigBank+"];
@@ -98,7 +98,7 @@ export function AskBar({ path }: { path: Path }) {
           let d = dados, u = uid;
           if (quer) {
             try {
-              if (!DEMO) { const agora = (await qc.fetchQuery(contaQuery)).user_id; if (agora !== u) { u = agora; d = undefined; } }
+              if (!DEMO) { const agora = (await lerContaFresca(qc)).user_id; if (agora !== u) { u = agora; d = undefined; } }
               if (!d && (DEMO || uidValido(u))) d = await qc.fetchQuery(agentesQuery(u));
             } catch { d = undefined; /* sem conta conferida ou sem catálogo: vai ao Piggy */ }
           }

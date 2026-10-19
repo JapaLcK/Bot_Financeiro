@@ -1,6 +1,6 @@
 // Cliente da /api/v2. Os tipos saem do contrato (api-v2.gen.ts); o fetch é o global,
 // que o auth-refresh.js do /painel envolve (renova no 401 e repete).
-import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
 
@@ -120,6 +120,13 @@ export const contaQuery = {
   retry: meQuery.retry,
   enabled: !DEMO,
 };
+// A conta numa leitura que SAIU agora ou depois. Uma leitura já em voo pode ter saído com a sessão anterior (a conta mudou noutra
+// aba): espera por ela e lê de novo. Cancelar não serve, quem a esperava receberia o cancelamento. Toda conferência de conta do
+// chat passa por aqui: montagem, foco, pergunta ao Piggy e menção (Codex no #1157).
+export async function lerContaFresca(qc: QueryClient) {
+  if (qc.isFetching({ queryKey: contaQuery.queryKey })) await qc.fetchQuery(contaQuery).catch(() => {});
+  return qc.fetchQuery(contaQuery);
+}
 
 // Dado que muda: relido a cada montagem, foco de aba e aviso do SSE.
 const vivo = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always" as const, retry: meQuery.retry, enabled: !DEMO };
