@@ -41,7 +41,7 @@ describe("erro não vira JSON na tela", () => {
     const erro = await chamar("/x", schema).catch((e: unknown) => e);
     expect(erro).toBeInstanceOf(ErroDeApi);
     expect((erro as ErroDeApi).message).toBe("Tivemos um problema aqui. Tente de novo em instantes.");
-    expect((erro as ErroDeApi).corpo).toBeUndefined();
+    expect((erro as ErroDeApi).corpo).toEqual({ detail: "psycopg.OperationalError" }); // o corpo é lido (o chat dos agentes decide por `detail.retryable`), mas o texto dele nunca vira mensagem
   });
 });
 

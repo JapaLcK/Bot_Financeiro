@@ -18,7 +18,7 @@ it("pergunta à direita em bolha, fala do Piggy à esquerda, sem bolha", async (
  expect(StyleSheet.flatten(screen.getByTestId("bolha-usuario").props.style)).toMatchObject({ alignSelf: "flex-end", maxWidth: "80%" });
  expect(StyleSheet.flatten(screen.getByTestId("fala-piggy").props.style)).toMatchObject({ alignSelf: "flex-start" });
  expect(StyleSheet.flatten(screen.getByTestId("fala-piggy").props.style).backgroundColor).toBeUndefined();
- expect(screen.queryByText("Converse com o Piggy")).toBeNull(); expect(within(screen.getByTestId("fala-piggy")).queryByText("Piggy")).toBeNull(); expect(screen.getByLabelText("Mensagem para o Piggy").props.placeholder).toBe("Converse com o Piggy…"); // sem título e sem a linha "Piggy" acima da fala
+ expect(screen.queryByText("Converse com o Piggy")).toBeNull(); expect(within(screen.getByTestId("fala-piggy")).getByText("Piggy")).toBeTruthy(); expect(screen.getByLabelText("Mensagem para o Piggy").props.placeholder).toBe("Converse com o Piggy…"); // sem título; a fala leva o cabeçalho "Piggy" (como os agentes do @, igual ao /painel)
  expect(screen.getByLabelText("Mensagem para o Piggy").props.maxLength).toBe(2000); expect(screen.queryByText("PigBank")).toBeNull();
 });
 it("o teclado desconta o Y do pai do campo na janela (measureInWindow), não um número fixo", async () => {
