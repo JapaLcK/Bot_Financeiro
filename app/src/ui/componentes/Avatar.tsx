@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Image, View } from "react-native";
 import { SvgAst, parse, type JsxAST } from "react-native-svg";
+import { inlineStyles } from "react-native-svg/css";
 
 import { useTema } from "@/ui/tema";
 
@@ -82,6 +83,7 @@ export function Avatar({ nome, imagem, tamanho = 40, decorativo = false, fundo, 
   const ehSvg = !!imagem && /\.svg$/i.test(imagem);
   // SVG (o logo do banco vem do CDN da Pluggy) não passa pelo `Image`: baixo o texto UMA vez por URI e só o desenho PRONTO esconde a inicial. Corpo que não é SVG
   // (HTML de CDN, XML quebrado, 404) falha aqui e cai na inicial; o `SvgUri` não serve porque avisa `onLoad` antes de analisar e refaz o download a cada render.
+  // `inlineStyles` aplica o `<style>.cls-1{fill:…}</style>` dos SVGs da Pluggy (Nubank, Inter e outros): sem ele o `parse` ignora o CSS e o logo sai preto.
   useEffect(() => {
     const uri = imagem;
     if (!uri || !ehSvg) return;
@@ -89,7 +91,7 @@ export function Avatar({ nome, imagem, tamanho = 40, decorativo = false, fundo, 
     // `aborted` guarda os dois setState: um fetch que ignora o abort (resposta de A chegando depois de B) não pode sobrescrever o desenho de B nem marcar B como falha.
     fetch(uri, { signal: ctl.signal, headers: { Accept: "image/svg+xml" } })
       .then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
-      .then((t) => { const ast = parse(t); if (ast?.tag !== "svg") throw new Error("não é svg"); if (!ctl.signal.aborted) setDesenho({ uri, ast }); })
+      .then((t) => { const ast = parse(t, inlineStyles); if (ast?.tag !== "svg") throw new Error("não é svg"); if (!ctl.signal.aborted) setDesenho({ uri, ast }); })
       .catch(() => { if (!ctl.signal.aborted) setUriQueFalhou(uri); });
     return () => ctl.abort();
   }, [imagem, ehSvg]);

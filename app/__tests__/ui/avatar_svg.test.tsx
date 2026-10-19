@@ -26,6 +26,13 @@ describe("Avatar com SVG (logo de banco)", () => {
     expect(tela.queryByText("N")).toBeNull();
   });
 
+  it("logo com <style> (classes .cls-N, como o Nubank da Pluggy): o fill vira atributo do desenho, não sai preto", async () => {
+    fetchSvg.mockResolvedValue(texto('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs><style>.cls-1{fill:#820AD1}</style></defs><circle class="cls-1" cx="5" cy="5" r="4"/></svg>'));
+    const tela = renderInterativo(<Avatar nome="Nubank" imagem={URI} />);
+    await drenar();
+    expect(JSON.stringify(tela.UNSAFE_getByType(SvgAst).props.ast)).toContain('"style":{"fill":"#820AD1"}'); // o texto do <style> também tem a cor: só o `style` do círculo prova a aplicação
+  });
+
   it.each([
     ["HTML com 200 (página do CDN)", texto("<!DOCTYPE html><html><body>Just a moment...</body></html>")],
     ["XML quebrado", texto("<svg><g></svg>")],
