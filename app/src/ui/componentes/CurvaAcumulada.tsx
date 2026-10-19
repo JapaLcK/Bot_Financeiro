@@ -19,7 +19,9 @@ export interface CurvaAcumuladaProps {
   /** Índice do ponto "hoje" (ponto com anel pulsante); `null` = sem ponto (mês passado). */
   indiceHoje: number | null;
   /** Cor da curva atual e do ponto: o sentido do ritmo (`positive` abaixo, `warning` acima) ou `ink` sem comparação. */
-  tom?: "ink" | "positive" | "warning";
+  tom?: "ink" | "positive" | "warning" | "brand";
+  /** Nomes das duas séries na legenda e na bolha, quando não são "este mês" e "mês passado" (a comparação de dois períodos quaisquer). */
+  rotulos?: { atual: string; anterior: string };
 }
 
 const ALTURA = 130, MARGEM_X = 12, TOPO = 8, BASE = 8, RAIO_PONTO = 4, COLUNA_Y = 44;
@@ -59,8 +61,8 @@ export function indiceDoDia(x: number, largura: number, diasNoMes: number, limit
 }
 export const reais = (c: number) => { const p = partes(c); return p ? `R$ ${p.inteiro},${p.centavos}` : "—"; };
 /** Textos da bolha: o valor é o `pontos[i]` desenhado (nunca recalculado); a 2ª linha ("mês passado R$ ...") só com a série do mês passado, no mesmo `i` (a série já vem preenchida até o fim do mês). */
-export function conteudoBolha(i: number, pontos: number[], anterior: number[] | null) {
-  return { dia: `dia ${i + 1}`, valor: reais(pontos[i]!), anterior: anterior && `mês passado ${reais(anterior[Math.min(i, anterior.length - 1)]!)}` };
+export function conteudoBolha(i: number, pontos: number[], anterior: number[] | null, nomeAnterior = "mês passado") {
+  return { dia: `dia ${i + 1}`, valor: reais(pontos[i]!), anterior: anterior && `${nomeAnterior} ${reais(anterior[Math.min(i, anterior.length - 1)]!)}` };
 }
 
 /**
@@ -75,7 +77,7 @@ export function conteudoBolha(i: number, pontos: number[], anterior: number[] | 
  * (navega) e, ao abrir a bolha, o gráfico marca `SegurouContext` para o card (ver `Bloco`) não navegar ao soltar.
  * Decorativa: tudo, inclusive os rótulos e a bolha, some do VoiceOver; quem usa o gráfico lê os números e o chip ao lado.
  */
-export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje, tom = "ink" }: CurvaAcumuladaProps) {
+export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje, tom = "ink", rotulos }: CurvaAcumuladaProps) {
   const { cores } = useTema();
   const idArea = `area${useId().replace(/\W/g, "")}`; // um id por instância: várias curvas na tela não podem compartilhar o degradê
   const reduzir = useReduzirMovimento();
@@ -127,9 +129,9 @@ export function CurvaAcumulada({ pontos, anterior = null, diasNoMes, indiceHoje,
     },
     onTouchEnd: fechar, onTouchCancel: fechar,
   };
-  const bolha = sel === null || sel >= pontos.length ? null : { cx: x(sel), cy: y(pontos[sel]!), w: serieAnterior ? BOLHA_W_COM_ANTERIOR : BOLHA_W, lado: ladoDaBolha(y(pontos[sel]!), serieAnterior ? 2 : 1), ...conteudoBolha(sel, pontos, serieAnterior) };
+  const bolha = sel === null || sel >= pontos.length ? null : { cx: x(sel), cy: y(pontos[sel]!), w: serieAnterior ? BOLHA_W_COM_ANTERIOR : BOLHA_W, lado: ladoDaBolha(y(pontos[sel]!), serieAnterior ? 2 : 1), ...conteudoBolha(sel, pontos, serieAnterior, rotulos?.anterior) };
   const dias = [...new Set([1, 15, 25, diasNoMes])].filter((n) => n <= diasNoMes);
-  const legenda = [{ rotulo: "Este mês", tracejado: false }, ...(serieAnterior ? [{ rotulo: "Mês passado", tracejado: true }] : [])];
+  const legenda = [{ rotulo: rotulos?.atual ?? "Este mês", tracejado: false }, ...(serieAnterior ? [{ rotulo: rotulos?.anterior ?? "Mês passado", tracejado: true }] : [])];
 
   return (
     <View testID="curva-acumulada" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ gap: 8 }}>
