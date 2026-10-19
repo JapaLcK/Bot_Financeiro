@@ -365,6 +365,18 @@ def test_falha_do_periodo_libera_o_resumo_de_varios_meses_e_nao_o_de_1_mes(mundo
         FALHAS_DE_CARD_DO_TURNO.reset(t)
 
 
+def test_falha_do_renda_libera_o_dado_do_mes_em_texto_sem_abrir_o_resumo(mundo):
+    """"Quanto entrou em setembro" num plano sem `renda` (Plus+): o `get_period_summary` devolve o dado, não manda ao `resumo`
+    (que só mostra gasto). Controle: sem a falha do `renda`, o mesmo pedido segue indo ao card."""
+    a, _ = mundo
+    assert _chama("get_period_summary", a, "um", [])["error"] == "mes_inteiro_no_card"
+    t = FALHAS_DE_CARD_DO_TURNO.set(["renda"])
+    try:
+        assert "error" not in _chama("get_period_summary", a, "um", [])
+    finally:
+        FALHAS_DE_CARD_DO_TURNO.reset(t)
+
+
 # ── a fatura só perde o total quando o `show_card fatura` ainda pode aparecer ────────────────────
 
 def _ids(*cards):
