@@ -184,23 +184,30 @@ it("429 sem quota_exhausted (rajada): o campo segue livre", async () => {
 });
 it("cota só sobe: a resposta atrasada de outro agente (leitura velha) não destrava a cota que já encheu", async () => {
   const g = segurar(); ag.chat = async (n) => { if (n === 1) { await g.promessa; return resp("Velha", { usage: { used: 99, limit: 100 } }); } return resp("Nova", { usage: { used: 100, limit: 100 } }); };
-  await abrir(); await enviar("@Xerife a"); await enviar("@Carteiro b"); await waitFor(() => expect(screen.getByText("Nova")).toBeTruthy());
+  await abrir(); srv.uso = 100; await enviar("@Xerife a"); await enviar("@Carteiro b"); await waitFor(() => expect(screen.getByText("Nova")).toBeTruthy());
   await act(async () => { g.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Velha")).toBeTruthy());
   await digitar("@Xerife de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
 });
 it("cota só sobe também no Piggy: o fim atrasado do Piggy (99) não destrava a cota que o agente encheu (100)", async () => {
   const g = segurar(); ag.chat = async () => { await g.promessa; return resp("Do agente", { usage: { used: 100, limit: 100 } }); };
-  await abrir(); await enviar("@Xerife a"); const f = respostaFluxo(); srv.chat = () => f; await enviar("oi"); // agente e Piggy em voo
+  await abrir(); srv.uso = 100; await enviar("@Xerife a"); const f = respostaFluxo(); srv.chat = () => f; await enviar("oi"); // agente e Piggy em voo
   await act(async () => { g.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Do agente")).toBeTruthy());
   await act(async () => { f.empurrar({ tipo: "fim", reply: "Do Piggy", usage: { used: 99, limit: 100 }, message_id: 9, chips: [] }); f.fechar(); await drenar(); });
   await waitFor(() => expect(screen.getByText("Do Piggy")).toBeTruthy());
   await digitar("mais uma"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
 });
-it("cota renova na virada do mês: a resposta do mês novo, menor, entra (o 'só sobe' vale dentro do mês)", async () => {
-  jest.setSystemTime(new Date("2026-10-31T12:00:00Z")); let n = 0; ag.chat = () => resp("Ok", { usage: ++n === 1 ? { used: 90, limit: 100 } : { used: 1, limit: 100 } });
+it("contagem menor (a cota renovou no mês novo): relê a cota no servidor e aplica a leitura", async () => {
+  let n = 0; ag.chat = () => resp("Ok", { usage: ++n === 1 ? { used: 90, limit: 100 } : { used: 1, limit: 100 } });
   await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("90 de 100 mensagens utilizadas")).toBeTruthy());
-  jest.setSystemTime(new Date("2026-11-01T12:00:00Z")); await enviar("@Xerife e agora?");
+  srv.uso = 1; await enviar("@Xerife e agora?"); // o servidor virou o mês
   await waitFor(() => expect(screen.queryByText("90 de 100 mensagens utilizadas")).toBeNull());
+});
+it("a releitura da cota que voltou depois de outra resposta gravar a cota é descartada", async () => {
+  let n = 0; ag.chat = () => resp("Ok", { usage: [{ used: 90, limit: 100 }, { used: 1, limit: 100 }, { used: 95, limit: 100 }][n++]! });
+  await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("90 de 100 mensagens utilizadas")).toBeTruthy());
+  const g = segurar(); srv.segurarGet = g; srv.uso = 50; await enviar("@Xerife b"); await act(drenar); // menor: relê, e a leitura fica presa
+  await enviar("@Carteiro c"); await waitFor(() => expect(screen.getByText("95 de 100 mensagens utilizadas")).toBeTruthy());
+  await act(async () => { g.soltar(); await drenar(); }); expect(screen.getByText("95 de 100 mensagens utilizadas")).toBeTruthy();
 });
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");

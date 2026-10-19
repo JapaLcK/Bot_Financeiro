@@ -7,7 +7,6 @@ import { mensagemRecurso, useEstadoPainel } from "./provider";
 import type { Pergunta } from "./perguntas";
 import type { Motivo } from "./motivoFeedback";
 import { useConversaAgentes, type TurnoAgente } from "./conversaAgentes";
-import { mesAtual } from "./catalogo";
 /** `passos`/`previa`/`blocos` são só GUARDADOS aqui: quem os desenha é o D2/E1. `parcial` = texto do stream até o `fim`. */
 export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; motivo: Motivo | null; interrompida: boolean; chips: string[]; agente?: TurnoAgente };
 export const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
@@ -50,11 +49,17 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
-  /** A cota de uma resposta só sobe no mesmo mês: pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do
-   * modelo. Mês novo (UTC, o do servidor, ou o de São Paulo) ou limite novo (troca de plano) entram direto, mesmo menores. */
-  const periodoUso = useRef(""), periodo = () => `${new Date().toISOString().slice(0, 7)}|${mesAtual()}`;
-  const subir = (n: Uso) => { const p = periodo(), virou = p !== periodoUso.current; periodoUso.current = p; return (u: Uso | null) => !virou && u && u.limit === n.limit && u.used > n.used ? u : n; };
-  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso: (n) => { versaoUso.current++; setUso(subir(n)); }, esgotarCota: () => { versaoUso.current++; setUso((u) => u && { ...u, used: Math.max(u.used, u.limit) }); }, falhou });
+  /** A cota que vem numa resposta: pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do modelo, então uma
+   * contagem MENOR com o mesmo limite não se aplica às cegas (pode ser velha, ou o mês que virou): relê a cota no servidor, e a leitura só entra se
+   * nenhuma outra cota foi gravada enquanto ela voava. Limite novo (troca de plano) entra direto. */
+  const usoAtual = useRef(uso); usoAtual.current = uso;
+  const aplicarUso = (n: Uso) => {
+    versaoUso.current++; const u = usoAtual.current;
+    if (!u || u.limit !== n.limit || n.used >= u.used) { usoAtual.current = n; setUso(n); return; }
+    const alvo = dono.current, v0 = versaoUso.current, c = novo();
+    void lerRecurso("/ai/messages?limit=1", conversaSchema, c).then((r) => { if (dono.current === alvo && versaoUso.current === v0) { usoAtual.current = r.usage; setUso(r.usage); } }, () => {}).finally(() => ativos.current.delete(c));
+  };
+  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso, esgotarCota: () => { versaoUso.current++; const u = usoAtual.current; if (u) { const e = { ...u, used: Math.max(u.used, u.limit) }; usoAtual.current = e; setUso(e); } }, falhou });
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
     const alvo = dono.current; if (alvo === null) return null;
     semDeleteUlt.current = semDelete;
@@ -67,7 +72,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
       const [, cota] = await Promise.all([d, lerRecurso("/ai/messages?limit=1", conversaSchema, cg), ...delecoes.current]);
       if (!vivo()) return null;
       if (erros.current === e0 && !semDelete) sujo.current = false;
-      if (versaoUso.current === v0) { periodoUso.current = periodo(); setUso(cota.usage); }
+      if (versaoUso.current === v0) { usoAtual.current = cota.usage; setUso(cota.usage); }
       setBloqueio("livre"); return cota.usage;
     } catch (e) { if (vivo()) { falhou(e); setBloqueio("falhou"); } return null; }
     finally { ativos.current.delete(cg); }
@@ -121,7 +126,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
         else if (e.tipo === "erro") throw new ErroDeApi(500, e.mensagem ?? "erro");
         else {
           fim = true; atualizar(() => ({ resposta: e.reply, parcial: "", messageId: e.message_id, chips: aberta.current ? e.chips : [] }));
-          versaoUso.current++; setUso(subir(e.usage));
+          aplicarUso(e.usage);
           if (aberta.current) AccessibilityInfo.announceForAccessibility("Piggy respondeu");
           concluir();
         }
