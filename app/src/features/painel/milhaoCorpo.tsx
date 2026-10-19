@@ -25,7 +25,8 @@ const virgula = (n: number) => String(n).replace(".", ",");
 export function MilhaoCorpo({ d }: { d: z.output<typeof S.progressoMilhaoSchema> }) {
   const { oculto } = usePrivacidade(), { cores } = useTema(), { fontScale } = useTipografiaPainel();
   const [aporte, setAporte] = useState(APORTE.padrao), [taxa, setTaxa] = useState(TAXA.padrao);
-  const p = useMemo(() => projetar({ patrimonio: d.patrimonio / 100, aporte, taxaAnual: taxa, inicio: mesAtual() }), [d.patrimonio, aporte, taxa]);
+  const inicio = mesAtual(); // fora do memo: a tela aberta na virada do mês recalcula no próximo render (ex.: puxar para atualizar)
+  const p = useMemo(() => projetar({ patrimonio: d.patrimonio / 100, aporte, taxaAnual: taxa, inicio }), [d.patrimonio, aporte, taxa, inicio]);
   const passou = p.meta > 1e6, alvo = passou ? `R$ ${new Intl.NumberFormat("pt-BR").format(p.meta / 1e6)} milhões` : "R$ 1 milhão", padrao = aporte === APORTE.padrao && taxa === TAXA.padrao;
   const trilha = { minimumTrackTintColor: cores.brand, maximumTrackTintColor: cores.surfaceRaised, style: { height: 40 } };
   return <View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>

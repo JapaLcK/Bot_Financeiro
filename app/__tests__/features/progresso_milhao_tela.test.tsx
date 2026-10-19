@@ -117,6 +117,12 @@ it("o mês de chegada vem do relógio: patrimônio igual, mês de partida outro,
   jest.setSystemTime(new Date("2026-12-19T16:00:00Z")); milhao = () => resposta(200, { patrimonio: "100000.00", motivos: [] }); await abrir();
   expect(screen.getByText("fevereiro de 2051")).toBeTruthy();
 });
+it("tela aberta na virada do mês (SP): puxar para atualizar com o mesmo patrimônio recalcula a chegada", async () => {
+  jest.setSystemTime(new Date("2026-11-01T02:30:00Z")); milhao = () => resposta(200, { patrimonio: "100000.00", motivos: [] }); await abrir(); // ainda 31/10 em SP
+  expect(screen.getByText("dezembro de 2050")).toBeTruthy();
+  jest.setSystemTime(new Date("2026-11-01T04:00:00Z")); await puxar();
+  expect(screen.getByText("janeiro de 2051")).toBeTruthy();
+});
 it("duas leituras: a resposta lenta da 1ª, que chega depois da 2ª, não sobrescreve", async () => {
   let solta!: (r: Response) => void;
   milhao = () => new Promise<Response>((r) => { solta = r; }); renderRouter("./app", { initialUrl: "/progresso-milhao" }); await act(drenar);
