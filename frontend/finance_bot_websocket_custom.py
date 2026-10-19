@@ -7299,14 +7299,21 @@ async def _create_billing_portal(user_id: int, customer_id: str, return_path: st
         ) from None
 
 
+# Para onde o Stripe devolve quem sai do portal. O cliente só ESCOLHE uma chave: o valor dele nunca entra na URL.
+_PORTAL_VOLTAR = {"/painel": "/painel", "/app": "/app"}
+
+
 @app.post("/billing/portal")
 @limiter.limit("30/hour")
-async def billing_portal(request: Request, user_id: int = Depends(_get_current_user)):
+async def billing_portal(request: Request, voltar: str | None = None, user_id: int = Depends(_get_current_user)):
     """
     Cria uma sessão no Stripe Customer Portal para o usuário gerenciar
     a assinatura (cancelar, trocar cartão, ver faturas).
+    `?voltar=` (opcional) escolhe a volta entre as chaves de `_PORTAL_VOLTAR`; sem ele, `/app`.
     """
     await asyncio.to_thread(_exigir_credencial, user_id)
+    if voltar is not None and voltar not in _PORTAL_VOLTAR:
+        raise HTTPException(status_code=400, detail="Destino de retorno inválido.")
     if not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Pagamentos ainda não configurados.")
 
@@ -7319,7 +7326,7 @@ async def billing_portal(request: Request, user_id: int = Depends(_get_current_u
         raise HTTPException(status_code=404, detail="Sem assinatura ativa.")
 
     portal = await _create_billing_portal(
-        user_id, user["stripe_customer_id"], "/app", "/billing/portal",
+        user_id, user["stripe_customer_id"], _PORTAL_VOLTAR.get(voltar, "/app"), "/billing/portal",
     )
     return {"portal_url": portal.url}
 
