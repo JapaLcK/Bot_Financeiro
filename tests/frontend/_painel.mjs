@@ -131,3 +131,9 @@ export async function abrirPainel(browser, { width = 1440, espera = "#board-prof
 // A fileira de próximas perguntas ignora o toque por ~500 ms depois de trocar (PiggyChat.tsx: TRAVA_MS, contra o duplo toque):
 // o teste que clica uma pergunta logo depois da resposta espera isto antes.
 export const passouATrava = (page) => page.waitForTimeout(600);
+
+// O painel dos 4 selects do Extrato (Origem, Tipo, Categoria, Conta) nasce fechado atrás do botão de filtros: abre se estiver fechado.
+export async function abrirFiltros(page) {
+  const botao = page.getByRole("button", { name: "Filtros", exact: true });
+  if ((await botao.getAttribute("aria-expanded")) !== "true") await botao.click();
+}

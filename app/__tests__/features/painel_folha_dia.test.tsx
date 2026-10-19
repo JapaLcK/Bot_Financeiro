@@ -87,7 +87,7 @@ describe("abrir pelo toque", () => {
  });
  it("dia de outro mês (parcela) NAVEGA ao extrato, sem folha e sem ler /gastos (controle negativo da regra síncrona: sem ela abriria com R$ 0,00)", async () => {
   await abrir(); await tocar("2026-09-30"); await extratoMontado();
-  expect(chamadas(GAS)).toHaveLength(0); expect(screen.queryByRole("header", { name: /setembro|outubro/ })).toBeNull();
+  expect(chamadas(GAS)).toHaveLength(0); expect(screen.queryByTestId("folha-painel")).toBeNull(); // o Extrato também tem cabeçalhos de dia: a folha se reconhece pelo painel
   await waitFor(() => expect(String(chamadas(LANC).at(-1)![0])).toContain("dia=2026-09-30"));
  });
  it("antes do corte do plano navega ao extrato; no corte e depois, abre (positivo)", async () => {

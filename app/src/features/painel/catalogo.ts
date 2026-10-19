@@ -69,3 +69,6 @@ export function nomeCategoria(chave: string | null, catalogo?: { chave: string; 
  const nome = catalogo?.find((c) => c.chave === chave)?.nome || chave;
  return nome[0]!.toUpperCase() + nome.slice(1);
 }
+/** Dia da semana por extenso de "AAAA-MM-DD"; data civil, nunca o fuso do aparelho. */
+const SEMANA = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+export const semana = (dia: string) => SEMANA[new Date(`${dia}T12:00:00Z`).getUTCDay()]!;
