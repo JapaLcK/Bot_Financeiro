@@ -49,8 +49,9 @@ export function ContaBancos() {
   const topo = b ? Number(b.total) : NaN;
   const vagas = lim && typeof lim.em_uso === "number" && typeof lim.of_banks_max === "number" && lim.of_banks_max > 0 ? `${lim.em_uso} de ${lim.of_banks_max} bancos` : null;
   // Sem vaga: a mensagem do servidor no lugar do link; sem mensagem, nenhum link (não convida a uma ação que o servidor recusa).
-  // Com o /limite ainda no ar, nada: o link apareceria e sumiria quando a resposta dissesse que não há vaga.
-  const conectar = limite.isLoading ? null : lim?.pode_adicionar !== false ? <a className="btn btn-primary btn-conectar" href={OF}>Conectar banco</a>
+  // Com o /limite ainda sem resposta, nada: o link apareceria e sumiria quando ela dissesse que não há vaga. Na 1ª falha o link
+  // volta (o /limite é opcional), sem esperar as novas tentativas.
+  const conectar = limite.isLoading && limite.failureCount === 0 ? null : lim?.pode_adicionar !== false ? <a className="btn btn-primary btn-conectar" href={OF}>Conectar banco</a>
     : typeof lim.message === "string" && lim.message.trim() ? <p className="faint">{lim.message}</p> : null;
 
   const abrir = (c: Conexao, botao: HTMLButtonElement) => {

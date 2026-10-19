@@ -384,6 +384,15 @@ test("/limite com pode_adicionar false e message nula não oferece 'Conectar ban
   assert.deepEqual(await links(LIMITE({ pode_adicionar: true, message: null })), [0, 1]); // controle positivo
 });
 
+test("/limite 500: o 'Conectar banco' volta na 1ª falha, sem esperar as novas tentativas (3 pedidos, ~3 s)", async () => {
+  const { ctx, page, srv } = await bancos({ limiteRes: ERRO_500, bancos: "padrao" });
+  await esperaCards(page, 3);
+  await page.getByRole("link", { name: "Conectar banco" }).waitFor({ timeout: 8000 });
+  const pedidos = srv.reqs.filter((p) => p === "/open-finance/7/limite").length;
+  await ctx.close();
+  assert.ok(pedidos < 3, `o link só veio depois de ${pedidos} pedidos do /limite`);
+});
+
 test("/bancos fora do contrato (sem 'bancos', sem 'motivos', banco sem 'motivos', item null em 'bancos') é leitura falha: cards com nome e '—', sem topo nem barra, sem erro de página", async () => {
   for (const corpoRuim of [{ total: "10.00", motivos: [] }, { total: "10.00", bancos: [] }, { total: "10.00", motivos: [], bancos: [{ conexao_id: 11, total: "10.00" }] }, { total: "10.00", motivos: [], bancos: [null] }, []]) {
     const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoRuim });
