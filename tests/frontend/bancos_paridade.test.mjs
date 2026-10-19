@@ -3,6 +3,7 @@
 //   · CORES_BANCO (webapp/src/dashboard/lib/bancos.ts) == coresBanco (app/src/ui/tokens.ts);
 //   · SUPERFICIE == --plane-1 e --tw-card (styles/base.css): a cor sobre a qual a regra de 3:1 mede o contraste;
 //   · TOM_DO_ESTADO == OF_PILL_CLASS (frontend/settings.html): active→ok, pending→pendente, error→erro.
+//   · estados sem Reconectar (SEM_RECONEXAO, conta/BancoCard.tsx) == a lista do app (conexoes/BancoCard.tsx).
 // Cada comparação falha ALTO se o formato mudar (mapa vazio), e o negativo prova que um hex ou um estado trocado é visto.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -68,4 +69,19 @@ test("TOM_DO_ESTADO == OF_PILL_CLASS do settings.html (active→ok, pending→pe
 });
 test("negativo: estado com outro tom (updated virando pendente) aparece como diferença", () => {
   assert.deepEqual(tomDiff(WEB().replace('updated: "ok"', 'updated: "pendente"'), SETTINGS()), ["updated: pendente × ok"]);
+});
+
+const BANCO_CARD_WEB = () => ler("webapp", "src", "dashboard", "conta", "BancoCard.tsx");
+const BANCO_CARD_APP = () => ler("app", "src", "features", "openFinance", "conexoes", "BancoCard.tsx");
+const lista = (m, rotulo) => { assert.ok(m, `${rotulo} não encontrado: o formato mudou`); return m[1].split(",").map((x) => x.trim().replace(/"/g, "")).filter(Boolean).sort(); };
+const estadosDiff = (web, app) => {
+  const w = lista(/SEM_RECONEXAO\s*=\s*\[([^\]]*)\]/.exec(web), "SEM_RECONEXAO");
+  const a = lista(/provider_item_id[^\n]*!\[([^\]]*)\]\.includes\(/.exec(app), "lista do app");
+  return w.join() === a.join() ? [] : [`${w} × ${a}`];
+};
+test("estados sem Reconectar do painel == os do app", () => {
+  assert.deepEqual(estadosDiff(BANCO_CARD_WEB(), BANCO_CARD_APP()), []);
+});
+test("negativo: um estado a mais só no painel aparece como diferença", () => {
+  assert.equal(estadosDiff(BANCO_CARD_WEB().replace('"paused"]', '"paused", "error"]'), BANCO_CARD_APP()).length, 1);
 });

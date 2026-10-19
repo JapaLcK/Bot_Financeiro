@@ -6,7 +6,7 @@ import { Ladrilho } from "./BancoCard";
 // O seletor de bancos é o módulo legado /open-finance-connect.js (o mesmo do /settings; ver `PBOpenFinance`). `pre` abre o seletor com esse banco já
 // escolhido: quem confirma é o usuário, no seletor, e toda a regra de teto/plano/confirmação é a dele.
 export type Pre = { id: number; name: string };
-export type SeletorOF = { init: (o: Record<string, unknown>) => void; open: (pre?: Pre) => void; destroy: () => void; busy: () => boolean };
+export type SeletorOF = { init: (o: Record<string, unknown>) => void; open: (pre?: Pre) => void; destroy: () => void; busy: () => boolean; reconnect: (itemId: string) => unknown };
 export const seletorOF = () => (window as unknown as { PBOpenFinance?: SeletorOF }).PBOpenFinance;
 
 // Link para o Open Finance do /settings; com o módulo carregado o clique abre o seletor aqui mesmo. Sem ele (o script não carregou), o href segue valendo.
@@ -27,7 +27,7 @@ export function Disponiveis({ lista, aoAbrir }: { lista: Conector[]; aoAbrir: ()
   const id = useId();
   if (!lista.length) return null;
   return (
-    <section className="span-12 bancos-col" aria-labelledby={id}>
+    <section className="bancos-col" aria-labelledby={id}>
       <h2 id={id} className="banco-rotulo">Disponíveis para conectar</h2>
       <ul className="banco-grupo">
         {lista.map((c, i) => (

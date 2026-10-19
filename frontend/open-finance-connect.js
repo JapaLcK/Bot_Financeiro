@@ -22,7 +22,8 @@
  * o fluxo do picker.
  *
  * Uma conexão por vez: do início do connect (picker ou reconexão) até o onClose,
- * o erro ou o fim do save, `open()` e `reconnect()` são IGNORADOS EM SILÊNCIO —
+ * o erro ou o fim do save, `open()` e `reconnect()` são IGNORADOS SEM CALLBACK
+ * (`reconnect()` devolve `false` nesse caso; senão devolve a promessa do connect) —
  * duplo clique não vira dois connect-tokens e dois widgets, e `onError` aqui
  * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
  * callback do host dispara para a conexão que estava em curso.
@@ -748,9 +749,10 @@
   }
 
   /** Reconecta um banco já conectado, sem picker. Não passa por refreshLimits:
-   *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto). */
+   *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto).
+   *  Devolve `false` se há conexão em curso (ignorado, sem callback): o host não é dono dela. */
   function reconnect(itemId) {
-    if (ocupado) return;   // em curso: ignora em silêncio, antes de validar (a regra vale para todo chamador)
+    if (ocupado) return false;   // em curso: ignora sem callback, antes de validar (a regra vale para todo chamador)
     if (typeof itemId !== "string" || !itemId) {
       conf("onError")("Conexão inválida para reconectar.");
       return;

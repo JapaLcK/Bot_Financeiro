@@ -21,7 +21,9 @@
  *    (ou o bloco inteiro `if (aberto && typeof aberto.then === "function")`).
  *  - A21 (destroy no onConnectStart): tirar o `if (!vivo()) return;` logo depois do onConnectStart.
  *  - A22 (destroy no onError do init): trocar `if (vivo()) conf("onClose", host)();` por `conf("onClose", host)();`.
- *  - A23 (ocupado antes de validar): tirar o `if (ocupado) return;` do topo de reconnect().
+ *  - A23 (ocupado antes de validar): tirar o `if (ocupado) return false;` do topo de reconnect().
+ *  - A24 (reconnect ocupado devolve false): trocar `if (ocupado) return false;` por `if (ocupado) return;` no topo de reconnect().
+ *    O positivo é o mesmo caso: a 1ª chamada NÃO devolve `false`, e depois do onClose a seguinte também não.
  *
  * Rodar: node --test tests/frontend/of_connect_reconectar.test.mjs
  */
@@ -482,5 +484,21 @@ test("A23 reconnect com id inválido durante uma conexão em curso: ignorado em 
   await sleep(200);
   assert.deepEqual(await ev(page), ["open"]);
   assert.equal(await page.evaluate(() => window.__n), 1);
+  await page.__ctx.close();
+});
+
+test("A24 reconnect com conexão em curso devolve false (sem callback nem pedido); a 1ª e a seguinte ao onClose não", async () => {
+  const page = await abrir();
+  const r1 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  const r2 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await sleep(200);
+  assert.equal(r1, undefined); // o evaluate espera a promessa do connect (resolve undefined): o que importa é que NÃO é false
+  assert.equal(r2, false);
+  assert.equal(page.__posts.length, 1);
+  assert.deepEqual(await ev(page), ["open"]);
+  await page.evaluate(() => window.__w.onClose());
+  const r3 = await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  assert.notEqual(r3, false);
   await page.__ctx.close();
 });
