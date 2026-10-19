@@ -11,7 +11,7 @@ import { useBloqueio } from "@/features/bloqueio/bloqueio";
 import { temTampa } from "@/features/bloqueio/tampa";
 import { carregarAcessoBancario, conferirSessao } from "@/features/openFinance/acesso";
 import { useForeground } from "@/features/openFinance/useForeground";
-import { concluirTentativaBancaria, lerCredenciais, lerTentativaBancaria, type Credenciais } from "@/storage/secure";
+import { concluirTentativaBancaria, lerCredenciais, lerTentativaBancaria, PRAZO_TENTATIVA_MS, type Credenciais } from "@/storage/secure";
 import { lerRecurso, salvarPerfil } from "@/services/painel";
 import { usePrivacidade } from "./privacidade";
 import { Screen } from "@/ui/componentes/Screen";
@@ -40,6 +40,7 @@ function rota(k: Recurso, uid: number, mes: string, dias?: number) {
   const base = `/api/app/`;
   return ({ contas: base + "contas", resumo: base + `resumo-do-mes?mes=${mes}`, detalhes: base + `mes-detalhes?mes=${mes}`, detalhesAnterior: base + `mes-detalhes?mes=${mesesAnteriores(mes, 2)[1]}`, patrimonio: base + "patrimonio", rendimento: base + "rendimento", previsao: base + "previsao" + (dias ? `?dias=${dias}` : ""), assinaturas: base + "assinaturas", metas: base + "metas", cartoes: `/cards/${uid}/summary`, parcelas: `/installments/${uid}/list`, renda: `/analytics/${uid}/evolution?months=6`, insights: `/insights/${uid}/current`, plano: base + "me", categorias: base + "categorias" })[k];
 }
+const vencimento = (t: { tentativa_id: string; iniciada_em: number } | null | undefined) => t ? { id: t.tentativa_id, ate: t.iniciada_em + PRAZO_TENTATIVA_MS } : null;
 const FALHA_DESCARTE = "Não conseguimos descartar agora. Tente de novo.";
 export function PainelProvider({ children }: { children: ReactNode }) {
   const sessao = useSessao();
@@ -48,7 +49,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   const [usuario, setUsuario] = useState<Perfil | null>(null);
   const [gate, setGate] = useState<"carregando" | "liberado" | "negado" | "erro">("carregando");
   const [erroGate, setErroGate] = useState("");
-  const [pendente, setPendente] = useState<string | null>(null); // tentativa_id do marcador lido no cofre
+  const [pendente, setPendente] = useState<{ id: string; ate: number } | null>(null); // marcador lido no cofre e quando ele vence
   const [mes, setMes] = useState(mesAtual);
   const { oculto, alternar: alternarPrivacidade, mostrar: mostrarValores } = usePrivacidade();
   const [perfil, setPerfil] = useState<S.PerfilPainel>("padrao");
@@ -111,7 +112,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
       }
       credencialValidada.current = cred;
       silenciosa.current = refoco && mesmo && !pediuAtualizar.current;
-      acessoValidando.current = false; setPendente(tentativa?.tentativa_id ?? null); setUsuario(a.perfil); setGate("liberado"); setVersao((v) => v + 1);
+      acessoValidando.current = false; setPendente(vencimento(tentativa)); setUsuario(a.perfil); setGate("liberado"); setVersao((v) => v + 1);
     }).catch((e: unknown) => {
       if (cancelado || g !== geracaoAcesso.current) return;
       if (e instanceof RequisicaoSuperada) { if (refoco) setGate("carregando"); return; }
@@ -212,14 +213,20 @@ export function PainelProvider({ children }: { children: ReactNode }) {
   };
   // O erro do Descartar não tem botão de fechar: sai quando a pendência some, por qualquer caminho (descarte, prazo, Retomar, foco).
   useEffect(() => { if (pendente === null) setAviso((a) => a === FALHA_DESCARTE ? null : a); }, [pendente]);
+  // O marcador vence com o painel aberto: sem isto o aviso ficaria até o próximo foco, com "Retomar" levando a uma volta sem tentativa.
+  useEffect(() => {
+    if (pendente === null) return;
+    const t = setTimeout(() => setPendente((p) => p?.id === pendente.id ? null : p), Math.max(0, pendente.ate - Date.now()));
+    return () => clearTimeout(t);
+  }, [pendente]);
   // "Descartar" do aviso de conexão pendente. Apaga só o marcador que o aviso mostrou (`concluirTentativaBancaria` confere o id e a sessão na fila) e RELÊ o cofre: uma tentativa B gravada depois continua aparecendo.
   const descartarPendente = async () => {
-    const id = pendente, uid = dono.current;
-    if (id === null) return false;
+    const id = pendente?.id, uid = dono.current;
+    if (id === undefined) return false;
     try {
       await concluirTentativaBancaria(id);
       const relida = await lerTentativaBancaria(uid ?? undefined);
-      if (dono.current === uid) setPendente(relida?.tentativa_id ?? null);
+      if (dono.current === uid) setPendente(vencimento(relida));
       return true;
     } catch {
       if (dono.current === uid) setAviso(FALHA_DESCARTE);

@@ -84,6 +84,15 @@ it("falha ao apagar e o marcador vence depois: a pendência some e o erro vai ju
   expect(screen.queryByText(ERRO)).toBeNull();
 });
 
+it("o marcador vence com o painel aberto: o aviso sai sozinho, sem esperar o próximo foco", async () => {
+  idade(PRAZO_TENTATIVA_MS - 60_000);
+  await abrir();
+  await act(async () => { jest.advanceTimersByTime(30_000); await drenar(); });
+  expect(pendente()).toBeTruthy(); // ainda dentro do prazo
+  await act(async () => { jest.advanceTimersByTime(31_000); await drenar(); });
+  expect(pendente()).toBeNull();
+});
+
 it("a legenda do aviso diz como sair, sem supor que a pessoa desistiu", async () => {
   await abrir();
   expect(screen.getByText("Não vai concluir? Descarte e comece de novo quando quiser.")).toBeTruthy();
