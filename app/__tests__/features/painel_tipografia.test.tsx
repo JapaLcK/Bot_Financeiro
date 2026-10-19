@@ -73,7 +73,7 @@ it("filtros refluem na troca live sem perder seleção, busca ou instância do c
 it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do mesmo usuário", async () => {
  const atraso = segurar(), impl = fetchFalso.getMockImplementation()!;
  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
-  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; return fluxoFim("Resposta após reflow", 900, 1000); }
+  if (new URL(url).pathname === "/ai/chat/stream") { await atraso.promessa; return fluxoFim("Resposta após reflow", 90, 100); } // mesmo limite da cota do fixture (2/100): limite diferente relê o servidor
   return impl(url, req);
  });
  renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
@@ -88,7 +88,7 @@ it("reflow durante POST mantém o rascunho novo e o voo, e aceita a resposta do 
  expect(screen.getByLabelText("Mensagem para o Piggy")).toBe(campo); expect(campo.props.value).toBe("Rascunho preservado"); expect(post[1].signal.aborted).toBe(false);
  expect(fetchFalso.mock.calls).toHaveLength(quantidade);
  atraso.soltar(); await act(async () => { await drenar(); }); await waitFor(() => expect(screen.getByText("Resposta após reflow")).toBeTruthy());
- expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("900 de 1000 mensagens utilizadas")).toBeTruthy();
+ expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe("Rascunho preservado"); expect(screen.getByText("90 de 100 mensagens utilizadas")).toBeTruthy();
 });
 it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e embaixo dela com fonte ampliada", async (escala) => {
  await fonte(escala); renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Filtros" })).toBeTruthy());
