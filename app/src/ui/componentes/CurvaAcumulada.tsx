@@ -49,8 +49,8 @@ export function ticksY(maximo: number) {
 /** Centavos em "R$ 950", "R$ 7,2k", "R$ 12k" (reais inteiros; no "k", uma casa e vírgula pt-BR); o valor exato fica na lista. */
 // ponytail: sem "mi" — acima de R$ 999,9 mil sai "R$ 1000k"; trocar por Intl compact se alguém chegar lá
 export function rotuloCompacto(centavos: number) {
-  const reais = centavos / 100, abs = Math.abs(reais);
-  return Math.round(abs) < 1000 ? `${reais < 0 && Math.round(reais) !== 0 ? "−" : ""}R$ ${Math.abs(Math.round(reais))}` : `${reais < 0 ? "−" : ""}R$ ${String(Math.round(abs / 100) / 10).replace(".", ",")}k`;
+  const reais = centavos / 100, abs = Math.abs(reais), r = Math.round(abs); // arredonda o módulo: Math.round(−950,5) = −950, mas Math.round(950,5) = 951
+  return r < 1000 ? `${reais < 0 && r !== 0 ? "−" : ""}R$ ${r}` : `${reais < 0 ? "−" : ""}R$ ${String(Math.round(abs / 100) / 10).replace(".", ",")}k`;
 }
 
 /** Índice do dia mais próximo de `x` (pt dentro do plot, mesma régua do desenho), preso a [0, `limite`]: nunca depois de "hoje". */
