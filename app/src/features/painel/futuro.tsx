@@ -14,8 +14,8 @@ import { useRespondidas } from "./receitas";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
-const COLUNAS = 7;
-/** As mesmas colunas do "Resumo do mês" (`BarrasMensais`): o saldo previsto de hoje ao fim do horizonte em até 7 pontos (a curva diária não tinha eixo nem valor); a última, o saldo do horizonte, em destaque. Saldo <= 0 fica só o trilho (a barra não tem lado negativo: o "Menor saldo previsto" da folha cobre). */
+const COLUNAS = 6; // 6 × 40pt (`COLUNA_MIN`) = 240pt cabe nos 252pt de um card em tela de 320pt; é também o número de meses do "Resumo do mês"
+/** As mesmas colunas do "Resumo do mês" (`BarrasMensais`): o saldo previsto de hoje ao fim do horizonte em até 6 pontos (a curva diária não tinha eixo nem valor); a última, o saldo do horizonte, em destaque. Saldo <= 0 fica só o trilho (a barra não tem lado negativo: o "Menor saldo previsto" da folha cobre). */
 function ColunasPrevisao({ d }: { d: DadosPrevisao }) {
   const { oculto } = usePainel();
   if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;

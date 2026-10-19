@@ -122,18 +122,18 @@ it("condicional (positivo): as colunas continuam desenhadas, a última em destaq
  const c = within(screen.getByTestId("bloco-hero"));
  expect(c.getByLabelText(CURVA)).toBeTruthy();
  const meses = c.getAllByTestId("barra-mes", { includeHiddenElements: true }), n = meses.length;
- expect(n).toBeGreaterThanOrEqual(2); expect(n).toBeLessThanOrEqual(7);
+ expect(n).toBeGreaterThanOrEqual(2); expect(n).toBeLessThanOrEqual(6);
  expect(c.getAllByTestId("barra-valor", { includeHiddenElements: true })).toHaveLength(1); // só a coluna do fim do horizonte escreve o valor
  for (const m of meses) expect(m.props.children).not.toMatch(/\*/);
  expect(c.queryByText("* mês em andamento")).toBeNull();
 });
-it("série diária de 31 pontos (o que a API manda): no máximo 7 colunas, da âncora ao fim do horizonte, a última é a que escreve o valor", async () => {
+it("série diária de 31 pontos (o que a API manda): no máximo 6 colunas, da âncora ao fim do horizonte, a última é a que escreve o valor", async () => {
  const dia = (i: number) => new Date(Date.UTC(2026, 9, 6 + i)).toISOString().slice(0, 10), ddmm = (iso: string) => `${iso.slice(8)}/${iso.slice(5, 7)}`;
  previsao = { ...F, ancora: { data: dia(0), saldo: "1000.00" }, trajetoria: Array.from({ length: 30 }, (_, i) => ({ data: dia(i + 1), saldo: `${1000 + (i + 1) * 100}.00`, compromissos: [] })) };
  await abrirResumo();
  const c = within(screen.getByTestId("bloco-hero")), H = { includeHiddenElements: true };
  const rot = c.getAllByTestId("barra-mes", H).map((t) => t.props.children as string);
- expect(rot).toHaveLength(7); expect(rot[0]).toBe(ddmm(dia(0))); expect(rot[6]).toBe(ddmm(dia(30)));
+ expect(rot).toHaveLength(6); expect(rot[0]).toBe(ddmm(dia(0))); expect(rot[5]).toBe(ddmm(dia(30)));
  expect(c.getByTestId("barra-valor", H).props.children).toBe("R$ 4k"); // o saldo do dia 30 (4.000,00), a coluna em destaque
 });
 it("bancos_excluidos: só o aviso do card ('Bancos conectados fora do cálculo'); nenhum motivo vira linha", async () => {
