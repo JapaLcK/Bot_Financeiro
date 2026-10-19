@@ -838,9 +838,9 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   **Consumidor (app):** `app/app/(app)/conexoes.tsx` + `app/src/features/openFinance/conexoes/`. A leitura é paralela ao
   snapshot e OPCIONAL: qualquer falha (403, 404, 5xx, rede, schema) deixa a tela sem números, nunca sem a lista nem
   as ações. `bancosSchema` é tolerante por item (um item inválido não derruba os outros); a junção é por `conexao_id`
-  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. O topo é o `total` do
-  servidor, sem soma no app; a barra e a legenda em % usam só as partes positivas e o cálculo é do cliente, sem R$.
-  Limite declarado: os `motivos` do topo NÃO são desenhados. "Ocultar valores" é agora contexto do app inteiro
+  (`juntar.ts`); `null` e conexão ausente de `/bancos` aparecem como "—", nunca R$ 0,00. A lista não mostra valor;
+  o total do detalhe (uma `Folha` aberta pela linha) é o `total` do servidor, sem soma no app, e a barra só entra com
+  Em conta e Investido positivos (cálculo do cliente, sem R$). "Ocultar valores" é agora contexto do app inteiro
   (`PrivacidadeProvider`, `app/src/features/painel/privacidade.tsx`), não mais estado local do Painel.
 
 - `GET /api/v2/metas`, `POST /api/v2/metas`, `/metas/editar` e `/metas/apagar` (`api/v2/metas.py`,

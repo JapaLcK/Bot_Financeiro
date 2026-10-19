@@ -1,8 +1,8 @@
-// Bancos conectados (PR 3): a regra pura da tela: juntar por id, logo, panorama, "há N min" e o contrato de `/api/app/bancos`.
+// Bancos conectados (PR 3): a regra pura da tela: juntar por id, logo, "há N min" e o contrato de `/api/app/bancos`.
 import type { Conexao } from "@/api/schemas/openFinance";
 import { conexoesSchema } from "@/api/schemas/openFinance";
 import { bancosSchema } from "@/api/schemas/painel";
-import { juntar, logoSeguro, panorama } from "@/features/openFinance/conexoes/juntar";
+import { juntar, logoSeguro } from "@/features/openFinance/conexoes/juntar";
 import { tempoRelativo } from "@/features/openFinance/conexoes/tempoRelativo";
 // O contrato LIDO do arquivo que o pytest valida contra o Pydantic (PR 1); nunca copiado (CLAUDE.md §0.7).
 import contrato from "../../../tests/fixtures/app_bancos.json";
@@ -66,15 +66,6 @@ describe("logoSeguro: o aparelho busca a URL, então o host é fixado", () => {
     "https://CDN.pluggy.ai/x.svg", "https://cdn.pluggy.ai/", "javascript:alert(1)", "data:image/svg+xml;base64,AAAA", "", null, undefined,
   ])("recusa %s: sem logo, fica a inicial", (url) => {
     expect(logoSeguro(url)).toBeUndefined();
-  });
-});
-
-describe("panorama", () => {
-  it("conta quem pede ação (reautorizar, conexão perdida) e só diz 'tudo em dia' se TODOS estão atualizados", () => {
-    expect(panorama([conexao(1, "A"), conexao(2, "B")])).toEqual({ acoes: 0, tudoEmDia: true });
-    expect(panorama([conexao(1, "A"), conexao(2, "B", "needs_user_action"), conexao(3, "C", "item_missing")])).toEqual({ acoes: 2, tudoEmDia: false });
-    expect(panorama([conexao(1, "A"), conexao(2, "B", "updating")])).toEqual({ acoes: 0, tudoEmDia: false });
-    expect(panorama([])).toEqual({ acoes: 0, tudoEmDia: false });
   });
 });
 

@@ -1,5 +1,6 @@
-import type { Conexao } from "@/api/schemas/openFinance";
+import type { Conector, Conexao } from "@/api/schemas/openFinance";
 import type { BancoLido } from "@/api/schemas/painel";
+import { semAcento } from "@/features/painel/composicaoContas";
 
 export type Item = { conexao: Conexao; banco: BancoLido | undefined };
 
@@ -16,10 +17,21 @@ export function juntar(conexoes: Conexao[], bancos: BancoLido[]): Item[] {
 const LOGO_PLUGGY = /^https:\/\/cdn\.pluggy\.ai\/[\w.~/-]+$/;
 export const logoSeguro = (url: string | null | undefined): string | undefined => (url && LOGO_PLUGGY.test(url) ? url : undefined);
 
-/** Estados em que o usuário tem de agir (`ConnectionStatus`: aviso e `Reconectar`/perdido). */
-const PEDEM_ACAO = ["needs_user_action", "item_missing"];
-export type Panorama = { acoes: number; tudoEmDia: boolean };
-export const panorama = (conexoes: Conexao[]): Panorama => ({
-  acoes: conexoes.filter((c) => PEDEM_ACAO.includes(c.ui.state)).length,
-  tudoEmDia: conexoes.length > 0 && conexoes.every((c) => c.ui.state === "updated"),
-});
+/**
+ * Disponíveis para conectar: os populares, NESTA ordem (cópia do POPULARES de webapp/src/dashboard/lib/bancos.ts; tests/frontend/bancos_paridade.test.mjs compara),
+ * que a conta ainda não tem. O NOME só escolhe a ordem; "já conectado" é pelo ID (`institution_id` do snapshot × `id` do conector): o gêmeo Open Finance de um banco tem nome igual e id diferente, e é outra conexão.
+ */
+export const POPULARES = ["itau", "bradesco", "banco do brasil", "santander", "caixa", "inter", "c6", "nubank", "btg", "mercado pago"];
+export function disponiveis(todos: Conector[], conectados: (string | null | undefined)[], max = 5): Conector[] {
+  const tem = new Set(conectados);
+  const porPosicao = new Map<number, Conector>(); // um por posição: o de nome exato vence o parecido ("Itaú" × "Itaú Personnalité")
+  for (const c of todos) {
+    if (tem.has(String(c.id))) continue;
+    const nome = semAcento(c.name).trim();
+    const pos = POPULARES.findIndex((k) => new RegExp(`\\b${k}\\b`).test(nome));
+    if (pos < 0) continue;
+    const atual = porPosicao.get(pos);
+    if (!atual || (nome === POPULARES[pos] && semAcento(atual.name).trim() !== POPULARES[pos])) porPosicao.set(pos, c);
+  }
+  return [...porPosicao.entries()].sort((a, b) => a[0] - b[0]).slice(0, max).map(([, c]) => c);
+}
