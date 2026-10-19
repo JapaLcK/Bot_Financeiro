@@ -859,8 +859,8 @@ Implementação local (2026-10-19): `POST /api/v2/simulador` (e `/api/app/simula
 de compra, números e a curva de 90 dias "sem × com a compra". Decisões do dono: compra primeiro (P1);
 curva na resposta (P3); API + web neste PR, app depois (P4). **Seguem abertos:** o corte de hábito real
 (P2: usa a média de 3 meses, que é estimativa variável; método a decidir, PR condicionado), a estimativa
-variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas, horizonte > 90 e
-a tela do app. O bloco de hábitos em `/simulador` continua demonstrativo.
+variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas e horizonte > 90.
+A tela do app está feita (folha na aba Gastos, só Pro). O bloco de hábitos em `/simulador` continua demonstrativo.
 
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 
