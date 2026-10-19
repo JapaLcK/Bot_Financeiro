@@ -79,9 +79,15 @@ export function Push() {
   useEffect(() => {
     if (registravel) void registrarAparelho();
   }, [registravel]);
-  useVoltaDoFundo(() => {
-    if (registravel) void registrarAparelho();
-  });
+  // A volta do fundo só CONTA a volta; quem registra é o efeito, que lê o `registravel` do render JÁ
+  // atualizado. No callback do AppState ele ainda é o de antes: a trava (`maquina.ts`, caso `livre`) só
+  // fecha nesse mesmo evento `active`, e registrar ali sairia antes do Face ID. Fora da carência o
+  // `registravel` já é falso neste render e o registro espera a borda de subida acima.
+  const [voltas, setVoltas] = useState(0);
+  useVoltaDoFundo(() => setVoltas((v) => v + 1));
+  useEffect(() => {
+    if (voltas && registravel) void registrarAparelho();
+  }, [voltas]); // só a volta dispara; a borda do `registravel` é o efeito acima
 
   // O hook segura a última resposta: cada uma vale uma vez só.
   const resposta = Notifications.useLastNotificationResponse();

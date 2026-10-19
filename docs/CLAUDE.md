@@ -2041,14 +2041,16 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
 
 - **Lado do app (PR 2).** `app/src/services/push.ts::registrarAparelho` faz `POST /api/push/register` (só
   iOS, só com permissão concedida e sessão no cofre; engole qualquer erro, sem retentativa própria) a cada
-  login, abertura e volta do fundo, disparado por `app/src/features/push/Push.tsx` (montado no `_layout`). O
+  login, abertura e volta do fundo, disparado por `app/src/features/push/Push.tsx` (montado no `_layout`), sempre
+  com a trava biométrica livre: a volta do fundo só conta a volta e o registro roda no efeito com o `registravel` já
+  atualizado, então depois da carência ele espera o Face ID (a borda de subida registra uma vez). O
   `environment` vem do `aps-environment` do perfil (`features/push/aparelho.ts::ambienteApns`), não do
   `APP_ENV`: `development` = sandbox, `production` = production, sem perfil = production em aparelho real e
   sandbox no simulador. O desregistro local no APNs é o gancho em `apagarSessaoNoCofre`
   (`app/src/storage/secure.ts`): toda limpeza do cofre passa por ali; o Sair NÃO chama
   `/api/push/unregister` (decisão do dono). `aparelho.ts` é folha (nunca importa `client`/`secure`) e tem uma
-  fila que põe o desregistro antes de qualquer token pedido depois, e o `getDevicePushTokenAsync` tem prazo de
-  10 s (o nativo só resolve em didRegister/didFail; offline ou no simulador pode nunca resolver e travaria o
+  fila que põe o desregistro antes de qualquer token pedido depois, e o `getDevicePushTokenAsync` tem prazo
+  (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`; o nativo só resolve em didRegister/didFail; offline ou no simulador pode nunca resolver e travaria o
   desregistro do Sair): estourou, o registro desiste e o token que chegar depois é ignorado (nenhum POST);
   sem sessão no cofre nunca se chama `getDevicePushTokenAsync`. O toque lê `notification.request.trigger.payload.rota` (o iOS não copia a raiz do
   payload para `content.data`) numa tabela própria (`Map`), espera a sessão e a trava e descarta se anônimo. Cada
@@ -2056,7 +2058,7 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
   um push remoto com collapse id é o próprio collapse id, igual em todos).
   **Limites só do iPhone.** (a) O `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
   nativo de novo enquanto ela está pendente: se o iOS nunca responder ao pedido pendente depois do
-  `unregisterForRemoteNotifications` (Sair offline aos 10 s), todo registro seguinte nesse processo estoura o
+  `unregisterForRemoteNotifications` (Sair offline, passado o `TEMPO_TOKEN_MS`), todo registro seguinte nesse processo estoura o
   prazo e devolve `null` até o app reiniciar. Conferir: modo avião, abrir o app, Sair, logar como B, tirar do
   modo avião. (b) A dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id`
   traz um `date` novo (a data de entrega).
@@ -2064,7 +2066,8 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
   client antigo, sem o módulo nativo, cai nesse import; o build da loja traz o módulo e não corre o risco.
   A chave da tela de Notificações ("Banco precisa de atenção", só iOS) é `push_bank_reconnect_enabled`:
   com a permissão do sistema concedida escreve o PATCH (só esse campo); negada abre os Ajustes (zero PATCH);
-  indeterminada pede a permissão e registra (`features/push/usePermissaoPush.ts`, `services/push.ts::pedirPermissaoPush`).
+  indeterminada pede a permissão, registra e, se a preferência estava desligada no servidor, grava `true`
+  (`features/push/usePermissaoPush.ts`, `services/push.ts::pedirPermissaoPush`). Negada mostra o selo "Nos Ajustes".
 
 Atraso: o push só sai na varredura do tique (~6 h). Plano do push no app e decisões do dono:
 [`plano-push-app.md`](plano-push-app.md).

@@ -1,8 +1,10 @@
 /**
  * Registro do aparelho e pedido de permissão pelo roteador de verdade (`_layout`
- * real). Grupo com os dois controles. NEGATIVO: tirar o efeito `[autenticado]`
- * do `Push.tsx` deixa vermelhos os casos de abertura e de login. POSITIVO:
- * permissão negada não gera token nem POST.
+ * real). Grupo com os dois controles. NEGATIVOS: tirar o efeito `[registravel]`
+ * do `Push.tsx` deixa vermelhos os casos de abertura e de login; voltar o
+ * callback da volta do fundo ao antigo (registrar ali, com o `registravel` do
+ * render anterior) deixa vermelho o caso do Face ID (registra antes dele).
+ * POSITIVO: permissão negada não gera token nem POST.
  */
 import * as LA from "expo-local-authentication";
 import * as Notifications from "expo-notifications";
@@ -90,6 +92,49 @@ describe("registro", () => {
         await drenar();
       });
       await waitFor(() => expect(registros()).toHaveLength(1));
+    } finally {
+      jest.mocked(LA.getEnrolledLevelAsync).mockResolvedValue(LA.SecurityLevel.NONE);
+      jest.mocked(LA.authenticateAsync).mockResolvedValue({ success: true });
+    }
+  });
+
+  it("com Face ID: voltar do fundo DEPOIS da carência não registra antes do Face ID; liberou, registra 1 vez", async () => {
+    const pendentes: ((r: LA.LocalAuthenticationResult) => void)[] = [];
+    jest.mocked(LA.getEnrolledLevelAsync).mockResolvedValue(LA.SecurityLevel.BIOMETRIC);
+    jest.mocked(LA.authenticateAsync).mockImplementation(() => new Promise((r) => pendentes.push(r)));
+    const liberar = (i: number) =>
+      act(async () => {
+        pendentes[i]!({ success: true } as LA.LocalAuthenticationResult);
+        await drenar();
+      });
+    await guardarCredenciais(S);
+    try {
+      renderRouter("./app", { initialUrl: "/" });
+      await waitFor(() => expect(pendentes).toHaveLength(1));
+      await liberar(0);
+      await waitFor(() => expect(registros()).toHaveLength(1));
+
+      // POSITIVO: dentro da carência não há trava, e a volta registra uma vez.
+      await appVai("inactive");
+      await appVai("background");
+      jest.setSystemTime(Date.now() + 30_000);
+      await appVai("active");
+      await waitFor(() => expect(registros()).toHaveLength(2));
+      expect(pendentes).toHaveLength(1);
+
+      // Depois da carência a trava volta: zero registro (e nenhum /auth/refresh) até o Face ID.
+      await appVai("inactive");
+      await appVai("background");
+      jest.setSystemTime(Date.now() + 61_000);
+      await appVai("active");
+      await waitFor(() => expect(pendentes).toHaveLength(2));
+      await act(drenar);
+      expect(registros()).toHaveLength(2);
+
+      await liberar(1);
+      await waitFor(() => expect(registros()).toHaveLength(3));
+      await act(drenar);
+      expect(registros()).toHaveLength(3);
     } finally {
       jest.mocked(LA.getEnrolledLevelAsync).mockResolvedValue(LA.SecurityLevel.NONE);
       jest.mocked(LA.authenticateAsync).mockResolvedValue({ success: true });

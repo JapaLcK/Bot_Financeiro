@@ -83,12 +83,12 @@ Achados que mudaram o desenho (estado antes do PR 1; a tabela acima é o estado 
 - baixar no Sair e na troca de conta, ANTES de revogar a sessão: ~~o unregister no servidor e,~~ sempre, o
   desregistro local do aparelho no APNs (`Notifications.unregisterForNotificationsAsync`, que não depende
   de rede). **Decisão do dono (P3-A, 2026-10-18): o Sair NÃO chama `/api/push/unregister`.** Ele exige
-  access token (15 min) e o `sair()` limpa o cofre ANTES da rede (#433); quando o logout chega ao servidor
+  access token (`ACCESS_TOKEN_TTL_MINUTES`, `core/refresh_tokens.py`) e o `sair()` limpa o cofre ANTES da rede (#433); quando o logout chega ao servidor
   a sessão é revogada e `list_push_tokens` deixa de listar, e quando não chega o unregister também não
   chegaria. Isto muda o §4 do plano #1123. O desregistro local vale para TODA limpeza do cofre, não só o Sair: o 401 terminal da
   renovação (`renovar` em `app/src/api/client.ts`, refresh vencido há mais de 14 dias) limpa o cofre sem
-  passar pelo `sair()`. Por isso ele mora nos pontos que limpam o cofre (`limparSe` e `limparSessaoDe`,
-  `app/src/storage/secure.ts`). O próximo login registra de novo;
+  passar pelo `sair()`. Por isso ele mora em `apagarSessaoNoCofre` (`app/src/storage/secure.ts`), por onde passam `limparCredenciais`,
+  `limparSe`, `limparSessaoDe` e o desfazer de `guardarCredenciaisSe`. O próximo login registra de novo;
 - tratar o toque (D6): abrir a rota do payload, esperando a trava biométrica (`features/bloqueio`) liberar;
 - o envio do lado do servidor para o(s) evento(s) da D1, só a quem tem acesso, com a preferência da D5.
 
@@ -150,13 +150,13 @@ cada token espera até 10 s em série e atrasa o PATCH do tique).
 **Estado do PR 2 (app, 2026-10-18): implementado.** `expo-notifications` e
 `expo-application` (plugin no `app.config.ts`, os três ambientes); permissão na 1ª abertura (D2), só com a
 trava `livre`/`inerte` (nunca por cima do Face ID); registro depois de cada login e de cada abertura/volta
-do fundo, também só com a trava livre (`app/src/services/push.ts`, `app/src/features/push/Push.tsx`);
+do fundo, também só com a trava livre (a volta depois da carência espera o Face ID) (`app/src/services/push.ts`, `app/src/features/push/Push.tsx`);
 desregistro local no APNs em toda limpeza do cofre (gancho em `apagarSessaoNoCofre`,
 `app/src/storage/secure.ts`; P3-A acima); toque em "Bancos conectados" (D6) lendo `trigger.payload.rota` (o
 servidor põe `rota` na raiz e o iOS não a copia para `content.data`). Com o app aberto: aviso no topo e som,
 sem badge (P2-A). Só iOS.
 
-**Prazo do token e limites.** O `getDevicePushTokenAsync` tem prazo de 10 s dentro da fila de `aparelho.ts`: o
+**Prazo do token e limites.** O `getDevicePushTokenAsync` tem prazo (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`) dentro da fila: o
 nativo só resolve em didRegister/didFail, e offline ou no simulador ele pode nunca resolver, o que travaria o
 desregistro do Sair e todo registro seguinte. Estourou o prazo, o registro desiste (sem POST) e a fila segue; o
 token que chegar depois é ignorado. O toque é deduplicado por `identifier:date`, porque o servidor manda
@@ -166,7 +166,7 @@ app: um dev client antigo, sem o módulo nativo, cai nesse import. O build da lo
 
 Limites só do iPhone: (a) o `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
 nativo de novo enquanto ela está pendente; se o iOS nunca responder ao pedido pendente depois do
-`unregisterForRemoteNotifications` (Sair offline aos 10 s), todo registro seguinte nesse processo estoura o prazo e
+`unregisterForRemoteNotifications` (Sair offline, passado o `TEMPO_TOKEN_MS`), todo registro seguinte nesse processo estoura o prazo e
 devolve `null` até o app reiniciar (conferir: modo avião, abrir o app, Sair, logar como B, tirar do modo avião);
 (b) a dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id` traz um `date` novo
 (a data de entrega).
