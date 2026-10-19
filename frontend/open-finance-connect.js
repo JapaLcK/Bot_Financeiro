@@ -667,7 +667,8 @@
         if (!vivo()) return;
         liberar();
         conf("onError", host)("Não foi possível concluir a conexão.");
-        conf("onClose", host)();   // o SDK não manda onClose depois de um init que rejeita
+        // o SDK não manda onClose depois de um init que rejeita; o onError do host pode ter chamado destroy()
+        if (vivo()) conf("onClose", host)();
       });
     }
     // Fora do try do connect: um onOpen do host que lança não é erro de conexão.
@@ -691,6 +692,7 @@
     const vivo = function () { return g === geracao; };
     // Isolado como o onOpen: um host que lança aqui não pode deixar a guarda presa.
     try { conf("onConnectStart", host)(); } catch (e) { console.error("onConnectStart do host falhou", e); }
+    if (!vivo()) return;   // o onConnectStart do host chamou destroy(): nada abre
     try {
       await openWidget(uid, host, itemId, sessao, vivo);
     } catch (err) {

@@ -19,6 +19,8 @@
  *  - A18 (onConnectStart isolado): tirar o try/catch em volta do `conf("onConnectStart", host)()`.
  *  - A19 (init assíncrono): tirar a linha `conf("onClose", host)();   // o SDK não manda onClose...` do rejeitado do init
  *    (ou o bloco inteiro `if (aberto && typeof aberto.then === "function")`).
+ *  - A21 (destroy no onConnectStart): tirar o `if (!vivo()) return;` logo depois do onConnectStart.
+ *  - A22 (destroy no onError do init): trocar `if (vivo()) conf("onClose", host)();` por `conf("onClose", host)();`.
  *
  * Rodar: node --test tests/frontend/of_connect_reconectar.test.mjs
  */
@@ -432,5 +434,41 @@ test("A19 init() assíncrono que rejeita: open, error, close (nessa ordem) e a p
     window.PBOpenFinance.reconnect("item-11");
   });
   await waitFor(() => page.evaluate(() => window.__n === 2));
+  await page.__ctx.close();
+});
+
+test("A21 onConnectStart que chama destroy(): nada abre e nenhum callback dispara", async () => {
+  const page = await abrir();
+  await page.evaluate(() => {
+    window.PBOpenFinance.init({ apiBase: "", userId: 1,
+      onConnectStart: () => window.PBOpenFinance.destroy(),
+      onOpen: () => window.__ev.push("open"),
+      onError: (m) => window.__ev.push(["error", m]),
+      onClose: () => window.__ev.push("close") });
+    window.PBOpenFinance.reconnect("item-11");
+  });
+  await sleep(300);
+  assert.equal(page.__posts.filter((p) => p[0] === "token").length, 0);
+  assert.equal(await page.evaluate(() => window.__n ?? 0), 0);
+  assert.deepEqual(await ev(page), []);
+  await page.__ctx.close();
+});
+
+test("A22 init que rejeita e o onError do host chama destroy(): sem onClose depois", async () => {
+  const page = await abrir();
+  await page.evaluate(() => {
+    window.PluggyConnect = function (o) {
+      window.__w = o; window.__n = (window.__n || 0) + 1;
+      this.init = function () { return Promise.reject(new Error("iframe falhou")); };
+    };
+    window.PBOpenFinance.init({ apiBase: "", userId: 1,
+      onOpen: () => window.__ev.push("open"),
+      onError: () => { window.__ev.push("error"); window.PBOpenFinance.destroy(); },
+      onClose: () => window.__ev.push("close") });
+    window.PBOpenFinance.reconnect("item-11");
+  });
+  await waitFor(async () => (await ev(page)).length >= 2);
+  await sleep(200);
+  assert.deepEqual(await ev(page), ["open", "error"]);
   await page.__ctx.close();
 });
