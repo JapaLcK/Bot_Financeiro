@@ -486,7 +486,7 @@ def test_risco_aceito_5xx_persistente_em_investments_nao_abre_o_disjuntor(
 @pytest.mark.parametrize("refresh_ligado", ["1", "0"])
 def test_primeiro_tique_espera_10_min_so_com_get_e_o_patch_entra_do_segundo(
         monkeypatch, refresh_ligado):
-    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda saúde e retentativa, e SÓ do 2º
+    """O laço espera `_PRIMEIRO_TIQUE_SEC` (600 s), roda catálogo, saúde e retentativa, e SÓ do 2º
     tique em diante, depois do intervalo, o PATCH periódico (e só com `OF_REFRESH_ENABLED`):
     o PATCH no boot é o que o Railway repetia a cada deploy."""
     eventos_: list = []

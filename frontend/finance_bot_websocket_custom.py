@@ -1784,8 +1784,8 @@ async def _open_finance_refresh():
     # deploy — medido, 15 rodadas em 48h, 10 delas nos 5 min seguintes a um
     # deploy. O cooldown real vive em `next_refresh_at` (persistido), então
     # reiniciar o processo não adianta nada pra quem quer forçar refresh.
-    # O 1º tique roda `_PRIMEIRO_TIQUE_SEC` depois do boot, SÓ com a saúde e a
-    # retentativa (que só fazem GET): com merges diários o processo quase nunca
+    # O 1º tique roda `_PRIMEIRO_TIQUE_SEC` depois do boot, SÓ com o catálogo, a saúde
+    # e a retentativa (que só fazem GET): com merges diários o processo quase nunca
     # chegava aos 6 h, e a retentativa nunca disparava. O PATCH só entra do 2º tique
     # em diante, a cada `OF_REFRESH_INTERVAL_SEC`.
     #
