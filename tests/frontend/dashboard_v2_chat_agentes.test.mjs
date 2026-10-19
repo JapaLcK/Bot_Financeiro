@@ -722,6 +722,18 @@ for (const width of TELAS) {
     await lista(page).waitFor();
     await campo(page).press("Enter");
     assert.equal(await campo(page).inputValue(), "@Detetive ,qual cobrança?");
+    await campo(page).fill("@Faria Limer pergunta");
+    await campo(page).press("Home");
+    for (let i = 0; i < 4; i++) await campo(page).press("ArrowRight"); // "@Far|ia Limer": o nome composto inteiro sai
+    await lista(page).waitFor();
+    await campo(page).press("Enter");
+    assert.equal(await campo(page).inputValue(), "@Faria Limer pergunta");
+    await campo(page).fill("@Faria pergunta");
+    await campo(page).press("Home");
+    for (let i = 0; i < 4; i++) await campo(page).press("ArrowRight"); // controle: sem a 2ª palavra do nome, a palavra seguinte fica
+    await lista(page).waitFor();
+    await campo(page).press("Enter");
+    assert.equal(await campo(page).inputValue(), "@Faria Limer pergunta");
     await ctx.close();
   });
 
@@ -804,6 +816,26 @@ for (const width of TELAS) {
     pro = true; // assinou o PigBank+ noutra aba
     await campo(page).fill("@Detetive oi");
     await campo(page).press("Enter");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await ctx.close();
+  });
+
+  // O envio relê a conta; enquanto ela é relida a lista sai do catálogo (uid indefinido), e a leitura do catálogo em voo é cancelada:
+  // o envio sempre faz uma leitura nova. Este teste fica de guarda dessa cadeia (Codex no #1157).
+  test(`${width}: o plano muda com a leitura do catálogo em voo: o envio lê de novo e vai ao agente`, async () => {
+    const cat = (pro) => ({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: pro, can_activate: pro, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
+    let solta, n = 0;
+    const presa = new Promise((ok) => { solta = ok; });
+    const { ctx, page } = await abrir({ width });
+    await ctx.route(/\/agents\/42$/, async (r) => {
+      if (++n === 1) { await presa; return r.fulfill(cat(false)).catch(() => {}); } // saiu antes de assinar
+      return r.fulfill(cat(true));
+    });
+    const saiu = page.waitForRequest((r) => /\/agents\/42$/.test(r.url()));
+    await campo(page).fill("@Detetive oi");
+    await saiu;
+    await campo(page).press("Enter"); // assinou o PigBank+ noutra aba antes de enviar
+    solta();
     await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
     await ctx.close();
   });

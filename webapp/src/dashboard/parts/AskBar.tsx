@@ -70,8 +70,14 @@ export function AskBar({ path }: { path: Path }) {
     const nova = `${text.slice(0, token.ini)}@${a.nome} `;
     depois.current = nova.length;
     // Troca o token inteiro, também o que está depois do cursor ("@Det|etive"): só as letras do nome (as mesmas do `tokenEm`), não a
-    // pontuação colada, e não dobra o espaço que já vinha (Codex no #1157).
-    setText(nova + text.slice(cursor).replace(/^[\p{L}\p{M}]*\s?/u, ""));
+    // pontuação colada, mais as palavras seguintes de um nome composto que já estejam lá ("@Far|ia Limer"), e não dobra o espaço (Codex no #1157).
+    let fim = cursor + /^[\p{L}\p{M}]*/u.exec(text.slice(cursor))![0].length;
+    for (const w of a.nome.split(" ").slice(1)) {
+      const p = /^\s([\p{L}\p{M}]+)/u.exec(text.slice(fim));
+      if (!p || semAcento(p[1]) !== semAcento(w)) break;
+      fim += p[0].length;
+    }
+    setText(nova + text.slice(fim).replace(/^\s/, ""));
     setFechada(false);
     setAtivo(0);
   };
