@@ -29,7 +29,12 @@ export const LIMITE = (o = {}) => ({ ok: true, of_banks_max: 3, em_uso: 2, pode_
  */
 export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, del, cdn = CDN_OK, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
   const s = { reqs: [], dels: [], cdn: [], conexoes };
+  // Resolve quando o /limite terminou (resposta ou falha): a tela mostra o que depende dele (vagas, "+") só depois disso.
+  s.limiteFim = new Promise((fim) => { s.fimDoLimite = fim; });
   s.antes = async (ctx) => {
+    const eLimite = (q) => /^\/open-finance\/\d+\/limite$/.test(new URL(q.url()).pathname);
+    ctx.on("requestfinished", (q) => { if (eLimite(q)) s.fimDoLimite(); });
+    ctx.on("requestfailed", (q) => { if (eLimite(q)) s.fimDoLimite(); });
     ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (!/open-finance|bancos|dashboard-profile/.test(p)) return; s.reqs.push(q.method() === "DELETE" ? `DELETE ${p}` : p); if (q.method() === "DELETE") s.dels.push([q.method(), p, q.headers()["x-csrf-token"] ?? null, q.postData()]); });
     await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: typeof perfil === "function" ? perfil() : perfil }));
     await ctx.route((u) => u.pathname === "/open-finance/7", (r) => snap ? snap(r) : r.fulfill({ json: { ok: true, connections: s.conexoes } }));

@@ -21,6 +21,8 @@ async function bancos(opts = {}, tela = {}) {
 const esperaCards = (page, n) => page.waitForFunction((n) => document.querySelectorAll(".banco-card").length === n, n, { timeout: 8000 });
 // Espera o fim da leitura de /bancos (o "…" sai do card).
 const semReticencias = (page) => page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…") && document.querySelector(".banco-total"), null, { timeout: 8000 });
+// Espera o /limite terminar e a tela pintar o que depende dele: sem isto, o teste lê a tela entre o snapshot e o /limite (CI lento).
+const limiteLido = async ({ page, srv }) => { await srv.limiteFim; await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); };
 const totais = (page) => page.locator(".banco-card .banco-total").allTextContents();
 const corpo = (page) => page.locator("body").innerText();
 // O detalhe de um banco (dialog modal): abre pela linha `n` e devolve o locator dele; `fechaDetalhe` usa o X.
@@ -137,8 +139,10 @@ test("snapshot é obrigatório: 500 mostra o erro e 'Tentar de novo' (que recupe
 
 test("vagas: '2 de 3 bancos' com o link 'Conectar banco' para /settings?view=open-finance; sem teto não diz 'de'; pode_adicionar false mostra a mensagem do servidor e nenhum link", async () => {
   const ler = async (limite) => {
-    const { ctx, page } = await bancos({ limite, bancos: "padrao" });
+    const p = await bancos({ limite, bancos: "padrao" });
+    const { ctx, page } = p;
     await esperaCards(page, 3);
+    await limiteLido(p);
     const r = { vagas: (await corpo(page)).match(/\d+ de \d+ bancos/)?.[0] ?? null, hrefs: await page.getByRole("link", { name: "Conectar banco" }).evaluateAll((l) => l.map((a) => a.getAttribute("href"))), corpo: await corpo(page) };
     await ctx.close();
     return r;
@@ -368,9 +372,11 @@ test("sessão acaba depois de a lista já estar em cache: o 401 da releitura esc
 
 test("of_banks_max 0 não mostra '0 de 0 bancos'; em_uso que não é número também não mostra a linha ('null de 3 bancos')", async () => {
   const vagas = async (limite) => {
-    const { ctx, page } = await bancos({ limite, bancos: "padrao" });
+    const p = await bancos({ limite, bancos: "padrao" });
+    const { ctx, page } = p;
     await esperaCards(page, 3);
     await semReticencias(page);
+    await limiteLido(p);
     const t = await corpo(page);
     await ctx.close();
     return /\bde\b \d+ bancos|null|undefined/.test(t);
@@ -383,8 +389,10 @@ test("of_banks_max 0 não mostra '0 de 0 bancos'; em_uso que não é número tam
 
 test("/limite com pode_adicionar false e message nula não oferece 'Conectar banco' (nem na lista vazia); com message mostra o texto", async () => {
   const links = async (limite, conexoes) => {
-    const { ctx, page } = await bancos({ limite, conexoes, bancos: "padrao" });
+    const p = await bancos({ limite, conexoes, bancos: "padrao" });
+    const { ctx, page } = p;
     await (conexoes?.length === 0 ? page.locator(".empty img").waitFor({ timeout: 8000 }) : esperaCards(page, 3));
+    await limiteLido(p);
     const n = await page.getByRole("link", { name: "Conectar banco" }).count();
     await ctx.close();
     return n;
@@ -448,8 +456,10 @@ test("snapshot fora do contrato não derruba a SPA: institution_name número, ui
 
 test("/limite com pode_adicionar false e message só de espaços: nem mensagem nem link (como message nula); com texto mostra a mensagem", async () => {
   const lido = async (message) => {
-    const { ctx, page } = await bancos({ limite: LIMITE({ pode_adicionar: false, message }), bancos: "padrao" });
+    const p = await bancos({ limite: LIMITE({ pode_adicionar: false, message }), bancos: "padrao" });
+    const { ctx, page } = p;
     await esperaCards(page, 3);
+    await limiteLido(p);
     const r = { area: await page.locator(".bancos-conectar").count(), links: await page.getByRole("link", { name: "Conectar banco" }).count() };
     await ctx.close();
     return r;
@@ -875,6 +885,7 @@ test("o '+' do topo: link redondo de 44 px com o nome 'Conectar banco' e o href 
   assert.deepEqual(r, { n: 1, href: "/settings?view=open-finance", medida: [44, 44, "", true] });
   const b = await bancos({ conexoes: dois_, bancos: "barra", limite: LIMITE({ pode_adicionar: false, message: "Plano cheio." }) });
   await esperaCards(b.page, 2);
+  await limiteLido(b);
   const sem = await b.page.getByRole("link", { name: "Conectar banco" }).count();
   await b.ctx.close();
   assert.equal(sem, 0);
