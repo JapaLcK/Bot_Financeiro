@@ -567,7 +567,7 @@ for (const width of TELAS) {
 
   test(`${width}: A→B→A com uma pergunta da A em voo: o context dela não volta para a conversa nova`, async () => {
     let solta;
-    const { ctx, page, chats } = await abrir({ width, segura: (kind) => (chats.length === 1 ? new Promise((ok) => { solta = ok; }) : undefined) });
+    const { ctx, page, chats } = await abrir({ width, segura: () => (chats.length === 1 ? new Promise((ok) => { solta = ok; }) : undefined) });
     await enviar(page, "@Detetive tem duplicada?");
     await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
     const relerNoFoco = async () => {
