@@ -99,7 +99,6 @@ LEGADOS: frozenset[str] = frozenset(
         "scripts/coluna_dupla.py",
         "scripts/medir_guarda_efeitos_214.py",
         "scripts/migrate_pii_to_encrypted.py",
-        "scripts/post_deploy_deletion_check.py",
         "scripts/whatsapp_qa_vault_harness.py",
         "statement_import.py",
         "utils_date.py",

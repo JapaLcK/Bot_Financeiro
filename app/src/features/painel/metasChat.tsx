@@ -1,88 +1,90 @@
-import { StyleSheet, View } from "react-native";
-import { Icone } from "@/ui/componentes/Icone";
-import { falado, MASCARA_OCULTA, partes, VALOR_OCULTO_FALADO } from "@/ui/dinheiro";
+import { type Href } from "expo-router";
+import { useContext, useState, type ReactNode } from "react";
+import { Pressable, View } from "react-native";
+import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
+import { falado, VALOR_INDISPONIVEL_FALADO, VALOR_OCULTO_FALADO } from "@/ui/dinheiro";
+import { selecao } from "@/ui/haptics";
 import { ProgressBar } from "@/ui/componentes/ProgressBar";
 import { useTema } from "@/ui/tema";
-import { raio } from "@/ui/tokens";
+import { ALFA_WASH_SERIE, raio, SERIE_META, tingir } from "@/ui/tokens";
 import { nomeMes } from "./catalogo";
-import { Valor, Vazio } from "./base";
+import { Vazio } from "./base";
 import { useBloco } from "./blocoContexto";
 import { avisos, DO_ALVO, fraseChegada, fraseCusto, fraseRitmo, MESES_PADRAO, type MetaV2 } from "./metasTextos";
+import { ContextoNavegacaoPainel } from "./navegacao";
 import { usePainel } from "./provider";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import type { MetasV2 } from "@/api/schemas/painel";
-/** Frase com um valor no meio ("Falta R$ X", "R$ X/mês até junho de 2027"): quebra de linha livre, sem caber em uma coluna só. `mes`: o "/mês" é lido "por mês". */
-function ComValor({ antes, valor, tipo, mes, depois }: { antes?: string; valor: number; tipo?: "saldo" | "entrada"; mes?: boolean; depois?: string }) {
-  return <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", columnGap: 4 }}>
-    {!!antes && <Texto variante="rotulo">{antes}</Texto>}<Valor valor={valor} tipo={tipo} pequeno />
-    {mes && <Texto variante="rotulo" accessibilityLabel="por mês">/mês</Texto>}{!!depois && <Texto variante="rotulo">{depois}</Texto>}
-  </View>;
-}
-function Selo({ texto }: { texto: string }) {
+const VISIVEIS = 5, POR_LINHA = 12, LADO = 20; // metas à mostra (reserva incluída); blocos por linha; largura do bloco
+/** Série (0..3) da meta pelo `id`, não pela posição: mesma cor depois de reordenar. A mesma regra de `MetaPilula.tsx` da web (`data-serie`); o teste `metas_serie_paridade` compara. */
+export const serieDaMeta = (id: number) => Math.abs(id) % SERIE_META.dark.length;
+/** Um bloco por mês da reserva: cheio em `tom`, vazio em `border`. Quebra de linha a cada `POR_LINHA` (largura máxima da linha). */
+export function Blocos({ n, cheios, tom }: { n: number; cheios: number; tom: "brand" | "positive" }) {
   const { cores } = useTema();
-  return <View style={{ alignSelf: "flex-start", backgroundColor: cores.border, borderRadius: raio.chip, paddingHorizontal: 8, paddingVertical: 2 }}><Texto variante="legenda">{texto}</Texto></View>;
-}
-const Nota = ({ texto, rotulo }: { texto: string; rotulo?: string }) => <Texto variante="legenda" tom="inkMuted" accessibilityLabel={rotulo}>{texto}</Texto>;
-const dias = (n: number | null) => n === null ? "medição parcial" : `medido em ${n} ${n === 1 ? "dia" : "dias"}`;
-function Precisa({ m }: { m: MetaV2 }) {
-  if (!m.data_alvo) return <Nota texto="Sem prazo. Defina uma data no painel e eu digo quanto guardar por mês." />;
-  const prazo = nomeMes(m.data_alvo.slice(0, 7));
-  if (m.prazo_passou) return <Texto variante="rotulo">O prazo era {prazo}</Texto>;
-  return m.por_mes === null ? <Texto variante="rotulo">Prazo: {prazo}</Texto> : <ComValor valor={m.por_mes} mes depois={`até ${prazo}`} />;
-}
-function Ritmo({ m }: { m: MetaV2 }) {
-  const v = m.ritmo.valor;
-  if (m.atual === null) return <Texto variante="rotulo">—</Texto>;
-  if (v === null) return <Nota texto={fraseRitmo(m.ritmo)} />;
-  return <View style={{ gap: 4 }}><ComValor valor={v} tipo={v > 0 ? "entrada" : "saldo"} mes /><Nota texto="inclui rendimento e variação" />{m.ritmo.parcial && <Selo texto={dias(m.ritmo.dias_de_historico)} />}</View>;
-}
-function Meta({ m, custo }: { m: MetaV2; custo: MetasV2["custo_mensal"] }) {
-  const { ampliado } = useTipografiaPainel(); const { oculto } = usePainel();
-  const reserva = m.tipo === "reserva", batida = m.falta === 0, semAtual = m.atual === null;
-  const conferir = m.atual === 0 && m.motivos.some((c) => !DO_ALVO.includes(c));
-  const aviso = reserva && m.alvo !== null ? fraseCusto(custo) : null; // com valor, o motivo vira "o valor pode estar velho"
-  const p = custo.valor ? partes(custo.valor) : null; // mesma máscara e mesmo rótulo de valor oculto do `Money`
-  const linha = (c: string) => { // `c`: o custo como aparece (visível) ou como é lido (falado)
-    const conta = reserva && m.alvo !== null && p ? ` (${m.meses} × ${c})` : "";
-    return reserva ? `Reserva de emergência · ${m.meses} ${m.meses === 1 ? "mês" : "meses"} das suas contas fixas${conta}${m.fonte.rotulo ? ` · ${m.fonte.rotulo}` : ""}` : m.fonte.rotulo;
-  };
-  const sub = linha(oculto ? MASCARA_OCULTA : `R$ ${p?.inteiro},${p?.centavos}`), falada = linha(oculto ? VALOR_OCULTO_FALADO : falado(custo.valor ?? 0) ?? "");
-  return <View testID={`meta-${m.id}`} style={{ gap: 6 }}>
-    <Texto variante="rotulo" accessibilityRole="header" numberOfLines={ampliado ? undefined : 2}>{m.nome}</Texto>
-    {!!sub && <Nota texto={sub} rotulo={falada ?? undefined} />}
-    {!!aviso && <Nota texto={aviso} />}
-    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "baseline", columnGap: 4, rowGap: 4 }}>
-      {semAtual ? <Texto variante="rotulo">—</Texto> : <Valor valor={m.atual} pequeno />}
-      {m.alvo !== null ? <><Texto variante="rotulo">de</Texto><Valor valor={m.alvo} pequeno /></> : !semAtual && <Texto variante="rotulo">guardado</Texto>}
-      {conferir && <Selo texto="a conferir" />}
-    </View>
-    {semAtual && <Nota texto={fraseRitmo(m.ritmo)} />}
-    {!oculto && m.percentual !== null && <ProgressBar valor={m.percentual / 100} tom={batida ? "positive" : "brand"} />}
-    {batida ? <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Icone nome="CheckCircle" tamanho={20} tom="positive" /><Texto variante="rotulo" tom="positive">Meta batida</Texto></View>
-      : m.falta !== null && <ComValor antes="Falta" valor={m.falta} />}
-    {reserva && m.alvo === null && !!fraseCusto(custo) && <Nota texto={fraseCusto(custo)!} />}
-    {!batida && <View style={{ flexDirection: ampliado ? "column" : "row", gap: ampliado ? 8 : 16 }}>
-      <View style={{ flex: 1, gap: 4 }}><Nota texto="Precisa por mês" /><Precisa m={m} /></View>
-      <View style={{ flex: 1, gap: 4 }}><Nota texto="Seu ritmo" /><Ritmo m={m} /></View>
-    </View>}
-    {!batida && !semAtual && !!fraseChegada(m) && <Nota texto={fraseChegada(m)!} />}
-    {avisos(m).map((a) => <Nota key={a} texto={a} />)}
+  return <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, maxWidth: POR_LINHA * (LADO + 4) - 4 }}>
+    {Array.from({ length: n }, (_, i) => <View key={i} testID={i < cheios ? "bloco-cheio" : "bloco-vazio"} style={{ width: LADO, height: 10, borderRadius: raio.barra, backgroundColor: i < cheios ? cores[tom] : cores.border }} />)}
   </View>;
 }
-/**
- * Card `metas` do chat (formato v2 de `/api/v2/metas`), só leitura: desenha o que o servidor mandou, sem somar nem derivar dinheiro. Reserva primeiro,
- * depois as outras na ordem do servidor. Criar e editar é no painel (web): nenhum botão aqui, o toque é do `Bloco` (abre a Folha com o mesmo bloco).
- */
-export function MetasChat() {
-  const d = useBloco()?.recursos.metas; const { cores } = useTema();
+/** Blocos cheios = meses cobertos: `floor((alvo-falta)*meses/alvo)` em centavos, de 0 a `meses`. Nem o `percentual` (o servidor trunca: 4/6 meses viraria 3 blocos) nem o `atual` (vem sem quantizar e o cliente arredonda: 2999,995 de 18000 encheria 1 bloco) servem de base; o `falta` já está em centavos e é a régua do "batida" (`db/metas.py`). */
+const blocosCheios = (m: MetaV2, meses: number) => m.alvo === null || m.falta === null || m.alvo <= 0 ? 0 : Math.min(meses, Number(BigInt(Math.max(m.alvo - m.falta, 0)) * BigInt(meses) / BigInt(m.alvo)));
+/** O que o VoiceOver lê da pílula: as frases que saíram da tela moram aqui. Com valores ocultos: sem %, sem valores, sem contagem de meses e sem a chegada (deriva do dinheiro); o prazo e os motivos (incluída a frase do ritmo que o ⚠ sinaliza) não são dinheiro e ficam. */
+function rotulo(m: MetaV2, custo: MetasV2["custo_mensal"], oculto: boolean, cheios: number, meses: number): string {
+  const reserva = m.tipo === "reserva", batida = m.falta === 0, dito = (c: number) => falado(c) ?? VALOR_INDISPONIVEL_FALADO;
+  const mostradaRitmo = m.atual === null || (m.ritmo.valor === null && !batida), prazo = m.data_alvo ? nomeMes(m.data_alvo.slice(0, 7)) : null;
+  return [
+    oculto ? `${m.nome}, ${VALOR_OCULTO_FALADO}` : `${m.nome}${m.percentual === null ? "" : `, ${m.percentual}%`}`,
+    reserva && [/reserva de emergência/i.test(m.nome) ? "" : "reserva de emergência", !oculto && m.atual !== null && m.alvo !== null ? `${cheios} de ${meses} meses` : ""].filter(Boolean).join(", "),
+    !oculto && m.atual !== null && (m.alvo !== null ? `${dito(m.atual)} de ${dito(m.alvo)}` : `${dito(m.atual)} guardado`),
+    batida && "meta batida",
+    prazo && (m.prazo_passou ? `o prazo era ${prazo}` : `prazo ${prazo}`),
+    !oculto && !batida && m.atual !== null && fraseChegada(m),
+    mostradaRitmo && fraseRitmo(m.ritmo),
+    reserva && fraseCusto(custo),
+    ...avisos(m),
+  ].filter(Boolean).join(", ");
+}
+function Pilula({ m, custo, ir }: { m: MetaV2; custo: MetasV2["custo_mensal"]; ir?: () => void }) { // `ir` só na aba: tocar abre a folha de edição; no chat a pílula segue só-leitura (View, byte a byte como antes)
+  const { cores, esquema } = useTema(); const { oculto } = usePainel(); const { ampliado } = useTipografiaPainel();
+  const reserva = m.tipo === "reserva", batida = m.falta === 0, semAtual = m.atual === null, semAlvo = reserva && m.alvo === null;
+  const serie = reserva ? null : SERIE_META[esquema][serieDaMeta(m.id)]!, cor = serie ?? cores.brand; // a reserva é sempre o rosa; as outras, a série
+  const conferir = m.atual === 0 && m.motivos.some((c) => !DO_ALVO.includes(c));
+  const meses = m.meses ?? MESES_PADRAO, cheios = oculto || semAlvo || semAtual ? 0 : blocosCheios(m, meses); // não batida (falta ≥ 1 centavo) nunca fecha todos os blocos
+  const aviso = semAtual || semAlvo || conferir || avisos(m).length > 0 || (reserva && !!fraseCusto(custo)), icone: NomeIcone = reserva ? "PiggyBank" : "Target";
+  const props = { testID: `meta-${m.id}`, accessible: true, accessibilityLabel: rotulo(m, custo, oculto, cheios, meses), style: { backgroundColor: cores.surfaceControl, borderRadius: raio.chip, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8 } };
+  const conteudo = <>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View style={{ width: 32, height: 32, borderRadius: raio.pilula, backgroundColor: serie ? tingir(serie, ALFA_WASH_SERIE) : cores.brandSoft, alignItems: "center", justifyContent: "center" }}><Icone nome={icone} tamanho={20} cor={cor} /></View>
+      <Texto variante="rotulo" numberOfLines={ampliado ? undefined : 1} style={{ flex: 1, minWidth: 0 }}>{m.nome}</Texto>
+      {batida ? <Icone nome="CheckCircle" tamanho={20} tom="positive" /> : !oculto && !semAtual && m.percentual !== null && <Texto variante="rotulo">{m.percentual}%</Texto>}
+      {aviso && <Icone nome="WarningCircle" tamanho={20} tom="inkMuted" />}
+    </View>
+    {reserva ? <Blocos n={meses} cheios={cheios} tom={batida ? "positive" : "brand"} />
+      : !oculto && !semAtual && m.percentual !== null && <ProgressBar valor={m.percentual / 100} cor={batida ? cores.positive : cor} />}
+  </>;
+  return ir ? <Pressable {...props} accessibilityRole="button" accessibilityLabel={`${props.accessibilityLabel}, editar`} onPress={ir}>{conteudo}</Pressable> : <View {...props}>{conteudo}</View>;
+}
+/** Linha-botão que pede algo AO CHAT (`pedir.enviar`, como se o usuário tivesse digitado): nada navega nem abre folha. Sem `pedir` (card fora da conversa) ou com a entrada do chat desligada, fica desativada. */
+function LinhaPedido({ icone, rotulo, rotuloAcessivel, pedido, ir, children }: { icone: NomeIcone; rotulo: string; rotuloAcessivel: string; pedido: string; ir?: () => void; children?: ReactNode }) {
+  const { cores } = useTema(); const pedir = useBloco()?.pedir; const off = !ir && (!pedir || pedir.desativado);
+  return <Pressable accessibilityRole="button" accessibilityLabel={rotuloAcessivel} accessibilityState={{ disabled: off }} disabled={off} onPress={() => { selecao(); if (ir) ir(); else pedir?.enviar(pedido); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8, gap: 8, opacity: off ? 0.5 : 1 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}><Icone nome={icone} tamanho={20} tom="brand" /><Texto variante="rotulo">{rotulo}</Texto></View>
+    {children}
+  </Pressable>;
+}
+/** Aba Metas e card `metas` do chat (formato v2 de `/api/v2/metas`; `d` vem de `Metas`, o bloco do chat é o fallback): pílulas com ícone, % e barra (blocos na reserva), sem frases; elas só alimentam o VoiceOver. Reserva primeiro, depois as outras na ordem do servidor; mais de `VISIVEIS` linhas (a de "Montar reserva" conta): "+N" expande o resto aqui mesmo. No chat, criar é pedir à IA (`LinhaPedido`); editar e apagar também são com a IA. Na aba (fora do chat) a pílula e a linha "Montar reserva" abrem a folha `meta` (`metaForm.tsx`). */
+export function MetasChat({ d: dado }: { d?: MetasV2 } = {}) {
+  const bloco = useBloco(), d = dado ?? bloco?.recursos.metas; const { cores } = useTema(); const navegar = useContext(ContextoNavegacaoPainel)?.navegar; /* uma entrada por vez (o duplo toque não empilha duas folhas); a aba sempre o tem, o chat só-leitura e os testes diretos não o usam */ const [aberto, setAberto] = useState(false);
   if (!d) return <Vazio texto="Dado indisponível neste card." />;
-  const ordem = [...d.metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva")), custo = d.custo_mensal, aviso = fraseCusto(custo);
-  return <View style={{ gap: 12 }}>
-    {!ordem.some((m) => m.tipo === "reserva") && <View style={{ gap: 4 }}>
-      <Texto variante="rotulo">Reserva de emergência: {MESES_PADRAO} meses das suas contas fixas. Monte no painel.</Texto>
-      {custo.valor !== null && <ComValor valor={custo.valor} mes />}{!!aviso && <Nota texto={aviso} />}
-    </View>}
-    {!ordem.length && <Vazio texto="Você ainda não tem metas. Crie a primeira no painel: pigbankai.com/painel." />}
-    {ordem.map((m, i) => <View key={m.id}>{i > 0 && <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: cores.border, marginBottom: 12 }} />}<Meta m={m} custo={custo} /></View>)}
+  const ordem = [...d.metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva")), semReserva = !ordem.some((m) => m.tipo === "reserva");
+  const visiveis = bloco ? VISIVEIS - Number(semReserva) : ordem.length, resto = ordem.length - visiveis; // no chat, a linha "Montar reserva" ocupa a vaga da reserva; na aba todas as metas aparecem, sem "+N" nem linhas de pedido
+  return <View style={{ gap: 8 }}>
+    {bloco && semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel={`Montar reserva de emergência, ${MESES_PADRAO} meses, ainda não criada`} pedido="Quero montar minha reserva de emergência"><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
+    {!bloco && semReserva && <LinhaPedido icone="PiggyBank" rotulo="Montar reserva" rotuloAcessivel="Montar reserva de emergência" pedido="" ir={() => navegar?.("/meta?tipo=reserva" as Href)}><Blocos n={MESES_PADRAO} cheios={0} tom="brand" /></LinhaPedido>}
+    {!bloco && !ordem.length && <Vazio texto="Nenhuma meta ainda." />}
+    {bloco && !ordem.length && <LinhaPedido icone="Plus" rotulo="Criar meta" rotuloAcessivel="Criar meta" pedido="Quero criar uma meta" />}
+    {(aberto ? ordem : ordem.slice(0, visiveis)).map((m) => <Pilula key={m.id} m={m} custo={d.custo_mensal} ir={bloco ? undefined : () => navegar?.(`/meta?id=${m.id}` as Href)} />)}
+    {resto > 0 && <Pressable testID="meta-mais" accessibilityRole="button" accessibilityLabel={aberto ? "Mostrar menos metas" : `+${resto}, mostrar mais ${resto} ${resto === 1 ? "meta" : "metas"}`} onPress={() => { selecao(); setAberto(!aberto); }} style={{ backgroundColor: cores.surfaceControl, borderRadius: raio.pilula, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }}>
+      <Texto variante="rotulo">{aberto ? "Mostrar menos" : `+${resto}`}</Texto>
+    </Pressable>}
   </View>;
 }

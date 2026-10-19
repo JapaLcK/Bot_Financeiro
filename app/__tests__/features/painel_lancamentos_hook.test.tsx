@@ -16,7 +16,7 @@ const pag = (ids: string[], proximo: string | null = null, motivos: string[] = [
 function presa() { let ok!: (v: unknown) => void, no!: (e: unknown) => void; const promessa = new Promise((a, b) => { ok = a; no = b; }); return { promessa, ok, no }; }
 const ids = (r: { current: { itens: { id: string }[] } }) => r.current.itens.map((i) => i.id);
 const urls = () => mockLer.mock.calls.map((c) => String(c[0]));
-const montar = (consulta = "mes=2026-10&limite=50", chave?: string) => renderHook((p: { consulta: string; chave?: string }) => useLancamentos(p.consulta, p.chave), { initialProps: { consulta, chave } });
+const montar = (consulta = "mes=2026-10&limite=50") => renderHook((p: { consulta: string }) => useLancamentos(p.consulta), { initialProps: { consulta } });
 const solta = async (p: ReturnType<typeof presa>, v: unknown) => { await act(async () => { p.ok(v); await p.promessa; }); };
 beforeEach(() => { mockLer.mockReset(); mockP.usuario = { user_id: 1 }; mockP.versao = 0; mockP.falhou.mockReset(); });
 
@@ -92,9 +92,9 @@ describe("erros", () => {
 });
 describe("o que refaz a leitura", () => {
   it.each([
-    ["troca de usuário", (r: (p: { consulta: string; chave?: string }) => void) => { mockP.usuario = { user_id: 2 }; r({ consulta: "mes=2026-10" }); }],
-    ["carga completa do provider (`versao`)", (r: (p: { consulta: string; chave?: string }) => void) => { mockP.versao = 1; r({ consulta: "mes=2026-10" }); }],
-    ["`chave` extra (o `dia` do Extrato)", (r: (p: { consulta: string; chave?: string }) => void) => r({ consulta: "mes=2026-10", chave: "2026-10-03" })],
+    ["troca de usuário", (r: (p: { consulta: string }) => void) => { mockP.usuario = { user_id: 2 }; r({ consulta: "mes=2026-10" }); }],
+    ["carga completa do provider (`versao`)", (r: (p: { consulta: string }) => void) => { mockP.versao = 1; r({ consulta: "mes=2026-10" }); }],
+    ["`dia` na consulta (Extrato do dia)", (r: (p: { consulta: string }) => void) => r({ consulta: "mes=2026-10&dia=2026-10-03" })],
   ])("%s: lista zerada e nova requisição", async (_nome, mudar) => {
     mockLer.mockResolvedValue(pag(["a"])); const { result, rerender } = montar("mes=2026-10"); await act(async () => {});
     expect(mockLer).toHaveBeenCalledTimes(1); await act(async () => { mudar(rerender as never); }); expect(mockLer).toHaveBeenCalledTimes(2); expect(ids(result)).toEqual(["a"]);

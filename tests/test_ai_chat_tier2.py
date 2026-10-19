@@ -173,6 +173,31 @@ def test_largest_expenses_respeita_limit(user_id):
     assert len(result["expenses"]) == 3
 
 
+def test_largest_expenses_empate_de_valor_tem_ordem_estavel(user_id):
+    """Empate em R$ 30 (lançamentos e cartão, dois no mesmo dia) sai pela data mais recente,
+    depois `fonte` e `id` — antes saía em ordem que variava entre duas chamadas iguais, e no
+    `limit` o empate decidia QUAL gasto entrava (flake do CI em test_ia_resumo_do_mes)."""
+    d = date.today() - timedelta(days=10)
+    card_id = db.create_card(user_id, "Nubank", closing_day=31, due_day=17)
+
+    def lanc(alvo, dia):  # inseridos fora da ordem esperada: o scan cru não acerta por acaso
+        db.add_launch_and_update_balance(user_id, "despesa", 30, alvo, None, categoria="outros",
+                                         criado_em=datetime.combine(dia, datetime.min.time().replace(hour=12)))
+
+    lanc("velho", d - timedelta(days=2))
+    lanc("novo_a", d)
+    lanc("novo_b", d)
+    db.add_credit_purchase(user_id, card_id, 30, "outros", "cartao", d - timedelta(days=1))
+    db.add_launch_and_update_balance(user_id, "despesa", 100, "topo", None, categoria="outros",
+                                     criado_em=datetime.combine(d, datetime.min.time().replace(hour=12)))
+    periodo = {"start_date": (d - timedelta(days=3)).isoformat(), "end_date": (d + timedelta(days=1)).isoformat()}
+
+    todos = [e["descricao"] for e in _get_largest_expenses(user_id, {**periodo, "limit": 20})["expenses"]]
+    assert todos == ["topo", "novo_a", "novo_b", "cartao", "velho"]
+    for n in (2, 3, 4):  # o empate na borda do `limit` (antes do join) escolhe o mesmo prefixo
+        assert [e["descricao"] for e in _get_largest_expenses(user_id, {**periodo, "limit": n})["expenses"]] == todos[:n]
+
+
 def test_largest_expenses_end_anterior_a_start(user_id):
     result = _get_largest_expenses(user_id, {"start_date": "2026-05-01", "end_date": "2026-04-01"})
     assert "error" in result
@@ -549,26 +574,30 @@ def test_spending_trend_inclui_credito(pro_user_id):
 
 
 # ─── forecast_month_end ─────────────────────────────────────────────────────
+# Lê o mês pelo mesmo leitor do card `categorias` (`db.mes_detalhes.ler`); o cruzamento com o card,
+# o cartão e o usuário B estão em `tests/test_ia_resumo_do_mes.py`.
+
+def _ritmo(r, valor):
+    return round(valor * r["dias_no_mes"] / r["dias_corridos"], 2)
+
 
 def test_forecast_month_end_sem_gastos_projeta_zero(pro_user_id):
     result = _forecast_month_end(pro_user_id, {})
-    assert result["despesa_real_atual"] == 0.0
-    assert result["aportes_atual"] == 0.0
-    assert result["saidas_atual"] == 0.0
-    assert result["saidas_projetadas_fim_do_mes"] == 0.0
+    assert result["despesa"] == 0.0
+    assert result["receita"] == 0.0
+    assert result["despesa_projetada"] == 0.0
+    assert result["saldo_projetado"] == 0.0
 
 
 def test_forecast_month_end_projeta_baseado_em_ritmo(pro_user_id):
-    """Despesa atual = R$ 100, gastei só hoje → projeção considera ritmo
-    diário e extrapola pro mês."""
+    """Gasto fora do cartão = R$ 100 → o ritmo diário extrapola pro mês."""
     db.add_launch_and_update_balance(pro_user_id, "despesa", 100, "x", "x", categoria="outros")
 
     result = _forecast_month_end(pro_user_id, {})
-    assert result["despesa_real_atual"] == 100.0
-    assert result["saidas_atual"] == 100.0  # sem aportes
-    # Despesa projetada deve ser >= valor atual (ritmo escala)
-    assert result["despesa_projetada_fim_do_mes"] >= 100.0
-    for key in ("days_elapsed", "days_in_month", "fluxo_do_mes", "vai_fechar_negativo"):
+    assert result["despesa"] == result["despesa_no_ritmo"] == 100.0
+    assert result["despesa_cartao"] == 0.0
+    assert result["despesa_projetada"] == _ritmo(result, 100)
+    for key in ("dias_corridos", "dias_no_mes", "saldo_ate_agora", "vai_fechar_negativo"):
         assert key in result
 
 
@@ -581,8 +610,8 @@ def test_forecast_month_end_vai_fechar_negativo(pro_user_id):
     assert result["vai_fechar_negativo"] is True
 
 
-def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(pro_user_id):
-    """Aporte de investimento entra no fluxo_do_mes (sai do caixa)."""
+def test_forecast_month_end_aporte_interno_nao_entra_no_saldo_ate_agora(pro_user_id):
+    """Guardar/aportar não é gasto no painel do mês: não entra em `saiu`."""
     db.add_launch_and_update_balance(pro_user_id, "receita", 1000, None, "salario")
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 500, "carteira", "aporte",
@@ -591,38 +620,26 @@ def test_forecast_month_end_conta_aportes_no_fluxo_do_mes(pro_user_id):
     )
 
     result = _forecast_month_end(pro_user_id, {})
-    assert result["despesa_real_atual"] == 0.0
-    assert result["aportes_atual"] == 500.0
-    assert result["saidas_atual"] == 500.0
-    assert result["receita_atual"] == 1000.0
-    # fluxo_do_mes = receita - saidas do mês = 1000 - 500 = 500
-    assert result["fluxo_do_mes"] == 500.0
+    assert result["despesa"] == 0.0
+    assert result["receita"] == 1000.0
+    assert result["saldo_ate_agora"] == 1000.0
 
 
-def test_forecast_month_end_aportes_constantes_na_projecao(pro_user_id):
-    """REGRESSION do bug do Lucas: aporte de R$ 300 nos primeiros dias do
-    mês NÃO deve escalar pelo ritmo (não projeta R$ 900 num mês de 30 dias).
-    Deve aparecer como constante R$ 300 nos aportes projetados."""
+def test_forecast_month_end_aporte_interno_nao_entra_em_saiu_nem_na_projecao(pro_user_id):
+    """Aporte de R$ 300 fora do `saiu`: nem soma, nem escala pelo ritmo. Só os R$ 50 comuns."""
     db.add_launch_and_update_balance(pro_user_id, "receita", 5000, None, "salario")
-    # Aporte único de R$ 300
     db.add_launch_and_update_balance(
         pro_user_id, "despesa", 300, "carteira", "aporte",
         categoria="investimento_aporte",
         is_internal_movement=True,
     )
-    # Despesa real "comum" de R$ 50 — essa SIM escala
     db.add_launch_and_update_balance(pro_user_id, "despesa", 50, "x", "x", categoria="outros")
 
     result = _forecast_month_end(pro_user_id, {})
-    # Aportes projetados = aportes atuais (constante, NÃO escala)
-    assert result["aportes_projetados_fim_do_mes"] == 300.0
-    assert result["aportes_atual"] == 300.0
-    # Despesa projetada escala (será > 50 se days_elapsed < days_in_month)
-    if result["days_elapsed"] < result["days_in_month"]:
-        assert result["despesa_projetada_fim_do_mes"] > 50.0
-    # Saída total projetada = despesa projetada + aportes constantes
-    expected_total = result["despesa_projetada_fim_do_mes"] + 300.0
-    assert abs(result["saidas_projetadas_fim_do_mes"] - expected_total) < 0.01
+    assert result["despesa"] == result["despesa_no_ritmo"] == 50.0
+    assert result["despesa_projetada"] == _ritmo(result, 50)
+    assert result["saldo_projetado"] == round(5000 - _ritmo(result, 50), 2)
+
 
 
 # ─── get_spending_trend summary (média, tendência) ──────────────────────────

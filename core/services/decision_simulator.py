@@ -18,11 +18,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from core.services import cashflow
 from core.services.cashflow_snapshot import carregar, Ocorrencia, centavos, legado
+from core.services.cashflow_contract import Snapshot
 from core.services.cashflow_forecast import _trajectory
 from utils_text import TETO_ENTRADA
 
 # strict: `true` e "180000" não passam por número; int continua valendo em float.
 _DINHEIRO = dict(ge=0, le=TETO_ENTRADA, allow_inf_nan=False, strict=True)
+
+# Mensagens da validação (a tool `simulate_purchase` as devolve à IA, então o texto não muda).
+# A rota v2 traduz cada uma por estas constantes em código estável; ver `api/v2/simulador.py`.
+ERRO_CASAS = "valores monetários devem ter no máximo duas casas decimais"
+ERRO_ENTRADA_MAIOR = "entrada maior que o preço"
+ERRO_ENTRADA_PARCIAL = "entrada parcial sem parcelas: informe parcelas > 1 ou tire a entrada"
+ERRO_ENTRADA_IGUAL = "entrada igual ao preço com parcelas > 1: nada a financiar"
+ERRO_JUROS_SEM_PARCELAS = ("juros sem parcelamento: pergunte ao usuário em quantas parcelas; "
+                           "se for uma compra única com acréscimo, some o acréscimo ao preco")
+ERRO_DATA_PASSADO = "data_compra no passado"
+ERRO_DATA_CALENDARIO = "data_compra fora do calendário"
+ERRO_FINANCIADO_PEQUENO = "valor financiado pequeno demais para esse número de parcelas"
+ERRO_NOMES_REPETIDOS = "cenários com o mesmo nome: a comparação fica ambígua"
 
 
 def _installments_decimal(principal: Decimal, monthly_rate: Decimal, n: int) -> list[Decimal]:
@@ -59,8 +73,8 @@ class _Corpo(BaseModel):
         # Após strict/range. Decimal(str(...)) evita confundir 0.29 com subcentavos
         # por causa da representação binária; taxa percentual não é dinheiro.
         valor = Decimal(str(v))
-        if valor != valor.quantize(Decimal("0.01")):
-            raise ValueError("valores monetários devem ter no máximo duas casas decimais")
+        if valor != valor.quantize(Decimal(1).scaleb(-CASAS_DINHEIRO)):
+            raise ValueError(ERRO_CASAS)
         return v
 
     @model_validator(mode="before")
@@ -103,26 +117,25 @@ class Cenario(_Corpo):
     @model_validator(mode="after")
     def _coerente(self) -> "Cenario":
         if self.entrada > self.preco:
-            raise ValueError("entrada maior que o preço")
+            raise ValueError(ERRO_ENTRADA_MAIOR)
         if self.a_vista and 0 < self.entrada < self.preco:
-            raise ValueError("entrada parcial sem parcelas: informe parcelas > 1 ou tire a entrada")
+            raise ValueError(ERRO_ENTRADA_PARCIAL)
         if not self.a_vista and self.entrada == self.preco:
-            raise ValueError("entrada igual ao preço com parcelas > 1: nada a financiar")
+            raise ValueError(ERRO_ENTRADA_IGUAL)
         if self.a_vista and self.juros_mensal_pct > 0:
             # `parcelas: 1` (ou ausente) é à vista, e à vista não rende juros: aceitar
             # a combinação jogaria a taxa no lixo sem o usuário saber.
-            raise ValueError("juros sem parcelamento: pergunte ao usuário em quantas parcelas; "
-                             "se for uma compra única com acréscimo, some o acréscimo ao preco")
+            raise ValueError(ERRO_JUROS_SEM_PARCELAS)
         if self.data_compra is None:
             self.data_compra = date.today()
         if self.data_compra < date.today():
-            raise ValueError("data_compra no passado")
+            raise ValueError(ERRO_DATA_PASSADO)
         try:
             _add_months(self.data_compra, self.parcelas or 1)
         except (ValueError, OverflowError):
-            raise ValueError("data_compra fora do calendário") from None
+            raise ValueError(ERRO_DATA_CALENDARIO) from None
         if self.financiado > 0 and min(installments(self.financiado, self.juros_mensal_pct / 100, self.parcelas)) < 0.01:
-            raise ValueError("valor financiado pequeno demais para esse número de parcelas")
+            raise ValueError(ERRO_FINANCIADO_PEQUENO)
         return self
 
 
@@ -136,7 +149,7 @@ class Simulacao(_Corpo):
         # Normalizado: "A" e "a " são o mesmo rótulo para quem lê a comparação.
         nomes = [c.nome.strip().casefold() for c in self.cenarios]
         if len(set(nomes)) != len(nomes):
-            raise ValueError("cenários com o mesmo nome: a comparação fica ambígua")
+            raise ValueError(ERRO_NOMES_REPETIDOS)
         return self
 
 
@@ -211,36 +224,38 @@ def _resumo(traj: dict[str, Any]) -> dict[str, Any]:
         "pior_dia": {"date": wd["date"], "saldo": wd["saldo_projetado"]} if wd else None,
         "dias_abaixo_da_reserva": len(abaixo),
         "primeiro_dia_abaixo": abaixo[0] if abaixo else None,
+        "trajetoria": [{"date": it["date"], "saldo": it["saldo_projetado"]} for it in dias],
     }
 
 
 DIAS = 90  # janela do saldo diário; a chave `saldo_final_90` do resumo assume 90
+CASAS_DINHEIRO = 2  # casas aceitas em valores monetários
+EXTENSO = {2: "duas", 4: "quatro"}  # as premissas (tool e v2) escrevem o número por extenso
 
 PREMISSAS = (
-    "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos "
+    f"Saldo de {DIAS} dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos "
     "previstos − boletos − faturas observadas), mais a compra simulada. O pior dia e os dias "
-    "abaixo da reserva incluem hoje após os compromissos e a compra, até o dia 90 inclusive "
-    "(91 datas). pago_na_compra é tudo "
+    f"abaixo da reserva incluem hoje após os compromissos e a compra, até o dia {DIAS} inclusive "
+    f"({DIAS + 1} datas). pago_na_compra é tudo "
     "o que sai na data da compra: o preço cheio (à vista) ou a entrada (parcelado), mais os "
     "custos únicos; no à vista, entrada é 0. A primeira parcela e a despesa mensal nova saem "
     "um mês depois, no mesmo dia (ajustado ao fim do mês). Parcelado com juros usa a tabela "
     "Price; o arredondamento em centavos vai para a última parcela. total_pago é pago_na_compra "
-    "mais todas as parcelas, inclusive as que caem depois do dia 90, e NÃO inclui a despesa "
+    f"mais todas as parcelas, inclusive as que caem depois do dia {DIAS}, e NÃO inclui a despesa "
     "mensal nova, que não tem fim contratado. Receitas fixas só entram quando mensais ou "
     "anuais; gastos fixos entram em todas as frequências. "
     "Não inclui gastos avulsos futuros nem IOF, "
-    "seguro ou tarifas não informados. Valores monetários aceitam no máximo duas casas decimais."
+    f"seguro ou tarifas não informados. Valores monetários aceitam no máximo {EXTENSO[CASAS_DINHEIRO]} casas decimais."
 )
 
 
-def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
-    """Compara o cenário atual com 1 a 3 cenários de compra, sobre UMA leitura das
-    fontes. Devolve resumos (não a trajetória diária inteira)."""
-    today = date.today()
+def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
+    """Compara o cenário atual com 1 a 3 cenários de compra sobre UMA snapshot já lida.
+    Dinheiro em Decimal; `trajetoria` diária (hoje..hoje+90) em `atual` e em cada resumo."""
+    today = snapshot.hoje
     days = DIAS
     until = today + timedelta(days=days)
     reserva = simulacao.reserva_minima
-    snapshot = carregar(user_id, today, until)
     sb, events = snapshot.base, snapshot.ocorrencias
 
     # O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE
@@ -259,7 +274,7 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
         resumo["compra_fora_da_janela"] = contrato["data_compra"] > until.isoformat()
         cenarios.append({"nome": cen.nome, "resumo": resumo, "contrato": contrato})
 
-    return legado({
+    return {
         **snapshot.qualidade(),
         "orientacao": "abster",
         "today": today.isoformat(),
@@ -269,7 +284,17 @@ def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
         "atual": atual,
         "cenarios": cenarios,
         "premissas": [*snapshot.premissas, PREMISSAS],
-    })
+    }
 
 
-__all__ = ["DIAS", "Simulacao", "installments", "simulate"]
+def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:
+    """Saída legada (tool de IA e rota antiga): resumos em float, sem a trajetória diária."""
+    today = date.today()
+    r = simular(carregar(user_id, today, today + timedelta(days=DIAS)), simulacao)
+    r["atual"].pop("trajetoria")
+    for c in r["cenarios"]:
+        c["resumo"].pop("trajetoria")
+    return legado(r)
+
+
+__all__ = ["DIAS", "Simulacao", "installments", "simular", "simulate"]

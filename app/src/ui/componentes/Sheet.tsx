@@ -1,5 +1,5 @@
 import type { NativeStackNavigationOptions } from "expo-router";
-import { useRef, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useRef, type ReactNode, type RefObject } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -27,6 +27,10 @@ export const OPCOES_SHEET: NativeStackNavigationOptions = {
   sheetAllowedDetents: [0.5, 1],
   sheetGrabberVisible: true,
 };
+
+const RolarAoTopo = createContext<() => void>(() => undefined);
+/** Para o conteúdo trocar de "tela" dentro da sheet (formulário ↔ resultado): devolve a função que leva a rolagem ao topo. No-op fora de `SheetConteudo rolar`. */
+export const useRolarSheetAoTopo = () => useContext(RolarAoTopo);
 
 interface Props {
   children: ReactNode;
@@ -69,6 +73,8 @@ export function SheetConteudo({ children, rolar = false }: Props) {
 
   useRolarAteCampoFocado(rolar, rolagem, conteudo);
 
+  const aoTopo = useRef(() => rolagem.current?.scrollTo({ y: 0, animated: false })).current; // sem animação: a troca de conteúdo já é instantânea
+
   const preenchimento = {
     paddingHorizontal: acesso ? espaco.xl : espaco.lg,
     paddingTop: espaco.xl,
@@ -86,7 +92,7 @@ export function SheetConteudo({ children, rolar = false }: Props) {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
       >
-        {children}
+        <RolarAoTopo.Provider value={aoTopo}>{children}</RolarAoTopo.Provider>
       </ScrollView>
     );
   }

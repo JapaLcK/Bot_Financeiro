@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { StyleSheet, Text, type TextProps } from "react-native";
 
 import { useTema } from "@/ui/tema";
@@ -13,6 +14,8 @@ interface Props extends Omit<TextProps, "maxFontSizeMultiplier"> {
   tom?: Tom;
   /** Só para valor numérico: liga `tabular-nums`, para dígito não "dançar" ao trocar. */
   numerico?: boolean;
+  /** Para quem precisa do nó (foco do leitor de tela). React 19 passa `ref` como prop. */
+  ref?: Ref<Text>;
 }
 
 /**

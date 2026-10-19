@@ -6,7 +6,7 @@ Fluxo:
   1. Anexo OFX?          → trata diretamente (não depende de intent)
   1b. Anexo CSV/PDF?     → importa como extrato bancário (mesmo pipeline)
   2. Anexo ÁUDIO?        → transcreve via Whisper e processa como texto
-  3. Anexo IMAGEM?       → analisa via GPT-4o Vision e retorna dados para confirmação
+  3. Anexo IMAGEM?       → analisa via visão do modelo e retorna dados para confirmação
   4. Ensure user no DB   → garante que o usuário existe
   5. Classifica intent   → core/intent_classifier.py (3 tiers: exact → regex → IA)
   6. Roteia              → core/intent_router.py
@@ -603,7 +603,7 @@ def _handle_audio(msg: IncomingMessage, platform: str,
 
 def _handle_image(msg: IncomingMessage, platform: str) -> list[OutgoingMessage] | None:
     """
-    Detecta anexo de imagem, analisa via GPT-4o Vision e retorna resumo para confirmação.
+    Detecta anexo de imagem, analisa via visão do modelo e retorna resumo para confirmação.
     Retorna lista de OutgoingMessage ou None se não houver imagem.
     """
     if not msg.attachments:
@@ -1259,6 +1259,7 @@ def handle_incoming(msg: IncomingMessage, *,
             and (
                 intent_result.intent == "out_of_scope"
                 or intent_result.confidence < 0.55
+                or intent_result.intent == "metas.escrita"  # C4: a IA escreve a meta; 1.0 serve ao abandono
                 or responde_a_ia
             )
         )

@@ -87,7 +87,7 @@ for (const a of ACOES) {
       await page.clock.runFor(100);   // anima o modal; o relógio está pausado
       await assenta();
       assert.equal(reqs.length, 0, "antes do 'sim' nada vai");
-      await page.getByRole("button", { name: a.modal }).click();
+      await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
       await waitFor(() => reqs.length === 1, "a requisição depois do 'sim'");
     } finally { await ctx.close(); }
   });
@@ -100,7 +100,7 @@ for (const a of ACOES) {
       await page.clock.runFor(100);   // anima o modal; o relógio está pausado
       await assenta();
       assert.equal(reqs.length, 0);
-      await page.getByRole("button", { name: a.modal }).click();
+      await page.locator(".pig-modal-overlay").getByRole("button", { name: a.modal }).click();
       await waitFor(() => reqs.length === 1, "a requisição depois do 'sim'");
     } finally { await ctx.close(); }
   });

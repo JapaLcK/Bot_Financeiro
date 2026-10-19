@@ -2,11 +2,15 @@
 Smoke test pós-deploy para exclusão real de conta temporária.
 
 O teste cria dois usuários temporários no banco:
-- vítima: será agendada via API e removida de verdade pela rotina de exclusão;
+- vítima: apagada de verdade por `DELETE /auth/account` (exclusão imediata);
 - controle: deve permanecer intacto para provar que a exclusão ficou no escopo certo.
 
 Por segurança, o script só remove usuários criados por ele nesta execução e exige
 confirmação explícita na linha de comando.
+
+O código de reautenticação que o DELETE exige é emitido direto no banco
+(`db.reauth_codes.emitir`): o e-mail temporário é `.invalid` e não recebe nada, então
+a rota `/auth/account/reauth-code` não é exercitada aqui.
 """
 from __future__ import annotations
 
@@ -98,19 +102,6 @@ def _count_user_rows(cur, table: str, user_id: int) -> int:
         return 0
     cur.execute(f"select count(*) as total from {table} where user_id = %s", (user_id,))
     return int(cur.fetchone()["total"])
-
-
-def _assert_account_email(cur, user_id: int, expected_email: str) -> None:
-    cur.execute("select email from auth_accounts where user_id = %s", (user_id,))
-    row = cur.fetchone()
-    if not row:
-        raise SafetyError(f"Conta temporária {user_id} não foi encontrada.")
-    if row["email"] != expected_email:
-        raise SafetyError(
-            f"Abortado: user_id {user_id} pertence a {row['email']!r}, não ao teste {expected_email!r}."
-        )
-    if not expected_email.endswith(f"@{EMAIL_DOMAIN}"):
-        raise SafetyError("Abortado: e-mail temporário não tem o domínio seguro do teste.")
 
 
 def _cleanup_temp_user(user_id: int, expected_email: str) -> None:
@@ -209,58 +200,23 @@ def _login_temp_user(base_url: str, session: requests.Session, email: str, passw
         raise SafetyError(f"Login retornou user_id inesperado: {payload}")
 
 
-def _schedule_deletion_via_api(base_url: str, session: requests.Session, password: str, expected_user_id: int) -> None:
+def _delete_account_via_api(base_url: str, session: requests.Session, password: str, expected_user_id: int) -> None:
+    from db.reauth_codes import EXCLUIR, emitir
+
     response = session.request(
         "DELETE",
         _url(base_url, "/auth/account"),
-        json={"password": password},
+        json={"password": password, "code": emitir(expected_user_id, EXCLUIR), "confirmacao": "EXCLUIR"},
         headers=_csrf_headers(session, base_url),
-        timeout=30,
+        timeout=60,
     )
     if response.status_code != 200:
-        raise RuntimeError(f"Agendamento falhou: {response.status_code} {_json_or_text(response)}")
+        raise RuntimeError(f"Exclusão falhou: {response.status_code} {_json_or_text(response)}")
     payload = response.json()
     if int(payload.get("user_id") or 0) != int(expected_user_id):
         raise SafetyError(f"DELETE /auth/account retornou user_id inesperado: {payload}")
-    if payload.get("status") != "scheduled":
-        raise SafetyError(f"DELETE /auth/account não agendou a exclusão: {payload}")
-
-
-def _complete_deletion_for_exact_temp_user(user_id: int, expected_email: str) -> dict:
-    import db
-
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            _assert_account_email(cur, user_id, expected_email)
-            cur.execute(
-                """
-                select deletion_status
-                from auth_accounts
-                where user_id = %s
-                for update
-                """,
-                (user_id,),
-            )
-            row = cur.fetchone()
-            if not row or row["deletion_status"] != "scheduled":
-                raise SafetyError(f"Conta temporária não está agendada para exclusão: {row}")
-            cur.execute(
-                """
-                update auth_accounts
-                set deletion_scheduled_for = now() - interval '1 minute',
-                    deletion_status = 'processing',
-                    deletion_processing_started_at = now()
-                where user_id = %s
-                  and email = %s
-                  and deletion_status = 'scheduled'
-                """,
-                (user_id, expected_email),
-            )
-            if cur.rowcount != 1:
-                raise SafetyError("Não foi possível marcar exatamente uma conta temporária para processamento.")
-        conn.commit()
-
-    return db.delete_user_data(user_id)
+    if payload.get("status") != "deleted":
+        raise SafetyError(f"DELETE /auth/account não apagou a conta no ato: {payload}")
 
 
 def _verify_deleted_and_scoped(victim_id: int, control_id: int, control_note: str) -> None:
@@ -312,13 +268,8 @@ def run(base_url: str, confirm: str) -> int:
         _login_temp_user(base_url, session, victim_email, password, victim_id)
         print("[post_deploy_deletion] login da vítima temporária OK")
 
-        _schedule_deletion_via_api(base_url, session, password, victim_id)
-        print("[post_deploy_deletion] DELETE /auth/account agendou somente a vítima temporária")
-
-        result = _complete_deletion_for_exact_temp_user(victim_id, victim_email)
-        if not result.get("deleted"):
-            raise RuntimeError(f"Rotina de exclusão não confirmou remoção: {result}")
-        print("[post_deploy_deletion] exclusão efetiva da vítima temporária OK")
+        _delete_account_via_api(base_url, session, password, victim_id)
+        print("[post_deploy_deletion] DELETE /auth/account apagou a vítima temporária no ato")
 
         _verify_deleted_and_scoped(victim_id, control_id, control_note)
         print("[post_deploy_deletion] escopo OK: controle temporário permaneceu intacto")

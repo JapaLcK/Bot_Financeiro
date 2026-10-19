@@ -3,7 +3,7 @@ import { coresBanco, type Paleta } from "@/ui/tokens";
 import type { Segmento } from "@/ui/componentes/BarraComposicao";
 import type { Dados } from "./provider";
 
-const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+export const semAcento = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 /** Cor do banco se for conhecido E passar 3:1 sobre o card; senão a escala de tinta do tema, ciclando pelo índice. */
 export function corDoBanco(instituicao: string, indice: number, cores: Paleta): string {

@@ -13,11 +13,15 @@ import { MetaForm } from "../parts/MetaForm";
 
 type Aberto = { meta?: Meta; comecar?: "reserva" | "valor" };
 
+// Reserva primeiro; o resto na ordem do servidor. A página e o chat usam a mesma.
+export const emOrdem = (metas: readonly Meta[]) => [...metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva"));
+export const SEM_SENHA = "Crie sua senha para ver suas metas. Depois de criar, volte para o painel novo.";
+
 function Bloqueio({ e }: { e: ErroApi }) {
   if (e.code === "password_required") {
     return (
       <div className="empty" role="alert">
-        <p>Crie sua senha para ver suas metas. Depois de criar, volte para o painel novo.</p>
+        <p>{SEM_SENHA}</p>
         <a className="btn btn-ghost retry" href={CRIAR_SENHA.href}>{CRIAR_SENHA.texto}</a>
       </div>
     );
@@ -37,7 +41,7 @@ export function MetasPainel() {
   const e4 = e && e.status >= 400 && e.status < 500 ? e : null;
   const d = !e4 ? q.data : undefined;
   const reserva = d?.metas.find((m) => m.tipo === "reserva");
-  const ordem = d ? [...d.metas].sort((a, b) => Number(b.tipo === "reserva") - Number(a.tipo === "reserva")) : [];
+  const ordem = d ? emOrdem(d.metas) : [];
   const custoTxt = d?.custo_mensal.valor ? moneyText(d.custo_mensal.valor) : null;
   const nova = (
     <button type="button" className="btn btn-primary" disabled={!d} onClick={() => setAberto({})}>

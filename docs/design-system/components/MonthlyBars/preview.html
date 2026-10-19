@@ -1,0 +1,8 @@
+<!-- @dsCard group="Charts" height=220 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {MonthlyBars}=PigBank;const k=(c)=>"R$ "+Math.round(c/100);return e(MonthlyBars,{formatValue:k,months:[
+ {key:"5",label:"mai",value:182000},{key:"6",label:"jun",value:154000},{key:"7",label:"jul",value:0,dimmed:true},{key:"8",label:"ago",value:201000},{key:"9",label:"set",value:176500},{key:"10",label:"out",value:98000,current:true}]})}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

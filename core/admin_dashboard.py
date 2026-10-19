@@ -1802,7 +1802,8 @@ def register_admin_routes(app: FastAPI, frontend_dir: Path, jwt_secret: str, lim
         send: int = 1,
         username: str = Depends(_get_current_admin),
     ):
-        """Diagnóstico de push: mostra tokens do usuário e (send=1) dispara um
+        """Diagnóstico de push: mostra os tokens de aparelhos com sessão ativa do
+        usuário (token de sessão encerrada não aparece) e (send=1) dispara um
         push de teste. Roda no serviço Dashboard, onde vivem as envs APNS_*.
         Ex.: /admin/push-test?user_id=88648360  (add &send=0 pra só conferir)."""
         import asyncio

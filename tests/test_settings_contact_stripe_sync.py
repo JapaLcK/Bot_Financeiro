@@ -27,7 +27,7 @@ from core.services.stripe_email_sync import sincronizar_pendentes
 from db import ensure_user
 from db.connection import get_conn
 from db.stripe_email_pendente import reivindicar
-from tests._helpers_pii import insert_auth_account_pii
+from tests._helpers_pii import HASH_SENHA, SENHA, insert_auth_account_pii
 from tests.test_settings_contact_pii_sync import _client_for
 
 
@@ -82,15 +82,17 @@ def conta():
         email = f"se-{uid}@t.local"
         cus = f"cus_{uid}" if customer == "_" else customer
         with get_conn() as conn, conn.cursor() as cur:
-            insert_auth_account_pii(cur, uid, email)
+            insert_auth_account_pii(cur, uid, email, password_hash=HASH_SENHA)
             cur.execute("update auth_accounts set stripe_customer_id = %s where user_id = %s", (cus, uid))
         promote_to_pro(uid)
         client, headers = _client_for(uid, email)
         return SimpleNamespace(
             uid=uid, email=email, cus=cus,
             novo=lambda tag: f"se-{tag}-{uid}@t.local",
-            patch=lambda **body: client.patch(f"/settings/{uid}/security/contact",
-                                              json=body, headers=headers),
+            patch=lambda **body: client.patch(
+                f"/settings/{uid}/security/contact",
+                json={"current_password": SENHA, **body} if "email" in body else body,  # e-mail pede a senha
+                headers=headers),
         )
 
     yield _nova
@@ -280,7 +282,9 @@ def test_migracao_cria_a_tabela_e_e_idempotente():
 def test_duas_linhas_do_mesmo_user_id(conta, stripe_fake, cliente_na_segunda):
     c = conta()
     with get_conn() as conn, conn.cursor() as cur:
-        insert_auth_account_pii(cur, c.uid, c.novo("dupla"))
+        # Senha real nas DUAS linhas: `verify_user_password` lê com `limit 1` sem ordem, e
+        # uma linha com hash falso viraria 401 em vez do 409 que este caso mede.
+        insert_auth_account_pii(cur, c.uid, c.novo("dupla"), password_hash=HASH_SENHA)
         if cliente_na_segunda:
             cur.execute("update auth_accounts set stripe_customer_id = %s"
                         " where user_id = %s and stripe_customer_id is null", (f"cus2_{c.uid}", c.uid))

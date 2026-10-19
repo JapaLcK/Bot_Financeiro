@@ -9,12 +9,13 @@ import type { Lancamento } from "../lib/api-v2.gen";
 import { moneyText, monthName } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import { mesDe } from "../lib/store.js";
-import { categoriasQuery, contasQuery, gastosCategoriaQuery, gastosQuery, lancamentosQuery } from "../lib/v2";
+import { categoriasQuery, gastosCategoriaQuery, gastosQuery, lancamentosQuery } from "../lib/v2";
 import type { DashState } from "../lib/types";
 import { Frame } from "../parts/Frame";
 import { estadoGastos } from "../parts/GastosEstado";
 import { GastosDiaTopo } from "../parts/GastosDiaTopo";
 import { LancamentoLinha } from "../parts/LancamentoLinha";
+import { IconeCategoria } from "../parts/IconeCategoria";
 import { Selos } from "../parts/Selos";
 
 const marcada = (i: Lancamento) => i.interno || i.motivos.includes("outra_moeda"); // guardado implica interno
@@ -31,7 +32,6 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const d = q.data;
   const lista = useInfiniteQuery(lancamentosQuery({ mes, dia: dia ?? undefined, tipo: "saida", categoria: cat ?? undefined })); // mes e dia sempre juntos: o cartão entra pelo mês da fatura
   const cats = useQuery(categoriasQuery);
-  const contas = useQuery(contasQuery);
   const itens = lista.data?.pages.flatMap((p) => p.itens) ?? [];
 
   const estado = estadoGastos(q);
@@ -88,7 +88,7 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
   const nome = daCat.data?.categoria.nome;
   const [y, m] = mes.split("-").map(Number);
   const entrada = dia && d ? d.dias.find((x) => x.dia === dia) : undefined;
-  const titulo = dia ? "Seu dia" : nome ? `${daCat.data!.categoria.emoji} ${nome[0].toUpperCase()}${nome.slice(1)} · ${monthName(new Date(y, m - 1, 1))}` : "Compras";
+  const titulo = dia ? "Seu dia" : nome ? <><IconeCategoria icone={daCat.data!.categoria.icone} /> {nome[0].toUpperCase()}{nome.slice(1)} · {monthName(new Date(y, m - 1, 1))}</> : "Compras";
   const compras = daCat.data?.compras ?? 0;
   const comTotal = dia ? !!entrada : Number(compras) > 0;
 
@@ -111,8 +111,8 @@ export function GastosCompras({ s, chegada }: { s: DashState; chegada: { current
             </div>
           )}
           {lista.data && !itens.length && comTotal && <p className="faint">Nenhum lançamento encontrado.</p>}
-          {itens.length > 0 && <ul className="compras-lista">{itens.map((item) => <LancamentoLinha key={item.id} item={item} categorias={cats.data?.categorias ?? []} contas={contas.data?.contas ?? []} />)}</ul>}
-          {itens.some(marcada) && <p className="faint compras-nota">Movimentos entre contas, guardados e saídas em outra moeda aparecem marcados e ficam fora do total.</p>}
+          {itens.length > 0 && <ul className="compras-lista">{itens.map((item) => <LancamentoLinha key={item.id} item={item} categorias={cats.data?.categorias ?? []} />)}</ul>}
+          {itens.some(marcada) && <p className="faint compras-nota">Movimentos entre contas, guardados e valores em outra moeda ficam fora do total e vêm com o rótulo ou o símbolo da moeda.</p>}
           {lista.hasNextPage && (
             <div className="compras-mais">
               {lista.isFetchNextPageError && <p role="alert">Não deu para carregar mais.</p>}

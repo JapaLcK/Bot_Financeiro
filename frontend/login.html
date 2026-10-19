@@ -163,8 +163,9 @@ if(PB_MFA)history.replaceState(null,'',location.pathname+location.search);
 
   // Sessão ainda válida (cookie vivo) → pula o login. Essencial no app iOS,
   // que abre sempre em /login; inofensivo no navegador. Access expirado com
-  // refresh válido conta como sessão viva (renova e segue).
-  (async function(){
+  // refresh válido conta como sessão viva (renova e segue). Com `#mfa=` nunca
+  // pula (#991): a sessão viva pode ser de OUTRA conta e venceria o código.
+  if(!PB_MFA)(async function(){
     try{
       var r=await fetch('/auth/validate',{credentials:'same-origin'});
       if(r.status===401){

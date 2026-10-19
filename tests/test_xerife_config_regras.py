@@ -106,10 +106,19 @@ def test_regra_normalizada_aplica_exato_teto_fim_e_isolamento(uid):
     assert {x["id"] for x in db.listar_candidatos_xerife(uid, datetime.now(timezone.utc))} == {acima, diferente}
     assert dele in {x["id"] for x in db.listar_candidatos_xerife(outro, datetime.now(timezone.utc))}
     assert alvo not in {x["payload"]["launch_id"] for x in _eventos(uid)}
-    yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
-    r2 = _request(uid, "POST", "regras", {"categoria":"alimentação", "descricao":"mercado central extra", "teto":500, "data_fim":yesterday})
+    # O dia do lançamento sai do banco, com o mesmo `::date` do predicado: `now() - 1h` cai
+    # no dia anterior na primeira hora do dia do app, e `datetime.now().date() - 1` errava (#994).
+    with db.get_conn() as conn:
+        dia = conn.execute("select criado_em::date as dia from launches where id = %s and user_id = %s",
+                           (diferente, uid)).fetchone()["dia"]
+    nova = {"categoria": "alimentação", "descricao": "mercado central extra", "teto": 500}
+    r2 = _request(uid, "POST", "regras", {**nova, "data_fim": (dia - timedelta(days=1)).isoformat()})
     assert r2.status_code == 200
     assert diferente in {x["id"] for x in db.listar_candidatos_xerife(uid, datetime.now(timezone.utc))}
+    # Positivo: `data_fim` é inclusivo, então a regra que termina NO dia do lançamento o esconde.
+    # Sem ele a asserção acima passaria também com uma `data_fim` que nunca vale.
+    assert _request(uid, "POST", "regras", {**nova, "data_fim": dia.isoformat()}).status_code == 200
+    assert diferente not in {x["id"] for x in db.listar_candidatos_xerife(uid, datetime.now(timezone.utc))}
 
 
 def test_regra_remove_da_media_e_desfazer_nao_reenvia_evento(uid):

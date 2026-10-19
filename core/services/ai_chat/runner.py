@@ -59,6 +59,7 @@ from .sanitizer import detect_trend_window, strip_markdown_headers
 from .system_prompt import ERROR_MSG, prompt_do_usuario
 from .tools import OCULTAS_NO_APP, get_tool, schemas_para
 from .tools._base import OUTRO_PEDIDO
+from .valor_do_usuario import RECUSA as VALOR_NAO_INFORMADO, RECUSA_PARCELAS, RECUSA_PARCIAL, RECUSA_PARCIAL_PARCELAS, ancora_valor
 
 
 logger = logging.getLogger(__name__)
@@ -694,6 +695,7 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
         })
 
         terminal_msg: str | None = None
+        recusou = None  # texto da 1ª chamada sem âncora de valor/parcelas na rodada
         pergunta = None  # pendência que a resposta final (`_CONFIRMA`) mostra
         for tc_dict in tool_calls_dicts:
             tc_id = tc_dict["id"]
@@ -729,14 +731,20 @@ def _run_tool_loop(client, user_id: int, messages: list[dict[str, Any]],
                 "name": name,
             })
 
-            if this_terminal is not None and terminal_msg is None:
+            if this_terminal in (VALOR_NAO_INFORMADO[1], RECUSA_PARCELAS[1]):  # só vira a resposta se nada mais respondeu
+                recusou = recusou or this_terminal
+            elif this_terminal is not None and terminal_msg is None:
                 terminal_msg = this_terminal
                 # Armou e respondeu de uma vez = `_CONFIRMA` desta pendência.
                 if _PENDENCIA_DO_TURNO.get() is not antes:
                     pergunta = _PENDENCIA_DO_TURNO.get()
 
+        if recusou:  # a recusa nunca esconde o que outra chamada da rodada gravou
+            parcial = RECUSA_PARCIAL_PARCELAS if recusou == RECUSA_PARCELAS[1] else RECUSA_PARCIAL
+            terminal_msg = f"{terminal_msg}\n\n{parcial}" if terminal_msg else recusou
         # Write auto-executado entrega a resposta final sem 2º round-trip.
-        # Se múltiplas tools rodaram no mesmo turno, vence a primeira terminal.
+        # Com várias tools no turno, a 1ª resposta terminal vence; a recusa de valor/parcelas
+        # só entra se nada respondeu, ou vai anexada a ela. Entre duas recusas vale a 1ª.
         if terminal_msg is not None:
             # Só a pergunta da pendência que ficou armada a mantém: resultado
             # de write direto, erro de validação ou `_CONFIRMA` de uma pendência
@@ -850,6 +858,14 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
             None,
         )
 
+    # O dinheiro que a IA grava tem que ter sido escrito pelo usuário: antes de
+    # qualquer pergunta de confirmação sobre um valor que o modelo inventou.
+    args, acao = ancora_valor(user_id, tool, args)
+    if acao == "recusa":
+        return VALOR_NAO_INFORMADO
+    if acao == "recusa_parcelas":
+        return RECUSA_PARCELAS
+
     if tool.is_write and tool.requires_confirmation:
         # Pre-check: se a tool define validate() e ele retorna erro, pula a
         # confirmação e mostra direto pro user. Evita IA pedir "confirma
@@ -862,6 +878,8 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                     ensure_ascii=False,
                 )
                 return (history, err)
+        if tool.ao_confirmar is not None:  # o resumo e a pendência levam o que o banco tem, não o do modelo
+            args = tool.ao_confirmar(user_id, args)
 
         summary_fn = tool.summary
         summary = summary_fn(args) if summary_fn else f"executar {name} com {args}"
@@ -881,6 +899,12 @@ def _dispatch_tool(user_id: int, name: str, args: dict[str, Any]) -> tuple[str, 
                 _OUTRO_PEDIDO,
             )
         _PENDENCIA_DO_TURNO.set(armada)
+        if tool.ao_armar is not None:  # só aqui: com `_OUTRO_PEDIDO` nada foi armado
+            try:  # enfeite (o card): a pendência já está armada e o resumo já diz o item, então não derruba o turno
+                tool.ao_armar(user_id, args)
+            except Exception as e:
+                from core.observability import _log_falha
+                _log_falha("ai_ao_armar_falhou", user_id, e, nivel=logging.WARNING, tool=name)
         return (
             json.dumps(
                 {

@@ -86,7 +86,9 @@ export const apertar = async (nome: string | RegExp) => { await act(async () => 
 export const digitar = async (t: string) => { await act(async () => { fireEvent.changeText(campo(), t); await drenar(); }); };
 export const enviar = async (t: string) => { await digitar(t); await apertar("Enviar mensagem"); };
 export const ir = async (rota: "/piggy" | "/resumo" | "/gastos") => { await act(async () => { router.navigate(rota); await drenar(); }); };
-export const abrir = async () => { renderRouter("./app", { initialUrl: "/piggy" }); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy()); };
+/** Chat pronto = a entrada existe e o `bloqueio` saiu de "abrindo" (sem o "Preparando…") e de "falhou" (sem "Tentar novamente"). O contador de mensagens só aparece perto do limite, então não serve de marco. */
+export const pronto = () => waitFor(() => { campo(); expect(screen.queryByLabelText("Preparando a conversa")).toBeNull(); expect(screen.queryByRole("button", { name: "Tentar novamente" })).toBeNull(); });
+export const abrir = async () => { renderRouter("./app", { initialUrl: "/piggy" }); await pronto(); };
 export const noResumo = async () => { await ir("/resumo"); await waitFor(() => expect(screen.getByRole("button", { name: "Organizar" })).toBeTruthy()); };
-export const voltar = async () => { await ir("/piggy"); await waitFor(() => expect(screen.getByText(/de \d+ mensagens utilizadas/)).toBeTruthy()); };
+export const voltar = async () => { await ir("/piggy"); await pronto(); };
 export const trocarParaBela = async () => { await appVai("background"); await guardarCredenciais({ access: "access-bela", refresh: "rt_bela" }); await appVai("active"); };

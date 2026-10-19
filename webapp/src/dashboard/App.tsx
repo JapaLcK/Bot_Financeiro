@@ -11,9 +11,11 @@ import { Ajuda } from "./parts/Ajuda";
 import { Guia, navGuia } from "./parts/Guia";
 import { Tip } from "./parts/Tip";
 import { PAGES } from "./pages";
-import { NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
+import { AvisosDoTopo } from "./parts/AvisosDoTopo";
+import { ReceitasProvider } from "./widgets/ReceitasDoBanco";
+import { CONTA, NO_MONTH, RAIL, TABBAR, href, route, useRoute, type Path } from "./router";
 import { ICON } from "./lib/brand";
-import { DEMO, MESES, contasQuery } from "./lib/v2";
+import { DEMO, MESES, contasQuery, sair } from "./lib/v2";
 
 // Quantos bancos têm conta não pausada na /api/v2/contas. Zero esconde a linha: a rota só
 // traz conta BANK, e quem conectou só cartão ou investimento chega com `contas: []`.
@@ -97,6 +99,20 @@ export function App() {
             ))}
             {!DEMO && <li className="ajuda"><Ajuda path={path} title="Ajuda"><i className="ph ph-question" aria-hidden="true" /><span className="rail-label">Ajuda</span></Ajuda></li>}
           </ul>
+          {/* Conta: fora da .rail-list e do .rail-foot (que some entre 761 e 1180px). Sem DEMO: o protótipo não tem conta. */}
+          {!DEMO && <div className="rail-conta" role="group" aria-labelledby="rail-conta-t">
+            <p id="rail-conta-t" className="rail-conta-t rail-label">Conta</p>
+            <ul>
+              {CONTA.map(route).map((r) => (
+                <li key={r.path}>
+                  <a href={href(r.path)} aria-current={path === r.path ? "page" : undefined} title={r.label}>
+                    <i className={`ph ${r.icon}`} aria-hidden="true" /><span className="rail-label">{r.label}</span>
+                  </a>
+                </li>
+              ))}
+              <li><button type="button" title="Sair" onClick={sair}><i className="ph ph-sign-out" aria-hidden="true" /><span className="rail-label">Sair</span></button></li>
+            </ul>
+          </div>}
           <div className="rail-foot">
             <RailSync />
           </div>
@@ -104,7 +120,10 @@ export function App() {
         <div className="main-col">
           <Topbar s={s} path={path} />
           <main id="main" className="page" data-page={path}>
-            <Page s={s} />
+            <ReceitasProvider>
+              <AvisosDoTopo path={path} />
+              <Page s={s} />
+            </ReceitasProvider>
             {DEMO && <p className="foot">Protótipo com dados sintéticos. Nenhum valor aqui pertence a um usuário real.</p>}
           </main>
         </div>

@@ -6,7 +6,7 @@ exports[`SegmentedControl snapshot (dois temas): claro 1`] = `
   style={
     {
       "backgroundColor": "#EFEFF1",
-      "borderRadius": 10,
+      "borderRadius": 999,
       "flexDirection": "row",
       "padding": 3,
     }
@@ -68,7 +68,7 @@ exports[`SegmentedControl snapshot (dois temas): claro 1`] = `
         style={
           {
             "backgroundColor": "#FFFFFF",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 0,
@@ -166,7 +166,7 @@ exports[`SegmentedControl snapshot (dois temas): claro 1`] = `
         style={
           {
             "backgroundColor": "#FFFFFF",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 1,
@@ -264,7 +264,7 @@ exports[`SegmentedControl snapshot (dois temas): claro 1`] = `
         style={
           {
             "backgroundColor": "#FFFFFF",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 0,
@@ -315,7 +315,7 @@ exports[`SegmentedControl snapshot (dois temas): escuro 1`] = `
   style={
     {
       "backgroundColor": "#16161A",
-      "borderRadius": 10,
+      "borderRadius": 999,
       "flexDirection": "row",
       "padding": 3,
     }
@@ -377,7 +377,7 @@ exports[`SegmentedControl snapshot (dois temas): escuro 1`] = `
         style={
           {
             "backgroundColor": "#1D1D22",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 0,
@@ -475,7 +475,7 @@ exports[`SegmentedControl snapshot (dois temas): escuro 1`] = `
         style={
           {
             "backgroundColor": "#1D1D22",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 1,
@@ -573,7 +573,7 @@ exports[`SegmentedControl snapshot (dois temas): escuro 1`] = `
         style={
           {
             "backgroundColor": "#1D1D22",
-            "borderRadius": 7,
+            "borderRadius": 999,
             "bottom": 0,
             "left": 0,
             "opacity": 0,

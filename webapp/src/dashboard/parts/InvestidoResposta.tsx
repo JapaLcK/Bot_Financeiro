@@ -8,7 +8,7 @@ import { rotulo } from "./Selos";
 // (db/investido.py, a mesma regra do WhatsApp e da IA). Só conteúdo de linha (sem <p>,
 // lista ou botão): vai dentro do <p class="msg-text"> e de novo no role=status do
 // PiggyChat. Nunca float, nunca meio número.
-const ERRO = "Não consegui buscar agora. Pergunta de novo daqui a pouco.";
+export const ERRO = "Não consegui buscar agora. Pergunta de novo daqui a pouco.";
 // Os 4xx esperados da rota não são falha passageira: "pergunta de novo" não resolve. Rede,
 // 5xx e o resto seguem no ERRO.
 const erro = (e: Error) => !(e instanceof ErroApi) ? ERRO

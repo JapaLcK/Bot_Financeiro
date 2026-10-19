@@ -1,25 +1,33 @@
 """
 Cobre as 2 tools finais do Tier 1 da E2:
-  - delete_launch: apaga lançamento normal (por user_seq) e compra no cartão
-    (por id de credit_transaction); parcelamento derruba o grupo inteiro
+  - delete_launch: apaga lançamento normal (`#N` = user_seq ou `l<id>`) pelo `pode` do Extrato;
+    compra no cartão, parcelamento manual, guardado e lançamento antigo são RECUSADOS antes de
+    armar a confirmação (P5-A: a IA segue o mesmo `pode` do Extrato; a tabela completa está em
+    `tests/test_ai_chat_extrato_ia.py`)
   - get_card_limit_usage: limite/usado/disponível; tratamento pra limite null
 """
 from datetime import date
 
 import db
 from core.services.ai_chat.tools.cards import _get_card_limit_usage
-from core.services.ai_chat.tools.launches import (
-    _delete_launch_execute,
-    _delete_launch_summary,
-    _delete_launch_validate,
+from core.services.ai_chat.tools.extrato_ia import (
+    ao_confirmar,
+    apagar,
+    resumo_apagar,
+    validar_apagar,
 )
+
+
+def _canonico(uid, bruto):
+    return ao_confirmar(uid, {"launch_id": bruto})
 
 
 # ─── delete_launch ──────────────────────────────────────────────────────────
 
 def test_delete_launch_summary():
-    assert _delete_launch_summary({"launch_id": 5}) == "apagar o lançamento #5"
-    assert _delete_launch_summary({}) == "apagar lançamento"
+    item = {"descricao": "Mercado", "valor": 50.0, "data": "2026-10-17", "parcelas": 1}
+    assert resumo_apagar({"_item": item}) == 'apagar "Mercado", R$ 50,00, 17/10'
+    assert resumo_apagar({}) == "apagar o lançamento"
 
 
 def test_delete_launch_lancamento_normal_por_user_seq(user_id):
@@ -27,109 +35,67 @@ def test_delete_launch_lancamento_normal_por_user_seq(user_id):
     _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "compra")
     assert db.get_balance(user_id) == 950
 
-    msg = _delete_launch_execute(user_id, {"launch_id": str(user_seq)})
-    assert "apagado" in msg.lower()
+    msg = apagar(user_id, _canonico(user_id, str(user_seq)))
+    assert "apagado" in msg.lower() and '"compra", R$ 50,00' in msg
     assert db.get_balance(user_id) == 1000  # saldo revertido
 
 
-def test_delete_launch_compra_credito_por_id(user_id):
+def test_delete_launch_compra_manual_no_credito_e_recusada_sem_apagar(user_id):
     card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
     db.set_default_card(user_id, card_id)
     tx_id, _, _ = db.add_credit_purchase(user_id, card_id, 50, "outros", "uber", date.today())
 
-    msg = _delete_launch_execute(user_id, {"launch_id": str(tx_id)})
-    assert "apagada" in msg.lower() or "apagado" in msg.lower()
+    for bruto in (f"c{tx_id}", f"CC{tx_id}"):
+        err = validar_apagar(user_id, {"launch_id": bruto})
+        assert err and "só de leitura" in err, err
+    assert "mudou" in apagar(user_id, {"launch_id": f"c{tx_id}"})  # nem forjando a pendência
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select id from credit_transactions where id = %s", (tx_id,))
+        assert cur.fetchone() is not None
 
-    # Confere que tx foi removida
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("select id from credit_transactions where id = %s", (tx_id,))
-            assert cur.fetchone() is None
 
-
-def test_delete_launch_parcelamento_derruba_grupo(user_id):
+def _parcelamento(user_id):
     card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
     db.set_default_card(user_id, card_id)
     r = db.add_credit_purchase_installments(
         user_id=user_id, card_id=card_id, valor_total=300, categoria="outros",
         nota="celular", purchased_at=date.today(), installments=3,
     )
-    info = r[0] if isinstance(r, tuple) else r
-    tx_ids = info["tx_ids"]
-
-    msg = _delete_launch_execute(user_id, {"launch_id": str(tx_ids[1])})  # apaga a 2ª parcela
-    assert "Parcelamento apagado" in msg
-    assert "3 parcelas" in msg
+    return r[0] if isinstance(r, tuple) else r
 
 
-def test_delete_launch_por_codigo_pc(user_id):
-    """User digita o código PCxxxxxxxx do parcelamento — resolve e apaga
-    o grupo inteiro. Era o caso do feedback do Lucas."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
-    db.set_default_card(user_id, card_id)
-    r = db.add_credit_purchase_installments(
-        user_id=user_id, card_id=card_id, valor_total=200, categoria="outros",
-        nota="x", purchased_at=date.today(), installments=2,
-    )
-    info = r[0] if isinstance(r, tuple) else r
-    group_id = info["group_id"]
-    # Code formato: PC + primeiros 8 chars do uuid hex em UPPERCASE
-    group_hex = group_id.replace("-", "").upper()
-    pc_code = f"PC{group_hex[:8]}"
+def test_delete_launch_parcelamento_manual_e_recusado_pelo_codigo_pc_e_pela_parcela(user_id):
+    info = _parcelamento(user_id)
+    pc_code = f"PC{info['group_id'].replace('-', '').upper()[:8]}"
 
-    msg = _delete_launch_execute(user_id, {"launch_id": pc_code})
-    assert "Parcelamento" in msg and pc_code in msg
-    assert "2 parcelas" in msg
+    for bruto in (pc_code, pc_code.lower(), f"c{info['tx_ids'][1]}"):
+        err = validar_apagar(user_id, {"launch_id": bruto})
+        assert err and "só de leitura" in err, (bruto, err)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from credit_transactions where user_id = %s", (user_id,))
+        assert cur.fetchone()["n"] == 3
 
 
-def test_delete_launch_validate_aceita_pc_code(user_id):
-    """validate retorna None pra PC code que existe — não bloqueia confirmação."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
-    db.set_default_card(user_id, card_id)
-    r = db.add_credit_purchase_installments(
-        user_id=user_id, card_id=card_id, valor_total=200, categoria="outros",
-        nota="x", purchased_at=date.today(), installments=2,
-    )
-    info = r[0] if isinstance(r, tuple) else r
-    group_hex = info["group_id"].replace("-", "").upper()
-    pc_code = f"PC{group_hex[:8]}"
-
-    assert _delete_launch_validate(user_id, {"launch_id": pc_code}) is None
-    # E o número sem PC também (sem o prefixo, só hex)
-    assert _delete_launch_validate(user_id, {"launch_id": group_hex[:8]}) is None
+def test_delete_launch_8_hex_sem_pc_nao_arma_o_grupo(user_id):
+    # group_id fixo: o hex solto `c1234567`/`cc123456` colide com `c<id>`/`CC<id>`, então nunca vale
+    info = _parcelamento(user_id)
+    with db.get_conn() as conn, conn.cursor() as cur:
+        cur.execute("update credit_transactions set group_id = %s::uuid where user_id = %s and group_id = %s::uuid",
+                    ("ab12cd34-0000-4000-8000-000000000001", user_id, info["group_id"]))
+        conn.commit()
+    assert "só de leitura" in validar_apagar(user_id, {"launch_id": "PCAB12CD34"})
+    for bruto in ("ab12cd34", "AB12CD34"):
+        assert "Não achei" in validar_apagar(user_id, {"launch_id": bruto}), bruto
 
 
 def test_delete_launch_id_vazio(user_id):
-    msg = _delete_launch_execute(user_id, {"launch_id": ""})
-    assert "Faltou" in msg
+    assert "Faltou" in validar_apagar(user_id, {"launch_id": ""})
 
 
 def test_delete_launch_id_nao_resolve(user_id):
-    msg = _delete_launch_execute(user_id, {"launch_id": "abc"})
-    assert "Não achei" in msg
-
-
-def test_delete_launch_nao_existe(user_id):
-    msg = _delete_launch_execute(user_id, {"launch_id": "99999999"})
-    assert "Não achei" in msg
-
-
-# ─── delete_launch validate (anti-hallucination de IDs) ────────────────────
-
-def test_delete_launch_validate_id_inexistente_aborta(user_id):
-    """ID que LLM inventou (não existe nem como user_seq nem como CT) deve
-    falhar a validação ANTES de pedir confirmação enganosa."""
-    err = _delete_launch_validate(user_id, {"launch_id": 81524273})
-    assert err is not None
-    assert "Não achei" in err
-
-
-def test_delete_launch_validate_id_invalido(user_id):
-    err = _delete_launch_validate(user_id, {"launch_id": "abc"})
-    assert "Não achei" in err  # abc não é número nem PC code
-
-    err = _delete_launch_validate(user_id, {"launch_id": ""})
-    assert "Faltou" in err
+    assert "Não achei" in validar_apagar(user_id, {"launch_id": "abc"})
+    assert "Não achei" in validar_apagar(user_id, {"launch_id": "99999999"})
+    assert "Não achei" in validar_apagar(user_id, {"launch_id": 81524273})  # o que o LLM inventou
 
 
 def test_delete_launch_validate_user_seq_existe(user_id):
@@ -137,16 +103,8 @@ def test_delete_launch_validate_user_seq_existe(user_id):
     db.add_launch_and_update_balance(user_id, "receita", 100, None, "seed")
     _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "x")
 
-    assert _delete_launch_validate(user_id, {"launch_id": user_seq}) is None
-
-
-def test_delete_launch_validate_credit_transaction_existe(user_id):
-    """ID de credit_transaction passa pela validação."""
-    card_id = db.create_card(user_id, "Nubank", closing_day=10, due_day=17)
-    db.set_default_card(user_id, card_id)
-    tx_id, _, _ = db.add_credit_purchase(user_id, card_id, 50, "outros", "uber", date.today())
-
-    assert _delete_launch_validate(user_id, {"launch_id": tx_id}) is None
+    assert validar_apagar(user_id, {"launch_id": user_seq}) is None
+    assert validar_apagar(user_id, {"launch_id": f"#{user_seq}"}) is None
 
 
 # ─── get_card_limit_usage ───────────────────────────────────────────────────
@@ -198,16 +156,15 @@ def test_get_card_limit_usage_sem_cartao(user_id):
 
 def test_delete_launch_sem_efeitos_nao_promete_retry_no_ai_chat(user_id):
     """Porta `/ai/chat`, mesma ação do WhatsApp: lançamento sem `efeitos` é
-    condição PERMANENTE (`ValueError` de `db/accounts.py`), não erro técnico.
+    condição PERMANENTE (`LaunchNoEffects` de `db/accounts.py`), não erro técnico.
 
     O `_ERRO_APAGAR` genérico manda "tenta de novo em alguns minutos" — que
     aqui nunca vai funcionar. É o mesmo defeito do `resolve_delete`, e a mesma
     distinção que o `delete_all_launches` já faz (`kept_no_effects` × `errors`).
 
-    Controle negativo (medido): tirando o `except ValueError` de
-    `_delete_launch_execute` este teste falha; o
-    `test_delete_launch_lancamento_normal_por_user_seq` (caminho legítimo)
-    continua verde.
+    Controle negativo (medido): tirando o `LaunchNoEffects` da tabela `_RECUSAS` de
+    `extrato_ia.apagar` este teste falha; o `test_delete_launch_lancamento_normal_por_user_seq`
+    (caminho legítimo) continua verde.
     """
     _, user_seq, _ = db.add_launch_and_update_balance(user_id, "despesa", 50, None, "compra")
     internal = db.resolve_user_seq_to_id(user_id, user_seq)
@@ -216,31 +173,21 @@ def test_delete_launch_sem_efeitos_nao_promete_retry_no_ai_chat(user_id):
             cur.execute("update launches set efeitos=null where id=%s", (internal,))
         conn.commit()
 
-    msg = _delete_launch_execute(user_id, {"launch_id": str(user_seq)})
+    msg = apagar(user_id, _canonico(user_id, str(user_seq)))
 
     assert "de novo" not in msg.lower(), f"condição permanente prometendo retry: {msg!r}"
-    assert "antigo" in msg.lower() and f"#{user_seq}" in msg, msg
+    assert "antigo" in msg.lower() and '"compra"' in msg, msg
     assert db.resolve_user_seq_to_id(user_id, user_seq) == internal, "não podia apagar"
 
 
-def test_delete_launch_aporte_com_resgate_diz_o_que_destrava_no_ai_chat(user_id):
-    """Porta `/ai/chat`: lote já resgatado é condição TEMPORÁRIA com contorno.
-
-    Antes do tipo próprio ela caía no mesmo `except ValueError` do "sem
-    efeitos" e o usuário ouvia "é antigo" sobre um aporte de hoje, sem saber
-    que apagar o resgate destrava.
-    """
+def test_delete_launch_aporte_e_recusado_e_o_aporte_fica(user_id):
+    """Aporte/depósito de caixinha é guardado: `pode = []` (P1 do dono). Antes a IA o apagava e
+    explicava o resgate que travava; agora recusa antes de armar e o aporte fica."""
     db.add_launch_and_update_balance(user_id, "receita", 1000, None, "seed")
     db.create_investment_db(user_id, "CDB Lote", rate=0.01, period="monthly", nota="t")
     aporte_id, *_ = db.investment_deposit_from_account(user_id, "CDB Lote", 200, "aporte")
-    db.investment_withdraw_to_account(user_id, "CDB Lote", 50, "resgate")
-    seq = db.get_launch_user_seq(user_id, int(aporte_id))
 
-    msg = _delete_launch_execute(user_id, {"launch_id": str(seq)})
+    msg = validar_apagar(user_id, {"launch_id": f"l{aporte_id}"})
 
-    assert "antigo" not in msg.lower(), f"condição temporária vendida como permanente: {msg!r}"
-    assert "de novo" not in msg.lower(), f"retry que nunca funciona: {msg!r}"
-    # Guarda "só o último movimento": o resgate posterior recusa antes do lote.
-    assert "mais novos primeiro" in msg.lower(), f"não diz o que destrava: {msg!r}"
-    assert f"#{seq}" in msg, msg
-    assert db.resolve_user_seq_to_id(user_id, seq) == int(aporte_id), "o aporte não podia sumir"
+    assert msg and "só de leitura" in msg, msg
+    assert db.resolve_user_seq_to_id(user_id, db.get_launch_user_seq(user_id, int(aporte_id))) == int(aporte_id)

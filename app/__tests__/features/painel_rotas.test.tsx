@@ -46,11 +46,12 @@ it("PUT lento durante foreground não deixa seletor travado e reconcilia o perfi
 });
 it("privacidade remove montantes, gráfico e mensagem financeira da árvore acessível", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("Disponível agora")).toBeTruthy());
- await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull();
+ await waitFor(() => expect(screen.getByLabelText(/^Saldo previsto ao longo/)).toBeTruthy()); // as colunas da previsão estavam na tela antes de ocultar
+ await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull(); expect(screen.queryByLabelText(/^Saldo previsto ao longo/)).toBeNull();
  await act(async () => { router.navigate("/piggy"); await drenar(); }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
- // Chat privado: campo, chips e cota desligados; o histórico do servidor nunca é mostrado.
+ // Chat privado: campo e chips desligados; o histórico do servidor nunca é mostrado.
  expect(screen.getByLabelText("Mensagem para o Piggy").props.editable).toBe(false); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
- expect(screen.queryByText(/mensagens utilizadas/)).toBeNull(); expect(screen.queryByText(/Oi! Posso ajudar/)).toBeNull();
+ expect(screen.queryByText(/Oi! Posso ajudar/)).toBeNull(); // a cota oculta é medida em painel_conversa (uso ≥ 80%); aqui o uso da fixture nem a mostraria
 });
 it("contas A atrasadas após logout não são mostradas e não restauram sessão", async () => {
  const atraso = segurar(); servidor({ contasLentas: atraso }); renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByTestId("painel-conta")).toBeTruthy());

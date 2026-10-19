@@ -5,6 +5,7 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { useIsFocused } from "expo-router";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
 import { useToast } from "@/ui/componentes/Toast";
+import { SegmentedControl } from "@/ui/componentes/SegmentedControl";
 import { Skeleton } from "@/ui/componentes/Skeleton";
 import { sucesso } from "@/ui/haptics";
 import { duracoes, useEntrada, useReduzirMovimento } from "@/ui/motion";
@@ -13,13 +14,17 @@ import { useTema } from "@/ui/tema";
 import type { BlocoChat, CardChat } from "@/api/schemas/painel";
 import { Bloco, tituloWidget } from "./base";
 import { BlocoContexto } from "./blocoContexto";
-import { nomeMes } from "./catalogo";
+import { mesAbrev, mesCurto, nomeMes } from "./catalogo";
 import { tituloPeriodo } from "./cardPeriodo";
+import { TITULO_LANCAMENTOS } from "./cardLancamentos";
+import { tituloFimDoMes, tituloMaiores } from "./cardMaiores";
+import { tituloComparacao } from "./cardComparacao";
 import { raio, texto as escalas } from "@/ui/tokens";
-import { ChipPainel, TextoPainel as Texto } from "./tipografia";
+import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
-import { sugestoes, type Pergunta } from "./perguntas";
-import { useConversa, type Turno } from "./conversaEstado";
+import { nomeDe } from "./cabecalho";
+import { cotaCheia, useConversa, type Turno } from "./conversaEstado";
+import { MotivoFeedback } from "./motivoFeedback";
 import { WidgetConteudo } from "./widgets";
 export const OCULTA = "Mensagem oculta enquanto os valores estão privados.";
 /** O servidor usa o negrito do WhatsApp (`*x*`): o conteúdo começa e termina com não-espaço, colado aos asteriscos; dígito colado não vale (`5*3*4` é conta). */
@@ -33,7 +38,7 @@ export function BolhaUsuario({ texto }: { texto: string }) {
 }
 export function FalaPiggy({ children }: { children: ReactNode }) {
   const entrada = useEntrada();
-  return <Animated.View entering={entrada} testID="fala-piggy" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}><View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}><Image source={SIMBOLO} style={{ width: 24, height: 24 }} accessibilityIgnoresInvertColors /><Texto testID="fala-piggy-nome" variante="legenda" tom="inkMuted">Piggy</Texto></View>{children}</Animated.View>;
+  return <Animated.View entering={entrada} testID="fala-piggy" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}>{children}</Animated.View>;
 }
 const FRASES_PIGGY = ["Contando as moedinhas…", "Abrindo o cofrinho…", "Fuçando seus gastos…", "Farejando os números…", "Separando as notinhas…", "Dando uma olhada no extrato…", "Calculando aqui, um segundinho…"];
 /** Em voo, antes do texto: a frase divertida troca a cada 2 s até chegar o 1º passo; depois, só o último passo. O rótulo não anuncia a frase divertida; com passo real, anuncia o passo. */
@@ -77,7 +82,7 @@ function Acoes({ turno: t }: { turno: Turno }) {
     try { await setStringAsync(t.resposta!.replace(new RegExp(NEGRITO.source, "g"), "$1")); sucesso(); toast.mostrar({ mensagem: "Copiado", tom: "sucesso" }); }
     catch { toast.mostrar({ mensagem: "Não conseguimos copiar.", tom: "erro" }); }
   };
-  const nota = async (n: 1 | -1) => { if (!(await c.avaliar(t, n))) toast.mostrar({ mensagem: "Não conseguimos registrar sua avaliação.", tom: "erro" }); };
+  const nota = async (n: 1 | -1) => { if ((await c.avaliar(t, n)) === false) toast.mostrar({ mensagem: "Não conseguimos registrar sua avaliação.", tom: "erro" }); };
   return <View style={{ flexDirection: "row", marginLeft: -10 }}>
     <BotaoAcao rotulo="Copiar resposta" icone="Copy" onPress={() => void copiar()} />
     {t.messageId !== null && <><BotaoAcao rotulo="Gostei da resposta" icone="ThumbsUp" selecionado={t.feedback === 1} onPress={() => void nota(1)} /><BotaoAcao rotulo="Não gostei da resposta" icone="ThumbsDown" selecionado={t.feedback === -1} onPress={() => void nota(-1)} /></>}
@@ -88,38 +93,52 @@ export function tituloCard(card: CardChat, aba: BlocoChat["abas"][number]) {
   const periodo = aba.recursos.periodo;
   if (card === "periodo") return periodo ? tituloPeriodo(periodo.inicio, periodo.fim) : "Período";
   if (card === "caixinhas") return "Caixinhas"; // card só do chat: fora do `TITULOS`
-  if (card === "metas") return "Metas"; // o do chat mostra só as metas; `TITULOS.metas` ("Metas e caixinhas") é o do painel
+  if (card === "maiores_gastos") return tituloMaiores(aba.recursos.maiores_gastos);
+  if (card === "fim_do_mes") return tituloFimDoMes(aba.recursos.fim_do_mes);
+  if (card === "comparacao") return tituloComparacao(aba.recursos.comparacao);
+  if (card === "ultimos_lancamentos" || card === "sem_categoria") return TITULO_LANCAMENTOS[card];
   return aba.mes ? `${tituloWidget(card)} · ${nomeMes(aba.mes)}` : tituloWidget(card, aba.recursos.previsao?.dias);
 }
-/** Um card por aba do bloco, cada um com os dados embutidos pelo servidor; tocar em qualquer ponto livre abre a Folha com o MESMO bloco/aba. */
-export function CardChat({ bloco, abrir }: { bloco: BlocoChat; abrir: (b: BlocoChat, aba: number) => void }) {
-  return <>{bloco.abas.map((aba, i) => <BlocoContexto.Provider key={i} value={{ recursos: aba.recursos }}><Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)} ir={{ destino: "detalhes", acao: () => abrir(bloco, i) }}><WidgetConteudo id={bloco.card} /></Bloco></BlocoContexto.Provider>)}</>;
+/** Um card por bloco; com mais de uma aba (meses do `categorias`), abas no topo. Tudo acontece dentro do card, no chat: não há folha nem toque que abra outra tela. */
+export function CardChat({ bloco }: { bloco: BlocoChat }) {
+  const p = usePainel(); const c = useConversa();
+  const pedir = { enviar: (texto: string) => void c.enviar(texto), desativado: p.oculto || c.enviando || c.bloqueio !== "livre" || cotaCheia(c.uso) };
+  const [selecionada, setSel] = useState(0); const { abas } = bloco, sel = Math.min(selecionada, abas.length - 1), aba = abas[sel]!;
+  // Rótulo único (é a identidade no `SegmentedControl`): "out" se todas são do mesmo ano, senão "out/2026".
+  const mesmoAno = abas.every((a) => a.mes?.slice(0, 4) === abas[0]!.mes?.slice(0, 4)), rotulos = abas.map((a, i) => a.mes ? (mesmoAno ? mesAbrev(a.mes) : mesCurto(a.mes)) : String(i + 1));
+  return <Bloco id={bloco.card} titulo={tituloCard(bloco.card, aba)}>
+    {abas.length > 1 && <SegmentedControl opcoes={rotulos} acessiveis={abas.map((a, i) => a.mes ? nomeMes(a.mes) : rotulos[i]!)} valor={rotulos[sel]!} onChange={(v) => setSel(rotulos.indexOf(v))} />}
+    <BlocoContexto.Provider key={sel} value={{ recursos: aba.recursos, pedir }}><WidgetConteudo id={bloco.card} /></BlocoContexto.Provider>
+  </Bloco>;
 }
-/** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e os cards (`bloco`) que o servidor montou, antes do texto. */
-export function TurnoChat({ turno: t, onLayout, abrir }: { turno: Turno; onLayout?: (y: number) => void; abrir?: (b: BlocoChat, aba: number) => void }) {
+/** Um turno: pergunta à direita, fala do Piggy à esquerda (texto parcial enquanto o stream corre) e os cards (`bloco`) que o servidor montou, antes do texto. Copiar/curtir só no `ultimo` turno. */
+export function TurnoChat({ turno: t, ultimo, onLayout }: { turno: Turno; ultimo: boolean; onLayout?: (y: number) => void }) {
   const p = usePainel(); const entrada = useEntrada();
   const emVoo = t.resposta === undefined && !t.erro && !t.interrompida, status = emVoo && !t.parcial;
-  const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto; enquanto o status os mostra, não duplica
+  const passos = [...new Set(t.passos)].join(" · "); // os passos ficam acima do texto enquanto a resposta chega; enquanto o status os mostra, não duplica; com a resposta pronta, somem
   return <View onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)} style={{ gap: 12 }}>
     {p.oculto ? <Texto tom="inkMuted">{OCULTA}</Texto> : <>
       <BolhaUsuario texto={t.pergunta} />
       <FalaPiggy>
         {status && <StatusPiggy passos={t.passos} />}
-        {!status && !!passos && <Texto variante="legenda" tom="inkMuted">{passos}</Texto>}
-        {abrir && t.blocos.map((b, i) => <Animated.View key={i} entering={entrada}><CardChat bloco={b} abrir={abrir} /></Animated.View>)}
+        {!status && t.resposta === undefined && !!passos && <Texto variante="legenda" tom="inkMuted">{passos}</Texto>}
+        {t.blocos.map((b, i) => <Animated.View key={i} entering={entrada}><CardChat bloco={b} /></Animated.View>)}
         {emVoo && t.previa && t.blocos.at(-1)?.card !== t.previa && <Skeleton largura="100%" altura={120} raio={raio.bloco} />}
         {t.erro ? <Texto tom="warning">{t.erro}</Texto> : <Markdown texto={t.resposta ?? t.parcial} />}
         {t.nota && <ComNegrito texto={`Cancelei *${t.nota}* porque você saiu do chat.`} />}
         {t.interrompida && t.resposta === undefined && !t.erro && <Texto variante="legenda" tom="inkMuted">Você parou esta resposta.</Texto>}
-        {t.resposta !== undefined && <Acoes turno={t} />}
+        {ultimo && t.resposta !== undefined && <Acoes turno={t} />}
+        {ultimo && t.feedback === -1 && t.messageId !== null && <MotivoFeedback turno={t} />}
       </FalaPiggy>
     </>}
   </View>;
 }
-export function EstadoVazio({ desativado, escolher }: { desativado: boolean; escolher: (p: Pergunta) => void }) {
+/** Chat novo: só o logo e a saudação, no centro. As sugestões moram na linha acima da caixa de entrada (conversa.tsx). */
+export function EstadoVazio() {
   const p = usePainel();
-  return <View style={{ gap: 12 }}>
-    <View style={{ alignItems: "flex-start", gap: 8 }}><Image source={SIMBOLO} style={{ width: 28, height: 28 }} accessibilityIgnoresInvertColors /><Texto>Oi, eu sou o Piggy. Pergunta o que quiser sobre o seu dinheiro, ou começa por uma destas:</Texto></View>
-    <View style={{ alignItems: "flex-start" }}>{sugestoes(p.perfil).map((s) => <ChipPainel key={s.key} rotulo={s.ask} selecionado={false} desativado={desativado} onPress={() => escolher(s)} />)}</View>
+  return <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 8 }}>
+    <Image source={SIMBOLO} style={{ width: 72, height: 72 }} accessibilityIgnoresInvertColors />
+    <Texto variante="titulo" accessibilityRole="header" style={{ textAlign: "center" }}>Olá, {nomeDe(p.usuario)}</Texto>
+    <Texto tom="inkMuted">Como posso te ajudar?</Texto>
   </View>;
 }

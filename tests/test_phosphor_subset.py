@@ -78,6 +78,9 @@ def test_nao_surgiu_fonte_dinamica_de_icone_fora_dos_mapas_conhecidos():
         ("dashboard.js", "name"),        # phIcon(), alimentado por EMOJI_TO_PH
         ("settings.html", "name"),       # catIcon(), alimentado por CAT_ICONS
         ("settings.html", 'ACTIVITY_ICONS[ev.event] || "circle"'),
+        # IconeCategoria.tsx (/painel): o `icone` do servidor (`db/cat_icones.py`). Os nomes são os MESMOS do EMOJI_TO_PH,
+        # então o subset já os tem; `tests/test_cat_icones.py` compara os dois mapas e cada nome contra o CSS.
+        ("IconeCategoria.tsx", 'NOME_DE_ICONE.test(icone ?? "") ? icone : "tag"'),
     }
     achados = set()
     # As mesmas raízes do gerador (frontend/ E webapp/src), e a mesma exclusão de

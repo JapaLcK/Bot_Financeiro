@@ -1,12 +1,13 @@
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, ScrollView, View } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { ActivityIndicator, ScrollView, View } from "react-native";
 
 import { SessaoExpirada } from "@/api/client";
 import type { MfaStatus, Perfil } from "@/api/schemas/auth";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { Desbloqueio } from "@/features/seguranca/Desbloqueio";
 import { useFalha } from "@/features/seguranca/falha";
+import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
 import { statusMfa } from "@/services/mfa";
 import { Button } from "@/ui/componentes/Button";
@@ -104,21 +105,8 @@ export default function Seguranca() {
     }, []),
   );
 
-  // O link do e-mail abre o Safari: voltar ao app é AppState, não foco de navegação, e o foco
-  // acima não dispara. Recarrega na volta REAL (`active` depois de `background`): no iOS a volta
-  // passa por `inactive` com a rede ainda acordando, e `inactive` sozinho (Central de Controle) não
-  // é saída do app. Sem "carregando": a tela segue como está até a resposta chegar. `[]` de propósito.
-  useEffect(() => {
-    let foiParaFundo = false;
-    const escuta = AppState.addEventListener("change", (v) => {
-      if (v === "background") foiParaFundo = true;
-      else if (v === "active" && foiParaFundo) {
-        foiParaFundo = false;
-        void carregar();
-      }
-    });
-    return () => escuta.remove();
-  }, []);
+  // O link do e-mail abre o Safari: a volta é AppState, não foco (ver `useVoltaDoFundo`).
+  useVoltaDoFundo(() => void carregar());
 
   return (
     <ScrollView

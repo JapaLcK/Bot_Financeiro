@@ -162,6 +162,9 @@ def init_db():
         )
         """,
         """create index if not exists idx_push_tokens_user on push_tokens(user_id)""",
+        # Sessão que registrou o token (auth_sessions.jti): push só vai a aparelho
+        # de sessão ativa. NULL = registro antigo, nunca recebe até re-registrar.
+        """alter table push_tokens add column if not exists session_jti text""",
         """
         create table if not exists pockets (
           id bigserial primary key,
@@ -612,6 +615,11 @@ def init_db():
         # atual assim que o job de saúde media o item novo como saudável.
         """
         alter table open_finance_connections add column if not exists reconnected_at timestamptz
+        """,
+        # Trava do push "reconectar": NULL = nenhum push dado neste episódio; preenchida
+        # = já avisado. Volta a NULL se a conexão fica Atualizada/Parcial ou o envio não entrega.
+        """
+        alter table open_finance_connections add column if not exists push_reconectar_em timestamptz
         """,
         """
         create index if not exists idx_of_conn_refresh_due
@@ -1292,6 +1300,22 @@ def init_db():
         """
         create index if not exists idx_data_export_tokens_user on data_export_tokens (user_id, created_at desc)
         """,
+        # Código de reautenticação por e-mail (exclusão de conta). Uma linha por
+        # (usuário, propósito): o upsert troca o código anterior e a tabela não cresce.
+        # Fora de `user_owned_tables`/export de propósito: segredo transitório (cascade
+        # apaga na exclusão). Só o HMAC do código; nunca o código.
+        """
+        create table if not exists account_reauth_codes (
+          user_id bigint not null references users(id) on delete cascade,
+          purpose text not null,
+          code_hash text not null,
+          expires_at timestamptz not null,
+          attempts int not null default 0,
+          used_at timestamptz,
+          created_at timestamptz not null default now(),
+          primary key (user_id, purpose)
+        )
+        """,
         """
         create table if not exists auth_rate_limits (
           bucket text not null,
@@ -1375,6 +1399,10 @@ def init_db():
         """
         alter table auth_accounts add column if not exists
           whatsapp_updates_opt_out boolean not null default false
+        """,
+        """
+        alter table auth_accounts add column if not exists
+          push_bank_reconnect_opt_out boolean not null default false
         """,
         """
         alter table auth_accounts add column if not exists deletion_requested_at timestamptz
@@ -1855,6 +1883,10 @@ def init_db():
         # (`Literal[-1, 1] | None`), e uma constraint num ALTER em tabela cheia
         # varre tudo no boot.
         "alter table ai_messages add column if not exists feedback smallint",
+        # Motivo do 👎 (chave de `db.ai_feedback.MOTIVOS`) e comentário livre (só com
+        # "outro", ≤ 500). Nulas e sem CHECK, pelo mesmo motivo de `feedback`.
+        "alter table ai_messages add column if not exists feedback_motivo text",
+        "alter table ai_messages add column if not exists feedback_texto text",
 
         # Pending action: write proposto pela IA aguardando confirmação do user.
         # Quando o user manda "sim" / "confirma", a ação é executada e a linha

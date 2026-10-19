@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 import db
 import frontend.finance_bot_websocket_custom as dashboard
-from core.services.ai_chat.tools.launches import _delete_launch_execute
+from core.services.ai_chat.tools.extrato_ia import validar_apagar
 from tests._fusao_of_helpers import ia_fora, manda, uid_pro  # noqa: F401 (fixtures)
 from tests._of_cash_helpers import q
 from tests.test_credit_transactions_endpoints import _auth, _csrf_headers
@@ -117,7 +117,7 @@ def test_whatsapp_e_ia_respondem_com_a_frase(uid_pro, ia_fora, rodar):
     g, c = gid(uid_pro), ct_id(uid_pro)
     curto = g.replace("-", "")[:8]
     for resposta in (manda(uid_pro, f"apagar parcelamento pc{curto}"), manda(uid_pro, f"apagar CC{c}"),
-                     _delete_launch_execute(uid_pro, {"launch_id": f"PC{curto}"}),
-                     _delete_launch_execute(uid_pro, {"launch_id": str(c)})):
+                     validar_apagar(uid_pro, {"launch_id": f"PC{curto}"}),
+                     validar_apagar(uid_pro, {"launch_id": f"c{c}"})):
         assert "vem do seu banco" in resposta, resposta
     assert estado(uid_pro) == (1, [(100, "open")], 0)

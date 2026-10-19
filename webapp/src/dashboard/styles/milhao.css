@@ -1,0 +1,15 @@
+/* Progresso ao milhão (widgets/ProgressoMilhao.tsx, MilhaoGrafico.tsx). Grid, não flex com gap (Safari 14). */
+.mi-corpo { display: grid; gap: 18px; min-width: 0; }
+.mi-topo, .mi-quando { display: grid; gap: 8px; min-width: 0; }
+.mi-titulo { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.mi-hoje { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.mi-topo .meter { height: 8px; }
+.mi-controles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 14px 24px; align-items: end; }
+.mi-ctl { display: grid; gap: 6px; font-size: 13px; min-width: 0; }
+.mi-ctl b { font-weight: 600; }
+.mi-controles .btn { min-height: 44px; height: auto; white-space: normal; }
+.mi-ctl .range { min-height: 44px; }
+.mi-chart { height: 240px; flex: none; }
+.mi-meta { stroke: var(--ink-3); }
+.mi-rodape { font-size: 12px; }
+@media (max-width: 600px) { .mi-titulo { font-size: 22px; } }

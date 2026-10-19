@@ -19,9 +19,9 @@ it("a fixture compartilhada: título, Entrou/Saiu/Saldo do servidor e o percentu
   await mostrar({});
   expect(screen.getByText("Agosto a setembro 2026")).toBeTruthy();
   expect(card().getByText("+R$ 3.000,00")).toBeTruthy(); expect(card().getByText("−R$ 1.300,50")).toBeTruthy(); expect(card().getByText("R$ 1.699,50")).toBeTruthy();
-  expect(card().getByText("Mercado")).toBeTruthy(); expect(card().getByText("70% dos gastos")).toBeTruthy(); expect(card().getByText("Transporte")).toBeTruthy(); expect(card().getByText("30% dos gastos")).toBeTruthy();
+  expect(card().getByText("Mercado")).toBeTruthy(); expect(card().getByText("70%")).toBeTruthy(); expect(card().getByText("Transporte")).toBeTruthy(); expect(card().getByText("30%")).toBeTruthy();
 });
-it("categoria com percentual 0 e valor > 0 diz '<1%'", async () => { await mostrar({ categorias: [cat("mercado", "999.00", 99), cat("outros", "0.50", 0)] }); expect(card().getByText("<1% dos gastos")).toBeTruthy(); });
+it("categoria com percentual 0 e valor > 0 diz '<1%'", async () => { await mostrar({ categorias: [cat("mercado", "999.00", 99), cat("outros", "0.50", 0)] }); expect(card().getByText("<1%")).toBeTruthy(); expect(card().queryByText(/dos gastos/)).toBeNull(); });
 
 describe("mais de 5 categorias", () => {
   const sete = ["a", "b", "c", "d", "e", "f", "g"].map((n, i) => cat(n, `${100 - i}.00`));
@@ -70,5 +70,9 @@ it("sem categorias: 'Nenhum gasto em reais neste período.' e o topo e as barras
 it("categoria com `maiores: []` NÃO é expansível; com `maiores`, é", async () => {
   await mostrar({ categorias: [{ ...cat("mercado", "100.00", 50), maiores: [PERIODO.categorias[0].maiores[0]] }, cat("transporte", "50.00", 50)] });
   expect(card().getByRole("button", { name: /Mercado/ })).toBeTruthy(); expect(card().getByText("Transporte")).toBeTruthy(); expect(card().queryByRole("button", { name: /Transporte/ })).toBeNull();
+});
+it("a linha das maiores de uma categoria MANTÉM a data (só o Extrato a omite)", async () => {
+  await mostrar({}); fireEvent.press(card().getByRole("button", { name: /Mercado/ }));
+  expect(card().getByText(/^03\/09\/2026 · Nubank · Mercado/)).toBeTruthy();
 });
 it("o Saldo é o do servidor, não Entrou − Saiu", async () => { await mostrar({ saldo: "1234.56" }); expect(card().getByText("R$ 1.234,56")).toBeTruthy(); expect(card().queryByText("R$ 1.699,50")).toBeNull(); });

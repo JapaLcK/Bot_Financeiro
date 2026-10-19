@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { WidgetItem } from "@/components/ui/draggable-widget-grid";
 import { PROFILES, locked, tierOf } from "../lib/profiles.js";
-import { usePlan } from "../lib/v2";
+import { NOME_DO_PLANO, usePlan } from "../lib/v2";
 
 // Qual perfil monta o Resumo. Sempre visível; trocar leva ao layout daquele perfil.
 // `busy` (PUT em voo): aria-disabled e não `disabled`, que tiraria o foco do seletor.
@@ -16,8 +16,6 @@ export function ProfileSelect({ value, busy, onPick }: { value: string; busy: bo
     </label>
   );
 }
-
-const TIER_NAME: Record<string, string> = { plus: "Plus", pro: "Pro" };
 
 // Blocos fora do painel, só no Organizar. Os do plano acima aparecem com cadeado e
 // não entram. Depois de adicionar, o foco fica na lista (o item some dela).
@@ -46,7 +44,7 @@ export function Catalog({ missing, onAdd }: { missing: WidgetItem[]; onAdd: (id:
                   }}>
                   <i className={`ph ${off ? "ph-lock" : "ph-plus"}`} aria-hidden="true" />
                   <span>{w.label}</span>
-                  {off && <span className="catalog-tier">No {TIER_NAME[tierOf(w.id)]}</span>}
+                  {off && <span className="catalog-tier">No {NOME_DO_PLANO[tierOf(w.id)]}</span>}
                 </button>
               </li>
             );

@@ -32,7 +32,7 @@ export default tseslint.config(
     files: ["jest.config.js", "jest.setup.js", "jest.css-stub.js", "metro.config.js", "babel.config.js"],
     languageOptions: {
       sourceType: "commonjs",
-      globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly" },
+      globals: { module: "readonly", require: "readonly", jest: "readonly", __dirname: "readonly", process: "readonly" },
     },
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
@@ -53,7 +53,7 @@ export default tseslint.config(
     // um `import` estático do ícone arrasta o typecheck para dentro de um
     // arquivo interno do `phosphor-react-native` com erro de tipo real
     // contra a versão instalada do `react-native-svg`.
-    files: ["src/ui/componentes/Icone.tsx"],
+    files: ["src/ui/componentes/Icone.tsx", "src/ui/componentes/IconeCategoria.tsx"], // o mesmo motivo, no registro de ícones das categorias
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
   {

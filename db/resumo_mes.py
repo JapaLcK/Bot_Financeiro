@@ -7,7 +7,7 @@ estorno pelo `period_end` da fatura (parcelado: uma parcela por mês). Leem daqu
 `GET /api/v2/resumo-do-mes`, o "Gastos em <mês>" do WhatsApp, o relatório mensal, a
 consulta 5 do /app, `compute_kpis` das Análises e as tools da IA de meses inteiros
 (`get_period_summary`, que para 2 a 12 meses lê `mes_detalhes.ler_periodo`, o mesmo do
-card `periodo` do chat; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07; `get_top_categories`, `get_largest_expenses` e
+card `periodo` do chat; `forecast_month_end`, que lê o mês por `mes_detalhes.ler` e extrapola só o gasto até hoje fora do cartão do Open Finance; `compare_periods`, que lê `totais`/`categorias` daqui, PL-07, e `lancamentos.listar` para a série diária do gasto; `get_top_categories`, `get_largest_expenses` e
 `get_category_spend` pela fatura: `core/services/ai_chat/tools/launches.py`); as pernas dela (`MES_*_SQL`), a
 lista de `GET /api/v2/lancamentos` (`db/lancamentos.py`). `compute_evolution` é cópia em
 consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
@@ -15,10 +15,10 @@ consulta única, comparada mês a mês em `tests/test_resumo_mes_regra.py`.
 `categorias` abre a despesa de `TOTAIS_SQL` por categoria (a soma é o `saiu`); lê dela
 `core/services/comparacao_periodos.py` (`compare_periods` da IA, PL-07, com `mes=`; com datas que não são meses
 inteiros dos dois lados ele usa a regra de período livre das outras tools, cartão pela data da compra:
-`n_compras_cartao` conta essas compras).
+`n_compras_cartao` conta essas compras). O mês aberto da comparação é o mês inteiro, como o `resumo_do_mes`.
 
 Ficam fora da regra, de propósito, e é divergência conhecida: relatório diário e semanal
-(só `launches`, sem cartão: `get_summary_by_period`), projeção de fechamento, o Repórter
+(só `launches`, sem cartão: `get_summary_by_period`), o Repórter
 (`piggy_agents._month_stats`) e as ferramentas da IA de período livre: `get_period_summary`
 soma `launches` + cartão pela data da compra (`cartao_por: data_da_compra`), como
 `get_top_categories` e `get_largest_expenses`; `get_category_spend` pela fatura

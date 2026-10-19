@@ -733,9 +733,9 @@ def test_installment_categoria_vazia_limpa_o_campo(pro_user_id):
 
 
 def _tool_recategorize(user_id: int, launch_id: int, categoria: str) -> str:
-    from core.services.ai_chat.tools.categories import _recategorize_launch_execute
-    return _recategorize_launch_execute(
-        user_id, {"launch_id": launch_id, "new_category": categoria}
+    from core.services.ai_chat.tools.extrato_ia import ao_confirmar, recategorizar
+    return recategorizar(  # com o `_item` que o runner grava na pendência
+        user_id, ao_confirmar(user_id, {"launch_id": f"l{launch_id}", "new_category": categoria})
     )
 
 

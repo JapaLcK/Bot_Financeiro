@@ -12,7 +12,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, exigeArtefatoEmDia, passouATrava, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -41,7 +41,8 @@ const respostas = (page) => page.locator(".chat > .msg-piggy").count();
 // Clica uma próxima pergunta da última resposta e espera a resposta dela chegar.
 const seguir = async (page, nome) => {
   const antes = await respostas(page);
-  await page.locator(".chat > .msg-piggy").last().locator(".chat-follow button", { hasText: nome }).click();
+  await passouATrava(page);
+  await page.locator(".chat-follow button", { hasText: nome }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
 };
 
@@ -72,7 +73,7 @@ test("digitar numa página qualquer abre a conversa; texto livre recebe os atalh
   const r = await page.evaluate(() => [
     document.querySelector(".chat .msg-user").textContent,
     document.querySelector(".chat .msg-piggy .msg-text").textContent.startsWith("Aqui no protótipo"),
-    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length,
+    document.querySelectorAll(".chat-follow button").length,
     document.querySelector("#askbar-input").value,
   ]);
   await ctx.close();
@@ -85,6 +86,7 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   await perguntar(page, "oi");
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const blocos = {};
+  let cartoesMetas = 0;
   for (const [assunto, nome] of [
     ["categorias", "Pra onde vai meu dinheiro?"], ["lancamentos", "Quais foram meus maiores gastos do mês?"],
     ["categoria", /^Me mostra o detalhe/], ["saldo", "Vai sobrar até o fim do mês?"], ["fatura", "E a minha fatura?"],
@@ -93,14 +95,20 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   ]) {
     await seguir(page, nome);
     blocos[assunto] = await page.locator(".chat > .msg-piggy").last().locator(".msg-block").count();
+    // metas é real (parts/MetasResposta.tsx): sem bloco de exemplo, as pílulas vêm do servidor
+    if (assunto === "metas") {
+      await page.locator(".chat > .msg-piggy").last().locator(".pilula").first().waitFor();
+      cartoesMetas = await page.locator(".chat > .msg-piggy").last().locator(".pilula").count();
+    }
   }
   const r = await page.evaluate(() => {
     const ids = [...document.querySelectorAll("[id]")].map((e) => e.id);
-    return [ids.filter((x, i) => ids.indexOf(x) !== i), document.querySelectorAll(".chat .chat-follow").length];
+    return [ids.filter((x, i) => ids.indexOf(x) !== i), document.querySelectorAll(".chat .chat-follow").length, document.querySelectorAll(".chat-follow").length];
   });
   await ctx.close();
-  assert.deepEqual(blocos, { categorias: 1, lancamentos: 1, categoria: 1, saldo: 2, fatura: 2, saldo2: 2, metas: 1, investimentos: 2, renda: 1 });
-  assert.deepEqual(r, [[], 1]); // nenhum id repetido; só a última resposta oferece próximas perguntas
+  assert.deepEqual(blocos, { categorias: 1, lancamentos: 1, categoria: 1, saldo: 2, fatura: 2, saldo2: 2, metas: 0, investimentos: 2, renda: 1 });
+  assert.equal(cartoesMetas, 5);
+  assert.deepEqual(r, [[], 0, 1]); // nenhum id repetido; as próximas perguntas ficam fora da conversa, numa fileira só
   assert.deepEqual(erros, []);
 });
 
@@ -109,6 +117,7 @@ test("\"qual categoria mais cresceu\" e \"que dia da semana\" respondem o que fo
   const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "controlar" });
   const clicar = async (texto) => {
     const antes = await respostas(page);
+    await passouATrava(page);
     await page.locator(".chat-follow button", { hasText: texto }).first().click();
     await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
     return page.locator(".chat > .msg-piggy").last().evaluate((m) => [m.querySelector(".msg-text").textContent, [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, ""))]);
@@ -159,8 +168,8 @@ test("a conversa sobrevive à troca de página e some ao recarregar", async () =
 
 test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async () => {
   const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "investir" });
-  const ideias = await page.locator(".chat-empty .chat-follow button").evaluateAll((bs) => bs.map((b) => b.textContent));
-  await page.locator(".chat-empty .chat-follow button").first().click();
+  const ideias = await page.locator(".chat-follow button").evaluateAll((bs) => bs.map((b) => b.textContent));
+  await page.locator(".chat-follow button").first().click();
   await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
   const blocos = await page.locator(".chat > .msg-piggy .msg-block").count();
   await ctx.close();
@@ -176,7 +185,7 @@ test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async ()
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const r = await page.evaluate(() => [
     document.querySelector(".chat .msg-user").textContent,
-    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length > 0,
+    document.querySelectorAll(".chat-follow button").length > 0,
     document.querySelectorAll(".chat-plus").length,
   ]);
   await ctx.close();
@@ -188,7 +197,7 @@ test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async ()
 test("320 e 390: a conversa não rola para o lado e a barra fica acima da de baixo", async () => {
   for (const width of [320, 390]) {
     const { ctx, page } = await abrir({ width, hash: "#/piggy" });
-    await page.locator(".chat-empty .chat-follow button").first().click();
+    await page.locator(".chat-follow button").first().click();
     await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
     const r = await page.evaluate(() => {
       const a = document.querySelector(".askbar").getBoundingClientRect();
@@ -204,10 +213,11 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
   const vistos = {};
   for (const perfil of ["economizar", "investir", "controlar", "dividas", "autonomo"]) for (let i = 0; i < 5; i++) {
     const { ctx, page, erros } = await abrir({ hash: "#/piggy", perfil });
-    const botao = page.locator(".chat-empty .chat-follow button").nth(i);
+    const botao = page.locator(".chat-follow button").nth(i);
     const pergunta = await botao.textContent();
     await botao.click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .msg-text").textContent.includes("Calculando"));
     vistos[pergunta] = [await page.locator(".chat > .msg-piggy .msg-text").textContent(), erros.length];
     await ctx.close();
   }
@@ -218,7 +228,8 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
   await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
   const fds = await page.locator(".chat > .msg-piggy .msg-text").textContent();
   await ctx.close();
-  for (const [q, [texto, n]] of Object.entries(vistos)) assert.ok(texto.length > 40 && n === 0, `${q}: ${texto} (${n} erros)`);
+  // metas é real: a frase é curta de propósito (as pílulas vêm abaixo dela)
+  for (const [q, [texto, n]] of Object.entries(vistos)) assert.ok((texto.length > 40 || /^Você tem 11 metas\.$/.test(texto)) && n === 0, `${q}: ${texto} (${n} erros)`);
   assert.equal(chave, "fim-de-semana");
   assert.match(fds, /por fim de semana|segurar o fim de semana/);
   assert.deepEqual(erros, []);
@@ -226,7 +237,7 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
 
 test("a resposta nova é anunciada para leitor de tela", async () => {
   const { ctx, page } = await abrir({ hash: "#/piggy" });
-  await page.locator(".chat-empty .chat-follow button").first().click();
+  await page.locator(".chat-follow button").first().click();
   await page.locator(".chat > .msg-piggy").first().waitFor();
   await perguntar(page, "oi");
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);
@@ -254,6 +265,7 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
     const { ctx, page } = await abrir({ hash: "#/piggy", perfil });
     await page.locator(".chat-follow button", { hasText: texto }).click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .msg-text").textContent.includes("Calculando"));
     const t = await page.locator(".chat > .msg-piggy .msg-text").textContent();
     await ctx.close();
     return t;
@@ -269,7 +281,8 @@ test("as perguntas de dívida, assinatura, resumo, reserva e economia respondem 
   };
   assert.match(await pela("dividas", "comprometido"), /^No mês que vem, R\$ 1\.821 já estão comprometidos: R\$ 1\.310 de contas fixas e R\$ 511 de parcelas/);
   assert.match(await pela("dividas", "volta a caber"), /acaba em março de 2027/);
-  assert.match(await pela("investir", "reserva de emergência"), /^Sua reserva cobre 3,3 meses .* já passou do mínimo/);
+  // metas é real: o chip da reserva mostra as metas do servidor, não o texto de exemplo (que o teste do protótipo cobre)
+  assert.match(await pela("investir", "reserva de emergência"), /^Você tem 11 metas\./);
   assert.match(await pela("dividas", "economizar este mês"), /^O que mais subiu foi Delivery/);
   // comuns fora das sugestões: pela faixa (3 insights × 2 + 11 comuns × 1 = 17)
   assert.match(await faixa(12.5 / 17, "assinaturas"), /^Você paga 3 assinaturas: Spotify .*Netflix .* e Academia .*R\$ 166,70 por mês/);

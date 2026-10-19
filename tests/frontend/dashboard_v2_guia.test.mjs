@@ -164,7 +164,7 @@ test("POST 409 passo_indisponivel: relê o guia e mostra a orientação, sem \"T
   });
   await bora(page);
   await FAZER["mes.trocado"](page);
-  const link = page.locator('.guia-balao a[href="/settings?view=open-finance"]');
+  const link = page.locator('.guia-balao a[href="#/conta/bancos"]');
   await link.waitFor({ timeout: 5000 });
   const r = [await page.getByRole("button", { name: "Tentar de novo" }).count(), await page.getByText("Isso aí!").count()];
   await page.getByRole("button", { name: "Seguir" }).click();
@@ -179,12 +179,26 @@ test("sem dados, pela Ajuda: orientação com o link do Open Finance e segue par
   await page.waitForTimeout(800);
   const convite = await page.locator(".guia-balao").count();
   await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
-  await page.locator('.guia-balao a[href="/settings?view=open-finance"]').waitFor({ timeout: 5000 });
+  await page.locator('.guia-balao a[href="#/conta/bancos"]').waitFor({ timeout: 5000 });
   await page.getByRole("button", { name: "Seguir" }).click();
   await esperaTitulo(page, PASSOS[1].fala.titulo);
   await ctx.close();
   assert.equal(convite, 0);
   assert.deepEqual(acoes(s), ["reabrir"]);
+});
+
+test("sem dados, pela Ajuda: o link do balão leva à página Bancos conectados sem recarregar o painel", async () => {
+  const { ctx, page } = await abrir({ guia: "indisponivel" });
+  await page.waitForTimeout(800);
+  await page.locator(".rail").getByRole("button", { name: "Ajuda" }).click();
+  await page.evaluate(() => { window.__mesmaPagina = true; });
+  await page.locator('.guia-balao a[href="#/conta/bancos"]').click();
+  await page.waitForFunction(() => location.hash === "#/conta/bancos");
+  await page.waitForTimeout(600);
+  // O guia fecha ao seguir o link: senão o véu do passo cobriria a página nova (estado `fora`).
+  const r = { recarregou: await page.evaluate(() => window.__mesmaPagina !== true), titulo: await page.locator("#page-title").textContent(), balao: await page.locator(".guia-balao").count(), veu: await page.locator(".guia-veu").count() };
+  await ctx.close();
+  assert.deepEqual(r, { recarregou: false, titulo: "Bancos conectados", balao: 0, veu: 0 });
 });
 
 test("passo 1 pulado, 2 e 3 feitos: sem \"Fechou!\" nem \"Guia concluído.\" (o servidor segue em_andamento); Fechar não dispensa", async () => {

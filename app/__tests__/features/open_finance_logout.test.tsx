@@ -38,7 +38,7 @@ it("credencial recusada preserva tentativa A e callback válido recupera na mesm
     if (chave === "pb.credenciais") throw new Error("keychain recusou credencial");
     return apagar(chave);
   });
-  let saiu: boolean | undefined;
+  let saiu: boolean | "outra" | undefined;
   await act(async () => { saiu = await sessao.sair(); });
   expect(saiu).toBe(false);
   expect(sessao.estado()).toEqual({ fase: "autenticado" });
@@ -67,7 +67,7 @@ it("cleanup recusado desloga; marcador residual não é adotado sem credencial o
     if (chave === "pb.of.tentativa") throw new Error("keychain recusou marcador");
     return apagar(chave);
   });
-  let saiu: boolean | undefined;
+  let saiu: boolean | "outra" | undefined;
   await act(async () => { saiu = await sessao.sair(); });
   expect(saiu).toBe(true);
   expect(sessao.estado()).toEqual({ fase: "anonimo" });
@@ -98,7 +98,7 @@ it("leitura do marcador recusada não impede logout com credenciais apagadas", a
     return tem(chave);
   });
   await expect(lerTentativaBancaria(1)).rejects.toThrow("leitura do marcador");
-  let saiu: boolean | undefined;
+  let saiu: boolean | "outra" | undefined;
   await act(async () => { saiu = await sessao.sair(); });
   expect(saiu).toBe(true);
   expect(sessao.estado()).toEqual({ fase: "anonimo" });

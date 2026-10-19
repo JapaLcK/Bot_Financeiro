@@ -2,6 +2,8 @@ import { z } from "zod";
 import * as SecureStore from "expo-secure-store";
 import * as Crypto from "expo-crypto";
 
+import { desregistrarAparelho } from "@/features/push/aparelho";
+
 /**
  * Guarda de credencial, atrás de uma interface de um arquivo.
  *
@@ -291,6 +293,8 @@ export function guardarCredenciaisSe(
 
 // Marcador de retorno bancário: sem token Pluggy, saldos ou dados bancários.
 const TENTATIVA_OF = "pb.of.tentativa";
+/** Passado esse prazo o marcador vale como inexistente (leitura, captura, nova tentativa); o POST do `volta.ts` já usava o mesmo limite. */
+export const PRAZO_TENTATIVA_MS = 60 * 60_000;
 const tentativaSchema = z.object({
   user_id: z.number().int().positive(), sessao: z.string().min(1), tentativa_id: z.string(),
   iniciada_em: z.number(), modo: z.enum(["nova", "reconectar"]),
@@ -309,16 +313,23 @@ export class TentativaBancariaPendente extends Error {
 
 async function apagarSessaoNoCofre(): Promise<void> {
   await SecureStore.deleteItemAsync(PAR);
+  // Toda limpeza de sessão passa por aqui, então o aparelho deixa de receber o
+  // push da conta que saiu mesmo quando o logout não chega ao servidor. Só se o
+  // PAR foi apagado: se falhou, a sessão continua e o push também.
+  desregistrarAparelho();
   // Só depois de apagar a credencial o marcador fica obsoleto. Se PAR falhar,
   // preserva a tentativa; sem PAR, a guarda de sessão impede adotá-la mesmo
   // quando o cleanup falha. Essa falha não pode desfazer um logout concluído.
   await SecureStore.deleteItemAsync(TENTATIVA_OF).catch(() => undefined);
 }
 
-async function tentativaNoCofre(): Promise<TentativaBancaria | null> {
+async function tentativaNoCofre(comVencida = false): Promise<TentativaBancaria | null> {
   const bruto = await SecureStore.getItemAsync(TENTATIVA_OF);
   if (!bruto) return null;
-  try { return tentativaSchema.parse(JSON.parse(bruto)); } catch { return null; }
+  try {
+    const t = tentativaSchema.parse(JSON.parse(bruto));
+    return !comVencida && Date.now() - t.iniciada_em > PRAZO_TENTATIVA_MS ? null : t;
+  } catch { return null; }
 }
 
 async function sessaoNoCofre(): Promise<string | null> {
@@ -336,7 +347,9 @@ export function iniciarTentativaBancaria(
     const pendente = anterior?.sessao === sessao ? anterior : null;
     // A escolha vale somente para a sessão e o nonce mostrados no aviso.
     // Comparar e gravar na mesma fila impede uma confirmação velha apagar B.
-    if (substituir && (substituir.sessao !== sessao || pendente?.tentativa_id !== substituir.tentativa_id)) return null;
+    // O aviso mostrado pode ter vencido com a tela aberta: o MESMO marcador, vencido, ainda pode ser substituído. Concluído ou trocado por outro não.
+    const venceu = substituir && !pendente ? (await tentativaNoCofre(true))?.tentativa_id === substituir.tentativa_id : false;
+    if (substituir && (substituir.sessao !== sessao || (pendente?.tentativa_id !== substituir.tentativa_id && !venceu))) return null;
     if (pendente && pendente.user_id !== user_id) return null;
     if (pendente && !substituir) throw new TentativaBancariaPendente(pendente);
     const t: TentativaBancaria = { user_id, sessao, ids_antes, item_id, reconnected_antes, modo: item_id ? "reconectar" : "nova",
@@ -366,6 +379,7 @@ export function capturarItemBancario(item_id: string, tentativa_id: string | und
   });
 }
 
+/** Também é o "Descartar" do aviso de conexão pendente: compara o `tentativa_id` e a sessão na fila, então nunca apaga a tentativa de outro. */
 export function concluirTentativaBancaria(tentativa_id: string): Promise<void> {
   return naFila(async () => {
     const t = await tentativaNoCofre();

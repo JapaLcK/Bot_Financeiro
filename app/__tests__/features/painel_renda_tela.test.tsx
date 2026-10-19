@@ -4,7 +4,7 @@ jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule
 let mockHoje = "2026-10-15";
 jest.mock("@/features/painel/catalogo", () => ({ ...jest.requireActual("@/features/painel/catalogo"), hojeSP: () => mockHoje, mesAtual: () => mockHoje.slice(0, 7) }));
 
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
@@ -34,18 +34,20 @@ async function abrir() {
  await waitFor(() => expect(screen.getByText("Renda mês a mês")).toBeTruthy());
  await waitFor(() => expect(screen.getByText("maio de 2026")).toBeTruthy()); // a lista chegou
 }
-const alturas = () => screen.getAllByTestId("barra", H).map((b) => (StyleSheet.flatten(b.props.style) as { height: number }).height);
+// O Resumo tem outras colunas (o "Saldo previsto" também usa `BarrasMensais`): só o card de Renda conta aqui.
+const renda = () => within(screen.getByTestId("bloco-renda"));
+const alturas = () => renda().getAllByTestId("barra", H).map((b) => (StyleSheet.flatten(b.props.style) as { height: number }).height);
 
 it("card Renda: barras dos 6 meses do fixture (mais antigo à esquerda), mês atual com valor compacto e '*', ACIMA da lista", async () => {
  await abrir();
  expect(alturas()).toEqual([103, 115, 107, 117, 113, 120]); // 6200, 6900, 6400, 7000, 6800, 7200 na escala do máximo (7200)
- expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
- expect(screen.getAllByTestId("barra-valor", H).map((t) => t.props.children)).toEqual(["R$ 7,2k"]);
- expect(screen.getByText("* mês em andamento", H)).toBeTruthy();
+ expect(renda().getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
+ expect(renda().getAllByTestId("barra-valor", H).map((t) => t.props.children)).toEqual(["R$ 7,2k"]);
+ expect(renda().getByText("* mês em andamento", H)).toBeTruthy();
  const hosts = screen.UNSAFE_root.findAll((n) => typeof n.type === "string"); // pré-ordem = ordem de tela
  const ordem = (el: unknown) => hosts.indexOf(el as never);
- expect(ordem(screen.getByTestId("barras-mensais", H))).toBeGreaterThan(-1);
- expect(ordem(screen.getByTestId("barras-mensais", H))).toBeLessThan(ordem(screen.getByText("maio de 2026"))); // gráfico antes da primeira linha da lista
+ expect(ordem(renda().getByTestId("barras-mensais", H))).toBeGreaterThan(-1);
+ expect(ordem(renda().getByTestId("barras-mensais", H))).toBeLessThan(ordem(screen.getByText("maio de 2026"))); // gráfico antes da primeira linha da lista
 });
 it("a lista continua igual: 6 meses, cada um com a renda e a linha 'Saídas' (versão acessível do gráfico)", async () => {
  await abrir();
@@ -57,38 +59,38 @@ it("a lista continua igual: 6 meses, cada um com a renda e a linha 'Saídas' (ve
 it("outro mês corrente: a marcação acompanha o mês de hoje (maio vira o atual e o último do gráfico)", async () => {
  mockHoje = "2026-05-20";
  await abrir();
- expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai*"]); // meses depois do atual ficam fora do gráfico (a lista mantém os 6)
- expect(screen.getAllByTestId("barra-valor", H).map((t) => t.props.children)).toEqual(["R$ 6,2k"]);
+ expect(renda().getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai*"]); // meses depois do atual ficam fora do gráfico (a lista mantém os 6)
+ expect(renda().getAllByTestId("barra-valor", H).map((t) => t.props.children)).toEqual(["R$ 6,2k"]);
 });
 it("valores ocultos: o gráfico e os valores somem ('Gráfico oculto') e a lista segue mascarada; voltam ao mostrar", async () => {
  await abrir();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ocultar valores" })); });
- expect(screen.queryByTestId("barras-mensais", H)).toBeNull();
+ expect(renda().queryByTestId("barras-mensais", H)).toBeNull();
  expect(screen.queryByText("R$ 7,2k", H)).toBeNull();
- expect(screen.getAllByText("Gráfico oculto")).toHaveLength(4); // Curva + Resumo do mês + Patrimônio (preset Autônomo) + este card (4 → 3 se o texto da Renda sumir)
+ expect(screen.getAllByText("Gráfico oculto")).toHaveLength(4); // Resumo do mês + Patrimônio (preset Autônomo) + este card + a Curva do "Saldo previsto" (sempre visível, 4 → 3 se o texto da Renda sumir)
  expect(screen.getAllByText("Saídas")).toHaveLength(6);
  expect(screen.queryByLabelText("7200 reais")).toBeNull();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Mostrar valores" })); });
- expect(screen.getByTestId("barras-mensais", H)).toBeTruthy();
+ expect(renda().getByTestId("barras-mensais", H)).toBeTruthy();
 });
 it("todos os meses com renda 0: sem gráfico, só a lista", async () => {
  evolucao = { ...F[EVO], evolution: F[EVO].evolution.map((m: any) => ({ ...m, income: 0 })) };
  await abrir();
- expect(screen.queryByTestId("barras-mensais", H)).toBeNull();
+ expect(renda().queryByTestId("barras-mensais", H)).toBeNull();
  expect(screen.getAllByText("Saídas")).toHaveLength(6);
 });
 it("histórico vazio: o texto de antes e nenhum gráfico", async () => {
  evolucao = { ...F[EVO], evolution: [] };
  renderRouter("./app", { initialUrl: "/resumo" });
  await waitFor(() => expect(screen.getByText("Ainda não há histórico de renda disponível.")).toBeTruthy());
- expect(screen.queryByTestId("barras-mensais", H)).toBeNull();
+ expect(renda().queryByTestId("barras-mensais", H)).toBeNull();
 });
 it("hoje 31/10 (BRT) e o servidor já em novembro (UTC): o gráfico para no mês atual; a lista mantém os 7 meses", async () => {
  mockHoje = "2026-10-31";
  evolucao = { ...F[EVO], evolution: [...F[EVO].evolution, { month: "2026-11", income: 5000, expense: 100, net: 4900 }] };
  renderRouter("./app", { initialUrl: "/resumo" });
  await waitFor(() => expect(screen.getByText("novembro de 2026")).toBeTruthy());
- expect(screen.getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
- expect(screen.getAllByTestId("barra", H)).toHaveLength(6);
+ expect(renda().getAllByTestId("barra-mes", H).map((t) => t.props.children)).toEqual(["mai", "jun", "jul", "ago", "set", "out*"]);
+ expect(renda().getAllByTestId("barra", H)).toHaveLength(6);
  expect(screen.getAllByText("Saídas")).toHaveLength(7);
 });

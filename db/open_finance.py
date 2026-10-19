@@ -264,7 +264,7 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
     # então a mão única é esta (ver o comentário lá).
     from .open_finance_state import (
         SQL_COLETA_ESTOURADA, SQL_COLETA_VENCIDA, SQL_DEVICE_NA_JANELA, SQL_EXECUTION_STATUS,
-        aplica_teto_por_health, janela_device_auth_min)
+        SQL_LOGO_URL, aplica_teto_por_health, janela_device_auth_min, logo_url_valida)
 
     cur.execute(
         f"""
@@ -294,13 +294,14 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
         -- O `execution_status` (e o `device_na_janela`) é REMOVIDO do dict antes de a resposta
         -- sair (logo abaixo, DENTRO do laço, por item, logo depois do
         -- `connection_ui_state` que o consome): o corpo HTTP fica
-        -- idêntico em chaves ao de antes deste PR.
+        -- idêntico em chaves ao de antes deste PR (exceto logo_url, PR 2).
         select id, provider, provider_item_id, status, institution_name, institution_id,
                last_sync_at, last_attempt_at, status_reason, health, reconnected_at,
                {SQL_EXECUTION_STATUS},
                {SQL_DEVICE_NA_JANELA},
                {SQL_COLETA_VENCIDA},
-               {SQL_COLETA_ESTOURADA}
+               {SQL_COLETA_ESTOURADA},
+               {SQL_LOGO_URL}
         from open_finance_connections
         where user_id=%s
         order by updated_at desc, id desc
@@ -312,12 +313,20 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
     # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
     # função que o decide. O front deixou de derivar rótulo do `status`:
     # ele não sabe de produto atrasado nem de item que sumiu.
+    from core.services.pluggy_catalogo import logo_do_conector
     from core.services.pluggy_health import connection_ui_state
     for c in connections:
         c["ui"] = connection_ui_state(c)
+        # `logo_url` é um escalar do `raw` que SAI, validado (`ui.detail` também deriva do execution_status);
+        # o `raw` em si continua fora. Ver `SQL_LOGO_URL`. Sem ele (item/deleted troca o `raw`), o catálogo
+        # da Pluggy em memória, pelo id do conector (`institution_id`, nunca pelo nome); só `pluggy`: o id
+        # do `mock_pluggy` é de outro mundo. Sem rede aqui: cache frio = None = inicial.
+        c["logo_url"] = logo_url_valida(c["logo_url"])
+        if c["logo_url"] is None and c.get("provider") == "pluggy":
+            c["logo_url"] = logo_url_valida(logo_do_conector(str(c.get("institution_id") or "")))
         # Campo de TRABALHO, não de contrato: entrou no select só para o
         # `connection_ui_state` acima e sai antes da serialização, para o
-        # corpo HTTP ficar byte-idêntico em chaves ao de antes. O `pop`
+        # corpo HTTP ficar byte-idêntico em chaves ao de antes (exceto logo_url, PR 2). O `pop`
         # é o que impede um campo derivado do `raw` de virar API pública
         # sem ninguém ter decidido isso.
         c.pop("execution_status", None)

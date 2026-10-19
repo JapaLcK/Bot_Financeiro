@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { RAIZ, RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RAIZ, RESPOSTAS, abrirFiltros, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -38,7 +38,8 @@ const lerCard = (page) => page.evaluate(() => { const lede = () => { const r = d
   nota: document.querySelector(".compras-nota")?.textContent ?? null,
   linhas: [...document.querySelectorAll("#gastos-compras .lanc-linha")].map((li) => ({
     valor: li.querySelector(".lanc-valor").textContent,
-    marcada: /fora de Entrou\/Saiu/.test(li.textContent) || [...li.querySelectorAll(".selo")].some((x) => x.textContent === "outra moeda"),
+    // sem detalhe, a linha marca com "Movimento"/"Guardado" no valor ou com o selo "outra moeda" embaixo do subtítulo
+    marcada: /Movimento|Guardado/.test(li.querySelector(".lanc-valor").textContent) || [...li.querySelectorAll(".selo")].some((x) => x.textContent === "outra moeda"),
   })),
 }; });
 // "Gasto no dia · R$ 290,00": o rótulo e o total do dia, que agora moram na faixa e não numa linha só.
@@ -64,11 +65,11 @@ test("soma: as linhas sem marca somam o total do dia, em centavos; sem a marca a
   assert.equal(real.linhas.length, 4);
   assert.deepEqual(real.linhas.map((l) => l.marcada), [false, false, true, true]); // o interno e o de outra moeda
   assert.equal(somaNaoMarcadas(real.linhas), centavos(real.lede));
-  assert.match(real.nota, /^Movimentos entre contas, guardados e saídas em outra moeda aparecem marcados e ficam fora do total\.$/);
+  assert.match(real.nota, /^Movimentos entre contas, guardados e valores em outra moeda ficam fora do total e vêm com o rótulo ou o símbolo da moeda\.$/);
 
   // controle negativo: o mesmo dia sem a marca do servidor. A conta passaria a incluir o interno e a outra moeda
   // (R$ 470,00) e não bateria com o total; é isso que prova que a marca é o que fecha a soma.
-  const semMarca = await cardDoDia((itens) => itens.map((i) => ({ ...i, interno: false, motivos: [] })));
+  const semMarca = await cardDoDia((itens) => itens.map((i) => ({ ...i, interno: false, moeda: "BRL", motivos: [] })));
   assert.notEqual(somaNaoMarcadas(semMarca.linhas), centavos(semMarca.lede));
   assert.equal(somaNaoMarcadas(semMarca.linhas), 47000);
 
@@ -147,7 +148,8 @@ test("'Ver em Lançamentos' ainda leva `mes` e `dia`; com categoria escolhida o 
   assert.equal(lanc.at(-1), "?mes=2026-10&dia=2026-10-07&tipo=saida&categoria=sem+categoria&guardado=true");
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
-  await page.locator(".ledger-chips .chip").waitFor();
+  await page.locator(".ledger-chips .chip").first().waitFor();
+  await abrirFiltros(page); // com o painel aberto só a ficha do dia aparece (as outras vivem nos selos)
   const r = [lanc.at(-1), await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), await page.locator(".ledger-chips .chip").textContent()];
   await ctx.close();
   assert.deepEqual(r, ["?mes=2026-10&categoria=sem+categoria&dia=2026-10-07&guardado=true", "sem categoria", "dia 7remover filtro"]);
@@ -162,9 +164,9 @@ test("categoria: 'Ver compras' abre o card do mês da categoria e alterna; outra
   assert.equal(await botao.getAttribute("aria-controls"), null);
   await botao.click();
   await page.locator("#gastos-compras .lanc-linha").first().waitFor();
-  const aberto = await page.evaluate(() => ({ titulo: document.querySelector("#w-compras-h").textContent, lede: document.querySelector("#gastos-compras .w-lede").textContent,
+  const aberto = await page.evaluate(() => ({ titulo: document.querySelector("#w-compras-h").textContent.trim(), lede: document.querySelector("#gastos-compras .w-lede").textContent,
     foco: document.activeElement.id, exp: document.querySelector('[aria-controls="gastos-compras"]').textContent }));
-  assert.deepEqual(aberto, { titulo: "🍽️ Alimentação · outubro", lede: "R$ 300,00 · 2 compras", foco: "gastos-compras", exp: "Ver compras" });
+  assert.deepEqual(aberto, { titulo: "Alimentação · outubro", lede: "R$ 300,00 · 2 compras", foco: "gastos-compras", exp: "Ver compras" });
   assert.equal(lanc.at(-1), "?mes=2026-10&tipo=saida&categoria=alimentacao&guardado=true");
   await page.keyboard.press("Escape");
   await page.locator("#gastos-compras").waitFor({ state: "detached" });
@@ -411,12 +413,13 @@ for (const atraso of [300, 2500]) {
       if (gesto) { await page.mouse.move(700, 500); await page.mouse.wheel(0, 150); await page.waitForTimeout(100); }
       await page.locator("#w-cat-detalhe .detail-facts").waitFor({ timeout: 15000 });
       await page.waitForTimeout(500);
-      const m = await page.evaluate(() => { const r = document.querySelector("#gastos-compras").getBoundingClientRect(); return { topo: Math.round(r.top), base: Math.round(r.bottom), janela: innerHeight }; });
+      const m = await page.evaluate(() => { const r = document.querySelector("#gastos-compras").getBoundingClientRect(); return { topo: Math.round(r.top), base: Math.round(r.bottom), janela: innerHeight, fimDaPagina: scrollY + innerHeight >= document.documentElement.scrollHeight - 1 }; });
       await ctx.close();
       console.log(`# Detalhe +${atraso} ms, gesto ${gesto}:`, JSON.stringify(m));
       assert.deepEqual(erros, []);
       if (gesto) assert.ok(Math.abs(m.topo - 100) > 20, `a pessoa rolou e o card foi puxado de volta: ${JSON.stringify(m)}`);
-      else assert.ok(m.topo >= 0 && m.topo <= 150 && m.base <= m.janela, JSON.stringify(m));
+      // a linha limpa deixou a página curta: sem mais o que rolar (fimDaPagina) o card não chega ao topo, e mesmo assim cabe inteiro
+      else assert.ok(m.topo >= 0 && (m.topo <= 150 || m.fimDaPagina) && m.base <= m.janela, JSON.stringify(m));
     }
   });
 }

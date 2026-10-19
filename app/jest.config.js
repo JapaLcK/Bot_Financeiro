@@ -2,6 +2,15 @@
 module.exports = {
   preset: "jest-expo",
   setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
+  // Protege a máquina local: o jest confere o heap (`heapUsed`) do worker após cada
+  // arquivo de teste e o reinicia se passar do limite; não muda resultado de teste.
+  // Desligado no CI: lá cada reinício abre um worker frio e, num run do CI (#1086), o
+  // job ficou mais lento e estourou o timeout de um primeiro teste. Efeito colateral
+  // (só fora do CI): o jest nunca roda in-band sozinho (até 1 arquivo ou
+  // `--maxWorkers=1` vai para um worker filho); só `-i`/`--runInBand` roda in-band.
+  workerIdleMemoryLimit: process.env.CI ? undefined : "512MB",
+  // O teste de paridade (`atualizar_banco_paridade.test.ts`) importa um .ts de `webapp/`, e o babel injeta ali os helpers de `@babel/runtime`, que só existe em `app/node_modules`.
+  modulePaths: ["<rootDir>/node_modules"],
   testMatch: ["<rootDir>/__tests__/**/*.test.ts?(x)"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",

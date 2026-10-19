@@ -1,4 +1,4 @@
-"""A forma legada de `tipo` nos quatro leitores que não mostram NÚMERO na tela.
+"""A forma legada de `tipo` nos leitores que não mostram NÚMERO na tela.
 
 Irmão de `test_tipo_legado_no_dashboard.py`, separado de propósito: lá o sintoma
 é um total errado na cara do usuário; aqui é uma SUGESTÃO que não aparece, e o
@@ -8,48 +8,35 @@ número para comparar.
 | leitor                        | o que a linha legada tira do usuário          |
 |-------------------------------|-----------------------------------------------|
 | `find_recurring_candidate`    | subconta meses → não pergunta "virar fixo?"   |
-| `get_uncategorized_launches`  | a linha nunca vira candidata a regra          |
-| `get_internal_movement_total` | aporte legado fora da projeção de saldo       |
+| `recentes(sem_categoria=True)`| a linha nunca vira candidata a regra          |
 | `list_launches_by_tipo`       | bot pergunta o valor recorrente que já sabe   |
 
-O terceiro NÃO é sintético — a versão anterior deste docstring dizia o oposto do
-que o código faz. A migração retroativa de `db/schema.py:245-256` marca
-`is_internal_movement` por CATEGORIA, sem olhar o `tipo`, e roda a cada
-`init_db()`; então uma linha legada com categoria 'investimentos' (ou
-'criptomoedas', 'bitcoin'…) sai de lá marcada como movimento interno. Medido num
-banco descartável, uma única linha `tipo='saida'`/`categoria='investimentos'`:
+`get_internal_movement_total` (o antigo terceiro leitor, aporte legado na projeção do fim do mês) saiu:
+a projeção lê o mês por `db.mes_detalhes.ler`, coberto em `tests/test_ia_resumo_do_mes.py`. A migração
+retroativa de `db/schema.py:245-256` marca `is_internal_movement` por CATEGORIA, sem olhar o `tipo`, e
+roda a cada `init_db()`: `test_migracao_marca_a_linha_legada_como_interna` prende o mecanismo.
 
-    antes da migracao : is_internal_movement=False
-    DEPOIS da migracao: is_internal_movement=True
-    get_internal_movement_total: 500.0
-
-O que continua valendo é que a produção deu ZERO linhas legadas em 27/08/2026
-(ver o docstring do irmão) — o caminho é alcançável, a base de hoje é que está
-vazia. `test_migracao_marca_a_linha_legada_como_interna` prende o mecanismo.
-
-O quarto (`list_launches_by_tipo`, db/accounts.py:172) é o único em que o `tipo`
+O `list_launches_by_tipo` (db/accounts.py:172) é o único em que o `tipo`
 é PARÂMETRO e não literal: o conserto é `TIPO_CANON_SQL` no lado da coluna.
 
 Controles NEGATIVOS (um por site) — reverta o filtro para `tipo = 'despesa'` em:
   • db/recurring.py  (find_recurring_candidate)  → `test_repeticao_legada...` vermelho
-  • db/categories.py (get_uncategorized_launches) → `test_linha_legada_e_candidata...` vermelho
-  • db/accounts.py   (get_internal_movement_total) → `test_aporte_legado_entra...` vermelho
+  • db/resumo_mes.py (`MES_TIPOS_SQL`, a janela de `listar`: `tipo = 'despesa'`) → `test_linha_legada_e_candidata...` vermelho
   • db/accounts.py   (list_launches_by_tipo, `{TIPO_CANON_SQL}=%s` → `tipo=%s`)
     → `test_valor_recorrente_legado_e_sugerido` vermelho (None != 1200.0)
 Controles POSITIVOS — são DOIS, porque um só não separa as duas maneiras de errar:
   • `test_base_sem_linha_legada_responde_o_mesmo` (não alargou de menos): base
     normal, 100% moderna, devolve os mesmos números;
-  • `test_receita_nao_conta_como_despesa` (não alargou de MAIS): trocar os quatro
+  • `test_receita_nao_conta_como_despesa` (não alargou de MAIS): trocar os
     filtros por `tipo is not null` deixaria receita/entrada/aporte entrarem como
     despesa, e sem este caso o grupo ficava verde nessa mutação (medido: 5 passed).
 
-TETO MEDIDO do positivo "não alargou de menos" — ele pega 2 dos 4 sites, e os
+TETO MEDIDO do positivo "não alargou de menos" — ele pegava 2 dos 4 sites (hoje 1 dos 3, o `recentes(sem_categoria=True)`), e os
 outros 2 são cegos por construção da FUNÇÃO, não do teste. Medido injetando
 `from launches, (values (1),(2)) as _dup(n)` (cada linha exatamente duas vezes)
 em UM site por vez, e rodando só `test_base_sem_linha_legada_responde_o_mesmo`:
 
-  db/categories.py  get_uncategorized_launches   → FAILED  (2 notas, esperava 1)
-  db/accounts.py    get_internal_movement_total  → FAILED  (140.0 != 70.0)
+  db/lancamentos_leitura.py recentes(sem_categoria)  → FAILED  (2 notas, esperava 1)
   db/accounts.py    list_launches_by_tipo        → passed  (cego)
   db/recurring.py   find_recurring_candidate     → cego, não medido
 
@@ -66,10 +53,10 @@ from datetime import datetime
 
 import db
 from core.handlers.launches import infer_recurring_value
-from db.accounts import add_launch_and_update_balance, get_internal_movement_total
-from db.categories import get_uncategorized_launches
+from db.accounts import add_launch_and_update_balance
+from db.lancamentos_leitura import recentes
 from db.recurring import find_recurring_candidate
-from utils_date import _tz, today_tz
+from utils_date import _tz, now_tz, today_tz
 
 from tests.test_tipo_legado_no_dashboard import _grava_tipo_legado, _hoje_as
 
@@ -116,21 +103,15 @@ def test_linha_legada_e_candidata_a_regra(user_id):
     _grava_tipo_legado(user_id, "saida", 31.00, "outros", nota="Padaria legada")
     _add_moderno(user_id, 12.00, "Padaria nova", "outros", *_ano_mes_hoje())
 
-    notas = {l["nota"] for l in get_uncategorized_launches(user_id)}
+    notas = {l["mensagem"] for l in _sem_categoria(user_id)}
     assert "Padaria legada" in notas, notas
     assert "Padaria nova" in notas, notas
 
 
-# ── 3) aporte interno na projeção de saldo ──────────────────────────────────
-
-def test_aporte_legado_entra_no_total_interno(user_id):
-    hoje = today_tz()
-    _grava_tipo_legado(user_id, "saida", 70.00, "caixinha", interno=True)
-    assert get_internal_movement_total(user_id, hoje, hoje) == 70.0
-
+# ── 3) migração que marca a linha legada como interna ───────────────────────
 
 def test_migracao_marca_a_linha_legada_como_interna(user_id):
-    """O mecanismo que torna o caso acima ALCANÇÁVEL, e não sintético.
+    """A migração marca a linha legada como interna (alcançável, não sintético).
 
     A migração de `db/schema.py:245-256` roda a cada `init_db()` e marca
     `is_internal_movement` por CATEGORIA — o `tipo` não aparece no `where`, então
@@ -156,10 +137,8 @@ def test_migracao_marca_a_linha_legada_como_interna(user_id):
     init_db()
 
     assert _flag_interna(user_id, "aporte legado") is True, (
-        "a migração deixou de marcar a linha legada — o caso acima virou sintético"
+        "a migração deixou de marcar a linha legada — o caminho legado virou sintético"
     )
-    hoje = today_tz()
-    assert get_internal_movement_total(user_id, hoje, hoje) == 500.0
 
 
 # ── 4) valor recorrente auto-preenchido ─────────────────────────────────────
@@ -202,9 +181,7 @@ def test_receita_nao_conta_como_despesa(user_id):
     assert find_recurring_candidate(
         user_id, "salario legado", 900.00, current_year=2026, current_month=9,
     ) == 0
-    assert get_uncategorized_launches(user_id) == []
-    hoje = today_tz()
-    assert get_internal_movement_total(user_id, hoje, hoje) == 0.0
+    assert _sem_categoria(user_id) == []
     assert infer_recurring_value(user_id, "despesa", "Salario legado") is None
     # e o espelho: como RECEITA a mesma descrição é encontrada — senão o caso
     # acima passaria num código que simplesmente não acha nada.
@@ -215,11 +192,10 @@ def test_receita_nao_conta_como_despesa(user_id):
 
 def test_base_sem_linha_legada_responde_o_mesmo(user_id):
     """Sem esta prova o grupo passaria num código que conta a mesma linha duas
-    vezes — os quatro leitores têm que devolver o valor de sempre numa base
+    vezes — os leitores têm que devolver o valor de sempre numa base
     100% moderna, que é a produção de hoje.
 
-    TETO MEDIDO: ele pega 2 dos 4 sites (`get_uncategorized_launches` e
-    `get_internal_movement_total`). Em `find_recurring_candidate` (`set` de
+    TETO MEDIDO: ele pega 1 dos 3 sites (`recentes(sem_categoria=True)`). Em `find_recurring_candidate` (`set` de
     meses) e em `list_launches_by_tipo` (argmax de um `Counter`) a contagem
     dupla é invisível por construção da FUNÇÃO — a tabela da medição está no
     docstring do módulo. Ali este caso prova só "o valor certo continua
@@ -231,12 +207,8 @@ def test_base_sem_linha_legada_responde_o_mesmo(user_id):
     ) == 2
 
     _add_moderno(user_id, 12.00, "Padaria nova", "outros", *_ano_mes_hoje())
-    notas = [l["nota"] for l in get_uncategorized_launches(user_id)]
+    notas = [l["mensagem"] for l in _sem_categoria(user_id)]
     assert notas.count("Padaria nova") == 1, notas
-
-    hoje = today_tz()
-    _grava_interno_moderno(user_id, 70.00)
-    assert get_internal_movement_total(user_id, hoje, hoje) == 70.0
 
     # `list_launches_by_tipo`: prova só que o valor certo continua saindo (ver o
     # TETO acima — duplicação uniforme não move um argmax).
@@ -244,6 +216,11 @@ def test_base_sem_linha_legada_responde_o_mesmo(user_id):
 
 
 # ── auxiliares ──────────────────────────────────────────────────────────────
+
+def _sem_categoria(user_id):
+    """A lista "sem categoria" da IA (`get_uncategorized_launches`): `mensagem` é a `nota` da linha."""
+    return recentes(user_id, now_tz(), 50, sem_categoria=True)["itens"]
+
 
 def _ano_mes_hoje():
     h = today_tz()
@@ -271,14 +248,3 @@ def _grava_aporte_de_caixinha(user_id, valor):
         )
         conn.commit()
 
-
-def _grava_interno_moderno(user_id, valor):
-    """Aporte interno na forma MODERNA. `add_launch_and_update_balance` não
-    expõe `is_internal_movement`, então o espelho do legado também entra por SQL."""
-    with db.get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "insert into launches (user_id, tipo, valor, categoria, nota, "
-            "criado_em, is_internal_movement) values (%s,'despesa',%s,%s,%s,%s,true)",
-            (user_id, valor, "caixinha", "aporte", _hoje_as(9)),
-        )
-        conn.commit()

@@ -36,8 +36,16 @@ marca na seção 8 o que concluiu.
 ### O que a primeira versão tem (Q3, Q6)
 
 Resumo, Lançamentos, Previsão, Metas e caixinhas, Para onde vai, Patrimônio e o chat do
-Piggy com IA real e blocos. Pix, conexão do Open Finance, MFA e notificações continuam em
+Piggy com IA real e blocos. Pix, conexão do Open Finance e notificações continuam em
 `settings.html`/`precos.html`. O resto abre no antigo até ser migrado, um de cada vez.
+
+**Conta no painel (dono, 2026-10-17):** a seção "Conta" fica na barra lateral, embaixo, com
+Perfil, Cobrança, Configurações e Bancos conectados, mais o botão Sair (sem atalhos de teclado). O conteúdo
+vem em PRs, uma página por vez. O **Perfil** já é página de verdade (`conta/Perfil.tsx`: nome,
+e-mail e telefone editáveis em modal, WhatsApp e "Desde"; só ícone e valor, a palavra é para o
+leitor de tela); **Bancos conectados** também é página real (`conta/Bancos.tsx`: total, barra por banco, estado de cada conexão e desconectar um banco); a **Cobrança** também é página real (`conta/Cobranca.tsx`: plano, intervalo, "Período atual até", portal do Stripe, desfazer a troca agendada e o link para a `/precos`); as Configurações mostram a Segurança (senha por link de e-mail e MFA), os dispositivos conectados, as preferências de notificação e o link para a tela antiga. O "continua em `settings.html`" acima vale até cada página receber o seu conteúdo; a
+`/settings` antiga fica como saída de emergência. A tela "Assinaturas"
+(Netflix etc.) é outra coisa e já existe.
 
 O Resumo tem um bloco de **contas**: o saldo de hoje no total e o de cada conta conectada
 no Open Finance, mais a carteira Piggy (dono, 2026-09-30: o protótipo não mostrava o saldo
@@ -799,7 +807,7 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
 
 Situação em 2026-10-13, conferida contra os PRs mergeados (a 5 foi marcada concluída em 2026-10-15). Ficam abertas: a 3, porque
 simulador v2 e estimativa variável não entraram (ver o PR2 da Etapa 3); e a 4, porque falta
-o PR C.
+a conferência pós-deploy do PR C (marcá-la concluída é decisão do dono, como foi com a 5).
 
 | Etapa | PRs mergeados |
 |---|---|
@@ -807,7 +815,7 @@ o PR C.
 | 1 | #750 (A), #754 (B), #757 (D), #764 (C), #781 (C2) |
 | 2 | #778 (1), #792 (2a), #800 e #812 (2b), #831 (3), #836 (4), #983 (P8: guardado) |
 | 3 | #842 (PR1), #843 (PR2), #847 (PR3) |
-| 4 | #950 (PR A), #954 (PR A2), #961 (PR B) |
+| 4 | #950 (PR A), #954 (PR A2), #961 (PR B), #982 (PR C1, IA), #1009 (PR C2, WhatsApp), #1051 (PR C4, escrita pela IA), #1065 (PR C3, chat do `/painel`), app PR 1 (a aba Metas do app lê a v2; vale no primeiro build arquivado depois do merge) |
 | 5 e 6 | 5: #998 (PR 1a, API do mês), #1002 (PR 1b, API da categoria), #1008 (PR 2, a tela ligada à API), #1019 (o card de compras na mesma tela); 6: nenhum PR de etapa. A Etapa 5 está concluída: o dono conferiu o Saiu em produção em 2026-10-15 (ele respondeu "Bateu" na sessão) |
 | 7 | só o lado do app nativo e do backend do chat, abaixo; o `/painel` ainda não consome |
 
@@ -816,8 +824,8 @@ o PR C.
   investido, um banco ou uma conta), a reserva de emergência (no máximo uma, alvo = meses ×
   custo mensal das recorrências do banco) e, no A2, o `ritmo` (crescimento atual da fonte em
   R$/mês, medido nas fotos por posição) e o `chega_em`. O contrato, os motivos e os limites
-  declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. Faltam o PR
-  C (IA e WhatsApp usarem a mesma regra) e a conferência pós-deploy.
+  declarados estão em `docs/CLAUDE.md`, "API v2", parágrafo de `/api/v2/metas`. O PR C
+  (IA, WhatsApp e o chat do `/painel` usarem a mesma regra) está feito; falta só a conferência pós-deploy.
 - Chat do Piggy (Etapa 7, lado do backend e do app nativo): `POST /ai/chat/stream` com
   parar e 👍👎 (#943), `show_card` com a mesma fonte do app (#946, #947), chips de
   continuação (#949), períodos de até 12 meses e card `periodo` (#957), e o consumo no app
@@ -845,6 +853,15 @@ PR2 aguarda revisão independente, CI e Codex no head. Etapa3 inteira permanece
 aberta: PR3 terá consumidor/tela/refetch temporal; simulador v2, estimativa variável,
 calendário novo e Q37 não entram nesta entrega. Merge requer autorização do dono.
 
+### Etapa 3 — simulador de compra v2 (API + tela web, 19/10/2026)
+
+Implementação local (2026-10-19): `POST /api/v2/simulador` (e `/api/app/simulador`) e a tela `#/simulador/compra`: 1 a 3 cenários
+de compra, números e a curva de 90 dias "sem × com a compra". Decisões do dono: compra primeiro (P1);
+curva na resposta (P3); API + web neste PR, app depois (P4). **Seguem abertos:** o corte de hábito real
+(P2: usa a média de 3 meses, que é estimativa variável; método a decidir, PR condicionado), a estimativa
+variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas e horizonte > 90.
+A tela do app está feita (folha na aba Gastos, só Pro). O bloco de hábitos em `/simulador` continua demonstrativo.
+
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 
 Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a
@@ -867,7 +884,7 @@ reserva em meta comum e apagar. Decisões do dono: o card "Metas e caixinhas" SA
 hook `useDialogo` (`parts/dialog.ts`) é o esqueleto de modal do `LancamentoForm` e do
 `MetaForm`: o clique no fundo só vale passada a `JANELA_DO_FUNDO`, então o 2º clique de um
 duplo clique no botão que abriu o diálogo não o fecha (vale também para o lançamento da
-Carteira). Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
+Carteira). O mesmo clique também só vale se o ponteiro DESCEU no fundo (`onPointerDown`): apertar dentro do painel, arrastar a seleção e soltar no fundo não fecha nem perde o digitado. Meta batida não mostra "Precisa" nem "Seu ritmo". Em plano sem investimentos a
 fonte padrão da meta nova é a conta (`MetaFonte`). Validação e mensagem do valor em dinheiro
 são uma só para lançamento e meta (`lib/format.js`); `DIAS_MINIMOS` e `MESES_PADRAO` de
 `lib/metas-textos.ts` copiam constantes do servidor e `tests/test_metas_textos_constantes.py`

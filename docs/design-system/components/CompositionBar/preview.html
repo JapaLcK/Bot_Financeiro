@@ -1,0 +1,8 @@
+<!-- @dsCard group="Data" height=110 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {CompositionBar,Text}=PigBank;return e("div",{style:{display:"grid",gap:8}},e(Text,{variant:"label",as:"div"},"Onde está seu dinheiro"),
+ e(CompositionBar,{segments:[{value:52,color:"var(--cat-mercado)"},{value:21,color:"var(--cat-delivery)"},{value:14,color:"var(--cat-transporte)"},{value:9,color:"var(--cat-lazer)"},{value:1,color:"var(--cat-outros)"}]}))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

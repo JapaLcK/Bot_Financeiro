@@ -1,9 +1,11 @@
 import { act, fireEvent, screen, waitFor, within } from "expo-router/testing-library";
+import { metasSchema } from "@/api/schemas/painel";
 import { faladoComSinal } from "@/ui/dinheiro";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
-import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv, voltar } from "./conversa_apoio";
+import { abrir, apertar, caminho, enviar, fim, ir, noResumo, reiniciar, respostaFluxo, srv } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
+import metasBanco from "./painel_metas_banco.fixture.json";
 import { CARDS, F, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 // Os 18 cards do chat desenham o bloco que o servidor embutiu, nunca o provider: o provider destes casos responde 500 (instalarCards).
 jest.setTimeout(30_000);
@@ -23,24 +25,19 @@ it.each(CARDS)("%s: o card do chat desenha o bloco, sem ler o provider", async (
 });
 
 const contasCom = (total: string) => ({ contas: { ...F["/api/app/contas"], total } });
-it("o número do chat é o do bloco e a Folha mostra o MESMO bloco, não o provider", async () => {
+it("o número do chat é o do bloco, não o do provider", async () => {
   instalarCards(true); comBlocos(bloco("contas", contasCom("4321.09"))); await perguntar();
   const bloco4321 = faladoComSinal(432109), provider9400 = faladoComSinal(940025);
   expect(screen.getAllByLabelText(bloco4321)).toHaveLength(1);
-  fireEvent.press(screen.getByTestId("bloco-contas"));
-  expect(screen.getByRole("header", { name: "Contas" })).toBeTruthy();
-  expect(screen.getAllByLabelText(bloco4321)).toHaveLength(2); // card + Folha
   expect(screen.queryByLabelText(provider9400)).toBeNull(); // o provider responde 9.400,25
 });
 
-it("card inteiro: o toque abre a Folha do mesmo bloco; o título é o botão; Fechar fecha; sair da aba fecha", async () => {
+it("o card é 100% do chat: sem botão de abrir, e tocar nele não abre folha nem modal", async () => {
   comBlocos(bloco("metas")); await perguntar();
-  expect(screen.getByRole("button", { name: "Metas, abrir detalhes" })).toBeTruthy();
-  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
-  fireEvent.press(screen.getByTestId("bloco-metas")); expect(screen.getByRole("header", { name: "Metas" })).toBeTruthy();
-  await apertar("Fechar"); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
-  fireEvent.press(screen.getByTestId("bloco-metas")); await noResumo(); await voltar();
-  expect(screen.queryByRole("header", { name: "Metas" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /abrir detalhes/ })).toBeNull(); expect(within(screen.getByTestId("bloco-metas")).queryAllByRole("button").map((b) => b.props.accessibilityLabel)).toEqual(["+6, mostrar mais 6 metas"]); // o único botão é o "+N", que expande dentro do card
+  fireEvent.press(screen.getByTestId("bloco-metas")); fireEvent.press(within(screen.getByTestId("bloco-metas")).getByText("Metas"));
+  expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull(); expect(screen.queryByRole("header", { name: "Metas" })).toBeNull(); // só a Folha tem "Fechar" e o header
+  expect(screen.getByTestId("bloco-metas")).toBeTruthy(); expect(screen.getByText("Resposta do Piggy")).toBeTruthy(); // o card segue no chat
 });
 
 describe("só leitura no chat; as abas do painel seguem como eram", () => {
@@ -50,12 +47,25 @@ describe("só leitura no chat; as abas do painel seguem como eram", () => {
     expect(within(screen.getByTestId("bloco-hero")).queryByRole("button", { name: "30 dias" })).toBeNull();
     await ir("/resumo"); await waitFor(() => expect(screen.getByRole("button", { name: "30 dias" })).toBeTruthy());
   });
-  it("assinaturas sem Ignorar/É assinatura/Reconsiderar; na aba, com", async () => {
+  it("hero no chat mostra tudo inline (âncora, marcos, curva) e tocar nele não abre folha", async () => {
+    instalarCards(true); comBlocos(bloco("hero")); await perguntar();
+    const c = within(screen.getByTestId("bloco-hero"));
+    expect(c.getByText("Hoje, com as premissas")).toBeTruthy(); expect(c.getByText(/^30 dias · /)).toBeTruthy(); expect(c.getByLabelText(/^Saldo previsto ao longo do período/)).toBeTruthy();
+    fireEvent.press(screen.getByTestId("bloco-hero")); expect(screen.queryByTestId("folha-sheet")).toBeNull(); expect(screen.queryByRole("button", { name: "Fechar" })).toBeNull();
+    expect(c.queryByRole("button", { name: /ver detalhes/ })).toBeNull();
+  });
+  it("hero no chat não leva a seção 'Receitas na previsão', mesmo com respondidas no bloco; na aba (Resumo) ela é do card", async () => {
+    const respondidas = [{ chave: "extrato#alu", nome: "Aluguel Carla", valor: "1200.00", dia: 10, status: "confirmada" }];
+    instalarCards(true); comBlocos(bloco("hero", { previsao: { ...F["/api/app/previsao"], receitas_do_banco: respondidas } })); await perguntar();
+    expect(within(screen.getByTestId("bloco-hero")).getByText("30 dias · 05/11/2026")).toBeTruthy(); // o card desenhou o bloco
+    expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); expect(screen.queryByTestId("receitas-respondidas")).toBeNull();
+  });
+  it("assinaturas sem Ignorar/É assinatura/Voltar a mostrar/Remover marca; na aba, com", async () => {
     const dado = { ...F["/api/app/assinaturas"] }, outra = { ...dado.servicos[0], chave: "o", nome: "Outra" };
-    const todas = { ...dado, outras: [outra], ignoradas: [{ ...outra, chave: "i", nome: "Ignorada" }] };
+    const todas = { ...dado, servicos: [{ ...dado.servicos[0], marcada: true }], outras: [outra], ignoradas: [{ ...outra, chave: "i", nome: "Ignorada" }] };
     instalarCards(true); comBlocos(bloco("assinaturas", { assinaturas: todas })); await perguntar();
     const c = within(screen.getByTestId("bloco-assinaturas"));
-    expect(c.getByText("Netflix")).toBeTruthy(); for (const n of [/Ignorar/, /É assinatura|Marcar .* como assinatura/, /Reconsiderar/]) expect(c.queryByRole("button", { name: n })).toBeNull();
+    expect(c.getByText("Netflix")).toBeTruthy(); for (const n of [/Ignorar/, /É assinatura|Marcar .* como assinatura/, /Voltar a mostrar/, /Remover marca|Não é assinatura/]) expect(c.queryByRole("button", { name: n })).toBeNull();
     await ir("/gastos"); await waitFor(() => expect(screen.getAllByRole("button", { name: /Ignorar/ }).length).toBeGreaterThan(0));
   });
   it("simulador no plano free: o chat mostra os sliders (o servidor já aplicou o plano); a aba, 'indisponível'", async () => {
@@ -72,25 +82,10 @@ it("compromissos: o título usa o horizonte do bloco (60), não o do provider (3
   expect(screen.queryByText("Próximos 30 dias")).toBeNull();
 });
 
-it("categorias com 2 abas: um card por aba, com o mês no título", async () => {
-  const aba = (mes: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10"), aba("2026-09")] }); await perguntar();
-  expect(screen.getAllByTestId("bloco-categorias")).toHaveLength(2);
-  expect(screen.getByText("Para onde vai · outubro de 2026")).toBeTruthy(); expect(screen.getByText("Para onde vai · setembro de 2026")).toBeTruthy();
-});
-
-it("categorias com 3 abas: tocar o 2º ou o 3º card abre a Folha DAQUELA aba (título e dados)", async () => {
-  const aba = (mes: string, categoria: string) => ({ mes, recursos: { detalhes: { ...F["/api/app/mes-detalhes"], mes, categorias: [{ categoria, valor: "100.00", quantidade: 1 }] } } });
-  comBlocos({ card: "categorias", abas: [aba("2026-10", "Casa"), aba("2026-09", "Lazer"), aba("2026-08", "Viagem")] }); await perguntar();
-  fireEvent.press(screen.getAllByTestId("bloco-categorias")[1]!); expect(screen.getByRole("header", { name: "Para onde vai · setembro de 2026" })).toBeTruthy();
-  expect(screen.getAllByText("Lazer")).toHaveLength(2); expect(screen.getAllByText("Casa")).toHaveLength(1); expect(screen.getAllByText("Viagem")).toHaveLength(1); // card + Folha só da aba 2
-  await apertar("Fechar"); fireEvent.press(screen.getAllByTestId("bloco-categorias")[2]!);
-  expect(screen.getByRole("header", { name: "Para onde vai · agosto de 2026" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2); expect(screen.getAllByText("Lazer")).toHaveLength(1);
-});
 it("sem bloco, o chip com assunto não monta card (o card legado do assunto saiu)", async () => {
   await abrir(); await apertar("Quanto falta pra minha próxima meta e quando eu chego lá?");
   await waitFor(() => expect(screen.getByText("Resposta do Piggy")).toBeTruthy());
-  expect(screen.queryByText("Metas e caixinhas")).toBeNull(); expect(screen.queryByTestId("bloco-metas")).toBeNull();
+  expect(screen.queryByTestId("bloco-metas")).toBeNull();
 });
 it("bloco de recursos vazios: 'Dado indisponível neste card.', sem tela de erro", async () => {
   comBlocos({ card: "categorias", abas: [{ mes: null, recursos: {} }] }); await perguntar();
@@ -98,10 +93,26 @@ it("bloco de recursos vazios: 'Dado indisponível neste card.', sem tela de erro
 });
 
 describe("`caixinhas` e `metas` v2 no chat", () => {
-  it("`caixinhas` (formato legado): a mesma lista de metas, com o título do card; a Folha abre o mesmo bloco", async () => {
+  it("`caixinhas` (formato legado): a mesma lista de metas, com o título do card", async () => {
     comBlocos(bloco("caixinhas")); await perguntar();
-    expect(screen.getByRole("button", { name: "Caixinhas, abrir detalhes" })).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
-    fireEvent.press(screen.getByTestId("bloco-caixinhas")); expect(screen.getByRole("header", { name: "Caixinhas" })).toBeTruthy(); expect(screen.getAllByText("Viagem")).toHaveLength(2);
+    expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Caixinhas")).toBeTruthy(); expect(within(screen.getByTestId("bloco-caixinhas")).getByText("Viagem")).toBeTruthy();
+  });
+  // Portados de `painel_regressoes`: a aba Metas já não mostra caixinhas, o card `caixinhas` (`ListaMetas`) é quem as desenha.
+  it("`caixinhas` com saldo bancário 500.005 é aceito e apresentado", async () => {
+    expect(metasSchema.parse(metasBanco).goals[0]!.balance).toBe(50001);
+    comBlocos(bloco("caixinhas", { caixinhas: metasBanco })); await perguntar();
+    const c = within(screen.getByTestId("bloco-caixinhas")); expect(c.getByText("Espelhada")).toBeTruthy(); expect(c.getByLabelText("500 reais e 1 centavo")).toBeTruthy();
+  });
+  it("`caixinhas`: indicador tight e prazo da meta têm cópia em português", async () => {
+    comBlocos(bloco("caixinhas", { caixinhas: { ...metasBanco, goals: [{ ...metasBanco.goals[0], is_goal: true, indicator: "tight", target_date: "2026-11-03" }] } })); await perguntar();
+    const c = within(screen.getByTestId("bloco-caixinhas")); expect(c.getByText("Prazo apertado")).toBeTruthy(); expect(c.getByText("03/11/2026")).toBeTruthy(); expect(c.queryByText("tight")).toBeNull();
+  });
+  it("`caixinhas` com valores ocultos: o chat troca o turno por um marcador (o card some inteiro, sem a barra nem o valor); volta ao mostrar", async () => {
+    comBlocos(bloco("caixinhas")); await perguntar();
+    const barras = () => screen.UNSAFE_root.findAll((n) => typeof n.type === "string" && n.props.accessibilityRole === "progressbar"); // a barra não é `accessible`: getByRole não a acha
+    expect(barras()).toHaveLength(1); expect(within(screen.getByTestId("bloco-caixinhas")).getByLabelText("6000 reais")).toBeTruthy();
+    await apertar("Ocultar valores"); expect(screen.queryByTestId("bloco-caixinhas")).toBeNull(); expect(barras()).toHaveLength(0); expect(screen.queryByLabelText("6000 reais")).toBeNull();
+    await apertar("Mostrar valores"); expect(barras()).toHaveLength(1);
   });
   // O recurso `metas` do chat vem no formato v2 (`/api/v2/metas`); o legado `{ok, goals}` já não vale para o bloco `metas` (é do `caixinhas`).
   const metasV2 = (v2 as unknown as { metas: { varios: Record<string, any> } }).metas.varios;

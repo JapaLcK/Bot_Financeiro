@@ -14,6 +14,7 @@ NAO_FINANCEIRAS_IA = frozenset({
     'set_budget', 'delete_budget', 'recategorize_launch', 'create_category_rule',
     'delete_category_rule', 'enable_daily_report', 'disable_daily_report',
     'set_daily_report_hour', 'open_dashboard', 'report_out_of_scope',
+    'create_meta', 'edit_meta', 'delete_meta',  # meta não mexe em caixa (mesmo `create_meta`, que arma "Só confirmando")
 })
 INTENCOES_SEM_CAIXA = frozenset({
     'budget.set', 'budgets.set', 'launch.recategorize', 'launches.recategorize',

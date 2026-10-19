@@ -5,6 +5,7 @@ da suíte inteira, e o que mora lá roda para todos os 8 mil testes. Isto aqui
 serve a dois arquivos. Importar irmão pelo nome já é padrão na suíte
 (`from _max_lines_baseline import LEGADOS`, em `tests/test_max_lines_python.py`).
 """
+import pyotp
 import pytest
 from fastapi.testclient import TestClient
 
@@ -84,6 +85,61 @@ def sql(query, *args):
         conn.execute(query, args)
         conn.commit()
     db_support.invalidate_auth_user_cache()
+
+
+def marca_exclusao(uid, senha, segredo=None):
+    """Marca a conta para exclusão pelo caminho real (senha + código de e-mail + TOTP
+    se `segredo`), SEM apagá-la: é o estado `processing` que os testes de guarda querem."""
+    from db.reauth_codes import EXCLUIR, emitir
+    return db.schedule_account_deletion(
+        uid, senha, code=emitir(uid, EXCLUIR), totp=pyotp.TOTP(segredo).now() if segredo else None)
+
+
+SENHA_EXCLUSAO = "senha-forte-123"
+
+
+def conta_exclusao(tipo="P", mfa=False):
+    """Conta real para os testes de exclusão. `P`: com senha. `G`: sem senha, com
+    identidade Google. `S`: sem credencial nenhuma (conta do quiz/funil). Devolve
+    (uid, email, segredo do TOTP, códigos de backup)."""
+    import uuid
+    from types import SimpleNamespace
+    email = f"excl-{uuid.uuid4().hex[:10]}@example.com"
+    uid = int(db.register_auth_user(email, SENHA_EXCLUSAO)["user_id"])
+    if tipo in ("G", "S"):
+        sql("update auth_accounts set password_hash = null where user_id = %s", uid)
+    if tipo == "G":
+        db.link_google_identity(uid, f"sub-{uuid.uuid4().hex}", email)
+    segredo = backups = None
+    if mfa:
+        segredo = db.mfa_setup_secret(uid, email)["secret"]
+        backups = db.mfa_verify_and_enable(uid, pyotp.TOTP(segredo).now())
+    return SimpleNamespace(uid=uid, email=email, segredo=segredo, backups=backups)
+
+
+def bearer(uid):
+    """Cabeçalho Bearer de uma sessão nova da conta (sem cookie: sem CSRF)."""
+    return {"Authorization": f"Bearer {sessao_de(uid)['access']}"}
+
+
+@pytest.fixture
+def emails(monkeypatch):
+    """Captura os e-mails da exclusão em vez de enviar. `.codigos`: (para, código);
+    `.excluida`: destinatários do "conta excluída"; `.falha`: True faz o envio do
+    código falhar. O export também é capturado (`.exports`: URLs do link)."""
+    from types import SimpleNamespace
+    import core.services.email_service as es
+    cap = SimpleNamespace(codigos=[], excluida=[], exports=[], falha=False)
+    monkeypatch.setattr(es, "send_account_reauth_code_email",
+                        lambda to, code: cap.codigos.append((to, code)) or not cap.falha)
+    monkeypatch.setattr(es, "send_account_deletion_completed_email",
+                        lambda to: cap.excluida.append(to) or True)
+    monkeypatch.setattr(es, "send_data_export_link_email",
+                        lambda to, url, *a, **kw: cap.exports.append(url) or not cap.falha)
+    monkeypatch.setattr(es, "send_data_export_completed_email", lambda *a, **kw: True, raising=False)
+    from frontend.routes import shared
+    shared.limiter.reset()
+    return cap
 
 
 def sessao_de(uid):

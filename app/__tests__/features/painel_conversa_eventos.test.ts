@@ -48,9 +48,21 @@ it("bloco com `contas` válido é aceito, com o dinheiro em centavos", () => {
   const e = lerEvento(comRecursos({ contas })) as unknown as Lido;
   expect(e.bloco.abas[0]!.recursos.contas.total).toBe(940025); expect(e.bloco.abas[0]!.recursos.contas.carteira.saldo).toBe(45000);
 });
+it("`contas` inválido ao lado de `detalhes` (sincronização do card de gastos) sai do bloco sem invalidá-lo; sozinho, invalida", () => {
+  const detalhes = fixture["/api/app/mes-detalhes" as keyof typeof fixture];
+  const e = lerEvento(comRecursos({ detalhes, contas: {} })) as unknown as Lido;
+  expect(Object.keys(e.bloco.abas[0]!.recursos)).toEqual(["detalhes"]);
+  expect(lerEvento(comRecursos({ contas: {} }))).toBeNull(); expect(lerEvento(comRecursos({ detalhes: {}, contas }))).toBeNull(); // `detalhes` inválido segue invalidando
+});
 it("recurso inválido invalida o evento: `contas: {}`, e `periodo` sem `meses`", () => {
   expect(lerEvento(comRecursos({ contas: {} }))).toBeNull();
   const { meses: _, ...semMeses } = periodo; expect(lerEvento(comRecursos({ periodo: semMeses }))).toBeNull();
+});
+it("`detalhes` com `origens`: aceito, em centavos; origem inválida invalida o bloco; sem `origens` segue aceito", () => {
+  const detalhes = (fixture as Record<string, Record<string, unknown>>)["/api/app/mes-detalhes"]!, origens = { cartao: "600.00", banco: "400.00", carteira: "0.00", registro_antigo: "0.00" };
+  const e = lerEvento(comRecursos({ detalhes: { ...detalhes, origens } })) as unknown as Lido; expect(e.bloco.abas[0]!.recursos.detalhes.origens).toEqual({ cartao: 60000, banco: 40000, carteira: 0, registro_antigo: 0 });
+  expect(lerEvento(comRecursos({ detalhes: { ...detalhes, origens: { ...origens, cartao: "abc" } } }))).toBeNull();
+  expect(lerEvento(comRecursos({ detalhes }))?.tipo).toBe("bloco");
 });
 it("recurso desconhecido é descartado sem invalidar o bloco (e as chaves herdadas do Object não passam)", () => {
   const e = lerEvento(comRecursos({ contas, desconhecido: { x: 1 }, toString: "x" })) as unknown as Lido;

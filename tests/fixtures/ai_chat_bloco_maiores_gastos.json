@@ -1,0 +1,21 @@
+{
+  "card": "maiores_gastos",
+  "abas": [
+    {
+      "mes": null,
+      "recursos": {
+        "maiores_gastos": {
+          "start_date": "2026-10-01",
+          "end_date": "2026-10-31",
+          "categoria": null,
+          "expenses": [
+            {"valor": 300.0, "categoria": "moradia", "descricao": "aluguel", "data": "2026-10-17", "fonte": "launches", "instituicao": "Nubank", "parcelamento": "compra de R$ 600,00 em 3x"},
+            {"valor": 120.0, "categoria": "alimentação", "descricao": "mercado", "data": "2026-10-17", "fonte": "launches", "instituicao": null, "parcelamento": null}
+          ],
+          "count": 2,
+          "cartao_por": "fatura"
+        }
+      }
+    }
+  ]
+}
