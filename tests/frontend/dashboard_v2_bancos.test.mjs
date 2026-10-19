@@ -19,6 +19,8 @@ async function bancos(opts = {}, tela = {}) {
   return { ...p, srv: s }; // `s` é o do guia (_guia.mjs); o do servidor de bancos é `srv`
 }
 const esperaCards = (page, n) => page.waitForFunction((n) => document.querySelectorAll(".banco-card").length === n, n, { timeout: 8000 });
+// O /limite chegou: a linha de vagas do LIMITE() padrão está na tela. A lista vem antes dele; o que depende das vagas espera isto.
+const esperaLimite = (page) => page.getByText("2 de 3 bancos").waitFor({ timeout: 8000 });
 // Espera o fim da leitura de /bancos (o "…" sai do card).
 const semReticencias = (page) => page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…") && document.querySelector(".banco-total"), null, { timeout: 8000 });
 const totais = (page) => page.locator(".banco-card .banco-total").allTextContents();
@@ -91,6 +93,7 @@ test("leituras opcionais: /bancos 500 e 404 deixam os cards com nome e pílula, 
     const { ctx, page } = await bancos({ bancosRes });
     await esperaCards(page, 3);
     await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 }); // 500: 3 tentativas, ~3 s
+    await esperaLimite(page);
     const r = {
       nomes: await page.locator(".banco-card h2").allTextContents(), pilulas: await page.locator(".banco-card .selo").allTextContents(),
       totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count(),
@@ -131,6 +134,7 @@ test("vagas: '2 de 3 bancos' com o link 'Conectar banco' para /settings?view=ope
   const ler = async (limite) => {
     const { ctx, page } = await bancos({ limite, bancos: "padrao" });
     await esperaCards(page, 3);
+    await page.locator(".bancos-conectar").waitFor({ timeout: 8000 });
     const r = { vagas: (await corpo(page)).match(/\d+ de \d+ bancos/)?.[0] ?? null, hrefs: await page.getByRole("link", { name: "Conectar banco" }).evaluateAll((l) => l.map((a) => a.getAttribute("href"))), corpo: await corpo(page) };
     await ctx.close();
     return r;
@@ -158,6 +162,7 @@ test("nenhum banco: 'Conectar banco' tem 44 px em 390×844 e em 1280×800, sem r
   for (const [width, height] of [[390, 844], [1280, 800]]) {
     const { ctx, page } = await bancos({ conexoes: [], bancos: "vazio" }, { width, height });
     await page.locator(".empty img").waitFor({ timeout: 8000 });
+    await esperaLimite(page);
     const r = await page.evaluate(() => ({ alt: Math.round(document.querySelector(".empty a.btn").getBoundingClientRect().height), lateral: document.documentElement.scrollWidth - innerWidth }));
     await ctx.close();
     assert.ok(r.alt >= 44, `${width}×${height}: botão com ${r.alt}px`);
@@ -246,7 +251,7 @@ test("layout 1280×800: dois cards lado a lado, no mesmo topo; 390×844: uma col
   await a.ctx.close();
   assert.equal(caixas[0].top, caixas[1].top);
   assert.notEqual(caixas[0].left, caixas[1].left);
-  const medidas = (page) => page.evaluate(() => ({ lateral: document.documentElement.scrollWidth - innerWidth, botao: Math.round([...document.querySelectorAll("a.btn")].find((e) => e.textContent.includes("Conectar banco")).getBoundingClientRect().height), lefts: [...document.querySelectorAll(".banco-card")].map((e) => Math.round(e.getBoundingClientRect().left)) }));
+  const medidas = async (page) => (await esperaLimite(page), page.evaluate(() => ({ lateral: document.documentElement.scrollWidth - innerWidth, botao: Math.round([...document.querySelectorAll("a.btn")].find((e) => e.textContent.includes("Conectar banco")).getBoundingClientRect().height), lefts: [...document.querySelectorAll(".banco-card")].map((e) => Math.round(e.getBoundingClientRect().left)) })));
   const b = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width: 390, height: 844 });
   await esperaCards(b.page, 2);
   const m = await medidas(b.page);
@@ -317,6 +322,7 @@ test("releitura de /bancos que falha tira os números da tela (nunca deixa o val
   });
   await esperaCards(page, 3);
   await semReticencias(page);
+  await esperaLimite(page);
   const antes = { topo: await page.locator(".bancos-total").innerText(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
   falha = true;
   await refoco(page);
@@ -342,10 +348,11 @@ test("sessão acaba depois de a lista já estar em cache: o 401 da releitura esc
 });
 
 test("of_banks_max 0 não mostra '0 de 0 bancos'; em_uso que não é número também não mostra a linha ('null de 3 bancos')", async () => {
-  const vagas = async (limite) => {
+  const vagas = async (limite, chega = false) => {
     const { ctx, page } = await bancos({ limite, bancos: "padrao" });
     await esperaCards(page, 3);
     await semReticencias(page);
+    if (chega) await esperaLimite(page);
     const t = await corpo(page);
     await ctx.close();
     return /\bde\b \d+ bancos|null|undefined/.test(t);
@@ -353,20 +360,28 @@ test("of_banks_max 0 não mostra '0 de 0 bancos'; em_uso que não é número tam
   assert.equal(await vagas(LIMITE({ of_banks_max: 0, em_uso: 0 })), false);
   assert.equal(await vagas(LIMITE({ of_banks_max: 3, em_uso: null })), false);
   assert.equal(await vagas(LIMITE({ of_banks_max: 3, em_uso: "2" })), false);
-  assert.equal(await vagas(LIMITE()), true); // controle positivo: com número a linha aparece
+  assert.equal(await vagas(LIMITE(), true), true); // controle positivo: com número a linha aparece
 });
 
 test("/limite com pode_adicionar false e message nula não oferece 'Conectar banco' (nem na lista vazia); com message mostra o texto", async () => {
+  // O /limite fica preso até a lista estar na tela: conta o link com ele pendente e de novo depois que chega (a linha de vagas
+  // é o sinal de que chegou). Sem a trava, a contagem caía antes ou depois do /limite conforme a máquina (flake do CI).
   const links = async (limite, conexoes) => {
-    const { ctx, page } = await bancos({ limite, conexoes, bancos: "padrao" });
+    let soltar;
+    const preso = new Promise((r) => { soltar = r; });
+    const { ctx, page } = await bancos({ limite, conexoes, bancos: "padrao", limiteRes: async (r) => { await preso; await r.fulfill({ json: limite }); } });
     await (conexoes?.length === 0 ? page.locator(".empty img").waitFor({ timeout: 8000 }) : esperaCards(page, 3));
-    const n = await page.getByRole("link", { name: "Conectar banco" }).count();
+    const conta = () => page.getByRole("link", { name: "Conectar banco" }).count();
+    const pendente = await conta();
+    soltar();
+    await esperaLimite(page);
+    const chegou = await conta();
     await ctx.close();
-    return n;
+    return [pendente, chegou];
   };
-  assert.equal(await links(LIMITE({ pode_adicionar: false, message: null })), 0);
-  assert.equal(await links(LIMITE({ pode_adicionar: false, message: null }), []), 0);
-  assert.equal(await links(LIMITE({ pode_adicionar: true, message: null })), 1); // controle positivo
+  assert.deepEqual(await links(LIMITE({ pode_adicionar: false, message: null })), [0, 0]);
+  assert.deepEqual(await links(LIMITE({ pode_adicionar: false, message: null }), []), [0, 0]);
+  assert.deepEqual(await links(LIMITE({ pode_adicionar: true, message: null })), [0, 1]); // controle positivo
 });
 
 test("/bancos fora do contrato (sem 'bancos', sem 'motivos', banco sem 'motivos', item null em 'bancos') é leitura falha: cards com nome e '—', sem topo nem barra, sem erro de página", async () => {
@@ -424,6 +439,7 @@ test("/limite com pode_adicionar false e message só de espaços: nem mensagem n
   const lido = async (message) => {
     const { ctx, page } = await bancos({ limite: LIMITE({ pode_adicionar: false, message }), bancos: "padrao" });
     await esperaCards(page, 3);
+    await esperaLimite(page);
     const r = { area: await page.locator(".bancos-conectar").count(), links: await page.getByRole("link", { name: "Conectar banco" }).count() };
     await ctx.close();
     return r;
