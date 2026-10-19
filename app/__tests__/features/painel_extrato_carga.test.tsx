@@ -8,6 +8,7 @@ import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import { irAoExtrato } from "@/features/painel/navegacao";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import fixture from "./painel.fixture.json";
+import { ficha, filtrar } from "./extrato_filtros_apoio";
 // #849: o efeito do Extrato roda antes do efeito de carga do provider; se a carga completa cancelasse as
 // operações, a lista nasceria abortada. A guarda de resposta velha e a de troca de usuário seguem de pé.
 const LANC = "/api/app/lancamentos", VAZIO = "Nenhum lançamento encontrado.";
@@ -39,11 +40,10 @@ it("refresh no Extrato mantém a lista e não aborta a última leitura", async (
  expect(chamadasLanc().at(-1)![1].signal.aborted).toBe(false);
 });
 const authMe = () => fetchFalso.mock.calls.filter(([url]) => new URL(String(url)).pathname === "/auth/me").length;
-const marcar = (nome: string) => { fireEvent.press(screen.getByRole("button", { name: nome })); };
 async function extratoComFiltros() {
  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await act(drenar);
  fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Sal"); act(() => { jest.advanceTimersByTime(400); }); await lista(); await act(drenar);
- marcar("Banco"); marcar("Entradas"); await lista(); await act(drenar);
+ await filtrar({ origem: "Banco", tipo: "Entradas" }); await lista(); await act(drenar);
  fireEvent.press(screen.getByText("Salário")); await act(drenar);
 }
 const detalhe = () => screen.queryByText(/Nubank · 12:00/);
@@ -52,8 +52,7 @@ it("#897: inactive→active mantém busca, origem, tipo e lançamento aberto, se
  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal"); expect(detalhe()).toBeTruthy();
  await appVai("inactive"); await appVai("active"); await act(drenar);
  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal");
- expect(screen.getByRole("button", { name: "Banco" }).props.accessibilityState.selected).toBe(true);
- expect(screen.getByRole("button", { name: "Entradas" }).props.accessibilityState.selected).toBe(true);
+ expect(ficha("origem Banco")).toBeTruthy(); expect(ficha("Entradas")).toBeTruthy();
  expect(detalhe()).toBeTruthy(); expect(authMe()).toBe(me); expect(chamadasLanc().length).toBe(lanc);
 });
 // Decisão do dono (reverte o #897): o background (rede derrubada) NÃO fecha o portão; a tela e os filtros ficam (a tampa nativa cobre o app switcher) e o acesso é revalidado em silêncio.
@@ -160,7 +159,7 @@ describe("Extrato: consulta, dia e detalhe", () => {
  });
  it("mudar um filtro fecha o detalhe aberto", async () => {
   renderRouter("./app", { initialUrl: "/extrato" }); await lista(); fireEvent.press(screen.getByText("Salário")); await act(drenar); expect(detalhe()).toBeTruthy();
-  marcar("Entradas"); await lista(); await act(drenar); expect(detalhe()).toBeNull();
+  await filtrar({ tipo: "Entradas" }); await lista(); await act(drenar); expect(detalhe()).toBeNull();
  });
  it("a linha recolhida NÃO diz 'parcela n/N' (só o detalhe aberto: 'Parcela n/N')", async () => {
   lancamentos = () => com([{ ...L[1], parcela: { n: 3, total: 10 } }]); renderRouter("./app", { initialUrl: "/extrato" });
@@ -171,40 +170,40 @@ describe("Extrato: consulta, dia e detalhe", () => {
 
 // Filtros de uma visita anterior não valem para a seguinte: toda ida ao Extrato por `irAoExtrato` traz uma `entrada` nova (as abas ficam montadas).
 describe("Extrato: filtros zeram a cada entrada", () => {
- const selecionado = (nome: string) => screen.getByRole("button", { name: nome }).props.accessibilityState.selected;
+ const ativo = (nome: string) => !!ficha(nome);
  const ir = async (rota: "/gastos" | "/extrato") => { await act(async () => { router.navigate(rota); await drenar(); }); };
  const dia = "calendario-dia-2026-10-02", tocarDia = async () => { await waitFor(() => expect(screen.getByTestId(dia)).toBeTruthy()); await act(async () => { fireEvent.press(screen.getByTestId(dia)); await drenar(); }); await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Ver extrato do dia" })); await drenar(); }); }; // o toque abre a folha do dia (PR 2b); o botão dela leva ao Extrato
  // Busca, origem e tipo de uma só vez; o debounce (300 ms) é avançado à mão porque o Router já usa timers falsos.
- const filtrar = async () => { marcar("Banco"); marcar("Entradas"); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Sal"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); }); expect(selecionado("Banco")).toBe(true); expect(selecionado("Entradas")).toBe(true); expect(screen.getByTestId("extrato-escopo-busca")).toBeTruthy(); };
+ const filtra = async () => { await filtrar({ origem: "Banco", tipo: "Entradas", min: "1000" }); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Sal"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); }); expect(ativo("origem Banco")).toBe(true); expect(ativo("Entradas")).toBe(true); expect(ativo("valor")).toBe(true); expect(screen.getByTestId("extrato-escopo-busca")).toBeTruthy(); };
  // Chamado LOGO após a entrada, sem avançar o debounce: um reset que esquece `busca` ou `origem` ainda deixa `q`/`origem` na consulta aqui, e só converge sozinho 300 ms depois.
  const limpo = () => {
-  expect(selecionado("Todas as origens")).toBe(true); expect(selecionado("Banco")).toBe(false); expect(selecionado("Tudo")).toBe(true); expect(selecionado("Entradas")).toBe(false);
+  expect(ativo("origem Banco")).toBe(false); expect(ativo("Entradas")).toBe(false); expect(ativo("valor")).toBe(false);
   expect(screen.getByLabelText("Buscar lançamento").props.value).toBe(""); expect(screen.queryByTestId("extrato-escopo-busca")).toBeNull();
-  for (const k of ["q", "origem", "tipo"]) expect(consulta().has(k)).toBe(false);
+  for (const k of ["q", "origem", "tipo", "valor_min", "valor_max"]) expect(consulta().has(k)).toBe(false);
  };
  const aguardar = () => waitFor(() => expect(screen.getByLabelText("Buscar lançamento")).toBeTruthy());
  beforeEach(() => { lancamentos = servidorReal(L); });
  it("'Entradas' escolhido antes, depois o toque do dia: mostra as saídas do dia; e de novo no MESMO dia (D → Entradas → Gastos → D)", async () => {
-  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtrar();
+  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtra();
   await ir("/gastos"); await tocarDia(); limpo(); await aguardar();
   await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy()); expect(screen.queryByText(VAZIO)).toBeNull();
-  await filtrar(); await waitFor(() => expect(screen.getByText(VAZIO)).toBeTruthy());
+  await filtra(); await waitFor(() => expect(screen.getByText(VAZIO)).toBeTruthy());
   await ir("/gastos"); await tocarDia(); limpo(); // mesmo `dia`: só a `entrada` difere
   await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy()); expect(screen.queryByText(VAZIO)).toBeNull();
  });
  it("por Categorias: 'Entradas' e a busca escolhidos antes não combinam com a categoria (e repete na mesma categoria)", async () => {
-  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtrar();
+  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtra();
   const linha = () => screen.getByRole("button", { name: /Alimentação/ });
   await ir("/gastos"); await waitFor(() => expect(linha()).toBeTruthy()); await act(async () => { fireEvent.press(linha()); await drenar(); }); await aguardar(); limpo();
   await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
-  await filtrar(); await waitFor(() => expect(screen.getByText(VAZIO)).toBeTruthy());
+  await filtra(); await waitFor(() => expect(screen.getByText(VAZIO)).toBeTruthy());
   await ir("/gastos"); await act(async () => { fireEvent.press(linha()); await drenar(); }); limpo(); await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
  });
  // Controle positivo: sem `entrada` nova (refresh, troca de mês) os filtros ficam, como na `main`; um reset em `versao`/`mes` apagaria a busca do usuário.
  it("refresh e troca de mês mantêm busca, origem e tipo", async () => {
-  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtrar();
+  renderRouter("./app", { initialUrl: "/extrato" }); await lista(); await filtra();
   await refresh(); await act(drenar);
-  const seguem = () => { expect(selecionado("Banco")).toBe(true); expect(selecionado("Entradas")).toBe(true); expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal"); expect(screen.getByTestId("extrato-escopo-busca")).toBeTruthy(); };
+  const seguem = () => { expect(ativo("origem Banco")).toBe(true); expect(ativo("Entradas")).toBe(true); expect(ativo("valor")).toBe(true); expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Sal"); expect(screen.getByTestId("extrato-escopo-busca")).toBeTruthy(); };
   seguem();
   const outro = nomeMes(mesesAnteriores(mesAtual())[1]!);
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: nomeMes(mesAtual()).slice(0, 3) })); await drenar(); });
@@ -241,19 +240,19 @@ describe("Extrato: limpar o filtro de dia e de categoria", () => {
  });
  it("limpar um filtro não desfaz os outros: origem, tipo e busca escolhidos depois da entrada seguem na consulta", async () => {
   await entrar({ dia: "2026-10-02" }); await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
-  marcar("Banco"); marcar("Saídas"); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Mer"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); });
+  await filtrar({ origem: "Banco", tipo: "Saídas" }); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Mer"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); });
   await waitFor(() => expect(consulta().get("q")).toBe("Mer"));
   await limpar("Limpar filtro do dia 02/10/2026"); await waitFor(() => expect(consulta().has("dia")).toBe(false));
   expect([consulta().get("q"), consulta().get("origem"), consulta().get("tipo")]).toEqual(["Mer", "banco", "saida"]);
-  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Mer"); expect(screen.getByRole("button", { name: "Saídas" }).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Mer"); expect(ficha("Saídas")).toBeTruthy();
  });
  it("limpar a categoria também não desfaz os outros: origem, tipo e busca escolhidos depois da entrada seguem na consulta", async () => {
   await entrar({ categoria: "Alimentação" }); await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
-  marcar("Banco"); marcar("Saídas"); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Mer"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); });
+  await filtrar({ origem: "Banco", tipo: "Saídas" }); fireEvent.changeText(screen.getByLabelText("Buscar lançamento"), "Mer"); await act(async () => { jest.advanceTimersByTime(300); await drenar(); });
   await waitFor(() => expect(consulta().get("q")).toBe("Mer"));
   await limpar("Limpar filtro de Alimentação"); await waitFor(() => expect(consulta().has("categoria")).toBe(false));
   expect([consulta().get("q"), consulta().get("origem"), consulta().get("tipo")]).toEqual(["Mer", "banco", "saida"]);
-  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Mer"); expect(screen.getByRole("button", { name: "Saídas" }).props.accessibilityState.selected).toBe(true);
+  expect(screen.getByLabelText("Buscar lançamento").props.value).toBe("Mer"); expect(ficha("Saídas")).toBeTruthy();
  });
  it("reentrar no MESMO dia depois de limpar volta a filtrar pelo dia", async () => {
   await entrar({ dia: "2026-10-02" }); await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());

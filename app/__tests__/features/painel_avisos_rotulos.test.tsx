@@ -4,6 +4,7 @@ import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
+import { abrirFiltros } from "./extrato_filtros_apoio";
 import { claro, escuro } from "@/ui/tokens";
 import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 // Dados no formato REAL da API (conexão "partial", chave de categoria sem acento, slug do cartão):
@@ -119,8 +120,8 @@ it("taxa não informada tem tamanho de legenda, não de título de seção", asy
 });
 it("lançamento de registro antigo tem rótulo legível, e o filtro de origem não o oferece", async () => {
  const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[0], origem: "registro_antigo" }] };
- renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: /^Banco/ })).toBeTruthy());
- expect(screen.queryByRole("button", { name: /^Registro antigo/ })).toBeNull();
+ renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByText(/· Registro antigo/)).toBeTruthy()); await abrirFiltros();
+ expect(screen.getByRole("button", { name: /^Banco/ })).toBeTruthy(); expect(screen.queryByRole("button", { name: /^Registro antigo/ })).toBeNull();
  await waitFor(() => expect(screen.getByText(/· Registro antigo/)).toBeTruthy()); expect(screen.queryByText(/registro_antigo/)).toBeNull();
 });
 it("compromisso realizado diz recebido na entrada e pago na saída", async () => {
@@ -131,7 +132,7 @@ it("compromisso realizado diz recebido na entrada e pago na saída", async () =>
 });
 it("fatura sai como mês curto no Extrato, nunca o ISO cru", async () => {
  const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[1], origem: "cartao", fatura: "2026-10" }] };
- renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Cartão" })).toBeTruthy());
+ renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByRole("button", { name: "Filtros" })).toBeTruthy());
  await waitFor(() => expect(screen.getByText(/· fatura out\/2026/)).toBeTruthy()); expect(screen.queryByText(/fatura 2026-10/)).toBeNull();
 });
 it("a atualização da conta sai curta, sem quebrar a linha com o ano", async () => {
