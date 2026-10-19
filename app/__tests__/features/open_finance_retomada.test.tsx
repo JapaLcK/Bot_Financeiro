@@ -1,8 +1,8 @@
 import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import type { Conexao } from "@/api/schemas/openFinance";
-import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
-import { chamadas, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
+import { capturarItemBancario, iniciarTentativaBancaria, lerTentativaBancaria, PRAZO_TENTATIVA_MS } from "@/storage/secure";
+import { chamadas, cofre, prepararCaso, resposta, rotear, S, segurar } from "./auth_apoio";
 import { guardarSessaoOf, SESSAO_OF, VIVO } from "./open_finance_volta_apoio";
 import { abrirBanco, appVai, desligarTrava, drenar, umIntervalo } from "./open_finance_volta_rota_apoio";
 
@@ -37,6 +37,17 @@ beforeEach(async () => {
   const a = (await lerTentativaBancaria(1))!; await capturarItemBancario(VIVO.provider_item_id, a.tentativa_id);
 });
 afterEach(() => jest.restoreAllMocks());
+
+it("marcador vence com a Home aberta: 'Retomar conexão' sai sozinho, sem esperar o próximo foco", async () => {
+  const m = JSON.parse(cofre.get("pb.of.tentativa")!) as object;
+  cofre.set("pb.of.tentativa", JSON.stringify({ ...m, iniciada_em: Date.now() - PRAZO_TENTATIVA_MS + 60_000 }));
+  servidor(false); renderRouter("./app", { initialUrl: "/" });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Retomar conexão" })).toBeEnabled());
+  await act(async () => { jest.advanceTimersByTime(30_000); await drenar(); });
+  expect(screen.queryByRole("button", { name: "Retomar conexão" })).toBeTruthy(); // ainda dentro do prazo
+  await act(async () => { jest.advanceTimersByTime(31_000); await drenar(); });
+  expect(screen.queryByRole("button", { name: "Retomar conexão" })).toBeNull();
+});
 
 it("Retomar duplo real tem um leitor/uma Volta e back chega à Home", async () => {
   servidor(); const r = renderRouter("./app", { initialUrl: "/" });

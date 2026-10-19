@@ -4,10 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
-import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
+import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
 import { aoConferirConta, contaDaSessao } from "./lib/conversation";
-import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
@@ -55,6 +55,8 @@ if (DEMO) {
       { tipo: "acoes", rotulo: "Ações", valor: "3480.00", motivos: [] }],
     por_banco: [{ banco: "Nubank", valor: "23480.00", motivos: [] }],
   });
+  const nw = netWorth();
+  qc.setQueryData(milhaoQuery.queryKey, { patrimonio: txt(nw[nw.length - 1].total), motivos: [] }); // sem .at (Safari 14)
   // Orçamentos por categoria de exemplo (só o mês corrente, como o real): um por status.
   const hoje = new Date();
   const ORC = [["alimentação", "alimentacao", "fork-knife", "🍔", "#f59e0b", 800, 412.3], ["transporte", "transporte", "car", "🚗", "#38bdf8", 300, 255],

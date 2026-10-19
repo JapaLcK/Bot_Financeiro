@@ -9,28 +9,9 @@ import { ehNegativo, mesAno } from "../lib/metas-textos";
 import { DEMO, ErroApi, orcamentoQuery } from "../lib/v2";
 import { mesDe } from "../lib/store.js";
 import type { DashState } from "../lib/types";
-import { CRIAR_SENHA } from "../parts/Entrada";
+import { Bloqueio } from "../parts/Bloqueio";
 import { Frame } from "../parts/Frame";
 import { CHAVE_ESCRITA, OrcamentoForm, mostra, useEscrita, type Modo } from "../parts/OrcamentoForm";
-import { ConvitePro } from "./Compromissos";
-
-export function Bloqueio({ e, pro = "O Orçamento doméstico é do Plus e do Pro." }: { e: ErroApi; pro?: string }) {
-  if (e.code === "pro_required") return <ConvitePro texto={pro} />;
-  if (e.code === "password_required") {
-    return (
-      <div className="empty" role="alert">
-        <p>Crie sua senha para ver o orçamento. Depois de criar, volte para o painel novo.</p>
-        <a className="btn btn-ghost retry" href={CRIAR_SENHA.href}>{CRIAR_SENHA.texto}</a>
-      </div>
-    );
-  }
-  return (
-    <div className="empty" role="alert">
-      <p>{e.status === 401 ? "Sua sessão terminou." : "Não deu para abrir o orçamento."}</p>
-      <button type="button" className="btn btn-ghost retry" onClick={() => location.reload()}>Recarregar</button>
-    </div>
-  );
-}
 
 const pctTxt = (v: string | null) => v === null ? "—" : `${Math.round(Number(v))}%`;
 const largura = (v: string | null) => v === null ? 0 : Math.min(Math.max(Number(v), 0), 100);
@@ -102,7 +83,7 @@ export function OrcamentoPainel({ s }: { s: DashState }) {
   return (
     <div className="panel span-12">
       <Frame id="orcamento" title={`Potes de ${mesAno(mes)}`} real>
-        {e4 ? <Bloqueio e={e4} />
+        {e4 ? <Bloqueio e={e4} convite="O Orçamento doméstico é do Plus e do Pro." o="o orçamento" />
           : !d ? (q.isError && !q.isFetching
             ? (
               <div className="empty" role="alert">

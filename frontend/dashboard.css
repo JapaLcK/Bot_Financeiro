@@ -2707,14 +2707,51 @@ body.light .hb-badge-auto { background:rgba(15,23,42,.05); }
 .hb-table tfoot td { border-bottom:none; border-top:1px solid var(--glass-border);
                      font-weight:700; color:var(--text); }
 
-.hb-metas-head { display:flex; justify-content:space-between; align-items:center;
-                 margin-bottom:14px; }
-.hb-meta-row { display:flex; align-items:center; gap:8px; padding:9px 2px;
-               border-bottom:1px dashed var(--glass-border); font-size:.8rem; }
-.hb-meta-row:last-child { border-bottom:none; }
-.hb-meta-label { flex:1; color:var(--text-2); overflow:hidden;
-                 text-overflow:ellipsis; white-space:nowrap; }
-.hb-meta-pct { font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; }
+/* Alocação da renda: card de largura total (fora da .hb-grid, senão o auto-fit não colapsa a 3ª coluna); donut à esquerda, 6 potes à direita
+   em 2 colunas (1 no mobile). Pote = <button> inteiro, foco visível nativo. */
+.hb-aloc { margin-bottom:14px; } /* = gap da .hb-grid logo abaixo */
+.hb-aloc-head { display:flex; justify-content:space-between; align-items:center;
+                gap:10px; flex-wrap:wrap; margin-bottom:24px; }
+.hb-aloc-head h3 { margin:0; }
+.hb-aloc-acts { display:flex; gap:8px; flex-wrap:wrap; }
+.hb-aloc-body { display:grid; grid-template-columns:minmax(0,240px) minmax(0,1fr);
+                gap:18px; align-items:center; }
+.hb-aloc-donut { width:100%; max-width:240px; margin:0 auto; }
+.hb-potes { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+.hb-pote { display:flex; flex-direction:column; gap:6px; text-align:left; font:inherit;
+           color:var(--text); cursor:pointer; padding:12px 14px; border-radius:14px;
+           background:rgba(255,255,255,.04); border:1px solid var(--glass-border);
+           transition:border-color .18s var(--ease), background .18s var(--ease); }
+.hb-pote:hover { background:rgba(255,255,255,.08); border-color:rgba(255,128,184,.5); }
+.hb-pote:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+body.light .hb-pote { background:rgba(15,23,42,.03); }
+body.light .hb-pote:hover { background:rgba(15,23,42,.07); }
+.hb-pote.over { border-color:var(--red); }
+.hb-pote-top { display:flex; align-items:center; gap:8px; font-size:.8rem; }
+.hb-pote-nome { flex:1; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hb-pote-pct { color:var(--text-3); font-variant-numeric:tabular-nums; }
+.hb-pote-aloc { font-size:1.05rem; font-weight:700; font-variant-numeric:tabular-nums; }
+.hb-pote-bar { display:block; height:6px; border-radius:999px; background:rgba(128,128,128,.22); overflow:hidden; }
+.hb-pote-bar > span { display:block; height:100%; border-radius:999px; }
+.hb-pote-sub { font-size:.72rem; color:var(--text-3); font-variant-numeric:tabular-nums; }
+.hb-pote.over .hb-pote-sub { color:var(--red); }
+@media (max-width:640px) {
+  .hb-aloc-body { grid-template-columns:minmax(0,1fr); }
+  .hb-potes { grid-template-columns:minmax(0,1fr); }
+}
+
+/* Modal do pote */
+.hb-pote-total { margin:0 0 12px; font-size:.9rem; color:var(--text-2); }
+.hb-pote-total strong { color:var(--text); }
+.hb-pote-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+.hb-pote-chips .chip { flex:0 1 auto; min-width:0; }
+.hb-pote-chips .chip-val { font-size:.85rem; white-space:nowrap; }
+.hb-pote-row { display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+               padding:10px 2px; border-top:1px solid var(--div); }
+.hb-pote-row-main { display:flex; flex-direction:column; min-width:0; }
+.hb-pote-row-desc { font-weight:600; font-size:.85rem; overflow-wrap:anywhere; }
+.hb-pote-row-meta { font-size:.72rem; color:var(--text-3); }
+.hb-pote-row-val { font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
 /* Soma ao vivo do modal de metas: nasce vermelha ("ainda não fecha") e vira
    verde só no 100% exato — é o estado que habilita o Salvar, então a cor é

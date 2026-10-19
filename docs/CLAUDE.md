@@ -590,6 +590,17 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   PR à parte). No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
   `simuladorForm.tsx`, `simuladorResultado.tsx`), aberta pelo `+` do bloco Simulador na aba Gastos, só Pro;
   frases mais curtas que as do web, chaves comparadas por `simulador_textos_paridade.test.ts`.
+- `GET /api/v2/progresso-milhao` (`api/v2/progresso_milhao.py`; também `/api/app/progresso-milhao`): o
+  patrimônio de hoje (`db/patrimonio.calcular`, a conta da tela Patrimônio do app, lida como em
+  `api/nativo/patrimonio.py`) para o `/painel#/milhao`, fora do menu lateral e do Menu do celular (só o card
+  de Ferramentas e o ⌘K). Gate `million_progress` (Plus/Pro): Essencial/Free = 403 `pro_required` ANTES de
+  qualquer leitura. Resposta `{patrimonio: "1234.57" (texto, 0,01 HALF_UP), motivos[]}`: os de `calcular` mais
+  `sem_banco_conectado` quando nenhuma conta BRL nem posição de conexão viva entrou (só Carteira, caixinhas e
+  manuais, ou conexão pausada, ou só conta em outra moeda; vira o convite "Conecte um banco"). Sem entrada: o
+  usuário é o da sessão. A projeção (juros compostos, taxa fixa padrão 10% a.a., aporte só informado, teto de 600
+  meses) é do cliente, `webapp/src/dashboard/lib/milhao.ts`; nada é gravado. Limites declarados: o "mês de
+  hoje" vem do relógio do navegador (±1 mês na virada em fuso diferente) e o "Guardar por mês" vai até R$ 10
+  mil. Fora do escopo: app Expo, aporte do histórico, inflação, metas além do próximo milhão.
 - `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
   condicional do motor único, usuário da sessão e gates antes da leitura financeira.
   Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
@@ -637,7 +648,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Em `/` o anfitrião espera o `/perfil` para saber se o card está no layout (`comCardPrevisao`, do Board): se está, não abre consulta nenhuma (UM GET por carga, testado com `/perfil` a 0, 150 e 600 ms);
   só quando o Resumo NÃO tem o card (ex.: Economizar, ou o bloco tirado no Organizar) a pilha lê a chave `["previsao", null]` sozinha. Tirar o card no Organizar: ele desmonta e limpa a lista, o que re-renderiza a pilha, que passa a ler sozinha (NÃO coberto por teste; se o card nunca tinha publicado a lista, a leitura própria só abre no próximo render da pilha). Nas outras
   telas a pilha só tem o banco e não há GET `/previsao`); `/piggy`, a Conta e o
-  protótipo não têm pilha. "Conexão com o banco pendente" do app NÃO existe no web (no app vem do cofre do aparelho; sem fonte equivalente aqui). As
+  protótipo não têm pilha. "Conexão com o banco pendente" do app NÃO existe no web (no app vem do cofre do aparelho, onde o marcador expira em 60 min e o aviso tem "Descartar"; sem fonte equivalente aqui). As
   RESPONDIDAS (Desfazer) ficam na seção "Receitas na previsão" no fim da `/previsao` (`RespondidasDoBanco`). A lógica da mutação é o hook `useReceitas`
   (uma instância por ponta, mesma `mutationKey`); o alerta "Não deu para salvar" é UM só (contexto `ReceitasProvider`), fica FORA da pilha, acima dela, e
   não atravessa telas. Lê
