@@ -26,12 +26,16 @@ const semSenha = (e: unknown) => e instanceof ErroDeApi && (detalheDe(e).error =
 
 export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso, esgotarCota, falhou }: Deps) {
   const [catalogo, setCatalogo] = useState<{ uid: number; dados: Agentes } | null>(null);
-  const contextos = useRef(new Map<string, string | null>()), emVoo = useRef(new Set<string>()), epoca = useRef(0);
+  const contextos = useRef(new Map<string, string | null>()), emVoo = useRef(new Map<string, AbortController>()), epoca = useRef(0);
   const lendo = useRef<Promise<Agentes | null> | null>(null), esperando = useRef(false), leitura = useRef(0); // esperando: o 2º toque durante a espera do catálogo não duplica o envio
   const atual = catalogo?.uid === uid ? catalogo.dados : null; // o catálogo de A nunca é visto sob B, nem por um quadro
   const atualizar = (id: number, f: Partial<TurnoAgente>) => setTurnos((ts) => ts.map((t) => t.id === id && t.agente ? { ...t, agente: { ...t.agente, ...f } } : t));
-  const zerar = useCallback(() => { contextos.current.clear(); emVoo.current.clear(); esperando.current = false; lendo.current = null; epoca.current++; }, []);
-  useEffect(() => { zerar(); setCatalogo(null); }, [uid, zerar]); // troca de conta: o efeito do provider já abortou os pedidos; aqui some o que era de A
+  /** `conta`: troca de conta (o provider já abortou os pedidos de A). Na saída da aba a trava por kind (`emVoo`) fica até o pedido acabar: voltar e
+   * perguntar de novo ao mesmo agente não abre um 2º pedido no servidor (e uma 2ª cobrança) enquanto o 1º ainda roda. */
+  const zerar = useCallback((conta = false) => { contextos.current.clear(); if (conta) emVoo.current.clear(); esperando.current = false; lendo.current = null; epoca.current++; }, []);
+  /** Solta a trava do kind só se ela ainda é deste pedido (`c`): um pedido de antes da troca de conta não solta a trava de um pedido novo. */
+  const soltar = (kind: string, c: AbortController) => { if (emVoo.current.get(kind) === c) emVoo.current.delete(kind); };
+  useEffect(() => { zerar(true); setCatalogo(null); }, [uid, zerar]); // troca de conta: o efeito do provider já abortou os pedidos; aqui some o que era de A
   const ler = useCallback((): Promise<Agentes | null> => {
     const alvo = dono.current; if (alvo === null) return Promise.resolve(null);
     if (lendo.current) return lendo.current;
@@ -52,7 +56,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
   const enviarAgente = async (id: number, kind: string, mensagem: string, energia: Energia | null) => {
     const alvo = dono.current, e0 = epoca.current, c = new AbortController(); ativos.current.add(c);
     const vivo = () => dono.current === alvo && epoca.current === e0;
-    emVoo.current.add(kind); atualizar(id, { estado: "enviando", texto: "", redirects: [], repetir: false });
+    emVoo.current.set(kind, c); atualizar(id, { estado: "enviando", texto: "", redirects: [], repetir: false });
     try {
       const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c);
       if (dono.current !== alvo) return;
@@ -79,7 +83,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
           : "Não foi possível obter a resposta agora. Tente novamente em instantes.",
         repetir: d.retryable === true || !(e instanceof ErroDeApi), // só se o servidor marcou, ou se nem houve resposta (rede, prazo de 60 s)
       });
-    } finally { ativos.current.delete(c); if (vivo()) emVoo.current.delete(kind); }
+    } finally { ativos.current.delete(c); soltar(kind, c); }
   };
   /** Cria o turno do agente. Falso = já há pergunta em voo a ele, ou o Piggy está respondendo (turno de agente só nasce com `!enviando`: o `fechar` supõe que o turno em voo é o último). */
   const perguntar = (kind: string, original: string, mensagem: string, acesso: Acesso, energia: Energia | null) => {
@@ -106,16 +110,17 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     const a = t.agente, alvo = dono.current;
     if (!a || a.estado !== "inativo" || alvo === null || emVoo.current.has(a.kind)) return;
     const e0 = epoca.current, c = new AbortController(); ativos.current.add(c); const vivo = () => dono.current === alvo && epoca.current === e0;
-    emVoo.current.add(a.kind); atualizar(t.id, { ativando: true, falhaAtivar: false });
+    emVoo.current.set(a.kind, c); atualizar(t.id, { ativando: true, falhaAtivar: false });
     try { await ativarAgente(alvo, a.kind, c); }
     catch (e) {
+      soltar(a.kind, c);
       if (!vivo() || e instanceof RequisicaoSuperada) return;
-      emVoo.current.delete(a.kind); falhou(e);
+      falhou(e);
       const d = detalheDe(e), acesso = d.error === "no_energy" ? "no_energy" : d.error === "pro_required" ? "upgrade" : null;
       atualizar(t.id, acesso ? { ativando: false, ...estadoSemChat(a.kind, acesso, a.energia) } : semSenha(e) ? { ativando: false, estado: "erro", texto: SEM_SENHA, repetir: false } : { ativando: false, falhaAtivar: true });
       return;
     } finally { ativos.current.delete(c); }
-    if (!vivo()) return;
+    if (!vivo()) { soltar(a.kind, c); return; }
     lendo.current = null; void ler(); atualizar(t.id, { ativando: false });
     await enviarAgente(t.id, a.kind, a.mensagem, a.energia);
   };

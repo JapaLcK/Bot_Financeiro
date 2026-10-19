@@ -209,6 +209,26 @@ it("a releitura da cota que voltou depois de outra resposta gravar a cota é des
   await enviar("@Carteiro c"); await waitFor(() => expect(screen.getByText("95 de 100 mensagens utilizadas")).toBeTruthy());
   await act(async () => { g.soltar(); await drenar(); }); expect(screen.getByText("95 de 100 mensagens utilizadas")).toBeTruthy();
 });
+it("sair da aba com o agente respondendo: na volta, o mesmo agente não ganha 2º pedido até o 1º acabar", async () => {
+  const g = segurar(); ag.chat = async (n) => { if (n === 1) await g.promessa; return resp(`R${n}`); };
+  await abrir(); await enviar("@Xerife a"); await act(drenar); expect(ag.nChat).toBe(1);
+  await ir("/resumo"); await voltar(); await enviar("@Xerife b"); await act(drenar); expect(ag.nChat).toBe(1);
+  await act(async () => { g.soltar(); await drenar(); }); await enviar("@Xerife c"); await waitFor(() => expect(ag.nChat).toBe(2));
+});
+it("sair da aba durante a ativação: a trava do agente se solta quando a ativação acaba", async () => {
+  const g = segurar(); ag.catalogo = (u) => cat(Number(u), {}, null); ag.ativar = async (n) => { if (n === 1) await g.promessa; return resposta(200, { ok: true }); };
+  await abrir(); await enviar("@Carteiro oi"); await toque("Ativar e responder"); expect(ag.nAtivar).toBe(1);
+  await ir("/resumo"); await voltar(); await act(async () => { g.soltar(); await drenar(); }); expect(ag.nChat).toBe(0); // a ativação de antes não responde na conversa nova
+  await enviar("@Carteiro de novo"); await toque("Ativar e responder"); await waitFor(() => expect(ag.nAtivar).toBe(2));
+});
+it("nova tentativa do Piggy (depois de erro) com a cota lida descartada: vale a cota da tela, cheia, e o Piggy não envia", async () => {
+  srv.chat = () => resposta(500, { detail: "x" }); await abrir(); await enviar("oi"); await act(drenar); expect(posts()).toHaveLength(1);
+  const g1 = segurar(); ag.chat = async () => { await g1.promessa; return resp("Do agente", { usage: { used: 100, limit: 100 } }); };
+  await enviar("@Xerife a"); await act(drenar);
+  const g2 = segurar(); srv.segurarGet = g2; srv.uso = 99; await enviar("de novo"); await act(drenar); // o `preparar` lê 99 e fica preso
+  await act(async () => { g1.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Do agente")).toBeTruthy());
+  await act(async () => { g2.soltar(); await drenar(); }); expect(posts()).toHaveLength(1);
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());

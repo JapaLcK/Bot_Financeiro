@@ -73,7 +73,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
       if (!vivo()) return null;
       if (erros.current === e0 && !semDelete) sujo.current = false;
       if (versaoUso.current === v0) { usoAtual.current = cota.usage; setUso(cota.usage); }
-      setBloqueio("livre"); return cota.usage;
+      setBloqueio("livre"); return versaoUso.current === v0 ? cota.usage : usoAtual.current; // leitura descartada (outra cota gravou no meio): vale a cota da tela
     } catch (e) { if (vivo()) { falhou(e); setBloqueio("falhou"); } return null; }
     finally { ativos.current.delete(cg); }
   }, [falhou]);
