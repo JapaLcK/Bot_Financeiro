@@ -88,7 +88,8 @@ export function conversar(uid: number, kind: string, message: string, context: s
 
 // --- A menção: "@Nome" no começo do texto ou depois de espaço/quebra (assim fulano@gmail.com não conta). ---
 const sem = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-export const semAcento = (t: string) => t.split("").map(sem).join(""); // por letra: o tamanho não muda, os índices valem no texto original
+// Por letra, e a marca solta (o acento de "e" + U+0301, texto colado) fica como está: o tamanho nunca muda e os índices valem no texto original (Codex no #1157).
+export const semAcento = (t: string) => t.split("").map((c) => sem(c) || c).join("");
 const MAIS_LONGO = [...AGENTES].sort((a, b) => b.nome.length - a.nome.length);
 
 /** Toda menção válida (nome do catálogo, sem acento nem maiúscula, nome mais longo primeiro). Com `dados`, só os agentes disponíveis. */

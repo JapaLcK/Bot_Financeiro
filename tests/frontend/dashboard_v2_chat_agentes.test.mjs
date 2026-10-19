@@ -357,6 +357,29 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: "Ativar e responder" recusado por no_energy: o aviso não repete os números de quando a bolha nasceu`, async () => {
+    const { ctx, page } = await abrir({ width, ativarErro: { status: 403, json: { detail: { error: "no_energy" } } } });
+    await digitar(page, "@rep");
+    await lista(page).waitFor();
+    await campo(page).pressSequentially("órter resume");
+    await campo(page).press("Enter");
+    const r = resposta(page);
+    await r.locator(".msg-text", { hasText: "Ativar o Repórter usa ⚡1 de energia. Você tem 2 livre." }).waitFor();
+    await r.getByRole("button", { name: "Ativar e responder" }).click();
+    await r.locator(".msg-tag", { hasText: "SEM ENERGIA" }).waitFor();
+    assert.equal(await r.locator(".msg-text").first().textContent(), "Você está sem energia livre para ativar o Repórter.");
+    await ctx.close();
+  });
+
+  test(`${width}: acento decomposto antes da menção (e + U+0301, texto colado): a menção e o texto saem inteiros`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "cafe\u0301 @Detetive oi");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.deepEqual(chats.map((c) => [c.kind, c.message]), [["detetive", "cafe\u0301 oi"]]);
+    assert.equal(await page.locator(".chat > .msg-user .mencao").textContent(), "@Detetive");
+    await ctx.close();
+  });
+
   test(`${width}: "Ativar e responder" com password_required (403, detail objeto): pedido de senha, sem "Tentar de novo"`, async () => {
     const { ctx, page } = await abrir({ width, ativarErro: { status: 403, json: { detail: { error: "password_required" } } } });
     await digitar(page, "@rep");

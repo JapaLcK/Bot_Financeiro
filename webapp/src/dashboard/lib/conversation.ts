@@ -137,8 +137,8 @@ export async function ativarEResponder(id: number, depois: () => void) {
     await ativar(m.uid, m.agente);
   } catch (e) {
     const d = detalheDe(e), acesso = d.error === "no_energy" ? "no_energy" : d.error === "pro_required" ? "upgrade" : null;
-    const energia = m.custo != null && m.livre != null ? { custo: m.custo, livre: m.livre } : undefined;
-    patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso, energia) }
+    // Sem os números da bolha: são de quando ela nasceu, e a recusa mostra que a energia mudou depois (Codex no #1157).
+    patch(id, acesso ? { ativando: false, ...estadoSemChat(m.agente, acesso) }
       : semSenha(e) || sessaoDe(e) ? { ativando: false, estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false }
       : { ativando: false, falhaAtivar: true });
     emVoo.delete(`${m.uid}:${m.agente}`);
