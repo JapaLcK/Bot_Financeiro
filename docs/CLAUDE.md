@@ -1753,11 +1753,11 @@ Callbacks do host: `onOpen()` quando o widget foi iniciado (síncrono, não quan
 vem do servidor, ausente no erro do SDK); `onClose()` só depois de o `/pluggy-item` terminar, e
 SÓ na reconexão (o picker chama na hora, como sempre). `itemId` vazio ou não-string => `onError`,
 nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados em
-silêncio (guarda liberada no onClose, no fim do save, no erro do connect, no `init()` do SDK que
-rejeita (`onError` e em seguida `onClose()`) e no `destroy()`), e depois do `destroy()` nenhum
-callback do host dispara. Limites: (H2) `onError` do SDK sem `onClose` deixa a guarda presa, no painel
-até o `destroy()` da desmontagem e no settings até recarregar a página (ele nunca chama `destroy()`);
-o `onClose` tardio de uma conexão cujo save já terminou pode chegar durante a conexão seguinte e o
+silêncio (guarda liberada no onClose, no fim do save, no erro do connect, no `onError` do SDK (a
+Pluggy não garante `onClose` depois dele), no `init()` do SDK que rejeita (`onError` e em seguida
+`onClose()`) e no `destroy()`), e depois do `destroy()` nenhum callback do host dispara. Limites:
+depois de um `onError` do SDK com o widget ainda na tela, um novo clique abre outro widget (como antes
+da guarda); o `onClose` tardio de uma conexão cujo save já terminou pode chegar durante a conexão seguinte e o
 host não o distingue (hoje nenhum dos dois hosts deixa clicar nesse intervalo). Testes: `tests/frontend/of_connect_reconectar.test.mjs`. O campo opcional `attempt_id`
 exige UUID canônico em minúsculas e `app_scheme` permitido; o servidor monta a URI
 `<scheme>://open-finance-volta/<attempt_id>`. Sem esse campo, pedidos legados válidos

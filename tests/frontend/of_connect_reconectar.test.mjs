@@ -339,6 +339,18 @@ test("A14 erro do SDK seguido de onClose: error antes de close", async () => {
   await page.__ctx.close();
 });
 
+test("A20 erro do SDK SEM onClose depois: a guarda é liberada e o próximo reconnect abre", async () => {
+  // A Pluggy não garante onClose depois de onError (Codex, PR #1139). Negativo: tirar o
+  // `liberar();` do onError do widget em openWidget() deixa o 2º reconnect mudo.
+  const page = await reconectada();
+  await page.evaluate(() => { window.__w.onError({ x: 1 }); });
+  await waitFor(async () => (await ev(page)).length >= 2);
+  await page.evaluate(() => { window.PBOpenFinance.reconnect("item-11"); });
+  await waitFor(() => page.evaluate(() => window.__n === 2));
+  assert.deepEqual(await tipos(page), ["open", "error", "open"]);
+  await page.__ctx.close();
+});
+
 test("A15 onOpen do host que lança não vira onError", async () => {
   const page = await abrir();
   await page.evaluate(() => {

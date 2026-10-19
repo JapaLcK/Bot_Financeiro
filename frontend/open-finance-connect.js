@@ -24,9 +24,10 @@
  * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
  * callback do host dispara para a conexão que estava em curso.
  * `init()` do SDK que rejeita: `onError` e em seguida `onClose()`, e a guarda é liberada.
- * Limite conhecido (H2): `onError` do SDK sem `onClose` depois deixa a guarda presa — no
- * painel até o destroy() da desmontagem, no settings até recarregar a página (ele nunca
- * chama destroy()). Liberar ali permitiria dois widgets; hipótese, nunca visto.
+ * `onError` do SDK também libera a guarda: a Pluggy não garante `onClose` depois dele, e
+ * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
+ * custo é o de antes desta guarda: com o widget com erro ainda na tela, um novo clique
+ * abre outro; o `onClose` daquele chega depois ao host como tardio.
  *
  * A ordem do original é preservada de propósito: o modal aparece SÍNCRONO e só
  * o preenchimento é assíncrono. O estado do plano é rebuscado em paralelo e
@@ -634,6 +635,9 @@
       onError: function (error) {
         console.error("Pluggy Connect error", error);
         if (!vivo()) return;
+        // A Pluggy não garante onClose depois de onError: sem liberar aqui, o botão
+        // do settings (que se reabilita no onError) ficaria mudo até recarregar.
+        liberar();
         conf("onError", host)("Não foi possível concluir a conexão.");
       },
       onClose: function () {
