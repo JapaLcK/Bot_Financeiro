@@ -77,6 +77,18 @@ describe("prazo do marcador", () => {
     expect(nova).not.toBeNull();
     expect(nova!.tentativa_id).not.toBe(velha.tentativa_id);
   });
+  it("'Iniciar nova tentativa' com o marcador vencido na tela começa uma nova; com outro marcador no lugar continua recusando", async () => {
+    const velha = (await iniciarTentativaBancaria(1, SESSAO_OF, []))!;
+    idade(PRAZO_TENTATIVA_MS + 1_000);
+    const nova = await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, { sessao: SESSAO_OF, tentativa_id: velha.tentativa_id });
+    expect(nova).not.toBeNull();
+    expect(nova!.tentativa_id).not.toBe(velha.tentativa_id);
+    // B gravada depois: a confirmação velha (A) não a apaga.
+    expect(await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, { sessao: SESSAO_OF, tentativa_id: velha.tentativa_id })).toBeNull();
+    // Concluído (e não vencido) em outro lugar: segue recusando, como o teste de "limpeza" da substituição.
+    await concluirTentativaBancaria(nova!.tentativa_id);
+    expect(await iniciarTentativaBancaria(1, SESSAO_OF, [], undefined, undefined, { sessao: SESSAO_OF, tentativa_id: nova!.tentativa_id })).toBeNull();
+  });
   it("captura com marcador vencido não faz nada; recente captura", async () => {
     const a = (await iniciarTentativaBancaria(1, SESSAO_OF, []))!;
     idade(PRAZO_TENTATIVA_MS + 1_000);

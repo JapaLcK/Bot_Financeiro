@@ -323,12 +323,12 @@ async function apagarSessaoNoCofre(): Promise<void> {
   await SecureStore.deleteItemAsync(TENTATIVA_OF).catch(() => undefined);
 }
 
-async function tentativaNoCofre(): Promise<TentativaBancaria | null> {
+async function tentativaNoCofre(comVencida = false): Promise<TentativaBancaria | null> {
   const bruto = await SecureStore.getItemAsync(TENTATIVA_OF);
   if (!bruto) return null;
   try {
     const t = tentativaSchema.parse(JSON.parse(bruto));
-    return Date.now() - t.iniciada_em > PRAZO_TENTATIVA_MS ? null : t;
+    return !comVencida && Date.now() - t.iniciada_em > PRAZO_TENTATIVA_MS ? null : t;
   } catch { return null; }
 }
 
@@ -347,7 +347,9 @@ export function iniciarTentativaBancaria(
     const pendente = anterior?.sessao === sessao ? anterior : null;
     // A escolha vale somente para a sessão e o nonce mostrados no aviso.
     // Comparar e gravar na mesma fila impede uma confirmação velha apagar B.
-    if (substituir && (substituir.sessao !== sessao || pendente?.tentativa_id !== substituir.tentativa_id)) return null;
+    // O aviso mostrado pode ter vencido com a tela aberta: o MESMO marcador, vencido, ainda pode ser substituído. Concluído ou trocado por outro não.
+    const venceu = substituir && !pendente ? (await tentativaNoCofre(true))?.tentativa_id === substituir.tentativa_id : false;
+    if (substituir && (substituir.sessao !== sessao || (pendente?.tentativa_id !== substituir.tentativa_id && !venceu))) return null;
     if (pendente && pendente.user_id !== user_id) return null;
     if (pendente && !substituir) throw new TentativaBancariaPendente(pendente);
     const t: TentativaBancaria = { user_id, sessao, ids_antes, item_id, reconnected_antes, modo: item_id ? "reconectar" : "nova",
