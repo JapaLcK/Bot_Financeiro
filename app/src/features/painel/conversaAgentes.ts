@@ -8,7 +8,7 @@ import { NOVO, type Turno } from "./conversaEstado";
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string };
 export type TurnoAgente = { kind: string; mensagem: string; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
-type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; oculto: MutableRefObject<boolean>; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
+type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; livre: () => boolean; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e: Energia | null): Partial<TurnoAgente> =>
@@ -24,7 +24,7 @@ const detalheDe = (e: unknown): { error?: string; message?: string; retryable?: 
 const SEM_SENHA = "Crie a senha da sua conta pelo link que enviamos por e-mail para conversar com os agentes.";
 const semSenha = (e: unknown) => e instanceof ErroDeApi && (detalheDe(e).error === "password_required" || (e.corpo as { code?: unknown } | null | undefined)?.code === "password_required");
 
-export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, oculto, aplicarUso, esgotarCota, falhou }: Deps) {
+export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, livre, aplicarUso, esgotarCota, falhou }: Deps) {
   const [catalogo, setCatalogo] = useState<{ uid: number; dados: Agentes } | null>(null);
   const contextos = useRef(new Map<string, string | null>()), emVoo = useRef(new Map<string, AbortController>()), epoca = useRef(0);
   const lendo = useRef<Promise<Agentes | null> | null>(null), esperando = useRef(false), leitura = useRef(0); // esperando: o 2º toque durante a espera do catálogo não duplica o envio
@@ -85,9 +85,11 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       });
     } finally { ativos.current.delete(c); soltar(kind, c); }
   };
-  /** Cria o turno do agente. Falso = já há pergunta em voo a ele, ou o Piggy está respondendo (turno de agente só nasce com `!enviando`: o `fechar` supõe que o turno em voo é o último). */
+  /** Cria o turno do agente. Falso = já há pergunta em voo a ele, o Piggy está respondendo (turno de agente só nasce com `!enviando`: o `fechar` supõe que
+   * o turno em voo é o último), ou o envio não está `livre()` AGORA (conversa pronta, valores visíveis, cota com folga): todo caminho até um pedido ao
+   * agente passa aqui ou reconfere `livre()` depois do próprio await (`ativarEResponder`), porque a cota e o oculto mudam durante qualquer espera. */
   const perguntar = (kind: string, original: string, mensagem: string, acesso: Acesso, energia: Energia | null) => {
-    if (voo.current || (acesso === "ready" && emVoo.current.has(kind))) return false;
+    if (voo.current || !livre() || (acesso === "ready" && emVoo.current.has(kind))) return false;
     const id = ++proximo.current;
     setTurnos((ts) => [...ts, { id, pergunta: original, ...NOVO, agente: { kind, mensagem, estado: "enviando", texto: "", redirects: [], repetir: false, energia, ativando: false, falhaAtivar: false, ...(acesso === "ready" ? {} : estadoSemChat(kind, acesso, energia)) } }]);
     if (acesso === "ready") void enviarAgente(id, kind, mensagem, energia);
@@ -99,7 +101,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     if (!TEM_ARROBA.test(texto)) return "piggy";
     const alvo = dono.current; if (alvo === null || esperando.current) return alvo === null ? "piggy" : "fica";
     let dados = atual; const e0 = epoca.current;
-    if (!dados) { esperando.current = true; try { dados = await ler(); } finally { esperando.current = false; } if (dono.current !== alvo || epoca.current !== e0 || oculto.current) return "fica"; if (!dados) return "piggy"; } // valores ocultos durante a espera: não envia, como o envio do Piggy
+    if (!dados) { esperando.current = true; try { dados = await ler(); } finally { esperando.current = false; } if (dono.current !== alvo || epoca.current !== e0) return "fica"; if (!dados) return "piggy"; }
     const m = mencaoDe(texto, dados);
     if (!m) return "piggy";
     if (!m.texto || !perguntar(m.kind, texto.trim(), m.texto, acessoDe(dados, m.kind)!, energiaDe(dados, m.kind))) return "fica";
@@ -108,7 +110,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
   /** "Ativar e responder": o `emVoo` por kind segura o duplo toque já durante a ativação; depois da ativação, a lista relê o catálogo. */
   const ativarEResponder = async (t: Turno) => {
     const a = t.agente, alvo = dono.current;
-    if (!a || a.estado !== "inativo" || alvo === null || emVoo.current.has(a.kind)) return;
+    if (!a || a.estado !== "inativo" || alvo === null || !livre() || emVoo.current.has(a.kind)) return;
     const e0 = epoca.current, c = new AbortController(); ativos.current.add(c); const vivo = () => dono.current === alvo && epoca.current === e0;
     emVoo.current.set(a.kind, c); atualizar(t.id, { ativando: true, falhaAtivar: false });
     try { await ativarAgente(alvo, a.kind, c); }
@@ -121,9 +123,11 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       return;
     } finally { ativos.current.delete(c); }
     if (!vivo()) { soltar(a.kind, c); return; }
-    lendo.current = null; void ler(); atualizar(t.id, { ativando: false });
+    lendo.current = null; void ler();
+    if (!livre()) { soltar(a.kind, c); atualizar(t.id, { ativando: false, estado: "erro", texto: "Agente ativado. A pergunta não foi enviada: tente de novo quando puder.", repetir: true }); return; } // a cota encheu ou os valores ficaram ocultos durante a ativação
+    atualizar(t.id, { ativando: false });
     await enviarAgente(t.id, a.kind, a.mensagem, a.energia);
   };
-  const tentarDeNovo = (t: Turno) => { const a = t.agente; if (a?.estado === "erro" && a.repetir && !emVoo.current.has(a.kind)) void enviarAgente(t.id, a.kind, a.mensagem, a.energia); };
+  const tentarDeNovo = (t: Turno) => { const a = t.agente; if (a?.estado === "erro" && a.repetir && livre() && !emVoo.current.has(a.kind)) void enviarAgente(t.id, a.kind, a.mensagem, a.energia); };
   return { catalogo: atual, ler, rotear, redirecionar, ativarEResponder, tentarDeNovo, zerar };
 }

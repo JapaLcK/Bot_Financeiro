@@ -235,6 +235,22 @@ it("valores ocultos durante a espera do catálogo: a pergunta não vai ao agente
   expect(ag.nChat).toBe(0); expect(posts()).toHaveLength(0);
   await apertar("Mostrar valores"); expect(campo().props.value).toBe("@Xerife quanto gastei?");
 });
+it("a cota enche durante a espera do catálogo: a menção não vira pedido ao agente", async () => {
+  const g = segurar(); ag.segurarGet = g; await abrir(); await enviar("@Xerife a"); await act(drenar); // espera o catálogo
+  const f = respostaFluxo(); srv.chat = () => f; await enviar("oi"); // o Piggy responde e enche a cota no meio
+  await act(async () => { f.empurrar({ tipo: "fim", reply: "ok", usage: { used: 100, limit: 100 }, message_id: 3, chips: [] }); f.fechar(); await drenar(); });
+  await act(async () => { g.soltar(); await drenar(); }); expect(ag.nChat).toBe(0);
+});
+it("a cota enche durante a ativação: ativa, não pergunta, e o turno pede para tentar de novo (desligado com a cota cheia)", async () => {
+  const g = segurar(); ag.catalogo = (u) => { const d = cat(Number(u)); d.catalog.find((a) => a.kind === "carteiro")!.status = null; return d; };
+  ag.ativar = async () => { await g.promessa; return resposta(200, { ok: true }); };
+  await abrir(); await enviar("@Carteiro oi"); await toque("Ativar e responder"); expect(ag.nAtivar).toBe(1);
+  const f = respostaFluxo(); srv.chat = () => f; await enviar("oi");
+  await act(async () => { f.empurrar({ tipo: "fim", reply: "ok", usage: { used: 100, limit: 100 }, message_id: 3, chips: [] }); f.fechar(); await drenar(); });
+  await act(async () => { g.soltar(); await drenar(); }); expect(ag.nChat).toBe(0);
+  expect(screen.getByText("Agente ativado. A pergunta não foi enviada: tente de novo quando puder.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Tentar de novo" }).props.accessibilityState.disabled).toBe(true);
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());

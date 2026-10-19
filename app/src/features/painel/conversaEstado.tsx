@@ -37,7 +37,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const oculto = useRef(p.oculto); oculto.current = p.oculto; // pode() roda depois de awaits: lê o valor de agora, não o do render que criou o enviar
   const [turnos, setTurnos] = useState<Turno[]>([]);
   const [uso, setUso] = useState<Uso | null>(null);
-  const [bloqueio, setBloqueio] = useState<Bloqueio>("abrindo");
+  const [bloqueio, setBloqueio] = useState<Bloqueio>("abrindo"); const bloqueioAtual = useRef(bloqueio); bloqueioAtual.current = bloqueio;
   const [enviando, setEnviando] = useState(false);
   const [rascunho, setRascunho] = useState("");
   const [comentario, comentar] = useState<Comentario | null>(null);
@@ -59,7 +59,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     const alvo = dono.current, v0 = versaoUso.current, c = novo();
     void lerRecurso("/ai/messages?limit=1", conversaSchema, c).then((r) => { if (dono.current === alvo && versaoUso.current === v0) { usoAtual.current = r.usage; setUso(r.usage); } }, () => {}).finally(() => ativos.current.delete(c));
   };
-  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, oculto, aplicarUso, esgotarCota: () => { versaoUso.current++; const u = usoAtual.current; if (u) { const e = { ...u, used: Math.max(u.used, u.limit) }; usoAtual.current = e; setUso(e); } }, falhou });
+  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, livre: () => bloqueioAtual.current === "livre" && !oculto.current && !cotaCheia(usoAtual.current), aplicarUso, esgotarCota: () => { versaoUso.current++; const u = usoAtual.current; if (u) { const e = { ...u, used: Math.max(u.used, u.limit) }; usoAtual.current = e; setUso(e); } }, falhou });
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
     const alvo = dono.current; if (alvo === null) return null;
     semDeleteUlt.current = semDelete;
