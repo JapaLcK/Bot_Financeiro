@@ -31,7 +31,7 @@
 .cat[data-dim] { opacity: 0.45; }
 @media (hover: hover) and (pointer: fine) { .cat:hover { background: var(--plane-2); opacity: 1; } }
 .cat-name { grid-area: name; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cat-name i, .cat-emoji { font-size: 15px; line-height: 1; }
+.cat-name i { font-size: 15px; line-height: 1; }
 .cat-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cat-val { grid-area: val; font-size: 13px; font-weight: 600; }
 .cat-delta { grid-area: delta; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 11.5px; }

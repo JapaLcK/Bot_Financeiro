@@ -27,6 +27,7 @@ class CategoriaVisual(BaseModel):
     chave: str
     nome: str
     emoji: str
+    icone: str
     cor: str
 
 

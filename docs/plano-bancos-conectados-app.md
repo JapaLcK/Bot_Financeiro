@@ -183,6 +183,18 @@ fazem `push` **[Arquiteto]**; o Coder reconfere as sete antes de remover.
 - O app não tem atualização pelo ar (`expo-updates` ausente do `package.json` **[conferi]**): a tela só
   chega com build novo. App instalado ignora campo novo; app novo contra servidor velho cai no caminho sem números.
 
+**O que o código fez diferente do plano acima:**
+- `SvgUri` virou `fetch` + `parse` + `SvgAst` (achados A2/A3 do Tester: host fixo e sem `Authorization`, uma busca por URI).
+- "Acompanhar" e o "Reconectar" em destaque (`needs_user_action`) ficam FORA do que abre no cartão; o plano os punha dentro.
+- A rota NÃO entrou em `painel.fixture.json`: o `rotear` de `auth_apoio.ts` lê `tests/fixtures/app_bancos.json` (§0.7, uma fonte).
+- "Conferir de novo" virou ícone no topo (`ResumoBancos`) e botão só no estado de erro sem dados.
+- `ui.detail` some quando o estado é "atualizado".
+- Os números somem em TODA nova leitura (foco da tela, volta do segundo plano, volta do Reconectar, Conferir de novo,
+  Desconectar) até `/bancos` responder (`useFocusEffect` com `[ativo, travado, rodada]` e `setDados({..., numeros: null})`
+  em `conexoes.tsx`), por escolha: número velho poderia incluir banco removido.
+- Limites: render nativo, VoiceOver, Dynamic Type e SVG real NÃO foram verificados. `institution_name` vazio ('') não
+  é tratado. Os `motivos` do topo não aparecem e a barra de composição aparece mesmo com motivo incerto (decisão do dono pendente).
+
 ## Decisões do dono, 2ª rodada (2026-10-18)
 
 1. **Ocultar valores: a tela respeita.** `oculto` é estado local do `PainelProvider`

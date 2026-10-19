@@ -65,18 +65,18 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 
 ## Conta, segurança e sistema
 
-No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar WhatsApp e "Desde …", pelas rotas `/settings/{uid}/security[/contact]`, `/auth/dashboard-profile`, `/auth/me` (só `has_password`) e `/auth/link-code`); a Cobrança do `/painel` segue página-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`); Bancos conectados é página real, só leitura (`conta/Bancos.tsx`, linha abaixo); as Configurações mostram a Segurança (senha por link de e-mail e MFA, pelas rotas `/auth/mfa/*` e `/settings/{uid}/password-reset`; `conta/Seguranca.tsx`) e os dispositivos conectados (sessões ativas, pelas rotas `/settings/{uid}/sessions`; `conta/Sessoes.tsx`) e o link para a `/settings`, onde mora o resto do conteúdo abaixo.
+No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar WhatsApp e "Desde …", pelas rotas `/settings/{uid}/security[/contact]`, `/auth/dashboard-profile`, `/auth/me` (só `has_password`) e `/auth/link-code`); a Cobrança do `/painel` segue página-ponte para a tela antiga `/settings` (`conta/Ponte.tsx`); Bancos conectados é página real, que desconecta um banco por vez (`conta/Bancos.tsx`, linha abaixo); as Configurações mostram a Segurança (senha por link de e-mail e MFA, pelas rotas `/auth/mfa/*` e `/settings/{uid}/password-reset`; `conta/Seguranca.tsx`) e os dispositivos conectados (sessões ativas, pelas rotas `/settings/{uid}/sessions`; `conta/Sessoes.tsx`) e o link para a `/settings`, onde mora o resto do conteúdo abaixo.
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
 | Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 e S2 (exclusão imediata, `reauth-code`, cancela a assinatura Stripe na hora sem reembolso; `settings.html` já usa e avisa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` e Configurações do `/painel` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
-| Preferências de notificação | `/settings` | `notificacoes.tsx` (Configurações > Notificações): e-mail (dicas, insights), WhatsApp (atualizações do Piggy), resumos diário/semanal/mensal e horário, um PATCH por controle em `/settings/{uid}/notifications` | Nenhuma conhecida (push fica de fora nos dois lados) | App | issue #1121; falta conferir o seletor de hora no aparelho |
+| Preferências de notificação | `/settings` | Não há | — | App | issue #1121 (e-mail, WhatsApp e resumos, pelas rotas que já existem); a tela do app prevê a seção de push de [`plano-push-app.md`](plano-push-app.md) |
 | Contato (e-mail, nome, telefone) | Perfil do `/painel` (e `/settings`) | Só lê (`perfil.tsx`, P1): nome, e-mail, telefone, Conectar WhatsApp e "Desde …"; não edita | Edição (P2) | App | issue #1083; plano em [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md), seção B |
 | Trocar a senha de quem já tem senha | `/settings` e Configurações do `/painel` (link por e-mail, `password-reset`) | Só o link por e-mail para conta sem senha (`seguranca.tsx`) | — | App | a discutir com o dono |
-| Bancos conectados: quanto vale cada banco, total e vagas | `#/conta/bancos`: topo de `/bancos`, barra, "N de M bancos", card com estado (só leitura) | `conexoes.tsx`: lista com estado, reconectar, desconectar, `message` do `/limite`; sem valores nem "N de M" (PR 3 de `plano-bancos-conectados-app.md`) | O app não mostra valores nem vagas | App | a discutir com o dono |
-| Open Finance: reconectar e desconectar um banco | Só conecta (sem reconectar) e desconecta todos | Reconecta e desconecta um por vez | O web não reconecta nem desconecta um | Web | a discutir com o dono |
+| Bancos conectados: quanto vale cada banco, total e vagas | `#/conta/bancos`: topo de `/bancos`, barra, "N de M bancos", card com estado e "Gerenciar" > "Desconectar <banco>" (um por vez, com confirmação) | `conexoes.tsx`: lista com estado, reconectar, desconectar, `message` do `/limite`; sem valores nem "N de M" (PR 3 de `plano-bancos-conectados-app.md`) | O app não mostra valores nem vagas | App | a discutir com o dono |
+| Open Finance: reconectar e desconectar um banco | `#/conta/bancos` desconecta um por vez; `/settings` desconecta todos; reconectar não | Reconecta e desconecta um por vez | O web não reconecta | Web | a discutir com o dono |
 | Open Finance: atualizar agora, desconectar todos | Sim (`/refresh`, `disconnectAll`) | Não há | — | App | a discutir com o dono |
 | Vincular caixinha do banco a uma meta | `/settings` | Não há | — | App | a discutir com o dono |
 | Política de Privacidade | Link em Configurações | Só no cadastro | Quem já tem conta não a alcança | App | a discutir com o dono |
@@ -91,7 +91,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 - Cmd-K e atalhos de teclado (`Command.tsx`): não têm par em toque.
 - Compras Apple e restauração: regra da loja; o `app/README.md` as dá como "entrega separada".
 - Tempo real: o web recebe SSE (`/eventos`); o app não tem cliente dele, e `docs/api-app-painel.md` registra o SSE só no namespace web.
-- Push: nenhum dos dois (`expo-notifications` não está em `app/package.json`).
+- Push: o servidor já envia por APNs (dormente sem as envs, e nenhum evento de produto dispara push) e tem as rotas de registro, feitas para o app Capacitor antigo; o app Expo não registra token (`expo-notifications` não está em `app/package.json`); o `/painel` não tem web push, e fica sem. Plano e decisões do dono em [`plano-push-app.md`](plano-push-app.md).
 
 ## Como medi
 
