@@ -38,6 +38,7 @@ function PilhaApp() {
       <Stack.Screen name="teste-pluggy" options={{ headerShown: true, title: "Teste Open Finance", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
       <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
+      <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
       {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
       <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
       <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
