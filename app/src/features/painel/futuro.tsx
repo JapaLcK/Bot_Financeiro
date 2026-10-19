@@ -6,9 +6,10 @@ import { ChipPainel as Chip, TextoPainel as Texto } from "./tipografia";
 import { dataPtBr, nomeLegivel } from "./catalogo";
 import { usePainel } from "./provider";
 import { useBloco } from "./blocoContexto";
-import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros, useCardAberto } from "./base";
+import { RecursoDados, MOTIVOS_BANCO, Valor, Curva, Linha, Vazio, Filtros, useCardAberto } from "./base";
 import { LinhaExpansivel } from "./expansao";
 import { useRespondidas } from "./receitas";
+import { DIRECAO, ESTADO, MOTIVO, ou } from "./previsaoMotivos";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
@@ -28,8 +29,10 @@ export function Previsao() {
       {d.estado === "indisponivel" && <Texto variante="rotulo" tom="warning">Previsão indisponível</Texto>}
       {d.base.bancos_excluidos && <Texto variante="legenda" tom="warning">Bancos conectados fora do cálculo</Texto>}
       {/* A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Sempre visível. */}
-      {d.trajetoria ? <Curva valores={[...(d.ancora ? [d.ancora.saldo] : []), ...d.trajetoria.map((t) => t.saldo)]} /> : <Vazio texto="Trajetória indisponível no seu plano." />}
+      {d.trajetoria ? (d.estado === "indisponivel" ? null : <Curva valores={[...(d.ancora ? [d.ancora.saldo] : []), ...d.trajetoria.map((t) => t.saldo)]} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
       {aberto && <View style={{ gap: 8 }}>
+        {d.estado !== "indisponivel" && <Texto variante="rotulo" tom="inkMuted">{ou(ESTADO, d.estado)}</Texto>}
+        {d.motivos.filter((m) => !MOTIVOS_BANCO.has(m.codigo) && m.codigo !== "bancos_excluidos").map((m) => <Linha key={m.codigo + m.direcao_do_erro} titulo={ou(MOTIVO, m.codigo)} detalhe={ou(DIRECAO, m.direcao_do_erro)} />)}
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}
         {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
         {pior && (pior.causas.length ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}</View></LinhaExpansivel> : piorLinha)}

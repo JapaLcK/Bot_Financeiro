@@ -331,8 +331,11 @@ for (const width of [1440, 390]) {
 const medeSeta = (page) => page.evaluate(() => ({ sy: Math.round(scrollY), top: Math.round(document.querySelector("#gastos-compras .dia-seta").getBoundingClientRect().top), card: Math.round(document.querySelector("#gastos-compras").getBoundingClientRect().height) }));
 
 for (const [width, height] of [[390, 844], [1440, 900]]) {
-  test(`${width}x${height}: apertar a seta de dia não rola a página (card com 4 linhas, mais alto que a janela) e o botão fica onde estava`, async () => {
+  test(`${width}x${height}: apertar a seta de dia não rola a página (card com muitas linhas, mais alto que a janela) e o botão fica onde estava`, async () => {
     const { ctx, page } = await abrir({ width, height });
+    // a linha limpa (sem contexto) é mais baixa: dobra as linhas da fixture para o card seguir mais alto que a janela
+    const pagina = RESPOSTAS.lancamentos.estados;
+    await ctx.route((u) => u.pathname === "/api/v2/lancamentos", (r) => r.fulfill({ json: { ...pagina, itens: [...pagina.itens, ...pagina.itens.map((i) => ({ ...i, id: `${i.id}-b` }))], proximo: null } }));
     await abrirDia(page, 5);
     await page.locator("#gastos-compras .lanc-linha").first().waitFor();
     await page.waitForTimeout(500);

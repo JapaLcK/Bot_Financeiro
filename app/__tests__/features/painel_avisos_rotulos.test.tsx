@@ -1,4 +1,4 @@
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { StyleSheet } from "react-native";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
@@ -119,10 +119,11 @@ it("taxa não informada tem tamanho de legenda, não de título de seção", asy
  expect(screen.getByText("Taxa contratada")).toBeTruthy(); expect(screen.queryByText("Rendimento contratado")).toBeNull(); expect(screen.queryByText(/Não representam rendimento recebido/)).toBeNull();
 });
 it("lançamento de registro antigo tem rótulo legível, e o filtro de origem não o oferece", async () => {
- const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[0], origem: "registro_antigo" }] };
- renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByText(/· Registro antigo/)).toBeTruthy()); await abrirFiltros();
- expect(screen.getByRole("button", { name: /^Banco/ })).toBeTruthy(); expect(screen.queryByRole("button", { name: /^Registro antigo/ })).toBeNull();
- await waitFor(() => expect(screen.getByText(/· Registro antigo/)).toBeTruthy()); expect(screen.queryByText(/registro_antigo/)).toBeNull();
+ const l = fixture["/api/app/lancamentos"]; extra["/api/app/lancamentos"] = { ...l, itens: [{ ...l.itens[0], origem: "registro_antigo", instituicao: null }] };
+ renderRouter("./app", { initialUrl: "/extrato" }); await waitFor(() => expect(screen.getByText(/^Registro antigo/)).toBeTruthy()); await abrirFiltros();
+ const folha = within(screen.getByTestId("folha-sheet")); // a linha da lista também diz "Registro antigo": o filtro se confere só na folha
+ expect(folha.getByRole("button", { name: /^Banco/ })).toBeTruthy(); expect(folha.queryByRole("button", { name: /^Registro antigo/ })).toBeNull();
+ await waitFor(() => expect(screen.getByText(/^Registro antigo/)).toBeTruthy()); expect(screen.queryByText(/registro_antigo/)).toBeNull();
 });
 it("compromisso realizado diz recebido na entrada e pago na saída", async () => {
  const oc = (chave: string, nome: string, direcao: string) => ({ ...fatura("x", "2026-10-15", true), chave, nome, tipo: "conta", direcao, realizacao: "realizada" });

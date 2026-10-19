@@ -6,7 +6,7 @@ import { guardarCredenciais } from "@/storage/secure";
 import { mesAtual } from "@/features/painel/catalogo";
 import { isoDoSeletor } from "@/features/painel/metasEscrita";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
-import { abrirFiltros, ficha, filtrar } from "./extrato_filtros_apoio";
+import { abrirFiltros, ficha, filtrar, nFichas } from "./extrato_filtros_apoio";
 import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 // Botão "Filtros" do Extrato: a folha guarda um rascunho e a consulta só muda em "Aplicar filtros". O seletor de data é nativo: o dublê expõe as props (min/max do mês) e o `onChange`.
@@ -30,7 +30,7 @@ const abrir = async (url = "/extrato") => { r = renderRouter("./app", { initialU
 const aplicado = (campos: Record<string, string | null>) => { for (const [k, v] of Object.entries(campos)) expect(consulta().get(k)).toBe(v); };
 
 it("o botão Filtros abre a folha com tipo, origem, dia e valores; sem filtro não há ficha nem contagem", async () => {
- await abrir(); expect(screen.queryByText("Aplicar filtros")).toBeNull(); expect(screen.queryByText(/Filtros ·/)).toBeNull();
+ await abrir(); expect(screen.queryByText("Aplicar filtros")).toBeNull(); expect(nFichas()).toBe(0); expect(screen.getByRole("button", { name: "Filtros", selected: false })).toBeTruthy();
  expect(screen.queryByRole("button", { name: "Todas as origens" })).toBeNull(); // as duas fileiras de fichas saíram da tela
  await abrirFiltros();
  for (const t of ["Aplicar filtros", "Limpar tudo", "Tipo", "Origem", "Qualquer dia"]) expect(screen.getByText(t)).toBeTruthy();
@@ -65,10 +65,10 @@ it("mínimo maior que o máximo: erro no campo e nenhuma consulta", async () => 
  await abrir(); const antes = chamadas().length; await filtrar({ min: "5000", max: "1000" }); await act(drenar);
  expect(screen.getByText("O máximo não pode ser menor que o mínimo.")).toBeTruthy(); expect(chamadas().length).toBe(antes);
 });
-it("a contagem no botão soma tipo, origem, valor, dia e categoria (min e max são UM filtro)", async () => {
- await abrir("/extrato?dia=2026-10-02&categoria=alimentacao"); expect(screen.getByText("Filtros · 2")).toBeTruthy();
- await filtrar({ tipo: "Entradas", origem: "Banco", min: "1000", max: "9000" }); await waitFor(() => expect(screen.getByText("Filtros · 5")).toBeTruthy());
- expect(screen.getByRole("button", { name: "Filtros" })).toBeTruthy(); // o rótulo falado não muda com a contagem
+it("a contagem de fichas soma tipo, origem, valor, dia e categoria (min e max são UM filtro)", async () => {
+ await abrir("/extrato?dia=2026-10-02&categoria=alimentacao"); expect(nFichas()).toBe(2);
+ await filtrar({ tipo: "Entradas", origem: "Banco", min: "1000", max: "9000" }); await waitFor(() => expect(nFichas()).toBe(5));
+ expect(screen.getByRole("button", { name: "Filtros", selected: true })).toBeTruthy(); // o rótulo falado não muda com a contagem (o botão é só ícone); o VoiceOver ouve "selecionado"
 });
 it("min == max é válido (valor exato) e a ficha diz 'A partir de' só com mínimo, 'Até' só com máximo", async () => {
  await abrir(); await filtrar({ min: "5000", max: "5000" }); await waitFor(() => expect(consulta().get("valor_min")).toBe("50.00")); aplicado({ valor_max: "50.00" });
@@ -82,14 +82,14 @@ it("tirar uma ficha refaz a consulta sem ela e mantém as outras", async () => {
  await abrir(); await filtrar({ tipo: "Saídas", min: "1000", max: "9000" }); await waitFor(() => expect(consulta().get("valor_min")).toBe("10.00")); const antes = chamadas().length;
  await act(async () => { fireEvent.press(ficha("valor")!); await drenar(); });
  await waitFor(() => expect(chamadas().length).toBeGreaterThan(antes)); aplicado({ tipo: "saida", valor_min: null, valor_max: null });
- expect(ficha("valor")).toBeNull(); expect(screen.getByText("Filtros · 1")).toBeTruthy();
+ expect(ficha("valor")).toBeNull(); expect(nFichas()).toBe(0); // sobrou só tipo=saida, que o atalho "Saídas" já mostra: sem ficha
 });
 it("Limpar tudo tira tipo, origem, valor, dia e categoria de uma vez e fecha a folha", async () => {
  await abrir("/extrato?dia=2026-10-02&categoria=alimentacao"); await filtrar({ tipo: "Saídas", origem: "Cartão", min: "1000" });
  await waitFor(() => expect(consulta().get("valor_min")).toBe("10.00")); await abrirFiltros();
  await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Limpar tudo" })); await drenar(); });
  await waitFor(() => expect([...consulta().keys()].sort()).toEqual(["limite", "mes"]));
- expect(screen.queryByText(/Filtros ·/)).toBeNull(); expect(screen.queryByText("Aplicar filtros")).toBeNull(); expect(screen.queryByRole("button", { name: /^Limpar filtro/ })).toBeNull();
+ expect(nFichas()).toBe(0); expect(screen.queryByText("Aplicar filtros")).toBeNull(); expect(screen.queryByRole("button", { name: /^Limpar filtro/ })).toBeNull();
 });
 it("fechar a folha sem aplicar descarta o rascunho", async () => {
  await abrir(); const antes = chamadas().length; await filtrar({ tipo: "Saídas", min: "1000" }, false);
@@ -98,10 +98,10 @@ it("fechar a folha sem aplicar descarta o rascunho", async () => {
 });
 describe("dia pelo seletor", () => {
  it("dia de OUTRO mês no param entra como 'Qualquer dia' e 'Aplicar' não o reenvia", async () => {
-  await abrir("/extrato?dia=2025-01-05"); await waitFor(() => expect(consulta().get("dia")).toBe("2025-01-05")); expect(screen.getByText("Filtros · 1")).toBeTruthy();
+  await abrir("/extrato?dia=2025-01-05"); await waitFor(() => expect(consulta().get("dia")).toBe("2025-01-05")); expect(nFichas()).toBe(1);
   await abrirFiltros(); expect(screen.getByText("Qualquer dia")).toBeTruthy(); expect(screen.queryByTestId("seletor-data")).toBeNull();
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Aplicar filtros" })); await drenar(); });
-  await waitFor(() => expect(consulta().has("dia")).toBe(false)); expect(r.getSearchParams().dia).toBeUndefined(); expect(screen.queryByText(/Filtros ·/)).toBeNull();
+  await waitFor(() => expect(consulta().has("dia")).toBe(false)); expect(r.getSearchParams().dia).toBeUndefined(); expect(nFichas()).toBe(0);
  });
  const [ano, mes] = mesAtual().split("-").map(Number) as [number, number];
  const dia15 = `${mesAtual()}-15`, cDia = `15/${String(mes).padStart(2, "0")}/${ano}`;
@@ -118,7 +118,7 @@ describe("dia pelo seletor", () => {
   await abrir(`/extrato?dia=${dia15}`); await waitFor(() => expect(consulta().get("dia")).toBe(dia15)); await abrirFiltros();
   await act(async () => { fireEvent.press(screen.getAllByText("Qualquer dia")[0]!); await drenar(); });
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Aplicar filtros" })); await drenar(); });
-  await waitFor(() => expect(consulta().has("dia")).toBe(false)); expect(r.getSearchParams().dia).toBeUndefined(); expect(screen.queryByText(/Filtros ·/)).toBeNull();
+  await waitFor(() => expect(consulta().has("dia")).toBe(false)); expect(r.getSearchParams().dia).toBeUndefined(); expect(nFichas()).toBe(0);
  });
  it("Android: abre o diálogo nativo limitado ao mês, e o dia escolhido filtra", async () => {
   jest.replaceProperty(Platform, "OS", "android"); const abrirAndroid = DateTimePickerAndroid.open as jest.Mock;
@@ -129,7 +129,7 @@ describe("dia pelo seletor", () => {
   await waitFor(() => expect(consulta().get("dia")).toBe(dia15));
  });
  it("a rota navega com o dia do calendário e o botão já conta o dia", async () => {
-  await abrir(); await act(async () => { router.setParams({ dia: dia15 }); await drenar(); }); await waitFor(() => expect(screen.getByText("Filtros · 1")).toBeTruthy()); expect(consulta().get("dia")).toBe(dia15);
+  await abrir(); await act(async () => { router.setParams({ dia: dia15 }); await drenar(); }); await waitFor(() => expect(nFichas()).toBe(1)); expect(consulta().get("dia")).toBe(dia15);
  });
 });
 

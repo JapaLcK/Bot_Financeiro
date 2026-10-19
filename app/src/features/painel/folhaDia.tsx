@@ -6,7 +6,7 @@ import { IconeCategoria } from "@/ui/componentes/IconeCategoria";
 import { falado, faladoComSinal, VALOR_INDISPONIVEL_FALADO } from "@/ui/dinheiro";
 import { CORES_CATEGORIA } from "@/ui/tokens";
 import { ButtonPainel, TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
-import { nomeMes } from "./catalogo";
+import { nomeMes, semana } from "./catalogo";
 import { Acao, Folha, Linha, Valor } from "./base";
 import { usePainel } from "./provider";
 import { useGastosMes } from "./gastosMes";
@@ -20,9 +20,7 @@ import { irAoExtrato, useNavegacaoPainel } from "./navegacao";
  * dia de outro mês/ano (parcela) ou antes do corte não existe em `/gastos` e vai ao extrato (nunca R$ 0,00). Não usa `saiu`, `hojeSP()` nem o `diaAbrivel`, que dependem do `/gastos`.
  */
 export const abreFolha = (dia: string, mes: string, historicoDesde?: string | null) => dia.startsWith(mes) && !(historicoDesde && dia < historicoDesde);
-const SEMANA = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
 const TOM_PILULA = { gain: "positive", warn: "warning", "": "inkMuted" } as const; // tons do web (`gastosDia.ts`) → paleta do app
-const semana = (dia: string) => SEMANA[new Date(`${dia}T12:00:00Z`).getUTCDay()]!;
 /** "qui, 16 out" (título) e "quinta-feira, 16 de outubro" (VoiceOver). Datas civis: nunca passam pelo fuso do aparelho. */
 export const dataCurta = (dia: string) => `${semana(dia).slice(0, 3)}, ${Number(dia.slice(8))} ${nomeMes(dia.slice(0, 7)).slice(0, 3)}`;
 export const dataFalada = (dia: string) => `${semana(dia)}, ${Number(dia.slice(8))} de ${nomeMes(dia.slice(0, 7)).split(" de ")[0]}`;

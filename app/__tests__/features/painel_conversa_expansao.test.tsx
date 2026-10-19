@@ -19,18 +19,19 @@ const tocar = async (nome: RegExp) => { await act(async () => { fireEvent.press(
 
 it("categoria de OUTRO mês: pede o mês da aba, expande no lugar, recolhe ao tocar de novo, e nunca navega", async () => {
   const push = jest.spyOn(router, "push"); comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar();
-  expect(aberta(/Alimentação/)).toBe(false);
-  await tocar(/Alimentação/);
+  expect(aberta(/^Alimentação/)).toBe(false);
+  await tocar(/^Alimentação/);
   await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy());
+  expect(screen.getAllByText(/^\d{2}\/\d{2}\/\d{4} · /).length).toBeGreaterThan(0); // a linha expandida MANTÉM a data (semData só no Extrato)
   const q = consultaLanc(); expect([q.get("mes"), q.get("categoria"), q.get("tipo"), q.get("limite")]).toEqual([MES, "Alimentação", "saida", "10"]);
-  expect(aberta(/Alimentação/)).toBe(true);
-  await tocar(/Alimentação/); expect(aberta(/Alimentação/)).toBe(false); expect(screen.queryByText("Mercado do bairro")).toBeNull();
+  expect(aberta(/^Alimentação/)).toBe(true);
+  await tocar(/^Alimentação/); expect(aberta(/^Alimentação/)).toBe(false); expect(screen.queryByText("Mercado do bairro")).toBeNull();
   expect(push).not.toHaveBeenCalled();
 });
 it("controle positivo: no painel (aba Gastos) a mesma linha segue levando ao Extrato", async () => {
   instalarCards(true); const push = jest.spyOn(router, "push"); await abrir(); await ir("/gastos");
-  await waitFor(() => expect(screen.getByRole("button", { name: /Alimentação/ })).toBeTruthy());
-  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação", entrada: expect.any(Number) } });
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Alimentação/ })).toBeTruthy());
+  await act(async () => { fireEvent.press(screen.getByRole("button", { name: /^Alimentação/ })); await drenar(); }); expect(push).toHaveBeenCalledWith({ pathname: "/extrato", params: { categoria: "Alimentação", entrada: expect.any(Number) } });
   await waitFor(() => expect(screen.getByText("Mercado do bairro")).toBeTruthy()); await act(drenar); // espera o Extrato aberto terminar a leitura (senão ela atualiza o estado depois do teste)
 });
 it("categoria null: pede `categoria=` vazio (casa 'sem categoria')", async () => {
@@ -73,19 +74,19 @@ it("conta: pede a conta e o mês atual, expande no lugar e não navega", async (
 it("estados: carregando, erro com 'Tentar de novo' e vazio", async () => {
   const presa = segurar(); lancamentos.resp = async () => { await presa.promessa; return pagina([lanc({ descricao: "Chegou" })]); };
   comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar();
-  await tocar(/Alimentação/); expect(screen.getByLabelText("Carregando lançamentos")).toBeTruthy();
+  await tocar(/^Alimentação/); expect(screen.getByLabelText("Carregando lançamentos")).toBeTruthy();
   await act(async () => { presa.soltar(); await drenar(); }); expect(screen.getByText("Chegou")).toBeTruthy(); expect(screen.queryByLabelText("Carregando lançamentos")).toBeNull();
-  await tocar(/Alimentação/);
-  lancamentos.resp = () => resposta(500, { detail: "x" }); await tocar(/Alimentação/);
+  await tocar(/^Alimentação/);
+  lancamentos.resp = () => resposta(500, { detail: "x" }); await tocar(/^Alimentação/);
   await waitFor(() => expect(screen.getByText("Não conseguimos carregar agora. Tente novamente.")).toBeTruthy());
   lancamentos.resp = () => pagina([lanc({ descricao: "Voltou" })]); await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Tentar de novo" })); await drenar(); });
   expect(screen.getByText("Voltou")).toBeTruthy();
-  await tocar(/Alimentação/); lancamentos.resp = () => pagina([]); await tocar(/Alimentação/);
+  await tocar(/^Alimentação/); lancamentos.resp = () => pagina([]); await tocar(/^Alimentação/);
   await waitFor(() => expect(screen.getByText("Nenhum lançamento encontrado.")).toBeTruthy());
 });
 it("carregar mais: 'Carregar mais lançamentos' segue o cursor e junta as páginas", async () => {
   lancamentos.resp = (u) => u.searchParams.get("cursor") ? pagina([lanc({ descricao: "Segunda" })]) : pagina([lanc({ descricao: "Primeira" })], "c2");
-  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/Alimentação/);
+  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/^Alimentação/);
   await waitFor(() => expect(screen.getByText("Primeira")).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Carregar mais lançamentos" })); await drenar(); });
   expect(screen.getByText("Primeira")).toBeTruthy(); expect(screen.getByText("Segunda")).toBeTruthy(); expect(consultaLanc().get("cursor")).toBe("c2");
@@ -95,16 +96,16 @@ it("recolher no meio da busca: o sinal é abortado e nada atualiza depois (sem a
   const erro = jest.spyOn(console, "error").mockImplementation(() => undefined);
   const presa = segurar(); lancamentos.resp = async () => { await presa.promessa; return pagina([lanc({ descricao: "Tarde demais" })]); };
   comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar();
-  await tocar(/Alimentação/); await waitFor(() => expect(chamadasLanc()).toHaveLength(1)); const req = chamadasLanc()[0]![1] as RequestInit;
+  await tocar(/^Alimentação/); await waitFor(() => expect(chamadasLanc()).toHaveLength(1)); const req = chamadasLanc()[0]![1] as RequestInit;
   expect(req.signal!.aborted).toBe(false);
-  await tocar(/Alimentação/); expect(req.signal!.aborted).toBe(true);
+  await tocar(/^Alimentação/); expect(req.signal!.aborted).toBe(true);
   await act(async () => { presa.soltar(); await drenar(); });
   expect(screen.queryByText("Tarde demais")).toBeNull(); expect(erro).not.toHaveBeenCalled();
 });
 
 it("transação: a linha recolhida já diz 'parcela 3/10' e o toque abre o detalhe", async () => {
   lancamentos.resp = () => pagina([lanc({ descricao: "Geladeira", parcela: { n: 3, total: 10 }, instituicao: "Nubank", hora: "09:30", categoria: "Casa" })]);
-  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/Alimentação/);
+  comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/^Alimentação/);
   await waitFor(() => expect(screen.getByText("Geladeira")).toBeTruthy());
   expect(screen.getByText(/ · parcela 3\/10$/)).toBeTruthy(); expect(screen.queryByText(/Parcela 3\/10$/)).toBeNull();
   await act(async () => { fireEvent.press(screen.getByText("Geladeira")); await drenar(); });
@@ -118,7 +119,7 @@ it("card `periodo`: a categoria expande os maiores lançamentos no lugar — sem
 });
 
 it.each([[true, "undefined"], [false, "object"]])("reduzir movimento=%s: as transações da coluna entram com entering %s", async (reduzir, tipo) => {
-  definirReduzir(reduzir); comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/Alimentação/);
+  definirReduzir(reduzir); comBlocos(bloco("categorias", detalhesDe(MES), MES)); await perguntar(); await tocar(/^Alimentação/);
   await waitFor(() => expect(typeof screen.getByTestId("gastos-transacoes").props.entering).toBe(tipo));
 });
 it("reduzir movimento: o dia (linha expansível) segue entrando com `linha-expandida`", async () => {

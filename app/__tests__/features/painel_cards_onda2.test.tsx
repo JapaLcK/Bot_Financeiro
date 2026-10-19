@@ -25,7 +25,8 @@ describe.each([["ultimos_lancamentos", "Últimos lançamentos", ULT], ["sem_cate
     expect(screen.getByText(titulo)).toBeTruthy();
     const descricoes = (fixture.abas[0]!.recursos as Record<string, any>)[id].itens.map((i: any) => i.descricao as string);
     for (const d of descricoes) expect(c.getByText(d)).toBeTruthy();
-    expect(c.getByText("17/10/2026 · Carteira")).toBeTruthy(); expect(c.queryByRole("button", { name: /^\+ / })).toBeNull();
+    expect(c.getByText(id === "ultimos_lancamentos" ? "17/10/2026 · Carteira · Alimentacao" : "17/10/2026 · Carteira · Outros")).toBeTruthy(); // o card do chat MANTÉM a data, e ganha a categoria
+    expect(c.queryByRole("button", { name: /^\+ / })).toBeNull();
   });
   it("10 itens: 5 à vista e '+ 5 lançamentos' que abre os outros 5 na própria lista; 'Mostrar menos' volta", async () => {
     await mostrar(lista(id, 10)); const c = within(screen.getByTestId(`bloco-${id}`)), vistas = () => Array.from({ length: 10 }, (_, i) => i).filter((i) => c.queryByText(`compra ${i}`));
