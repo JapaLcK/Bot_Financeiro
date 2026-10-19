@@ -200,6 +200,20 @@ test("500 numa releitura: o número guardado continua, com o aviso", async () =>
   assert.match(t, /Não deu para atualizar\. Mostrando o que carregou antes\./);
 });
 
+test("sem banco + 500 numa releitura: o convite continua, com o aviso", async () => {
+  let cai = false;
+  const { ctx, page, ir } = await abrir({ milhao: "sem_banco", resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });
+  await card(page).locator(".convite").waitFor();
+  cai = true;
+  await ir("/ferramentas");
+  await ir("/milhao");
+  await card(page).locator(".prev-antigo").waitFor(); // o retry (1 s + 2 s) corre antes do aviso
+  const t = await texto(page);
+  await ctx.close();
+  assert.match(t, /Conecte um banco para ver quanto falta/);
+  assert.match(t, /Não deu para atualizar\. Mostrando o que carregou antes\./);
+});
+
 test("500: \"Tentar de novo\" refaz o pedido e mostra o número", async () => {
   let cai = true;
   const { ctx, page, pedidos } = await abrir({ resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });

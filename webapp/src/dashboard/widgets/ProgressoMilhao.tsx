@@ -81,6 +81,12 @@ export function MilhaoPainel() {
   const e = q.error instanceof ErroApi ? q.error : null;
   const e4 = e && e.status >= 400 && e.status < 500 ? e : null;
   const d = !e4 ? q.data : undefined;
+  const antigo = q.isRefetchError && (
+    <div className="prev-antigo" role="status">
+      <p>Não deu para atualizar. Mostrando o que carregou antes.</p>
+      <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
+    </div>
+  );
   return (
     <div className="panel span-12">
       <Frame id="milhao" title={Number(d?.patrimonio) >= 1e6 ? "Rumo ao próximo milhão" : "Rumo ao primeiro milhão"} real>
@@ -93,13 +99,8 @@ export function MilhaoPainel() {
               </div>
             )
             : <p role="status" className="faint">Carregando…</p>)
-          : d.motivos.includes("sem_banco_conectado") ? SEM_BANCO
-          : <Corpo d={d} busy={q.isFetching} antigo={q.isRefetchError && (
-            <div className="prev-antigo" role="status">
-              <p>Não deu para atualizar. Mostrando o que carregou antes.</p>
-              <button type="button" className="btn btn-quiet" onClick={() => q.refetch()}>Tentar de novo</button>
-            </div>
-          )} />}
+          : d.motivos.includes("sem_banco_conectado") ? <>{antigo}{SEM_BANCO}</>
+          : <Corpo d={d} busy={q.isFetching} antigo={antigo} />}
       </Frame>
     </div>
   );
