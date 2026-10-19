@@ -15,6 +15,8 @@ interface Base
   desativado?: boolean;
   /** Ícone à esquerda, dentro do contorno do campo (E-mail/Senha do login). Sem ele, o campo é IDÊNTICO ao de antes — snapshot preservado. */
   icone?: NomeIcone;
+  /** Sem o rótulo visível (campo de busca com ícone e placeholder); o leitor de tela continua lendo `rotulo`. */
+  rotuloOculto?: boolean;
   /** Vai direto ao `TextInput` (React 19: `ref` é prop comum), para quem precisa devolver o foco. */
   ref?: Ref<TextInput>;
 }
@@ -43,7 +45,7 @@ type Props = Base & ({ somenteLeitura?: false } | { somenteLeitura: true; value:
  * visível e o anunciado). Um `accessibilityLabel` custom do chamador
  * quebraria justamente essa concordância sem avisar ninguém.
  */
-export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura = false, ...resto }: Props) {
+export function Input({ rotulo, erro, desativado = false, icone, rotuloOculto = false, somenteLeitura = false, ...resto }: Props) {
   const { cores, acesso } = useTema();
   useAvisoAoErrar(!!erro);
   // Quem não está com o dedo neste campo (ou usa leitor de tela sem foco
@@ -110,9 +112,11 @@ export function Input({ rotulo, erro, desativado = false, icone, somenteLeitura 
 
   return (
     <View>
-      <Texto variante="rotulo" tom={inativo ? "inkMuted" : "ink"}>
-        {rotulo}
-      </Texto>
+      {rotuloOculto ? null : (
+        <Texto variante="rotulo" tom={inativo ? "inkMuted" : "ink"}>
+          {rotulo}
+        </Texto>
+      )}
       {icone ? (
         <View
           style={{

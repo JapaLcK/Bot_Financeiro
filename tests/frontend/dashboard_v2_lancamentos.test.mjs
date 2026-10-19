@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
+import { abrirFiltros, abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
 after(() => browser?.close());
@@ -15,13 +15,27 @@ test("mês real, quatro origens, nota, fatura de outro mês, selos e cursor opac
   await ir("/lancamentos");
   assert.equal(requests[0].searchParams.get("mes"), "2026-10");
   const text = await page.locator(".lancamentos").textContent();
-  for (const t of ["Carteira Piggy", "Banco", "Cartão", "Registro antigo", "Nota: gastei 42,90", "Parcela 1 de 3", "Fatura de Outubro 2026", "Movimento interno · fora de Entrou/Saiu", "transação pendente", "20 set"]) assert.ok(text.includes(t), t);
-  assert.doesNotMatch(text, /total do dia|\d+ de \d+ resultados|WhatsApp/i);
+  for (const t of ["Carteira Piggy", "Nubank", "Registro antigo", "Hoje · 02/10", "Ontem · 01/10", "Dom · 20/09"]) assert.ok(text.includes(t), t);
+  // P2: nada do contexto fica na linha; ele mora no detalhe
+  const linhas = await page.locator(".lanc-linha").allTextContents();
+  assert.doesNotMatch(linhas.join("|"), /Nota:|Parcela|Fatura de|Movimento interno|transação pendente|Junto com o banco/);
+  for (const [id, esperado] of [["l901", "Nota: gastei 42,90"], ["c55", "Parcela 1 de 3"], ["c55", "Fatura de Outubro 2026"], ["l899", "Movimento interno · fora de Entrou/Saiu"], ["l900", "transação pendente"], ["l898", "Junto com o banco"]]) {
+    await page.locator(`[data-id="${id}"] .lanc-abrir`).click();
+    await page.locator(".lanc-form[open]").waitFor();
+    assert.ok((await page.locator(".lanc-form").textContent()).includes(esperado), esperado);
+    await page.keyboard.press("Escape");
+    await page.locator(".lanc-form[open]").waitFor({ state: "detached" });
+  }
+  assert.doesNotMatch(text, /\d+ de \d+ resultados|WhatsApp/i);
+  // regra (a): com próxima página o último dia fica SEM total; os dois completos têm
+  assert.deepEqual(await page.locator(".lanc-dia h3 .num").allTextContents(), ["−R$ 72,90", "+R$ 1.040,00"]);
+  assert.equal(await page.locator(".lanc-dia").last().locator("h3 .num").count(), 0);
   await page.getByRole("button", { name: "Carregar mais", exact: true }).click();
   await page.locator('[data-id="l55"]').waitFor();
   assert.equal(requests.at(-1).searchParams.get("cursor"), fixture.proximo);
   assert.equal(await page.locator('[data-id="c55"]').count(), 1);
   assert.equal(await page.locator('.lanc-dia[aria-label*="20 de setembro"]').count(), 1);
+  assert.deepEqual(await page.locator(".lanc-dia h3 .num").allTextContents(), ["−R$ 72,90", "+R$ 1.040,00", "−R$ 100,01"]); // sem próxima página o último dia fecha, juntando as duas páginas
   assert.equal(await page.getByRole("button", { name: "Carregar mais", exact: true }).count(), 0);
   assert.deepEqual(erros, []);
   await ctx.close();
@@ -39,14 +53,16 @@ test("filtros e busca histórica só no servidor; trocar combinação reinicia c
     return r.fulfill({ json: { ...fixture, itens: u.searchParams.has("q") ? [fixture.itens[4]] : fixture.itens, proximo: null } });
   });
   await ir("/lancamentos");
+  await abrirFiltros(page);
   await page.getByRole("combobox", { name: /^Origem/ }).selectOption("banco");
   await page.getByRole("combobox", { name: /^Tipo/ }).selectOption("saida");
   await page.getByRole("combobox", { name: /^Categoria/ }).selectOption("alimentacao");
   const conta = respostaLista((p) => p.has("conta"));
+  await abrirFiltros(page);
   await page.getByRole("combobox", { name: /^Conta/ }).selectOption("7");
   await (await conta).finished();
   const historica = respostaLista((p) => p.has("q"));
-  await page.getByLabel("Buscar", { exact: true }).fill("loja ação");
+  await page.getByLabel("Buscar lançamento", { exact: true }).fill("loja ação");
   await (await historica).finished();
   await page.waitForFunction(() => document.querySelector('.lancamentos .w-lede')?.textContent.includes("loja ação"));
   await page.locator(".lanc-linha").nth(1).waitFor({ state: "detached" });
@@ -54,11 +70,11 @@ test("filtros e busca histórica só no servidor; trocar combinação reinicia c
   assert.deepEqual(Object.fromEntries(u.searchParams), { mes: "2026-10", origem: "banco", tipo: "saida", categoria: "alimentacao", conta: "7", q: "loja ação", guardado: "true" });
   assert.equal(await page.locator('[data-id="c55"]').count(), 1); // backend pode responder data de outro mês
   const mensal = respostaLista((p) => !p.has("q"));
-  await page.getByLabel("Buscar", { exact: true }).fill("a x");
+  await page.getByLabel("Buscar lançamento", { exact: true }).fill("a x");
   await (await mensal).finished();
   await page.getByText("Use pelo menos uma palavra de 2 ou mais caracteres para buscar.").waitFor();
   assert.equal(urls.at(-1).searchParams.has("q"), false);
-  await page.getByLabel("Buscar", { exact: true }).fill("");
+  await page.getByLabel("Buscar lançamento", { exact: true }).fill("");
   const anterior = respostaLista((p) => p.get("mes") !== "2026-10");
   await page.getByRole("button", { name: "Mês anterior", exact: true }).click();
   await (await anterior).finished();
@@ -78,6 +94,7 @@ test("resposta atrasada de filtro anterior não mistura linhas", async () => {
     await r.fulfill({ json: { ...fixture, itens: origem ? fixture.itens.filter((i) => i.origem === origem) : fixture.itens, proximo: null } }).catch(() => {});
   });
   await ir("/lancamentos");
+  await abrirFiltros(page);
   await page.getByRole("combobox", { name: /^Origem/ }).selectOption("banco");
   await page.getByRole("combobox", { name: /^Origem/ }).selectOption("cartao");
   await page.locator('[data-id="c55"]').waitFor();
@@ -95,6 +112,7 @@ test("vazio com motivo e catálogos falhos permitem carregar e tentar novamente"
   await page.getByText("Nenhum lançamento encontrado.").waitFor();
   await page.getByText("Não foi possível carregar as categorias.", { exact: false }).waitFor();
   assert.match(await page.locator(".lancamentos .selos").textContent(), /início do histórico/);
+  await abrirFiltros(page);
   assert.equal(await page.getByRole("combobox", { name: /^Categoria/ }).isDisabled(), true);
   await ctx.close();
 });
@@ -129,6 +147,7 @@ test("fronteiras reais de exemplos: o CTA da categoria leva a escolha (sem tipo)
   await page.locator(".lanc-linha").first().waitFor();
   // Decisão do dono: a ida é por filtro global, SEM `tipo` (a lista do extrato mostra entradas e saídas; a contagem pode passar a de "Compras").
   assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-10", categoria: "alimentacao", guardado: "true" });
+  await abrirFiltros(page);
   assert.equal(await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), "alimentacao");
   await page.keyboard.press("Control+k");
   assert.equal(await page.locator(".cmdk input").getAttribute("placeholder"), "Buscar página ou ação…");
@@ -141,7 +160,7 @@ for (const width of [1440, 760, 390, 320]) test(`layout ${width}: metadados vis�
   const { ctx, page, ir, erros } = await abrir({ width });
   await ctx.route("**/api/v2/lancamentos?*", (r) => r.fulfill({ json: { ...fixture, itens: [{ ...fixture.itens[0], descricao: "Descrição extensa ".repeat(12), mensagem: "Nota longa com detalhes ".repeat(45), valor: "999999999.99", moeda: "USD", motivos: ["outra_moeda", "moeda_presumida"] }, ...fixture.itens.slice(1)] } }));
   await ir("/lancamentos");
-  assert.ok(await page.locator('[data-id="l900"] .lanc-meta').isVisible());
+  assert.ok(await page.locator('[data-id="l900"] .faint').isVisible());
   await page.locator('[data-id="l901"] button').click();
   await page.locator(".lanc-form[open]").waitFor();
   const medidas = await page.evaluate(() => {
@@ -185,7 +204,7 @@ test("chat mantém extrato demonstrativo; abrir lançamentos reais preserva mês
   await abrirReal.click();
   await page.locator('[data-id="l901"]').waitFor();
   assert.deepEqual(Object.fromEntries(urls.at(-1).searchParams), { mes: "2026-09", guardado: "true" });
-  assert.equal(await page.getByLabel("Buscar", { exact: true }).inputValue(), "");
+  assert.equal(await page.getByLabel("Buscar lançamento", { exact: true }).inputValue(), "");
   await ctx.close();
 });
 
@@ -199,7 +218,7 @@ for (const width of [1440, 390]) test(`guardado (P8, ${width}px): a tela pede gu
   const linha = page.locator('[data-id="l902"]');
   await linha.waitFor();
   const texto = await linha.textContent();
-  assert.ok(texto.includes("Guardado · fora de Entrou/Saiu") && texto.includes("Viagem"), texto);
+  assert.ok(texto.includes("Guardado") && texto.includes("Viagem") && !texto.includes("fora de Entrou/Saiu"), texto);
   assert.doesNotMatch(texto, /Movimento|Registro antigo|Entrada|Saída/);
   assert.equal(await linha.locator(".lanc-valor.gain").count(), 0);
   const entrada = page.locator('[data-id="l903"]');
@@ -209,7 +228,7 @@ for (const width of [1440, 390]) test(`guardado (P8, ${width}px): a tela pede gu
   assert.equal(await entrada.locator(".lanc-valor.gain").count(), 0);
   await linha.locator(".lanc-abrir").click();
   const dialog = page.locator("dialog.lanc-form");
-  assert.ok((await dialog.textContent()).includes("Guardado"));
+  assert.ok((await dialog.textContent()).includes("Guardado · fora de Entrou/Saiu"));
   assert.doesNotMatch(await dialog.textContent(), /Movimento|Registro antigo|Apagar|Salvar/);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "sem rolagem horizontal");
   assert.deepEqual(erros, []);
