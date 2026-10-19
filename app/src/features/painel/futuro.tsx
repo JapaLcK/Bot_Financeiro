@@ -28,7 +28,7 @@ function ColunasPrevisao({ d }: { d: DadosPrevisao }) {
   </View>;
 }
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
-/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e a curva, sempre. O resto abre numa folha ao toque no card INTEIRO. */
+/** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e as colunas, sempre. O resto abre numa folha ao toque no card INTEIRO. */
 /** Montado só com a previsão na tela: avisa o card (`Bloco`) que há o que abrir. */
 function Pronto() { const { avisar } = useCardAberto(); useEffect(() => { avisar(true); return () => avisar(false); }, [avisar]); return null; }
 export function Previsao() {
@@ -42,7 +42,7 @@ export function Previsao() {
       <Valor valor={d.marcos.find((m) => m.dias === d.dias)?.saldo ?? null} destaque />
       {d.estado === "indisponivel" && <Texto variante="rotulo" tom="warning">Previsão indisponível</Texto>}
       {d.base.bancos_excluidos && <Texto variante="legenda" tom="warning">Bancos conectados fora do cálculo</Texto>}
-      {/* A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Sempre visível. */}
+      {/* As colunas partem da âncora (hoje), se houver: a trajetória da API começa amanhã. Sempre visíveis. */}
       {d.trajetoria ? (d.estado === "indisponivel" ? null : <ColunasPrevisao d={d} />) : <Vazio texto="Trajetória indisponível no seu plano." />}
       {aberto && <View style={{ gap: 8 }}>
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}

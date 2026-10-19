@@ -26,7 +26,8 @@ beforeEach(async () => {
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 });
-afterEach(() => { jest.restoreAllMocks(); });
+const janelaOriginal = Dimensions.get("window");
+afterEach(async () => { jest.restoreAllMocks(); await act(async () => { Dimensions.set({ window: janelaOriginal }); }); });
 const abrir = async (url = "/extrato") => { renderRouter("./app", { initialUrl: url }); jest.setSystemTime(new Date("2026-10-19T16:00:00Z")); await waitFor(() => expect(screen.getByText("Compra A")).toBeTruthy()); await act(drenar); };
 const cabecalhos = () => screen.getAllByRole("header").map((h) => h.props.children as string).filter((t) => /·/.test(t));
 const carregarMais = () => act(async () => { fireEvent.press(screen.getByRole("button", { name: "Carregar mais lançamentos" })); await drenar(); });
