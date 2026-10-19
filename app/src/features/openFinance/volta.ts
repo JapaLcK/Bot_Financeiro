@@ -3,7 +3,7 @@ import type { Conexao } from "@/api/schemas/openFinance";
 import { GENERICO, textoDaFalha } from "@/features/auth/entrar";
 import { perfil } from "@/services/auth";
 import { conexoes, registrarItem } from "@/services/openFinance";
-import { capturarItemBancario, concluirTentativaBancaria, lerTentativaBancaria, marcarTentativaBancariaVista, type TentativaBancaria } from "@/storage/secure";
+import { capturarItemBancario, concluirTentativaBancaria, lerTentativaBancaria, marcarTentativaBancariaVista, PRAZO_TENTATIVA_MS, type TentativaBancaria } from "@/storage/secure";
 
 /**
  * A volta do OAuth do banco (`<scheme>://open-finance-volta/<uuid>?itemId=…`, que a
@@ -217,7 +217,7 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
         const corrente = await lerTentativaBancaria(uid);
         if (d.cancelado()) return;
         const podeRegistrar = tentativa && corrente?.tentativa_id === tentativa.tentativa_id && itemId && tentativa.item_id === itemId &&
-          !tentativa.visto_no_servidor && (!reconectando || tentativa.autorizacao_recebida) && Date.now() - tentativa.iniciada_em <= 60 * 60_000;
+          !tentativa.visto_no_servidor && (!reconectando || tentativa.autorizacao_recebida) && Date.now() - tentativa.iniciada_em <= PRAZO_TENTATIVA_MS;
         if (tentativa && posts < MAX_POSTS && !visto && podeRegistrar) {
           posts += 1;
           const resposta = await registrarTentativa(uid, tentativa, itemId!, d.controlador);

@@ -8,7 +8,7 @@ import { useSessao } from "@/features/auth/sessao";
 import { carregarAcessoBancario, type AcessoBancario } from "@/features/openFinance/acesso";
 import { useForeground } from "@/features/openFinance/useForeground";
 import { useBloqueio } from "@/features/bloqueio/bloqueio";
-import { lerTentativaBancaria } from "@/storage/secure";
+import { lerTentativaBancaria, PRAZO_TENTATIVA_MS } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Screen } from "@/ui/componentes/Screen";
@@ -18,7 +18,7 @@ import { espaco, raio } from "@/ui/tokens";
 
 const MENSAGEM_ERRO_SAIR = "Não conseguimos sair. Tente de novo.";
 
-type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string; acesso: AcessoBancario["fase"]; pendente: boolean } | { fase: "erro"; mensagem: string };
+type Estado = { fase: "carregando" } | { fase: "pronto"; nome: string; acesso: AcessoBancario["fase"]; pendenteAte: number | null } | { fase: "erro"; mensagem: string };
 
 /**
  * Início provisório com gate de acesso e prova bancária no servidor.
@@ -65,6 +65,14 @@ export default function Inicio() {
     }
   }, [sessao]);
 
+  // O marcador vence com a tela aberta: sem isto "Retomar conexão" ficaria até o próximo foco, levando a uma volta sem tentativa.
+  const pendenteAte = estado.fase === "pronto" ? estado.pendenteAte : null;
+  useEffect(() => {
+    if (pendenteAte === null) return;
+    const t = setTimeout(() => setEstado((e) => e.fase === "pronto" && e.pendenteAte === pendenteAte ? { ...e, pendenteAte: null } : e), Math.max(0, pendenteAte - Date.now()));
+    return () => clearTimeout(t);
+  }, [pendenteAte]);
+
   const carregar = useCallback(async (cancelado: () => boolean = () => false) => {
     setAviso(null);
     try {
@@ -73,7 +81,7 @@ export default function Inicio() {
       const tentativa = a.fase === "inicio" || a.fase === "conectar" ? await lerTentativaBancaria(p.user_id) : null;
       if (cancelado()) return;
       const nome = p.display_name?.trim() || p.email?.split("@")[0] || "por aí";
-      setEstado({ fase: "pronto", nome, acesso: a.fase, pendente: !!tentativa });
+      setEstado({ fase: "pronto", nome, acesso: a.fase, pendenteAte: tentativa ? tentativa.iniciada_em + PRAZO_TENTATIVA_MS : null });
     } catch (e) {
       // Sessão encerrada (revogada, senha trocada): o provider decide a
       // navegação — não há erro para mostrar aqui.
@@ -136,7 +144,7 @@ export default function Inicio() {
               : estado.acesso === "senha" ? "Crie sua senha pelo link enviado por e-mail para continuar."
               : "Conecte seu banco e conclua a primeira sincronização para entrar."}</Texto>}
             {estado.acesso === "conectar" && <Button rotulo="Conectar meu banco" desativado={entrando} onPress={() => navegar("/conectar-banco")} />}
-            {estado.pendente && <Button rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />}
+            {estado.pendenteAte !== null && <Button rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} />}
             {estado.acesso === "inicio" && <Button rotulo="Bancos conectados" variante="secondary" desativado={entrando} onPress={() => navegar("/conexoes")} />}
             <Button rotulo="Conferir acesso novamente" variante="ghost" onPress={() => void carregar()} />
             <Button rotulo="Segurança" variante="secondary" icone="Lock" desativado={entrando} onPress={() => navegar("/seguranca")} />
