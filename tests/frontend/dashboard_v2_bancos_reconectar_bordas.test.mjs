@@ -17,10 +17,11 @@
 //  - E14: em reconectar.ts, trocar `semId: true` do "ocupado" por `semId: false`.
 //  - E15 (releitura lenta + troca de conta): em Bancos.tsx `terminou`, trocar `if (!contaMudou() && montada.current) {` por `if (true) {` (o "<banco> reconectado." da conta 7 vaza para o status da 8).
 //  - E18 (toast do seletor): em Bancos.tsx, no `onError` do seletor, trocar `(status === undefined ? msg : textoDoServidor({ status, msg }))` por `msg` (o corpo cru do 502 vai ao toast). Positivo: o 429 em JSON curto continua no toast.
-//  - E16 (toast do seletor): tirar `setErroOF("");` do cleanup do efeito do seletor. E17: tirar `pendente.current = null;` de `reconectarBanco` (um `onClose` tardio da 1ª sessão puxa o foco para a linha depois que a 2ª já terminou).
+//  - E16 (toast do seletor): tirar `setErroOF("");` do cleanup do efeito do seletor. E17 (duas proteções independentes, só fica vermelho com as DUAS desligadas): `velha` = `false` em frontend/open-finance-connect.js E tirar `pendente.current = null;` do `onConnectStart` (um `onClose` tardio da 1ª sessão puxa o foco para a linha depois que a 2ª já terminou).
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
 //  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
 //  - E20 (onSuccess de widget velho): em frontend/open-finance-connect.js, `fala` (no onSuccess de openWidget) por `vivo()` (o save falho de A termina a reconexão B).
+//  - E21 (foco pendente × seletor): em Bancos.tsx, tirar `pendente.current = null;` do `onConnectStart`.
 //  - E11 (onClose antes do onSuccess): em `iniciar`, `onClose`, nada a desligar: o positivo é o módulo real (o save acontece e o `onConnected` tardio relê).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -558,4 +559,25 @@ test("E20 o save FALHO do onSuccess tardio do widget velho A NÃO termina a reco
   await aviso(page).filter({ hasText: "Inter reconectado." }).waitFor({ state: "attached", timeout: 5000 });
   await ctx.close();
   assert.deepEqual(meio, { aviso: "Reconectando Inter…", alertas: 0, toasts: 0 });
+});
+
+test("E21 reconexão A conclui com o widget por cima (foco pendente, sem onClose) e depois o seletor conecta OUTRO banco: o onClose do seletor NÃO puxa o foco de volta para a linha de A", async () => {
+  const { ctx, page } = await telaRecon({}, { antes: (c) => c.route((u) => u.pathname === "/auth/me", (r) => r.fulfill({ json: { of_banks_max: 3 } })) });
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  await sucesso(page, "item-11");
+  await aviso(page).filter({ hasText: "Nubank reconectado." }).waitFor({ state: "attached" });
+  await page.evaluate(() => document.getElementById("pluggy-falso").remove()); // o iframe de A saiu, sem onClose
+  await page.getByRole("link", { name: "Conectar Bradesco", exact: true }).click();
+  await page.locator("#bankpick-go:not([disabled])").waitFor();
+  await page.waitForTimeout(400);
+  await page.locator("#bankpick-go").click();
+  await page.waitForFunction(() => window.__n === 2, null, { timeout: 8000 });
+  await page.evaluate(() => { window.__w.onSuccess({ item: { id: "item-novo" } }); }); // o seletor conclui: onConnected leva o foco ao título
+  await page.waitForFunction(() => document.activeElement?.id === "page-title", null, { timeout: 8000 });
+  await fechaWidget(page); // o onClose do seletor
+  await page.waitForTimeout(500);
+  const foco = await focoEm(page);
+  await ctx.close();
+  assert.equal(foco, "page-title");
 });

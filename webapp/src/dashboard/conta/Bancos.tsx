@@ -65,7 +65,7 @@ export function ContaBancos() {
     const viva = () => (emCurso.current && !emCurso.current.acabou() ? emCurso.current : null); // a reconexão que já terminou (releitura em voo) não engole o que vem do seletor
     seletor.init({
       apiBase: location.origin, userId: uid, guardaDuploClique: true,
-      onConnectStart: () => { if (vivo.on) setErroOF(""); },
+      onConnectStart: () => { pendente.current = null; if (vivo.on) setErroOF(""); }, // toda conexão nova (seletor ou reconexão) zera o foco que a anterior deixou pendente
       onOpen: () => viva()?.onOpen(),
       onClose: () => { const s = viva(); if (s) s.onClose(); else if (pendente.current !== null) { focar(pendente.current); pendente.current = null; } },
       onConnected: () => { const s = viva(); if (s) return s.onConnected(); mudou(); if (vivo.on) { setErroOF(""); document.getElementById("page-title")?.focus(); } }, // o "+" que abriu o seletor pode ter saído da lista: o foco vai ao título
@@ -182,7 +182,6 @@ export function ContaBancos() {
     const seletor = seletorOF();
     if (alvo || dialogo.current || emCurso.current || !seletor || !uidValido(uid) || !c.provider_item_id) return;
     const a = { uid, id: c.id, nome: nomeDoBanco(c) };
-    pendente.current = null;
     const s = emCurso.current = iniciar((r, semFoco) => { terminou(a, r, semFoco, s); }, () => seletor.destroy());
     setRecon(true);
     setAviso(`Reconectando ${a.nome}…`);
