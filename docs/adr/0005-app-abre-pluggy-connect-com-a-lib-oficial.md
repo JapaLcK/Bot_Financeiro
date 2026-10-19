@@ -172,9 +172,8 @@ legada sem vínculo consulta o servidor, sem atribuir o banco à tentativa ativa
 Falha/cancelamento da preparação descarta somente aquele nonce antes do widget;
 token entregue e pistas de possível autorização continuam recuperáveis.
 
-O diagnóstico `Teste Open Finance` continua em Configurações até a validação das
-telas definitivas no iPhone. Isso não adiciona modo OAuth dentro do app nem
-contorna limites/direito. Jest cobre as transições com SDK e rede simulados;
+O diagnóstico `Teste Open Finance` foi removido em 2026-10-18 por decisão do
+dono: a tela lia por uid sem conferir a conta entre as chamadas. Jest cobre as transições com SDK e rede simulados;
 exportação Metro não prova consentimento bancário real. A validação real das
 builds anteriores não substitui o roteiro das novas telas no aparelho.
 
