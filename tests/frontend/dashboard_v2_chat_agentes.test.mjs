@@ -399,6 +399,15 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: texto antes da menção que o NFD alonga (sílaba Hangul vira 2–3 jamos): a menção e o texto saem inteiros`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "한국어 @Detetive oi");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.deepEqual(chats.map((c) => [c.kind, c.message]), [["detetive", "한국어 oi"]]);
+    assert.equal(await page.locator(".chat > .msg-user .mencao").textContent(), "@Detetive");
+    await ctx.close();
+  });
+
   test(`${width}: nome do agente colado com acento decomposto (o + U+0301): a lista o acha e o envio vai ao agente`, async () => {
     const { ctx, page, chats } = await abrir({ width });
     await campo(page).fill("@Repo\u0301");
