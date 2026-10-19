@@ -6,8 +6,8 @@ import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, escutarLogout, investidoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas, Investido } from "./lib/api-v2.gen";
+import { DEMO, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Investido, OrcamentoDomestico } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -41,6 +41,18 @@ if (DEMO) {
     const anterior = prev && { mes: prev, entrou: txt(summary(prev).income), saiu: txt(summary(prev).expense) };
     const ate = `${mes}-${new Date(Number(mes.slice(0, 4)), Number(mes.slice(5)), 0).getDate()}`;
     qc.setQueryData(resumoMesQuery(mes).queryKey, { mes, ate, entrou: txt(m.income), saiu: txt(m.expense), anterior, motivos: [] });
+    // Potes de exemplo: teto = % da renda do mês; o gasto é uma fração fixa do teto, só para a tela ter o que mostrar.
+    const POTES = [["custos_fixos", "Custos fixos", "#7dd3fc", 55, 0.9], ["conforto", "Conforto", "#6ee7b7", 5, 0.5], ["metas", "Metas", "#fde047", 10, 0.6],
+      ["prazeres", "Prazeres", "#f0abfc", 10, 1.2], ["liberdade_financeira", "Liberdade financeira", "#93c5fd", 10, 0.8], ["conhecimento", "Conhecimento", "#fdba74", 10, 0.3]] as const;
+    const potes = POTES.map(([chave, nome, cor, pct, uso]) => {
+      const teto = Math.round(m.income * pct) / 100, gasto = Math.round(teto * uso * 100) / 100;
+      return { chave, nome, cor, pct: txt(pct), teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), usado_pct: teto > 0 ? txt(uso * 100) : null };
+    });
+    const soma = (k: "teto" | "gasto") => potes.reduce((a, p) => a + Number(p[k]), 0);
+    qc.setQueryData<OrcamentoDomestico>(orcamentoQuery(mes).queryKey, {
+      mes, renda: { valor: txt(m.income), origem: "calculada" }, potes,
+      total: { teto: txt(soma("teto")), gasto: txt(soma("gasto")), restante: txt(soma("teto") - soma("gasto")), usado_pct: soma("teto") > 0 ? txt(soma("gasto") / soma("teto") * 100) : null },
+    });
   }
 }
 
