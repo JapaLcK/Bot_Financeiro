@@ -210,6 +210,8 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     const uid = usuario.user_id;
     filaStorage.current = filaStorage.current.catch(() => {}).then(() => SecureStore.setItemAsync(chave, JSON.stringify(valor))).catch(() => { if (dono.current === uid) setAviso("Organização mantida nesta visita. Não conseguimos salvar neste aparelho."); });
   };
+  // O erro do Descartar não tem botão de fechar: sai quando a pendência some, por qualquer caminho (descarte, prazo, Retomar, foco).
+  useEffect(() => { if (pendente === null) setAviso((a) => a === FALHA_DESCARTE ? null : a); }, [pendente]);
   // "Descartar" do aviso de conexão pendente. Apaga só o marcador que o aviso mostrou (`concluirTentativaBancaria` confere o id e a sessão na fila) e RELÊ o cofre: uma tentativa B gravada depois continua aparecendo.
   const descartarPendente = async () => {
     const id = pendente, uid = dono.current;
@@ -217,7 +219,7 @@ export function PainelProvider({ children }: { children: ReactNode }) {
     try {
       await concluirTentativaBancaria(id);
       const relida = await lerTentativaBancaria(uid ?? undefined);
-      if (dono.current === uid) { setPendente(relida?.tentativa_id ?? null); setAviso((a) => a === FALHA_DESCARTE ? null : a); }
+      if (dono.current === uid) setPendente(relida?.tentativa_id ?? null);
       return true;
     } catch {
       if (dono.current === uid) setAviso(FALHA_DESCARTE);

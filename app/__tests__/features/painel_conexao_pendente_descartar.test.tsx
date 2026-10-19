@@ -4,7 +4,7 @@ import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 import { PRAZO_TENTATIVA_MS } from "@/storage/secure";
 import { chamadas, cofre, falharApagar, prepararCaso, resposta, rotear, S } from "./auth_apoio";
 import { guardarSessaoOf } from "./open_finance_volta_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 
 // O dono tocou num banco sem querer e o aviso ficou para sempre: "Descartar" apaga o marcador do cofre. Roda pela rota, como o `painel_pilha_avisos.test.tsx`.
@@ -69,6 +69,19 @@ it("falha ao apagar no cofre: erro visível e o aviso fica", async () => {
   await waitFor(() => expect(pendente()).toBeNull());
   expect(screen.queryByText(ERRO)).toBeNull();
   expect(cofre.has("pb.of.tentativa")).toBe(false);
+});
+
+it("falha ao apagar e o marcador vence depois: a pendência some e o erro vai junto, sem botão para tentar de novo", async () => {
+  await abrir();
+  falharApagar(true);
+  await descartar();
+  await waitFor(() => expect(screen.getByText(ERRO)).toBeTruthy());
+  falharApagar(false);
+  idade(PRAZO_TENTATIVA_MS + 1_000);
+  await appVai("background");
+  await appVai("active");
+  await waitFor(() => expect(pendente()).toBeNull());
+  expect(screen.queryByText(ERRO)).toBeNull();
 });
 
 it("a legenda do aviso diz como sair, sem supor que a pessoa desistiu", async () => {
