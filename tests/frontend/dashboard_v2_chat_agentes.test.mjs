@@ -236,6 +236,38 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: a conta muda noutra aba: a 1ª pergunta da conta nova ao mesmo agente vai sem o context da anterior`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    const da43 = [];
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 43, display_name: "Outra", email: null, whatsapp_linked: true } }));
+    await ctx.route(/\/agents\/43(\/|$)/, (r) => {
+      const m = new URL(r.request().url()).pathname.match(/^\/agents\/43\/(\w+)\/chat$/);
+      if (!m) return r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
+      da43.push({ kind: m[1], context: r.request().postDataJSON().context });
+      return r.fulfill({ json: { reply: "Oi, conta nova.", context: "ctx-43", redirects: [] } });
+    });
+    await page.evaluate(() => { location.hash = "#/conta/perfil"; }); // a Conta relê /auth/dashboard-profile (staleTime 0) sem recarregar a página
+    await page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await enviar(page, "@Detetive e agora?");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Oi, conta nova." }).waitFor();
+    assert.deepEqual(da43, [{ kind: "detetive", context: null }]);
+    assert.equal(chats.length, 1);
+    await ctx.close();
+  });
+
+  test(`${width}: trocar de página fecha a lista do @ (no celular a barra some fora do /piggy)`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await digitar(page, "@");
+    await lista(page).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await lista(page).waitFor({ state: "detached" });
+    assert.equal(await page.locator(".mencoes").count(), 0);
+    await ctx.close();
+  });
+
   test(`${width}: o redirect "Perguntar ao Carteiro" manda a pergunta dele ao Carteiro`, async () => {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });

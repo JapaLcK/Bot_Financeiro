@@ -40,7 +40,7 @@ export function ask(q: { text: string; topic?: TopicId | null; cat?: string | nu
 }
 
 // --- Conversa com um agente (@Nome na barra) ---
-// O context de cada agente e os que estão em voo vivem aqui, fora do React, com o `msgs`: a troca de página não os apaga.
+// O context de cada agente (chave `uid:kind`: o servidor amarra o context ao usuário e ao agente, e a conta pode mudar noutra aba) e os que estão em voo vivem aqui, fora do React, com o `msgs`: a troca de página não os apaga.
 const contextos = new Map<string, string | null>();
 const emVoo = new Set<string>();
 const notifica = () => subs.forEach((f) => f());
@@ -73,15 +73,15 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
   emVoo.add(kind);
   patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
   try {
-    const r = await conversar(uid, kind, texto, contextos.get(kind) ?? null);
+    const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null);
     if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
-    contextos.set(kind, r.context ?? null);
+    contextos.set(`${uid}:${kind}`, r.context ?? null);
     const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
     patch(id, { estado: "pronto", text: r.reply, redirects });
   } catch (e) {
     const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;
     const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
-    if (d.error === "invalid_context") contextos.delete(kind); // o próximo envio recomeça a conversa
+    if (d.error === "invalid_context") contextos.delete(`${uid}:${kind}`); // o próximo envio recomeça a conversa
     if (acesso) patch(id, estadoSemChat(kind, acesso));
     else if (semSenha(e) || sessaoDe(e)) patch(id, { estado: "erro", text: semSenha(e) ? SEM_SENHA : SESSAO, repetir: false });
     else patch(id, {

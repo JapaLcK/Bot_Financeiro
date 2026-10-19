@@ -24,6 +24,9 @@ export function AskBar({ path }: { path: Path }) {
   const input = useRef<HTMLInputElement>(null);
   const depois = useRef<number | null>(null); // onde o cursor fica depois de inserir a menção
   const here = path === "/piggy";
+  // Trocar de página fecha a lista (como o Esc): no celular a barra some fora do /piggy e a lista ficaria solta sobre a página nova.
+  const [rota, setRota] = useState(path);
+  if (rota !== path) { setRota(path); setFechada(true); }
   const avatar = <img src={ICON} alt="" width={28} height={28} />;
 
   // O catálogo só é lido quando há um "@" em edição: sem ele, nenhuma requisição a /auth nem a /agents.
