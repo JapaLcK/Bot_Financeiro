@@ -793,6 +793,41 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: o plano muda noutra aba com o rascunho aberto: a menção relê o catálogo e vai ao agente`, async () => {
+    const cat = (pro) => ({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: pro, can_activate: pro, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
+    let pro = false;
+    const { ctx, page } = await abrir({ width, lista: undefined });
+    await ctx.route(/\/agents\/42$/, (r) => r.fulfill(cat(pro)));
+    await digitar(page, "@det");
+    await lista(page).waitFor(); // o catálogo lido: sem plano
+    await campo(page).press("Escape");
+    pro = true; // assinou o PigBank+ noutra aba
+    await campo(page).fill("@Detetive oi");
+    await campo(page).press("Enter");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await ctx.close();
+  });
+
+  test(`${width}: o que se digita enquanto a menção é conferida fica no campo`, async () => {
+    const { ctx, page } = await abrir({ width });
+    let soltaPerfil;
+    const preso = new Promise((ok) => { soltaPerfil = ok; });
+    await campo(page).fill("@Detetive oi");
+    await page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile")); // a leitura do "@" já voltou
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fallback(); }); // a do envio demora
+    const saiu = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await campo(page).press("Enter");
+    await saiu;
+    await campo(page).fill("outra pergunta"); // começa a próxima enquanto a conta é conferida
+    soltaPerfil();
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.equal(await campo(page).inputValue(), "outra pergunta");
+    await enviar(page, "@Detetive oi"); // controle: sem edição no meio, o envio limpa o campo
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 2 do detetive." }).waitFor();
+    assert.equal(await campo(page).inputValue(), "");
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

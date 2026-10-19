@@ -99,8 +99,9 @@ export function AskBar({ path }: { path: Path }) {
           let d = dados, u = uid;
           if (quer) {
             try {
-              if (!DEMO) { const agora = (await lerContaFresca(qc)).user_id; if (agora !== u) { u = agora; d = undefined; } }
-              if (!d && (DEMO || uidValido(u))) d = await qc.fetchQuery(agentesQuery(u));
+              if (!DEMO) u = (await lerContaFresca(qc)).user_id;
+              // O catálogo também é relido: o plano ou um agente pode ter mudado noutra aba com a mesma conta (Codex no #1157).
+              d = DEMO || uidValido(u) ? await qc.fetchQuery(agentesQuery(u)) : undefined;
             } catch { d = undefined; /* sem conta conferida ou sem catálogo: vai ao Piggy */ }
           }
           const m = d && (DEMO || u != null) ? mencaoDe(t, d) : null;
@@ -108,7 +109,7 @@ export function AskBar({ path }: { path: Path }) {
             const acesso = acessoDe(d!, m.kind)!;
             if (!m.texto || !perguntarAoAgente({ kind: m.kind, original: t, texto: m.texto, uid: u ?? 0, acesso, energia: energiaDe(d!, m.kind) })) return; // só a menção, ou já há pergunta em voo a ele: o texto fica
           } else if (!ask({ text: t })) return; // outra pergunta ainda confere a conta: o texto fica
-          setText("");
+          setText((agora) => (agora === text ? "" : agora)); // o que foi digitado durante a conferência fica (Codex no #1157)
         } finally { enviando.current = false; }
       }}>
       {avatar}
