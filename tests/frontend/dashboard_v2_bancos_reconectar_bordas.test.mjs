@@ -19,6 +19,7 @@
 //  - E18 (toast do seletor): em Bancos.tsx, no `onError` do seletor, trocar `(status === undefined ? msg : textoDoServidor({ status, msg }))` por `msg` (o corpo cru do 502 vai ao toast). Positivo: o 429 em JSON curto continua no toast.
 //  - E16 (toast do seletor): tirar `setErroOF("");` do cleanup do efeito do seletor. E17: tirar `pendente.current = null;` de `reconectarBanco` (um `onClose` tardio da 1ª sessão puxa o foco para a linha depois que a 2ª já terminou).
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
+//  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
 //  - E11 (onClose antes do onSuccess): em `iniciar`, `onClose`, nada a desligar: o positivo é o módulo real (o save acontece e o `onConnected` tardio relê).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -513,4 +514,28 @@ test("E19 o onClose TARDIO do widget A, com a reconexão B em curso, NÃO termin
   const r = await aviso(page).innerText();
   await ctx.close();
   assert.equal(r, "Inter reconectado.");
+});
+
+test("E19b depois do save de B (a guarda do módulo já voltou a null) o onClose e o onError TARDIOS de A não consomem o foco pendente de B nem viram toast; o onClose de B devolve o foco", async () => {
+  const { ctx, page } = await telaRecon();
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  await page.evaluate(() => { window.__w1 = window.__w; });
+  await sucesso(page, "item-11");
+  await aviso(page).filter({ hasText: "Nubank reconectado." }).waitFor({ state: "attached" });
+  await page.evaluate(() => document.getElementById("pluggy-falso").remove());
+  await reconectar(page, "Inter");
+  await page.waitForFunction(() => window.__n === 2, null, { timeout: 8000 });
+  await sucesso(page, "item-12"); // B salva: `ocupado` volta a null com o widget de B ainda aberto
+  await aviso(page).filter({ hasText: "Inter reconectado." }).waitFor({ state: "attached" });
+  await page.evaluate(() => document.getElementById("page-title").focus());
+  await page.evaluate(() => { window.__w1.onError({ message: "tardio" }); window.__w1.onClose(); });
+  await page.waitForTimeout(500);
+  const meio = { toasts: await page.locator(".banco-toast").count(), foco: await focoEm(page) };
+  await fechaWidget(page); // o onClose de B
+  await page.waitForTimeout(400);
+  const fim = await naLinha(page, "Inter");
+  await ctx.close();
+  assert.deepEqual(meio, { toasts: 0, foco: "page-title" });
+  assert.ok(fim, "o onClose de B devolve o foco à linha");
 });

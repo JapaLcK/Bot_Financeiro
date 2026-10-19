@@ -27,7 +27,7 @@
  * duplo clique não vira dois connect-tokens e dois widgets, e `onError` aqui
  * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
  * callback do host dispara para a conexão que estava em curso.
- * O `onError`/`onClose` de um widget VELHO (já há outra conexão em curso, `ocupado` é outra sessão) não chegam ao host: a conexão mais nova é dona dele.
+ * O `onError`/`onClose`/init rejeitado de um widget VELHO (já nasceu uma conexão mais nova, mesmo depois de ela terminar) não chegam ao host: só a mais nova é dona dele (`ultima`).
  * `init()` do SDK que rejeita: `onError` e em seguida `onClose()`, e a guarda é liberada.
  * `onError` do SDK também libera a guarda: a Pluggy não garante `onClose` depois dele, e
  * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
@@ -85,6 +85,9 @@
   // connect() fixa a geração em que nasceu e, se ela mudou, é um fluxo morto —
   // seus callbacks (widget e save) não chegam mais ao host.
   let ocupado = null;
+  // A conexão mais NOVA (a última sessão criada em connect()), mesmo depois de `ocupado` voltar a null: só ela é dona do host. Os callbacks de um widget
+  // anterior (onError, onClose, init que rejeita) são ignorados; o onSuccess de qualquer widget salva sempre. O destroy() invalida tudo por `geracao`.
+  let ultima = null;
   let geracao = 0;
 
   function noop() {}
@@ -626,8 +629,9 @@
   async function openWidget(uid, host, itemId, sessao, vivo) {
     // Libera a guarda só se ainda for a desta conexão (não a de uma mais nova).
     const liberar = function () { if (ocupado === sessao) ocupado = null; };
-    // O widget é de uma conexão VELHA quando há outra, mais nova, em curso: o onError/onClose dele já não são do host (o onSuccess segue valendo: o item autorizado é sempre salvo).
-    const velha = function () { return !!ocupado && ocupado !== sessao; };
+    // O widget é de uma conexão VELHA quando já nasceu outra depois dele (pelo tempo de vida, não pela guarda `ocupado`, que volta a null no fim do save): o
+    // onError/onClose/init rejeitado dele já não são do host. O onSuccess segue valendo: o item autorizado é sempre salvo.
+    const velha = function () { return ultima !== sessao; };
     const data = await post("/open-finance/" + uid + "/connect-token", itemId ? { item_id: itemId } : {});
     const accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
@@ -703,7 +707,7 @@
     if (aberto && typeof aberto.then === "function") {
       aberto.then(null, function (err) {
         console.error("Pluggy init falhou", err);
-        if (!vivo()) return;
+        if (!vivo() || velha()) return;
         liberar();
         conf("onError", host)("Não foi possível concluir a conexão.");
         // o SDK não manda onClose depois de um init que rejeita; o onError do host pode ter chamado destroy()
@@ -726,7 +730,7 @@
     const host = cfg;
     const uid = host && host.userId;
     if (!uid) { conf("onError", host)("Sessão inválida. Faça login novamente"); return; }
-    const sessao = ocupado = {};
+    const sessao = ocupado = ultima = {};
     const g = geracao;
     const vivo = function () { return g === geracao; };
     // Isolado como o onOpen: um host que lança aqui não pode deixar a guarda presa.
