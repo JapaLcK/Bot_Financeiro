@@ -74,7 +74,7 @@ export function ContaBancos() {
     });
     return () => {
       vivo.on = false;
-      setAviso(""); setErroOF(""); // o que era da conta (ou da tela) que saiu não fica no status da nova (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta; a de reconexão tem `uid` e some sozinha na conta nova)
+      setAviso(""); setErroOF(""); pendente.current = null; // o que era da conta (ou da tela) que saiu não fica no status da nova (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta; a de reconexão tem `uid` e some sozinha na conta nova)
       if (seletor.busy()) return;
       seletor.destroy(); // aborta o connect-token em voo: a reconexão que ainda não abriu o widget não chega ao fim
       emCurso.current?.cancelar();
@@ -164,7 +164,7 @@ export function ContaBancos() {
     const status = r && !r.ok ? r.status : undefined;
     const trocada = contaMudou();
     let titulo = status === 401 || status === 403;
-    if (semFoco) pendente.current = titulo; // antes do await: o `onClose` tardio pode chegar durante a releitura
+    if (semFoco && !trocada) pendente.current = titulo; // (só se a conta ainda é a do clique: na nova o foco não é nosso) antes do await: o `onClose` tardio pode chegar durante a releitura
     if (status === 401) setFim(true);
     if (status === 403 || trocada) conta.refetch();
     else if (!titulo && !(r && !r.ok && r.tipo)) {

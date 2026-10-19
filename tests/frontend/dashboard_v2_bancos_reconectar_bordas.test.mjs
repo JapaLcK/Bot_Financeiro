@@ -21,6 +21,7 @@
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
 //  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
 //  - E20 (onSuccess de widget velho): em frontend/open-finance-connect.js, `fala` (no onSuccess de openWidget) por `vivo()` (o save falho de A termina a reconexão B).
+//  - E25 (conta trocada com o widget aberto): em Bancos.tsx `terminou`, trocar `if (semFoco && !trocada)` por `if (semFoco)` (o `onClose` tardio puxa o foco da página nova para o título). O `pendente.current = null` do cleanup do efeito do seletor NÃO é observável (com o `pendente` já setado o módulo é destruído no cleanup, e o `onClose` não chega mais): é só higiene.
 //  - E23 (onConnected tardio): em Bancos.tsx, no `onConnected` do seletor, tirar `if (pendente.current === null)` (o foco vai ao título atrás do widget). E24: em `falhaVisivel`, tirar `(falha.uid === undefined || falha.uid === uid) &&` (o alerta da conta 7 aparece sobre a 8).
 //  - E22 (abrir o seletor): em Bancos.tsx, tirar `pendente.current = null;` de `aoAbrirSeletor` (o `onConnectStart` sozinho não cobre: ainda não rodou, o usuário só abriu o picker).
 //  - E21 (foco pendente × seletor): em Bancos.tsx, tirar `pendente.current = null;` do `onConnectStart`.
@@ -630,4 +631,22 @@ test("E24 a falha de uma reconexão sem id (403) na conta 7 NÃO aparece sobre o
   const n = await alerta(page).count();
   await ctx.close();
   assert.equal(n, 0);
+});
+
+test("E25 a conta troca (7→8, sem desmontar) com o widget da reconexão aberto; o erro e o onClose tardios chegam: o foco da página nova NÃO vai ao título", async () => {
+  let uid = 7;
+  const { ctx, page } = await telaRecon({ perfil: () => ({ display_name: "Ana", email: "a@e.com", user_id: uid, whatsapp_linked: false }) }, { antes: rotas8 });
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  uid = 8;
+  await refoco(page);
+  await card(page, "Outro").waitFor();
+  await erroDoSdk(page); // o erro tardio do widget da conta 7
+  await page.waitForTimeout(400);
+  await linha(page, "Outro").evaluate((el) => el.focus());
+  await fechaWidget(page); // o onClose tardio
+  await page.waitForTimeout(500);
+  const r = await linha(page, "Outro").evaluate((el) => el === document.activeElement);
+  await ctx.close();
+  assert.equal(r, true);
 });
