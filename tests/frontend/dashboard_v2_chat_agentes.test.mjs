@@ -155,7 +155,7 @@ for (const width of TELAS) {
       return { bolha: u.textContent, mencao: men.textContent, cor: getComputedStyle(men).color, pink: (() => { const e = document.createElement("i"); e.style.color = "var(--pink-ink)"; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; })(), url: location.hash };
     });
     const cab = await resposta(page).locator(".msg-autor").evaluate((e) => ({ texto: e.textContent, src: e.querySelector("img").getAttribute("src").split("/").slice(-2).join("/"), selo: e.querySelector(".msg-tag")?.textContent }));
-    assert.deepEqual(chats.map(({ csrf, ...c }) => c), [{ kind: "detetive", message: "tem duplicada?", context: null }]);
+    assert.deepEqual(chats.map((c) => ({ kind: c.kind, message: c.message, context: c.context })), [{ kind: "detetive", message: "tem duplicada?", context: null }]);
     assert.equal(chats[0].csrf, "tok-123");
     assert.equal(r.bolha, "tem duplicada @detetive?");
     assert.equal(r.mencao, "@detetive"); // como o usuário digitou
