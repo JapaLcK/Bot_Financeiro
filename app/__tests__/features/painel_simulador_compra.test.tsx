@@ -144,12 +144,14 @@ describe("rolagem da folha", () => {
   it("resultado e 'Editar' levam a rolagem ao topo; um 422 e a digitação não rolam (o erro fica perto do campo)", async () => {
     const rolagem = jest.spyOn(ScrollView.prototype, "scrollTo").mockImplementation(() => undefined);
     try {
-      await abrirFolha(); preencher(); digitar(/^Nome/, "Celular 2"); rolagem.mockClear();
+      await abrirFolha(); preencher(); rolagem.mockClear(); digitar(/^Nome/, "Celular 2");
       simular = () => erro(422, "validation_error", [{ loc: ["body", "cenarios", 0, "preco"], msg: "x", type: "preco_invalido" }]); await calcular();
       await waitFor(() => expect(screen.getByLabelText(/^Preço.*erro/)).toBeTruthy()); expect(rolagem).not.toHaveBeenCalled();
       simular = () => resposta(200, SIM); await calcular(); await waitFor(() => expect(screen.getByRole("button", { name: "Editar" })).toBeTruthy());
       expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }]]);
       await apertar("Editar"); expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }], [{ y: 0, animated: false }]]);
+      rolagem.mockClear(); simular = () => erro(403, "pro_required"); await calcular();
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Calcular" })).toBeNull()); expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }]]);
     } finally { rolagem.mockRestore(); }
   });
 });

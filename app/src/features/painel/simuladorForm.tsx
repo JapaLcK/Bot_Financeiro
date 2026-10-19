@@ -78,7 +78,7 @@ export function SimuladorCompraFolha() {
       const f = falhaDe(e, n);
       if (f.motivo === "superada" || f.motivo === "portao") return fechar(); // a releitura da aba cai no portão (402); a folha era de outra conta (409)
       setAbertas((a) => a.map((v, i) => v || erroEmExtras(f.cenarios[i])));
-      setFalha(f);
+      setFalha(f); if (f.motivo === "plano") aoTopo(); // o convite troca o formulário inteiro, como o resultado; o 422 fica perto do campo
     } finally { voando.current = false; if (vivo.current) setPendente(false); }
   }
 
