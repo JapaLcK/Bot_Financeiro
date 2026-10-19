@@ -715,6 +715,7 @@
   /** Reconecta um banco já conectado, sem picker. Não passa por refreshLimits:
    *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto). */
   function reconnect(itemId) {
+    if (ocupado) return;   // em curso: ignora em silêncio, antes de validar (a regra vale para todo chamador)
     if (typeof itemId !== "string" || !itemId) {
       conf("onError")("Conexão inválida para reconectar.");
       return;

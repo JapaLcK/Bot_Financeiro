@@ -21,6 +21,7 @@
  *    (ou o bloco inteiro `if (aberto && typeof aberto.then === "function")`).
  *  - A21 (destroy no onConnectStart): tirar o `if (!vivo()) return;` logo depois do onConnectStart.
  *  - A22 (destroy no onError do init): trocar `if (vivo()) conf("onClose", host)();` por `conf("onClose", host)();`.
+ *  - A23 (ocupado antes de validar): tirar o `if (ocupado) return;` do topo de reconnect().
  *
  * Rodar: node --test tests/frontend/of_connect_reconectar.test.mjs
  */
@@ -470,5 +471,16 @@ test("A22 init que rejeita e o onError do host chama destroy(): sem onClose depo
   await waitFor(async () => (await ev(page)).length >= 2);
   await sleep(200);
   assert.deepEqual(await ev(page), ["open", "error"]);
+  await page.__ctx.close();
+});
+
+test("A23 reconnect com id inválido durante uma conexão em curso: ignorado em silêncio", async () => {
+  const page = await abrir();
+  await page.evaluate(() => window.PBOpenFinance.reconnect("item-11"));
+  await widgetPronto(page);
+  await page.evaluate(() => { window.PBOpenFinance.reconnect(""); window.PBOpenFinance.reconnect(null); });
+  await sleep(200);
+  assert.deepEqual(await ev(page), ["open"]);
+  assert.equal(await page.evaluate(() => window.__n), 1);
   await page.__ctx.close();
 });
