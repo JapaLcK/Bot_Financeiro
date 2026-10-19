@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { sair as sairNoServidor, temSessao } from "@/services/auth";
+import type { Credenciais } from "@/storage/secure";
 
 /**
  * Estado de sessão do app inteiro. Monta UMA vez na raiz (`_layout.tsx`) e
@@ -32,8 +33,11 @@ interface Sessao {
    * `false`, a falha do cofre passava em silêncio: o provider continuava
    * `autenticado` (correto, o invariante de pé) mas quem tocou "Sair" não via
    * nada, nem um erro nem uma segunda chance óbvia.
+   *
+   * `capturada`: a sessão de que quem chama sai (lida ANTES de uma ação longa), em vez de reler o cofre. Se o cofre
+   * já tem OUTRA sessão, nada é apagado, o provider segue autenticado (invariante) e devolve `"outra"` (truthy).
    */
-  sair: () => Promise<boolean>;
+  sair: (capturada?: Credenciais | null) => Promise<boolean | "outra">;
   /** Só vale em `erro`: refaz a checagem de sessão do início. */
   tentarDeNovo: () => void;
 }
@@ -89,11 +93,12 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
         if (saindoEmVoo.current) return;
         setEstado((s) => (s.fase === "autenticado" ? { fase: "anonimo", aviso } : s));
       },
-      sair: () => {
+      sair: (capturada) => {
         if (saindoEmVoo.current) return Promise.resolve(true);
         saindoEmVoo.current = true;
-        return sairNoServidor()
-          .then(() => {
+        return sairNoServidor(capturada)
+          .then((outraSessao) => {
+            if (outraSessao) return "outra" as const;
             setEstado({ fase: "anonimo" });
             return true;
           })

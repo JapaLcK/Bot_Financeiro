@@ -7,7 +7,7 @@ import { useSessao } from "@/features/auth/sessao";
 import { apagarLayouts } from "@/features/painel/catalogo";
 import { useFalha } from "@/features/seguranca/falha";
 import { excluirConta, pedirCodigoReauth } from "@/services/conta";
-import { lerCredenciais } from "@/storage/secure";
+import { lerCredenciais, type Credenciais } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Input } from "@/ui/componentes/Input";
@@ -58,6 +58,8 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
   const emVoo = useRef(false);
   const pedindoRef = useRef(false);
   const saindo = useRef(false);
+  // A sessão que iniciou a exclusão, lida antes do DELETE; `undefined` = o cofre falhou na leitura.
+  const daExclusao = useRef<Credenciais | null | undefined>(undefined);
   const campos = { senha: useRef<TextInput>(null), codigo: useRef<TextInput>(null), totp: useRef<TextInput>(null) };
 
   // Depois do render que devolveu `editable` ao campo (e montou o do autenticador) — antes dele o foco não pega.
@@ -90,18 +92,32 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
     }
   };
 
+  const soltar = () => {
+    setEnviando(false);
+    desprender();
+  };
+
   const sairEAvisar = async (status: Status) => {
     if (saindo.current) return; // duplo toque no "Sair" do Banner: um aviso só
     saindo.current = true;
-    if (!(await sessao.sair())) {
+    const saiu = await sessao.sair(daExclusao.current);
+    if (saiu !== true) {
       saindo.current = false;
-      setEnviando(false);
-      desprender();
-      setSemSair(status);
+      soltar();
+      if (!saiu) setSemSair(status); // "outra": outra conta ocupa o cofre; nada a avisar nem a apagar
       return;
     }
     if (status === "deleting") Alert.alert("Excluindo", "Você recebe um e-mail ao terminar.");
     else Alert.alert(status === "superada" ? NAO_CONFIRMOU : "Conta excluída");
+  };
+
+  // A conta já não existe: layouts do aparelho e sessão saem antes de qualquer aviso. Sai da sessão LIDA ANTES do
+  // DELETE (`sair` não relê o cofre): outra conta que entrou no meio não é deslogada. Leitura que falhou: sem sair às cegas.
+  const concluir = async (status: Status) => {
+    await apagarLayouts(userId);
+    if (daExclusao.current !== undefined) return sairEAvisar(status);
+    soltar();
+    setSemSair(status);
   };
 
   const excluir = async () => {
@@ -114,6 +130,7 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
     setAviso(null);
     setEnviando(true);
     prender();
+    daExclusao.current = await lerCredenciais().catch(() => undefined);
     let status: Status;
     try {
       status = await excluirConta({ ...(modo === "senha" ? { password: senha } : {}), code: codigo, ...(mostrarTotp ? { totp: totp.trim() } : {}) });
@@ -121,16 +138,10 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
       // 401 de sessão na PRÓPRIA requisição: o servidor só revoga sessões no commit e responde 200, então aqui nada
       // foi executado e a conta está viva: os layouts ficam. Timeout e rede também não apagam: a conta pode existir.
       if (e instanceof SessaoExpirada) return void falha(e);
-      // Superada: o 200 chegou com a sessão já revogada por requisição paralela (exclusão provável). Só sai se o cofre
-      // está vazio: com credenciais de OUTRA conta nele (B entrou durante o DELETE), `sair()` as destruiria.
-      if (e instanceof RequisicaoSuperada) {
-        await apagarLayouts(userId);
-        if ((await lerCredenciais()) === null) await sairEAvisar("superada");
-        return;
-      }
+      // Superada: o 200 chegou com a sessão já revogada por requisição paralela (exclusão provável).
+      if (e instanceof RequisicaoSuperada) return void (await concluir("superada"));
       emVoo.current = false;
-      setEnviando(false);
-      desprender();
+      soltar();
       const texto = falha(e);
       if (texto === null) return;
       setAviso(textoDaExclusao(e, texto));
@@ -139,9 +150,7 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
       if (campo) apontar(campo, true);
       return;
     }
-    // A conta já não existe: layouts do aparelho e sessão saem antes de qualquer aviso.
-    await apagarLayouts(userId);
-    await sairEAvisar(status);
+    await concluir(status);
   };
 
   return (

@@ -10,6 +10,7 @@ import {
   type Perfil,
 } from "../api/schemas/auth";
 import {
+  type Credenciais,
   FalhaNoCofre,
   guardarCredenciaisSe,
   lerCredenciais,
@@ -318,16 +319,19 @@ export async function temSessao(): Promise<boolean> {
  * entra (e não pode ser deslogada por engano) ou esta mesma sessão é renovada
  * por outra tela (e não pode escapar da saída com um refresh novo).
  */
-export async function sair(): Promise<void> {
+export async function sair(capturada?: Credenciais | null): Promise<"outra" | undefined> {
   // Toda entrada em voo fica inválida: sair é a intenção mais recente, e um
   // login que terminasse depois gravaria credencial numa sessão que o usuário
   // acabou de encerrar.
   ultimaTentativa += 1;
-  const daSaida = await lerCredenciais();
+  // `capturada`: quem já sabe de que sessão está saindo (a que iniciou uma ação longa) a passa, em vez de
+  // reler um cofre onde outra conta pode ter entrado. `null` = não havia sessão: nada a revogar.
+  const daSaida = capturada === undefined ? await lerCredenciais() : capturada;
+  let outraSessao: "outra" | undefined;
   // Sem sessão capturada não há logout a fazer, e TENTAR é pior que não fazer:
   // a requisição releria o cofre e poderia sair autenticada por uma conta que
   // entrou depois. Saída duplicada ou tardia cai exatamente aqui.
-  if (!daSaida) return;
+  if (!daSaida) return capturada === null && (await lerCredenciais()) !== null ? "outra" : undefined;
   try {
     // Esquece a linhagem SÓ se a sessão apagada era mesmo a desta saída. Se
     // outra conta assumiu o cofre no meio, a linhagem já é dela, e apagá-la
@@ -342,6 +346,9 @@ export async function sair(): Promise<void> {
     // mexer aqui não deve confiar em vermelho para perceber que a quebrou.
     if (await limparSessaoDe(daSaida.access, daSaida.refresh)) {
       _esquecerRotacoes();
+    } else if (capturada) {
+      // Devolve se o cofre guarda OUTRA sessão: quem chamou não pode virar anônimo com ela lá.
+      if ((await lerCredenciais()) !== null) outraSessao = "outra";
     }
   } finally {
     // Esperada, mas com tempo limite: um `fetch` pendurado não prende a tela
@@ -359,4 +366,5 @@ export async function sair(): Promise<void> {
       credencial: { access: daSaida.refresh, refresh: daSaida.refresh },
     }).catch(() => undefined);
   }
+  return outraSessao;
 }
