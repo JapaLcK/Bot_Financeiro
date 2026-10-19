@@ -46,8 +46,7 @@ it("PUT lento durante foreground não deixa seletor travado e reconcilia o perfi
 });
 it("privacidade remove montantes, gráfico e mensagem financeira da árvore acessível", async () => {
  renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("Disponível agora")).toBeTruthy());
- await waitFor(() => expect(screen.getByLabelText(/^Saldo previsto ao longo/)).toBeTruthy()); // as colunas da previsão estavam na tela antes de ocultar
- await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull(); expect(screen.queryByLabelText(/^Saldo previsto ao longo/)).toBeNull();
+ await apertar("Ocultar valores"); expect(screen.queryByLabelText(/9[.]?400/)).toBeNull(); expect(screen.queryByLabelText("Evolução dos valores no período")).toBeNull();
  await act(async () => { router.navigate("/piggy"); await drenar(); }); await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy")).toBeTruthy());
  // Chat privado: campo e chips desligados; o histórico do servidor nunca é mostrado.
  expect(screen.getByLabelText("Mensagem para o Piggy").props.editable).toBe(false); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();

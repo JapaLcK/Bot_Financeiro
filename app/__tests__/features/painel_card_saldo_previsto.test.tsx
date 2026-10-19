@@ -25,7 +25,7 @@ afterEach(() => jest.restoreAllMocks());
 const card = () => within(screen.getByTestId("bloco-hero")), folha = () => within(screen.getByTestId("folha-sheet"));
 const titulo = () => card().getByRole("button", { name: "Saldo previsto, ver detalhes" });
 const tocar = async (alvo: Parameters<typeof fireEvent.press>[0]) => { await act(async () => { fireEvent.press(alvo); await drenar(); }); };
-const DETALHES = ["Hoje, com as premissas", /^30 dias · /, /^Menor saldo previsto/], CURVA = /^Saldo previsto ao longo do período/;
+const DETALHES = ["Hoje, com as premissas", /^30 dias · /, /^Menor saldo previsto/], CURVA = "Evolução dos valores no período";
 async function abrirResumo() { renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy()); }
 const semDetalhes = () => { for (const t of DETALHES) expect(card().queryByText(t)).toBeNull(); };
 const comDetalhes = () => { expect(folha().getByText("Hoje, com as premissas")).toBeTruthy(); expect(folha().getByText(/^30 dias · /)).toBeTruthy(); expect(folha().getByLabelText(CURVA)).toBeTruthy(); };
