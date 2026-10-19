@@ -12,10 +12,22 @@
   .orc-corpo .btn-quiet:disabled:hover, .orc-form .btn-quiet:disabled:hover { background: transparent; color: var(--ink-2); }
 }
 .orc-dica { padding: 10px 12px; border-radius: 10px; background: var(--warn-wash); font-size: 13px; color: var(--ink-2); }
-.orc-potes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-.orc-pote { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 14px 16px; border-radius: var(--r-ctrl); background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); }
+.orc-grade { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
+.orc-donut { position: relative; width: 100%; max-width: 260px; aspect-ratio: 1; justify-self: center; }
+.orc-donut svg { display: block; width: 100%; height: 100%; }
+.orc-donut-centro { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; padding: 0 22%; text-align: center; pointer-events: none; }
+.orc-donut-centro b { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; overflow-wrap: anywhere; white-space: normal; }
+.orc-potes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+@media (max-width: 860px) { .orc-grade { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .orc-potes { grid-template-columns: minmax(0, 1fr); } }
+.orc-pote { position: relative; display: grid; gap: 10px; align-content: start; min-width: 0; padding: 14px 16px; border-radius: var(--r-ctrl); background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); }
 .orc-pote-topo { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
 .orc-pote h3 { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.orc-pote-btn { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.orc-pote-btn::after { content: ""; position: absolute; inset: 0; border-radius: var(--r-ctrl); } /* o card inteiro é o alvo do clique; o foco aparece no card */
+.orc-pote:has(.orc-pote-btn:focus-visible) { outline: 2px solid var(--pink); outline-offset: 2px; }
+.orc-pote-btn:focus-visible { outline: none; }
+@media (hover: hover) and (pointer: fine) { .orc-pote:hover { background: var(--plane-3, var(--plane-2)); } }
 .orc-ponto { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-3); }
 .orc-pote .meter { height: 6px; }
 .orc-valores { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 110px), 1fr)); gap: 8px 12px; margin: 0; font-size: 13px; }
@@ -38,3 +50,13 @@ button.orc-linha:disabled { cursor: default; opacity: 0.6; }
 .orc-linha-topo b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .orc-linha-corpo .meter { display: block; height: 6px; }
 .orc-fixa { display: grid; gap: 2px; }
+
+/* Modal de um pote (parts/PoteLancamentos.tsx). */
+.orc-modal-corpo { display: grid; gap: 12px; min-width: 0; }
+.orc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.orc-chips li { padding: 4px 10px; border-radius: 999px; background: var(--plane-2); box-shadow: inset 0 0 0 1px var(--rule); font-size: 12.5px; }
+.orc-lanc { display: grid; margin: 0; padding: 0; list-style: none; }
+.orc-lanc li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 10px 0; border-top: 1px solid var(--rule); font-size: 13.5px; }
+.orc-lanc-desc { overflow-wrap: anywhere; }
+.orc-lanc .num { white-space: nowrap; }
+.orc-lanc-sub { grid-column: 1 / -1; font-size: 12px; }

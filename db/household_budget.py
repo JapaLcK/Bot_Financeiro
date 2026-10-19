@@ -33,12 +33,12 @@ from .users import ensure_user
 # ─── Potes ───────────────────────────────────────────────────────────────────
 # Ordem de exibição = ordem da aba; cores da referência visual do produto.
 BUCKETS: list[dict[str, Any]] = [
-    {"key": "custos_fixos",          "label": "Custos fixos",          "color": "#7dd3fc", "default_pct": 55},
-    {"key": "conforto",              "label": "Conforto",              "color": "#6ee7b7", "default_pct": 5},
-    {"key": "metas",                 "label": "Metas",                 "color": "#fde047", "default_pct": 10},
-    {"key": "prazeres",              "label": "Prazeres",              "color": "#f0abfc", "default_pct": 10},
-    {"key": "liberdade_financeira",  "label": "Liberdade financeira",  "color": "#93c5fd", "default_pct": 10},
-    {"key": "conhecimento",          "label": "Conhecimento",          "color": "#fdba74", "default_pct": 10},
+    {"key": "custos_fixos",          "label": "Custos fixos",          "color": "#7dd3fc", "default_pct": 55, "guarda": False},
+    {"key": "conforto",              "label": "Conforto",              "color": "#6ee7b7", "default_pct": 5, "guarda": False},
+    {"key": "metas",                 "label": "Metas",                 "color": "#fde047", "default_pct": 10, "guarda": True},
+    {"key": "prazeres",              "label": "Prazeres",              "color": "#f0abfc", "default_pct": 10, "guarda": False},
+    {"key": "liberdade_financeira",  "label": "Liberdade financeira",  "color": "#93c5fd", "default_pct": 10, "guarda": True},
+    {"key": "conhecimento",          "label": "Conhecimento",          "color": "#fdba74", "default_pct": 10, "guarda": False},
 ]
 BUCKET_KEYS: set[str] = {b["key"] for b in BUCKETS}
 
@@ -210,7 +210,7 @@ def get_household_budget_status(
     color, pct, budget_amount, spent, remaining, used_pct, categories,
     by_category[{categoria,total}], launches[{data,descricao,categoria,valor,
     origem}]}], "totals": {spent,
-    budget_amount, remaining, used_pct}} — used_pct=None se budget_amount == 0.
+    budget_amount, remaining, remaining_free, used_pct}} — used_pct=None se budget_amount == 0.
     """
     ensure_user(user_id)
     month = _validate_month(month) if month else _current_month()
@@ -230,7 +230,7 @@ def get_household_budget_status(
         bucket_spent = round(sum(r["valor"] for r in mine), 2)
         by_cat: dict[str, dict[str, Any]] = {}
         for r in mine:
-            c = by_cat.setdefault(r["key"], {"categoria": r["categoria"], "total": 0.0})
+            c = by_cat.setdefault(r["categoria"], {"categoria": r["categoria"], "total": 0.0})
             c["total"] = round(c["total"] + r["valor"], 2)
         used_pct = (
             round(bucket_spent / budget_amount * 100.0, 2)
@@ -246,6 +246,7 @@ def get_household_budget_status(
             "budget_amount": budget_amount,
             "spent": bucket_spent,
             "remaining": round(budget_amount - bucket_spent, 2),
+            "guarda": b["guarda"],
             "used_pct": used_pct,
             "categories": _bucket_categories(b["key"]),
             "by_category": sorted(by_cat.values(), key=lambda c: -c["total"]),
@@ -266,6 +267,8 @@ def get_household_budget_status(
             "spent": total_spent,
             "budget_amount": total_budget,
             "remaining": round(total_budget - total_spent, 2),
+            # Restante sem o excedente dos potes guardados (passar do teto de Metas/Liberdade não come o folgado dos outros).
+            "remaining_free": round(sum(max(b["remaining"], 0) if b["guarda"] else b["remaining"] for b in buckets_out), 2),
             "used_pct": (
                 round(total_spent / total_budget * 100.0, 2)
                 if total_budget > 0 else None
