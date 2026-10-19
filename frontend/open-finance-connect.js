@@ -10,6 +10,24 @@
  *   PBOpenFinance.init({ apiBase, userId, onConnected, ... });
  *   PBOpenFinance.open();      // abre o modal na hora; preenche depois
  *   PBOpenFinance.destroy();   // remove markup e listeners; idempotente
+ *   PBOpenFinance.reconnect(itemId);  // reconecta um banco já conectado, sem picker
+ *
+ * Reconexão (`reconnect`): connect-token com `item_id` e `updateItem` no widget,
+ * sem `selectedConnectorId`. Callbacks extras: `onOpen()` quando o widget foi iniciado (não quando terminou de abrir);
+ * `onError(msg, status)` (status HTTP quando vem do servidor; erro do SDK não tem);
+ * `onClose()` (sem argumento) só depois de o /pluggy-item terminar — nada disso muda
+ * o fluxo do picker.
+ *
+ * Uma conexão por vez: do início do connect (picker ou reconexão) até o onClose,
+ * o erro ou o fim do save, `open()` e `reconnect()` são IGNORADOS EM SILÊNCIO —
+ * duplo clique não vira dois connect-tokens e dois widgets, e `onError` aqui
+ * pintaria erro pra quem só clicou duas vezes. Depois do `destroy()` nenhum
+ * callback do host dispara para a conexão que estava em curso.
+ * `init()` do SDK que rejeita: `onError` e em seguida `onClose()`, e a guarda é liberada.
+ * `onError` do SDK também libera a guarda: a Pluggy não garante `onClose` depois dele, e
+ * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
+ * custo é o de antes desta guarda: com o widget com erro ainda na tela, um novo clique
+ * abre outro; o `onClose` daquele chega depois ao host como tardio.
  *
  * A ordem do original é preservada de propósito: o modal aparece SÍNCRONO e só
  * o preenchimento é assíncrono. O estado do plano é rebuscado em paralelo e
@@ -52,6 +70,11 @@
   // terminar fora de ordem e a mais VELHA sobrescrever a mais nova pouco antes
   // de o confirmar ler — decidindo teto e reconexão com dado vencido.
   let limitsPromise = null;   // busca em voo, iniciada no open()
+  // Conexão em andamento (guarda de uma por vez) e geração do destroy(): cada
+  // connect() fixa a geração em que nasceu e, se ela mudou, é um fluxo morto —
+  // seus callbacks (widget e save) não chegam mais ao host.
+  let ocupado = null;
+  let geracao = 0;
 
   function noop() {}
 
@@ -106,13 +129,17 @@
   async function apiError(resp) {
     let raw = "";
     try { raw = await resp.text(); } catch (_e) { /* corpo ilegível */ }
+    let msg;
     try {
       const detail = JSON.parse(raw).detail;
-      if (detail && typeof detail === "object") return new Error(detail.message || detail.code || raw);
-      return new Error(detail || raw);
+      msg = (detail && typeof detail === "object") ? (detail.message || detail.code || raw) : (detail || raw);
     } catch (_e) {
-      return new Error(raw || "Erro inesperado");
+      msg = raw || "Erro inesperado";
     }
+    // O status viaja junto: quem reconecta decide pelo código (401 sessão, 404 banco sumiu…).
+    const err = new Error(msg);
+    err.status = resp.status;
+    return err;
   }
 
   /**
@@ -418,7 +445,7 @@
    * já ter ido pro campo de busca.
    */
   function open() {
-    if (!cfg) return;
+    if (!cfg || ocupado) return;
 
     // Sem atalho de plano aqui. O original tinha um, mas lendo um valor que a
     // PÁGINA acabara de buscar; aqui a única fonte seria um cache do módulo, e
@@ -549,18 +576,21 @@
    * init() trocasse de usuário enquanto o widget estava aberto — e isolamento
    * por usuário é regra dura deste repositório.
    */
-  async function savePluggyItem(itemData, uid, host) {
+  async function savePluggyItem(itemData, uid, host, vivo) {
     const item = (itemData && itemData.item) || itemData || {};
     if (!item.id && !item.itemId) throw new Error("A Pluggy não retornou o item conectado.");
     // Só depois desta resposta a conexão existe do lado do PigBank — o
     // onSuccess da Pluggy diz apenas que o banco autorizou.
     const data = await post("/open-finance/" + uid + "/pluggy-item", { item: item });
-    conf("onConnected", host)(data);
+    if (vivo()) conf("onConnected", host)(data);
     return data;
   }
 
-  async function openWidget(uid, host) {
-    const data = await post("/open-finance/" + uid + "/connect-token", {});
+  /** `itemId` = reconexão de um banco já conectado; sem ele, o fluxo de sempre. */
+  async function openWidget(uid, host, itemId, sessao, vivo) {
+    // Libera a guarda só se ainda for a desta conexão (não a de uma mais nova).
+    const liberar = function () { if (ocupado === sessao) ocupado = null; };
+    const data = await post("/open-finance/" + uid + "/connect-token", itemId ? { item_id: itemId } : {});
     const accessToken = data.accessToken;
     if (!accessToken) throw new Error("A Pluggy não retornou accessToken.");
 
@@ -572,54 +602,103 @@
     const connectorTypes = ["PERSONAL_BANK", "BUSINESS_BANK"];
     if (data.includeSandbox) connectorTypes.push("SANDBOX");
 
-    const widget = new PluggyConnect({
+    let salvando = null;   // o save do /pluggy-item em voo (só a reconexão espera por ele)
+    const opts = {
       connectToken: accessToken,
       includeSandbox: Boolean(data.includeSandbox),
       connectorTypes: connectorTypes,
-      selectedConnectorId: (selected && selected.id) || undefined,
+      // Reconexão não escolhe banco: `selected` sobrevive ao close() do picker e vazaria.
+      selectedConnectorId: itemId ? undefined : ((selected && selected.id) || undefined),
       // A mesma lista que foi no connect token (pluggy_products(), CLAUDE.md §0.7).
       products: data.products || undefined,
       language: "pt",
       theme: "dark",
-      onSuccess: async function (itemData) {
-        try {
-          await savePluggyItem(itemData, uid, host);
-          conf("notify", host)("Banco conectado com sucesso!", "ok");
-        } catch (err) {
-          // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
-          // autorizado na Pluggy mas o plano não comporta mais conexões.
-          conf("onError", host)(String((err && err.message) || err) || "Não foi possível salvar a conexão.");
-        }
+      onSuccess: function (itemData) {
+        if (!vivo()) return;
+        salvando = (async function () {
+          try {
+            await savePluggyItem(itemData, uid, host, vivo);
+            if (vivo()) conf("notify", host)("Banco conectado com sucesso!", "ok");
+          } catch (err) {
+            if (!vivo() || foiAbortado(err)) return;
+            // Ex.: limite de bancos do plano (402 OF_BANK_LIMIT) — o banco foi
+            // autorizado na Pluggy mas o plano não comporta mais conexões.
+            conf("onError", host)(String((err && err.message) || err) || "Não foi possível salvar a conexão.",
+              err && err.status);
+          } finally {
+            // Sucesso encerra a conexão mesmo se o SDK nunca mandar onClose.
+            liberar();
+          }
+        })();
+        return salvando;
       },
       onError: function (error) {
         console.error("Pluggy Connect error", error);
+        if (!vivo()) return;
+        // A Pluggy não garante onClose depois de onError: sem liberar aqui, o botão
+        // do settings (que se reabilita no onError) ficaria mudo até recarregar.
+        liberar();
         conf("onError", host)("Não foi possível concluir a conexão.");
       },
       onClose: function () {
-        conf("onClose", host)();
+        // Reconexão: o host relê a lista no onClose, então ele só vem depois do
+        // save — senão relê antes de o /pluggy-item gravar. O picker segue como era.
+        if (!vivo()) return;
+        const fim = function () {
+          if (!vivo()) return;
+          liberar();
+          conf("onClose", host)();   // sem argumento, como no picker
+        };
+        if (itemId) Promise.resolve(salvando).then(fim, fim);
+        else fim();
       },
-    });
+    };
+    if (itemId) opts.updateItem = itemId;
+    const widget = new PluggyConnect(opts);
 
-    if (typeof widget.init === "function") widget.init();
-    else if (typeof widget.open === "function") widget.open();
+    let aberto;
+    if (typeof widget.init === "function") aberto = widget.init();
+    else if (typeof widget.open === "function") aberto = widget.open();
     else throw new Error("Widget da Pluggy carregou em um formato inesperado.");
+    // SDK assíncrono: a rejeição não pode ficar solta nem deixar a guarda presa.
+    if (aberto && typeof aberto.then === "function") {
+      aberto.then(null, function (err) {
+        console.error("Pluggy init falhou", err);
+        if (!vivo()) return;
+        liberar();
+        conf("onError", host)("Não foi possível concluir a conexão.");
+        // o SDK não manda onClose depois de um init que rejeita; o onError do host pode ter chamado destroy()
+        if (vivo()) conf("onClose", host)();
+      });
+    }
+    // Fora do try do connect: um onOpen do host que lança não é erro de conexão.
+    if (vivo()) {
+      try { conf("onOpen", host)(); } catch (e) { console.error("onOpen do host falhou", e); }
+    }
   }
 
-  async function connect() {
+  async function connect(itemId) {
     // Fixa AQUI as duas pontas do fluxo — o usuário e o host — e carrega as
     // duas até o fim. O widget da Pluggy fica aberto por minutos: reler `cfg`
     // depois gravaria o item de quem iniciou na conta de quem estiver
     // configurado no fim, e pintaria as contas e transações de um na tela do
     // outro. Fixar só a URL resolvia metade.
+    if (ocupado) return;   // uma conexão por vez (ver docstring)
     const host = cfg;
     const uid = host && host.userId;
     if (!uid) { conf("onError", host)("Sessão inválida. Faça login novamente"); return; }
-    conf("onConnectStart", host)();
+    const sessao = ocupado = {};
+    const g = geracao;
+    const vivo = function () { return g === geracao; };
+    // Isolado como o onOpen: um host que lança aqui não pode deixar a guarda presa.
+    try { conf("onConnectStart", host)(); } catch (e) { console.error("onConnectStart do host falhou", e); }
+    if (!vivo()) return;   // o onConnectStart do host chamou destroy(): nada abre
     try {
-      await openWidget(uid, host);
+      await openWidget(uid, host, itemId, sessao, vivo);
     } catch (err) {
-      if (foiAbortado(err)) return;   // destruído no meio: o widget nem chegou a abrir
-      conf("onError", host)((err && err.message) || "Erro ao abrir a conexão Pluggy");
+      if (!vivo() || foiAbortado(err)) return;   // destruído no meio: o widget nem chegou a abrir
+      if (ocupado === sessao) ocupado = null;     // erro antes do widget: libera o botão
+      conf("onError", host)((err && err.message) || "Erro ao abrir a conexão Pluggy", err && err.status);
     }
   }
 
@@ -633,12 +712,25 @@
     return api;
   }
 
+  /** Reconecta um banco já conectado, sem picker. Não passa por refreshLimits:
+   *  o backend deixa reconexão passar pelo teto (test_b_p1_reconexao_passa_no_teto). */
+  function reconnect(itemId) {
+    if (ocupado) return;   // em curso: ignora em silêncio, antes de validar (a regra vale para todo chamador)
+    if (typeof itemId !== "string" || !itemId) {
+      conf("onError")("Conexão inválida para reconectar.");
+      return;
+    }
+    return connect(itemId);
+  }
+
   function destroy() {
     // Cancela o que estiver em voo ANTES de desmontar. Sem isto, uma requisição
     // pendente volta depois com a tela já desfeita — e o caso que mais dói é o
     // /connect-token: a continuação abriria o widget da Pluggy sozinha, sobre
     // uma página que não existe mais.
     abortInflight();
+    geracao++;
+    ocupado = null;
     close();
     if (root && root.parentNode) root.parentNode.removeChild(root);
     root = null;
@@ -647,6 +739,6 @@
     // propósito pra reabrir sem novo fetch da lista.
   }
 
-  const api = { init: init, open: open, close: close, destroy: destroy };
+  const api = { init: init, open: open, close: close, destroy: destroy, reconnect: reconnect };
   window.PBOpenFinance = api;
 })();
