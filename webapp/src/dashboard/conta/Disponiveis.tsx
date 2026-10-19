@@ -27,14 +27,14 @@ export function Disponiveis({ lista, aoAbrir }: { lista: Conector[]; aoAbrir: ()
   const id = useId();
   if (!lista.length) return null;
   return (
-    <section className="bancos-col" aria-labelledby={id}>
-      <h2 id={id} className="banco-rotulo">Disponíveis para conectar</h2>
-      <ul className="banco-grupo">
+    <section className="panel banco-sec" aria-labelledby={id}>
+      <header className="banco-sec-cab"><h2 id={id}>Disponíveis para conectar</h2><p>Conecte mais bancos via Open Finance.</p></header>
+      <ul className="banco-lista">
         {lista.map((c, i) => (
           <li key={c.id} className="banco-item">
             <Ladrilho nome={c.name} logo={c.logo} cor={corDoConector(c.color, i)} />
-            <span className="banco-id"><span className="banco-nome">{c.name}</span><span className="banco-sub">Conecte sua conta</span></span>
-            <ConectarLink pre={{ id: c.id, name: c.name }} className="banco-mais cinza" label={`Conectar ${c.name}`} aoAbrir={aoAbrir}><i className="ph ph-plus" aria-hidden="true" /></ConectarLink>
+            <span className="banco-id"><span className="banco-nome">{c.name}</span><span className="banco-sub">Conecte sua conta e tenha uma visão completa.</span></span>
+            <ConectarLink pre={{ id: c.id, name: c.name }} className="btn btn-primary banco-conectar" label={`Conectar ${c.name}`} aoAbrir={aoAbrir}><i className="ph ph-plus" aria-hidden="true" />Conectar</ConectarLink>
           </li>
         ))}
         <li><ConectarLink className="banco-todos" aoAbrir={aoAbrir}>Ver todos os bancos<i className="ph ph-caret-right" aria-hidden="true" /></ConectarLink></li>
