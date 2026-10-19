@@ -22,7 +22,7 @@ it("sair(capturadaA) pendurado, B entra e toca Sair: o Sair de B sai de verdade;
   const logouts: string[] = [];
   rotear({
     "/auth/logout": async (o) => {
-      const auth = (o.headers as Record<string, string>)["Authorization"];
+      const auth = (o.headers as Record<string, string>)["Authorization"] ?? "";
       logouts.push(auth);
       if (auth === "Bearer rt_s") await logoutA.promessa;
       return resposta(200, {});
