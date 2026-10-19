@@ -117,7 +117,7 @@ def _meses_inteiros(start: date, end: date) -> tuple[tuple[int, int], tuple[int,
 _MSG_1_MES = {
     "categorias": 'use show_card categorias com meses=["{mes}"]',
     "resumo": (
-        'use show_card resumo com meses=["{mes}"]. Vários meses (mês a mês, comparar) = UMA chamada: '
+        'use show_card resumo com meses=["{mes}"] (gasto do mês; o que ENTROU = show_card renda). Vários meses (mês a mês, comparar) = UMA chamada: '
         "show_card periodo com de/ate, ou categorias com meses=[...] (até 3). "
         'Saldo ("meu saldo", "quanto tenho") = show_card contas.'
     ),

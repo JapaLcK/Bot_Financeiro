@@ -56,7 +56,9 @@ def _resumo_renda(v: dict, categoria: str | None) -> dict:
     ev = v["evolution"]
     entrou, saiu = (sum((_dec(m[k]) for m in ev), Decimal(0)) for k in ("income", "expense"))
     return {"months": v["months"], "tendencia": v["tendencia"], "entrou": float(entrou), "saiu": float(saiu),
-            "saldo": float(entrou - saiu)} | _extremos([(m["month"], m["income"], m["expense"]) for m in ev])
+            "saldo": float(entrou - saiu),
+            "por_mes": [{"mes": m["month"], "entrou": float(_dec(m["income"])), "saiu": float(_dec(m["expense"]))} for m in ev],
+            } | _extremos([(m["month"], m["income"], m["expense"]) for m in ev])
 
 
 def _resumo_calendario(v: dict, categoria: str | None) -> dict:
