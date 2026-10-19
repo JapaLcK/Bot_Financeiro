@@ -231,7 +231,7 @@ export default function NotificacoesTela() {
               />
             </GrupoDeLinhas>
             {/* Nasce vazio: a seção de push entra aqui (docs/plano-push-app.md §2). */}
-            <Destino icone="Bell" rotulo="Push" valor="No celular" />
+            <Destino icone="Bell" rotulo="Notificações no celular" valor="No celular" />
           </>
         )}
       </View>
