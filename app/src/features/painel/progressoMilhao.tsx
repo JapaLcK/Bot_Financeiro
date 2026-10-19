@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, View } from "react-native";
 import type { z } from "zod";
 import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { progressoMilhaoSchema } from "@/api/schemas/painel";
 import { useSessao } from "@/features/auth/sessao";
+import { useBloqueio } from "@/features/bloqueio/bloqueio";
+import { useForeground } from "@/features/openFinance/useForeground";
 import { SEM_SENHA } from "@/features/openFinance/volta";
 import { lerRecurso } from "@/services/painel";
 import { Banner } from "@/ui/componentes/Banner";
@@ -36,7 +39,12 @@ export function ProgressoMilhao() {
       setFalha("erro");
     } finally { if (ctl.current === c) setLendo(false); }
   }, [expirou]);
-  useEffect(() => { void ler(); return () => { ctl.current?.abort(); ctl.current = null; }; }, [ler]);
+  // Como o provider: relê a cada foco (a volta de Bancos conectados) e na volta do segundo plano; nada sob a trava biométrica. Sair aborta.
+  const ativo = useForeground(), travado = useBloqueio().estado.fase === "travado";
+  useFocusEffect(useCallback(() => {
+    if (ativo && !travado) void ler();
+    return () => { ctl.current?.abort(); ctl.current = null; };
+  }, [ler, ativo, travado]));
 
   const corpo = dado
     ? <>

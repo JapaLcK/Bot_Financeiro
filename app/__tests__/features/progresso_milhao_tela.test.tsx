@@ -5,7 +5,7 @@ import { guardarCredenciais } from "@/storage/secure";
 import { ProgressBar } from "@/ui/componentes/ProgressBar";
 import { VALOR_OCULTO_FALADO } from "@/ui/dinheiro";
 import { fetchFalso, prepararCaso, resposta } from "./auth_apoio";
-import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
+import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
 // Tela Progresso ao milhão: `renderRouter` + servidor falso. A conta de juros tem o seu teste (`milhao_paridade`); aqui, os estados e as falhas. Relógio em 2026-10.
@@ -122,6 +122,17 @@ it("tela aberta na virada do mês (SP): puxar para atualizar com o mesmo patrim�
   expect(screen.getByText("dezembro de 2050")).toBeTruthy();
   jest.setSystemTime(new Date("2026-11-01T04:00:00Z")); await puxar();
   expect(screen.getByText("janeiro de 2051")).toBeTruthy();
+});
+it("voltar de Bancos conectados relê: o convite de sem banco dá lugar ao corpo", async () => {
+  milhao = () => resposta(200, F.sem_banco); await abrir(); await apertar("Conectar banco");
+  await waitFor(() => expect(screen).toHavePathname("/conexoes"));
+  milhao = () => resposta(200, F.padrao); await act(async () => { router.back(); await drenar(); });
+  await waitFor(() => expect(screen.getByLabelText("Guardar por mês")).toBeTruthy()); expect(leituras()).toHaveLength(2);
+});
+it("voltar do segundo plano relê; em segundo plano, nenhuma leitura", async () => {
+  await abrir(); expect(leituras()).toHaveLength(1);
+  await appVai("background"); expect(leituras()).toHaveLength(1);
+  await appVai("active"); await waitFor(() => expect(leituras()).toHaveLength(2));
 });
 it("duas leituras: a resposta lenta da 1ª, que chega depois da 2ª, não sobrescreve", async () => {
   let solta!: (r: Response) => void;
