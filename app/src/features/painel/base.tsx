@@ -138,22 +138,26 @@ export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, childr
 }
 /**
  * `outra`: segunda série (tracejada) na MESMA escala, p.ex. o saldo sem a compra; as duas precisam ter o mesmo tamanho e nenhum null.
- * `eixoX`: textos embaixo (início, meio e fim) e, à esquerda, o maior, o do meio e o menor valor (`rotuloCompacto`, em centavos); sem ele, a curva é só o desenho.
+ * `datas` (uma por valor): liga os eixos. Embaixo, a data do início, do meio e do fim; à esquerda, o maior, o do meio e o menor valor (`rotuloCompacto`, em centavos; um só se todos forem iguais). Os valores e as datas entram também no rótulo de acessibilidade. Sem `datas`, a curva é só o desenho.
  */
 const CURVA_Y0 = 15, CURVA_Y1 = 100, CURVA_ALTURA = 112, CURVA_COLUNA_Y = 52;
-export function Curva({ valores, outra, eixoX }: { valores: (number | null)[]; outra?: (number | null)[]; eixoX?: string[] }) {
+export function Curva({ valores, outra, datas }: { valores: (number | null)[]; outra?: (number | null)[]; datas?: string[] }) {
   const { oculto } = usePrivacidade(); const { cores } = useTema();
   if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
   if (!valores.length || valores.some((v) => v === null) || (outra && (outra.length !== valores.length || outra.some((v) => v === null)))) return <Vazio texto="Trajetória indisponível." />;
   const nums = valores as number[], todos = outra ? [...nums, ...(outra as number[])] : nums, min = Math.min(...todos), max = Math.max(...todos), amplitude = max - min || 1;
+  const marcas = datas && datas.length === nums.length && nums.length > 1 ? [...new Set([0, Math.floor((nums.length - 1) / 2), nums.length - 1])] : null; // índices do início, do meio e do fim
+  const eixoX = marcas?.map((i) => datas![i]!);
+  const ticksY = max === min ? [max] : [max, (max + min) / 2, min]; // sem variação, um rótulo só: três iguais ficariam um por cima do outro
   const y = (v: number) => CURVA_Y1 - (v - min) / amplitude * (CURVA_Y1 - CURVA_Y0);
   const caminho = (ns: number[]) => ns.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, ns.length - 1)},${y(v)}`).join(" ");
-  const tracos = <>{eixoX && [max, (max + min) / 2, min].map((v, i) => <Line key={i} x1={0} x2={300} y1={y(v)} y2={y(v)} stroke={cores.border} strokeWidth={1} />)}{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums)} fill="none" stroke={cores.brand} strokeWidth={3} /></>;
-  if (!eixoX) return <Svg width="100%" height={CURVA_ALTURA} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período">{tracos}</Svg>;
-  return <View accessible accessibilityLabel="Evolução dos valores no período">
+  const tracos = <>{eixoX && ticksY.map((v, i) => <Line key={i} x1={0} x2={300} y1={y(v)} y2={y(v)} stroke={cores.border} strokeWidth={1} />)}{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums)} fill="none" stroke={cores.brand} strokeWidth={3} /></>;
+  if (!marcas || !eixoX) return <Svg width="100%" height={CURVA_ALTURA} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período">{tracos}</Svg>;
+  const rotulo = `Evolução dos valores no período: ${marcas.map((i) => `${datas![i]}, ${rotuloCompacto(nums[i]!)}`).join("; ")}`;
+  return <View accessible accessibilityLabel={rotulo}>
     <View style={{ flexDirection: "row" }}>
       <View style={{ width: CURVA_COLUNA_Y, height: CURVA_ALTURA }}>
-        {[max, (max + min) / 2, min].map((v, i) => <Texto key={i} testID="curva-rotulo-y" variante="legenda" tom="inkMuted" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ position: "absolute", right: 6, top: y(v) - 8, height: 16, lineHeight: 16 }}>{rotuloCompacto(v)}</Texto>)}
+        {ticksY.map((v, i) => <Texto key={i} testID="curva-rotulo-y" variante="legenda" tom="inkMuted" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ position: "absolute", right: 6, top: y(v) - 8, height: 16, lineHeight: 16 }}>{rotuloCompacto(v)}</Texto>)}
       </View>
       <Svg style={{ flex: 1 }} height={CURVA_ALTURA} viewBox="0 0 300 112" preserveAspectRatio="none">{tracos}</Svg>
     </View>

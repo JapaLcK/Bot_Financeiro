@@ -12,10 +12,10 @@ import { useRespondidas } from "./receitas";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
-/** A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Eixo Y com o maior, o do meio e o menor saldo; eixo X com a data do início, do meio e do fim. */
+/** A curva parte da âncora (hoje), como a do /painel: a trajetória da API começa amanhã. Os eixos (valores e datas) ficam por conta da `Curva`. */
 function CurvaPrevisao({ d }: { d: DadosPrevisao }) {
   const serie = [...(d.ancora ? [{ data: d.ancora.data, saldo: d.ancora.saldo }] : []), ...(d.trajetoria ?? [])];
-  return <Curva valores={serie.map((s) => s.saldo)} eixoX={serie.length > 1 ? [serie[0]!, serie[Math.floor((serie.length - 1) / 2)]!, serie[serie.length - 1]!].map((s) => ddmm(s.data)) : undefined} />;
+  return <Curva valores={serie.map((s) => s.saldo)} datas={serie.map((s) => ddmm(s.data))} />;
 }
 const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLegivel(n) : n;
 /** Compacto (card do Resumo, `Bloco` com `detalhes`): horizonte, data, saldo e a curva, sempre. O resto abre numa folha ao toque no card INTEIRO. */
