@@ -14,8 +14,8 @@ import { Frame } from "../parts/Frame";
 import { CHAVE_ESCRITA, OrcamentoForm, mostra, useEscrita, type Modo } from "../parts/OrcamentoForm";
 import { ConvitePro } from "./Compromissos";
 
-function Bloqueio({ e }: { e: ErroApi }) {
-  if (e.code === "pro_required") return <ConvitePro texto="O Orçamento doméstico é do Plus e do Pro." />;
+export function Bloqueio({ e, pro = "O Orçamento doméstico é do Plus e do Pro." }: { e: ErroApi; pro?: string }) {
+  if (e.code === "pro_required") return <ConvitePro texto={pro} />;
   if (e.code === "password_required") {
     return (
       <div className="empty" role="alert">
