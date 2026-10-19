@@ -1,0 +1,9 @@
+<!-- @dsCard group="Surfaces" height=230 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {Card,Money,Text}=PigBank;return e("div",{style:{display:"grid",gap:12}},
+ e(Card,null,e(Text,{variant:"label",tone:"ink-muted",as:"div"},"Saldo previsto"),e(Money,{cents:428050,variant:"display"})),
+ e(Card,{elevation:"raised"},e(Text,{variant:"label",tone:"ink-muted",as:"div"},"Guardado"),e(Money,{cents:120000,variant:"display"})))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

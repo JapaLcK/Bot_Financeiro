@@ -284,6 +284,10 @@ export default defineConfig([
     // linha, lintando config de Expo com regras de <script> do site.
     // Mesmo motivo do `webapp/**` logo acima: dois mundos, dois configs.
     "app/**",
+    // Cópia do artifact do design system (docs/design-system/ORIGEM.md): o
+    // `bundle.js` dali roda dentro da página do artifact, não no site, e não é
+    // servido por rota nenhuma. Quem manda nele é o artifact, não este lint.
+    "docs/design-system/**",
     "frontend/precos-app.js",
     "frontend/precos-app.css",
     "frontend/chat-app.js",

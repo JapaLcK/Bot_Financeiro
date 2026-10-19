@@ -1,0 +1,8 @@
+<!-- @dsCard group="Foundations" height=330 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {Icon,iconNames}=PigBank;return e("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(40px,1fr))",gap:12}},
+ iconNames.map(n=>e("span",{key:n,title:n,style:{display:"flex",justifyContent:"center"}},e(Icon,{name:n,tone:"ink"}))))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>
