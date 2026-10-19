@@ -2,6 +2,7 @@ import { useId, useRef } from "react";
 import { FUSO, instante } from "../lib/v2";
 import { haQuanto } from "../lib/format.js";
 import { NATIVE, useDialogo } from "../parts/dialog";
+import { corDoBanco } from "../lib/bancos";
 import { Estado, Ladrilho, dinheiro, nomeDoBanco, plural, type Linha } from "./BancoCard";
 import type { Conexao } from "./api";
 
@@ -30,7 +31,7 @@ export function BancoDetalhe({ c, i, v, bloqueado, falha, onDesconectar, fechar 
         <div className="banco-det-cab"><button type="button" className="banco-det-x" aria-label="Fechar" onClick={fecharDialog}><i className="ph ph-x" aria-hidden="true" /></button></div>
         <div className="banco-det-corpo">
           <div className="banco-det-id">
-            <Ladrilho c={c} i={i} grande />
+            <Ladrilho nome={nome} logo={c.logo_url} cor={corDoBanco(c.institution_name ?? "", i)} grande />
             <h2 id={`${id}-t`}>{nome}</h2>
             <Estado c={c} />
             {c.ui.detail && <p>{c.ui.detail}</p>}

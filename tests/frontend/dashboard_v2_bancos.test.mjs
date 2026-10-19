@@ -1,14 +1,14 @@
 // Bancos conectados no /painel (#/conta/bancos, conta/Bancos.tsx, conta/BancoCard.tsx, lib/bancos.ts): a leitura. A desconexão mora em dashboard_v2_bancos_desconectar*.test.mjs. Plano:
 // docs/plano-bancos-conectados-painel.md, W1. Três leituras: o snapshot do Open Finance (`/open-finance/{uid}`, o estado de cada
 // conexão), `/api/v2/bancos` (os valores) e `/open-finance/{uid}/limite` (as vagas); só o snapshot é obrigatório.
-//   · o topo é o `total` do servidor, nunca a soma dos cards; a junção é por `conexao_id`, nunca por nome; null é "—", nunca "R$ 0,00";
-//   · a barra por banco só aparece quando nada deixa o número incerto e a soma fecha EXATA com o topo;
+//   · a lista é um grupo só, sem valor (sem topo, total, barra): os números estão no detalhe, onde a junção é por `conexao_id`, nunca por nome, e null é "—", nunca "R$ 0,00";
+//   · "Disponíveis para conectar" (/connectors): populares em ordem fixa, no máximo 5, fora os já conectados POR ID; o "+" abre o seletor (o módulo legado, em stub);
 //   · o `uid` vem só da sessão; perfil sem `user_id` válido não pede nada de /open-finance.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RESPOSTAS } from "./_painel.mjs";
 import { abrir, navegador } from "./_guia.mjs";
-import { CDN_OK, ERRO_404, ERRO_500, LIMITE, LOGO, PADRAO, con, servidorBancos } from "./_bancos.mjs";
+import { CDN_OK, ERRO_404, ERRO_500, LIMITE, LOGO, PADRAO, con, maisExato, regiao, semReticencias, servidorBancos, totalDe } from "./_bancos.mjs";
 
 const browser = navegador();
 void browser;
@@ -21,31 +21,30 @@ async function bancos(opts = {}, tela = {}) {
 const esperaCards = (page, n) => page.waitForFunction((n) => document.querySelectorAll(".banco-card").length === n, n, { timeout: 8000 });
 // O /limite chegou: a linha de vagas do LIMITE() padrão está na tela. A lista vem antes dele; o que depende das vagas espera isto.
 const esperaLimite = (page) => page.getByText("2 de 3 bancos").waitFor({ timeout: 8000 });
-// Espera o fim da leitura de /bancos (o "…" sai do card).
-const semReticencias = (page) => page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…") && document.querySelector(".banco-total"), null, { timeout: 8000 });
-const totais = (page) => page.locator(".banco-card .banco-total").allTextContents();
 const corpo = (page) => page.locator("body").innerText();
 // O detalhe de um banco (dialog modal): abre pela linha `n` e devolve o locator dele; `fechaDetalhe` usa o X.
 const detalhe = async (page, n = 0) => { await page.locator(".banco-linha").nth(n).click(); const d = page.locator("dialog.banco-det[open]"); await d.waitFor(); return d; };
 const fechaDetalhe = async (page) => { await page.locator("dialog.banco-det[open]").getByRole("button", { name: "Fechar" }).click(); await page.locator("dialog.banco-det[open]").waitFor({ state: "detached" }); };
 
-test("o topo é o total do servidor, não a soma dos cards: snapshot só com o banco 11 mostra R$ 67.000,00 no topo e R$ 45.000,00 no card", async () => {
-  const { ctx, page, erros } = await bancos({ conexoes: [con(11, "Nubank")], bancos: "padrao" });
+test("a lista não traz valor (sem topo, total nem barra, nenhum 'R$'); o total do servidor está no detalhe: snapshot só com o banco 11 mostra R$ 45.000,00, nunca os R$ 67.000,00 do topo antigo", async () => {
+  const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank")], bancos: "padrao" });
   await esperaCards(page, 1);
   await semReticencias(page);
-  const r = { topo: await page.locator(".bancos-total").innerText(), cards: await totais(page), selos: await page.locator(".bancos-topo .selo").allTextContents() };
+  const r = { lixo: await page.locator(".bancos-topo, .bancos-total, .banco-total, .comp-bar, .banco-barra").count(), tela: await page.locator("#main").innerText() };
+  const total = await totalDe(page);
   await ctx.close();
-  assert.deepEqual(r, { topo: "R$ 67.000,00", cards: ["R$ 45.000,00"], selos: ["conexão pausada"] });
-  assert.deepEqual(erros, []);
+  assert.equal(r.lixo, 0);
+  assert.ok(!r.tela.includes("R$") && !r.tela.includes("67.000"), r.tela);
+  assert.equal(total, "R$ 45.000,00");
 });
 
-test("dois bancos com o mesmo nome: cada card tem o valor da SUA conexão (junção por id, na ordem do snapshot)", async () => {
+test("dois bancos com o mesmo nome: o detalhe de cada um tem o valor da SUA conexão (junção por id, na ordem do snapshot)", async () => {
   const { ctx, page } = await bancos({ conexoes: [con(2, "Nubank"), con(1, "Nubank")], bancos: "mesmo_nome" });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const cards = await totais(page);
+  const totais = [await totalDe(page, 0), await totalDe(page, 1)];
   await ctx.close();
-  assert.deepEqual(cards, ["R$ 200,00", "R$ 100,00"]);
+  assert.deepEqual(totais, ["R$ 200,00", "R$ 100,00"]);
 });
 
 test("null é '—', nunca R$ 0,00: investido nulo, banco com tudo nulo e nenhuma 'R$ 0,00' na tela (lista e detalhe)", async () => {
@@ -70,53 +69,26 @@ test("null é '—', nunca R$ 0,00: investido nulo, banco com tudo nulo e nenhum
   assert.ok(!tres.corpo.includes("R$ 0,00") && !tres.linha.includes("R$ 0,00"), tres.corpo);
 });
 
-test("barra por banco: 2 segmentos e 'Nubank 67%, Inter 33%' quando fecha; some com motivo no topo ou no banco, 1 banco só, banco fora do snapshot, total nulo e soma que não fecha", async () => {
-  const nBarras = async (opts) => {
-    const { ctx, page } = await bancos(opts);
-    await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
-    await semReticencias(page);
-    const barra = page.locator(".bancos-topo .comp-bar");
-    const r = { barras: await barra.count(), segmentos: await page.locator(".bancos-topo .comp-bar span").count(), aria: (await barra.count()) ? await barra.getAttribute("aria-label") : null };
-    await ctx.close();
-    return r;
-  };
-  const dois = [con(11, "Nubank"), con(12, "Inter")];
-  assert.deepEqual(await nBarras({ conexoes: dois, bancos: "barra" }), { barras: 1, segmentos: 2, aria: "Nubank 67%, Inter 33%" });
-  const sem = { barras: 0, segmentos: 0, aria: null };
-  assert.deepEqual(await nBarras({ conexoes: dois, bancos: "desatualizado" }), sem); // motivo no topo e no banco
-  assert.deepEqual(await nBarras({ conexoes: PADRAO(), bancos: "padrao" }), sem); // motivo no topo, banco 13 com total nulo
-  assert.deepEqual(await nBarras({ conexoes: [con(11, "Nubank")], bancos: "um_banco" }), sem); // menos de 2 não é composição
-  assert.deepEqual(await nBarras({ conexoes: [con(11, "Nubank")], bancos: "barra" }), sem); // banco 12 que o snapshot não conhece
-  const nulo = structuredClone(RESPOSTAS.bancos.barra); // banco sem número e sem motivo
-  Object.assign(nulo.bancos[1], { saldo_conta: null, investido: null, total: null });
-  nulo.total = "45000.00";
-  assert.deepEqual(await nBarras({ conexoes: dois, bancos: nulo }), sem);
-  const naoFecha = structuredClone(RESPOSTAS.bancos.barra);
-  naoFecha.total = "67000.01"; // o servidor diz um centavo a mais do que as partes
-  assert.deepEqual(await nBarras({ conexoes: dois, bancos: naoFecha }), sem);
-});
-
-test("leituras opcionais: /bancos 500 e 404 deixam os cards com nome e pílula, valores '—', sem topo nem barra; /limite 500 tira só as vagas", async () => {
+test("leituras opcionais: /bancos 500 e 404 deixam as linhas com nome e estado e o detalhe com '—'; /limite 500 tira só as vagas", async () => {
   for (const [rotulo, bancosRes] of [["500", ERRO_500], ["404", ERRO_404]]) {
     const { ctx, page } = await bancos({ bancosRes });
     await esperaCards(page, 3);
-    await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 }); // 500: 3 tentativas, ~3 s
     await esperaLimite(page);
     const r = {
-      nomes: await page.locator(".banco-nome").allTextContents(), pilulas: await page.locator(".banco-estado").allTextContents(),
-      totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count(),
-      vagas: await corpo(page).then((t) => /\d+ de \d+ bancos/.test(t)),
+      nomes: await page.locator(".banco-nome").allTextContents(), estados: await page.locator(".banco-card .banco-estado").allTextContents(),
+      vagas: await corpo(page).then((t) => /\d+ de \d+ bancos/.test(t)), total: await totalDe(page), // 500: 3 tentativas, ~3 s (o detalhe espera sair do "…")
     };
     await ctx.close();
-    assert.deepEqual(r, { nomes: ["Nubank", "Inter", "Itaú"], pilulas: ["Atualizado", "Atualizado", "Pausado"], totais: ["—", "—", "—"], topo: 0, barra: 0, vagas: true }, rotulo);
+    assert.deepEqual(r.nomes.slice(0, 3), ["Nubank", "Inter", "Itaú"], rotulo);
+    assert.deepEqual([r.estados, r.vagas, r.total], [["Atualizado", "Atualizado", "Pausado"], true, "—"], rotulo);
   }
   const { ctx, page } = await bancos({ limiteRes: ERRO_500, bancos: "padrao" });
   await esperaCards(page, 3);
   await semReticencias(page);
   await page.waitForTimeout(3500); // as tentativas do /limite
-  const r = { vagas: /\d+ de \d+ bancos/.test(await corpo(page)), topo: await page.locator(".bancos-total").innerText(), cards: await totais(page), conectar: await page.getByRole("link", { name: "Conectar banco" }).count() };
+  const r = { vagas: /\d+ de \d+ bancos/.test(await corpo(page)), total: await totalDe(page), conectar: await maisExato(page).count() };
   await ctx.close();
-  assert.deepEqual(r, { vagas: false, topo: "R$ 67.000,00", cards: ["R$ 45.000,00", "R$ 22.000,00", "—"], conectar: 1 });
+  assert.deepEqual(r, { vagas: false, total: "R$ 45.000,00", conectar: 1 });
 });
 
 test("snapshot é obrigatório: 500 mostra o erro e 'Tentar de novo' (que recupera); 401 mostra 'Sua sessão terminou.' e nenhum card", async () => {
@@ -144,7 +116,7 @@ test("vagas: '2 de 3 bancos' com o link 'Conectar banco' para /settings?view=ope
     const { ctx, page } = p;
     await esperaCards(page, 3);
     await page.locator(".bancos-conectar, a.banco-mais").first().waitFor({ timeout: 8000 });
-    const r = { vagas: (await corpo(page)).match(/\d+ de \d+ bancos/)?.[0] ?? null, hrefs: await page.getByRole("link", { name: "Conectar banco" }).evaluateAll((l) => l.map((a) => a.getAttribute("href"))), corpo: await corpo(page) };
+    const r = { vagas: (await corpo(page)).match(/\d+ de \d+ bancos/)?.[0] ?? null, hrefs: await maisExato(page).evaluateAll((l) => l.map((a) => a.getAttribute("href"))), corpo: await corpo(page) };
     await ctx.close();
     return r;
   };
@@ -160,7 +132,7 @@ test("vagas: '2 de 3 bancos' com o link 'Conectar banco' para /settings?view=ope
 test("nenhum banco: o Piggy, 'Nenhum banco conectado.' e o link para conectar, sem topo", async () => {
   const { ctx, page } = await bancos({ conexoes: [], bancos: "vazio" });
   await page.locator(".empty img").waitFor({ timeout: 8000 });
-  const r = { src: await page.locator(".empty img").getAttribute("src"), texto: await page.locator(".empty").innerText(), href: await page.getByRole("link", { name: "Conectar banco" }).getAttribute("href"), topo: await page.locator(".bancos-topo").count(), cards: await page.locator(".banco-card").count() };
+  const r = { src: await page.locator(".empty img").getAttribute("src"), texto: await page.locator(".empty").innerText(), href: await maisExato(page).getAttribute("href"), topo: await page.locator(".bancos-topo").count(), cards: await page.locator(".banco-card").count() };
   await ctx.close();
   assert.match(r.src, /brand\/icon\.png$/);
   assert.match(r.texto, /Nenhum banco conectado\./);
@@ -203,7 +175,7 @@ test("tempo de sincronia (no detalhe), com o relógio em 2026-10-02 15:00Z: há 
 test("cor do banco: Itaú na cor da marca; Nubank (roxo, 2,64:1 sobre o card), BTG (azul-marinho) e banco desconhecido na escala de tinta", async () => {
   const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Itaú Unibanco"), con(13, "Banco XYZ"), con(14, "BTG Pactual")], bancos: "padrao" });
   await esperaCards(page, 4);
-  const cores = await page.locator(".banco-ini").evaluateAll((l) => l.map((e) => getComputedStyle(e).backgroundColor));
+  const cores = await page.locator(".banco-card .banco-ini").evaluateAll((l) => l.map((e) => getComputedStyle(e).backgroundColor));
   await ctx.close();
   const tintas = ["rgb(244, 244, 246)", "rgb(168, 168, 179)", "rgb(139, 139, 150)"];
   assert.equal(cores[1], "rgb(236, 112, 0)");
@@ -225,18 +197,19 @@ test("estado: updated é ok (pontinho verde), needs_user_action é erro (laranja
   assert.ok(noDetalhe.includes("O banco pediu novo login.") && noDetalhe.includes("Reconectar"), noDetalhe);
 });
 
-test("rota e isolamento: lê /open-finance/7 e /open-finance/7/limite (nunca /api/v2/open-finance); perfil sem user_id válido não pede nada de /open-finance e mostra o erro", async () => {
+test("rota e isolamento: lê /open-finance/7, /limite e /connectors (nunca /api/v2/open-finance); perfil sem user_id válido não pede nada de /open-finance e mostra o erro", async () => {
   const { srv, ctx, page } = await bancos({ bancos: "padrao" });
   await esperaCards(page, 3);
+  await regiao(page).waitFor({ timeout: 8000 }); // o /connectors só é pedido depois do /limite
   const pedidos = [...new Set(srv.reqs)].sort();
   await ctx.close();
-  assert.deepEqual(pedidos, ["/api/v2/bancos", "/auth/dashboard-profile", "/open-finance/7", "/open-finance/7/limite"]);
+  assert.deepEqual(pedidos, ["/api/v2/bancos", "/auth/dashboard-profile", "/open-finance-connect.css", "/open-finance-connect.js", "/open-finance/7", "/open-finance/7/connectors", "/open-finance/7/limite"]); // o painel carrega o seletor (css e js) e nada mais de Open Finance
   for (const perfil of [{ display_name: "Ana", email: "a@b.c", whatsapp_linked: false }, { display_name: "Ana", email: "a@b.c", user_id: 0, whatsapp_linked: false }, { display_name: "Ana", email: "a@b.c", user_id: "7/../8", whatsapp_linked: false }]) {
     const o = await bancos({ perfil, bancos: "padrao" });
     await o.page.getByRole("alert").waitFor({ timeout: 8000 });
     await o.page.getByRole("button", { name: "Tentar de novo" }).click(); // o "de novo" também não inventa um uid
     await o.page.waitForTimeout(300);
-    const r = { of: o.srv.reqs.filter((p) => p.includes("open-finance")), texto: await o.page.getByRole("alert").innerText() };
+    const r = { of: o.srv.reqs.filter((p) => p.startsWith("/open-finance/")), texto: await o.page.getByRole("alert").innerText() };
     await o.ctx.close();
     assert.deepEqual(r.of, [], JSON.stringify(perfil));
     assert.match(r.texto, /Não deu para carregar seus bancos\./);
@@ -256,32 +229,28 @@ test("navegação: 'Bancos conectados' no trilho da Conta (aria-current, título
   assert.ok(itens.map((t) => t.trim()).includes("Bancos conectados"), String(itens));
 });
 
-test("decimal em notação científica não derruba a tela: '1E-7' vira R$ 0,0000001, '1000' R$ 1.000,00, '0' R$ 0,00", async () => {
+test("decimal em notação científica não derruba a tela: '1E-7' vira R$ 0,0000001, '1000' R$ 1.000,00, '0' R$ 0,00 (nos detalhes)", async () => {
   const { ctx, page, erros } = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "cientifico" });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const d = await detalhe(page, 0); // o "R$ 0,00" é o investido "0" do 1º banco
-  const t = await corpo(page) + await d.innerText();
+  let t = await corpo(page);
+  for (const n of [0, 1]) { const d = await detalhe(page, n); t += await d.innerText(); await fechaDetalhe(page); } // o "R$ 0,00" é o investido "0" do 1º banco
   await ctx.close();
   for (const esperado of ["R$ 0,0000001", "R$ 1.000,00", "R$ 0,00"]) assert.ok(t.includes(esperado), `${esperado} em ${t}`);
   assert.deepEqual(erros, []);
 });
 
-test("layout 1280×800: dois cards lado a lado, no mesmo topo; 390×844: uma coluna, sem rolagem lateral, o botão mais de conectar e a linha com 44 px; nome de 70 letras sem espaço a 320, 375 e 1280 também", async () => {
-  const a = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width: 1280, height: 800 });
-  await esperaCards(a.page, 2);
-  const caixas = await a.page.locator(".banco-card").evaluateAll((l) => l.map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), left: Math.round(r.left) }; }));
-  await a.ctx.close();
-  assert.equal(caixas[0].top, caixas[1].top);
-  assert.notEqual(caixas[0].left, caixas[1].left);
+test("layout: o grupo é uma coluna só em 1280×800 e em 390×844, sem rolagem lateral, o '+' do topo e a linha com 44 px; nome de 70 letras sem espaço a 320, 375 e 1280 também", async () => {
   const medidas = async (page) => (await esperaLimite(page), page.evaluate(() => ({ lateral: document.documentElement.scrollWidth - innerWidth, botao: Math.round(document.querySelector("a.banco-mais").getBoundingClientRect().height), linha: Math.round(document.querySelector(".banco-linha").getBoundingClientRect().height), lefts: [...document.querySelectorAll(".banco-card")].map((e) => Math.round(e.getBoundingClientRect().left)) })));
-  const b = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width: 390, height: 844 });
-  await esperaCards(b.page, 2);
-  const m = await medidas(b.page);
-  await b.ctx.close();
-  assert.equal(m.lateral, 0);
-  assert.equal(new Set(m.lefts).size, 1); // uma coluna
-  assert.ok(m.botao >= 44 && m.linha >= 44, `botão com ${m.botao}px, linha com ${m.linha}px`);
+  for (const [width, height] of [[1280, 800], [390, 844]]) {
+    const a = await bancos({ conexoes: [con(11, "Nubank"), con(12, "Inter")], bancos: "barra" }, { width, height });
+    await esperaCards(a.page, 2);
+    const m = await medidas(a.page);
+    await a.ctx.close();
+    assert.equal(m.lateral, 0, `${width}: rolagem lateral`);
+    assert.equal(new Set(m.lefts).size, 1, `${width}: uma coluna`);
+    assert.ok(m.botao >= 44 && m.linha >= 44, `${width}: botão com ${m.botao}px, linha com ${m.linha}px`);
+  }
   const longo = "W".repeat(70);
   for (const width of [320, 375, 1280]) {
     const c = await bancos({ conexoes: [con(11, longo), con(12, "Inter")], bancos: "barra" }, { width, height: 800 });
@@ -300,47 +269,9 @@ const corpoBancos = (topo, linhas) => ({
   bancos: linhas.map(([conexao_id, total]) => ({ conexao_id, saldo_conta: total, investido: null, total, contas: 1, cartoes: 0, investimentos: 0, motivos: [] })),
 });
 const refoco = (page) => page.evaluate(() => window.dispatchEvent(new Event("visibilitychange"))); // o foco da aba: o React Query relê as leituras vivas
-// A barra mede: quantos segmentos, o aria-label e quanto da largura a barra preenche (borda direita do último segmento − borda esquerda do primeiro, contra a barra).
-const barraMedida = async (opts) => {
-  const { ctx, page } = await bancos(opts);
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
-  await semReticencias(page);
-  const r = await page.evaluate(() => {
-    const b = document.querySelector(".bancos-topo .comp-bar");
-    if (!b) return { segmentos: 0, aria: null, vazio: null };
-    const s = [...b.querySelectorAll("span")].map((e) => e.getBoundingClientRect()), br = b.getBoundingClientRect();
-    return { segmentos: s.length, aria: b.getAttribute("aria-label"), vazio: Math.round((br.right - s.at(-1).right + (s[0].left - br.left)) * 10) / 10 };
-  });
-  await ctx.close();
-  return r;
-};
 const dois = [con(11, "Nubank"), con(12, "Inter")];
 
-test("a barra preenche a largura toda mesmo quando os totais somam menos de 1 (R$ 0,40 + R$ 0,30, topo R$ 0,70)", async () => {
-  const pequeno = await barraMedida({ conexoes: dois, bancos: corpoBancos("0.70", [[11, "0.40"], [12, "0.30"]]) });
-  assert.deepEqual([pequeno.segmentos, pequeno.aria], [2, "Nubank 57%, Inter 43%"]);
-  assert.ok(pequeno.vazio <= 1, `sobrou ${pequeno.vazio}px vazios na barra`);
-  const grande = await barraMedida({ conexoes: dois, bancos: "barra" }); // o caminho que já funcionava continua inteiro
-  assert.deepEqual([grande.segmentos, grande.aria], [2, "Nubank 67%, Inter 33%"]);
-  assert.ok(grande.vazio <= 1, `sobrou ${grande.vazio}px vazios na barra`);
-});
-
-test("banco com total zero não vira segmento nem impede a barra; total negativo (mesmo com a soma fechando) e nulo recusam a barra", async () => {
-  const tres = [...dois, con(14, "C6 Bank")];
-  assert.deepEqual(await barraMedida({ conexoes: tres, bancos: corpoBancos("67000.00", [[11, "45000.00"], [12, "22000.00"], [14, "0.00"]]) }),
-    { segmentos: 2, aria: "Nubank 67%, Inter 33%", vazio: 0 }); // o C6 aparece como card, mas não na barra
-  const semBarra = { segmentos: 0, aria: null, vazio: null };
-  assert.deepEqual(await barraMedida({ conexoes: tres, bancos: corpoBancos("66999.99", [[11, "45000.00"], [12, "22000.00"], [14, "-0.01"]]) }), semBarra);
-  assert.deepEqual(await barraMedida({ conexoes: tres, bancos: corpoBancos("67000.00", [[11, "45000.00"], [12, "22000.00"], [14, null]]) }), semBarra);
-  assert.deepEqual(await barraMedida({ conexoes: tres, bancos: corpoBancos("45000.00", [[11, "45000.00"], [12, "0.00"], [14, "0.00"]]) }), semBarra); // 1 segmento só
-});
-
-test("a barra recusa conexao_id repetido em /bancos (a soma fecha e todos os ids são do snapshot)", async () => {
-  const r = await barraMedida({ conexoes: dois, bancos: corpoBancos("67000.00", [[11, "45000.00"], [11, "22000.00"]]) });
-  assert.deepEqual(r, { segmentos: 0, aria: null, vazio: null });
-});
-
-test("releitura de /bancos que falha tira os números da tela (nunca deixa o valor velho); idem /limite e as vagas", async () => {
+test("releitura de /bancos que falha tira os números da tela (nunca deixa o valor velho do detalhe); idem /limite e as vagas", async () => {
   let falha = false;
   const { ctx, page } = await bancos({
     bancos: "padrao", bancosRes: (r) => (falha ? ERRO_500(r) : r.fulfill({ json: RESPOSTAS.bancos.padrao })),
@@ -349,14 +280,16 @@ test("releitura de /bancos que falha tira os números da tela (nunca deixa o val
   await esperaCards(page, 3);
   await semReticencias(page);
   await esperaLimite(page);
-  const antes = { topo: await page.locator(".bancos-total").innerText(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
+  const d = await detalhe(page, 0); // o detalhe fica aberto durante a releitura
+  await page.waitForFunction(() => document.querySelector("dialog.banco-det[open] .banco-det-total")?.textContent !== "…", null, { timeout: 8000 });
+  const antes = { total: await d.locator(".banco-det-total").innerText(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
   falha = true;
   await refoco(page);
-  await page.waitForFunction(() => !document.querySelector(".bancos-topo") && !/\d+ de \d+ bancos/.test(document.body.innerText), null, { timeout: 12000 }); // 3 tentativas, ~3 s
-  const depois = { totais: await totais(page), cards: await page.locator(".banco-card").count(), corpo: await corpo(page) };
+  await page.waitForFunction(() => document.querySelector("dialog.banco-det[open] .banco-det-total")?.textContent === "—" && !/\d+ de \d+ bancos/.test(document.body.innerText), null, { timeout: 12000 }); // 3 tentativas, ~3 s
+  const depois = { cards: await page.locator(".banco-card").count(), corpo: await corpo(page) };
   await ctx.close();
-  assert.deepEqual(antes, { topo: "R$ 67.000,00", vagas: true });
-  assert.deepEqual([depois.totais, depois.cards], [["—", "—", "—"], 3]);
+  assert.deepEqual(antes, { total: "R$ 45.000,00", vagas: true });
+  assert.equal(depois.cards, 3);
   assert.ok(!depois.corpo.includes("45.000,00"), depois.corpo);
 });
 
@@ -397,7 +330,7 @@ test("/limite com pode_adicionar false e message nula não oferece 'Conectar ban
     const preso = new Promise((r) => { soltar = r; });
     const { ctx, page } = await bancos({ limite, conexoes, bancos: "padrao", limiteRes: async (r) => { await preso; await r.fulfill({ json: limite }); } });
     await (conexoes?.length === 0 ? page.locator(".empty img").waitFor({ timeout: 8000 }) : esperaCards(page, 3));
-    const conta = () => page.getByRole("link", { name: "Conectar banco" }).count();
+    const conta = () => maisExato(page).count();
     const pendente = await conta();
     soltar();
     await esperaLimite(page);
@@ -413,48 +346,36 @@ test("/limite com pode_adicionar false e message nula não oferece 'Conectar ban
 test("/limite 500: o 'Conectar banco' volta na 1ª falha, sem esperar as novas tentativas (3 pedidos, ~3 s)", async () => {
   const { ctx, page, srv } = await bancos({ limiteRes: ERRO_500, bancos: "padrao" });
   await esperaCards(page, 3);
-  await page.getByRole("link", { name: "Conectar banco" }).waitFor({ timeout: 8000 });
+  await maisExato(page).waitFor({ timeout: 8000 });
   const pedidos = srv.reqs.filter((p) => p === "/open-finance/7/limite").length;
   await ctx.close();
   assert.ok(pedidos < 3, `o link só veio depois de ${pedidos} pedidos do /limite`);
 });
 
-test("/bancos fora do contrato (sem 'bancos', sem 'motivos', banco sem 'motivos', item null em 'bancos') é leitura falha: cards com nome e '—', sem topo nem barra, sem erro de página", async () => {
+test("/bancos fora do contrato (sem 'bancos', sem 'motivos', banco sem 'motivos', item null em 'bancos') é leitura falha: linhas com nome e o detalhe com '—', sem erro de página", async () => {
   for (const corpoRuim of [{ total: "10.00", motivos: [] }, { total: "10.00", bancos: [] }, { total: "10.00", motivos: [], bancos: [{ conexao_id: 11, total: "10.00" }] }, { total: "10.00", motivos: [], bancos: [null] }, []]) {
     const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoRuim });
     await esperaCards(page, 2);
-    await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 });
-    const r = { nomes: await page.locator(".banco-nome").allTextContents(), totais: await totais(page), topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count() };
+    const r = { nomes: await page.locator(".banco-card .banco-nome").allTextContents(), total: await totalDe(page), lixo: await page.locator(".bancos-topo, .comp-bar").count() };
     await ctx.close();
-    assert.deepEqual(r, { nomes: ["Nubank", "Inter"], totais: ["—", "—"], topo: 0, barra: 0 }, JSON.stringify(corpoRuim));
+    assert.deepEqual(r, { nomes: ["Nubank", "Inter"], total: "—", lixo: 0 }, JSON.stringify(corpoRuim));
     assert.deepEqual(erros, [], JSON.stringify(corpoRuim));
   }
 });
 
 // ---- Consertos dos achados do Tester (rodada 2) ----
-const SEM_NUMEROS = { topo: 0, barra: 0, totais: ["—", "—"] };
-test("motivos que não são texto ({'x':1}) tiram os números e não derrubam a SPA; 'constructor'/'toString'/'__proto__' viram texto cru, nunca função", async () => {
+test("motivos que não são texto ({'x':1}), no topo ou no banco, tiram os números do detalhe e não derrubam a SPA", async () => {
   const objeto = { ...corpoBancos("67000.00", [[11, "45000.00"], [12, "22000.00"]]), motivos: [{ x: 1 }] };
   const noBanco = corpoBancos("67000.00", [[11, "45000.00"], [12, "22000.00"]]);
   noBanco.bancos[0].motivos = [{ x: 1 }];
   for (const corpoRuim of [objeto, noBanco]) {
     const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoRuim });
     await esperaCards(page, 2);
-    await page.waitForFunction(() => document.querySelector(".banco-total").textContent === "—", null, { timeout: 8000 });
-    const r = { topo: await page.locator(".bancos-topo").count(), barra: await page.locator(".comp-bar").count(), totais: await totais(page) };
+    const r = { total: await totalDe(page), lixo: await page.locator(".bancos-topo, .comp-bar").count() };
     await ctx.close();
-    assert.deepEqual(r, SEM_NUMEROS);
+    assert.deepEqual(r, { total: "—", lixo: 0 });
     assert.deepEqual(erros, []);
   }
-  const protos = ["constructor", "toString", "__proto__"];
-  const corpoProto = { ...corpoBancos("67000.00", [[11, "45000.00"], [12, "22000.00"]]), motivos: protos };
-  corpoProto.bancos[0].motivos = protos;
-  const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoProto });
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
-  const selos = await page.locator(".bancos-topo .selo").allTextContents();
-  await ctx.close();
-  assert.deepEqual(selos, protos); // texto cru (código desconhecido), uma vez cada
-  assert.deepEqual(erros, []);
 });
 
 test("snapshot fora do contrato não derruba a SPA: institution_name número, ui.label/ui.detail objeto, last_sync_at número viram nulo (nome 'Banco', 'Pendente', sem detalhe, sem <time>)", async () => {
@@ -462,7 +383,7 @@ test("snapshot fora do contrato não derruba a SPA: institution_name número, ui
   const { ctx, page, erros } = await bancos({ conexoes: [feia, con(12, "Inter")], bancos: "barra" });
   await esperaCards(page, 2);
   const d = await detalhe(page, 0);
-  const r = { nomes: await page.locator(".banco-nome").allTextContents(), selo: await page.locator(".banco-card").first().locator(".banco-estado").innerText(), card: await page.locator(".banco-card").first().innerText() + await d.innerText(), tempos: await d.locator("time").count() };
+  const r = { nomes: await page.locator(".banco-card .banco-nome").allTextContents(), selo: await page.locator(".banco-card").first().locator(".banco-estado").innerText(), card: await page.locator(".banco-card").first().innerText() + await d.innerText(), tempos: await d.locator("time").count() };
   await ctx.close();
   assert.deepEqual(r.nomes, ["Banco", "Inter"]);
   assert.equal(r.selo, "Pendente");
@@ -477,7 +398,7 @@ test("/limite com pode_adicionar false e message só de espaços: nem mensagem n
     const { ctx, page } = p;
     await esperaCards(page, 3);
     await esperaLimite(page);
-    const r = { area: await page.locator(".bancos-conectar").count(), links: await page.getByRole("link", { name: "Conectar banco" }).count() };
+    const r = { area: await page.locator(".bancos-conectar").count(), links: await maisExato(page).count() };
     await ctx.close();
     return r;
   };
@@ -485,29 +406,15 @@ test("/limite com pode_adicionar false e message só de espaços: nem mensagem n
   assert.deepEqual(await lido("Plano cheio."), { area: 1, links: 0 }); // controle positivo
 });
 
-test("topo não finito ('1E999' com duas partes de '5E998'): sem barra (nunca 'NaN%'); sem erro de página", async () => {
-  const r = await barraMedida({ conexoes: dois, bancos: corpoBancos("1E999", [[11, "5E998"], [12, "5E998"]]) });
-  assert.deepEqual(r, { segmentos: 0, aria: null, vazio: null });
+test("total não finito ('1E999' com duas partes de '5E998'): nunca 'NaN' na tela nem no detalhe; sem erro de página", async () => {
   const { ctx, page, erros } = await bancos({ conexoes: dois, bancos: corpoBancos("1E999", [[11, "5E998"], [12, "5E998"]]) });
   await esperaCards(page, 2);
-  const t = await corpo(page);
+  await semReticencias(page);
+  const d = await detalhe(page, 0);
+  const t = await corpo(page) + await d.innerText();
   await ctx.close();
   assert.ok(!t.includes("NaN"), t);
   assert.deepEqual(erros, []);
-});
-
-test("a cor de cada segmento da barra é a do card do mesmo banco, com um banco de total zero NO MEIO do snapshot", async () => {
-  const tres = [con(11, "Alfa"), con(12, "Beta"), con(13, "Gama")]; // nomes sem cor de marca: escala de tinta pelo índice do snapshot
-  const { ctx, page } = await bancos({ conexoes: tres, bancos: corpoBancos("67000.00", [[11, "45000.00"], [12, "0.00"], [13, "22000.00"]]) });
-  await esperaCards(page, 3);
-  await semReticencias(page);
-  const cores = (loc) => loc.evaluateAll((l) => l.map((e) => getComputedStyle(e).backgroundColor));
-  const r = { barra: await cores(page.locator(".bancos-topo .comp-bar span")), cards: await cores(page.locator(".banco-ini")) };
-  await ctx.close();
-  assert.equal(r.barra.length, 2);
-  assert.notEqual(r.cards[0], r.cards[2]); // sem isto o teste não distinguiria o índice 0 do 2
-  assert.notEqual(r.cards[1], r.cards[2]); // nem o índice recontado só entre bancos com saldo (Gama seria o 1)
-  assert.deepEqual(r.barra, [r.cards[0], r.cards[2]]);
 });
 
 // ---- Codex no #1116 ----
@@ -518,16 +425,16 @@ test("releitura do snapshot que falha (500) depois de a lista estar na tela: o e
   falha = true;
   await refoco(page);
   await page.getByRole("alert").waitFor({ timeout: 12000 }); // 3 tentativas, ~3 s
-  const r = { texto: await page.getByRole("alert").innerText(), cards: await page.locator(".banco-card").count(), topo: await page.locator(".bancos-topo").count() };
+  const r = { texto: await page.getByRole("alert").innerText(), cards: await page.locator(".banco-card").count() };
   falha = false;
   await page.getByRole("button", { name: "Tentar de novo" }).click();
   await esperaCards(page, 3);
   await ctx.close();
   assert.match(r.texto, /Não deu para carregar seus bancos\./);
-  assert.deepEqual([r.cards, r.topo], [0, 0]);
+  assert.equal(r.cards, 0);
 });
 
-test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o total da conta antiga nunca aparece ao lado da lista nova", async () => {
+test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o total da conta antiga nunca aparece (nem no detalhe) ao lado da lista nova", async () => {
   let uid = 7, solta;
   const preso = new Promise((ok) => { solta = ok; });
   const s = servidorBancos({ bancos: "padrao" });
@@ -543,17 +450,17 @@ test("troca de conta em outra aba: com o /bancos da conta nova ainda no ar, o to
     },
   });
   await esperaCards(page, 3);
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  await semReticencias(page);
   uid = 8;
   await refoco(page);
   await page.waitForFunction(() => document.querySelectorAll(".banco-card").length === 1, null, { timeout: 8000 });
-  const r = { corpo: await corpo(page), topo: await page.locator(".bancos-topo").count(), card: await page.locator(".banco-card .banco-total").innerText() };
+  const d = await detalhe(page, 0);
+  const r = { corpo: await corpo(page), total: await d.locator(".banco-det-total").innerText() };
   solta();
   await ctx.close();
   assert.match(r.corpo, /C6 Bank/);
-  assert.equal(r.topo, 0, r.corpo);
-  assert.ok(!r.corpo.includes("67.000,00"), r.corpo);
-  assert.equal(r.card, "…");
+  assert.ok(!r.corpo.includes("67.000,00") && !r.corpo.includes("45.000,00"), r.corpo);
+  assert.equal(r.total, "…");
 });
 
 test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfil e snapshot da conta antiga presos; a lista antiga sai, o perfil é relido e vem a conta nova", async () => {
@@ -580,7 +487,8 @@ test("troca de conta no meio da releitura: /bancos já com a sessão nova, perfi
     },
   });
   await esperaCards(page, 3);
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  await semReticencias(page);
+  await detalhe(page, 0); // o total aparece no detalhe: a amostra abaixo o vê junto do nome do banco antigo
   uid = 8;
   // Amostra a tela a cada quadro: em nenhum o total da conta nova aparece junto dos bancos da antiga.
   await page.evaluate(() => { window.__mistura = false; const f = () => { const t = document.body.innerText; if (t.includes("9.999,00") && t.includes("Nubank")) window.__mistura = true; requestAnimationFrame(f); }; f(); });
@@ -618,7 +526,7 @@ test("401 numa leitura opcional (/bancos ou /limite) depois de a lista estar na 
   }
 });
 
-test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os números (topo e vagas), não só a lista", async () => {
+test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os números (detalhe e vagas), não só a lista", async () => {
   let caiu = false;
   const cai = (ok) => (q) => (caiu ? ERRO_500(q) : ok(q));
   const { ctx, page } = await bancos({
@@ -636,10 +544,10 @@ test("rede caída em todas as leituras e 'Tentar de novo': volta a lista E os n�
   caiu = false;
   await page.getByRole("button", { name: "Tentar de novo" }).click();
   await esperaCards(page, 3);
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 }).catch(() => {});
-  const r = { topo: await page.locator(".bancos-topo").count(), vagas: /2 de 3 bancos/.test(await corpo(page)) };
+  await esperaLimite(page);
+  const r = { total: await totalDe(page), vagas: /2 de 3 bancos/.test(await corpo(page)) };
   await ctx.close();
-  assert.deepEqual(r, { topo: 1, vagas: true });
+  assert.deepEqual(r, { total: "R$ 45.000,00", vagas: true });
 });
 
 test("troca de conta com TODA releitura do perfil presa (só a conferência do /bancos responde): a lista antiga sai e fica o erro, nunca os bancos da outra conta", async () => {
@@ -662,7 +570,7 @@ test("troca de conta com TODA releitura do perfil presa (só a conferência do /
     },
   });
   await esperaCards(page, 3);
-  await page.locator(".bancos-topo").waitFor({ timeout: 8000 });
+  await semReticencias(page);
   uid = 8;
   await refoco(page);
   await page.getByRole("alert").waitFor({ timeout: 8000 });
@@ -675,7 +583,7 @@ test("troca de conta com TODA releitura do perfil presa (só a conferência do /
 
 // ---- logo do banco (`logo_url` do snapshot; plano B: o servidor o empresta do catálogo da Pluggy) ----
 const naoCarregou = (r) => r.fulfill({ status: 404, body: "" });
-const comLogo = (opts = {}) => bancos({ conexoes: [con(11, "Itaú Unibanco", "updated", "Atualizado", undefined, null, LOGO), con(12, "Inter")], bancos: "padrao", ...opts });
+const comLogo = (opts = {}) => bancos({ conexoes: [con(11, "Itaú Unibanco", "updated", "Atualizado", undefined, null, LOGO), con(12, "Inter")], bancos: "padrao", conectores: [], ...opts }); // sem catálogo: os logos dos Disponíveis não entram na conta de `srv.cdn`
 const ini = (page, n) => page.locator(".banco-card").nth(n).locator(".banco-ini");
 const bg = (loc) => loc.evaluate((e) => getComputedStyle(e).backgroundColor);
 
@@ -685,7 +593,7 @@ test("logo: com logo_url o ladrilho traz a imagem (alt vazio, src do servidor, c
   await page.waitForFunction(() => { const i = document.querySelector(".banco-ini img"); return i && i.complete && i.naturalWidth > 0; }, null, { timeout: 8000 });
   const img = ini(page, 0).locator("img");
   const r = {
-    alt: await img.getAttribute("alt"), src: await img.getAttribute("src"), referrer: await img.getAttribute("referrerpolicy"), imgs: await page.locator(".banco-ini img").count(),
+    alt: await img.getAttribute("alt"), src: await img.getAttribute("src"), referrer: await img.getAttribute("referrerpolicy"), imgs: await page.locator(".banco-card .banco-ini img").count(),
     letra: await ini(page, 0).innerText(), aria: await ini(page, 0).getAttribute("aria-hidden"), fundo: await bg(ini(page, 0)), corte: await ini(page, 0).evaluate((e) => getComputedStyle(e).overflow),
     outra: await ini(page, 1).innerText(), outraCor: await bg(ini(page, 1)),
   };
@@ -700,7 +608,7 @@ test("logo: a imagem que não carrega (404) sai e a letra volta, com a cor do ba
   await esperaCards(page, 1);
   await page.waitForFunction(() => document.querySelector(".banco-ini")?.textContent === "I", null, { timeout: 8000 });
   await page.waitForFunction(() => getComputedStyle(document.querySelector(".banco-ini")).backgroundColor === "rgb(236, 112, 0)", null, { timeout: 8000 }); // o fundo tem transição curta
-  const r = { imgs: await page.locator(".banco-ini img").count(), letra: await ini(page, 0).innerText(), fundo: await bg(ini(page, 0)), classe: await ini(page, 0).getAttribute("class") };
+  const r = { imgs: await page.locator(".banco-card .banco-ini img").count(), letra: await ini(page, 0).innerText(), fundo: await bg(ini(page, 0)), classe: await ini(page, 0).getAttribute("class") };
   await ctx.close();
   assert.deepEqual(r, { imgs: 0, letra: "I", fundo: "rgb(236, 112, 0)", classe: "banco-ini" });
 });
@@ -724,10 +632,10 @@ test("logo: depois de uma URL que falhou, uma URL NOVA do mesmo banco é tentada
 test("logo: sem logo_url (null, ausente, número) ou com URL fora da regra (http, outro host, query, user@) é a letra, e o navegador nem pede a imagem", async () => {
   const ruins = [null, undefined, 123, "http://cdn.pluggy.ai/a.svg", "https://evil.example/a.svg", "https://cdn.pluggy.ai/a.svg?x=1", "https://u@cdn.pluggy.ai/a.svg", "https://cdn.pluggy.ai.evil.example/a.svg", "javascript:alert(1)"];
   const conexoes = ruins.map((l, i) => con(20 + i, "Alfa", "updated", "Atualizado", undefined, null, l));
-  const { ctx, page, srv, erros } = await bancos({ conexoes, bancos: "padrao" });
+  const { ctx, page, srv, erros } = await bancos({ conexoes, bancos: "padrao", conectores: [] });
   await esperaCards(page, ruins.length);
   await page.waitForTimeout(300); // uma imagem indevida teria sido pedida a esta altura
-  const r = { imgs: await page.locator(".banco-ini img").count(), letras: await page.locator(".banco-ini").allInnerTexts() };
+  const r = { imgs: await page.locator(".banco-card .banco-ini img").count(), letras: await page.locator(".banco-card .banco-ini").allInnerTexts() };
   await ctx.close();
   assert.deepEqual({ ...r, cdn: srv.cdn }, { imgs: 0, letras: ruins.map(() => "A"), cdn: [] });
   assert.deepEqual(erros, []);
@@ -737,8 +645,8 @@ test("logo: nenhum texto novo (o nome é o mesmo; o resto da linha é idêntico 
   const { ctx, page } = await bancos({ conexoes: [con(11, "Alfa", "updated", "Atualizado", undefined, null, LOGO), con(11, "Alfa")], bancos: "padrao" });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const lado = (n) => page.locator(".banco-card").nth(n).evaluate((c) => [".banco-id", ".banco-total"].map((s) => c.querySelector(s).innerText));
-  const r = { a: await lado(0), b: await lado(1), nomes: await page.locator(".banco-nome").allInnerTexts(), aria: await page.locator(".banco-ini").evaluateAll((l) => l.map((e) => e.getAttribute("aria-hidden"))) };
+  const lado = (n) => page.locator(".banco-card").nth(n).evaluate((c) => c.querySelector(".banco-id").innerText);
+  const r = { a: await lado(0), b: await lado(1), nomes: await page.locator(".banco-card .banco-nome").allInnerTexts(), aria: await page.locator(".banco-card .banco-ini").evaluateAll((l) => l.map((e) => e.getAttribute("aria-hidden"))) };
   await ctx.close();
   assert.deepEqual(r.a, r.b);
   assert.deepEqual(r.nomes, ["Alfa", "Alfa"]);
@@ -770,40 +678,20 @@ const dois_ = [con(11, "Nubank"), con(12, "Inter")];
 const foco = (page) => page.evaluate(() => { const e = document.activeElement; return e?.classList?.contains("banco-linha") ? e.querySelector(".banco-nome").textContent : e?.id || e?.tagName; });
 const noFoco = (page, t) => page.waitForFunction((t) => { const e = document.activeElement; return (e?.classList?.contains("banco-linha") ? e.querySelector(".banco-nome").textContent : e?.id || e?.tagName) === t; }, t, { timeout: 8000 });
 
-test("a linha é um <button> de 44 px+ com o chevron; sem <details>/<summary> nem 'Gerenciar' na página; a linha só tem nome, estado e total (e a barra conta × investido)", async () => {
+test("a linha é um <button> de 44 px+ com o chevron; sem <details>/<summary> nem 'Gerenciar' na página; a linha só tem ladrilho, nome e estado (sem valor nem barra)", async () => {
   const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" });
   await esperaCards(page, 2);
   await semReticencias(page);
   const r = await page.evaluate(() => {
     const b = document.querySelector(".banco-linha");
     return { tag: b.tagName, tipo: b.getAttribute("type"), alto: Math.round(b.getBoundingClientRect().height), chevron: !!b.querySelector(".ph-caret-right[aria-hidden=true]"), details: document.querySelectorAll("details, summary").length,
-      gerenciar: document.body.innerText.includes("Gerenciar"), texto: b.innerText.split("\n").map((t) => t.trim()).filter(Boolean), barra: b.querySelector(".banco-barra")?.getAttribute("aria-label") };
+      gerenciar: document.body.innerText.includes("Gerenciar"), texto: b.innerText.split("\n").map((t) => t.trim()).filter(Boolean), barra: b.querySelector(".comp-bar, .banco-barra, .banco-total") };
   });
   await ctx.close();
   assert.deepEqual([r.tag, r.tipo, r.chevron, r.details, r.gerenciar], ["BUTTON", "button", true, 0, false]);
   assert.ok(r.alto >= 44, `linha com ${r.alto}px`);
-  assert.deepEqual(r.texto, ["N", "Nubank", "Atualizado", "R$ 45.000,00"]); // a inicial do ladrilho, o nome, o estado e o total; sem "há N min", contagens, "Conta … · Investido …" nem ui.detail
-  assert.equal(r.barra, "Em conta 11%, investido 89%"); // 5.000 × 40.000
-});
-
-test("barra conta × investido da linha: só com os dois números, sem ressalva do servidor; 'investido 0' vira um segmento só", async () => {
-  const lido = async (bancos_) => {
-    const { ctx, page } = await bancos({ conexoes: [con(11, "Nubank")], bancos: bancos_ });
-    await esperaCards(page, 1);
-    await semReticencias(page);
-    const r = await page.locator(".banco-barra").evaluateAll((l) => l.map((e) => [e.getAttribute("aria-label"), e.getAttribute("role"), e.children.length]));
-    await ctx.close();
-    return r;
-  };
-  assert.deepEqual(await lido("barra"), [["Em conta 11%, investido 89%", "img", 2]]); // o banco 12 que o snapshot não conhece só afeta a barra do topo
-  const um = (o) => ({ ...corpoBancos("1.00", [[11, "1.00"]]), bancos: [{ conexao_id: 11, saldo_conta: "5000.00", investido: "40000.00", total: "45000.00", contas: 1, cartoes: 0, investimentos: 1, motivos: [], ...o }] });
-  assert.deepEqual(await lido(um({})), [["Em conta 11%, investido 89%", "img", 2]]);
-  assert.deepEqual(await lido(um({ investido: "0" })), [["Em conta 100%, investido 0%", "img", 1]]);
-  assert.deepEqual(await lido(um({ investido: null })), []); // número nulo: sem barra
-  assert.deepEqual(await lido(um({ saldo_conta: null })), []);
-  assert.deepEqual(await lido(um({ investido: "-1.00" })), []);
-  assert.deepEqual(await lido(um({ motivos: ["conexao_pausada"] })), []); // ressalva do servidor: o número é incerto
-  assert.deepEqual(await lido(um({ saldo_conta: "0", investido: "0" })), []); // nada a comparar
+  assert.deepEqual(r.texto, ["N", "Nubank", "Atualizado"]); // a inicial do ladrilho, o nome e o estado; sem valor, "há N min", contagens, barra nem ui.detail
+  assert.equal(r.barra, null);
 });
 
 test("o detalhe: nome, estado, ui.detail, total grande, linhas Última atualização / Em conta / Investido e só as contagens > 0 com ícone; 'Desconectar banco' no fim; nada de Reconectar, nem card dentro de card", async () => {
@@ -927,21 +815,21 @@ test("arrastar de dentro do detalhe e soltar no fundo não fecha o detalhe; o cl
 });
 
 // Cor da composição (conta × investido): dado usa neutro/série, nunca o rosa de decisão; o pontinho do detalhe tem a cor do segmento da barra.
-test("a barra conta × investido não usa o rosa; o pontinho de 'Em conta' e 'Investido' no detalhe tem a cor do segmento e contraste >= 3:1 com o painel", async () => {
+test("os pontinhos de 'Em conta' e 'Investido' no detalhe diferem entre si, não usam o rosa e passam de 3:1 contra o fundo do detalhe", async () => {
   const { ctx, page } = await bancos({ conexoes: dois_, bancos: "barra" }, { width: 1280, height: 800 });
   await esperaCards(page, 2);
   await semReticencias(page);
-  const barra = await page.locator(".banco-barra").first().evaluate((b) => ({ cores: [...b.children].map((x) => getComputedStyle(x).backgroundColor), painel: getComputedStyle(b.closest(".panel")).backgroundColor }));
   const d = await detalhe(page, 0);
   const marcas = await d.locator(".banco-det-dados .marca").evaluateAll((l) => l.map((x) => [x.closest("dt").textContent, getComputedStyle(x).backgroundColor, x.getAttribute("aria-hidden")]));
+  const fundo = await d.evaluate((e) => getComputedStyle(e).backgroundColor);
   await ctx.close();
   const lum = (c) => { const [r, g, b] = c.match(/\d+/g).slice(0, 3).map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
   const razao = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
-  assert.equal(barra.cores.length, 2);
-  assert.ok(!barra.cores.includes("rgb(255, 45, 142)"), barra.cores.join()); // --pink
-  assert.notEqual(barra.cores[0], barra.cores[1]);
-  for (const c of barra.cores) assert.ok(razao(c, barra.painel) >= 3, `${c} contra ${barra.painel}`);
-  assert.deepEqual(marcas, [["Em conta", barra.cores[0], "true"], ["Investido", barra.cores[1], "true"]]);
+  assert.deepEqual(marcas.map((m) => [m[0], m[2]]), [["Em conta", "true"], ["Investido", "true"]]);
+  const cores = marcas.map((m) => m[1]);
+  assert.ok(!cores.includes("rgb(255, 45, 142)"), cores.join()); // --pink
+  assert.notEqual(cores[0], cores[1]);
+  for (const c of cores) assert.ok(razao(c, fundo) >= 3, `${c} contra ${fundo}`);
 });
 
 // O X do detalhe fica à vista com o conteúdo rolado (a ação "Desconectar banco" do fim também), sem cobrir o conteúdo em repouso.

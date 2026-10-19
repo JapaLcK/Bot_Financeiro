@@ -2,7 +2,7 @@
 // DELETE /open-finance/{uid}/connections/{id}; o isolamento por usuário da rota já é provado em tests/test_fase4_open_finance.py.
 //   · um DELETE por vez, com o uid do clique e o x-csrf-token; duplo clique, outro banco e Esc/fundo em voo não mandam outro nem fecham;
 //   · resposta perdida, 404, 5xx e prazo: o snapshot relido decide (sem o id = foi; com o id = falha com o motivo), nunca um 2º DELETE;
-//   · 200 tira o banco, zera `/bancos` e `/limite` (o topo velho não fica na tela) e anuncia no leitor de tela; 401 = sessão; 403 = nada apagado.
+//   · 200 tira o banco, zera `/bancos` e `/limite` (o valor velho não fica na tela) e anuncia no leitor de tela; 401 = sessão; 403 = nada apagado.
 // Antes de refocar/injetar erro cada teste espera as leituras iniciais (senão o React Query reaproveita a leitura em andamento).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,7 +10,7 @@ import { RESPOSTAS } from "./_painel.mjs";
 import { abrir, navegador } from "./_guia.mjs";
 import { ate, portao } from "./_conta_perfil.mjs";
 import { JSON_ERRO, SESSAO } from "./_conta_seguranca.mjs";
-import { con, servidorBancos } from "./_bancos.mjs";
+import { abreDet, con, servidorBancos, totalDe } from "./_bancos.mjs";
 import { DEL, semReticencias, esperaCards, refoco, dlg, det, confirmar, manter, card, linha, botao, aviso, alerta, foco, noFoco, abreDetalhe, pedir, tiraDoSnapshot, lidosDepois, tela } from "./_bancos_desconectar.mjs";
 
 const browser = navegador();
@@ -26,7 +26,7 @@ test("feliz: o diálogo pergunta, o duplo clique manda 1 DELETE com o CSRF, o ca
   await aviso(page).filter({ hasText: "Nubank desconectado." }).waitFor({ state: "attached" });
   await noFoco(page, "page-title");
   await ate(page, () => ["/open-finance/7", "/open-finance/7/limite", "/api/v2/bancos"].every((x) => lidosDepois(srv).includes(x)), "as 3 leituras depois do DELETE");
-  const r = { fechado: await dlg(page).count(), nomes: await page.locator(".banco-nome").allInnerTexts(), detalhe: await det(page).count() };
+  const r = { fechado: await dlg(page).count(), nomes: await page.locator(".banco-card .banco-nome").allInnerTexts(), detalhe: await det(page).count() };
   await ctx.close();
   assert.deepEqual(antes, { titulo: "Desconectar Nubank?", botoes: ["Manter banco", "Desconectar"] });
   assert.deepEqual(srv.dels, [DEL(11)]);
@@ -43,25 +43,24 @@ test("o último banco: 'Nenhum banco conectado.'", async () => {
   assert.deepEqual(srv.dels, [DEL(11)]);
 });
 
-test("o topo não fica velho: com /bancos preso depois do 200 não há .bancos-topo nem o total antigo; solto, aparece o novo", async () => {
-  const velho = RESPOSTAS.bancos.barra, novo = { ...velho, total: "22000.00", bancos: [velho.bancos[1]] };
+test("o valor não fica velho: com /bancos preso depois do 200 o detalhe do banco que sobrou mostra '…', nunca o total antigo; solto, aparece o novo", async () => {
+  const velho = RESPOSTAS.bancos.barra, novo = { ...velho, total: "21000.00", bancos: [{ ...velho.bancos[1], total: "21000.00" }] };
   let apagou = false;
   const [segura, solta] = portao();
   const { ctx, page, srv } = await tela({ conexoes: [con(11, "Nubank"), con(12, "Inter")],
     bancosRes: async (r) => { if (!apagou) return r.fulfill({ json: velho }); await segura; return r.fulfill({ json: novo }); },
     del: (r, s) => { apagou = true; tiraDoSnapshot(s, 11); return r.fulfill({ json: { ok: true, deleted: 1 } }); } });
-  assert.ok((await page.locator(".bancos-topo").innerText()).includes("67.000,00"));
+  assert.equal(await totalDe(page, 1), "R$ 22.000,00"); // o Inter, antes
   await pedir(page, "Nubank");
   await confirmar(page).click();
   await esperaCards(page, 1);
   await ate(page, () => lidosDepois(srv).includes("/api/v2/bancos"), "a leitura de /bancos pedida (e presa)");
-  const preso = { topo: await page.locator(".bancos-topo").count(), velho: (await page.locator("body").innerText()).includes("67.000,00") };
+  const d = await abreDet(page, 0);
+  const preso = { total: await d.locator(".banco-det-total").innerText(), velho: (await page.locator("body").innerText()).includes("22.000,00") };
   solta();
-  await page.locator(".bancos-topo").waitFor();
-  const depois = await page.locator(".bancos-total").innerText();
+  await page.waitForFunction(() => document.querySelector("dialog.banco-det[open] .banco-det-total")?.textContent === "R$ 21.000,00", null, { timeout: 8000 });
   await ctx.close();
-  assert.deepEqual(preso, { topo: 0, velho: false });
-  assert.equal(depois, "R$ 22.000,00");
+  assert.deepEqual(preso, { total: "…", velho: false });
 });
 
 const JA_HA = "Já há uma sincronização em andamento. Tente em instantes.";

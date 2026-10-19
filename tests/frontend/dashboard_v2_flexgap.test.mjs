@@ -17,6 +17,7 @@ import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
 import { PAINEL, PROTOTIPO, RAIZ, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { regiao, servidorBancos } from "./_bancos.mjs";
 
 const PAGES = ["/", "/previsao", "/gastos", "/assinaturas", "/simulador", "/metas", "/patrimonio", "/lancamentos"];
 
@@ -92,6 +93,7 @@ async function measure(width, hash, withFallback, setup, semente = true) {
   // já escolheu o perfil (Pular): sem isso o modal da 1ª visita cobre o Resumo
   const demo = setup === filtros || setup === textoLongo; // provas de filtros/notas do Ledger demonstrativo
   await servir(ctx, demo ? RAIZ : undefined, { perfil: semente ? "padrao" : null });
+  await setup?.antes?.(ctx); // rotas próprias da tela (a de Bancos conectados lê /open-finance/…)
   if (demo && semente) await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   const pendentes = new Set();
@@ -132,12 +134,16 @@ const contasFora = async (page) => { await page.locator(".contas-mais").click();
 const simular = async (page) => { await page.locator(".presets .chip").first().click(); await page.locator(".sim-facts").waitFor(); };
 // mensagem que precisa de reticência em qualquer largura
 const textoLongo = (page) => page.locator(".row-msg").evaluateAll((qs) => qs.forEach((q) => { q.textContent = "pagamento da viagem de formatura dividido com a galera toda do terceirão"; }));
+// Bancos conectados (/conta/bancos): lista, "Disponíveis para conectar" e o "+" do topo, com as conexões e os conectores de _bancos.mjs.
+async function bancosTela(page) { await regiao(page).waitFor(); await page.locator(".banco-card").first().waitFor(); }
+bancosTela.antes = (ctx) => servidorBancos({ bancos: "padrao" }).antes(ctx);
 const CASES = [
   // 320: título que quebra linha e reticência; 1100: bloco estreito que o @container esconde
   ...[1440, 1100, 1024, 390, 320].flatMap((w) => PAGES.map((p) => [w, p])),
   ...[1440, 390, 320].flatMap((w) => [paleta, organizar, filtros].map((f) => [w, "/", f])),
   ...[1440, 390, 320].map((w) => [w, "/simulador", simular]),
   ...[1440, 390, 320].flatMap((w) => [[w, "/", modal, false], [w, "/", catalogo], [w, "/", contasFora]]),
+  ...[1440, 390, 320].map((w) => [w, "/conta/bancos", bancosTela]),
   [390, "/lancamentos", textoLongo],
   [1440, "/", dica],
 ];

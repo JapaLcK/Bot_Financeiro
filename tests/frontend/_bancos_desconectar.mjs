@@ -1,9 +1,9 @@
 // Helpers dos testes de desconectar banco (dashboard_v2_bancos_desconectar*.test.mjs): seletores e a tela já com as 3 leituras prontas.
 import { abrir } from "./_guia.mjs";
-import { PADRAO, servidorBancos } from "./_bancos.mjs";
+import { PADRAO, semReticencias, servidorBancos } from "./_bancos.mjs";
+export { semReticencias };
 
 export const DEL = (id) => ["DELETE", `/open-finance/7/connections/${id}`, "tok-123", null];
-export const semReticencias = (page) => page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…") && document.querySelector(".banco-total"), null, { timeout: 8000 });
 export const esperaCards = (page, n) => page.waitForFunction((n) => document.querySelectorAll(".banco-card").length === n, n, { timeout: 8000 });
 export const refoco = (page) => page.evaluate(() => window.dispatchEvent(new Event("visibilitychange"))); // o foco da aba: o React Query relê as leituras vivas
 export const dlg = (page) => page.locator("dialog[open].lanc-form"); // o Confirma (a pergunta)

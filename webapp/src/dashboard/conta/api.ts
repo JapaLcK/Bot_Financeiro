@@ -3,6 +3,7 @@
 // (frontend/routes/settings.py), então os tipos são escritos aqui, não gerados.
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, FUSO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
+import type { Conector } from "../lib/bancos";
 import { guardarCodigos } from "./Cofre";
 
 export type Campo = "nome" | "email" | "telefone";
@@ -22,7 +23,7 @@ export const segurancaQuery = (uid: number | undefined) => queryOptions({
 
 // Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
 // contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
-export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; logo_url: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Conexao = { id: number; institution_id: string | null; institution_name: string | null; last_sync_at: string | null; logo_url: string | null; ui: { state: string; label: string; detail: string | null } };
 export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
 // `logo_url` é dado de terceiro e o navegador o busca: só https no CDN de ícones da Pluggy; outro host, http, `user@host`, porta ou query = null
 // (a inicial). A MESMA regra do app (app/src/features/openFinance/conexoes/juntar.ts::logoSeguro): tests/frontend/logo_banco_paridade.test.mjs as compara.
@@ -35,7 +36,7 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
   queryFn: async ({ signal }): Promise<Conexao[]> => {
     const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, GET(signal));
     const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
-    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), logo_url: logoSeguro(c.logo_url),
+    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_id: t(c.institution_id), institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), logo_url: logoSeguro(c.logo_url),
       ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } }));
   },
   ...aberto, enabled: !DEMO && uidValido(uid),
@@ -44,6 +45,18 @@ export const limiteQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "limite", uid],
   queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
   ...aberto, enabled: !DEMO && uidValido(uid),
+});
+// O catálogo de bancos do "Disponíveis para conectar" (`GET /open-finance/{uid}/connectors`, a mesma lista do seletor). Leitura opcional: o catálogo
+// muda pouco (sem releitura no foco) e falha = a seção some. Dado de terceiro: item sem id inteiro ou sem nome some; logo só pela regra do CDN; cor validada em lib/bancos.
+export const conectoresQuery = (uid: unknown, ativo = true) => queryOptions({
+  queryKey: ["conta", "conectores", uid],
+  queryFn: async ({ signal }): Promise<Conector[]> => {
+    const r = await chamar<{ connectors?: unknown }>(`/open-finance/${uid}/connectors`, GET(signal));
+    return (Array.isArray(r.connectors) ? r.connectors : []).flatMap((c: Record<string, unknown> | null) =>
+      c && Number.isInteger(c.id) && typeof c.name === "string" && c.name.trim()
+        ? [{ id: c.id as number, name: c.name.trim(), color: typeof c.color === "string" ? c.color : null, logo: logoSeguro(c.logo) }] : []);
+  },
+  staleTime: 300000, refetchOnWindowFocus: false, networkMode: "always", retry: meQuery.retry, enabled: !DEMO && uidValido(uid) && ativo,
 });
 // A sessão já é de outra conta (outra aba trocou): a tela esconde o que está em cache e relê o perfil.
 export class ContaTrocada extends Error {}

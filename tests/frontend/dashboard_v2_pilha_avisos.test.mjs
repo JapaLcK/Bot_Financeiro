@@ -803,10 +803,12 @@ test("G1: sem GET duplicado de /api/v2/bancos: a pilha lê em `/` (1), a tela Ba
   await page.locator(PILHA).waitFor();
   await page.waitForTimeout(300);
   const emResumo = gets;
+  const leu = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v2/bancos"); // a leitura da tela Bancos, a 2ª
   await page.evaluate(() => { location.hash = "#/conta/bancos"; });
   await page.locator(".banco-card").waitFor();
-  await page.waitForFunction(() => !document.querySelector(".banco-total")?.textContent.includes("…"));
-  await page.waitForTimeout(500);
+  await leu;
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)))); // React assentou
   const pilha = await page.locator(PILHA).count();
   await ctx.close();
   assert.equal(emResumo, 1);

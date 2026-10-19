@@ -62,6 +62,8 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
   let atual = perfil;
   await ctx.route("**/*", (r) => {
     const url = new URL(r.request().url());
+    // O SDK da Pluggy do painel.html (o widget que o seletor de bancos abre): vazio e atendido, não abortado (um aborto é "requisição com falha"); nenhum teste o executa.
+    if (url.origin === "https://cdn.pluggy.ai" && url.pathname.startsWith("/pluggy-connect/")) return r.fulfill({ contentType: "application/javascript", body: "" });
     if (url.origin !== ORIGIN) return r.abort();
     if (url.pathname === "/api/v2/me") return r.fulfill({ json: me });
     if (url.pathname === "/api/v2/eventos") return;
