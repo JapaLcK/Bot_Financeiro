@@ -5,7 +5,7 @@ import { z } from "zod";
 import { chamar } from "@/api/client";
 import { NAO_CONFIRMOU } from "@/features/conta/exclusao";
 import { chaveLayout, PERFIS } from "@/features/painel/catalogo";
-import { guardarCredenciais, lerCredenciais } from "@/storage/secure";
+import { guardarCredenciais, lerCredenciais, limparCredenciais } from "@/storage/secure";
 
 import { cofre, resposta, segurar } from "./auth_apoio";
 import { abrir, chamadasA, digitar, esperarBotao, responderAlerta, sessaoMorta, tocar } from "./conta_apoio";
@@ -176,5 +176,35 @@ describe("Excluir conta — sessão morre com o DELETE em voo", () => {
     expect(semLogoutDeB()).toBe(true);
     expect(alerta).not.toHaveBeenCalledWith(NAO_CONFIRMOU);
     await expect(lerCredenciais()).resolves.toEqual(B);
+  });
+
+  /** O DELETE FALHOU (conta intacta) e o cofre mudou no meio: superada, mas sem 2xx. Nada de apagar layouts nem sair. */
+  it("B entra no cofre e o DELETE volta 503: layouts de A ficam, sem /auth/logout, B intacto, sheet solta", async () => {
+    await abrirExcluir({ [DELETE]: async () => { await guardarCredenciais(B); return resposta(503, { detail: "stripe_indisponivel" }); } });
+    semearLayouts();
+    const alerta = responderAlerta("Excluir");
+
+    await excluir();
+    await act(async () => { await drenar(); });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Excluir conta" })).toBeTruthy());
+    expect(layouts(7)).toEqual(PERFIS.map(() => true));
+    expect(chamadasA("/auth/logout")).toHaveLength(0);
+    expect(alerta).not.toHaveBeenCalledWith(NAO_CONFIRMOU);
+    await expect(lerCredenciais()).resolves.toEqual(B);
+  });
+
+  it("cofre esvaziado por requisição paralela e o DELETE volta 401 'Senha incorreta.': layouts de A ficam, zero logout", async () => {
+    await abrirExcluir({ [DELETE]: async () => { await limparCredenciais(); return resposta(401, { detail: "Senha incorreta." }); } });
+    semearLayouts();
+    const alerta = responderAlerta("Excluir");
+
+    await excluir();
+    await act(async () => { await drenar(); });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Excluir conta" })).toBeTruthy());
+    expect(layouts(7)).toEqual(PERFIS.map(() => true));
+    expect(chamadasA("/auth/logout")).toHaveLength(0);
+    expect(alerta).not.toHaveBeenCalledWith(NAO_CONFIRMOU);
   });
 });

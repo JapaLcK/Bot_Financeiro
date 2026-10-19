@@ -138,8 +138,9 @@ function Formulario({ modo, userId, mfa, prender, desprender }: { modo: "senha" 
       // 401 de sessão na PRÓPRIA requisição: o servidor só revoga sessões no commit e responde 200, então aqui nada
       // foi executado e a conta está viva: os layouts ficam. Timeout e rede também não apagam: a conta pode existir.
       if (e instanceof SessaoExpirada) return void falha(e);
-      // Superada: o 200 chegou com a sessão já revogada por requisição paralela (exclusão provável).
-      if (e instanceof RequisicaoSuperada) return void (await concluir("superada"));
+      // Superada APÓS o 200 (sessão revogada por requisição paralela): exclusão provável. Superada na falha do DELETE
+      // (503, 4xx) deixa a conta viva: cai no caminho comum abaixo, que solta a sheet e não mostra nada.
+      if (e instanceof RequisicaoSuperada && e.aposSucesso) return void (await concluir("superada"));
       emVoo.current = false;
       soltar();
       const texto = falha(e);
