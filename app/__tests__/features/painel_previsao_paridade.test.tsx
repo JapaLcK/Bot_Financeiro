@@ -98,3 +98,38 @@ it("com valores ocultos, nenhum dígito das causas aparece", async () => {
  const semDigitos = () => { expect(hero().queryByLabelText(/1800|9400|reais/)).toBeNull(); expect(hero().queryByText(/1\.800|9\.400/)).toBeNull(); };
  await apertar(screen.getByTestId("pior-dia")); expect(hero().getByText("Aluguel")).toBeTruthy(); semDigitos();
 });
+const motivo = (codigo: string, direcao_do_erro = "so_melhora") => ({ codigo, direcao_do_erro });
+const CURVA = "Evolução dos valores no período";
+it("na folha: o estado e cada motivo com rótulo e direção; código desconhecido (a direção desconhecida o schema já recusa) e 'constructor' saem crus", async () => {
+ previsao = { ...F, estado: "a_conferir", motivos: [motivo("gastos_variaveis_nao_estimados"), motivo("receita_nao_garantida", "so_piora"), motivo("ambos_x", "ambos"), motivo("codigo_novo"), motivo("constructor")] };
+ await abrirResumo();
+ expect(hero().getByText("A conferir")).toBeTruthy(); expect(hero().getByText("gastos do dia a dia fora da conta")).toBeTruthy(); expect(hero().getAllByText("o real pode ser pior")).toHaveLength(3);
+ expect(hero().getByText("receita não garantida")).toBeTruthy(); expect(hero().getByText("o real pode ser melhor")).toBeTruthy(); expect(hero().getByText("pode variar para os dois lados")).toBeTruthy();
+ expect(hero().getByText("codigo_novo")).toBeTruthy(); expect(hero().getByText("constructor")).toBeTruthy();
+});
+it("estado condicional aparece na folha; no card fechado nem o estado nem os motivos", async () => {
+ previsao = { ...F, estado: "condicional", motivos: [motivo("receita_nao_garantida")] };
+ renderRouter("./app", { initialUrl: "/resumo" }); await waitFor(() => expect(screen.getByText("A partir de hoje, 06/10")).toBeTruthy());
+ expect(screen.queryByText("receita não garantida")).toBeNull(); expect(screen.queryByText("Previsão condicional")).toBeNull();
+ await apertar(screen.getByTestId("bloco-hero"));
+ expect(hero().getByText("Previsão condicional")).toBeTruthy(); expect(hero().getByText("receita não garantida")).toBeTruthy();
+});
+it("indisponível: avisa uma vez e não desenha a curva", async () => {
+ previsao = { ...F, estado: "indisponivel", motivos: [] };
+ await abrirResumo();
+ expect(hero().getAllByText("Previsão indisponível")).toHaveLength(1); expect(within(screen.getByTestId("bloco-hero")).queryByLabelText(CURVA)).toBeNull(); expect(hero().queryByLabelText(CURVA)).toBeNull();
+});
+it("indisponível sem trajetória (plano): a frase do plano aparece e não há curva", async () => {
+ previsao = { ...F, estado: "indisponivel", motivos: [], trajetoria: null };
+ await abrirResumo();
+ expect(hero().getByText("Trajetória indisponível no seu plano.")).toBeTruthy(); expect(hero().queryByLabelText(CURVA)).toBeNull();
+});
+it("condicional (positivo): a curva continua desenhada", async () => {
+ previsao = { ...F, estado: "condicional" }; await abrirResumo(); expect(within(screen.getByTestId("bloco-hero")).getByLabelText(CURVA)).toBeTruthy();
+});
+it("motivos de banco e bancos_excluidos não viram linha na folha (aviso único do topo / do card); os outros sim", async () => {
+ previsao = { ...F, base: { ...F.base, bancos_excluidos: true }, motivos: [motivo("banco_desatualizado"), motivo("bancos_excluidos"), motivo("conexao_pausada"), motivo("carteira_nao_confirmada")] };
+ await abrirResumo();
+ expect(hero().getByText("a confirmar")).toBeTruthy(); expect(hero().getByText("Bancos conectados fora do cálculo")).toBeTruthy();
+ for (const t of ["banco desatualizado", "bancos fora do cálculo", "conexão pausada"]) expect(hero().queryByText(t)).toBeNull();
+});
