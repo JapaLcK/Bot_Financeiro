@@ -12,19 +12,26 @@ export const con = (id, institution_name, state = "updated", label = "Atualizado
 });
 // As conexões da fixture `bancos.padrao`: 11 e 12 em dia, 13 pausada.
 export const PADRAO = () => [con(11, "Nubank"), con(12, "Inter"), con(13, "Itaú", "paused", "Pausado")];
+// A resposta do POST /open-finance/{uid}/refresh (forma de `pluggy_sync.py`: `sync.items[]` por item, `still_updating` a soma, e o snapshot de depois em `connections`).
+export const item = (item_id, state = "updated", still_updating = false, detail = null, reason = "ok", institution = "Nubank") =>
+  ({ item_id, institution, state, label: state, detail, reason, still_updating });
+export const refreshDe = (items, connections = PADRAO(), ok = true) =>
+  ({ ok: true, sync: { ok, items, still_updating: items.filter((i) => i.still_updating).length }, connections });
 export const LIMITE = (o = {}) => ({ ok: true, of_banks_max: 3, em_uso: 2, pode_adicionar: true, code: null, message: null, ...o });
 
 /**
  * `conexoes`: o snapshot; `bancos`: nome da fixture `bancos` ou o corpo; `limite`: o corpo do /limite.
  * `snap`/`bancosRes`/`limiteRes`: `(r) => r.fulfill(...)` para responder outra coisa; `perfil`: o corpo do dashboard-profile (padrão uid 7).
  * `s.reqs`: os caminhos pedidos (das três leituras e do perfil) na ordem.
+ * `refresh`: `(r) => r.fulfill(...)` do POST /open-finance/7/refresh (padrão: 200, tudo em dia); `s.posts`: um `{ headers }` por POST recebido.
  */
-export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
-  const s = { reqs: [] };
+export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, refresh, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
+  const s = { reqs: [], posts: [] };
   s.antes = async (ctx) => {
     ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (/open-finance|bancos|dashboard-profile/.test(p)) s.reqs.push(p); });
     await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: perfil }));
     await ctx.route((u) => u.pathname === "/open-finance/7", (r) => snap ? snap(r) : r.fulfill({ json: { ok: true, connections: conexoes } }));
+    await ctx.route((u) => u.pathname === "/open-finance/7/refresh", (r) => { s.posts.push({ headers: r.request().headers() }); return refresh ? refresh(r) : r.fulfill({ json: refreshDe([item("item-11")]) }); });
     await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => limiteRes ? limiteRes(r) : r.fulfill({ json: limite }));
     if (bancos || bancosRes) await ctx.route((u) => u.pathname === "/api/v2/bancos", (r) => bancosRes ? bancosRes(r) : r.fulfill({ json: typeof bancos === "string" ? RESPOSTAS.bancos[bancos] : bancos }));
   };

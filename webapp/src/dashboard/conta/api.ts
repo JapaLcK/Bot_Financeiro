@@ -4,6 +4,7 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { DEMO, ErroApi, FUSO, apiGet, chamar, escrever, instante, meQuery } from "../lib/v2";
 import { guardarCodigos } from "./Cofre";
+import type { Refresh } from "../lib/atualizarBanco";
 
 export type Campo = "nome" | "email" | "telefone";
 export type Seguranca = { email: string | null; display_name: string | null; phone: string | null; created_at: string | null };
@@ -22,20 +23,31 @@ export const segurancaQuery = (uid: number | undefined) => queryOptions({
 
 // Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
 // contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
-export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Conexao = { id: number; institution_name: string | null; last_sync_at: string | null; provider_item_id: string | null; ui: { state: string; label: string; detail: string | null } };
 export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
 const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry } as const;
 
+// O leitor do snapshot, UM só: o `conexoesQuery` (página Bancos, aviso do topo) e a máquina do "Atualizar agora" (lib/atualizarBanco.ts) o usam.
+const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
+const conexaoDe = (c: Partial<Conexao>): Conexao => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), provider_item_id: t(c.provider_item_id),
+  ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } });
+export async function lerConexoes(uid: number, signal?: AbortSignal): Promise<Conexao[]> {
+  const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, signal ? GET(signal) : { headers: { Accept: "application/json" } });
+  return (r.connections ?? []).map(conexaoDe);
+}
 export const conexoesQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "conexoes", uid],
-  queryFn: async ({ signal }): Promise<Conexao[]> => {
-    const r = await chamar<{ connections?: Partial<Conexao>[] }>(`/open-finance/${uid}`, GET(signal));
-    const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
-    return (r.connections ?? []).map((c) => ({ id: c.id!, institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at),
-      ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } }));
-  },
+  queryFn: ({ signal }) => lerConexoes(uid as number, signal), // `enabled` só deixa rodar com `uidValido`
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
+// `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. Mesma borda do snapshot: o que não é string vira null,
+// `state` fora do contrato vira "" (estado desconhecido, e portanto erro: o default seguro do `refreshVerdict`), `still_updating` só vale se for `true`.
+const refreshDe = (r: { connections?: Partial<Conexao>[]; sync?: { ok?: unknown; items?: unknown } }): Refresh => ({
+  connections: (r.connections ?? []).map(conexaoDe),
+  sync: { ...(typeof r.sync?.ok === "boolean" ? { ok: r.sync.ok } : {}), items: (Array.isArray(r.sync?.items) ? r.sync.items : []).filter(objeto).map((i) => ({
+    item_id: t(i.item_id) ?? "", institution: t(i.institution), state: t(i.state) ?? "", label: t(i.label) ?? "", detail: t(i.detail), reason: t(i.reason), still_updating: i.still_updating === true })) },
+});
+export const atualizarBancos = (uid: number, signal: AbortSignal) => escrever<Parameters<typeof refreshDe>[0]>("POST", `/open-finance/${uid}/refresh`, {}, signal).then(refreshDe);
 export const limiteQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "limite", uid],
   queryFn: ({ signal }) => chamar<Limite>(`/open-finance/${uid}/limite`, GET(signal)),
