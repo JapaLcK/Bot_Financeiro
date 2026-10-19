@@ -17,7 +17,7 @@ export default function Ferramentas() {
   return <Screen sobCabecalho><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <GrupoDeLinhas>
       <ListRow icone="ShoppingCart" titulo="Vale a pena comprar?" desativado={pro === undefined} chevron={pro === "1"} trailing={pro === "0" ? <Selo texto="Pro" /> : undefined} onPress={() => { if (pro === "1") navegar("/simulador-compra"); else if (pro === "0") Alert.alert(SEM_PLANO); }} />
-      <ListRow icone="Trophy" titulo="Progresso ao milhão" trailing={breve} />
+      <ListRow icone="Trophy" titulo="Progresso ao milhão" chevron onPress={() => navegar("/progresso-milhao")} />
     </GrupoDeLinhas>
     <GrupoDeLinhas>
       <ListRow icone="Lightning" titulo="Simulador" trailing={breve} />

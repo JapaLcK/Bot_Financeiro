@@ -37,6 +37,7 @@ function PilhaApp() {
       <Stack.Screen name="conexoes" options={{ headerShown: true, title: "Bancos conectados", headerBackButtonDisplayMode: "minimal" }} />
       <Stack.Screen name="seguranca" options={{ ...CABECALHO, title: "Segurança" }} />
       <Stack.Screen name="ferramentas" options={{ ...CABECALHO, title: "Ferramentas" }} />
+      <Stack.Screen name="progresso-milhao" options={{ ...CABECALHO, title: "Progresso ao milhão" }} />
       <Stack.Screen name="perfil" options={{ ...CABECALHO, title: "Perfil" }} />
       <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
       {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
