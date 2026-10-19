@@ -39,6 +39,7 @@ class PlanLimits(TypedDict):
     of_banks_max: int | None            # bancos conectáveis no Open Finance (0 = sem OF)
     agents_max: int | None              # teto de agentes ativos (legado; hoje o limite real é a energia)
     agents_energy_budget: int           # orçamento de energia p/ ativar agentes (0 = sem agentes)
+    budgets_max: int | None             # orçamentos por categoria; None = ilimitado
 
 
 # Ordem canônica da escada. Comparações de tier usam este ranking.
@@ -96,6 +97,7 @@ FREE_LIMITS: PlanLimits = {
     "of_banks_max": 0,                   # Grátis não tem Open Finance (trial usa o tier assinado)
     "agents_max": 0,                     # Grátis não tem agentes (trial usa o tier assinado)
     "agents_energy_budget": 0,           # Grátis não tem energia p/ agentes
+    "budgets_max": 3,
 }
 
 
@@ -118,6 +120,7 @@ ESSENCIAL_LIMITS: PlanLimits = {
     "of_banks_max": 1,                   # 1 conexão viva (pode trocar de banco)
     "agents_max": 0,                     # prateleira de agentes começa no Plus
     "agents_energy_budget": 0,           # Essencial ainda não tem energia p/ agentes
+    "budgets_max": None,
 }
 
 
@@ -140,6 +143,7 @@ PLUS_LIMITS: PlanLimits = {
     "of_banks_max": 2,
     "agents_max": 3,                     # legado (headline "até 3"); o limite real é a energia
     "agents_energy_budget": 4,           # cabem os 3 baratos (1+1+2), ou 2 se um for caro (⚡3)
+    "budgets_max": None,
 }
 
 

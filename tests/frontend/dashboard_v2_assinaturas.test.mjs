@@ -242,8 +242,8 @@ test("lista vazia: o texto e o link para conectar banco, no card e na página", 
   assert.equal(r.secao, 0); // `ignoradas: []`: o vazio é de quem não conectou, não de quem ignorou
   assert.equal(r.textoPagina, r.texto);
   assert.equal(r.texto, "Nenhuma assinatura por aqui ainda. Elas aparecem sozinhas a partir das contas e cartões conectados pelo Open Finance.");
-  assert.equal(r.link, "/settings?view=open-finance");
-  assert.equal(r.pagina, "/settings?view=open-finance");
+  assert.equal(r.link, "#/conta/bancos");
+  assert.equal(r.pagina, "#/conta/bancos");
 });
 
 test("500: mensagem fixa e \"Tentar de novo\" pede de novo", async () => {
@@ -531,11 +531,14 @@ test("card só com outras: \"N cobranças recorrentes para revisar\"", async () 
 test("protótipo com Economizar: zero pedidos à /api/v2 (fora o /me, que ele também não faz)", async () => {
   const { ctx, page, tudo } = await abrir({ url: PROTOTIPO, raiz: RAIZ });
   await page.locator("#w-assinaturas .empty").waitFor();
+  // O protótipo não tem as rotas da Conta (ATIVAS): "Conectar banco" fica no destino antigo, não em #/conta/bancos (que viraria #/).
+  const cta = await page.locator("#w-assinaturas .empty a").getAttribute("href");
   await page.evaluate(() => { location.hash = "#/assinaturas"; });
   await page.locator(".page .empty").waitFor();
   await page.waitForLoadState("networkidle");
   await ctx.close();
   assert.deepEqual(tudo, []);
+  assert.equal(cta, "/settings?view=open-finance");
 });
 
 // ── Ignoradas (#751) ─────────────────────────────────────────────────────────

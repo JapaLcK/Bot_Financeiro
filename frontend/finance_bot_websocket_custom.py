@@ -8606,9 +8606,6 @@ class BudgetPayload(BaseModel):
     categoria: str
     budget: float
 
-FREE_BUDGETS_LIMIT = 3
-
-
 @app.post("/budgets/{user_id}")
 async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     _authorize_dashboard_access(request, user_id)
@@ -8616,48 +8613,21 @@ async def set_budget(request: Request, user_id: int, payload: BudgetPayload):
     if payload.budget <= 0 or not valor_valido(payload.budget):  # `nan <= 0` é False
         raise HTTPException(status_code=400, detail="budget must be > 0 and finite")
 
-    from core.services.plan_service import plan_gate_ok
+    from core.services.plan_limits import PlanLimitExceeded
+    from core.services.plan_service import get_user_limits
+    from db.budgets import upsert_budget
 
-    async with await db_connect() as conn:
-        async with conn.cursor() as cur:
-            # Pro gate: Free pode ter até FREE_BUDGETS_LIMIT orçamentos.
-            # Update de orçamento existente não conta — só novo INSERT.
-            if not plan_gate_ok(user_id, "generic"):
-                await cur.execute(
-                    "SELECT 1 FROM category_budgets "
-                    "WHERE user_id=%s AND lower(categoria)=lower(%s)",
-                    (user_id, payload.categoria),
-                )
-                is_existing = await cur.fetchone() is not None
-                if not is_existing:
-                    await cur.execute(
-                        "SELECT COUNT(*) AS n FROM category_budgets WHERE user_id=%s",
-                        (user_id,),
-                    )
-                    row = await cur.fetchone()
-                    current = int((row.get("n") if isinstance(row, dict) else row[0]) or 0)
-                    if current >= FREE_BUDGETS_LIMIT:
-                        raise HTTPException(
-                            status_code=403,
-                            detail={
-                                "error": "pro_required",
-                                "feature": "budgets_limit",
-                                "limit": FREE_BUDGETS_LIMIT,
-                            },
-                        )
-
-            await cur.execute(
-                """
-                INSERT INTO category_budgets (user_id, categoria, budget)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id, categoria)
-                DO UPDATE SET budget = EXCLUDED.budget
-                """,
-                (user_id, payload.categoria, payload.budget),
-            )
-        await conn.commit()
+    # Mesma regra do /api/v2/orcamentos-categoria: o teto vem de plan_limits.budgets_max
+    # e o upsert casa a categoria sem caixa/acento (não nasce gêmea).
+    limite = (await asyncio.to_thread(get_user_limits, user_id))["budgets_max"]
+    try:
+        canon, _ = await asyncio.to_thread(upsert_budget, user_id, payload.categoria, payload.budget, limite=limite)
+    except PlanLimitExceeded:
+        raise HTTPException(status_code=403, detail={"error": "pro_required", "feature": "budgets_limit", "limit": limite})
+    except ValueError:
+        raise HTTPException(status_code=400, detail="budget must be > 0 and finite")
     _invalidate_dashboard_current_cache(user_id)
-    return {"ok": True, "categoria": payload.categoria, "budget": payload.budget}
+    return {"ok": True, "categoria": canon, "budget": payload.budget}
 
 @app.delete("/budgets/{user_id}/{categoria}")
 async def delete_budget(request: Request, user_id: int, categoria: str):

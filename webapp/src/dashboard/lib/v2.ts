@@ -158,6 +158,12 @@ export const milhaoQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
   ...vivo,
 };
+// Os orçamentos por categoria do mês corrente (`GET /api/v2/orcamentos-categoria`, sem `mes`); a escrita devolve a resposta nova e ela entra nesta chave.
+export const orcamentosCategoriaQuery = {
+  queryKey: ["orcamentos-categoria"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/orcamentos-categoria", signal),
+  ...vivo,
+};
 export const guiaQuery = {
   queryKey: ["guia"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),

@@ -28,6 +28,7 @@ from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.metas import Metas
 from api.v2.orcamento_domestico import OrcamentoDomestico
+from api.v2.orcamentos_categoria import OrcamentosCategoria
 from api.v2.progresso_milhao import ProgressoMilhao
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
@@ -503,3 +504,9 @@ def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
     ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/api-v2.gen.ts").read_text(encoding="utf-8")
     bloco = "\n".join(l for l in ts.splitlines() if l.startswith(("export type Simulador", "export type ResumoCenario", "export type ContratoSimulador", "export type PontoSimulador")))
     assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["orcamentos_categoria"]))
+def test_fixture_dos_orcamentos_por_categoria_segue_o_modelo(nome):
+    f = FIXTURES["orcamentos_categoria"][nome]
+    assert OrcamentosCategoria.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
