@@ -8,7 +8,7 @@ import { NOVO, type Turno } from "./conversaEstado";
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string };
 export type TurnoAgente = { kind: string; mensagem: string; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
-type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; aplicarUso: (u: { used: number; limit: number }) => void; falhou: (e: unknown) => void };
+type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; aplicarUso: Dispatch<SetStateAction<{ used: number; limit: number } | null>>; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const estadoSemChat = (kind: string, acesso: Exclude<Acesso, "ready">, e: Energia | null): Partial<TurnoAgente> =>
@@ -67,6 +67,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
       const d = detalheDe(e), status = e instanceof ErroDeApi ? e.status : -1;
       const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
       if (d.error === "invalid_context") contextos.current.delete(kind); // o próximo envio recomeça a conversa
+      if (d.error === "quota_exhausted") aplicarUso((u) => u && { ...u, used: Math.max(u.used, u.limit) }); // outro cliente gastou o resto: trava o campo e as ações como a cota cheia
       falhou(e);
       if (acesso) atualizar(id, estadoSemChat(kind, acesso, energia));
       else if (semSenha(e)) atualizar(id, { estado: "erro", texto: SEM_SENHA, repetir: false });

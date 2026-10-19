@@ -171,6 +171,17 @@ it("cota cheia: 'Ativar e responder', 'Tentar de novo' e 'Perguntar ao' ficam de
   await toque("Ativar e responder"); await toque("Perguntar ao Carteiro"); await act(drenar);
   expect(ag.nAtivar).toBe(0); expect(ag.nChat).toBe(2);
 });
+it("429 quota_exhausted do agente (outro cliente gastou o resto): a cota fica cheia na tela e o campo trava", async () => {
+  ag.chat = () => erro(429, { error: "quota_exhausted", message: "Você atingiu a cota mensal compartilhada da IA." });
+  await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("Você atingiu a cota mensal compartilhada da IA.")).toBeTruthy());
+  await digitar("@Xerife de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+  await apertar("Enviar mensagem"); await act(drenar); expect(ag.nChat).toBe(1); expect(posts()).toHaveLength(0);
+});
+it("429 sem quota_exhausted (rajada): o campo segue livre", async () => {
+  ag.chat = () => erro(429, { error: "rate_limited", message: "Calma." });
+  await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("Calma.")).toBeTruthy());
+  await digitar("@Xerife de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).not.toBeDisabled();
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
