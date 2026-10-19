@@ -17,13 +17,20 @@ import { cancelarAtualizarBanco } from "./usarAtualizarBanco";
 import { PilhaDeAvisos, type AvisoDaPilha } from "./pilhaAvisos";
 import { ProvedorRespondidas, ReceitasDoBanco } from "./receitas";
 import { usePainel } from "./provider";
-import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
+import { ContextoNavegacaoPainel, useNavegacaoPainel, useNavegarPainel } from "./navegacao";
+import { planoPro } from "./widgets";
 import { Acao, Folha, MOTIVOS_BANCO, RecursoDados, temMotivoBanco } from "./base";
 import { BLOCOS_HOME, PERFIS, TITULOS, nomeMes, mesesDoHistorico, dataPtBr, mesAtual, type Widget } from "./catalogo";
 export const nomeDe = (u: { display_name?: string | null; email?: string | null }) => u.display_name?.trim() || u.email?.split("@")[0] || "Você";
 export function BotaoPrivacidade({ tamanho }: { tamanho?: 20 | 24 }) {
  const p = usePainel();
  return <Pressable testID="painel-privacidade" accessibilityRole="button" accessibilityLabel={p.oculto ? "Mostrar valores" : "Ocultar valores"} onPress={p.alternarPrivacidade} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome={p.oculto ? "EyeSlash" : "Eye"} tamanho={tamanho} /></Pressable>;
+}
+/** Manda o retrato do plano por parâmetro: a tela Ferramentas fica fora do provider. Ausente = plano carregando ou falhou. */
+export function BotaoFerramentas({ tamanho }: { tamanho?: 20 | 24 }) {
+ const { navegar } = useNavegacaoPainel(); const { dados } = usePainel();
+ const pro = planoPro(dados) ? "1" : dados.plano?.fase === "pronto" ? "0" : undefined;
+ return <Pressable testID="painel-ferramentas" accessibilityRole="button" accessibilityLabel="Abrir ferramentas" onPress={() => navegar({ pathname: "/ferramentas", params: pro ? { pro } : {} })} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome="Wrench" tamanho={tamanho} /></Pressable>;
 }
 /** `comReceitas`: só o Resumo. As receitas pendentes entram na pilha; as respondidas somem do topo e vão para o card "Saldo previsto" (contexto `ProvedorRespondidas`, que só existe aqui). */
 export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: string; children: ReactNode; comReceitas?: boolean }) {
@@ -51,7 +58,7 @@ export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: 
  const feedback = <>{p.aviso && <Banner tom="warning" mensagem={p.aviso} />}{avisoNavegacao && <Banner tom="warning" mensagem={avisoNavegacao} />}</>;
  const sair = async () => { setSaindo(true); setErroSaida(null); if (!(await sessao.sair())) { setSaindo(false); setErroSaida("Não conseguimos sair. Tente de novo."); } };
  const tela = (topo: ReactNode) => <Screen onAtualizar={p.atualizar} atualizando={p.atualizando}><View style={{ gap: 12, paddingTop: 12, paddingBottom: 24 }}>
- <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel="PigBank, abrir Resumo" onPress={() => navegar("/resumo", "navigate")} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center" }}><View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}><Image source={SIMBOLO} style={{ width: 28, height: 28 }} accessibilityIgnoresInvertColors /><Texto variante="secao" style={{ letterSpacing: -1, fontSize: 26, flexShrink: 1 }}>PigBank</Texto></View></Pressable><BotaoPrivacidade /><Pressable testID="painel-conta" accessibilityRole="button" accessibilityLabel="Abrir minha conta" onPress={() => { if (!entradaEmVoo.current) setFolha("conta"); }} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: raio.pilula, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}><Texto variante="rotulo">{nome.slice(0, 1).toUpperCase()}</Texto></Pressable></View>
+ <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><Pressable accessibilityRole="button" accessibilityLabel="PigBank, abrir Resumo" onPress={() => navegar("/resumo", "navigate")} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center" }}><View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}><Image source={SIMBOLO} style={{ width: 28, height: 28 }} accessibilityIgnoresInvertColors /><Texto variante="secao" style={{ letterSpacing: -1, fontSize: 26, flexShrink: 1 }}>PigBank</Texto></View></Pressable><BotaoFerramentas /><BotaoPrivacidade /><Pressable testID="painel-conta" accessibilityRole="button" accessibilityLabel="Abrir minha conta" onPress={() => { if (!entradaEmVoo.current) setFolha("conta"); }} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: raio.pilula, backgroundColor: cores.surfaceRaised, alignItems: "center", justifyContent: "center" }}><Texto variante="rotulo">{nome.slice(0, 1).toUpperCase()}</Texto></Pressable></View>
  {topo}
  <View style={{ gap: 8 }}>{titulo === "Resumo" && <Texto variante="rotulo" tom="inkMuted">Bom dia, {nome}</Texto>}<View style={{ flexDirection: ampliado ? "column" : "row", alignItems: ampliado ? "flex-start" : "center", gap: 12 }}><Texto variante="titulo" accessibilityRole="header" style={{ flex: ampliado ? undefined : 1, flexShrink: 1, minWidth: 0 }}>{titulo === "Resumo" ? `Resumo de ${nomeMes(p.mes).split(" de ")[0]}` : titulo}</Texto><Acao rotulo={nomeMes(p.mes).slice(0, 3)} iconeFim="CaretDown" onPress={() => setFolha("mes")} /></View></View>
  {titulo === "Resumo" && <View style={{ flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}><Acao rotulo={label} iconeFim="CaretDown" onPress={() => setFolha("perfil")} desativado={p.salvandoPerfil} /><Acao rotulo="Organizar" icone="SlidersHorizontal" onPress={() => setFolha("organizar")} /></View>}
