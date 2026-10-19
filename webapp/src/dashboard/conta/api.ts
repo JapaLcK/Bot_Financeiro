@@ -40,15 +40,23 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
   queryFn: ({ signal }) => lerConexoes(uid as number, signal), // `enabled` só deixa rodar com `uidValido`
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
-// `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. Mesma borda do snapshot: o que não é string vira null,
-// `state` fora do contrato vira "" (estado desconhecido, e portanto erro: o default seguro do `refreshVerdict`), `still_updating` só vale se for `true`.
-// `sync.items` ausente ou fora de lista é contrato quebrado (o servidor sempre o manda, `pluggy_sync.py`), não "em dia": falha como o `ContratoInvalido` do app.
+// `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. O veredito decide o desfecho, então a borda é a do
+// `refreshSchema` do app: `sync.items` ausente, fora de lista, ou com um item fora do contrato (não-objeto, `item_id`/`state`/`label` sem string,
+// `still_updating` sem booleano, `institution`/`detail`/`reason` fora de string ou null) é contrato quebrado, nunca "em dia" calado: falha como o `ContratoInvalido`.
+// O servidor sempre manda os campos. O snapshot (`connections`) segue a borda branda de `conexaoDe` (o que não é string vira null).
+const contrato = () => new ErroApi(200, "contrato");
+const textoOuNulo = (v: unknown, opcional = false) => typeof v === "string" || v === null || (opcional && v === undefined);
+const itemDe = (i: unknown) => {
+  if (!objeto(i) || typeof i.item_id !== "string" || typeof i.state !== "string" || typeof i.label !== "string" || typeof i.still_updating !== "boolean"
+    || !textoOuNulo(i.institution) || !textoOuNulo(i.detail, true) || !textoOuNulo(i.reason, true)) throw contrato();
+  return { item_id: i.item_id, institution: i.institution as string | null, state: i.state, label: i.label, detail: (i.detail ?? null) as string | null,
+    reason: (i.reason ?? null) as string | null, still_updating: i.still_updating };
+};
 const refreshDe = (r: { connections?: Partial<Conexao>[]; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
-  if (!Array.isArray(r.sync?.items)) throw new ErroApi(200, "contrato");
+  if (!Array.isArray(r.sync?.items)) throw contrato();
   return {
     connections: (r.connections ?? []).map(conexaoDe),
-    sync: { ...(typeof r.sync.ok === "boolean" ? { ok: r.sync.ok } : {}), items: r.sync.items.filter(objeto).map((i) => ({
-      item_id: t(i.item_id) ?? "", institution: t(i.institution), state: t(i.state) ?? "", label: t(i.label) ?? "", detail: t(i.detail), reason: t(i.reason), still_updating: i.still_updating === true })) },
+    sync: { ...(typeof r.sync.ok === "boolean" ? { ok: r.sync.ok } : {}), items: r.sync.items.map(itemDe) },
   };
 };
 export const atualizarBancos = (uid: number, signal: AbortSignal) => escrever<Parameters<typeof refreshDe>[0]>("POST", `/open-finance/${uid}/refresh`, {}, signal).then(refreshDe);

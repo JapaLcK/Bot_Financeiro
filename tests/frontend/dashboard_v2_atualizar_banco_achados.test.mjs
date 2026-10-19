@@ -196,42 +196,38 @@ test("M24: o anúncio do banco não fica pendurado ao trocar de tela (a região 
   assert.equal(depois, "", "em /gastos o texto de /painel não fica na região");
 });
 
-test("M31 (borda): 'still_updating' que não é o booleano true (1, 'x') NÃO é coleta: o POST em dia conclui na hora, sem acompanhar; com true acompanha (controle)", async () => {
-  for (const valor of [1, "x"]) {
+// M31/M32 (borda do POST): item fora do contrato do `refreshSchema` do app é contrato quebrado, não "em dia" nem "coletando".
+// Antes a borda saneava (o `still_updating` não-booleano virava false, o `item_id` ausente virava ""); agora recusa, como o app.
+const semItemId = () => { const i = item("item-11", "updated", true); delete i.item_id; return i; };
+for (const [nome, itens] of [
+  ["still_updating 1", [{ ...item("item-11", "updated", false), still_updating: 1 }]],
+  ["still_updating 'x'", [{ ...item("item-11", "updated", false), still_updating: "x" }]],
+  ["sem item_id", [semItemId()]],
+  ["item null", [null]],
+  ["state número", [{ ...item("item-11"), state: 3 }]],
+]) {
+  test(`M31/M32 (borda, ${nome}): o POST com item fora do contrato falha (a falha + 'Atualizar agora'), sem acompanhar nem concluir calado`, async () => {
     const { ctx, page, abrir, botao, s } = await abre();
-    s.refresh = (r) => { s.emDia = true; return r.fulfill({ json: refreshDe([{ ...item("item-11", "updated", false), still_updating: valor }], []) }); };
+    // Montado à mão: o `refreshDe` do harness lê `still_updating` de cada item (e o `null` quebraria o dublê, não a tela).
+    s.refresh = (r) => { s.emDia = true; return r.fulfill({ json: { ok: true, sync: { ok: true, items: itens, still_updating: 0 }, connections: [] } }); };
     await abrir();
     const base = await marca(page);
     await botao.click();
-    await page.locator(AVISO).waitFor({ state: "detached", timeout: 4000 });
-    await assentar(page);
-    const l = (await pedidos(page, base)).filter((p) => p === "GET /open-finance/7");
+    await page.waitForFunction((f) => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes(f), FALHA);
+    const r = { botao: await page.locator(BOTAO).textContent(), gets: (await pedidos(page, base)).filter((p) => p === "GET /open-finance/7").length };
     await ctx.close();
-    assert.equal(l.length, 1, `${JSON.stringify(valor)}: só a releitura da recarga`);
-  }
+    assert.equal(r.botao, "Atualizar agora");
+    assert.equal(r.gets, 0, "contrato quebrado não lê o snapshot nem recarrega");
+  });
+}
+
+test("M31/M32 (controle): item no contrato com still_updating true acompanha", async () => {
   const { ctx, page, abrir, botao, s } = await abre();
   s.refresh = (r) => r.fulfill({ json: refreshDe([item("item-11", "updated", true)], [UPDATING()]) });
   await abrir();
   s.conexoes = [UPDATING()];
   await botao.click();
   await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("O banco está atualizando"));
-  await ctx.close();
-});
-
-test("M32 (borda): item do POST sem item_id não é casado a NENHUMA conexão (nem a uma de id 'x'): a 1ª leitura (5 s) conclui, não espera o teto", async () => {
-  const { ctx, page, abrir, botao, s } = await abre();
-  const sem = item("item-11", "updated", true);
-  delete sem.item_id;
-  const noX = () => ({ ...UPDATING(), provider_item_id: "x" });
-  s.refresh = (r) => r.fulfill({ json: refreshDe([sem], [noX()]) });
-  await abrir();
-  s.conexoes = [noX()];
-  await congelar(page);
-  await botao.click();
-  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("O banco está atualizando"));
-  s.emDia = true;
-  await avancar(page, 6_000);
-  await ate(page, () => !document.querySelector("#avisos-topo section.pilha"));
   await ctx.close();
 });
 
