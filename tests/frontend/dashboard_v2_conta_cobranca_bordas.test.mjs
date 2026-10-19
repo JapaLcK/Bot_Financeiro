@@ -262,6 +262,26 @@ test("portal: o bfcache solta a trava mesmo com a Cobrança desmontada (o ouvint
   assert.equal(solto, null);
 });
 
+test("portal: saiu da Cobrança antes da resposta = NÃO leva ao Stripe a partir de outra tela, e a trava solta (Codex #1150)", async () => {
+  const p = await abrirCobranca();
+  const [segura, solta] = portao();
+  p.s.portal = async (r) => { await segura; return r.fulfill({ json: { portal_url: "https://billing.stripe.test/p/session/teste" } }); };
+  let foiAoStripe = false;
+  await p.ctx.route("https://billing.stripe.test/**", (r) => { foiAoStripe = true; return r.fulfill({ status: 204 }); });
+  await p.bt("Gerenciar assinatura").click();
+  await ate(p.page, () => p.s.portais.length === 1, "o POST saiu");
+  await irPara(p, "#/conta/bancos", "Bancos conectados");
+  solta();
+  await p.page.waitForTimeout(500);
+  const url = p.page.url();
+  await irPara(p, "#/conta/cobranca", "Cobrança");
+  const solto = await p.bt("Gerenciar assinatura").getAttribute("aria-disabled"); // antes do prazo de 10 s
+  await p.fecha();
+  assert.equal(foiAoStripe, false);
+  assert.match(url, /#\/conta\/bancos$/);
+  assert.equal(solto, null);
+});
+
 test("desfazer: o pageshow persistido NÃO solta um desfazer em voo (um 2º POST seria possível)", async () => {
   const p = await abrirCobranca(comTroca());
   const [segura, solta] = portao();

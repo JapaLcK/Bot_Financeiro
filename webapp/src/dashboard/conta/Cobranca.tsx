@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ErroApi, NOME_DO_PLANO, usePlan } from "../lib/v2";
-import { route } from "../router";
+import { href, route } from "../router";
 import { abrirPortal, cobrancaQuery, comPrazoLeitura, desfazerTroca, falhaCobranca, type Falha } from "./api";
 
 const SELO = { monthly: "Mensal", annual: "Anual" };
@@ -65,11 +65,17 @@ export function ContaCobranca() {
       await comPrazoLeitura(qc.invalidateQueries({ queryKey: chave }));
     } finally { if (!fica) muda({ voando: null }); }
   };
-  const gerenciar = () => executar(async () => location.assign(await abrirPortal()), ERRO_PORTAL, () => {
-    muda({ voando: "navegando" });
-    seguranca = setTimeout(solta, PRAZO_NAVEGACAO);
-    return true;
-  });
+  const gerenciar = () => {
+    let url = "";
+    return executar(async () => { url = await abrirPortal(); }, ERRO_PORTAL, () => {
+      // Saiu da Cobrança antes da resposta: não arranca a pessoa da tela em que está agora; a trava solta.
+      if (location.hash !== href("/conta/cobranca")) return;
+      muda({ voando: "navegando" });
+      seguranca = setTimeout(solta, PRAZO_NAVEGACAO);
+      location.assign(url);
+      return true;
+    });
+  };
   const desfazer = () => executar(desfazerTroca, ERRO_DESFAZER, () => {
     qc.setQueryData(chave, (c: typeof d) => c && { ...c, troca: null });
     setAviso("Troca desfeita. Seu plano continua como está.");
