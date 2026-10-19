@@ -1844,15 +1844,19 @@ Cada conexão do snapshot traz também `institution_id` (texto, o id do conector
 laço de `_read_open_finance_connections` nunca o tirou: o gate de reconexão do picker já o lia, `ids` em `refreshLimits`):
 `tests/test_of_connection_state.py` (`CHAVES_DA_CONEXAO`) prende a chave e `tests/test_of_snapshot_institution_id.py` o valor e o
 isolamento por usuário. É por ele que o /painel decide "já conectado": `String(connector.id) === institution_id`, nunca pelo nome.
-**Tela Bancos conectados do /painel** (`#/conta/bancos`, `conta/Bancos.tsx`, `BancoCard.tsx`, `Disponiveis.tsx`, `BancoDetalhe.tsx`, `styles/bancos.css`):
-título e "Gerencie as conexões via Open Finance." com o "+" rosa no topo (a ação principal); os bancos conectados num grupo só
-(uma superfície, cantos de 16 px, divisor de 0,5 px, sem card por banco): ladrilho, nome, pontinho com o `ui.label` (a cor nunca é o
-único sinal), chevron; a linha inteira é um botão que abre o detalhe (os valores em R$ moram só nele; a lista não tem total, barra nem
-topo). "N de M bancos" (de `/limite`) segue como linha discreta. Abaixo, "Disponíveis para conectar": até 5 dos populares (Itaú,
+**Tela Bancos conectados do /painel** (`#/conta/bancos`, `conta/Bancos.tsx`, `ResumoBancos.tsx`, `BancoCard.tsx`, `MenuBanco.tsx`, `Disponiveis.tsx`, `SegurancaBancos.tsx`, `BancoDetalhe.tsx`, `styles/bancos.css`):
+layout da referência do dono (2026-10-19), UMA coluna de 4 cards `.panel`. (1) Resumo: quantidade de bancos ("N de M bancos" de `/limite`, discreto, só com teto), "Última sincronização"
+(a `last_sync_at` mais recente, "Hoje, 14:32"/"Ontem, …"/"dd/mm, …", no fuso de São Paulo; sem data "—") com "Concluída" (todos em tom ok de `tomDoEstado`) ou "Atenção" (no tom do pior), e
+"Conectar banco" (ou a mensagem do servidor sem vaga). (2) "Meus bancos conectados": por banco, ladrilho, nome, pílula com o `ui.label`, "Última atualização" e três botões de 44 px:
+"Detalhes" (o detalhe com os valores em R$, que moram só nele), "Sincronizar" e o menu "…" (Reconectar, só quando `reconectavel`, e Desconectar; as MESMAS ações do detalhe, que as mantém).
+"Sincronizar" é a rodada do "Atualizar agora" do aviso do topo (`useAtualizarBanco`, com `automatico: false`: a página não parte rodada sozinha): o servidor só atualiza todos os bancos
+(`POST /open-finance/{uid}/refresh`), então TODOS os botões travam juntos (`aria-busy`/`aria-disabled`, "Sincronizando…") e o resultado sai na tela e na região viva; sem laço de retentativa.
+A partir de 1181 px (trilho aberto) a linha é uma só e o resumo tem 3 zonas; abaixo disso e no celular empilham, e até 480 px os botões viram só ícone (`aria-label`). (3) "Disponíveis para conectar"
+(abaixo) e (4) o aviso de segurança com "Saiba mais" (externo, Banco Central). Par no app: o app NÃO muda neste PR (divergência de plataforma, `docs/paridade-app-dashboard.md`). Abaixo, "Disponíveis para conectar": até 5 dos populares (Itaú,
 Bradesco, Banco do Brasil, Santander, Caixa, Inter, C6, Nubank, BTG, Mercado Pago, nessa ordem; o NOME só escolhe a ordem) de
 `GET /open-finance/{uid}/connectors` que ainda não estão conectados (por id) e "Ver todos os bancos". A seção só existe com vaga
 (`pode`, o gate do `/limite`) e some se o `/connectors` falha (leitura opcional, nunca derruba a tela) ou se não sobra banco.
-O "+" de cada um, o do topo e o botão do estado vazio são `<a href="/settings?view=open-finance">` com `onClick`: com
+O "Conectar" de cada um, o "Conectar banco" do resumo e o "Ver todos" são `<a href="/settings?view=open-finance">` com `onClick`: com
 `window.PBOpenFinance` presente abrem o seletor ali mesmo (`open({id, name})` pré-seleciona o banco; o usuário ainda toca em
 "Conectar", e todo o teto/plano/confirmação é o do módulo), sem ele o href segue. `Bancos.tsx` faz `init` ao montar (o `onConnected`
 relê snapshot, `/limite`, `/bancos`, `/connectors` e as contas) e `destroy` ao desmontar, salvo com widget da Pluggy já aberto (`busy()`): aí o `destroy` não roda, para o `onSuccess` ainda salvar o item. O `painel.html` carrega

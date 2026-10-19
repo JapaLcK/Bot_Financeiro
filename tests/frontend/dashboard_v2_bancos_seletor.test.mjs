@@ -138,12 +138,17 @@ test("2º clique no mesmo ponto do '+' (100 e 250 ms depois, caindo numa linha d
   for (const [width, height] of [[390, 844], [360, 740]]) {
     const pre = await painel({ tela: { width, height } }); // pré-condição: sob o ponto do "+" há OUTRA linha do modal (senão o teste não mede nada)
     await esperaDisponiveis(pre.page);
+    await maisDe(pre.page, "Bradesco").scrollIntoViewIfNeeded(); // a página tem 4 cards: o "Conectar" dos disponíveis fica abaixo da dobra e o ponto tem de estar na tela
     const bb = await maisDe(pre.page, "Bradesco").boundingBox();
     await maisDe(pre.page, "Bradesco").click();
     await pre.page.locator("#bankpick-overlay.open .bank-row").first().waitFor();
-    const sob = await pre.page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.closest(".bank-row")?.textContent ?? null, [bb.x + bb.width / 2, bb.y + bb.height / 2]);
+    // O botão agora fica abaixo da dobra e a página rola: acha, com o modal aberto, a altura (em tela) de uma linha de OUTRO banco e quanto rolar para o centro do botão cair nela.
+    const alvo = await pre.page.evaluate(([cx, cy]) => {
+      const r = [...document.querySelectorAll("#bankpick-overlay .bank-row")].filter((e) => !/Bradesco/.test(e.textContent)).map((e) => e.getBoundingClientRect()).find((b) => b.top > 200 && b.bottom < innerHeight - 60);
+      return r ? { y: (r.top + r.bottom) / 2, rola: cy - (r.top + r.bottom) / 2, sob: document.elementFromPoint(cx, (r.top + r.bottom) / 2)?.closest(".bank-row")?.textContent ?? null } : null;
+    }, [bb.x + bb.width / 2, bb.y + bb.height / 2]);
     await pre.ctx.close();
-    assert.ok(sob && !/Bradesco/.test(sob), `${width}×${height}: precisa haver OUTRA linha sob o cursor (${sob})`);
+    assert.ok(alvo && alvo.sob && !/Bradesco/.test(alvo.sob), `${width}×${height}: precisa haver OUTRA linha sob o cursor (${alvo?.sob})`);
     for (const intervalo of [100, 250]) {
       // A janela do módulo é de 350 ms: o que vale é o intervalo REAL entre os dois cliques (medido na página), não o `waitForTimeout`; sob carga o
       // `mouse.click` demora, e um intervalo real >= 330 ms não prova nada (cai fora da janela): repete o caso em página nova, até 4 vezes.
@@ -152,8 +157,11 @@ test("2º clique no mesmo ponto do '+' (100 e 250 ms depois, caindo numa linha d
         const { ctx, page } = await painel({ tela: { width, height } });
         await esperaDisponiveis(page);
         await page.evaluate(() => { window.__t = []; document.addEventListener("click", () => window.__t.push(performance.now()), true); });
+        await maisDe(page, "Bradesco").scrollIntoViewIfNeeded();
+        await page.evaluate((rola) => window.scrollBy(0, rola), alvo.rola); // o centro do botão cai na linha de outro banco que o modal vai pôr ali
         const b = await maisDe(page, "Bradesco").boundingBox();
         const x = b.x + b.width / 2, y = b.y + b.height / 2;
+        assert.ok(Math.abs(y - alvo.y) < 2, `${rotulo}: o botão ficou em ${y}, não em ${alvo.y}`);
         await page.mouse.click(x, y);
         await page.waitForTimeout(intervalo); // nada entre os dois cliques: o tempo medido é o do duplo clique
         await page.mouse.click(x, y);

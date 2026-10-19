@@ -83,6 +83,8 @@ export type MetasV2 = z.output<typeof metasV2Schema>;
 export const investidoBancosSchema = z.object({ por_banco: z.array(z.object({ banco: z.string() })) });
 /** A resposta das três escritas de `/api/app/metas*`: o id. */
 export const metaGravadaSchema = z.object({ id: z.number().int() });
+/** `GET /api/app/progresso-milhao` (`api/v2/progresso_milhao.py`): só o patrimônio de hoje; a conta de juros é do app (`milhao.ts`). Fora de `schemasRecurso`: a tela lê sozinha. */
+export const progressoMilhaoSchema = z.object({ patrimonio: dinheiro, motivos });
 /** Fonte única dos recursos do painel: o provider lê cada rota com o schema daqui e o card do chat valida o recurso que o servidor embutiu com o mesmo. */
 export const schemasRecurso = { contas: contasSchema, resumo: resumoSchema, detalhes: detalhesMesSchema, detalhesAnterior: detalhesMesSchema, patrimonio: patrimonioSchema, rendimento: rendimentoSchema, previsao: previsaoSchema, assinaturas: assinaturasSchema, metas: metasV2Schema, cartoes: cartoesSchema, parcelas: parcelasSchema, renda: rendaSchema, insights: insightsSchema, plano: planoSchema, categorias: categoriasSchema };
 /** Dinheiro em que o app também DECIDE (média, % do dia, fatia da barra): centavos para exibir e o texto decimal bruto para decidir, como o web (`Number(raw)`); arredondar antes muda o resultado (`gastosDia.ts`). */

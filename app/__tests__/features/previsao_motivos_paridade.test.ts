@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { DIRECAO, ESTADO, MOTIVO, ou } from "@/features/painel/previsaoMotivos";
+import { DIRECAO, ESTADO, MOTIVO, MOTIVO_PATRIMONIO, ou } from "@/features/painel/previsaoMotivos";
 // `previsaoMotivos.ts` copia o web (§0.7): o app não importa o web, então este teste compara com o fonte dele e com os códigos do Python.
 const RAIZ = resolve(__dirname, "../../..");
 const ler = (p: string) => readFileSync(resolve(RAIZ, p), "utf8");
@@ -33,6 +33,20 @@ it("controle negativo: o comparador acusa rótulo mudado, código removido, dire
   const { banco_desatualizado: _b, ...semBanco } = MOTIVO; expect(divergencias(semBanco, DIRECAO, ESTADO)).toContain("códigos do Python");
   expect(divergencias(MOTIVO, { ...DIRECAO, ambos: "x" }, ESTADO)).toContain("direção");
   expect(divergencias(MOTIVO, DIRECAO, { ...ESTADO, a_conferir: "x" })).toContain("estado a_conferir");
+});
+it("MOTIVO_PATRIMONIO (Progresso ao milhão) é o do web", () => {
+  const web = pares(selos.split("const MOTIVO")[1]!.split("\n};")[0]!);
+  for (const [k, v] of Object.entries(MOTIVO_PATRIMONIO)) expect(web[k]).toBe(v);
+  expect(Object.keys(MOTIVO_PATRIMONIO)).toEqual(["manual_e_banco", "caixinha_espelhada_fora", "conciliacao_pendente", "movimentos_pendentes"]);
+});
+/** Códigos de `db/patrimonio.py` sem rótulo no app (`sem_banco_conectado` vem da rota e troca o corpo da tela, não vira selo). */
+const semRotulo = (rotulo: Record<string, string>) => emitidos.filter((c) => !(c in rotulo));
+const emitidos = [...ler("db/patrimonio.py").split("motivos = [")[1]!.split("if sim]")[0]!.matchAll(/^ {8}\("([a-z_]+)",/gm)].map((m) => m[1]!);
+it("todo código que o patrimônio emite tem rótulo no app (a categoria, não só os dois conhecidos)", () => {
+  expect(emitidos.length).toBeGreaterThanOrEqual(10); // a regex achou o bloco
+  expect(semRotulo({ ...MOTIVO, ...MOTIVO_PATRIMONIO })).toEqual([]);
+  const { conciliacao_pendente: _c, ...sem } = MOTIVO_PATRIMONIO; // controle negativo
+  expect(semRotulo({ ...MOTIVO, ...sem })).toEqual(["conciliacao_pendente"]);
 });
 it("só chave própria: 'constructor' e '__proto__' saem crus", () => {
   expect(ou(MOTIVO, "constructor")).toBe("constructor"); expect(ou(MOTIVO, "__proto__")).toBe("__proto__"); expect(ou(MOTIVO, "bancos_excluidos")).toBe("bancos fora do cálculo");

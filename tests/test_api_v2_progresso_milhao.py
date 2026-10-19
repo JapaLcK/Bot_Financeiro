@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import api.v2.progresso_milhao as rota
 import frontend.finance_bot_websocket_custom as dashboard
-from _apoio_auth_app import sessao_de as sessao
+from _apoio_auth_app import sessao_de as sessao, sql
 from _patrimonio_helpers import conexao, conta, horas_atras, posicao
 from conftest import promote_to_pro
 from db import ensure_user
@@ -49,6 +49,23 @@ def test_b_nao_ve_o_patrimonio_de_a(a_e_b):
     ra = _get(a)  # controle positivo: A vê o que tem
     assert ra.status_code == 200 and ra.json()["patrimonio"] == "5000.00" and SEM_BANCO not in ra.json()["motivos"], ra.text
     rb = _get(b, uid=a, user_id=a)  # o uid vindo do cliente não conta
+    assert (rb.status_code, rb.json()) == (200, {"patrimonio": "0.00", "motivos": [SEM_BANCO]}), rb.text
+
+
+def _get_app(quem, **q):  # o app: Bearer, /api/app (`usuario_do_app`), sem cookie
+    client = TestClient(dashboard.app)
+    client.headers["Authorization"] = f"Bearer {sessao(quem)['access']}"
+    return client.get("/api/app/progresso-milhao", params=q)
+
+
+def test_app_b_nao_ve_o_patrimonio_de_a(a_e_b):
+    a, b = a_e_b
+    for u in (a, b):
+        sql("update auth_accounts set open_finance_onboarding_completed_at=now() where user_id=%s", u)
+    _viva(a, 5000)
+    ra = _get_app(a)  # controle positivo: A vê o que tem
+    assert ra.status_code == 200 and ra.json()["patrimonio"] == "5000.00" and SEM_BANCO not in ra.json()["motivos"], ra.text
+    rb = _get_app(b, uid=a, user_id=a)  # o uid vindo do cliente não conta
     assert (rb.status_code, rb.json()) == (200, {"patrimonio": "0.00", "motivos": [SEM_BANCO]}), rb.text
 
 

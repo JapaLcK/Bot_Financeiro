@@ -9,7 +9,7 @@ jest.setTimeout(30_000);
 let plano: string | null; // null = /api/app/me responde 500
 const posts = () => fetchFalso.mock.calls.filter(([u, o]) => (o as RequestInit)?.method === "POST" && new URL(String(u)).pathname === "/api/app/simulador");
 const TITULOS = ["Vale a pena comprar?", "Progresso ao milhão", "Simulador", "Orçamento doméstico", "Orçamentos por categoria", "Agentes"];
-const BREVE = TITULOS.slice(1);
+const BREVE = TITULOS.slice(2);
 beforeEach(async () => {
   prepararCaso(); desligarTrava(); plano = "pro"; await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" });
   fetchFalso.mockImplementation(async (url: string) => {
@@ -68,8 +68,14 @@ describe("Vale a pena comprar?", () => {
   });
 });
 
-it("as 5 linhas 'Em breve' não são botões", async () => {
+it("as 4 linhas 'Em breve' não são botões", async () => {
   await abrir(); await tocarChave();
-  expect(screen.getAllByText("Em breve")).toHaveLength(5);
+  expect(screen.getAllByText("Em breve")).toHaveLength(4);
   for (const t of BREVE) expect(screen.queryByRole("button", { name: new RegExp(t) })).toBeNull();
+});
+
+it.each(["pro", "essencial"])("Progresso ao milhão (plano %s): é botão e abre a tela", async (p) => {
+  plano = p; await abrir(); await tocarChave();
+  await act(async () => { fireEvent.press(linha(TITULOS[1]!)); await drenar(); });
+  await waitFor(() => expect(screen).toHavePathname("/progresso-milhao"));
 });
