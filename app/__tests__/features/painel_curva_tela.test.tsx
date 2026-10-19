@@ -8,7 +8,10 @@ jest.mock("@/ui/componentes/Icone", () => ({ Icone: ({ nome }: { nome: string })
 let mockHoje = "2026-10-06";
 jest.mock("@/features/painel/catalogo", () => ({ ...jest.requireActual("@/features/painel/catalogo"), hojeSP: () => mockHoje }));
 
+import { render } from "@testing-library/react-native";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
+import { Curva } from "@/features/painel/base";
+import { TemaProvider } from "@/ui/tema";
 import { StyleSheet } from "react-native";
 import { mesAtual, mesesAnteriores, nomeMes } from "@/features/painel/catalogo";
 import { guardarCredenciais } from "@/storage/secure";
@@ -275,4 +278,19 @@ it("o ícone de ressalvas (Avisos) abre a explicação e NÃO navega", async () 
  await act(async () => { fireEvent.press(carta().getByRole("button", { name: "Ver ressalvas" })); });
  expect(carta().getByText(/arredondados/)).toBeTruthy();
  expect(screen).toHavePathname("/resumo");
+});
+
+describe("Curva com `outra` (o simulador de compra: sem × com a compra, na MESMA escala)", () => {
+ const paths = (r: ReturnType<typeof render>) => r.UNSAFE_root.findAll((n) => String(n.type) === "RNSVGPath");
+ const d = (r: ReturnType<typeof render>, i: number) => paths(r)[i]!.props.d as string;
+ const ver = (valores: (number | null)[], outra?: (number | null)[]) => render(<TemaProvider><Curva valores={valores} outra={outra} /></TemaProvider>);
+ it("sem `outra`: um traço só, como sempre", () => { const r = ver([1, 2, 3]); expect(paths(r)).toHaveLength(1); expect(d(r, 0)).toBe("M0,100 L150,57.5 L300,15"); });
+ it("com `outra`: dois traços (o tracejado primeiro), escala comum: o mesmo valor cai na mesma altura nos dois", () => {
+  const r = ver([0, 10], [0, 20]); expect(paths(r)).toHaveLength(2);
+  expect(d(r, 0)).toBe("M0,100 L300,15"); expect(d(r, 1)).toBe("M0,100 L300,57.5"); // 20 é o teto dos dois: 10 fica na metade
+  expect(paths(r)[0]!.props.strokeDasharray).toEqual(["6", "4"]); expect(paths(r)[1]!.props.strokeDasharray).toBeUndefined();
+ });
+ it.each([["null na outra", [1, 2], [1, null]], ["null na principal", [1, null], [1, 2]], ["tamanhos diferentes", [1, 2], [1, 2, 3]]] as const)("%s: 'Trajetória indisponível.' e nenhum traço", (_, a, b) => {
+  const r = ver([...a], [...b]); expect(paths(r)).toHaveLength(0); expect(r.getByText("Trajetória indisponível.")).toBeTruthy();
+ });
 });

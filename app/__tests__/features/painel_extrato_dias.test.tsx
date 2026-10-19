@@ -1,4 +1,5 @@
-import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
+import { Dimensions, StyleSheet } from "react-native";
+import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
 import { claro, escuro } from "@/ui/tokens";
 import IconeStub from "../ui/__mocks__/iconeStub";
@@ -25,11 +26,24 @@ beforeEach(async () => {
   return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
  });
 });
-afterEach(() => { jest.restoreAllMocks(); });
+const janelaOriginal = Dimensions.get("window");
+afterEach(async () => { jest.restoreAllMocks(); await act(async () => { Dimensions.set({ window: janelaOriginal }); }); });
 const abrir = async (url = "/extrato") => { renderRouter("./app", { initialUrl: url }); jest.setSystemTime(new Date("2026-10-19T16:00:00Z")); await waitFor(() => expect(screen.getByText("Compra A")).toBeTruthy()); await act(drenar); };
 const cabecalhos = () => screen.getAllByRole("header").map((h) => h.props.children as string).filter((t) => /·/.test(t));
 const carregarMais = () => act(async () => { fireEvent.press(screen.getByRole("button", { name: "Carregar mais lançamentos" })); await drenar(); });
 const total = (texto: string) => screen.queryByText(texto);
+
+describe("linha do lançamento", () => {
+ it("valor na mesma linha do título (sem a seta), texto na largura toda e respiro vertical de 12", async () => {
+  Dimensions.set({ window: { ...Dimensions.get("window"), fontScale: 1 } }); // no Jest o padrão é fonte ampliada (outro layout, coberto em painel_tipografia)
+  await abrir();
+  const sobe = (el: { parent: unknown }, quer: (s: Record<string, unknown>) => boolean) => { for (let n = el.parent as { parent: unknown; props?: { style?: unknown } } | null; n; n = n.parent as typeof n) { const s = StyleSheet.flatten(n!.props?.style as object) as Record<string, unknown> | undefined; if (s && quer(s)) return n; } return null; };
+  const titulo = screen.getByText("Compra A");
+  const linhaTitulo = sobe(titulo, (s) => s.flexDirection === "row" && s.alignItems === "flex-start");
+  expect(linhaTitulo).not.toBeNull(); expect(within(linhaTitulo as never).getByText(`${MENOS}R$ 32,40`)).toBeTruthy(); // título e valor na mesma linha
+  expect(sobe(titulo, (s) => s.flexDirection === "row" && s.paddingVertical === 12)).not.toBeNull();
+ });
+});
 
 describe("total do dia só no grupo completo", () => {
  it("com 'Carregar mais' pendente, o ÚLTIMO dia não tem total (negativo); os de cima têm", async () => {

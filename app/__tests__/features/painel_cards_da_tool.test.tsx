@@ -4,6 +4,7 @@ import { fireEvent, screen, within } from "expo-router/testing-library";
 import { CARDS_DA_TOOL, lerEvento } from "@/api/schemas/painel";
 import { BlocoContexto } from "@/features/painel/blocoContexto";
 import { CardFimDoMes, CardMaiores } from "@/features/painel/cardMaiores";
+import * as privacidade from "@/features/painel/privacidade";
 import * as provider from "@/features/painel/provider";
 import { faladoComSinal } from "@/ui/dinheiro";
 import { TemaProvider } from "@/ui/tema";
@@ -130,6 +131,7 @@ describe("valores ocultos", () => {
   });
   const direto = (recursos: unknown, ui: React.ReactElement, oculto: boolean) => {
     jest.spyOn(provider, "usePainel").mockImplementation(() => ({ oculto, dados: {} }) as never);
+    jest.spyOn(privacidade, "usePrivacidade").mockImplementation(() => ({ oculto, alternar: () => undefined, mostrar: () => undefined })); // `Valor`/`Curva` leem a privacidade, não o `usePainel`
     return render(<TemaProvider esquema="light"><BlocoContexto.Provider value={{ recursos: recursos as never }}>{ui}</BlocoContexto.Provider></TemaProvider>);
   };
   const recursosDe = (b: unknown) => (lerEvento({ tipo: "bloco", bloco: b }) as unknown as { bloco: { abas: { recursos: unknown }[] } }).bloco.abas[0]!.recursos; // o recurso JÁ no formato do app (centavos)

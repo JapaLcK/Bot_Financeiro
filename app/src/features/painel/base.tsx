@@ -16,6 +16,7 @@ import type { CardChat } from "@/api/schemas/painel";
 import { TITULOS, type Widget } from "./catalogo";
 import { useBloco } from "./blocoContexto";
 import { useNavegacaoPainel } from "./navegacao";
+import { usePrivacidade } from "./privacidade";
 import { usePainel, type Dados, type Recurso } from "./provider";
 /**
  * Com texto, espelha os tokens do `Button secondary` (PDF "Fantasma": fundo `surfaceControl`, sem contorno, texto `ink` SemiBold). `texto` é o visível; `rotulo`, o do VoiceOver.
@@ -27,13 +28,16 @@ export function Acao({ rotulo, texto = rotulo, onPress, icone, iconeFim, somente
   return <Pressable accessibilityRole="button" accessibilityLabel={rotulo} accessibilityState={{ disabled: desativado, ...(somenteIcone && { selected: ativa }) }} disabled={desativado} onPress={onPress} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ minHeight: 44, minWidth: 44, maxWidth: "100%", flexShrink: 1, alignSelf: "flex-start", justifyContent: "center" }}><Animated.View style={[{ minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, opacity: desativado ? 0.45 : 1 }, (!somenteIcone || ativa) && { minHeight: compacta ? 30 : 36, backgroundColor: ativa ? cores.brandSoft : cores.surfaceControl, borderRadius: raio.pilula, paddingHorizontal: compacta ? 10 : 14 }, pressao.estilo]}>{icone && <Icone nome={icone} tamanho={20} tom={ativa ? "brandInk" : undefined} />}{!somenteIcone && <Texto variante="rotulo" tom={ativa ? "brandInk" : undefined} style={{ flexShrink: 1, fontFamily: escalas.secao.fontFamily }}>{texto}</Texto>}{iconeFim && <Icone nome={iconeFim} tamanho={20} tom={ativa ? "brandInk" : undefined} />}</Animated.View></Pressable>;
 }
 export function Valor({ valor, destaque = false, pequeno = false, tipo = "saldo" }: { valor: number | null; destaque?: boolean; pequeno?: boolean; tipo?: "saldo" | "entrada" | "saida" }) {
-  const { oculto } = usePainel(); const { fontScale } = useTipografiaPainel();
+  const { oculto } = usePrivacidade(); const { fontScale } = useTipografiaPainel(); // `usePrivacidade`, não `usePainel`: a folha do simulador fica fora do `PainelProvider`
   return valor === null ? <Texto tom="inkMuted">Não informado</Texto> : <Money key={fontScale} centavos={valor} oculto={oculto} variante={destaque ? "display" : pequeno ? "rotulo" : "corpo"} tipo={tipo} />;
 }
 /** Linha de 32pt (`inicio`: slot à esquerda, o círculo com ícone do Extrato; com `children`, sem mínimo: a barra embaixo completa a altura); tocável, 44pt de alvo. */
 export function Linha({ titulo, valor, tipo, detalhe, onPress, children, inicio }: { inicio?: ReactNode; titulo: string; valor?: number | null; tipo?: "saldo" | "entrada" | "saida"; detalhe?: string; onPress?: () => void; children?: ReactNode }) {
   const { ampliado } = useTipografiaPainel(); const linhas = ampliado ? undefined : 2;
-  const linha = <View style={{ flexDirection: "row", gap: 12, alignItems: "center", minHeight: children ? undefined : 32 }}>{inicio}<View style={{ flex: 1, minWidth: 0, gap: ampliado ? 8 : 2 }}><Texto variante="rotulo" numberOfLines={linhas}>{titulo}</Texto>{detalhe && <Texto variante="legenda" tom="inkMuted" numberOfLines={linhas}>{detalhe}</Texto>}{ampliado && valor !== undefined && <Valor valor={valor} tipo={tipo} />}</View>{!ampliado && valor !== undefined && <Valor valor={valor} tipo={tipo} />}{onPress && <Icone nome="CaretRight" tamanho={20} />}</View>;
+  // Linha do Extrato (`inicio`): o valor sobe para a 1ª linha, no lugar da seta, e o texto ganha a largura toda; respiro vertical para o hairline não encostar. Fonte ampliada segue a coluna de baixo.
+  const linha = inicio && !ampliado
+    ? <View style={{ flexDirection: "row", gap: 12, alignItems: "center", paddingVertical: 12 }}>{inicio}<View style={{ flex: 1, minWidth: 0, gap: 2 }}><View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}><View style={{ flex: 1, minWidth: 0 }}><Texto variante="rotulo" numberOfLines={2}>{titulo}</Texto></View>{valor !== undefined && <Valor valor={valor} tipo={tipo} />}</View>{detalhe && <Texto variante="legenda" tom="inkMuted" numberOfLines={2}>{detalhe}</Texto>}</View></View>
+    : <View style={{ flexDirection: "row", gap: 12, alignItems: "center", minHeight: children ? undefined : 32 }}>{inicio}<View style={{ flex: 1, minWidth: 0, gap: ampliado ? 8 : 2 }}><Texto variante="rotulo" numberOfLines={linhas}>{titulo}</Texto>{detalhe && <Texto variante="legenda" tom="inkMuted" numberOfLines={linhas}>{detalhe}</Texto>}{ampliado && valor !== undefined && <Valor valor={valor} tipo={tipo} />}</View>{!ampliado && valor !== undefined && <Valor valor={valor} tipo={tipo} />}{onPress && <Icone nome="CaretRight" tamanho={20} />}</View>;
   const corpo = children ? <View style={{ gap: 6 }}>{linha}{children}</View> : linha;
   return onPress ? <Pressable accessibilityRole="button" onPress={onPress} style={{ minHeight: 44, justifyContent: "center" }}>{corpo}</Pressable> : corpo;
 }
@@ -132,13 +136,14 @@ export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, childr
   </Modal>;
   return <Modal visible={aberta && focado} animationType={reduzir ? "none" : "slide"} presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={fechar}><View testID="folha-sheet" style={{ flex: 1, backgroundColor: cores.bg }} accessibilityViewIsModal><Screen sobCabecalho={Platform.OS === "ios"}><View style={{ gap: 20, paddingTop: espaco.lg, paddingBottom: 24 }}>{cabecalho}{children}</View></Screen></View></Modal>;
 }
-export function Curva({ valores }: { valores: (number | null)[] }) {
-  const { oculto } = usePainel(); const { cores } = useTema();
+/** `outra`: segunda série (tracejada) na MESMA escala, p.ex. o saldo sem a compra; as duas precisam ter o mesmo tamanho e nenhum null. */
+export function Curva({ valores, outra }: { valores: (number | null)[]; outra?: (number | null)[] }) {
+  const { oculto } = usePrivacidade(); const { cores } = useTema();
   if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
-  if (!valores.length || valores.some((v) => v === null)) return <Vazio texto="Trajetória indisponível." />;
-  const nums = valores as number[], min = Math.min(...nums), amplitude = Math.max(...nums) - min || 1;
-  const pontos = nums.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, nums.length - 1)},${100 - (v - min) / amplitude * 85}`).join(" ");
-  return <Svg width="100%" height={112} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período"><Path d={pontos} fill="none" stroke={cores.brand} strokeWidth={3} /></Svg>;
+  if (!valores.length || valores.some((v) => v === null) || (outra && (outra.length !== valores.length || outra.some((v) => v === null)))) return <Vazio texto="Trajetória indisponível." />;
+  const nums = valores as number[], todos = outra ? [...nums, ...(outra as number[])] : nums, min = Math.min(...todos), amplitude = Math.max(...todos) - min || 1;
+  const caminho = (ns: number[]) => ns.map((v, i) => `${i ? "L" : "M"}${i * 300 / Math.max(1, ns.length - 1)},${100 - (v - min) / amplitude * 85}`).join(" ");
+  return <Svg width="100%" height={112} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período">{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums)} fill="none" stroke={cores.brand} strokeWidth={3} /></Svg>;
 }
 export function Anel({ partes }: { partes: number[] }) {
   const { oculto } = usePainel(); const { cores } = useTema();
