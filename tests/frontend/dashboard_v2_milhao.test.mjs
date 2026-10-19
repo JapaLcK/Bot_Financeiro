@@ -83,6 +83,7 @@ test("rendimento 0%: sem aporte não há previsão, e o texto diz o que fazer", 
 
 test("gráfico: svg com rótulo, tracejado no y da meta e tabela por ano para leitor de tela", async () => {
   const { ctx, page } = await pronto();
+  await page.locator("#w-milhao svg[role=img]").waitFor(); // o svg só entra depois que useSize mede a largura
   const r = await page.evaluate(() => {
     const svg = document.querySelector("#w-milhao svg[role=img]");
     const meta = svg.querySelector(".mi-meta"), linha = svg.querySelector("path.line");
@@ -161,6 +162,25 @@ test("403 numa releitura: o número guardado some e aparece o convite do Plus", 
   assert.doesNotMatch(t, /48\.250/);
 });
 
+test("4xx sem ser plano: senha por criar, sessão terminada e erro genérico, cada um com o seu texto e ação", async () => {
+  const casos = [
+    [403, "password_required", /Crie sua senha para ver o progresso ao milhão/, "Criar senha"],
+    [401, "unauthorized", /Sua sessão terminou\./, "Recarregar"],
+    [404, "not_found", /Não deu para abrir o progresso ao milhão/, "Recarregar"],
+  ];
+  for (const [status, code, re, acao] of casos) {
+    const { ctx, page } = await abrir({ resposta: (r) => r.fulfill({ status, json: { error: { code, message: "x" } } }) });
+    const alerta = card(page).getByRole("alert");
+    await alerta.waitFor();
+    const t = await alerta.innerText();
+    const el = alerta.getByRole(acao === "Criar senha" ? "link" : "button", { name: acao });
+    const href = acao === "Criar senha" ? await el.getAttribute("href") : null;
+    await ctx.close();
+    assert.match(t, re, `${status}: ${t}`);
+    assert.equal(href, acao === "Criar senha" ? "/home" : null);
+  }
+});
+
 test("500: \"Tentar de novo\" refaz o pedido e mostra o número", async () => {
   let cai = true;
   const { ctx, page, pedidos } = await abrir({ resposta: (r) => (cai ? r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } }) : r.fallback()) });
@@ -217,6 +237,7 @@ test("protótipo (DEMO): abre com o patrimônio de exemplo e não pede nada à A
 for (const [width, alvoMin] of [[1440, 0], [390, 44]]) {
   test(`${width}px: sem rolagem lateral, sliders e botão dentro da tela${alvoMin ? ", alvos de 44px" : ""}`, async () => {
     const { ctx, page } = await pronto({ width });
+    await page.locator("#w-milhao svg[role=img]").waitFor(); // o svg só entra depois que useSize mede a largura
     const r = await page.evaluate(() => {
       const c = document.querySelector("#w-milhao").getBoundingClientRect();
       const fora = [...document.querySelectorAll("#w-milhao *")].filter((e) => { const b = e.getBoundingClientRect(); return b.width && (b.right > c.right + 1 || b.left < c.left - 1); }).map((e) => e.className || e.tagName);
