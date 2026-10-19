@@ -608,6 +608,20 @@
       </div>
     </div>
 
+    <div class="mock-card hb-aloc" id="hb-aloc">
+      <div class="hb-aloc-head">
+        <h3>Alocação da renda</h3>
+        <div class="hb-aloc-acts">
+          <button class="mock-cta outline" type="button" id="hb-metas-edit-btn" onclick="openHouseholdBudgetModal()">Editar metas</button>
+          <button class="mock-cta" type="button" id="hb-fixo-btn" data-pro-feature="recurring_expenses" onclick="openRecurringEditModal()">+ Gasto fixo</button>
+        </div>
+      </div>
+      <div class="hb-aloc-body">
+        <div class="chart-wrap donut hb-aloc-donut"><canvas id="hb-aloc-donut"></canvas></div>
+        <div class="hb-potes" id="hb-potes"></div>
+      </div>
+    </div>
+
     <div class="hb-grid">
       <div class="mock-card" id="hb-gastos">
         <h3>Gastos</h3>
@@ -617,13 +631,6 @@
       <div class="mock-card" id="hb-resumo">
         <h3>Resumo</h3>
         <div id="hb-resumo-body"></div>
-      </div>
-      <div class="mock-card" id="hb-metas">
-        <div class="hb-metas-head">
-          <h3 style="margin:0">Metas</h3>
-          <button class="mock-cta outline" id="hb-metas-edit-btn" onclick="openHouseholdBudgetModal()">Editar</button>
-        </div>
-        <div id="hb-metas-list"></div>
       </div>
     </div>
   </div>
@@ -1039,6 +1046,19 @@
         <button class="btn-save" type="submit" id="hb-metas-save-btn">Salvar</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div class="overlay" id="hb-pote-overlay" onclick="if(event.target===this) closeHbPote()">
+  <div class="modal wide" role="dialog" aria-labelledby="hb-pote-title" aria-modal="true">
+    <h3 id="hb-pote-title"></h3>
+    <p class="msub" id="hb-pote-cats"></p>
+    <p class="hb-pote-total" id="hb-pote-total"></p>
+    <div class="hb-pote-chips" id="hb-pote-chips"></div>
+    <div class="hb-pote-list" id="hb-pote-list"></div>
+    <div class="modal-acts" style="margin-top:18px">
+      <button class="btn-cancel" type="button" id="hb-pote-close" onclick="closeHbPote()">Fechar</button>
+    </div>
   </div>
 </div>
 

@@ -14,7 +14,7 @@ nunca 300.
 Controle NEGATIVO medido no #759 por mutação, um site por vez (edição temporária da linha,
 reposta por cópia do arquivo): sem a guarda, os 15 joins deixam vermelho o teste com banco do
 ponto e o portão. Ex.: get_largest_expenses → A sai [4321.0, 80.0, 50.0];
-sum_spent_in_category_this_month e _spent_by_bucket → 4451.0; _detect_category_spike →
+sum_spent_in_category_this_month e _month_rows → 4451.0; _detect_category_spike →
 "R$ 4.451,00 contra..."; anticipate → TypeError (fatura None); undo → removed_count 3;
 list_installment_groups → (3, 300.0).
 
@@ -34,7 +34,7 @@ from datetime import date, timedelta
 import db
 from conftest import usuario_pagante
 from db import insights
-from db.household_budget import _spent_by_bucket
+from db.household_budget import _month_rows
 from tests._patrimonio_helpers import q
 from tests.test_fonte_unica_q36 import _proprios
 from tests.test_resumo_mes_regra import FIM, INICIO, semeia_a_em_fatura_de_b
@@ -84,7 +84,7 @@ def test_orcamento_conta_o_2o_cartao_e_nunca_a_de_b():
 def test_potes_do_orcamento_domestico_contam_o_2o_cartao_e_nunca_a_de_b():
     a, b = _cena()
     for uid, total in ((a, 130.0), (b, 1.0)):
-        assert sum(_spent_by_bucket(uid, INICIO.year, INICIO.month).values()) == total, uid
+        assert round(sum(r["valor"] for r in _month_rows(uid, INICIO.year, INICIO.month)), 2) == total, uid
 
 
 def test_alertas_de_categoria_e_de_mes_queimando_contam_o_2o_cartao_e_nunca_a_de_b(monkeypatch):

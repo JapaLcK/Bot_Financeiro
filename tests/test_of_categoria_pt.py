@@ -22,7 +22,14 @@ from decimal import Decimal
 
 import db
 from db.categories import _custom_categories_allowed
-from db.household_budget import _spent_by_bucket
+from db.household_budget import _month_rows
+
+
+def _por_pote(uid, y, m):
+    out = {}
+    for r in _month_rows(uid, y, m):
+        out[r["bucket"]] = round(out.get(r["bucket"], 0.0) + r["valor"], 2)
+    return out
 from db.open_finance_categories import PLUGGY_PARA_PIGBANK, _GRUPOS, categoria_pigbank
 from tests._of_cash_helpers import conecta, dia, q, sync
 from utils_text import CATEGORY_LABELS, is_internal_category
@@ -161,7 +168,7 @@ def _aportes(uid):
     import frontend.finance_bot_websocket_custom as mono
     fin = asyncio.run(mono.get_financial_data(uid, year=2026, month=3))
     alloc = sum(b["total"] for b in fin["monthly_allocations"].values())
-    pote = _spent_by_bucket(uid, 2026, 3).get("liberdade_financeira", 0.0)
+    pote = _por_pote(uid, 2026, 3).get("liberdade_financeira", 0.0)
     export = asyncio.run(mono._fetch_export_items(uid, date(2026, 3, 1), date(2026, 3, 31)))
     return alloc, pote, [i["valor"] for i in export if i["natureza"] == "aporte"]
 
@@ -174,11 +181,11 @@ def test_t10_aplicacao_do_of_fica_fora_dos_aportes(pro_user_id):
     # "Investments" NÃO é interno: é gasto, e no pote cai onde caía antes (conforto)
     _banco(user_id, [_tx("x1", -500, "Investments")], item="x")
     assert _launch(user_id, "x1")["categoria"] == "investimento_aporte" and not _launch(user_id, "x1")["interno"]
-    assert _spent_by_bucket(user_id, 2026, 3) == {"conforto": 500.0}
+    assert _por_pote(user_id, 2026, 3) == {"conforto": 500.0}
     # o mesmo no cartão (a fatura de uma compra de 10/03 fecha em abril)
     _cartao(user_id, [_tx("c1", 50, "Investments")])
     assert _compra(user_id, "c1")["categoria"] == "investimento_aporte"
-    assert _spent_by_bucket(user_id, 2026, 4) == {"conforto": 50.0}
+    assert _por_pote(user_id, 2026, 4) == {"conforto": 50.0}
     # controle positivo: o aporte manual continua contando nos três
     q("insert into launches(user_id, tipo, valor, categoria, alvo, criado_em, is_internal_movement, source) "
       "values (%s,'despesa',70,'investimento_aporte','CDB',%s,true,'manual')", (user_id, dia(10)))

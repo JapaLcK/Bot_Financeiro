@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { Platform, ScrollView } from "react-native";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { guardarCredenciais } from "@/storage/secure";
 import { fetchFalso, prepararCaso, resposta, segurar } from "./auth_apoio";
@@ -137,6 +137,22 @@ describe("resultado: premissas e legendas", () => {
   it("datas: o dia de outro ano que o 'hoje' leva o ano (hoje em novembro: 90 dias caem em 2027); do mesmo ano, sem ano", async () => {
     simular = () => resposta(200, clone((s) => { s.hoje = "2026-11-20"; })); await resultado();
     expect(screen.getByText("90 dias · 04/01/27")).toBeTruthy(); expect(screen.getByText("A partir de hoje, 20/11")).toBeTruthy(); expect(screen.getByText(/^Menor saldo · 08\/10$/)).toBeTruthy();
+  });
+});
+
+describe("rolagem da folha", () => {
+  it("resultado e 'Editar' levam a rolagem ao topo; um 422 e a digitação não rolam (o erro fica perto do campo)", async () => {
+    const rolagem = jest.spyOn(ScrollView.prototype, "scrollTo").mockImplementation(() => undefined);
+    try {
+      await abrirFolha(); preencher(); rolagem.mockClear(); digitar(/^Nome/, "Celular 2");
+      simular = () => erro(422, "validation_error", [{ loc: ["body", "cenarios", 0, "preco"], msg: "x", type: "preco_invalido" }]); await calcular();
+      await waitFor(() => expect(screen.getByLabelText(/^Preço.*erro/)).toBeTruthy()); expect(rolagem).not.toHaveBeenCalled();
+      simular = () => resposta(200, SIM); await calcular(); await waitFor(() => expect(screen.getByRole("button", { name: "Editar" })).toBeTruthy());
+      expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }]]);
+      await apertar("Editar"); expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }], [{ y: 0, animated: false }]]);
+      rolagem.mockClear(); simular = () => erro(403, "pro_required"); await calcular();
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Calcular" })).toBeNull()); expect(rolagem.mock.calls).toEqual([[{ y: 0, animated: false }]]);
+    } finally { rolagem.mockRestore(); }
   });
 });
 

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Image, Pressable, View } from "react-native";
+import { AccessibilityInfo, Image, Pressable, View } from "react-native";
 import { useSessao } from "@/features/auth/sessao";
 import { Screen } from "@/ui/componentes/Screen";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
@@ -31,6 +31,8 @@ export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: 
  const p = usePainel(); const sessao = useSessao(); const { cores } = useTema();
  const [folha, setFolha] = useState<"perfil" | "mes" | "organizar" | "conta" | null>(null);
  const [erroSaida, setErroSaida] = useState<string | null>(null); const [saindo, setSaindo] = useState(false);
+ const [descartando, setDescartando] = useState(false);
+ const descartar = async () => { setDescartando(true); const ok = await p.descartarPendente(); setDescartando(false); if (ok) AccessibilityInfo.announceForAccessibility("Conexão pendente descartada"); };
  const [quantidadeMeses, setQuantidadeMeses] = useState(12);
  const { navegar, entrando, aviso: avisoNavegacao, emVoo: entradaEmVoo } = useNavegarPainel(() => setFolha(null));
  const nome = nomeDe(p.usuario);
@@ -43,7 +45,7 @@ export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: 
  const mover = (id: Widget, dir: number) => { const ids = [...p.layout], i = ids.indexOf(id), j = i + dir; if (j < 0 || j >= ids.length) return; const atual = ids[i]!, outro = ids[j]!; ids[i] = outro; ids[j] = atual; p.organizar(ids); };
  // Ordem da pilha: conexão pendente (tem prazo), banco (os números estão errados agora), receitas (decisão). `p.aviso` e `avisoNavegacao` são feedback de uma ação: ficam FORA, como Banner.
  const itens: AvisoDaPilha[] = [
-  ...(p.pendente ? [{ id: "conexao", tom: "alerta" as const, icone: "ArrowsClockwise" as const, titulo: "Conexão com o banco pendente", corpo: <Acao rotulo="Retomar conexão" desativado={entrando} onPress={() => navegar("/open-finance-volta")} /> }] : []),
+  ...(p.pendente ? [{ id: "conexao", tom: "alerta" as const, icone: "ArrowsClockwise" as const, titulo: "Conexão com o banco pendente", corpo: <><Texto variante="legenda" tom="inkMuted">Não vai concluir? Descarte e comece de novo quando quiser.</Texto><View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}><Acao rotulo="Retomar conexão" desativado={entrando || descartando} onPress={() => navegar("/open-finance-volta")} /><Acao rotulo="Descartar" desativado={entrando || descartando} onPress={() => void descartar()} /></View></> }] : []),
   ...(bancoVelho && !avisoFechado ? [{ id: "banco", tom: "alerta" as const, icone: "Bank" as const, titulo: "Dados do banco desatualizados", aoFechar: () => { cancelarAtualizarBanco(); fecharAvisoBanco(); }, corpo: <CorpoAvisoBanco bancos={bancos} /> }] : []),
  ];
  const feedback = <>{p.aviso && <Banner tom="warning" mensagem={p.aviso} />}{avisoNavegacao && <Banner tom="warning" mensagem={avisoNavegacao} />}</>;
