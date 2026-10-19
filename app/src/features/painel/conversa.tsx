@@ -11,7 +11,7 @@ import { useTema } from "@/ui/tema";
 import { espaco, raio, texto as escalas } from "@/ui/tokens";
 import { TextoPainel as Texto } from "./tipografia";
 import { usePainel } from "./provider";
-import { BotaoPrivacidade } from "./cabecalho";
+import { BotaoFerramentas, BotaoPrivacidade } from "./cabecalho";
 import { ContextoNavegacaoPainel, useNavegarPainel } from "./navegacao";
 import { cotaCheia, useConversa } from "./conversaEstado";
 import { EstadoVazio, TurnoChat } from "./conversaFalas";
@@ -41,7 +41,7 @@ function ConversaTela({ aviso }: { aviso: string | null }) {
   const sugs = vazio ? sugestoes(p.perfil).map((s) => ({ rotulo: s.ask, aoEscolher: () => void c.enviar(s.ask, s) })) : chips.map((x) => ({ rotulo: x, aoEscolher: () => void c.enviar(x) }));
   const ativo = com.ativo ? com.pode && !p.oculto : c.enviando || podeEnviar; // enviando = o botão vira "Parar" (permitido com valores ocultos: não revela nada)
   return <Screen rolar={false} sobAbas><View ref={pai} onLayout={() => pai.current?.measureInWindow((_x, y) => setTopoJanela(y))} style={{ flex: 1 }}>
-    <View style={{ flexDirection: "row", justifyContent: "flex-end", backgroundColor: cores.bg }}><BotaoPrivacidade tamanho={20} /></View>
+    <View style={{ flexDirection: "row", justifyContent: "flex-end", backgroundColor: cores.bg }}><BotaoFerramentas tamanho={20} /><BotaoPrivacidade tamanho={20} /></View>
     {aviso && <Texto tom="warning">{aviso}</Texto>}
     <KeyboardAvoidingView keyboardVerticalOffset={topoJanela} behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
