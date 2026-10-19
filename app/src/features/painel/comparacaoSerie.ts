@@ -17,12 +17,14 @@ export function rotulosDaComparacao(d: Comparacao) {
 
 /**
  * As duas linhas do `CurvaAcumulada`, em centavos, no mesmo eixo X (o maior dos dois períodos). `serie` ausente, vazia ou com ponto negativo
- * (o eixo Y começa em 0): `null`, o card sai sem gráfico e nunca com linha inventada. A série do lado que contém hoje é mais curta que `dias`
- * (para em hoje): `indiceHoje` marca o dia de hoje só quando é a ATUAL (`dias_corridos` no mês aberto, SEMPRE, mesmo com a série cobrindo o mês todo: um lançamento de data futura a estica além de hoje e o scrub do gráfico para em `indiceHoje`; senão, o fim da série se ela for mais curta que `dias`); o ponto "hoje" da série anterior fica sem marca.
+ * (o eixo Y começa em 0): `null`, o card sai sem gráfico e nunca com linha inventada. `indiceHoje` marca o dia de hoje só no `mes_aberto` com
+ * `dias_corridos` válido (0 < n <= pontos): aí a atual é SEMPRE o mês corrente e a marca é `dias_corridos - 1`, mesmo com a série esticada por um lançamento
+ * de data futura (o scrub para nela). Em qualquer outro caso (`mes_fechado`, `periodos_informados`, `dias_corridos` ausente/inválido) é `null`: o servidor não
+ * diz qual é hoje, e adivinhar pelo tamanho da série marcaria o dia do último lançamento futuro; sem marca, o scrub cobre a série inteira.
  */
 export function curvasDaComparacao(d: Comparacao) {
   const s = d.serie, dias = Math.max(d.atual.dias, d.anterior.dias);
   if (!s || dias < 2 || !s.atual.length || !s.anterior.length || [...s.atual, ...s.anterior].some((v) => v < 0)) return null;
   const hoje = d.dias_corridos ?? 0, pontos = s.atual.slice(0, d.atual.dias), anterior = s.anterior.slice(0, d.anterior.dias);
-  return { pontos, anterior, diasNoMes: dias, indiceHoje: d.modo === "mes_aberto" && hoje > 0 && hoje <= pontos.length ? hoje - 1 : pontos.length >= d.atual.dias ? null : pontos.length - 1 };
+  return { pontos, anterior, diasNoMes: dias, indiceHoje: d.modo === "mes_aberto" && hoje > 0 && hoje <= pontos.length ? hoje - 1 : null };
 }

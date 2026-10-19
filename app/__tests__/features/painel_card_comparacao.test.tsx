@@ -69,22 +69,19 @@ describe("curvasDaComparacao", () => {
   it("período mais curto que o outro: o eixo é o maior (fevereiro de 28 contra janeiro de 31)", () => {
     expect(curvasDaComparacao(de({ atual: { inicio: "2026-02-01", fim: "2026-02-28", dias: 28 }, anterior: { inicio: "2026-01-01", fim: "2026-01-31", dias: 31 }, serie: { atual: Array(28).fill(1), anterior: Array(31).fill(1) } }))!.diasNoMes).toBe(31);
   });
-  it("lançamento de data futura estica a série atual além de hoje: a marca fica em `dias_corridos`, não no fim da série", () => {
-    const c = curvasDaComparacao(de({ dias_corridos: 12, serie: { atual: Array(25).fill(10), anterior: Array(30).fill(10) } }))!; expect([c.pontos.length, c.indiceHoje]).toEqual([25, 11]);
-  });
-  it("caso comum (a série para em hoje) marca o último ponto; `dias_corridos` incoerente com a série não inventa dia", () => {
-    expect(curvasDaComparacao(de({ dias_corridos: 12, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
-    expect(curvasDaComparacao(de({ dias_corridos: 20, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
-  });
-  it("mês aberto com lançamento futuro no ÚLTIMO dia: a série cobre o mês todo (31 pontos) e a marca continua em `dias_corridos` (o scrub do gráfico para nela)", () => {
-    const c = curvasDaComparacao(de({ dias_corridos: 12, serie: { atual: Array(31).fill(10), anterior: Array(30).fill(10) } }))!; expect([c.pontos.length, c.diasNoMes, c.indiceHoje]).toEqual([31, 31, 11]);
-  });
-  it("mês aberto com `dias_corridos` maior que a série cai na regra antiga (fim da série)", () => {
-    expect(curvasDaComparacao(de({ dias_corridos: 20, serie: { atual: Array(12).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBe(11);
-  });
-  it("série cheia (período fechado): sem marca de hoje", () => {
-    expect(curvasDaComparacao(de({ modo: "mes_fechado", dias_corridos: undefined, dias_no_mes: undefined, serie: { atual: Array(31).fill(10), anterior: Array(30).fill(10) } }))!.indiceHoje).toBeNull();
-  });
+  const serie = (n: number, m = 30) => ({ serie: { atual: Array(n).fill(10), anterior: Array(m).fill(10) } }), semHoje = { dias_corridos: undefined, dias_no_mes: undefined };
+  // A tabela inteira de `indiceHoje`: só `mes_aberto` com `dias_corridos` válido (0 < n <= pontos) sabe qual é hoje; o resto é `null`, nunca "o fim da série".
+  it.each([
+    ["mes_aberto, a série para em hoje", { dias_corridos: 12, ...serie(12) }, 11],
+    ["mes_aberto, lançamento futuro estica a série além de hoje", { dias_corridos: 12, ...serie(25) }, 11],
+    ["mes_aberto, lançamento futuro no último dia (a série cobre o mês todo)", { dias_corridos: 12, ...serie(31) }, 11],
+    ["mes_aberto, `dias_corridos` ausente", { ...semHoje, ...serie(12) }, null],
+    ["mes_aberto, `dias_corridos` 0", { dias_corridos: 0, ...serie(12) }, null],
+    ["mes_aberto, `dias_corridos` maior que a série", { dias_corridos: 20, ...serie(12) }, null],
+    ["mes_fechado, série cheia", { modo: "mes_fechado", ...semHoje, ...serie(31) }, null],
+    ["mes_fechado, série curta", { modo: "mes_fechado", ...semHoje, ...serie(12) }, null],
+    ["periodos_informados, mês corrente: hoje dia 12 e lançamento no dia 15 (15 pontos, sem `dias_corridos`)", { ...informados(OUT26, SET26), ...serie(15) }, null],
+  ])("indiceHoje: %s", (_n, extra, esperado) => { expect(curvasDaComparacao(de(extra))!.indiceHoje).toBe(esperado); });
   it.each([["null", { serie: null }], ["vazia", { serie: { atual: [], anterior: [1] } }], ["ponto negativo", { serie: { atual: [-1, 2], anterior: [1] } }]])("%s: sem gráfico (nunca linha inventada)", (_n, extra) => { expect(curvasDaComparacao(de(extra))).toBeNull(); });
 });
 
@@ -132,6 +129,12 @@ describe("CardComparacao", () => {
     expect(screen.getByTestId("curva-linha", { includeHiddenElements: true })).toBeTruthy(); expect(screen.getByTestId("curva-anterior", { includeHiddenElements: true })).toBeTruthy();
     expect(screen.getAllByTestId("curva-legenda", { includeHiddenElements: true })).toHaveLength(2); expect(screen.getByText("out", { includeHiddenElements: true })).toBeTruthy(); expect(screen.getByText("set", { includeHiddenElements: true })).toBeTruthy();
     expect(screen.getByText("−R$ 800,00")).toBeTruthy(); expect(screen.getByText("−R$ 200,00")).toBeTruthy(); expect(screen.getByText("+R$ 45,00")).toBeTruthy();
+  });
+  it("periodos_informados no mês corrente com lançamento futuro (15 pontos, sem `dias_corridos`): o anel de hoje não é desenhado, a linha sim; no mês aberto (controle) o anel existe", () => {
+    const abrir = () => fireEvent(screen.getByTestId("curva-plot", { includeHiddenElements: true }), "layout", { nativeEvent: { layout: { width: 300, height: 130 } } });
+    const v = direto(bloco({ ...informados(OUT26, SET26), serie: { atual: Array(15).fill(10), anterior: Array(30).fill(10) } })); abrir();
+    expect(screen.getByTestId("curva-linha", { includeHiddenElements: true })).toBeTruthy(); expect(screen.queryByTestId("ponto-hoje", { includeHiddenElements: true })).toBeNull();
+    v.unmount(); direto(COMP); abrir(); expect(screen.getByTestId("ponto-hoje", { includeHiddenElements: true })).toBeTruthy();
   });
   it("diminuiu é verde, aumentou é atenção (nunca vermelho)", () => {
     const cor = (t: string) => StyleSheet.flatten(screen.getByText(t).props.style).color;
