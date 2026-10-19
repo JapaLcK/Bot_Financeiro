@@ -158,6 +158,28 @@ describe("Notificações — lacunas da suíte", () => {
     expect(patches()).toEqual([{ daily_report_hour: 10, daily_report_minute: 2, daily_report_enabled: true }]);
   });
 
+  it("RequisicaoSuperada na LEITURA (volta do fundo): some o dado da conta anterior e relê a conta nova", async () => {
+    const seg = segurar();
+    let conta = 1, prender = false;
+    const srv2 = servidor({ monthly_report_enabled: false });
+    await abrirNotificacoes(servidor({}, { get: () => (prender ? seg.promessa.then(() => resposta(200, { ...BASE })) : resposta(200, { ...BASE })) }), {
+      "/auth/me": () => resposta(200, { user_id: conta, email: "sofia@x.com", display_name: "Sofia", app_access: true }),
+      "/settings/2/notifications": srv2.rota,
+    });
+    await esperar();
+    prender = true; // o GET da releitura da conta 1 fica preso
+    await appVai("background");
+    await appVai("active");
+    cofre.set("pb.credenciais", JSON.stringify({ access: "access-b", refresh: "rt_b" })); // outra conta assumiu o cofre
+    conta = 2;
+    await act(async () => {
+      seg.soltar();
+      for (let i = 0; i < 10; i++) await drenar();
+    });
+    await waitFor(() => expect(ligada("Resumo mensal")).toBe(false)); // o que a conta 2 tem no servidor
+    expect(fetchFalso.mock.calls.some(([u]: [string]) => String(u).endsWith("/settings/2/notifications"))).toBe(true);
+  });
+
   it("releitura que FALHA com dados na tela mantém a tela (não troca por 'erro')", async () => {
     let falhar = false;
     await abrirNotificacoes(servidor({}, { get: () => (falhar ? resposta(500, { detail: "boom" }) : resposta(200, { ...BASE })) }));

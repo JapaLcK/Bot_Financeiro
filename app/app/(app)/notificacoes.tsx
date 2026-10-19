@@ -92,7 +92,10 @@ export default function NotificacoesTela() {
     } catch (e) {
       if (e instanceof SessaoExpirada) return void falha(e); // sessão expirada vale de qualquer geração
       if (minha !== geracao.current || fase(e, emailDaConta)) return;
-      if (falha(e) === null) return; // RequisicaoSuperada: resposta de outra conta
+      if (falha(e) === null) { // RequisicaoSuperada: a conta trocou no meio; some o dado da anterior e relê (como na escrita)
+        setEstado({ fase: "carregando" });
+        return void carregar();
+      }
       // Recarga com dados na tela mantém a tela: trocar por erro desmontaria o que está sendo usado.
       setEstado((atual) => (atual.fase === "pronto" ? atual : { fase: "erro" }));
     }
