@@ -5,18 +5,24 @@ Cobre `db/household_budget.py` e as rotas `/household-budget/...`: seed lazy
 dos defaults (soma 100); save_config (validações + tudo-ou-nada); renda
 computada × override × limpeza e RENDA_INVALIDA; gasto por pote (launch +
 cartão, interno excluído EXCETO aporte, fallback 'conforto'); budget_amount e
-used_pct (None com renda 0); validação de month; rotas 403 Free / 200 Pro /
+used_pct (None com renda 0); validação de month; caixinha/cripto/aporte nos potes + lista por linha (soma == spent, sem vazar
+entre usuários); rotas 403 Free / 200 Pro /
 PUT income com amount null pelo HTTP de verdade.
 """
 from __future__ import annotations
 
 from datetime import date
 
+import uuid
+
 import pytest
 
 from conftest import promote_to_pro
 from db.accounts import add_launch_and_update_balance
 from db.connection import get_conn
+from db.investments import create_investment, investment_deposit_from_account
+from db.pockets import create_pocket, pocket_deposit_from_account, pocket_withdraw_to_account
+from db.users import ensure_user
 from db.household_budget import (
     BUCKETS,
     clear_income_override,
@@ -44,7 +50,7 @@ def _receita(user_id: int, valor: float):
     add_launch_and_update_balance(user_id, "receita", valor, "teste", "teste")
 
 
-def _gasto_cartao(user_id: int, categoria: str, valor: float):
+def _gasto_cartao(user_id: int, categoria: str, valor: float, estorno: float = 0):
     """Compra no cartão atribuída ao mês pela fatura (period_end = hoje)."""
     hoje = date.today()
     with get_conn() as conn:
@@ -63,10 +69,17 @@ def _gasto_cartao(user_id: int, categoria: str, valor: float):
             bill = cur.fetchone()["id"]
             cur.execute(
                 "insert into credit_transactions "
-                "(bill_id, user_id, card_id, valor, purchased_at, categoria) "
-                "values (%s, %s, %s, %s, %s, %s)",
-                (bill, user_id, card, valor, hoje, categoria),
+                "(bill_id, user_id, card_id, valor, purchased_at, categoria, is_refund) "
+                "values (%s, %s, %s, %s, %s, %s, %s)",
+                (bill, user_id, card, valor, hoje, categoria, False),
             )
+            if estorno:  # estorno na mesma fatura
+                cur.execute(
+                    "insert into credit_transactions "
+                    "(bill_id, user_id, card_id, valor, purchased_at, categoria, is_refund) "
+                    "values (%s, %s, %s, %s, %s, %s, true)",
+                    (bill, user_id, card, estorno, hoje, categoria),
+                )
         conn.commit()
 
 
@@ -229,6 +242,96 @@ def test_totals_tem_o_shape_fechado(user_id):
     assert status["totals"]["spent"] == 1000.0
     assert status["totals"]["used_pct"] == 10.0
     assert status["income"] == {"amount": 10000.0, "source": "override"}
+
+
+# ── caixinha, cripto, aporte e a lista por linha ─────────────────────────────
+
+def test_deposito_de_caixinha_cai_em_metas_e_saque_nao(user_id):
+    add_launch_and_update_balance(user_id, "receita", 1000.0, "teste", "teste")
+    create_pocket(user_id, "Viagem")
+    pocket_deposit_from_account(user_id, "Viagem", 300.0)
+    pocket_withdraw_to_account(user_id, "Viagem", 100.0)
+
+    metas = _bucket(get_household_budget_status(user_id, _mes_atual()), "metas")
+    assert metas["spent"] == 300.0  # o saque de 100 não abate nem soma
+    assert [l["valor"] for l in metas["launches"]] == [300.0]
+    assert metas["categories"] == ["Depósitos em caixinhas"]
+
+
+def test_cripto_e_aporte_de_investimento_caem_em_liberdade(user_id):
+    add_launch_and_update_balance(user_id, "receita", 5000.0, "teste", "teste")
+    _gasto(user_id, "criptomoedas", 200.0, interno=True)
+    create_investment(user_id, "CDB X", 1.0, "daily")
+    investment_deposit_from_account(user_id, "CDB X", 400.0)
+
+    lib = _bucket(get_household_budget_status(user_id, _mes_atual()), "liberdade_financeira")
+    assert lib["spent"] == 600.0
+    assert _bucket(get_household_budget_status(user_id, _mes_atual()), "conforto")["spent"] == 0.0
+
+
+def test_categorias_de_investimento_cripto_e_aliases_caem_em_liberdade(user_id):
+    _receita(user_id, 5000.0)
+    for cat in ("cripto", "Bitcoin", "investimentos"):
+        _gasto(user_id, cat, 100.0, interno=True)
+    _gasto_cartao(user_id, "btc", 50.0)
+    _gasto(user_id, "rendimentos", 70.0, interno=True)  # segue fora
+
+    st = get_household_budget_status(user_id, _mes_atual())
+    assert _bucket(st, "liberdade_financeira")["spent"] == 350.0
+    assert _bucket(st, "conforto")["spent"] == 0.0
+
+
+def test_tabela_de_decisao_do_pote_por_linha(user_id):
+    """Cada linha da tabela do docstring de db/household_budget.py."""
+    _receita(user_id, 5000.0)
+    _gasto(user_id, "Tesouro Selic", 10.0, interno=True)      # 2: composta interna → liberdade
+    _gasto(user_id, "Ações Brasil", 20.0, interno=True)       # 2
+    _gasto_cartao(user_id, "Tesouro Direto", 40.0)            # 2: cartão
+    _gasto(user_id, "ajuste_saldo", 999.0, interno=True)      # 3: interna não-investimento → fora
+    _gasto(user_id, "lazer", 100.0)                           # 4 → prazeres
+    _gasto(user_id, "Presentes", 200.0)                       # 5 → conforto
+
+    st = get_household_budget_status(user_id, _mes_atual())
+    assert _bucket(st, "liberdade_financeira")["spent"] == 70.0
+    assert _bucket(st, "prazeres")["spent"] == 100.0
+    assert _bucket(st, "conforto")["spent"] == 200.0
+    assert st["totals"]["spent"] == 370.0
+
+
+def test_launches_somam_o_spent_de_cada_pote_e_nao_vazam_entre_usuarios(user_id):
+    outro = int(uuid.uuid4().int % 10_000_000_000)
+    ensure_user(outro)
+    try:
+        _gasto(user_id, "moradia", 2000.0)
+        _gasto_cartao(user_id, "mercado", 800.0)
+        _gasto(outro, "moradia", 777.0)
+        _gasto_cartao(outro, "mercado", 555.0)
+
+        status = get_household_budget_status(user_id, _mes_atual())
+        for b in status["buckets"]:
+            assert round(sum(l["valor"] for l in b["launches"]), 2) == b["spent"]
+        cf = _bucket(status, "custos_fixos")
+        assert cf["spent"] == 2800.0
+        assert {l["origem"] for l in cf["launches"]} == {"conta", "cartao"}
+        assert sum(c["total"] for c in cf["by_category"]) == 2800.0
+    finally:
+        from conftest import _cleanup_user
+        _cleanup_user(outro)
+
+
+def test_estorno_no_cartao_nao_entra_no_spent_nem_nos_launches(user_id):
+    _gasto_cartao(user_id, "mercado", 800.0, estorno=100.0)
+    cf = _bucket(get_household_budget_status(user_id, _mes_atual()), "custos_fixos")
+    assert cf["spent"] == 800.0
+    assert [l["valor"] for l in cf["launches"]] == [800.0]
+
+
+def test_rotulo_de_categoria_usa_o_nome_do_mapa_mesmo_sem_acento_na_origem(user_id):
+    _gasto(user_id, "Alimentacao", 10.0)
+    _gasto(user_id, "ALIMENTAÇÃO ", 20.0)
+    cf = _bucket(get_household_budget_status(user_id, _mes_atual()), "custos_fixos")
+    assert [c["categoria"] for c in cf["by_category"]] == ["Alimentação"]
+    assert {l["categoria"] for l in cf["launches"]} == {"Alimentação"}
 
 
 # ── validação de month ───────────────────────────────────────────────────────
