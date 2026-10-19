@@ -91,12 +91,14 @@ export function AskBar({ path }: { path: Path }) {
         enviando.current = true;
         try {
           // Com "@" no texto o catálogo decide o destino: se ainda carrega, espera (falhou/404: fica sem dados e vai ao Piggy).
+          // A conta pode ter mudado noutra aba com a anterior ainda no cache: o envio com menção relê o perfil (um fetch em voo é
+          // reaproveitado) e só usa o catálogo dessa conta (Codex no #1157). A releitura passa pelo `contaDaSessao` antes da bolha nova.
           let d = dados, u = uid;
-          if (quer && !d) {
+          if (quer) {
             try {
-              if (!DEMO && u == null) u = (await qc.fetchQuery(contaQuery)).user_id;
-              if (DEMO || uidValido(u)) d = await qc.fetchQuery(agentesQuery(u));
-            } catch { /* sem catálogo: vai ao Piggy */ }
+              if (!DEMO) { const agora = (await qc.fetchQuery(contaQuery)).user_id; if (agora !== u) { u = agora; d = undefined; } }
+              if (!d && (DEMO || uidValido(u))) d = await qc.fetchQuery(agentesQuery(u));
+            } catch { d = undefined; /* sem conta conferida ou sem catálogo: vai ao Piggy */ }
           }
           const m = d && (DEMO || u != null) ? mencaoDe(t, d) : null;
           if (m) {

@@ -277,6 +277,54 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: sair do /piggy e voltar não anuncia de novo a conversa; a resposta que terminou longe é anunciada ao voltar`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: (kind) => (kind === "xerife" ? new Promise((ok) => { solta = ok; }) : undefined) });
+    const dito = () => page.evaluate(() => document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? "");
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.waitForFunction(() => /do detetive\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""));
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(await dito(), "", "a conversa que já foi anunciada não é lida de novo");
+    await enviar(page, "@Xerife algo fora do padrão?");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    const respondeu = page.waitForResponse((r) => /\/agents\/42\/xerife\/chat$/.test(r.url()));
+    solta();
+    await respondeu;
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.waitForFunction(() => /do xerife\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""), null, { timeout: 3000 });
+    assert.doesNotMatch(await dito(), /do detetive/);
+    await ctx.close();
+  });
+
+  // Só no desktop: no celular a barra só existe no /piggy, onde o chat já confere a conta ao montar.
+  test(`${width}: a conta muda noutra aba e a menção sai logo, de outra página, com a anterior no cache: vai à conta nova`, { skip: width < 768 && "no celular a barra some fora do /piggy" }, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?"); // conta e catálogo da 42 no cache
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    const da43 = await paraConta43(ctx);
+    let soltaPerfil;
+    const perfilPreso = new Promise((ok) => { soltaPerfil = ok; });
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await perfilPreso; return r.fallback(); }); // a releitura ainda em voo no envio
+    await enviar(page, "@Detetive e agora?");
+    await page.waitForTimeout(200);
+    assert.equal(chats.length, 1, "com a releitura em voo, nada sai com a conta do cache");
+    soltaPerfil();
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Oi, conta nova." }).waitFor();
+    assert.deepEqual(da43, [{ kind: "detetive", context: null }]);
+    assert.equal(chats.length, 1, "nada mais à 42");
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o chat está fechado: ao abrir o /piggy, nada da conversa anterior aparece antes de conferir a conta`, async () => {
     const { ctx, page } = await abrir({ width });
     await enviar(page, "@Detetive tem duplicada?");

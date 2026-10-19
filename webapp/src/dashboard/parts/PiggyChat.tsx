@@ -27,6 +27,9 @@ function ComMencoes({ t }: { t: string }) {
 }
 
 const ETIQUETA = { inativo: "NÃO ATIVO", sem_energia: "SEM ENERGIA" } as const;
+// O último estado anunciado de cada resposta, fora do componente: sair do /piggy e voltar não anuncia de novo a conversa
+// inteira; uma resposta que terminou longe do chat é anunciada ao voltar (Codex no #1157).
+const estados = new Map<number, string>();
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
 // próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
@@ -82,7 +85,6 @@ export function PiggyChat() {
   const [said, setSaid] = useState<ReactNode>(null);
   // Anuncia a resposta que acabou de mudar de estado, não só a última: com dois agentes em voo, a mais
   // antiga pode terminar enquanto a mais nova ainda está "Preparando…" (Codex no #1157).
-  const estados = useRef(new Map<number, string>());
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fila = useRef<ReactNode[]>([]);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -91,8 +93,8 @@ export function PiggyChat() {
     for (const m of msgs) {
       if (m.role !== "piggy") continue;
       const agora = m.estado ?? "pronto";
-      if (estados.current.get(m.id) === agora) continue;
-      estados.current.set(m.id, agora);
+      if (estados.get(m.id) === agora) continue;
+      estados.set(m.id, agora);
       if (agora !== "enviando") { fila.current.push(m.text ?? null); novas++; }
     }
     if (!novas) return; // sem cleanup aqui: uma bolha de outro agente entrando em "Preparando…" não cancela o anúncio pendente
