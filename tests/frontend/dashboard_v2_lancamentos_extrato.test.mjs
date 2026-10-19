@@ -111,6 +111,16 @@ test("(f) chip de atalho selecionado mantém o rosa com o mouse em cima", async 
   await ctx.close();
 });
 
+test("(g) o leitor de tela ouve o subtítulo (instituição · categoria): o aria-label do botão troca o nome, o aria-describedby devolve o contexto", async () => {
+  const { ctx, page, ir, erros } = await abrir();
+  await ir("/lancamentos");
+  await page.locator('[data-id="l901"] .ph-shopping-cart').waitFor();
+  const d = await page.evaluate(() => { const b = document.querySelector('[data-id="l901"] button.lanc-abrir'); const alvo = document.getElementById(b.getAttribute("aria-describedby") ?? ""); return { desc: alvo?.textContent ?? null, dentro: b.contains(alvo), sub: b.querySelector(".faint").textContent }; });
+  assert.ok(d.sub.includes(" · "), d.sub); assert.equal(d.desc, d.sub); assert.equal(d.dentro, true);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
 for (const width of [1440, 390]) test(`visual ${width}: linha dentro do card, ícones certos, alvos de 44px`, async () => {
   const { ctx, page, ir, erros } = await abrir({ width });
   await ir("/lancamentos");
