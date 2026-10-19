@@ -1787,8 +1787,53 @@ repetidos, corpo acima de 4096 bytes ou lento retornam 400 antes de qualquer cha
 Cada conexão do snapshot (`GET /open-finance/{uid}`, `POST .../pluggy-item`, `.../sync`, `.../refresh`,
 `.../mock-connect`: todas as rotas que devolvem `**snapshot`) traz `logo_url`:
 `https` ou `null`, derivado de `raw.connector.imageUrl` e validado em `logo_url_valida`
-(`db/open_finance_state.py`); o `raw` não sai. Conexão `mock_pluggy` e item sem `connector` dão `null`,
-e também depois de `item/deleted` (o envelope do webhook substitui o `raw`).
+(`db/open_finance_state.py`); o `raw` não sai. Sem `connector` no `raw` (as conexões antigas, e toda
+conexão depois de `item/deleted`, que substitui o `raw`), o snapshot empresta o logo do catálogo de
+conectores da Pluggy que já vive em memória (`core/services/pluggy_catalogo.py`, `logo_do_conector`):
+casa só pelo id do conector (`institution_id`, `str` dos dois lados; nunca pelo nome), só em
+`provider='pluggy'`, ignora o TTL (logo velho serve) e nunca vai à rede nem levanta, então o caminho
+do snapshot não espera a Pluggy. O `raw` vence o catálogo. O cache é aquecido por
+`_aquece_catalogo` (monólito) no boot, como tarefa de fundo, e no começo de cada tique do Open Finance,
+com a mesma função e a mesma chave do modal "Conectar banco"; falha vira uma linha com o tipo da exceção.
+Continua `null`: cache frio (segundos depois do boot, ou até o 1º tique, em até 10 min, se o
+aquecimento do boot falhar; só com `RUN_BACKGROUND_TASKS`; ou Pluggy fora do ar), conector que saiu do
+catálogo, `mock_pluggy` e `institution_id = "pluggy"` (item sem `connector` nem `connectorId`).
+Ids de produção das 4 antigas, medidos pelo dono em 2026-10-18: 611, 612, 651, 775; que o catálogo
+real os liste só se prova depois do deploy. O servidor NÃO fixa o host (`logo_url_valida` segue
+aceitando qualquer https); quem fixa é o cliente.
+Cada conexão do snapshot traz também `institution_id` (texto, o id do conector da Pluggy; é coluna `not null`, e o `pop` do
+laço de `_read_open_finance_connections` nunca o tirou: o gate de reconexão do picker já o lia, `ids` em `refreshLimits`):
+`tests/test_of_connection_state.py` (`CHAVES_DA_CONEXAO`) prende a chave e `tests/test_of_snapshot_institution_id.py` o valor e o
+isolamento por usuário. É por ele que o /painel decide "já conectado": `String(connector.id) === institution_id`, nunca pelo nome.
+**Tela Bancos conectados do /painel** (`#/conta/bancos`, `conta/Bancos.tsx`, `BancoCard.tsx`, `Disponiveis.tsx`, `BancoDetalhe.tsx`, `styles/bancos.css`):
+título e "Gerencie as conexões via Open Finance." com o "+" rosa no topo (a ação principal); os bancos conectados num grupo só
+(uma superfície, cantos de 16 px, divisor de 0,5 px, sem card por banco): ladrilho, nome, pontinho com o `ui.label` (a cor nunca é o
+único sinal), chevron; a linha inteira é um botão que abre o detalhe (os valores em R$ moram só nele; a lista não tem total, barra nem
+topo). "N de M bancos" (de `/limite`) segue como linha discreta. Abaixo, "Disponíveis para conectar": até 5 dos populares (Itaú,
+Bradesco, Banco do Brasil, Santander, Caixa, Inter, C6, Nubank, BTG, Mercado Pago, nessa ordem; o NOME só escolhe a ordem) de
+`GET /open-finance/{uid}/connectors` que ainda não estão conectados (por id) e "Ver todos os bancos". A seção só existe com vaga
+(`pode`, o gate do `/limite`) e some se o `/connectors` falha (leitura opcional, nunca derruba a tela) ou se não sobra banco.
+O "+" de cada um, o do topo e o botão do estado vazio são `<a href="/settings?view=open-finance">` com `onClick`: com
+`window.PBOpenFinance` presente abrem o seletor ali mesmo (`open({id, name})` pré-seleciona o banco; o usuário ainda toca em
+"Conectar", e todo o teto/plano/confirmação é o do módulo), sem ele o href segue. `Bancos.tsx` faz `init` ao montar (o `onConnected`
+relê snapshot, `/limite`, `/bancos`, `/connectors` e as contas) e `destroy` ao desmontar, salvo com widget da Pluggy já aberto (`busy()`): aí o `destroy` não roda, para o `onSuccess` ainda salvar o item. O `painel.html` carrega
+`open-finance-connect.css/.js` e o SDK da Pluggy (mesma versão e SRI do `settings.html`; `async`, em TODO carregamento do /painel
+— carga sob demanda é follow-up); os tokens do seletor saem do painel em `.bankpick-overlay` (`bancos.css`). Par no app: o "Disponíveis"
+é plano futuro (PR próprio). Testes: `tests/frontend/dashboard_v2_bancos*.test.mjs` (o seletor, em stub) e `of_connect_settings.test.mjs`
+(`open({id, name})` no módulo real).
+Opção do módulo `init({ guardaDuploClique: true })` (só o /painel a liga): nos 350 ms depois de abrir o picker, clique em linha e em "Conectar" é ignorado (só o
+"fechar" explícito vale), para o 2º clique de um duplo clique no "+" não escolher outro banco. O clique no fundo é ignorado sempre nesse prazo, também no /settings.
+O /settings NÃO liga a opção, de propósito: ali a classe de bug irmã continua (o 2º clique de um duplo clique no botão que abre o picker pode escolher outra linha),
+para não mudar o comportamento que `of_connect_settings.test.mjs` fixa. Testes: `dashboard_v2_bancos_seletor.test.mjs` e `of_connect_settings.test.mjs`.
+Limites declarados dessa tela (decisão do dono pendente, nenhum código para eles): (1) o gêmeo direto × Open Finance: um banco conectado pelo conector
+direto (ex.: Caixa, id 219) e o mesmo banco no Open Finance (id 619) são conectores diferentes; "já conectado" é por id, então o 619 aparece em
+"Disponíveis" como se o banco não estivesse conectado (o teto de vagas e o `connections` do servidor valem igual); (2) o SDK da Pluggy carrega em
+todo /painel, não só no clique; (3) sair da página com o widget já aberto não o destrói (`busy()` só vale depois de o widget ser criado; antes, durante o `/connect-token`, sair ainda chama `destroy()` e aborta): o `onSuccess` ainda salva o item, mas uma falha ao salvar (teto do plano, rede) fica muda, porque a tela já saiu, e o item/consentimento ficam na Pluggy sem conexão no PigBank; voltar à página com o widget antigo ainda aberto deixa o "+" sem efeito até o widget fechar (`open()` é ignorado em silêncio pela guarda "uma conexão por vez"; o overlay da Pluggy cobre a página, então só dá para alcançar pelo teclado); (4) o aviso do seletor (toast) fica sob um `<dialog>` aberto em top layer (o detalhe do banco, o Confirma): o `z-index` não vence o top layer; (5) o StrictMode (montar, desmontar, montar) só foi provado por leitura: o build de teste é de produção.
+`PBOpenFinance.open({id, name})` (opcional; `open()` sem argumento segue idêntico para o /settings): abre com esse banco
+selecionado e à vista; id que não está na lista, ou argumento que não é `{id inteiro, name}` (um Event), é ignorado.
+No /painel (`conta/BancoCard.tsx`, `Ladrilho`) o ladrilho quadrado arredondado (44 px na linha, 64 px no detalhe) troca a inicial pela imagem (`<img alt="">`, fundo `--ink`,
+`overflow: hidden`; o painel só tem tema escuro); `logoSeguro` (`conta/api.ts`) é a cópia da regra do app e
+`tests/frontend/logo_banco_paridade.test.mjs` as compara; imagem que falha volta à inicial na cor do banco.
 No app (`conexoes/juntar.ts`, `logoSeguro`), o `logo_url` só é carregado com o host fixo `https://cdn.pluggy.ai/`; o SVG
 vem por `fetch` + `parse` + `SvgAst` (uma vez por URI, sem `Authorization`) e o `Avatar` cai na inicial em falha, `!ok` ou
 corpo que não é SVG. Limites: sem teto de tamanho do corpo; `<image href>` e `<use href>` dentro do SVG são renderizados;
@@ -2488,11 +2533,13 @@ finito em toda coluna numérica (`_tarefa_finito_checks` →
 teste que sobe o `app` herda o default (`1`) — `tests/test_table_cleanup.py` passa
 `"1"` de propósito, para ver a tarefa subir.
 
-O Open Finance tem **cinco** trabalhos: expiração de trial
-(`_open_finance_trial_expiry`), **job de saúde**, **retentativa**, **push de reconectar**
-(`run_reconnect_push`, ver "Push (app iOS)") e refresh proativo —
-os quatro últimos no mesmo tick de `_open_finance_refresh`, nessa ordem. O 1º tick
-roda 10 min depois do boot (`_PRIMEIRO_TIQUE_SEC`) só com saúde, retentativa e push (GET); o
+O Open Finance tem **seis** trabalhos: expiração de trial
+(`_open_finance_trial_expiry`), **aquecimento do catálogo** (`_aquece_catalogo`), **job de
+saúde**, **retentativa**, **push de reconectar** (`run_reconnect_push`, ver "Push (app iOS)")
+e refresh proativo — os cinco últimos no mesmo tick de `_open_finance_refresh`, nessa ordem (o
+tick começa pelo aquecimento). O lifespan sobe também a tarefa `pluggy_catalogo`, que aquece o
+catálogo uma vez no boot (só com `RUN_BACKGROUND_TASKS`). O 1º tick roda 10 min depois do boot
+(`_PRIMEIRO_TIQUE_SEC`) só com aquecimento, saúde, retentativa e push (GET); o
 PATCH periódico não roda no boot e entra do 2º tick em diante, a cada
 `OF_REFRESH_INTERVAL_SEC` (6 h). O refresh
 proativo depende de `OF_REFRESH_ENABLED` (off por padrão em produção); o job de saúde
@@ -2503,8 +2550,10 @@ nada mais faria essa verificação. A retentativa (Onda 5, PR-B2,
 `frontend/routes/of_retentativa.py`) vem logo depois: relê a Pluggy, também só com GET,
 para até `OF_RETRY_MAX_PER_TICK` conexões com dado atrás (default 20; só `0` ou
 negativo desliga só ela, valor que não é inteiro cai no padrão), uma de cada vez, pelo mesmo caminho de sync do webhook. Quem entra e por quê:
-`docs/open_finance_estados.md` §2.2. Kill switch dos dois: `OF_HEALTH_CHECK_ENABLED=0`
-(default `1`).
+`docs/open_finance_estados.md` §2.2. Kill switch da saúde e da retentativa:
+`OF_HEALTH_CHECK_ENABLED=0` (default `1`). O aquecimento do catálogo NÃO tem kill switch (esse
+flag não o desliga); sua falha só loga o tipo da exceção e nunca bloqueia saúde, retentativa
+nem PATCH.
 (Há ainda `_open_finance_proactive`, que retorna na hora sem `OF_PROACTIVE_ENABLED`.)
 
 ---

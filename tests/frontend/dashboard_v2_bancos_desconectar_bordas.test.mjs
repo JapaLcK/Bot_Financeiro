@@ -6,7 +6,7 @@ import { abrir, navegador } from "./_guia.mjs";
 import { ate } from "./_conta_perfil.mjs";
 import { JSON_ERRO, encurtaPrazo } from "./_conta_seguranca.mjs";
 import { PADRAO, con, servidorBancos } from "./_bancos.mjs";
-import { DEL, semReticencias, esperaCards, refoco, dlg, confirmar, manter, card, aviso, alerta, foco, noFoco, pedir, tiraDoSnapshot, lidosDepois, tela } from "./_bancos_desconectar.mjs";
+import { DEL, semReticencias, esperaCards, refoco, dlg, det, confirmar, manter, card, aviso, alerta, foco, noFoco, abreDetalhe, pedir, tiraDoSnapshot, lidosDepois, tela } from "./_bancos_desconectar.mjs";
 
 const browser = navegador();
 void browser;
@@ -107,13 +107,15 @@ test("C4 404 com o banco ainda no snapshot: 'Não deu para desconectar Nubank. T
   assert.deepEqual(srv.dels, [DEL(11)]);
 });
 
-test("C5 403: o foco vai ao título (não ao botão)", async () => {
+test("C5 403 com a mesma conta: o detalhe segue aberto com o alerta dentro e o foco volta ao botão dele (a lista não mudou)", async () => {
   const { ctx, page } = await tela({ del: JSON_ERRO(403, "CSRF token ausente.") });
   await pedir(page, "Nubank");
   await confirmar(page).click();
   await alerta(page).filter({ hasText: "Recarregue a página" }).waitFor();
-  await noFoco(page, "page-title");
+  await noFoco(page, "Desconectar banco");
+  const r = { detalhe: await det(page).count(), noDetalhe: await det(page).locator("[role=alert]").count() };
   await ctx.close();
+  assert.deepEqual(r, { detalhe: 1, noDetalhe: 1 });
 });
 
 test("C6 uma falha velha (Nubank) some quando se abre o diálogo de OUTRO banco (Inter)", async () => {
@@ -122,10 +124,43 @@ test("C6 uma falha velha (Nubank) some quando se abre o diálogo de OUTRO banco 
   await confirmar(page).click();
   await alerta(page).waitFor();
   await dlg(page).waitFor({ state: "detached" });
+  await det(page).getByRole("button", { name: "Fechar" }).click(); // a falha passa a ser a da página, acima da lista
+  await det(page).waitFor({ state: "detached" });
+  await alerta(page).waitFor();
   await pedir(page, "Inter");
   const r = await alerta(page).count();
   await ctx.close();
   assert.equal(r, 0);
+});
+
+test("C6b a falha COM id (Nubank) só aparece no detalhe do Nubank, nunca no do Inter; acima da lista só sem detalhe aberto; a SEM id (403) aparece em qualquer detalhe", async () => {
+  const a = await tela({ del: (r) => r.abort() });
+  await pedir(a.page, "Nubank");
+  await confirmar(a.page).click();
+  await alerta(a.page).filter({ hasText: "Nubank" }).waitFor();
+  await dlg(a.page).waitFor({ state: "detached" });
+  await det(a.page).getByRole("button", { name: "Fechar" }).click();
+  await det(a.page).waitFor({ state: "detached" });
+  await a.page.locator(".page-grid [role=alert]").waitFor(); // sem detalhe: acima da lista
+  await abreDetalhe(a.page, "Inter");
+  const inter = { noDetalhe: await det(a.page).locator("[role=alert]").count(), naPagina: await a.page.locator(".page-grid [role=alert]").count() };
+  await det(a.page).getByRole("button", { name: "Fechar" }).click();
+  await det(a.page).waitFor({ state: "detached" });
+  await abreDetalhe(a.page, "Nubank");
+  const nubank = await det(a.page).locator("[role=alert]").innerText();
+  await a.ctx.close();
+  assert.deepEqual(inter, { noDetalhe: 0, naPagina: 0 });
+  assert.match(nubank, /Nubank/);
+  const b = await tela({ del: JSON_ERRO(403, "CSRF token ausente.") });
+  await pedir(b.page, "Nubank");
+  await confirmar(b.page).click();
+  await alerta(b.page).filter({ hasText: "Recarregue a página" }).waitFor();
+  await det(b.page).getByRole("button", { name: "Fechar" }).click();
+  await det(b.page).waitFor({ state: "detached" });
+  await abreDetalhe(b.page, "Inter");
+  const semId = await det(b.page).locator("[role=alert]").innerText();
+  await b.ctx.close();
+  assert.match(semId, /Recarregue a página/);
 });
 
 test("C7 o DELETE aborta e a releitura do snapshot fica presa: passado o prazo, a falha sai COM o id e o foco volta ao botão; quando a releitura presa enfim volta sem o card, a falha some junto", async () => {
@@ -141,7 +176,7 @@ test("C7 o DELETE aborta e a releitura do snapshot fica presa: passado o prazo, 
   await dlg(page).waitFor({ state: "detached" });
   await alerta(page).waitFor();
   const texto = await alerta(page).innerText();
-  await noFoco(page, "Desconectar Nubank");
+  await noFoco(page, "Desconectar banco");
   tiraDoSnapshot(S, 11);
   solta();
   await esperaCards(page, 2);
@@ -160,5 +195,5 @@ test("C8 o DELETE nunca responde: o prazo aborta, o diálogo fecha, a releitura 
   await alerta(page).waitFor();
   const r = { texto: await alerta(page).innerText(), foco: await foco(page), dels: srv.dels.length };
   await ctx.close();
-  assert.deepEqual(r, { texto: "Não deu para desconectar Nubank. Tente de novo.", foco: "Desconectar Nubank", dels: 1 });
+  assert.deepEqual(r, { texto: "Não deu para desconectar Nubank. Tente de novo.", foco: "Desconectar banco", dels: 1 });
 });

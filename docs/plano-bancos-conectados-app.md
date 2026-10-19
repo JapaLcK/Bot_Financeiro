@@ -110,8 +110,8 @@ externa, sem catálogo frio, e conector direto que some do `/connectors` não im
 **Condição do PR, MEDIDA em produção em 2026-10-18 (o staging tem 0 conexões Pluggy):** `n=8`,
 `com_logo=4`, `svg=4` (todo logo medido é SVG, em `https://cdn.pluggy.ai/assets/connector-icons/…`). As 4 sem
 logo são as mais antigas (ids 161 a 179; 2 ACTIVE, 2 PAUSED) e o `raw` delas NÃO tem `connector`; o sync não
-reescreve o `raw`, então as antigas só ganham logo ao reconectar. O dono decidiu abrir o PR assim (o app cai na
-inicial onde não há logo); o plano B abaixo fica como follow-up. O texto original da condição:
+reescreve o `raw`. O PR 2 abriu assim (o app cai na inicial onde não há logo) e o plano B abaixo, já feito,
+dá logo a essas pelo catálogo. O texto original da condição:
 - se o `connector` embutido no item traz `imageUrl` (no repositório `imageUrl` só aparece lido do
   **catálogo**, `frontend/routes/open_finance.py:1675`);
 - o formato da imagem (lembrança não conferida: SVG no CDN da Pluggy). O `Image` do React Native não
@@ -122,6 +122,10 @@ inicial onde não há logo); o plano B abaixo fica como follow-up. O texto origi
   from open_finance_connections where provider='pluggy';` e depois hosts distintos e o `content-type` de um exemplo.
 - Se `com_logo` ficar bem abaixo de `n`: plano B = consulta ao catálogo **só em cache**, sem buscar nada
   dentro do snapshot.
+- **Plano B: feito** (#1142). `logo_do_conector` (`core/services/pluggy_catalogo.py`) lê o catálogo
+  em memória pelo `institution_id`, só em `provider='pluggy'`; o aquecimento roda no boot e no tique do Open Finance
+  (`docs/CLAUDE.md`, parágrafo do `logo_url`). O app ganha o logo das antigas sem código novo, no build que tiver a tela.
+  Falta provar depois do deploy: o catálogo real lista 611, 612, 651 e 775, e o host é `cdn.pluggy.ai`.
 
 ## PR 3 — app: a tela
 

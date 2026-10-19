@@ -9,7 +9,10 @@
  *
  *   PBOpenFinance.init({ apiBase, userId, onConnected, ... });
  *   PBOpenFinance.open();      // abre o modal na hora; preenche depois
+ *   PBOpenFinance.open({ id, name });  // idem, com esse banco já escolhido e à vista (o /painel, "Disponíveis para conectar")
  *   PBOpenFinance.destroy();   // remove markup e listeners; idempotente
+ *   PBOpenFinance.busy();      // há conexão em curso? (um host que desmonta sem destruir enquanto há, para o item autorizado ser salvo)
+ *   init({ guardaDuploClique: true }) // opcional: nos 350 ms depois de abrir, linha e "Conectar" também ignoram o clique (2º clique de um duplo clique no botão do host)
  *   PBOpenFinance.reconnect(itemId);  // reconecta um banco já conectado, sem picker
  *
  * Reconexão (`reconnect`): connect-token com `item_id` e `updateItem` no widget,
@@ -28,6 +31,10 @@
  * sem isso o settings (que reabilita o botão no onError) ficaria mudo até recarregar. O
  * custo é o de antes desta guarda: com o widget com erro ainda na tela, um novo clique
  * abre outro; o `onClose` daquele chega depois ao host como tardio.
+ *
+ * A pré-escolha só põe o banco como selecionado: quem toca "Conectar" ainda é o usuário, e o confirmar (teto, plano, reconexão)
+ * é o mesmo. Id fora da lista de bancos = sem pré-escolha. Um argumento que não é `{id inteiro, name texto}` (um Event, por
+ * exemplo) é ignorado: `open()` sem argumento segue idêntico.
  *
  * A ordem do original é preservada de propósito: o modal aparece SÍNCRONO e só
  * o preenchimento é assíncrono. O estado do plano é rebuscado em paralelo e
@@ -54,6 +61,8 @@
   let lastFocus = null;    // quem tinha o foco antes de abrir
   let connectors = null;   // cache da lista da Pluggy (não muda durante a sessão)
   let selected = null;     // {id, name}
+  let abertoEm = 0;        // performance.now() da última abertura do picker (ver o clique no fundo em onClick)
+  let trazer = false;      // a abertura veio com pré-escolha: depois de desenhar a lista, leva o banco à vista
   // Limites do plano e conexões, rebuscados a cada open() — confiar no que a
   // página leu no load faz quem acabou de fazer upgrade em outra aba continuar
   // batendo no teto antigo.
@@ -425,7 +434,15 @@
   /* ─── Cliques (delegados) ─────────────────────────────────────────────── */
 
   function onClick(e) {
-    if (e.target === root) { close(); return; }          // clique no fundo
+    // Nos primeiros 350 ms o clique pode ser o 2º de um duplo clique no botão que abriu o picker: ele cai no fundo (que já cobre a
+    // página) ou numa linha do modal (escolheria outro banco). O fundo é sempre ignorado nesse prazo; linha e "Conectar" só com
+    // `guardaDuploClique` no init (o /painel); só o "fechar" explícito vale. O mousedown tirou o foco da busca: devolve-o.
+    if (performance.now() - abertoEm < 350) {
+      const modal = q(".bankpick-modal"), busca = q("#bankpick-search");
+      if (modal && busca && !modal.contains(document.activeElement)) busca.focus();
+      if ((e.target === root || cfg.guardaDuploClique) && !(e.target.closest && e.target.closest('[data-act="close"]'))) return;
+    }
+    if (e.target === root) { close(); return; }           // clique no fundo
     const act = e.target.closest ? e.target.closest("[data-act]") : null;
     if (act) {
       if (act.getAttribute("data-act") === "close") return close();
@@ -444,7 +461,7 @@
    * clique disparava tudo de novo e o `lastFocus` era capturado depois do foco
    * já ter ido pro campo de busca.
    */
-  function open() {
+  function open(pre) {
     if (!cfg || ocupado) return;
 
     // Sem atalho de plano aqui. O original tinha um, mas lendo um valor que a
@@ -457,6 +474,7 @@
     ensureRoot();
     lastFocus = document.activeElement;
     root.classList.add("open");
+    abertoEm = performance.now();
     // Registrado aqui, antes dos returns/await abaixo, pra valer em TODOS os
     // caminhos: lista em cache, lista carregada do servidor e erro de fetch.
     onKeyRef = onKey;
@@ -464,14 +482,30 @@
 
     const search = q("#bankpick-search");
     if (search) { search.value = ""; search.focus(); }
-    selected = null;
+    const preOk = !!pre && typeof pre === "object" && Number.isInteger(pre.id) && typeof pre.name === "string" && !!pre.name;
+    selected = preOk ? { id: pre.id, name: pre.name } : null;
+    trazer = preOk;
     syncFoot();
 
     // Estado do plano em paralelo: quem espera é o confirmar.
     limitsPromise = refreshLimits();
 
-    if (connectors) { renderList(""); return; }
+    if (connectors) { desenha(); return; }
     carregarBancos();
+  }
+
+  /** Desenha a lista inteira. Com pré-escolha, descarta a que não está na lista e leva a escolhida à vista. */
+  function desenha() {
+    if (selected && !(connectors || []).some(function (b) { return b.id === selected.id; })) {
+      selected = null;
+      syncFoot();
+    }
+    renderList("");
+    if (trazer) {
+      trazer = false;
+      const on = q("#bankpick-list .bank-row.active");
+      if (on && on.scrollIntoView) on.scrollIntoView({ block: "center" });
+    }
   }
 
   /**
@@ -488,7 +522,7 @@
     try {
       const data = await get("/open-finance/" + cfg.userId + "/connectors");
       connectors = (data.connectors || []).filter(function (b) { return b && b.name; });
-      renderList("");
+      desenha();
       // sem focar de novo: o foco já entrou no modal antes do await, e refocar
       // agora roubaria o foco de quem já tivesse tabulado pra dentro do card
     } catch (err) {
@@ -655,6 +689,7 @@
     };
     if (itemId) opts.updateItem = itemId;
     const widget = new PluggyConnect(opts);
+    sessao.aberto = true;   // a partir daqui busy() vale: o widget existe e o onSuccess dele precisa ser salvo (antes, sair da página ainda aborta o /connect-token)
 
     let aberto;
     if (typeof widget.init === "function") aberto = widget.init();
@@ -739,6 +774,9 @@
     // propósito pra reabrir sem novo fetch da lista.
   }
 
-  const api = { init: init, open: open, close: close, destroy: destroy, reconnect: reconnect };
+  /** Há conexão em curso com o widget já criado (aberto ou salvando)? A fase do /connect-token ainda não conta: `destroy()` a aborta. Quem desmonta o host decide: `destroy()` agora descartaria o `onSuccess` de um item que a Pluggy já autorizou. */
+  function busy() { return !!(ocupado && ocupado.aberto); }
+
+  const api = { init: init, open: open, close: close, destroy: destroy, reconnect: reconnect, busy: busy };
   window.PBOpenFinance = api;
 })();
