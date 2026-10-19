@@ -1746,7 +1746,19 @@ não barra reconexão e o 402 do `/pluggy-item` continua valendo)) mais o webhoo
 Aceita também `item_id` opcional (reconectar banco já conectado; vai como `itemId` ao lado de
 `options`): só item não pausado do próprio usuário no nosso banco e com o `clientUserId` dele
 na Pluggy; não-string ou vazio é 400, todo o resto é o mesmo 404 `OF_ITEM_NAO_ENCONTRADO`.
-`item_id: null` conta como ausente (token de banco novo). O campo opcional `attempt_id`
+`item_id: null` conta como ausente (token de banco novo). No site, o legado
+`frontend/open-finance-connect.js` expõe `PBOpenFinance.reconnect(itemId)`: manda `item_id`, abre o
+widget com `updateItem` e sem `selectedConnectorId`, e não passa pelo picker nem pelo `refreshLimits`.
+Callbacks do host: `onOpen()` quando o widget foi iniciado (síncrono, não quando terminou de abrir); `onError(msg, status)` (status HTTP quando
+vem do servidor, ausente no erro do SDK); `onClose()` só depois de o `/pluggy-item` terminar, e
+SÓ na reconexão (o picker chama na hora, como sempre). `itemId` vazio ou não-string => `onError`,
+nenhum pedido. Uma conexão por vez: `open()`/`reconnect()` durante uma em curso são ignorados em
+silêncio (guarda liberada no onClose, no fim do save, no erro do connect, no `init()` do SDK que
+rejeita (`onError` e em seguida `onClose()`) e no `destroy()`), e depois do `destroy()` nenhum
+callback do host dispara. Limites: (H2) `onError` do SDK sem `onClose` deixa a guarda presa, no painel
+até o `destroy()` da desmontagem e no settings até recarregar a página (ele nunca chama `destroy()`);
+o `onClose` tardio de uma conexão cujo save já terminou pode chegar durante a conexão seguinte e o
+host não o distingue (hoje nenhum dos dois hosts deixa clicar nesse intervalo). Testes: `tests/frontend/of_connect_reconectar.test.mjs`. O campo opcional `attempt_id`
 exige UUID canônico em minúsculas e `app_scheme` permitido; o servidor monta a URI
 `<scheme>://open-finance-volta/<attempt_id>`. Sem esse campo, pedidos legados válidos
 mantêm a URI anterior. Após os gates de sessão e acesso, JSON malformado, campos
