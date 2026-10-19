@@ -41,7 +41,8 @@ export class SessaoExpirada extends ErroDeApi {
  * ela ter entrado.
  */
 export class RequisicaoSuperada extends ErroDeApi {
-  constructor() {
+  /** `aposSucesso`: o 2xx chegou e só depois o cofre se mostrou de outra conta (a escrita rodou). Sem isso, a chamada falhou. */
+  constructor(readonly aposSucesso = false) {
     super(409, "Esta tela era de outra conta.");
     this.name = "RequisicaoSuperada";
   }
@@ -498,7 +499,7 @@ async function comDono<T>(
     if (trocouDeConta) throw new RequisicaoSuperada();
     throw e;
   }
-  if (await superada(guardadas.refresh, false)) throw new RequisicaoSuperada();
+  if (await superada(guardadas.refresh, false)) throw new RequisicaoSuperada(true);
   return valor;
 }
 

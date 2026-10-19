@@ -1751,6 +1751,13 @@ async def _open_finance_tick(*, interval: int, com_patch: bool) -> None:
         # Falha da retentativa não segura o PATCH periódico logo abaixo. Só o
         # tipo: a mensagem pode trazer dado de usuário (FK/CHECK do Postgres).
         print(f"[open_finance_retry] erro: {type(exc).__name__}", file=sys.stderr)
+    # Push de "reconectar" no app, depois da saúde e da retentativa (que acabam de
+    # gravar o estado) e sem segurar o PATCH.
+    try:
+        from core.services.open_finance_proactive import run_reconnect_push
+        print(f"[open_finance_push] {await asyncio.to_thread(run_reconnect_push)}", flush=True)
+    except Exception as exc:
+        print(f"[open_finance_push] erro: {type(exc).__name__}", file=sys.stderr)
     if com_patch:
         res = await asyncio.to_thread(request_pluggy_refresh, origin="periodic")
         print(f"[open_finance_refresh] {res}", flush=True)

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { sair as sairNoServidor, temSessao } from "@/services/auth";
+import type { Credenciais } from "@/storage/secure";
 
 /**
  * Estado de sessão do app inteiro. Monta UMA vez na raiz (`_layout.tsx`) e
@@ -23,7 +24,9 @@ interface Sessao {
   expirou: (aviso: string) => void;
   /**
    * Toque duplo é ignorado (guarda por `ref`, único provider da árvore), e
-   * `expirou()` também, enquanto a saída estiver em voo.
+   * `expirou()` também, enquanto a saída estiver em voo. Só o Sair comum: a
+   * saída de uma sessão `capturada` não usa a guarda (outra conta pode entrar
+   * e tocar Sair no meio), e um `expirou()` nela leva a anônimo, o desejado.
    *
    * Resolve `true` quando a saída terminou — depois da resposta da revogação
    * no servidor ou do tempo limite dela — ou quando o toque foi ignorado
@@ -32,8 +35,11 @@ interface Sessao {
    * `false`, a falha do cofre passava em silêncio: o provider continuava
    * `autenticado` (correto, o invariante de pé) mas quem tocou "Sair" não via
    * nada, nem um erro nem uma segunda chance óbvia.
+   *
+   * `capturada`: a sessão de que quem chama sai (lida ANTES de uma ação longa), em vez de reler o cofre. Se o cofre
+   * já tem OUTRA sessão, nada é apagado, o provider segue autenticado (invariante) e devolve `"outra"` (truthy).
    */
-  sair: () => Promise<boolean>;
+  sair: (capturada?: Credenciais | null) => Promise<boolean | "outra">;
   /** Só vale em `erro`: refaz a checagem de sessão do início. */
   tentarDeNovo: () => void;
 }
@@ -81,7 +87,7 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
       estado,
       autenticar: () => setEstado({ fase: "autenticado" }),
       expirou: (aviso) => {
-        // Com a saída em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
+        // Com a saída comum em voo, um `SessaoExpirada` é efeito dela (o cofre já foi
         // limpo): virar anônimo aqui abriria Entrar antes de `sair()` terminar,
         // e o `.then` abaixo apagaria o estado de quem entrasse nesse meio.
         // E só age a partir de `autenticado`: um `SessaoExpirada` que chega
@@ -89,11 +95,17 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
         if (saindoEmVoo.current) return;
         setEstado((s) => (s.fase === "autenticado" ? { fase: "anonimo", aviso } : s));
       },
-      sair: () => {
-        if (saindoEmVoo.current) return Promise.resolve(true);
-        saindoEmVoo.current = true;
-        return sairNoServidor()
-          .then(() => {
+      sair: (capturada) => {
+        // `capturada` é a limpeza de UMA sessão antiga (exclusão de conta), não o Sair da pessoa: não usa
+        // a guarda, senão engole o Sair da conta que entrou durante a espera do /auth/logout dela.
+        const comum = capturada === undefined;
+        if (comum) {
+          if (saindoEmVoo.current) return Promise.resolve(true);
+          saindoEmVoo.current = true;
+        }
+        return sairNoServidor(capturada)
+          .then((outraSessao) => {
+            if (outraSessao) return "outra" as const;
             setEstado({ fase: "anonimo" });
             return true;
           })
@@ -107,7 +119,7 @@ export function SessaoProvider({ children }: { children: ReactNode }) {
             return false;
           })
           .finally(() => {
-            saindoEmVoo.current = false;
+            if (comum) saindoEmVoo.current = false;
           });
       },
       tentarDeNovo: () => setTentativa((t) => t + 1),
