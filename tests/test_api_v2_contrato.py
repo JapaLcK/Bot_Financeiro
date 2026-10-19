@@ -28,6 +28,7 @@ from api.v2.lancamentos import Lancamentos
 from api.v2.me import Me
 from api.v2.metas import Metas
 from api.v2.orcamento_domestico import OrcamentoDomestico
+from api.v2.progresso_milhao import ProgressoMilhao
 from api.v2.perfil import Perfil
 from api.v2.previsao import Previsao
 from api.v2.resumo_mes import ResumoDoMes
@@ -350,6 +351,12 @@ def test_fixture_do_orcamento_domestico_segue_o_modelo(nome):
     f = FIXTURES["orcamento_domestico"][nome]
     assert OrcamentoDomestico.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
     assert [p["chave"] for p in f["potes"]] == ["custos_fixos", "conforto", "metas", "prazeres", "liberdade_financeira", "conhecimento"]
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["progresso_milhao"]))
+def test_fixture_do_progresso_milhao_segue_o_modelo(nome):
+    f = FIXTURES["progresso_milhao"][nome]
+    assert ProgressoMilhao.model_validate(f).model_dump(mode="json") == f  # patrimônio é texto de 2 casas
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["resumo_do_mes"]))

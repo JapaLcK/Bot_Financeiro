@@ -56,7 +56,7 @@ export const RESPOSTAS = JSON.parse(readFileSync(join(RAIZ, "tests", "frontend",
  * Registrar de novo vale para as próximas requisições (atraso, falha, troca de
  * resposta): no Playwright a rota registrada por último vence.
  */
-export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao" } = {}) {
+export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "padrao", contas = "todos_os_estados", resumo = "exato", guia = "concluido", lancamentos = "estados", categorias = "padrao", previsao, investido = "com_banco", metas = "varios", gastos = "padrao", gastosCategoria = "padrao", bancos = "em_dia", orcamento = "padrao", milhao = "padrao" } = {}) {
   const me = RESPOSTAS.me[plano];
   if (!me) throw new Error(`plano sem fixture: ${plano}`);
   let atual = perfil;
@@ -80,6 +80,11 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
     if (url.pathname === "/api/v2/investido") {
       const e = RESPOSTAS.erros["403_pro_required"];
       return plano === "free" ? r.fulfill({ status: e.status, json: e.body }) : r.fulfill({ json: RESPOSTAS.investido[investido] });
+    }
+    // O Progresso ao milhão: Plus e Pro leem a fixture `milhao` (padrão `padrao`); os outros, 403 `pro_required`. Os demais estados, por `ctx.route` no teste.
+    if (url.pathname === "/api/v2/progresso-milhao") {
+      const e = RESPOSTAS.erros["403_pro_required"];
+      return plano === "plus" || plano === "pro" ? r.fulfill({ json: RESPOSTAS.progresso_milhao[milhao] }) : r.fulfill({ status: e.status, json: e.body });
     }
     if (url.pathname === "/api/v2/metas" && r.request().method() === "GET") return r.fulfill({ json: RESPOSTAS.metas[metas] });
     if (/^\/api\/v2\/metas(\/editar|\/apagar)?$/.test(url.pathname) && r.request().method() === "POST") return r.fulfill({ json: { id: r.request().postDataJSON().id ?? 99 } });

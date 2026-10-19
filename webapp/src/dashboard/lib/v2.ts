@@ -152,6 +152,12 @@ export const orcamentoQuery = (mes: string) => queryOptions({
   queryFn: ({ signal }) => apiGet("/orcamento-domestico", signal, { mes }),
   ...vivo,
 });
+// O patrimônio de hoje para o Progresso ao milhão (`GET /api/v2/progresso-milhao`); a projeção é do cliente (lib/milhao.ts).
+export const milhaoQuery = {
+  queryKey: ["progresso-milhao"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/progresso-milhao", signal),
+  ...vivo,
+};
 export const guiaQuery = {
   queryKey: ["guia"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),

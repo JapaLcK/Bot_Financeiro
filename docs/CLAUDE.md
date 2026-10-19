@@ -587,6 +587,17 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
   comprar?"). Em aberto: o corte de hábito real (média de 3 meses, estimativa variável: decisão P2 do dono,
   PR à parte) e a tela do app.
+- `GET /api/v2/progresso-milhao` (`api/v2/progresso_milhao.py`; também `/api/app/progresso-milhao`): o
+  patrimônio de hoje (`db/patrimonio.calcular`, a conta da tela Patrimônio do app, lida como em
+  `api/nativo/patrimonio.py`) para o `/painel#/milhao`, fora do menu lateral e do Menu do celular (só o card
+  de Ferramentas e o ⌘K). Gate `million_progress` (Plus/Pro): Essencial/Free = 403 `pro_required` ANTES de
+  qualquer leitura. Resposta `{patrimonio: "1234.57" (texto, 0,01 HALF_UP), motivos[]}`: os de `calcular` mais
+  `sem_banco_conectado` quando nenhuma conta BRL nem posição de conexão viva entrou (só Carteira, caixinhas e
+  manuais, ou conexão pausada, ou só conta em outra moeda; vira o convite "Conecte um banco"). Sem entrada: o
+  usuário é o da sessão. A projeção (juros compostos, taxa fixa padrão 10% a.a., aporte só informado, teto de 600
+  meses) é do cliente, `webapp/src/dashboard/lib/milhao.ts`; nada é gravado. Limites declarados: o "mês de
+  hoje" vem do relógio do navegador (±1 mês na virada em fuso diferente) e o "Guardar por mês" vai até R$ 10
+  mil. Fora do escopo: app Expo, aporte do histórico, inflação, metas além do próximo milhão.
 - `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
   condicional do motor único, usuário da sessão e gates antes da leitura financeira.
   Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,

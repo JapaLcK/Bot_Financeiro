@@ -140,6 +140,7 @@ TABELA = {
     ("GET", "/api/v2/orcamento-domestico"): (B, "usuario_atual"),
     ("POST", "/api/v2/orcamento-domestico/potes"): (B, "usuario_atual"),
     ("POST", "/api/v2/orcamento-domestico/renda"): (B, "usuario_atual"),
+    ("GET", "/api/v2/progresso-milhao"): (B, "usuario_atual"),
     # ── /api/app: mesma guarda de credencial, antes do marco bancário ──
     ("GET", "/api/app/me"): (B, "usuario_do_app"),
     ("GET", "/api/app/assinaturas"): (B, "usuario_do_app"),
@@ -169,6 +170,7 @@ TABELA = {
     ("GET", "/api/app/orcamento-domestico"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamento-domestico/potes"): (B, "usuario_do_app"),
     ("POST", "/api/app/orcamento-domestico/renda"): (B, "usuario_do_app"),
+    ("GET", "/api/app/progresso-milhao"): (B, "usuario_do_app"),
     ("WS", "/ws/{user_id}"): (B, "close 4403"),
     # ── HTML autenticado ──
     ("GET", "/app"): (L, "casca; o overlay sobe"), ("GET", "/home"): (L, "casca; o overlay sobe"),

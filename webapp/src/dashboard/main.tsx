@@ -4,9 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
-import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
+import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { DEMO, contasQuery, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
@@ -36,6 +36,8 @@ if (DEMO) {
       { tipo: "acoes", rotulo: "Ações", valor: "3480.00", motivos: [] }],
     por_banco: [{ banco: "Nubank", valor: "23480.00", motivos: [] }],
   });
+  const nw = netWorth();
+  qc.setQueryData(milhaoQuery.queryKey, { patrimonio: txt(nw[nw.length - 1].total), motivos: [] }); // sem .at (Safari 14)
   for (const mes of MONTHS) {
     const m = summary(mes), prev = previousKey(mes);
     const anterior = prev && { mes: prev, entrou: txt(summary(prev).income), saiu: txt(summary(prev).expense) };
