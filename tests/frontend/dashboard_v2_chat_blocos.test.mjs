@@ -208,7 +208,7 @@ test("a resposta lê a simulação atual: zerar no Simulador tira \"Com a simula
   const { ctx, page, erros } = await abrir({ hash: "#/simulador" });
   await page.locator(".presets .chip").first().click();
   await page.locator(".sim-facts").waitFor();
-  const c = await atalho(page, "Pra onde vai meu dinheiro?");
+  await atalho(page, "Pra onde vai meu dinheiro?");
   const n = await respostas(page).count();
   await passouATrava(page);
   await page.locator(".chat-follow button", { hasText: "Vai sobrar até o fim do mês?" }).click();
