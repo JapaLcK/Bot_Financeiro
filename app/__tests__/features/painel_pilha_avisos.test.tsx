@@ -50,8 +50,8 @@ const fio = () => { let no = within(screen.getByTestId("pilha-avisos")).getByRol
 const alvo44 = (no: { props: { style?: unknown } }) => { const e = StyleSheet.flatten(no.props.style as never) as { width: number; height: number }; return Math.min(e.width, e.height) >= 44; };
 const acao = (nome: "increment" | "decrement") => act(async () => { fireEvent(ajustavel(), "accessibilityAction", { nativeEvent: { actionName: nome } }); await drenar(); });
 const apertar = async (nome: string) => { await act(async () => { fireEvent.press(screen.getByRole("button", { name: nome })); await drenar(); }); };
-// O card Saldo previsto nasce recolhido: a linha das respondidas só existe depois do toque nele.
-const abrirSaldoPrevisto = async () => { await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Saldo previsto" })); await drenar(); }); };
+// O card Saldo previsto é compacto: a linha das respondidas só existe na folha que o toque nele abre.
+const abrirSaldoPrevisto = async () => { await act(async () => { fireEvent.press(screen.getByTestId("bloco-hero")); await drenar(); }); };
 const toqueNoPonto = (k: number) => act(async () => { fireEvent.press(ponto(k)); await drenar(); });
 
 it("a ordem é conexão pendente, banco e receitas; o adjustable lê 'Aviso N de 4' e troca de aviso sem sair da lista", async () => {
@@ -160,10 +160,10 @@ it("sem banco, receita sem aviso nenhum em outra aba: nem a pilha existe (contro
   await abrir("/gastos", "Para onde vai");
   expect(screen.queryByTestId("pilha-avisos")).toBeNull(); expect(screen.queryByLabelText("Avisos")).toBeNull(); expect(pontos()).toBe(0);
 });
-it("a linha 'Receitas na previsão' fica fora da pilha, dentro do card Saldo previsto, e abre com Desfazer", async () => {
+it("a linha 'Receitas na previsão' fica fora da pilha, na folha do Saldo previsto, e abre com Desfazer", async () => {
   marcas["extrato#free"] = "negada"; await abrir();
   const pilha = screen.getByTestId("pilha-avisos"); expect(within(pilha).queryByText(/Receitas na previsão/)).toBeNull();
-  expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); await abrirSaldoPrevisto(); // recolhido, a linha não aparece
+  expect(screen.queryByText(/Receitas na previsão/)).toBeNull(); await abrirSaldoPrevisto(); // compacto, a linha não aparece
   const linha = screen.getByText("Receitas na previsão (1)"); expect(linha).toBeTruthy();
   await act(async () => { fireEvent.press(linha); await drenar(); }); expect(screen.getByRole("button", { name: "Desfazer resposta: Freela Beta" })).toBeTruthy();
 });

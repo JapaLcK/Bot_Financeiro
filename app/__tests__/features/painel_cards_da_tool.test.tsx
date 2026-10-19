@@ -152,8 +152,8 @@ describe("valores ocultos", () => {
 });
 
 describe("o POST do chat", () => {
-  it("manda `cards` com os quatro ids, os mesmos da lista do schema", async () => {
-    const ids = ["maiores_gastos", "fim_do_mes", "ultimos_lancamentos", "sem_categoria"];
+  it("manda `cards` com os cinco ids, os mesmos da lista do schema (a ordem do `cards.DA_TOOL` do Python)", async () => {
+    const ids = ["maiores_gastos", "fim_do_mes", "comparacao", "ultimos_lancamentos", "sem_categoria"];
     await mostrar(MAIORES);
     expect(JSON.parse(String(posts().at(-1)![1].body))).toEqual({ message: "oi", cards: ids });
     expect(CARDS_DA_TOOL).toEqual(ids);

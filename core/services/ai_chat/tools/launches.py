@@ -44,7 +44,7 @@ from utils_date import _tz, now_tz, today_tz
 from utils_text import fmt_brl, valor_valido
 
 from .. import streaming
-from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, JANELAS_DO_TURNO
+from .._context import CATEGORIAS_NAO_ACHADAS_DO_TURNO, CURRENT_PLATFORM, CURRENT_USER_MESSAGE, FALHAS_DE_CARD_DO_TURNO, JANELAS_DO_TURNO
 from ..cards import MAX_CATEGORIA, MAX_MESES_PERIODO, card_ainda_resolve, mostrar_da_tool
 from ..cards_resumos import resumo_comparacao, resumo_maiores
 from ._base import Tool
@@ -117,7 +117,7 @@ def _meses_inteiros(start: date, end: date) -> tuple[tuple[int, int], tuple[int,
 _MSG_1_MES = {
     "categorias": 'use show_card categorias com meses=["{mes}"]',
     "resumo": (
-        'use show_card resumo com meses=["{mes}"]. Vários meses (mês a mês, comparar) = UMA chamada: '
+        'use show_card resumo com meses=["{mes}"] (gasto do mês; o que ENTROU = show_card renda). Vários meses (mês a mês, comparar) = UMA chamada: '
         "show_card periodo com de/ate, ou categorias com meses=[...] (até 3). "
         'Saldo ("meu saldo", "quanto tenho") = show_card contas.'
     ),
@@ -149,6 +149,8 @@ def _recusa_se_for_do_card(
         return None
     if categoria and cat_key(categoria) in map(cat_key, CATEGORIAS_NAO_ACHADAS_DO_TURNO.get() or ()):  # o card já disse que não a tem: o dado
         return None
+    if card_1_mes == "resumo" and "renda" in (FALHAS_DE_CARD_DO_TURNO.get() or ()):
+        return None  # o `renda` (o que ENTROU) já falhou por plano: o dado sai em texto, o `resumo` só mostraria gasto
     um = meses[0] == meses[1]
     alvo = card_1_mes if um else "periodo"
     if not card_ainda_resolve(user_id, alvo):

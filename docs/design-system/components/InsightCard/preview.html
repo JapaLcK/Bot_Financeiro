@@ -1,0 +1,9 @@
+<!-- @dsCard group="Surfaces" height=200 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {InsightCard}=PigBank;return e("div",{style:{display:"grid",gap:12}},
+ e(InsightCard,{sticker:"/_blob/1e8c74364c804227de4164c931f307d4",title:"Delivery subiu 18%",message:"Foram 9 pedidos este mês, 3 a mais que em setembro.",action:{label:"Ver gastos",onClick(){}}}),
+ e(InsightCard,{title:"Sem novidades",message:"Seus gastos estão no ritmo de sempre."}))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

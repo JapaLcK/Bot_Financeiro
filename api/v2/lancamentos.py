@@ -5,7 +5,9 @@
 `cursor` é o `proximo` da página anterior, devolvido como veio: adulterado = 422.
 `guardado=1` inclui o guardado (opt-in; sem ele a lista é a de antes, que é o que o app nativo
 recebe em `/api/app`). `limite` de 1 a 100 (acima de 100 corta). `conta`/`cartao` de outro usuário
-dão a lista vazia, igual a um id que não existe. Dinheiro é `Decimal` e sai como TEXTO; nada de
+dão a lista vazia, igual a um id que não existe. `valor_min`/`valor_max` (texto `N` ou `N.NN`, inclusivos,
+min > max = 422) filtram pelo valor do item; lançamento em outra moeda (`moeda != BRL`, valor não convertido)
+NÃO casa com eles. Dinheiro é `Decimal` e sai como TEXTO; nada de
 `provider_*_id`, `raw`, `external_id` ou id da transação do banco.
 """
 from datetime import date, datetime
@@ -27,6 +29,7 @@ router = APIRouter()
 _TETO = 100
 _MAX_ID = 2**63 - 1
 _DATA = r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"  # `str` e não `date`: o gerador de tipos recusa format: date em query
+_VALOR = r"^[0-9]{1,9}(\.[0-9]{1,2})?$"  # `[0-9]` e nunca `\d`: o regex é Unicode e "١٢" passaria
 
 
 class Parcela(BaseModel):
@@ -78,6 +81,8 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
            guardado: bool = False,
            dia: str | None = Query(None, pattern=_DATA),
            q: str | None = Query(None, max_length=200),
+           valor_min: str | None = Query(None, pattern=_VALOR),
+           valor_max: str | None = Query(None, pattern=_VALOR),
            cursor: str | None = Query(None, max_length=200),
            limite: int = 50,
            uid: int = Depends(usuario_atual)) -> Lancamentos:
@@ -91,23 +96,26 @@ def listar(mes: str | None = Query(None, pattern=PADRAO_MES),
         dia_pedido = date.fromisoformat(dia) if dia else None
     except ValueError:
         raise _recusa("dia", "Data inválida.") from None
+    minimo, maximo = (Decimal(v) if v is not None else None for v in (valor_min, valor_max))
+    if minimo is not None and maximo is not None and minimo > maximo:
+        raise _recusa("valor_min", "O valor mínimo não pode passar do máximo.")
     ano, m, agora = mes_pedido(mes)
     try:
         dados = lancamentos_leitura.pagina(uid, ano, m, agora, cursor=cursor, limite=min(limite, _TETO), q=q,
                                            origem=origem, conta=conta, cartao=cartao, dia=dia_pedido,
-                                           categoria=categoria, tipo=tipo, com_guardado=guardado)
+                                           categoria=categoria, tipo=tipo, com_guardado=guardado,
+                                           valor_min=minimo, valor_max=maximo)
     except lancamentos.CursorInvalido as e:
         raise _recusa("cursor", str(e)) from None
     return Lancamentos(**dados)
 
 
 # ── escrita (PR 2a) ─────────────────────────────────────────────────────────
-# `[0-9]` e nunca `\d`: o regex é Unicode e "١٢" passaria. Rotas `def` (o banco é síncrono),
+# Rotas `def` (o banco é síncrono),
 # POST com o id no corpo; o CSRF é o `csrf_middleware` do pai, que cobre /api/v2.
 # ponytail: sem chave de idempotência; dois POST iguais gravam dois lançamentos. Acrescentar
 # Idempotency-Key (coluna pedido_id com índice único parcial, entrando na exportação, no reset
 # e na exclusão) quando a tela (PR 4) mostrar duplicata real.
-_VALOR = r"^[0-9]{1,9}(\.[0-9]{1,2})?$"
 _ID = lancamentos.ID_RE
 
 

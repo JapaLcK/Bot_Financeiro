@@ -1,0 +1,8 @@
+<!-- @dsCard group="Actions" height=120 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {Chip}=PigBank;const [s,set]=React.useState("Mês");return e("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+ ["Semana","Mês","Ano","Tudo"].map(t=>e(Chip,{key:t,selected:s===t,onClick:()=>set(t)},t)),e(Chip,{disabled:true},"Desativado"))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

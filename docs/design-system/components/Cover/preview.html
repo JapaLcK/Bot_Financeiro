@@ -1,0 +1,58 @@
+<!-- @dsCard height=288 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;background:var(--bg)}
+.cover{position:relative;width:960px;height:288px;overflow:hidden;background:var(--bg);font-family:var(--font-sans)}
+.cover svg{position:absolute;inset:0}
+.b-brand{fill:var(--brand);rx:var(--radius-block)}
+.b-ink{fill:var(--ink);rx:var(--radius-block)}
+.b-pos{fill:var(--positive);rx:var(--radius-block)}
+.d-brand{fill:var(--brand)}
+.d-quiet{fill:var(--surface-control)}
+.txt{position:absolute;left:40px;bottom:40px;width:440px}
+.txt h1{margin:0;font-size:88px;line-height:.95;font-weight:800;letter-spacing:-0.035em;color:var(--ink)}
+.txt h1 span{color:var(--brand)}
+.txt p{margin:12px 0 0;font-size:14px;line-height:20px;font-weight:500;color:var(--ink-muted)}
+</style></head><body>
+<div class="cover">
+<svg width="960" height="288" viewBox="0 0 960 288" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<!-- blocks: brand 224x160, ink 240x144 (bleeds off the right edge), positive 160x96; corners radius-block 16.
+ arrangement: staggered stack, the pink slab leads at the top, the ink slab drops beside it, the green slab anchors the lower left of the box.
+ pattern: 30 discs at a 26px pitch, r=8 (radius-pill on a 16px square); chosen because the system is soft and pill-shaped and its pig mark is a disc; one in four is brand, the rest surface-control.
+ scales: radius-block, radius-pill, steps of 8/16/32; no gradients, no shadows. -->
+<rect class="b-brand" x="496" y="0" width="224" height="160"/>
+<rect class="b-ink" x="736" y="32" width="240" height="144"/>
+<rect class="b-pos" x="496" y="176" width="160" height="96"/>
+<circle class="d-brand" cx="696" cy="214" r="8"/>
+<circle class="d-quiet" cx="722" cy="214" r="8"/>
+<circle class="d-quiet" cx="748" cy="214" r="8"/>
+<circle class="d-quiet" cx="774" cy="214" r="8"/>
+<circle class="d-brand" cx="800" cy="214" r="8"/>
+<circle class="d-quiet" cx="826" cy="214" r="8"/>
+<circle class="d-quiet" cx="852" cy="214" r="8"/>
+<circle class="d-quiet" cx="878" cy="214" r="8"/>
+<circle class="d-brand" cx="904" cy="214" r="8"/>
+<circle class="d-quiet" cx="930" cy="214" r="8"/>
+<circle class="d-quiet" cx="696" cy="240" r="8"/>
+<circle class="d-quiet" cx="722" cy="240" r="8"/>
+<circle class="d-quiet" cx="748" cy="240" r="8"/>
+<circle class="d-brand" cx="774" cy="240" r="8"/>
+<circle class="d-quiet" cx="800" cy="240" r="8"/>
+<circle class="d-quiet" cx="826" cy="240" r="8"/>
+<circle class="d-quiet" cx="852" cy="240" r="8"/>
+<circle class="d-brand" cx="878" cy="240" r="8"/>
+<circle class="d-quiet" cx="904" cy="240" r="8"/>
+<circle class="d-quiet" cx="930" cy="240" r="8"/>
+<circle class="d-quiet" cx="696" cy="266" r="8"/>
+<circle class="d-quiet" cx="722" cy="266" r="8"/>
+<circle class="d-brand" cx="748" cy="266" r="8"/>
+<circle class="d-quiet" cx="774" cy="266" r="8"/>
+<circle class="d-quiet" cx="800" cy="266" r="8"/>
+<circle class="d-quiet" cx="826" cy="266" r="8"/>
+<circle class="d-brand" cx="852" cy="266" r="8"/>
+<circle class="d-quiet" cx="878" cy="266" r="8"/>
+<circle class="d-quiet" cx="904" cy="266" r="8"/>
+<circle class="d-quiet" cx="930" cy="266" r="8"/>
+</svg>
+<div class="txt"><h1><span>Pig</span>Bank</h1><p>O assistente financeiro que mora no WhatsApp.</p></div>
+</div></body></html>

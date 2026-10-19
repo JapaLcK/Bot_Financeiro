@@ -122,3 +122,7 @@ export async function abrirPainel(browser, { width = 1440, espera = "#board-prof
   const ir = async (rota = "/") => { await page.goto(`${demo ? PROTOTIPO : PAINEL}#${rota}`); if (espera) await page.locator(espera).waitFor(); };
   return { ctx, page, erros, ir };
 }
+
+// A fileira de próximas perguntas ignora o toque por ~500 ms depois de trocar (PiggyChat.tsx: TRAVA_MS, contra o duplo toque):
+// o teste que clica uma pergunta logo depois da resposta espera isto antes.
+export const passouATrava = (page) => page.waitForTimeout(600);

@@ -1,0 +1,9 @@
+<!-- @dsCard group="Actions" height=180 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {Button}=PigBank;const rows=[["primary","Pagar fatura"],["secondary","Ver detalhes"],["ghost","Ver 90 dias"],["link","Esqueci a senha"],["danger","Excluir conta"]];
+ return e("div",{style:{display:"flex",flexWrap:"wrap",gap:12,alignItems:"center"}},rows.map(([v,t])=>e(Button,{key:v,variant:v},t)),
+ e(Button,{variant:"primary",size:"L",icon:"Bank"},"Conectar banco"),e(Button,{variant:"primary",disabled:true},"Desativado"),e(Button,{variant:"primary",loading:true},"Salvando"))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

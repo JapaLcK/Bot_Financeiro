@@ -1,0 +1,9 @@
+<!-- @dsCard group="Data" height=190 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {ProgressBar,Text}=PigBank;const r=(t,v,c,col)=>e("div",{key:t,style:{display:"grid",gridTemplateColumns:"96px 1fr 40px",gap:12,alignItems:"center"}},
+ e(Text,{variant:"caption",tone:"ink-muted"},t),e(ProgressBar,{value:v,tone:c,color:col}),e(Text,{variant:"caption",tone:"ink-muted",numeric:true},Math.round(v*100)+"%"));
+ return e("div",{style:{display:"grid",gap:12}},r("Reserva",0.62,"brand"),r("Meta batida",1,"positive"),r("Acima do ritmo",0.88,"warning"),r("Estourou",1,"danger"),r("Intercâmbio",0.4,null,"var(--serie-1)"))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

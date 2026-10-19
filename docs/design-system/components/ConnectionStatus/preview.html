@@ -1,0 +1,10 @@
+<!-- @dsCard group="Feedback" height=330 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {ConnectionStatus}=PigBank;return e("div",{style:{display:"grid",gap:16}},
+ e(ConnectionStatus,{state:"updated",label:"Atualizado",detail:"Hoje às 09:14"}),e(ConnectionStatus,{state:"updating",label:"Atualizando…"}),
+ e(ConnectionStatus,{state:"needs_user_action",label:"O banco pede sua confirmação",action:{label:"Reconectar",onClick(){}}}),
+ e(ConnectionStatus,{state:"item_missing",label:"Conexão perdida"}),e(ConnectionStatus,{state:"paused",label:"Pausado"}))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>

@@ -1,4 +1,4 @@
-// Bancos conectados no /painel (#/conta/bancos, conta/Bancos.tsx, conta/BancoCard.tsx, lib/bancos.ts), só leitura. Plano:
+// Bancos conectados no /painel (#/conta/bancos, conta/Bancos.tsx, conta/BancoCard.tsx, lib/bancos.ts): a leitura. A desconexão mora em dashboard_v2_bancos_desconectar*.test.mjs. Plano:
 // docs/plano-bancos-conectados-painel.md, W1. Três leituras: o snapshot do Open Finance (`/open-finance/{uid}`, o estado de cada
 // conexão), `/api/v2/bancos` (os valores) e `/open-finance/{uid}/limite` (as vagas); só o snapshot é obrigatório.
 //   · o topo é o `total` do servidor, nunca a soma dos cards; a junção é por `conexao_id`, nunca por nome; null é "—", nunca "R$ 0,00";

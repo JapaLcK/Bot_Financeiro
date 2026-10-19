@@ -22,16 +22,24 @@ export const LIMITE = (o = {}) => ({ ok: true, of_banks_max: 3, em_uso: 2, pode_
 /**
  * `conexoes`: o snapshot; `bancos`: nome da fixture `bancos` ou o corpo; `limite`: o corpo do /limite.
  * `snap`/`bancosRes`/`limiteRes`: `(r) => r.fulfill(...)` para responder outra coisa; `perfil`: o corpo do dashboard-profile (padrão uid 7).
- * `cdn`: a resposta do CDN de logos (padrão: um SVG); `s.cdn`: as URLs que o navegador pediu a ele. `s.reqs`: os caminhos pedidos (das três leituras e do perfil) na ordem.
+ * `cdn`: a resposta do CDN de logos (padrão: um SVG); `s.cdn`: as URLs que o navegador pediu a ele.
+ * `s.reqs`: os caminhos pedidos (das três leituras e do perfil) na ordem; o DELETE entra como "DELETE <caminho>".
+ * `del(r, s)`: responde o DELETE de uma conexão (padrão: 200 e tira o id de `s.conexoes`, que é o que o snapshot devolve);
+ * `s.dels`: um [método, caminho, x-csrf-token, corpo] por DELETE. `perfil` pode ser uma função (o perfil muda no meio do teste).
  */
-export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, cdn = CDN_OK, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
-  const s = { reqs: [], cdn: [] };
+export function servidorBancos({ conexoes = PADRAO(), bancos, limite = LIMITE(), snap, bancosRes, limiteRes, del, cdn = CDN_OK, perfil = { display_name: "Ana", email: "ana@exemplo.com", user_id: 7, whatsapp_linked: false } } = {}) {
+  const s = { reqs: [], dels: [], cdn: [], conexoes };
   s.antes = async (ctx) => {
-    ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (/open-finance|bancos|dashboard-profile/.test(p)) s.reqs.push(p); });
-    await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: perfil }));
-    await ctx.route((u) => u.pathname === "/open-finance/7", (r) => snap ? snap(r) : r.fulfill({ json: { ok: true, connections: conexoes } }));
+    ctx.on("request", (q) => { const p = new URL(q.url()).pathname; if (!/open-finance|bancos|dashboard-profile/.test(p)) return; s.reqs.push(q.method() === "DELETE" ? `DELETE ${p}` : p); if (q.method() === "DELETE") s.dels.push([q.method(), p, q.headers()["x-csrf-token"] ?? null, q.postData()]); });
+    await ctx.route((u) => u.pathname === "/auth/dashboard-profile", (r) => r.fulfill({ json: typeof perfil === "function" ? perfil() : perfil }));
+    await ctx.route((u) => u.pathname === "/open-finance/7", (r) => snap ? snap(r) : r.fulfill({ json: { ok: true, connections: s.conexoes } }));
     await ctx.route((u) => u.pathname === "/open-finance/7/limite", (r) => limiteRes ? limiteRes(r) : r.fulfill({ json: limite }));
     await ctx.route((u) => u.hostname === "cdn.pluggy.ai", (r) => { s.cdn.push(r.request().url()); return cdn(r); });
+    await ctx.route((u) => /^\/open-finance\/\d+\/connections\/\d+$/.test(u.pathname), (r) => {
+      if (del) return del(r, s);
+      s.conexoes = s.conexoes.filter((c) => `/open-finance/7/connections/${c.id}` !== new URL(r.request().url()).pathname);
+      return r.fulfill({ json: { ok: true, deleted: 1 } });
+    });
     if (bancos || bancosRes) await ctx.route((u) => u.pathname === "/api/v2/bancos", (r) => bancosRes ? bancosRes(r) : r.fulfill({ json: typeof bancos === "string" ? RESPOSTAS.bancos[bancos] : bancos }));
   };
   return s;

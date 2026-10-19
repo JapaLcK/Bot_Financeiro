@@ -27,7 +27,7 @@ for (const width of [1440, 390]) {
     const cartoes = await ultima(page).locator("article.meta").count();
     const controles = await ultima(page).locator(".metas-chat button, .metas-chat a").evaluateAll((cs) => cs.map((c) => [c.textContent, Math.round(c.getBoundingClientRect().height)]));
     const link = await ultima(page).locator("a.msg-open").getAttribute("href");
-    const dado = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by").textContent]);
+    const dado = await ultima(page).evaluate((li) => [li.dataset.dado, li.querySelector(".msg-by")?.textContent.trim() ?? null]);
     const largura = await pilulas(page).first().evaluate((p) => Math.round(p.getBoundingClientRect().width));
     const estoura = await ultima(page).evaluate((li) => [li.scrollWidth > li.clientWidth, [...li.querySelectorAll(".pilula")].some((p) => p.scrollWidth > p.clientWidth)]);
     const docLargo = await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
@@ -46,7 +46,7 @@ for (const width of [1440, 390]) {
     assert.deepEqual(controles, [["+6", controles[0][1]], ["Ver todas as 11 metas no painel", controles[1][1]]]);
     assert.ok(controles.every(([, h]) => h >= 44), JSON.stringify(controles)); // alvo de toque do "+N" e do link
     assert.equal(link, "#/metas");
-    assert.deepEqual(dado, ["real", "Piggy"]);
+    assert.deepEqual(dado, ["real", null]);
     assert.ok(largura <= 480);
     assert.deepEqual(estoura, [false, false]);
     assert.equal(docLargo, 0);
@@ -62,13 +62,13 @@ test("os chips da reserva e da meta de economia mostram as metas reais, nunca o 
     const texto = await resposta(page);
     await pilulas(page).first().waitFor();
     const dado = await ultima(page).getAttribute("data-dado");
-    const selo = await ultima(page).locator(".msg-by").textContent();
+    const selo = await ultima(page).locator(".msg-by").count();
     const nome = await pilulas(page).first().locator(".pilula-nome").innerText();
     await ctx.close();
     assert.equal(texto, "Você tem 11 metas.", ask);
     assert.doesNotMatch(texto, /Sua reserva cobre|caixinhas já recebem/);
     assert.equal(dado, "real");
-    assert.equal(selo, "Piggy");
+    assert.equal(selo, 0); // a resposta real não leva a linha do selo
     assert.equal(nome, "Reserva de emergência"); // a reserva primeiro
     assert.deepEqual(gets, ["GET"], ask);
   }

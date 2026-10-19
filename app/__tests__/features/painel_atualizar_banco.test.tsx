@@ -13,7 +13,7 @@ import { appVai, desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 // O "Atualizar agora" do aviso de banco, pela rota: o servidor falso guarda o snapshot de conexões e o que o POST /refresh devolve.
 // A máquina pura (cadência, teto, cancelamento) tem o relógio falso em `painel_atualizar_banco_maquina.test.ts`; aqui a conversa inteira.
 jest.setTimeout(30_000); // `renderRouter` monta a árvore inteira: no CI o 1º teste paga o carregamento a frio e passou dos 5 s (igual a painel_receitas)
-const AINDA = "O banco está demorando. Seus dados aparecem aqui quando terminar.", PARCIAL_TEXTO = "Nubank: Parte dos dados ainda não veio.";
+const AINDA = "O banco está demorando. Seus dados aparecem aqui quando terminar.", PARCIAL_TEXTO = "Erro em Nubank.";
 const BANCO = ["banco_desatualizado"], FALHA = "Não conseguimos atualizar agora. Tente de novo.", SOZINHO = "O banco está atualizando. Seus dados aparecem aqui sozinhos quando terminar.";
 const VELHO = "2026-10-10T12:00:00Z", NOVO = "2026-10-10T13:00:00Z";
 type Srv = { estado: string; detalhe: string | null; sync: string; atualizado: boolean; limite: number; snapshot: Rota | null; post: Rota; leituras: number[]; t0: number };
@@ -141,24 +141,24 @@ it("(b) needs_user_action 'Reautorize o banco': 'Reconectar Nubank' abre a autor
   const push = jest.spyOn(router, "push").mockImplementation(() => undefined);
   await apertar("Reconectar Nubank"); expect(push).toHaveBeenCalledWith({ pathname: "/autorizando", params: { itemId: "it_1" } }); expect(posts()).toHaveLength(0);
 });
-it("(c) needs_user_action de DISPOSITIVO: 'Ver bancos conectados' com a instrução do servidor, nada de 'Reconectar'", async () => {
+it("(c) needs_user_action de DISPOSITIVO: 'Ver bancos conectados' com o nome do banco, nada de 'Reconectar'", async () => {
   srv.estado = "needs_user_action"; srv.detalhe = "Autorize o acesso no app do banco"; await abrir();
-  expect(botoes()).toEqual(["Ver bancos conectados"]); expect(screen.getByText("Nubank: Autorize o acesso no app do banco.")).toBeTruthy();
+  expect(botoes()).toEqual(["Ver bancos conectados"]); expect(screen.getByText("Erro em Nubank.")).toBeTruthy();
   const push = jest.spyOn(router, "push").mockImplementation(() => undefined); await apertar("Ver bancos conectados"); expect(push).toHaveBeenCalledWith("/conexoes");
 });
 it.each([
-  ["item_missing", () => { srv.estado = "item_missing"; srv.detalhe = "Esse banco não existe mais"; }, "Nubank: Esse banco não existe mais."],
-  ["paused", () => { srv.estado = "paused"; srv.detalhe = "Plano pausado"; }, "Nubank: Plano pausado."],
-  ["(b) com of_banks_max 0", () => { srv.estado = "needs_user_action"; srv.detalhe = "Reautorize o banco"; srv.limite = 0; }, "Nubank: Reautorize o banco."],
+  ["item_missing", () => { srv.estado = "item_missing"; srv.detalhe = "Esse banco não existe mais"; }, "Erro em Nubank."],
+  ["paused", () => { srv.estado = "paused"; srv.detalhe = "Plano pausado"; }, "Erro em Nubank."],
+  ["(b) com of_banks_max 0", () => { srv.estado = "needs_user_action"; srv.detalhe = "Reautorize o banco"; srv.limite = 0; }, "Erro em Nubank."],
   ["snapshot 500", () => { srv.snapshot = () => resposta(500, {}); }, null],
 ])("(c) %s: só 'Ver bancos conectados' (nunca bloqueia o aviso)", async (_, montar, frase) => {
   montar(); await abrir(); expect(botoes()).toEqual(["Ver bancos conectados"]); expect(aviso()).toBeTruthy();
   if (frase) expect(screen.getByText(frase)).toBeTruthy(); else expect(screen.getByText(/precisam ser atualizados/)).toBeTruthy();
 });
-it("sem laço: a rodada que termina partial deixa o aviso com a instrução do servidor e SEM 'Atualizar agora'", async () => {
+it("sem laço: a rodada que termina partial deixa o aviso com o nome do banco e SEM 'Atualizar agora'", async () => {
   srv.post = () => resposta(200, { ok: true, sync: { ok: false, items: [item("partial", false, "Parte dos dados ainda não veio")] }, connections: [con()] });
   await abrir(); await apertar("Atualizar agora"); await act(drenar); await act(drenar);
-  await waitFor(() => expect(screen.getByText("Nubank: Parte dos dados ainda não veio.")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("Erro em Nubank.")).toBeTruthy());
   expect(botoes()).toEqual(["Ver bancos conectados"]); expect(aviso()).toBeTruthy(); expect(haptico("warning")).toBe(1); expect(haptico("success")).toBe(0);
   expect(posts()).toHaveLength(1);
 });
@@ -300,7 +300,7 @@ it("X enquanto o limite do plano é lido (candidato (b) + outro banco coletando)
   expect(gets() - g0).toBe(0); expect(haptico("warning") + haptico("success")).toBe(0);
 });
 
-it("(a0) que termina com problema também é calada: o texto do servidor aparece, sem aviso() nem anúncio", async () => {
+it("(a0) que termina com problema também é calada: o aviso curto do banco aparece, sem aviso() nem anúncio", async () => {
   srv.estado = "updating"; srv.snapshot = () => { if (srv.leituras.length >= 2) { srv.estado = "partial"; srv.detalhe = "Parte dos dados ainda não veio"; srv.sync = NOVO; } return resposta(200, { ok: true, connections: [con()] }); };
   await abrir(); expect(screen.getByText(SOZINHO)).toBeTruthy(); await avancar(10_000);
   await waitFor(() => expect(screen.getByText(PARCIAL_TEXTO)).toBeTruthy()); expect(haptico("warning") + haptico("success")).toBe(0); expect(anuncios()).toEqual([]);

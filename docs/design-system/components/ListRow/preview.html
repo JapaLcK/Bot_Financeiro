@@ -1,0 +1,9 @@
+<!-- @dsCard group="Lists" height=250 -->
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;font-family:var(--font-sans)}.wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.pane{background:var(--bg);color:var(--ink);padding:20px;min-width:0}</style></head>
+<body><div class="wrap"><div class="pane" data-theme="light"><div id="a"></div></div><div class="pane" data-theme="dark"><div id="b"></div></div></div>
+<script>const e=React.createElement;
+function Col(){const {ListRow,ListGroup,Text}=PigBank;return e(ListGroup,null,
+ e(ListRow,{icon:"UserCircle",title:"Perfil",chevron:true,onClick(){}}),e(ListRow,{icon:"Bank",title:"Bancos conectados",subtitle:"2 bancos",chevron:true,onClick(){}}),
+ e(ListRow,{icon:"Bell",title:"Notificações",trailing:e(Text,{variant:"caption",tone:"ink-muted"},"Ligadas")}),e(ListRow,{icon:"Trash",title:"Excluir conta",tone:"danger",onClick(){}}))}
+ReactDOM.createRoot(document.getElementById("a")).render(e(Col));ReactDOM.createRoot(document.getElementById("b")).render(e(Col));</script></body></html>
