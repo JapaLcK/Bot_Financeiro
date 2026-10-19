@@ -249,7 +249,7 @@ for (const semDialog of [false, true]) {
     await esperaTitulo(page, PASSOS[2].fala.titulo);
     await page.locator('[data-guia="piggy.chip"]').waitFor();
     await irAoAlvo(page, '[data-guia="piggy.chip"]');
-    const outroChip = await clicar(['.chat-empty .chip:not([data-guia])']);
+    const outroChip = await clicar(['.chat-follow .chip:not([data-guia])']);
     const passo3 = await estado();
     await FAZER["piggy.perguntou"](page);
     await esperaTitulo(page, "Fechou!");

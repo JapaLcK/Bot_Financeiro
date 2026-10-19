@@ -29,6 +29,8 @@ after(() => browser?.close());
 async function abrir(url, raiz, width) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 760 ? 900 : 844 }, reducedMotion: "reduce" });
   await servir(ctx, raiz);
+  // O chat do Piggy lê o nome da conta para a saudação.
+  await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: 1, whatsapp_linked: false } }));
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   const falhas = [];

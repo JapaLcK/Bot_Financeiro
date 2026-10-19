@@ -12,7 +12,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { PAINEL, exigeArtefatoEmDia, servir } from "./_painel.mjs";
+import { PAINEL, exigeArtefatoEmDia, passouATrava, servir } from "./_painel.mjs";
 
 let browser;
 before(async () => {
@@ -41,7 +41,8 @@ const respostas = (page) => page.locator(".chat > .msg-piggy").count();
 // Clica uma próxima pergunta da última resposta e espera a resposta dela chegar.
 const seguir = async (page, nome) => {
   const antes = await respostas(page);
-  await page.locator(".chat > .msg-piggy").last().locator(".chat-follow button", { hasText: nome }).click();
+  await passouATrava(page);
+  await page.locator(".chat-follow button", { hasText: nome }).click();
   await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
 };
 
@@ -72,7 +73,7 @@ test("digitar numa página qualquer abre a conversa; texto livre recebe os atalh
   const r = await page.evaluate(() => [
     document.querySelector(".chat .msg-user").textContent,
     document.querySelector(".chat .msg-piggy .msg-text").textContent.startsWith("Aqui no protótipo"),
-    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length,
+    document.querySelectorAll(".chat-follow button").length,
     document.querySelector("#askbar-input").value,
   ]);
   await ctx.close();
@@ -102,12 +103,12 @@ test("os 8 assuntos respondem com blocos, sem erro e sem id repetido", async () 
   }
   const r = await page.evaluate(() => {
     const ids = [...document.querySelectorAll("[id]")].map((e) => e.id);
-    return [ids.filter((x, i) => ids.indexOf(x) !== i), document.querySelectorAll(".chat .chat-follow").length];
+    return [ids.filter((x, i) => ids.indexOf(x) !== i), document.querySelectorAll(".chat .chat-follow").length, document.querySelectorAll(".chat-follow").length];
   });
   await ctx.close();
   assert.deepEqual(blocos, { categorias: 1, lancamentos: 1, categoria: 1, saldo: 2, fatura: 2, saldo2: 2, metas: 0, investimentos: 2, renda: 1 });
   assert.equal(cartoesMetas, 5);
-  assert.deepEqual(r, [[], 1]); // nenhum id repetido; só a última resposta oferece próximas perguntas
+  assert.deepEqual(r, [[], 0, 1]); // nenhum id repetido; as próximas perguntas ficam fora da conversa, numa fileira só
   assert.deepEqual(erros, []);
 });
 
@@ -116,6 +117,7 @@ test("\"qual categoria mais cresceu\" e \"que dia da semana\" respondem o que fo
   const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "controlar" });
   const clicar = async (texto) => {
     const antes = await respostas(page);
+    await passouATrava(page);
     await page.locator(".chat-follow button", { hasText: texto }).first().click();
     await page.waitForFunction((n) => document.querySelectorAll(".chat > .msg-piggy").length > n, antes);
     return page.locator(".chat > .msg-piggy").last().evaluate((m) => [m.querySelector(".msg-text").textContent, [...m.querySelectorAll(".msg-block article")].map((a) => a.id.replace(/^m\d+-/, ""))]);
@@ -166,8 +168,8 @@ test("a conversa sobrevive à troca de página e some ao recarregar", async () =
 
 test("estado vazio: as sugestões do perfil vêm primeiro e respondem", async () => {
   const { ctx, page } = await abrir({ hash: "#/piggy", perfil: "investir" });
-  const ideias = await page.locator(".chat-empty .chat-follow button").evaluateAll((bs) => bs.map((b) => b.textContent));
-  await page.locator(".chat-empty .chat-follow button").first().click();
+  const ideias = await page.locator(".chat-follow button").evaluateAll((bs) => bs.map((b) => b.textContent));
+  await page.locator(".chat-follow button").first().click();
   await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
   const blocos = await page.locator(".chat > .msg-piggy .msg-block").count();
   await ctx.close();
@@ -183,7 +185,7 @@ test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async ()
   await page.locator(".chat > .msg-piggy").first().waitFor();
   const r = await page.evaluate(() => [
     document.querySelector(".chat .msg-user").textContent,
-    document.querySelectorAll(".chat .msg-piggy .chat-follow button").length > 0,
+    document.querySelectorAll(".chat-follow button").length > 0,
     document.querySelectorAll(".chat-plus").length,
   ]);
   await ctx.close();
@@ -195,7 +197,7 @@ test("Essencial: conversa normal, a barra pergunta e o Piggy responde", async ()
 test("320 e 390: a conversa não rola para o lado e a barra fica acima da de baixo", async () => {
   for (const width of [320, 390]) {
     const { ctx, page } = await abrir({ width, hash: "#/piggy" });
-    await page.locator(".chat-empty .chat-follow button").first().click();
+    await page.locator(".chat-follow button").first().click();
     await page.locator(".chat > .msg-piggy .msg-block").first().waitFor();
     const r = await page.evaluate(() => {
       const a = document.querySelector(".askbar").getBoundingClientRect();
@@ -211,7 +213,7 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
   const vistos = {};
   for (const perfil of ["economizar", "investir", "controlar", "dividas", "autonomo"]) for (let i = 0; i < 5; i++) {
     const { ctx, page, erros } = await abrir({ hash: "#/piggy", perfil });
-    const botao = page.locator(".chat-empty .chat-follow button").nth(i);
+    const botao = page.locator(".chat-follow button").nth(i);
     const pergunta = await botao.textContent();
     await botao.click();
     await page.locator(".chat > .msg-piggy .msg-text").first().waitFor();
@@ -235,7 +237,7 @@ test("toda pergunta pronta responde com texto, sem erro (as sugestões de cada p
 
 test("a resposta nova é anunciada para leitor de tela", async () => {
   const { ctx, page } = await abrir({ hash: "#/piggy" });
-  await page.locator(".chat-empty .chat-follow button").first().click();
+  await page.locator(".chat-follow button").first().click();
   await page.locator(".chat > .msg-piggy").first().waitFor();
   await perguntar(page, "oi");
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);

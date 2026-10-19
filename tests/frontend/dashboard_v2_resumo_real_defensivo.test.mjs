@@ -23,14 +23,14 @@ after(() => browser?.close());
 
 const abrir = (opts) => abrirPainel(browser, opts);
 const sugestoes = (p) => [...(BY_PROFILE[p] ?? []), ...COMMON].filter((x) => x.ask && x.topic).slice(0, 5).map((x) => x.ask);
-const chips = (page) => page.locator(".chat-empty .chip").allTextContents();
+const chips = (page) => page.locator(".chat-follow .chip").allTextContents();
 
 // --- 1. o perfil da conversa ---------------------------------------------------------
 
 test("/piggy: as sugestões são as do perfil do servidor, com o localStorage limpo, nos 5 perfis", async () => {
   const vistos = {};
   for (const perfil of ["economizar", "investir", "controlar", "dividas", "autonomo"]) {
-    const { ctx, page, ir } = await abrir({ perfil, espera: ".chat-empty li:first-child .chip" });
+    const { ctx, page, ir } = await abrir({ perfil, espera: ".chat-follow li:first-child .chip" });
     await ir("/piggy");
     vistos[perfil] = [await chips(page), await page.evaluate(() => localStorage.length)];
     await ctx.close();
@@ -40,7 +40,7 @@ test("/piggy: as sugestões são as do perfil do servidor, com o localStorage li
 });
 
 test("positivo: no protótipo as sugestões continuam vindo do perfil salvo no navegador", async () => {
-  const { ctx, page, ir } = await abrir({ demo: true, espera: ".chat-empty li:first-child .chip" });
+  const { ctx, page, ir } = await abrir({ demo: true, espera: ".chat-follow li:first-child .chip" });
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"investir"'));
   await ir("/piggy");
   const r = await chips(page);
