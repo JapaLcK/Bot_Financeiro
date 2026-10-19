@@ -83,7 +83,6 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 | Suporte | Sem link no `/painel` | "Falar com o suporte" | — | Web | a discutir com o dono |
 | Tema | Só escuro (`color-scheme: dark`) | Segue o sistema | — | Web | a discutir com o dono |
 | Categorias: criar, renomear, fundir, apagar | Só lê | Só lê | Nenhum lado tem | Ambos | a discutir com o dono |
-| "Teste Open Finance" | Não há | Tela de diagnóstico provisória (`teste-pluggy.tsx`) | Ferramenta interna do app | Nenhum (app-only) | a discutir com o dono |
 
 ## Específico da plataforma
 

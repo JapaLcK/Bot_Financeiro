@@ -2,7 +2,7 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Linking, View } from "react-native";
 
-import { ErroDeApi, SessaoExpirada } from "@/api/client";
+import { ErroDeApi, SessaoExpirada, conferirLinhagem } from "@/api/client";
 import type { Contato } from "@/api/schemas/conta";
 import { EsqueciSenha } from "@/features/auth/EsqueciSenha";
 import { linkSeguro, semSenha, telefoneBR } from "@/features/conta/contato";
@@ -11,6 +11,7 @@ import { useFalha } from "@/features/seguranca/falha";
 import { useVoltaDoFundo } from "@/features/seguranca/voltaDoFundo";
 import { perfil } from "@/services/auth";
 import { gerarLinkWhatsApp, lerContato } from "@/services/conta";
+import { lerCredenciais } from "@/storage/secure";
 import { Banner } from "@/ui/componentes/Banner";
 import { Button } from "@/ui/componentes/Button";
 import { Icone, type NomeIcone } from "@/ui/componentes/Icone";
@@ -65,17 +66,26 @@ export default function Perfil() {
   const carregar = async () => {
     const minha = ++geracao.current;
     try {
+      const esperada = await lerCredenciais();
       const conta = await perfil();
-      const contato = await lerContato(conta.user_id);
+      // A conta trocada ENTRE as duas leituras faz a 2ª sair com o token novo e o uid antigo: o 403 de uid alheio vira RequisicaoSuperada.
+      const contato = await lerContato(conta.user_id).catch(async (e: unknown) => {
+        if (!(e instanceof SessaoExpirada)) await conferirLinhagem(esperada);
+        throw e;
+      });
       if (minha !== geracao.current) return;
       setBloqueio(null);
+      setErroWa(null);
       setEstado({ fase: "pronto", contato, precisaSenha: conta.precisa_criar_senha === true, emailDaConta: conta.email?.trim() || null });
     } catch (e) {
       if (e instanceof SessaoExpirada) return void falha(e); // sessão expirada vale de qualquer geração
       if (minha !== geracao.current) return;
       if (e instanceof ErroDeApi && e.status === 402) return setEstado({ fase: "plano" });
       if (e instanceof ErroDeApi && e.status === 403 && /exclus/i.test(e.detalhe)) return setEstado({ fase: "exclusao" });
-      if (falha(e) === null) return; // RequisicaoSuperada: resposta de outra conta
+      if (falha(e) === null) { // RequisicaoSuperada: a conta trocou no meio; some o dado da anterior e relê
+        setEstado({ fase: "carregando" });
+        return void carregar();
+      }
       // Recarga com dados na tela mantém a tela: trocar por erro desmontaria o `EsqueciSenha` e reabriria o envio.
       setEstado((atual) => (atual.fase === "pronto" ? atual : { fase: "erro" }));
     }
