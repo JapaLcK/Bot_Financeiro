@@ -3,7 +3,7 @@ import { AccessibilityInfo } from "react-native";
 import { ErroDeApi, RequisicaoSuperada, SessaoExpirada } from "@/api/client";
 import { ativarAgente, conversarComAgente, lerAgentes } from "@/services/agentes";
 import { TEM_ARROBA, acessoDe, agenteDe, energiaDe, mencaoDe, type Acesso, type Agentes } from "./agentes";
-import { NOVO, type Turno } from "./conversaEstado";
+import { NOVO, cotaQueSobe, type Turno } from "./conversaEstado";
 // O `@Nome` do chat: o turno do agente é um `Turno` com `agente` (ordem, limpeza no fechar e na troca de conta, OCULTA: tudo já coberto). Porta de webapp/src/dashboard/lib/conversation.ts.
 export type Energia = { custo: number; livre: number };
 export type Redirecionamento = { kind: string; name: string; question: string; access: string };
@@ -56,7 +56,7 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     try {
       const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c);
       if (dono.current !== alvo) return;
-      if (r.usage) aplicarUso(r.usage); // a cota do app sai desta resposta; o servidor só desconta quando o agente respondeu
+      if (r.usage) aplicarUso(cotaQueSobe(r.usage)); // a cota do app sai desta resposta; o servidor só desconta quando o agente respondeu
       if (!vivo()) return;
       if (!r.reply.trim()) throw new ErroDeApi(200, "resposta vazia");
       contextos.current.set(kind, r.context);

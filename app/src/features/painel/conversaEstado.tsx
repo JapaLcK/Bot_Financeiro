@@ -12,6 +12,8 @@ export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta
 export const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
 export const cotaCheia = (u: Uso | null) => !!u && u.used >= u.limit;
+/** A cota vinda de uma resposta só sobe (mesmo limite): pedidos em paralelo (Piggy e agentes) chegam fora de ordem, e um redirect traz a leitura de antes do modelo. Limite novo (troca de plano) entra direto; a virada do mês entra no `preparar`. */
+export const cotaQueSobe = (n: Uso) => (u: Uso | null) => u && u.limit === n.limit && u.used > n.used ? u : n;
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
 type Bloqueio = "abrindo" | "livre" | "falhou";
 /** O estado inteiro da avaliação, como o servidor o grava: `motivo`/`texto` só valem com `nota: -1`. */
@@ -116,7 +118,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
         else if (e.tipo === "erro") throw new ErroDeApi(500, e.mensagem ?? "erro");
         else {
           fim = true; atualizar(() => ({ resposta: e.reply, parcial: "", messageId: e.message_id, chips: aberta.current ? e.chips : [] }));
-          versaoUso.current++; setUso(e.usage);
+          versaoUso.current++; setUso(cotaQueSobe(e.usage));
           if (aberta.current) AccessibilityInfo.announceForAccessibility("Piggy respondeu");
           concluir();
         }

@@ -182,6 +182,20 @@ it("429 sem quota_exhausted (rajada): o campo segue livre", async () => {
   await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("Calma.")).toBeTruthy());
   await digitar("@Xerife de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).not.toBeDisabled();
 });
+it("cota só sobe: a resposta atrasada de outro agente (leitura velha) não destrava a cota que já encheu", async () => {
+  const g = segurar(); ag.chat = async (n) => { if (n === 1) { await g.promessa; return resp("Velha", { usage: { used: 99, limit: 100 } }); } return resp("Nova", { usage: { used: 100, limit: 100 } }); };
+  await abrir(); await enviar("@Xerife a"); await enviar("@Carteiro b"); await waitFor(() => expect(screen.getByText("Nova")).toBeTruthy());
+  await act(async () => { g.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Velha")).toBeTruthy());
+  await digitar("@Xerife de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+});
+it("cota só sobe também no Piggy: o fim atrasado do Piggy (99) não destrava a cota que o agente encheu (100)", async () => {
+  const g = segurar(); ag.chat = async () => { await g.promessa; return resp("Do agente", { usage: { used: 100, limit: 100 } }); };
+  await abrir(); await enviar("@Xerife a"); const f = respostaFluxo(); srv.chat = () => f; await enviar("oi"); // agente e Piggy em voo
+  await act(async () => { g.soltar(); await drenar(); }); await waitFor(() => expect(screen.getByText("Do agente")).toBeTruthy());
+  await act(async () => { f.empurrar({ tipo: "fim", reply: "Do Piggy", usage: { used: 99, limit: 100 }, message_id: 9, chips: [] }); f.fechar(); await drenar(); });
+  await waitFor(() => expect(screen.getByText("Do Piggy")).toBeTruthy());
+  await digitar("mais uma"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
