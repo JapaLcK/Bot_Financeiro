@@ -33,7 +33,7 @@ export function ContaBancos() {
   const qc = useQueryClient();
   const [alvo, setAlvo] = useState<Alvo | null>(null); // diálogo aberto; cobre também o voo e a releitura
   const [aviso, setAviso] = useState("");
-  const [falha, setFalha] = useState<{ texto: string; id?: number } | null>(null);
+  const [falha, setFalha] = useState<{ texto: string; id?: number; uid?: number } | null>(null); // `uid`: a falha de uma RECONEXÃO é da conta do clique e não aparece na conta que a substituir
   const [fim, setFim] = useState(false); // 401 no DELETE: a sessão acabou
   const abriu = useRef<HTMLButtonElement | null>(null);
   const [det, setDet] = useState<number | null>(null); // o banco com o detalhe aberto
@@ -68,13 +68,13 @@ export function ContaBancos() {
       onConnectStart: () => { pendente.current = null; if (vivo.on) setErroOF(""); }, // toda conexão nova (seletor ou reconexão) zera o foco que a anterior deixou pendente
       onOpen: () => viva()?.onOpen(),
       onClose: () => { const s = viva(); if (s) s.onClose(); else if (pendente.current !== null) { focar(pendente.current); pendente.current = null; } },
-      onConnected: () => { const s = viva(); if (s) return s.onConnected(); mudou(); if (vivo.on) { setErroOF(""); document.getElementById("page-title")?.focus(); } }, // o "+" que abriu o seletor pode ter saído da lista: o foco vai ao título
+      onConnected: () => { const s = viva(); if (s) return s.onConnected(); mudou(); if (vivo.on) { setErroOF(""); if (pendente.current === null) document.getElementById("page-title")?.focus(); } }, // o "+" que abriu o seletor pode ter saído da lista: o foco vai ao título (com `pendente` o widget de uma reconexão ainda está por cima: o `onClose` dele devolve o foco)
       onError: (msg: string, status?: number) => { const s = viva(); if (s) s.onError(msg, status); else if (vivo.on) setErroOF((status === undefined ? msg : textoDoServidor({ status, msg })) || "Não foi possível conectar o banco."); }, // com status o texto é o do servidor: só o de pessoa (a mesma regra da reconexão); sem status é do próprio módulo
       notify: (msg: string, tipo: string) => { if (vivo.on) (tipo === "error" ? setErroOF(msg) : setAviso(msg)); }, // o "ok" da reconexão é coberto pelo aviso do `terminou`, que vem depois da releitura
     });
     return () => {
       vivo.on = false;
-      setAviso(""); setErroOF(""); // o que era da conta (ou da tela) que saiu não fica no status da nova (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta)
+      setAviso(""); setErroOF(""); // o que era da conta (ou da tela) que saiu não fica no status da nova (a `falha` fica: o alerta do 403 do Desconectar nasce da troca de conta; a de reconexão tem `uid` e some sozinha na conta nova)
       if (seletor.busy()) return;
       seletor.destroy(); // aborta o connect-token em voo: a reconexão que ainda não abriu o widget não chega ao fim
       emCurso.current?.cancelar();
@@ -176,7 +176,7 @@ export function ContaBancos() {
     }
     if (!contaMudou() && montada.current) { // a releitura pode ter durado: com a conta trocada (ou a página fora) nada é dito, e o foco não é tocado
       setAviso(r?.ok ? `${a.nome} reconectado.` : ""); // sai o "Reconectando…"
-      if (r && !r.ok && status !== 401) { const f = textoDaFalha(r, a.nome); setFalha({ texto: f.texto, id: f.semId ? undefined : a.id }); }
+      if (r && !r.ok && status !== 401) { const f = textoDaFalha(r, a.nome); setFalha({ texto: f.texto, id: f.semId ? undefined : a.id, uid: a.uid }); }
       if (!semFoco) focar(titulo);
     }
     if (emCurso.current === eu) { emCurso.current = null; setRecon(false); } // defensiva: a releitura desta sessão não solta a trava de uma reconexão mais nova (a da conta nova)
@@ -194,7 +194,7 @@ export function ContaBancos() {
   };
   // Reconectar não gasta vaga (P1 do `/limite`): a regra é a do app (`provider_item_id`, `of_banks_max !== 0`, estado fora de SEM_RECONEXAO), e o módulo tem de estar carregado.
   const reconectavel = (c: Conexao) => !!c.provider_item_id && lim?.of_banks_max !== 0 && !SEM_RECONEXAO.includes(c.ui.state) && !!seletorOF();
-  const falhaVisivel = falha && (falha.id === undefined || lista?.some((c) => c.id === falha.id)) ? falha : null; // falha de um card que sumiu não fica; a com id só aparece no detalhe daquele banco (ou acima da lista, sem detalhe aberto), a sem id em qualquer um
+  const falhaVisivel = falha && (falha.uid === undefined || falha.uid === uid) && (falha.id === undefined || lista?.some((c) => c.id === falha.id)) ? falha : null; // falha de um card que sumiu não fica; a com id só aparece no detalhe daquele banco (ou acima da lista, sem detalhe aberto), a sem id em qualquer um
 
   return (
     <>

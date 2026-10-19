@@ -21,6 +21,7 @@
 //  - E19 (widget velho): em frontend/open-finance-connect.js, tirar `|| velha()` do `onClose` de openWidget (o `onClose` tardio do widget A termina a reconexão B).
 //  - E19b: trocar `ultima !== sessao` por `!!ocupado && ocupado !== sessao` em frontend/open-finance-connect.js (depois do save de B o `onClose` de A consome o foco `pendente` de B e o `onError`, tardio, vira toast).
 //  - E20 (onSuccess de widget velho): em frontend/open-finance-connect.js, `fala` (no onSuccess de openWidget) por `vivo()` (o save falho de A termina a reconexão B).
+//  - E23 (onConnected tardio): em Bancos.tsx, no `onConnected` do seletor, tirar `if (pendente.current === null)` (o foco vai ao título atrás do widget). E24: em `falhaVisivel`, tirar `(falha.uid === undefined || falha.uid === uid) &&` (o alerta da conta 7 aparece sobre a 8).
 //  - E22 (abrir o seletor): em Bancos.tsx, tirar `pendente.current = null;` de `aoAbrirSeletor` (o `onConnectStart` sozinho não cobre: ainda não rodou, o usuário só abriu o picker).
 //  - E21 (foco pendente × seletor): em Bancos.tsx, tirar `pendente.current = null;` do `onConnectStart`.
 //  - E11 (onClose antes do onSuccess): em `iniciar`, `onClose`, nada a desligar: o positivo é o módulo real (o save acontece e o `onConnected` tardio relê).
@@ -597,4 +598,36 @@ test("E22 reconexão A conclui com o widget por cima (foco pendente, sem onClose
   const r = { naLinha: await naLinha(page, "Nubank"), pickerAberto: await page.evaluate(() => !!document.querySelector("#bankpick-overlay.open")) };
   await ctx.close();
   assert.deepEqual(r, { naLinha: false, pickerAberto: true });
+});
+
+test("E23 A termina por onError com o widget por cima e o SDK manda um onSuccess TARDIO (A ainda é o widget mais novo: o onConnected chega): o foco NÃO vai ao título atrás do widget; o onClose tardio devolve o foco à linha", async () => {
+  const { ctx, page, srv } = await telaRecon();
+  await reconectar(page, "Nubank");
+  await widgetAberto(page);
+  await erroDoSdk(page);
+  await alertaCom(page, "Não deu para concluir");
+  await sucesso(page, "item-11");
+  await ate(page, () => saves(srv).length === 1, "o save tardio");
+  await page.waitForTimeout(500);
+  const comWidget = await focoEm(page);
+  await fechaWidget(page);
+  await page.waitForTimeout(400);
+  const fim = await naLinha(page, "Nubank");
+  await ctx.close();
+  assert.notEqual(comWidget, "page-title");
+  assert.ok(fim, "o onClose devolve o foco à linha");
+});
+
+test("E24 a falha de uma reconexão sem id (403) na conta 7 NÃO aparece sobre os bancos da conta 8 quando a conta troca com a tela montada", async () => {
+  let uid = 7;
+  const { ctx, page } = await telaRecon({ perfil: () => ({ display_name: "Ana", email: "a@e.com", user_id: uid, whatsapp_linked: false }), tokenRes: JSON_ERRO(403, "CSRF token ausente.") }, { antes: rotas8 });
+  await reconectar(page, "Nubank");
+  await alertaCom(page, "Recarregue a página");
+  uid = 8;
+  await refoco(page);
+  await card(page, "Outro").waitFor();
+  await page.waitForTimeout(500);
+  const n = await alerta(page).count();
+  await ctx.close();
+  assert.equal(n, 0);
 });
