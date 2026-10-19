@@ -62,12 +62,12 @@ if (DEMO) {
       ["prazeres", "Prazeres", "#f0abfc", 10, 1.2], ["liberdade_financeira", "Liberdade financeira", "#93c5fd", 10, 0.8], ["conhecimento", "Conhecimento", "#fdba74", 10, 0.3]] as const;
     const potes = POTES.map(([chave, nome, cor, pct, uso]) => {
       const teto = Math.round(m.income * pct) / 100, gasto = Math.round(teto * uso * 100) / 100;
-      return { chave, nome, cor, pct: txt(pct), teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), usado_pct: teto > 0 ? txt(uso * 100) : null };
+      return { chave, nome, cor, pct: txt(pct), teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), guardado: chave === "metas" || chave === "liberdade_financeira", usado_pct: teto > 0 ? txt(uso * 100) : null, categorias: [], por_categoria: [], lancamentos: [] }; // sem lançamentos no protótipo
     });
     const soma = (k: "teto" | "gasto") => potes.reduce((a, p) => a + Number(p[k]), 0);
     qc.setQueryData<OrcamentoDomestico>(orcamentoQuery(mes).queryKey, {
       mes, renda: { valor: txt(m.income), origem: "calculada" }, potes,
-      total: { teto: txt(soma("teto")), gasto: txt(soma("gasto")), restante: txt(soma("teto") - soma("gasto")), usado_pct: soma("teto") > 0 ? txt(soma("gasto") / soma("teto") * 100) : null },
+      total: { teto: txt(soma("teto")), gasto: txt(soma("gasto")), restante: txt(soma("teto") - soma("gasto")), restante_livre: txt(potes.reduce((a, p) => a + (p.guardado ? Math.max(Number(p.restante), 0) : Number(p.restante)), 0)), usado_pct: soma("teto") > 0 ? txt(soma("gasto") / soma("teto") * 100) : null },
     });
   }
 }
