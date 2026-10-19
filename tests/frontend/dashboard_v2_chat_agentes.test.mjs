@@ -612,6 +612,32 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: uma leitura da conta que saiu antes da troca de conta não libera a conversa no foco`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    let soltaVelha;
+    const velha = new Promise((ok) => { soltaVelha = ok; });
+    await paraConta43(ctx);
+    let pedidos = 0;
+    await ctx.route("**/auth/dashboard-profile", async (r) => {
+      if (++pedidos > 1) return r.fallback(); // as leituras seguintes já são da sessão da 43
+      await velha; // a 1ª saiu com a sessão da 42 e só termina depois do foco
+      await r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } });
+    });
+    const saiu = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await enviar(page, "@Detetive e agora?"); // a menção relê a conta: essa leitura fica presa
+    await saiu;
+    await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); }); // a sessão já virou a 43 noutra aba
+    const nova = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile") && pedidos > 1);
+    soltaVelha(); // a leitura de antes do foco termina com a 42: não basta para mostrar a conversa
+    await nova;
+    await page.locator(".chat > .msg-piggy").first().waitFor({ state: "detached" }).catch(() => {});
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByText("tem duplicada?").count(), 0, "a conversa da 42 não volta com a leitura velha");
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

@@ -79,13 +79,16 @@ export function PiggyChat() {
   const [relendo, setRelendo] = useState(false);
   const relendoRef = useRef(false);
   relendoRef.current = relendo;
-  const { refetch } = contaQ;
+  const { refetch } = contaQ, qc = useQueryClient();
   useEffect(() => DEMO ? undefined : focusManager.subscribe((focado) => {
     if (!focado) return;
     relendoRef.current = true; // já, antes do render: um anúncio que dispare neste meio tempo também espera
     setRelendo(true);
-    void refetch({ cancelRefetch: false }).finally(() => setRelendo(false)); // reaproveita uma leitura em voo
-  }), [refetch]);
+    // Uma leitura já em voo saiu antes do foco, talvez com a sessão anterior: espera por ela e lê de novo (Codex no #1157).
+    // Cancelar não serve: quem a esperava (o `ask`, a menção) receberia o cancelamento.
+    const velha = qc.getQueryState(contaQuery.queryKey)?.fetchStatus === "fetching";
+    void refetch({ cancelRefetch: false }).then(() => (velha ? refetch({ cancelRefetch: false }) : undefined)).finally(() => setRelendo(false));
+  }), [qc, refetch]);
   const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
   // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
