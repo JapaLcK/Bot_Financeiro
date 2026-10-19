@@ -380,6 +380,20 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: nome do agente colado com acento decomposto (o + U+0301): a lista o acha e o envio vai ao agente`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await campo(page).fill("@Repo\u0301");
+    await lista(page).waitFor();
+    assert.deepEqual(await nomes(page), ["Repórter"]);
+    await enviar(page, "@Repo\u0301rter resume");
+    const r = resposta(page);
+    await r.locator(".msg-text", { hasText: "Ativar o Repórter usa ⚡1 de energia. Você tem 2 livre." }).waitFor();
+    assert.equal(await r.locator(".msg-autor b").textContent(), "Repórter");
+    assert.equal(await page.locator(".chat > .msg-user .mencao").textContent(), "@Repo\u0301rter");
+    assert.deepEqual(chats, []);
+    await ctx.close();
+  });
+
   test(`${width}: "Ativar e responder" com password_required (403, detail objeto): pedido de senha, sem "Tentar de novo"`, async () => {
     const { ctx, page } = await abrir({ width, ativarErro: { status: 403, json: { detail: { error: "password_required" } } } });
     await digitar(page, "@rep");

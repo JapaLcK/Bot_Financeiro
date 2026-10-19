@@ -87,18 +87,26 @@ export function conversar(uid: number, kind: string, message: string, context: s
 }
 
 // --- A menção: "@Nome" no começo do texto ou depois de espaço/quebra (assim fulano@gmail.com não conta). ---
-const sem = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-// Por letra, e a marca solta (o acento de "e" + U+0301, texto colado) fica como está: o tamanho nunca muda e os índices valem no texto original (Codex no #1157).
-export const semAcento = (t: string) => t.split("").map((c) => sem(c) || c).join("");
-const MAIS_LONGO = [...AGENTES].sort((a, b) => b.nome.length - a.nome.length);
+const sem = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+/** O texto sem acento e minúsculo para comparar (a marca solta de texto colado, "e" + U+0301, também some) e, para cada
+ * posição dele, a posição no original: as menções se medem no texto dobrado e se recortam no original (Codex no #1157). */
+function dobra(t: string) {
+  let f = "";
+  const de: number[] = [];
+  for (let i = 0; i < t.length; i++) for (const c of sem(t[i])) { f += c; de.push(i); }
+  de.push(t.length);
+  return { f, de };
+}
+export const semAcento = (t: string) => dobra(t).f;
+const MAIS_LONGO = [...AGENTES].sort((a, b) => b.nome.length - a.nome.length).map((a) => ({ ...a, chave: semAcento(a.nome) }));
 
 /** Toda menção válida (nome do catálogo, sem acento nem maiúscula, nome mais longo primeiro). Com `dados`, só os agentes disponíveis. */
 export function mencoes(texto: string, dados?: Agentes) {
-  const f = semAcento(texto), out: { ini: number; fim: number; kind: string }[] = [];
+  const { f, de } = dobra(texto), out: { ini: number; fim: number; kind: string }[] = [];
   for (const m of f.matchAll(/(^|\s)@/g)) {
     const ini = m.index! + m[1].length, resto = f.slice(ini + 1);
-    const a = MAIS_LONGO.find((x) => resto.startsWith(semAcento(x.nome)) && !/^[a-z0-9_]/.test(resto.slice(x.nome.length)) && (!dados || acessoDe(dados, x.kind)));
-    if (a) out.push({ ini, fim: ini + 1 + a.nome.length, kind: a.kind });
+    const a = MAIS_LONGO.find((x) => resto.startsWith(x.chave) && !/^[a-z0-9_]/.test(resto.slice(x.chave.length)) && (!dados || acessoDe(dados, x.kind)));
+    if (a) out.push({ ini: de[ini], fim: de[ini + 1 + a.chave.length], kind: a.kind });
   }
   return out;
 }
@@ -112,6 +120,6 @@ export function mencaoDe(texto: string, dados?: Agentes) {
 }
 /** O token em edição: "@" + letras até o cursor, logo depois de espaço ou no começo. */
 export function tokenEm(texto: string, cursor: number) {
-  const m = /(^|\s)@(\p{L}*)$/u.exec(texto.slice(0, cursor));
+  const m = /(^|\s)@([\p{L}\p{M}]*)$/u.exec(texto.slice(0, cursor)); // \p{M}: o acento solto de um nome colado
   return m ? { ini: cursor - m[2].length - 1, q: semAcento(m[2]) } : null;
 }
