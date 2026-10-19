@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { focusManager, useQuery } from "@tanstack/react-query";
+import { focusManager, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, usePerguntando, type Msg } from "../lib/conversation";
 import { agenteDe, agentesQuery, mencoes } from "../lib/agentes";
@@ -36,6 +36,10 @@ const fila: { id: number; text: ReactNode }[] = [];
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
 // próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
+const emVoo = (qc: QueryClient) => qc.getQueryState(contaQuery.queryKey)?.fetchStatus === "fetching";
+const releitura = (refetch: (o: { cancelRefetch: boolean }) => Promise<unknown>, velha: boolean) =>
+  refetch({ cancelRefetch: false }).then(() => (velha ? refetch({ cancelRefetch: false }) : undefined));
+
 function PiggySays({ m }: { m: Msg }) {
   const qc = useQueryClient();
   const a = m.agente ? agenteDe(m.agente) : undefined;
@@ -72,27 +76,31 @@ export function PiggyChat() {
   // Nome como no app (nomeDe): nome → parte do e-mail antes do @ → "Você". Sem a conta lida (carregando, erro, protótipo), só "Olá".
   // Relida também com a conversa aberta e na volta do foco: se a sessão virou outra conta noutra aba, a leitura chega ao
   // `contaDaSessao` (main.tsx) e a conversa da anterior some. O corpo vem do servidor: o que não é texto vira vazio (como conta/Ponte.tsx).
+  // Regra das duas guardas abaixo (montagem e foco): a conversa só aparece depois de uma leitura que SAIU depois do último
+  // dos dois. Uma leitura já em voo nesse momento pode ter saído com a sessão anterior: espera por ela e lê de novo (Codex no #1157).
+  // Cancelar não serve: quem a esperava (o `ask`, a menção) receberia o cancelamento.
+  const qc = useQueryClient();
+  const [montando, setMontando] = useState(() => !DEMO && emVoo(qc)); // lido antes do useQuery assinar (e talvez juntar-se à leitura)
   const contaQ = useQuery(contaQuery), conta = contaQ.data;
+  const { refetch } = contaQ;
+  const [releMontagem] = useState(montando);
+  useEffect(() => { if (releMontagem) void releitura(refetch, true).finally(() => setMontando(false)); }, [releMontagem, refetch]);
   // Na volta do foco a conta é relida, e até chegar uma leitura mais nova que o foco a conversa fica escondida (sem sair do
   // DOM: a rolagem fica), sem leitor de tela e sem clique — a sessão pode ter virado outra conta noutra aba (Codex no #1157).
   // Só o foco esconde: as releituras do envio (`ask`, a menção) não piscam a conversa.
   const [relendo, setRelendo] = useState(false);
   const relendoRef = useRef(false);
   relendoRef.current = relendo;
-  const { refetch } = contaQ, qc = useQueryClient();
   useEffect(() => DEMO ? undefined : focusManager.subscribe((focado) => {
     if (!focado) return;
     relendoRef.current = true; // já, antes do render: um anúncio que dispare neste meio tempo também espera
     setRelendo(true);
-    // Uma leitura já em voo saiu antes do foco, talvez com a sessão anterior: espera por ela e lê de novo (Codex no #1157).
-    // Cancelar não serve: quem a esperava (o `ask`, a menção) receberia o cancelamento.
-    const velha = qc.getQueryState(contaQuery.queryKey)?.fetchStatus === "fetching";
-    void refetch({ cancelRefetch: false }).then(() => (velha ? refetch({ cancelRefetch: false }) : undefined)).finally(() => setRelendo(false));
+    void releitura(refetch, emVoo(qc)).finally(() => setRelendo(false));
   }), [qc, refetch]);
   const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
   // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
-  const conferida = DEMO || (contaQ.isFetchedAfterMount && contaQ.isSuccess);
+  const conferida = DEMO || (!montando && contaQ.isFetchedAfterMount && contaQ.isSuccess);
   const txt = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const nome = conta && (txt(conta.display_name) || txt(conta.email).split("@")[0] || "Você");
   const end = useRef<HTMLLIElement>(null);

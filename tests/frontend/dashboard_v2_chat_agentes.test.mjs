@@ -638,6 +638,70 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: A→B→A: o invalid_context da pergunta abandonada não apaga o context da conversa nova`, async () => {
+    let solta;
+    const { ctx, page, chats } = await abrir({ width,
+      segura: () => (chats.length === 1 ? new Promise((ok) => { solta = ok; }) : undefined),
+      chat: (c) => (c.message === "velha" ? { status: 400, json: { detail: { error: "invalid_context", message: "A conversa expirou.", retryable: false } } } : null) });
+    await enviar(page, "@Detetive velha");
+    await resposta(page).locator(".msg-text", { hasText: "Preparando a resposta…" }).waitFor();
+    const relerNoFoco = async () => {
+      const relida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+      await page.evaluate(() => { window.dispatchEvent(new Event("visibilitychange")); });
+      await relida;
+    };
+    await paraConta43(ctx);
+    await relerNoFoco();
+    await page.locator(".chat-empty").waitFor();
+    await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } }));
+    await relerNoFoco(); // de volta à 42, com a "velha" ainda presa
+    await enviar(page, "@Detetive nova");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 2 do detetive." }).waitFor();
+    const recusada = page.waitForResponse((r) => /\/agents\/42\/detetive\/chat$/.test(r.url()) && r.status() === 400);
+    solta(); // a abandonada termina com invalid_context
+    await recusada;
+    await page.waitForTimeout(200);
+    await enviar(page, "@Detetive de novo");
+    await page.locator(".chat > .msg-piggy .msg-text", { hasText: "Resposta 3 do detetive." }).waitFor();
+    assert.deepEqual(chats.map((c) => c.context), [null, null, "ctx-2"], "a 3ª pergunta segue a conversa nova");
+    await ctx.close();
+  });
+
+  test(`${width}: uma leitura da conta em voo antes de abrir o /piggy não libera a conversa`, async () => {
+    const { ctx, page } = await abrir({ width });
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.locator("#board-profile").waitFor();
+    let soltaVelha;
+    const velha = new Promise((ok) => { soltaVelha = ok; });
+    await paraConta43(ctx);
+    let soltaNova;
+    const nova = new Promise((ok) => { soltaNova = ok; });
+    let pedidos = 0;
+    await ctx.route("**/auth/dashboard-profile", async (r) => {
+      const n = ++pedidos;
+      if (n > 2) return r.fallback(); // as leituras seguintes já são da sessão da 43
+      if (n === 2) { await nova; return r.fallback(); } // a 1ª depois de abrir o chat também espera: a conversa não pode aparecer antes dela
+      await velha; // a 1ª saiu com a sessão da 42 e só termina com o chat já aberto
+      await r.fulfill({ json: { user_id: 42, display_name: "Marina", email: null, whatsapp_linked: true } }).catch(() => {});
+    });
+    const saiu = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await page.evaluate(() => { location.hash = "#/conta/perfil"; }); // a Conta lê o perfil: essa leitura fica presa
+    await saiu;
+    await page.evaluate(() => { location.hash = "#/piggy"; }); // o chat monta com ela em voo
+    await page.locator(".chat-espera", { hasText: "Carregando a conversa…" }).waitFor();
+    const voltou = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+    soltaVelha(); // termina com a 42: não basta para mostrar a conversa
+    await voltou;
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByText("tem duplicada?").count(), 0, "a leitura de antes de abrir o chat não o libera");
+    soltaNova();
+    await page.locator(".chat-empty").waitFor(); // a leitura seguinte trouxe a 43 e a conversa da 42 sumiu
+    assert.equal(await page.getByText("tem duplicada?").count(), 0);
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

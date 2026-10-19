@@ -110,6 +110,7 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
     const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
     patch(id, { estado: "pronto", text: r.reply, redirects });
   } catch (e) {
+    if (!msgs.some((x) => x.id === id)) return; // conversa limpa (troca de conta) com a pergunta em voo: o erro dela não mexe no context da conversa nova (Codex no #1157)
     const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;
     const acesso = status === 403 && d.error ? CODIGO_ACESSO[d.error] : undefined;
     if (d.error === "invalid_context") contextos.delete(`${uid}:${kind}`); // o próximo envio recomeça a conversa
