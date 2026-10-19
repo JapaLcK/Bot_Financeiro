@@ -7,7 +7,7 @@ import { TextoPainel as Texto } from "./tipografia";
 import { Acao } from "./base";
 import { agenteDe, mencoes } from "./agentes";
 import { AVATAR } from "./avatares";
-import { useConversa, type Turno } from "./conversaEstado";
+import { cotaCheia, useConversa, type Turno } from "./conversaEstado";
 /** Quem fala: avatar (fora do VoiceOver), nome e, num agente, a etiqueta do estado. Sem `kind`, é o Piggy. */
 export function Autor({ kind, etiqueta }: { kind?: string; etiqueta?: string }) {
   const nome = kind ? agenteDe(kind)?.nome ?? "Agente" : "Piggy";
@@ -26,6 +26,7 @@ export function ComMencoes({ texto }: { texto: string }) {
 /** A resposta de um agente (turno com `agente`). Texto puro, sem Markdown: o `\n` do RN já quebra a linha. Sem copiar, sem 👍👎 (não há `messageId`). */
 export function FalaAgente({ turno: t }: { turno: Turno }) {
   const c = useConversa(); const entrada = useEntrada(); const a = t.agente!, ag = c.agentes, nome = agenteDe(a.kind)?.nome ?? "Agente";
+  const trava = c.bloqueio !== "livre" || cotaCheia(c.uso); // a mesma trava do campo: a cota da IA é uma só (Piggy e agentes)
   const etiqueta = a.estado === "inativo" ? "NÃO ATIVO" : a.estado === "sem_energia" ? "SEM ENERGIA" : "AGENTE";
   return <Animated.View entering={entrada} testID="fala-agente" style={{ alignSelf: "flex-start", width: "100%", gap: 6 }}>
     <Autor kind={a.kind} etiqueta={etiqueta} />
@@ -33,10 +34,10 @@ export function FalaAgente({ turno: t }: { turno: Turno }) {
       ? <View style={{ alignSelf: "flex-start" }}><ActivityIndicator size="small" accessibilityLabel={`${nome} está respondendo`} /></View>
       : <Texto tom={a.estado === "erro" ? "warning" : "ink"}>{a.texto}</Texto>}
     {a.estado === "inativo" && <>
-      <Acao rotulo={a.ativando ? "Ativando…" : "Ativar e responder"} desativado={a.ativando} onPress={() => void ag.ativarEResponder(t)} />
+      <Acao rotulo={a.ativando ? "Ativando…" : "Ativar e responder"} desativado={a.ativando || trava} onPress={() => void ag.ativarEResponder(t)} />
       {a.falhaAtivar && <Texto tom="warning" accessibilityRole="alert">Não foi possível ativar o agente. Tente novamente.</Texto>}
     </>}
-    {a.estado === "erro" && a.repetir && <Acao rotulo="Tentar de novo" onPress={() => ag.tentarDeNovo(t)} />}
-    {a.estado === "pronto" && a.redirects.map((r, i) => <Acao key={i} rotulo={`Perguntar ao ${agenteDe(r.kind)?.nome ?? r.name}`} desativado={c.enviando} onPress={() => ag.redirecionar(r)} />)}
+    {a.estado === "erro" && a.repetir && <Acao rotulo="Tentar de novo" desativado={trava} onPress={() => ag.tentarDeNovo(t)} />}
+    {a.estado === "pronto" && a.redirects.map((r, i) => <Acao key={i} rotulo={`Perguntar ao ${agenteDe(r.kind)?.nome ?? r.name}`} desativado={c.enviando || trava} onPress={() => ag.redirecionar(r)} />)}
   </Animated.View>;
 }

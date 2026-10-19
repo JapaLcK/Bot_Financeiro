@@ -158,6 +158,19 @@ it("valores ocultos: o turno de agente mostra só a mensagem de oculto", async (
   expect(screen.queryByText("Gastou R$ 123")).toBeNull(); expect(screen.getByText(estado_OCULTA())).toBeTruthy();
 });
 const estado_OCULTA = () => "Mensagem oculta enquanto os valores estão privados.";
+it("cota cheia: 'Ativar e responder', 'Tentar de novo' e 'Perguntar ao' ficam desligados (a cota da IA é a do Piggy)", async () => {
+  ag.catalogo = (u) => { const d = cat(Number(u)); d.catalog.find((a) => a.kind === "carteiro")!.status = null; return d; };
+  ag.chat = (n) => n === 1 ? erro(503, { error: "agent_unavailable", message: "Fora do ar agora.", retryable: true })
+    : resp("Isso é com o Carteiro.", { usage: { used: 100, limit: 100 }, redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] });
+  await abrir(); await enviar("@Carteiro oi"); await waitFor(() => screen.getByRole("button", { name: "Ativar e responder" }));
+  await enviar("@Xerife a"); await waitFor(() => screen.getByRole("button", { name: "Tentar de novo" }));
+  const des = (nome: string) => screen.getByRole("button", { name: nome }).props.accessibilityState.disabled;
+  expect(des("Ativar e responder")).toBe(false); expect(des("Tentar de novo")).toBe(false); // com cota: ligados
+  await enviar("@Xerife b"); await waitFor(() => screen.getByRole("button", { name: "Perguntar ao Carteiro" }));
+  expect(des("Ativar e responder")).toBe(true); expect(des("Tentar de novo")).toBe(true); expect(des("Perguntar ao Carteiro")).toBe(true);
+  await toque("Ativar e responder"); await toque("Perguntar ao Carteiro"); await act(drenar);
+  expect(ag.nAtivar).toBe(0); expect(ag.nChat).toBe(2);
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());
