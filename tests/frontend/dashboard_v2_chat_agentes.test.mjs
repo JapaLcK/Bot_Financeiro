@@ -860,6 +860,27 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: a conta muda noutra aba: a Cobrança da anterior não aparece para a nova`, async () => {
+    const cob = (plan) => ({ json: { active: true, lifetime: false, gateway: "stripe", plan, interval: "monthly", current_period_end: "2026-11-12", scheduled_change: null } });
+    const { ctx, page } = await abrir({ width });
+    await ctx.route("**/billing/subscription", (r) => r.fulfill(cob("pro"))); // a 42 assina o Pro
+    await page.evaluate(() => { location.hash = "#/conta/cobranca"; });
+    await page.locator("main", { hasText: "Pro Mensal" }).waitFor();
+    await paraConta43(ctx);
+    let solta;
+    const presa = new Promise((ok) => { solta = ok; });
+    await ctx.route("**/billing/subscription", async (r) => { await presa; return r.fulfill(cob("essencial")); }); // a da 43 demora
+    await page.evaluate(() => { location.hash = "#/conta/perfil"; });
+    await page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile")); // a releitura da Conta descobre a 43
+    await page.waitForTimeout(100);
+    await page.evaluate(() => { location.hash = "#/conta/cobranca"; });
+    await page.waitForTimeout(300);
+    assert.doesNotMatch(await page.locator("main").innerText(), /Pro Mensal/, "o plano da 42 não aparece enquanto o da 43 carrega");
+    solta();
+    await page.locator("main", { hasText: "Essencial Mensal" }).waitFor();
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

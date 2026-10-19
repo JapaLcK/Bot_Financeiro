@@ -19,13 +19,15 @@ const qc = new QueryClient();
 // sai do cache (a próxima tela lê do zero); o que está na tela relê já, mantendo o dado até chegar: zerar o `me` derrubaria
 // quem conta com ele carregado (o portão da Entrada). O microtask roda antes de quem esperava essa leitura (`ask`, a menção).
 let uidVisto: number | undefined;
+// Só a chave exata do perfil: as de baixo dela (["conta", "cobranca"], ["conta", "mfa"]…) são dados da conta como os outros (Codex no #1157).
+const ehPerfil = (k: readonly unknown[]) => k.length === 1 && k[0] === contaQuery.queryKey[0];
 qc.getQueryCache().subscribe((e) => {
-  if (e.type !== "updated" || e.query.queryKey[0] !== contaQuery.queryKey[0]) return;
+  if (e.type !== "updated" || !ehPerfil(e.query.queryKey)) return;
   const uid = (e.query.state.data as { user_id?: number } | undefined)?.user_id;
   contaDaSessao(uid);
   if (uid == null) return;
   if (uidVisto != null && uid !== uidVisto) queueMicrotask(() => {
-    const daConta = (q: { queryKey: readonly unknown[] }) => q.queryKey[0] !== contaQuery.queryKey[0];
+    const daConta = (q: { queryKey: readonly unknown[] }) => !ehPerfil(q.queryKey);
     qc.removeQueries({ predicate: (q) => daConta(q) && q.getObserversCount() === 0 });
     void qc.invalidateQueries({ predicate: daConta });
   });
