@@ -95,6 +95,7 @@ it.each([1, 2])("Extrato fontScale %s: o valor fica na linha da descrição, e e
  // O deep link frio descarta a 1ª página (a carga do provider cancela a operação); o filtro recarrega.
  await filtrar({ tipo: "Saídas" });
  await waitFor(() => expect(screen.getByText("Mercado")).toBeTruthy());
- const titulo = screen.getByText("Mercado"), valor = screen.getByLabelText("menos 120 reais");
+ const titulo = screen.getByText("Mercado"), valores = screen.getAllByLabelText("menos 120 reais"), valor = valores[1]!; // exatamente dois: [0] é o total do dia (cabeçalho), [1] o valor da linha
+ expect(valores).toHaveLength(2);
  expect(escala > 1 ? paiVisual(titulo) : paiVisual(paiVisual(titulo)!)).toBe(paiVisual(valor));
 });

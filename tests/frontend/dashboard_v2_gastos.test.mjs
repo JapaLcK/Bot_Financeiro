@@ -13,7 +13,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
-import { RESPOSTAS, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
+import { RESPOSTAS, abrirFiltros, abrirPainel, exigeArtefatoEmDia } from "./_painel.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -188,6 +188,7 @@ test("'Ver compras' e 'Ver em Lançamentos' do detalhe levam a categoria aos lan
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
+  await abrirFiltros(page);
   const r = [lanc.at(-1), await page.getByRole("combobox", { name: /^Categoria/ }).inputValue(), await page.locator('select option[value="sem categoria"]').textContent()];
   await ctx.close();
   assert.deepEqual(r, ["?mes=2026-10&categoria=sem+categoria&guardado=true", "sem categoria", "Sem categoria"]);
@@ -202,6 +203,7 @@ test("catálogo de categorias fora do ar com categoria já escolhida: o select s
   await page.getByRole("button", { name: "Ver compras" }).click();
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.getByText("Não foi possível carregar as categorias.").waitFor();
+  await abrirFiltros(page);
   const sel = page.getByRole("combobox", { name: /^Categoria/ });
   const habilitado = await sel.isEnabled();
   await sel.selectOption("");
@@ -341,7 +343,8 @@ test("'Ver em Lançamentos' do detalhe larga o dia que estava escolhido: a lista
   await page.getByRole("button", { name: "Ver em Lançamentos" }).click();
   await page.waitForFunction(() => location.hash === "#/lancamentos");
   await page.locator(".lanc-linha").first().waitFor();
-  const r = [lanc.at(-1), await page.locator(".ledger-chips .chip").count()];
+  // a categoria vira ficha (painel fechado), o dia não: nenhuma ficha "dia N"
+  const r = [lanc.at(-1), (await page.locator(".ledger-chips .chip").allTextContents()).filter((t) => /^dia \d/.test(t)).length];
   await ctx.close();
   assert.deepEqual(r, ["?mes=2026-10&categoria=alimentacao&guardado=true", 0]);
 });
