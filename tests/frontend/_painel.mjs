@@ -112,13 +112,16 @@ export async function servir(ctx, raiz = FRONTEND, { plano = "pro", perfil = "pa
  * Contexto do /painel (ou do protótipo, com `demo`) para os testes `dashboard_v2_resumo_real*`:
  * o relógio congela em `agora` (padrão: 2 de outubro de 2026, 12h em SP) e `tz` é o fuso do
  * aparelho; o resto das opções vai para o `servir`. `ir(rota)` navega e espera `espera`.
+ * `relogio`: "fixo" (padrão, `setFixedTime`: os timers andam em tempo real) ou "instalado" (`clock.install`: os timers também são falsos e `page.clock.runFor` os adianta;
+ * é o que mede a cadência de acompanhamento e o prazo do POST do "Atualizar agora").
  */
-export async function abrirPainel(browser, { width = 1440, espera = "#board-profile", agora = "2026-10-02T15:00:00Z", tz = "America/Sao_Paulo", demo = false, ...opts } = {}) {
+export async function abrirPainel(browser, { width = 1440, espera = "#board-profile", agora = "2026-10-02T15:00:00Z", tz = "America/Sao_Paulo", demo = false, relogio = "fixo", ...opts } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: width > 500 ? 900 : 844 }, reducedMotion: "reduce", timezoneId: tz });
   await servir(ctx, demo ? RAIZ : undefined, opts);
   await ctx.addCookies([{ name: "csrf_token", value: "tok-123", url: ORIGIN }]);
   const page = await ctx.newPage();
-  await page.clock.setFixedTime(new Date(agora));
+  if (relogio === "instalado") await page.clock.install({ time: new Date(agora) });
+  else await page.clock.setFixedTime(new Date(agora));
   const erros = [];
   page.on("pageerror", (e) => erros.push(e.message));
   const ir = async (rota = "/") => { await page.goto(`${demo ? PROTOTIPO : PAINEL}#${rota}`); if (espera) await page.locator(espera).waitFor(); };

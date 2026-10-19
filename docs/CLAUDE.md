@@ -605,7 +605,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Receitas do extrato (PR 2a, `widgets/ReceitasDoBanco.tsx`; #1076 PR 1 as moveu para a pilha): as PENDENTES são avisos da PILHA DE AVISOS do topo
   do `/painel` (`parts/AvisosDoTopo.tsx`, montada uma vez no `App.tsx`, um aviso por vez, pontos "Aviso k de n", rosa para decisão; o BANCO desatualizado,
   âmbar, vem antes; `GET /api/v2/bancos` lido por `avisoDeBancoQuery` (`lib/v2.ts`; NÃO é o `bancosQuery(uid)` da página Bancos, `conta/api.ts`, que mostra valores em R$ e confere a conta), `motivos` com `banco_desatualizado` ou `conexao_pausada`, "Ver bancos conectados" abre a página
-  `#/conta/bancos` (`href("/conta/bancos")`; o "Reconectar {banco}" do PR 2 irá ao Ajustes antigo, onde está o widget); o X vale até recarregar a página). As receitas só entram na pilha em `/` e em `/previsao`, e só nos planos com previsão (`locked("hero", plano)`: Essencial e Free não fazem GET). A lista é a que o card/a página
+  `#/conta/bancos` (`href("/conta/bancos")`) quando não há conserto pelo painel; "Atualizar agora" e "Reconectar {banco}" são do #1076 PR 2, parágrafo "Atualizar agora do aviso do banco" mais abaixo; o X vale até recarregar a página). As receitas só entram na pilha em `/` e em `/previsao`, e só nos planos com previsão (`locked("hero", plano)`: Essencial e Free não fazem GET). A lista é a que o card/a página
   leu quando o layout salvo diz que o card existe (exceção: limite (j)), no horizonte que ele mostra (`useListaDaPagina`, publicada por `usePrevisao`; durante a troca de horizonte ela mantém a última, e um 4xx a apaga: 4xx nunca mostra dado guardado, inclusive no downgrade com o card em 60/90 dias).
   Em `/` o anfitrião espera o `/perfil` para saber se o card está no layout (`comCardPrevisao`, do Board): se está, não abre consulta nenhuma (UM GET por carga, testado com `/perfil` a 0, 150 e 600 ms);
   só quando o Resumo NÃO tem o card (ex.: Economizar, ou o bloco tirado no Organizar) a pilha lê a chave `["previsao", null]` sozinha. Tirar o card no Organizar: ele desmonta e limpa a lista, o que re-renderiza a pilha, que passa a ler sozinha (NÃO coberto por teste; se o card nunca tinha publicado a lista, a leitura própria só abre no próximo render da pilha). Nas outras
@@ -637,6 +637,21 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   esvazia a pilha, com o foco solto no body, ainda leva o foco ao alvo "Nenhum aviso.";
   (j) o layout salvo e o card montado podem divergir. K5: o Pro está em `/` com o card em 90 dias; outra aba grava o layout salvo sem `hero` (Organizar); a pilha re-renderiza (p.ex. o `/bancos` muda) e passa a ler `["previsao", null]` sozinha mesmo com o card ainda montado, e no rebaixamento o card mostra o dado do Pro por um instante. K7, o inverso: no perfil Economizar, outra aba põe o `hero` no layout; a receita some da pilha até trocar de tela ou recarregar (sem perda de dado). Causa: `AvisosDoTopo.tsx` usa `comCardPrevisao`, que lê o layout salvo no localStorage em vez de observar se o card está montado. A correção estrutural é observar a montagem (contexto `undefined` = nada montado × `null` = montado sem lista); issue a abrir. Servidor
   sem o campo (deploy fora de ordem): a caixa não aparece.
+  **"Atualizar agora" do aviso do banco (#1076 PR 2; par do `usarAtualizarBanco.ts` do app, #1100)**: o corpo do aviso (`parts/CorpoAvisoBanco.tsx`) escolhe a ação pela CLASSIFICAÇÃO do snapshot `GET /open-finance/{uid}`
+  (`classificar` em `lib/atualizarBanco.ts`; prioridade (b) > (a) > (a0) > (c)): (a) `partial`/`updated`/`error_recoverable`/`no_accounts`/`updating` com coleta vencida: "Atualizar agora", que faz `POST /open-finance/{uid}/refresh`
+  e acompanha a coleta (GETs do snapshot em 5, 15, 35, 75 s e depois a cada 60 s, um de cada vez, teto de 300 s); (a0) já `updating`: parte SOZINHA e calada ("O banco está atualizando…"); (b) `needs_user_action` com vaga no plano (`/limite`):
+  link "Reconectar {banco}" para `/settings?view=open-finance` (`OF` de `parts/guia-falas.ts`); (c) o resto: `Erro em {bancos}.` (o #1127; o porquê de cada banco mora em "Bancos conectados") + "Ver bancos conectados" (`#/conta/bancos`); `updating` sem `provider_item_id`: o texto padrão do aviso, sem "Erro". A paridade compara o texto. Sem a leitura do snapshot (lendo, erro, conta trocada) fica o corpo do PR 1.
+  O `uid` sai SÓ do `contaQuery`; as duas rotas têm o `uid` no caminho e o servidor dá 403 se a sessão não for dele. O leitor do snapshot é UM (`lerConexoes` em `conta/api.ts`, usado pelo `conexoesQuery` e pela máquina).
+  A máquina existe duas vezes: `app/src/features/painel/atualizarBanco.ts` e o PORTO `webapp/src/dashboard/lib/atualizarBanco.ts` (SEM nenhum import: o typecheck do app segue a cadeia de imports de qualquer arquivo que o jest do app leia).
+  Presas por `app/__tests__/features/atualizar_banco_paridade.test.ts` (a MESMA tabela de cenários nos dois lados, traço inteiro igual) e por `tests/test_app_espelhos.py` (textos, cadência, motivos, prazo e janela). Mudou uma, mude a outra; o `.github/workflows/app.yml` roda a paridade quando só o porto muda.
+  O estado mora no hook `parts/usarAtualizarBanco.ts`, chamado por `AvisosDoTopo` (o único anfitrião sempre montado: o corpo do aviso desmonta a cada troca de ponto da pilha). A RODADA é a identidade de um `AbortController` (`vivo`), e toda escrita de estado e todo barulho passam por `atual()`.
+  O `marco` decide quando uma leitura pode PARTIR um (a0): só uma feita depois do último marco (montagem, aviso que entra ou sai da tela, partida, fim, abort, volta da aba). O POST tem prazo de 60 s próprio (`comPrazo` de `conta/api.ts`, que corta junto com a rodada), sem `AbortSignal.timeout`/`any` (Safari 14): estourou, lê o snapshot e acompanha. O corte do sinal sai como `AbortError` na raiz (`chamar` em `lib/v2.ts`, que só engole o corpo cortado quando a resposta NÃO é 2xx; `executar` e `enviar` em `app/src/api/client.ts`); 4xx e 5xx mantêm o status.
+  O X, o motivo que some do `/bancos`, a troca de `uid` e o desmonte abortam a rodada calados. Medido em `dashboard_v2_atualizar_banco*.test.mjs` (relógio instalado; cada caso leva o nome no teste). Dois julgamentos do app foram corrigidos junto, para bater com o `refreshVerdict` do `/settings` (`Origem: #1100`):
+  D1, `updating` neutro com `still_updating:false` ACOMPANHA (antes era "em dia"); D2, `items:[]` com `ok:false` é falha (antes era "em dia"; `schemas/openFinance.ts` passou a ler `sync.ok`, opcional). D2 não é alcançável pelo backend de hoje (`items:[]` só sai com `ok:true`); é paridade e defesa.
+  Limites aceitos: (k) o SUCESSO é calado (o app vibra; o web não tem par e anunciar pede texto aprovado pelo dono): o aviso some e o foco vai para o próximo aviso ou "Nenhum aviso." só se o usuário não o levou para fora (`agiu` do PR 1); com o motivo persistindo por OUTRA fonte,
+  "Atualizar agora" volta e o servidor responde `rate_limited` no cooldown de 120 s. (l) Com `acompanhando` o botão sai e o foco cai no `<body>`; o fim leva o foco ao próximo aviso só se a lista não mudou no meio. (m) A rodada viva NÃO para com a aba em segundo plano (no app, para): o POST já foi e abortar
+  não cancela o servidor; o teto é de relógio, então termina certo. (n) "Reconectar" leva ao `/settings`, onde o widget cria um item NOVO (sem modo update). (o) Entre o sucesso do POST e a releitura do `/bancos`, o botão volta ativo e um 2º clique faz um 2º POST: o servidor responde `rate_limited` (cooldown de 120 s por item), que conta como em dia, então não há dano nem cobrança dupla; fechar a janela custa estado (um "enviando" até a releitura) que não vale o ganho. A leitura do snapshot tem prazo de 15 s (o do app, `TEMPO_LIMITE_AUTH_MS`): o teto de 5 min só é checado entre leituras, então a rodada fecha em até 15 s depois dele. `updating` SEM `provider_item_id` não é (a0) nem (c) (é "c0": texto padrão sem "Erro" + "Ver bancos conectados"): `classificar` e `baseDe` têm de concordar, senão a rodada concluía na hora e recarregava em laço. Também: o fim de toda rodada faz `invalidateQueries()` (relê tudo, como um aviso do SSE); o snapshot traz contas e transações (só as conexões ficam no cache; é lido com o aviso na tela e a cadência de uma rodada);
+  `aria-disabled` e não `disabled` no botão em voo (o `disabled` mandaria o foco para o `<body>`). NÃO verificado aqui (só no staging/aparelho): a Pluggy real (PATCH, a espera de ~18 s, cota, `still_updating` de verdade), o widget/OAuth do "Reconectar", o SSE de outro processo, o estrangulamento real dos timers em aba oculta, VoiceOver/NVDA falando o anúncio, Safari/iOS real e o /painel publicado.
   **No app nativo (PR 2b, `app/src/features/painel/receitas.tsx`)**: uma caixa só, no TOPO do Resumo (`TelaResumo`), para todo
   usuário com Previsão liberada, tenha ou não o card "Saldo previsto" no layout (o provider lê a previsão sempre). Previsão
   `negado` ou `erro` sem falha de toque: sem caixa. Falha de um toque deixa o aviso até a próxima leitura boa; se a previsão está `erro`, a caixa
@@ -1273,6 +1288,8 @@ Stripe: `/billing/create-checkout`, `/billing/checkout/bump` (página própria, 
 com 410: a escolha do plano Grátis saiu da /precos em 2026-09-02; a rota
 sobrevive pra devolver `detail.message` a cliente antigo em cache).
 
+**`POST /billing/portal` aceita `?voltar=`** (query, opcional): o cliente só escolhe uma chave de `_PORTAL_VOLTAR` (`/painel` volta para `/painel`, `/app` para `/app`); valor fora da lista (inclusive vazio) é 400 "Destino de retorno inválido." antes de qualquer chamada ao Stripe, e o valor nunca entra na URL. Sem o parâmetro a volta é `/app`, como sempre; o `GET /conta` (que o resto do site e o WhatsApp usam) volta para `/settings` e não mudou. Consumidor: a Cobrança do `/painel`. O Stripe aceitar o `return_url` de produção só se prova no staging ou depois do deploy.
+
 **Funil (`checkout_funnel_events`):** além de `started`/`completed`, grava `viewed_pricing`
 (GET `/precos` de usuário logado, 1 por janela móvel de 24h) e `expired` (webhook
 `checkout.session.expired`). Esse evento também dispara quando o app troca/expira a sessão
@@ -1605,6 +1622,8 @@ servidor comita e a resposta é a única cópia dos códigos); resposta perdida 
 o 409 "já ativado" do `enable` também vira T2). O S0 corrigiu `_current_session_jti` (`frontend/routes/settings.py`): no painel, que roda só com o `dashboard_token`, o jti vinha `None` e "encerrar os outros" revogava a PRÓPRIA sessão; agora vem do que o gate já resolveu. O C1b pôs os "Dispositivos conectados" na mesma página (`conta/Sessoes.tsx`), pelas rotas antigas `GET /settings/{uid}/sessions`, `DELETE /settings/{uid}/sessions/{jti}` e `DELETE /settings/{uid}/sessions` (encerrar as outras): os DELETE têm `comPrazo` (30 s); a releitura depois de falha usa `comPrazoLeitura` (`conta/api.ts`, compartilhado com `lerStatusMfa`); depois do DELETE a linha sai do cache e o `invalidateQueries` relê (o `cancelRefetch` dele cancela o GET em voo); a sessão atual (`is_current` ou `current_jti`) nunca tem botão; resposta fora do contrato cai no erro com "Tentar de novo" (`sessoesDe`). Limite: com `current_jti` null (só token legado sem jti) "encerrar as outras" revoga todas as linhas de `auth_sessions`, igual à `/settings` (`core/sessions.py:revoke_other_sessions`); o token legado não é linha, então a atual segue válida. O app não tem lista de sessões (`app/app/(app)/seguranca.tsx`).
 
 **Configurações do /painel mostram as Notificações (C2).** `conta/Notificacoes.tsx`, pelas rotas antigas `GET`/`PATCH /settings/{uid}/notifications`: os mesmos 7 controles da `/settings`, cada um salva sozinho (corpo só com o campo tocado, no máximo 1 PATCH em voo por página: a trava é do módulo, então sair da rota e voltar não a solta; várias abas são independentes; a tela segue a resposta e o `invalidateQueries` relê). O horário manda o `daily_report_enabled` atual junto: o servidor liga o diário ao gravar a hora (`set_daily_report_hour`), então sem o campo mexer no horário religaria um diário desligado (a própria `/settings` ainda faz isso: issue #1122). `whatsapp_updates_enabled` é consentimento e só vai com o clique no interruptor dele. `HORAS` (`conta/api.ts`) copia as opções de `#notif-daily-hour` do `settings.html`; o teste compara as duas. Par no app: `app/app/(app)/notificacoes.tsx` (#1121), com horário de qualquer hora e minuto e a seção "No celular" para o push de `plano-push-app.md`.
+
+**Cobrança do /painel (`/conta/cobranca`).** `conta/Cobranca.tsx` lê `GET /billing/subscription` (fora da `/api/v2`: `billing` está na lista do `chamar`, `lib/v2.ts`) e mostra o plano (`NOME_DO_PLANO`, `lib/v2.ts`, a fonte única do painel), o selo Mensal/Anual/Pix/Vitalício e a data. A rota não diz se é teste, carência ou cancelada no fim: por isso o cartão só diz "Período atual até DD/MM/AAAA", e o Pix "Válido até" (a data sai por split, nunca `new Date`). Ações: `POST /billing/portal?voltar=%2Fpainel` (abre o portal na mesma aba, só se a resposta for `https:`), `POST /billing/cancel-change` (a troca agendada; 400 `no_change` e 409 `no_subscription` só releem) e o link para a `/precos`. Uma trava no módulo para as duas escritas; `refetchOnWindowFocus` desligado (cada leitura chama o Stripe de 1 a 4 vezes), com releitura no `pageshow` do bfcache. Na carência o `plan_tier` do `/api/v2/me` é `free`: o nome vem da assinatura. Par no app: específico da plataforma (ver `paridade-app-dashboard.md`).
 
 **Fatura com produtos extras:** no `invoice.paid`/`payment_succeeded`, `amount_cents`
 é só o plano: `amount_paid` menos o líquido (`_extras_liquido_cents`) de TODAS as
@@ -2083,6 +2102,44 @@ O APNs recusar com `DeviceTokenNotForTopic` apaga o token, como `BadDeviceToken`
 - **Preferência.** `auth_accounts.push_bank_reconnect_opt_out` (default `false`), exposta como
   `push_bank_reconnect_enabled` em `/settings/{uid}/notifications` (GET e PATCH); leitura direta
   `db.push_bank_reconnect_bloqueado`, sem o cache do `get_auth_user`.
+
+- **Lado do app (PR 2).** `app/src/services/push.ts::registrarAparelho` faz `POST /api/push/register` (só
+  iOS, só com permissão concedida e sessão no cofre; engole qualquer erro, sem retentativa própria) a cada
+  login, abertura e volta do fundo, disparado por `app/src/features/push/Push.tsx` (montado no `_layout`), sempre
+  com a trava biométrica livre: a volta do fundo só conta a volta e o registro roda no efeito com o `registravel` já
+  atualizado, então depois da carência ele espera o Face ID (a borda de subida registra uma vez). O
+  `environment` vem do `aps-environment` do perfil (`features/push/aparelho.ts::ambienteApns`), não do
+  `APP_ENV`: `development` = sandbox, `production` = production, sem perfil = production em aparelho real e
+  sandbox no simulador. O desregistro local no APNs é o gancho em `apagarSessaoNoCofre`
+  (`app/src/storage/secure.ts`): toda limpeza do cofre passa por ali; o Sair NÃO chama
+  `/api/push/unregister` (decisão do dono). `aparelho.ts` é folha (nunca importa `client`/`secure`) e tem uma
+  fila que põe o desregistro antes de qualquer token pedido depois, e o `getDevicePushTokenAsync` tem prazo
+  (`TEMPO_TOKEN_MS`, `app/src/features/push/aparelho.ts`; o nativo só resolve em didRegister/didFail; offline ou no simulador pode nunca resolver e travaria o
+  desregistro do Sair): estourou, o registro desiste e o token que chegar depois é ignorado (nenhum POST). O
+  desregistro CANCELA a espera do token em voo antes de enfileirar (roda na hora: depois da chamada nativa que já
+  estava em voo, mas possivelmente antes da resposta dela), e um registro que decidia enquanto o Sair chegava desiste sem pedir o token;
+  sem sessão no cofre nunca se chama `getDevicePushTokenAsync`. O toque lê `notification.request.trigger.payload.rota` (o iOS não copia a raiz do
+  payload para `content.data`) numa tabela própria (`Map`), espera a sessão e a trava e descarta se anônimo. Cada
+  resposta vale uma vez, por `identifier:date` (o servidor manda `apns-collapse-id` e, no iOS, o identificador de
+  um push remoto com collapse id é o próprio collapse id, igual em todos).
+  Token que rola com o app aberto: `Push.tsx` assina `addPushTokenListener` só com sessão e trava livres, e o
+  ouvinte (`services/push.ts::registrarToken`) registra o token do evento sem NUNCA pedi-lo ao nativo (o evento
+  dispara a cada `didRegister`, inclusive os do nosso `getDevicePushTokenAsync`: pedir de novo faria laço). Ele
+  confere o `ultimoToken` (em `aparelho.ts`, zerado em todo desregistro e quando o POST falha); o
+  `registrarAparelho` continua postando sempre, porque o login novo precisa amarrar o token à sessão nova. Pode
+  sair um POST repetido entre os dois (upsert no servidor).
+  **Limites só do iPhone.** (a) O `getDevicePushTokenAsync` real guarda a promessa nativa no módulo e não chama o
+  nativo de novo enquanto ela está pendente: se o iOS nunca responder ao pedido pendente depois do
+  `unregisterForRemoteNotifications` (Sair offline), todo registro seguinte nesse processo estoura o
+  prazo (`TEMPO_TOKEN_MS`) e devolve `null` até o app reiniciar. O desregistro em si não espera mais o prazo. Conferir: modo avião, abrir o app, Sair, logar como B, tirar do
+  modo avião; o push de A não pode mais chegar (se a resposta tardia re-registrar o aparelho no APNs, chega). (b) A dedupe do toque por `identifier:date` supõe que o 2º push com o mesmo `apns-collapse-id`
+  traz um `date` novo (a data de entrega).
+  **Limite:** `expo-notifications` entra no import de todo o app pelo `secure.ts` (gancho do desregistro): um dev
+  client antigo, sem o módulo nativo, cai nesse import; o build da loja traz o módulo e não corre o risco.
+  A chave da tela de Notificações ("Banco precisa de atenção", só iOS) é `push_bank_reconnect_enabled`:
+  com a permissão do sistema concedida escreve o PATCH (só esse campo); negada abre os Ajustes (zero PATCH);
+  indeterminada pede a permissão, registra e, se a preferência estava desligada no servidor, grava `true`
+  (`features/push/usePermissaoPush.ts`, `services/push.ts::pedirPermissaoPush`). Negada mostra o selo "Nos Ajustes".
 
 Atraso: o push só sai na varredura do tique (~6 h). Plano do push no app e decisões do dono:
 [`plano-push-app.md`](plano-push-app.md).

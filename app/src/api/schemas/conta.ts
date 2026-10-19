@@ -29,6 +29,7 @@ export const notificacoesSchema = z.object({
   tip_email_enabled: bool,
   insight_email_enabled: bool,
   whatsapp_updates_enabled: bool,
+  push_bank_reconnect_enabled: bool,
   daily_report_enabled: bool,
   daily_report_hour: z.number().int().min(0).max(23),
   daily_report_minute: z.number().int().min(0).max(59),

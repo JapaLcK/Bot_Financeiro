@@ -154,7 +154,7 @@ describe("Notificações — horário", () => {
 });
 
 describe("Notificações — seção No celular", () => {
-  it("a tela pronta mostra o grupo 'No celular', ainda sem controles (docs/plano-push-app.md §2)", async () => {
+  it("a tela pronta mostra o grupo 'No celular' (os controles dele: notificacoes_push.test.tsx)", async () => {
     await abrir();
     expect(screen.getByText("No celular")).toBeTruthy();
   });

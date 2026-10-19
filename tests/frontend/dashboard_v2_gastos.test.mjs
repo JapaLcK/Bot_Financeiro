@@ -22,6 +22,9 @@ after(() => browser?.close());
 const abrir = (opts) => abrirPainel(browser, { espera: "#w-categorias", ...opts });
 // Espera o dado: o bloco aparece antes do /gastos responder.
 const COM_DADO = { espera: "#w-cat-detalhe .detail-facts" };
+// Os três blocos saíram do "Carregando…" (que também é `.faint`, como os avisos finais: esperar `.faint` não basta).
+const semCarregando = (page) => page.waitForFunction(() => ["categorias", "calendario", "cat-detalhe"]
+  .every((id) => { const b = document.querySelector(`#w-${id} .w-body`); return b && !b.querySelector("[role=status]"); }), null, { timeout: 8000 });
 const centavos = (t) => Number(t.replace(/\D/g, ""));
 const numero = (loc) => loc.evaluate((v) => [...v.shadowRoot.querySelectorAll(".symbol__value, [part~=digit]")]
   .map((n) => (n.matches("[part~=digit]") ? n.style.getPropertyValue("--current").trim() : n.textContent)).join("").replace(/\s/g, " "));
@@ -230,7 +233,7 @@ test("erro: o 500 da /gastos mostra 'Não deu para carregar.' nos três blocos e
 test("mês fora do histórico: o aviso nos três blocos e nenhum R$ 0", async () => {
   const { ctx, page, ir } = await abrir({ gastos: "indisponivel", gastosCategoria: "indisponivel", espera: "#w-calendario" });
   await ir("/gastos");
-  await page.locator("#w-cat-detalhe .faint").waitFor();
+  await semCarregando(page);
   const r = await page.evaluate(() => ["categorias", "calendario", "cat-detalhe"].map((id) => document.querySelector(`#w-${id} .w-body`).textContent));
   await ctx.close();
   assert.deepEqual(r, Array(3).fill("Este mês está fora do seu histórico."));
@@ -272,7 +275,7 @@ test("mês sem gasto e categoria sem gasto: textos próprios, sem pedir o detalh
   const { ctx, page, ir } = await abrir({ gastos: "vazio", espera: "#w-categorias" });
   const urls = pedidos(page, "/api/v2/gastos/categoria");
   await ir("/gastos");
-  await page.locator("#w-cat-detalhe .faint").waitFor();
+  await semCarregando(page);
   const vazio = [await texto(page, "#w-categorias .w-body"), await texto(page, "#w-cat-detalhe .w-body"), await page.locator("#w-calendario .cal-day").count()];
   await ctx.close();
   assert.deepEqual(vazio, ["Nenhum gasto neste mês.", "Nenhum gasto neste mês.", 31]);

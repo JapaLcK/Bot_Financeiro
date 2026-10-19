@@ -73,6 +73,51 @@ def test_portal_sucesso_preserva_destino_e_cliente(portal, route, return_path):
     assert portal.calls == [{"customer": portal.customer, "return_url": f"{dashboard.DASHBOARD_URL}{return_path}"}]
 
 
+def _post_voltar(portal, query):
+    return portal.client.post(f"/billing/portal{query}", headers={dashboard.CSRF_HEADER_NAME: "csrf-portal-test"})
+
+
+@pytest.mark.parametrize("voltar,return_path", [("/painel", "/painel"), ("/app", "/app")])
+def test_portal_voltar_da_lista_escolhe_o_destino(portal, voltar, return_path):
+    response = _post_voltar(portal, f"?voltar={voltar}")
+    assert response.status_code == 200
+    assert portal.calls == [{"customer": portal.customer, "return_url": f"{dashboard.DASHBOARD_URL}{return_path}"}]
+
+
+INVALIDOS = ["", "/painel/", "/PAINEL", "/painel%23x", "/painel%3Fx%3D1", "//evil.example", "https://evil.example",
+             "/settings", "/conta", "javascript:alert(1)"]
+
+
+@pytest.mark.parametrize("voltar", INVALIDOS)
+def test_portal_voltar_fora_da_lista_e_400_sem_chamar_o_stripe(portal, voltar):
+    response = _post_voltar(portal, f"?voltar={voltar}")
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Destino de retorno inválido."}
+    assert portal.calls == []
+
+
+def test_portal_voltar_repetido_vale_o_ultimo_e_nunca_sai_da_lista(portal):
+    assert _post_voltar(portal, "?voltar=/painel&voltar=https://evil.example").status_code == 400
+    assert portal.calls == []
+    assert _post_voltar(portal, "?voltar=https://evil.example&voltar=/painel").status_code == 200
+    assert [c["return_url"] for c in portal.calls] == [f"{dashboard.DASHBOARD_URL}/painel"]
+
+
+def test_portal_voltar_invalido_sem_sessao_e_401(portal):
+    portal.client.cookies.clear()
+    portal.client.cookies.set(dashboard.CSRF_COOKIE_NAME, "csrf-portal-test")
+    assert _post_voltar(portal, "?voltar=https://evil.example").status_code == 401
+    assert portal.calls == []
+
+
+@pytest.mark.parametrize("voltar", ["/painel", "https://evil.example"])
+def test_portal_voltar_nao_muda_a_ordem_dos_outros_erros(portal, monkeypatch, voltar):
+    """Lista válida segue os erros de sempre; fora da lista é 400 antes do 503 de 'sem chave' (nada vai ao Stripe)."""
+    monkeypatch.setattr(dashboard, "STRIPE_SECRET_KEY", "")
+    assert _post_voltar(portal, f"?voltar={voltar}").status_code == (503 if voltar == "/painel" else 400)
+    assert portal.calls == []
+
+
 @pytest.mark.parametrize("route", ROUTES)
 @pytest.mark.parametrize("request_id", [None, "req_portal_test"])
 def test_falha_stripe_controlada_e_log_seguro(portal, monkeypatch, caplog, route, request_id):

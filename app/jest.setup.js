@@ -13,6 +13,7 @@ function mockEstado() {
     fonte: { carregado: true, erro: null },
     acessibilidade: { valor: false, ouvintes: new Set() },
     app: { atual: "active", ouvintes: new Set() },
+    push: { permissao: "denied", promptResponde: "granted", token: "apns-teste", ambiente: null, resposta: null, ouvintes: new Set(), ouvintesToken: new Set(), atrasoDesregistro: null },
   });
 }
 
@@ -253,3 +254,61 @@ jest.mock("./app/+native-intent", () => {
       a.path.startsWith("/") && !a.path.startsWith("/open-finance-volta") ? a.path : real.redirectSystemPath(a),
   };
 });
+
+// expo-notifications e expo-application são nativos. Global porque `storage/secure.ts`
+// importa a folha do push (`features/push/aparelho.ts`): todo teste que toca o cofre passa por
+// aqui. Estado controlável por `__definirPush({ permissao, promptResponde, token, ambiente,
+// atrasoDesregistro })`, `__responderNotificacao(resposta)` (o toque) e `__emitirToken(data)` (o token rolou); as espiãs são as do módulo.
+// Padrão: permissão NEGADA (nem prompt nem registro: o resto da suíte não vê chamada de push), o
+// prompt concede, o simulador (`ambiente: null`).
+global.__definirPush = (v) => Object.assign(mockEstado().push, v);
+global.__emitirToken = (data) => mockEstado().push.ouvintesToken.forEach((fn) => fn({ type: "ios", data }));
+global.__responderNotificacao = (r) => {
+  mockEstado().push.resposta = r;
+  mockEstado().push.ouvintes.forEach((fn) => fn(r));
+};
+function mockPermissao() {
+  const { permissao } = mockEstado().push;
+  return { status: permissao, granted: permissao === "granted", canAskAgain: permissao === "undetermined" };
+}
+jest.mock("expo-notifications", () => ({
+  DEFAULT_ACTION_IDENTIFIER: "expo.modules.notifications.actions.DEFAULT",
+  setNotificationHandler: jest.fn(),
+  getPermissionsAsync: jest.fn(async () => mockPermissao()),
+  requestPermissionsAsync: jest.fn(async () => {
+    const p = mockEstado().push;
+    if (p.permissao === "undetermined") p.permissao = p.promptResponde;
+    return mockPermissao();
+  }),
+  getDevicePushTokenAsync: jest.fn(async () => ({ type: "ios", data: mockEstado().push.token })),
+  unregisterForNotificationsAsync: jest.fn(async () => {
+    if (mockEstado().push.atrasoDesregistro) await mockEstado().push.atrasoDesregistro;
+  }),
+  // Troca de token com o app aberto: `__emitirToken(data)` dispara os ouvintes.
+  addPushTokenListener: jest.fn((fn) => {
+    mockEstado().push.ouvintesToken.add(fn);
+    return { remove: () => mockEstado().push.ouvintesToken.delete(fn) };
+  }),
+  // Como o real: o `clear` emite o evento e o hook volta a `null`.
+  clearLastNotificationResponse: jest.fn(() => {
+    mockEstado().push.resposta = null;
+    mockEstado().push.ouvintes.forEach((fn) => fn(null));
+  }),
+  // Como o real: começa `undefined`; no efeito lê a última resposta (ou `null`); resposta nova com o MESMO
+  // identificador que a atual é descartada (`determineNextResponse`), e só `clear` zera o hook.
+  useLastNotificationResponse: () => {
+    const React = require("react");
+    const [resposta, definir] = React.useState(undefined);
+    React.useLayoutEffect(() => {
+      const aplicar = (nova) =>
+        definir((antes) => (!nova ? null : !antes || antes.notification.request.identifier !== nova.notification.request.identifier ? nova : antes));
+      aplicar(mockEstado().push.resposta);
+      mockEstado().push.ouvintes.add(aplicar);
+      return () => mockEstado().push.ouvintes.delete(aplicar);
+    }, []);
+    return resposta;
+  },
+}));
+jest.mock("expo-application", () => ({
+  getIosPushNotificationServiceEnvironmentAsync: jest.fn(async () => mockEstado().push.ambiente),
+}));

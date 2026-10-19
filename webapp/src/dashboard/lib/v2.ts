@@ -24,6 +24,9 @@ export const MESES: string[] = DEMO ? MONTHS : (() => {
   return Array.from({ length: 6 }, (_, i) => mesAtual(new Date(Date.UTC(y, m - 6 + i, 15))));
 })();
 
+// O nome do plano na tela, por tier: a fonte única do painel (o servidor não manda nome de exibição).
+export const NOME_DO_PLANO: Record<string, string> = { essencial: "Essencial", plus: "Plus", pro: "Pro" };
+
 // Sem envelope (o `{"detail"}` do CSRF, HTML, JSON inválido) o code é `http_<status>`;
 // sem resposta, status 0 e code "network". A `message` do envelope não vai para a tela:
 // em 402/404 ela é o texto padrão do HTTP em inglês ("Payment Required", "Not Found").
@@ -47,13 +50,14 @@ export class ErroApi extends Error {
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((/^\/(auth|settings|open-finance)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings|open-finance|billing)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
   }
   let body: unknown;
-  try { body = await r.json(); } catch { body = undefined; }
+  // Corpo cortado pelo sinal numa resposta 2xx é prazo, não resposta vazia (par da linha do `fetch`); o 4xx/5xx cortado mantém o status.
+  try { body = await r.json(); } catch (e) { if (r.ok && init.signal?.aborted) throw e; body = undefined; }
   if (r.ok && body !== undefined) return body as T;
   const erro = (body as Partial<ErroV2> | undefined)?.error;
   if (!r.ok && erro && typeof erro.code === "string") {

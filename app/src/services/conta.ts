@@ -14,6 +14,7 @@ export type CorpoNotificacoes = Partial<
     | "tip_email_enabled"
     | "insight_email_enabled"
     | "whatsapp_updates_enabled"
+    | "push_bank_reconnect_enabled"
     | "daily_report_enabled"
     | "daily_report_hour"
     | "daily_report_minute"

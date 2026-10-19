@@ -17,6 +17,7 @@
 .pilha-x { width: 44px; height: 44px; margin: -12px; display: grid; place-items: center; border: 0; background: transparent; color: var(--ink-2); border-radius: var(--r-ctrl); }
 .pilha-corpo .btn { justify-self: start; min-height: 44px; height: auto; white-space: normal; }
 .pilha .sub { border-top: 0; padding: 0; }
+.pilha .btn[aria-disabled="true"] { opacity: .5; cursor: default; }
 .pilha-faixa { height: 6px; margin: 0 8px; border: 1px solid var(--faixa); border-top: 0; border-radius: 0 0 var(--r-panel) var(--r-panel); }
 .pilha-faixa[data-tom="alerta"] { --faixa: var(--warn); }
 .pilha-faixa[data-tom="decisao"] { --faixa: var(--pink); }
