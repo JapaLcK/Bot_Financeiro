@@ -103,8 +103,10 @@ o saldo final continua sendo o do dia 90. A tool avisa antes dos números se os
 bancos conectados estiverem excluídos ou o saldo consolidado não for confirmado.
 Preço, entrada, custos, despesa mensal nova e reserva aceitam no máximo duas casas
 decimais; frações de centavo são recusadas na validação comum da API e da tool.
-Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos.
-Sem persistência e sem tela ainda; lógica em `core/services/decision_simulator.py`.
+Taxas percentuais mantêm precisão livre, inclusive valores muito pequenos (na rota legada e na tool; a v2 aceita juros com no máximo 4 casas, ver "API v2").
+Sem persistência; lógica em `core/services/decision_simulator.py` (`simular` sobre uma snapshot, em Decimal;
+`simulate` é o adaptador legado em float, sem a trajetória diária). Esta rota é a legada (tool e card);
+a tela web usa `POST /api/v2/simulador` (ver "API v2").
 
 **Rota nova vai para um router de `frontend/routes/`**, não para o monólito — exceto
 rota da `/api/v2`, que vai para `api/v2/` (ver "API v2" abaixo). Ao procurar uma rota
@@ -563,6 +565,27 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a dica uma vez, sem mover o foco e nunca com o guia aberto; a Ajuda vira menu só na tela com
   dica (`parts/Ajuda.tsx`), e o Cmd-K ganha "Como funciona esta tela" lá.
 
+- `POST /api/v2/simulador` (`api/v2/simulador.py`; também `/api/app/simulador`): simulador de compra do
+  Pro, o mesmo `simular` da rota legada sobre `previsao_v2.ler_snapshot(uid, 90)` (a mesma leitura da
+  Previsão). Gate `pro_required` (recurso `simulator`) antes de qualquer leitura financeira e antes da
+  validação do corpo (Plus com corpo inválido recebe 403, não 422). Limite declarado: Plus com JSON malformado (não parseável) recebe 422 `json_invalid` antes do 403 do gate (provado pelo Tester); só o JSON bem formado e inválido chega ao 403. Entrada em texto (`_VALOR`, `_DATA`,
+  juros `0..20`), `extra=forbid`, sem `user_id`; a conversão para float acontece só na fronteira de
+  `decision_simulator.Simulacao` (fonte única da validação) e o erro dela vira 422 `validation_error` com
+  `loc` prefixado por `body`, só `loc`/`msg`/`type`. Juros: texto com no máximo 4 casas decimais (`_JUROS`; a tela
+  diz isso). Cada `value_error` do `Simulacao` sai com `type` = código estável e o campo no `loc` (tabela
+  `CODIGOS_ERRO`, chaveada pelas constantes `ERRO_*` de `decision_simulator.py`, que a tool de IA continua recebendo
+  com o texto de sempre): `entrada_maior_que_preco` e `entrada_igual_ao_preco` (loc `entrada`),
+  `entrada_parcial_sem_parcelas`, `juros_sem_parcelas` e `financiado_pequeno_demais` (loc `parcelas`),
+  `data_no_passado` e `data_fora_do_calendario` (loc `data_compra`), `dinheiro_casas` (campo do `loc`),
+  `nomes_repetidos` (loc `["body"]`); `value_error` sem código mapeado sai `valor_invalido`, sem o `msg` original
+  (`msg` fixo "Valor inválido."). Um teste enumera os `raise ValueError` do modelo e falha se algum não tiver código.
+  As `premissas` da resposta são as da snapshot (as mesmas da Previsão, inclusive a do banco quando há) mais `PREMISSAS_V2` (escritas para a pessoa), não a `PREMISSAS` da tool; um teste liga as duas listas regra a regra (§0.7). Resposta: dinheiro em texto, `atual` e cada cenário com
+  `saldo_final`, `pior_dia`, dias abaixo da reserva e `trajetoria` diária (hoje..hoje+90, 91 pontos: um a mais
+  que a da Previsão, que começa amanhã), `delta_vs_atual`, `contrato`. `cabe_nas_premissas` é sempre false e
+  `orientacao` sempre `abster`: sem veredito. Não grava nada. A tela é `#/simulador/compra`
+  (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
+  comprar?"). Em aberto: o corte de hábito real (média de 3 meses, estimativa variável: decisão P2 do dono,
+  PR à parte) e a tela do app.
 - `GET /api/v2/previsao?dias=30|60|90` (`api/v2/previsao.py`): previsão
   condicional do motor único, usuário da sessão e gates antes da leitura financeira.
   Sem `dias`, escolhe o menor horizonte permitido; Plus recebe marcos de 30 dias,
