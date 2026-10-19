@@ -288,3 +288,18 @@ a.tool:focus-visible, button.tool:focus-visible { outline: none; box-shadow: var
 .mfa-segredo { display: block; word-break: break-all; user-select: all; }
 .mfa-qr { width: 216px; max-width: 100%; margin: 0 auto; padding: 8px; border-radius: 12px; background: #fff; } /* fundo branco: a câmera não lê QR escuro no tema escuro */
 .mfa-qr img { display: block; width: 100%; height: auto; }
+
+/* Simulador de compra (widgets/SimuladorCompra.tsx): grid, o gap vale no Safari 14. */
+.comp-form, .comp-corpo, .comp-res { display: grid; gap: 10px; min-width: 0; }
+.comp-cen { align-items: end; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; min-width: 0; }
+.comp-cen > legend, .comp-cen > p, .comp-cen > button, .comp-cen > .comp-campo:nth-of-type(1) { grid-column: 1 / -1; }
+.comp-cen { margin: 0; padding: 12px 0 0; border: 0; border-top: 1px solid var(--line, rgba(255, 255, 255, .08)); }
+.comp-cen legend { padding: 0 8px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.comp-campo { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); min-width: 0; }
+.comp-campo .field { height: 44px; width: 100%; min-width: 0; }
+.comp-campo .field[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--warn); }
+.comp-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
+.comp-form .btn { min-height: 44px; height: auto; white-space: normal; }
+.comp-res { padding-top: 8px; }
+.comp-res .prev-h, .comp-res .legend li { overflow-wrap: anywhere; min-width: 0; }
+.comp-res .chart { height: 240px; }
