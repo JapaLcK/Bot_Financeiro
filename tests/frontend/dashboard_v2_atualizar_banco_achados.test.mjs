@@ -160,6 +160,23 @@ for (const [nome, status, segue] of [["500", 500, true], ["429", 429, true], ["4
   });
 }
 
+test("O1 (GET 200 com corpo que não é JSON, sinal VIVO): continua ErroApi(200), não transitório: a rodada fecha com a falha e há um GET só (um SyntaxError solto seguiria a cadência)", async () => {
+  const { ctx, page, abrir, botao, s } = await abre();
+  s.refresh = (r) => r.fulfill({ json: refreshDe([item("item-11", "updated", true)], [UPDATING()]) });
+  await abrir();
+  s.conexoes = [UPDATING()];
+  await congelar(page);
+  await botao.click();
+  await page.waitForFunction(() => document.querySelector("#avisos-topo .pilha-corpo")?.textContent.includes("O banco está atualizando"));
+  const t0 = await instantePost(page), base = await marca(page);
+  s.falha = (r) => r.fulfill({ status: 200, body: "<html>" });
+  await avancar(page, 120_000, 10_000);
+  const corpo = await texto(page), l = (await gets(page, base)).map((t) => Math.round((t - t0) / 1000));
+  await ctx.close();
+  assert.ok(corpo.includes(FALHA), corpo);
+  assert.deepEqual(l, [5], "um GET só: o 200 sem JSON é ErroApi(200), que encerra");
+});
+
 test("M24: o anúncio do banco não fica pendurado ao trocar de tela (a região de status esvazia)", async () => {
   const { ctx, page, abrir, botao, s } = await abre();
   const portao = porta();
