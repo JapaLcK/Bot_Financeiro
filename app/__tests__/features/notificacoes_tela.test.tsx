@@ -153,6 +153,13 @@ describe("Notificações — horário", () => {
   });
 });
 
+describe("Notificações — seção No celular", () => {
+  it("a tela pronta mostra o grupo 'No celular', ainda sem controles (docs/plano-push-app.md §2)", async () => {
+    await abrir();
+    expect(screen.getByText("No celular")).toBeTruthy();
+  });
+});
+
 describe("Notificações — resumo semanal", () => {
   it("fora do plano e gravado LIGADO: aparece ligado com 'Pausado no seu plano'; o toque manda false e termina desativado com 'Plus e Pro'", async () => {
     await abrir({ weekly_report_available: false, weekly_report_enabled: false, weekly_report_stored_enabled: true });

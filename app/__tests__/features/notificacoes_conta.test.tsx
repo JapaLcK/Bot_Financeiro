@@ -164,10 +164,27 @@ describe("Notificações — lacunas da suíte", () => {
     await esperar();
     falhar = true;
     await appVai("background");
+    const antes = gets();
     await appVai("active");
     await act(async () => void (await drenar()));
+    expect(gets()).toBeGreaterThan(antes); // a releitura saiu (e falhou); sem isto a tela intacta poderia ser só uma tela que nunca releu
     expect(screen.getByLabelText("Resumo mensal")).toBeTruthy();
     expect(screen.queryByText("Não conseguimos carregar suas notificações.")).toBeNull();
+  });
+
+  it("Android: com um PATCH em voo a linha 'Horário dos resumos' fica desativada e o toque não abre o seletor", async () => {
+    emAndroid();
+    const seg = segurar();
+    await abrir({}, { gancho: () => seg.promessa.then(() => undefined) });
+    await trocar("Resumo mensal", false);
+    const linha = screen.getByRole("button", { name: /Horário dos resumos/ });
+    expect(linha.props.accessibilityState).toMatchObject({ disabled: true });
+    fireEvent.press(linha);
+    expect(DateTimePickerAndroid.open).not.toHaveBeenCalled();
+    await act(async () => {
+      seg.soltar();
+      await drenar();
+    });
   });
 
   it("semanal gravado ligado fora do plano: com o PATCH em voo o switch já mostra desligado", async () => {

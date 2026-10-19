@@ -204,7 +204,7 @@ export default function NotificacoesTela() {
               {chave("monthly_report_enabled", "Resumo mensal", v.monthly_report_enabled)}
               <ListRow
                 titulo="Horário dos resumos"
-                desativado={!algumResumo(v)}
+                desativado={gravando || !algumResumo(v)}
                 chevron={android}
                 onPress={android ? () => { if (!gravando) DateTimePickerAndroid.open({ value: dataDaHora(v.daily_report_hour, v.daily_report_minute), mode: "time", is24Hour: true, onValueChange: (_, d) => confirmarHora(d) }); } : undefined}
                 trailing={
@@ -230,6 +230,8 @@ export default function NotificacoesTela() {
                 }
               />
             </GrupoDeLinhas>
+            {/* Nasce vazio: a seção de push entra aqui (docs/plano-push-app.md §2). */}
+            <Destino icone="Bell" rotulo="Push" valor="No celular" />
           </>
         )}
       </View>
