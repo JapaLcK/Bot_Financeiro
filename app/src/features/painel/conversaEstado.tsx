@@ -6,9 +6,10 @@ import { avaliarResposta, cancelarPendencia, conversarFluxo, lerRecurso } from "
 import { mensagemRecurso, useEstadoPainel } from "./provider";
 import type { Pergunta } from "./perguntas";
 import type { Motivo } from "./motivoFeedback";
+import { useConversaAgentes, type TurnoAgente } from "./conversaAgentes";
 /** `passos`/`previa`/`blocos` são só GUARDADOS aqui: quem os desenha é o D2/E1. `parcial` = texto do stream até o `fim`. */
-export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; motivo: Motivo | null; interrompida: boolean; chips: string[] };
-const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
+export type Turno = { id: number; pergunta: string; assunto?: Pergunta; resposta?: string; erro?: string; nota?: string; passos: string[]; previa: string | null; parcial: string; blocos: BlocoChat[]; messageId: number | null; feedback: 1 | -1 | null; motivo: Motivo | null; interrompida: boolean; chips: string[]; agente?: TurnoAgente };
+export const NOVO = { passos: [], previa: null, parcial: "", blocos: [], messageId: null, feedback: null, motivo: null, interrompida: false, chips: [] };
 type Uso = { used: number; limit: number };
 export const cotaCheia = (u: Uso | null) => !!u && u.used >= u.limit;
 /** abrindo = DELETE /ai/pending e a cota em curso, e a fila de DELETE em voo (`delecoes`) ainda não esvaziou; falhou = sem 2xx, envio desligado até "Tentar novamente". */
@@ -17,7 +18,7 @@ type Bloqueio = "abrindo" | "livre" | "falhou";
 export type Avaliacao = { nota: 1 | -1 | null; motivo?: Motivo; texto?: string };
 /** Modo comentário do "Outro": o texto mora aqui (separado do `rascunho` do chat) e só vale para o último turno enquanto ele estiver com 👎 + motivo "outro" (derivado em `useComentario`: reverter a avaliação desliga o modo sozinho). */
 export type Comentario = { turno: number; texto: string };
-type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean | null>; gravarAvaliacao: (turno: Turno, a: Avaliacao) => Promise<boolean | null>; avaliando: boolean; comentario: Comentario | null; comentar: (c: Comentario | null) => void };
+type Conversa = { turnos: Turno[]; uso: Uso | null; bloqueio: Bloqueio; enviando: boolean; rascunho: string; setRascunho: (t: string) => void; abrir: () => void; fechar: () => void; tentarNovamente: () => void; enviar: (texto: string, assunto?: Pergunta, doCampo?: boolean) => Promise<void>; parar: () => void; avaliar: (turno: Turno, nota: 1 | -1) => Promise<boolean | null>; gravarAvaliacao: (turno: Turno, a: Avaliacao) => Promise<boolean | null>; avaliando: boolean; comentario: Comentario | null; comentar: (c: Comentario | null) => void; agentes: ReturnType<typeof useConversaAgentes> };
 const Contexto = createContext<Conversa | null>(null);
 export function useConversa() { const c = useContext(Contexto); if (!c) throw new Error("Conversa indisponível"); return c; }
 /**
@@ -48,6 +49,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const delecoes = useRef(new Set<Promise<void>>()), semDeleteUlt = useRef(false);
   const voo = useRef<AbortController | null>(null), parado = useRef<AbortController | null>(null), avaliando = useRef(new Set<number>()), prep = useRef<AbortController[]>([]), ativos = useRef(new Set<AbortController>());
   const novo = () => { const c = new AbortController(); ativos.current.add(c); return c; };
+  const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, aplicarUso: (u) => { versaoUso.current++; setUso(u); }, falhou });
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
     const alvo = dono.current; if (alvo === null) return null;
     semDeleteUlt.current = semDelete;
@@ -83,10 +85,10 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (!aberta.current) return;
     aberta.current = false; for (const c of prep.current) c.abort(); prep.current = [];
     const emVoo = voo.current ? proximo.current : null; // o turno em voo é sempre o último
-    setRascunho(""); comentar(null); setTurnos((ts) => ts.filter((t) => t.id === emVoo));
+    setRascunho(""); comentar(null); ag.zerar(); setTurnos((ts) => ts.filter((t) => t.id === emVoo)); // zerar: o context dos agentes não sobrevive à saída da aba
     const alvo = dono.current;
     if (enviou.current && !voo.current && alvo !== null) { enviou.current = false; sair(alvo); }
-  }, [sair]);
+  }, [sair, ag.zerar]);
   const enviar = async (texto: string, assunto?: Pergunta, doCampo = false) => { // doCampo: só o envio do campo limpa o rascunho; chip e sugestão preservam o que está digitado. No erro, qualquer origem volta ao campo vazio
     const message = texto.trim(), alvo = dono.current, minha = abertura.current;
     const pode = () => dono.current === alvo && aberta.current && !voo.current && !oculto.current && !!message && message.length <= 2000;
@@ -94,7 +96,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (sujo.current) { const cota = await preparar(); if (!cota || !pode() || cota.used >= cota.limit) return; } // depois de erro: DELETE bloqueante e cota relida antes de enviar
     const ctrl = new AbortController(); ativos.current.add(ctrl); voo.current = ctrl;
     const id = ++proximo.current; enviou.current = true;
-    setEnviando(true); if (doCampo) setRascunho(""); setTurnos((ts) => [...ts, { id, pergunta: message, assunto, ...NOVO }]);
+    setEnviando(true); if (doCampo) setRascunho((r) => r === texto ? "" : r); setTurnos((ts) => [...ts, { id, pergunta: message, assunto, ...NOVO }]);
     const vivo = () => dono.current === alvo && voo.current === ctrl;
     const atualizar = (f: (t: Turno) => Partial<Turno>) => setTurnos((ts) => ts.map((t) => t.id === id ? { ...t, ...f(t) } : t));
     const concluir = () => {
@@ -154,5 +156,5 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     if (aberta.current && uid !== null) void preparar();
   }, [uid, preparar]);
   useEffect(() => () => { for (const c of ativos.current) c.abort(); }, []);
-  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar, parar, avaliar, gravarAvaliacao, avaliando: salvando, comentario, comentar }}>{children}</Contexto.Provider>;
+  return <Contexto.Provider value={{ turnos, uso, bloqueio, enviando, rascunho, setRascunho, abrir, fechar, tentarNovamente: () => void preparar(semDeleteUlt.current || !!voo.current), enviar, parar, avaliar, gravarAvaliacao, avaliando: salvando, comentario, comentar, agentes: ag }}>{children}</Contexto.Provider>;
 }
