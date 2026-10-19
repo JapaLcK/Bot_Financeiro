@@ -25,12 +25,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { startServer } from "./_server.mjs";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { chromium } from "playwright";
 
-const FRONTEND = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "frontend");
 let ORIGIN, server, browser;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
