@@ -22,3 +22,5 @@ export const responderReceita = (chave: string, resposta: "sim" | "nao" | "desfa
 export const criarMeta = (corpo: object, pai: AbortController) => chamar("/api/app/metas", S.metaGravadaSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });
 export const editarMeta = (corpo: object, pai: AbortController) => chamar("/api/app/metas/editar", S.metaGravadaSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });
 export const apagarMeta = (id: number, pai: AbortController) => chamar("/api/app/metas/apagar", S.metaGravadaSchema, { metodo: "POST", corpo: { id }, sinal: comLimite(undefined, pai) });
+/** Simulador de compra: POST só de cálculo (não grava nada). O corpo é montado por `simuladorCompra.ts`. */
+export const simularCompra = (corpo: object, pai: AbortController) => chamar("/api/app/simulador", S.simuladorSchema, { metodo: "POST", corpo, sinal: comLimite(undefined, pai) });

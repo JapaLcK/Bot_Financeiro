@@ -82,13 +82,16 @@ def get_budget(user_id: int, categoria: str) -> dict[str, Any] | None:
             return {"categoria": row["categoria"], "budget": float(row["budget"])}
 
 
-def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, bool]:
+def upsert_budget(user_id: int, categoria: str, budget: float, *, limite: int | None = None) -> tuple[str, bool]:
     """Cria ou atualiza orçamento. Retorna `(categoria_canonical, created)`.
 
     `created=True` se foi INSERT, False se foi UPDATE.
     Se já existe uma row com a mesma categoria (case-insensitive), mantém o
     case original do INSERT — não reescreve. Isso evita "alimentação" virar
     "Alimentação" só porque o user digitou diferente.
+
+    `limite` (teto de orçamentos do plano; None = sem teto) só vale para INSERT:
+    atualizar um existente nunca conta. Estoura -> `PlanLimitExceeded`.
     """
     ensure_user(user_id)
     cat = (categoria or "").strip()
@@ -117,13 +120,28 @@ def upsert_budget(user_id: int, categoria: str, budget: float) -> tuple[str, boo
                 conn.commit()
                 return canon, False
 
+            if limite is not None:
+                # ponytail: count + insert sem lock; N POSTs simultâneos do mesmo Grátis passam até N-1 acima do teto (a trava de duplo clique cobre uma aba só). Lock por usuário se isso aparecer.
+                cur.execute("select count(*) as n from category_budgets where user_id=%s", (user_id,))
+                if cur.fetchone()["n"] >= limite:
+                    from core.services.plan_limits import PlanLimitExceeded
+                    raise PlanLimitExceeded(
+                        "budgets_unlimited",
+                        f"🐷 No seu plano você cria até {limite} orçamentos. Com um plano pago é ilimitado.\n"
+                        "Faça upgrade: https://pigbankai.com/precos",
+                    )
+            # `on conflict`: dois POSTs da mesma categoria nova batem na unique exata; o perdedor atualiza
+            # (como a rota antiga fazia) em vez de estourar UniqueViolation. `xmax = 0` = linha inserida.
             cur.execute(
                 "insert into category_budgets (user_id, categoria, budget) "
-                "values (%s, %s, %s)",
+                "values (%s, %s, %s) "
+                "on conflict (user_id, categoria) do update set budget = excluded.budget "
+                "returning (xmax = 0) as created",
                 (user_id, cat, Decimal(str(budget))),
             )
+            created = cur.fetchone()["created"]
             conn.commit()
-            return cat, True
+            return cat, created
 
 
 def delete_budget(user_id: int, categoria: str) -> bool:
@@ -431,6 +449,7 @@ def get_budgets_status_for_month(
             "pct": round(pct, 1),
             "status": status,
             "remaining": round(budget - spent, 2),
+            "cat_key": r["cat_key"],
         })
 
     total_pct = (total_spent / total_budget * 100.0) if total_budget > 0 else 0.0

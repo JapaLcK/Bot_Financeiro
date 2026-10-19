@@ -32,6 +32,7 @@ import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { MetasPainel } from "./widgets/Metas";
 import { OrcamentoPainel } from "./widgets/OrcamentoDomestico";
+import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
 import { PrevisaoPainel } from "./widgets/Previsao";
 import { Simulator } from "./widgets/Simulator";
 import { SimuladorCompra } from "./widgets/SimuladorCompra";
@@ -205,7 +206,7 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
   { label: "Simulador", line: "E se você cortasse o delivery pela metade? Veja o saldo e as metas mudarem na hora.", icon: "ph-lightning", to: "/simulador" },
   { label: "Painel antigo", line: "O dashboard de sempre, com os seus dados de verdade.", icon: "ph-chart-bar", url: "/app" },
   { label: "Orçamento doméstico", line: "Divida a renda do mês em 6 potes e veja quanto ainda cabe em cada um.", icon: "ph-house", to: "/orcamento" },
-  { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie" },
+  { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
   { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", ...(DEMO ? {} : { to: "/simulador/compra" as Path }) },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy" },
   { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
@@ -240,9 +241,17 @@ function Budget({ s }: { s: DashState }) {
   );
 }
 
+function CategoryBudgets() {
+  return (
+    <Page path="/orcamentos-categoria" lede="Um teto por mês para cada categoria. Quando um gasto que você manda para o Piggy passa de 80%, 100% e 120%, ele avisa no WhatsApp.">
+      <OrcamentosCategoriaPainel />
+    </Page>
+  );
+}
+
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate, "/simulador/compra": ComprarPage,
   "/metas": GoalsPage, "/patrimonio": Wealthy, "/lancamentos": Launches,
-  "/orcamento": Budget, "/ferramentas": Tools, "/piggy": PiggyChat,
+  "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };

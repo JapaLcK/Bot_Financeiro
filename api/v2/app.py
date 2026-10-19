@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.v2 import assinaturas, bancos, categorias, contas, erros, eventos, gastos, guia, investido, lancamentos, me, metas, orcamento_domestico, perfil, previsao, resumo_mes, simulador
+from api.v2 import assinaturas, bancos, categorias, contas, erros, eventos, gastos, guia, investido, lancamentos, me, metas, orcamento_domestico, orcamentos_categoria, perfil, previsao, resumo_mes, simulador
 
 
 class _AppV2(FastAPI):
@@ -33,7 +33,8 @@ def criar_app(prefixo: str, *, com_eventos: bool = True) -> FastAPI:
     sub.add_exception_handler(psycopg.errors.CheckViolation, erros.valor_finito_erro)
     sub.add_exception_handler(Exception, erros.erro_interno)
     for modulo in (me, eventos, perfil, contas, assinaturas, resumo_mes, lancamentos,
-                   categorias, gastos, guia, previsao, investido, metas, bancos, simulador, orcamento_domestico):
+                   categorias, gastos, guia, previsao, investido, metas, bancos, simulador, orcamento_domestico,
+                   orcamentos_categoria):
         if modulo is not eventos or com_eventos:
             sub.include_router(modulo.router)
     return sub

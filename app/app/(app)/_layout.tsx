@@ -40,6 +40,7 @@ function PilhaApp() {
       <Stack.Screen name="notificacoes" options={{ ...CABECALHO, title: "Notificações" }} />
       {/* Folha de meta (criar, editar, apagar): a altura do conteúdo, só aqui; `OPCOES_SHEET` e `SHEET_INTEIRA` seguem como estão. */}
       <Stack.Screen name="meta" options={{ ...OPCOES_SHEET, sheetAllowedDetents: "fitToContents" }} />
+      <Stack.Screen name="simulador-compra" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-ativar" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-novos-codigos" options={SHEET_INTEIRA} />
       <Stack.Screen name="mfa-desativar" options={SHEET_INTEIRA} />

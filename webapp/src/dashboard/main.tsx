@@ -7,8 +7,8 @@ import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
 import { aoConferirConta, contaDaSessao } from "./lib/conversation";
-import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
-import type { Assinaturas, Investido, OrcamentoDomestico } from "./lib/api-v2.gen";
+import { DEMO, contaQuery, contasQuery, escutarLogout, investidoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import type { Assinaturas, Investido, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
@@ -54,6 +54,20 @@ if (DEMO) {
     por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "20000.00", motivos: [] },
       { tipo: "acoes", rotulo: "Ações", valor: "3480.00", motivos: [] }],
     por_banco: [{ banco: "Nubank", valor: "23480.00", motivos: [] }],
+  });
+  // Orçamentos por categoria de exemplo (só o mês corrente, como o real): um por status.
+  const hoje = new Date();
+  const ORC = [["alimentação", "alimentacao", "fork-knife", "🍔", "#f59e0b", 800, 412.3], ["transporte", "transporte", "car", "🚗", "#38bdf8", 300, 255],
+    ["lazer", "lazer", "confetti", "🎉", "#f0abfc", 200, 236.5], ["saúde", "saude", "heartbeat", "💊", "#6ee7b7", 150, 0]] as const;
+  const orcs = ORC.map(([categoria, chave, icone, emoji, cor, teto, gasto]) => {
+    const uso = gasto / teto * 100;
+    return { categoria, chave, emoji, icone, cor, teto: txt(teto), gasto: txt(gasto), restante: txt(teto - gasto), usado_pct: txt(uso),
+      status: uso >= 100 ? "vermelho" as const : uso >= 80 ? "amarelo" as const : "verde" as const };
+  });
+  const somaO = (k: "teto" | "gasto") => orcs.reduce((a, o) => a + Number(o[k]), 0);
+  qc.setQueryData<OrcamentosCategoria>(orcamentosCategoriaQuery.queryKey, {
+    mes: `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`, limite: null, orcamentos: orcs,
+    total: { teto: txt(somaO("teto")), gasto: txt(somaO("gasto")), restante: txt(somaO("teto") - somaO("gasto")), usado_pct: txt(somaO("gasto") / somaO("teto") * 100), em_risco: 2 },
   });
   for (const mes of MONTHS) {
     const m = summary(mes), prev = previousKey(mes);

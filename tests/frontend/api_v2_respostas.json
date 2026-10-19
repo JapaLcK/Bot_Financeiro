@@ -1,5 +1,5 @@
 {
-  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Bancos, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
+  "_comentario": "Respostas da /api/v2 que os testes de navegador servem. tests/test_api_v2_contrato.py valida cada uma pelos modelos Pydantic (Me, Perfil, Contas, Assinaturas, ResumoDoMes, Lancamentos, Categorias, Gastos, Guia, Investido, Metas, Bancos, OrcamentoDomestico, OrcamentosCategoria, ErroV2); a marcada fora_do_envelope tem de NÃO validar. As dicas do guia vêm todas com vista: true (a dica não aparece nem faz POST nos testes que não são dela; os dela trocam em tests/frontend/_guia.mjs). Dinheiro é texto decimal.",
   "me": {
     "free": { "plan_tier": "free" },
     "essencial": { "plan_tier": "essencial" },
@@ -6084,6 +6084,130 @@
         "gasto": "0.00",
         "restante": "0.00",
         "usado_pct": null
+      }
+    }
+  },
+  "orcamentos_categoria": {
+    "padrao": {
+      "mes": "2026-10",
+      "limite": null,
+      "orcamentos": [
+        {
+          "categoria": "alimentação",
+          "chave": "alimentacao",
+          "emoji": "🍽️",
+          "icone": "fork-knife",
+          "cor": "#f97316",
+          "teto": "800.00",
+          "gasto": "412.30",
+          "restante": "387.70",
+          "usado_pct": "51.54",
+          "status": "verde"
+        },
+        {
+          "categoria": "mercado",
+          "chave": "mercado",
+          "emoji": "🛒",
+          "icone": "shopping-cart",
+          "cor": "#16a34a",
+          "teto": "300.00",
+          "gasto": "255.00",
+          "restante": "45.00",
+          "usado_pct": "85.00",
+          "status": "amarelo"
+        },
+        {
+          "categoria": "transporte",
+          "chave": "transporte",
+          "emoji": "🚗",
+          "icone": "car",
+          "cor": "#38bdf8",
+          "teto": "150.00",
+          "gasto": "150.00",
+          "restante": "0.00",
+          "usado_pct": "100.00",
+          "status": "vermelho"
+        },
+        {
+          "categoria": "lazer",
+          "chave": "lazer",
+          "emoji": "🎉",
+          "icone": "confetti",
+          "cor": "#f0abfc",
+          "teto": "200.00",
+          "gasto": "236.50",
+          "restante": "-36.50",
+          "usado_pct": "118.25",
+          "status": "vermelho"
+        }
+      ],
+      "total": {
+        "teto": "1450.00",
+        "gasto": "1053.80",
+        "restante": "396.20",
+        "usado_pct": "72.68",
+        "em_risco": 3
+      }
+    },
+    "vazio": {
+      "mes": "2026-10",
+      "limite": null,
+      "orcamentos": [],
+      "total": {
+        "teto": "0.00",
+        "gasto": "0.00",
+        "restante": "0.00",
+        "usado_pct": "0.00",
+        "em_risco": 0
+      }
+    },
+    "gratis_no_limite": {
+      "mes": "2026-10",
+      "limite": 3,
+      "orcamentos": [
+        {
+          "categoria": "alimentação",
+          "chave": "alimentacao",
+          "emoji": "🍽️",
+          "icone": "fork-knife",
+          "cor": "#f97316",
+          "teto": "800.00",
+          "gasto": "412.30",
+          "restante": "387.70",
+          "usado_pct": "51.54",
+          "status": "verde"
+        },
+        {
+          "categoria": "mercado",
+          "chave": "mercado",
+          "emoji": "🛒",
+          "icone": "shopping-cart",
+          "cor": "#16a34a",
+          "teto": "300.00",
+          "gasto": "255.00",
+          "restante": "45.00",
+          "usado_pct": "85.00",
+          "status": "amarelo"
+        },
+        {
+          "categoria": "lazer",
+          "chave": "lazer",
+          "emoji": "🎉",
+          "icone": "confetti",
+          "cor": "#f0abfc",
+          "teto": "200.00",
+          "gasto": "236.50",
+          "restante": "-36.50",
+          "usado_pct": "118.25",
+          "status": "vermelho"
+        }
+      ],
+      "total": {
+        "teto": "1300.00",
+        "gasto": "903.80",
+        "restante": "396.20",
+        "usado_pct": "69.52",
+        "em_risco": 2
       }
     }
   },
