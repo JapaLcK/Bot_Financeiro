@@ -42,11 +42,15 @@ export const conexoesQuery = (uid: unknown) => queryOptions({
 });
 // `POST /open-finance/{uid}/refresh` (pluggy_sync.py): o veredito por item e o snapshot de depois. Mesma borda do snapshot: o que não é string vira null,
 // `state` fora do contrato vira "" (estado desconhecido, e portanto erro: o default seguro do `refreshVerdict`), `still_updating` só vale se for `true`.
-const refreshDe = (r: { connections?: Partial<Conexao>[]; sync?: { ok?: unknown; items?: unknown } }): Refresh => ({
-  connections: (r.connections ?? []).map(conexaoDe),
-  sync: { ...(typeof r.sync?.ok === "boolean" ? { ok: r.sync.ok } : {}), items: (Array.isArray(r.sync?.items) ? r.sync.items : []).filter(objeto).map((i) => ({
-    item_id: t(i.item_id) ?? "", institution: t(i.institution), state: t(i.state) ?? "", label: t(i.label) ?? "", detail: t(i.detail), reason: t(i.reason), still_updating: i.still_updating === true })) },
-});
+// `sync.items` ausente ou fora de lista é contrato quebrado (o servidor sempre o manda, `pluggy_sync.py`), não "em dia": falha como o `ContratoInvalido` do app.
+const refreshDe = (r: { connections?: Partial<Conexao>[]; sync?: { ok?: unknown; items?: unknown } }): Refresh => {
+  if (!Array.isArray(r.sync?.items)) throw new ErroApi(200, "contrato");
+  return {
+    connections: (r.connections ?? []).map(conexaoDe),
+    sync: { ...(typeof r.sync.ok === "boolean" ? { ok: r.sync.ok } : {}), items: r.sync.items.filter(objeto).map((i) => ({
+      item_id: t(i.item_id) ?? "", institution: t(i.institution), state: t(i.state) ?? "", label: t(i.label) ?? "", detail: t(i.detail), reason: t(i.reason), still_updating: i.still_updating === true })) },
+  };
+};
 export const atualizarBancos = (uid: number, signal: AbortSignal) => escrever<Parameters<typeof refreshDe>[0]>("POST", `/open-finance/${uid}/refresh`, {}, signal).then(refreshDe);
 export const limiteQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "limite", uid],

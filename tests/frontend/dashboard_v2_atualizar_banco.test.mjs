@@ -105,7 +105,9 @@ test("W4: a coleta nunca termina: no teto de 300 s fica o texto do 'demorando' +
   assert.equal(Math.round((ultimo - t0) / 1000), 300, "a última leitura cai no teto exato");
 });
 
-for (const [nome, resposta] of [["500", (r) => r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } })], ["429", (r) => r.fulfill({ status: 429, json: { error: { code: "rate_limited", message: "x" } } })], ["rede", (r) => r.abort()]]) {
+for (const [nome, resposta] of [["500", (r) => r.fulfill({ status: 500, json: { error: { code: "internal_error", message: "x" } } })], ["429", (r) => r.fulfill({ status: 429, json: { error: { code: "rate_limited", message: "x" } } })], ["rede", (r) => r.abort()],
+  // Contrato quebrado (sem `sync.items`, ou fora de lista): falha, nunca "em dia" calado. O vazio VÁLIDO (`items: []`, `ok: true`) conclui: W5b.
+  ["sem sync.items", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true } } })], ["sync.items objeto", (r) => r.fulfill({ json: { ...refreshDe([]), sync: { ok: true, items: {} } } })]]) {
   test(`W5 (${nome}): o POST falha: a falha aparece e 'Atualizar agora' volta NO MESMO nó, com o foco nele, e a falha é anunciada`, async () => {
     const { ctx, page, abrir, botao, s } = await abre();
     s.refresh = resposta;
@@ -122,6 +124,17 @@ for (const [nome, resposta] of [["500", (r) => r.fulfill({ status: 500, json: { 
     assert.ok(corpo.includes(FALHA), corpo);
   });
 }
+
+test("W5b (controle do contrato): 'items: []' com 'ok: true' é resposta válida: conclui em dia, sem falha", async () => {
+  const { ctx, page, abrir, botao, s } = await abre();
+  s.refresh = (r) => { emDia(s); return r.fulfill({ json: refreshDe([]) }); };
+  await abrir();
+  await botao.click();
+  await page.locator(AVISO).waitFor({ state: "detached" });
+  const topo = await page.locator("#avisos-topo").innerText().catch(() => "");
+  await ctx.close();
+  assert.ok(!topo.includes(FALHA), topo);
+});
 
 for (const [nome, status, corpoErro] of [["401 sem WWW-Authenticate", 401, { detail: "Sessão" }], ["402", 402, { error: { code: "payment_required", message: "x" } }]]) {
   test(`W6 (${nome}): nenhum texto de falha, nenhum anúncio e +1 GET /api/v2/me (o portão decide)`, async () => {
