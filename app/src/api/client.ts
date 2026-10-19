@@ -510,6 +510,11 @@ async function superada(refresh: string, fimDeSessao: boolean): Promise<boolean>
   return agora.refresh !== refresh && !daMesmaCadeia(refresh, agora.refresh);
 }
 
+/** Troca de conta ENTRE duas chamadas: `chamar` só vê a que acontece durante uma. Mesma linhagem (refresh renovado no meio) não conta. */
+export async function conferirLinhagem(esperada: { refresh: string } | null): Promise<void> {
+  if (esperada && (await superada(esperada.refresh, false))) throw new RequisicaoSuperada();
+}
+
 /**
  * Mensagem para o usuário, nunca o texto cru do servidor.
  *

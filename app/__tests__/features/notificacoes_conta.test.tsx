@@ -8,7 +8,7 @@ import { act, fireEvent, screen, waitFor } from "expo-router/testing-library";
 
 import * as servicosConta from "@/services/conta";
 
-import { fetchFalso, resposta, segurar } from "./auth_apoio";
+import { credencialDe, fetchFalso, resposta, segurar } from "./auth_apoio";
 import { BASE, abrirNotificacoes, gets, ligada, patches, servidor, trocar } from "./notificacoes_apoio";
 import { appVai, drenar, preparar } from "./seguranca_sem_senha_apoio";
 
@@ -218,6 +218,24 @@ describe("Notificações — lacunas da suíte", () => {
     await appVai("active");
     await act(async () => void (await drenar()));
     expect(gets()).toBeGreaterThan(antes); // a releitura saiu (e falhou); sem isto a tela intacta poderia ser só uma tela que nunca releu
+    expect(screen.getByLabelText("Resumo mensal")).toBeTruthy();
+    expect(screen.queryByText("Não conseguimos carregar suas notificações.")).toBeNull();
+  });
+
+  it("refresh legítimo da mesma conta + 500 na releitura com dado na tela: a tela mantém o dado", async () => {
+    let expirou = false;
+    await abrirNotificacoes(servidor({}, { get: () => (expirou ? resposta(500, { detail: "boom" }) : resposta(200, { ...BASE })) }), {
+      "/auth/me": (o) => (expirou && (o.headers as Record<string, string>)["Authorization"] === "Bearer access-s" ? resposta(401, { detail: "expirado" })
+        : resposta(200, { user_id: 1, email: "sofia@x.com", display_name: "Sofia", app_access: true })),
+      "/auth/refresh": () => resposta(200, credencialDe("s2")),
+    });
+    await esperar();
+    expirou = true;
+    await appVai("background");
+    const antes = gets();
+    await appVai("active");
+    await act(async () => { for (let i = 0; i < 10; i++) await drenar(); });
+    expect(gets()).toBeGreaterThan(antes);
     expect(screen.getByLabelText("Resumo mensal")).toBeTruthy();
     expect(screen.queryByText("Não conseguimos carregar suas notificações.")).toBeNull();
   });
