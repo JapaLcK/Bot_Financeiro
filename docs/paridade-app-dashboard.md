@@ -69,7 +69,7 @@ No web, o Perfil do `/painel` é página real (nome, e-mail, telefone, Conectar 
 
 | Função | Web | App | Imparidade | Quem está atrás | Como resolver |
 |---|---|---|---|---|---|
-| Excluir conta e exportar dados | `/settings` | Não há | — | App | servidor pronto no S1 e S2 (exclusão imediata, `reauth-code`, cancela a assinatura Stripe na hora sem reembolso; `settings.html` já usa e avisa); faltam C1 (app) e C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md) |
+| Excluir conta e exportar dados | `/settings` | Configurações → "Exportar meus dados" e "Excluir conta" (`excluir-conta.tsx`, `exportar-dados.tsx`; exclusão imediata, código por e-mail, Alert nativo) | O `/painel` não tem (só a `/settings`) | Web | C1 (app) feito; falta C3 (`/painel`) no [`plano-app-conta-excluir-exportar-perfil.md`](plano-app-conta-excluir-exportar-perfil.md); a Apple não revoga o token (S3/C2, fora) |
 | Recomeçar do zero | `/settings` | Não há | — | App | a discutir com o dono |
 | Sessões ativas | `/settings` e Configurações do `/painel` | Não há (o código diz que "entram como seção irmã") | — | App | a discutir com o dono |
 | Preferências de notificação | `/settings` e Configurações do `/painel` | Não há | — | App | issue #1121 (e-mail, WhatsApp e resumos, pelas rotas que já existem); a tela do app prevê a seção de push de [`plano-push-app.md`](plano-push-app.md) |
