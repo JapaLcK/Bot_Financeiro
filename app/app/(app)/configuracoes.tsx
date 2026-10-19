@@ -16,6 +16,7 @@ export default function Configuracoes() {
   return <Screen sobCabecalho><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <GrupoDeLinhas>
       <ListRow titulo="Perfil" chevron onPress={() => router.push("/perfil")} />
+      <ListRow titulo="Notificações" chevron onPress={() => router.push("/notificacoes")} />
       <ListRow titulo="Bancos conectados" chevron onPress={() => router.push("/conexoes")} />
       <ListRow titulo="Segurança" chevron onPress={() => router.push("/seguranca")} />
     </GrupoDeLinhas>
