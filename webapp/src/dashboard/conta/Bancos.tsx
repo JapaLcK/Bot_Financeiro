@@ -128,13 +128,14 @@ export function ContaBancos() {
     if (abriu.current.isConnected) abriu.current.focus(); else document.getElementById("page-title")?.focus();
     abriu.current = null;
   }, [alvo, !!sel]);
+  useEffect(() => { if (menu !== null && !lista?.some((c) => c.id === menu)) { setMenu(null); document.getElementById("page-title")?.focus(); } }, [menu, lista]); // o banco do menu aberto saiu do snapshot: o menu não reabre sozinho quando ele voltar
   const fecharDet = () => { setDet(null); if (linha.current?.isConnected) linha.current.focus(); }; // o Safari não foca o botão ao clicar: o foco volta explícito
 
   const abrir = (c: Conexao, botao: HTMLButtonElement) => {
-    if (alvo || emCurso.current || !uidValido(uid)) return;
+    if (alvo || emCurso.current || sync.emVoo() || !uidValido(uid)) return;
     dialogo.current = true;
     abriu.current = botao;
-    sync.calar(); // o anúncio da rodada do "Sincronizar" não volta à região viva quando o `aviso` zerar
+    sync.calar(); // o anúncio da rodada anterior do "Sincronizar" sai da região viva
     setAviso("");
     setFalha(null);
     setAlvo({ uid, id: c.id, nome: nomeDoBanco(c) });
@@ -194,7 +195,7 @@ export function ContaBancos() {
   // `botao`: o "…" da linha quando vem do menu (o foco volta a ele); do detalhe, `linha` já é o botão que o abriu.
   const reconectarBanco = (c: Conexao, botao?: HTMLButtonElement) => {
     const seletor = seletorOF();
-    if (alvo || dialogo.current || emCurso.current || !seletor || !uidValido(uid) || !c.provider_item_id) return;
+    if (alvo || dialogo.current || emCurso.current || sync.emVoo() || !seletor || !uidValido(uid) || !c.provider_item_id) return;
     if (botao) linha.current = botao;
     const a = { uid, id: c.id, nome: nomeDoBanco(c) };
     const s = emCurso.current = iniciar((r, semFoco) => { terminou(a, r, semFoco, s); }, () => seletor.destroy());
@@ -209,9 +210,12 @@ export function ContaBancos() {
   const reconectavel = (c: Conexao) => !!c.provider_item_id && lim?.of_banks_max !== 0 && !SEM_RECONEXAO.includes(c.ui.state) && !!seletorOF();
   const falhaVisivel = falha && (falha.uid === undefined || falha.uid === uid) && (falha.id === undefined || lista?.some((c) => c.id === falha.id)) ? falha : null; // falha de um card que sumiu não fica; a com id só aparece no detalhe daquele banco (ou acima da lista, sem detalhe aberto), a sem id em qualquer um
 
-  const sincronizar = () => { setAviso(""); sync.atualizar(); };
+  // Os refs, não o estado (velho no mesmo tick): reconexão, diálogo do Desconectar e seletor ocupado não andam junto com a rodada (o inverso está em `abrir` e `reconectarBanco`).
+  // Não zera o `aviso` (é de outra ação, p. ex. "X desconectado."): a região viva mostra os dois.
+  const sincronizar = () => { if (alvo || dialogo.current || emCurso.current || seletorOF()?.busy()) return; sync.atualizar(); };
   const m = sync.maquina; // o que a rodada do "Sincronizar" diz na tela (o mesmo texto vai à região viva, `sync.dito`): sucesso é calado, a lista nova é o aviso
   const textoSync = m.fase === "acompanhando" ? ATUALIZANDO_SOZINHO : m.fase === "resultado" ? m.texto : m.fase === "ocioso" && m.falha ? FALHA : "";
+  useEffect(() => { if (!sincronizando && !textoSync) sync.calar(); }, [sincronizando, textoSync]); // fim da rodada sem texto próprio (sucesso, `rate_limited`): "Atualizando os dados do banco" não fica na região viva
   const idMeus = "bancos-meus";
 
   return (
@@ -243,9 +247,9 @@ export function ContaBancos() {
                   {textoSync && <p className={`banco-sync${m.fase === "acompanhando" ? "" : " warn"}`}>{textoSync}</p>}
                   <ul className="banco-lista" aria-label="Bancos">
                     {lista.map((c, i) => (
-                      <BancoCard key={c.id} c={c} i={i} sincronizando={sincronizando} onSincronizar={sincronizar}
+                      <BancoCard key={c.id} c={c} i={i} sincronizando={sincronizando} bloqueado={!!alvo || recon} onSincronizar={sincronizar}
                         onAbrir={(b) => { if (alvo || emCurso.current) return; setMenu(null); linha.current = b; setDet(c.id); }}
-                        menu={<MenuBanco nome={nomeDoBanco(c)} aberto={menu === c.id} bloqueado={!!alvo || recon} alternar={() => setMenu(menu === c.id ? null : c.id)} fechar={() => setMenu(null)}
+                        menu={<MenuBanco nome={nomeDoBanco(c)} aberto={menu === c.id} bloqueado={!!alvo || recon || sincronizando} alternar={() => setMenu(menu === c.id ? null : c.id)} fechar={() => setMenu(null)}
                           onReconectar={reconectavel(c) ? (b) => reconectarBanco(c, b) : undefined} onDesconectar={(b) => abrir(c, b)} />} />
                     ))}
                   </ul>
@@ -256,9 +260,9 @@ export function ContaBancos() {
             </div>
           )}
       </div>
-      <p role="status" className="sr-only">{aviso}{!aviso && sync.dito.t && <span key={sync.dito.n}>{sync.dito.t}</span>}</p>
+      <p role="status" className="sr-only">{aviso}{sync.dito.t && <span key={sync.dito.n}>{sync.dito.t}</span>}</p>
       {erroOF && createPortal(<div role="alert" className="banco-toast"><span>{erroOF}</span><button type="button" aria-label="Dispensar aviso" onClick={() => setErroOF("")}><i className="ph ph-x" aria-hidden="true" /></button></div>, document.body)}
-      {sel && <BancoDetalhe c={sel} i={iDet} v={vDe(sel)} bloqueado={!!alvo || recon} falha={falhaVisivel && (falhaVisivel.id === undefined || falhaVisivel.id === sel.id) ? falhaVisivel.texto : undefined} onDesconectar={(b) => abrir(sel, b)} onReconectar={reconectavel(sel) ? () => reconectarBanco(sel) : undefined} fechar={fecharDet} />}
+      {sel && <BancoDetalhe c={sel} i={iDet} v={vDe(sel)} bloqueado={!!alvo || recon} sync={sincronizando} falha={falhaVisivel && (falhaVisivel.id === undefined || falhaVisivel.id === sel.id) ? falhaVisivel.texto : undefined} onDesconectar={(b) => abrir(sel, b)} onReconectar={reconectavel(sel) ? () => reconectarBanco(sel) : undefined} fechar={fecharDet} />}
       {alvo && <Confirma titulo={`Desconectar ${alvo.nome}?`} texto="Os dados importados deste banco serão removidos. Seus outros bancos e lançamentos manuais serão preservados."
         botao="Desconectar" pendente="Desconectando…" cancelar="Manter banco" agir={() => desconectar(alvo)} fechar={fechar} />}
     </>

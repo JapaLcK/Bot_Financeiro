@@ -56,14 +56,62 @@ test("RES 'Concluída' só com todos em tom ok (verde, ícone de check); banco e
   assert.deepEqual((await lido([con(11, "Nubank"), con(12, "Inter", "updating", "Atualizando…")])).estado, ["Atenção", "banco-estado estado-pendente"]);
 });
 
-test("RES sem banco: '0 bancos conectados', '—' na sincronização, nenhum 'Concluída' e um único 'Conectar banco' (no resumo, não no estado vazio)", async () => {
+test("RES o pior tom vence nas DUAS ordens: erro vence pendente (banco em erro antes ou depois do que coleta); pendente sozinho fica pendente", async () => {
+  const lido = async (conexoes) => {
+    const { ctx, page } = await telaRecon({ conexoes }, SEM_VAGAS);
+    const r = await page.locator(".banco-resumo .banco-estado").evaluate((e) => [e.textContent, e.className]);
+    await ctx.close();
+    return r;
+  };
+  const coleta = con(11, "Nubank", "updating", "Atualizando…"), erro = con(12, "Inter", ATENCAO, "Atenção");
+  assert.deepEqual(await lido([coleta, erro]), ["Atenção", "banco-estado estado-erro"]);
+  assert.deepEqual(await lido([erro, coleta]), ["Atenção", "banco-estado estado-erro"]);
+  assert.deepEqual(await lido([coleta, con(13, "Itaú")]), ["Atenção", "banco-estado estado-pendente"]); // positivo: sem erro, o pendente aparece
+});
+
+test("RES a 'última sincronização' do resumo é a MAIS RECENTE, esteja na 1ª, no meio ou na última posição da lista", async () => {
+  const velha = "2026-09-30T15:00:00+00:00", meio = "2026-10-02T02:30:00+00:00", nova = "2026-10-02T14:47:59+00:00";
+  const lido = async (datas) => {
+    const { ctx, page } = await telaRecon({ conexoes: datas.map((d, i) => con(11 + i, ["Nubank", "Inter", "Itaú"][i], "updated", "Atualizado", d)) }, SEM_VAGAS);
+    const r = await page.locator(".banco-resumo .resumo-quando").innerText();
+    await ctx.close();
+    return r;
+  };
+  assert.equal(await lido([velha, meio, nova]), "Hoje, 11:47"); // a mais nova por último
+  assert.equal(await lido([velha, nova, meio]), "Hoje, 11:47"); // no meio
+  assert.equal(await lido([nova, velha, meio]), "Hoje, 11:47"); // no começo
+  assert.equal(await lido([velha, meio, "lixo"]), "Ontem, 23:30"); // data inválida não vence nem apaga
+});
+
+test("RES data de OUTRO ano leva o ano ('02/10/2025, 09:00'), do ano corrente não; na virada de ano, 'Ontem' é de ontem e o dia 30/12 já é do ano passado (relógio fixo)", async () => {
+  const conexoes = [con(11, "Nubank", "updated", "Atualizado", "2025-10-02T12:00:00+00:00"), con(12, "Inter", "updated", "Atualizado", "2026-01-05T12:00:00+00:00"), con(13, "Itaú", "updated", "Atualizado", "2026-10-02T02:30:00+00:00")];
+  const { ctx, page, srv } = await telaRecon({ conexoes }, SEM_VAGAS);
+  const antes = { linhas: await texto(page, ".banco-card .banco-quando > span:last-child"), resumo: await page.locator(".banco-resumo .resumo-quando").innerText() };
+  // Vira o relógio para 2027-01-01 09:00 em São Paulo e remonta a tela (a data é calculada ao renderizar), com o snapshot de datas da virada.
+  srv.conexoes = [con(11, "Nubank", "updated", "Atualizado", "2026-12-31T22:30:00+00:00"), con(12, "Inter", "updated", "Atualizado", "2026-12-30T12:00:00+00:00"), con(13, "Itaú", "updated", "Atualizado", "2027-01-01T11:00:00+00:00")];
+  await page.clock.setFixedTime(new Date("2027-01-01T12:00:00Z"));
+  await page.evaluate(() => { location.hash = "#/"; });
+  await page.waitForFunction(() => !document.querySelector(".banco-card"), null, { timeout: 8000 });
+  await page.evaluate(() => { location.hash = "#/conta/bancos"; });
+  await page.locator(".banco-card", { hasText: "Ontem, 19:30" }).waitFor(); // o cache velho aparece primeiro: espera o snapshot novo
+  const virada = { linhas: await texto(page, ".banco-card .banco-quando > span:last-child"), resumo: await page.locator(".banco-resumo .resumo-quando").innerText() };
+  await ctx.close();
+  assert.deepEqual(antes.linhas, ["02/10/2025, 09:00", "05/01, 09:00", "Ontem, 23:30"]);
+  assert.equal(antes.resumo, "Ontem, 23:30");
+  assert.deepEqual(virada.linhas, ["Ontem, 19:30", "30/12/2026, 09:00", "Hoje, 08:00"]);
+  assert.equal(virada.resumo, "Hoje, 08:00");
+});
+
+test("RES sem banco: '0 bancos conectados', '—' na sincronização, ladrilho NEUTRO (relógio, sem verde nem alerta), nenhum 'Concluída' e um único 'Conectar banco' (no resumo, não no estado vazio)", async () => {
   const { ctx, page } = await telaRecon({ conexoes: [] }, SEM_VAGAS);
   await page.locator(".empty img").waitFor();
+  const ladrilho = await page.locator(".banco-resumo .resumo-ico").evaluateAll((l) => l.map((e) => [e.className, e.querySelector("i").className]));
   const r = { resumo: await page.locator(".banco-resumo").innerText(), conectar: await page.getByRole("link", { name: "Conectar banco", exact: true }).count(), vazio: await page.locator(".empty").innerText(), seguro: await page.locator(".banco-seguro").count() };
   await ctx.close();
   assert.match(r.resumo, /^0\nbancos conectados/);
   assert.ok(r.resumo.includes("—") && !r.resumo.includes("Concluída") && !r.resumo.includes("Atenção"), r.resumo);
   assert.deepEqual([r.conectar, r.vazio, r.seguro], [1, "Nenhum banco conectado.", 1]);
+  assert.deepEqual(ladrilho, [["resumo-ico", "ph ph-bank"], ["resumo-ico", "ph ph-clock"]]); // sem `estado-ok`: nada de verde com 0 bancos
 });
 
 test("RES a segurança fecha a página: texto e o link 'Saiba mais' externo (nova aba, noopener) para o Open Finance do Banco Central", async () => {

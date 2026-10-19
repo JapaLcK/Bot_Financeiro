@@ -31,8 +31,9 @@ export const Estado = ({ c }: { c: Conexao }) => (
 
 // Um banco conectado, em linha: ladrilho, nome, estado, última atualização e as ações. "Detalhes" abre o BancoDetalhe (os valores do `/bancos`, juntados por id, nunca por nome);
 // o botão que abriu entra no `onAbrir` para o foco voltar a ele quando o detalhe fechar. "Sincronizar" atualiza TODOS os bancos (o servidor só sabe fazer todos), então todos
-// os botões travam juntos (`sincronizando`). `aria-disabled`, não `disabled`: o botão focado não pode perder o foco no meio da rodada. O menu "…" vem pronto (`menu`).
-export function BancoCard({ c, i, sincronizando, onAbrir, onSincronizar, menu }: { c: Conexao; i: number; sincronizando: boolean; onAbrir: (botao: HTMLButtonElement) => void; onSincronizar: () => void; menu: ReactNode }) {
+// os botões travam juntos (`sincronizando`). `bloqueado` (reconexão ou diálogo de Desconectar em curso) só PINTA o travamento: quem decide é o `sincronizar` do pai, que confere refs (o estado está velho no mesmo tick).
+// `aria-disabled`, não `disabled`: o botão focado não pode perder o foco no meio da rodada. O menu "…" vem pronto (`menu`).
+export function BancoCard({ c, i, sincronizando, bloqueado, onAbrir, onSincronizar, menu }: { c: Conexao; i: number; sincronizando: boolean; bloqueado: boolean; onAbrir: (botao: HTMLButtonElement) => void; onSincronizar: () => void; menu: ReactNode }) {
   const nome = nomeDoBanco(c);
   return (
     <li className="banco-card">
@@ -44,7 +45,7 @@ export function BancoCard({ c, i, sincronizando, onAbrir, onSincronizar, menu }:
         <button type="button" className="btn btn-ghost banco-acao banco-linha" aria-haspopup="dialog" aria-label={`Detalhes de ${nome}`} onClick={(e) => onAbrir(e.currentTarget)}>
           <i className="ph ph-eye" aria-hidden="true" /><span className="banco-bt">Detalhes</span>
         </button>
-        <button type="button" className="btn btn-ghost banco-acao" aria-label={sincronizando ? "Sincronizando…" : "Sincronizar todos os bancos"} aria-busy={sincronizando} aria-disabled={sincronizando || undefined} onClick={() => { if (!sincronizando) onSincronizar(); }}>
+        <button type="button" className="btn btn-ghost banco-acao" aria-label={sincronizando ? "Sincronizando…" : "Sincronizar todos os bancos"} aria-busy={sincronizando} aria-disabled={sincronizando || bloqueado || undefined} onClick={() => { if (!sincronizando) onSincronizar(); }}>
           <i className="ph ph-arrows-clockwise" aria-hidden="true" /><span className="banco-bt">{sincronizando ? "Sincronizando…" : "Sincronizar"}</span>
         </button>
         {menu}

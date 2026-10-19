@@ -108,5 +108,6 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
     acao, maquina: vista, dito, cancelar: abortar,
     atualizar: () => { if (uid !== undefined && !vivo.current) correr(uid, atualizar); }, // o ref, não o estado: dois cliques no mesmo tique fazem 1 POST
     calar,
+    emVoo: () => vivo.current !== null, // há rodada em curso (síncrono, como o ref do `atualizar`): quem não pode andar junto com ela confere aqui
   };
 }

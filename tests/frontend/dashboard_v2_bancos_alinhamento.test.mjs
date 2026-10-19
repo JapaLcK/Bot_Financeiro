@@ -83,3 +83,23 @@ test("nome de 70 letras sem espaço e 'Disponíveis' longos não geram rolagem h
     assert.ok(m.cards.every((c) => c.right <= m.lateral[1] + 1), `${width}: card fora da tela`);
   }
 });
+
+// O menu "…" da ÚLTIMA linha de uma lista longa não pode ser cortado por `overflow` de um ancestral (o card `.banco-sec`): o menu desce além do card, por cima do seguinte.
+// Controle negativo: `overflow: hidden` em `.banco-sec` (styles/bancos.css), rebuild: os dois tamanhos ficam vermelhos (o último item sai do alcance do clique).
+for (const [width, height] of [[1280, 800], [390, 844]]) {
+  test(`${width}x${height}: o '…' da última de 10 bancos abre um menu clicável (elementFromPoint no 1º e no último item) e dentro da tela`, async () => {
+    const conexoes = Array.from({ length: 10 }, (_, i) => con(11 + i, `Banco ${i + 1}`));
+    const { ctx, page } = await telaRecon({ conexoes }, { width, height, vagas: "" });
+    const mais = page.getByRole("button", { name: "Mais ações de Banco 10" });
+    await mais.evaluate((e) => e.scrollIntoView({ block: "center" })); // o botão no meio da tela (rolar o menu depois rolaria o próprio `overflow: hidden` e esconderia o corte)
+    await mais.click();
+    const itens = page.getByRole("menuitem");
+    const m = await itens.evaluateAll((l) => l.map((e) => {
+      const b = e.getBoundingClientRect(), topo = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return { texto: e.textContent, clicavel: !!topo && e.contains(topo), dentro: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight };
+    }));
+    await ctx.close();
+    assert.deepEqual(m.map((x) => x.texto), ["Reconectar", "Desconectar"]);
+    assert.deepEqual(m.map((x) => [x.clicavel, x.dentro]), [[true, true], [true, true]]);
+  });
+}

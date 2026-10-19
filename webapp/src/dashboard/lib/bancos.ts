@@ -60,14 +60,15 @@ export const TOM_DO_ESTADO: Record<string, "ok" | "pendente" | "erro"> = {
 };
 export const tomDoEstado = (s: unknown) => (Object.prototype.hasOwnProperty.call(TOM_DO_ESTADO, String(s)) ? TOM_DO_ESTADO[String(s)] : "pendente"); // "constructor" não é estado (herdaria função)
 
-// "Hoje, 14:32", "Ontem, 19:45" ou "03/10, 08:10" no fuso do painel (nunca o do aparelho); sem data válida, "—". Sem dateStyle/hourCycle: Safari 14.0.
+// "Hoje, 14:32", "Ontem, 19:45", "03/10, 08:10" ou, de outro ano, "03/10/2025, 08:10" no fuso do painel (nunca o do aparelho); sem data válida, "—". Sem dateStyle/hourCycle: Safari 14.0.
 const AAAA_MM_DD = new Intl.DateTimeFormat("en-CA", { timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit" });
 const HORA_MIN = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, hour: "2-digit", minute: "2-digit" });
 export function quandoSync(iso: unknown, agora = Date.now()): string {
   const ms = instante(iso);
   if (!Number.isFinite(ms)) return "—";
   const dia = AAAA_MM_DD.format(ms);
-  const quando = dia === AAAA_MM_DD.format(agora) ? "Hoje" : dia === AAAA_MM_DD.format(agora - 864e5) ? "Ontem" : dia.slice(8) + "/" + dia.slice(5, 7);
+  const hoje = AAAA_MM_DD.format(agora);
+  const quando = dia === hoje ? "Hoje" : dia === AAAA_MM_DD.format(agora - 864e5) ? "Ontem" : dia.slice(8) + "/" + dia.slice(5, 7) + (dia.slice(0, 4) === hoje.slice(0, 4) ? "" : "/" + dia.slice(0, 4));
   return `${quando}, ${HORA_MIN.format(ms)}`;
 }
 // A sincronização mais recente entre as conexões (a que o resumo mostra); nenhuma com data válida = null.
