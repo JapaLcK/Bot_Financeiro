@@ -262,6 +262,25 @@ it("escolher na lista com o cursor no meio de '@repórter' troca o token inteiro
   await act(async () => { fireEvent(campo(), "selectionChange", { nativeEvent: { selection: { start: 4, end: 4 } } }); await drenar(); });
   await toque("Repórter, Resumo do mês"); expect(campo().props.value).toBe("@Repórter oi");
 });
+it("catálogo falha e a menção cai no Piggy depois que a cota encheu: o Piggy não envia (a cota é a de agora, não a do render)", async () => {
+  const g = segurar(); ag.segurarGet = g; await abrir(); await enviar("@Xerife a"); await act(drenar);
+  const f = respostaFluxo(); srv.chat = () => f; await enviar("oi");
+  await act(async () => { f.empurrar({ tipo: "fim", reply: "ok", usage: { used: 100, limit: 100 }, message_id: 3, chips: [] }); f.fechar(); await drenar(); });
+  ag.getStatus = 500; await act(async () => { g.soltar(); await drenar(); }); expect(posts()).toHaveLength(1); expect(ag.nChat).toBe(0);
+});
+it("releitura velha que volta depois da leitura da reabertura não sobrescreve a cota mais nova", async () => {
+  let n = 0; ag.chat = () => resp("Ok", { usage: [{ used: 90, limit: 100 }, { used: 1, limit: 100 }][n++]! });
+  await abrir(); await enviar("@Xerife oi"); await waitFor(() => expect(screen.getByText("90 de 100 mensagens utilizadas")).toBeTruthy());
+  const base = fetchFalso.getMockImplementation()!, g = segurar(); let k = 0;
+  fetchFalso.mockImplementation(async (url: string, req: RequestInit) => {
+    if (caminho(url) !== "/ai/messages") return base(url, req);
+    if (++k === 1) { await g.promessa; return resposta(200, { messages: [], usage: { used: 99, limit: 100 } }); } // a releitura, velha e lenta
+    return resposta(200, { messages: [], usage: { used: 100, limit: 100 } }); // a leitura da reabertura
+  });
+  await enviar("@Xerife b"); await act(drenar); // menor: relê (presa)
+  await ir("/resumo"); await voltar(); await digitar("mais uma"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+  await act(async () => { g.soltar(); await drenar(); }); await digitar("mais uma de novo"); expect(screen.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+});
 it("cota: a usage da resposta do agente aparece como '85 de 100 mensagens utilizadas'", async () => {
   ag.chat = () => resp("Ok", { usage: { used: 85, limit: 100 } }); await abrir(); await enviar("@Xerife oi");
   await waitFor(() => expect(screen.getByText("85 de 100 mensagens utilizadas")).toBeTruthy());

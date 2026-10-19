@@ -57,7 +57,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
     versaoUso.current++; const u = usoAtual.current;
     if (!u || (u.limit === n.limit && n.used >= u.used)) { usoAtual.current = n; setUso(n); return; }
     const alvo = dono.current, v0 = versaoUso.current, c = novo();
-    void lerRecurso("/ai/messages?limit=1", conversaSchema, c).then((r) => { if (dono.current === alvo && versaoUso.current === v0) { usoAtual.current = r.usage; setUso(r.usage); } }, () => {}).finally(() => ativos.current.delete(c));
+    void lerRecurso("/ai/messages?limit=1", conversaSchema, c).then((r) => { if (dono.current === alvo && versaoUso.current === v0) { versaoUso.current++; usoAtual.current = r.usage; setUso(r.usage); } }, () => {}).finally(() => ativos.current.delete(c));
   };
   const ag = useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos, setRascunho, livre: () => bloqueioAtual.current === "livre" && !oculto.current && !cotaCheia(usoAtual.current), aplicarUso, esgotarCota: () => { versaoUso.current++; const u = usoAtual.current; if (u) { const e = { ...u, used: Math.max(u.used, u.limit) }; usoAtual.current = e; setUso(e); } }, falhou });
   const preparar = useCallback(async (semDelete = false): Promise<Uso | null> => {
@@ -72,8 +72,8 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
       const [, cota] = await Promise.all([d, lerRecurso("/ai/messages?limit=1", conversaSchema, cg), ...delecoes.current]);
       if (!vivo()) return null;
       if (erros.current === e0 && !semDelete) sujo.current = false;
-      if (versaoUso.current === v0) { usoAtual.current = cota.usage; setUso(cota.usage); }
-      setBloqueio("livre"); return versaoUso.current === v0 ? cota.usage : usoAtual.current; // leitura descartada (outra cota gravou no meio): vale a cota da tela
+      if (versaoUso.current === v0) { versaoUso.current++; usoAtual.current = cota.usage; setUso(cota.usage); } // toda cota aplicada avança a versão: uma leitura mais velha em voo não passa mais pela guarda
+      setBloqueio("livre"); return usoAtual.current; // a leitura, se entrou; se foi descartada (outra cota gravou no meio), a cota da tela
     } catch (e) { if (vivo()) { falhou(e); setBloqueio("falhou"); } return null; }
     finally { ativos.current.delete(cg); }
   }, [falhou]);
@@ -102,7 +102,7 @@ export function ConversaProvider({ children }: { children: ReactNode }) {
   const enviar = async (texto: string, assunto?: Pergunta, doCampo = false) => { // doCampo: só o envio do campo limpa o rascunho; chip e sugestão preservam o que está digitado. No erro, qualquer origem volta ao campo vazio
     const message = texto.trim(), alvo = dono.current, minha = abertura.current;
     const pode = () => dono.current === alvo && aberta.current && !voo.current && !oculto.current && !!message && message.length <= 2000;
-    if (alvo === null || !pode() || bloqueio !== "livre" || !uso || uso.used >= uso.limit) return;
+    const u0 = usoAtual.current; if (alvo === null || !pode() || bloqueioAtual.current !== "livre" || !u0 || u0.used >= u0.limit) return; // refs: o enviar pode rodar depois de um await (o rotear que caiu no Piggy)
     if (sujo.current) { const cota = await preparar(); if (!cota || !pode() || cota.used >= cota.limit) return; } // depois de erro: DELETE bloqueante e cota relida antes de enviar
     const ctrl = new AbortController(); ativos.current.add(ctrl); voo.current = ctrl;
     const id = ++proximo.current; enviou.current = true;
