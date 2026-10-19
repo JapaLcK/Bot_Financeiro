@@ -26,7 +26,7 @@ Medido na `main` em 53681b4e (2026-10-17). As colunas comparam telas; o chat do 
 | Para onde vai | `/gastos`: estabelecimentos, série de meses, detalhe da categoria | Lê só `mes-detalhes`; o schema de `/gastos` existe, mas só o hook do "Seu dia" o usa | Sem estabelecimentos, série nem detalhe | App | a discutir com o dono |
 | Dia a dia (calendário) | Quantidade e categorias por dia | Só entrou e saiu por dia; o toque abre o extrato do dia | Menos informação no app | App | a discutir com o dono |
 | Seu dia | Card em `/gastos` (`GastosDiaTopo.tsx`) | Só a base: `useGastosMes` (nenhuma tela o usa) e o Extrato que aceita `dia` | O card não existe no app | App (plano em `docs/plano-seu-dia-app.md`) | a discutir com o dono |
-| Simulador | Simulador de compra real (`#/simulador/compra`, `POST /api/v2/simulador`); hábitos seguem de exemplo | Só corte por categoria; a tela de compra é o próximo PR | O app não tem o simulador de compra; hábitos: o web é exemplo, o app é real só no corte por categoria | App (compra) e ambos (hábitos) | a discutir com o dono |
+| Simulador | Simulador de compra real (`#/simulador/compra`, `POST /api/v2/simulador`); hábitos seguem de exemplo | Corte por categoria + simulador de compra real (folha `simulador-compra`, `+` do bloco Simulador na aba Gastos, só Pro) | Hábitos: o web é exemplo, o app é real só no corte por categoria | Ambos (hábitos) | a discutir com o dono |
 | Assinaturas | "Não é assinatura", "Voltar a mostrar" (restaura a marca), "Desfazer", e o aviso de reajuste com o valor anterior | Só "Ignorar", "É assinatura" e "Reconsiderar", que sempre manda `nenhuma` e apaga a marca antiga; não mostra o reajuste | O app perde a marca manual ao reconsiderar | App | a discutir com o dono |
 
 ## Previsão
