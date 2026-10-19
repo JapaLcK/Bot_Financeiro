@@ -23,13 +23,13 @@ it("Free mostra falta de acesso sem consultar nem oferecer conexão", async () =
   expect(screen.queryByRole("button", { name: "Conectar meu banco" })).toBeNull();
   expect(chamadas().some((c) => c.caminho === "/onboarding/open-finance")).toBe(false);
 });
-it("conclusão servidor mantém Início e avatar abre Configurações/Teste OF", async () => {
+it("conclusão servidor mantém Início e avatar abre Configurações", async () => {
   servidor(p, true); renderRouter("./app", { initialUrl: "/" });
   await waitFor(() => expect(screen.getByRole("button", { name: "Bancos conectados" })).toBeTruthy());
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Abrir minha conta" })); await drenar(); });
   await act(async () => { fireEvent.press(screen.getByRole("button", { name: "Configurações" })); await drenar(); });
   await waitFor(() => expect(screen).toHavePathname("/configuracoes"));
-  expect(screen.getByRole("button", { name: "Teste Open Finance" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Teste Open Finance" })).toBeNull();
   // Lista agrupada: sem o subtítulo antigo, e "Sair" vermelho (danger) dentro do próprio grupo.
   expect(screen.queryByText("Sua conta, do seu jeito")).toBeNull();
   expect(StyleSheet.flatten(screen.getByText("Sair").props.style).color).toBe(claro.danger);
