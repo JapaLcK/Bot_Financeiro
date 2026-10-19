@@ -14,8 +14,6 @@ export interface BarrasMensaisProps {
   meses: BarraMensal[];
   /** Texto compacto do valor, escrito só em cima da barra do mês atual. */
   rotuloValor: (valor: number) => string;
-  /** `true` (padrão): a coluna `atual` é um período em andamento ("*" no rótulo e a nota "* mês em andamento"). `false`: ela só fica em destaque (Saldo previsto: a coluna do fim do horizonte). */
-  parcial?: boolean;
 }
 
 // Colunas flex:1 em pai que encolhe ao conteúdo (fala do Piggy no chat) ficariam espremidas: piso por coluna, cabe o "R$ 12,3k".
@@ -32,7 +30,7 @@ export const alturaBarra = (valor: number, maximo: number, altura: number) => va
  * Crescem de baixo para cima em 450ms ao montar (transform nativo; com "reduzir movimento" o hook começa em false e resolve assíncrono: o 1º quadro pode animar e termina parado em 1, limite aceito).
  * O desenho some do VoiceOver (os números exatos estão na lista abaixo); a legenda do mês em andamento não, para o valor parcial ser anunciado.
  */
-export function BarrasMensais({ meses, rotuloValor, parcial = true }: BarrasMensaisProps) {
+export function BarrasMensais({ meses, rotuloValor }: BarrasMensaisProps) {
   const { cores } = useTema();
   const reduzir = useReduzirMovimento();
   const crescer = useRef(new Animated.Value(0)).current;
@@ -60,12 +58,12 @@ export function BarrasMensais({ meses, rotuloValor, parcial = true }: BarrasMens
               <View testID="barra-trilho" style={{ width: LARGURA, height: ALTURA, justifyContent: "flex-end", overflow: "hidden", borderRadius: raio.barra, backgroundColor: cores.surfaceControl, opacity: m.apagado ? OPACIDADE_APAGADO : 1 }}>
                 {h > 0 && <Animated.View testID="barra" style={{ height: h, borderTopLeftRadius: raio.barra, borderTopRightRadius: raio.barra, backgroundColor: cores.brand, opacity: m.atual ? 1 : OPACIDADE_OUTROS, transform: [{ translateY: crescer.interpolate({ inputRange: [0, 1], outputRange: [h / 2, 0] }) }, { scaleY: crescer }] }} />}
               </View>
-              <Texto testID="barra-mes" variante="legenda" tom={m.atual ? "brandInk" : m.apagado ? "inkFaint" : "inkMuted"} style={m.atual ? { alignSelf: "stretch", textAlign: "center", fontFamily: escala.secao.fontFamily } : { alignSelf: "stretch", textAlign: "center" }}>{`${m.rotulo}${m.atual && parcial ? "*" : ""}`}</Texto>
+              <Texto testID="barra-mes" variante="legenda" tom={m.atual ? "brandInk" : m.apagado ? "inkFaint" : "inkMuted"} style={m.atual ? { alignSelf: "stretch", textAlign: "center", fontFamily: escala.secao.fontFamily } : { alignSelf: "stretch", textAlign: "center" }}>{`${m.rotulo}${m.atual ? "*" : ""}`}</Texto>
             </View>
           );
         })}
       </View>
-      {parcial && meses.some((m) => m.atual) && <Texto variante="legenda" tom="inkMuted" accessibilityLabel="Mês atual em andamento: o valor ainda é parcial" style={{ textAlign: "center" }}>* mês em andamento</Texto>}
+      {meses.some((m) => m.atual) && <Texto variante="legenda" tom="inkMuted" accessibilityLabel="Mês atual em andamento: o valor ainda é parcial" style={{ textAlign: "center" }}>* mês em andamento</Texto>}
     </View>
   );
 }
