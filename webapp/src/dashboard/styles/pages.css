@@ -2,6 +2,16 @@
 .page-head { display: grid; gap: 6px; padding-top: 8px; }
 .page-head h1 { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; outline: none; }
 .page-lede { font-size: 14px; color: var(--ink-2); max-width: 70ch; }
+/* Página com botões à direita do título (pages.tsx, `acoes`); no celular, uma linha própria abaixo do texto. */
+.page-head-acoes { grid-template-columns: minmax(0, 1fr) auto; align-items: end; column-gap: 16px; }
+.page-head-acoes > h1, .page-head-acoes > .page-lede { grid-column: 1; }
+.page-acoes { grid-column: 2; grid-row: 1 / span 2; display: grid; grid-auto-flow: column; gap: 8px; }
+.page-acoes:empty { display: none; }
+.page-acoes .btn { min-height: 40px; }
+@media (max-width: 760px) {
+  .page-head-acoes { grid-template-columns: minmax(0, 1fr); }
+  .page-acoes { grid-column: 1; grid-row: auto; grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 6px; }
+}
 
 .page-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 20px; align-items: start; }
 .span-4 { grid-column: span 4; }

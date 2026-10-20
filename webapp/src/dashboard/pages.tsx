@@ -1,4 +1,4 @@
-import { useMemo, useRef, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { BANK_CDB, BANK_CDB_TOTAL, GOALS, MONTHS, caixinhasTotal, goalEta, goalsTotal, isCurrentMonth, keyDate, monthlySaving, trajectory } from "./lib/api";
 import { money0, monthName, monthYear, signedBig, tone } from "./lib/format.js";
 import { mesDe, simActive } from "./lib/store.js";
@@ -42,12 +42,14 @@ import { TrajectoryChart } from "./widgets/TrajectoryChart";
 import { Wealth } from "./widgets/Wealth";
 
 // Cada página: título, uma linha do que ela responde e os blocos em grade de 12.
-function Page({ path, lede, children }: { path: Path; lede: ReactNode; children: ReactNode }) {
+// `acoes`: o lugar (à direita do título, abaixo do texto no celular) onde a página põe os botões dela.
+function Page({ path, lede, acoes, children }: { path: Path; lede: ReactNode; acoes?: ReactNode; children: ReactNode }) {
   return (
     <>
-      <header className="page-head">
+      <header className={`page-head${acoes ? " page-head-acoes" : ""}`}>
         <h1 id="page-title" tabIndex={-1}>{route(path).title}</h1>
         <p className="page-lede">{lede}</p>
+        {acoes}
       </header>
       <DicaDaTela path={path} />
       <div className="page-grid">{children}</div>
@@ -235,9 +237,10 @@ function Tools() {
 }
 
 function Budget({ s }: { s: DashState }) {
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null); // o widget põe os botões aqui (portal) porque o estado dos modais é dele
   return (
-    <Page path="/orcamento" lede="A renda do mês dividida em potes: quanto cabe em cada um e quanto já saiu. Aportes em investimento contam no pote Liberdade financeira.">
-      <OrcamentoPainel s={s} />
+    <Page path="/orcamento" lede="Distribua sua renda entre os potes e acompanhe o mês." acoes={DEMO ? undefined : <div className="page-acoes" ref={setSlot} />}>
+      <OrcamentoPainel s={s} slot={slot} />
     </Page>
   );
 }
