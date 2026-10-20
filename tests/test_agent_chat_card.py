@@ -17,7 +17,7 @@ from tests._patrimonio_helpers import conexao, posicao
 from tests.test_agent_chat_conversation import ScriptedClient, SnapshotCall, own_route, response
 
 SNAP = ("consultar_dados_do_agente", {}, {})
-BUDGETS = {"budgets": [{"categoria": "mercado"}], "count": 1}
+BUDGETS = {"budgets": [{"categoria": "mercado"}], "count": 1, "mes": "2026-10"}
 BILLS = {"bills": [], "count_pending": 0}
 POCKETS = {"pockets": []}
 
@@ -48,7 +48,9 @@ def gate(monkeypatch):
     ("detetive", [SNAP], {"tipo": "assinaturas"}),
     ("detetive", [("get_balance", {}, {})], None),
     ("faria_limer", [("get_budget_status", {}, BUDGETS)], None),
-    ("xerife", [("get_budget_status", {}, BUDGETS)], {"tipo": "orcamentos"}),
+    ("xerife", [("get_budget_status", {}, BUDGETS)], {"tipo": "orcamentos", "mes": "2026-10"}),
+    ("xerife", [("get_budget_status", {}, {**BUDGETS, "mes": None})], None),  # sem o mês da consulta
+    ("xerife", [("get_budget_status", {}, {**BUDGETS, "mes": "2026-13"})], None),
     ("xerife", [("get_budget_status", {}, {"budgets": [], "count": 0})], None),  # nada a mostrar
     ("xerife", [("get_budget_status", {"categoria": "mercado"}, {"found": True, "categoria": "mercado"})], None),  # o texto fala de uma só
     ("carteiro", [("get_bills_to_pay", {}, BILLS)], {"tipo": "contas"}),
@@ -92,7 +94,7 @@ def test_gate_de_cada_tipo_e_o_da_rota_v2(gate):
     assert card_da_resposta(1, "detetive", [SNAP]) is None and gate["consultadas"] == ["subscriptions"]
     gate["consultadas"].clear()
     assert card_da_resposta(1, "reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))]) == {"tipo": "resumo_mes", "mes": "2026-10", "motivos": []}
-    assert card_da_resposta(1, "xerife", [("get_budget_status", {}, BUDGETS)]) == {"tipo": "orcamentos"}
+    assert card_da_resposta(1, "xerife", [("get_budget_status", {}, BUDGETS)]) == {"tipo": "orcamentos", "mes": "2026-10"}
     assert gate["consultadas"] == []
     # contas = `recurring_expenses` (api/v2/contas_a_pagar.py, o gate da agenda de boletos); caixinhas não tem gate
     gate["consultadas"].clear()
@@ -251,3 +253,15 @@ def test_padrao_do_mes_no_cliente_e_o_da_rota():
     from api.v2.resumo_mes import PADRAO_MES
     ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/agentes.ts").read_text(encoding="utf-8")
     assert re.search(r"export const MES = /(.+?)/;", ts).group(1) == PADRAO_MES
+
+
+def test_consulta_de_orcamentos_carimba_o_mes_da_consulta(user_id, monkeypatch):
+    """O card mostra o mês da consulta: execute_read carimba o mês em que o get_budget_status rodou (Codex no #1199)."""
+    from datetime import date as _date
+    class Hoje(_date):
+        @classmethod
+        def today(cls):
+            return _date(2026, 1, 31)
+    monkeypatch.setattr(chat, "date", Hoje)
+    r = chat.execute_read(user_id, "xerife", "get_budget_status", {})
+    assert r["mes"] == "2026-01"

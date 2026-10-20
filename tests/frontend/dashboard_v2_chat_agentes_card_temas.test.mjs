@@ -18,7 +18,7 @@ const SHOTS = process.env.PR3B_SHOTS; // pasta dos screenshots (opcional)
 const TIPOS = {
   assinaturas: { nome: "Detetive", kind: "detetive", card: { tipo: "assinaturas" }, url: /\/api\/v2\/assinaturas$/, ok: RESPOSTAS.assinaturas.cheia },
   resumo_mes: { nome: "Repórter", kind: "reporter", card: { tipo: "resumo_mes", mes: "2026-10" }, url: /\/api\/v2\/resumo-do-mes\?/, ok: RESPOSTAS.resumo_do_mes.exato },
-  orcamentos: { nome: "Xerife", kind: "xerife", card: { tipo: "orcamentos" }, url: /\/api\/v2\/orcamentos-categoria$/, ok: RESPOSTAS.orcamentos_categoria.padrao },
+  orcamentos: { nome: "Xerife", kind: "xerife", card: { tipo: "orcamentos", mes: "2026-10" }, url: /\/api\/v2\/orcamentos-categoria$/, ok: RESPOSTAS.orcamentos_categoria.padrao },
 };
 const CAT = Object.values(TIPOS).map((t) => [t.kind, t.nome]);
 const resposta = (card) => ({ json: { reply: "Texto do agente.", context: "ctx-1", redirects: [{ kind: "barao", name: "Barão", question: "e a renda fixa?", access: "ready" }], usage: { used: 1, limit: 100 }, ...(card === undefined ? {} : { card }) } });
@@ -118,7 +118,7 @@ for (const width of TELAS) {
 
   test(`${width}: card desconhecido, sem mês ou com mês inválido: nenhum card e nenhum GET`, async () => {
     const ruins = [[{ tipo: "novo" }, "assinaturas"], [{ tipo: "resumo_mes" }, "resumo_mes"], [{ tipo: "resumo_mes", mes: "2026-13" }, "resumo_mes"],
-      [{ tipo: "resumo_mes", mes: "2026-10&x=1" }, "resumo_mes"], [{ tipo: "resumo_mes", mes: 202610 }, "resumo_mes"], [{ tipo: "resumo_mes", mes: "../../auth" }, "resumo_mes"]];
+      [{ tipo: "resumo_mes", mes: "2026-10&x=1" }, "resumo_mes"], [{ tipo: "resumo_mes", mes: 202610 }, "resumo_mes"], [{ tipo: "resumo_mes", mes: "../../auth" }, "resumo_mes"], [{ tipo: "orcamentos" }, "orcamentos"], [{ tipo: "orcamentos", mes: "2026-13" }, "orcamentos"]];
     for (const [c, tipo] of ruins) {
       const { ctx, page, erros, gets } = await abrir({ width, tipo, card: c });
       await perguntar(page, TIPOS[tipo].nome);
@@ -207,6 +207,16 @@ for (const width of [390, 320]) test(`Xerife: total e linhas de 7 dígitos em ${
   const r = await card(page).evaluate((c) => { const b = c.getBoundingClientRect();
     return { fora: [...c.querySelectorAll("*")].filter((e) => e.getBoundingClientRect().right > b.right + 0.5).map((e) => e.className), pagina: document.documentElement.scrollWidth > innerWidth }; });
   assert.deepEqual(r, { fora: [], pagina: false });
+  await ctx.close();
+});
+
+test("Xerife: a rota respondeu outro mês (virou o mês depois da consulta): nenhum card, nem erro", async () => {
+  const { ctx, page, gets } = await abrir({ width: 1440, tipo: "orcamentos", card: { tipo: "orcamentos", mes: "2026-09" } });
+  await perguntar(page, "Xerife");
+  await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .card-agente[aria-busy]"));
+  await page.waitForTimeout(200);
+  assert.equal(gets.length, 1);
+  assert.equal(await card(page).count(), 0);
   await ctx.close();
 });
 

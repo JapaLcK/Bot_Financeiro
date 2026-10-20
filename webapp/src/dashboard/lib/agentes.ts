@@ -97,11 +97,12 @@ export function ativar(uid: number, kind: string) {
 export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
 /** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
-export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "orcamentos" | "contas" | "caixinhas" } | { tipo: "resumo_mes"; mes: string; motivos: string[] };
+export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "contas" | "caixinhas" } | { tipo: "orcamentos"; mes: string } | { tipo: "resumo_mes"; mes: string; motivos: string[] };
 export const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
 export const cardDe = (v: unknown): CardAgente | null => {
   const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown; motivos?: unknown }) : {};
-  if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "orcamentos" || c.tipo === "contas" || c.tipo === "caixinhas") return { tipo: c.tipo };
+  if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "contas" || c.tipo === "caixinhas") return { tipo: c.tipo };
+  if (c.tipo === "orcamentos") return typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "orcamentos", mes: c.mes } : null;
   // `motivos`: os avisos que o agente deu sobre o mês (lista de texto; fora disso, nenhum aviso).
   return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes, motivos: textos(c.motivos) ? c.motivos as string[] : [] } : null;
 };
