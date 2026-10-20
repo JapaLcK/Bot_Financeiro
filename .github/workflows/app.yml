@@ -54,6 +54,9 @@ on:
       - "db/contas_hoje.py"
       - "webapp/src/dashboard/widgets/SimuladorCompra.tsx"
       - "webapp/src/dashboard/lib/api-v2.gen.ts"
+      - "db/patrimonio.py"
+      - "webapp/src/dashboard/lib/milhao.ts"
+      - "webapp/src/dashboard/widgets/Agentes.tsx"
   pull_request:
     paths:
       - "app/**"
@@ -96,6 +99,9 @@ on:
       - "db/contas_hoje.py"
       - "webapp/src/dashboard/widgets/SimuladorCompra.tsx"
       - "webapp/src/dashboard/lib/api-v2.gen.ts"
+      - "db/patrimonio.py"
+      - "webapp/src/dashboard/lib/milhao.ts"
+      - "webapp/src/dashboard/widgets/Agentes.tsx"
 
 # A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
 # `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
