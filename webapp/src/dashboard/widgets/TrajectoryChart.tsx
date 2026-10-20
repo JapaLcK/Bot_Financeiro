@@ -10,7 +10,7 @@ const M = { t: 12, r: 10, b: 28 };
 // Largura de um rótulo do eixo Y na fonte do .axis (11px, a --font da página); um canvas só.
 // O .axis usa algarismos tabulares e o canvas não: medir tudo como "0" chega à largura tabular.
 let axisCtx: CanvasRenderingContext2D | null = null;
-function axisWidth(s: string) {
+export function axisWidth(s: string) {
   if (!axisCtx) {
     axisCtx = document.createElement("canvas").getContext("2d")!;
     axisCtx.font = `11px ${getComputedStyle(document.documentElement).getPropertyValue("--font")}`;
@@ -18,7 +18,7 @@ function axisWidth(s: string) {
   return axisCtx.measureText(s.replace(/\d/g, "0")).width;
 }
 
-function niceTicks(lo: number, hi: number, count = 4) {
+export function niceTicks(lo: number, hi: number, count = 4) {
   const raw = (hi - lo) / count;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw;

@@ -46,11 +46,12 @@ export function ticksY(maximo: number) {
   }
   return [0, maximo]; // ponytail: acima de R$ 10 trilhões não há degrau redondo; ninguém chega lá
 }
-/** Centavos em "R$ 950", "R$ 7,2k", "R$ 12k" (reais inteiros; no "k", uma casa e vírgula pt-BR); o valor exato fica na lista. */
-// ponytail: sem "mi" — acima de R$ 999,9 mil sai "R$ 1000k"; trocar por Intl compact se alguém chegar lá
+/** Centavos em "R$ 950", "R$ 7,2k", "R$ 12k", "R$ 1,5 mi" (reais inteiros; no "k" e no "mi", uma casa e vírgula pt-BR); o valor exato fica na lista. */
 export function rotuloCompacto(centavos: number) {
   const reais = centavos / 100, abs = Math.abs(reais), r = Math.round(abs); // arredonda o módulo: Math.round(−950,5) = −950, mas Math.round(950,5) = 951
-  return r < 1000 ? `${reais < 0 && r !== 0 ? "−" : ""}R$ ${r}` : `${reais < 0 ? "−" : ""}R$ ${String(Math.round(abs / 100) / 10).replace(".", ",")}k`;
+  const k = Math.round(abs / 100) / 10, sinal = reais < 0 ? "−" : "", virgula = (n: number) => String(n).replace(".", ",");
+  // Do "R$ 999,9k" em diante vira milhão: R$ 999.950 arredondaria para "R$ 1000k".
+  return r < 1000 ? `${reais < 0 && r !== 0 ? "−" : ""}R$ ${r}` : k < 1000 ? `${sinal}R$ ${virgula(k)}k` : `${sinal}R$ ${virgula(Math.round(abs / 1e5) / 10)} mi`;
 }
 
 /** Índice do dia mais próximo de `x` (pt dentro do plot, mesma régua do desenho), preso a [0, `limite`]: nunca depois de "hoje". */
