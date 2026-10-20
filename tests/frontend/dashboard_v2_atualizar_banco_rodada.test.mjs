@@ -92,7 +92,7 @@ test("W12 (D1 e D2, as divergências do julgar do app): 'updating' neutro com st
   }
 });
 
-test("W13 ((b) e (c)): needs_user_action reautorizável vira o link 'Reconectar Nubank' para /settings?view=open-finance (sem POST, 1 GET /limite); sem vaga no plano ou de dispositivo vira a instrução do servidor + 'Ver bancos conectados'", async () => {
+test("W13 ((b) e (c)): needs_user_action reautorizável vira o link 'Reconectar Nubank' para #/conta/bancos, onde o Reconectar abre o widget (sem POST, 1 GET /limite); sem vaga no plano ou de dispositivo vira a instrução do servidor + 'Ver bancos conectados'", async () => {
   const quadro = async (conexoes, limite) => {
     const { ctx, page, abrir, srv } = await abre({ conexoes, limite });
     await abrir(false);
@@ -104,7 +104,7 @@ test("W13 ((b) e (c)): needs_user_action reautorizável vira o link 'Reconectar 
   };
   const b = await quadro([NECESSARIA("Reautorize o banco")], LIMITE());
   assert.match(b.corpo, /Reconectar Nubank/);
-  assert.deepEqual([b.link, b.posts, b.limites], ["/settings?view=open-finance", 0, 1]);
+  assert.deepEqual([b.link, b.posts, b.limites], ["#/conta/bancos", 0, 1]);
   const semVaga = await quadro([NECESSARIA("Reautorize o banco")], LIMITE({ of_banks_max: 0 }));
   assert.match(semVaga.corpo, /Erro em Nubank\. Ver bancos conectados/);
   assert.match(semVaga.corpo, /Ver bancos conectados/);
