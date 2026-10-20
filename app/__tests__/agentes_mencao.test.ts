@@ -15,6 +15,9 @@ it.each([
   ["ana@detetive.com @Xerife oi", "xerife", "ana@detetive.com oi"],
   ["@Xerife", "xerife", ""],
   ["@Xerife ?", "xerife", ""],
+  ["@Xerife ?!...", "xerife", ""], // só pontuação continua vazia
+  ["@Detetive 👍", "detetive", "👍"], // emoji conta como mensagem, como no /painel (#1157)
+  ["@Xerife $", "xerife", "$"], // símbolo sozinho também
   ["한국어 @Xerife oi", "xerife", "한국어 oi"], // Hangul vira jamos no NFD: os índices não podem andar
   ["@Repo\u0301rter resumo", "reporter", "resumo"], // nome colado em NFD: a marca solta some na comparação
   ["한국어 @Repo\u0301rter oi", "reporter", "한국어 oi"],

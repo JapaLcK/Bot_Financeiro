@@ -43,7 +43,7 @@ from core.services.pluggy import (
     delete_pluggy_item,
     get_pluggy_item,
 )
-from core.services.pluggy_catalogo import list_pluggy_connectors
+from core.services.pluggy_catalogo import list_pluggy_connectors, logo_proprio
 from core.services import billing_copy
 from core.services.plan_service import is_pro
 from core.services.pluggy_sync import (
@@ -1673,6 +1673,7 @@ async def open_finance_connectors_route(request: Request, user_id: int):
             "type": c.get("type"),
             "color": (c.get("primaryColor") or "").lstrip("#"),
             "logo": c.get("imageUrl") or "",
+            "logo_proprio": logo_proprio(str(c.get("id"))),
             "inv": "INVESTMENTS" in products,
         })
     banks.sort(key=lambda b: b["name"].lower())

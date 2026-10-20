@@ -60,13 +60,14 @@ export function mencoes(texto: string, dados?: Agentes) {
   }
   return out;
 }
-/** A PRIMEIRA menção decide o agente; `texto` é a mensagem sem esse token (espaços normalizados; vazio = só havia a menção). */
+/** A PRIMEIRA menção decide o agente; `texto` é a mensagem sem esse token (espaços normalizados; vazio = só havia a menção, ou só
+ * pontuação). Emoji e símbolo contam como mensagem ("@Detetive 👍"), como no /painel desde o #1157. */
 export function mencaoDe(texto: string, dados?: Agentes) {
   const m = mencoes(texto, dados)[0];
   if (!m) return null;
   const esq = texto.slice(0, m.ini).trimEnd(), dir = texto.slice(m.fim).trimStart();
   const msg = (esq + (/^[?!.,;:]/.test(dir) ? "" : " ") + dir).replace(/\s+/g, " ").trim();
-  return { kind: m.kind, texto: /[\p{L}\d]/u.test(msg) ? msg : "" };
+  return { kind: m.kind, texto: /[^\p{P}\s]/u.test(msg) ? msg : "" };
 }
 /** O token em edição: "@" + letras até o cursor, logo depois de espaço ou no começo; `fim` = onde as letras dele acabam (o cursor pode estar no meio). */
 export function tokenEm(texto: string, cursor: number) {

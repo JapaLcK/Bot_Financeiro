@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { moneyText } from "../lib/format.js";
 import { corDoBanco, quandoSync, tomDoEstado } from "../lib/bancos";
 import type { Banco } from "../lib/api-v2.gen";
-import type { Conexao } from "./api";
+import { logoDoBanco, type Conexao } from "./api";
 
 export const nomeDoBanco = (c: Conexao) => c.institution_name?.trim() || "Banco";
 // Cópia da regra do app (app/src/features/openFinance/conexoes/BancoCard.tsx): o teste bancos_paridade compara as duas listas (§0.7).
@@ -37,7 +37,7 @@ export function BancoCard({ c, i, sincronizando, bloqueado, onAbrir, onSincroniz
   const nome = nomeDoBanco(c);
   return (
     <li className="banco-card">
-      <Ladrilho nome={nome} logo={c.logo_url} cor={corDoBanco(c.institution_name ?? "", i)} />
+      <Ladrilho nome={nome} logo={logoDoBanco(c)} cor={corDoBanco(c.institution_name ?? "", i)} />
       <span className="banco-nome">{nome}</span>
       <Estado c={c} />
       <span className="banco-quando"><span className="banco-leg">Última atualização</span><span>{quandoSync(c.last_sync_at)}</span></span>

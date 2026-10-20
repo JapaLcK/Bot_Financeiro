@@ -50,7 +50,7 @@
           actions.push({ label: 'Iniciar nova conversa', onClick: () => {
             const draft = s.draft || message.question;
             sessions.delete(kind);
-            window.openAgentChat(kind, draft);
+            window.openAgentChat(kind, draft, message.forward);
           } });
         } else if (message.retryable && s.access === 'ready') {
           actions.push({ label: 'Tentar novamente', onClick: () => sendTurn(kind, message.question, message), disabled: s.busy });
@@ -60,7 +60,7 @@
         const label = destination.access === 'ready' ? `Conversar com ${destination.name}`
           : destination.access === 'activate' ? `Ativar ${destination.name} e conversar`
           : `Ver acesso a ${destination.name}`;
-        actions.push({ label, onClick: () => window.openAgentChat(destination.kind, destination.question) });
+        actions.push({ label, onClick: () => window.openAgentChat(destination.kind, destination.question, { needs_data: destination.needs_data === true }) });
       }
       return { ...message, actions, author: message.role === 'user' ? 'Você'
         : message.state === 'error' ? 'Resposta não concluída' : name };
@@ -116,13 +116,13 @@
     if (currentKind) ui.update('agent', view());
   }
 
-  window.openAgentChat = async function (kind, question = '') {
+  window.openAgentChat = async function (kind, question = '', forward = null) {
     if (!Object.prototype.hasOwnProperty.call(questions, kind)) return;
     currentKind = kind;
     const generation = ++openGeneration;
     const ownsOpening = () => generation === openGeneration && currentKind === kind && ui.isOpen('agent');
     const s = state(kind);
-    if (question) s.draft = question;
+    if (question) { s.draft = question; s.forward = forward && { question, needs_data: forward.needs_data === true }; } // a marca só vale para esta pergunta: editar o rascunho a descarta
     s.access = 'loading';
     s.error = '';
     if (!registered) { ui.register('agent', view()); registered = true; }
@@ -197,18 +197,21 @@
     if (!reply || s.draft === text) s.draft = '';
     s.busy = true;
     s.error = '';
+    const retrying = !!reply;
     if (!reply) {
       const createdAt = new Date().toISOString();
       s.messages.push({ id: `agent-${++messageSequence}`, role: 'user', content: text, createdAt });
       reply = { id: `agent-${++messageSequence}`, role: 'assistant', question: text };
       s.messages.push(reply);
     }
+    reply.forward = reply.forward || (s.forward?.question === text ? s.forward : null); // a marca do encaminhamento fica no turno: tentar de novo a mantém
+    if (!retrying) s.forward = null;
     Object.assign(reply, { state: 'pending', content: 'Preparando a resposta…', createdAt: undefined, errorCode: '', redirects: [] });
     render();
     try {
       const response = await fetch(`${API}/agents/${USER_ID}/${kind}/chat`, {
         method: 'POST', credentials: 'same-origin', headers: csrfHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ message: text, context: s.context }),
+        body: JSON.stringify({ message: text, context: s.context, ...(reply.forward && { forwarded: true, needs_data: reply.forward.needs_data }) }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || typeof data?.reply !== 'string' || !data.reply.trim()) {

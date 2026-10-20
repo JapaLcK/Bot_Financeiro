@@ -50,6 +50,14 @@ it("rode a conversa: @Xerife vai ao agente (sem stream), com menção em brandIn
   expect(corpoDe(chats()[1]!)).toEqual({ message: "e agora?", context: "ctx1" });
 });
 
+it("'@Xerife ?' (só pontuação) fica no campo sem tocar no agente nem no Piggy; '@Xerife 👍' envia o emoji, como no /painel (#1157)", async () => {
+  ag.chat = () => resp("Valeu.");
+  await abrir(); await enviar("@Xerife ?");
+  expect(chats()).toHaveLength(0); expect(posts()).toHaveLength(0); expect(campo().props.value).toBe("@Xerife ?");
+  await enviar("@Xerife 👍"); await waitFor(() => expect(screen.getByText("Valeu.")).toBeTruthy());
+  expect(chats()).toHaveLength(1); expect(corpoDe(chats()[0]!)).toEqual({ message: "👍", context: null }); expect(posts()).toHaveLength(0);
+});
+
 it("lista do @: '@' mostra os grupos, '@rep' só o Repórter, tocar no item deixa '@Repórter ' no campo", async () => {
   ag.catalogo = (u) => cat(Number(u), {}, null); await abrir(); await digitar("@");
   await waitFor(() => expect(screen.getByText("Ativar para conversar")).toBeTruthy());
@@ -92,13 +100,25 @@ describe("estados do agente", () => {
     await waitFor(() => expect(screen.getByText("Conversar com o Xerife faz parte do PigBank+.")).toBeTruthy()); expect(screen.queryByRole("button", { name: /planos/i })).toBeNull();
   });
   it("redirect: 'Perguntar ao Carteiro' cria um turno para o carteiro; desligado com o Piggy em voo", async () => {
-    ag.chat = (n) => n === 1 ? resp("Isso é com o Carteiro.", { redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }, { kind: "x", name: "X", question: "q", access: "ready" }] }) : resp("Duas contas.");
+    ag.chat = (n) => n === 1 ? resp("Isso é com o Carteiro.", { redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready", needs_data: true }, { kind: "x", name: "X", question: "q", access: "ready" }] }) : resp("Duas contas.");
     await abrir(); await enviar("@Xerife contas?"); await waitFor(() => screen.getByRole("button", { name: "Perguntar ao Carteiro" })); expect(screen.queryByRole("button", { name: /Perguntar ao X$/ })).toBeNull();
     const f = respostaFluxo(); srv.chat = () => f; await enviar("oi"); // Piggy em voo
     expect(screen.getByRole("button", { name: "Perguntar ao Carteiro" }).props.accessibilityState.disabled).toBe(true);
     await act(async () => { f.empurrar({ tipo: "fim", reply: "ok", usage: { used: 3, limit: 100 }, message_id: 3, chips: [] }); f.fechar(); await drenar(); });
     await toque("Perguntar ao Carteiro"); await waitFor(() => expect(screen.getByText("Duas contas.")).toBeTruthy());
     expect(caminho(chats()[1]![0])).toBe("/agents/1/carteiro/chat"); expect(corpoDe(chats()[1]!).message).toBe("Que contas vencem?");
+    expect(corpoDe(chats()[0]!)).toEqual({ message: "contas?", context: null }); // a pergunta digitada não vai marcada
+    expect(corpoDe(chats()[1]!)).toEqual({ message: "Que contas vencem?", context: null, forwarded: true, needs_data: true });
+  });
+  it("redirect para agente inativo: 'Ativar e responder' manda a pergunta ainda marcada; 'Tentar de novo' também", async () => {
+    let n = 0;
+    ag.catalogo = (u) => cat(Number(u), {}, "active");
+    ag.chat = (c) => c === 1 ? resp("Isso é com o Carteiro.", { redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate", needs_data: true }] })
+      : ++n === 1 ? erro(503, { error: "model_busy", message: "Ocupado.", retryable: true }) : resp("Duas contas.");
+    await abrir(); await enviar("@Xerife contas?"); await toque("Perguntar ao Carteiro");
+    await toque("Ativar e responder"); await waitFor(() => screen.getByRole("button", { name: "Tentar de novo" })); await toque("Tentar de novo");
+    await waitFor(() => expect(screen.getByText("Duas contas.")).toBeTruthy());
+    expect(chats().slice(1).map(corpoDe)).toEqual([1, 2].map(() => ({ message: "Que contas vencem?", context: null, forwarded: true, needs_data: true })));
   });
 });
 

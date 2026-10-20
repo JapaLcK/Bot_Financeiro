@@ -27,6 +27,8 @@ const conexaoSchema = z.object({
   institution_name: z.string().nullable(),
   // https ou null; o host é fixado em `features/openFinance/conexoes/juntar.ts` antes de buscar. Servidor velho (sem o campo) e valor de forma estranha viram sem logo.
   logo_url: z.string().nullable().optional().catch(null),
+  // Caminho do logo PRÓPRIO (`/brand/bancos/<ispb>.png`, mesma origem da API) ou null; a forma é conferida em `logoDoBanco` (juntar.ts). Ausente ou de tipo estranho = sem logo próprio.
+  logo_proprio: z.string().nullable().optional().catch(null),
   // O id do conector da Pluggy (`pluggy_connector_id`): é por ele, e nunca pelo nome, que "Disponíveis para conectar" sabe o que já está conectado.
   institution_id: z.string().nullable().optional().catch(null),
   ui: z.object({ state: z.string(), label: z.string(), detail: z.string().nullable().optional() }),
@@ -41,7 +43,7 @@ export type Conexao = z.infer<typeof conexaoSchema>;
  * `GET /open-finance/{uid}/connectors` (catálogo da Pluggy). Tolerante POR ITEM como o `bancosSchema`: item que não passa sai e os outros ficam; `connectors` ausente vira `[]`.
  * `logo` vem como "" quando o conector não tem; o host é fixado no render (`logoSeguro`), não aqui.
  */
-const conectorSchema = z.object({ id: z.number().int().positive(), name: z.string().trim().min(1), logo: z.string().nullable().catch(null) });
+const conectorSchema = z.object({ id: z.number().int().positive(), name: z.string().trim().min(1), logo: z.string().nullable().catch(null), logo_proprio: z.string().nullable().optional().catch(null) });
 export const conectoresSchema = z.object({
   connectors: z.array(z.unknown()).catch([]).transform((itens) => itens.flatMap((i) => { const c = conectorSchema.safeParse(i); return c.success ? [c.data] : []; })),
 });

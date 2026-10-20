@@ -1840,6 +1840,16 @@ catálogo, `mock_pluggy` e `institution_id = "pluggy"` (item sem `connector` nem
 Ids de produção das 4 antigas, medidos pelo dono em 2026-10-18: 611, 612, 651, 775; que o catálogo
 real os liste só se prova depois do deploy. O servidor NÃO fixa o host (`logo_url_valida` segue
 aceitando qualquer https); quem fixa é o cliente.
+Logo PRÓPRIO dos 10 bancos principais (Itaú, Bradesco, Banco do Brasil, Santander, Caixa, Inter, C6, Nubank, BTG, Mercado Pago): cada
+conexão do snapshot e cada item do `/connectors` traz também `logo_proprio` (`/brand/bancos/<ispb>.png` ou `null`; campo a mais,
+`logo_url` e `logo` não mudam). A fonte única é `_LOGO_PROPRIO_ISPB` (`core/services/pluggy_catalogo.py`, `logo_proprio`): id do conector
+(texto) → ISPB, só id EXATO e só as variantes pessoa física (nunca por nome); Itaú Empresas, Bradescard, Mercado Bitcoin etc. ficam
+fora de propósito e seguem com o logo da Pluggy. Os PNG 256×256 moram em `frontend/brand/bancos/` (pacote `logos-bancos-br` 0.8.2; as
+marcas são dos bancos, uso nominativo, sem deformar nem recolorir) e saem pela rota `/brand/{path}` com cache imutável de 1 ano:
+trocar a arte de um banco exige trocar o NOME do arquivo E ampliar a regex do cliente (web e, quando existir, app) no mesmo PR. Precedência no cliente: próprio > `logo_url` da Pluggy > inicial. O /painel
+(`conta/api.ts::logoDoBanco`) só aceita `/^\/brand\/bancos\/\d{8}\.png$/` (mesma origem, sem host de terceiro); o que não bate cai no
+`logo_url`, e o próprio que falha ao carregar cai na inicial (não tenta a Pluggy no meio). O seletor legado
+(`open-finance-connect.js`) fica de fora. O app aplica a mesma precedência (`logoDoBanco` em `app/src/features/openFinance/conexoes/juntar.ts`, URL = `baseUrl()` + caminho, o PNG vai ao `<Image>` do Avatar e o fetch de SVG segue só no CDN da Pluggy); `tests/frontend/logo_banco_paridade.test.mjs` compara a regex e a função dos dois lados, e trocar a arte de um banco exige ampliar a regex também no app.
 Cada conexão do snapshot traz também `institution_id` (texto, o id do conector da Pluggy; é coluna `not null`, e o `pop` do
 laço de `_read_open_finance_connections` nunca o tirou: o gate de reconexão do picker já o lia, `ids` em `refreshLimits`):
 `tests/test_of_connection_state.py` (`CHAVES_DA_CONEXAO`) prende a chave e `tests/test_of_snapshot_institution_id.py` o valor e o
