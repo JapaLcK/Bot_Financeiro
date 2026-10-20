@@ -81,6 +81,31 @@ test("rendimento 0%: sem aporte não há previsão, e o texto diz o que fazer", 
   assert.doesNotMatch(t, /Você chega em/);
 });
 
+test("gráfico: os dois eixos têm nome e valores (Patrimônio em R$, Ano de 8 em 8), dentro do svg", async () => {
+  const { ctx, page } = await pronto();
+  await page.locator("#w-milhao svg[role=img]").waitFor(); // o svg só entra depois que useSize mede a largura
+  const r = await page.evaluate(() => {
+    const svg = document.querySelector("#w-milhao svg[role=img]"), c = svg.getBoundingClientRect();
+    const txt = (sel) => [...svg.querySelectorAll(sel)].map((e) => e.textContent.replace(/\s/g, " ")); // o Intl separa "500 mil" com espaço fino
+    const fora = [...svg.querySelectorAll("text")].filter((e) => { const b = e.getBoundingClientRect(); return b.left < c.left - 1 || b.right > c.right + 1 || b.top < c.top - 1 || b.bottom > c.bottom + 1; }).map((e) => e.textContent);
+    return { eixos: txt(".mi-eixo"), y: txt(".mi-y"), x: txt(".mi-x"), fora };
+  });
+  await ctx.close();
+  assert.deepEqual(r.eixos, ["Patrimônio", "Ano"]);
+  assert.deepEqual(r.y, ["R$ 0", "R$ 500 mil", "R$ 1 mi"]);
+  assert.deepEqual(r.x, ["2026", "2034", "2042", "2050", "2058"]); // 382 meses: passo de 8 anos e o fim da curva (ago/2058)
+  assert.deepEqual(r.fora, []);
+});
+
+test("gráfico de prazo curto (menos de 2 anos): o eixo X vira Mês, com mês/ano", async () => {
+  const { ctx, page } = await pronto({ resposta: (route) => route.fulfill({ json: { patrimonio: "999000.00", motivos: [] } }) });
+  await page.locator("#w-milhao svg[role=img]").waitFor();
+  const r = await page.evaluate(() => [...document.querySelectorAll("#w-milhao svg .mi-eixo, #w-milhao svg .mi-x")].map((e) => e.textContent));
+  await ctx.close();
+  assert.equal(r.at(-1), "Mês"); // na ordem do svg: "Patrimônio", as marcas do X e o nome do X
+  assert.equal(r[1], "out/26");
+});
+
 test("gráfico: svg com rótulo, tracejado no y da meta e tabela por ano para leitor de tela", async () => {
   const { ctx, page } = await pronto();
   await page.locator("#w-milhao svg[role=img]").waitFor(); // o svg só entra depois que useSize mede a largura
