@@ -14,7 +14,7 @@ import { ContaBancos } from "./conta/Bancos";
 import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
-import { DEMO } from "./lib/v2";
+import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
@@ -31,6 +31,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { MetasPainel } from "./widgets/Metas";
+import { AgentesPainel } from "./widgets/Agentes";
 import { MilhaoPainel } from "./widgets/ProgressoMilhao";
 import { OrcamentoPainel } from "./widgets/OrcamentoDomestico";
 import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
@@ -212,15 +213,16 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
   { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", ...(DEMO ? {} : { to: "/simulador/compra" as Path }) },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy", to: "/milhao" },
-  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
+  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot", to: "/agentes" },
   ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel em 3 passos.", icon: "ph-question", run: abrirGuia }]),
 ];
 
 function Tools() {
+  const agentes = useAgentesLigados();
   return (
     <Page path="/ferramentas" lede="Tudo o que ajuda a decidir, num lugar só.">
       <ul className="span-12 tools">
-        {TOOLS.map((t) => {
+        {TOOLS.filter((t) => agentes || t.to !== "/agentes").map((t) => {
           const body = <><i className={`ph ${t.icon}`} aria-hidden="true" /><b>{t.label}</b><span>{t.line}</span></>;
           const link = t.url ?? (t.to && href(t.to));
           return (
@@ -253,6 +255,16 @@ function Milhao() {
   );
 }
 
+function Agentes() {
+  // Com o freio ligado o /agents responde 404: a tela não pede nada e só avisa (link antigo ou digitado).
+  if (!useAgentesLigados()) return <Page path="/agentes" lede="Os agentes estão indisponíveis no momento.">{null}</Page>;
+  return (
+    <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
+      <AgentesPainel />
+    </Page>
+  );
+}
+
 function CategoryBudgets() {
   return (
     <Page path="/orcamentos-categoria" lede="Um teto por mês para cada categoria. Quando um gasto que você manda para o Piggy passa de 80%, 100% e 120%, ele avisa no WhatsApp.">
@@ -263,7 +275,7 @@ function CategoryBudgets() {
 
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate, "/simulador/compra": ComprarPage,
-  "/metas": GoalsPage, "/milhao": Milhao, "/patrimonio": Wealthy, "/lancamentos": Launches,
+  "/metas": GoalsPage, "/milhao": Milhao, "/agentes": Agentes, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };
