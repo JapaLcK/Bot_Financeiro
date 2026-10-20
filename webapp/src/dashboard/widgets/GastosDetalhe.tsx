@@ -1,7 +1,7 @@
 // Detalhe da categoria com backend (/api/v2/gastos/categoria): a escolhida em "Para onde vai" ou,
 // sem escolha, a maior do mês. Dinheiro é texto do servidor (moneyText); Number() só dá a altura das barras.
 import { useQuery } from "@tanstack/react-query";
-import { dayMonth, isoDay, moneyText, monthShort } from "../lib/format.js";
+import { dayMonth, isoDay, medida, moneyText, monthShort } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import { mesDe } from "../lib/store.js";
 import { DEMO, gastosCategoriaQuery, gastosQuery } from "../lib/v2";
@@ -27,8 +27,8 @@ export function GastosDetalhe({ s }: { s: DashState }) {
   const parcial = d.historico_desde !== null; // o corte do plano cai dentro do mês escolhido
   const aberto = !!s.gastosAberto && "categoria" in s.gastosAberto && s.gastosAberto.categoria === chave; // o card de compras é o desta categoria
   const corrente = d.hoje.slice(0, 7);
-  const pico = Math.max(...d.serie.map((x) => Number(x.valor ?? 0)), 1);
-  const picoLoja = Math.max(...d.estabelecimentos.map((p) => Number(p.valor)), 1);
+  const pico = Math.max(...d.serie.map((x) => medida(x.valor)), 1);
+  const picoLoja = Math.max(...d.estabelecimentos.map((p) => medida(p.valor)), 1);
   return (
     <Frame id="cat-detalhe" real
       title={<span className="detail-title"><IconeCategoria icone={c.icone} /><span className="detail-nome">{c.nome}</span>{!escolhida && <span className="faint detail-auto">maior gasto do mês</span>}</span>}
@@ -47,7 +47,7 @@ export function GastosDetalhe({ s }: { s: DashState }) {
           <ul className="months">
             {d.serie.map((x, i) => (
               <li key={x.mes} data-on={i === d.serie.length - 1 || undefined}>
-                <span className="months-bar">{x.valor !== null && <i style={{ background: c.cor, transform: `scaleY(${Number(x.valor) / pico})` }} />}</span>
+                <span className="months-bar">{x.valor !== null && <i style={{ background: c.cor, transform: `scaleY(${medida(x.valor) / pico})` }} />}</span>
                 {x.valor === null ? <span className="faint">fora do histórico</span> : <b className="num">{moneyText(x.valor)}</b>}
                 <span className="faint">{monthShort(isoDay(`${x.mes}-01`))}{x.mes === corrente ? " · mês em andamento" : ""}</span>
               </li>
@@ -63,7 +63,7 @@ export function GastosDetalhe({ s }: { s: DashState }) {
                   <span className="place-name">{p.nome}</span>
                   <span className="faint num">{p.quantidade}×</span>
                   <b className="num">{moneyText(p.valor)}</b>
-                  <span className="place-bar" aria-hidden="true"><i style={{ background: c.cor, transform: `scaleX(${Number(p.valor) / picoLoja})` }} /></span>
+                  <span className="place-bar" aria-hidden="true"><i style={{ background: c.cor, transform: `scaleX(${medida(p.valor) / picoLoja})` }} /></span>
                 </li>
               ))}
             </ul>
