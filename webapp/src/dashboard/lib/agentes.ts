@@ -17,6 +17,20 @@ export const AGENTES = [
 ];
 export const agenteDe = (kind: string) => AGENTES.find((a) => a.kind === kind);
 
+// As frases do "enviando" (parts/Carregando.tsx), em ordem fixa. Só dizem o que o agente está FAZENDO: o servidor não informa etapas,
+// então nenhuma afirma uma etapa concluída. Depois das do agente vêm as comuns, e a lista recomeça.
+const FRASES_COMUNS = ["Desenrolando o novelo…", "Organizando a resposta…"];
+const FRASES: Record<string, string[]> = {
+  faria_limer: ["Abrindo a carteira…", "Pulando entre os números…", "Olhando ações e renda fixa…"],
+  barao: ["Olhando a renda fixa…", "Procurando dinheiro parado…"],
+  detetive: ["Procurando pistas nos lançamentos…", "Comparando cobranças parecidas…"],
+  carteiro: ["Separando as contas…", "Conferindo os vencimentos…"],
+  reporter: ["Juntando entradas e saídas…", "Montando o resumo…"],
+  cofre: ["Abrindo as caixinhas…", "Conferindo as metas…"],
+  xerife: ["Patrulhando os gastos…", "Comparando com seus limites…"],
+};
+export const frasesDe = (kind: string) => [...(FRASES[kind] ?? []), ...FRASES_COMUNS];
+
 export interface Agentes {
   catalog: { kind: string; nome: string; disponivel: boolean; status: string | null; energy_cost: number }[];
   can_chat?: boolean; can_activate?: boolean; energy_enabled: boolean; energy_budget: number; energy_used: number;

@@ -106,3 +106,28 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 }
 /* Na volta do foco, até a conta ser relida (PiggyChat): a conversa não aparece, mas fica no lugar (sem pular a rolagem). */
 [data-reconferindo] { visibility: hidden; }
+
+/* Resposta de agente viva (parts/PiggyChat.tsx, parts/Carregando.tsx). Nada daqui esconde texto do DOM: só opacidade, blur e subida. */
+.msg-text[data-carga] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } /* "Preparando a resposta…" fica só para o leitor de tela; quem se vê é .msg-carga */
+.msg-carga { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 10px; font-size: 15px; line-height: 1.55; overflow: hidden; }
+.msg-carga-anel { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pink-line); border-top-color: var(--pink); }
+.msg-carga-frase {
+  min-width: 0; color: transparent;
+  background: linear-gradient(100deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%) 100% 0 / 250% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text;
+}
+.rv { display: inline-block; }
+@media (prefers-reduced-motion: no-preference) {
+  .msg-carga-anel { animation: carga-gira 0.9s linear infinite; }
+  .msg-carga-frase { animation: carga-entra 0.35s var(--ease-out) both, carga-brilho 1.8s linear infinite; }
+  .rv { animation: rv-entra 0.5s var(--ease-out) both; }
+  .msg-acoes[data-revela] { animation: rv-acoes 0.4s var(--ease-out) both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-carga-frase { background: none; color: var(--ink-2); } /* sem brilho: a cor lisa */
+}
+@keyframes carga-gira { to { transform: rotate(1turn); } }
+@keyframes carga-entra { from { opacity: 0; transform: translateY(6px); } }
+@keyframes carga-brilho { to { background-position: 0 0; } }
+@keyframes rv-entra { from { opacity: 0; filter: blur(4px); transform: translateY(4px); } }
+@keyframes rv-acoes { from { opacity: 0; } }
