@@ -178,3 +178,29 @@ test("fatura (390x844): o número acompanha o tamanho do pai e não encolhe a ~1
   assert.deepEqual(erros, []);
   await ctx.close();
 });
+
+test("links internos: todo #alvo existe, o clique rola até a seção (não salta) e com reduced-motion salta", async () => {
+  const clicarPlanos = async page => page.evaluate(async () => {
+    // 150 ms: a rolagem suave já saiu do lugar e ainda não chegou; o salto já chegou.
+    const quadro = () => new Promise(r => setTimeout(r, 150));
+    document.querySelector('nav a[href="#planos"]').click();
+    await quadro();
+    return { meio: scrollY, fim: document.getElementById("planos").getBoundingClientRect().top + scrollY };
+  });
+  const noTopo = page => page.waitForFunction(() => Math.abs(document.getElementById("planos").getBoundingClientRect().top) < 2);
+
+  const { page, ctx, erros } = await abrir();
+  const alvos = await page.$$eval('a[href^="#"]', as => as.map(a => a.getAttribute("href")));
+  assert.ok(alvos.length >= 10, alvos.join());
+  for (const h of alvos) assert.ok(await page.$(h), `alvo sem seção: ${h}`);
+  const { meio, fim } = await clicarPlanos(page);
+  assert.ok(meio > 0 && meio < fim - 50, `rolou ${meio} de ${fim}: saltou em vez de rolar`);
+  await noTopo(page);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+
+  const calmo = await abrir({ calmo: true });
+  const r = await clicarPlanos(calmo.page);
+  assert.ok(Math.abs(r.meio - r.fim) < 2, `reduced-motion devia saltar: ${r.meio} de ${r.fim}`);
+  await calmo.ctx.close();
+});
