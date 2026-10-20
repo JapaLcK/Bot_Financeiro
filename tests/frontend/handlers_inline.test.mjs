@@ -41,7 +41,7 @@ let ORIGIN;   // a porta é efêmera, o `before` preenche
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Páginas públicas: com sessão fingida elas redirecionam para dentro do app. */
-const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "precos.html"]);
+const SEM_SESSAO = new Set(["login.html", "cadastro.html", "index.html", "inicio-antiga.html", "precos.html"]);
 
 // ───────────────────────── análise estática, o mínimo ─────────────────────────
 

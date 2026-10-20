@@ -55,6 +55,17 @@ async def serve_landing():
     return html_file(
         FRONTEND_DIR / "index.html",
         clarity=True,
+        defer_tracking=True,
+        sem_teste=not demo_ligado(),
+    )
+
+
+@router.get("/inicio-antiga")
+async def serve_inicio_antiga():
+    # A LP que era a raiz, guardada (noindex, fora do sitemap).
+    return html_file(
+        FRONTEND_DIR / "inicio-antiga.html",
+        clarity=True,
         inline_css=("brand.css", "phosphor.css", "site.css", "site-redesign.css"),
         defer_tracking=True,
         sem_teste=not demo_ligado(),
@@ -516,11 +527,10 @@ async def serve_vsl():
 
 
 @router.get("/oferta")
-async def serve_oferta():
-    # LP de comparação (nenhum link do site leva a ela; noindex, fora do sitemap).
-    # Sem `sem_teste`: a página não tem botão "Testar o Piggy" para tirar, e todo CTA
-    # dela vai para o #planos da própria página.
-    return html_file(FRONTEND_DIR / "oferta.html", clarity=True)
+async def serve_oferta(request: Request):
+    # Links antigos de anúncio: a LP virou a raiz. A query (utm_*, fbclid) segue junto.
+    q = request.url.query
+    return RedirectResponse("/" + (f"?{q}" if q else ""), status_code=302)
 
 
 @router.get("/oferta.js")
@@ -1198,7 +1208,7 @@ async def serve_font(name: str):
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
         "Inter-Variable.woff2",
-        "Archivo-Variable.woff2",  # só a /oferta
+        "Archivo-Variable.woff2",  # só a /
         "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:

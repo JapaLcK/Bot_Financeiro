@@ -177,6 +177,13 @@ def registro() -> dict[str, Card]:
         gate_mes(uid, a)
         if not plan_gate_ok(uid, "simulator"):  # a mesma regra da rota do simulador
             raise HTTPException(403, {"error": "pro_required", "feature": "simulator"})
+        gate_previsao(uid)  # o card lê a previsão (a base do corte de hábito)
+
+    def le_simulador(uid, a):
+        """O mês (builds antigos do app desenham só ele) + a previsão de 90 dias para o app novo. A visão do
+        modelo segue a de antes: o Piggy só passa a ler a previsão no PR 3b, junto com o card novo."""
+        p = previsao(dias="90", uid=uid)
+        return [(m, r | {"previsao": p}) for m, r in _mes(uid, a, detalhes=mes_detalhes)]
 
     def gate_periodo(uid, a):
         mes_pedido(a["ate"])  # defensivo: quem chama já cortou o futuro
@@ -252,8 +259,7 @@ def registro() -> dict[str, Card]:
         "categorias": Card(categorias_e_contas, det("mes", "ate", "entrou", "saiu", "categorias", "motivos"), gate_mes),
         "calendario": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
                            det("mes", "ate", "entrou", "saiu", "dias", "motivos"), gate_mes),
-        "simulador": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
-                          det("mes", "categorias", "motivos"), gate_simulador),
+        "simulador": Card(le_simulador, det("mes", "categorias", "motivos"), gate_simulador),
         "patrimonio": Card(lambda uid, a: [(None, {"patrimonio": patrimonio(uid=uid)})], historico),
         "wealth": Card(lambda uid, a: [(None, {"patrimonio": patrimonio(uid=uid)})],
                        _so("patrimonio", "total", "partes", "motivos")),

@@ -1,5 +1,5 @@
 /**
- * /oferta — LP de comparação (frontend/oferta.html + oferta.js). O markup é estático e
+ * A / (frontend/index.html, ex-/oferta, + oferta.js). O markup é estático e
  * o JS só liga ciclo, chat, animações ao rolar e a barra fixa; cada caso abaixo morre se
  * a peça correspondente sair (controles do CLAUDE.md §3: tirar o listener do ciclo
  * deixa "ciclo" vermelho; tirar o armar() deixa "animações" vermelho).
@@ -17,17 +17,27 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
-async function abrir({ js = true, calmo = false, mobile = false, relogio = false } = {}) {
+async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0 } = {}) {
   const ctx = await browser.newContext({
-    viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
+    viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
   });
+  // o servidor estático não tem /auth: o nav-auth.js decide logado/deslogado pelo /auth/validate
+  await ctx.route("**/auth/validate", r => logado
+    ? r.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })
+    : r.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
+  await ctx.route("**/auth/dashboard-profile", r => r.fulfill({
+    status: 200, contentType: "application/json",
+    body: JSON.stringify({ email: "ana.beatriz@gmail.com", display_name: "Ana Beatriz", plan: "free" }) }));
+  // o servidor estático não tem o /billing/plans-config: por padrão os três planos estão à venda
+  await ctx.route("**/billing/plans-config", async r => (await new Promise(ok => setTimeout(ok, planosDepois)), r.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true, ...disponivel }) })));
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
-  page.on("response", r => { if (r.status() >= 400) erros.push(`${r.status()} ${r.url()}`); });
+  page.on("response", r => { if (r.status() >= 400 && !r.url().endsWith("/auth/validate")) erros.push(`${r.status()} ${r.url()}`); });
   if (relogio) await page.clock.install({ time: new Date("2026-01-01T08:00:00") });
-  await page.goto(`${ORIGIN}/oferta.html`, { waitUntil: "load" });
+  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
   if (relogio) await page.clock.pauseAt(new Date("2026-01-01T09:00:00")); // daqui o tempo só anda no runFor
   return { page, ctx, erros };
 }
@@ -203,4 +213,188 @@ test("links internos: todo #alvo existe, o clique rola até a seção (não salt
   const r = await clicarPlanos(calmo.page);
   assert.ok(Math.abs(r.meio - r.fim) < 2, `reduced-motion devia saltar: ${r.meio} de ${r.fim}`);
   await calmo.ctx.close();
+});
+
+// ── Nav da raiz: "Entrar" para o cliente chegar ao dashboard ─────────────────
+
+const navMedida = page => page.evaluate(() => {
+  const nav = document.querySelector("nav.nav"), b = nav.getBoundingClientRect();
+  const itens = [...nav.querySelectorAll(":scope > a, :scope > .nav-right > *")].filter(e => e.getBoundingClientRect().width > 0);
+  return { h: +b.height.toFixed(1), fora: itens.filter(e => e.getBoundingClientRect().right > innerWidth + 0.5).length,
+           largura: document.documentElement.scrollWidth <= innerWidth };
+});
+
+test("nav deslogado: o link Entrar está no markup, visível e aponta para /login", async () => {
+  const { page, ctx, erros } = await abrir();
+  const entrar = page.locator('.nav .nav-right a[href="/login"]');
+  assert.equal(await entrar.count(), 1);
+  assert.equal((await entrar.textContent()).trim(), "Entrar");
+  assert.ok(await entrar.isVisible());
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
+test("nav logado: o menu da conta troca o Entrar e leva ao Dashboard (/app) e ao Início (/home)", async () => {
+  const { page, ctx, erros } = await abrir({ logado: true });
+  await page.waitForSelector("#pb-acct-btn", { state: "visible" });
+  assert.equal(await page.locator('.nav .nav-right a[href="/login"]').count(), 0);
+  await page.waitForFunction(() => document.getElementById("pb-acct-lbl").textContent === "Ana Beatriz");
+  await page.click("#pb-acct-btn");
+  assert.ok(await page.locator("#pb-acct-dd").isVisible());
+  assert.equal((await page.locator('#pb-acct-dd a[href="/app"]').textContent()).trim(), "Dashboard");
+  assert.equal(await page.locator('#pb-acct-dd a[href="/home"]').count(), 1);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
+for (const largura of [320, 375, 390, 1280]) {
+  for (const logado of [false, true]) {
+    test(`nav ${logado ? "logado" : "deslogado"} em ${largura}px: sem rolagem lateral, numa linha, Entrar com 44px`, async () => {
+      const { page, ctx } = await abrir({ largura, logado });
+      if (logado) await page.waitForFunction(() => document.getElementById("pb-acct-lbl")?.textContent === "Ana Beatriz");
+      await page.evaluate(() => document.fonts.ready);
+      const m = await navMedida(page);
+      assert.ok(m.largura, `${largura}: scrollWidth > innerWidth`);
+      assert.equal(m.fora, 0, `${largura}: item da nav fora da tela`);
+      assert.ok(m.h <= 66, `${largura}: nav com ${m.h}px, passou de uma linha`);
+      if (!logado) {
+        const e = await page.locator('.nav .nav-right a[href="/login"]').boundingBox();
+        assert.ok(e.height >= 44, `${largura}: Entrar com ${e.height}px`);
+      } else {
+        await page.click("#pb-acct-btn");
+        const dd = await page.locator("#pb-acct-dd").boundingBox();
+        assert.ok(dd.x >= 0 && dd.x + dd.width <= largura, `${largura}: menu da conta aberto em ${Math.round(dd.x)}..${Math.round(dd.x + dd.width)}`);
+      }
+      await ctx.close();
+    });
+  }
+}
+
+test("teclado: o 1º Tab é o 'Pular para o conteúdo', que aparece no foco e leva ao hero dentro do <main>; o Tab seguinte não volta ao nav", async () => {
+  const { page, ctx, erros } = await abrir({ calmo: true });
+  const estrutura = await page.evaluate(() => {
+    const main = document.querySelectorAll("main");
+    return [main.length, !!main[0]?.querySelector("#conteudo, #planos, #cta-final"), ["#conteudo", "#planos", "#cta-final"].every(s => main[0]?.contains(document.querySelector(s))),
+      !main[0]?.contains(document.querySelector("footer"))];
+  });
+  assert.deepEqual(estrutura, [1, true, true, true]);
+  const escondido = await page.locator(".pb-skip").evaluate(e => e.getBoundingClientRect().bottom <= 0);
+  await page.keyboard.press("Tab");
+  const pulo = await page.evaluate(() => { const a = document.activeElement, r = a.getBoundingClientRect();
+    return [a.textContent.trim(), a.getAttribute("href"), r.top >= 0 && r.bottom <= innerHeight]; });
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "conteudo");
+  await page.keyboard.press("Tab");
+  const depois = await page.evaluate(() => { const a = document.activeElement;
+    return [!!a.closest(".pb-hero"), !!a.closest("nav"), a.textContent.trim().slice(0, 30)]; });
+  await ctx.close();
+  assert.ok(escondido, "o link aparece antes do foco");
+  assert.deepEqual(pulo, ["Pular para o conteúdo", "#conteudo", true]);
+  assert.deepEqual(depois.slice(0, 2), [true, false], `o Tab seguinte foi para "${depois[2]}"`);
+  assert.deepEqual(erros, []);
+});
+
+test("com sessão, os botões de plano levam à /precos (troca de plano do assinante); sem sessão, à /assinar", async () => {
+  const hrefs = async logado => {
+    const { page, ctx, erros } = await abrir({ logado });
+    if (logado) await page.waitForFunction(() => !document.querySelector('[data-plano] a[href^="/assinar"]'));
+    else await page.waitForSelector("#pb-acct-btn", { state: "attached", timeout: 1500 }).catch(() => {});
+    const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => a.getAttribute("href")));
+    await ctx.close();
+    assert.deepEqual(erros, []);
+    return r;
+  };
+  assert.deepEqual(await hrefs(true), Array(6).fill("/precos"));
+  const anonimo = await hrefs(false);
+  assert.equal(anonimo.length, 6);
+  for (const h of anonimo) assert.match(h, /^\/assinar\?plano=(essencial|plus|pro)&ciclo=(annual|monthly)$/);
+});
+
+test("plano sem price no Stripe (plans-config): os botões dele viram 'Indisponível' sem link; os outros seguem para a /assinar", async () => {
+  const { page, ctx, erros } = await abrir({ disponivel: { plus_available: false } });
+  await page.waitForFunction(() => document.querySelectorAll('[data-plano="plus"] [aria-disabled="true"]').length === 2);
+  const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href"), a.textContent.trim()]));
+  await ctx.close();
+  assert.deepEqual(r.filter(([t]) => t === "plus"), [["plus", null, "Indisponível"], ["plus", null, "Indisponível"]]);
+  const outros = r.filter(([t]) => t !== "plus");
+  assert.equal(outros.length, 4);
+  for (const [t, href, txt] of outros) assert.ok(href.startsWith(`/assinar?plano=${t}&`) && txt !== "Indisponível", `${t}: ${href} ${txt}`);
+  assert.deepEqual(erros, []);
+});
+
+test("com sessão e o plans-config chegando depois do /auth/validate, o plano indisponível ainda vira 'Indisponível'", async () => {
+  const { page, ctx, erros } = await abrir({ logado: true, disponivel: { plus_available: false }, planosDepois: 600 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-plano] [aria-disabled="true"]').length === 2, null, { timeout: 5000 });
+  const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href"), a.textContent.trim()]));
+  await ctx.close();
+  assert.deepEqual(r.filter(([t]) => t === "plus"), [["plus", null, "Indisponível"], ["plus", null, "Indisponível"]]);
+  assert.deepEqual(r.filter(([t]) => t !== "plus").map(([, h]) => h), Array(4).fill("/precos"));
+  assert.deepEqual(erros, []);
+});
+
+// ── Imagens: só o topo baixa de cara, e o espaço de cada uma já está reservado ─────────
+
+for (const [w, h] of [[1440, 900], [390, 844], [320, 640]]) {
+  test(`imagens em ${w}px: a dobra é eager, o resto é lazy, e a altura não depende do download`, async () => {
+    const medir = async bloquear => {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+      if (bloquear) await ctx.route(/\/brand\/oferta\//, r => r.abort());
+      const page = await ctx.newPage();
+      await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
+      const topo = await page.evaluate(() => ({
+        lazyNaDobra: [...document.images].filter(i => { const r = i.getBoundingClientRect();
+          return i.loading === "lazy" && r.width > 0 && r.top < innerHeight; }).map(i => i.src.split("/").pop()),
+        lazy: [...document.images].filter(i => i.loading === "lazy").length,
+        total: document.images.length,
+      }));
+      // força o download de tudo para comparar a altura final e a proporção de cada arte
+      if (!bloquear) {
+        await page.evaluate(() => [...document.images].forEach(i => { i.loading = "eager"; }));
+        await page.waitForFunction(() => [...document.images].every(i => i.complete && i.naturalWidth));
+      }
+      const fim = await page.evaluate(() => ({
+        alturas: [...document.images].map(i => Math.round(i.getBoundingClientRect().height)),
+        // width/height viram proporção, não tamanho: nenhuma arte sai esticada (fora as de caixa
+        // fixa do design: cover recorta, e altura no style é ícone quadrado de propósito)
+        esticadas: [...document.images].filter(i => { const r = i.getBoundingClientRect();
+          return i.naturalWidth && r.width > 2 && getComputedStyle(i).objectFit !== "cover" &&
+            !(i.style.height && i.style.height !== "auto") &&
+            Math.abs(r.height - r.width * i.naturalHeight / i.naturalWidth) > 2; })
+          .map(i => i.src.split("/").pop()),
+        medidas: [...document.images].filter(i => i.naturalWidth && i.getBoundingClientRect().width > 2).length,
+      }));
+      await ctx.close();
+      return { ...topo, ...fim };
+    };
+    const com = await medir(false), sem = await medir(true);
+    assert.deepEqual(com.lazyNaDobra, [], "imagem da dobra adiada");
+    assert.ok(com.lazy >= com.total - 4, `só ${com.lazy} de ${com.total} são lazy`);
+    assert.ok(com.medidas >= 30, `só ${com.medidas} imagens medidas: a medição não achou a página`);
+    assert.deepEqual(com.esticadas, [], "arte fora da proporção");
+    // sem o download, cada <img> já ocupa a altura final: rolar não empurra o conteúdo
+    assert.deepEqual(sem.alturas, com.alturas);
+  });
+}
+
+// ── Guard da PWA instalada (index.html, 1º <script>): standalone entra pelo app ─────────
+
+/** Abre `/index.html` + `query` com `display-mode: standalone` emulado e devolve o pathname final.
+ *  O servidor estático não tem /login (404): vale o pathname da URL, não o status. */
+async function pathAposAbrirStandalone(query) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript(() => {
+    const real = window.matchMedia.bind(window);
+    window.matchMedia = q => /display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : real(q);
+  });
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/index.html${query}`, { waitUntil: "load" }).catch(() => {});
+  await page.waitForTimeout(500);
+  const path = new URL(page.url()).pathname;
+  await ctx.close();
+  return path;
+}
+
+test("PWA instalada (standalone): a / manda para /login; com ?site=1 fica na landing", async () => {
+  assert.equal(await pathAposAbrirStandalone(""), "/login");
+  assert.equal(await pathAposAbrirStandalone("?site=1"), "/index.html");
 });
