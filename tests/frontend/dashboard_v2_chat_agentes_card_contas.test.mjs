@@ -121,13 +121,14 @@ for (const width of TELAS) {
 test("Carteiro: conta variável sem estimativa (gravada como 0) diz 'valor a definir', não R$ 0,00", async () => {
   const base = RESPOSTAS.contas_a_pagar.cheia;
   const contas = base.contas.map((c, i) => (i === 1 ? { ...c, valor: "0.00", variavel: true } : i === 2 ? { ...c, valor: "0.00", variavel: false } : c));
-  const { ctx, page } = await abrir({ width: 1440, tipo: "contas", corpo: { ...base, contas } });
+  // o total do servidor deixa de fora a variável sem estimativa (0) e a fixa zerada: 1245,60 − 132,60 − 99,90
+  const { ctx, page } = await abrir({ width: 1440, tipo: "contas", corpo: { ...base, contas, total_estimado: "1013.10" } });
   await perguntar(page, "Carteiro");
   await carregado(page);
   const l = await linhas(card(page), ".card-agente-lista li");
   assert.match(l[1], /valor a definir/);
   assert.match(l[2], /R\$ 0,00/); // fixa de valor zero continua R$ 0,00
-  assert.equal(await card(page).locator(".card-agente-total").innerText(), "R$ 1.245,60");
+  assert.equal(await card(page).locator(".card-agente-total").innerText(), "R$ 1.013,10");
   assert.match(await card(page).innerText(), /fora 1 conta a definir/); // o total não conta a de valor a definir
   await ctx.close();
 });
