@@ -4,10 +4,11 @@
 // tem link: o painel não tem tela de contas a pagar nem de caixinhas.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { abrirPainel, exigeArtefatoEmDia, FRONTEND, RESPOSTAS } from "./_painel.mjs";
+import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
+import { bundleSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -126,6 +127,19 @@ test("Carteiro: conta variável sem estimativa (gravada como 0) diz 'valor a def
   const l = await linhas(card(page), ".card-agente-lista li");
   assert.match(l[1], /valor a definir/);
   assert.match(l[2], /R\$ 0,00/); // fixa de valor zero continua R$ 0,00
+  assert.equal(await card(page).locator(".card-agente-total").innerText(), "R$ 1.245,60");
+  assert.match(await card(page).innerText(), /fora 1 conta a definir/); // o total não conta a de valor a definir
+  await ctx.close();
+});
+
+test("Carteiro: só conta variável sem estimativa: o total diz 'Valor a definir', não R$ 0,00", async () => {
+  const corpo = { hoje: "2026-10-20", pendentes: 1, vencidas: 0, total_estimado: "0.00", tem_variavel: true,
+    contas: [{ id: 1, nome: "Luz", categoria: null, vence_em: "2026-10-25", dias: 5, valor: "0.00", variavel: true, vencida: false }] };
+  const { ctx, page } = await abrir({ width: 390, tipo: "contas", corpo });
+  await perguntar(page, "Carteiro");
+  await carregado(page);
+  assert.equal(await card(page).locator(".card-agente-total").innerText(), "Valor a definir");
+  assert.ok(!/R\$ 0,00/.test(await card(page).innerText()));
   await ctx.close();
 });
 
@@ -190,26 +204,10 @@ test("nomes e valores enormes não estouram o card em 390; corpo fora do contrat
 
 // --- Isolamento: a /api/v2 lê o usuário da SESSÃO. Se a sessão virou a conta B entre o pedido e a resposta, o número de B nunca aparece. ---
 const DA_B = { contas: [{ ...RESPOSTAS.contas_a_pagar.cheia, total_estimado: "98765.43" }, "98.765,43"], caixinhas: [{ ...RESPOSTAS.caixinhas.cheia, total: "98765.43" }, "98.765,43"] };
-// `sem`: no controle negativo a 1ª leitura do perfil depois do GET (a de daConta, que o bundle patchado ignora) ainda diz 42 e as seguintes
-// demoram 500 ms: sem isso a limpeza da conversa (a releitura do próprio painel) corre com o desenho do card e o teste não mediria nada.
-async function viraConta43NoGet(ctx, page, tipo, sem = false) {
+const viraConta43NoGet = async (ctx, page, tipo, sem = false) => {
   const [corpoB, marca] = DA_B[tipo];
-  const observa = (m) => {
-    window.__viu = false;
-    window.__viuErro = false;
-    new MutationObserver(() => { if (document.body.textContent.includes(m)) window.__viu = true; if (document.body.textContent.includes("Não deu para carregar")) window.__viuErro = true; }).observe(document, { subtree: true, childList: true, characterData: true });
-  };
-  await page.addInitScript(observa, marca);
-  await page.evaluate(observa, marca);
-  let virou = false, armado = false, depois = 0;
-  await ctx.route("**/auth/dashboard-profile", async (r) => {
-    const n = virou ? ++depois : 0, conta = virou && !(sem && n === 1) ? 43 : 42;
-    if (sem && n > 1) await new Promise((ok) => setTimeout(ok, 500));
-    await r.fulfill({ json: { user_id: conta, display_name: conta === 43 ? "Outra" : "Marina", email: null, whatsapp_linked: true } });
-  });
-  await ctx.route(TIPOS[tipo].url, (r) => { virou = armado; r.fulfill({ json: corpoB }); });
-  return { arma: () => { armado = true; }, marca };
-}
+  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca, sem), marca };
+};
 for (const width of TELAS) {
   for (const tipo of Object.keys(TIPOS)) {
     test(`${width}: ISOLAMENTO ${tipo}: depois do GET do card a sessão vira a conta 43: o número dela nunca aparece e a conversa é limpa`, async () => {
@@ -234,9 +232,7 @@ for (const width of TELAS) {
 for (const tipo of Object.keys(TIPOS)) {
   test(`ISOLAMENTO ${tipo}, controle negativo: com a conferência da conta desligada no bundle, o número de B APARECE (o teste acima mede)`, async () => {
     const { ctx, page, t } = await abrir({ width: 1440, tipo });
-    const js = readFileSync(join(FRONTEND, "dashboard-app.js"), "utf8");
-    const desligado = js.replace(/user_id!==(\w+)\)throw new (\w+);return/, "user_id===-1)throw new $2;return");
-    assert.notEqual(desligado, js, "o padrão da conferência não está mais no bundle: ajuste o teste");
+    const desligado = bundleSemConferencia();
     await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
     const { arma } = await viraConta43NoGet(ctx, page, tipo, true);
     await page.goto(page.url());

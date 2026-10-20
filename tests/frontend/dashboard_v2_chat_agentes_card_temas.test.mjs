@@ -3,10 +3,11 @@
 // O servidor só diz QUAL card (e o mês); os números vêm da rota v2 do tipo, conferida a conta da sessão (conta/api.ts: daConta). Tudo em 1440 e 390.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { abrirPainel, exigeArtefatoEmDia, FRONTEND, RESPOSTAS } from "./_painel.mjs";
+import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
+import { bundleSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -241,26 +242,10 @@ test("Repórter: corpo de outro mês ou fora do contrato: erro, nunca número", 
 // --- Isolamento: a /api/v2 lê o usuário da SESSÃO. Se a sessão virou a conta B entre o pedido e a resposta, o número de B nunca aparece. ---
 const DA_B = { assinaturas: [{ ...RESPOSTAS.assinaturas.cheia, total_mensal: "98765.43" }, "98.765,43"], resumo_mes: [RES("98765.43", "1.00"), "98.765,43"],
   orcamentos: [{ ...RESPOSTAS.orcamentos_categoria.padrao, total: { ...RESPOSTAS.orcamentos_categoria.padrao.total, gasto: "98765.43" } }, "98.765,43"] };
-// `sem`: no controle negativo a 1ª leitura do perfil depois do GET (a de daConta, que o bundle patchado ignora) ainda diz 42 e as seguintes
-// demoram 500 ms: sem isso a limpeza da conversa (a releitura do próprio painel) corre com o desenho do card e o teste não mediria nada.
-async function viraConta43NoGet(ctx, page, tipo, sem = false) {
+const viraConta43NoGet = async (ctx, page, tipo, sem = false) => {
   const [corpoB, marca] = DA_B[tipo];
-  const observa = (m) => {
-    window.__viu = false;
-    window.__viuErro = false;
-    new MutationObserver(() => { if (document.body.textContent.includes(m)) window.__viu = true; if (document.body.textContent.includes("Não deu para carregar")) window.__viuErro = true; }).observe(document, { subtree: true, childList: true, characterData: true });
-  };
-  await page.addInitScript(observa, marca);
-  await page.evaluate(observa, marca);
-  let virou = false, armado = false, depois = 0;
-  await ctx.route("**/auth/dashboard-profile", async (r) => {
-    const n = virou ? ++depois : 0, conta = virou && !(sem && n === 1) ? 43 : 42;
-    if (sem && n > 1) await new Promise((ok) => setTimeout(ok, 500));
-    await r.fulfill({ json: { user_id: conta, display_name: conta === 43 ? "Outra" : "Marina", email: null, whatsapp_linked: true } });
-  });
-  await ctx.route(TIPOS[tipo].url, (r) => { virou = armado; r.fulfill({ json: corpoB }); });
-  return { arma: () => { armado = true; }, marca };
-}
+  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca, sem), marca };
+};
 for (const width of TELAS) {
   for (const tipo of Object.keys(TIPOS)) {
     test(`${width}: ISOLAMENTO ${tipo}: depois do GET do card a sessão vira a conta 43: o número dela nunca aparece e a conversa é limpa`, async () => {
@@ -285,9 +270,7 @@ for (const width of TELAS) {
 for (const tipo of Object.keys(TIPOS)) {
   test(`ISOLAMENTO ${tipo}, controle negativo: com a conferência da conta desligada no bundle, o número de B APARECE (o teste acima mede)`, async () => {
     const { ctx, page, t } = await abrir({ width: 1440, tipo });
-    const js = readFileSync(join(FRONTEND, "dashboard-app.js"), "utf8");
-    const desligado = js.replace(/user_id!==(\w+)\)throw new (\w+);return/, "user_id===-1)throw new $2;return");
-    assert.notEqual(desligado, js, "o padrão da conferência não está mais no bundle: ajuste o teste");
+    const desligado = bundleSemConferencia();
     await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
     const { arma } = await viraConta43NoGet(ctx, page, tipo, true);
     await page.goto(page.url());

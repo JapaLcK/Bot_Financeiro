@@ -8,7 +8,8 @@ export const contratoCaixinhas = (d: unknown) => {
   const x = d as Caixinhas | null;
   return !!x && money(x.total) && Array.isArray(x.caixinhas)
     && x.caixinhas.every((c) => c && typeof c.nome === "string" && money(c.saldo) && (c.meta === null || money(c.meta))
-      && (c.progresso_pct === null || (typeof c.progresso_pct === "string" && Number.isFinite(Number(c.progresso_pct)))));
+      && (c.progresso_pct === null || (typeof c.progresso_pct === "string" && Number.isFinite(Number(c.progresso_pct))))
+      && (c.atingida === null || typeof c.atingida === "boolean")); // "false" em texto diria "Meta batida"
 };
 
 /** O total guardado e as caixinhas do maior saldo, com a barra de quem tem meta (o saldo é o último registrado: o servidor não aplica juros ao ler). */
