@@ -380,7 +380,7 @@ test("Repórter compara: card fora do contrato (um mês, três, iguais, decresce
 
 test("Repórter compara: corpo de outro mês ou fora do contrato num dos lados: erro, nunca meio card; 500 num: Tentar de novo", async () => {
   const bom = (req) => RES(...PAR[mesDe(req)], mesDe(req));
-  for (const lado of ["2026-09", "2026-10"]) for (const ruim of [(req) => RES("1.00", "1.00", "2026-08"), (req) => RES(1, "1.00", mesDe(req)), (req) => ({ ...RES("1.00", "1.00", mesDe(req)), motivos: [{}] })]) {
+  for (const lado of ["2026-09", "2026-10"]) for (const ruim of [() => RES("1.00", "1.00", "2026-08"), (req) => RES(1, "1.00", mesDe(req)), (req) => ({ ...RES("1.00", "1.00", mesDe(req)), motivos: [{}] })]) {
     const { ctx, page } = await abrir({ width: 1440, tipo: "comparacao_meses", corpo: (_n, req) => (mesDe(req) === lado ? ruim(req) : bom(req)) });
     await perguntar(page, "Repórter");
     await card(page).getByRole("button", { name: "Tentar de novo" }).waitFor({ timeout: 5000 });
