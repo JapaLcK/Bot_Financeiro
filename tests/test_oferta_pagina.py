@@ -125,3 +125,12 @@ def test_selo_dos_agentes_e_rodape_sem_promessa_nem_placeholder():
     # "Preço de fundador" (valor congelado) contradiz termos.html: preço muda na renovação.
     for sobra in ("Razão social", "00.000.000", "[CNPJ", "fundador", "congelado"):
         assert sobra not in pagina, sobra
+
+
+def test_preco_por_dia_do_time_inteiro_e_o_do_pro():
+    """"Um time inteiro" são os 7 agentes, que só a energia do Pro ativa; o preço por dia
+    é o do Pro anual (o mais barato que roda os 7), arredondado para cima."""
+    pro = limits_for_tier("pro")
+    assert pro["agents_max"] == max(limits_for_tier(t)["agents_max"] for t in TIERS)
+    por_dia = -(-_plan_prices()["pro"]["annual"] // 365)
+    assert f"Um time inteiro a partir de {_brl(por_dia)} por dia." in _pagina()
