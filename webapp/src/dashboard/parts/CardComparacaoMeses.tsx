@@ -14,16 +14,21 @@ const nome = (mes: string) => minus(mes).replace(/^./, (c) => c.toUpperCase());
 // Melhorou = verde, piorou = aviso, zero = neutro; o sinal fica no texto (a cor não é o único sinal).
 const sentido = (dif: string, subirEMelhor: boolean) => (!/[1-9]/.test(dif) ? "" : dif.startsWith("-") === subirEMelhor ? " warn" : " gain");
 
+/** O título do card, também o dos estados Carregando/erro do `CardAgente`: "Setembro × outubro de 2026". */
+export const tituloComparacao = (meses: [string, string]) => {
+  const [a, b] = meses.map((m) => mesAno(m));
+  return meses[0].slice(0, 4) === meses[1].slice(0, 4) ? `${nome(meses[0])} × ${minus(meses[1])} de ${meses[1].slice(0, 4)}` : `${a.replace(/^./, (c) => c.toUpperCase())} × ${b}`;
+};
+
 /** Entrou, Saiu e Sobrou dos dois meses lado a lado e a diferença (mais novo − mais antigo): o resumo-do-mes de cada um, a mesma regra do `compare_periods` por fatura. */
 export function CardComparacaoMeses({ d, meses, motivos }: { d: [ResumoDoMes, ResumoDoMes]; meses: [string, string]; motivos: string[] }) {
   const [ant, nov] = d;
   const sob = (x: ResumoDoMes) => menos(x.entrou, x.saiu);
   const linhas: [string, string, string, boolean][] = [["Entrou", ant.entrou, nov.entrou, true], ["Saiu", ant.saiu, nov.saiu, false], ["Sobrou", sob(ant), sob(nov), true]];
   const [a, b] = meses.map((m) => mesAno(m));
-  const tit = meses[0].slice(0, 4) === meses[1].slice(0, 4) ? `${nome(meses[0])} × ${minus(meses[1])} de ${meses[1].slice(0, 4)}` : `${a.replace(/^./, (c) => c.toUpperCase())} × ${b}`;
   return (
     <section className="card-agente" aria-label={`Comparação de ${a} com ${b}`}>
-      <p className="card-agente-tit"><b>{tit}</b></p>
+      <p className="card-agente-tit"><b>{tituloComparacao(meses)}</b></p>
       <dl className="card-agente-comp">
         {linhas.map(([rot, x, y, sobe]) => {
           const dif = menos(y, x);

@@ -277,6 +277,8 @@ from core.services.ai_chat.tools import launches as tool  # noqa: E402
 from db import resumo_mes  # noqa: E402
 from tests._patrimonio_helpers import q  # noqa: E402
 from tests.conftest import usuario_pagante  # noqa: E402
+
+execute_read_real = chat.execute_read  # o fixture `conversa` troca o `chat.execute_read`; o teste do Repórter devolve o real
 from utils_date import _tz  # noqa: E402
 
 AGORA = datetime(2026, 10, 12, 10, 0, tzinfo=_tz())
@@ -436,8 +438,7 @@ class _Call:
 def test_conversa_do_reporter_compara_dois_meses_e_leva_o_card(conversa, monkeypatch, conta):
     monkeypatch.setattr(plan_service, "plan_gate_ok", lambda uid, feature: True)  # o fixture `gate` nega financial_comparison; aqui o plano é o da conta
     r = tool._compare_periods(conta, {"mes": "2026-09"})
-    soma = tool._get_period_summary(conta, {"start_date": "2026-09-01", "end_date": "2026-09-30"})
-    monkeypatch.setattr(chat, "execute_read", lambda uid, kind, nome, args: r if nome == "compare_periods" else soma)
+    monkeypatch.setattr(chat, "execute_read", execute_read_real)  # a conversa passa pelo `execute_read → tool.execute` de verdade
     monkeypatch.setattr(chat, "_route", lambda *a: own_route(needs_data=True))
     conversa([response(calls=[_Call("compare_periods", {"mes": "2026-09"}, 1)]), response("Setembro foi diferente."), OK])
     assert chat.chat(conta, "reporter", "Compare agosto com setembro")["card"] == _contrato(["2026-08", "2026-09"], r)

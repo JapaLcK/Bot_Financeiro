@@ -7,7 +7,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
-import { bundleSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
+import { servirSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -248,9 +248,9 @@ test("Repórter: corpo de outro mês ou fora do contrato: erro, nunca número", 
 // --- Isolamento: a /api/v2 lê o usuário da SESSÃO. Se a sessão virou a conta B entre o pedido e a resposta, o número de B nunca aparece. ---
 const DA_B = { assinaturas: [{ ...RESPOSTAS.assinaturas.cheia, total_mensal: "98765.43" }, "98.765,43"], resumo_mes: [RES("98765.43", "1.00"), "98.765,43"],
   orcamentos: [{ ...RESPOSTAS.orcamentos_categoria.padrao, total: { ...RESPOSTAS.orcamentos_categoria.padrao.total, gasto: "98765.43" } }, "98.765,43"] };
-const viraConta43NoGet = async (ctx, page, tipo, sem = false) => {
+const viraConta43NoGet = async (ctx, page, tipo) => {
   const [corpoB, marca] = DA_B[tipo];
-  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca, sem), marca };
+  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca), marca };
 };
 for (const width of TELAS) {
   for (const tipo of Object.keys(TIPOS)) {
@@ -276,15 +276,15 @@ for (const width of TELAS) {
 for (const tipo of Object.keys(TIPOS)) {
   test(`ISOLAMENTO ${tipo}, controle negativo: com a conferência da conta desligada no bundle, o número de B APARECE (o teste acima mede)`, async () => {
     const { ctx, page, t } = await abrir({ width: 1440, tipo });
-    const desligado = bundleSemConferencia();
-    await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
-    const { arma } = await viraConta43NoGet(ctx, page, tipo, true);
-    await page.goto(page.url());
+    const servido = await servirSemConferencia(ctx);
+    const { arma } = await viraConta43NoGet(ctx, page, tipo);
+    await page.reload();
     await page.locator(".chat-empty").waitFor();
     arma();
     await page.locator("#askbar-input").fill(`@${t.nome} me mostra?`);
     await page.locator("#askbar-input").press("Enter");
     await page.waitForFunction(() => window.__viu, null, { timeout: 5000 }).catch(() => {});
+    assert.ok(servido.n > 0, "o bundle desligado não foi servido: o controle não mede nada");
     assert.equal(await page.evaluate(() => window.__viu), true, "sem a conferência o número de B tem de aparecer");
     await ctx.close();
   });
@@ -406,7 +406,7 @@ const corpoCmp = (req, n) => (n === 1 ? RES("1000000.00", "1.00", mesDe(req)) : 
 for (const [viraNoN, nome] of [[1, "1ª leitura"], [2, "2ª leitura (a 1ª já era legítima)"]]) {
   test(`ISOLAMENTO comparacao_meses: a sessão vira a conta 43 na ${nome}: nenhum número aparece e a conversa é limpa`, async () => {
     const { ctx, page, erros } = await abrir({ width: 390, tipo: "comparacao_meses" });
-    const arma = await vira(ctx, page, CMP.url, corpoCmp, MARCA_B, false, viraNoN);
+    const arma = await vira(ctx, page, CMP.url, corpoCmp, MARCA_B, viraNoN);
     arma();
     await page.evaluate((a) => { new MutationObserver(() => { if (document.body.textContent.includes(a)) window.__viuA = true; }).observe(document, { subtree: true, childList: true, characterData: true }); }, DA_A);
     const lidas = page.waitForResponse((r) => CMP.url.test(r.url()));
@@ -425,15 +425,15 @@ for (const [viraNoN, nome] of [[1, "1ª leitura"], [2, "2ª leitura (a 1ª já e
 }
 test("ISOLAMENTO comparacao_meses, controle negativo: sem a conferência da conta no bundle, o número de B APARECE", async () => {
   const { ctx, page } = await abrir({ width: 1440, tipo: "comparacao_meses" });
-  const desligado = bundleSemConferencia();
-  await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
-  const arma = await vira(ctx, page, CMP.url, corpoCmp, MARCA_B, true, 2);
-  await page.goto(page.url());
+  const servido = await servirSemConferencia(ctx);
+  const arma = await vira(ctx, page, CMP.url, corpoCmp, MARCA_B, 2);
+  await page.reload();
   await page.locator(".chat-empty").waitFor();
   arma();
   await page.locator("#askbar-input").fill("@Repórter me mostra?");
   await page.locator("#askbar-input").press("Enter");
   await page.waitForFunction(() => window.__viu, null, { timeout: 5000 }).catch(() => {});
+  assert.ok(servido.n > 0, "o bundle desligado não foi servido: o controle não mede nada");
   assert.equal(await page.evaluate(() => window.__viu), true, "sem a conferência o número de B tem de aparecer");
   await ctx.close();
 });
