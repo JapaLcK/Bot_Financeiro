@@ -872,6 +872,12 @@ curva na resposta (P3); API + web neste PR, app depois (P4). **Seguem abertos:**
 variável (`cabe_nas_premissas` continua false), veredito/recomendador, metas afetadas e horizonte > 90.
 A tela do app está feita (folha na aba Gastos, só Pro). O bloco de hábitos em `/simulador` continua demonstrativo.
 
+**Corte de hábito real, servidor (PR 3a, 20/10/2026).** `POST /api/v2/simulador/habitos` (e `/api/app/...`) e o card
+`simulador` do chat com a previsão (ver `docs/CLAUDE.md`, "API v2"). Decisões do dono: Q1 (a) o /painel real só com os
+cortes e o resultado (meta, gasto fixo novo e presets ficam no protótipo); Q2 (a) o app usa o gasto mensal estimado e a
+curva antes × depois; Q3 (a) o card do chat vira o real; Q4 passo 10 %, rótulo "Sobra por mês". As telas (web e app)
+são o PR 3b; até lá o bloco de hábitos segue demonstrativo.
+
 ### Etapa 3 — PR3: tela real da previsão (implementação local, 07/10/2026)
 
 Com backend, `/painel#/previsao` e o card "Saldo previsto" do Resumo (Q1 = a) mostram a
