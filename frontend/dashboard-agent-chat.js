@@ -50,7 +50,7 @@
           actions.push({ label: 'Iniciar nova conversa', onClick: () => {
             const draft = s.draft || message.question;
             sessions.delete(kind);
-            window.openAgentChat(kind, draft, message.forward);
+            window.openAgentChat(kind, draft, draft === message.forward?.question ? message.forward : null); // rascunho editado perde a marca
           } });
         } else if (message.retryable && s.access === 'ready') {
           actions.push({ label: 'Tentar novamente', onClick: () => sendTurn(kind, message.question, message), disabled: s.busy });

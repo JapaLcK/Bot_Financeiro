@@ -164,3 +164,36 @@ test('ativação em andamento informa progresso e desabilita a ação até concl
     assert.equal(await page.locator('.agent-chat-message').count(), 0);
   } finally { release(); await page.close(); }
 });
+
+// Pergunta do botão que cai em invalid_context: a marca só sobrevive ao "Iniciar nova conversa" se o rascunho não foi editado.
+async function encaminhadaExpirada(edited) {
+  const { page, requests } = await setup({ failAt: [2], failureStatus: 400, failureDetail: { error: 'invalid_context', message: 'Expirou.', retryable: false } });
+  await ask(page, 'Duplicidades e CDI');
+  await page.getByRole('button', { name: 'Conversar com Barão' }).click();
+  await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+  await page.click('#agent-chat-send');
+  await page.waitForFunction(() => document.querySelector('.agent-chat-assistant[data-state="error"]'));
+  if (edited) await page.fill('#agent-chat-input', 'Quanto gastei no mercado?');
+  await page.locator('.agent-chat-assistant[data-state="error"]').getByRole('button', { name: 'Iniciar nova conversa' }).click();
+  await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+  await page.click('#agent-chat-send');
+  await page.waitForFunction(() => document.querySelector('.agent-chat-assistant[data-state="complete"]'));
+  return { page, requests };
+}
+
+test('nova conversa com rascunho editado não leva a marca de encaminhada', async () => {
+  const { page, requests } = await encaminhadaExpirada(true);
+  try {
+    assert.equal(requests[2].message, 'Quanto gastei no mercado?');
+    assert.equal(requests[2].forwarded, undefined);
+  } finally { await page.close(); }
+});
+
+test('nova conversa sem edição mantém a marca de encaminhada', async () => {
+  const { page, requests } = await encaminhadaExpirada(false);
+  try {
+    assert.equal(requests[1].forwarded, true);
+    assert.equal(requests[2].forwarded, true);
+    assert.equal(requests[2].needs_data, true);
+  } finally { await page.close(); }
+});
