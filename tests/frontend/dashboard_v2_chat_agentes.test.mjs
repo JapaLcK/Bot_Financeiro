@@ -1554,6 +1554,19 @@ for (const width of TELAS) {
     solta();
     await ctx.close();
   });
+  test(`${width}: enquanto envia, ligar o movimento reduzido no meio da espera congela a frase`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    const carga = resposta(page).locator(".msg-carga");
+    await carga.filter({ hasText: "Comparando cobranças parecidas…" }).waitFor({ timeout: 3500 }); // trocando
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForTimeout(4500); // duas trocas
+    assert.equal(await carga.textContent(), "Comparando cobranças parecidas…");
+    solta();
+    await ctx.close();
+  });
   test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {
     const { ctx, page } = await abrir({ width, ativos: ["detetive", "carteiro"], chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: palavras(150), context: "c", redirects: [RED] } } : null) });
     await MOVIMENTO(page);
