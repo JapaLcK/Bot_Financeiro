@@ -135,6 +135,12 @@ def execute_read(user_id: int, kind: str, name: str, args: dict):
         return _list_pockets(user_id, args, accrue=False)
     if getattr(tool, "has_side_effects", False):
         return {"error": "Consulta com efeitos colaterais não permitida."}
+    if name == "get_budget_status":
+        # O mês da consulta (db/budgets usa date.today()): o card dos orçamentos o leva e só mostra esse mês, mesmo
+        # que a resposta chegue depois da virada (Codex no #1199).
+        mes = date.today().strftime("%Y-%m")
+        result = tool.execute(user_id, args)
+        return {**result, "mes": mes} if isinstance(result, dict) else result
     return tool.execute(user_id, args)
 
 

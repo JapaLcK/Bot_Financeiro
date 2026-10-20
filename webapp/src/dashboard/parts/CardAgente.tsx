@@ -24,7 +24,8 @@ const contratoInvestido = (d: unknown) => {
       && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))) && textos(p.motivos));
 };
 
-type Leitura = { chave: string; titulo: string; ler: (signal: AbortSignal) => Promise<unknown>; contrato: (d: unknown) => boolean; desenha: (d: any) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any
+// `outroMes`: a rota respondeu um mês que não é o do texto (virou o mês entre a consulta e o card): nenhum card, nem erro.
+type Leitura = { chave: string; titulo: string; ler: (signal: AbortSignal) => Promise<unknown>; contrato: (d: unknown) => boolean; desenha: (d: any) => ReactNode; outroMes?: (d: any) => boolean }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 function leituraDe(c: Card): Leitura {
   switch (c.tipo) {
@@ -33,7 +34,7 @@ function leituraDe(c: Card): Leitura {
     case "resumo_mes":
       return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} motivos={c.motivos} /> };
     case "orcamentos":
-      return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} /> };
+      return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroMes: (d) => d.mes !== c.mes };
     default: {
       const foco = c.tipo === "renda_fixa" ? "renda_fixa" : undefined;
       return { chave: "card-investido", titulo: foco ? "Renda fixa" : "Investimentos", ler: (signal) => investidoQuery.queryFn({ signal }), contrato: contratoInvestido, desenha: (d: Investido) => <CardInvestido d={d} foco={foco} /> };
@@ -64,5 +65,6 @@ export function CardAgente({ uid, c }: { uid: number; c: Card }) {
       </section>
     );
   }
+  if (l.outroMes?.(q.data)) return null;
   return <>{l.desenha(q.data)}</>;
 }

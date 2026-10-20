@@ -31,8 +31,12 @@ def _card(tipo: str, resultado) -> dict | None:
         # Os avisos são os que o agente viu, não os da rota: para um mês inteiro a consulta tira o "início do histórico"
         # que só cortou o mês anterior, e a rota o mantém (ela compara com o anterior) (Manager no PR 3b).
         return {"tipo": tipo, "mes": ini, "motivos": [m for m in r.get("motivos") or [] if isinstance(m, str)]}
-    if tipo == "orcamentos" and not (isinstance(resultado, dict) and resultado.get("budgets")):
-        return None  # com `categoria` o texto fala de uma só (o card traria todas); sem orçamento não há o que mostrar
+    if tipo == "orcamentos":
+        # com `categoria` o texto fala de uma só (o card traria todas); sem orçamento não há o que mostrar; sem o mês da consulta
+        # (execute_read o carimba) o card não sabe se a rota, que só serve o mês corrente, ainda é o mesmo mês
+        if not (isinstance(resultado, dict) and resultado.get("budgets") and MES.match(str(resultado.get("mes")))):
+            return None
+        return {"tipo": tipo, "mes": resultado["mes"]}
     return {"tipo": tipo}
 
 
