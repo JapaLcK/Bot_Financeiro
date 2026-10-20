@@ -30,6 +30,7 @@ from .connection import (
     get_conn, cat_norm_sql, cat_key_sql, CAT_META_SQL,
     TIPO_CANON_SQL, TIPO_DESPESA_SQL, TIPO_RECEITA_SQL,
 )
+from .bank_declaracoes import DECLARADA_SQL
 # Fonte única do que conta como "fundido" (db/reconciliation.py) — o mesmo
 # filtro que o undo usa pra decidir se ainda há o que desfazer.
 from .reconciliation import FUSED_STATUSES
@@ -773,7 +774,9 @@ def list_history(
                  -- id da transação OF do outro lado da fusão, só quando ainda
                  -- fundida (mesma condição do undo, db/reconciliation.py:119-120)
                  -- — usada pelo front pra oferecer "Desfazer" no detalhe.
-                 fused.of_tx_id AS reconciliation_of_tx_id
+                 fused.of_tx_id AS reconciliation_of_tx_id,
+                 -- despesa/receita "pelo banco": o detalhe oferece a conferência (ADR 0006)
+                 {DECLARADA_SQL} AS bank_declaration
           FROM launches
           -- Antes: subquery correlacionada por linha de launches, com
           -- Seq Scan de open_finance_transactions em cada uma (O(launches ×
@@ -837,7 +840,7 @@ def list_history(
                     JOIN open_finance_connections conn ON conn.id = a.connection_id
                    WHERE a.id = c.open_finance_account_id LIMIT 1) AS bank_name,
                  NULL AS reconciliation_status,
-                 NULL::bigint AS reconciliation_of_tx_id
+                 NULL::bigint AS reconciliation_of_tx_id, false AS bank_declaration
           FROM credit_transactions ct
           LEFT JOIN credit_cards c ON c.id = ct.card_id AND c.user_id = ct.user_id
           JOIN credit_bills b ON b.id = ct.bill_id
@@ -870,7 +873,7 @@ def list_history(
                 f"""
                 SELECT id, tipo, valor, alvo, nota, categoria, criado_em,
                        installments_total, installment_no,
-                       origin, bank_name, reconciliation_status, reconciliation_of_tx_id
+                       origin, bank_name, reconciliation_status, reconciliation_of_tx_id, bank_declaration
                 FROM ({union_sql}) merged
                 ORDER BY criado_em DESC, id ASC
                 LIMIT %s OFFSET %s
@@ -898,6 +901,7 @@ def list_history(
             "reconciliation_status": r["reconciliation_status"],  # imported | pending | auto_merged | confirmed | None
             # id da transação OF do outro lado, só enquanto fundida (None fora disso).
             "reconciliation_of_tx_id": r["reconciliation_of_tx_id"],
+            "bank_declaration": bool(r["bank_declaration"]),
         }
         for r in rows
     ]
