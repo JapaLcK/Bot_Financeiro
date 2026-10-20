@@ -10,7 +10,7 @@ import { Selo } from "@/ui/componentes/Selo";
 import { useTema } from "@/ui/tema";
 import { espaco } from "@/ui/tokens";
 import { Acao, Curva } from "./base";
-import { mesAtual, nomeMes } from "./catalogo";
+import { mesAtual, mesCurto, nomeMes } from "./catalogo";
 import { duracao, projetar } from "./milhao";
 import { MOTIVO, MOTIVO_PATRIMONIO, ou } from "./previsaoMotivos";
 import { usePrivacidade } from "./privacidade";
@@ -21,12 +21,24 @@ const TAXA = { min: 0, max: 15, passo: 0.5, padrao: 10 };
 const ROTULO = { ...MOTIVO, ...MOTIVO_PATRIMONIO };
 const virgula = (n: number) => String(n).replace(".", ",");
 
+// Rótulo de cada mês para o eixo X (a Curva mostra o início, o meio e o fim): o ano quando o prazo passa de 2 anos, senão "out/2026".
+function marcasX(inicio: string, total: number) {
+  const [a, m] = inicio.split("-").map(Number) as [number, number];
+  const emAnos = total - 1 >= 24;
+  const datas = Array.from({ length: total }, (_, k) => {
+    const t = a * 12 + (m - 1) + k, mes = `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
+    return emAnos ? mes.slice(0, 4) : mesCurto(mes);
+  });
+  return { titulo: emAnos ? "Ano" : "Mês", datas };
+}
+
 /** O corpo do Progresso ao milhão: o patrimônio vem do servidor, a conta de juros é de `milhao.ts` e os dois controles não gravam nada. */
 export function MilhaoCorpo({ d }: { d: z.output<typeof S.progressoMilhaoSchema> }) {
   const { oculto } = usePrivacidade(), { cores } = useTema(), { fontScale } = useTipografiaPainel();
   const [aporte, setAporte] = useState(APORTE.padrao), [taxa, setTaxa] = useState(TAXA.padrao);
   const inicio = mesAtual(); // fora do memo: a tela aberta na virada do mês recalcula no próximo render (ex.: puxar para atualizar)
   const p = useMemo(() => projetar({ patrimonio: d.patrimonio / 100, aporte, taxaAnual: taxa, inicio }), [d.patrimonio, aporte, taxa, inicio]);
+  const eixoX = useMemo(() => marcasX(inicio, p.pontos.length), [inicio, p.pontos.length]);
   const passou = p.meta > 1e6, alvo = passou ? `R$ ${new Intl.NumberFormat("pt-BR").format(p.meta / 1e6)} milhões` : "R$ 1 milhão", padrao = aporte === APORTE.padrao && taxa === TAXA.padrao;
   const trilha = { minimumTrackTintColor: cores.brand, maximumTrackTintColor: cores.surfaceRaised, style: { height: 40 } };
   return <View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
@@ -55,7 +67,7 @@ export function MilhaoCorpo({ d }: { d: z.output<typeof S.progressoMilhaoSchema>
         <Texto variante="legenda" tom="inkMuted">Arraste o Guardar por mês para ver quando você chega.</Texto>
       </>}
     </View>
-    <Curva valores={p.pontos} outra={p.pontos.map(() => p.meta)} />
+    <Curva valores={p.pontos.map((v) => v * 100)} outra={p.pontos.map(() => p.meta * 100)} datas={eixoX.datas} eixos={{ x: eixoX.titulo, y: "Patrimônio" }} />
     <View>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <Texto variante="rotulo">Guardar por mês</Texto>
