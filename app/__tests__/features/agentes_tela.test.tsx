@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { router } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testing-library";
 import { AGENTES, PERGUNTA, SOBRE } from "@/features/painel/agentes";
 import { guardarCredenciais } from "@/storage/secure";
@@ -106,4 +107,11 @@ it("freio dos agentes com a tela já aberta: só o aviso, sem pedir /agents", as
   freio.auth = false; renderRouter("./app", { initialUrl: "/agentes" });
   await waitFor(() => expect(screen.getByText("Os agentes estão indisponíveis no momento.")).toBeTruthy()); await act(drenar);
   expect(getsDeAgentes()).toEqual([]); expect(screen.queryByText("De olho nos excessos.")).toBeNull();
+});
+
+it("/piggy já aberto: link com outro `agente` (sem `entrada` nova) troca o '@Nome pergunta' do campo", async () => {
+  renderRouter("./app", { initialUrl: "/piggy?agente=xerife" });
+  await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe(`@Xerife ${PERGUNTA.xerife}`));
+  await act(async () => { router.setParams({ agente: "reporter" }); await drenar(); });
+  await waitFor(() => expect(screen.getByLabelText("Mensagem para o Piggy").props.value).toBe(`@Repórter ${PERGUNTA.reporter}`));
 });
