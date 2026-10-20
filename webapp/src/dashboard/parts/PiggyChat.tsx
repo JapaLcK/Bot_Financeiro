@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { focusManager, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
-import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, usePerguntando, type Msg } from "../lib/conversation";
+import { ask, ativarEResponder, naConversa, perguntarAoAgente, tentarDeNovo, useConversation, usePerguntando, type Msg } from "../lib/conversation";
 import { acessoDe, agenteDe, agentesQuery, energiaDe, mencoes, type Acesso } from "../lib/agentes";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
@@ -49,6 +49,7 @@ function PiggySays({ m }: { m: Msg }) {
       const agora = acessoDe(d, r.kind);
       if (agora) { acesso = agora; energia = energiaDe(d, r.kind); }
     } catch { /* o acesso que veio na resposta */ }
+    if (!naConversa(m.id)) return; // a conta mudou durante a leitura: a conversa de onde o redirect veio foi limpa (Codex no #1157)
     perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso, energia });
   };
   return (

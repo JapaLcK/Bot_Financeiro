@@ -76,6 +76,9 @@ export function contaDaSessao(uid: number | undefined) {
   dono = uid;
 }
 
+/** A resposta ainda está na conversa: depois de um `await`, a troca de conta pode tê-la limpado. */
+export const naConversa = (id: number) => msgs.some((x) => x.id === id);
+
 const nomeDe = (kind: string) => agenteDe(kind)?.nome ?? "agente";
 const SEM_ENERGIA = (kind: string, e?: { custo: number; livre: number }) => e
   ? `O ${nomeDe(kind)} usa ⚡${e.custo} de energia e você tem ${e.livre} livre.` : `Você está sem energia livre para ativar o ${nomeDe(kind)}.`;

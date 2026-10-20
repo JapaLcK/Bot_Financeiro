@@ -1081,6 +1081,31 @@ for (const width of TELAS) {
     assert.deepEqual(chats.map((c) => c.kind), ["detetive", "carteiro"]);
   });
 
+  test(`${width}: a conta muda enquanto o redirect relê o catálogo: a pergunta da anterior não reaparece na conversa nova`, async () => {
+    const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });
+    await enviar(page, "@Detetive e os boletos?");
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
+    let soltaPerfil, soltaCat;
+    const perfilPreso = new Promise((ok) => { soltaPerfil = ok; }), catPreso = new Promise((ok) => { soltaCat = ok; });
+    await paraConta43(ctx);
+    await ctx.route("**/auth/dashboard-profile", async (r) => { await perfilPreso; return r.fallback(); }); // a sessão já é a 43; a leitura demora
+    await ctx.route(/\/agents\/42$/, async (r) => { await catPreso; return r.fallback().catch(() => {}); }); // a releitura do catálogo do redirect também
+    const lendo = page.waitForRequest((r) => r.url().includes("/auth/dashboard-profile"));
+    await campo(page).fill("@"); // o "@" relê a conta antes do clique
+    await lendo;
+    const saiu = page.waitForRequest((r) => /\/agents\/42$/.test(r.url()));
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await saiu;
+    soltaPerfil(); // a 43 chega com o catálogo do redirect ainda em voo: a conversa da 42 é limpa
+    await page.locator(".chat-empty").waitFor();
+    soltaCat();
+    await page.waitForTimeout(500);
+    assert.equal(await page.getByText("Que contas vencem?").count(), 0, "a pergunta do redirect da 42 não aparece para a 43");
+    assert.deepEqual(chats.map((c) => c.kind), ["detetive"]);
+    await ctx.close();
+  });
+
   test(`${width}: agente inativo: nenhum POST de chat antes do clique; "Ativar e responder" ativa uma vez e responde`, async () => {
     let solta;
     const { ctx, page, chats, ativacoes } = await abrir({ width, soltaAtivar: new Promise((ok) => { solta = ok; }) });
