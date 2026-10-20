@@ -24,6 +24,7 @@ export type NomeIcone =
   | "Envelope"
   | "Lock"
   | "ArrowLeft"
+  | "ArrowRight"
   | "GoogleLogo"
   | "Eye"
   | "EyeSlash"
@@ -147,6 +148,7 @@ const ICONES: Record<NomeIcone, ComponenteIcone> = {
   Envelope: resolver(require("phosphor-react-native/src/icons/Envelope"), "EnvelopeIcon"),
   Lock: resolver(require("phosphor-react-native/src/icons/Lock"), "LockIcon"),
   ArrowLeft: resolver(require("phosphor-react-native/src/icons/ArrowLeft"), "ArrowLeftIcon"),
+  ArrowRight: resolver(require("phosphor-react-native/src/icons/ArrowRight"), "ArrowRightIcon"),
   GoogleLogo: resolver(require("phosphor-react-native/src/icons/GoogleLogo"), "GoogleLogoIcon"),
 };
 

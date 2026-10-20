@@ -30,7 +30,8 @@ export function BotaoPrivacidade({ tamanho }: { tamanho?: 20 | 24 }) {
 export function BotaoFerramentas({ tamanho }: { tamanho?: 20 | 24 }) {
  const { navegar } = useNavegacaoPainel(); const { dados } = usePainel();
  const pro = planoPro(dados) ? "1" : dados.plano?.fase === "pronto" ? "0" : undefined;
- return <Pressable testID="painel-ferramentas" accessibilityRole="button" accessibilityLabel="Abrir ferramentas" onPress={() => navegar({ pathname: "/ferramentas", params: pro ? { pro } : {} })} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome="Wrench" tamanho={tamanho} /></Pressable>;
+ const agentes = dados.plano?.fase === "pronto" && dados.plano.dado.agents_ui_enabled === false ? "0" : undefined; // o freio AGENTS_UI_ENABLED=0
+ return <Pressable testID="painel-ferramentas" accessibilityRole="button" accessibilityLabel="Abrir ferramentas" onPress={() => navegar({ pathname: "/ferramentas", params: { ...(pro && { pro }), ...(agentes && { agentes }) } })} style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}><Icone nome="Wrench" tamanho={tamanho} /></Pressable>;
 }
 /** `comReceitas`: só o Resumo. As receitas pendentes entram na pilha; as respondidas somem do topo e vão para o card "Saldo previsto" (contexto `ProvedorRespondidas`, que só existe aqui). */
 export function TelaPainel({ titulo, children, comReceitas = false }: { titulo: string; children: ReactNode; comReceitas?: boolean }) {

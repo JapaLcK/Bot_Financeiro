@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Screen } from "@/ui/componentes/Screen";
 import { Icone } from "@/ui/componentes/Icone";
@@ -18,7 +18,7 @@ import { EstadoVazio, TurnoChat } from "./conversaFalas";
 import { Acao } from "./base";
 import { LinhaSugestoes } from "./linhaSugestoes";
 import { ListaMencoes } from "./listaMencoes";
-import { TEM_ARROBA, itensMencao, tokenEm } from "./agentes";
+import { TEM_ARROBA, aberturaDe, itensMencao, tokenEm } from "./agentes";
 import { sugestoes } from "./perguntas";
 import { TEXTO_MAX, useComentario } from "./motivoFeedback";
 /** A aba Piggy é só o chat. Sair da aba limpa a tela (conversaEstado.fechar); o histórico do servidor não é mostrado. */
@@ -42,6 +42,8 @@ function ConversaTela({ aviso }: { aviso: string | null }) {
   const vazio = !c.turnos.length; // chat novo: as 5 sugestões fixas (desligadas, não escondidas, se o envio está bloqueado); depois da resposta, os chips do servidor
   const sugs = vazio ? sugestoes(p.perfil).map((s) => ({ rotulo: s.ask, aoEscolher: () => void c.enviar(s.ask, s) })) : chips.map((x) => ({ rotulo: x, aoEscolher: () => void c.enviar(x) }));
   const [cursor, setCursor] = useState(0); // onChangeText põe no fim; o onSelectionChange corrige (a ordem dos dois muda por plataforma)
+  const { agente, entrada: veio } = useLocalSearchParams<{ agente?: string; entrada?: string }>();
+  useEffect(() => { const t = aberturaDe(agente); if (t) { c.setRascunho(t); setCursor(t.length); } }, [agente, veio]); // a cada toque em "Conversar"/"Ativar" da tela Agentes (`entrada` nova) ou link com outro `agente`; o envio é do usuário e o `rotear` de sempre trata o estado do agente
   const quer = !com.ativo && !p.oculto && TEM_ARROBA.test(c.rascunho), { ler, catalogo } = c.agentes; // sem `@`, nenhuma requisição a /agents
   useEffect(() => { if (quer) void ler(); }, [quer, ler]);
   const token = quer ? tokenEm(c.rascunho, cursor) : null, itens = token && catalogo ? itensMencao(catalogo, token.q) : [];

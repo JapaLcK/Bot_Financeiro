@@ -16,6 +16,29 @@ export const AGENTES = [
   { kind: "faria_limer", nome: "Faria Limer", tema: "Carteira de investimentos" },
 ];
 export const agenteDe = (kind: string) => AGENTES.find((a) => a.kind === kind);
+// A tela Agentes: os mesmos textos de webapp/src/dashboard/widgets/Agentes.tsx (agentes_tela.test.tsx confere). `foco`: onde a cena
+// recorta na faixa aberta (0 = borda esquerda, 1 = direita), o `--foco` do /painel.
+export const SOBRE: Record<string, { frase: string; texto: string; ritmo: string; foco: number }> = {
+  xerife: { frase: "De olho nos excessos.", texto: "Avisa sobre gastos fora do padrão e categorias que ultrapassam os limites que você definiu.", ritmo: "Diário", foco: 0.55 },
+  reporter: { frase: "Seu mês, em pauta.", texto: "Reúne entradas, saídas, aportes e quanto sobrou em um resumo mensal das suas finanças.", ritmo: "Mensal", foco: 0.43 },
+  carteiro: { frase: "Vencimentos no radar.", texto: "Traz lembretes de vencimento dos seus boletos no feed para ajudar você a se organizar.", ritmo: "Contínuo", foco: 0.62 },
+  detetive: { frase: "Os detalhes importam.", texto: "Identifica recorrências, assinaturas e cobranças que podem estar duplicadas.", ritmo: "Semanal", foco: 0.58 },
+  cofre: { frase: "Cada caixinha conta.", texto: "Acompanha aportes, saídas e o progresso das caixinhas vinculadas ao Open Finance.", ritmo: "Dia do salário", foco: 0.48 },
+  barao: { frase: "Saldo parado em foco.", texto: "Observa o dinheiro em conta corrente e mostra uma estimativa de rendimento comparada ao CDI.", ritmo: "Diário", foco: 0.52 },
+  faria_limer: { frase: "Sua carteira à vista.", texto: "Apresenta o valor, o resultado e a concentração da sua carteira de ações e fundos imobiliários.", ritmo: "Mensal", foco: 0.49 },
+};
+/** A pergunta que "Conversar"/"Ativar" deixa no campo do chat, depois do "@Nome". */
+export const PERGUNTA: Record<string, string> = {
+  xerife: "Algum gasto fugiu do meu padrão?",
+  reporter: "Como foi o meu mês?",
+  carteiro: "Quais contas vencem nos próximos dias?",
+  detetive: "Tem assinatura ou cobrança duplicada?",
+  cofre: "Como estão as minhas caixinhas?",
+  barao: "Tenho dinheiro parado que poderia render mais?",
+  faria_limer: "Como está a minha carteira?",
+};
+/** "@Nome pergunta" de um kind do catálogo; kind desconhecido (param de link) = null. */
+export const aberturaDe = (kind: string | undefined) => { const a = kind ? agenteDe(kind) : undefined; return a ? `@${a.nome} ${PERGUNTA[a.kind]}` : null; };
 
 export type Acesso = "ready" | "activate" | "no_energy" | "upgrade";
 export const GRUPO: Record<Acesso, string> = { ready: "Agentes ativos", activate: "Ativar para conversar", no_energy: "Ativar para conversar", upgrade: "No PigBank+" };
