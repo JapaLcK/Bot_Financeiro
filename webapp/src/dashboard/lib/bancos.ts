@@ -76,7 +76,7 @@ export const ultimaSync = (datas: (string | null)[]): string | null =>
   datas.reduce<string | null>((a, d) => (Number.isFinite(instante(d)) && (a === null || instante(d) > instante(a)) ? d : a), null);
 
 // A resposta do /bancos tem a forma do contrato? Fora dela a tela trata como leitura falha (nunca quebra a SPA).
-const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
+export const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
 export const bancosValidos = (b: unknown): b is Bancos => {
   const x = b as Bancos | null;
   return !!x && textos(x.motivos) && Array.isArray(x.bancos) && x.bancos.every((y) => !!y && textos(y.motivos));

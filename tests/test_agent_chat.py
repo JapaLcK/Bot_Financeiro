@@ -134,12 +134,12 @@ def test_detetive_consulta_duplicidades_sem_emitir_alertas(monkeypatch):
     monkeypatch.setattr(agents, 'find_duplicate_charges', lambda uid, today: [{'descricao': 'Mercado', 'repeticoes': 2}])
     from core.services import assinaturas
     monkeypatch.setattr(assinaturas, 'listar_assinaturas', lambda uid, today: {
-        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}]})
+        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}], 'total_mensal': 0})
     monkeypatch.setattr(db, 'record_agent_event', lambda *a, **k: pytest.fail('gravou evento'))
     dados = chat.execute_read(42, 'detetive', 'consultar_dados_do_agente', {})
     assert dados['possiveis_duplicidades'][0]['repeticoes'] == 2
     # Ignorada é decisão do usuário: o chat do Detetive não a vê.
-    assert (dados['recorrencias'], dados['total_recorrencias']) == ([], 0)
+    assert (dados['recorrencias'], dados['total_recorrencias'], dados['total_mensal']) == ([], 0, 0)
 
 
 def test_classificador_descarta_destinos_invalidos():

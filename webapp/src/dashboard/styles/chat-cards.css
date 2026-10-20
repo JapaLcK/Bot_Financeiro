@@ -1,4 +1,4 @@
-/* Card de dados abaixo da resposta de um agente (parts/CardAgente.tsx, parts/CardInvestido.tsx). Grid, não flex com gap (Safari 14).
+/* Card de dados abaixo da resposta de um agente (parts/CardAgente.tsx e um Card*.tsx por tipo). Grid, não flex com gap (Safari 14).
    O rosa só no realce (o foco do botão); as cores dos tipos são as séries de metas.css, longe do verde (ganho) e do âmbar (aviso). */
 .card-agente { display: grid; gap: 10px; max-width: 480px; box-sizing: border-box; padding: 14px; margin-top: 10px; border-radius: 14px; background: var(--plane-2); border: 1px solid var(--rule); box-shadow: var(--lift); }
 .card-agente > * { margin: 0; min-width: 0; }
@@ -15,3 +15,11 @@
 .card-agente-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-agente .btn { justify-self: start; min-height: 44px; }
 .card-slot { min-width: 0; }
+.card-agente-lista-2 li { grid-template-columns: minmax(0, 1fr) auto; }
+.card-agente-valores { display: grid; margin: 0; }
+.card-agente-valores > div { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 12px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.card-agente-valores > div:first-child { border-top: 0; padding-top: 0; }
+.card-agente-valores dt { color: var(--ink-2); }
+.card-agente-valores dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.card-agente-de { font-size: 14px; font-weight: 400; } /* .num (nowrap) só em cada valor: "de R$ X" desce para a linha de baixo em vez de sair do card */
+.card-agente .msg-open { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
