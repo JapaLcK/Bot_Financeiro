@@ -116,11 +116,12 @@ function Galeria({ lista }: { lista: Agente[] }) {
 }
 
 function Energia({ usada, total }: { usada: number; total: number }) {
+  const cheios = total > 30 ? Math.round((usada / total) * 30) : usada; // acima de 30 a barra vira proporção: 30 traços para o orçamento todo
   return (
     <div className="ag-energia" role="img" aria-label={`Energia: ${usada} de ${total} em uso`}>
       <span className="ag-energia-rot"><i className="ph ph-lightning" aria-hidden="true" />Energia <b>{usada}</b> de {total}</span>
       <span className="ag-energia-barra" aria-hidden="true">
-        {Array.from({ length: Math.min(total, 30) }, (_, i) => <i key={i} data-on={i < usada || undefined} />)}
+        {Array.from({ length: Math.min(total, 30) }, (_, i) => <i key={i} data-on={i < cheios || undefined} />)}
       </span>
     </div>
   );

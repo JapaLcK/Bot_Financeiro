@@ -80,7 +80,7 @@
 .ag-faixa-ponto { position: absolute; top: 16px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--gain); box-shadow: 0 0 0 4px var(--gain-wash); transition: opacity 200ms ease; }
 .ag-faixa[data-on] .ag-faixa-ponto { opacity: 0; }
 .ag-faixa-info {
-  position: absolute; left: 0; bottom: 0; width: min(560px, 62vw); padding: 32px;
+  position: absolute; left: 0; bottom: 0; width: min(560px, 100%); padding: 32px; /* 100% = a faixa aberta: em 62vw ela era mais estreita que o texto entre 720 e ~1100px e o overflow cortava */
   display: grid; gap: 10px; justify-items: start;
   opacity: 0; transform: translateY(14px); pointer-events: none;
   transition: opacity 200ms ease, transform 200ms var(--ease-out);
