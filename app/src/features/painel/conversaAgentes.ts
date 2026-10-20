@@ -6,8 +6,8 @@ import { TEM_ARROBA, acessoDe, agenteDe, energiaDe, mencaoDe, type Acesso, type 
 import { NOVO, type Turno } from "./conversaEstado";
 // O `@Nome` do chat: o turno do agente é um `Turno` com `agente` (ordem, limpeza no fechar e na troca de conta, OCULTA: tudo já coberto). Porta de webapp/src/dashboard/lib/conversation.ts.
 export type Energia = { custo: number; livre: number };
-export type Redirecionamento = { kind: string; name: string; question: string; access: string };
-export type TurnoAgente = { kind: string; mensagem: string; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
+export type Redirecionamento = { kind: string; name: string; question: string; access: string; needs_data?: boolean };
+export type TurnoAgente = { kind: string; mensagem: string; encaminhada?: { needs_data: boolean }; estado: "enviando" | "pronto" | "erro" | "inativo" | "sem_energia" | "sem_plano"; texto: string; redirects: Redirecionamento[]; repetir: boolean; energia: Energia | null; ativando: boolean; falhaAtivar: boolean };
 type Deps = { uid: number | null; dono: MutableRefObject<number | null>; ativos: MutableRefObject<Set<AbortController>>; voo: MutableRefObject<AbortController | null>; proximo: MutableRefObject<number>; setTurnos: Dispatch<SetStateAction<Turno[]>>; setRascunho: Dispatch<SetStateAction<string>>; livre: () => boolean; aplicarUso: (u: { used: number; limit: number }) => void; esgotarCota: () => void; falhou: (e: unknown) => void };
 
 const nomeAg = (kind: string) => agenteDe(kind)?.nome ?? "agente";
@@ -53,12 +53,12 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     return (lendo.current = eu.p!);
   }, [dono, ativos, falhou]);
 
-  const enviarAgente = async (id: number, kind: string, mensagem: string, energia: Energia | null) => {
+  const enviarAgente = async (id: number, kind: string, mensagem: string, energia: Energia | null, encaminhada?: { needs_data: boolean }) => {
     const alvo = dono.current, e0 = epoca.current, c = new AbortController(); ativos.current.add(c);
     const vivo = () => dono.current === alvo && epoca.current === e0;
     emVoo.current.set(kind, c); atualizar(id, { estado: "enviando", texto: "", redirects: [], repetir: false });
     try {
-      const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c);
+      const r = await conversarComAgente(alvo!, kind, mensagem, contextos.current.get(kind) ?? null, c, encaminhada);
       if (dono.current !== alvo) return;
       if (r.usage) aplicarUso(r.usage); // a cota do app sai desta resposta; o servidor só desconta quando o agente respondeu
       if (!vivo()) return;
@@ -88,14 +88,14 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
   /** Cria o turno do agente. Falso = já há pergunta em voo a ele, o Piggy está respondendo (turno de agente só nasce com `!enviando`: o `fechar` supõe que
    * o turno em voo é o último), ou o envio não está `livre()` AGORA (conversa pronta, valores visíveis, cota com folga): todo caminho até um pedido ao
    * agente passa aqui ou reconfere `livre()` depois do próprio await (`ativarEResponder`), porque a cota e o oculto mudam durante qualquer espera. */
-  const perguntar = (kind: string, original: string, mensagem: string, acesso: Acesso, energia: Energia | null) => {
+  const perguntar = (kind: string, original: string, mensagem: string, acesso: Acesso, energia: Energia | null, encaminhada?: { needs_data: boolean }) => {
     if (voo.current || !livre() || (acesso === "ready" && emVoo.current.has(kind))) return false;
     const id = ++proximo.current;
-    setTurnos((ts) => [...ts, { id, pergunta: original, ...NOVO, agente: { kind, mensagem, estado: "enviando", texto: "", redirects: [], repetir: false, energia, ativando: false, falhaAtivar: false, ...(acesso === "ready" ? {} : estadoSemChat(kind, acesso, energia)) } }]);
-    if (acesso === "ready") void enviarAgente(id, kind, mensagem, energia);
+    setTurnos((ts) => [...ts, { id, pergunta: original, ...NOVO, agente: { kind, mensagem, encaminhada, estado: "enviando", texto: "", redirects: [], repetir: false, energia, ativando: false, falhaAtivar: false, ...(acesso === "ready" ? {} : estadoSemChat(kind, acesso, energia)) } }]);
+    if (acesso === "ready") void enviarAgente(id, kind, mensagem, energia, encaminhada);
     return true;
   };
-  const redirecionar = (r: Redirecionamento) => perguntar(r.kind, r.question, r.question, r.access === "ready" || r.access === "no_energy" || r.access === "upgrade" ? r.access : "activate", atual ? energiaDe(atual, r.kind) : null);
+  const redirecionar = (r: Redirecionamento) => perguntar(r.kind, r.question, r.question, r.access === "ready" || r.access === "no_energy" || r.access === "upgrade" ? r.access : "activate", atual ? energiaDe(atual, r.kind) : null, { needs_data: r.needs_data === true });
   /** Decide para onde vai o texto do campo: "piggy" (segue o envio de sempre), "agente" (criou o turno e limpou o campo) ou "fica" (o texto continua no campo). */
   const rotear = async (texto: string): Promise<"piggy" | "agente" | "fica"> => {
     if (!TEM_ARROBA.test(texto)) return "piggy";
@@ -126,8 +126,8 @@ export function useConversaAgentes({ uid, dono, ativos, voo, proximo, setTurnos,
     lendo.current = null; void ler();
     if (!livre()) { soltar(a.kind, c); atualizar(t.id, { ativando: false, estado: "erro", texto: "Agente ativado. A pergunta não foi enviada: tente de novo quando puder.", repetir: true }); return; } // a cota encheu ou os valores ficaram ocultos durante a ativação
     atualizar(t.id, { ativando: false });
-    await enviarAgente(t.id, a.kind, a.mensagem, a.energia);
+    await enviarAgente(t.id, a.kind, a.mensagem, a.energia, a.encaminhada);
   };
-  const tentarDeNovo = (t: Turno) => { const a = t.agente; if (a?.estado === "erro" && a.repetir && livre() && !emVoo.current.has(a.kind)) void enviarAgente(t.id, a.kind, a.mensagem, a.energia); };
+  const tentarDeNovo = (t: Turno) => { const a = t.agente; if (a?.estado === "erro" && a.repetir && livre() && !emVoo.current.has(a.kind)) void enviarAgente(t.id, a.kind, a.mensagem, a.energia, a.encaminhada); };
   return { catalogo: atual, ler, rotear, redirecionar, ativarEResponder, tentarDeNovo, zerar };
 }

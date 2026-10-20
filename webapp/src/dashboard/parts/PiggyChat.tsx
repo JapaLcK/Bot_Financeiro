@@ -59,7 +59,7 @@ function PiggySays({ m }: { m: Msg }) {
       if (agora) { acesso = agora; energia = energiaDe(d, r.kind); }
     } catch { /* o acesso que veio na resposta */ }
     if (!naConversa(m.id)) return; // a conta mudou durante a leitura: a conversa de onde o redirect veio foi limpa (Codex no #1157)
-    perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso, energia });
+    perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso, energia, encaminhada: { needs_data: r.needs_data === true } });
   };
   return (
     <FrameScope.Provider value={`m${m.id}-`}>

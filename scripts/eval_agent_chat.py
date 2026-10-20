@@ -28,6 +28,9 @@ def cases(suite):
         rows += [
             ('detective_investments', 'detetive', 'O que é CDI em renda fixa?', None, ['barao'], False, False, 0),
             ('baron_due_dates', 'barao', 'Quais boletos vencem amanhã?', None, ['carteiro'], False, False, 0),
+            # Rendimento da carteira inteira é do Faria Limer, venha de onde vier (antes: Detetive → Barão → Faria Limer).
+            ('detective_portfolio_return', 'detetive', 'quanto rendeu meus investimentos?', None, ['faria_limer'], False, False, 0),
+            ('baron_portfolio_return', 'barao', 'quanto rendeu meus investimentos?', None, ['faria_limer'], False, False, 0),
             ('mixed_due_summary', 'carteiro', 'Quais contas cadastradas vencem esta semana e como estão minhas entradas e saídas do mês?', None, ['reporter'], True, True, 1),
             ('outside_domain', 'carteiro', 'Como preparar um bolo de chocolate?', None, [], False, False, 0),
             ('education_xerife', 'xerife', 'Como avaliar se um gasto foge do padrão?', None, [], False, True, 1),

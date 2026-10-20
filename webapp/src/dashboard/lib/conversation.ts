@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
-import { agenteDe, ativar, conversar, type Acesso, type Redirect } from "./agentes";
+import { agenteDe, ativar, conversar, type Acesso, type Encaminhada, type Redirect } from "./agentes";
 import { ErroApi } from "./v2";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
@@ -11,7 +11,7 @@ export interface Msg extends Partial<Omit<Answer, "text">> {
   id: number; role: "user" | "piggy"; text: ReactNode;
   // Conversa com um agente (@): `agente` é o kind (na bolha do usuário, o que ela destaca); o resto é o estado da resposta.
   agente?: string; estado?: EstadoAgente; redirects?: Redirect[]; pergunta?: string; repetir?: boolean;
-  uid?: number; custo?: number; livre?: number; ativando?: boolean; falhaAtivar?: boolean;
+  uid?: number; custo?: number; livre?: number; ativando?: boolean; falhaAtivar?: boolean; encaminhada?: Encaminhada;
 }
 
 let msgs: Msg[] = [];
@@ -102,11 +102,11 @@ const SESSAO = "Sua sessão terminou. Recarregue a página.";
 // Sessão/CSRF: o mesmo TEXTO de MetasResposta/InvestidoResposta, critério próprio (401 e 403 sem `error` de objeto, que cobre o CSRF `{"detail": "Token CSRF…"}` e o "Acesso negado para este usuário" da troca de conta em outra aba). Repetir não adianta. Vale no chat e no "Ativar e responder".
 const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e.status === 403 && !detalheDe(e).error));
 
-async function enviar(id: number, kind: string, texto: string, uid: number) {
+async function enviar(id: number, kind: string, texto: string, uid: number, encaminhada?: Encaminhada) {
   emVoo.set(`${uid}:${kind}`, id);
   patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
   try {
-    const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null);
+    const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null, encaminhada);
     if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
     if (!msgs.some((x) => x.id === id)) return; // a conversa foi limpa (troca de conta) com a pergunta em voo: o context dela não volta (Codex no #1157)
     contextos.set(`${uid}:${kind}`, r.context ?? null);
@@ -133,24 +133,24 @@ async function enviar(id: number, kind: string, texto: string, uid: number) {
 }
 
 /** Pergunta a um agente: bolha do usuário (`original`, com as menções) e a resposta, que se atualiza por id. Falso = já há uma pergunta em voo a esse agente (o texto fica na barra). */
-export function perguntarAoAgente(a: { kind: string; original: string; texto: string; uid: number; acesso: Acesso; energia?: { custo: number; livre: number } | null }) {
+export function perguntarAoAgente(a: { kind: string; original: string; texto: string; uid: number; acesso: Acesso; energia?: { custo: number; livre: number } | null; encaminhada?: Encaminhada }) {
   contaDaSessao(a.uid); // o uid da pergunta é o da sessão agora: se mudou, a conversa velha sai antes
   if (a.acesso === "ready" && emVoo.has(`${a.uid}:${a.kind}`)) return false;
   const e = a.energia ?? undefined;
   const bolha = ++seq, resp = ++seq;
   msgs = [...msgs,
     { id: bolha, role: "user", text: a.original, agente: a.kind },
-    { id: resp, role: "piggy", agente: a.kind, real: true, uid: a.uid, pergunta: a.texto, custo: e?.custo, livre: e?.livre, text: "", ...(a.acesso === "ready" ? {} : estadoSemChat(a.kind, a.acesso, e)) }];
+    { id: resp, role: "piggy", agente: a.kind, real: true, uid: a.uid, pergunta: a.texto, encaminhada: a.encaminhada, custo: e?.custo, livre: e?.livre, text: "", ...(a.acesso === "ready" ? {} : estadoSemChat(a.kind, a.acesso, e)) }];
   notifica();
   go("/piggy");
-  if (a.acesso === "ready") void enviar(resp, a.kind, a.texto, a.uid);
+  if (a.acesso === "ready") void enviar(resp, a.kind, a.texto, a.uid, a.encaminhada);
   return true;
 }
 
 /** "Tentar de novo" de um erro que o servidor marcou como repetível. */
 export function tentarDeNovo(id: number) {
   const m = msgs.find((x) => x.id === id);
-  if (m?.estado === "erro" && m.repetir && m.agente && m.pergunta && m.uid != null && !emVoo.has(`${m.uid}:${m.agente}`)) void enviar(id, m.agente, m.pergunta, m.uid);
+  if (m?.estado === "erro" && m.repetir && m.agente && m.pergunta && m.uid != null && !emVoo.has(`${m.uid}:${m.agente}`)) void enviar(id, m.agente, m.pergunta, m.uid, m.encaminhada);
 }
 
 /** "Ativar e responder": ativa o agente e manda a pergunta guardada. Enquanto a ativação/o envio desse agente está em voo, o `emVoo` (por conta e agente) segura os outros cliques; duas bolhas inativas clicadas em sequência fazem duas ativações (o servidor aceita reativar). */
@@ -173,5 +173,5 @@ export async function ativarEResponder(id: number, depois: () => void) {
   depois(); // a lista do @ relê o catálogo
   if (!msgs.some((x) => x.id === id)) { solta(`${m.uid}:${m.agente}`, id); return; } // a conversa foi limpa (troca de conta) durante a ativação: a pergunta da conta anterior não sai
   patch(id, { ativando: false });
-  await enviar(id, m.agente, m.pergunta, m.uid);
+  await enviar(id, m.agente, m.pergunta, m.uid, m.encaminhada);
 }

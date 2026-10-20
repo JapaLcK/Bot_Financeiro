@@ -80,7 +80,7 @@ def test_partes_mistas_preservam_todos_os_trechos_sem_misturar_destinos():
         'needs_data': True,
         'outside': True,
         'redirects': [
-            {'kind': 'barao', 'question': 'O que é CDI?\nO que significa pós-fixado?'},
-            {'kind': 'carteiro', 'question': 'Quais boletos vencem amanhã?'},
+            {'kind': 'barao', 'question': 'O que é CDI?\nO que significa pós-fixado?', 'needs_data': False},
+            {'kind': 'carteiro', 'question': 'Quais boletos vencem amanhã?', 'needs_data': True},
         ],
     }
