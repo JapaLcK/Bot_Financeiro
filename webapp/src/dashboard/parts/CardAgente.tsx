@@ -12,6 +12,7 @@ import { CardCaixinhas, contratoCaixinhas } from "./CardCaixinhas";
 import { CardContas, contratoContas } from "./CardContas";
 import { CardInvestido } from "./CardInvestido";
 import { CardOrcamentos, contratoOrcamentos } from "./CardOrcamentos";
+import { CardComparacaoMeses, contratoComparacaoMeses, tituloComparacao } from "./CardComparacaoMeses";
 import { CardResumoMes, contratoResumoMes } from "./CardResumoMes";
 
 // O card abaixo da resposta de um agente (o servidor só diz QUAL: `card.tipo`, e o mês no resumo). Os números vêm da rota v2 do tipo, a mesma
@@ -35,6 +36,11 @@ function leituraDe(c: Card): Leitura {
       return { chave: "card-assinaturas", titulo: "Assinaturas", ler: (signal) => assinaturasQuery.queryFn({ signal }), contrato: contratoAssinaturas, desenha: (d) => <CardAssinaturas d={d} /> };
     case "resumo_mes":
       return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} motivos={c.motivos} /> };
+    case "comparacao_meses": {
+      // Duas leituras, uma conferência de conta depois das duas (o queryFn abaixo): falha de uma = o card inteiro falha, nunca um lado só.
+      const [a, b] = c.meses;
+      return { chave: `card-comparacao_meses-${a}-${b}`, titulo: tituloComparacao(c.meses), ler: (signal) => Promise.all(c.meses.map((m) => resumoMesQuery(m).queryFn({ signal }))), contrato: (d) => contratoComparacaoMeses(d, c.meses), desenha: (d) => <CardComparacaoMeses d={d} meses={c.meses} motivos={c.motivos} /> };
+    }
     case "orcamentos":
       return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroPeriodo: (d) => d.mes !== c.mes };
     case "contas":

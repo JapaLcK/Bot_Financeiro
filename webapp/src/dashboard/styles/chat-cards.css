@@ -29,3 +29,12 @@
 .card-agente-lista .meter { margin-top: 6px; }
 .card-agente-sub { font-size: 12px; margin-top: 4px; }
 .card-agente .meter.ok > span { background: var(--gain); }
+/* Comparação de dois meses: por linha, o nome e a diferença em cima, os dois valores lado a lado embaixo (7 dígitos cabem em 320 px). */
+.card-agente-comp { display: grid; margin: 0; }
+.card-agente-comp > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: baseline; column-gap: 12px; row-gap: 2px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.card-agente-comp > div:first-child { border-top: 0; padding-top: 0; }
+.card-agente-comp dt { color: var(--ink-2); }
+.card-agente-comp dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.card-agente-comp dd.card-agente-dif { font-size: 14px; font-weight: 600; text-align: right; }
+@media (max-width: 340px) { .card-agente-comp dd:not(.card-agente-dif) { font-size: 12px; } } /* 9 dígitos com sinal (−R$ 987.654.320,99) não cabem na meia coluna a 13px em 320 */
+.card-agente-comp dd > .faint { display: block; font-size: 12px; } /* o mês numa linha só dele: o valor de 7 dígitos (nowrap) cabe na meia coluna */
