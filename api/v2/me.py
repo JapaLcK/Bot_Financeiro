@@ -5,15 +5,16 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.v2.sessao import usuario_atual
-from core.services.plan_service import get_plan_tier
+from core.services.plan_service import agents_ui_enabled, get_plan_tier
 
 router = APIRouter()
 
 
 class Me(BaseModel):
     plan_tier: Literal["free", "essencial", "plus", "pro"]
+    agents_ui_enabled: bool  # o freio AGENTS_UI_ENABLED=0 (só a allowlist); o mesmo gate de /auth/me e de /agents
 
 
 @router.get("/me", response_model=Me)
 def me(uid: int = Depends(usuario_atual)) -> Me:
-    return Me(plan_tier=get_plan_tier(uid))
+    return Me(plan_tier=get_plan_tier(uid), agents_ui_enabled=agents_ui_enabled(uid))
