@@ -172,6 +172,7 @@ describe("CurvaAcumulada", () => {
 describe("rotuloCompacto", () => {
   it.each([
     [720000, "R$ 7,2k"], [700000, "R$ 7k"], [1200000, "R$ 12k"], [95000, "R$ 950"], [0, "R$ 0"], [99950, "R$ 1k"], [723456, "R$ 7,2k"], [100000, "R$ 1k"], [1234500, "R$ 12,3k"], [-1500000, "−R$ 15k"], [-95000, "−R$ 950"], [-723456, "−R$ 7,2k"], [99900, "R$ 999"], [15050, "R$ 151"], [-95050, "−R$ 951"], [-50, "−R$ 1"], [-49, "R$ 0"],
+    [99994900, "R$ 999,9k"], [99995000, "R$ 1 mi"], [100000000, "R$ 1 mi"], [150000000, "R$ 1,5 mi"], [-250000000, "−R$ 2,5 mi"],
   ])("rotuloCompacto(%i) = %s (vírgula pt-BR, uma casa, sem ruído de arredondamento)", (centavos, esperado) => {
     expect(rotuloCompacto(centavos)).toBe(esperado);
   });

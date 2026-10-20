@@ -44,6 +44,18 @@ it("R$ 100 mil: dezembro de 2050 daqui a 24 anos e 2 meses", async () => {
   expect(screen.getByLabelText("Guardar por mês")).toBeTruthy(); expect(screen.getByLabelText("Rendimento ao ano")).toBeTruthy();
   expect(screen.getByText("Conta de juros compostos com taxa fixa: não é promessa de rendimento. Patrimônio = Carteira, contas, caixinhas e investimentos.")).toBeTruthy();
 });
+const H = { includeHiddenElements: true };
+const textos = (id: string) => screen.getAllByTestId(id, H).map((t) => t.props.children);
+it("gráfico: os dois eixos têm nome e valores; R$ 100 mil em 24 anos vão de 2026 a 2050 e de R$ 100k a R$ 1 mi", async () => {
+  milhao = () => resposta(200, { patrimonio: "100000.00", motivos: [] }); await abrir();
+  expect([textos("curva-eixo-y"), textos("curva-eixo-x")]).toEqual([["Patrimônio"], ["Ano"]]);
+  expect(textos("curva-rotulo-x")).toEqual(["2026", "2038", "2050"]);
+  expect(textos("curva-rotulo-y")).toEqual(["R$ 1 mi", "R$ 550,4k", "R$ 100k"]); // em reais (a Curva conta em centavos); o topo é o último ponto, um pouco acima de 1 mi
+});
+it("gráfico de prazo curto (menos de 2 anos): o eixo X vira 'Mês', com o mês e o ano", async () => {
+  milhao = () => resposta(200, { patrimonio: "999000.00", motivos: [] }); await abrir();
+  expect(textos("curva-eixo-x")).toEqual(["Mês"]); expect(textos("curva-rotulo-x")[0]).toBe("out/2026");
+});
 it("padrão (R$ 48.250,37): 4% e 'Voltar ao padrão' desativado", async () => {
   await abrir(); expect(screen.getByText("· 4%")).toBeTruthy(); expect(screen.UNSAFE_queryAllByType(ProgressBar)).toHaveLength(1); expect(screen.getByRole("button", { name: "Voltar ao padrão" }).props.accessibilityState).toMatchObject({ disabled: true });
 });

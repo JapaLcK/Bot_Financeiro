@@ -139,9 +139,10 @@ export function Folha({ titulo, rotulo, aberta, fechar, ancorada = false, childr
 /**
  * `outra`: segunda série (tracejada) na MESMA escala, p.ex. o saldo sem a compra; as duas precisam ter o mesmo tamanho e nenhum null.
  * `datas` (uma por valor): liga os eixos. Embaixo, a data do início, do meio e do fim; à esquerda, o maior, o do meio e o menor valor (`rotuloCompacto`, em centavos; um só se todos forem iguais). Os valores e as datas entram também no rótulo de acessibilidade. Sem `datas`, a curva é só o desenho.
+ * `eixos` (com `datas`): o nome de cada eixo, em cima da coluna dos valores e embaixo das datas. Regra do dono: todo gráfico nomeia os dois eixos.
  */
 const CURVA_Y0 = 15, CURVA_Y1 = 100, CURVA_ALTURA = 112, CURVA_COLUNA_Y = 52;
-export function Curva({ valores, outra, datas }: { valores: (number | null)[]; outra?: (number | null)[]; datas?: string[] }) {
+export function Curva({ valores, outra, datas, eixos }: { valores: (number | null)[]; outra?: (number | null)[]; datas?: string[]; eixos?: { x: string; y: string } }) {
   const { oculto } = usePrivacidade(); const { cores } = useTema();
   if (oculto) return <View style={{ height: 100, justifyContent: "center" }}><Texto tom="inkMuted">Gráfico oculto</Texto></View>;
   if (!valores.length || valores.some((v) => v === null) || (outra && (outra.length !== valores.length || outra.some((v) => v === null)))) return <Vazio texto="Trajetória indisponível." />;
@@ -154,7 +155,9 @@ export function Curva({ valores, outra, datas }: { valores: (number | null)[]; o
   const tracos = <>{eixoX && ticksY.map((v, i) => <Line key={i} x1={0} x2={300} y1={y(v)} y2={y(v)} stroke={cores.border} strokeWidth={1} />)}{outra && <Path d={caminho(outra as number[])} fill="none" stroke={cores.inkMuted} strokeWidth={2} strokeDasharray="6 4" />}<Path d={caminho(nums)} fill="none" stroke={cores.brand} strokeWidth={3} /></>;
   if (!marcas || !eixoX) return <Svg width="100%" height={CURVA_ALTURA} viewBox="0 0 300 112" accessible accessibilityLabel="Evolução dos valores no período">{tracos}</Svg>;
   const rotulo = `Evolução dos valores no período: ${marcas.map((i) => `${datas![i]}, ${rotuloCompacto(nums[i]!)}`).join("; ")}`;
-  return <View accessible accessibilityLabel={rotulo}>
+  const nomeEixo = { fontWeight: "600" as const };
+  return <View accessible accessibilityLabel={eixos ? `${rotulo}. Eixo vertical: ${eixos.y}; eixo horizontal: ${eixos.x}` : rotulo}>
+    {eixos ? <Texto testID="curva-eixo-y" variante="legenda" tom="inkMuted" style={nomeEixo}>{eixos.y}</Texto> : null}
     <View style={{ flexDirection: "row" }}>
       <View style={{ width: CURVA_COLUNA_Y, height: CURVA_ALTURA }}>
         {ticksY.map((v, i) => <Texto key={i} testID="curva-rotulo-y" variante="legenda" tom="inkMuted" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={{ position: "absolute", right: 6, top: y(v) - 8, height: 16, lineHeight: 16 }}>{rotuloCompacto(v)}</Texto>)}
@@ -164,6 +167,7 @@ export function Curva({ valores, outra, datas }: { valores: (number | null)[]; o
     <View style={{ flexDirection: "row", justifyContent: "space-between", marginLeft: CURVA_COLUNA_Y }}>
       {eixoX.map((t, i) => <Texto key={i} testID="curva-rotulo-x" variante="legenda" tom="inkMuted">{t}</Texto>)}
     </View>
+    {eixos ? <Texto testID="curva-eixo-x" variante="legenda" tom="inkMuted" style={{ ...nomeEixo, textAlign: "center", marginLeft: CURVA_COLUNA_Y }}>{eixos.x}</Texto> : null}
   </View>;
 }
 export function Anel({ partes }: { partes: number[] }) {
