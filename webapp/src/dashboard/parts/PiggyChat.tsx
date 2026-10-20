@@ -171,7 +171,11 @@ export function PiggyChat() {
     relendoRef.current = true; // já, antes do render: um anúncio que dispare neste meio tempo também espera
     setRelendo(true);
     const g = ++geracao.current;
-    void lerContaFresca(qc).catch(() => {}).finally(() => { if (g === geracao.current) setRelendo(false); });
+    // Conferida a conta, o catálogo dela é relido também: o plano ou um agente pode ter mudado noutra aba, e o painel lateral
+    // o mostra sem "@" (o agentesQuery não relê no foco; Codex no #1212).
+    void lerContaFresca(qc)
+      .then((c) => { if (g === geracao.current) void qc.invalidateQueries({ queryKey: agentesQuery(c.user_id).queryKey, exact: true }); })
+      .catch(() => {}).finally(() => { if (g === geracao.current) setRelendo(false); });
   }), [qc]);
   const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta

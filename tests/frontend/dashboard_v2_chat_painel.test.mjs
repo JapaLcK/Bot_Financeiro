@@ -165,6 +165,29 @@ test("1440: catálogo em 500/rede: o painel fica (carregando, depois \"Tentar de
   await ctx.close();
 });
 
+test("1440: catálogo com item inválido ({catalog: [null]}): sem erro na página e sem painel (contrato)", async () => {
+  const { ctx, page, erros } = await abrir({ width: 1440, lista: { json: { catalog: [null], can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 0, energy_used: 0 } } });
+  await page.waitForTimeout(800);
+  assert.equal(await painel(page).count(), 0);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
+test("1440: na volta do foco o catálogo da conta é relido (o plano mudou noutra aba)", async () => {
+  let ativos = ["xerife"];
+  const { ctx, page } = await abrir({ width: 1440 });
+  await ctx.route(/\/agents\/42$/, (r) => r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: ativos.includes(kind) ? "active" : null, energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } }));
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await botao(page, "Xerife").waitFor();
+  const ativosNaTela = () => painel(page).locator("li").evaluateAll((lis) => { let g = ""; return lis.flatMap((li) => { g = li.querySelector("h2")?.textContent ?? g; return g === "Agentes ativos" ? [li.querySelector(".painel-item").getAttribute("aria-label")] : []; }); });
+  await page.waitForFunction(() => document.querySelectorAll(".chat-painel .painel-item").length > 0);
+  ativos = ["xerife", "reporter"]; // ativou o Repórter noutra aba
+  await foco(page);
+  await page.waitForFunction(() => [...document.querySelectorAll(".chat-painel li")].some((li) => li.querySelector("h2")?.textContent === "Ativar para conversar" && li.querySelector(".painel-item").getAttribute("aria-label") === "Perguntar ao Repórter") === false, null, { timeout: 5000 });
+  assert.deepEqual(await ativosNaTela(), ["Perguntar ao Xerife", "Perguntar ao Repórter"]);
+  await ctx.close();
+});
+
 test("1440: os grupos e as tags seguem o catálogo; o agente indisponível não aparece", async () => {
   const { ctx, page } = await abrir({ width: 1440 });
   await botao(page, "Xerife").waitFor(); // o painel aparece já carregando: espera o catálogo
