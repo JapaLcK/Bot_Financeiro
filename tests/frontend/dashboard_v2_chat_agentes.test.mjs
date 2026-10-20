@@ -1472,7 +1472,8 @@ for (const width of TELAS) {
     assert.equal(fade.estado, "finished", "a animação das ações não foi cortada");
     assert.ok(fade.op.some((o) => o > 0 && o < 1), `sem opacidade intermediária: ${[...new Set(fade.op)]}`);
     assert.equal(fade.op.at(-1), 1);
-    assert.equal(await bolha.locator(".rv").count(), 0, "texto voltou a ser contínuo");
+    await bolha.locator(".rv").first().waitFor({ state: "detached", timeout: 1000 }); // texto voltou a ser contínuo, logo depois do fade
+    assert.equal(await acoes.getAttribute("data-revela"), null, "a marca dos botões saiu");
     await ctx.close();
     assert.deepEqual(erros, []);
   });
@@ -1565,6 +1566,23 @@ for (const width of TELAS) {
     await page.waitForTimeout(4500); // duas trocas
     assert.equal(await carga.textContent(), "Comparando cobranças parecidas…");
     solta();
+    await ctx.close();
+  });
+  test(`${width}: resposta mostrada com movimento reduzido não se revela depois que a preferência muda; revelada, a marca dos botões sai`, async () => {
+    const { ctx, page } = await abrir({ width, chat: (c, n) => ({ json: { reply: n === 1 ? palavras(40) : "Segunda.", context: "c", redirects: [RED] } }) });
+    await enviar(page, "@Detetive tem duplicada?"); // contexto reduce
+    const primeira = page.locator(".chat > .msg-piggy").filter({ hasText: "p39" });
+    await primeira.locator(".msg-text", { hasText: "p39" }).waitFor();
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive e agora?"); // re-render com a preferência nova
+    await resposta(page).locator(".rv").first().waitFor();
+    assert.equal(await primeira.locator(".rv").count(), 0, "a primeira resposta não reanima");
+    assert.equal(await primeira.locator(".msg-acoes[data-revela]").count(), 0, "nem os botões dela");
+    assert.equal(await primeira.locator(".msg-acoes button").first().evaluate((b) => b.checkVisibility({ visibilityProperty: true, opacityProperty: true })), true);
+    const ultima = resposta(page).locator(".msg-acoes");
+    assert.equal(await ultima.getAttribute("data-revela"), "true"); // a nova revela
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy:last-child .msg-acoes[data-revela]"), null, { timeout: 5000 });
+    assert.equal(await resposta(page).locator(".rv").count(), 0);
     await ctx.close();
   });
   test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {

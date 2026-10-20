@@ -40,6 +40,7 @@ const aRevelar = new Set<number>();
 const REVELA_MS = 2000; // teto do atraso somado das palavras; 30 ms por palavra até caber
 const REVELA_PASSO = 30;
 const REVELA_ANIM = 500; // duração da animação de cada palavra (inline no span: a CSS não repete o valor)
+const ACOES_ANIM = 400; // o fade dos botões, depois da última palavra (inline também)
 
 // Cada palavra é um <span> que anima só opacidade/blur/subida (chat.css); o espaço e as quebras de linha ficam como texto.
 function Revela({ t }: { t: string }) {
@@ -79,19 +80,21 @@ function PiggySays({ m }: { m: Msg }) {
   };
   // Decidido no render e limpo no efeito: o Strict Mode renderiza duas vezes e as duas têm de concordar.
   if (a && m.estado === "enviando") aRevelar.add(m.id);
-  const revela = useRef(false);
-  if (m.estado === "pronto" && aRevelar.has(m.id)) revela.current = true;
-  useEffect(() => { if (m.estado === "pronto") aRevelar.delete(m.id); }, [m.estado, m.id]);
   const texto = typeof m.text === "string" ? m.text : "";
-  // Acabada a última palavra, volta ao texto contínuo: spans inline-block por palavra viram uma parada por palavra no leitor de tela.
+  // A revelação se decide uma vez, quando a resposta chega, já com o movimento reduzido (o texto vem contínuo, sem spans por palavra,
+  // e o leitor de tela não para em cada um). Mudar a preferência depois não reabre uma resposta já mostrada (Codex no #1196).
+  const revela = useRef(false);
+  if (m.estado === "pronto" && aRevelar.has(m.id))
+    revela.current = !!texto && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => { if (m.estado === "pronto") aRevelar.delete(m.id); }, [m.estado, m.id]);
+  // Acabado o fade dos botões, volta ao texto contínuo e tira a marca dos botões: spans inline-block por palavra viram uma parada por
+  // palavra no leitor de tela, e a marca deixada esconderia os botões de novo se a animação voltasse a valer.
   const [fim, setFim] = useState(false);
-  const revelando = revela.current && m.estado === "pronto" && !!texto;
-  // Com movimento reduzido o texto já vem contínuo, sem spans por palavra (o leitor de tela não para em cada um).
-  const animar = revelando && !fim && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const animar = revela.current && m.estado === "pronto" && !fim;
   const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
   useEffect(() => {
     if (!animar) return;
-    const id = setTimeout(() => setFim(true), total);
+    const id = setTimeout(() => setFim(true), total + ACOES_ANIM + 100); // folga: o relógio do timer não é o da animação, e cortar o fade no último quadro o faria saltar
     return () => clearTimeout(id);
   }, [animar, total]);
   return (
@@ -109,7 +112,7 @@ function PiggySays({ m }: { m: Msg }) {
       {m.estado === "erro" && m.repetir && <div className="msg-acoes"><button type="button" className="btn btn-ghost" onClick={() => tentarDeNovo(m.id)}>Tentar de novo</button></div>}
       {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
       {m.estado === "pronto" && !!m.redirects?.length && (
-        <div className="msg-acoes" data-revela={revelando || undefined} style={revelando ? { animationDelay: `${total}ms` } : undefined}>
+        <div className="msg-acoes" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms`, animationDuration: `${ACOES_ANIM}ms` } : undefined}>
           {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" disabled={seguindo} onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}

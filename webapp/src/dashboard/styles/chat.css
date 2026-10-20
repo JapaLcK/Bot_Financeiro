@@ -117,12 +117,12 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
   background: linear-gradient(100deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%) 100% 0 / 250% 100% no-repeat;
   -webkit-background-clip: text; background-clip: text;
 }
-.rv { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; } /* inline-block não herda o quebra-tudo do pai: uma URL sem espaço alargaria a página */
+.rv { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; } /* guarda: o quebra-tudo já vem herdado do .msg-text; explícito aqui para que um nowrap futuro no .rv não deixe uma URL alargar a página */
 @media (prefers-reduced-motion: no-preference) {
   .msg-carga-anel { animation: carga-gira 0.9s linear infinite; }
   .msg-carga-frase { animation: carga-entra 0.35s var(--ease-out) both, carga-brilho 1.8s linear infinite; }
   .rv { animation: rv-entra 0s var(--ease-out) both; } /* a duração vem inline (REVELA_ANIM em PiggyChat.tsx) */
-  .msg-acoes[data-revela] { animation: rv-acoes 0.4s var(--ease-out) both; }
+  .msg-acoes[data-revela] { animation: rv-acoes 0s var(--ease-out) both; } /* duração inline (ACOES_ANIM) */
 }
 @media (prefers-reduced-motion: reduce) {
   .msg-carga-frase { background: none; color: var(--ink-2); } /* sem brilho: a cor lisa */
