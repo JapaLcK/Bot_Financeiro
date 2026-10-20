@@ -1430,3 +1430,229 @@ for (const width of TELAS) {
     assert.deepEqual(erros, []);
   });
 }
+
+// --- Resposta viva: o texto aparece palavra por palavra e o "enviando" mostra frases do agente (PiggyChat.tsx, Carregando.tsx) ---
+const MOVIMENTO = (page) => page.emulateMedia({ reducedMotion: "no-preference" }); // o painel de teste abre com movimento reduzido
+const emAnimacao = (page) => page.evaluate(() => document.getAnimations().filter((a) => /^(rv|carga)-/.test(a.animationName) && a.playState !== "finished").map((a) => a.animationName)); // as do painel (view transition) ficam de fora; "finished" com fill:both ainda está na lista
+// O nome da animação que a CSS aplica agora (getAnimations pode vir vazio mesmo com ela aplicada).
+const animacoes = (page, sel) => page.evaluate((q) => [...document.querySelectorAll(q)].map((e) => getComputedStyle(e).animationName), sel);
+const palavras = (n) => Array.from({ length: n }, (_, i) => `p${i}`).join(" ");
+const RED = { kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready", needs_data: true };
+// Por palavra: o atraso da animação, e a opacidade agora.
+const revelacao = (page) => page.evaluate(() => [...document.querySelectorAll(".chat > .msg-piggy:last-child .msg-text .rv")].map((e) => ({
+  atraso: e.getAnimations()[0]?.effect.getTiming().delay ?? null, op: +getComputedStyle(e).opacity, t: e.textContent })));
+
+for (const width of TELAS) {
+  test(`${width}: a resposta do agente aparece palavra por palavra: texto inteiro no DOM, atrasos crescentes, teto de 2 s, ações depois`, async () => {
+    const texto = `Linha um ${palavras(197)}\nLinha dois.`; // 201 palavras: o passo encolhe de 30 ms para ~10 ms
+    const { ctx, page, erros } = await abrir({ width, chat: () => ({ json: { reply: texto, context: "c", redirects: [RED] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    const bolha = resposta(page).locator(".msg-text");
+    await bolha.locator(".rv").first().waitFor();
+    assert.equal(await bolha.textContent(), texto); // nada escondido: o texto inteiro, com a quebra de linha
+    assert.equal(await bolha.evaluate((e) => getComputedStyle(e).whiteSpace), "pre-line");
+    const ps = await revelacao(page);
+    assert.equal(ps.length, 201);
+    const atrasos = ps.map((p) => p.atraso);
+    assert.ok(atrasos.every((a, i) => i === 0 || a >= atrasos[i - 1]) && atrasos.at(-1) > atrasos[0], "atrasos crescentes");
+    assert.ok(atrasos.at(-1) <= 2000 && atrasos.at(-1) > 1500, `último atraso ${atrasos.at(-1)}`);
+    assert.ok(ps.at(-1).op < 1, "a última palavra começa escondida");
+    const acoes = resposta(page).locator(".msg-acoes");
+    assert.equal(await acoes.locator("button", { hasText: "Perguntar ao Carteiro" }).count(), 1); // no DOM desde o início (getByRole não vê o que está visibility:hidden)
+    assert.ok(+(await acoes.evaluate((e) => getComputedStyle(e).opacity)) < 1, "as ações esperam o texto");
+    const atrasoAcoes = await acoes.evaluate((e) => e.getAnimations()[0].effect.getTiming().delay);
+    assert.ok(atrasoAcoes >= atrasos.at(-1) + 500, `ações em ${atrasoAcoes} ms, última palavra começa em ${atrasos.at(-1)} e dura 500`);
+    // O fade das ações tem de rodar inteiro, mesmo depois de o texto voltar a ser contínuo (a troca não pode cortá-lo): amostra a opacidade até a animação acabar.
+    const fade = await acoes.evaluate((e) => new Promise((ok) => {
+      const an = e.getAnimations()[0], op = [];
+      const f = () => { op.push(+getComputedStyle(e).opacity); an.playState === "finished" || an.playState === "idle" ? ok({ op, estado: an.playState }) : requestAnimationFrame(f); };
+      f();
+    }));
+    assert.equal(fade.estado, "finished", "a animação das ações não foi cortada");
+    assert.ok(fade.op.some((o) => o > 0 && o < 1), `sem opacidade intermediária: ${[...new Set(fade.op)]}`);
+    assert.equal(fade.op.at(-1), 1);
+    await bolha.locator(".rv").first().waitFor({ state: "detached", timeout: 1000 }); // texto voltou a ser contínuo, logo depois do fade
+    assert.equal(await acoes.getAttribute("data-revela"), null, "a marca dos botões saiu");
+    await ctx.close();
+    assert.deepEqual(erros, []);
+  });
+
+  test(`${width}: resposta curta: 30 ms por palavra`, async () => {
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: "um dois três", context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    await resposta(page).locator(".rv").first().waitFor();
+    assert.deepEqual((await revelacao(page)).map((p) => p.atraso), [0, 30, 60]);
+    await ctx.close();
+  });
+
+  test(`${width}: com movimento reduzido não há animação, só o texto`, async () => {
+    const { ctx, page } = await abrir({ width }); // o contexto já é reduce
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    assert.deepEqual(await emAnimacao(page), []);
+    assert.equal(await resposta(page).locator(".msg-text").evaluate((e) => getComputedStyle(e).opacity), "1");
+    assert.equal(await page.locator(".chat .rv").count(), 0, "sem movimento: texto contínuo, sem spans por palavra");
+    await ctx.close();
+  });
+
+  test(`${width}: sair do /piggy e voltar não reanima, e erros aparecem direto`, async () => {
+    const { ctx, page } = await abrir({ width, chat: (c, n) => (n === 2 ? { status: 500, json: { detail: { message: "Deu ruim.", retryable: true } } } : { json: { reply: palavras(80), context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".rv").first().waitFor();
+    assert.ok((await revelacao(page)).at(-1).op < 1, "animou na primeira vez");
+    await page.evaluate(() => { location.hash = "#/conta/perfil"; }); // sai no meio da revelação
+    await page.locator(".chat").waitFor({ state: "detached" });
+    await page.evaluate(() => { location.hash = "#/piggy"; });
+    await page.locator(".chat").waitFor();
+    assert.equal(await resposta(page).locator(".msg-text").textContent(), palavras(80));
+    assert.deepEqual(await emAnimacao(page), []);
+    assert.ok((await revelacao(page)).every((p) => p.op === 1));
+    await enviar(page, "@Detetive e agora?");
+    await resposta(page).locator(".msg-text", { hasText: "Deu ruim." }).waitFor();
+    assert.equal(await resposta(page).locator(".rv").count(), 0);
+    await ctx.close();
+  });
+
+  test(`${width}: enquanto envia: frases do agente que trocam a cada 2 s, sem ir ao leitor de tela`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }), chat: () => ({ json: { reply: "Feito, sem duplicada.", context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    const carga = resposta(page).locator(".msg-carga");
+    await carga.waitFor();
+    assert.equal(await carga.getAttribute("aria-hidden"), "true");
+    assert.equal(await carga.textContent(), "Procurando pistas nos lançamentos…");
+    assert.equal(await resposta(page).locator(".msg-text").textContent(), "Preparando a resposta…"); // o que o leitor de tela e a bolha já tinham
+    await page.evaluate(() => { // tudo o que a região viva chega a dizer
+      window.__ditos = [];
+      const st = document.querySelector("[role=status]:not(.guia-status)");
+      new MutationObserver(() => window.__ditos.push(st.textContent)).observe(st, { childList: true, subtree: true, characterData: true });
+    });
+    await carga.filter({ hasText: "Comparando cobranças parecidas…" }).waitFor({ timeout: 3500 });
+    const cabe = await carga.evaluate((e) => { const f = e.querySelector(".msg-carga-frase").getBoundingClientRect(); return f.right <= e.getBoundingClientRect().right + 1 && e.scrollWidth <= e.clientWidth + 1; });
+    assert.ok(cabe, "a frase cabe na bolha");
+    solta();
+    await resposta(page).locator(".msg-text", { hasText: "Feito, sem duplicada." }).waitFor();
+    await page.waitForFunction(() => /Feito, sem duplicada\.$/.test(document.querySelector("[role=status]:not(.guia-status)")?.textContent ?? ""));
+    assert.equal(await resposta(page).locator(".msg-carga").count(), 0);
+    assert.deepEqual((await page.evaluate(() => window.__ditos)).filter((t) => t && !/Feito, sem duplicada\./.test(t)), []);
+    await ctx.close();
+  });
+
+  test(`${width}: enquanto envia, com movimento reduzido a frase fica fixa e sem brilho`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }) });
+    await enviar(page, "@Xerife algo fora do padrão?");
+    const carga = resposta(page).locator(".msg-carga");
+    await carga.waitFor();
+    await page.waitForTimeout(2400);
+    assert.equal(await carga.textContent(), "Patrulhando os gastos…");
+    assert.deepEqual(await animacoes(page, ".msg-carga-anel, .msg-carga-frase"), ["none", "none"]);
+    assert.deepEqual(await emAnimacao(page), []);
+    solta();
+    await ctx.close();
+  });
+  test(`${width}: enquanto envia, ligar o movimento reduzido no meio da espera congela a frase`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    const carga = resposta(page).locator(".msg-carga");
+    await carga.filter({ hasText: "Comparando cobranças parecidas…" }).waitFor({ timeout: 3500 }); // trocando
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForTimeout(4500); // duas trocas
+    assert.equal(await carga.textContent(), "Comparando cobranças parecidas…");
+    solta();
+    await ctx.close();
+  });
+  test(`${width}: resposta mostrada com movimento reduzido não se revela depois que a preferência muda; revelada, a marca dos botões sai`, async () => {
+    const { ctx, page } = await abrir({ width, chat: (c, n) => ({ json: { reply: n === 1 ? palavras(40) : "Segunda.", context: "c", redirects: [RED] } }) });
+    await enviar(page, "@Detetive tem duplicada?"); // contexto reduce
+    const primeira = page.locator(".chat > .msg-piggy").filter({ hasText: "p39" });
+    await primeira.locator(".msg-text", { hasText: "p39" }).waitFor();
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive e agora?"); // re-render com a preferência nova
+    await resposta(page).locator(".rv").first().waitFor();
+    assert.equal(await primeira.locator(".rv").count(), 0, "a primeira resposta não reanima");
+    assert.equal(await primeira.locator(".msg-acoes[data-revela]").count(), 0, "nem os botões dela");
+    assert.equal(await primeira.locator(".msg-acoes button").first().evaluate((b) => b.checkVisibility({ visibilityProperty: true, opacityProperty: true })), true);
+    const ultima = resposta(page).locator(".msg-acoes");
+    assert.equal(await ultima.getAttribute("data-revela"), "true"); // a nova revela
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy:last-child .msg-acoes[data-revela]"), null, { timeout: 5000 });
+    assert.equal(await resposta(page).locator(".rv").count(), 0);
+    await ctx.close();
+  });
+  test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {
+    const { ctx, page } = await abrir({ width, ativos: ["detetive", "carteiro"], chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: palavras(150), context: "c", redirects: [RED] } } : null) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".rv").first().waitFor();
+    const botao = resposta(page).locator(".msg-acoes button", { hasText: "Perguntar ao Carteiro" });
+    const foca = () => botao.evaluate((b) => { b.focus(); return document.activeElement === b; });
+    assert.equal(await foca(), false, "invisível e focável");
+    assert.equal(await botao.evaluate((b) => b.checkVisibility({ visibilityProperty: true })), false);
+    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
+    assert.equal(await foca(), true);
+    await botao.click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha DURANTE a revelação (.rv)`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.locator(".rv").first().waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth, rv: document.querySelectorAll(".rv").length }));
+    assert.ok(m.rv > 0, "sem .rv o caso não mede nada");
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
+    await ctx.close();
+  });
+
+  test(`${width}: acabada a revelação a bolha volta ao texto contínuo, sem spans, sem salto`, async () => {
+    const texto = `um dois três ${palavras(10)}`;
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: texto, context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text");
+    await bolha.locator(".rv").first().waitFor();
+    assert.ok((await bolha.locator(".rv").count()) > 0, "durante a revelação há spans");
+    const alt = await bolha.evaluate((e) => e.getBoundingClientRect().height);
+    await bolha.locator(".rv").first().waitFor({ state: "detached", timeout: 4000 });
+    assert.equal(await bolha.textContent(), texto);
+    assert.equal(await bolha.evaluate((e) => e.getBoundingClientRect().height), alt, "sem salto de altura");
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha do usuário`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    for (const pergunta of [url, `@Detetive ${url}`]) {
+      const { ctx, page } = await abrir({ width });
+      await enviar(page, pergunta);
+      const bolha = page.locator(".chat .msg-user", { hasText: "exemplo.com" });
+      await bolha.waitFor();
+      const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+      assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+      assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto do usuário passa da bolha");
+      await ctx.close();
+    }
+  });
+}

@@ -11,6 +11,7 @@ import { ICON, agenteImg } from "../lib/brand";
 import { DEMO, contaQuery, lerContaFresca, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
 import { Anuncio } from "./InvestidoResposta";
+import { Carregando } from "./Carregando";
 
 const TRAVA_MS = 500; // a fileira nova ignora o toque por esse tempo: mais que o intervalo de um duplo toque, menos que ler a resposta
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
@@ -33,6 +34,22 @@ const estados = new Map<number, string>();
 // O que falta anunciar, com o id da resposta: também fora do componente, para não se perder se o chat desmonta antes dos 60 ms.
 // Ao montar, sai o que não é mais da conversa (a sessão trocou de conta com o chat fechado: a resposta era da anterior; Codex no #1157).
 const fila: { id: number; text: ReactNode }[] = [];
+// Respostas de agente vistas "enviando" nesta sessão e ainda sem revelar: só elas aparecem palavra por palavra, uma vez (a revelação
+// é visual, o texto já está inteiro no DOM). Fora do componente, como `estados`: sair do /piggy e voltar não reanima.
+const aRevelar = new Set<number>();
+const REVELA_MS = 2000; // teto do atraso somado das palavras; 30 ms por palavra até caber
+const REVELA_PASSO = 30;
+const REVELA_ANIM = 500; // duração da animação de cada palavra (inline no span: a CSS não repete o valor)
+const ACOES_ANIM = 400; // o fade dos botões, depois da última palavra (inline também)
+
+// Cada palavra é um <span> que anima só opacidade/blur/subida (chat.css); o espaço e as quebras de linha ficam como texto.
+function Revela({ t }: { t: string }) {
+  const partes = t.split(/(\s+)/);
+  const n = partes.length >> 1 || 1;
+  const passo = Math.min(REVELA_PASSO, REVELA_MS / n);
+  let w = 0;
+  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms`, animationDuration: `${REVELA_ANIM}ms` }}>{p}</span>)}</>;
+}
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
 // próprio da resposta). Só o exemplo leva a linha do selo; as próximas perguntas moram na fileira de cima da barra (PiggyChat).
@@ -61,11 +78,31 @@ function PiggySays({ m }: { m: Msg }) {
     if (!naConversa(m.id)) return; // a conta mudou durante a leitura: a conversa de onde o redirect veio foi limpa (Codex no #1157)
     perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso, energia, encaminhada: { needs_data: r.needs_data === true } });
   };
+  // Decidido no render e limpo no efeito: o Strict Mode renderiza duas vezes e as duas têm de concordar.
+  if (a && m.estado === "enviando") aRevelar.add(m.id);
+  const texto = typeof m.text === "string" ? m.text : "";
+  // A revelação se decide uma vez, quando a resposta chega, já com o movimento reduzido (o texto vem contínuo, sem spans por palavra,
+  // e o leitor de tela não para em cada um). Mudar a preferência depois não reabre uma resposta já mostrada (Codex no #1196).
+  const revela = useRef(false);
+  if (m.estado === "pronto" && aRevelar.has(m.id))
+    revela.current = !!texto && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  useEffect(() => { if (m.estado === "pronto") aRevelar.delete(m.id); }, [m.estado, m.id]);
+  // Acabado o fade dos botões, volta ao texto contínuo e tira a marca dos botões: spans inline-block por palavra viram uma parada por
+  // palavra no leitor de tela, e a marca deixada esconderia os botões de novo se a animação voltasse a valer.
+  const [fim, setFim] = useState(false);
+  const animar = revela.current && m.estado === "pronto" && !fim;
+  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
+  useEffect(() => {
+    if (!animar) return;
+    const id = setTimeout(() => setFim(true), total + ACOES_ANIM + 100); // folga: o relógio do timer não é o da animação, e cortar o fade no último quadro o faria saltar
+    return () => clearTimeout(id);
+  }, [animar, total]);
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
       {!DEMO && !m.real && <p className="msg-by"><Demonstracao /></p>}
-      <p className={a ? "msg-text msg-pre" : "msg-text"} aria-busy={m.estado === "enviando" || undefined}>{m.text}</p>
+      {a && m.estado === "enviando" && <Carregando kind={a.kind} />}
+      <p className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} /> : m.text}</p>
       {m.estado === "inativo" && (
         <div className="msg-acoes">
           <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>
@@ -75,7 +112,7 @@ function PiggySays({ m }: { m: Msg }) {
       {m.estado === "erro" && m.repetir && <div className="msg-acoes"><button type="button" className="btn btn-ghost" onClick={() => tentarDeNovo(m.id)}>Tentar de novo</button></div>}
       {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
       {m.estado === "pronto" && !!m.redirects?.length && (
-        <div className="msg-acoes">
+        <div className="msg-acoes" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms`, animationDuration: `${ACOES_ANIM}ms` } : undefined}>
           {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" disabled={seguindo} onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}
