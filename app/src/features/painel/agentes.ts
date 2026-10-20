@@ -5,7 +5,7 @@ import type { z } from "zod";
 import type { agentesSchema } from "@/api/schemas/agentes";
 
 export type Agentes = z.output<typeof agentesSchema>;
-// Fonte da tela: kind e nome iguais a core/services/agent_chat.py::DOMAINS.
+// Fonte da tela: kind e nome iguais a core/services/agent_chat.py::DOMAINS, e AGENTES igual ao do /painel (tests/test_painel_agentes_catalogo.py confere).
 export const AGENTES = [
   { kind: "xerife", nome: "Xerife", tema: "Gasto fora do padrão" },
   { kind: "reporter", nome: "Repórter", tema: "Resumo do mês" },
