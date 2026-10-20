@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { DIRECAO, ESTADO, MOTIVO, MOTIVO_PATRIMONIO, ou } from "@/features/painel/previsaoMotivos";
+import { DIRECAO, ESTADO, GASTOS_DIA_A_DIA, MOTIVO, MOTIVO_PATRIMONIO, ou } from "@/features/painel/previsaoMotivos";
 // `previsaoMotivos.ts` copia o web (§0.7): o app não importa o web, então este teste compara com o fonte dele e com os códigos do Python.
 const RAIZ = resolve(__dirname, "../../..");
 const ler = (p: string) => readFileSync(resolve(RAIZ, p), "utf8");
@@ -50,4 +50,9 @@ it("todo código que o patrimônio emite tem rótulo no app (a categoria, não s
 });
 it("só chave própria: 'constructor' e '__proto__' saem crus", () => {
   expect(ou(MOTIVO, "constructor")).toBe("constructor"); expect(ou(MOTIVO, "__proto__")).toBe("__proto__"); expect(ou(MOTIVO, "bancos_excluidos")).toBe("bancos fora do cálculo");
+});
+it("o rótulo 'Gastos do dia a dia' é o mesmo literal nos dois lados (e o controle acusa o desvio)", () => {
+  const web = (t: string) => t.includes(`GASTOS_DIA_A_DIA = "${GASTOS_DIA_A_DIA}"`);
+  expect(GASTOS_DIA_A_DIA).toBe("Gastos do dia a dia"); expect(web(previsao)).toBe(true);
+  expect(web(previsao.replace("Gastos do dia a dia", "Gastos variáveis"))).toBe(false);
 });
