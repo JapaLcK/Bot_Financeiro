@@ -103,6 +103,8 @@ function PiggySays({ m }: { m: Msg }) {
       {!DEMO && !m.real && <p className="msg-by"><Demonstracao /></p>}
       {a && m.estado === "enviando" && <Carregando kind={a.kind} />}
       <p className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} /> : m.text}</p>
+      {/* O card do agente entra depois do texto, com o mesmo fade dos botões (chat.css). */}
+      {m.card && (m.agente ? <div className="card-slot" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms`, animationDuration: `${ACOES_ANIM}ms` } : undefined}>{m.card}</div> : m.card)}
       {m.estado === "inativo" && (
         <div className="msg-acoes">
           <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>
@@ -116,7 +118,6 @@ function PiggySays({ m }: { m: Msg }) {
           {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" disabled={seguindo} onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}
-      {m.card}
       {m.blocks?.length && m.s0 && m.page ? <LiveAnswer blocks={m.blocks} s0={m.s0} page={m.page} /> : null}
     </FrameScope.Provider>
   );

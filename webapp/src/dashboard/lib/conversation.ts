@@ -1,8 +1,9 @@
-import { useSyncExternalStore, type ReactNode } from "react";
+import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
-import { agenteDe, ativar, conversar, type Acesso, type Encaminhada, type Redirect } from "./agentes";
+import { agenteDe, ativar, cardDe, conversar, type Acesso, type Encaminhada, type Redirect } from "./agentes";
 import { ErroApi } from "./v2";
+import { CardAgente } from "../parts/CardAgente";
 
 // A conversa com o Piggy: vive enquanto a aba está aberta (troca de página não apaga;
 // recarregar começa de novo). Guardar histórico é fase posterior, com backend.
@@ -104,14 +105,15 @@ const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e
 
 async function enviar(id: number, kind: string, texto: string, uid: number, encaminhada?: Encaminhada) {
   emVoo.set(`${uid}:${kind}`, id);
-  patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false });
+  patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false, card: undefined });
   try {
     const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null, encaminhada);
     if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
     if (!msgs.some((x) => x.id === id)) return; // a conversa foi limpa (troca de conta) com a pergunta em voo: o context dela não volta (Codex no #1157)
     contextos.set(`${uid}:${kind}`, r.context ?? null);
     const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
-    patch(id, { estado: "pronto", text: r.reply, redirects });
+    const c = cardDe(r.card);
+    patch(id, { estado: "pronto", text: r.reply, redirects, card: c ? createElement(CardAgente, { uid, c }) : undefined });
   } catch (e) {
     if (!msgs.some((x) => x.id === id)) return; // conversa limpa (troca de conta) com a pergunta em voo: o erro dela não mexe no context da conversa nova (Codex no #1157)
     const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;

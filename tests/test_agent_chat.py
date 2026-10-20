@@ -81,7 +81,7 @@ def test_redirecionamento_puro_nao_consulta_dados_nem_desconta(monkeypatch, arme
 
 def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
     monkeypatch.setattr(chat, '_route', lambda *a: {'own_question': 'Há duplicatas?', 'redirects': [{'kind': 'barao', 'question': 'O que é CDI?'}], 'outside': False})
-    def answer(client, uid, kind, question, history, *, needs_data=False):
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
         assert question == 'Há duplicatas?'
         assert history == []
         return 'Há indícios que podemos conferir.'
@@ -98,7 +98,7 @@ def test_pergunta_encaminhada_responde_direto_sem_reclassificar(monkeypatch, arm
     monkeypatch.setattr(chat, '_route', lambda *a: routed.append(a) or {
         'own_question': '', 'redirects': [{'kind': 'faria_limer', 'question': 'Quanto rendeu?', 'needs_data': True}], 'outside': False})
     answered = []
-    def answer(client, uid, kind, question, history, *, needs_data=False):
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
         answered.append((kind, question, needs_data))
         return 'Sua renda fixa rendeu assim.'
     monkeypatch.setattr(chat, '_answer', answer)

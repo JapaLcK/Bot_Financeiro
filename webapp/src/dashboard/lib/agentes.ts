@@ -94,7 +94,13 @@ export function ativar(uid: number, kind: string) {
   return escrever<{ ok: boolean }>("POST", `/agents/${uid}/${kind}/activate`, {});
 }
 export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
-export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[] }
+export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
+/** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
+export type CardAgente = { tipo: "investido" | "renda_fixa" };
+export const cardDe = (v: unknown): CardAgente | null => {
+  const t = v && typeof v === "object" ? (v as { tipo?: unknown }).tipo : undefined;
+  return t === "investido" || t === "renda_fixa" ? { tipo: t } : null;
+};
 /** Pergunta vinda do botão "Perguntar ao X": o servidor não a reclassifica, e o agente sugerido responde. */
 export interface Encaminhada { needs_data: boolean }
 export function conversar(uid: number, kind: string, message: string, context: string | null, encaminhada?: Encaminhada) {

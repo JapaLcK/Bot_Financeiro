@@ -9,6 +9,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 from datetime import date
 
@@ -18,11 +19,13 @@ import db
 from core.services.ai_chat.tools import get_tool
 from core.services.ai_chat.runner import MAX_TOKENS, OPENAI_TIMEOUT, OPENAI_MAX_RETRIES
 
+from .agent_chat_card import card_da_resposta
 from .agent_chat_data import _snapshot, SNAPSHOT_ITEMS_LIMIT
 from .agent_chat_errors import (ChatError, ModelResponseError, AnswerPolicyError, DataQueryError, handle_failure)
 from .modelo_openai import completion_options
 from .agent_chat_policy import (routing_format, REVIEW_FORMAT, response_text, response_json, routing_prompt, answer_prompt, review_prompt)
 
+logger = logging.getLogger(__name__)
 MODEL = (os.getenv("AGENT_CHAT_MODEL") or "").strip() or "gpt-5.4-mini"
 
 DOMAINS = {
@@ -169,7 +172,9 @@ def _route(client, kind: str, text: str, history: list[dict]) -> dict:
             "outside": outside, "needs_data": needs_data}
 
 
-def _answer(client, user_id: int, kind: str, question: str, history: list[dict], *, needs_data: bool = False) -> str:
+def _answer(client, user_id: int, kind: str, question: str, history: list[dict], *, needs_data: bool = False,
+            consultas: list | None = None) -> str:
+    """`consultas` recebe (nome, args, resultado) de cada consulta permitida: o card é decidido por elas."""
     name, domain = DOMAINS[kind]
     messages = [{"role": "system", "content": answer_prompt(name, domain, date.today().isoformat())}]
     messages += history + [{"role": "user", "content": question}]
@@ -225,6 +230,8 @@ def _answer(client, user_id: int, kind: str, question: str, history: list[dict],
             if allowed and isinstance(result, dict) and result.get("error"):
                 raise DataQueryError("Data query returned an error")
             consulted = consulted or allowed
+            if allowed and consultas is not None:
+                consultas.append((call.function.name, args, result))
             messages.append({"role": "tool", "tool_call_id": call.id,
                              "content": json.dumps(result, ensure_ascii=False, default=str)})
     raise ModelResponseError("Tool loop exhausted")
@@ -275,7 +282,15 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None, *,
         stage = "access_redirect"
         redirects = [{**r, "name": DOMAINS[r["kind"]][0], "access": access_state(user_id, r["kind"])} for r in route["redirects"]]
         stage = "answering"
-        reply = _answer(client, user_id, kind, own, history, needs_data=route.get("needs_data", False)) if own else ""
+        consultas: list = []
+        reply = _answer(client, user_id, kind, own, history, needs_data=route.get("needs_data", False),
+                        consultas=consultas) if own else ""
+        card = None
+        if own:  # cosmético: falha aqui não derruba a resposta
+            try:
+                card = card_da_resposta(user_id, kind, consultas)
+            except Exception:
+                logger.exception("agent_chat: card falhou user_id=%s kind=%s", user_id, kind)
         if redirects:
             names = ", ".join(r["name"] for r in redirects)
             subject = "Essa outra parte" if reply else "Esse assunto"
@@ -295,7 +310,7 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None, *,
             if consumed is None:
                 raise ChatError("quota_exhausted", 429, "Você atingiu a cota mensal compartilhada da IA.")
             used = consumed
-        return {"reply": reply, "context": next_context, "redirects": redirects, "usage": {"used": used, "limit": limit}}
+        return {"reply": reply, "context": next_context, "redirects": redirects, "card": card, "usage": {"used": used, "limit": limit}}
     except ChatError:
         raise
     except Exception as exc:
