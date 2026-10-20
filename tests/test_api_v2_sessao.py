@@ -30,6 +30,7 @@ def _ninguem_liberado(monkeypatch):
     os e-mails de teste do default."""
     monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", "")
+    monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)  # agentes lançados: o freio de emergência desligado
 
 
 def get_com_cookie(token, **headers):
@@ -115,7 +116,7 @@ def test_cookie_dashboard_token_200(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_cookie(sessao(user_id)["dashboard"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "plus"}
+    assert r.json() == {"plan_tier": "plus", "agents_ui_enabled": True}
 
 
 def test_bearer_access_200(monkeypatch, user_id):
@@ -123,7 +124,7 @@ def test_bearer_access_200(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_bearer(sessao(user_id)["access"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "pro"}
+    assert r.json() == {"plan_tier": "pro", "agents_ui_enabled": True}
 
 
 def test_carencia_200_com_tier_free(monkeypatch, user_id):
@@ -131,7 +132,7 @@ def test_carencia_200_com_tier_free(monkeypatch, user_id):
     libera(monkeypatch, user_id)
     r = get_com_cookie(sessao(user_id)["dashboard"])
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "free"}
+    assert r.json() == {"plan_tier": "free", "agents_ui_enabled": True}
 
 
 def test_liberado_por_email_em_caixa_diferente_200(monkeypatch, user_id):
@@ -177,3 +178,26 @@ def test_chave_por_id_e_por_email_em_caixa_diferente(monkeypatch):
     assert dashboard_v2_enabled(8, "x@y.com")
     assert not dashboard_v2_enabled(9, "x@y.com")
     assert dashboard_v2_enabled(9, " fulana@EXEMPLO.com ")
+
+
+# ── O freio dos agentes (AGENTS_UI_ENABLED=0) chega à v2 ─────────────────────
+# O /painel esconde a tela de Agentes por este campo; o /agents/{uid} já recusa com 404.
+
+def test_freio_dos_agentes_desliga_quem_nao_esta_na_allowlist(monkeypatch, user_id):
+    promote_to_pro(user_id)
+    libera(monkeypatch, user_id)
+    monkeypatch.setenv("AGENTS_UI_ENABLED", "0")
+    monkeypatch.setenv("AGENTS_BETA_EMAILS", "")
+    monkeypatch.setenv("AGENTS_BETA_USER_IDS", "")
+    r = get_com_cookie(sessao(user_id)["dashboard"])
+    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": False})
+
+
+def test_freio_dos_agentes_mantem_a_allowlist(monkeypatch, user_id):
+    promote_to_pro(user_id)
+    libera(monkeypatch, user_id)
+    monkeypatch.setenv("AGENTS_UI_ENABLED", "0")
+    monkeypatch.setenv("AGENTS_BETA_EMAILS", "")
+    monkeypatch.setenv("AGENTS_BETA_USER_IDS", str(user_id))
+    r = get_com_cookie(sessao(user_id)["dashboard"])
+    assert (r.status_code, r.json()) == (200, {"plan_tier": "plus", "agents_ui_enabled": True})

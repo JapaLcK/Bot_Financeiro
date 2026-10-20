@@ -7,7 +7,7 @@ const motivos = z.array(z.string());
 const texto = z.string().nullable();
 export const perfilPainelSchema = z.object({ perfil: z.enum(["padrao", "economizar", "investir", "controlar", "dividas", "autonomo"]).nullable() });
 export const categoriasSchema = z.object({ categorias: z.array(z.object({ chave: z.string(), nome: z.string(), icone: z.string().catch("tag") })) }); // `icone`: o card `comparacao` desenha o ícone de categorias que podem não ter gasto no mês (o `/gastos` só devolve as com gasto)
-export const planoSchema = z.object({ plan_tier: z.enum(["free", "essencial", "plus", "pro"]) });
+export const planoSchema = z.object({ plan_tier: z.enum(["free", "essencial", "plus", "pro"]), agents_ui_enabled: z.boolean().optional() }); // `agents_ui_enabled`: o freio dos agentes; ausente (servidor antigo) = ligado
 export const contasSchema = z.object({ total: dinheiro, motivos, fora_do_total: z.number().int(), carteira: z.object({ saldo: dinheiro, motivos }), contas: z.array(z.object({ id: z.number().int(), instituicao: texto, nome: texto, saldo: dinheiro.nullable(), moeda: z.string(), no_total: z.boolean(), conexao: z.string(), sincronizado_em: texto, motivos })) });
 /**
  * `GET /api/app/bancos` (`api/v2/bancos.py`): o que cada banco vale, calculado no servidor (o app NÃO soma dinheiro). `null` ≠ zero. Tolerante POR ITEM: um banco que não passa

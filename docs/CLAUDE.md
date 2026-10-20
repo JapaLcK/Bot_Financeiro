@@ -146,7 +146,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
   antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
   `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
-- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro", "agents_ui_enabled": bool}`, sem PII. `agents_ui_enabled` é o freio `AGENTS_UI_ENABLED=0` (o mesmo gate do `/auth/me` e do `/agents`): com ele `false` o /painel esconde a tela de Agentes.
 - `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
   (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
   `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit: o fim do sync do
