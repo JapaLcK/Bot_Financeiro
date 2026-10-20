@@ -515,6 +515,20 @@ async def serve_vsl():
     return resp
 
 
+@router.get("/oferta")
+async def serve_oferta():
+    # LP de comparação (nenhum link do site leva a ela; noindex, fora do sitemap).
+    # Sem `sem_teste`: a página não tem botão "Testar o Piggy" para tirar, e todo CTA
+    # dela vai para o #planos da própria página.
+    return html_file(FRONTEND_DIR / "oferta.html", clarity=True)
+
+
+@router.get("/oferta.js")
+async def serve_oferta_js(request: Request):
+    return FileResponse(FRONTEND_DIR / "oferta.js", media_type="application/javascript",
+                        headers={"Cache-Control": _cache_asset_versionado(request)})
+
+
 @router.get("/continuar-compra")
 async def serve_continuar_compra():
     """Retoma no checkout a escolha feita antes da autenticação.
@@ -1184,6 +1198,7 @@ async def serve_font(name: str):
         "Inter-Regular.woff2", "Inter-Medium.woff2", "Inter-SemiBold.woff2",
         "Inter-Bold.woff2", "Inter-ExtraBold.woff2", "Inter-Black.woff2",
         "Inter-Variable.woff2",
+        "Archivo-Variable.woff2",  # só a /oferta
         "Phosphor.woff2",  # icones Phosphor (peso Regular), self-hosted
     }
     if name not in allowed:
