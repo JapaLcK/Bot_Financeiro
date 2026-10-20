@@ -18,12 +18,12 @@ export default function Ferramentas() {
     <GrupoDeLinhas>
       <ListRow icone="ShoppingCart" titulo="Vale a pena comprar?" desativado={pro === undefined} chevron={pro === "1"} trailing={pro === "0" ? <Selo texto="Pro" /> : undefined} onPress={() => { if (pro === "1") navegar("/simulador-compra"); else if (pro === "0") Alert.alert(SEM_PLANO); }} />
       <ListRow icone="Trophy" titulo="Progresso ao milhão" chevron onPress={() => navegar("/progresso-milhao")} />
+      <ListRow icone="Robot" titulo="Agentes" chevron onPress={() => navegar("/agentes")} />
     </GrupoDeLinhas>
     <GrupoDeLinhas>
       <ListRow icone="Lightning" titulo="Simulador" trailing={breve} />
       <ListRow icone="House" titulo="Orçamento doméstico" trailing={breve} />
       <ListRow icone="ChartPie" titulo="Orçamentos por categoria" trailing={breve} />
-      <ListRow icone="Robot" titulo="Agentes" trailing={breve} />
     </GrupoDeLinhas>
   </View></Screen>;
 }
