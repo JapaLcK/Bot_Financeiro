@@ -8199,8 +8199,8 @@ function renderOfFixedIncomePanel(d) {
   if (elS) elS.innerHTML = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Saldo</div><div class="chip-val b">${fmt(sum.balance || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${sum.invested == null ? "—" : fmt(sum.invested)}</div></div>
+      <div class="chip"><div class="chip-lbl">Rendeu</div><div class="chip-val">${fmtPnl(sum.pnl)}</div></div>
     </div>`;
 
   const elL = document.getElementById("of-rf-list");
@@ -8229,12 +8229,13 @@ const RV_KIND_LABELS = { stock: "Ação", fii: "FII", etf: "ETF", bdr: "BDR", cr
 
 /* Resultado de uma posição. A SETA sai junto com a cor no neutro, e isso é
    decisão, não descuido: "↑" afirma o mesmo que o verde, então "↑ R$ 0,00" em
-   preto continuaria mentindo. Zero aqui é o DEFAULT do código, não borda — os
-   dois chamadores passam `sum.pnl || 0`, e renda variável sem posição (ou
-   posição exatamente no preço de compra) cai nele. Antes: `Number(v) >= 0`
+   preto continuaria mentindo. Zero é posição exatamente no preço de compra;
+   `null` é custo desconhecido (o banco não informou) e vira "—", nunca
+   "R$ 0,00". Antes: `Number(v) >= 0`
    cru, que pintava o zero de verde com seta pra cima e o resíduo de float de
    vermelho. */
 function fmtPnl(v, pct) {
+  if (v == null) return "—";
   const arrow = _toneClass(v, "↑ ", "↓ ");
   const cls = _toneClass(v, "pnl-up", "pnl-down");
   const pctTxt = (pct != null) ? ` (${(Number(pct) * 100).toFixed(2).replace(".", ",")}%)` : "";
@@ -8248,8 +8249,8 @@ function renderVariableIncomePanel(d) {
   const summaryHtml = `
     <div class="chips" style="margin-top:0;margin-bottom:6px">
       <div class="chip"><div class="chip-lbl">Valor de mercado</div><div class="chip-val b">${fmt(sum.market_value || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${fmt(sum.invested || 0)}</div></div>
-      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl || 0)}</div></div>
+      <div class="chip"><div class="chip-lbl">Investido</div><div class="chip-val">${sum.invested == null ? "—" : fmt(sum.invested)}</div></div>
+      <div class="chip"><div class="chip-lbl">Resultado</div><div class="chip-val">${fmtPnl(sum.pnl)}</div></div>
     </div>`;
   const listHtml = pos.map(p => {
     const day = (p.last_month_rate != null)

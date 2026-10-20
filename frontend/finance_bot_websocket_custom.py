@@ -91,6 +91,8 @@ from db import (
     accrue_all_investments,
     list_rv_positions,
     list_of_fixed_income,
+    rv_portfolio_summary,
+    of_fixed_income_summary,
     create_investment_db,
     delete_investment,
     get_dashboard_market_rates,
@@ -989,17 +991,9 @@ async def get_financial_data(
         "pockets":            [{**dict(r), "of_plan_active": _of_plan_active} for r in pockets],
         "investments":        [dict(r) for r in investments],
         "rv_positions":       rv_positions,  # ações/FIIs via Open Finance (já são dicts)
-        "rv_summary": {
-            "market_value": sum(p["market_value"] for p in rv_positions),
-            "invested":     sum(p["invested"] for p in rv_positions),
-            "pnl":          sum(p["pnl"] for p in rv_positions),
-        },
+        "rv_summary": rv_portfolio_summary(user_id, positions=rv_positions),
         "of_fixed_income":    of_fixed_income,  # renda fixa do banco (CDB/Tesouro), agregada
-        "of_fixed_income_summary": {
-            "balance":  sum(i["balance"] for i in of_fixed_income),
-            "invested": sum(i["invested"] for i in of_fixed_income),
-            "pnl":      sum(i["pnl"] for i in of_fixed_income),
-        },
+        "of_fixed_income_summary": of_fixed_income_summary(user_id, items=of_fixed_income),
         "market_rates":       market_rates,
         "recent_launches":    [dict(r) for r in launches],
         "launches_pagination": {
