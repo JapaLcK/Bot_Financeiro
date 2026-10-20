@@ -153,6 +153,11 @@ test("1440: catálogo em 500/rede: o painel fica (carregando, depois \"Tentar de
   await tentar.waitFor({ timeout: 10000 }); // depois das tentativas (meQuery.retry)
   assert.equal((await caixa(page, ".askbar")).left, inicio.left, "a barra não saltou");
   assert.equal(await page.evaluate(() => document.body.hasAttribute("data-chat-painel")), true);
+  await tentar.focus();
+  await page.keyboard.press("Enter"); // falha de novo: o foco fica no botão durante a nova tentativa e depois dela
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Tentar de novo", "o foco não cai no body");
+  await painel(page).getByText("Não deu para carregar").waitFor({ timeout: 10000 });
   falha = false;
   await tentar.click();
   await botao(page, "Xerife").waitFor();
@@ -273,6 +278,8 @@ test("1440: a sessão vira a conta 43 com a releitura presa: o painel some (hidd
   await ctx.route("**/auth/dashboard-profile", async (r) => { await preso; return r.fulfill(perfil(43, "Outra")); });
   await foco(page);
   await page.waitForFunction(() => document.querySelector(".chat-painel[data-reconferindo]"));
+  // O inert vale já; a visibilidade pode levar um quadro (transição), então espera-se ela, com prazo curto.
+  await page.waitForFunction(() => getComputedStyle(document.querySelector(".chat-painel")).visibility === "hidden", null, { timeout: 1000 });
   const p = await painel(page).evaluate((e) => ({ inert: e.inert, visibility: getComputedStyle(e).visibility }));
   assert.deepEqual(p, { inert: true, visibility: "hidden" });
   assert.equal(await page.getByRole("button", { name: /Perguntar ao/ }).count(), 0, "nenhum nome clicável");

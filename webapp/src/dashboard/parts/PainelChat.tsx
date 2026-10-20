@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AGENTES, acessoDe, agentesQuery, energiaDe } from "../lib/agentes";
 import { agenteImg } from "../lib/brand";
@@ -18,8 +18,12 @@ export function PainelChat({ msgs, uid, escondido, conferindo }: { msgs: Msg[]; 
   const itens = d ? GRUPOS.flatMap((g) => AGENTES.flatMap((a) => { const acesso = acessoDe(d, a.kind); return acesso && GRUPO[acesso] === g ? [{ ...a, acesso, g }] : []; })) : [];
   // 5xx ou rede (os que se tentam de novo): o painel fica, com "Tentar de novo"; sumir faria a coluna saltar depois das tentativas.
   // 4xx (beta desligado, plano): sem painel, a tela de uma coluna só.
-  const instavel = q.isError && q.error instanceof ErroApi && (q.error.status === 0 || q.error.status >= 500);
-  const carregando = !d && !q.isError && (conferindo || q.isFetching);
+  const falhou = q.isError && q.error instanceof ErroApi && (q.error.status === 0 || q.error.status >= 500);
+  // O "Tentar de novo" volta a query a "pending" (sem dado): sem esta memória, o botão sumiria no clique e o foco cairia no body.
+  const [erroDe, setErroDe] = useState<number>();
+  useEffect(() => { if (falhou) setErroDe(uid); else if (d) setErroDe(undefined); }, [falhou, d, uid]);
+  const instavel = falhou || (uid != null && erroDe === uid && !d && q.isFetching);
+  const carregando = !d && !q.isError && !instavel && (conferindo || q.isFetching);
   const ligado = itens.length > 0 || cards.length > 0 || carregando || instavel;
   useEffect(() => {
     if (ligado) document.body.dataset.chatPainel = ""; else delete document.body.dataset.chatPainel;
@@ -31,11 +35,12 @@ export function PainelChat({ msgs, uid, escondido, conferindo }: { msgs: Msg[]; 
   const ir = (id: number) => { const el = document.getElementById(`msg-${id}`); el?.scrollIntoView({ block: "start" }); el?.focus({ preventScroll: true }); };
   return (
     <aside className="chat-painel" aria-label="Agentes e cards da conversa" inert={escondido} data-reconferindo={escondido || undefined}>
-      {carregando && <p className="painel-nota" aria-busy="true">Carregando agentes…</p>}
+      {carregando && <p className="painel-nota" role="status" aria-busy="true">Carregando agentes…</p>}
       {instavel && (
         <div className="painel-erro">
-          <p className="painel-nota">Não deu para carregar os agentes agora.</p>
-          <button type="button" className="btn btn-ghost" disabled={q.isFetching} onClick={() => void q.refetch()}>Tentar de novo</button>
+          <p className="painel-nota" role="status">{q.isFetching ? "Tentando de novo…" : "Não deu para carregar os agentes agora."}</p>
+          {/* aria-disabled, não disabled: o botão desabilitado perde o foco */}
+          <button type="button" className="btn btn-ghost" aria-disabled={q.isFetching || undefined} onClick={() => { if (!q.isFetching) void q.refetch(); }}>Tentar de novo</button>
         </div>
       )}
       {itens.length > 0 && (
