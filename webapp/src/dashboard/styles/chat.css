@@ -32,6 +32,7 @@
 .msg-foot { display: grid; grid-auto-flow: column; justify-content: start; column-gap: 20px; margin-top: -8px; }
 .msg-foot .link { color: var(--ink-2); }
 .msg-text { max-width: 68ch; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.msg-text { word-break: break-word; overflow-wrap: anywhere; } /* URL longa sem espaço quebra em vez de estourar a bolha; break-word é o fallback do Safari 14 (anywhere: 15.4+) */
 .msg-text b { color: var(--ink); font-weight: 600; }
 
 /* Estado vazio: logo e saudação no centro da coluna (vh e não dvh: o Safari 14 não tem). */
@@ -130,4 +131,4 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 @keyframes carga-entra { from { opacity: 0; transform: translateY(6px); } }
 @keyframes carga-brilho { to { background-position: 0 0; } }
 @keyframes rv-entra { from { opacity: 0; filter: blur(4px); transform: translateY(4px); } }
-@keyframes rv-acoes { from { opacity: 0; } }
+@keyframes rv-acoes { from { opacity: 0; visibility: hidden; } } /* hidden: sem foco nem clique enquanto invisíveis; visível assim que o fade começa */

@@ -1459,7 +1459,7 @@ for (const width of TELAS) {
     assert.ok(atrasos.at(-1) <= 2000 && atrasos.at(-1) > 1500, `último atraso ${atrasos.at(-1)}`);
     assert.ok(ps.at(-1).op < 1, "a última palavra começa escondida");
     const acoes = resposta(page).locator(".msg-acoes");
-    assert.equal(await acoes.getByRole("button", { name: "Perguntar ao Carteiro" }).count(), 1); // no DOM desde o início
+    assert.equal(await acoes.locator("button", { hasText: "Perguntar ao Carteiro" }).count(), 1); // no DOM desde o início (getByRole não vê o que está visibility:hidden)
     assert.ok(+(await acoes.evaluate((e) => getComputedStyle(e).opacity)) < 1, "as ações esperam o texto");
     await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
     assert.ok((await revelacao(page)).every((p) => p.op === 1));
@@ -1544,6 +1544,33 @@ for (const width of TELAS) {
     assert.deepEqual(await animacoes(page, ".msg-carga-anel, .msg-carga-frase"), ["none", "none"]);
     assert.deepEqual(await emAnimacao(page), []);
     solta();
+    await ctx.close();
+  });
+  test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {
+    const { ctx, page } = await abrir({ width, ativos: ["detetive", "carteiro"], chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: palavras(150), context: "c", redirects: [RED] } } : null) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".rv").first().waitFor();
+    const botao = resposta(page).locator(".msg-acoes button", { hasText: "Perguntar ao Carteiro" });
+    const foca = () => botao.evaluate((b) => { b.focus(); return document.activeElement === b; });
+    assert.equal(await foca(), false, "invisível e focável");
+    assert.equal(await botao.evaluate((b) => b.checkVisibility({ visibilityProperty: true })), false);
+    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
+    assert.equal(await foca(), true);
+    await botao.click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
     await ctx.close();
   });
 }
