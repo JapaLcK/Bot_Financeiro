@@ -18,7 +18,7 @@ export const V2 = v2Json as unknown as { metas: Record<string, any> };
 export const RECURSOS: Record<string, Record<string, unknown>> = {
   contas: { contas: F["/api/app/contas"] }, hero: { previsao: F["/api/app/previsao"] }, compromissos: { previsao: F["/api/app/previsao"] },
   resumo: { resumo: F["/api/app/resumo-do-mes"], detalhes: F["/api/app/mes-detalhes"] },
-  categorias: { detalhes: F["/api/app/mes-detalhes"], contas: F["/api/app/contas"] }, calendario: { detalhes: F["/api/app/mes-detalhes"] }, simulador: { detalhes: F["/api/app/mes-detalhes"] },
+  categorias: { detalhes: F["/api/app/mes-detalhes"], contas: F["/api/app/contas"] }, calendario: { detalhes: F["/api/app/mes-detalhes"] }, simulador: { detalhes: F["/api/app/mes-detalhes"], previsao: F["/api/app/previsao"] },
   patrimonio: { patrimonio: F["/api/app/patrimonio"] }, wealth: { patrimonio: F["/api/app/patrimonio"] }, rendimento: { rendimento: F["/api/app/rendimento"] },
   assinaturas: { assinaturas: F["/api/app/assinaturas"] }, metas: { metas: V2.metas.varios }, fatura: { cartoes: F["/cards/1/summary"] },
   parcelas: { parcelas: F["/installments/1/list"] }, renda: { renda: F["/analytics/1/evolution"] }, piggy: { insights: F["/insights/1/current"] },

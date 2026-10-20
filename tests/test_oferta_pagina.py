@@ -1,5 +1,6 @@
-"""/oferta (frontend/oferta.html): LP de comparação convertida da exportação do Claude Design.
+"""A / (frontend/index.html, ex-/oferta): LP convertida da exportação do Claude Design.
 
+A /oferta virou redirect para a /; a LP antiga mora em /inicio-antiga (noindex).
 Três coisas podem quebrar em silêncio e são as que este arquivo prende:
   * sobra de runtime/Google Fonts/`{{ }}` na conversão (o CSP do site não deixa rodar);
   * caminho de asset errado ou arquivo órfão em `frontend/brand/oferta/`;
@@ -23,19 +24,44 @@ TIERS = ("essencial", "plus", "pro")
 
 
 def _pagina() -> str:
-    return client.get("/oferta").text
+    return client.get("/").text
 
 
-def test_oferta_responde_html_sem_runtime_nem_google_fonts():
-    r = client.get("/oferta")
+def test_raiz_responde_html_indexavel_sem_runtime_nem_google_fonts():
+    r = client.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
     assert r.headers["cache-control"] == "no-store"
     csp = r.headers["content-security-policy"]
     assert "script-src" in csp and "unsafe-eval" not in csp
-    assert '<meta name="robots" content="noindex"' in r.text
+    assert "noindex" not in r.text
+    for presente in (
+        '<link rel="canonical" href="https://pigbankai.com/"',
+        'name="description"',
+        'property="og:url" content="https://pigbankai.com/"',
+        'name="facebook-domain-verification"',
+        "<title>PigBank — Seus gastos se organizam enquanto você vive</title>",
+        "[?&]site=1",  # saída da PWA instalada (armadilhas.md)
+        "pb-safe",
+        "viewport-fit=cover",
+    ):
+        assert presente in r.text, presente
     for sobra in ("dc-runtime", "fonts.googleapis", "fonts.gstatic", "{{", "<sc-", "x-dc", '"assets/'):
         assert sobra not in r.text, sobra
+
+
+def test_oferta_redireciona_para_a_raiz_preservando_a_query():
+    r = client.get("/oferta?utm_source=x&fbclid=y", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/?utm_source=x&fbclid=y"
+    r = client.get("/oferta", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/"
+
+
+def test_inicio_antiga_e_noindex_e_sem_canonical():
+    r = client.get("/inicio-antiga")
+    assert r.status_code == 200
+    assert '<meta name="robots" content="noindex"' in r.text
+    assert 'rel="canonical"' not in r.text and 'property="og:url"' not in r.text
 
 
 def test_todo_caminho_local_existe_e_nenhum_asset_e_orfao():

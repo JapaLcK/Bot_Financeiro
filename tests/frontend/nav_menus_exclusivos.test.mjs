@@ -132,7 +132,7 @@
  * inócuo; ficou, e o caso 6 cobre. O anel também aparece lá.
  *
  * O que este arquivo NÃO alcança: âncora em `.nav-links` só existe na
- * `index.html` (medido nas 12 páginas que carregam os DOIS arquivos da nav —
+ * `inicio-antiga.html` (medido nas 12 páginas que carregam os DOIS arquivos da nav —
  * `nav-auth.js` e `nav-burger.js`, sempre em par); aparelho
  * real; e o app carrega o site AO VIVO, então nada disto aparece antes do
  * deploy (CLAUDE.md §5). E a classe do defeito 2 segue aberta em três irmãos
@@ -171,7 +171,7 @@ async function abrir({ logado = false, reduced = false, w = 390, h = 780 } = {})
       body: JSON.stringify({ email: "ana.beatriz@gmail.com", display_name: "Ana", plan: "free" }) }));
   }
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/`);
+  await page.goto(`${ORIGIN}/inicio-antiga.html`);
   // o burger é injetado pelo nav-burger.js; o menu da conta, pelo nav-auth.js só depois do fetch.
   await page.waitForSelector(logado ? ".pb-acct-btn" : ".pb-burger", { state: "attached" });
   return { ctx, page };

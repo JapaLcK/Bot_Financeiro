@@ -18,8 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from core.services import cashflow
 from core.services.cashflow_snapshot import carregar, Ocorrencia, centavos, legado
-from core.services.cashflow_contract import Snapshot
+from core.services.cashflow_contract import FONTE_VARIAVEL, Snapshot
 from core.services.cashflow_forecast import _trajectory
+from core.services.previsao_variavel import cortar, ocorrencias
 from utils_text import TETO_ENTRADA
 
 # strict: `true` e "180000" não passam por número; int continua valendo em float.
@@ -249,6 +250,12 @@ PREMISSAS = (
 )
 
 
+def _curva(snapshot: Snapshot, events: list[Ocorrencia], reserva) -> dict[str, Any]:
+    """O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE como primeiro
+    ponto, sem reler saldo nem mover o fim (hoje + 90 dias): 91 pontos."""
+    return _resumo(_trajectory(snapshot.hoje - timedelta(days=1), snapshot.base, events, DIAS + 1, reserva))
+
+
 def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
     """Compara o cenário atual com 1 a 3 cenários de compra sobre UMA snapshot já lida.
     Dinheiro em Decimal; `trajetoria` diária (hoje..hoje+90) em `atual` e em cada resumo."""
@@ -258,15 +265,12 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
     reserva = simulacao.reserva_minima
     sb, events = snapshot.base, snapshot.ocorrencias
 
-    # O motor puro inicia no dia seguinte à âncora. Ancorar em ontem inclui HOJE
-    # como primeiro ponto, sem reler saldo nem mover o fim (hoje + 90 dias).
-    # Compra hoje pode violar a reserva e ser encoberta por um salário amanhã.
-    anchor = today - timedelta(days=1)
-    atual = _resumo(_trajectory(anchor, sb, events, days + 1, reserva))
+    # Compra hoje pode violar a reserva e ser encoberta por um salário amanhã: `_curva` inclui hoje.
+    atual = _curva(snapshot, events, reserva)
     cenarios = []
     for cen in simulacao.cenarios:
         extra, contrato = _decision_events(cen, today, until)
-        resumo = _resumo(_trajectory(anchor, sb, events + extra, days + 1, reserva))
+        resumo = _curva(snapshot, events + extra, reserva)
         resumo["delta_vs_atual"] = (_duas_casas(resumo["saldo_final_90"] - atual["saldo_final_90"])
                                   if resumo["saldo_final_90"] is not None and atual["saldo_final_90"] is not None else None)
         # Compra datada depois da janela: o saldo de 90 dias é igual ao atual, e sem
@@ -285,6 +289,22 @@ def simular(snapshot: Snapshot, simulacao: Simulacao) -> dict[str, Any]:
         "cenarios": cenarios,
         "premissas": [*snapshot.premissas, PREMISSAS],
     }
+
+
+def simular_corte(snapshot: Snapshot, cortes: dict[str, int]) -> dict[str, Any]:
+    """Corta `cortes` (`{chave da categoria: % 0..100}`, todas na estimativa) a partir de amanhã e compara com a
+    previsão atual, sobre UMA snapshot. Só a fonte `FONTE_VARIAVEL` troca; o resto das ocorrências é o mesmo."""
+    est = snapshot.estimativa_variavel
+    por_categoria, economia = cortar(est, cortes)
+    novo = est["despesa_mensal"] - economia
+    fixos = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL]
+    atual = _curva(snapshot, snapshot.ocorrencias, 0)
+    com = _curva(snapshot, fixos + ocorrencias(snapshot.hoje, snapshot.hoje + timedelta(days=DIAS), novo), 0)
+    com["delta_vs_atual"] = (_duas_casas(com["saldo_final_90"] - atual["saldo_final_90"])
+                             if com["saldo_final_90"] is not None and atual["saldo_final_90"] is not None else None)
+    return {**snapshot.qualidade(), "orientacao": "abster", "today": snapshot.hoje.isoformat(),
+            "despesa_mensal": est["despesa_mensal"], "economia_mensal": economia, "cortes": por_categoria,
+            "atual": atual, "com_corte": com, "premissas": list(snapshot.premissas)}
 
 
 def simulate(user_id: int, simulacao: Simulacao) -> dict[str, Any]:

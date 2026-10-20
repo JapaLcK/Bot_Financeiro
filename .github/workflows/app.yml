@@ -4,15 +4,104 @@
 # inteiro e roda 8 mil testes de backend. Nada disso serve ao app, e pendurar o
 # app lá faria cada PR de Python esperar por `npm ci` do React Native.
 #
-# `paths` restringe a execução: PR que não toca `app/` não dispara nada aqui.
+# `paths` restringe a execução: PR que não toca `app/` (nem um arquivo que os testes do app
+# leem) não dispara nada aqui.
+# `frontend/finance_bot_websocket_custom.py` é lido pelos testes do app (SETUP_EXPIRADO) e ficou
+# fora de `paths:` DE PROPÓSITO (decisão D1=b do dono): PR que só toca o monólito não dispara o App.
 name: App
 
 on:
   push:
     branches: [main]
-    paths: ["app/**", "tests/fixtures/ai_chat_eventos.json", "tests/fixtures/percentual_categorias.json", "tests/fixtures/gastos_dia_casos.json", "tests/fixtures/app_gastos.json", "tests/fixtures/app_gastos_campos_lidos.json", "tests/fixtures/app_bancos.json", "tests/frontend/api_v2_respostas.json", "webapp/src/dashboard/styles/metas.css", "webapp/src/dashboard/parts/MetaPilula.tsx", "tests/fixtures/user_agents_app.json", "tests/fixtures/ai_chat_bloco_periodo.json", "tests/fixtures/ai_chat_bloco_maiores_gastos.json", "tests/fixtures/ai_chat_bloco_fim_do_mes.json", "tests/fixtures/telefones_cadastro.json", "webapp/src/dashboard/lib/prompts.js", "webapp/src/dashboard/lib/profiles.js", "webapp/src/dashboard/lib/metas-textos.ts", "webapp/src/dashboard/parts/Board.tsx", "webapp/src/dashboard/parts/MetaForm.tsx", "webapp/src/dashboard/parts/MetaCartao.tsx", "api/v2/metas.py", "core/services/metas_conversa.py", "db/metas_ritmo.py", "frontend/finance_bot_websocket_custom.py", "webapp/src/dashboard/conta/api.ts", "webapp/src/dashboard/lib/atualizarBanco.ts", "webapp/src/dashboard/parts/Selos.tsx", "webapp/src/dashboard/widgets/Previsao.tsx", "core/services/cashflow_snapshot.py", "core/services/previsao_recorrencias.py", "db/contas_hoje.py", "webapp/src/dashboard/widgets/SimuladorCompra.tsx", "webapp/src/dashboard/lib/api-v2.gen.ts", ".github/workflows/app.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+      # Fora de `app/`, mas lidos por testes do app (app/__tests__): mudar só um deles tem
+      # de rodar o jest. A lista é conferida por tests/test_app_yml_paths_cobrem_testes_do_app.py.
+      - "tests/fixtures/ai_chat_eventos.json"
+      - "tests/fixtures/percentual_categorias.json"
+      - "tests/fixtures/gastos_dia_casos.json"
+      - "tests/fixtures/app_gastos.json"
+      - "tests/fixtures/app_gastos_campos_lidos.json"
+      - "tests/fixtures/app_bancos.json"
+      - "tests/frontend/api_v2_respostas.json"
+      - "webapp/src/dashboard/styles/metas.css"
+      - "webapp/src/dashboard/parts/MetaPilula.tsx"
+      - "tests/fixtures/user_agents_app.json"
+      - "tests/fixtures/ai_chat_bloco_periodo.json"
+      - "tests/fixtures/ai_chat_bloco_maiores_gastos.json"
+      - "tests/fixtures/ai_chat_bloco_fim_do_mes.json"
+      - "tests/fixtures/ai_chat_bloco_comparacao.json"
+      - "tests/fixtures/ai_chat_bloco_sem_categoria.json"
+      - "tests/fixtures/ai_chat_bloco_ultimos_lancamentos.json"
+      - "tests/fixtures/telefones_cadastro.json"
+      - "webapp/src/dashboard/lib/prompts.js"
+      - "webapp/src/dashboard/lib/profiles.js"
+      - "webapp/src/dashboard/lib/metas-textos.ts"
+      - "webapp/src/dashboard/parts/Board.tsx"
+      - "webapp/src/dashboard/parts/MetaForm.tsx"
+      - "webapp/src/dashboard/parts/MetaCartao.tsx"
+      - "api/v2/metas.py"
+      - "core/services/metas_conversa.py"
+      - "db/metas_ritmo.py"
+      - "db/cat_icones.py"
+      - "webapp/src/dashboard/conta/api.ts"
+      - "webapp/src/dashboard/lib/atualizarBanco.ts"
+      - "webapp/src/dashboard/parts/Selos.tsx"
+      - "webapp/src/dashboard/widgets/Previsao.tsx"
+      - "core/services/cashflow_snapshot.py"
+      - "core/services/previsao_recorrencias.py"
+      - "db/contas_hoje.py"
+      - "webapp/src/dashboard/widgets/SimuladorCompra.tsx"
+      - "webapp/src/dashboard/lib/api-v2.gen.ts"
+      - "db/patrimonio.py"
+      - "webapp/src/dashboard/lib/milhao.ts"
+      - "webapp/src/dashboard/widgets/Agentes.tsx"
   pull_request:
-    paths: ["app/**", "tests/fixtures/ai_chat_eventos.json", "tests/fixtures/percentual_categorias.json", "tests/fixtures/gastos_dia_casos.json", "tests/fixtures/app_gastos.json", "tests/fixtures/app_gastos_campos_lidos.json", "tests/fixtures/app_bancos.json", "tests/frontend/api_v2_respostas.json", "webapp/src/dashboard/styles/metas.css", "webapp/src/dashboard/parts/MetaPilula.tsx", "tests/fixtures/user_agents_app.json", "tests/fixtures/ai_chat_bloco_periodo.json", "tests/fixtures/ai_chat_bloco_maiores_gastos.json", "tests/fixtures/ai_chat_bloco_fim_do_mes.json", "tests/fixtures/telefones_cadastro.json", "webapp/src/dashboard/lib/prompts.js", "webapp/src/dashboard/lib/profiles.js", "webapp/src/dashboard/lib/metas-textos.ts", "webapp/src/dashboard/parts/Board.tsx", "webapp/src/dashboard/parts/MetaForm.tsx", "webapp/src/dashboard/parts/MetaCartao.tsx", "api/v2/metas.py", "core/services/metas_conversa.py", "db/metas_ritmo.py", "frontend/finance_bot_websocket_custom.py", "webapp/src/dashboard/conta/api.ts", "webapp/src/dashboard/lib/atualizarBanco.ts", "webapp/src/dashboard/parts/Selos.tsx", "webapp/src/dashboard/widgets/Previsao.tsx", "core/services/cashflow_snapshot.py", "core/services/previsao_recorrencias.py", "db/contas_hoje.py", "webapp/src/dashboard/widgets/SimuladorCompra.tsx", "webapp/src/dashboard/lib/api-v2.gen.ts", ".github/workflows/app.yml"]
+    paths:
+      - "app/**"
+      - ".github/workflows/app.yml"
+      # Fora de `app/`, mas lidos por testes do app (app/__tests__): mudar só um deles tem
+      # de rodar o jest. A lista é conferida por tests/test_app_yml_paths_cobrem_testes_do_app.py.
+      - "tests/fixtures/ai_chat_eventos.json"
+      - "tests/fixtures/percentual_categorias.json"
+      - "tests/fixtures/gastos_dia_casos.json"
+      - "tests/fixtures/app_gastos.json"
+      - "tests/fixtures/app_gastos_campos_lidos.json"
+      - "tests/fixtures/app_bancos.json"
+      - "tests/frontend/api_v2_respostas.json"
+      - "webapp/src/dashboard/styles/metas.css"
+      - "webapp/src/dashboard/parts/MetaPilula.tsx"
+      - "tests/fixtures/user_agents_app.json"
+      - "tests/fixtures/ai_chat_bloco_periodo.json"
+      - "tests/fixtures/ai_chat_bloco_maiores_gastos.json"
+      - "tests/fixtures/ai_chat_bloco_fim_do_mes.json"
+      - "tests/fixtures/ai_chat_bloco_comparacao.json"
+      - "tests/fixtures/ai_chat_bloco_sem_categoria.json"
+      - "tests/fixtures/ai_chat_bloco_ultimos_lancamentos.json"
+      - "tests/fixtures/telefones_cadastro.json"
+      - "webapp/src/dashboard/lib/prompts.js"
+      - "webapp/src/dashboard/lib/profiles.js"
+      - "webapp/src/dashboard/lib/metas-textos.ts"
+      - "webapp/src/dashboard/parts/Board.tsx"
+      - "webapp/src/dashboard/parts/MetaForm.tsx"
+      - "webapp/src/dashboard/parts/MetaCartao.tsx"
+      - "api/v2/metas.py"
+      - "core/services/metas_conversa.py"
+      - "db/metas_ritmo.py"
+      - "db/cat_icones.py"
+      - "webapp/src/dashboard/conta/api.ts"
+      - "webapp/src/dashboard/lib/atualizarBanco.ts"
+      - "webapp/src/dashboard/parts/Selos.tsx"
+      - "webapp/src/dashboard/widgets/Previsao.tsx"
+      - "core/services/cashflow_snapshot.py"
+      - "core/services/previsao_recorrencias.py"
+      - "db/contas_hoje.py"
+      - "webapp/src/dashboard/widgets/SimuladorCompra.tsx"
+      - "webapp/src/dashboard/lib/api-v2.gen.ts"
+      - "db/patrimonio.py"
+      - "webapp/src/dashboard/lib/milhao.ts"
+      - "webapp/src/dashboard/widgets/Agentes.tsx"
 
 # A MESMA regra do `tests.yml`, e pelo mesmo motivo medido lá: na main o
 # `github.ref` de todo push é `refs/heads/main`, então dois merges próximos
