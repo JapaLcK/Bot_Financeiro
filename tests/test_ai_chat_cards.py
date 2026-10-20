@@ -138,7 +138,7 @@ def test_visao_do_modelo_esta_no_bloco(mundo, card):
                      "periodo": {"categorias_total"}}.get(card, set())
         sem_derivados = [{k: v for k, v in a.items() if k not in derivados} for a in r["abas"]]
         assert _numeros(sem_derivados) <= _numeros(bloco)
-        assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "rendimento", "piggy"), \
+        assert any(isinstance(x, float) for x in _numeros(r)) or card in ("assinaturas", "piggy"), \
             "a visão do modelo tem número como número"
     json.dumps(r)  # serializa como o runner serializa
 
