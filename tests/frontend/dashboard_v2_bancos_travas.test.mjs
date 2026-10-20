@@ -6,14 +6,15 @@
 // Controles negativos (desligue, rebuild `npm --prefix webapp run build`, o grupo tem de ficar vermelho; restaure e rebuild):
 //  - MEN1: em Bancos.tsx, tirar o `useEffect` que zera `menu` quando o id sai de `lista`.
 //  - RES2: em ResumoBancos.tsx, `{conectar && <div className="resumo-conectar">…</div>}` por `<div className="resumo-conectar">{conectar}</div>`.
-//  - TRV: em Bancos.tsx, `sincronizar` sem a guarda `alvo || dialogo.current || emCurso.current || seletorOF()?.busy()` (3 testes); `bloqueado={!!alvo || recon || sincronizando}` do MenuBanco por `bloqueado={!!alvo}`
-//    (itens do menu liberados na reconexão e na rodada); `sync.emVoo()` de `abrir` e `reconectarBanco` MAIS `|| sincronizando` do menu (o `disabled` do React já cobre o clique: a guarda do handler sozinha é redundante neste caminho).
+//  - TRV: em Bancos.tsx, `sincronizar` sem a guarda `alvo || dialogo.current || emCurso.current || seletorOF()?.busy()` (3 testes); `bloqueado={!!alvo || recon || enviando}` do MenuBanco por `bloqueado={!!alvo}`
+//    (itens do menu liberados na reconexão e no envio); `sync.enviando()` de `abrir` e `reconectarBanco` MAIS `|| enviando` do menu (o `disabled` do React já cobre o clique: a guarda do handler sozinha é redundante neste caminho);
+//    o teste 'TRV na fase acompanhando': `enviando` por `sincronizando` no menu, em `sync={enviando}` do detalhe ou nas guardas `sync.enviando()` por `vivo` (menu/detalhe travados na coleta, ou o diálogo/widget não abre).
 //  - VIVA: em Bancos.tsx, tirar o `useEffect` que chama `sync.calar()` no fim da rodada (a região fica com "Atualizando…"); recolocar `setAviso("")` em `sincronizar` (o "Nubank desconectado." some).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { navegador } from "./_guia.mjs";
 import { ate } from "./_conta_perfil.mjs";
-import { LIMITE, item, refreshDe } from "./_bancos.mjs";
+import { LIMITE, con, item, refreshDe } from "./_bancos.mjs";
 import { aviso, card, confirmar, dlg, det, esperaCards, linha, manter, refoco, tiraDoSnapshot } from "./_bancos_desconectar.mjs";
 import { fechaWidget, saves, sucesso, telaRecon, tokens, widgetAberto, widgetsAbertos, PADRAO } from "./_bancos_reconectar.mjs";
 
@@ -161,6 +162,32 @@ test("TRV rodada do Sincronizar em voo: Reconectar e Desconectar (menu e detalhe
   assert.deepEqual(detalhe, [["Reconectar banco", true], ["Desconectar banco", true]]);
   assert.deepEqual(r, { dialogo: 0, tokens: 0, widgets: 0 });
   assert.deepEqual(depois, [["Reconectar", false], ["Desconectar", false]]);
+});
+
+test("TRV na fase 'acompanhando' (o banco coleta sozinho) Reconectar e Desconectar ficam LIVRES (abre o diálogo); o Sincronizar segue travado; no envio do POST, travados", async () => {
+  const coletando = () => [con(11, "Nubank", "updating", "Atualizando…"), ...PADRAO().slice(1)];
+  const { ctx, page, srv } = await telaRecon({ conexoes: coletando(), refresh: (r) => r.fulfill({ json: refreshDe([item("item-11", "updating", true)], coletando()) }) }, SEM_VAGAS);
+  await sincronizar(page, 1).click();
+  await page.locator(".banco-sync").waitFor();
+  const sync = await estadoSync(sincronizar(page, 1));
+  await maisDe(page, "Inter").click();
+  const itens = await itensTravados(page);
+  await page.getByRole("menuitem", { name: "Desconectar" }).click();
+  await dlg(page).waitFor();
+  const dialogo = await dlg(page).count();
+  await manter(page).click();
+  await dlg(page).waitFor({ state: "detached" });
+  await linha(page, "Inter").click();
+  await det(page).waitFor();
+  const detalhe = await det(page).locator(".banco-det-acoes button").evaluateAll((l) => l.map((b) => [b.textContent, b.disabled]));
+  await det(page).getByRole("button", { name: "Reconectar banco" }).click();
+  await widgetAberto(page); // a guarda de `reconectarBanco` também deixa passar na fase acompanhando
+  await ctx.close();
+  assert.equal(srv.posts.length, 1);
+  assert.deepEqual(detalhe, [["Reconectar banco", false], ["Desconectar banco", false]]);
+  assert.deepEqual(sync, ["true", "Sincronizando…"]);
+  assert.deepEqual(itens, [["Reconectar", false], ["Desconectar", false]]); // `disabled` false: ao contrário do envio (teste acima)
+  assert.equal(dialogo, 1);
 });
 
 // ---- VIVA ----

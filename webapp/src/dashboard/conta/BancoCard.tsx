@@ -24,9 +24,9 @@ export function Ladrilho({ nome, logo: url, cor, grande }: { nome: string; logo:
   );
 }
 
-// Pontinho no tom do estado + o rótulo do servidor: o rótulo diz o estado, a cor só acompanha.
+// Pontinho no tom do estado + o rótulo do servidor: o rótulo diz o estado, a cor só acompanha. Exceção (decisão do dono): `updated` diz "Conectado", como no desenho.
 export const Estado = ({ c }: { c: Conexao }) => (
-  <span className={`banco-estado estado-${tomDoEstado(c.ui.state)}`}><span className="ponto" aria-hidden="true" />{c.ui.label || "Pendente"}</span>
+  <span className={`banco-estado estado-${tomDoEstado(c.ui.state)}`}><span className="ponto" aria-hidden="true" />{c.ui.state === "updated" ? "Conectado" : c.ui.label || "Pendente"}</span>
 );
 
 // Um banco conectado, em linha: ladrilho, nome, estado, última atualização e as ações. "Detalhes" abre o BancoDetalhe (os valores do `/bancos`, juntados por id, nunca por nome);
