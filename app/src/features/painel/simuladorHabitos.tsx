@@ -43,7 +43,7 @@ export function SimuladorHabitos() {
     setCortes(novo); setFalha(null);
     op.current?.controlador.abort(); // o 2º toque cancela o 1º: a resposta velha nunca chega à tela
     if (!lista.length) { op.current = null; setRes(null); return; }
-    const mine = (op.current = p.operacao());
+    const mine = (op.current = p.operacao()); setRes(null); // número velho nunca fica ao lado do corte novo enquanto o POST está no ar
     try { const r = await simularHabitos({ cortes: lista }, mine.controlador); if (mine.atual()) setRes(r); }
     catch (e) {
       if (!mine.atual()) return;

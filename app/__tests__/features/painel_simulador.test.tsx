@@ -55,6 +55,13 @@ it("Zerar aborta o que está no ar, limpa o resultado e volta os sliders a 0", a
  expect(o.signal!.aborted).toBe(true); lenta.soltar(); await act(async () => { await drenar(); });
  expect(screen.queryByText("Sobra por mês")).toBeNull(); expect(screen.getByLabelText("Corte em Mercado").props.value).toBe(0);
 });
+it("o 2º soltar tira o resultado anterior enquanto o novo POST está no ar", async () => {
+ const lenta = segurar(); let n = 0;
+ habitos = async () => { if (++n === 2) await lenta.promessa; return resposta(200, RESP); };
+ await abrir(); await soltar("Corte em Mercado", 50); expect(screen.getByLabelText("mais 12 reais e 34 centavos")).toBeTruthy();
+ await soltar("Corte em Mercado", 70); expect(screen.queryByLabelText("mais 12 reais e 34 centavos")).toBeNull();
+ lenta.soltar(); await act(async () => { await drenar(); }); expect(screen.getByLabelText("mais 12 reais e 34 centavos")).toBeTruthy();
+});
 it("o 2º toque aborta o 1º: a resposta do 1º não aparece", async () => {
  const lenta = segurar(); let n = 0;
  habitos = async () => { if (++n === 1) { await lenta.promessa; return resposta(200, { ...RESP, economia_mensal: "11.11" }); } return resposta(200, { ...RESP, economia_mensal: "22.22" }); };
