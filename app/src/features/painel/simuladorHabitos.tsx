@@ -33,10 +33,10 @@ export function SimuladorHabitos() {
   useEffect(() => () => op.current?.controlador.abort(), []);
   const limpar = () => { op.current?.controlador.abort(); op.current = null; setCortes({}); setRes(null); };
   const zerar = () => { limpar(); setFalha(null); };
-  // Previsão relida com outra versão (pull-to-refresh, foco, 422): corte e resultado eram da estimativa antiga. A falha fica (é a do 422). No chat o bloco é congelado.
+  // Previsão relida com outra versão (pull-to-refresh, foco, 422): corte e resultado eram da estimativa antiga. Só a falha do 422 fica. No chat o bloco é congelado.
   const versao = useRef<string | null>(null);
   const r = p.dados.previsao, v = r?.fase === "pronto" ? r.dado.calculado_em : null;
-  useEffect(() => { if (v === null || bloco) return; if (versao.current !== null && versao.current !== v) limpar(); versao.current = v; }, [v, bloco]);
+  useEffect(() => { if (v === null || bloco) return; if (versao.current !== null && versao.current !== v) { limpar(); setFalha((f) => (f === MUDOU ? f : null)); } versao.current = v; }, [v, bloco]);
   async function soltou(categorias: { chave: string }[], chave: string, v: number) {
     const novo = { ...cortes, [chave]: v };
     const lista = categorias.filter((c) => (novo[c.chave] ?? 0) > 0).map((c) => ({ categoria: c.chave, percentual: novo[c.chave]! }));

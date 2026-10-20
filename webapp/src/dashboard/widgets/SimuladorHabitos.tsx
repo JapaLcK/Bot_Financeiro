@@ -63,7 +63,8 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   const pro = usePlan() === "pro";
   const qc = useQueryClient();
   // No Resumo com o card de previsão, a estimativa é a que ELE leu (mesma regra da pilha de avisos): um 2º observador da chave padrão guardaria o dado do plano antigo.
-  const perfil = useQuery({ ...perfilQuery, enabled: pro && !full, subscribed: pro && !full });
+  // Só lê o /perfil que o Board já observa: montar com o layout novo não refaz o GET (no meio da troca otimista de perfil ele traria o valor antigo).
+  const perfil = useQuery({ ...perfilQuery, enabled: pro && !full, subscribed: pro && !full, refetchOnMount: false, refetchOnWindowFocus: false });
   const comCard = !full && !!perfil.data && comCardPrevisao(perfil.data.perfil ?? "padrao", "pro");
   const sozinho = pro && (full || (!perfil.isPending && !comCard));
   const prev = useQuery({ ...previsaoQuery(null), enabled: sozinho, subscribed: sozinho });
@@ -87,7 +88,7 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
   useEffect(() => {
     if (!e) return;
     if (e.status === 401 || e.status === 402) void qc.refetchQueries({ queryKey: meQuery.queryKey }); // o portão decide
-    if (mudou) void qc.invalidateQueries({ queryKey: ["previsao"] }); // sem retentativa do POST: a chave só muda se a lista mudar
+    if (mudou) void qc.invalidateQueries({ queryKey: ["previsao"] }); // sem retentativa aqui: a releitura traz outro `calculado_em` (chave nova) e o corpo só leva categorias da estimativa nova, então é um POST, sem laço
   }, [e, mudou, qc]);
 
   const titulo = full ? "Seus gastos do dia a dia" : "Simulador";
