@@ -14,7 +14,7 @@ import { ContaBancos } from "./conta/Bancos";
 import { ContaCobranca } from "./conta/Cobranca";
 import { ContaConfiguracoes } from "./conta/Configuracoes";
 import { ContaPerfil } from "./conta/Perfil";
-import { DEMO } from "./lib/v2";
+import { DEMO, useAgentesLigados } from "./lib/v2";
 import { useMedia } from "./useMedia";
 import { go, href, route, type Path } from "./router";
 import { Bills } from "./widgets/Bills";
@@ -218,10 +218,11 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
 ];
 
 function Tools() {
+  const agentes = useAgentesLigados();
   return (
     <Page path="/ferramentas" lede="Tudo o que ajuda a decidir, num lugar só.">
       <ul className="span-12 tools">
-        {TOOLS.map((t) => {
+        {TOOLS.filter((t) => agentes || t.to !== "/agentes").map((t) => {
           const body = <><i className={`ph ${t.icon}`} aria-hidden="true" /><b>{t.label}</b><span>{t.line}</span></>;
           const link = t.url ?? (t.to && href(t.to));
           return (
@@ -255,6 +256,8 @@ function Milhao() {
 }
 
 function Agentes() {
+  // Com o freio ligado o /agents responde 404: a tela não pede nada e só avisa (link antigo ou digitado).
+  if (!useAgentesLigados()) return <Page path="/agentes" lede="Os agentes estão indisponíveis no momento.">{null}</Page>;
   return (
     <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
       <AgentesPainel />

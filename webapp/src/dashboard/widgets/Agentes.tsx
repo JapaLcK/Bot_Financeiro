@@ -100,7 +100,7 @@ function Galeria({ lista }: { lista: Agente[] }) {
               <span className="ag-faixa-nome">{a.nome}</span>
               {a.estado === "ready" && <span className="ag-faixa-ponto" role="img" aria-label="no seu time" />}
             </button>
-            <div className="ag-faixa-info" id={`ag-g-${a.kind}`} inert={!on}>
+            <div className="ag-faixa-info" id={`ag-g-${a.kind}`} inert={!on} aria-hidden={!on || undefined}>{/* aria-hidden: o inert não existe no Safari 14–15.4 */}
               <span className="ag-olho">{a.tema}</span>
               <h2 className="ag-nome">{a.nome}</h2>
               <p className="ag-frase">{a.frase}</p>
