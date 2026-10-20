@@ -994,6 +994,44 @@ test("fmtPnl: resultado zerado não tem cor NEM seta", async () => {
   await page.close();
 });
 
+test("painéis de renda variável/fixa: custo desconhecido (null) vira \"—\", nunca R$ 0,00", async () => {
+  // NEGATIVO: tire o `if (v == null) return "—"` do fmtPnl (ou o ternário de
+  // `invested`) e o caso nulo mostra "R$ 0,00". POSITIVO: o caso com custo segue
+  // mostrando valor e resultado.
+  const { page, errs } = await bootPage();
+  const r = await page.evaluate(() => {
+    for (const id of ["rv-card", "rv-summary", "rv-list", "of-rf-card", "of-rf-summary", "of-rf-list"]) {
+      const el = document.createElement("div"); el.id = id; document.body.appendChild(el);
+    }
+    const txt = (d) => {
+      renderVariableIncomePanel(d); renderOfFixedIncomePanel(d);
+      return ["rv-summary", "rv-list", "of-rf-summary", "of-rf-list"].map((i) => document.getElementById(i).textContent).join("|");
+    };
+    const nulo = { market_value: 1000, invested: null, pnl: null, pnl_pct: null };
+    const com = { market_value: 1000, invested: 950, pnl: 50, pnl_pct: 0.0526 };
+    return {
+      nulo: txt({
+        rv_positions: [{ ticker: "PETR4", kind: "stock", market_value: 1000, pnl: null, pnl_pct: null }],
+        rv_summary: nulo,
+        of_fixed_income: [{ name: "CDB", count: 1, balance: 1000, pnl: null, pnl_pct: null }],
+        of_fixed_income_summary: { balance: 1000, invested: null, pnl: null },
+      }),
+      com: txt({
+        rv_positions: [{ ticker: "PETR4", kind: "stock", market_value: 1000, pnl: 50, pnl_pct: 0.0526 }],
+        rv_summary: com,
+        of_fixed_income: [{ name: "CDB", count: 1, balance: 1000, pnl: 50, pnl_pct: 0.0526 }],
+        of_fixed_income_summary: { balance: 1000, invested: 950, pnl: 50 },
+      }),
+    };
+  });
+  assert.ok(r.nulo.includes("—"), `sem "—": ${r.nulo}`);
+  assert.ok(!r.nulo.includes("R$ 0,00"), `custo desconhecido virou zero: ${r.nulo}`);
+  assert.ok(r.com.includes("R$ 950,00"), r.com);
+  assert.ok(r.com.includes("↑ R$ 50,00"), r.com);
+  await semErros(page, errs);
+  await page.close();
+});
+
 /* Guarda do tema POR PAINEL e geração do histórico (#435, apontamentos 4-7).
    CONTROLES NEGATIVOS deste grupo:
    - tire o `alvo.removeAttribute("data-terminal")` do `_chartVazio` → T1 cai;

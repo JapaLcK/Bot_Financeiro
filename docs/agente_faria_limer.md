@@ -31,7 +31,7 @@ A decisão é sempre sua.
 ## O que ele dispara (eventos, dedupe mensal)
 
 1. **Retrato do mês** (`rv_retrato:YYYY-MM`) — valor de mercado, resultado em
-   aberto (P&L) e a variação do mês (média ponderada por posição, quando a
+   aberto (P&L, só quando o custo é conhecido) e a variação do mês (média ponderada por posição, quando a
    corretora manda a taxa). Ex.: *"Sua renda variável: R$ 11.000,00 em 2 ativos."*
 2. **Concentração** (`rv_concentracao:YYYY-MM`) — dispara quando um único ativo
    passa de 40% da carteira. Ex.: *"PETR4 é 80% da sua carteira de RV."*
