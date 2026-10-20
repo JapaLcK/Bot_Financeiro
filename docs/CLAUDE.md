@@ -146,7 +146,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   a vê. Erro no meio de um stream SSE chega num `ExceptionGroup` e é desembrulhado
   antes de classificar. Ficam **fora** do envelope o 403 do CSRF e o 422 do
   `query_venenosa_middleware`, que nascem nos middlewares do pai e saem `{"detail": ...}`.
-- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro"}`, sem PII.
+- `GET /api/v2/me` devolve `{"plan_tier": "free"|"essencial"|"plus"|"pro", "agents_ui_enabled": bool}`, sem PII. `agents_ui_enabled` é o freio `AGENTS_UI_ENABLED=0` (o mesmo gate do `/auth/me` e do `/agents`): com ele `false` o /painel esconde a tela de Agentes.
 - `GET /api/v2/eventos` (`api/v2/eventos.py`): SSE, `data: {"recurso": "open_finance"|"tudo"}`
   (sem dado financeiro, sem id, sem `id:`/replay) e `: ping` a cada 15 s. Quem avisa chama
   `eventos.avisar(user_id, recurso)` na thread do loop, depois do commit: o fim do sync do
@@ -644,6 +644,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
   global de bytes comprovado/adicionado: esses limites dimensionais não limitam
   fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.
+  Consumidor (estimativa do gasto do dia a dia): `Previsao.tsx` mostra `estimativa_variavel` (fato "Gastos do dia a dia −R$ X/mês" no card e na página, categorias só na página) e a parte `pior_dia.despesa_variavel` na frase do pior dia; o app mostra a linha na folha e no card do chat (`futuro.tsx`; `previsaoSchema` lê os campos com `.catch(null)`). Só o mensal; sem estimativa (`null`) as telas são as de antes. Dinheiro é o texto da API (`saida()` em `Compromissos.tsx`); a única conta do cliente é a largura da barra. Paridade plena entre os dois lados (por isso fora de `docs/paridade-app-dashboard.md`).
   Consumidor (Etapa 3 PR3): `webapp/src/dashboard/widgets/Previsao.tsx` (página
   `/previsao` e card "Saldo previsto" do Resumo) e `Compromissos.tsx`, com
   `previsaoQuery` em `lib/v2.ts`: chave `["previsao", dias]`, `gcTime: 0` (dado sem

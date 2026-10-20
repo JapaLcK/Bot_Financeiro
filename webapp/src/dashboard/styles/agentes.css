@@ -1,0 +1,106 @@
+/* Agentes: a galeria de faixas (widgets/Agentes.tsx). */
+.ag { display: grid; gap: 24px; min-width: 0; }
+.ag ul { list-style: none; margin: 0; padding: 0; }
+
+.ag-energia { display: grid; gap: 8px; width: min(320px, 100%); }
+.ag-energia-rot { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.ag-energia-rot i { color: var(--pink); font-size: 14px; }
+.ag-energia-rot b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ag-energia-barra { display: flex; gap: 3px; }
+.ag-energia-barra i { flex: 1 1 0; height: 6px; border-radius: 2px; background: var(--plane-3); }
+.ag-energia-barra i[data-on] { background: var(--pink); box-shadow: 0 0 10px rgba(255, 45, 142, 0.35); }
+
+.ag-aviso { margin: 0; font-size: 13px; color: var(--warn); }
+
+/* Peças comuns */
+.ag-olho { font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); }
+.ag-nome { margin: 0; font-size: 28px; font-weight: 650; letter-spacing: -0.025em; line-height: 1.1; color: var(--ink); }
+.ag-frase { margin: 0; font-size: 15px; font-weight: 550; letter-spacing: -0.01em; color: var(--ink); }
+.ag-texto { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); max-width: 46ch; text-wrap: pretty; }
+.ag-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ag-ritmo, .ag-custo {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); font-size: 11.5px; font-weight: 500; color: var(--ink-2);
+}
+.ag-custo { font-variant-numeric: tabular-nums; }
+.ag-custo i { color: var(--pink); }
+.ag-selo {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 999px;
+  background: rgba(9, 9, 11, 0.6); box-shadow: inset 0 0 0 1px var(--rule-strong);
+  font-size: 11.5px; font-weight: 550; color: var(--ink-2); white-space: nowrap;
+}
+.ag-selo i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
+.ag-selo[data-tom="ready"] { color: var(--ink); }
+.ag-selo[data-tom="ready"] i { background: var(--gain); box-shadow: 0 0 0 3px var(--gain-wash); }
+.ag-selo[data-tom="activate"] i { background: var(--pink); }
+.ag-selo[data-tom="no_energy"] i { background: var(--warn); }
+
+/* Botão com a seta no próprio círculo */
+.ag-acao { justify-self: start; height: 40px; padding: 0 6px 0 16px; border-radius: 999px; gap: 10px; }
+.ag-acao-seta {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(15, 23, 42, 0.14); transition: transform var(--t-mid) var(--ease-out);
+}
+.btn-ghost .ag-acao-seta { background: rgba(255, 255, 255, 0.08); }
+.ag-acao-seta i { font-size: 14px; }
+@media (hover: hover) and (pointer: fine) { .ag-acao:hover .ag-acao-seta { transform: translateX(2px) scale(1.06); } }
+
+/* Galeria: faixas que abrem */
+.ag-galeria { display: flex; gap: 8px; height: clamp(460px, 64vh, 620px); }
+.ag-faixa {
+  position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; isolation: isolate;
+  border-radius: 22px; background: var(--plane-1); box-shadow: inset 0 0 0 1px var(--rule);
+  transition: flex-grow 480ms var(--ease-out);
+}
+.ag-faixa[data-on] { flex-grow: 7; }
+.ag-faixa img {
+  position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%;
+  object-fit: cover; object-position: var(--foco, 50%) 30%;
+  transform: scale(1.12); filter: saturate(0.55) brightness(0.5);
+  transition: transform 700ms var(--ease-out), filter 480ms var(--ease-out);
+}
+.ag-faixa[data-on] img { transform: scale(1); filter: none; }
+.ag-faixa::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(9, 9, 11, 0) 30%, rgba(9, 9, 11, 0.55) 60%, rgba(9, 9, 11, 0.95) 100%);
+}
+.ag-faixa[data-on]::after {
+  background:
+    linear-gradient(90deg, rgba(9, 9, 11, 0.82) 0%, rgba(9, 9, 11, 0.35) 40%, rgba(9, 9, 11, 0) 65%),
+    linear-gradient(180deg, rgba(9, 9, 11, 0) 40%, rgba(9, 9, 11, 0.9) 100%);
+}
+.ag-faixa-alvo { position: absolute; inset: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; color: var(--ink); cursor: pointer; }
+.ag-faixa-alvo:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--pink); }
+.ag-faixa-nome {
+  position: absolute; left: 50%; bottom: 22px; writing-mode: vertical-rl; transform: translateX(-50%) rotate(180deg);
+  font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap;
+  transition: opacity 200ms ease;
+}
+.ag-faixa[data-on] .ag-faixa-nome { opacity: 0; }
+.ag-faixa-ponto { position: absolute; top: 16px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--gain); box-shadow: 0 0 0 4px var(--gain-wash); transition: opacity 200ms ease; }
+.ag-faixa[data-on] .ag-faixa-ponto { opacity: 0; }
+.ag-faixa-info {
+  position: absolute; left: 0; bottom: 0; width: min(560px, 100%); padding: 32px; /* 100% = a faixa aberta: em 62vw ela era mais estreita que o texto entre 720 e ~1100px e o overflow cortava */
+  display: grid; gap: 10px; justify-items: start;
+  opacity: 0; transform: translateY(14px); pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms var(--ease-out);
+}
+.ag-faixa[data-on] .ag-faixa-info { opacity: 1; transform: none; pointer-events: auto; transition: opacity 320ms ease 160ms, transform 420ms var(--ease-out) 160ms; }
+.ag-faixa-info .ag-nome { font-size: clamp(30px, 3.2vw, 44px); }
+.ag-faixa-info .ag-olho { color: var(--pink-ink); }
+.ag-faixa-info .ag-acao { margin-top: 6px; }
+@media (hover: hover) and (pointer: fine) { .ag-faixa:not([data-on]):hover img { filter: saturate(0.8) brightness(0.7); } }
+
+@media (max-width: 720px) {
+  .ag-galeria { flex-direction: column; height: auto; }
+  .ag-faixa { flex: none; height: 72px; transition: height 420ms var(--ease-out); }
+  .ag-faixa[data-on] { height: 500px; }
+  .ag-faixa img { object-position: var(--foco, 50%) 30%; }
+  .ag-faixa-nome { left: 20px; bottom: 50%; transform: translateY(50%); writing-mode: horizontal-tb; }
+  .ag-faixa-ponto { top: 50%; left: auto; right: 20px; margin: -3.5px 0 0; }
+  .ag-faixa-info { width: 100%; padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ag-faixa, .ag-faixa img, .ag-faixa-info, .ag-acao-seta { transition-property: opacity, filter; }
+}

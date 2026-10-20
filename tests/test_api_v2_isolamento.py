@@ -21,6 +21,7 @@ def a_e_b(monkeypatch, user_id):
     promote_to_pro(b, plan="essencial")
     monkeypatch.setenv("DASHBOARD_V2_BETA_EMAILS", "")
     monkeypatch.setenv("DASHBOARD_V2_BETA_USER_IDS", f"{a},{b}")
+    monkeypatch.delenv("AGENTS_UI_ENABLED", raising=False)  # o `/me` também manda o freio dos agentes
     return a, b
 
 
@@ -33,7 +34,7 @@ def test_user_id_de_a_na_query_nao_troca_o_usuario_de_b(a_e_b):
     client.cookies.set(dashboard.DASHBOARD_COOKIE_NAME, sessao(b)["dashboard"])
     r = client.get(ME, params={"user_id": a, "uid": a})
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "essencial"}
+    assert r.json() == {"plan_tier": "essencial", "agents_ui_enabled": True}
 
 
 def test_bearer_de_a_com_cookie_de_b_vale_o_bearer(a_e_b):
@@ -42,7 +43,7 @@ def test_bearer_de_a_com_cookie_de_b_vale_o_bearer(a_e_b):
     a, b = a_e_b
     r = get_com_cookie(sessao(b)["dashboard"], Authorization=f"Bearer {sessao(a)['access']}")
     assert r.status_code == 200, r.text
-    assert r.json() == {"plan_tier": "pro"}
+    assert r.json() == {"plan_tier": "pro", "agents_ui_enabled": True}
 
 
 def test_aviso_de_a_nao_chega_ao_stream_de_b(a_e_b):

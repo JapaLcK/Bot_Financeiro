@@ -3,20 +3,22 @@
 // 4xx nunca mostra dado guardado; rede/5xx com dado mostra o antigo, com aviso.
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Previsao } from "../lib/api-v2.gen";
-import { dayMonth, isoDay, longDate, moneyText } from "../lib/format.js";
+import type { EstimativaVariavel, Previsao } from "../lib/api-v2.gen";
+import { dayMonth, isoDay, longDate, medida, moneyText } from "../lib/format.js";
 import type { Point } from "../lib/types";
 import { ErroApi, previsaoQuery } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
 import { Seg } from "../parts/Seg";
 import { MotivosPrevisao, Selos } from "../parts/Selos";
-import { Compromissos, ConvitePro, ddmm, valorOc } from "./Compromissos";
+import { Compromissos, ConvitePro, ddmm, saida, valorOc } from "./Compromissos";
 import { RespondidasDoBanco, useFalhaReceita, useListaDaPagina } from "./ReceitasDoBanco";
 import { TrajectoryChart } from "./TrajectoryChart";
 
 type Dias = 30 | 60 | 90;
 const ESTADO: Record<Previsao["estado"], string> = { condicional: "Previsão condicional", a_conferir: "A conferir", indisponivel: "Indisponível" };
+// Mesmo rótulo do app (`GASTOS_DIA_A_DIA` em previsaoMotivos.ts; previsao_motivos_paridade.test.ts compara).
+const GASTOS_DIA_A_DIA = "Gastos do dia a dia";
 export const hora = (d: { calculado_em: string }) => d.calculado_em.slice(11, 16); // hora do servidor, no fuso do app
 
 function usePrevisao() {
@@ -92,6 +94,8 @@ function Conteudo({ d }: { d: Previsao }) {
   const pior = d.pior_dia;
   const piorTxt = pior && moneyText(pior.saldo);
   const negativo = !!piorTxt?.startsWith("−");
+  const mensal = d.estimativa_variavel && saida(d.estimativa_variavel.despesa_mensal);
+  const partes = pior ? [...pior.causas.map((c) => `${c.nome} ${valorOc(c) ?? "valor desconhecido"}`), ...(pior.despesa_variavel ? [`${GASTOS_DIA_A_DIA} ${saida(pior.despesa_variavel) ?? "valor desconhecido"}`] : [])] : [];
   return (
     <>
       <div className="hero-figure">
@@ -101,6 +105,7 @@ function Conteudo({ d }: { d: Previsao }) {
       <dl className="hero-facts prev-facts">
         <div><dt>Saldo de partida</dt><dd>{moneyText(d.base.saldo) ?? "indisponível"}</dd></div>
         {d.ancora && <div><dt>Hoje, com as premissas</dt><dd>{moneyText(d.ancora.saldo) ?? "indisponível"}</dd></div>}
+        {d.estimativa_variavel && <div><dt>{GASTOS_DIA_A_DIA}</dt><dd>{mensal ? `${mensal}/mês` : "indisponível"}</dd></div>}
         {d.capacidades.includes("pior_dia") && (
           <div><dt>Menor saldo</dt><dd className={negativo ? "warn" : ""}>{pior ? `${piorTxt ?? "indisponível"} em ${ddmm(pior.data)}` : "indisponível"}</dd></div>
         )}
@@ -111,7 +116,7 @@ function Conteudo({ d }: { d: Previsao }) {
       {pior && (
         <p className={`w-lede ${negativo ? "warn" : ""}`}>
           {negativo ? `Fica negativo em ${ddmm(pior.data)}` : `Menor saldo em ${ddmm(pior.data)}`}
-          {pior.desde && pior.causas.length > 0 && <>, desde {ddmm(pior.desde)}: {pior.causas.map((c) => `${c.nome} ${valorOc(c) ?? "valor desconhecido"}`).join(", ")}</>}
+          {pior.desde && partes.length > 0 && <>, desde {ddmm(pior.desde)}: {partes.join(", ")}</>}
         </p>
       )}
       {d.capacidades.includes("trajetoria") ? <Grafico d={d} /> : <ConvitePro texto="O saldo dia a dia, o menor saldo e os compromissos de cada dia são do Pro." />}
@@ -157,6 +162,22 @@ export function PrevisaoHero({ p, id }: { p: Estado; id: string }) {
 // O card "Saldo previsto" do Resumo: o mesmo bloco da página.
 export const PrevisaoCard = () => <PrevisaoHero p={usePrevisao()} id="hero" />;
 
+// Categorias na ordem do servidor; Number() só mede a barra (valor ÷ maior), o dinheiro é o texto da API.
+function Estimativa({ e }: { e: EstimativaVariavel }) {
+  const max = Math.max(...e.categorias.map((c) => medida(c.despesa_mensal)), 0) || 1;
+  return (
+    <ul className="cats">
+      {e.categorias.map((c) => (
+        <li key={c.chave} className="cat-est">
+          <span className="cat-name"><span className="cat-nome">{c.nome}</span></span>
+          <span className="cat-val num">{saida(c.despesa_mensal) ?? "indisponível"}</span>
+          <span className="cat-track" aria-hidden="true"><span className="cat-fill" style={{ background: "var(--ink-3)", transform: `scaleX(${medida(c.despesa_mensal) / max})` }} /></span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ComoFoiFeita({ d }: { d: Previsao }) {
   const b = d.base;
   const origem = b.origem === "manual" ? "Carteira"
@@ -170,6 +191,12 @@ function ComoFoiFeita({ d }: { d: Previsao }) {
         <Selos motivos={b.motivos} />
       </div>
       {d.motivos.length > 0 && <><h3 className="prev-h">Por que é condicional</h3><MotivosPrevisao motivos={d.motivos} /></>}
+      {d.estimativa_variavel && (
+        <>
+          <h3 className="prev-h">{GASTOS_DIA_A_DIA}</h3>
+          <Estimativa e={d.estimativa_variavel} />
+        </>
+      )}
       <h3 className="prev-h">Premissas</h3>
       <ul className="premissas">{d.premissas.map((t) => <li key={t}>{t}</li>)}</ul>
       {d.cobertura.janela_conferencia_inicio && <p className="w-lede">Conferência desde {ddmm(d.cobertura.janela_conferencia_inicio)}</p>}

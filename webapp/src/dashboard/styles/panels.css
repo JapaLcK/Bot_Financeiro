@@ -34,6 +34,7 @@
 .cat-name i { font-size: 15px; line-height: 1; }
 .cat-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .cat-val { grid-area: val; font-size: 13px; font-weight: 600; }
+.cat-est { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name val" "track track"; align-items: center; gap: 7px 8px; padding: 8px; }
 .cat-delta { grid-area: delta; display: inline-flex; align-items: center; justify-content: flex-end; gap: 2px; font-size: 11.5px; }
 .cat-delta i { font-size: 11px; }
 @container (min-height: 600px) { .cats { flex: 1; align-content: space-evenly; } }
@@ -162,6 +163,7 @@
 .prev-corpo { display: contents; } /* os filhos seguem itens do .w-body; o gráfico cresce */
 .hero-value.hero-na { font-size: 28px; }
 .hero-facts.prev-facts { display: grid; grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(100px, max-content)); gap: 10px 28px; }
+.prev-facts dd { overflow-wrap: anywhere; } /* valor enorme quebra dentro da célula, não vaza para o vizinho */
 .prev-base { display: grid; gap: 8px; }
 .marcos, .premissas, .prev-motivos, .ocorrencias { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
 .marcos { grid-template-columns: repeat(auto-fit, minmax(140px, max-content)); gap: 6px 24px; color: var(--ink-2); }

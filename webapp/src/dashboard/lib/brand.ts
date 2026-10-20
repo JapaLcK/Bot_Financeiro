@@ -6,3 +6,5 @@ const SCRIPT = (document.currentScript as HTMLScriptElement | null)?.src || loca
 export const ICON = new URL("brand/icon.png", SCRIPT).href;
 // O retrato de cada agente (frontend/brand/agents/{kind}.png), resolvido como o ICON.
 export const agenteImg = (kind: string) => new URL(`brand/agents/${kind}.png`, SCRIPT).href;
+// A cena de cada agente (1200×600), para as telas grandes.
+export const agenteCena = (kind: string) => new URL(`brand/agents/${kind}_hero.webp`, SCRIPT).href;
