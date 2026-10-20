@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AGENTES, acessoDe, agentesQuery, energiaDe } from "../lib/agentes";
 import { agenteImg } from "../lib/brand";
 import type { Msg } from "../lib/conversation";
+import { ErroApi } from "../lib/v2";
 import { GRUPO, GRUPOS } from "./Mencoes";
 import { tituloDe } from "./CardAgente";
 
@@ -15,7 +16,11 @@ export function PainelChat({ msgs, uid, escondido, conferindo }: { msgs: Msg[]; 
   const d = q.isError ? undefined : q.data; // falhou: o bloco não existe (nem o dado antigo)
   const cards = msgs.filter((m) => m.role === "piggy" && m.agente && m.cartao);
   const itens = d ? GRUPOS.flatMap((g) => AGENTES.flatMap((a) => { const acesso = acessoDe(d, a.kind); return acesso && GRUPO[acesso] === g ? [{ ...a, acesso, g }] : []; })) : [];
-  const ligado = itens.length > 0 || cards.length > 0 || conferindo || (q.isFetching && !d);
+  // 5xx ou rede (os que se tentam de novo): o painel fica, com "Tentar de novo"; sumir faria a coluna saltar depois das tentativas.
+  // 4xx (beta desligado, plano): sem painel, a tela de uma coluna só.
+  const instavel = q.isError && q.error instanceof ErroApi && (q.error.status === 0 || q.error.status >= 500);
+  const carregando = !d && !q.isError && (conferindo || q.isFetching);
+  const ligado = itens.length > 0 || cards.length > 0 || carregando || instavel;
   useEffect(() => {
     if (ligado) document.body.dataset.chatPainel = ""; else delete document.body.dataset.chatPainel;
     return () => { delete document.body.dataset.chatPainel; };
@@ -26,6 +31,13 @@ export function PainelChat({ msgs, uid, escondido, conferindo }: { msgs: Msg[]; 
   const ir = (id: number) => { const el = document.getElementById(`msg-${id}`); el?.scrollIntoView({ block: "start" }); el?.focus({ preventScroll: true }); };
   return (
     <aside className="chat-painel" aria-label="Agentes e cards da conversa" inert={escondido} data-reconferindo={escondido || undefined}>
+      {carregando && <p className="painel-nota" aria-busy="true">Carregando agentes…</p>}
+      {instavel && (
+        <div className="painel-erro">
+          <p className="painel-nota">Não deu para carregar os agentes agora.</p>
+          <button type="button" className="btn btn-ghost" disabled={q.isFetching} onClick={() => void q.refetch()}>Tentar de novo</button>
+        </div>
+      )}
       {itens.length > 0 && (
         <ul className="painel-lista">
           {itens.map((a) => {

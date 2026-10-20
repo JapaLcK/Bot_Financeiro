@@ -99,7 +99,7 @@ for (const width of [1440, 1366, 1181, 1180]) {
 test("1181 e 1440: com a coluna centralizada (sem painel) e com ele, a coluna não passa de 760 px e o painel tem 264 px", async () => {
   for (const width of [1440, 1181]) {
     const { ctx, page } = await abrir({ width });
-    await painel(page).waitFor();
+    await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
     const c = await caixa(page, ".chat-empty"), p = await caixa(page, ".chat-painel");
     assert.ok(c.width <= 760.5, `coluna ${c.width}`);
     assert.equal(Math.round(p.right - p.left), 264);
@@ -116,7 +116,7 @@ test("1180 e 390: sem painel e sem nenhum GET /agents (sem \"@\"); 1440: um GET 
     await ctx.close();
   }
   const { ctx, page, pedidos } = await abrir({ width: 1440 });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   assert.deepEqual(pedidos, ["GET /agents/42"]);
   await ctx.close();
 });
@@ -143,9 +143,26 @@ test("1440: catálogo em 404: nenhum painel, nenhuma reserva de espaço, a colun
 });
 
 // --- Agentes ---
+test("1440: catálogo em 500/rede: o painel fica (carregando, depois \"Tentar de novo\") e a coluna não salta; tentar de novo traz os agentes", async () => {
+  let falha = true;
+  const { ctx, page } = await abrir({ width: 1440, lista: { status: 500, json: { detail: "x" } } });
+  await ctx.route(/\/agents\/42$/, (r) => r.fulfill(falha ? { status: 500, json: { detail: "x" } } : { json: catalogo43 }));
+  const inicio = await caixa(page, ".askbar");
+  assert.ok(await painel(page).innerText() !== "", "enquanto carrega o painel não é um vão vazio");
+  const tentar = painel(page).getByRole("button", { name: "Tentar de novo" });
+  await tentar.waitFor({ timeout: 10000 }); // depois das tentativas (meQuery.retry)
+  assert.equal((await caixa(page, ".askbar")).left, inicio.left, "a barra não saltou");
+  assert.equal(await page.evaluate(() => document.body.hasAttribute("data-chat-painel")), true);
+  falha = false;
+  await tentar.click();
+  await botao(page, "Xerife").waitFor();
+  assert.equal((await caixa(page, ".askbar")).left, inicio.left);
+  await ctx.close();
+});
+
 test("1440: os grupos e as tags seguem o catálogo; o agente indisponível não aparece", async () => {
   const { ctx, page } = await abrir({ width: 1440 });
-  await painel(page).waitFor();
+  await botao(page, "Xerife").waitFor(); // o painel aparece já carregando: espera o catálogo
   assert.deepEqual(await painel(page).locator("h2").allTextContents(), ["Agentes ativos", "Ativar para conversar"]);
   const itens = await painel(page).locator(".painel-item").evaluateAll((es) => es.map((e) => [e.getAttribute("aria-label"), e.querySelector(".msg-tag")?.textContent ?? null]));
   assert.deepEqual(itens, [["Perguntar ao Xerife", null], ["Perguntar ao Detetive", null], ["Perguntar ao Repórter", "⚡1"], ["Perguntar ao Carteiro", "⚡1"], ["Perguntar ao Banqueiro", "⚡2"], ["Perguntar ao Barão", "⚡3"], ["Perguntar ao Faria Limer", "⚡4"]]);
@@ -154,7 +171,7 @@ test("1440: os grupos e as tags seguem o catálogo; o agente indisponível não 
 
 test("1440: o painel não mostra valor nenhum (nem o saved_365d do catálogo, nem a energia livre)", async () => {
   const { ctx, page } = await abrir({ width: 1440 });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   const t = await painel(page).innerText();
   assert.doesNotMatch(t, /R\$|\d+,\d{2}|1234|\b9\b/);
   assert.doesNotMatch(t, /livre|energia/i);
@@ -163,7 +180,7 @@ test("1440: o painel não mostra valor nenhum (nem o saved_365d do catálogo, ne
 
 test("1440: clicar num agente insere a menção: campo vazio, texto, menção do começo e token em edição; foco e cursor no fim, lista fechada", async () => {
   const { ctx, page, chats } = await abrir({ width: 1440, ativos: ["faria_limer", "detetive"] });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   const estado = () => page.evaluate(() => { const i = document.getElementById("askbar-input"); return { v: i.value, foco: document.activeElement === i, ini: i.selectionStart, fim: i.selectionEnd, lista: !!document.getElementById("mencoes-lista") }; });
   const fim = (v) => ({ v, foco: true, ini: v.length, fim: v.length, lista: false });
   await botao(page, "Faria Limer").click();
@@ -203,7 +220,7 @@ const CARDS = (corpo, n, kind) => kind === "faria_limer" ? { json: { reply: `Inv
 
 test("1440: os cards viram itens do índice, em ordem; o clique rola até a resposta e põe o foco nela", async () => {
   const { ctx, page } = await abrir({ width: 1440, ativos: ["faria_limer", "reporter", "xerife"], chat: CARDS });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   assert.equal(await painel(page).getByText("Nesta conversa").count(), 0, "sem card, sem bloco");
   await enviar(page, "@Faria Limer carteira?");
   await page.locator(".chat > .msg-piggy").nth(0).locator(".card-agente").waitFor();
@@ -246,7 +263,7 @@ test("1440: \"Tentar de novo\": durante o erro nenhum item no índice; depois da
 // --- Isolamento entre contas ---
 test("1440: a sessão vira a conta 43 com a releitura presa: o painel some (hidden e inert) e, solto, mostra só o da 43, sem card da 42", async () => {
   const { ctx, page } = await abrir({ width: 1440, ativos: ["faria_limer"], chat: CARDS });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   await enviar(page, "@Faria Limer carteira?");
   await page.locator(".chat > .msg-piggy .card-agente").waitFor();
   await painel(page).locator("section").waitFor();
@@ -270,7 +287,7 @@ test("1440: a sessão vira a conta 43 com a releitura presa: o painel some (hidd
 
 test("1440: a releitura dá 401: nem agente nem card da 42 na tela", async () => {
   const { ctx, page } = await abrir({ width: 1440, ativos: ["faria_limer"], chat: CARDS });
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   await enviar(page, "@Faria Limer carteira?");
   await page.locator(".chat > .msg-piggy .card-agente").waitFor();
   await painel(page).locator("section").waitFor();
@@ -323,7 +340,7 @@ test("1440: protótipo: os 7 agentes, nenhuma rede e nenhum bloco de cards", asy
   page.on("request", (r) => { if (/\/(agents\/\d|auth\/)/.test(r.url())) pedidos.push(r.url()); });
   await ir("/piggy");
   await page.locator(".chat-empty").waitFor();
-  await painel(page).waitFor();
+  await painel(page).locator(".painel-item").first().waitFor(); // o painel aparece já carregando: espera o catálogo
   assert.equal(await painel(page).locator(".painel-item").count(), 7);
   assert.equal(await painel(page).getByText("Nesta conversa").count(), 0);
   assert.deepEqual(pedidos, []);

@@ -18,3 +18,6 @@
 .painel-item img { border-radius: 50%; }
 .painel-item:hover { background: var(--plane-3); }
 .painel-item:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+.painel-nota { padding: 0 8px; font-size: 13px; color: var(--ink-3); }
+.painel-erro { display: grid; row-gap: 8px; justify-items: start; }
+.painel-erro .btn { min-height: 44px; }
