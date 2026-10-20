@@ -101,13 +101,13 @@ export const conectoresQuery = (uid: unknown, ativo = true) => queryOptions({
 export class ContaTrocada extends Error {}
 // `/api/v2/bancos` lê o usuário da sessão, não o `uid`: a chave separa o cache por conta, e a sessão é conferida DEPOIS da resposta
 // (outra aba pode ter trocado de conta no meio). Sessão de outra conta = leitura falha (sem números), nunca o total dela sob este `uid`.
+export async function daConta<T>(uid: unknown, signal: AbortSignal, r: T): Promise<T> {
+  if ((await chamar<{ user_id?: unknown }>("/auth/dashboard-profile", GET(signal))).user_id !== uid) throw new ContaTrocada();
+  return r;
+}
 export const bancosQuery = (uid: unknown) => queryOptions({
   queryKey: ["conta", "bancos", uid],
-  queryFn: async ({ signal }) => {
-    const r = await apiGet("/bancos", signal);
-    if ((await chamar<{ user_id?: unknown }>("/auth/dashboard-profile", GET(signal))).user_id !== uid) throw new ContaTrocada();
-    return r;
-  },
+  queryFn: async ({ signal }) => daConta(uid, signal, await apiGet("/bancos", signal)),
   ...aberto, enabled: !DEMO && uidValido(uid),
 });
 

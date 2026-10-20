@@ -452,7 +452,8 @@ TOOLS: list[Tool] = [
                 "description": (
                     "Projeta o caixa até uma data pra responder 'tô tranquilo nesse prazo?' / 'como "
                     "tô de prazo no dia X?' / 'dá pra pegar esse boleto pra tal dia?'. Retorna saldo "
-                    "atual, receitas previstas, gastos fixos e boletos até a data, e o valor PROJETADO "
+                    "atual, receitas previstas, gastos fixos e boletos até a data, a estimativa dos gastos "
+                    "do dia a dia (`despesa_variavel_estimada`, quando há histórico) e o valor PROJETADO "
                     "(sobra se >=0, falta se <0) + 'tranquilo' (bool). Use SEMPRE que o usuário quiser "
                     "saber se aguenta um prazo/compromisso — NÃO responda só listando os boletos. Passe "
                     "`amount` se ele estiver considerando pegar um boleto novo naquele prazo."
@@ -480,7 +481,8 @@ TOOLS: list[Tool] = [
                     "uma visão do FUTURO em horizontes, sem citar uma data específica — ex: 'como "
                     "vou estar de saldo nos próximos meses?', 'me dá a previsão de saldo', 'vou "
                     "ter fôlego daqui pra frente?'. Retorna apenas os horizontes do plano, cada um "
-                    "com o saldo projetado e 'tranquilo'. Se o usuário citar UMA data/prazo "
+                    "com o saldo projetado e 'tranquilo'; o saldo já desconta a estimativa dos gastos do "
+                    "dia a dia (`estimativa_variavel`, quando há histórico). Se o usuário citar UMA data/prazo "
                     "específico ('tô tranquilo dia 16?'), use check_cashflow. Se vier "
                     "'pro_required', ofereça o upgrade com jeitinho, não despeje número nenhum."
                 ),

@@ -348,7 +348,8 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
     janela de conferência (decisão aberta 7 do plano da Piggy)?
   - Receita: irregular cadastrada como fixa, legada `once`/`weekly`/`daily` fora da
     previsão, recorrência sem data de fim. Que política de confiança e de fim?
-  - Gasto variável do dia a dia fica fora. Que estimativa (o protótipo usa o ritmo de 60
+  - (Resolvido em 2026-10-20: `core/services/previsao_variavel.py`, mediana por categoria, ver `docs/CLAUDE.md`.)
+    Gasto variável do dia a dia fica fora. Que estimativa (o protótipo usa o ritmo de 60
     dias e a faixa provável) sem contar duas vezes o agendado, separando cartão de caixa,
     e com que amostra mínima?
   - Saldo de partida: pendências (`reconciliation`, `bank_movements`, `pending_actions` e

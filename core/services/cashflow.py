@@ -6,6 +6,7 @@ from decimal import Decimal
 import math
 from datetime import date, timedelta
 from typing import Any
+from core.services.cashflow_contract import FONTE_VARIAVEL
 from core.services.cashflow_snapshot import (Ocorrencia, Motivo, Snapshot, carregar, centavos, dinheiro, legado, somar)
 
 
@@ -78,7 +79,7 @@ def _projection(today: date, sb: dict, events: list[Ocorrencia],
                 target_date: date, extra_amount=Decimal(0)) -> dict:
     """Única soma financeira; valores completos até quantizar o resultado."""
     extra = validar_extra(extra_amount)
-    values = {t: [] for t in ('receita', 'gasto_fixo', 'boleto', 'fatura_cartao')}
+    values = {t: [] for t in ('receita', 'gasto_fixo', 'boleto', 'fatura_cartao', 'gasto_variavel')}
     for event in events:
         if (event.data is not None and event.data <= target_date and event.incluida
                 and event.realizacao != 'realizada'):
@@ -97,6 +98,7 @@ def _projection(today: date, sb: dict, events: list[Ocorrencia],
         'gastos_fixos_previstos': centavos(sums['gasto_fixo'].copy_negate()),
         'boletos_ate': centavos(sums['boleto'].copy_negate()), 'n_boletos': len(values['boleto']),
         'faturas_cartao': centavos(sums['fatura_cartao'].copy_negate()), 'boleto_novo': centavos(extra),
+        'despesa_variavel_estimada': centavos(sums['gasto_variavel'].copy_negate()),
         'projetado': projected, 'tranquilo': projected is not None and projected >= 0,
     }
 
@@ -115,7 +117,7 @@ def _risco(snapshot: Snapshot, target: date, extra=Decimal(0)) -> str:
                          for m in snapshot.motivos
                          if m.codigo in ('conciliacao_a_conferir', 'declaracao_bancaria_a_conferir')
                          and m.efeito_quantificado is not None)))
-    events = [e for e in snapshot.ocorrencias if not (e.direcao == 'saida'
+    events = [e for e in snapshot.ocorrencias if e.fonte != FONTE_VARIAVEL and not (e.direcao == 'saida'
               and (e.realizacao == 'a_conferir' or
                    any(m.direcao_do_erro in ('so_piora', 'ambos') for m in e.motivos)))]
     projected = _projection(snapshot.hoje, base, events, target, extra)['projetado']

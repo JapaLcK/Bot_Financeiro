@@ -8,6 +8,17 @@ from typing import Literal
 from math import isfinite
 
 Direction = Literal['so_melhora', 'so_piora', 'ambos']
+FONTE_VARIAVEL = 'estimativa_variavel'  # `Ocorrencia.fonte` da estimativa do dia a dia (core/services/previsao_variavel.py)
+PREMISSA_SEM_ESTIMATIVA = 'Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.'
+
+
+def premissa_com_estimativa(est: dict) -> str:
+    """Premissa da estimativa do dia a dia, com o histórico que de fato entrou (`est['janela']`)."""
+    j = est['janela']
+    n = (date.fromisoformat(j['fim']) - date.fromisoformat(j['inicio'])).days + 1
+    base = (f'gasto dos últimos {n} dias levado a um mês' if not est['janelas_completas']
+            else f'mediana mensal por categoria dos últimos {n} dias')
+    return f'Inclui estimativa dos gastos do dia a dia ({base}, a partir de amanhã); não autoriza compra segura.'
 
 
 def dinheiro(value) -> Decimal | None:
@@ -109,12 +120,13 @@ class Snapshot:
     motivos: list[Motivo] = field(default_factory=list)
     premissas: list[str] = field(default_factory=lambda: [
         'Projeção condicional; receitas previstas não são garantidas.',
-        'Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.',
+        PREMISSA_SEM_ESTIMATIVA,
         'Recorrências sem data de fim seguem ativas no horizonte consultado.',
         'Não reconstrói realização passada nem desloca datas por feriados.',
     ])
     valido_ate: datetime | None = None
     receitas_do_banco: list = field(default_factory=list)  # candidatas do extrato e a resposta do usuário; fora de `qualidade()`
+    estimativa_variavel: dict | None = None  # `previsao_variavel.estimar`; None = sem histórico suficiente
 
     def qualidade(self):
         return {'estado': 'indisponivel' if self.base['saldo'] is None else
@@ -122,7 +134,7 @@ class Snapshot:
                 'motivos': [asdict(m) for m in self.motivos], 'premissas': self.premissas,
                 'calculado_em': self.calculado_em.isoformat(),
                 'valido_ate': self.valido_ate.isoformat() if self.valido_ate else None,
-                'cobertura': {'inclui_estimativa_variavel': False,
+                'cobertura': {'inclui_estimativa_variavel': self.estimativa_variavel is not None,
                              'janela_conferencia_inicio': None,
                              'fontes_incompletas': sorted({m.codigo for m in self.motivos})},
-                'cabe_nas_premissas': False}
+                'cabe_nas_premissas': False, 'estimativa_variavel': self.estimativa_variavel}

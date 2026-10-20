@@ -72,6 +72,22 @@ class PiorDiaPrevisao(BaseModel):
     saldo: Decimal
     desde: str | None
     causas: list[OcorrenciaPrevisao]
+    despesa_variavel: Decimal | None  # a estimativa do dia a dia entre o último pico e o pior dia (não é compromisso)
+
+
+class CategoriaEstimada(BaseModel):
+    chave: str
+    nome: str
+    despesa_mensal: Decimal
+
+
+class EstimativaVariavel(BaseModel):
+    despesa_mensal: Decimal
+    despesa_no_horizonte: Decimal
+    janela: PeriodoPrevisao
+    dias_de_historico: int
+    janelas_completas: int
+    categorias: list[CategoriaEstimada]
 
 
 class GrupoCompromissos(BaseModel):
@@ -122,6 +138,7 @@ class Previsao(BaseModel):
     pior_dia: PiorDiaPrevisao | None
     compromissos: list[GrupoCompromissos] | None
     receitas_do_banco: list[ReceitaDoBanco]
+    estimativa_variavel: EstimativaVariavel | None
 
 
 def _assinante(uid: int = Depends(usuario_atual)) -> int:

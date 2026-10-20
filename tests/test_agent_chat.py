@@ -81,7 +81,7 @@ def test_redirecionamento_puro_nao_consulta_dados_nem_desconta(monkeypatch, arme
 
 def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
     monkeypatch.setattr(chat, '_route', lambda *a: {'own_question': 'Há duplicatas?', 'redirects': [{'kind': 'barao', 'question': 'O que é CDI?'}], 'outside': False})
-    def answer(client, uid, kind, question, history, *, needs_data=False):
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
         assert question == 'Há duplicatas?'
         assert history == []
         return 'Há indícios que podemos conferir.'
@@ -98,7 +98,7 @@ def test_pergunta_encaminhada_responde_direto_sem_reclassificar(monkeypatch, arm
     monkeypatch.setattr(chat, '_route', lambda *a: routed.append(a) or {
         'own_question': '', 'redirects': [{'kind': 'faria_limer', 'question': 'Quanto rendeu?', 'needs_data': True}], 'outside': False})
     answered = []
-    def answer(client, uid, kind, question, history, *, needs_data=False):
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
         answered.append((kind, question, needs_data))
         return 'Sua renda fixa rendeu assim.'
     monkeypatch.setattr(chat, '_answer', answer)
@@ -134,12 +134,12 @@ def test_detetive_consulta_duplicidades_sem_emitir_alertas(monkeypatch):
     monkeypatch.setattr(agents, 'find_duplicate_charges', lambda uid, today: [{'descricao': 'Mercado', 'repeticoes': 2}])
     from core.services import assinaturas
     monkeypatch.setattr(assinaturas, 'listar_assinaturas', lambda uid, today: {
-        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}]})
+        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}], 'total_mensal': 0})
     monkeypatch.setattr(db, 'record_agent_event', lambda *a, **k: pytest.fail('gravou evento'))
     dados = chat.execute_read(42, 'detetive', 'consultar_dados_do_agente', {})
     assert dados['possiveis_duplicidades'][0]['repeticoes'] == 2
     # Ignorada é decisão do usuário: o chat do Detetive não a vê.
-    assert (dados['recorrencias'], dados['total_recorrencias']) == ([], 0)
+    assert (dados['recorrencias'], dados['total_recorrencias'], dados['total_mensal']) == ([], 0, 0)
 
 
 def test_classificador_descarta_destinos_invalidos():
