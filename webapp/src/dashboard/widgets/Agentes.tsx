@@ -106,7 +106,7 @@ function Galeria({ lista }: { lista: Agente[] }) {
               <p className="ag-frase">{a.frase}</p>
               <p className="ag-texto">{a.texto}</p>
               <div className="ag-meta"><Selo a={a} /><span className="ag-ritmo"><i className="ph ph-clock" aria-hidden="true" />{a.ritmo}</span><Custo a={a} /></div>
-              <Acao a={a} abrir={abrir} />
+              {on && <Acao a={a} abrir={abrir} />}{/* só na aberta: o `inert` não existe no Safari 14–15.4 (alvo da ilha) e o botão da faixa fechada seguiria no Tab */}
             </div>
           </li>
         );
