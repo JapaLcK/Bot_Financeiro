@@ -9,7 +9,7 @@ import { Texto } from "@/ui/componentes/Texto";
 import { usePressao } from "@/ui/motion";
 import { claro, espaco, texto } from "@/ui/tokens";
 
-import { logoSeguro } from "./juntar";
+import { logoDoBanco } from "./juntar";
 
 interface Props {
   /** Já filtrada por `disponiveis()` (populares ainda não conectados, por id). */
@@ -24,7 +24,7 @@ function Linha({ c, i, desativado, aoConectar }: { c: Conector; i: number; desat
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={`Conectar ${c.name}`} accessibilityState={{ disabled: desativado }} disabled={desativado} onPress={() => aoConectar(c.id)} onPressIn={pressao.aoPressionar} onPressOut={pressao.aoSoltar} style={{ opacity: desativado ? 0.45 : 1 }}>
       <Animated.View style={[{ flexDirection: "row", alignItems: "center", gap: espaco.md, minHeight: 56, paddingVertical: espaco.sm }, pressao.estilo]}>
-        <Avatar nome={c.name} imagem={logoSeguro(c.logo)} tamanho={44} decorativo fundo={claro.bg} letra={corDoBanco(c.name, i, claro)} />
+        <Avatar nome={c.name} imagem={logoDoBanco({ logo_proprio: c.logo_proprio, logo_url: c.logo })} tamanho={44} decorativo fundo={claro.bg} letra={corDoBanco(c.name, i, claro)} />
         <Texto numberOfLines={1} style={{ flex: 1, fontSize: 16, lineHeight: 22, fontFamily: texto.secao.fontFamily }}>{c.name}</Texto>
         <Icone nome="Plus" tamanho={20} tom="inkMuted" />
       </Animated.View>

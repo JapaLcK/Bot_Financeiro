@@ -1,8 +1,8 @@
 // Bancos conectados (PR 3): a regra pura da tela: juntar por id, logo, "há N min" e o contrato de `/api/app/bancos`.
 import type { Conexao } from "@/api/schemas/openFinance";
-import { conexoesSchema } from "@/api/schemas/openFinance";
+import { conectoresSchema, conexoesSchema } from "@/api/schemas/openFinance";
 import { bancosSchema } from "@/api/schemas/painel";
-import { juntar, logoSeguro } from "@/features/openFinance/conexoes/juntar";
+import { juntar, logoDoBanco, logoSeguro } from "@/features/openFinance/conexoes/juntar";
 import { tempoRelativo } from "@/features/openFinance/conexoes/tempoRelativo";
 // O contrato LIDO do arquivo que o pytest valida contra o Pydantic (PR 1); nunca copiado (CLAUDE.md §0.7).
 import contrato from "../../../tests/fixtures/app_bancos.json";
@@ -39,6 +39,38 @@ describe("logo_url no snapshot", () => {
   it("ausente (servidor velho) e null passam", () => {
     const r = conexoesSchema.parse({ connections: [conexao(1, "A"), { ...conexao(2, "B"), logo_url: null }] });
     expect(r.connections).toHaveLength(2);
+  });
+});
+
+describe("logo_proprio no schema: tolerante, uma conexão ruim não derruba a lista", () => {
+  it.each([[5], [{ a: 1 }], [["x"]], [true]])("tipo errado (%j) vira null no snapshot e no catálogo; os outros itens ficam", (lixo) => {
+    const ok = "/brand/bancos/60746948.png";
+    const c = conexoesSchema.parse({ connections: [{ ...conexao(1, "A"), logo_proprio: lixo }, { ...conexao(2, "B"), logo_proprio: ok }, conexao(3, "C")] });
+    expect(c.connections.map((x) => [x.id, x.logo_proprio ?? null])).toEqual([[1, null], [2, ok], [3, null]]);
+    const k = conectoresSchema.parse({ connectors: [{ id: 1, name: "A", logo: "", logo_proprio: lixo }, { id: 2, name: "B", logo: null, logo_proprio: ok }, { id: 3, name: "C", logo: null }] });
+    expect(k.connectors.map((x) => [x.id, x.logo_proprio ?? null])).toEqual([[1, null], [2, ok], [3, null]]);
+  });
+});
+
+describe("logoDoBanco: próprio > Pluggy > inicial", () => {
+  const PROPRIO = "/brand/bancos/60746948.png", PLUGGY = "https://cdn.pluggy.ai/assets/connector-icons/201.svg";
+  it("com os dois, vale o próprio, na URL ABSOLUTA do servidor (o aparelho não tem origem relativa)", () => {
+    expect(logoDoBanco({ logo_proprio: PROPRIO, logo_url: PLUGGY })).toBe(`http://backend.teste${PROPRIO}`);
+  });
+  it("sem próprio, segue o da Pluggy (positivo: o banco fora dos 10 principais não perde o logo)", () => {
+    expect(logoDoBanco({ logo_proprio: null, logo_url: PLUGGY })).toBe(PLUGGY);
+    expect(logoDoBanco({ logo_url: PLUGGY })).toBe(PLUGGY);
+  });
+  it("sem nenhum dos dois, inicial (undefined)", () => {
+    expect(logoDoBanco({})).toBeUndefined();
+    expect(logoDoBanco({ logo_proprio: null, logo_url: "" })).toBeUndefined();
+  });
+  it.each([
+    "//evil.example/x.png", "/brand/bancos/../x.png", "https://evil.example/brand/bancos/60746948.png", "/brand/bancos/60746948.png?x=1", "/brand/bancos/6074694.png",
+    "/brand/bancos/60746948.svg", "/brand/bancos/60746948.png\n", "brand/bancos/60746948.png", "",
+  ])("próprio fora da regra (%j) cai no logo da Pluggy, nunca é concatenado ao host", (ruim) => {
+    expect(logoDoBanco({ logo_proprio: ruim, logo_url: PLUGGY })).toBe(PLUGGY);
+    expect(logoDoBanco({ logo_proprio: ruim, logo_url: null })).toBeUndefined();
   });
 });
 

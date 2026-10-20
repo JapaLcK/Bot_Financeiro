@@ -1,6 +1,7 @@
 // Bancos conectados: a LINHA (sem dinheiro) e dois detalhes do DETALHE que o ícone-stub do Jest esconde (aviso "a conferir" e o `ui.detail`). O Icone vira um Text com o nome;
 // a Folha (que precisa do navegador) vira um invólucro: o que ela faz (abrir, fechar, `focado`) é das suítes de rota. O resto é o real.
 import { fireEvent } from "@testing-library/react-native";
+import { Image } from "react-native";
 import { BancoCard } from "@/features/openFinance/conexoes/BancoCard";
 import { BancoDetalhe } from "@/features/openFinance/conexoes/BancoDetalhe";
 import type { Item } from "@/features/openFinance/conexoes/juntar";
@@ -24,6 +25,33 @@ describe("a linha do banco", () => {
     expect(t.queryAllByTestId("icone-WarningCircle")).toHaveLength(0); // o "a conferir" mora no detalhe
     fireEvent.press(linha);
     expect(aoAbrir).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("logo do banco: o próprio vira <Image> do nosso host; a Pluggy segue; sem os dois, a inicial", () => {
+  const PROPRIO = "/brand/bancos/60746948.png", PLUGGY = "https://cdn.pluggy.ai/a/201.png"; // .png de propósito: bitmap, sem o fetch de SVG
+  const uris = (t: ReturnType<typeof detalhe>) => t.UNSAFE_queryAllByType(Image).map((i) => i.props.source?.uri);
+  const item = (extra: Record<string, unknown>) => ({ conexao: { ...conexao("updated", null), ...extra }, banco: lido([]) });
+  const linha = (extra: Record<string, unknown>) => renderInterativo(<BancoCard item={item(extra)} indice={0} aoAbrir={() => {}} />);
+  it.each([["linha", (e: Record<string, unknown>) => linha(e)], ["detalhe", (e: Record<string, unknown>) => detalhe(item(e))]])("%s: com os dois campos, o Avatar recebe o host da API + caminho", (_n, desenhar) => {
+    expect(uris(desenhar({ logo_proprio: PROPRIO, logo_url: PLUGGY }) as ReturnType<typeof detalhe>)).toEqual([`http://backend.teste${PROPRIO}`]);
+  });
+  it("só logo_url: o da Pluggy", () => {
+    expect(uris(linha({ logo_url: PLUGGY }) as ReturnType<typeof detalhe>)).toEqual([PLUGGY]);
+  });
+  it("sem os dois: nenhuma imagem, fica a inicial", () => {
+    const t = linha({});
+    expect(uris(t as ReturnType<typeof detalhe>)).toEqual([]);
+    expect(t.getByText("N", { includeHiddenElements: true })).toBeTruthy();
+  });
+  it("próprio fora da regra cai no logo da Pluggy (nunca no host de fora)", () => {
+    expect(uris(linha({ logo_proprio: "//evil.example/x.png", logo_url: PLUGGY }) as ReturnType<typeof detalhe>)).toEqual([PLUGGY]);
+  });
+  it("o próprio que falha ao carregar cai na inicial, sem tentar a Pluggy no meio", () => {
+    const t = linha({ logo_proprio: PROPRIO, logo_url: PLUGGY });
+    fireEvent(t.UNSAFE_getByType(Image), "error");
+    expect(t.UNSAFE_queryAllByType(Image)).toHaveLength(0);
+    expect(t.getByText("N", { includeHiddenElements: true })).toBeTruthy();
   });
 });
 

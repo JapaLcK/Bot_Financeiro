@@ -6,9 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 
-const literal = (arquivo) => {
-  const m = readFileSync(new URL(`../../${arquivo}`, import.meta.url), "utf8").match(/^(?:export )?const LOGO_PLUGGY = (\/.+\/);$/m);
-  assert.ok(m, `${arquivo}: não achei a regex LOGO_PLUGGY`);
+const literal = (arquivo, nome = "LOGO_PLUGGY") => {
+  const m = readFileSync(new URL(`../../${arquivo}`, import.meta.url), "utf8").match(new RegExp(`^(?:export )?const ${nome} = (\\/.+\\/);$`, "m"));
+  assert.ok(m, `${arquivo}: não achei a regex ${nome}`);
   const [, corpo, flags] = /^\/(.+)\/([a-z]*)$/.exec(m[1]);
   return new RegExp(corpo, flags);
 };
@@ -42,4 +42,39 @@ test("logo do banco: a função logoSeguro do painel e a do app dão o mesmo res
   for (const u of BOAS) assert.equal(painel(u), u);
   // Só o painel confere o tipo (o app tipa `string | null | undefined` e o zod já filtrou): número, objeto e lista não são logo.
   for (const u of [123, {}, ["https://cdn.pluggy.ai/a.svg"], true]) assert.equal(painel(u), null, JSON.stringify(u));
+});
+
+// Logo PRÓPRIO (PR do servidor + painel + app): mesmo literal nos dois lados e a mesma precedência (próprio > Pluggy > nada).
+const PROPRIAS = ["/brand/bancos/60746948.png", "/brand/bancos/00000000.png"];
+const PROPRIAS_RUINS = ["//evil.example/x.png", "/brand/bancos/../x.png", "https://x.example/brand/bancos/60746948.png", "/brand/bancos/60746948.png?x=1", "/brand/bancos/6074694.png",
+  "/brand/bancos/607469481.png", "/brand/bancos/60746948.svg", "/brand/bancos/60746948.png\n", "brand/bancos/60746948.png", "/brand/bancos/6074694a.png", "/x/brand/bancos/60746948.png", ""];
+
+test("logo próprio: a regra do painel é a do app (mesmo literal) e a tabela de casos vale", () => {
+  const app = literal(APP, "LOGO_PROPRIO"), painel = literal(PAINEL, "LOGO_PROPRIO");
+  assert.equal(painel.source, app.source);
+  assert.equal(painel.flags, app.flags);
+  for (const u of PROPRIAS) assert.ok(painel.test(u) && app.test(u), u);
+  for (const u of PROPRIAS_RUINS) assert.ok(!painel.test(u) && !app.test(u), JSON.stringify(u));
+});
+
+// logoDoBanco inteira, executada. O app a devolve ABSOLUTA (`baseUrl() + caminho`) e o painel RELATIVA (mesma origem): com `baseUrl` = "" os dois têm de dar o mesmo resultado.
+const precedencia = (arquivo) => {
+  const fonte = readFileSync(new URL(`../../${arquivo}`, import.meta.url), "utf8");
+  const trechos = [/^const LOGO_PLUGGY = .+;$/m, /^export const logoSeguro = .+;$/m, /^const LOGO_PROPRIO = .+;$/m, /^export const logoDoBanco = [\s\S]*?;$/m]
+    .map((r) => { const m = fonte.match(r); assert.ok(m, `${arquivo}: ${r}`); return m[0].replace("export ", ""); });
+  return new Function(`const baseUrl = () => "";\n${stripTypeScriptTypes(trechos.join("\n"))}\nreturn logoDoBanco;`)();
+};
+
+test("logo próprio: logoDoBanco do painel e a do app dão o mesmo resultado, com a precedência próprio > Pluggy > nada", () => {
+  const app = precedencia(APP), painel = precedencia(PAINEL);
+  const PLUGGY = BOAS[0];
+  for (const proprio of [...PROPRIAS, ...PROPRIAS_RUINS, null, undefined]) {
+    for (const url of [PLUGGY, RUINS[1], null, undefined]) {
+      assert.equal(app({ logo_proprio: proprio, logo_url: url }) ?? null, painel({ logo_proprio: proprio, logo_url: url }) ?? null, JSON.stringify([proprio, url]));
+    }
+  }
+  assert.equal(app({ logo_proprio: PROPRIAS[0], logo_url: PLUGGY }), PROPRIAS[0]); // o próprio ganha
+  assert.equal(app({ logo_proprio: null, logo_url: PLUGGY }), PLUGGY);             // positivo: sem próprio, segue o da Pluggy
+  assert.equal(app({ logo_proprio: PROPRIAS_RUINS[0], logo_url: PLUGGY }), PLUGGY); // próprio fora da regra cai no da Pluggy
+  assert.equal(app({ logo_proprio: PROPRIAS_RUINS[0], logo_url: null }) ?? null, null);
 });
