@@ -23,3 +23,8 @@
 .card-agente-valores dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .card-agente-de { font-size: 14px; font-weight: 400; } /* .num (nowrap) só em cada valor: "de R$ X" desce para a linha de baixo em vez de sair do card */
 .card-agente .msg-open { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.card-agente-aviso { font-size: 13px; font-weight: 600; }
+.card-agente-lista .meter, .card-agente-sub { grid-column: 1 / -1; }
+.card-agente-lista .meter { margin-top: 6px; }
+.card-agente-sub { font-size: 12px; margin-top: 4px; }
+.card-agente .meter.ok > span { background: var(--gain); }

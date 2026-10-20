@@ -11,16 +11,25 @@ from api.v2.resumo_mes import PADRAO_MES
 # (agente, consulta) -> tipo do card
 CARDS = {("faria_limer", "consultar_dados_do_agente"): "investido", ("barao", "consultar_dados_do_agente"): "renda_fixa",
          ("detetive", "consultar_dados_do_agente"): "assinaturas", ("reporter", "get_period_summary"): "resumo_mes",
-         ("xerife", "get_budget_status"): "orcamentos"}
-# tipo -> feature do plan_gate_ok da rota v2 que o card lê; fora daqui a rota não tem gate (resumo-do-mes, orcamentos-categoria)
-GATES = {"investido": "investments", "renda_fixa": "investments", "assinaturas": "subscriptions"}
+         ("xerife", "get_budget_status"): "orcamentos", ("carteiro", "get_bills_to_pay"): "contas", ("cofre", "list_pockets"): "caixinhas"}
+# tipo -> feature do plan_gate_ok da rota v2 que o card lê; fora daqui a rota não tem gate (resumo-do-mes, orcamentos-categoria, caixinhas)
+GATES = {"investido": "investments", "renda_fixa": "investments", "assinaturas": "subscriptions", "contas": "recurring_expenses"}
 # Consultas que não têm período (o saldo de agora): não mudam do que o texto fala. Qualquer outra consulta fora de CARDS é de um
 # período ou recorte que o card não mostra (compare_periods, get_spending_trend, get_category_spend…) = sem card.
 SEM_PERIODO = {"get_balance"}
+DIA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MES = re.compile(PADRAO_MES)  # o padrão da rota; tests/test_agent_chat_card.py prende a cópia TS (lib/agentes.ts) a ele
 
 
-def _card(tipo: str, resultado) -> dict | None:
+def _card(tipo: str, resultado, args=None) -> dict | None:
+    if tipo == "contas" and ((args or {}).get("include_paid") or not (isinstance(resultado, dict) and "bills" in resultado)):
+        return None  # com as pagas o texto fala de mais que o card (a rota só traz as pendentes); sem `bills` a consulta falhou
+    if tipo == "contas":
+        # "vence amanhã" e "vencida" dependem do dia: o card leva o dia da consulta e some se a rota já está noutro (Codex no #1200)
+        hoje = resultado.get("today")
+        return {"tipo": tipo, "hoje": hoje} if isinstance(hoje, str) and DIA.match(hoje) else None
+    if tipo == "caixinhas" and not (isinstance(resultado, dict) and "pockets" in resultado):
+        return None
     if tipo == "resumo_mes":
         # get_period_summary de meses inteiros leva as datas do mês (fim = último dia) e cartao_por "fatura": é o resumo-do-mes.
         # Período livre, vários meses ou mês futuro (a rota dá 422) = sem card.
@@ -44,7 +53,7 @@ def card_da_resposta(user_id: int, kind: str, consultas: list) -> dict | None:
     from core.services.plan_service import plan_gate_ok
     if any((kind, nome) not in CARDS and nome not in SEM_PERIODO for nome, _, _ in consultas):
         return None
-    cards = [_card(CARDS[(kind, nome)], res) for nome, _, res in consultas if (kind, nome) in CARDS]
+    cards = [_card(CARDS[(kind, nome)], res, args) for nome, args, res in consultas if (kind, nome) in CARDS]
     # Duas consultas que dão cards diferentes (dois meses): o texto fala dos dois, nenhum card o representa.
     if not cards or any(c is None or c != cards[0] for c in cards):
         return None

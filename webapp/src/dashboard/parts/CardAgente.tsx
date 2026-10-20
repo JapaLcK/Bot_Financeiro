@@ -3,11 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContaTrocada, daConta, uidValido } from "../conta/api";
 import type { CardAgente as Card } from "../lib/agentes";
 import type { Investido } from "../lib/api-v2.gen";
-import { DEMO, ErroApi, assinaturasQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
+import { DEMO, ErroApi, assinaturasQuery, caixinhasQuery, contasAPagarQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
 import { textos } from "../lib/bancos";
 import { CardAssinaturas, contratoAssinaturas } from "./CardAssinaturas";
+import { CardCaixinhas, contratoCaixinhas } from "./CardCaixinhas";
+import { CardContas, contratoContas } from "./CardContas";
 import { CardInvestido } from "./CardInvestido";
 import { CardOrcamentos, contratoOrcamentos } from "./CardOrcamentos";
 import { CardResumoMes, contratoResumoMes } from "./CardResumoMes";
@@ -24,8 +26,8 @@ const contratoInvestido = (d: unknown) => {
       && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))) && textos(p.motivos));
 };
 
-// `outroMes`: a rota respondeu um mês que não é o do texto (virou o mês entre a consulta e o card): nenhum card, nem erro.
-type Leitura = { chave: string; titulo: string; ler: (signal: AbortSignal) => Promise<unknown>; contrato: (d: unknown) => boolean; desenha: (d: any) => ReactNode; outroMes?: (d: any) => boolean }; // eslint-disable-line @typescript-eslint/no-explicit-any
+// `outroPeriodo`: a rota respondeu um mês ou dia que não é o do texto (virou entre a consulta e o card): nenhum card, nem erro.
+type Leitura = { chave: string; titulo: string; ler: (signal: AbortSignal) => Promise<unknown>; contrato: (d: unknown) => boolean; desenha: (d: any) => ReactNode; outroPeriodo?: (d: any) => boolean }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 function leituraDe(c: Card): Leitura {
   switch (c.tipo) {
@@ -34,7 +36,11 @@ function leituraDe(c: Card): Leitura {
     case "resumo_mes":
       return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} motivos={c.motivos} /> };
     case "orcamentos":
-      return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroMes: (d) => d.mes !== c.mes };
+      return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} />, outroPeriodo: (d) => d.mes !== c.mes };
+    case "contas":
+      return { chave: "card-contas", titulo: "Contas a pagar", ler: (signal) => contasAPagarQuery.queryFn({ signal }), contrato: contratoContas, desenha: (d) => <CardContas d={d} />, outroPeriodo: (d) => d.hoje !== c.hoje };
+    case "caixinhas":
+      return { chave: "card-caixinhas", titulo: "Caixinhas", ler: (signal) => caixinhasQuery.queryFn({ signal }), contrato: contratoCaixinhas, desenha: (d) => <CardCaixinhas d={d} /> };
     default: {
       const foco = c.tipo === "renda_fixa" ? "renda_fixa" : undefined;
       return { chave: "card-investido", titulo: foco ? "Renda fixa" : "Investimentos", ler: (signal) => investidoQuery.queryFn({ signal }), contrato: contratoInvestido, desenha: (d: Investido) => <CardInvestido d={d} foco={foco} /> };
@@ -65,6 +71,6 @@ export function CardAgente({ uid, c }: { uid: number; c: Card }) {
       </section>
     );
   }
-  if (l.outroMes?.(q.data)) return null;
+  if (l.outroPeriodo?.(q.data)) return null;
   return <>{l.desenha(q.data)}</>;
 }
