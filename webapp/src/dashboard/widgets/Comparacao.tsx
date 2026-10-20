@@ -15,20 +15,20 @@ import { ConvitePro } from "./Compromissos";
 
 const pctTexto = (p: string) => `${p.replace("-", "").replace(".", ",")}%`;
 
-// `bom`: para que lado a variação é boa (gasto caindo, entrada subindo). No mês aberto (P1-B: o mês
-// inteiro até agora contra o anterior inteiro) a queda ainda não se sabe e fica neutra; a alta já é fato
-// e mantém a cor (decisão do dono PB-1).
-function variacao(l: LinhaComparada, bom: 1 | -1, aberto: boolean) {
+// `bom`: para que lado a variação é boa (gasto caindo, entrada subindo); 0 = sempre neutra. No mês aberto
+// (P1-B: o mês inteiro até agora contra o anterior inteiro) a queda ainda não se sabe e fica neutra; a alta
+// já é fato e mantém a cor (decisão do dono PB-1). O Resultado do mês aberto é neutro (decisão de 2026-10-20).
+function variacao(l: LinhaComparada, bom: 1 | -1 | 0, aberto: boolean) {
   if (l.estado === "nova") return { texto: "nova", tom: "faint", seta: null, fala: "não tinha no mês anterior" };
   if (l.estado === "vazio") return { texto: "—", tom: "faint", seta: null, fala: "nada nos dois períodos" };
   if (l.estado === "igual") return { texto: "igual", tom: "faint", seta: null, fala: "igual ao anterior" };
   const sobe = Number(l.total_delta) > 0;
   const texto = l.pct === null ? moneyText(l.total_delta.replace("-", "")) : pctTexto(l.pct); // a seta diz o sinal
-  const tom = aberto && !sobe ? "faint" : (sobe ? 1 : -1) === bom ? "gain" : "warn";
+  const tom = bom === 0 || (aberto && !sobe) ? "faint" : (sobe ? 1 : -1) === bom ? "gain" : "warn";
   return { texto, tom, seta: sobe ? "ph-arrow-up" : "ph-arrow-down", fala: `${sobe ? "subiu" : "caiu"} ${texto}` };
 }
 
-function Linha({ nome, l, bom, antes, aberto }: { nome: string; l: LinhaComparada; bom: 1 | -1; antes: string; aberto: boolean }) {
+function Linha({ nome, l, bom, antes, aberto }: { nome: string; l: LinhaComparada; bom: 1 | -1 | 0; antes: string; aberto: boolean }) {
   const v = variacao(l, bom, aberto);
   return (
     <li className="cmp-linha" aria-label={`${nome}: ${moneyText(l.total_atual)}, em ${antes} ${moneyText(l.total_anterior)}, ${v.fala}`}>
@@ -55,7 +55,7 @@ function Corpo({ d }: { d: Dados }) {
       <ul className="cats cmp-totais" aria-label="Totais">
         <Linha nome="Saiu" l={d.despesa} bom={-1} antes={antes} aberto={aberto} />
         <Linha nome="Entrou" l={d.receita} bom={1} antes={antes} aberto={aberto} />
-        <Linha nome="Resultado" l={d.resultado} bom={1} antes={antes} aberto={aberto} />
+        <Linha nome="Resultado" l={d.resultado} bom={aberto ? 0 : 1} antes={antes} aberto={aberto} />
       </ul>
       {d.motivo === "sem_base" ? <p className="faint">Sem lançamentos em {antes} para comparar.</p>
         : d.motivo === "categorias_indisponiveis" ? <p className="faint">Não deu para carregar as categorias agora.</p>

@@ -67,12 +67,14 @@ test("cores: no mês aberto a queda é neutra e a alta colorida; no fechado, as 
     await ctx.close();
     return r;
   };
-  // aberto: Saiu, Lazer e Alimentação caíram; Entrou e Resultado subiram (bom); em `muitas` o gasto subiu (ruim)
+  // aberto: Saiu, Lazer e Alimentação caíram; Entrou subiu (bom); o Resultado é sempre neutro no mês aberto
+  // (decisão de 2026-10-20), aqui subindo; em `muitas` o gasto subiu (ruim)
   assert.deepEqual(await tons("aberto", ["Saiu", "Lazer", "Alimentação", "Entrou", "Resultado"]),
-    { Saiu: "faint", Lazer: "faint", "Alimentação": "faint", Entrou: "gain", Resultado: "gain" });
+    { Saiu: "faint", Lazer: "faint", "Alimentação": "faint", Entrou: "gain", Resultado: "faint" });
   assert.deepEqual(await tons("muitas", ["Saiu", "Resultado"]), { Saiu: "warn", Resultado: "faint" });
   // fechado: o gasto subiu (âmbar) e o Transporte caiu (verde, como sempre)
-  assert.deepEqual(await tons("fechado", ["Saiu", "Transporte", "Entrou"]), { Saiu: "warn", Transporte: "gain", Entrou: "gain" });
+  assert.deepEqual(await tons("fechado", ["Saiu", "Transporte", "Entrou", "Resultado"]),
+    { Saiu: "warn", Transporte: "gain", Entrou: "gain", Resultado: "warn" });
 });
 
 test("+N outras e sem base dizem o que falta", async () => {
