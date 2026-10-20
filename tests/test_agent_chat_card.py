@@ -14,12 +14,21 @@ from tests._patrimonio_helpers import conexao, posicao
 from tests.test_agent_chat_conversation import ScriptedClient, SnapshotCall, own_route, response
 
 SNAP = ("consultar_dados_do_agente", {}, {})
+BUDGETS = {"budgets": [{"categoria": "mercado"}], "count": 1}
+
+
+def mes(ini, fim, por="fatura", motivos=()):
+    """O resultado de get_period_summary (core/services/ai_chat/tools/launches.py::_resumo_periodo) que o card lê."""
+    return {"start_date": ini, "end_date": fim, "cartao_por": por, "motivos": list(motivos), "receita": 1.0, "despesa": 1.0}
 
 
 @pytest.fixture
 def gate(monkeypatch):
     estado = {"ok": True}
-    monkeypatch.setattr(plan_service, "plan_gate_ok", lambda uid, feature: estado["ok"] if feature == "investments" else False)
+    # só as features que o card consulta; `consultadas` prova que resumo_mes e orcamentos (rotas sem gate) não consultam nenhuma
+    estado["consultadas"] = []
+    monkeypatch.setattr(plan_service, "plan_gate_ok",
+                        lambda uid, feature: estado["consultadas"].append(feature) or (estado["ok"] if feature in ("investments", "subscriptions") else False))
     return estado
 
 
@@ -31,6 +40,21 @@ def gate(monkeypatch):
     ("barao", [("get_balance", {}, {}), SNAP], {"tipo": "renda_fixa"}),
     ("reporter", [SNAP], None),
     ("xerife", [SNAP], None),
+    ("detetive", [SNAP], {"tipo": "assinaturas"}),
+    ("detetive", [("get_balance", {}, {})], None),
+    ("faria_limer", [("get_budget_status", {}, BUDGETS)], None),
+    ("xerife", [("get_budget_status", {}, BUDGETS)], {"tipo": "orcamentos"}),
+    ("xerife", [("get_budget_status", {}, {"budgets": [], "count": 0})], None),  # nada a mostrar
+    ("xerife", [("get_budget_status", {"categoria": "mercado"}, {"found": True, "categoria": "mercado"})], None),  # o texto fala de uma só
+    ("xerife", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
+    ("reporter", [("get_period_summary", {}, mes("2024-02-01", "2024-02-29"))], {"tipo": "resumo_mes", "mes": "2024-02"}),
+    ("reporter", [("get_period_summary", {}, mes("2026-03-01", "2026-08-31"))], None),  # vários meses
+    ("reporter", [("get_period_summary", {}, mes("2026-10-05", "2026-10-12", por="data_da_compra"))], None),  # período livre
+    ("reporter", [("get_period_summary", {}, mes("2099-01-01", "2099-01-31", motivos=["mes_futuro"]))], None),  # a rota dá 422
+    ("reporter", [("get_period_summary", {}, {"saldo_periodo": 1})], None),
+    ("reporter", [("get_period_summary", {}, mes("2026-09-01", "2026-09-30")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
 ])
 def test_decisao_do_card(gate, kind, consultas, esperado):
     assert card_da_resposta(1, kind, consultas) == esperado
@@ -39,6 +63,16 @@ def test_decisao_do_card(gate, kind, consultas, esperado):
 def test_sem_plano_de_investimentos_nao_tem_card(gate):
     gate["ok"] = False
     assert card_da_resposta(1, "faria_limer", [SNAP]) is None
+
+
+def test_gate_de_cada_tipo_e_o_da_rota_v2(gate):
+    # assinaturas = `subscriptions` (api/v2/assinaturas.py); resumo-do-mes e orcamentos-categoria não têm gate: o plano não corta o card
+    gate["ok"] = False
+    assert card_da_resposta(1, "detetive", [SNAP]) is None and gate["consultadas"] == ["subscriptions"]
+    gate["consultadas"].clear()
+    assert card_da_resposta(1, "reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))]) == {"tipo": "resumo_mes", "mes": "2026-10"}
+    assert card_da_resposta(1, "xerife", [("get_budget_status", {}, BUDGETS)]) == {"tipo": "orcamentos"}
+    assert gate["consultadas"] == []
 
 
 # --- ponta a ponta: chat() com o cliente roteirizado, sem mockar _answer ---
@@ -162,3 +196,15 @@ def test_snapshot_degrada_se_a_leitura_do_total_falha(monkeypatch, kind):
     assert snap["investido"] == {"indisponivel": True}
     assert snap.get("total_renda_fixa") is None
     assert "indisponivel" in snap["nota"]
+
+
+# --- o card lê o resultado REAL do get_period_summary (sem mock): mês inteiro vira card; o resto, não ---
+@pytest.mark.parametrize("args,esperado", [
+    ({"start_date": "2025-03-01", "end_date": "2025-03-31"}, {"tipo": "resumo_mes", "mes": "2025-03"}),
+    ({"start_date": "2025-03-01", "end_date": "2025-03-15"}, None),  # mês passado cortado no meio = período livre
+    ({"start_date": "2025-03-01", "end_date": "2025-05-31"}, None),
+    ({"start_date": "2025-03-10", "end_date": "2025-03-12"}, None),
+])
+def test_resultado_real_do_get_period_summary(gate, user_id, args, esperado):
+    from core.services.ai_chat.tools.launches import _get_period_summary
+    assert card_da_resposta(user_id, "reporter", [("get_period_summary", args, _get_period_summary(user_id, args))]) == esperado

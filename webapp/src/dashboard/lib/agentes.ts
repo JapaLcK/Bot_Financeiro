@@ -96,10 +96,12 @@ export function ativar(uid: number, kind: string) {
 export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
 /** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
-export type CardAgente = { tipo: "investido" | "renda_fixa" };
+export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "orcamentos" } | { tipo: "resumo_mes"; mes: string };
+const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
 export const cardDe = (v: unknown): CardAgente | null => {
-  const t = v && typeof v === "object" ? (v as { tipo?: unknown }).tipo : undefined;
-  return t === "investido" || t === "renda_fixa" ? { tipo: t } : null;
+  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown }) : {};
+  if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "orcamentos") return { tipo: c.tipo };
+  return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes } : null;
 };
 /** Pergunta vinda do botão "Perguntar ao X": o servidor não a reclassifica, e o agente sugerido responde. */
 export interface Encaminhada { needs_data: boolean }

@@ -16,7 +16,7 @@ const largura = (v: string) => Math.min(Math.max(Number(v), 0), 100);
 const COR = /^#[0-9a-f]{6}$/i;
 const sem = (v: string) => moneyText(v.slice(1)); // "-20.00" -> "R$ 20,00"
 
-function Linha({ o }: { o: Orcamento }) {
+export function Linha({ o }: { o: Orcamento }) {
   const passou = o.status === "vermelho";
   return <>
     <span className="orc-icone" style={COR.test(o.cor) ? { color: o.cor } : undefined}><IconeCategoria icone={o.icone} /></span>

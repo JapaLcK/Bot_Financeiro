@@ -47,9 +47,10 @@ def _snapshot(user_id: int, kind: str) -> dict:
         recurring = lista["servicos"] + lista["outras"]
         return {"possiveis_duplicidades": duplicates[:50], "recorrencias": recurring[:50],
                 "total_duplicidades": len(duplicates), "total_recorrencias": len(recurring),
+                "total_mensal": lista["total_mensal"],
                 "cobertura_duplicidades": {"desde": date.today() - timedelta(days=DETETIVE_DUP_LOOKBACK_DAYS), "valor_minimo": DETETIVE_DUP_MIN_VALOR},
                 "cobertura_recorrencias": {"fonte": "open_finance", "criterio": "recorrência detectada pela Pluggy (Recurring Payments); só despesas de conexões ativas, sem parcelas nem movimento interno"},
-                "nota": "São indícios, não confirmação de erro. Nenhum lançamento foi alterado. Explicite a cobertura quando não houver achados; não exclua duplicidades fora desse período ou abaixo do valor mínimo."}
+                "nota": "São indícios, não confirmação de erro. Nenhum lançamento foi alterado. `total_mensal` é a soma das assinaturas ativas, o número do card abaixo da resposta. Explicite a cobertura quando não houver achados; não exclua duplicidades fora desse período ou abaixo do valor mínimo."}
     if kind == "faria_limer":
         positions = db.list_rv_positions(user_id)
         brl = [p for p in positions if (p.get("currency") or "BRL").upper() == "BRL"]
