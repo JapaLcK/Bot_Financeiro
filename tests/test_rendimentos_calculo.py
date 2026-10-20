@@ -78,6 +78,12 @@ def test_sem_leitura_no_mes(atualizado):
     assert mes["motivo"] == "sem_leitura_no_mes" and total["valor"] == D("100.00")
 
 
+def test_leitura_depois_da_base_mas_ainda_no_mes_passado_nao_vira_mes():
+    # base de 24/09, última leitura 29/09, resposta em outubro: o delta seria de setembro
+    mes, total = um(base=base(em=date(2026, 9, 24)), atualizado_em=date(2026, 9, 29))
+    assert mes["motivo"] == "sem_leitura_no_mes" and total["valor"] == D("100.00")
+
+
 def test_saldo_ausente_hoje_vence_tudo():
     mes, total = um(ausente=True, base=None)
     assert mes["motivo"] == total["motivo"] == "saldo_ausente"

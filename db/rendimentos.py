@@ -51,14 +51,14 @@ def _total(a: dict) -> dict:
     return _ok(a["B"] - a["A"], a["A"])
 
 
-def _mes(a: dict) -> dict:
+def _mes(a: dict, fim: date) -> dict:
     b = a["base"]
     if a["saldo_ausente"]:
         return _sem("saldo_ausente")
     if b is None:
         return _sem("sem_base")
-    if a["atualizado_em"] is None or a["atualizado_em"] <= b["observed_on"]:
-        return _sem("sem_leitura_no_mes")  # o banco não leu de novo desde a base: seria um R$ 0,00 falso
+    if a["atualizado_em"] is None or a["atualizado_em"] <= fim:
+        return _sem("sem_leitura_no_mes")  # sem leitura neste mês: seria o mês passado (ou um R$ 0,00 falso)
     if a["tipo"] in CUSTO:
         if any(x is None or x <= 0 for x in (a["A"], b["A0"])):
             return _sem("aplicado_ausente")
@@ -92,7 +92,7 @@ def _saldo(ativos: list[dict]) -> Decimal | None:
 def calcular(ativos: list[dict], hoje: date) -> dict:
     """`ativos`: [{tipo (chave de TIPOS), nome, instituicao, logo_proprio, saldo_ausente, B, A, Q,
     base: {observed_on, B0, A0, Q0} | None, atualizado_em (date no fuso do app)}]."""
-    calc = [(a, _mes(a), _total(a)) for a in ativos]
+    calc = [(a, _mes(a, fim_do_mes_anterior(hoje)), _total(a)) for a in ativos]
     por_tipo: dict[str, list] = {}
     for c in calc:
         por_tipo.setdefault(c[0]["tipo"], []).append(c)
