@@ -16,7 +16,7 @@ import { Selos } from "../parts/Selos";
 // Texto decimal do servidor como número; malformado ou infinito = null (sem comparação, nunca "NaN%").
 const num = (s: string | null) => (decimal(s) && Number.isFinite(Number(s)) ? Number(s) : null);
 // Variação contra o anterior; null = sem base (o servidor não tem o mês anterior, o gasto de lá foi zero, um dos dois veio malformado ou a conta estoura o double).
-const variacao = (atual: number | null, antes: number | null) => { const v = atual !== null && antes !== null && antes > 0 ? (atual - antes) / antes : NaN; return Number.isFinite(v) ? v : null; };
+const variacao = (atual: number | null, antes: number | null) => { const v = atual !== null && antes !== null && antes > 0 ? (atual - antes) / antes : NaN; return Number.isFinite(v * 100) ? v : null; }; // × 100: a escala que pct() mostra
 const pct = (v: number) => Math.round(Math.abs(v) * 100);
 
 function delta(c: GastoCategoria, corte: number) {

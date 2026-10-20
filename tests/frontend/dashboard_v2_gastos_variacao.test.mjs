@@ -41,6 +41,7 @@ for (const [caso, mudar, frase] of [
   ["anterior infinito", (g) => { g.categorias[0].anterior_ate_corte = "1e400"; }, true],
   // finitos um a um, a conta estoura: a razão da linha e a soma do total
   ["razão que estoura o double", (g) => { g.categorias[0].valor_ate_corte = "1e308"; g.categorias[0].anterior_ate_corte = "1e-300"; g.anterior_total_ate_corte = "1e-300"; }, false],
+  ["razão finita cujo percentual estoura", (g) => { g.categorias[0].valor_ate_corte = "1e308"; g.categorias[0].anterior_ate_corte = "1"; g.anterior_total_ate_corte = "1"; }, false],
   ["soma que estoura o double", (g) => { g.categorias[0].valor_ate_corte = "1e308"; g.categorias[1].valor_ate_corte = "1e308"; g.categorias[0].anterior_ate_corte = "1e-300"; }, false],
 ]) {
   test(`${caso}: a linha fica sem comparação, sem NaN/Infinity na tela nem no nome acessível`, async () => {
