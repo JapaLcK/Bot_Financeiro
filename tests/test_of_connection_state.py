@@ -1358,6 +1358,7 @@ CHAVES_DA_CONEXAO = {
     "last_sync_at", "last_attempt_at", "status_reason", "health",
     "reconnected_at", "ui",
     "logo_url",   # derivado de `raw.connector.imageUrl`, validado (db/open_finance_state.py)
+    "logo_proprio",   # arquivo do repo pelo id do conector (core/services/pluggy_catalogo.py)
 }
 
 

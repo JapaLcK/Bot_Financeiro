@@ -55,3 +55,32 @@ def logo_do_conector(connector_id: str) -> str | None:
             if isinstance(c, dict) and str(c.get("id")) == connector_id:
                 return c.get("imageUrl")
     return None
+
+
+# Logo PRÓPRIO dos 10 bancos principais: PNG 256 em frontend/brand/bancos/<ispb>.png, servido pela rota
+# `/brand/{path}` (cache imutável de 1 ano: trocar a arte de um banco exige trocar o NOME do arquivo E ampliar a regex
+# `LOGO_PROPRIO` do cliente (webapp/src/dashboard/conta/api.ts e, quando existir, o app) no mesmo PR; nunca sobrescrever o PNG).
+# Origem: pacote npm logos-bancos-br 0.8.2 (MIT no código; ver o DISCLAIMER.md do pacote, github.com/rzmt/logos-bancos-br).
+# Os logos são marcas dos bancos, NÃO cobertas pela MIT: uso nominativo, só para identificar a instituição, sem deformar nem
+# recolorir. Precedência no produto: próprio > `logo_url` da Pluggy > inicial. Busca SÓ por id exato do conector (nunca por nome).
+# Regra de quem entra (catálogo da Pluggy, medido em 2026-10-20): só conectores de PESSOA FÍSICA do banco principal; BTG 614 (investimentos
+# OF) e 214 (direto) entram por serem a mesma marca em pessoa física. Empresas, Bradescard, 'sem conta', Caixa Tem, Previdência
+# (279 BB, 246 Caixa), Corretoras (812 Santander) e cripto ficam FORA e seguem com o logo da Pluggy.
+_LOGO_PROPRIO_ISPB: dict[str, str] = {
+    "601": "60701190",  # Itaú
+    "603": "60746948",  # Bradesco
+    "611": "00000000",  # Banco do Brasil
+    "608": "90400888",  # Santander
+    "619": "00360305", "219": "00360305",  # Caixa
+    "823": "00416968", "215": "00416968",  # Inter
+    "626": "31872495",  # C6
+    "612": "18236120",  # Nubank
+    "675": "30306294", "614": "30306294", "214": "30306294",  # BTG
+    "606": "10573521", "206": "10573521",  # Mercado Pago
+}
+
+
+def logo_proprio(connector_id: Any) -> str | None:
+    """Caminho relativo do logo próprio do conector, ou None. Só id exato (str); nunca exceção."""
+    ispb = _LOGO_PROPRIO_ISPB.get(connector_id) if isinstance(connector_id, str) else None
+    return f"/brand/bancos/{ispb}.png" if ispb else None
