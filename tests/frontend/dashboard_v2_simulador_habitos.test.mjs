@@ -165,7 +165,6 @@ test("Plus em /simulador a 1280: o convite está num painel e ocupa o grid (não
   });
   assert.equal(m.painel, true);
   assert.ok(m.razao >= 0.5, `razão ${m.razao}`);
-  await page.screenshot({ path: "/private/tmp/claude-501/-Users-lucaskuramoti-Projetos-bot-bot-wa--claude-worktrees-intelligent-euler-774cba/702846fb-4390-4ebc-bd8f-a8671707a9f8/scratchpad/p3b-plus-v2-1280.png" });
   await ctx.close();
 });
 
