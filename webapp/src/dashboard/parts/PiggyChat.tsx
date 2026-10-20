@@ -39,6 +39,7 @@ const fila: { id: number; text: ReactNode }[] = [];
 const aRevelar = new Set<number>();
 const REVELA_MS = 2000; // teto do atraso somado das palavras; 30 ms por palavra até caber
 const REVELA_PASSO = 30;
+const REVELA_ANIM = 500; // duração da animação de cada palavra (inline no span: a CSS não repete o valor)
 
 // Cada palavra é um <span> que anima só opacidade/blur/subida (chat.css); o espaço e as quebras de linha ficam como texto.
 function Revela({ t }: { t: string }) {
@@ -46,7 +47,7 @@ function Revela({ t }: { t: string }) {
   const n = partes.length >> 1 || 1;
   const passo = Math.min(REVELA_PASSO, REVELA_MS / n);
   let w = 0;
-  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms` }}>{p}</span>)}</>;
+  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms`, animationDuration: `${REVELA_ANIM}ms` }}>{p}</span>)}</>;
 }
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
@@ -82,8 +83,17 @@ function PiggySays({ m }: { m: Msg }) {
   if (m.estado === "pronto" && aRevelar.has(m.id)) revela.current = true;
   useEffect(() => { if (m.estado === "pronto") aRevelar.delete(m.id); }, [m.estado, m.id]);
   const texto = typeof m.text === "string" ? m.text : "";
-  const animar = revela.current && m.estado === "pronto" && !!texto;
-  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS);
+  // Acabada a última palavra, volta ao texto contínuo: spans inline-block por palavra viram uma parada por palavra no leitor de tela.
+  const [fim, setFim] = useState(false);
+  const revelando = revela.current && m.estado === "pronto" && !!texto;
+  // Com movimento reduzido o texto já vem contínuo, sem spans por palavra (o leitor de tela não para em cada um).
+  const animar = revelando && !fim && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
+  useEffect(() => {
+    if (!animar) return;
+    const id = setTimeout(() => setFim(true), total);
+    return () => clearTimeout(id);
+  }, [animar, total]);
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
@@ -91,7 +101,7 @@ function PiggySays({ m }: { m: Msg }) {
       {a && m.estado === "enviando" && <Carregando kind={a.kind} />}
       <p className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} /> : m.text}</p>
       {/* O card do agente entra depois do texto, com o mesmo fade dos botões (chat.css). */}
-      {m.card && (m.agente ? <div className="card-slot" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms` } : undefined}>{m.card}</div> : m.card)}
+      {m.card && (m.agente ? <div className="card-slot" data-revela={revelando || undefined} style={revelando ? { animationDelay: `${total}ms` } : undefined}>{m.card}</div> : m.card)}
       {m.estado === "inativo" && (
         <div className="msg-acoes">
           <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>
@@ -101,7 +111,7 @@ function PiggySays({ m }: { m: Msg }) {
       {m.estado === "erro" && m.repetir && <div className="msg-acoes"><button type="button" className="btn btn-ghost" onClick={() => tentarDeNovo(m.id)}>Tentar de novo</button></div>}
       {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
       {m.estado === "pronto" && !!m.redirects?.length && (
-        <div className="msg-acoes" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms` } : undefined}>
+        <div className="msg-acoes" data-revela={revelando || undefined} style={revelando ? { animationDelay: `${total}ms` } : undefined}>
           {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" disabled={seguindo} onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}

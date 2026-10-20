@@ -1459,11 +1459,20 @@ for (const width of TELAS) {
     assert.ok(atrasos.at(-1) <= 2000 && atrasos.at(-1) > 1500, `último atraso ${atrasos.at(-1)}`);
     assert.ok(ps.at(-1).op < 1, "a última palavra começa escondida");
     const acoes = resposta(page).locator(".msg-acoes");
-    assert.equal(await acoes.getByRole("button", { name: "Perguntar ao Carteiro" }).count(), 1); // no DOM desde o início
+    assert.equal(await acoes.locator("button", { hasText: "Perguntar ao Carteiro" }).count(), 1); // no DOM desde o início (getByRole não vê o que está visibility:hidden)
     assert.ok(+(await acoes.evaluate((e) => getComputedStyle(e).opacity)) < 1, "as ações esperam o texto");
-    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
-    assert.ok((await revelacao(page)).every((p) => p.op === 1));
-    assert.equal(await acoes.evaluate((e) => getComputedStyle(e).opacity), "1");
+    const atrasoAcoes = await acoes.evaluate((e) => e.getAnimations()[0].effect.getTiming().delay);
+    assert.ok(atrasoAcoes >= atrasos.at(-1) + 500, `ações em ${atrasoAcoes} ms, última palavra começa em ${atrasos.at(-1)} e dura 500`);
+    // O fade das ações tem de rodar inteiro, mesmo depois de o texto voltar a ser contínuo (a troca não pode cortá-lo): amostra a opacidade até a animação acabar.
+    const fade = await acoes.evaluate((e) => new Promise((ok) => {
+      const an = e.getAnimations()[0], op = [];
+      const f = () => { op.push(+getComputedStyle(e).opacity); an.playState === "finished" || an.playState === "idle" ? ok({ op, estado: an.playState }) : requestAnimationFrame(f); };
+      f();
+    }));
+    assert.equal(fade.estado, "finished", "a animação das ações não foi cortada");
+    assert.ok(fade.op.some((o) => o > 0 && o < 1), `sem opacidade intermediária: ${[...new Set(fade.op)]}`);
+    assert.equal(fade.op.at(-1), 1);
+    assert.equal(await bolha.locator(".rv").count(), 0, "texto voltou a ser contínuo");
     await ctx.close();
     assert.deepEqual(erros, []);
   });
@@ -1483,8 +1492,7 @@ for (const width of TELAS) {
     await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
     assert.deepEqual(await emAnimacao(page), []);
     assert.equal(await resposta(page).locator(".msg-text").evaluate((e) => getComputedStyle(e).opacity), "1");
-    assert.deepEqual([...new Set(await animacoes(page, ".chat .rv"))], ["none"]);
-    assert.ok((await page.locator(".chat .rv").count()) > 0);
+    assert.equal(await page.locator(".chat .rv").count(), 0, "sem movimento: texto contínuo, sem spans por palavra");
     await ctx.close();
   });
 
@@ -1545,5 +1553,61 @@ for (const width of TELAS) {
     assert.deepEqual(await emAnimacao(page), []);
     solta();
     await ctx.close();
+  });
+  test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {
+    const { ctx, page } = await abrir({ width, ativos: ["detetive", "carteiro"], chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: palavras(150), context: "c", redirects: [RED] } } : null) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    await resposta(page).locator(".rv").first().waitFor();
+    const botao = resposta(page).locator(".msg-acoes button", { hasText: "Perguntar ao Carteiro" });
+    const foca = () => botao.evaluate((b) => { b.focus(); return document.activeElement === b; });
+    assert.equal(await foca(), false, "invisível e focável");
+    assert.equal(await botao.evaluate((b) => b.checkVisibility({ visibilityProperty: true })), false);
+    await page.waitForFunction(() => !document.getAnimations().some((a) => a.playState !== "finished"), null, { timeout: 5000 });
+    assert.equal(await foca(), true);
+    await botao.click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
+    await ctx.close();
+  });
+
+  test(`${width}: acabada a revelação a bolha volta ao texto contínuo, sem spans, sem salto`, async () => {
+    const texto = `um dois três ${palavras(10)}`;
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: texto, context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text");
+    await bolha.locator(".rv").first().waitFor();
+    assert.ok((await bolha.locator(".rv").count()) > 0, "durante a revelação há spans");
+    const alt = await bolha.evaluate((e) => e.getBoundingClientRect().height);
+    await bolha.locator(".rv").first().waitFor({ state: "detached", timeout: 4000 });
+    assert.equal(await bolha.textContent(), texto);
+    assert.equal(await bolha.evaluate((e) => e.getBoundingClientRect().height), alt, "sem salto de altura");
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha do usuário`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    for (const pergunta of [url, `@Detetive ${url}`]) {
+      const { ctx, page } = await abrir({ width });
+      await enviar(page, pergunta);
+      const bolha = page.locator(".chat .msg-user", { hasText: "exemplo.com" });
+      await bolha.waitFor();
+      const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+      assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+      assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto do usuário passa da bolha");
+      await ctx.close();
+    }
   });
 }
