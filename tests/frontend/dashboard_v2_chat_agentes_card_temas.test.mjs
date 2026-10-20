@@ -194,14 +194,23 @@ test("Repórter: os motivos do mês viram selos no card, como o texto avisa", as
   await ctx.close();
 });
 
-test("Xerife: total de 7 dígitos em 390 não sai do card nem rola a página", async () => {
+for (const width of [390, 320]) test(`Xerife: total e linhas de 7 dígitos em ${width} não saem do card nem rolam a página`, async () => {
   const o = RESPOSTAS.orcamentos_categoria.padrao;
-  const { ctx, page } = await abrir({ width: 390, tipo: "orcamentos", corpo: { ...o, total: { ...o.total, gasto: "1234567.89", teto: "9999999.99" } } });
+  const corpo = { ...o, total: { ...o.total, gasto: "1234567.89", teto: "9999999.99" }, orcamentos: o.orcamentos.map((x) => ({ ...x, gasto: "1234567.89", teto: "1234567.89" })) };
+  const { ctx, page } = await abrir({ width, tipo: "orcamentos", corpo });
   await perguntar(page, "Xerife");
   await carregado(page);
   const r = await card(page).evaluate((c) => { const b = c.getBoundingClientRect();
     return { fora: [...c.querySelectorAll("*")].filter((e) => e.getBoundingClientRect().right > b.right + 0.5).map((e) => e.className), pagina: document.documentElement.scrollWidth > innerWidth }; });
   assert.deepEqual(r, { fora: [], pagina: false });
+  await ctx.close();
+});
+
+test("Xerife: mês fora do padrão no corpo: erro, nunca número", async () => {
+  const { ctx, page } = await abrir({ width: 1440, tipo: "orcamentos", corpo: { ...RESPOSTAS.orcamentos_categoria.padrao, mes: "xx" } });
+  await perguntar(page, "Xerife");
+  await card(page).getByRole("button", { name: "Tentar de novo" }).waitFor({ timeout: 5000 });
+  assert.ok(!/undefined|NaN/.test(await card(page).innerText()));
   await ctx.close();
 });
 

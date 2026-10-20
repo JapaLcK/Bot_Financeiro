@@ -97,7 +97,7 @@ export interface Redirect { kind: string; name: string; question: string; access
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
 /** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
 export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "orcamentos" } | { tipo: "resumo_mes"; mes: string };
-const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
+export const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
 export const cardDe = (v: unknown): CardAgente | null => {
   const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown }) : {};
   if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "orcamentos") return { tipo: c.tipo };

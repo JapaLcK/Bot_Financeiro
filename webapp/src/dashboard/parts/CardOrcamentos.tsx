@@ -1,6 +1,7 @@
 import type { OrcamentosCategoria } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
+import { MES } from "../lib/agentes";
 import { href } from "../router";
 import { Linha } from "../widgets/OrcamentosCategoria";
 
@@ -9,7 +10,7 @@ const money = (v: unknown) => typeof v === "string" && moneyText(v) !== null;
 // Corpo fora do contrato não desenha meio número (o que a `Linha` lê, inclusive).
 export const contratoOrcamentos = (d: unknown) => {
   const x = d as OrcamentosCategoria | null;
-  return !!x && typeof x.mes === "string" && !!x.total && money(x.total.gasto) && money(x.total.teto) && Array.isArray(x.orcamentos)
+  return !!x && typeof x.mes === "string" && MES.test(x.mes) && !!x.total && money(x.total.gasto) && money(x.total.teto) && Array.isArray(x.orcamentos)
     && x.orcamentos.every((o) => o && typeof o.categoria === "string" && typeof o.icone === "string" && typeof o.cor === "string" && typeof o.status === "string"
       && money(o.gasto) && money(o.teto) && money(o.restante) && typeof o.usado_pct === "string" && Number.isFinite(Number(o.usado_pct)));
 };

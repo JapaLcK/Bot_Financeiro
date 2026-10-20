@@ -104,6 +104,7 @@ button.orc-linha:disabled { cursor: default; opacity: 0.6; }
 .orc-linha-corpo { display: grid; gap: 6px; min-width: 0; font-size: 13px; }
 .orc-linha-topo { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; }
 .orc-linha-topo b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.orc-linha-valor { text-align: right; } /* nowrap em cada valor, não no par: "de R$ X" desce de linha em vez de sair do card em tela estreita */
 .orc-linha-corpo .meter { display: block; height: 6px; }
 .orc-fixa { display: grid; gap: 2px; }
 
