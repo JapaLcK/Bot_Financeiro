@@ -1,6 +1,6 @@
 // Cliente da /api/v2. Os tipos saem do contrato (api-v2.gen.ts); o fetch é o global,
 // que o auth-refresh.js do /painel envolve (renova no 401 e repete).
-import { infiniteQueryOptions, queryOptions, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { ErroV2, QueryGet, RotasGet, RotasPost, RotasPut } from "./api-v2.gen";
 import { MONTHS } from "./api";
 
@@ -38,19 +38,22 @@ export class ErroApi extends Error {
   // no 401 que carrega WWW-Authenticate: esse é o 401 de SESSÃO, e quem o recebe não pode confundi-lo com
   // "Senha incorreta." (que não carrega).
   detalhe?: string;
-  constructor(status: number, code: string, details?: ErroV2["error"]["details"], detalhe?: string) {
+  // O corpo lido, inteiro: as rotas antigas mandam `detail` OBJETO (`{error, message, retryable}` do /agents), que `detalhe` (só texto) não guarda.
+  corpo?: unknown;
+  constructor(status: number, code: string, details?: ErroV2["error"]["details"], detalhe?: string, corpo?: unknown) {
     super(code);
     this.status = status;
     this.code = code;
     this.details = details;
     this.detalhe = detalhe;
+    this.corpo = corpo;
   }
 }
 
 export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   let r: Response;
   try {
-    r = await fetch((/^\/(auth|settings|open-finance|billing)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
+    r = await fetch((/^\/(auth|settings|open-finance|billing|agents)\//.test(path) ? "" : "/api/v2") + path, { credentials: "same-origin", ...init });
   } catch (e) {
     if (init.signal?.aborted) throw e;
     throw new ErroApi(0, "network");
@@ -65,7 +68,7 @@ export async function chamar<T>(path: string, init: RequestInit): Promise<T> {
   }
   const d = (body as { detail?: unknown } | undefined)?.detail;
   const sessao = r.status === 401 && !!r.headers.get("WWW-Authenticate");
-  throw new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined);
+  throw new ErroApi(r.status, `http_${r.status}`, undefined, !r.ok && typeof d === "string" && !sessao ? d : undefined, body);
 }
 
 type Query<P> = P extends keyof QueryGet ? QueryGet[P] : never;
@@ -117,6 +120,13 @@ export const contaQuery = {
   retry: meQuery.retry,
   enabled: !DEMO,
 };
+// A conta numa leitura que SAIU agora ou depois. Uma leitura já em voo pode ter saído com a sessão anterior (a conta mudou noutra
+// aba): espera por ela e lê de novo. Cancelar não serve, quem a esperava receberia o cancelamento. Toda conferência de conta do
+// chat passa por aqui: montagem, foco, pergunta ao Piggy e menção (Codex no #1157).
+export async function lerContaFresca(qc: QueryClient) {
+  if (qc.isFetching({ queryKey: contaQuery.queryKey })) await qc.fetchQuery(contaQuery).catch(() => {});
+  return qc.fetchQuery(contaQuery);
+}
 
 // Dado que muda: relido a cada montagem, foco de aba e aviso do SSE.
 const vivo = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always" as const, retry: meQuery.retry, enabled: !DEMO };

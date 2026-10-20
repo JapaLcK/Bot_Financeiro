@@ -6,13 +6,37 @@ import { Entrada } from "./parts/Entrada";
 import { Cofre } from "./conta/Cofre";
 import { BALANCE_TODAY, MONTHS, netWorth, previousKey, summary } from "./lib/api";
 import { readProfile } from "./lib/profiles.js";
-import { DEMO, contasQuery, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
+import { aoConferirConta, contaDaSessao } from "./lib/conversation";
+import { DEMO, contaQuery, contasQuery, lerContaFresca, escutarLogout, investidoQuery, milhaoQuery, orcamentoQuery, orcamentosCategoriaQuery, perfilQuery, resumoMesQuery } from "./lib/v2";
 import type { Assinaturas, Investido, OrcamentoDomestico, OrcamentosCategoria } from "./lib/api-v2.gen";
 import "./styles/index.css";
 
 declare global { interface Window { PIGBANK_DEMO_PLAN?: unknown } }
 
 const qc = new QueryClient();
+// Toda leitura de /auth/dashboard-profile, de qualquer tela, diz de quem é a sessão: a conversa do Piggy é da conta que a fez.
+// Se a sessão virou outra conta (noutra aba), todo o cache era da anterior (as chaves não levam o uid). O que ninguém mostra
+// sai do cache (a próxima tela lê do zero); o que está na tela relê já, mantendo o dado até chegar: zerar o `me` derrubaria
+// quem conta com ele carregado (o portão da Entrada). O microtask roda antes de quem esperava essa leitura (`ask`, a menção).
+let uidVisto: number | undefined;
+// Só a chave exata do perfil: as de baixo dela (["conta", "cobranca"], ["conta", "mfa"]…) são dados da conta como os outros (Codex no #1157).
+const ehPerfil = (k: readonly unknown[]) => k.length === 1 && k[0] === contaQuery.queryKey[0];
+qc.getQueryCache().subscribe((e) => {
+  if (e.type !== "updated" || !ehPerfil(e.query.queryKey)) return;
+  const uid = (e.query.state.data as { user_id?: number } | undefined)?.user_id;
+  contaDaSessao(uid);
+  if (uid == null) return;
+  if (uidVisto != null && uid !== uidVisto) { const antigo = uidVisto; queueMicrotask(() => {
+    const daConta = (q: { queryKey: readonly unknown[] }) => !ehPerfil(q.queryKey);
+    qc.removeQueries({ predicate: (q) => daConta(q) && q.getObserversCount() === 0 });
+    // As famílias com o uid na chave (["conta", <assunto>, uid] e ["agentes", uid]) do uid antigo já são da conta anterior: quem as
+    // mostra troca de chave sozinho, e relê-las agora seria ler a conta anterior com a sessão nova. Só elas: ["previsao", 30] não é uid.
+    const doUidAntigo = (k: readonly unknown[]) => ((k[0] === "conta" && k.length === 3) || (k[0] === "agentes" && k.length === 2)) && k[k.length - 1] === antigo;
+    void qc.invalidateQueries({ predicate: (q) => daConta(q) && !doUidAntigo(q.queryKey) });
+  }); }
+  uidVisto = uid;
+});
+if (!DEMO) aoConferirConta(() => lerContaFresca(qc)); // toda pergunta nova ao Piggy relê a conta antes de entrar
 // O protótipo (dashboard-v2/index.html) define o plano da demonstração e não fala com a
 // API: o cache nasce com os dados sintéticos e o perfil salvo no navegador. O bundle nunca
 // lê a URL: quem decide o plano é o /api/v2/me.
