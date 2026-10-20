@@ -20,20 +20,21 @@ const erro = (e: Error) => !(e instanceof ErroApi) ? ERRO
 // nunca a dispara (um 403 rápido já seria erro quando ela monta e pediria de novo).
 export const Anuncio = createContext(false);
 
+// O porquê de não haver total, em texto: o mesmo no chat e no card (CardInvestido).
+export const fraseSemTotal = (motivos: readonly string[]) => motivos.includes("sem_banco_conectado")
+  ? "Ainda não sei: conecte seu banco para eu ver seus investimentos."
+  : motivos.includes("saldo_ausente")
+    ? "Ainda não sei: seu banco não informou o saldo dos seus investimentos."
+    : motivos.includes("nenhum_investimento")
+      ? "Não encontrei investimentos nos seus bancos conectados."
+      : "Ainda não sei: ainda não consegui ler seus investimentos no banco.";
+
 export function InvestidoResposta() {
   const q = useQuery({ ...investidoQuery, enabled: investidoQuery.enabled && !useContext(Anuncio) });
   if (q.isPending) return <>Calculando…</>;
   if (q.isError) return <>{erro(q.error)}</>;
   const d = q.data;
-  if (d.total === null) {
-    return <>{d.motivos.includes("sem_banco_conectado")
-      ? "Ainda não sei: conecte seu banco para eu ver seus investimentos."
-      : d.motivos.includes("saldo_ausente")
-        ? "Ainda não sei: seu banco não informou o saldo dos seus investimentos."
-        : d.motivos.includes("nenhum_investimento")
-          ? "Não encontrei investimentos nos seus bancos conectados."
-          : "Ainda não sei: ainda não consegui ler seus investimentos no banco."}</>;
-  }
+  if (d.total === null) return <>{fraseSemTotal(d.motivos)}</>;
   const total = moneyText(d.total);
   const linha = (partes: { nome: string; valor: string | null }[]) =>
     partes.map((p) => (p.valor === null ? `${p.nome}: saldo não informado` : `${p.nome} ${moneyText(p.valor)}`)).join(" · ");

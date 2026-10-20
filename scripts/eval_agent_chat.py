@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+from decimal import Decimal
 import json
 import hashlib
 import re
@@ -51,8 +52,16 @@ def cases(suite):
             for i, a, q, s, r, d, own, charge in rows]
 
 
+SYNTHETIC_INVESTIDO = {  # o formato de db.investido.ler: o total dos bancos, por tipo
+    'total': Decimal('48000.00'), 'motivos': [], 'por_banco': [],
+    'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': Decimal('48000.00'), 'motivos': []}],
+}
+
+
 def synthetic_data():
     return {
+        'investido': {'total_investido': '48000.00', 'por_banco': [], 'motivos': [], 'fonte': 'sintética',
+                      'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': '48000.00', 'motivos': []}]},
         'posicoes': [],
         'resumo_brl': {'count': 0, 'market_value': 0, 'invested': 0, 'pnl': 0, 'pnl_pct': 0, 'cost_known': False},
         'renda_fixa_brl': {'count': 22, 'balance': 48000, 'invested': 45000, 'pnl': 3000},
@@ -69,6 +78,7 @@ def synthetic_read(uid, kind, name, arguments):
     """Usa formatos reais de consulta com fontes vazias/sintéticas, sem banco."""
     import db
     import db.bills
+    import db.investido
     from core.services import agent_chat as chat, assinaturas, comparacao_periodos, piggy_agents, plan_service
     from core.services.agent_chat_data import _snapshot
     from core.services.ai_chat.tools import get_tool
@@ -102,6 +112,7 @@ def synthetic_read(uid, kind, name, arguments):
         for attribute, value in rows.items():
             stack.enter_context(patch.object(db, attribute, return_value=value))
         stack.enter_context(patch.object(db.bills, 'list_bills', return_value=[]))
+        stack.enter_context(patch.object(db.investido, 'ler', return_value=SYNTHETIC_INVESTIDO))
         stack.enter_context(patch.object(resumo_mes, 'resumo_do_mes', return_value={
             'entrou': 0, 'saiu': 0, 'motivos': []}))
         # compare_periods: período livre lê `db.*` (patchados acima) e conta compras de cartão; `mes=` e meses inteiros
