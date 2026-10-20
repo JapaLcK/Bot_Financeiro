@@ -895,6 +895,28 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  if (width >= 768) test(`${width}: troca de conta saindo do uid 60 relê a previsão de 60 dias (a chave ["previsao", 60] não é de uid)`, async () => {
+    const { ctx, page } = await abrir({ width });
+    const previsoes = [];
+    page.on("request", (r) => { const u = new URL(r.url()); if (u.pathname === "/api/v2/previsao") previsoes.push(u.search); });
+    await page.evaluate(() => { location.hash = "#/"; });
+    await page.getByRole("radio", { name: "60 dias" }).click();
+    await page.waitForFunction(() => true);
+    const virar = async (uid) => {
+      await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { user_id: uid, display_name: "X", email: null, whatsapp_linked: true } }));
+      const lida = page.waitForResponse((r) => r.url().includes("/auth/dashboard-profile"));
+      await campo(page).fill("@"); // o "@" relê a conta: a troca é descoberta com a previsão na tela
+      await lida;
+      await campo(page).fill("");
+      await page.waitForTimeout(400);
+    };
+    await virar(60); // 42 → 60
+    const antes = previsoes.filter((x) => x === "?dias=60").length;
+    await virar(43); // 60 → 43: o uid antigo é 60
+    assert.ok(previsoes.filter((x) => x === "?dias=60").length > antes, `a previsão de 60 dias da conta anterior foi relida: ${previsoes}`);
+    await ctx.close();
+  });
+
   test(`${width}: com a conta lenta, a pergunta sem menção abre o chat em "Carregando a conversa…" e entra quando a conta volta`, async () => {
     const { ctx, page } = await abrir({ width });
     if (width >= 768) { // no desktop a barra também fica nas outras páginas

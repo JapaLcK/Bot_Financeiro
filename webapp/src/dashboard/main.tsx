@@ -29,9 +29,10 @@ qc.getQueryCache().subscribe((e) => {
   if (uidVisto != null && uid !== uidVisto) { const antigo = uidVisto; queueMicrotask(() => {
     const daConta = (q: { queryKey: readonly unknown[] }) => !ehPerfil(q.queryKey);
     qc.removeQueries({ predicate: (q) => daConta(q) && q.getObserversCount() === 0 });
-    // A chave que termina no uid antigo (["conta", "bancos", 7]) já é da conta anterior: quem a mostra troca de chave sozinho, e
-    // relê-la agora seria ler a conta anterior com a sessão nova.
-    void qc.invalidateQueries({ predicate: (q) => daConta(q) && q.queryKey[q.queryKey.length - 1] !== antigo });
+    // As famílias com o uid na chave (["conta", <assunto>, uid] e ["agentes", uid]) do uid antigo já são da conta anterior: quem as
+    // mostra troca de chave sozinho, e relê-las agora seria ler a conta anterior com a sessão nova. Só elas: ["previsao", 30] não é uid.
+    const doUidAntigo = (k: readonly unknown[]) => ((k[0] === "conta" && k.length === 3) || (k[0] === "agentes" && k.length === 2)) && k[k.length - 1] === antigo;
+    void qc.invalidateQueries({ predicate: (q) => daConta(q) && !doUidAntigo(q.queryKey) });
   }); }
   uidVisto = uid;
 });
