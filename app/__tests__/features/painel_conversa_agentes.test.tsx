@@ -50,6 +50,14 @@ it("rode a conversa: @Xerife vai ao agente (sem stream), com menção em brandIn
   expect(corpoDe(chats()[1]!)).toEqual({ message: "e agora?", context: "ctx1" });
 });
 
+it("'@Xerife ?' (só pontuação) fica no campo sem tocar no agente nem no Piggy; '@Xerife 👍' envia o emoji, como no /painel (#1157)", async () => {
+  ag.chat = () => resp("Valeu.");
+  await abrir(); await enviar("@Xerife ?");
+  expect(chats()).toHaveLength(0); expect(posts()).toHaveLength(0); expect(campo().props.value).toBe("@Xerife ?");
+  await enviar("@Xerife 👍"); await waitFor(() => expect(screen.getByText("Valeu.")).toBeTruthy());
+  expect(chats()).toHaveLength(1); expect(corpoDe(chats()[0]!)).toEqual({ message: "👍", context: null }); expect(posts()).toHaveLength(0);
+});
+
 it("lista do @: '@' mostra os grupos, '@rep' só o Repórter, tocar no item deixa '@Repórter ' no campo", async () => {
   ag.catalogo = (u) => cat(Number(u), {}, null); await abrir(); await digitar("@");
   await waitFor(() => expect(screen.getByText("Ativar para conversar")).toBeTruthy());
