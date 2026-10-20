@@ -61,6 +61,8 @@ export interface Dependencias {
   /** `useSessao().expirou`: a pilha troca para o login. */
   expirou: (aviso: string) => void;
   controlador?: AbortController;
+  /** O marcador que ESTA rodada acompanha (`null` em `modo=acompanhar` ou sem marcador): o "Descartar" da tela só apaga este. */
+  aoTentativa?: (id: string | null) => void;
 }
 
 /** O `itemId` do link, ou `null` se ausente, repetido (array), vazio ou fora da regra do servidor. */
@@ -141,6 +143,7 @@ export async function conferirVolta(link: unknown, d: Dependencias, origem?: unk
     return d.aoMudar({ fase: "erro", texto: "Não conseguimos ler o retorno do banco neste aparelho. Tente de novo." });
   }
   if (d.cancelado()) return;
+  d.aoTentativa?.(inicial?.tentativa_id ?? null);
   if (!itemId && !inicial) return d.aoMudar({ fase: "sem-item" });
   const linkVinculado = !!inicial && tentativaDoLink(origem) === inicial.tentativa_id;
   const legado = link !== undefined && link !== null && !linkVinculado;
