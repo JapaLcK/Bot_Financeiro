@@ -186,12 +186,16 @@ for (const [entrou, saiu, sobrou] of [["0.10", "0.30", "−R$ 0,20"], ["0", "310
   });
 }
 
-test("Repórter: os motivos do mês viram selos no card, como o texto avisa", async () => {
-  const { ctx, page } = await abrir({ width: 1440, tipo: "resumo_mes", corpo: { ...RES("10.00", "5.00"), motivos: ["conciliacao_pendente"] } });
-  await perguntar(page, "Repórter");
-  await carregado(page);
-  assert.deepEqual(await card(page).locator(".selo").allInnerTexts(), ["conciliação pendente"]);
-  await ctx.close();
+test("Repórter: os selos são os avisos que o agente deu (do card), não os da rota", async () => {
+  // a rota avisa do corte no mês anterior; o agente, com o mês inteiro, não: o card segue o agente
+  const corpo = { ...RES("10.00", "5.00"), motivos: ["inicio_do_historico", "conciliacao_pendente"] };
+  for (const [motivos, esperado] of [[["conciliacao_pendente"], ["conciliação pendente"]], [[], []], [[{}], []]]) {
+    const { ctx, page } = await abrir({ width: 1440, tipo: "resumo_mes", card: { tipo: "resumo_mes", mes: "2026-10", motivos }, corpo });
+    await perguntar(page, "Repórter");
+    await carregado(page);
+    assert.deepEqual(await card(page).locator(".selo").allInnerTexts(), esperado, JSON.stringify(motivos));
+    await ctx.close();
+  }
 });
 
 for (const width of [390, 320]) test(`Xerife: total e linhas de 7 dígitos em ${width} não saem do card nem rolam a página`, async () => {
