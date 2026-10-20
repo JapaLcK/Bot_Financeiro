@@ -266,3 +266,182 @@ def test_consulta_de_orcamentos_carimba_o_mes_da_consulta(user_id, monkeypatch):
     monkeypatch.setattr(chat, "date", Hoje)
     r = chat.execute_read(user_id, "xerife", "get_budget_status", {})
     assert r["mes"] == "2026-01"
+
+
+# --- compare_periods → card `comparacao_meses`: o resultado REAL da tool (sem mock), relógio congelado em 12/10/2026 ---
+from datetime import datetime  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from core.services import agent_chat_card, comparacao_periodos as cp  # noqa: E402
+from core.services.ai_chat.tools import launches as tool  # noqa: E402
+from db import resumo_mes  # noqa: E402
+from tests._patrimonio_helpers import q  # noqa: E402
+from tests.conftest import usuario_pagante  # noqa: E402
+
+execute_read_real = chat.execute_read  # o fixture `conversa` troca o `chat.execute_read`; o teste do Repórter devolve o real
+from utils_date import _tz  # noqa: E402
+
+AGORA = datetime(2026, 10, 12, 10, 0, tzinfo=_tz())
+CENT = Decimal("0.01")
+
+
+@pytest.fixture
+def relogio(monkeypatch):
+    monkeypatch.setattr(cp, "now_tz", lambda: AGORA)
+    monkeypatch.setattr(tool, "now_tz", lambda: AGORA)
+    monkeypatch.setattr(tool, "today_tz", lambda: AGORA.date())
+    monkeypatch.setattr(agent_chat_card, "now_tz", lambda: AGORA)
+
+
+@pytest.fixture
+def conta(relogio):
+    """Mar, ago, set e out de 2026 com dinheiro e uma compra de cartão cuja fatura (fecha dia 20) cai no próprio mês."""
+    uid = usuario_pagante("pro")
+    for mes_, rec, desp in ((3, 700, 70), (8, 1000, 100), (9, 1500, 250), (10, 900, 40)):
+        for tipo, v, dia in (("receita", rec, 3), ("despesa", desp, 4)):
+            q("insert into launches (user_id, tipo, valor, criado_em) values (%s, %s, %s, %s)", (uid, tipo, v, datetime(2026, mes_, dia, 12, tzinfo=_tz())))
+    cartao = db.create_card(uid, "Nubank", closing_day=20, due_day=27)
+    for mes_ in (8, 9, 10):
+        db.add_credit_purchase(uid, cartao, 80, "Mercado", f"c{mes_}", date(2026, mes_, 5))
+    # depois do fechamento (dia 20): a fatura cai no mês seguinte ao da compra, então "por fatura" ≠ "por data da compra"
+    for dia, valor in ((20, 7), (21, 11), (25, 13)):
+        db.add_credit_purchase(uid, cartao, valor, "Padaria", f"p8{dia}", date(2026, 8, dia))
+    db.add_credit_purchase(uid, cartao, 17, "Padaria", "p921", date(2026, 9, 21))
+    return uid
+
+
+def _comparar(uid, **args):
+    r = tool._compare_periods(uid, args)
+    return r, card_da_resposta(uid, "reporter", [("compare_periods", args, r)])
+
+
+def datas(a, b):
+    """Os 4 argumentos de dois meses inteiros ("2026-08" → 01..último dia)."""
+    import calendar
+    dia = lambda m: (f"{m}-01", f"{m}-{calendar.monthrange(int(m[:4]), int(m[5:]))[1]:02d}")  # noqa: E731
+    return dict(zip(("period_a_start", "period_a_end", "period_b_start", "period_b_end"), (*dia(a), *dia(b))))
+
+
+def _compra_por_data(uid, ano, mes_):
+    """O que o cálculo por data da compra somaria no mês (a regra que a tool NÃO usa)."""
+    return q("select coalesce(sum(valor), 0) as s from credit_transactions where user_id=%s and extract(year from purchased_at)=%s "
+             "and extract(month from purchased_at)=%s", (uid, ano, mes_))["s"]
+
+
+def _contrato(meses, r):
+    return {"tipo": "comparacao_meses", "meses": meses, "motivos": r["motivos"]}
+
+
+@pytest.mark.parametrize("args,meses", [
+    ({"mes": "2026-09"}, ["2026-08", "2026-09"]),  # mês passado
+    ({"mes": "2026-10"}, ["2026-09", "2026-10"]),  # o corrente, inteiro
+    (datas("2026-08", "2026-09"), ["2026-08", "2026-09"]),  # 4 datas consecutivas
+    (datas("2026-03", "2026-08"), ["2026-03", "2026-08"]),  # 4 datas não consecutivas
+    (datas("2026-09", "2026-10"), ["2026-09", "2026-10"]),  # corrente contra o anterior pelas datas
+])
+def test_comparacao_vira_card_e_os_numeros_batem_com_o_resumo_do_mes(conta, args, meses):
+    r, card = _comparar(conta, **args)
+    assert card == _contrato(meses, r) and r["base"]["cartao"] == "fatura"
+    for lado, m in zip(("anterior", "atual"), meses):
+        rota = resumo_mes.resumo_do_mes(conta, int(m[:4]), int(m[5:]), AGORA)
+        assert r["receita"]["total_" + lado] == Decimal(str(rota["entrou"])).quantize(CENT)
+        assert r["despesa"]["total_" + lado] == Decimal(str(rota["saiu"])).quantize(CENT)
+        assert r["despesa"]["total_" + lado] > 0  # a fatura do cartão entrou: o número não é de lançamento só
+    # por fatura ≠ por data da compra (as compras pós-fechamento de ago e set mudam de mês): o assert acima separa as duas regras
+    for lado, m in zip(("anterior", "atual"), meses):
+        if m in ("2026-08", "2026-09"):
+            avulso = Decimal(q("select coalesce(sum(valor), 0) as s from launches where user_id=%s and tipo='despesa' "
+                               "and to_char(criado_em, 'YYYY-MM')=%s", (conta, m))["s"])
+            assert r["despesa"]["total_" + lado] != avulso + _compra_por_data(conta, int(m[:4]), int(m[5:])), m
+
+
+def test_card_leva_os_motivos_da_tool_so_os_str(conta, monkeypatch):
+    from db import contas_hoje
+    monkeypatch.setattr(contas_hoje, "listar", lambda cur, uid: {"motivos": ["conciliacao_pendente", "banco_desatualizado"]})
+    r, card = _comparar(conta, mes="2026-09")
+    assert r["motivos"] == ["conciliacao_pendente", "banco_desatualizado"] and card == _contrato(["2026-08", "2026-09"], r)
+    assert card["motivos"] == ["conciliacao_pendente", "banco_desatualizado"]
+    sujo = {**r, "motivos": ["conciliacao_pendente", {"obj": 1}, None, "banco_desatualizado"]}  # só `str` chega ao card
+    assert card_da_resposta(conta, "reporter", [("compare_periods", {}, sujo)])["motivos"] == ["conciliacao_pendente", "banco_desatualizado"]
+
+
+def test_corte_do_plano_no_dia_1_do_mais_antigo_ainda_e_card(conta, monkeypatch):
+    monkeypatch.setattr(cp, "history_earliest_date", lambda uid, agora: date(2026, 8, 1))
+    r, card = _comparar(conta, mes="2026-09")
+    assert card == _contrato(["2026-08", "2026-09"], r)
+
+
+@pytest.mark.parametrize("nome,args,corte", [
+    ("período livre (data da compra)", {"period_a_start": "2026-08-05", "period_a_end": "2026-08-20", "period_b_start": "2026-09-05", "period_b_end": "2026-09-20"}, None),
+    ("lado com dois meses", {**datas("2026-08", "2026-09"), "period_a_start": "2026-07-01"}, None),
+    ("mês igual", datas("2026-08", "2026-08"), None),
+    ("anterior depois do atual", datas("2026-09", "2026-08"), None),
+    ("mês futuro", datas("2026-10", "2026-11"), None),
+    ("corte do plano no mais antigo", {"mes": "2026-09"}, date(2026, 8, 15)),
+    ("sem base no mês anterior", {"mes": "2026-06"}, None),
+    ("lado com fim ajustado (pedido)", {**datas("2026-09", "2026-10"), "period_b_end": "2026-12-31"}, None),
+    ("erro da tool", {}, None),
+])
+def test_sem_card(conta, monkeypatch, nome, args, corte):
+    if corte:
+        monkeypatch.setattr(cp, "history_earliest_date", lambda uid, agora: corte)
+    r, card = _comparar(conta, **args)
+    assert card is None, nome
+    if nome == "lado com dois meses":
+        assert r["anterior"]["inicio"] == "2026-07-01" and r["base"]["cartao"] == "fatura"  # chegou ao card por fatura: só o lado o barrou
+    if nome == "lado com fim ajustado (pedido)":
+        assert "pedido" in r["atual"] and r["atual"]["inicio"] == "2026-10-01"  # as duas pontas são mês inteiro: só o `pedido` barra
+    if nome == "mês futuro":
+        assert "error" not in r  # o futuro chegou ao card: só a regra do mês corrente o barra
+    if nome == "sem base no mês anterior":
+        assert r["motivo"] == "sem_base"
+    if nome == "corte do plano no mais antigo":
+        assert r["motivo"] == "inicio_do_historico"
+
+
+def test_sem_card_formas_sinteticas_e_consultas_misturadas(conta):
+    r, _ = _comparar(conta, mes="2026-09")
+    soma = tool._get_period_summary(conta, {"start_date": "2026-09-01", "end_date": "2026-09-30"})
+    r2, _ = _comparar(conta, mes="2026-10")
+    for res in ({}, None, {"base": None}, {**r, "base": {**r["base"], "cartao": "data_da_compra"}}, {**r, "despesa": None}, {**r, "atual": None}):
+        assert card_da_resposta(1, "reporter", [("compare_periods", {}, res)]) is None
+    c = lambda res: ("compare_periods", {}, res)  # noqa: E731
+    assert card_da_resposta(1, "reporter", [c(r), ("get_period_summary", {}, soma)]) is None  # cards diferentes: o texto fala dos dois
+    assert card_da_resposta(1, "reporter", [c(r), c(r2)]) is None
+    assert card_da_resposta(1, "reporter", [c(r), c(r)]) == _contrato(["2026-08", "2026-09"], r)
+    assert card_da_resposta(1, "xerife", [c(r)]) is None  # outro agente
+
+
+@pytest.mark.parametrize("troca", [
+    {"atual": {"inicio": "2026-09-01", "fim": "2026-09-15"}},  # mês incompleto
+    {"atual": {"inicio": "2026-09-01", "fim": "2026-09-99"}},  # dia impossível
+    {"atual": {"inicio": "2026-09-01", "fim": "2026-09-30T00:00"}},  # lixo depois do dia
+    {"anterior": {"inicio": "2026-08-02", "fim": "2026-08-31"}},  # não começa no dia 1
+    {"anterior": {"inicio": "2026-13-01", "fim": "2026-13-31"}},  # mês que não existe
+    {"receita": None},
+    {"despesa": None},
+])
+def test_sem_card_guardas_do_mes_inteiro(conta, troca):
+    r, card = _comparar(conta, mes="2026-09")
+    assert card and card_da_resposta(1, "reporter", [("compare_periods", {}, {**r, **troca})]) is None
+
+
+class _Call:
+    def __init__(self, nome, args, n):
+        self.id = f"call_{n}"
+        self.function = SimpleNamespace(name=nome, arguments=json.dumps(args))
+
+    def model_dump(self):
+        return {"id": self.id, "type": "function", "function": {"name": self.function.name, "arguments": self.function.arguments}}
+
+
+def test_conversa_do_reporter_compara_dois_meses_e_leva_o_card(conversa, monkeypatch, conta):
+    monkeypatch.setattr(plan_service, "plan_gate_ok", lambda uid, feature: True)  # o fixture `gate` nega financial_comparison; aqui o plano é o da conta
+    r = tool._compare_periods(conta, {"mes": "2026-09"})
+    monkeypatch.setattr(chat, "execute_read", execute_read_real)  # a conversa passa pelo `execute_read → tool.execute` de verdade
+    monkeypatch.setattr(chat, "_route", lambda *a: own_route(needs_data=True))
+    conversa([response(calls=[_Call("compare_periods", {"mes": "2026-09"}, 1)]), response("Setembro foi diferente."), OK])
+    assert chat.chat(conta, "reporter", "Compare agosto com setembro")["card"] == _contrato(["2026-08", "2026-09"], r)
+    # as duas consultas na mesma resposta: o texto fala de mais que um card mostra
+    conversa([response(calls=[_Call("compare_periods", {"mes": "2026-09"}, 1), _Call("get_period_summary", {}, 2)]), response("Setembro foi diferente."), OK])
+    assert chat.chat(conta, "reporter", "Compare agosto com setembro e resuma setembro")["card"] is None
