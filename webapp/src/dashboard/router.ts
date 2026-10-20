@@ -21,7 +21,7 @@ export const ROUTES = [
   { path: "/orcamentos-categoria", label: "Orçamentos por categoria", short: "Orçamentos", icon: "ph-chart-pie", title: "Orçamentos por categoria" },
   // Fora do RAIL, como o Orçamento: abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/milhao", label: "Progresso ao milhão", short: "Milhão", icon: "ph-trophy", title: "Progresso ao milhão" },
-  // Esboço: fora do RAIL, abre pelo card de Ferramentas e pelo ⌘K.
+  // Fora do RAIL, como o Milhão: abre pelo card de Ferramentas e pelo ⌘K.
   { path: "/agentes", label: "Agentes", short: "Agentes", icon: "ph-robot", title: "Agentes" },
   { path: "/ferramentas", label: "Ferramentas", short: "Ferramentas", icon: "ph-wrench", title: "Ferramentas" },
   { path: "/piggy", label: "Piggy", short: "Piggy", icon: "ph-chat-circle", title: "Converse com o Piggy" },

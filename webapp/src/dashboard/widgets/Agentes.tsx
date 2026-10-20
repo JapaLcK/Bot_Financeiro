@@ -1,14 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, type CSSProperties } from "react";
 import { AGENTES, acessoDe, agentesQuery, type Acesso } from "../lib/agentes";
 import { agenteCena } from "../lib/brand";
 import { contaQuery } from "../lib/v2";
-import { Seg } from "../parts/Seg";
 
-// Esboço da tela de Agentes (/painel#/agentes): três formatos da mesma lista, para escolher um.
+// A tela de Agentes (/painel#/agentes): uma galeria de faixas, a escolhida abre e mostra o agente inteiro.
 // O estado de cada agente (ativo, energia, plano) vem do mesmo /agents/{uid} da barra do Piggy.
 // ponytail: frase/texto copiados de frontend/agents.html e o ritmo de frontend/preview_agentes.html;
-// quando um formato vencer, a copy vira uma fonte só (ou vem do servidor) e o teste de catálogo passa a conferir.
+// a copy vira uma fonte só (ou vem do servidor) quando a /agents antiga sair, e o teste de catálogo passa a conferir.
 const SOBRE: Record<string, { frase: string; texto: string; ritmo: string; foco: string }> = {
   xerife: { frase: "De olho nos excessos.", texto: "Avisa sobre gastos fora do padrão e categorias que ultrapassam os limites que você definiu.", ritmo: "Diário", foco: "55%" },
   reporter: { frase: "Seu mês, em pauta.", texto: "Reúne entradas, saídas, aportes e quanto sobrou em um resumo mensal das suas finanças.", ritmo: "Mensal", foco: "43%" },
@@ -22,20 +21,22 @@ const SOBRE: Record<string, { frase: string; texto: string; ritmo: string; foco:
 type Estado = Acesso | "off";
 const SELO: Record<Estado, string> = { ready: "No seu time", activate: "Disponível", no_energy: "Sem energia", upgrade: "Fora do plano", off: "Em breve" };
 const ACAO: Record<Estado, string> = { ready: "Conversar", activate: "Ativar", no_energy: "Liberar energia", upgrade: "Ver planos", off: "" };
-// ponytail: toda ação leva à /agents, que já ativa e conversa; trocar por ativar()/conversar() quando o formato for escolhido.
+// ponytail: toda ação leva à /agents, que já ativa e conversa; trocar por ativar()/conversar() quando a tela fizer isso sozinha.
 const DESTINO = "/agents";
 
 function useElenco() {
   const conta = useQuery(contaQuery);
   const uid = conta.isFetching || conta.isError ? undefined : conta.data?.user_id;
-  const d = useQuery(agentesQuery(uid)).data; // sem dados (carregando, erro): a tela mostra o catálogo sem estado
+  const q = useQuery(agentesQuery(uid));
+  const d = q.data; // sem dados (carregando, erro): a tela mostra o catálogo sem estado nem botão
   const lista = AGENTES.map((a) => ({
     ...a, ...SOBRE[a.kind],
     estado: d ? ((acessoDe(d, a.kind) ?? "off") as Estado) : null,
     custo: d?.catalog.find((c) => c.kind === a.kind)?.energy_cost,
   }));
-  const energia = d?.energy_enabled ? { usada: Number(d.energy_used || 0), total: Number(d.energy_budget || 0) } : null;
-  return { lista, energia };
+  // Plano sem energia (orçamento 0): sem barra; o botão de cada agente já diz "Ver planos".
+  const energia = d?.energy_enabled && Number(d.energy_budget) > 0 ? { usada: Number(d.energy_used || 0), total: Number(d.energy_budget) } : null;
+  return { lista, energia, erro: conta.isError || q.isError };
 }
 type Agente = ReturnType<typeof useElenco>["lista"][number];
 
@@ -47,7 +48,6 @@ const Acao = ({ a }: { a: Agente }) => a.estado && a.estado !== "off" && (
   </a>
 );
 
-// --- 1. Galeria: faixas lado a lado; a escolhida abre e mostra o agente inteiro. ---
 function Galeria({ lista }: { lista: Agente[] }) {
   const [ativo, setAtivo] = useState(0);
   return (
@@ -60,7 +60,7 @@ function Galeria({ lista }: { lista: Agente[] }) {
             <img src={agenteCena(a.kind)} alt="" loading="lazy" decoding="async" />
             <button type="button" className="ag-faixa-alvo" aria-expanded={on} aria-controls={`ag-g-${a.kind}`} onClick={() => setAtivo(i)} onFocus={() => setAtivo(i)}>
               <span className="ag-faixa-nome">{a.nome}</span>
-              {a.estado === "ready" && <span className="ag-faixa-ponto" aria-label="no seu time" />}
+              {a.estado === "ready" && <span className="ag-faixa-ponto" role="img" aria-label="no seu time" />}
             </button>
             <div className="ag-faixa-info" id={`ag-g-${a.kind}`} inert={!on}>
               <span className="ag-olho">{a.tema}</span>
@@ -77,94 +77,6 @@ function Galeria({ lista }: { lista: Agente[] }) {
   );
 }
 
-// --- 2. Carrossel: capas em perspectiva; a do centro ganha a ficha embaixo. ---
-function Carrossel({ lista }: { lista: Agente[] }) {
-  const [ativo, setAtivo] = useState(Math.floor(lista.length / 2)); // começa no meio: capas dos dois lados
-  const toque = useRef<{ x: number; moveu: boolean } | null>(null);
-  const ir = (i: number) => setAtivo(Math.max(0, Math.min(lista.length - 1, i)));
-  const onKey = (e: KeyboardEvent) => {
-    const passo = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (passo) { e.preventDefault(); ir(ativo + passo); }
-  };
-  const a = lista[ativo];
-  return (
-    <section className="ag-cf" aria-roledescription="carrossel" aria-label="Agentes">
-      <div className="ag-palco" tabIndex={0} onKeyDown={onKey}
-        onPointerDown={(e) => { toque.current = { x: e.clientX, moveu: false }; }}
-        onPointerMove={(e) => { if (toque.current && Math.abs(e.clientX - toque.current.x) > 8) toque.current.moveu = true; }}
-        onPointerUp={(e) => { const t = toque.current; if (t && Math.abs(e.clientX - t.x) > 40) ir(ativo + (e.clientX < t.x ? 1 : -1)); }}>
-        {lista.map((x, i) => {
-          const d = i - ativo, ad = Math.abs(d), s = Math.sign(d);
-          const tx = d === 0 ? 0 : s * (56 + (ad - 1) * 22);
-          return (
-            <button key={x.kind} type="button" className="ag-capa" tabIndex={-1} aria-hidden={d !== 0}
-              data-on={d === 0 || undefined} data-longe={ad > 2 || undefined}
-              style={{ "--tx": `${tx}%`, "--rot": `${-s * 30}deg`, "--esc": 1 - Math.min(ad, 3) * 0.1, "--z": -ad * 120, "--sombra": Math.min(ad * 0.28, 0.8), "--foco": x.foco, zIndex: 10 - ad } as CSSProperties}
-              onClick={() => { if (!toque.current?.moveu) setAtivo(i); toque.current = null; }}>
-              <img src={agenteCena(x.kind)} alt="" loading="lazy" decoding="async" draggable={false} />
-              <span className="ag-capa-nome">{x.nome}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="ag-cf-barra">
-        <button type="button" className="icon-btn" aria-label="Agente anterior" disabled={ativo === 0} onClick={() => ir(ativo - 1)}><i className="ph ph-arrow-left" /></button>
-        <div className="ag-pontos" role="tablist" aria-label="Escolha um agente">
-          {lista.map((x, i) => <button key={x.kind} type="button" role="tab" aria-selected={i === ativo} aria-label={x.nome} onClick={() => setAtivo(i)} />)}
-        </div>
-        <button type="button" className="icon-btn" aria-label="Próximo agente" disabled={ativo === lista.length - 1} onClick={() => ir(ativo + 1)}><i className="ph ph-arrow-right" /></button>
-      </div>
-      <article className="ag-ficha" key={a.kind} aria-live="polite">
-        <div>
-          <span className="ag-olho">{a.tema} · {ativo + 1} de {lista.length}</span>
-          <h2 className="ag-nome">{a.nome}</h2>
-          <p className="ag-frase">{a.frase}</p>
-        </div>
-        <div className="ag-ficha-dir">
-          <p className="ag-texto">{a.texto}</p>
-          <div className="ag-meta"><Selo a={a} /><span className="ag-ritmo"><i className="ph ph-clock" aria-hidden="true" />{a.ritmo}</span><Custo a={a} /></div>
-          <Acao a={a} />
-        </div>
-      </article>
-    </section>
-  );
-}
-
-// --- 3. Elenco: quem já trabalha para você em destaque, o resto da equipe embaixo. ---
-function Cartao({ a, grande }: { a: Agente; grande?: boolean }) {
-  return (
-    <li className="ag-casca" data-grande={grande || undefined} style={{ "--foco": a.foco } as CSSProperties}>
-      <article className="ag-nucleo">
-        <figure className="ag-cartao-img"><img src={agenteCena(a.kind)} alt="" loading="lazy" decoding="async" /><Selo a={a} /></figure>
-        <div className="ag-cartao-corpo">
-          <div className="ag-cartao-topo"><h3 className="ag-nome">{a.nome}</h3><Custo a={a} /></div>
-          <p className="ag-frase">{a.frase}</p>
-          <p className="ag-texto">{a.texto}</p>
-          <div className="ag-cartao-pe"><span className="ag-ritmo"><i className="ph ph-clock" aria-hidden="true" />{a.ritmo}</span><Acao a={a} /></div>
-        </div>
-      </article>
-    </li>
-  );
-}
-function Elenco({ lista }: { lista: Agente[] }) {
-  const time = lista.filter((a) => a.estado === "ready");
-  const resto = lista.filter((a) => a.estado !== "ready");
-  return (
-    <div className="ag-elenco">
-      {time.length > 0 && (
-        <section>
-          <h2 className="ag-sec">No seu time <span>{time.length}</span></h2>
-          <ul className="ag-bento" data-destaque={time.length >= 3 || undefined}>{time.map((a, i) => <Cartao key={a.kind} a={a} grande={i === 0 && time.length >= 3} />)}</ul>
-        </section>
-      )}
-      <section>
-        <h2 className="ag-sec">{time.length ? "Para completar o time" : "Todos os agentes"} <span>{resto.length}</span></h2>
-        <ul className="ag-bento ag-bento-resto">{resto.map((a) => <Cartao key={a.kind} a={a} />)}</ul>
-      </section>
-    </div>
-  );
-}
-
 function Energia({ usada, total }: { usada: number; total: number }) {
   return (
     <div className="ag-energia" role="img" aria-label={`Energia: ${usada} de ${total} em uso`}>
@@ -176,21 +88,13 @@ function Energia({ usada, total }: { usada: number; total: number }) {
   );
 }
 
-type Vista = "galeria" | "carrossel" | "elenco";
-const VISTAS: { value: Vista; label: string }[] = [{ value: "galeria", label: "Galeria" }, { value: "carrossel", label: "Carrossel" }, { value: "elenco", label: "Elenco" }];
-
 export function AgentesPainel() {
-  const { lista, energia } = useElenco();
-  const [vista, setVista] = useState<Vista>("galeria");
+  const { lista, energia, erro } = useElenco();
   return (
     <div className="span-12 ag">
-      <div className="ag-topo">
-        {energia ? <Energia {...energia} /> : <span />}
-        <div className="ag-vista"><span className="ag-esboco">Esboço</span><Seg label="Formato da tela" options={VISTAS} value={vista} onChange={setVista} /></div>
-      </div>
-      <div className="ag-vista-corpo" key={vista}>
-        {vista === "galeria" ? <Galeria lista={lista} /> : vista === "carrossel" ? <Carrossel lista={lista} /> : <Elenco lista={lista} />}
-      </div>
+      {energia && <Energia {...energia} />}
+      {erro && <p className="ag-aviso" role="status">Não deu para carregar o estado dos seus agentes agora. Tente de novo em instantes.</p>}
+      <Galeria lista={lista} />
     </div>
   );
 }
