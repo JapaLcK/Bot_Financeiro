@@ -17,7 +17,7 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
-async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {} } = {}) {
+async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {}, planosDepois = 0 } = {}) {
   const ctx = await browser.newContext({
     viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
@@ -30,8 +30,8 @@ async function abrir({ js = true, calmo = false, mobile = false, relogio = false
     status: 200, contentType: "application/json",
     body: JSON.stringify({ email: "ana.beatriz@gmail.com", display_name: "Ana Beatriz", plan: "free" }) }));
   // o servidor estático não tem o /billing/plans-config: por padrão os três planos estão à venda
-  await ctx.route("**/billing/plans-config", r => r.fulfill({ status: 200, contentType: "application/json",
-    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true, ...disponivel }) }));
+  await ctx.route("**/billing/plans-config", async r => (await new Promise(ok => setTimeout(ok, planosDepois)), r.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true, ...disponivel }) })));
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
@@ -319,6 +319,16 @@ test("plano sem price no Stripe (plans-config): os botões dele viram 'Indispon�
   const outros = r.filter(([t]) => t !== "plus");
   assert.equal(outros.length, 4);
   for (const [t, href, txt] of outros) assert.ok(href.startsWith(`/assinar?plano=${t}&`) && txt !== "Indisponível", `${t}: ${href} ${txt}`);
+  assert.deepEqual(erros, []);
+});
+
+test("com sessão e o plans-config chegando depois do /auth/validate, o plano indisponível ainda vira 'Indisponível'", async () => {
+  const { page, ctx, erros } = await abrir({ logado: true, disponivel: { plus_available: false }, planosDepois: 600 });
+  await page.waitForFunction(() => document.querySelectorAll('[data-plano] [aria-disabled="true"]').length === 2, null, { timeout: 5000 });
+  const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href"), a.textContent.trim()]));
+  await ctx.close();
+  assert.deepEqual(r.filter(([t]) => t === "plus"), [["plus", null, "Indisponível"], ["plus", null, "Indisponível"]]);
+  assert.deepEqual(r.filter(([t]) => t !== "plus").map(([, h]) => h), Array(4).fill("/precos"));
   assert.deepEqual(erros, []);
 });
 

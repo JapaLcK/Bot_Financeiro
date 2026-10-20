@@ -36,7 +36,8 @@
       if (!cfg) return;
       for (const card of planos.querySelectorAll("[data-plano]")) {
         if (cfg[card.dataset.plano + "_available"] !== false) continue;
-        for (const a of card.querySelectorAll('a[href^="/assinar"]')) {
+        // Pela classe, não pelo href: com sessão o outro fetch pode ter trocado o destino para /precos antes.
+        for (const a of card.querySelectorAll("a.so-anual, a.so-mensal")) {
           a.removeAttribute("href");
           a.setAttribute("aria-disabled", "true");
           a.textContent = "Indisponível";
