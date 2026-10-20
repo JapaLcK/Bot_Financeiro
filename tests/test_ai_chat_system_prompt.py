@@ -20,7 +20,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 PASTA = RAIZ / "core/services/ai_chat"
 FONTES = [p for p in PASTA.rglob("*.py") if p.name != "system_prompt.py"] + [
     RAIZ / f for f in ("api/nativo/mes_detalhes.py", "db/mes_detalhes.py", "db/resumo_mes.py", "db/accounts.py",
-                       "core/services/cashflow.py", "core/services/comparacao_periodos.py")]
+                       "core/services/cashflow.py", "core/services/comparacao_periodos.py", "db/rendimentos.py")]
 PRODUTORES_DA_REGRA_10 = [PASTA / "tools/launches.py", PASTA / "tools/mostrar_card.py"]
 NOME = re.compile(r"`([a-z_][a-z0-9_]*)`")
 TEXTO = SYSTEM_PROMPT.replace(FORMATO_WHATSAPP, "") + ADENDO_CARDS  # o bloco de formato fala de markdown, não do código

@@ -189,7 +189,7 @@ SCHEMA = {
             "Cards: contas (saldo total e por conta: 'meu saldo'), hero (previsão de saldo), compromissos (próximos "
             "pagamentos), resumo (SÓ o gasto do mês e o ritmo contra o mês passado, não o que entrou), categorias (gastos por categoria; aceita "
             "até 3 meses, uma aba por mês), calendario (gastos por dia), simulador (Pro), patrimonio, "
-            "wealth (distribuição do patrimônio), rendimento (taxas contratadas), assinaturas, "
+            "wealth (distribuição do patrimônio), rendimento (quanto os investimentos renderam no mês e no total, por categoria e ativo), assinaturas, "
             "metas (caixinhas com meta), fatura (cartões e limite), parcelas, renda (o que ENTROU × saiu "
             "mês a mês, até 12 meses; se recusar por plano, o dado de UM mês sai em texto pelo get_period_summary), piggy (insights), periodo (2 a 12 meses inteiros, 'março a agosto', "
             "'este ano': entrou, saiu, saldo, barras por mês e categorias somadas; use de/ate). Erro de plano: ofereça o upgrade, sem números."

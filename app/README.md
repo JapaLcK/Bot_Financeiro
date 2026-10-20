@@ -18,7 +18,7 @@ entradas por link também passam pelo portão.
 Há dezesseis blocos e seis perfis. O perfil é salvo no servidor, e a ordem,
 a visibilidade e a restauração ficam no SecureStore por usuário e perfil.
 Falhas de um recurso são recuperáveis e não viram dinheiro fictício.
-Rendimento mostra taxas contratadas; o simulador calcula economia hipotética
+Rendimento mostra taxas contratadas (o servidor já manda também o quanto rendeu, sem tela ainda); o simulador calcula economia hipotética
 sobre gastos observados, sem alterar registros ou a previsão. Histórico e
 recursos respeitam a disponibilidade do servidor. Compras Apple e restauração
 fazem parte de uma entrega separada. Validação em simulador não comprova
