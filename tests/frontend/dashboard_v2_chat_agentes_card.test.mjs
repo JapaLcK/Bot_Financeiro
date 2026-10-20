@@ -1,4 +1,4 @@
-// O card com os dados do tema abaixo da resposta do Faria Limer e do Barão (webapp: parts/CardAgente.tsx, parts/CardInvestido.tsx).
+// O card com os dados do tema acima do texto da resposta do Faria Limer e do Barão (webapp: parts/CardAgente.tsx, parts/CardInvestido.tsx).
 // O servidor só diz QUAL card (`card.tipo`); os números vêm do /api/v2/investido, conferida a conta da sessão (conta/api.ts: daConta).
 // O backend é de mentira (ctx.route); o contrato é o de frontend/routes/agents.py. Tudo em 1440 e 390.
 import { test, before, after } from "node:test";
@@ -45,7 +45,7 @@ const card = (page) => page.locator(".chat > .msg-piggy .card-agente");
 const shot = async (page, nome, width) => { if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, `${nome}-${width}.png`) }); } };
 
 for (const width of TELAS) {
-  test(`${width}: Faria Limer: o card fica entre o texto e "Perguntar ao X", com o número do /api/v2/investido`, async () => {
+  test(`${width}: Faria Limer: o card fica acima do texto, e o texto acima de "Perguntar ao X", com o número do /api/v2/investido`, async () => {
     const { ctx, page, erros, gets } = await abrir({ width });
     await perguntar(page);
     await card(page).locator(".card-agente-total").waitFor();
@@ -53,7 +53,7 @@ for (const width of TELAS) {
       const li = document.querySelector(".chat > .msg-piggy"), top = (s) => li.querySelector(s).getBoundingClientRect(), c = top(".card-agente"), l = li.getBoundingClientRect();
       const bar = [...li.querySelectorAll(".comp-bar span")];
       return {
-        ordem: [top(".msg-text").bottom <= c.top, c.bottom <= top(".msg-acoes").top],
+        ordem: [c.bottom <= top(".msg-text").top, top(".msg-text").bottom <= top(".msg-acoes").top],
         total: li.querySelector(".card-agente-total").textContent, titulo: li.querySelector(".card-agente-tit").textContent,
         linhas: [...li.querySelectorAll(".card-agente-lista li")].map((e) => e.innerText.replace(/\s+/g, " ")),
         segmentos: bar.length, rotulo: li.querySelector(".comp-bar").getAttribute("aria-label"), role: li.querySelector(".comp-bar").getAttribute("role"),
@@ -339,22 +339,20 @@ test("selos do Barão: só os da renda fixa e os do banco; o 'saldo ausente' dos
 });
 
 for (const width of TELAS) {
-  test(`${width}: o card só fica visível quando o texto termina (invisível, sem foco, até lá)`, async () => {
-    const longo = { json: { reply: Array.from({ length: 80 }, (_, i) => `palavra${i}`).join(" "), context: "c", redirects: [], usage: { used: 1, limit: 100 }, card: { tipo: "investido" } } };
+  test(`${width}: o card entra primeiro e o texto se revela depois dele; os botões, depois do texto`, async () => {
+    const longo = { json: { ...FARIA.json, reply: Array.from({ length: 80 }, (_, i) => `palavra${i}`).join(" ") } };
     const { ctx, page } = await abrir({ width, chat: longo });
     await page.emulateMedia({ reducedMotion: "no-preference" }); // o painel de teste abre com movimento reduzido (sem a animação do card)
     await perguntar(page);
-    const slot = page.locator(".chat > .msg-piggy .card-slot");
-    await slot.waitFor({ state: "attached" });
-    const antes = await slot.evaluate((e) => {
-      const b = document.createElement("button"); // o "Tentar de novo" do card é um botão dentro do slot; o que mede é o slot
-      e.appendChild(b); b.focus();
-      const cs = getComputedStyle(e), r = { visibilidade: cs.visibility, opacidade: cs.opacity, foco: document.activeElement === b, delay: e.style.animationDelay, revela: e.hasAttribute("data-revela") };
-      b.remove();
-      return r;
+    await page.locator(".chat > .msg-piggy .msg-text .rv").first().waitFor();
+    const atrasos = await page.evaluate(() => {
+      const li = document.querySelector(".chat > .msg-piggy"), d = (s) => li.querySelector(s).style.animationDelay;
+      return { card: d(".card-slot[data-revela]"), palavra: d(".msg-text .rv"), botoes: d(".msg-acoes[data-revela]") };
     });
-    assert.deepEqual(antes, { visibilidade: "hidden", opacidade: "0", foco: false, delay: "2500ms", revela: true });
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".card-slot")).visibility === "visible", null, { timeout: 6000 });
+    // O card entra já; a 1ª palavra espera o fade dele (ACOES_ANIM 400); os botões, a última palavra: 400 + 2000 (teto) + 500 (REVELA_ANIM).
+    assert.deepEqual(atrasos, { card: "0ms", palavra: "400ms", botoes: "2900ms" });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".card-slot")).opacity === "1", null, { timeout: 2000 });
+    assert.ok(await page.locator(".chat > .msg-piggy .rv").count() > 0, "o card já entrou e o texto ainda está se revelando");
     await ctx.close();
   });
 }
