@@ -8,7 +8,7 @@ import { __resetAvisoBanco } from "@/features/painel/avisoBanco";
 import { F as FX, bloco, comBlocos, instalarCards, perguntar } from "./conversa_cards_apoio";
 import { reiniciar } from "./conversa_apoio";
 import v2 from "../../../tests/frontend/api_v2_respostas.json";
-// "Gastos do dia a dia" (docs/paridade-app-dashboard.md): a linha mensal e as categorias na folha e no card do chat, e a parte no pior dia.
+// "Gastos do dia a dia" (paridade plena, por isso fora de docs/paridade-app-dashboard.md): a linha mensal e as categorias na folha e no card do chat, e a parte no pior dia.
 // Sem estimativa (null) a folha é a de sempre. Mesmas fixtures do Playwright do /painel (tests/frontend/api_v2_respostas.json).
 jest.setTimeout(30_000);
 const V = (v2 as any).previsao as Record<string, any>;
