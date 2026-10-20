@@ -14,9 +14,9 @@ import { FolhaDia, abreFolha } from "./folhaDia";
 import { CORES_CATEGORIA, raio } from "@/ui/tokens";
 import { somarCentavos, percentualEmCentavos } from "./decimal";
 // Barra da cor da fatia no donut, logo abaixo do nome (linha + barra = 44pt). Decorativa: o valor já está na linha. `fracao` é 0–1.
-export function LinhaCategoria({ titulo, detalhe, valor, fracao, cor, onPress }: { titulo: string; detalhe?: string; valor: number; fracao: number; cor: string; onPress?: () => void }) {
+export function LinhaCategoria({ titulo, detalhe, valor, tipo, fracao, cor, onPress }: { titulo: string; detalhe?: string; valor: number; tipo?: "saida"; fracao: number; cor: string; onPress?: () => void }) {
   const { oculto } = usePainel(); const { cores } = useTema();
-  return <Linha titulo={titulo} detalhe={detalhe} valor={valor} onPress={onPress}>{!oculto && <View accessibilityElementsHidden importantForAccessibility="no" style={{ height: 6, borderRadius: raio.pilula, backgroundColor: cores.border }}><View style={{ height: 6, borderRadius: raio.pilula, width: `${fracao * 100}%`, backgroundColor: cor }} /></View>}</Linha>;
+  return <Linha titulo={titulo} detalhe={detalhe} valor={valor} tipo={tipo} onPress={onPress}>{!oculto && <View testID="categoria-barra" accessibilityElementsHidden importantForAccessibility="no" style={{ height: 6, borderRadius: raio.pilula, backgroundColor: cores.border }}><View style={{ height: 6, borderRadius: raio.pilula, width: `${fracao * 100}%`, backgroundColor: cor }} /></View>}</Linha>;
 }
 /** "30%"; "<1%" quando o inteiro arredonda a 0 mas há valor. */
 export const rotuloPercentual = (pct: number, valor: number) => `${pct === 0 && valor > 0 ? "<1" : pct}%`;
