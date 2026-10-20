@@ -183,6 +183,13 @@ que não se sabe aparece como "sem comparação", "a conferir", "desatualizado" 
   algum banco passar a mandar `lastMonthRate` e as outras taxas, as colunas já as guardam.
   Só compara com o CDI quando se sabe o período exato e que a posição existiu nele o tempo
   todo.
+  **Revisão do dono (2026-10-20):** a regra "nunca a diferença entre fotos" foi REVOGADA. Motivo:
+  medição em produção em 2026-10-20 (consulta SQL rodada pelo dono em produção: conta, nas
+  posições, quantas têm cada campo não nulo; taxas e lucro nulos: lastMonthRate 0/106,
+  lastTwelveMonthsRate 1/106, amountProfit 0/106; aplicado presente em 86/86 da renda fixa; fotos
+  por posição desde 30/09/2026). Contagens datadas: remedir antes de reusar (CLAUDE.md §2). O card "rendimento" ganhou o bloco `rendimentos` (quanto renderam no Mês e no
+  Total, por categoria e ativo, estimado pelo saldo; `db/rendimentos.py`, `docs/api-app-painel.md`).
+  Continua sem comparação com o CDI.
 - **Reserva em meses**: a caixinha de reserva é designada pelo usuário (hoje só existe o
   palpite pelo nome, `_is_reserva`); a conta divide pelo custo mensal das contas fixas.
 - **Só reais**: o que estiver em outra moeda fica fora das somas, com aviso. Câmbio fica
@@ -311,8 +318,10 @@ PR de cada etapa, não soluções prontas. Cada PR confere se ainda valem, decid
   do banco para comparar. **Decidido pelo dono (2026-10-01, §4):** o bloco de rendimento
   mostra só o contratado ("100% do CDI contratado"), de `rate`/`rateType` das fotos por
   posição, sem afirmar que rendeu; entra na etapa de tela do bloco de rendimento. A regra
-  continua — a comparação de rendimento usa a taxa que o banco calcula, nunca a diferença
-  entre fotos do rendimento acumulado.
+  continua — a comparação com o CDI usa a taxa que o banco calcula. **Revogada em 2026-10-20
+  pelo dono** a parte "nunca a diferença entre fotos" para o valor que RENDEU (Mês e Total, por
+  saldo e aplicado): motivo, a medição em produção (taxas e lucro nulos, aplicado presente, fotos
+  desde 30/09). Ver Q35 acima.
 
 **Etapas de tela (1 a 6)**
 - Etapa 2: identidade das transações importadas por conta (conta e cartão); editar a data

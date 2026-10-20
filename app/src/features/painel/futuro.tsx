@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import type { z } from "zod";
 import type { previsaoSchema } from "@/api/schemas/painel";
+import { useTema } from "@/ui/tema";
 import { ChipPainel as Chip, TextoPainel as Texto } from "./tipografia";
 import { dataPtBr, nomeLegivel } from "./catalogo";
 import { usePainel } from "./provider";
@@ -9,6 +10,8 @@ import { useBloco } from "./blocoContexto";
 import { RecursoDados, Valor, Curva, Linha, Vazio, Filtros, useCardAberto } from "./base";
 import { LinhaExpansivel } from "./expansao";
 import { useRespondidas } from "./receitas";
+import { LinhaCategoria } from "./gastos";
+import { GASTOS_DIA_A_DIA } from "./previsaoMotivos";
 type DadosPrevisao = z.output<typeof previsaoSchema>;
 type Ocorrencia = NonNullable<DadosPrevisao["compromissos"]>[number]["ocorrencias"][number];
 const ddmm = (iso: string) => dataPtBr(iso).slice(0, 5);
@@ -22,9 +25,9 @@ const nome = (o: Ocorrencia, n = o.nome) => o.tipo === "fatura_cartao" ? nomeLeg
 /** Montado só com a previsão na tela: avisa o card (`Bloco`) que há o que abrir. */
 function Pronto() { const { avisar } = useCardAberto(); useEffect(() => { avisar(true); return () => avisar(false); }, [avisar]); return null; }
 export function Previsao() {
-  const p = usePainel(), bloco = useBloco(), respondidas = useRespondidas(); const [piorAberto, setPiorAberto] = useState(false), { aberto } = useCardAberto();
+  const p = usePainel(), bloco = useBloco(), respondidas = useRespondidas(); const [piorAberto, setPiorAberto] = useState(false), [estAberta, setEstAberta] = useState(false), { cores } = useTema(), { aberto } = useCardAberto();
   return <RecursoDados nome="previsao">{(d) => {
-    const pior = d.pior_dia, piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && pior.causas.length ? `desde ${ddmm(pior.desde)}` : undefined} />;
+    const pior = d.pior_dia, est = d.estimativa_variavel, maior = Math.max(1, ...(est?.categorias.map((c) => c.despesa_mensal) ?? [])), temCausa = !!pior && (pior.causas.length > 0 || pior.despesa_variavel !== null), piorLinha = pior && <Linha titulo={`Menor saldo previsto · ${dataPtBr(pior.data)}`} valor={pior.saldo} detalhe={pior.desde && temCausa ? `desde ${ddmm(pior.desde)}` : undefined} />;
     return <View style={{ gap: 8 }}>
       <Pronto />
       {!bloco && <Filtros>{d.dias_permitidos.map((dias) => <Chip key={dias} rotulo={`${dias} dias`} selecionado={d.dias === dias} onPress={() => p.mudarDias(dias)} />)}</Filtros>}
@@ -36,7 +39,8 @@ export function Previsao() {
       {aberto && <View style={{ gap: 8 }}>
         {d.ancora && <Linha titulo="Hoje, com as premissas" valor={d.ancora.saldo} />}
         {d.marcos.map((m) => <Linha key={m.dias} titulo={`${m.dias} dias · ${dataPtBr(m.data)}`} valor={m.saldo} />)}
-        {pior && (pior.causas.length ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}</View></LinhaExpansivel> : piorLinha)}
+        {est && <LinhaExpansivel testID="estimativa-variavel" linha={<Linha titulo={GASTOS_DIA_A_DIA} valor={est.despesa_mensal} tipo="saida" detalhe="por mês" />} aberta={estAberta} alternar={() => setEstAberta((a) => !a)}><View style={{ gap: 4 }}>{est.categorias.map((c) => <LinhaCategoria key={c.chave} titulo={c.nome} valor={c.despesa_mensal} tipo="saida" fracao={Math.max(0, c.despesa_mensal) / maior} cor={cores.inkMuted} />)}</View></LinhaExpansivel>}
+        {pior && (temCausa ? <LinhaExpansivel testID="pior-dia" linha={piorLinha} aberta={piorAberto} alternar={() => setPiorAberto((a) => !a)}><View style={{ gap: 4 }}>{pior.causas.map((o) => <Linha key={o.chave + o.ciclo} titulo={nome(o)} valor={o.valor} tipo={o.direcao} detalhe={o.data ? ddmm(o.data) : "sem data"} />)}{pior.despesa_variavel !== null && <Linha titulo={GASTOS_DIA_A_DIA} valor={pior.despesa_variavel} tipo="saida" />}</View></LinhaExpansivel> : piorLinha)}
         {respondidas}
       </View>}
     </View>;

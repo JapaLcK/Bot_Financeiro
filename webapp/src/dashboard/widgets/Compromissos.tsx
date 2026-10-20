@@ -15,10 +15,9 @@ const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um :
 
 // "−R$ 2,675" / "+R$ 10,00", ou null se o valor não veio (ou não é decimal).
 // Zero sai "R$ 0,00" sem sinal, como o moneyText: nunca "−R$ 0,00" nem "+R$ 0,00".
-export function valorOc(o: OcorrenciaPrevisao) {
-  const t = moneyText(o.valor);
-  return t && (t === "R$ 0,00" ? t : `${o.direcao === "entrada" ? "+" : "−"}${t}`);
-}
+const comSinal = (t: string | null, sinal: string) => t && (t === "R$ 0,00" ? t : `${sinal}${t}`);
+export const saida = (v: string | null) => comSinal(moneyText(v), "−");
+export const valorOc = (o: OcorrenciaPrevisao) => comSinal(moneyText(o.valor), o.direcao === "entrada" ? "+" : "−");
 
 function resumo(oc: OcorrenciaPrevisao[]) {
   const valores = oc.map(valorOc);
