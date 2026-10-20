@@ -1,5 +1,5 @@
 /**
- * /oferta — LP de comparação (frontend/oferta.html + oferta.js). O markup é estático e
+ * A / (frontend/index.html, ex-/oferta, + oferta.js). O markup é estático e
  * o JS só liga ciclo, chat, animações ao rolar e a barra fixa; cada caso abaixo morre se
  * a peça correspondente sair (controles do CLAUDE.md §3: tirar o listener do ciclo
  * deixa "ciclo" vermelho; tirar o armar() deixa "animações" vermelho).
@@ -17,17 +17,24 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
-async function abrir({ js = true, calmo = false, mobile = false, relogio = false } = {}) {
+async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false } = {}) {
   const ctx = await browser.newContext({
-    viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
+    viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
   });
+  // o servidor estático não tem /auth: o nav-auth.js decide logado/deslogado pelo /auth/validate
+  await ctx.route("**/auth/validate", r => logado
+    ? r.fulfill({ status: 200, contentType: "application/json", body: '{"ok":true}' })
+    : r.fulfill({ status: 401, contentType: "application/json", body: "{}" }));
+  await ctx.route("**/auth/dashboard-profile", r => r.fulfill({
+    status: 200, contentType: "application/json",
+    body: JSON.stringify({ email: "ana.beatriz@gmail.com", display_name: "Ana Beatriz", plan: "free" }) }));
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
-  page.on("response", r => { if (r.status() >= 400) erros.push(`${r.status()} ${r.url()}`); });
+  page.on("response", r => { if (r.status() >= 400 && !r.url().endsWith("/auth/validate")) erros.push(`${r.status()} ${r.url()}`); });
   if (relogio) await page.clock.install({ time: new Date("2026-01-01T08:00:00") });
-  await page.goto(`${ORIGIN}/oferta.html`, { waitUntil: "load" });
+  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
   if (relogio) await page.clock.pauseAt(new Date("2026-01-01T09:00:00")); // daqui o tempo só anda no runFor
   return { page, ctx, erros };
 }
@@ -203,4 +210,82 @@ test("links internos: todo #alvo existe, o clique rola até a seção (não salt
   const r = await clicarPlanos(calmo.page);
   assert.ok(Math.abs(r.meio - r.fim) < 2, `reduced-motion devia saltar: ${r.meio} de ${r.fim}`);
   await calmo.ctx.close();
+});
+
+// ── Nav da raiz: "Entrar" para o cliente chegar ao dashboard ─────────────────
+
+const navMedida = page => page.evaluate(() => {
+  const nav = document.querySelector("nav.nav"), b = nav.getBoundingClientRect();
+  const itens = [...nav.querySelectorAll(":scope > a, :scope > .nav-right > *")].filter(e => e.getBoundingClientRect().width > 0);
+  return { h: +b.height.toFixed(1), fora: itens.filter(e => e.getBoundingClientRect().right > innerWidth + 0.5).length,
+           largura: document.documentElement.scrollWidth <= innerWidth };
+});
+
+test("nav deslogado: o link Entrar está no markup, visível e aponta para /login", async () => {
+  const { page, ctx, erros } = await abrir();
+  const entrar = page.locator('.nav .nav-right a[href="/login"]');
+  assert.equal(await entrar.count(), 1);
+  assert.equal((await entrar.textContent()).trim(), "Entrar");
+  assert.ok(await entrar.isVisible());
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
+test("nav logado: o menu da conta troca o Entrar e leva ao Dashboard (/app) e ao Início (/home)", async () => {
+  const { page, ctx, erros } = await abrir({ logado: true });
+  await page.waitForSelector("#pb-acct-btn", { state: "visible" });
+  assert.equal(await page.locator('.nav .nav-right a[href="/login"]').count(), 0);
+  await page.waitForFunction(() => document.getElementById("pb-acct-lbl").textContent === "Ana Beatriz");
+  await page.click("#pb-acct-btn");
+  assert.ok(await page.locator("#pb-acct-dd").isVisible());
+  assert.equal((await page.locator('#pb-acct-dd a[href="/app"]').textContent()).trim(), "Dashboard");
+  assert.equal(await page.locator('#pb-acct-dd a[href="/home"]').count(), 1);
+  assert.deepEqual(erros, []);
+  await ctx.close();
+});
+
+for (const largura of [320, 375, 390, 1280]) {
+  for (const logado of [false, true]) {
+    test(`nav ${logado ? "logado" : "deslogado"} em ${largura}px: sem rolagem lateral, numa linha, Entrar com 44px`, async () => {
+      const { page, ctx } = await abrir({ largura, logado });
+      if (logado) await page.waitForFunction(() => document.getElementById("pb-acct-lbl")?.textContent === "Ana Beatriz");
+      await page.evaluate(() => document.fonts.ready);
+      const m = await navMedida(page);
+      assert.ok(m.largura, `${largura}: scrollWidth > innerWidth`);
+      assert.equal(m.fora, 0, `${largura}: item da nav fora da tela`);
+      assert.ok(m.h <= 66, `${largura}: nav com ${m.h}px, passou de uma linha`);
+      if (!logado) {
+        const e = await page.locator('.nav .nav-right a[href="/login"]').boundingBox();
+        assert.ok(e.height >= 44, `${largura}: Entrar com ${e.height}px`);
+      } else {
+        await page.click("#pb-acct-btn");
+        const dd = await page.locator("#pb-acct-dd").boundingBox();
+        assert.ok(dd.x >= 0 && dd.x + dd.width <= largura, `${largura}: menu da conta aberto em ${Math.round(dd.x)}..${Math.round(dd.x + dd.width)}`);
+      }
+      await ctx.close();
+    });
+  }
+}
+
+// ── Guard da PWA instalada (index.html, 1º <script>): standalone entra pelo app ─────────
+
+/** Abre `/index.html` + `query` com `display-mode: standalone` emulado e devolve o pathname final.
+ *  O servidor estático não tem /login (404): vale o pathname da URL, não o status. */
+async function pathAposAbrirStandalone(query) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await ctx.addInitScript(() => {
+    const real = window.matchMedia.bind(window);
+    window.matchMedia = q => /display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {} } : real(q);
+  });
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/index.html${query}`, { waitUntil: "load" }).catch(() => {});
+  await page.waitForTimeout(500);
+  const path = new URL(page.url()).pathname;
+  await ctx.close();
+  return path;
+}
+
+test("PWA instalada (standalone): a / manda para /login; com ?site=1 fica na landing", async () => {
+  assert.equal(await pathAposAbrirStandalone(""), "/login");
+  assert.equal(await pathAposAbrirStandalone("?site=1"), "/index.html");
 });

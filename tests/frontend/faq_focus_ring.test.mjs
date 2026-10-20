@@ -102,7 +102,7 @@ test("controle: com overflow:hidden de volta no .faq-item, a folga zera", async 
 
 
 test("o foco do FAQ nativo da landing é visível e cabe fora do summary", async () => {
-  const page = await abrir('index');
+  const page = await abrir('inicio-antiga');
   await page.keyboard.press('Tab');
   await page.locator('.lp-faq summary').first().focus();
   const ring = await page.locator('.lp-faq summary').first().evaluate(el => {
@@ -120,7 +120,7 @@ test("o foco do FAQ nativo da landing é visível e cabe fora do summary", async
 });
 
 test("controle: recortar details da landing também elimina o espaço do anel", async () => {
-  const page = await abrir('index');
+  const page = await abrir('inicio-antiga');
   await page.addStyleTag({ content: '.lp-faq details { overflow: hidden !important; }' });
   const spaces = await folgas(page, '.lp-faq summary');
   assert.equal(spaces.length, 3);

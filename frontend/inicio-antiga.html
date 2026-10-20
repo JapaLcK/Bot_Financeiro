@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>PigBank — Sua grana. Tudo mais claro.</title>
+<meta content="Organize suas finanças pelo WhatsApp. Registre gastos, conecte contas com Open Finance e acompanhe cartões, metas e alertas no PigBank." name="description"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<link href="/brand/apple-touch-icon.png?v=3" rel="apple-touch-icon"/>
+<link rel="preload" href="/fonts/Inter-Variable.woff2?v=5059ef2a9db0" as="font" type="font/woff2" crossorigin />
+<meta content="#111111" name="theme-color"/>
+<meta content="bkhplpcvt5kouph3e1b9y8jk8aiqsu" name="facebook-domain-verification"/>
+<meta name="robots" content="noindex"/>
+<meta property="og:type" content="website" />
+<meta property="og:locale" content="pt_BR" />
+<meta property="og:site_name" content="PigBank" />
+<meta property="og:title" content="PigBank — Sua grana. Tudo mais claro." />
+<meta property="og:description" content="Seu assistente financeiro no WhatsApp. Registre gastos, conecte contas e acompanhe seu dinheiro com clareza." />
+<meta property="og:image" content="https://pigbankai.com/brand/landing-piggy-cta.webp?v=1" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="600" />
+<meta property="og:image:alt" content="Piggy, o assistente financeiro do PigBank" />
+<meta name="twitter:card" content="summary_large_image" />
+<script>
+/* PWA instalada (start_url antiga "/"): entra pelo app, não pela landing —
+   /login pula direto pro /home quando a sessão está viva.
+   Exceção: ?site=1 é o usuário PEDINDO o site pelo menu da conta ("Ir para o
+   site"). Sem essa saída, o atalho virava um pulo de volta pro /home. */
+if (!/[?&]site=1(&|$)/.test(location.search) &&
+    ((window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true)) {
+  location.replace("/login");
+}
+</script>
+<!-- GA4 e Meta Pixel entram aqui no serve-time (frontend/routes/shared.py,
+     inject_tracking) — chumbar de novo no HTML duplicaria o page_view. -->
+<link rel="stylesheet" href="/brand.css?v=4" />
+<link rel="stylesheet" href="/phosphor.css?v=1" />
+<link rel="stylesheet" href="/site.css?v=5" />
+<link rel="stylesheet" href="/site-redesign.css?v=1" />
+<style>html.pb-safe body {
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    box-sizing: border-box;
+  }</style>
+<!-- A classe e o viewport precisam existir antes da primeira pintura dentro do
+     app. O bootstrap inline evita tanto o salto visual quanto uma ida à rede. -->
+<script>
+  (() => {
+    const standalone =
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+      window.navigator.standalone === true;
+    if (!/PigBankApp/.test(navigator.userAgent) && !standalone) return;
+
+    document.documentElement.classList.add("pb-safe");
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport && !/viewport-fit/.test(viewport.content)) {
+      viewport.content += ", viewport-fit=cover";
+    }
+  })();
+</script>
+</head>
+<body class="lp" id="topo">
+  <a class="lp-skip-link" href="#conteudo">Pular para o conteúdo</a>
+  <nav class="nav" aria-label="Navegação principal">
+    <a class="nav-logo" href="/" aria-label="PigBank, início"><img class="logo-full" src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42"></a>
+    <div class="nav-links"><a href="#como-funciona">Como funciona</a><a href="/funcionalidades">Funcionalidades</a><a href="#open-finance">Open Finance</a><a href="/whatsapp">WhatsApp</a><a href="/agents">Agentes</a><a href="/precos">Planos</a></div>
+    <div class="nav-right"><a class="link-entrar" href="/login">Entrar</a><a class="btn btn-primary" href="/cadastro">Criar conta</a></div>
+  </nav>
+  <main id="conteudo">
+    <section class="lp-hero lp-section-light" aria-labelledby="hero-title">
+      <div class="lp-shell lp-hero-grid">
+        <div class="lp-hero-copy">
+          <p class="lp-eyebrow">Seu assistente financeiro no WhatsApp</p>
+          <h1 id="hero-title">Sua grana.<br>Uma conversa.<br><span class="lp-underline">Tudo mais claro.</span></h1>
+          <p class="lp-lead">Mande um texto, áudio ou comprovante. O Piggy organiza seus lançamentos e ajuda você a entender seu dinheiro.</p>
+          <div class="lp-actions"><a class="lp-btn lp-btn-dark" href="/cadastro">Começar agora</a><a class="lp-btn lp-btn-line" data-teste href="/teste">Testar o Piggy agora</a><a class="lp-text-link" href="#como-funciona">Ver como funciona</a></div>
+          <ul class="lp-hero-perks"><li><i class="ph ph-chat-circle" aria-hidden="true"></i>Texto, áudio e foto</li><li><i class="ph ph-desktop" aria-hidden="true"></i>Painel no navegador</li><li><i class="ph ph-file-text" aria-hidden="true"></i>Sem planilha</li></ul>
+        </div>
+        <div class="lp-hero-art">
+          <div class="lp-hero-bubble" aria-hidden="true"></div>
+          <img class="lp-piggy" src="/brand/landing-piggy-four-digits.webp?v=1" alt="Piggy, o porquinho rosa de óculos escuros e moletom preto, com celular na mão" width="800" height="1200" srcset="/brand/landing-piggy-four-digits-480.webp?v=1 480w, /brand/landing-piggy-four-digits.webp?v=1 800w" sizes="(max-width: 640px) 85vw, (max-width: 980px) 52vw, 600px" fetchpriority="high">
+          <div class="lp-hero-chat" aria-label="Conversa ilustrativa com o Piggy">
+            <div class="lp-chat-sent">gastei 32 no almoço <span>12:04 <b>✓✓</b></span></div>
+            <div class="lp-chat-response"><img src="/brand/landing-icon.webp?v=1" alt="" width="27" height="27"><div><strong>Anotado!</strong><p>Alimentação · R$ 32,00</p></div><span class="lp-check" aria-hidden="true">✓</span></div>
+            <p class="lp-caption">Conversa ilustrativa.</p>
+          </div>
+          <span class="lp-spark lp-spark-one" aria-hidden="true">✳</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-home-vsl lp-section-dark" id="vsl" aria-labelledby="vsl-title">
+      <div class="lp-shell"><div class="lp-vsl-heading"><p class="lp-eyebrow">PigBank em ação</p><h2 id="vsl-title">Veja a conversa virar organização.</h2><p>Conheça o PigBank em pouco mais de um minuto.</p></div>
+        <div class="lp-vsl-player"><video id="vsl-video" controls playsinline preload="none" width="1280" height="720" poster="/brand/vsl-poster-860.webp?v=1" src="/brand/vsl.mp4?v=1" aria-label="Vídeo de apresentação do PigBank, com legendas incorporadas"><p>Seu navegador não consegue reproduzir este vídeo. <a href="/brand/vsl.mp4?v=1">Abra o vídeo de apresentação</a>.</p></video></div>
+        <div class="lp-vsl-actions"><a id="vsl-cta" class="lp-btn lp-btn-pink" href="/cadastro">Criar minha conta</a></div>
+      </div>
+    </section>
+
+    <section class="lp-how lp-section-blush" id="como-funciona" aria-labelledby="how-title">
+      <div class="lp-shell">
+        <div class="lp-section-heading"><p class="lp-eyebrow">Do seu jeito</p><h2 id="how-title">Você conta. O Piggy organiza.</h2><p class="lp-lead">Do gasto do dia à visão do mês, tudo começa na conversa.</p></div>
+        <div class="lp-steps">
+          <article class="lp-step"><h3><span class="lp-step-number">01</span>Envie como preferir</h3><div class="lp-message-demo lp-surface"><div class="lp-message-input"><i class="ph ph-chat-circle" aria-hidden="true"></i><span>Digite uma mensagem...</span></div><div class="lp-message-tools" aria-hidden="true"><i class="ph ph-file-text"></i><i class="ph ph-microphone"></i><i class="ph ph-camera"></i></div></div></article>
+          <span class="lp-step-arrow" aria-hidden="true">→</span>
+          <article class="lp-step"><h3><span class="lp-step-number">02</span>Tudo no lugar</h3><div class="lp-record-demo lp-surface"><div><i class="ph ph-fork-knife" aria-hidden="true"></i><strong>Alimentação</strong></div><p><span class="lp-check" aria-hidden="true">✓</span>Gasto registrado</p></div></article>
+          <span class="lp-step-arrow" aria-hidden="true">→</span>
+          <article class="lp-step"><h3><span class="lp-step-number">03</span>Consulte quando quiser</h3><div class="lp-month-demo lp-surface"><strong>Visão do mês</strong><div class="lp-mini-chart" role="img" aria-label="Exemplo de gráfico de entradas e saídas"><div class="lp-bars"><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="lp-legend"><span>Entradas</span><span>Saídas</span></div></div></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-open-finance lp-section-light" id="open-finance" aria-labelledby="finance-title">
+      <div class="lp-shell lp-finance-grid">
+        <div class="lp-finance-copy"><p class="lp-eyebrow">Open Finance</p><h2 id="finance-title">Seu banco também<br>entra na conversa.</h2><p class="lp-lead">Conecte suas contas e acompanhe saldos e transações sincronizados no PigBank.</p><ul class="lp-finance-perks"><li><i class="ph ph-lock" aria-hidden="true"></i><span>Você<br>autoriza</span></li><li><i class="ph ph-file-text" aria-hidden="true"></i><span>Acesso só<br>de leitura</span></li><li><i class="ph ph-gear" aria-hidden="true"></i><span>Pode<br>desconectar</span></li></ul><a class="lp-btn lp-btn-dark" href="/funcionalidades">Conhecer a conexão</a><p class="lp-fine-print">Conexões disponíveis conforme o plano.</p></div>
+        <div class="lp-connection-demo" aria-label="Exemplo ilustrativo de duas contas conectadas ao PigBank">
+          <div class="lp-bank-accounts"><div class="lp-bank-card lp-surface"><i class="ph ph-bank" aria-hidden="true"></i><div><strong>Conta pessoal</strong><span class="lp-skeleton"></span><span class="lp-skeleton lp-short"></span></div></div><div class="lp-bank-card lp-surface"><i class="ph ph-bank" aria-hidden="true"></i><div><strong>Outra conta</strong><span class="lp-skeleton"></span><span class="lp-skeleton lp-short"></span></div></div></div>
+          <div class="lp-connection-hub"><div class="lp-hub-icon"><img src="/brand/landing-icon.webp?v=1" alt="PigBank" width="48" height="48"></div><div class="lp-consent lp-surface"><i class="ph ph-lock" aria-hidden="true"></i><span>Conexão autorizada<br>por você</span></div></div>
+          <div class="lp-connected-card lp-surface"><h3>Contas conectadas</h3><p class="lp-sync"><span></span>Sincronizado</p><h4>Saldos</h4><div class="lp-account-row"><b></b><span class="lp-skeleton"></span><span class="lp-skeleton"></span></div><div class="lp-account-row lp-pink"><b></b><span class="lp-skeleton"></span><span class="lp-skeleton"></span></div><h4>Transações</h4><div class="lp-account-row"><b></b><span class="lp-skeleton"></span></div><div class="lp-account-row lp-pink"><b></b><span class="lp-skeleton"></span></div><div class="lp-account-row lp-gray"><b></b><span class="lp-skeleton"></span></div></div>
+          <p class="lp-caption">Conexão ilustrativa.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="lp-overview lp-section-dark" id="funcionalidades" aria-labelledby="overview-title">
+      <div class="lp-shell lp-overview-grid">
+        <div class="lp-overview-copy"><p class="lp-eyebrow">Clareza no dia a dia</p><h2 id="overview-title">O mês inteiro,<br>sem o quebra-cabeça.</h2><p class="lp-lead">Acompanhe entradas, saídas, cartões e metas em um painel no navegador.</p><ul class="lp-feature-list"><li><i class="ph ph-chart-bar" aria-hidden="true"></i>Gastos por categoria</li><li><i class="ph ph-credit-card" aria-hidden="true"></i>Cartões, faturas e parcelas</li><li><i class="ph ph-target" aria-hidden="true"></i>Caixinhas e objetivos</li></ul><a class="lp-text-link lp-pink-link" href="/funcionalidades">Explorar funcionalidades</a></div>
+        <div class="lp-dashboard-wrap"><div class="lp-dashboard" role="img" aria-label="Interface ilustrativa do PigBank com categorias, entradas, saídas, lançamento de almoço de 32 reais e caixinha viagem">
+          <aside class="lp-dashboard-sidebar"><img src="/brand/landing-logo.webp?v=1" alt="" width="88" height="26"><div class="lp-sidebar-current"><i class="ph ph-desktop" aria-hidden="true"></i><span>Visão geral</span></div><div><i class="ph ph-receipt" aria-hidden="true"></i><span>Lançamentos</span></div><div><i class="ph ph-credit-card" aria-hidden="true"></i><span>Cartões</span></div><div><i class="ph ph-piggy-bank" aria-hidden="true"></i><span>Caixinhas</span></div><div><i class="ph ph-gear" aria-hidden="true"></i><span>Configurações</span></div></aside>
+          <div class="lp-dashboard-main"><div class="lp-dashboard-heading"><strong>Visão geral</strong><i class="ph ph-user" aria-hidden="true"></i></div><div class="lp-dashboard-tabs"><span class="lp-selected">Resumo</span><span>Lançamentos</span><span>Cartões</span><span>Caixinhas</span></div><div class="lp-dashboard-panels"><div class="lp-dashboard-panel"><h3>Gastos por categoria</h3><div class="lp-category-chart"><div class="lp-donut"></div><div class="lp-legend lp-category-legend"><span>Alimentação</span><span>Transporte</span><span>Casa</span></div></div></div><div class="lp-dashboard-panel"><h3>Entradas e saídas</h3><div class="lp-bars lp-dashboard-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="lp-legend lp-horizontal"><span>Entradas</span><span>Saídas</span></div></div><div class="lp-dashboard-panel"><h3>Últimos lançamentos</h3><div class="lp-transaction"><i class="ph ph-fork-knife" aria-hidden="true"></i><div><strong>Almoço</strong><small>Alimentação</small></div><b>R$ 32,00</b></div></div><div class="lp-dashboard-panel"><h3>Caixinha viagem</h3><div class="lp-dashboard-goal"><i class="ph ph-briefcase" aria-hidden="true"></i><span class="lp-progress lp-pink-progress"></span></div></div></div></div>
+        </div><p class="lp-caption">Interface ilustrativa.</p></div>
+      </div>
+    </section>
+
+    <section class="lp-agents lp-section-dark" id="agentes" aria-labelledby="agents-title">
+      <div class="lp-shell"><div class="lp-agents-heading"><div><p class="lp-eyebrow">Os agentes do PigBank</p><h2 id="agents-title">Um time atento<br>ao que passa batido<span class="lp-pink-dot">.</span></h2></div><div><p>Cada agente acompanha um detalhe<br>e traz avisos para o seu feed.</p><a class="lp-text-link lp-pink-link" href="/agents">Conhecer os agentes</a></div></div>
+        <img class="lp-agents-panorama" src="/brand/landing-agents-cartoon.webp?v=1" alt="Xerife confere gastos no tablet, Carteiro entrega um lembrete de boleto e Detetive examina uma assinatura recorrente" width="1800" height="600" loading="lazy">
+        <div class="lp-agents-grid">
+          <article class="lp-agent"><img class="lp-agent-mobile-art" src="/brand/landing-agents-cartoon.webp?v=1" alt="Xerife aponta para um aviso de limite atingido" width="1800" height="600" loading="lazy"><div class="lp-agent-body"><span class="lp-agent-name"><i class="ph ph-star" aria-hidden="true"></i>Xerife</span><h3>Gastos sob atenção</h3><p>Avisa sobre gastos fora do padrão e limites definidos por você.</p></div></article>
+          <article class="lp-agent"><img class="lp-agent-mobile-art" src="/brand/landing-agents-cartoon.webp?v=1" alt="Carteiro entrega um lembrete de boleto perto do vencimento" width="1800" height="600" loading="lazy"><div class="lp-agent-body"><span class="lp-agent-name"><i class="ph ph-envelope" aria-hidden="true"></i>Carteiro</span><h3>Vencimentos à vista</h3><p>Lembra dos boletos antes do vencimento, direto no seu feed.</p></div></article>
+          <article class="lp-agent"><img class="lp-agent-mobile-art" src="/brand/landing-agents-cartoon.webp?v=1" alt="Detetive usa uma lupa para identificar cobranças recorrentes" width="1800" height="600" loading="lazy"><div class="lp-agent-body"><span class="lp-agent-name"><i class="ph ph-magnifying-glass" aria-hidden="true"></i>Detetive</span><h3>Assinaturas no radar</h3><p>Identifica cobranças recorrentes que merecem sua atenção.</p></div></article>
+        </div><p class="lp-agents-caption lp-caption">Exemplos ilustrativos de alertas.</p>
+      </div>
+    </section>
+
+    <section class="lp-goals lp-section-blush" aria-labelledby="goals-title"><div class="lp-shell lp-goals-grid"><div><h2 id="goals-title">Dê um lugar aos<br>seus próximos planos.</h2><p class="lp-lead">Organize suas caixinhas e acompanhe<br>o progresso de cada objetivo.</p></div><div class="lp-goals-demo"><span class="lp-goal-question lp-surface">Como está minha meta?</span><div class="lp-goal-cards"><div class="lp-goal-card lp-surface"><i class="ph ph-briefcase" aria-hidden="true"></i><div><strong>Viagem</strong><span class="lp-progress lp-pink-progress"></span></div></div><div class="lp-goal-card lp-surface"><i class="ph ph-house" aria-hidden="true"></i><div><strong>Reserva</strong><span class="lp-progress lp-lime-progress"></span></div></div></div></div></div></section>
+
+    <section class="lp-trust lp-section-light" aria-labelledby="trust-title"><div class="lp-shell lp-trust-grid"><div class="lp-trust-copy"><div class="lp-lock-tile"><i class="ph ph-lock" aria-hidden="true"></i></div><div><h2 id="trust-title">O controle<br>continua com você.</h2><p>O PigBank organiza suas informações.<br>Não movimenta nem guarda seu dinheiro.</p></div></div><div class="lp-faq"><h3>Antes do primeiro oi</h3><details open><summary>Preciso baixar um aplicativo?</summary><p>Não. Converse pelo WhatsApp e acesse o painel no navegador.</p></details><details><summary>Como começo?</summary><p>Crie sua conta, escolha seu plano e conecte o WhatsApp. Depois, é só conversar com o Piggy.</p></details><details><summary>Posso cancelar quando quiser?</summary><p>Sim. Você pode cancelar pelo próprio painel, sem precisar falar com o atendimento.</p></details></div></div></section>
+
+    <section class="lp-final-cta" aria-labelledby="cta-title"><div class="lp-shell lp-cta-grid"><div class="lp-cta-copy"><h2 id="cta-title">Bora deixar sua<br>grana mais clara?</h2><p>Crie sua conta, escolha seu plano e conecte o WhatsApp.</p><div class="lp-actions"><a class="lp-btn lp-btn-dark" href="/cadastro">Criar minha conta</a><a class="lp-btn lp-btn-line" data-teste href="/teste">Testar o Piggy agora</a><a class="lp-text-link" href="/precos">Ver planos</a></div></div><div class="lp-cta-art"><img src="/brand/landing-piggy-cta.webp?v=1" alt="Piggy aponta para o convite para começar" width="1200" height="600" loading="lazy"></div></div></section>
+  </main>
+  <footer class="lp-footer lp-section-dark"><div class="lp-shell"><div class="lp-footer-grid"><div class="lp-footer-brand"><a class="lp-brand" href="#topo" aria-label="PigBank, voltar ao início"><img src="/brand/landing-logo.webp?v=1" alt="PigBank" width="142" height="42" loading="lazy"></a><p>Clareza pra suas contas.<br>Espaço pra sua vida.</p></div><nav aria-label="Produto"><h3>Produto</h3><a href="/whatsapp">WhatsApp</a><a href="/funcionalidades">Funcionalidades</a><a href="/agents">Agentes</a><a href="/precos">Planos</a></nav><nav aria-label="Ajuda"><h3>Ajuda</h3><a href="/suporte">Suporte</a><a href="/privacy">Privacidade</a><a href="/termos">Termos de uso</a></nav></div><div class="lp-footer-bottom"><p>© 2026 PigBank</p><a href="#topo">De volta ao topo</a></div></div></footer>
+  <script>
+  /* ── vsl-metrics: o vídeo é opcional; o cadastro está sempre disponível ── */
+  (function () {
+    var video = document.getElementById("vsl-video");
+    if (!video) return;
+
+    var assistido = 0, ultimoTempo = video.currentTime, buscando = false, marcos = {};
+
+    video.addEventListener("play", function () {
+      ultimoTempo = video.currentTime;
+      if (window.gtag) gtag("event", "vsl_play", {});
+    }, { once: true });
+
+    video.addEventListener("seeking", function () { buscando = true; });
+    video.addEventListener("seeked", function () {
+      buscando = false;
+      ultimoTempo = video.currentTime;
+    });
+
+    video.addEventListener("timeupdate", function () {
+      var tempoAtual = video.currentTime;
+      if (!buscando && tempoAtual > ultimoTempo) {
+        assistido += tempoAtual - ultimoTempo;
+      }
+      ultimoTempo = tempoAtual;
+      var d = video.duration;
+      if (!d || !isFinite(d)) return;
+      var pct = Math.floor((assistido / d) * 100);
+      [25, 50, 75].forEach(function (m) {
+        if (pct >= m && !marcos[m]) {
+          marcos[m] = 1;
+          if (window.gtag) gtag("event", "vsl_progress", { percent: m });
+        }
+      });
+    });
+  })();
+  </script>
+  <script src="/nav-auth.js?v=7" defer></script>
+  <script src="/teste-piggy.js?v=1" defer></script>
+  <script src="/nav-burger.js?v=1" defer></script>
+</body>
+</html>

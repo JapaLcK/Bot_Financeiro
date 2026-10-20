@@ -8,6 +8,7 @@ import asyncio
 import re
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from frontend.routes.shared import (
@@ -19,17 +20,18 @@ from frontend.routes.shared import (
 from frontend.routes.static_pages import (
     _CACHE_IMUTAVEL,
     _cache_asset_versionado,
+    serve_inicio_antiga,
     serve_landing,
 )
 
 
 def _landing_servida() -> str:
-    return asyncio.run(serve_landing()).body.decode("utf-8")
+    return asyncio.run(serve_inicio_antiga()).body.decode("utf-8")
 
 
 def _landing_com_links_versionados() -> str:
     return stamp_asset_versions(
-        (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+        (FRONTEND_DIR / "inicio-antiga.html").read_text(encoding="utf-8")
     )
 
 
@@ -137,8 +139,9 @@ def test_artes_abaixo_da_dobra_preservam_carregamento_lazy_e_espaco_reservado():
         assert re.search(r'height="[1-9][0-9]*"', arte)
 
 
-def test_safe_area_critica_e_inicializada_inline_antes_da_primeira_pintura():
-    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+@pytest.mark.parametrize("pagina", ["index.html", "inicio-antiga.html"])
+def test_safe_area_critica_e_inicializada_inline_antes_da_primeira_pintura(pagina):
+    html = (FRONTEND_DIR / pagina).read_text(encoding="utf-8")
     assert 'src="/safe-area.js' not in html
     assert 'document.documentElement.classList.add("pb-safe")' in html
     assert "viewport-fit=cover" in html
@@ -154,7 +157,7 @@ def test_phosphor_usa_font_display_swap():
 
 
 def test_ctas_sem_setas_ou_dependencia_de_fonte_para_a_acao():
-    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    html = (FRONTEND_DIR / "inicio-antiga.html").read_text(encoding="utf-8")
     ctas = re.findall(r'<a[^>]*class="[^"]*\b(?:lp-btn|btn-primary)\b[^"]*"[^>]*>(.*?)</a>', html)
     assert len(ctas) == 7  # quatro cadastros + conhecer Open Finance + dois "Testar o Piggy agora"
     assert all(not re.search(r"<i\b|<svg\b|[→↗]", cta) for cta in ctas)
@@ -162,10 +165,12 @@ def test_ctas_sem_setas_ou_dependencia_de_fonte_para_a_acao():
 
 
 def test_landing_publicada_tem_seo_e_nao_copia_os_fluxos_simulados():
-    html = _landing_servida()
+    html = asyncio.run(serve_landing()).body.decode("utf-8")  # a raiz; a antiga é noindex
     assert '<link rel="canonical" href="https://pigbankai.com/"' in html
     assert 'property="og:url" content="https://pigbankai.com/"' in html
     assert 'property="og:image" content="https://pigbankai.com/brand/' in html
+    og = re.search(r'property="og:image" content="https://pigbankai\.com(/[^"?]+)', html).group(1)
+    assert (FRONTEND_DIR / og.lstrip("/")).is_file(), og  # a imagem de compartilhamento existe
     assert 'noindex' not in html
     assert 'conceito da nova' not in html
     assert 'assets/auth.js' not in html
