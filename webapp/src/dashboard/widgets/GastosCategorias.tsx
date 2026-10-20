@@ -3,7 +3,7 @@
 import { useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { GastoCategoria } from "../lib/api-v2.gen";
-import { medida, moneyText, monthName } from "../lib/format.js";
+import { decimal, medida, moneyText, monthName } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import { mesDe } from "../lib/store.js";
 import { gastosQuery } from "../lib/v2";
@@ -13,14 +13,18 @@ import { AvisoMoeda, estadoGastos } from "../parts/GastosEstado";
 import { IconeCategoria } from "../parts/IconeCategoria";
 import { Selos } from "../parts/Selos";
 
-// Variação contra o anterior; null = sem base (o servidor não tem o mês anterior, ou o gasto de lá foi zero).
-const variacao = (atual: string, antes: string | null) => antes && Number(antes) > 0 ? (Number(atual) - Number(antes)) / Number(antes) : null;
+// Texto decimal do servidor como número; malformado ou infinito = null (sem comparação, nunca "NaN%").
+const num = (s: string | null) => (decimal(s) && Number.isFinite(Number(s)) ? Number(s) : null);
+// Variação contra o anterior; null = sem base (o servidor não tem o mês anterior, o gasto de lá foi zero, um dos dois veio malformado ou a conta estoura o double).
+const variacao = (atual: number | null, antes: number | null) => { const v = atual !== null && antes !== null && antes > 0 ? (atual - antes) / antes : NaN; return Number.isFinite(v) ? v : null; };
 const pct = (v: number) => Math.round(Math.abs(v) * 100);
 
 function delta(c: GastoCategoria, corte: number) {
-  const v = variacao(c.valor_ate_corte, c.anterior_ate_corte);
+  const [atual, antes] = [num(c.valor_ate_corte), num(c.anterior_ate_corte)];
+  const v = variacao(atual, antes);
   if (v === null) {
-    const fala = c.anterior_ate_corte === null ? "sem comparação: mês anterior fora do seu histórico" : `sem gasto no mês anterior até o dia ${corte}`;
+    const fala = c.anterior_ate_corte === null ? "sem comparação: mês anterior fora do seu histórico"
+      : atual !== null && antes !== null && antes <= 0 ? `sem gasto no mês anterior até o dia ${corte}` : "sem comparação";
     return { fala, tom: "faint", seta: null, texto: "—" };
   }
   if (Math.abs(v) < 0.005) return { fala: "igual ao mesmo dia do mês anterior", tom: "faint", seta: null, texto: "igual" };
@@ -42,8 +46,8 @@ export function GastosCategorias({ s }: { s: DashState }) {
   const max = Math.max(...d.categorias.map((c) => Math.max(medida(c.valor), medida(c.anterior_ate_corte))), 1);
   const alvo = d.categorias.find((c) => c.chave !== active)?.chave; // a linha que o guia destaca (parts/Guia.tsx)
   // O total do mês contra o anterior até o mesmo dia; o servidor manda o total anterior (inclui categoria que só existe lá).
-  const soma = d.categorias.reduce((a, c) => a + Number(c.valor_ate_corte), 0);
-  const vt = variacao(String(soma), d.anterior_total_ate_corte);
+  const soma = d.categorias.reduce<number | null>((a, c) => { const n = num(c.valor_ate_corte); return a === null || n === null ? null : a + n; }, 0);
+  const vt = variacao(soma, num(d.anterior_total_ate_corte));
   const [y, m] = d.mes.split("-").map(Number);
   const antes = monthName(new Date(y, m - 2, 1));
   const corrente = d.hoje.startsWith(d.mes);
