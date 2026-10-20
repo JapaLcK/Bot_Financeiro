@@ -31,6 +31,7 @@ import { Hero } from "./widgets/Hero";
 import { Invoice } from "./widgets/Invoice";
 import { NetWorth } from "./widgets/NetWorth";
 import { MetasPainel } from "./widgets/Metas";
+import { AgentesPainel } from "./widgets/Agentes";
 import { MilhaoPainel } from "./widgets/ProgressoMilhao";
 import { OrcamentoPainel } from "./widgets/OrcamentoDomestico";
 import { OrcamentosCategoriaPainel } from "./widgets/OrcamentosCategoria";
@@ -212,7 +213,7 @@ const TOOLS: { label: string; line: string; icon: string; to?: Path; url?: strin
   { label: "Orçamentos por categoria", line: "Um teto por categoria e um aviso antes de estourar.", icon: "ph-chart-pie", to: "/orcamentos-categoria" },
   { label: "Vale a pena comprar?", line: "Veja o que uma compra faz com o seu saldo nos próximos 90 dias.", icon: "ph-shopping-cart", ...(DEMO ? {} : { to: "/simulador/compra" as Path }) },
   { label: "Progresso ao milhão", line: "Quanto falta e em quanto tempo você chega ao primeiro milhão.", icon: "ph-trophy", to: "/milhao" },
-  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot" },
+  { label: "Agentes", line: "Piggys que cuidam de uma parte do seu dinheiro por você.", icon: "ph-robot", to: "/agentes" },
   ...(DEMO ? [] : [{ label: "Guia do painel", line: "O Piggy te mostra o painel em 3 passos.", icon: "ph-question", run: abrirGuia }]),
 ];
 
@@ -253,6 +254,14 @@ function Milhao() {
   );
 }
 
+function Agentes() {
+  return (
+    <Page path="/agentes" lede="Sete Piggys, cada um cuidando de uma parte do seu dinheiro. Ative os que fazem sentido para o seu momento.">
+      <AgentesPainel />
+    </Page>
+  );
+}
+
 function CategoryBudgets() {
   return (
     <Page path="/orcamentos-categoria" lede="Um teto por mês para cada categoria. Quando um gasto que você manda para o Piggy passa de 80%, 100% e 120%, ele avisa no WhatsApp.">
@@ -263,7 +272,7 @@ function CategoryBudgets() {
 
 export const PAGES: Record<Path, (p: { s: DashState }) => ReactNode> = {
   "/": Home, "/previsao": Forecast, "/gastos": Spending, "/assinaturas": SubscriptionsPage, "/simulador": Simulate, "/simulador/compra": ComprarPage,
-  "/metas": GoalsPage, "/milhao": Milhao, "/patrimonio": Wealthy, "/lancamentos": Launches,
+  "/metas": GoalsPage, "/milhao": Milhao, "/agentes": Agentes, "/patrimonio": Wealthy, "/lancamentos": Launches,
   "/orcamento": Budget, "/orcamentos-categoria": CategoryBudgets, "/ferramentas": Tools, "/piggy": PiggyChat,
   "/conta/perfil": ContaPerfil, "/conta/cobranca": ContaCobranca, "/conta/configuracoes": ContaConfiguracoes, "/conta/bancos": ContaBancos,
 };
