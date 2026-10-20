@@ -1849,7 +1849,7 @@ marcas são dos bancos, uso nominativo, sem deformar nem recolorir) e saem pela 
 trocar a arte de um banco exige trocar o NOME do arquivo E ampliar a regex do cliente (web e, quando existir, app) no mesmo PR. Precedência no cliente: próprio > `logo_url` da Pluggy > inicial. O /painel
 (`conta/api.ts::logoDoBanco`) só aceita `/^\/brand\/bancos\/\d{8}\.png$/` (mesma origem, sem host de terceiro); o que não bate cai no
 `logo_url`, e o próprio que falha ao carregar cai na inicial (não tenta a Pluggy no meio). O seletor legado
-(`open-finance-connect.js`) fica de fora. O app ainda não usa o campo (PR 2).
+(`open-finance-connect.js`) fica de fora. O app aplica a mesma precedência (`logoDoBanco` em `app/src/features/openFinance/conexoes/juntar.ts`, URL = `baseUrl()` + caminho, o PNG vai ao `<Image>` do Avatar e o fetch de SVG segue só no CDN da Pluggy); `tests/frontend/logo_banco_paridade.test.mjs` compara a regex e a função dos dois lados, e trocar a arte de um banco exige ampliar a regex também no app.
 Cada conexão do snapshot traz também `institution_id` (texto, o id do conector da Pluggy; é coluna `not null`, e o `pop` do
 laço de `_read_open_finance_connections` nunca o tirou: o gate de reconexão do picker já o lia, `ids` em `refreshLimits`):
 `tests/test_of_connection_state.py` (`CHAVES_DA_CONEXAO`) prende a chave e `tests/test_of_snapshot_institution_id.py` o valor e o

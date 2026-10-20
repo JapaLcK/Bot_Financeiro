@@ -1,3 +1,4 @@
+import { baseUrl } from "@/api/client";
 import type { Conector, Conexao } from "@/api/schemas/openFinance";
 import type { BancoLido } from "@/api/schemas/painel";
 import { semAcento } from "@/features/painel/composicaoContas";
@@ -16,6 +17,11 @@ export function juntar(conexoes: Conexao[], bancos: BancoLido[]): Item[] {
 /** `logo_url` é dado de terceiro e o aparelho o busca: só https no CDN de ícones da Pluggy (medido em produção: 4 de 4 são SVG ali). Outro host, http, `user@host`, porta ou query = sem logo (a inicial). */
 const LOGO_PLUGGY = /^https:\/\/cdn\.pluggy\.ai\/[\w.~/-]+$/;
 export const logoSeguro = (url: string | null | undefined): string | undefined => (url && LOGO_PLUGGY.test(url) ? url : undefined);
+
+/** Logo PRÓPRIO do banco (arquivo do repo servido pela API; mesmo literal do painel, `webapp/src/dashboard/conta/api.ts`, e `tests/frontend/logo_banco_paridade.test.mjs` compara). Só `/brand/bancos/<8 dígitos>.png`: o Avatar o desenha como bitmap (não é `.svg`), e o fetch de SVG segue só no CDN da Pluggy. Precedência: próprio > `logo_url` (Pluggy) > a inicial. */
+const LOGO_PROPRIO = /^\/brand\/bancos\/\d{8}\.png$/;
+export const logoDoBanco = ({ logo_proprio, logo_url }: { logo_proprio?: string | null; logo_url?: string | null }): string | undefined =>
+  (logo_proprio && LOGO_PROPRIO.test(logo_proprio) ? baseUrl() + logo_proprio : logoSeguro(logo_url));
 
 /**
  * Disponíveis para conectar: os populares, NESTA ordem (cópia do POPULARES de webapp/src/dashboard/lib/bancos.ts; tests/frontend/bancos_paridade.test.mjs compara),
