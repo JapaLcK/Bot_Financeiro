@@ -12,6 +12,8 @@ import { DEMO, contaQuery, lerContaFresca, perfilQuery } from "../lib/v2";
 import { Demonstracao } from "./Selos";
 import { Anuncio } from "./InvestidoResposta";
 import { Carregando } from "./Carregando";
+import { PainelChat } from "./PainelChat";
+import { useMedia } from "../useMedia";
 
 const TRAVA_MS = 500; // a fileira nova ignora o toque por esse tempo: mais que o intervalo de um duplo toque, menos que ler a resposta
 type Prompt = { key: string; ask: string | null; topic?: TopicId; cat?: string };
@@ -169,13 +171,22 @@ export function PiggyChat() {
     relendoRef.current = true; // já, antes do render: um anúncio que dispare neste meio tempo também espera
     setRelendo(true);
     const g = ++geracao.current;
-    void lerContaFresca(qc).catch(() => {}).finally(() => { if (g === geracao.current) setRelendo(false); });
+    // Conferida a conta, o catálogo dela é relido também: o plano ou um agente pode ter mudado noutra aba, e o painel lateral
+    // o mostra sem "@" (o agentesQuery não relê no foco; Codex no #1212).
+    void lerContaFresca(qc)
+      .then((c) => { if (g === geracao.current) void qc.invalidateQueries({ queryKey: agentesQuery(c.user_id).queryKey, exact: true }); })
+      .catch(() => {}).finally(() => { if (g === geracao.current) setRelendo(false); });
   }), [qc]);
   const reconferindo = !DEMO && msgs.length > 0 && relendo;
   // A conversa só aparece depois de uma leitura do perfil feita NESTA montagem e bem-sucedida: se a sessão virou outra conta
   // enquanto o chat estava fechado, o `contaDaSessao` a limpa antes de ela ser mostrada; sem conseguir conferir, não mostra (Codex no #1157).
   const conferida = DEMO || (!montando && contaQ.isFetchedAfterMount && contaQ.isSuccess);
   const txt = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  // O painel lateral só existe em tela larga (chat.css reserva o espaço): abaixo disso nem monta, e não há GET /agents.
+  const largo = useMedia("(min-width: 1181px)");
+  const uid = DEMO ? undefined : conferida ? conta?.user_id : undefined; // nenhum dado antes da conta conferida
+  // key: as 3 saídas do componente são fragmentos com filhos em posições diferentes; sem ela o painel desmontaria (e releria o catálogo) a cada troca de ramo.
+  const painel = (cards: Msg[]) => largo && <PainelChat key="painel" msgs={cards} uid={uid} escondido={relendo} conferindo={!conferida && !contaQ.isError} />;
   const nome = conta && (txt(conta.display_name) || txt(conta.email).split("@")[0] || "Você");
   const end = useRef<HTMLLIElement>(null);
   // Quando as próximas perguntas entraram: elas aparecem no lugar das que acabaram de ser tocadas, e o 2º toque de um duplo toque cairia numa delas.
@@ -256,6 +267,7 @@ export function PiggyChat() {
         <section className="chat-espera" aria-busy={!contaQ.isError || undefined}>
           <p>{contaQ.isError && !perguntando ? "Não foi possível confirmar sua conta. Recarregue a página." : "Carregando a conversa…"}</p>
         </section>
+        {painel([])}
       </>
     );
   }
@@ -270,6 +282,7 @@ export function PiggyChat() {
           <p>Como posso te ajudar?</p>
         </section>
         {fileira}
+        {painel([])}
       </>
     );
   }
@@ -282,13 +295,14 @@ export function PiggyChat() {
       <p className="sr-only" role="status" hidden={reconferindo}><Anuncio.Provider value>{said}</Anuncio.Provider></p>
       <ol className="chat" aria-label="Conversa" inert={reconferindo} data-reconferindo={reconferindo || undefined}>
         {msgs.map((m, i) => (
-          <li key={m.id} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
+          <li key={m.id} id={`msg-${m.id}`} tabIndex={-1} ref={i === msgs.length - 2 ? end : undefined} className={m.role === "user" ? "msg-user" : "msg-piggy"}
             data-dado={m.role === "user" ? undefined : m.real && !DEMO ? "real" : "exemplo"}>
             {m.role === "piggy" ? <PiggySays m={m} /> : m.agente && typeof m.text === "string" ? <ComMencoes t={m.text} /> : m.text}
           </li>
         ))}
       </ol>
       {fileira}
+      {painel(msgs)}
     </>
   );
 }

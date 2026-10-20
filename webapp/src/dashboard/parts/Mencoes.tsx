@@ -2,6 +2,7 @@ import { agenteImg } from "../lib/brand";
 import type { Acesso } from "../lib/agentes";
 
 export interface ItemMencao { kind: string; nome: string; tema: string; acesso: Acesso }
+export const GRUPOS = ["Agentes ativos", "Ativar para conversar", "No PigBank+"];
 export const GRUPO: Record<Acesso, string> = { ready: "Agentes ativos", activate: "Ativar para conversar", no_energy: "Ativar para conversar", upgrade: "No PigBank+" };
 
 // A lista do @ da barra (parts/AskBar.tsx), no molde da busca (Command.tsx): o foco fica no campo, o item marcado é o aria-activedescendant dele.

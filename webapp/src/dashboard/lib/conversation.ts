@@ -1,7 +1,7 @@
 import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { go } from "../router";
 import { DEMO, answer, type Answer, type TopicId } from "./topics";
-import { agenteDe, ativar, cardDe, conversar, type Acesso, type Encaminhada, type Redirect } from "./agentes";
+import { agenteDe, ativar, cardDe, conversar, type Acesso, type CardAgente as Cartao, type Encaminhada, type Redirect } from "./agentes";
 import { ErroApi } from "./v2";
 import { CardAgente } from "../parts/CardAgente";
 
@@ -12,6 +12,7 @@ export interface Msg extends Partial<Omit<Answer, "text">> {
   id: number; role: "user" | "piggy"; text: ReactNode;
   // Conversa com um agente (@): `agente` é o kind (na bolha do usuário, o que ela destaca); o resto é o estado da resposta.
   agente?: string; estado?: EstadoAgente; redirects?: Redirect[]; pergunta?: string; repetir?: boolean;
+  cartao?: Cartao; // o descritor do card (card é o elemento): o índice do painel lateral lê o título dele
   uid?: number; custo?: number; livre?: number; ativando?: boolean; falhaAtivar?: boolean; encaminhada?: Encaminhada;
 }
 
@@ -105,7 +106,7 @@ const sessaoDe = (e: unknown) => e instanceof ErroApi && (e.status === 401 || (e
 
 async function enviar(id: number, kind: string, texto: string, uid: number, encaminhada?: Encaminhada) {
   emVoo.set(`${uid}:${kind}`, id);
-  patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false, card: undefined });
+  patch(id, { estado: "enviando", text: "Preparando a resposta…", redirects: undefined, repetir: false, card: undefined, cartao: undefined });
   try {
     const r = await conversar(uid, kind, texto, contextos.get(`${uid}:${kind}`) ?? null, encaminhada);
     if (typeof r?.reply !== "string" || !r.reply.trim()) throw new Error("contrato");
@@ -113,7 +114,7 @@ async function enviar(id: number, kind: string, texto: string, uid: number, enca
     contextos.set(`${uid}:${kind}`, r.context ?? null);
     const redirects = (Array.isArray(r.redirects) ? r.redirects : []).filter((x) => agenteDe(x?.kind) && typeof x.question === "string" && x.access !== "unavailable");
     const c = cardDe(r.card);
-    patch(id, { estado: "pronto", text: r.reply, redirects, card: c ? createElement(CardAgente, { uid, c }) : undefined });
+    patch(id, { estado: "pronto", text: r.reply, redirects, card: c ? createElement(CardAgente, { uid, c }) : undefined, cartao: c ?? undefined });
   } catch (e) {
     if (!msgs.some((x) => x.id === id)) return; // conversa limpa (troca de conta) com a pergunta em voo: o erro dela não mexe no context da conversa nova (Codex no #1157)
     const d = detalheDe(e), status = e instanceof ErroApi ? e.status : -1;

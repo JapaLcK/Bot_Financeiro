@@ -147,7 +147,7 @@ for (const width of TELAS) {
     assert.deepEqual(chats, []);
   });
 
-  test(`${width}: "fulano@gmail.com" não abre a lista nem pede nada; sem @ nenhuma requisição a /agents; o Piggy leva ícone e nome`, async () => {
+  test(`${width}: "fulano@gmail.com" não abre a lista nem pede nada; sem "@" o GET /agents é só o do painel lateral (≥1181 px), nunca um POST; o Piggy leva ícone e nome`, async () => {
     const { ctx, page, pedidos, chats } = await abrir({ width });
     await digitar(page, "fulano@gmail.com");
     await page.waitForTimeout(200);
@@ -158,7 +158,7 @@ for (const width of TELAS) {
     await page.waitForTimeout(200);
     await ctx.close();
     assert.deepEqual(cab, { texto: "Piggy", src: "brand/icon.png", tag: false, w: 22 });
-    assert.deepEqual(pedidos, []);
+    assert.deepEqual(pedidos, width >= 1181 ? ["GET /agents/42"] : []); // o painel lateral lê o catálogo mesmo sem "@" (parts/PainelChat.tsx); no celular, nada
     assert.deepEqual(chats, []);
   });
 
@@ -822,6 +822,7 @@ for (const width of TELAS) {
 
   // O envio relê a conta; enquanto ela é relida a lista sai do catálogo (uid indefinido), e a leitura do catálogo em voo é cancelada:
   // o envio sempre faz uma leitura nova. Este teste fica de guarda dessa cadeia (Codex no #1157).
+  // Com o painel lateral (≥1181 px) a leitura em voo tem um observador fixo e não se cancela sozinha: o envio a cancela (AskBar.tsx).
   test(`${width}: o plano muda com a leitura do catálogo em voo: o envio lê de novo e vai ao agente`, async () => {
     const cat = (pro) => ({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: pro, can_activate: pro, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
     let solta, n = 0;
@@ -1062,7 +1063,7 @@ for (const width of TELAS) {
     await lista(page).waitFor();
     await campo(page).pressSequentially("etive e os boletos?");
     await campo(page).press("Enter");
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).click();
     await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
     await ctx.close();
     assert.deepEqual(chats.map((c) => [c.kind, c.message]), [["detetive", "e os boletos?"], ["carteiro", "Que contas vencem?"]]);
@@ -1075,7 +1076,7 @@ for (const width of TELAS) {
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready", needs_data: true }] } }
         : n === 2 ? { status: 502, json: { detail: { error: "model_unavailable", message: "Falhou agora.", retryable: true } } } : null) });
     await enviar(page, "@Detetive e os boletos?");
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).click();
     await page.getByRole("button", { name: "Tentar de novo" }).click();
     await resposta(page).locator(".msg-text", { hasText: "Resposta 3 do carteiro." }).waitFor();
     await ctx.close();
@@ -1086,7 +1087,7 @@ for (const width of TELAS) {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
     await enviar(page, "@Detetive e os boletos?");
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).click();
     await page.getByRole("button", { name: "Ativar e responder" }).click();
     await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
     await ctx.close();
@@ -1097,10 +1098,10 @@ for (const width of TELAS) {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
     await enviar(page, "@Detetive e os boletos?");
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
     // o Carteiro é ativado noutra aba: o catálogo do servidor passa a dizer "active"
     await ctx.route(/\/agents\/42$/, (r) => r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: ["detetive", "carteiro"].includes(kind) ? "active" : null, energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } }));
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).click();
     await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
     await ctx.close();
     assert.deepEqual(chats.map((c) => c.kind), ["detetive", "carteiro"]);
@@ -1110,7 +1111,7 @@ for (const width of TELAS) {
     const { ctx, page } = await abrir({ width, ativos: ["detetive"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
     await enviar(page, "@Detetive e os boletos?");
-    const botao = page.getByRole("button", { name: "Perguntar ao Carteiro" });
+    const botao = page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" });
     await botao.waitFor();
     await botao.evaluate((b) => { b.click(); b.click(); }); // no mesmo tick, antes do re-render
     await page.getByRole("button", { name: "Ativar e responder" }).first().waitFor();
@@ -1126,7 +1127,7 @@ for (const width of TELAS) {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });
     await enviar(page, "@Detetive e os boletos?");
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
     let soltaPerfil, soltaCat;
     const perfilPreso = new Promise((ok) => { soltaPerfil = ok; }), catPreso = new Promise((ok) => { soltaCat = ok; });
     await paraConta43(ctx);
@@ -1136,7 +1137,7 @@ for (const width of TELAS) {
     await campo(page).fill("@"); // o "@" relê a conta antes do clique
     await lendo;
     const saiu = page.waitForRequest((r) => /\/agents\/42$/.test(r.url()));
-    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.locator(".chat").getByRole("button", { name: "Perguntar ao Carteiro" }).click();
     await saiu;
     soltaPerfil(); // a 43 chega com o catálogo do redirect ainda em voo: a conversa da 42 é limpa
     await page.locator(".chat-empty").waitFor();

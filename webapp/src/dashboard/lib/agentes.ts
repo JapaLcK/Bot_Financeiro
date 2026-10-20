@@ -83,7 +83,8 @@ export const agentesQuery = (uid: unknown, ativo = true) => queryOptions({
   queryFn: async ({ signal }) => {
     if (DEMO) return demo();
     const d = await chamar<Agentes>(`/agents/${uid}`, { headers: { Accept: "application/json" }, signal });
-    if (!Array.isArray(d?.catalog)) throw new Error("contrato"); // lista fora do contrato: a lista do @ não abre
+    // Lista fora do contrato (inclusive um item que não é objeto com `kind`): a lista do @ não abre e o painel lateral some (Codex no #1212).
+    if (!Array.isArray(d?.catalog) || !d.catalog.every((x) => x !== null && typeof x === "object" && typeof x.kind === "string")) throw new Error("contrato");
     return d;
   },
   staleTime: 0, refetchOnWindowFocus: false, networkMode: "always", retry: meQuery.retry,
