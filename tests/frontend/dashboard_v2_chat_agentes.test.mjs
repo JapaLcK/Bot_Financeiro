@@ -1068,6 +1068,19 @@ for (const width of TELAS) {
     assert.deepEqual(chats.map((c) => [c.kind, c.message]), [["detetive", "e os boletos?"], ["carteiro", "Que contas vencem?"]]);
   });
 
+  test(`${width}: o redirect relê o acesso no clique: o Carteiro ativado depois da resposta recebe a pergunta`, async () => {
+    const { ctx, page, chats } = await abrir({ width, ativos: ["detetive"],
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
+    await enviar(page, "@Detetive e os boletos?");
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).waitFor();
+    // o Carteiro é ativado noutra aba: o catálogo do servidor passa a dizer "active"
+    await ctx.route(/\/agents\/42$/, (r) => r.fulfill({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: ["detetive", "carteiro"].includes(kind) ? "active" : null, energy_cost })), can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 99, energy_used: 0 } }));
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
+    await ctx.close();
+    assert.deepEqual(chats.map((c) => c.kind), ["detetive", "carteiro"]);
+  });
+
   test(`${width}: agente inativo: nenhum POST de chat antes do clique; "Ativar e responder" ativa uma vez e responde`, async () => {
     let solta;
     const { ctx, page, chats, ativacoes } = await abrir({ width, soltaAtivar: new Promise((ok) => { solta = ok; }) });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { focusManager, useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { ask, ativarEResponder, perguntarAoAgente, tentarDeNovo, useConversation, usePerguntando, type Msg } from "../lib/conversation";
-import { agenteDe, agentesQuery, mencoes } from "../lib/agentes";
+import { acessoDe, agenteDe, agentesQuery, energiaDe, mencoes, type Acesso } from "../lib/agentes";
 import { BY_PROFILE, COMMON } from "../lib/prompts.js";
 import type { TopicId } from "../lib/topics";
 import { FrameScope } from "./Frame";
@@ -40,6 +40,17 @@ function PiggySays({ m }: { m: Msg }) {
   const qc = useQueryClient();
   const a = m.agente ? agenteDe(m.agente) : undefined;
   const etiqueta = a && (ETIQUETA[m.estado as keyof typeof ETIQUETA] ?? "AGENTE");
+  // O acesso do redirect é o de quando a resposta saiu: o agente pode ter sido ativado ou o plano mudado depois (noutra aba). O clique
+  // relê o catálogo e usa o acesso de agora; sem catálogo, fica o do servidor na resposta (Codex no #1157).
+  const seguir = async (r: NonNullable<Msg["redirects"]>[number]) => {
+    let acesso: Acesso = r.access === "ready" || r.access === "no_energy" || r.access === "upgrade" ? r.access : "activate", energia;
+    try {
+      const d = await qc.fetchQuery(agentesQuery(m.uid));
+      const agora = acessoDe(d, r.kind);
+      if (agora) { acesso = agora; energia = energiaDe(d, r.kind); }
+    } catch { /* o acesso que veio na resposta */ }
+    perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso, energia });
+  };
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
@@ -55,7 +66,7 @@ function PiggySays({ m }: { m: Msg }) {
       {(m.estado === "sem_plano" || (m.estado === "sem_energia")) && <div className="msg-acoes"><a className="btn btn-primary" href="/precos">Ver planos</a></div>}
       {m.estado === "pronto" && !!m.redirects?.length && (
         <div className="msg-acoes">
-          {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" onClick={() => perguntarAoAgente({ kind: r.kind, original: r.question, texto: r.question, uid: m.uid!, acesso: r.access === "ready" ? "ready" : r.access === "no_energy" ? "no_energy" : r.access === "upgrade" ? "upgrade" : "activate" })}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
+          {m.redirects.map((r, i) => <button key={i} type="button" className="btn btn-ghost" onClick={() => void seguir(r)}>Perguntar ao {agenteDe(r.kind)!.nome}</button>)}
         </div>
       )}
       {m.card}
