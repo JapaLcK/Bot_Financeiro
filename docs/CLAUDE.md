@@ -299,8 +299,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   2026-10-17); a `escolha` avisa que o mês não acabou. `anterior_encurtado` fica sempre False (contrato). Mês fechado = mês inteiro × mês inteiro. Categoria nova tem
   `pct=None`; sem gasto agora, `-100.0`; nunca +100%. O gate `financial_comparison` é a primeira instrução
   do serviço; o `anterior` de `GET /api/v2/resumo-do-mes` não muda (Essencial segue vendo os dois totais).
-  KPI das Análises (`/analytics/{uid}/kpis`, Plus+): `comparar_mes(..., meses=N)` com N = os meses do seletor,
-  P1-B também aqui: os N meses até o corrente, inteiros, contra os N antes deles, a mesma janela dos totais da rota
+  KPI das Análises (`/analytics/{uid}/kpis`, Plus+): `comparar_mes(..., meses=N)`, P1-B também aqui: os N meses até o corrente, inteiros, contra os N antes deles, a mesma janela dos totais da rota
   (cartão pela fatura; `delta_pct.income/expense` e `delta_escolha`, a frase); `dias_corridos`/`dias_no_mes` e a
   `serie` só com N=1 (com N meses não saem), e `anterior_encurtado` é sempre False também com N>1; o rótulo é "vs os N
   meses anteriores" ("vs o mês anterior" com N=1) e, como o período inclui o mês aberto, a queda fica neutra e a alta
@@ -310,6 +309,10 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   Plus (o `history_days` dele em `core/services/plan_limits.py` não alcança o anterior) recebe `inicio_do_historico`,
   vê "—" e o `title` começa pela constante `FORA_DO_HISTORICO` de `frontend/routes/analytics.py`. O rótulo usa
   `delta_meses`, o N que a rota usou (com o teto de `resolve_window`), e não o do seletor.
+  Cor do bloco v2 ("Comparado ao mês anterior", `widgets/Comparacao.tsx`): no mês aberto a queda fica cinza, a alta de
+  gasto âmbar, a receita subindo verde e caindo cinza, e o Resultado sempre neutro (decisões do dono PB-1 e de
+  2026-10-20); no mês fechado, as cores de sempre (gasto subindo âmbar e caindo verde, receita ao contrário).
+  Follow-up fora do PR B: a PB-2 (legenda "dia N de M" no mês aberto, como o card do app) e a PB-3 (ícone de categoria).
   Saída da tool: dinheiro e `pct` são NÚMERO JSON (o `ai_guard` só lê número como evidência; mesma convenção de
   `_resumo_periodo`) e moram em `total_atual`/`total_anterior`/`total_delta` (o guard só lê número sob chave
   monetária; `atual`/`anterior`/`delta` soltos não contariam). `motivos` + `nota` são os avisos de dado incompleto do

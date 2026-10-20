@@ -58,8 +58,11 @@ test("Plus: a escolha do servidor, os totais com o antes e as categorias", async
 // Decisão do dono PB-1: no mês aberto (o mês inteiro até agora × o anterior inteiro) a queda ainda não se sabe
 // e fica neutra; a alta já é fato e mantém a cor. No mês fechado, as cores de sempre.
 test("cores: no mês aberto a queda é neutra e a alta colorida; no fechado, as de sempre", async () => {
-  const tons = async (comparacao, nomes) => {
+  // `receita`: troca só a linha Entrou da resposta real (nenhuma fixture tem receita caindo)
+  const tons = async (comparacao, nomes, receita) => {
     const { ctx, page, ir } = await abrir({ plano: "plus", comparacao });
+    const real = RESPOSTAS.comparacao[comparacao];
+    if (receita) await ctx.route("**/api/v2/comparacao*", (r) => r.fulfill({ json: { ...real, receita: { ...real.receita, ...receita } } }));
     await ir();
     await page.locator(`${W} .cmp-linha`).first().waitFor();
     const r = {};
@@ -75,6 +78,9 @@ test("cores: no mês aberto a queda é neutra e a alta colorida; no fechado, as 
   // fechado: o gasto subiu (âmbar) e o Transporte caiu (verde, como sempre)
   assert.deepEqual(await tons("fechado", ["Saiu", "Transporte", "Entrou", "Resultado"]),
     { Saiu: "warn", Transporte: "gain", Entrou: "gain", Resultado: "warn" });
+  // receita caindo: cinza no mês aberto, âmbar no fechado
+  assert.deepEqual(await tons("aberto", ["Entrou"], { total_atual: "2000.00", total_delta: "-500.00", pct: "-20.0" }), { Entrou: "faint" });
+  assert.deepEqual(await tons("fechado", ["Entrou"], { total_atual: "800.00", total_delta: "-200.00", pct: "-20.0" }), { Entrou: "warn" });
 });
 
 test("+N outras e sem base dizem o que falta", async () => {
