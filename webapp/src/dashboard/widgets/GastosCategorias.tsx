@@ -3,7 +3,7 @@
 import { useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { GastoCategoria } from "../lib/api-v2.gen";
-import { moneyText, monthName } from "../lib/format.js";
+import { medida, moneyText, monthName } from "../lib/format.js";
 import { useActions } from "../lib/actions";
 import { mesDe } from "../lib/store.js";
 import { gastosQuery } from "../lib/v2";
@@ -39,7 +39,7 @@ export function GastosCategorias({ s }: { s: DashState }) {
   if (!d || estado) return <Frame id="categorias" title="Para onde vai" real aside={limpar}>{estado}</Frame>;
 
   const noMes = !!active && d.categorias.some((c) => c.chave === active); // categoria escolhida sem gasto neste mês: nada para atenuar
-  const max = Math.max(...d.categorias.map((c) => Math.max(Number(c.valor), Number(c.anterior_ate_corte ?? 0))), 1);
+  const max = Math.max(...d.categorias.map((c) => Math.max(medida(c.valor), medida(c.anterior_ate_corte))), 1);
   const alvo = d.categorias.find((c) => c.chave !== active)?.chave; // a linha que o guia destaca (parts/Guia.tsx)
   // O total do mês contra o anterior até o mesmo dia; o servidor manda o total anterior (inclui categoria que só existe lá).
   const soma = d.categorias.reduce((a, c) => a + Number(c.valor_ate_corte), 0);
@@ -62,7 +62,7 @@ export function GastosCategorias({ s }: { s: DashState }) {
         {d.categorias.map((c) => {
           const on = active === c.chave;
           const dl = delta(c, d.dia_de_corte);
-          const antesN = Number(c.anterior_ate_corte ?? 0);
+          const antesN = medida(c.anterior_ate_corte);
           return (
             <li key={c.chave}>
               <button type="button" className="cat" aria-pressed={on} data-guia={c.chave === alvo ? "categorias.item" : undefined} data-dim={noMes && !on ? "true" : undefined}
@@ -72,7 +72,7 @@ export function GastosCategorias({ s }: { s: DashState }) {
                 <span className="cat-val num">{moneyText(c.valor)}</span>
                 <span className={`cat-delta num ${dl.tom}`}>{dl.seta && <i className={`ph ${dl.seta}`} aria-hidden="true" />}{dl.texto}</span>
                 <span className="cat-track" aria-hidden="true">
-                  <span className="cat-fill" style={{ background: c.cor, transform: `scaleX(${Number(c.valor) / max})` }} />
+                  <span className="cat-fill" style={{ background: c.cor, transform: `scaleX(${medida(c.valor) / max})` }} />
                   {antesN > 0 && <span className="cat-ghost" style={{ left: `${(antesN / max) * 100}%` }} />}
                 </span>
               </button>
