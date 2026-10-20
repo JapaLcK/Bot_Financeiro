@@ -53,15 +53,17 @@ def cases(suite):
 
 
 SYNTHETIC_INVESTIDO = {  # o formato de db.investido.ler: o total dos bancos, por tipo
-    'total': Decimal('48000.00'), 'motivos': [], 'por_banco': [],
-    'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': Decimal('48000.00'), 'motivos': []}],
+    'total': Decimal('64321.00'), 'motivos': [], 'por_banco': [],  # total != renda fixa: o eval distingue um do outro
+    'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': Decimal('48000.00'), 'motivos': []},
+                 {'tipo': 'fundos', 'rotulo': 'Fundos', 'valor': Decimal('16321.00'), 'motivos': []}],
 }
 
 
 def synthetic_data():
     return {
-        'investido': {'total_investido': '48000.00', 'por_banco': [], 'motivos': [], 'fonte': 'sintética',
-                      'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': '48000.00', 'motivos': []}]},
+        'investido': {'total_investido': '64321.00', 'por_banco': [], 'motivos': [], 'fonte': 'sintética',
+                      'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': '48000.00', 'motivos': []},
+                                   {'tipo': 'fundos', 'rotulo': 'Fundos', 'valor': '16321.00', 'motivos': []}]},
         'posicoes': [],
         'resumo_brl': {'count': 0, 'market_value': 0, 'invested': 0, 'pnl': 0, 'pnl_pct': 0, 'cost_known': False},
         'renda_fixa_brl': {'count': 22, 'balance': 48000, 'invested': 45000, 'pnl': 3000},
@@ -251,6 +253,7 @@ def run(args):
         stack.enter_context(patch.object(chat, 'require_access'))
         stack.enter_context(patch.object(chat, 'access_state', return_value='ready'))
         stack.enter_context(patch.object(plan_service, 'ai_monthly_limit_for', return_value=100))
+        stack.enter_context(patch.object(plan_service, 'plan_gate_ok', return_value=True))  # card_da_resposta: sem banco
         stack.enter_context(patch.object(db, 'ai_get_usage_this_month', side_effect=lambda uid: len(charges)))
         stack.enter_context(patch.object(quota, 'try_consume_usage', side_effect=lambda *a: charges.append(1) or len(charges)))
         stack.enter_context(patch.object(chat, 'execute_read', read))

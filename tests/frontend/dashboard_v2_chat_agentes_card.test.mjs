@@ -215,7 +215,8 @@ async function viraConta43NoGet(ctx, page, sem = false) {
   // O GET do card devolve o total da conta B e, no mesmo instante, a sessão passa a ser a 43 (outra aba entrou em outra conta).
   const observa = () => {
     window.__viu = false;
-    new MutationObserver(() => { if (document.body.textContent.includes("98.765,43")) window.__viu = true; }).observe(document, { subtree: true, childList: true, characterData: true });
+    window.__viuErro = false;
+    new MutationObserver(() => { if (document.body.textContent.includes("98.765,43")) window.__viu = true; if (document.body.textContent.includes("Não deu para carregar")) window.__viuErro = true; }).observe(document, { subtree: true, childList: true, characterData: true });
   };
   await page.addInitScript(observa); // vale nas próximas navegações...
   await page.evaluate(observa); // ...e nesta
@@ -241,6 +242,7 @@ for (const width of TELAS) {
     await page.locator(".chat-empty").waitFor();
     await page.waitForTimeout(300);
     assert.equal(await page.evaluate(() => window.__viu), false, "o total da conta B apareceu no DOM");
+    assert.equal(await page.evaluate(() => window.__viuErro), false, "na troca de conta o card não mostra nada, nem o erro");
     assert.ok(!(await page.locator("body").innerText()).includes("98.765,43"));
     assert.equal(await page.locator(".chat > .msg-piggy").count(), 0, "a conversa da conta anterior sumiu");
     await ctx.close();
@@ -276,6 +278,92 @@ for (const width of TELAS) {
     await card(page).locator(".card-agente-total").waitFor();
     assert.equal(await page.locator(".chat > .msg-piggy .card-slot").count(), 1);
     assert.equal(await page.locator(".chat > .msg-piggy .card-slot[data-revela]").count(), 0);
+    await ctx.close();
+  });
+}
+
+// --- Cobertura do contrato, dos números e da entrada do card (mutantes que sobreviviam) ---
+const BASE = { total: "100.00", motivos: [], por_banco: [], por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "100.00", motivos: [] }] };
+test("corpo fora do contrato: o card mostra o erro e não desenha número", async () => {
+  const ruins = [
+    { ...BASE, total: 100 }, { ...BASE, total: "abc" }, { ...BASE, motivos: undefined }, { ...BASE, por_tipo: null },
+    { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "1e3", motivos: [] }] },
+    { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: 5, valor: "1.00", motivos: [] }] },
+  ];
+  for (const corpo of ruins) {
+    const { ctx, page } = await abrir({ width: 1440, investido: corpo });
+    await perguntar(page);
+    await card(page).getByRole("button", { name: "Tentar de novo" }).waitFor({ timeout: 5000 });
+    assert.match(await card(page).innerText(), /Não deu para carregar os dados agora\./, JSON.stringify(corpo));
+    assert.equal(await card(page).locator(".card-agente-total, .card-agente-lista").count(), 0, JSON.stringify(corpo));
+    await ctx.close();
+  }
+});
+
+test("parte negativa: sem % e fora da barra; os outros % saem da soma das positivas; Barão soma com sinal", async () => {
+  const neg = { total: "150.00", motivos: [], por_banco: [], por_tipo: [
+    { tipo: "renda_fixa", rotulo: "Renda fixa", valor: "100.00", motivos: [] }, { tipo: "acoes", rotulo: "Ações", valor: "-50.00", motivos: [] }, { tipo: "fundos", rotulo: "Fundos", valor: "100.00", motivos: [] }] };
+  let { ctx, page } = await abrir({ width: 390, investido: neg });
+  await perguntar(page);
+  await card(page).locator(".card-agente-total").waitFor();
+  let r = await card(page).evaluate((c) => ({ linhas: [...c.querySelectorAll(".card-agente-lista li")].map((e) => e.innerText.replace(/\s+/g, " ")),
+    seg: c.querySelectorAll(".comp-bar span").length, rotulo: c.querySelector(".comp-bar").getAttribute("aria-label") }));
+  assert.deepEqual(r.linhas, ["Renda fixa 50% R$ 100,00", "Ações \u2212R$ 50,00", "Fundos 50% R$ 100,00"]);
+  assert.equal(r.seg, 2);
+  assert.equal(r.rotulo, "Renda fixa 50%, Fundos 50%");
+  await ctx.close();
+  const barao = { total: "100.00", motivos: [], por_banco: [], por_tipo: [
+    { tipo: "renda_fixa", rotulo: "Renda fixa", valor: "100.00", motivos: [] }, { tipo: "tesouro", rotulo: "Tesouro Direto", valor: "-30.00", motivos: [] }] };
+  ({ ctx, page } = await abrir({ width: 390, chat: resposta({ tipo: "renda_fixa" }), investido: barao }));
+  await perguntar(page, "@Barão quanto tenho?");
+  await card(page).locator(".card-agente-total").waitFor();
+  assert.equal(await card(page).locator(".card-agente-total").innerText(), "R$ 70,00", "a mesma soma com sinal do total_renda_fixa do servidor");
+  assert.deepEqual(await card(page).locator(".card-agente-lista li").allInnerTexts().then((l) => l.map((t) => t.replace(/\s+/g, " "))), ["Renda fixa 100% R$ 100,00", "Tesouro Direto \u2212R$ 30,00"]);
+  await ctx.close();
+});
+
+test("390: positivo que arredonda a 0% mostra '<1%', nunca '0%'", async () => {
+  const mini = { total: "100000.01", motivos: [], por_banco: [], por_tipo: [
+    { tipo: "renda_fixa", rotulo: "Renda fixa", valor: "100000.00", motivos: [] }, { tipo: "fundos", rotulo: "Fundos", valor: "0.01", motivos: [] }] };
+  const { ctx, page } = await abrir({ width: 390, investido: mini });
+  await perguntar(page);
+  await card(page).locator(".card-agente-total").waitFor();
+  const r = await card(page).evaluate((c) => ({ linhas: [...c.querySelectorAll(".card-agente-lista li")].map((e) => e.innerText.replace(/\s+/g, " ")),
+    rotulo: c.querySelector(".comp-bar").getAttribute("aria-label"), pagina: document.documentElement.scrollWidth > innerWidth }));
+  assert.deepEqual(r.linhas, ["Renda fixa 100% R$ 100.000,00", "Fundos <1% R$ 0,01"]);
+  assert.equal(r.rotulo, "Renda fixa 100%, Fundos <1%");
+  assert.equal(r.pagina, false);
+  await ctx.close();
+});
+
+test("selos: 'sem banco conectado' não vira selo no card; os outros motivos sim", async () => {
+  const corpo = { ...BASE, motivos: ["sem_banco_conectado", "banco_desatualizado"] };
+  const { ctx, page } = await abrir({ width: 1440, investido: corpo });
+  await perguntar(page);
+  await card(page).locator(".card-agente-total").waitFor();
+  const t = await card(page).innerText();
+  assert.match(t, /banco desatualizado/);
+  assert.ok(!/sem banco conectado/.test(t), t);
+  await ctx.close();
+});
+
+for (const width of TELAS) {
+  test(`${width}: o card só fica visível quando o texto termina (invisível, sem foco, até lá)`, async () => {
+    const longo = { json: { reply: Array.from({ length: 80 }, (_, i) => `palavra${i}`).join(" "), context: "c", redirects: [], usage: { used: 1, limit: 100 }, card: { tipo: "investido" } } };
+    const { ctx, page } = await abrir({ width, chat: longo });
+    await page.emulateMedia({ reducedMotion: "no-preference" }); // o painel de teste abre com movimento reduzido (sem a animação do card)
+    await perguntar(page);
+    const slot = page.locator(".chat > .msg-piggy .card-slot");
+    await slot.waitFor({ state: "attached" });
+    const antes = await slot.evaluate((e) => {
+      const b = document.createElement("button"); // o "Tentar de novo" do card é um botão dentro do slot; o que mede é o slot
+      e.appendChild(b); b.focus();
+      const cs = getComputedStyle(e), r = { visibilidade: cs.visibility, opacidade: cs.opacity, foco: document.activeElement === b, delay: e.style.animationDelay, revela: e.hasAttribute("data-revela") };
+      b.remove();
+      return r;
+    });
+    assert.deepEqual(antes, { visibilidade: "hidden", opacidade: "0", foco: false, delay: "2500ms", revela: true });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".card-slot")).visibility === "visible", null, { timeout: 6000 });
     await ctx.close();
   });
 }

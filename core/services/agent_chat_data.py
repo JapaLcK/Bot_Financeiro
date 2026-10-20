@@ -1,4 +1,5 @@
 """Retratos de consulta dos especialistas, sem executar sincronizações."""
+import logging
 from datetime import date, timedelta
 
 from decimal import Decimal
@@ -6,12 +7,17 @@ from decimal import Decimal
 import db
 
 SNAPSHOT_ITEMS_LIMIT = 100
+logger = logging.getLogger(__name__)
 
 
 def _investido(user_id: int) -> dict:
     """O total dos bancos conectados: a mesma regra (db/investido.ler) do card e do /api/v2/investido."""
     from core.services.ai_chat.tools.investments import _get_investment_summary
-    return _get_investment_summary(user_id, {})
+    try:
+        return _get_investment_summary(user_id, {})
+    except Exception:  # sem o total dos bancos a conversa segue só com os recortes
+        logger.exception("agent_chat: investido.ler falhou user_id=%s", user_id)
+        return {"indisponivel": True}
 
 
 def total_renda_fixa(investido: dict) -> str | None:
@@ -54,7 +60,7 @@ def _snapshot(user_id: int, kind: str) -> dict:
                 "resumo_renda_fixa_manual_brl": {"balance": sum(r["balance"] for r in manual), "count": len(manual)},
                 "cobertura": {"posicoes": _snapshot_coverage(positions), "renda_fixa_manual": _snapshot_coverage(manual)},
                 "cobertura_renda_fixa": {"moeda": "BRL", "outras_moedas_incluidas": False, "caixinhas_incluidas": False, "patrimonio_completo": False},
-                "nota": "`investido` é o total dos bancos conectados, por tipo e por banco: a MESMA regra do card abaixo da resposta e do painel. Para quanto tenho, total da carteira e valor por tipo, use `investido.total_investido` e `investido.por_tipo`. `posicoes`, `resumo_brl` e `renda_fixa_brl` são recortes para composição e P&L de cada ativo: não os some como total. Investimento cadastrado à mão não está em `investido`: cite-o à parte, nunca somado. Não some moedas diferentes. Não some as listas parciais para calcular alocação; os resumos abrangem todos os registros consultados. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas. Zero nesses resumos não prova ausência de renda fixa nem permite concluir a alocação total. Explicite a cobertura: o cadastro pode não representar todo o patrimônio. Renda fixa serve apenas à análise de alocação; detalhes são do Barão e caixinhas são do Banqueiro."}
+                "nota": "`investido` é o total dos bancos conectados, por tipo e por banco: a MESMA regra do card abaixo da resposta e do painel. Para quanto tenho, total da carteira e valor por tipo, use `investido.total_investido` e `investido.por_tipo`. `posicoes`, `resumo_brl` e `renda_fixa_brl` são recortes para composição e P&L de cada ativo: não os some como total. Investimento cadastrado à mão não está em `investido`: cite-o à parte, nunca somado. Não some moedas diferentes. Não some as listas parciais para calcular alocação; os resumos abrangem todos os registros consultados. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas. Zero nesses resumos não prova ausência de renda fixa nem permite concluir a alocação total. Explicite a cobertura: o cadastro pode não representar todo o patrimônio. Renda fixa serve apenas à análise de alocação; detalhes são do Barão e caixinhas são do Banqueiro. Se `investido.indisponivel` for true, o total dos bancos não pôde ser lido agora: diga isso e responda só com os recortes, sem inventar o total."}
     if kind == "barao":
         fixed_income = db.list_of_fixed_income(user_id, currency="BRL")
         # Saldos, taxas e unidades bastam; não carrega os lotes de cada aporte.
@@ -65,7 +71,7 @@ def _snapshot(user_id: int, kind: str) -> dict:
                 "investimentos_manuais": manual[:SNAPSHOT_ITEMS_LIMIT],
                 "cobertura": {"renda_fixa": _snapshot_coverage(fixed_income), "investimentos_manuais": _snapshot_coverage(manual)},
                 "cobertura_renda_fixa": {"moeda": "BRL", "outras_moedas_incluidas": False, "caixinhas_incluidas": False, "patrimonio_completo": False},
-                "nota": "O total de renda fixa nos bancos é `total_renda_fixa`, o do card; inclui a caixinha espelhada do banco. A lista `renda_fixa` é detalhe por nome, sem a caixinha, e não é o total. Saldos e taxas são do último cadastro/sync (last_date), sem atualizar juros. Não são cotações atuais. Não prometa rendimentos. O rate cru depende de period/indexer; não interprete sem essas unidades. Detalhes de lotes não estão incluídos. Explicite a cobertura das listas; se truncadas, não trate sua soma como total nem descarte investimentos fora da amostra. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas, tema do Banqueiro. O cadastro pode não representar todo o patrimônio."}
+                "nota": "O total de renda fixa nos bancos é `total_renda_fixa`, o do card; inclui a caixinha espelhada do banco. A lista `renda_fixa` é detalhe por nome, sem a caixinha, e não é o total. Saldos e taxas são do último cadastro/sync (last_date), sem atualizar juros. Não são cotações atuais. Não prometa rendimentos. O rate cru depende de period/indexer; não interprete sem essas unidades. Detalhes de lotes não estão incluídos. Explicite a cobertura das listas; se truncadas, não trate sua soma como total nem descarte investimentos fora da amostra. A renda fixa inclui apenas BRL; USD e outras moedas ficam fora, assim como a renda fixa vinculada a caixinhas, tema do Banqueiro. O cadastro pode não representar todo o patrimônio. Se `investido.indisponivel` for true, o total dos bancos não pôde ser lido agora: diga isso e responda só com os recortes, sem inventar o total."}
     # Eventos só do próprio agente; não inclui alertas de outros especialistas.
     return {"alertas": db.list_agent_events(user_id, limit=20, kind=kind),
             "nota": "Alertas são históricos, confira os dados atuais nas ferramentas antes de afirmar valores atuais."}

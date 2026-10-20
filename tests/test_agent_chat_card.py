@@ -146,3 +146,19 @@ TABELA = [
 @pytest.mark.parametrize("investido,esperado", TABELA)
 def test_total_renda_fixa_tabela(investido, esperado):
     assert total_renda_fixa(investido) == esperado
+
+
+@pytest.mark.parametrize("kind", ["faria_limer", "barao"])
+def test_snapshot_degrada_se_a_leitura_do_total_falha(monkeypatch, kind):
+    import db.investido
+    def quebra(uid):
+        raise RuntimeError("banco fora")
+    monkeypatch.setattr(db.investido, "ler", quebra)
+    for nome in ("list_rv_positions", "list_investments", "list_of_fixed_income"):
+        monkeypatch.setattr(db, nome, lambda *a, **k: [])
+    monkeypatch.setattr(db, "rv_portfolio_summary", lambda *a, **k: {})
+    monkeypatch.setattr(db, "of_fixed_income_summary", lambda *a, **k: {})
+    snap = _snapshot(1, kind)
+    assert snap["investido"] == {"indisponivel": True}
+    assert snap.get("total_renda_fixa") is None
+    assert "indisponivel" in snap["nota"]

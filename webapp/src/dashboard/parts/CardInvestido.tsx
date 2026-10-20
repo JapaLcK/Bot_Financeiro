@@ -27,6 +27,7 @@ export function CardInvestido({ d, foco }: { d: Investido; foco?: "renda_fixa" }
     ? (d.total === null || cents.some((c) => c === null) ? null : moneyText(texto(cents.reduce<bigint>((s, c) => s + c!, BigInt(0)))))
     : moneyText(d.total);
   const pct = (c: bigint | null) => (c !== null && c > BigInt(0) && soma > BigInt(0) ? Math.round(Number((c * BigInt(10000)) / soma) / 100) : null);
+  const rot = (n: number) => (n === 0 ? "<1%" : `${n}%`); // positivo que arredonda a 0 não vira "0%"
   const barra = partes.flatMap((p, i) => (pct(cents[i]) === null ? [] : [{ p, c: cents[i]!, n: pct(cents[i])! }]));
   const selos = d.motivos.filter((m) => m !== "sem_banco_conectado");
   return (
@@ -37,7 +38,7 @@ export function CardInvestido({ d, foco }: { d: Investido; foco?: "renda_fixa" }
         : <p className="card-agente-total num">{total ?? "—"}</p>}
       {d.total !== null && !partes.length && <p className="card-agente-vazio">{foco ? "Nada em renda fixa nos bancos conectados." : fraseSemTotal(["nenhum_investimento"])}</p>}
       {barra.length > 0 && (
-        <div className="comp-bar" role="img" aria-label={barra.map((b) => `${b.p.rotulo} ${b.n}%`).join(", ")}>
+        <div className="comp-bar" role="img" aria-label={barra.map((b) => `${b.p.rotulo} ${rot(b.n)}`).join(", ")}>
           {barra.map((b) => <span key={b.p.tipo} style={{ flexGrow: Number(b.c), background: (TIPO[b.p.tipo] ?? TIPO.outros).cor }} />)}
         </div>
       )}
@@ -49,7 +50,7 @@ export function CardInvestido({ d, foco }: { d: Investido; foco?: "renda_fixa" }
               <li key={p.tipo}>
                 <i className={t.icone} style={{ color: t.cor }} aria-hidden="true" />
                 <span className="card-agente-nome">{p.rotulo}</span>
-                <span className="faint num">{n === null ? "" : `${n}%`}</span>
+                <span className="faint num">{n === null ? "" : rot(n)}</span>
                 {p.valor === null ? <span className="faint">saldo não informado</span> : <b className="num">{moneyText(p.valor) ?? "—"}</b>}
               </li>
             );
