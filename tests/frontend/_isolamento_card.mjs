@@ -10,7 +10,8 @@ import { FRONTEND } from "./_painel.mjs";
 // `arma()` (o GET do card: o painel lê as rotas v2 em outras telas). `window.__viu`: `marca` apareceu no DOM; `__viuErro`: o erro do card.
 // `sem`: no controle negativo a 1ª leitura do perfil depois do GET (a de daConta, que o bundle patchado ignora) ainda diz 42 e as seguintes
 // demoram 500 ms: sem isso a limpeza da conversa (a releitura do próprio painel) corre com o desenho do card e o teste não mediria nada.
-export async function viraConta43NoGet(ctx, page, url, corpoB, marca, sem = false) {
+// `corpoB` pode ser função (request, n do GET): o corpo de cada leitura (o card que lê duas rotas). `viraNoN`: a sessão só vira no N-ésimo GET.
+export async function viraConta43NoGet(ctx, page, url, corpoB, marca, sem = false, viraNoN = 1) {
   const observa = (m) => {
     window.__viu = false;
     window.__viuErro = false;
@@ -18,13 +19,13 @@ export async function viraConta43NoGet(ctx, page, url, corpoB, marca, sem = fals
   };
   await page.addInitScript(observa, marca); // vale nas próximas navegações...
   await page.evaluate(observa, marca); // ...e nesta
-  let virou = false, armado = false, depois = 0;
+  let virou = false, armado = false, depois = 0, gets = 0;
   await ctx.route("**/auth/dashboard-profile", async (r) => {
     const n = virou ? ++depois : 0, conta = virou && !(sem && n === 1) ? 43 : 42;
     if (sem && n > 1) await new Promise((ok) => setTimeout(ok, 500));
     await r.fulfill({ json: { user_id: conta, display_name: conta === 43 ? "Outra" : "Marina", email: null, whatsapp_linked: true } });
   });
-  await ctx.route(url, (r) => { virou = armado; r.fulfill({ json: corpoB }); });
+  await ctx.route(url, (r) => { const n = ++gets; virou = armado && n >= viraNoN; r.fulfill({ json: typeof corpoB === "function" ? corpoB(r.request(), n) : corpoB }); });
   return () => { armado = true; };
 }
 
