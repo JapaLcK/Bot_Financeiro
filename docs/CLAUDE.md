@@ -588,8 +588,8 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   que a da Previsão, que começa amanhã), `delta_vs_atual`, `contrato`. `cabe_nas_premissas` é sempre false e
   `orientacao` sempre `abster`: sem veredito. Não grava nada. A tela é `#/simulador/compra`
   (`widgets/SimuladorCompra.tsx`, fora do protótipo e do menu lateral; entra pela ferramenta "Vale a pena
-  comprar?"). Em aberto: o corte de hábito real (média de 3 meses, estimativa variável: decisão P2 do dono,
-  PR à parte). No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
+  comprar?"). O `atual` inclui a estimativa do dia a dia (mediana, ver Previsão); em aberto: o corte de hábito real
+  por categoria. No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
   `simuladorForm.tsx`, `simuladorResultado.tsx`), aberta pelo `+` do bloco Simulador na aba Gastos, só Pro;
   frases mais curtas que as do web, chaves comparadas por `simulador_textos_paridade.test.ts`.
 - `GET /api/v2/progresso-milhao` (`api/v2/progresso_milhao.py`; também `/api/app/progresso-milhao`): o
@@ -627,7 +627,20 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `"10.005"`, saída `"2.675"`, saldo calculado `"7.33"`. Pontos e causas resolvem as
   ocorrências originais, sem usar o valor arredondado do detalhe legado.
   `calculado_em`/`valido_ate`, qualidade e cobertura vêm da mesma snapshot;
-  `cabe_nas_premissas` e estimativa variável seguem `false`. Horizonte até 90 pontos
+  `cabe_nas_premissas` segue `false`. **Estimativa do dia a dia** (`estimativa_variavel`,
+  `core/services/previsao_variavel.py`, sem chave de desligar): por categoria, a mediana de
+  até 3 janelas de 30 dias que terminam ontem, das MESMAS linhas do "Para onde vai"
+  (`db.lancamentos.listar` + `_em_reais`); fora o que a previsão soma por outro caminho
+  (parcela, pagamento de conta, legado do cobrador, cadeia recorrente do banco fora do
+  cartão, fixo manual pago por fora). Piso de 7 dias de histórico (abaixo: `null` e o
+  motivo `gastos_variaveis_nao_estimados` continua); de 7 a 29 dias o total é levado a 30. Estimativa de total zero vira `null` (o motivo continua). A premissa
+  (`premissa_com_estimativa`, `cashflow_contract.py`) diz o histórico que entrou: mediana dos últimos N dias, ou o
+  gasto dos N dias levado a um mês.
+  Entra no saldo como uma saída por dia (`mensal/30`) a partir de amanhã, com
+  `fonte='estimativa_variavel'`: fica fora de `compromissos`, `causas` e do risco
+  (o `_risco` ignora a estimativa); `pior_dia.despesa_variavel` explica a parte dela. Campo novo no
+  topo da `Previsao` (também no Plus), `cobertura.inclui_estimativa_variavel` vira
+  `true`. Horizonte até 90 pontos
   futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
   global de bytes comprovado/adicionado: esses limites dimensionais não limitam
   fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.

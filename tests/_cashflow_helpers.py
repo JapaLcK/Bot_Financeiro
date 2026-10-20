@@ -67,6 +67,8 @@ def _mock_sources(monkeypatch, *, saldo=0.0, incomes=(), expenses=(), bills=(), 
     monkeypatch.setattr(cards, 'ler_faturas', card_read)
     import db.bank_movements, db.open_finance
     monkeypatch.setattr(db.bank_movements, '_declarations', lambda cur, uid: [])
+    import core.services.previsao_variavel as pv  # a estimativa lê o banco de verdade: tem testes próprios
+    monkeypatch.setattr(pv, 'estimar', lambda *a, **k: None)
     monkeypatch.setattr(db.open_finance, 'actionable_pending_params', lambda cur, uid: (uid,))
     def load(uid, today, until):
         nonlocal reference_today

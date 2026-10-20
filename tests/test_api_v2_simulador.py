@@ -317,6 +317,7 @@ REGRAS = {
     "casas": ["duas casas decimais"],
     "price": ["tabela price", "última parcela"],
     "receitas": ["só entram quando mensais ou anuais"],
+    "estimativa": ["estimativa dos gastos do dia a dia"],
     "total_pago_sem_despesa_mensal": ["não inclui a despesa mensal nova"],
 }
 

@@ -169,7 +169,11 @@ def _previsao_somente_leitura(uid: int, text: str) -> str | None:
                             if p['projetado'] is not None)
     else:
         values = f"{result['target']}: {fmt_brl(result['projetado'])}"
-    return f'🐷 Saldo previsto condicional — {values}.{resumo_cenario} Há dados ou compromissos a conferir; isso não autoriza uma compra.'
+    est = result.get('estimativa_variavel')
+    desconta = (f" Já desconta cerca de {fmt_brl(est['despesa_mensal'])} por mês de gastos do dia a dia (estimativa)."
+                if est and est['despesa_mensal'] else '')
+    return (f'🐷 Saldo previsto condicional — {values}.{resumo_cenario} Há dados ou compromissos a conferir; '
+            f'isso não autoriza uma compra.{desconta}')
 
 
 def _looks_like_help_fallback(response: str | None) -> bool:

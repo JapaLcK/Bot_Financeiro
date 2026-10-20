@@ -477,6 +477,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -528,6 +529,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -716,6 +718,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -798,6 +801,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [
         {
           "chave": "extrato#a1b2c3d4e5f60718",
@@ -1008,6 +1012,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -1090,6 +1095,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -1433,6 +1439,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -1515,6 +1522,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -2013,6 +2021,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -2095,6 +2104,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -2267,6 +2277,7 @@
         "data": "2026-10-07",
         "saldo": "10.00",
         "desde": null,
+        "despesa_variavel": null,
         "causas": []
       },
       "compromissos": []
@@ -2308,6 +2319,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -2564,6 +2576,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -2752,6 +2765,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -2841,6 +2855,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -3029,6 +3044,7 @@
         "data": "2026-10-07",
         "saldo": "7.33",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -3135,6 +3151,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -3354,6 +3371,7 @@
         "data": "2026-10-21",
         "saldo": "5.32",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "eafba5224bb0f55fd243719b13ae951dc284874adb4ecafdb715b8e9b60bdc12",
@@ -3521,6 +3539,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -3730,6 +3749,7 @@
         "data": "2026-10-10",
         "saldo": "-5.32",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "000fd0bc50f1b94969667542dbe599a0142cb9e73ac58251dfa051cf649c4404",
@@ -3841,6 +3861,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -4013,6 +4034,7 @@
         "data": "2026-10-07",
         "saldo": "0.00",
         "desde": null,
+        "despesa_variavel": null,
         "causas": []
       },
       "compromissos": []
@@ -4081,6 +4103,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -4364,6 +4387,7 @@
         "data": "2026-11-01",
         "saldo": "572.73",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "7671cab1156b52970cad918af61ce5fbd595f1c428cb22074c73d8a0982403d7",
@@ -4689,6 +4713,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -4798,6 +4823,7 @@
         "inclui_estimativa_variavel": false
       },
       "cabe_nas_premissas": false,
+      "estimativa_variavel": null,
       "receitas_do_banco": [],
       "marcos": [
         {
@@ -5016,6 +5042,7 @@
         "data": "2026-10-08",
         "saldo": "3460.10",
         "desde": "2026-10-06",
+        "despesa_variavel": null,
         "causas": [
           {
             "chave": "bb7d471f51686e53519e39b70323d470c111770f6b52b75803156f3285c6c481",
@@ -5164,6 +5191,74 @@
           ]
         }
       ]
+    },
+    "plus30_com_estimativa": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30
+      ],
+      "capacidades": [
+        "marcos"
+      ],
+      "base": {
+        "saldo": "10.005",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Inclui estimativa dos gastos do dia a dia (mediana mensal por categoria dos últimos 90 dias, a partir de amanhã); não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": true
+      },
+      "cabe_nas_premissas": false,
+      "estimativa_variavel": {
+        "despesa_mensal": "100.00",
+        "despesa_no_horizonte": "100.00",
+        "janela": {
+          "inicio": "2026-07-08",
+          "fim": "2026-10-05"
+        },
+        "dias_de_historico": 90,
+        "janelas_completas": 3,
+        "categorias": [
+          {
+            "chave": "mercado",
+            "nome": "Mercado",
+            "despesa_mensal": "70.00"
+          },
+          {
+            "chave": "transporte",
+            "nome": "Transporte",
+            "despesa_mensal": "30.00"
+          }
+        ]
+      },
+      "receitas_do_banco": [],
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "-92.67"
+        }
+      ],
+      "periodo": null,
+      "ancora": null,
+      "trajetoria": null,
+      "pior_dia": null,
+      "compromissos": null
     }
   },
   "metas": {
@@ -6496,14 +6591,14 @@
         "Não inclui estimativa de gastos variáveis futuros; não autoriza compra segura.",
         "Recorrências sem data de fim seguem ativas no horizonte consultado.",
         "Não reconstrói realização passada nem desloca datas por feriados.",
-        "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos previstos − boletos − faturas observadas), mais a compra simulada.",
+        "Saldo de 90 dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos previstos − boletos − faturas observadas − a estimativa dos gastos do dia a dia, quando há histórico), mais a compra simulada.",
         "O pior dia e os dias abaixo da reserva contam hoje, depois dos compromissos e da compra, até o dia 90 inclusive (91 datas).",
         "Na data da compra sai o preço cheio (à vista) ou a entrada (parcelado), mais os custos únicos.",
         "A primeira parcela e a despesa mensal nova saem um mês depois, no mesmo dia (ajustado ao fim do mês).",
         "Parcelado com juros usa a tabela Price; a diferença de centavos do arredondamento vai para a última parcela.",
         "O total pago soma o que sai na compra e todas as parcelas, inclusive as que caem depois do dia 90. Não inclui a despesa mensal nova, que não tem fim definido.",
         "Receitas fixas só entram quando mensais ou anuais; gastos fixos entram em todas as frequências.",
-        "Não inclui gastos avulsos futuros nem IOF, seguro ou tarifas que você não informou.",
+        "Não inclui IOF, seguro ou tarifas que você não informou.",
         "Valores em reais aceitam no máximo duas casas decimais; os juros, no máximo quatro."
       ],
       "cobertura": {

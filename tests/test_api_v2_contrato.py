@@ -476,7 +476,8 @@ def test_fixture_de_previsao_segue_modelo_e_precisao(nome):
     f = FIXTURES["previsao"][nome]
     p = Previsao.model_validate(f)
     assert p.model_dump(mode="json") == f
-    assert p.cabe_nas_premissas is p.cobertura.inclui_estimativa_variavel is False
+    assert p.cabe_nas_premissas is False
+    assert p.cobertura.inclui_estimativa_variavel is (p.estimativa_variavel is not None)
     assert len(p.marcos) <= 3
     if p.trajetoria is not None:
         assert len(p.trajetoria) == p.dias <= 90

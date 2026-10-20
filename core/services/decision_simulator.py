@@ -234,7 +234,7 @@ EXTENSO = {2: "duas", 4: "quatro"}  # as premissas (tool e v2) escrevem o númer
 
 PREMISSAS = (
     f"Saldo de {DIAS} dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos "
-    "previstos − boletos − faturas observadas), mais a compra simulada. O pior dia e os dias "
+    "previstos − boletos − faturas observadas − a estimativa dos gastos do dia a dia, quando há histórico), mais a compra simulada. O pior dia e os dias "
     f"abaixo da reserva incluem hoje após os compromissos e a compra, até o dia {DIAS} inclusive "
     f"({DIAS + 1} datas). pago_na_compra é tudo "
     "o que sai na data da compra: o preço cheio (à vista) ou a entrada (parcelado), mais os "
@@ -244,7 +244,7 @@ PREMISSAS = (
     f"mais todas as parcelas, inclusive as que caem depois do dia {DIAS}, e NÃO inclui a despesa "
     "mensal nova, que não tem fim contratado. Receitas fixas só entram quando mensais ou "
     "anuais; gastos fixos entram em todas as frequências. "
-    "Não inclui gastos avulsos futuros nem IOF, "
+    "Não inclui IOF, "
     f"seguro ou tarifas não informados. Valores monetários aceitam no máximo {EXTENSO[CASAS_DINHEIRO]} casas decimais."
 )
 

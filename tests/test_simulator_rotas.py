@@ -52,7 +52,7 @@ def test_gate_so_libera_o_tier_pro(cliente, plan, status):
         assert r.json()["detail"] == {"error": "pro_required", "feature": "simulator"}
     else:
         sim = r.json()["simulacao"]
-        assert set(sim) == {"today", "balance_source", "banks_excluded", "reserva_minima", "atual", "cenarios", "premissas", "estado", "motivos", "cobertura", "calculado_em", "valido_ate", "cabe_nas_premissas", "orientacao"}
+        assert set(sim) == {"today", "balance_source", "banks_excluded", "reserva_minima", "atual", "cenarios", "premissas", "estado", "motivos", "cobertura", "calculado_em", "valido_ate", "cabe_nas_premissas", "orientacao", "estimativa_variavel"}
         assert "trajectory" not in json.dumps(sim)
         contrato = sim["cenarios"][0]["contrato"]
         # entrada 36.000 + 48 parcelas (202.606,84) + custos únicos 2.500
