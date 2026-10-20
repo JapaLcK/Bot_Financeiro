@@ -57,7 +57,7 @@
  * valem 0 aqui; e o app carrega o site AO VIVO, então nada disto aparece no
  * aparelho antes do deploy (§5).
  *
- * COBERTURA POR PÁGINA, explícita: os casos abrem só `/index.html` e
+ * COBERTURA POR PÁGINA, explícita: os casos abrem só `/inicio-antiga.html` e
  * `/precos.html`. As 16 páginas que carregam esta `.nav` foram medidas À MÃO a
  * 320/341/360/375 e a 320 logado — todas em 1 faixa, 66px, nada fora da tela
  * (`login.html` logado não entra na conta: ele redireciona para `/home` antes de
@@ -88,7 +88,7 @@ after(async () => { await browser?.close(); server?.kill(); });
  * Abre `rota` na largura `w`. Com `logado`, o `/auth/validate` responde ok e o
  * `nav-auth.js` troca "Entrar / Criar conta" pelo menu da conta.
  */
-async function abrirNav(w, { logado = false, rota = "/index.html", rotulo = "Ana Beatriz" } = {}) {
+async function abrirNav(w, { logado = false, rota = "/inicio-antiga.html", rotulo = "Ana Beatriz" } = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: 720 } });
   if (logado) {
     await ctx.route("**/auth/validate", (r) =>
@@ -340,7 +340,7 @@ test("12) links públicos continuam acessíveis quando nav-burger.js falha", asy
   const ctx = await browser.newContext({ viewport: { width: 320, height: 720 } });
   await ctx.route("**/nav-burger.js*", r => r.fulfill({ status: 404, body: "" }));
   const page = await ctx.newPage();
-  await page.goto(`${ORIGIN}/index.html`);
+  await page.goto(`${ORIGIN}/inicio-antiga.html`);
   assert.equal(await page.locator(".pb-burger").count(), 0);
   const links = page.locator(".nav-links a");
   assert.ok(await links.count() >= 5);

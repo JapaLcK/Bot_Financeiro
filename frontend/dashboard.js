@@ -9007,6 +9007,7 @@ function _ensureLaunchDetailModal() {
           <button type="button" class="ld-del" id="ld-delete"><i class="ph ph-trash" aria-hidden="true"></i> Excluir</button>
           <span class="ld-acts-right">
             <button type="button" class="btn-cancel" id="ld-undo">Desfazer</button>
+            <button type="button" class="btn-cancel" id="ld-bank">Conferência com o banco</button>
             <button type="button" class="btn-cancel" id="ld-edit"><i class="ph ph-pencil-simple" aria-hidden="true"></i> Editar</button>
             <button type="button" class="btn-save" id="ld-close">Fechar</button>
           </span>
@@ -9020,6 +9021,7 @@ function _ensureLaunchDetailModal() {
   document.getElementById("ld-edit").addEventListener("click", _launchDetailEdit);
   document.getElementById("ld-delete").addEventListener("click", _launchDetailDelete);
   document.getElementById("ld-undo").addEventListener("click", _launchDetailUndo);
+  document.getElementById("ld-bank").addEventListener("click", _launchDetailBank);
   document.addEventListener("keydown", e => {
     if (!ov.classList.contains("open")) return;
     if (e.key === "Escape") { closeLaunchDetail(); return; }
@@ -9079,8 +9081,27 @@ function _renderLaunchDetail(l) {
   // Reabre sempre destravado — sem isto, um "Desfazer" concluído com sucesso
   // deixaria o botão desabilitado pra sempre nos próximos detalhes abertos.
   ldUndoBtn.disabled = false;
+  // Despesa/receita "pelo banco" (ADR 0006): trocar/desfazer/apagar moram no módulo da conferência,
+  // só a partir do Histórico (DP-6). Mesma guarda de `window.Reconciliations` acima.
+  document.getElementById("ld-bank").style.display =
+    (_launchDetailSource === "history" && l.bank_declaration && window.BankMovements) ? "" : "none";
 
   document.getElementById("launch-detail-overlay").classList.add("open");
+}
+
+function _launchDetailBank() {
+  const l = _launchDetailCurrent;
+  if (!l || l.id == null || !window.BankMovements) return;
+  // O "Apagar" de dentro da conferência cai no `confirmDeleteLaunch`, que recarrega o Histórico por
+  // este flag (mesmo contrato do Excluir do detalhe).
+  // ponytail: fechar a conferência sem apagar deixa o flag; o próximo apagar/editar recarrega o
+  // Histórico uma vez a mais. Limpar no fechamento exigiria um callback de fechar no módulo.
+  _editDeleteReturnTo = "history";
+  closeLaunchDetail();  // um overlay por vez
+  window.BankMovements.open(USER_ID, async msg => {
+    _historyResetAndReload();
+    await refreshDashboardAfterInvestment(msg);
+  }, { launchId: l.id });
 }
 
 async function _launchDetailUndo() {

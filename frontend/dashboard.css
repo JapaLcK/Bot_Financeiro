@@ -1681,7 +1681,7 @@ body.light .ov-period-tabs { background:rgba(0,0,0,.04); }
 .ov-stat-clickable:focus-visible { outline:2px solid var(--neon);outline-offset:2px; }
 .ov-lbl-info { font-size:.9em;opacity:.5;vertical-align:middle; }
 .modal.launch-detail .modal-acts.ld-acts { justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px; }
-.ld-acts-right { display:flex;gap:10px;margin-left:auto; }
+.ld-acts-right { display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-left:auto; }
 .ld-del { background:transparent;border:1px solid var(--glass-border);color:#ff6b6b;
   padding:8px 14px;border-radius:9px;cursor:pointer;font-size:.82rem;
   display:inline-flex;align-items:center;gap:6px;transition:background .2s; }
