@@ -1,6 +1,6 @@
 import { voltarAoInicio } from "@/features/openFinance/navegacao";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, View } from "react-native";
 
 import { useForeground } from "@/features/openFinance/useForeground";
@@ -13,6 +13,7 @@ import { ConnectionStatus } from "@/ui/componentes/ConnectionStatus";
 import { ProgressBarIndeterminada } from "@/ui/componentes/ProgressBar";
 import { Screen } from "@/ui/componentes/Screen";
 import { Texto } from "@/ui/componentes/Texto";
+import { concluirTentativaBancaria, lerTentativaBancaria } from "@/storage/secure";
 import { espaco } from "@/ui/tokens";
 
 /** Em `conferindo` há tanto tempo, aparece "Sair" com o aviso de demora. */
@@ -57,8 +58,12 @@ function Contador({ ms }: { ms: number }) {
  * dados": barra sem porcentagem (o servidor não diz quanto falta) e contador.
  * "Sair" só quando sair é seguro (o item já é conexão, ou ainda conferindo
  * `DEMORA_MS` depois da abertura ou do "Conferir de novo"); "Continuar" só nos
- * estados finais. O gesto de voltar
- * nunca é bloqueado.
+ * estados finais. "Descartar" (só em `conferindo`, a qualquer momento) apaga o
+ * marcador DESTA rodada e sai em um toque (só com marcador da rodada: nunca em
+ * `modo=acompanhar`); não chama o servidor nem desconecta (o webhook adota o item,
+ * como no "Descartar" do aviso do Início). Se a pessoa já saiu da tela quando o
+ * cofre responde, o fim do apagar não a puxa de volta ao Início. O gesto de
+ * voltar nunca é bloqueado.
  *
  */
 export default function OpenFinanceVolta() {
@@ -74,6 +79,12 @@ export default function OpenFinanceVolta() {
   const link = item ?? (recebido === undefined ? undefined : "");
   const [estado, setEstado] = useState<EstadoVolta>({ fase: "esperando-trava" });
   const [rodada, setRodada] = useState(0);
+  // O marcador que esta rodada acompanha; `desistiu` para o laço e `descartando` ignora o 2º toque.
+  const [tentativa, setTentativa] = useState<string | null>(null);
+  const desistiu = useRef(false);
+  const descartando = useRef(false);
+  const foco = useRef(true); // o apagar do cofre pode voltar depois de a pessoa já ter saído da tela: aí não puxa para o Início
+  useFocusEffect(useCallback(() => { foco.current = true; return () => { foco.current = false; }; }, []));
 
   // Nada de pedido fora de foco ou com a trava na frente; ao pausar, cancela, e ao
   // liberar recomeça com janela nova (o GET vem primeiro: não repete POST à toa).
@@ -86,8 +97,9 @@ export default function OpenFinanceVolta() {
       agora: Date.now,
       controlador,
       esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
-      cancelado: () => cancelado,
+      cancelado: () => cancelado || desistiu.current,
       aoMudar: setEstado,
+      aoTentativa: setTentativa,
       expirou,
     }, origem, modo);
     return () => {
@@ -112,6 +124,17 @@ export default function OpenFinanceVolta() {
     if (estado.fase === "conectado" && estado.ui.state !== "updating") AccessibilityInfo.announceForAccessibility(estado.ui.label);
   }, [estado]);
 
+  // Falha no cofre: o marcador fica e o Início mostra o aviso pendente (com Retomar/Descartar).
+  const descartar = async () => {
+    if (descartando.current || !tentativa) return;
+    descartando.current = desistiu.current = true;
+    try {
+      await concluirTentativaBancaria(tentativa);
+      // `concluir` não apaga o marcador de OUTRA rodada (nem avisa): só anuncia com o cofre sem marcador.
+      if (foco.current && await lerTentativaBancaria() === null) AccessibilityInfo.announceForAccessibility("Conexão pendente descartada");
+    } catch { /* o marcador fica; ver acima */ }
+    if (foco.current) voltarAoInicio();
+  };
   const sair = <Button rotulo="Sair" onPress={() => voltarAoInicio()} />;
   const continuar = <Button rotulo="Continuar" variante={estado.fase === "ainda-conferindo" ? "secondary" : "primary"} onPress={() => voltarAoInicio()} />;
 
@@ -141,6 +164,8 @@ export default function OpenFinanceVolta() {
             {sair}
           </>
         )}
+
+        {conferindo && tentativa && <Button rotulo="Descartar" variante="ghost" onPress={() => void descartar()} />}
 
         {atualizando && (
           <>
