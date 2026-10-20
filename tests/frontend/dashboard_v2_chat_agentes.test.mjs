@@ -1340,6 +1340,17 @@ for (const width of TELAS) {
     assert.deepEqual(chats, []);
   });
 
+  test(`${width}: "@Detetive 👍" envia o emoji; "@Detetive ?" (só pontuação) não envia`, async () => {
+    const { ctx, page, chats } = await abrir({ width });
+    await enviar(page, "@Detetive ?");
+    await page.waitForTimeout(150);
+    assert.equal(await campo(page).inputValue(), "@Detetive ?"); // controle: só pontuação continua sem envio
+    await enviar(page, "@Detetive 👍");
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 1 do detetive." }).waitFor();
+    await ctx.close();
+    assert.deepEqual(chats.map((c) => c.message), ["👍"]);
+  });
+
   test(`${width}: só a menção não envia nada e a barra guarda o texto`, async () => {
     const { ctx, page, chats } = await abrir({ width });
     await digitar(page, "@det");
