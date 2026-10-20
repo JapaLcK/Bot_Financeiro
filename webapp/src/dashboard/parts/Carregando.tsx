@@ -8,8 +8,9 @@ export function Carregando({ kind }: { kind: string }) {
   const frases = frasesDe(kind);
   const [i, setI] = useState(0);
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const t = setInterval(() => setI((n) => n + 1), TROCA_MS);
+    // Relido a cada troca: ligar o movimento reduzido no meio da espera congela a frase (Codex no #1196).
+    const reduzido = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const t = setInterval(() => { if (!reduzido.matches) setI((n) => n + 1); }, TROCA_MS);
     return () => clearInterval(t);
   }, []);
   return (

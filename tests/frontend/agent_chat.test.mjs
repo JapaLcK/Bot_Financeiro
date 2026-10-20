@@ -44,6 +44,29 @@ test('encaminha pergunta preenchida sem envio automático nem histórico', async
   } finally { await page.close(); }
 });
 
+test('encaminhamento: só a pergunta do botão vai marcada; editar o rascunho a desmarca; tentar de novo mantém', async () => {
+  const { page, requests } = await setup({ failAt: [2], failureStatus: 503, failureDetail: { error: 'busy', message: 'Falhou agora.', retryable: true } });
+  try {
+    await ask(page, 'Duplicidades e CDI');
+    assert.equal(requests[0].forwarded, undefined);
+    await page.getByRole('button', { name: 'Conversar com Barão' }).click();
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    await page.click('#agent-chat-send'); // 2º pedido: falha repetível
+    await page.getByRole('button', { name: 'Tentar novamente' }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.agent-chat-assistant[data-state="complete"]').length === 1);
+    assert.deepEqual(requests.slice(1).map(r => [r.forwarded, r.needs_data]), [[true, true], [true, true]]);
+    // rascunho editado vira pergunta normal; e a marca foi consumida
+    await page.evaluate(() => openAgentChat('detetive'));
+    await ask(page, 'Duplicidades e CDI');
+    await page.getByRole('button', { name: 'Conversar com Barão' }).last().click();
+    await page.waitForFunction(() => !document.getElementById('agent-chat-input').disabled);
+    await ask(page, 'O que é CDI? Explique melhor');
+    assert.deepEqual([requests[4].forwarded, requests[4].needs_data], [undefined, undefined]);
+    await ask(page, 'O que é CDI?');
+    assert.equal(requests[5].forwarded, undefined, 'a marca foi consumida pelo envio anterior');
+  } finally { await page.close(); }
+});
+
 test('falha preserva pergunta e contexto para tentar novamente', async () => {
   const { page, requests } = await setup();
   try {

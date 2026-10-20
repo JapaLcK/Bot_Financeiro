@@ -105,6 +105,20 @@ describe("logo do catálogo é dado de terceiro: só https no CDN da Pluggy é b
   });
 });
 
+describe("logo próprio no catálogo", () => {
+  it("conector com logo_proprio: o Avatar desenha o PNG do nosso host e o logo da Pluggy do mesmo conector não é baixado; o sem próprio segue com o da Pluggy", async () => {
+    const PLUGGY = "https://cdn.pluggy.ai/assets/connector-icons/602.svg";
+    servidor({ catalogo: () => resposta(200, { connectors: [{ id: 601, name: "Itaú", logo: "https://cdn.pluggy.ai/assets/connector-icons/601.svg", logo_proprio: "/brand/bancos/60701190.png" }, { id: 602, name: "Bradesco", logo: PLUGGY, logo_proprio: null }] }),
+      rotas: { "/assets/connector-icons/602.svg": () => ({ ok: true, status: 200, text: async () => SVG }) as unknown as Response } });
+    renderRouter("./app", { initialUrl: "/conexoes" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Conectar Itaú" })).toBeTruthy());
+    await act(drenar);
+    const externas = fetchFalso.mock.calls.map(([u]: [string]) => String(u)).filter((u: string) => !/\/(open-finance|auth|api|onboarding)\//.test(u));
+    expect(externas).toEqual([PLUGGY]); // o Itaú não baixou SVG nenhum; o Bradesco (sem próprio) baixou o da Pluggy
+    expect(screen.UNSAFE_queryAllByType(Image).map((i) => i.props.source?.uri)).toEqual(["http://backend.teste/brand/bancos/60701190.png"]);
+  });
+});
+
 describe("o catálogo é opcional: se falhar, a seção some e 'Conectar outro banco' aparece", () => {
   it.each([["500", () => resposta(500, { detail: "fora" })], ["rede fora", () => { throw new TypeError("rede fora"); }]] as const)("/connectors em %s", async (_nome, catalogo) => {
     servidor({ catalogo });

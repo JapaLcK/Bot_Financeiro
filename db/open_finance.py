@@ -313,7 +313,7 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
     # `ui` é o estado exibível — decidido por `connection_ui_state`, a única
     # função que o decide. O front deixou de derivar rótulo do `status`:
     # ele não sabe de produto atrasado nem de item que sumiu.
-    from core.services.pluggy_catalogo import logo_do_conector
+    from core.services.pluggy_catalogo import logo_do_conector, logo_proprio
     from core.services.pluggy_health import connection_ui_state
     for c in connections:
         c["ui"] = connection_ui_state(c)
@@ -324,6 +324,8 @@ def _read_open_finance_connections(cur, user_id: int, *, lock: bool = False) -> 
         c["logo_url"] = logo_url_valida(c["logo_url"])
         if c["logo_url"] is None and c.get("provider") == "pluggy":
             c["logo_url"] = logo_url_valida(logo_do_conector(str(c.get("institution_id") or "")))
+        # Logo PRÓPRIO (arquivo do repo) vence o da Pluggy no cliente; campo a mais, `logo_url` não muda. Só `pluggy`, id exato.
+        c["logo_proprio"] = logo_proprio(str(c.get("institution_id") or "")) if c.get("provider") == "pluggy" else None
         # Campo de TRABALHO, não de contrato: entrou no select só para o
         # `connection_ui_state` acima e sai antes da serialização, para o
         # corpo HTTP ficar byte-idêntico em chaves ao de antes (exceto logo_url, PR 2). O `pop`

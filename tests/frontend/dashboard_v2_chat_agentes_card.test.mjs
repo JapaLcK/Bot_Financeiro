@@ -263,9 +263,10 @@ test("ISOLAMENTO, controle negativo: com a conferência da conta desligada no bu
 for (const width of TELAS) {
   test(`${width}: o card entra com o fade dos botões uma vez e não anima ao voltar ao /piggy`, async () => {
     const { ctx, page } = await abrir({ width });
+    await page.emulateMedia({ reducedMotion: "no-preference" }); // com movimento reduzido não há fade nem marca (PiggyChat.tsx)
     await perguntar(page);
+    await page.locator(".chat > .msg-piggy .card-slot[data-revela]").waitFor();
     await card(page).locator(".card-agente-total").waitFor();
-    assert.equal(await page.locator(".chat > .msg-piggy .card-slot[data-revela]").count(), 1);
     await page.evaluate(() => { location.hash = "#/conta/perfil"; });
     await page.locator(".chat").waitFor({ state: "detached" });
     await page.evaluate(() => { location.hash = "#/piggy"; });

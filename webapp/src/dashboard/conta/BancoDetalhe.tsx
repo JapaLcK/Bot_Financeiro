@@ -4,7 +4,7 @@ import { haQuanto } from "../lib/format.js";
 import { NATIVE, useDialogo } from "../parts/dialog";
 import { corDoBanco } from "../lib/bancos";
 import { Estado, Ladrilho, dinheiro, nomeDoBanco, plural, type Linha } from "./BancoCard";
-import type { Conexao } from "./api";
+import { logoDoBanco, type Conexao } from "./api";
 
 const quando = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); // sem dateStyle: Safari 14.0
 
@@ -32,7 +32,7 @@ export function BancoDetalhe({ c, i, v, bloqueado, sync, falha, onDesconectar, o
         <div className="banco-det-cab"><button type="button" className="banco-det-x" aria-label="Fechar" onClick={fecharDialog}><i className="ph ph-x" aria-hidden="true" /></button></div>
         <div className="banco-det-corpo">
           <div className="banco-det-id">
-            <Ladrilho nome={nome} logo={c.logo_url} cor={corDoBanco(c.institution_name ?? "", i)} grande />
+            <Ladrilho nome={nome} logo={logoDoBanco(c)} cor={corDoBanco(c.institution_name ?? "", i)} grande />
             <h2 id={`${id}-t`}>{nome}</h2>
             <Estado c={c} />
             {c.ui.detail && <p>{c.ui.detail}</p>}
