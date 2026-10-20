@@ -61,7 +61,7 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
-  categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : SimuladorHabitos,
+  categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : () => <SimuladorHabitos />, // lambda: o simulador importa `comCardPrevisao` daqui (ciclo); a referência só é lida no render
   compromissos: Bills, piggy: Piggy, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,

@@ -4,10 +4,12 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CategoriaEstimada, RotasPost, SimuladorHabitos as Resposta } from "../lib/api-v2.gen";
 import { moneyText } from "../lib/format.js";
-import { ErroApi, escrever, meQuery, previsaoQuery, usePlan } from "../lib/v2";
+import { ErroApi, escrever, meQuery, perfilQuery, previsaoQuery, usePlan } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
+import { comCardPrevisao } from "../parts/Board";
 import { Frame } from "../parts/Frame";
 import { ConvitePro, ddmm } from "./Compromissos";
+import { useListaDaPagina } from "./ReceitasDoBanco";
 import { CurvaComparada } from "./CurvaComparada";
 
 const MAX_NO_RESUMO = 5;
@@ -60,16 +62,22 @@ const GENERICO = "Não deu para calcular agora.";
 export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean }) {
   const pro = usePlan() === "pro";
   const qc = useQueryClient();
-  const prev = useQuery({ ...previsaoQuery(null), enabled: pro });
+  // No Resumo com o card de previsão, a estimativa é a que ELE leu (mesma regra da pilha de avisos): um 2º observador da chave padrão guardaria o dado do plano antigo.
+  const perfil = useQuery({ ...perfilQuery, enabled: pro && !full, subscribed: pro && !full });
+  const comCard = !full && !!perfil.data && comCardPrevisao(perfil.data.perfil ?? "padrao", "pro");
+  const sozinho = pro && (full || (!perfil.isPending && !comCard));
+  const prev = useQuery({ ...previsaoQuery(null), enabled: sozinho, subscribed: sozinho });
+  const [doCard] = useListaDaPagina();
+  const dados = comCard ? doCard : prev.data;
   const [rascunho, setRascunho] = useState<Cortes>({});
   const [cortes, setCortes] = useState<Cortes>({});
-  const est = prev.data?.estimativa_variavel ?? null;
+  const est = dados?.estimativa_variavel ?? null;
   const cats = (est?.categorias ?? []).slice(0, full ? undefined : MAX_NO_RESUMO);
   // Só chaves da estimativa atual, na ordem dela, e só com corte: sem nenhum, não há POST nem resultado.
   const lista = cats.filter((c) => cortes[c.chave] > 0).map((c) => ({ categoria: c.chave, percentual: cortes[c.chave] }));
   const corpo: RotasPost["/simulador/habitos"]["corpo"] | null = lista.length ? { cortes: lista } : null;
   const q = useQuery({
-    queryKey: ["simulador-habitos", corpo],
+    queryKey: ["simulador-habitos", dados?.calculado_em, corpo], // a versão do snapshot: previsão relida com as mesmas chaves não reaproveita o resultado velho
     queryFn: ({ signal }) => escrever<Resposta>("POST", "/simulador/habitos", corpo, signal),
     enabled: pro && !!corpo, retry: false, gcTime: 0, staleTime: Infinity, refetchOnWindowFocus: false, networkMode: "always",
     placeholderData: keepPreviousData, // a chave abandonada é abortada e a resposta de outra chave nunca aparece na atual
@@ -84,11 +92,14 @@ export function SimuladorHabitos({ full = false }: { s?: unknown; full?: boolean
 
   const titulo = full ? "Seus gastos do dia a dia" : "Simulador";
   const id = full ? "habitos-alavancas" : "simulador";
-  if (!pro) return <Frame id={id} title={titulo} real><ConvitePro texto="O simulador é do Pro." /></Frame>;
+  if (!pro) {
+    const convite = <Frame id={id} title={titulo} real><ConvitePro texto="O simulador é do Pro." /></Frame>;
+    return full ? <div className="panel span-12">{convite}</div> : convite;
+  }
 
   let alavancas: ReactNode;
-  if (prev.isPending) alavancas = <p className="w-lede">Carregando…</p>;
-  else if (prev.isError) alavancas = <div className="empty" role="alert"><p>Não deu para ler seus gastos agora.</p><button type="button" className="btn btn-ghost retry" onClick={() => void prev.refetch()}>Tentar de novo</button></div>;
+  if (comCard ? !doCard : prev.isPending) alavancas = <p className="w-lede">Carregando…</p>;
+  else if (!comCard && prev.isError) alavancas = <div className="empty" role="alert"><p>Não deu para ler seus gastos agora.</p><button type="button" className="btn btn-ghost retry" onClick={() => void prev.refetch()}>Tentar de novo</button></div>;
   else if (!est) alavancas = <p className="w-lede">Ainda não há histórico para estimar o gasto do dia a dia.</p>;
   else alavancas = (
     <div className="levers">

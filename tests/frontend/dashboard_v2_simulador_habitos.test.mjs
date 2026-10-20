@@ -139,6 +139,36 @@ for (const rota of ["/simulador", "/"]) {
   });
 }
 
+test("previsão relida com as mesmas categorias e outro calculado_em: novo POST e a tela mostra a resposta nova", async () => {
+  const resposta = (n, rt) => rt.fulfill({ json: { ...OK, economia_mensal: n === 1 ? "11.11" : "22.22" } });
+  const { page, pedidos, ctx } = await abrir({ resposta });
+  let gets = 0;
+  await ctx.route("**/api/v2/previsao*", (rt) => rt.fulfill({ json: { ...RESPOSTAS.previsao.pro90_com_estimativa, calculado_em: `2026-10-06T15:0${++gets}:00Z` } }));
+  await page.reload();
+  await page.locator(".lever-habito").first().waitFor();
+  await tecla(page, "Mercado", 1);
+  await page.getByText("R$ 11,11").waitFor();
+  const antes = gets;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange", { bubbles: true }))); // o foco relê a previsão
+  await page.getByText("R$ 22,22").waitFor();
+  assert.ok(gets > antes && pedidos.length === 2);
+  assert.doesNotMatch(await page.locator("#w-habitos-resultado").innerText(), /11,11/);
+  await ctx.close();
+});
+
+test("Plus em /simulador a 1280: o convite está num painel e ocupa o grid (não 1 coluna solta)", async () => {
+  const { page, ctx } = await abrir({ plano: "plus", previsao: "plus30_com_estimativa", width: 1280 });
+  await page.locator(".convite").waitFor();
+  const m = await page.locator(".convite").evaluate((el) => {
+    const p = el.closest(".panel"), g = el.closest(".page-grid");
+    return { painel: !!p, razao: p ? p.getBoundingClientRect().width / g.getBoundingClientRect().width : 0 };
+  });
+  assert.equal(m.painel, true);
+  assert.ok(m.razao >= 0.5, `razão ${m.razao}`);
+  await page.screenshot({ path: "/private/tmp/claude-501/-Users-lucaskuramoti-Projetos-bot-bot-wa--claude-worktrees-intelligent-euler-774cba/702846fb-4390-4ebc-bd8f-a8671707a9f8/scratchpad/p3b-plus-v2-1280.png" });
+  await ctx.close();
+});
+
 test("Plus: convite ao Pro, sem POST e sem GET de previsão do widget", async () => {
   const r = await abrir({ plano: "plus", previsao: "plus30_com_estimativa" });
   const { page, pedidos, ctx } = r;
@@ -198,5 +228,24 @@ test("protótipo (DEMO): o exemplo continua, com presets", async () => {
   const { page, ctx } = await abrir({ demo: true, rota: "/simulador", espera: "#page-title", resposta: { json: OK } });
   await page.getByRole("button", { name: "Delivery pela metade" }).waitFor();
   assert.equal(await page.locator(".lever-habito").count(), 0);
+  await ctx.close();
+});
+
+test("Resumo: com o card em 60 dias o simulador usa a estimativa DO CARD e não abre outro GET (a chave padrão nunca é guardada por ele)", async () => {
+  const { page, ctx } = await abrir({ rota: "/", espera: "#page-title" });
+  const base = RESPOSTAS.previsao.pro90_com_estimativa;
+  const do60 = JSON.parse(JSON.stringify({ ...base, dias: 60 }));
+  do60.estimativa_variavel.categorias[0].nome = "Só-no-60";
+  const gets = [];
+  await ctx.route("**/api/v2/previsao*", (rt) => {
+    const dias = new URL(rt.request().url()).searchParams.get("dias");
+    gets.push(dias);
+    return rt.fulfill({ json: dias === "60" ? do60 : base });
+  });
+  await page.reload();
+  await page.locator("[data-widget-id=simulador] .lever-habito").first().waitFor();
+  await page.locator("#w-hero").getByRole("radio", { name: "60 dias" }).click();
+  await page.locator("[data-widget-id=simulador]").getByText("Só-no-60").waitFor();
+  assert.deepEqual(gets, [null, "60"], `GETs: ${gets}`);
   await ctx.close();
 });

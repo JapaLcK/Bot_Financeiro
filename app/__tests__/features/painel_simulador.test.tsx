@@ -75,6 +75,14 @@ it("422 categoria_fora_da_estimativa: relê a previsão (um GET a mais), avisa e
  expect(screen.getByText("Seus gastos do dia a dia mudaram. Ajuste de novo.")).toBeTruthy(); expect(screen.queryByText("Sobra por mês")).toBeNull();
  await waitFor(() => expect(gets()).toBe(antes + 1));
 });
+it("422 + previsão nova: os cortes zeram, mas a mensagem 'mudaram' continua na tela", async () => {
+ await abrir(); await soltar("Corte em Mercado", 30);
+ habitos = () => resposta(422, { error: { code: "validation_error", message: "x", details: [{ loc: ["body", "cortes", 0, "categoria"], msg: "x", type: "categoria_fora_da_estimativa" }] } });
+ previsao = { ...(V2.previsao.pro90_com_estimativa as object), calculado_em: "2026-10-06T15:05:00Z" };
+ await soltar("Corte em Mercado", 40);
+ await waitFor(() => expect(screen.getByLabelText("Corte em Mercado").props.value).toBe(0));
+ expect(screen.getByText("Seus gastos do dia a dia mudaram. Ajuste de novo.")).toBeTruthy();
+});
 it("falha genérica: mensagem curta, sem número; o 200 seguinte mostra os números", async () => {
  habitos = () => resposta(500, {}); await abrir(); await soltar("Corte em Mercado", 30);
  expect(screen.getByText("Não deu para calcular. Tente de novo.")).toBeTruthy(); expect(screen.queryByText("Sobra por mês")).toBeNull();
