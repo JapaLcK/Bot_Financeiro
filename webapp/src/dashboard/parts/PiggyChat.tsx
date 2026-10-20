@@ -40,15 +40,16 @@ const aRevelar = new Set<number>();
 const REVELA_MS = 2000; // teto do atraso somado das palavras; 30 ms por palavra até caber
 const REVELA_PASSO = 30;
 const REVELA_ANIM = 500; // duração da animação de cada palavra (inline no span: a CSS não repete o valor)
-const ACOES_ANIM = 400; // o fade dos botões, depois da última palavra (inline também)
+const ESPERA_CARD = 3000; // teto da pausa do texto enquanto o card acima dele carrega
+const ACOES_ANIM = 400; // o fade do card (antes do texto) e dos botões (depois da última palavra); inline também
 
 // Cada palavra é um <span> que anima só opacidade/blur/subida (chat.css); o espaço e as quebras de linha ficam como texto.
-function Revela({ t }: { t: string }) {
+function Revela({ t, inicio }: { t: string; inicio: number }) {
   const partes = t.split(/(\s+)/);
   const n = partes.length >> 1 || 1;
   const passo = Math.min(REVELA_PASSO, REVELA_MS / n);
   let w = 0;
-  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms`, animationDuration: `${REVELA_ANIM}ms` }}>{p}</span>)}</>;
+  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${inicio + Math.round(w++ * passo)}ms`, animationDuration: `${REVELA_ANIM}ms` }}>{p}</span>)}</>;
 }
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
@@ -91,10 +92,26 @@ function PiggySays({ m }: { m: Msg }) {
   // palavra no leitor de tela, e a marca deixada esconderia os botões de novo se a animação voltasse a valer.
   const [fim, setFim] = useState(false);
   const animar = revela.current && m.estado === "pronto" && !fim;
-  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
+  const inicio = m.card ? ACOES_ANIM : 0; // com card, o texto começa quando o card acabou de entrar
+  const total = inicio + Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
+  // O texto pausa enquanto o card carrega (chat.css), por no máximo ESPERA_CARD: a leitura do card não tem timeout, e um GET pendurado
+  // não pode esconder a resposta. O fim espera as palavras acabarem de fato, não só o relógio.
+  const [paciente, setPaciente] = useState(true);
   useEffect(() => {
     if (!animar) return;
-    const id = setTimeout(() => setFim(true), total + ACOES_ANIM + 100); // folga: o relógio do timer não é o da animação, e cortar o fade no último quadro o faria saltar
+    const id = setTimeout(() => setPaciente(false), ESPERA_CARD);
+    return () => clearTimeout(id);
+  }, [animar]);
+  const pTexto = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (!animar) return;
+    let id = 0;
+    const espera = (ms: number) => { id = window.setTimeout(() => {
+      const vivas = pTexto.current?.getAnimations?.({ subtree: true }).some((x) => x.playState !== "finished");
+      if (vivas) espera(200);
+      else id = window.setTimeout(() => setFim(true), ACOES_ANIM + 100); // folga: o relógio do timer não é o da animação, e cortar o fade no último quadro o faria saltar
+    }, ms); };
+    espera(total);
     return () => clearTimeout(id);
   }, [animar, total]);
   return (
@@ -102,9 +119,11 @@ function PiggySays({ m }: { m: Msg }) {
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
       {!DEMO && !m.real && <p className="msg-by"><Demonstracao /></p>}
       {a && m.estado === "enviando" && <Carregando kind={a.kind} />}
-      <p className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} /> : m.text}</p>
-      {/* O card do agente entra depois do texto, com o mesmo fade dos botões (chat.css). */}
-      {m.card && (m.agente ? <div className="card-slot" data-revela={animar || undefined} style={animar ? { animationDelay: `${total}ms`, animationDuration: `${ACOES_ANIM}ms` } : undefined}>{m.card}</div> : m.card)}
+      {/* O card do agente vem primeiro, acima do texto, com o mesmo fade dos botões (chat.css); o texto se revela depois dele.
+          O do Piggy (metas, topics.tsx) continua depois do texto. */}
+      {m.card && m.agente && <div className="card-slot" data-revela={animar || undefined} data-espera={(animar && paciente) || undefined} style={animar ? { animationDelay: "0ms", animationDuration: `${ACOES_ANIM}ms` } : undefined}>{m.card}</div>}
+      <p ref={pTexto} className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} inicio={inicio} /> : m.text}</p>
+      {m.card && !m.agente && m.card}
       {m.estado === "inativo" && (
         <div className="msg-acoes">
           <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>

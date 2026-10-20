@@ -1,4 +1,4 @@
-// Os cards do Carteiro (contas a pagar) e do Banqueiro (caixinhas, kind "cofre") abaixo da resposta (webapp: parts/CardAgente.tsx, CardContas.tsx,
+// Os cards do Carteiro (contas a pagar) e do Banqueiro (caixinhas, kind "cofre") acima do texto da resposta (webapp: parts/CardAgente.tsx, CardContas.tsx,
 // CardCaixinhas.tsx). Os outros cards estão em dashboard_v2_chat_agentes_card_temas.test.mjs. O servidor só diz QUAL card; os números vêm da rota
 // v2 do tipo (/api/v2/contas-a-pagar, /api/v2/caixinhas), conferida a conta da sessão (conta/api.ts: daConta). Tudo em 1440 e 390. Nenhum dos dois
 // tem link: o painel não tem tela de contas a pagar nem de caixinhas.
@@ -49,11 +49,11 @@ const carregado = (page) => card(page).locator(".card-agente-lista, .card-agente
 const shot = async (page, nome, width) => { if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, `${nome}-${width}.png`) }); } };
 const linhas = (loc, sel) => loc.locator(sel).evaluateAll((es) => es.map((e) => e.innerText.replace(/\s+/g, " ")));
 
-// Posição (entre o texto e as ações "Perguntar ao X"), geometria e rolagem do card.
+// Posição (acima do texto, que fica acima das ações "Perguntar ao X"), geometria e rolagem do card.
 const medida = (page) => page.evaluate(() => {
   const li = document.querySelector(".chat > .msg-piggy"), top = (s) => li.querySelector(s).getBoundingClientRect(), c = top(".card-agente"), l = li.getBoundingClientRect();
   return {
-    ordem: [top(".msg-text").bottom <= c.top, c.bottom <= top(".msg-acoes").top], dentro: c.left >= l.left - 1 && c.right <= l.right + 1,
+    ordem: [c.bottom <= top(".msg-text").top, top(".msg-text").bottom <= top(".msg-acoes").top], dentro: c.left >= l.left - 1 && c.right <= l.right + 1,
     semRolagem: document.documentElement.scrollWidth <= innerWidth && li.querySelector(".card-agente").scrollWidth <= Math.ceil(c.width), larg: c.width,
     link: li.querySelector(".card-agente a") !== null, status: document.querySelector("p[role=status]").textContent,
   };

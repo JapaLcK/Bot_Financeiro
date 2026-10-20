@@ -15,6 +15,7 @@
 .card-agente-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-agente .btn { justify-self: start; min-height: 44px; }
 .card-slot { min-width: 0; }
+.card-slot:empty { display: none; } /* card que não desenha nada (401/403, outro período): sem o gap do grid em cima do texto */
 .card-agente-lista-2 li { grid-template-columns: minmax(0, 1fr) auto; }
 .card-agente-valores { display: grid; margin: 0; }
 .card-agente-valores > div { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 12px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 14px; }

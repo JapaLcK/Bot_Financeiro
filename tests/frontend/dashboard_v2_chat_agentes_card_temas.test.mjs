@@ -1,4 +1,4 @@
-// Os cards do Detetive (assinaturas), do Repórter (resumo do mês) e do Xerife (orçamentos) abaixo da resposta (webapp: parts/CardAgente.tsx,
+// Os cards do Detetive (assinaturas), do Repórter (resumo do mês) e do Xerife (orçamentos) acima do texto da resposta (webapp: parts/CardAgente.tsx,
 // CardAssinaturas.tsx, CardResumoMes.tsx, CardOrcamentos.tsx). O Faria Limer e o Barão estão em dashboard_v2_chat_agentes_card.test.mjs.
 // O servidor só diz QUAL card (e o mês); os números vêm da rota v2 do tipo, conferida a conta da sessão (conta/api.ts: daConta). Tudo em 1440 e 390.
 import { test, before, after } from "node:test";
@@ -56,7 +56,7 @@ const medida = (page) => page.evaluate(() => {
   const li = document.querySelector(".chat > .msg-piggy"), top = (s) => li.querySelector(s).getBoundingClientRect(), c = top(".card-agente"), l = li.getBoundingClientRect();
   const a = li.querySelector(".card-agente a.msg-open");
   return {
-    ordem: [top(".msg-text").bottom <= c.top, c.bottom <= top(".msg-acoes").top], dentro: c.left >= l.left - 1 && c.right <= l.right + 1,
+    ordem: [c.bottom <= top(".msg-text").top, top(".msg-text").bottom <= top(".msg-acoes").top], dentro: c.left >= l.left - 1 && c.right <= l.right + 1,
     semRolagem: document.documentElement.scrollWidth <= innerWidth && li.querySelector(".card-agente").scrollWidth <= Math.ceil(c.width), larg: c.width,
     link: a.getAttribute("href"), alvo: a.getBoundingClientRect().height, status: document.querySelector("p[role=status]").textContent,
   };

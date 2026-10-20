@@ -31,7 +31,9 @@ for (const width of [1440, 390]) {
     const largura = await pilulas(page).first().evaluate((p) => Math.round(p.getBoundingClientRect().width));
     const estoura = await ultima(page).evaluate((li) => [li.scrollWidth > li.clientWidth, [...li.querySelectorAll(".pilula")].some((p) => p.scrollWidth > p.clientWidth)]);
     const docLargo = await page.evaluate(() => document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth);
+    const abaixo = await ultima(page).evaluate((li) => li.querySelector(".msg-text").getBoundingClientRect().bottom <= li.querySelector(".metas-chat").getBoundingClientRect().top);
     await ctx.close();
+    assert.equal(abaixo, true, "o card do Piggy fica depois do texto (só o dos agentes vem antes)");
     assert.equal(texto, "Você tem 11 metas.");
     assert.deepEqual(nomes, ["Reserva de emergência", "Viagem pro Japão", "Notebook novo", "Entrada do apê", "Curso de inglês"]);
     assert.deepEqual(rotulos, [

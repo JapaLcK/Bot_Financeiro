@@ -1,4 +1,4 @@
-// O card com os dados do tema abaixo da resposta do Faria Limer e do Barão (webapp: parts/CardAgente.tsx, parts/CardInvestido.tsx).
+// O card com os dados do tema acima do texto da resposta do Faria Limer e do Barão (webapp: parts/CardAgente.tsx, parts/CardInvestido.tsx).
 // O servidor só diz QUAL card (`card.tipo`); os números vêm do /api/v2/investido, conferida a conta da sessão (conta/api.ts: daConta).
 // O backend é de mentira (ctx.route); o contrato é o de frontend/routes/agents.py. Tudo em 1440 e 390.
 import { test, before, after } from "node:test";
@@ -45,7 +45,7 @@ const card = (page) => page.locator(".chat > .msg-piggy .card-agente");
 const shot = async (page, nome, width) => { if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: join(SHOTS, `${nome}-${width}.png`) }); } };
 
 for (const width of TELAS) {
-  test(`${width}: Faria Limer: o card fica entre o texto e "Perguntar ao X", com o número do /api/v2/investido`, async () => {
+  test(`${width}: Faria Limer: o card fica acima do texto, e o texto acima de "Perguntar ao X", com o número do /api/v2/investido`, async () => {
     const { ctx, page, erros, gets } = await abrir({ width });
     await perguntar(page);
     await card(page).locator(".card-agente-total").waitFor();
@@ -53,7 +53,7 @@ for (const width of TELAS) {
       const li = document.querySelector(".chat > .msg-piggy"), top = (s) => li.querySelector(s).getBoundingClientRect(), c = top(".card-agente"), l = li.getBoundingClientRect();
       const bar = [...li.querySelectorAll(".comp-bar span")];
       return {
-        ordem: [top(".msg-text").bottom <= c.top, c.bottom <= top(".msg-acoes").top],
+        ordem: [c.bottom <= top(".msg-text").top, top(".msg-text").bottom <= top(".msg-acoes").top],
         total: li.querySelector(".card-agente-total").textContent, titulo: li.querySelector(".card-agente-tit").textContent,
         linhas: [...li.querySelectorAll(".card-agente-lista li")].map((e) => e.innerText.replace(/\s+/g, " ")),
         segmentos: bar.length, rotulo: li.querySelector(".comp-bar").getAttribute("aria-label"), role: li.querySelector(".comp-bar").getAttribute("role"),
@@ -339,22 +339,83 @@ test("selos do Barão: só os da renda fixa e os do banco; o 'saldo ausente' dos
 });
 
 for (const width of TELAS) {
-  test(`${width}: o card só fica visível quando o texto termina (invisível, sem foco, até lá)`, async () => {
-    const longo = { json: { reply: Array.from({ length: 80 }, (_, i) => `palavra${i}`).join(" "), context: "c", redirects: [], usage: { used: 1, limit: 100 }, card: { tipo: "investido" } } };
+  test(`${width}: o card entra primeiro e o texto se revela depois dele; os botões, depois do texto`, async () => {
+    const longo = { json: { ...FARIA.json, reply: Array.from({ length: 80 }, (_, i) => `palavra${i}`).join(" ") } };
     const { ctx, page } = await abrir({ width, chat: longo });
     await page.emulateMedia({ reducedMotion: "no-preference" }); // o painel de teste abre com movimento reduzido (sem a animação do card)
     await perguntar(page);
-    const slot = page.locator(".chat > .msg-piggy .card-slot");
-    await slot.waitFor({ state: "attached" });
-    const antes = await slot.evaluate((e) => {
-      const b = document.createElement("button"); // o "Tentar de novo" do card é um botão dentro do slot; o que mede é o slot
-      e.appendChild(b); b.focus();
-      const cs = getComputedStyle(e), r = { visibilidade: cs.visibility, opacidade: cs.opacity, foco: document.activeElement === b, delay: e.style.animationDelay, revela: e.hasAttribute("data-revela") };
-      b.remove();
-      return r;
+    await page.locator(".chat > .msg-piggy .msg-text .rv").first().waitFor();
+    const atrasos = await page.evaluate(() => {
+      const li = document.querySelector(".chat > .msg-piggy"), d = (s) => li.querySelector(s).style.animationDelay;
+      return { card: d(".card-slot[data-revela]"), palavra: d(".msg-text .rv"), botoes: d(".msg-acoes[data-revela]") };
     });
-    assert.deepEqual(antes, { visibilidade: "hidden", opacidade: "0", foco: false, delay: "2500ms", revela: true });
-    await page.waitForFunction(() => getComputedStyle(document.querySelector(".card-slot")).visibility === "visible", null, { timeout: 6000 });
+    // O card entra já; a 1ª palavra espera o fade dele (ACOES_ANIM 400); os botões, a última palavra: 400 + 2000 (teto) + 500 (REVELA_ANIM).
+    assert.deepEqual(atrasos, { card: "0ms", palavra: "400ms", botoes: "2900ms" });
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".card-slot")).opacity === "1", null, { timeout: 2000 });
+    assert.ok(await page.locator(".chat > .msg-piggy .rv").count() > 0, "o card já entrou e o texto ainda está se revelando");
     await ctx.close();
+  });
+}
+
+// --- Card acima do texto: o texto não desce quando o card carrega, nem herda o espaço de um card que não desenha nada ---
+const LONGO = { json: { ...FARIA.json, reply: Array.from({ length: 40 }, (_, i) => `palavra${i}`).join(" ") } };
+// O GET do card responde só quando `solta()` é chamado (ou nunca).
+async function cardPreso(ctx) {
+  let solta;
+  const preso = new Promise((r) => { solta = r; });
+  await ctx.unroute("**/api/v2/investido");
+  await ctx.route("**/api/v2/investido", async (r) => { await preso; r.fulfill({ json: FIXTURE }).catch(() => {}); });
+  return () => solta();
+}
+const topoTexto = (page) => page.evaluate(() => document.querySelector(".chat > .msg-piggy .msg-text").getBoundingClientRect().top);
+const opacidadeDa1a = (page) => page.evaluate(() => getComputedStyle(document.querySelector(".chat > .msg-piggy .msg-text .rv")).opacity);
+
+for (const width of TELAS) {
+  test(`${width}: card lento: o texto espera o card carregar e não desce depois de visível`, async () => {
+    const { ctx, page } = await abrir({ width, chat: LONGO });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    const solta = await cardPreso(ctx);
+    await perguntar(page);
+    await page.locator(".chat > .msg-piggy .card-agente[aria-busy=true]").waitFor();
+    await page.waitForTimeout(1200); // bem depois dos 400 ms em que o texto começaria
+    assert.equal(await opacidadeDa1a(page), "0", "com o card carregando, nenhuma palavra aparece");
+    solta();
+    await card(page).locator(".card-agente-total").waitFor();
+    const t0 = Date.now();
+    await page.waitForFunction(() => +getComputedStyle(document.querySelector(".chat > .msg-piggy .msg-text .rv")).opacity > 0, null, { timeout: 3000 });
+    const visivel = await topoTexto(page); // onde o texto estava quando a 1ª palavra apareceu
+    await page.locator(".chat > .msg-piggy .rv").first().waitFor({ state: "detached", timeout: 6000 });
+    // A revelação inteira depois do card: 400 (fade do card) + 40 × 30 + 500 = 2100 ms; o relógio sozinho a cortaria no meio.
+    assert.ok(Date.now() - t0 >= 2000, `a revelação foi cortada ${Date.now() - t0} ms depois do card`);
+    assert.equal(await topoTexto(page), visivel, "o texto não se moveu depois de visível");
+    await ctx.close();
+  });
+
+  test(`${width}: card pendurado: o texto aparece mesmo assim, no máximo ~3 s depois`, async () => {
+    const { ctx, page } = await abrir({ width, chat: LONGO });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await cardPreso(ctx); // nunca solta
+    await perguntar(page);
+    await page.locator(".chat > .msg-piggy .rv").first().waitFor({ state: "detached", timeout: 8000 });
+    assert.equal(await card(page).getAttribute("aria-busy"), "true", "o card ainda carrega");
+    assert.match(await page.locator(".chat > .msg-piggy .msg-text").innerText(), /^palavra0 .* palavra39$/);
+    await ctx.close();
+  });
+
+  test(`${width}: card que não desenha nada (403): sem espaço em cima do texto, como resposta sem card`, async () => {
+    const gap = async (o) => {
+      const { ctx, page } = await abrir({ width, ...o });
+      await perguntar(page);
+      await page.waitForTimeout(300);
+      const r = await page.evaluate(() => {
+        const li = document.querySelector(".chat > .msg-piggy"), t = (s) => li.querySelector(s).getBoundingClientRect();
+        return { gap: Math.round(t(".msg-text").top - t(".msg-autor").bottom), card: !!li.querySelector(".card-agente") };
+      });
+      await ctx.close();
+      return r;
+    };
+    const semCard = await gap({ chat: resposta(null) }), com403 = await gap({ status: 403 });
+    assert.equal(com403.card, false);
+    assert.equal(com403.gap, semCard.gap, JSON.stringify({ semCard, com403 }));
   });
 }
