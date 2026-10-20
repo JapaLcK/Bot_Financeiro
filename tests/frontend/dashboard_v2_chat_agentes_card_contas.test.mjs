@@ -17,7 +17,7 @@ after(() => browser?.close());
 const TELAS = [1440, 390];
 const SHOTS = process.env.PR3C_SHOTS; // pasta dos screenshots (opcional)
 const TIPOS = {
-  contas: { nome: "Carteiro", kind: "carteiro", card: { tipo: "contas" }, url: /\/api\/v2\/contas-a-pagar$/, ok: RESPOSTAS.contas_a_pagar.cheia, vazio: RESPOSTAS.contas_a_pagar.vazia },
+  contas: { nome: "Carteiro", kind: "carteiro", card: { tipo: "contas", hoje: "2026-10-20" }, url: /\/api\/v2\/contas-a-pagar$/, ok: RESPOSTAS.contas_a_pagar.cheia, vazio: RESPOSTAS.contas_a_pagar.vazia },
   caixinhas: { nome: "Banqueiro", kind: "cofre", card: { tipo: "caixinhas" }, url: /\/api\/v2\/caixinhas$/, ok: RESPOSTAS.caixinhas.cheia, vazio: RESPOSTAS.caixinhas.vazia },
 };
 const CAT = Object.values(TIPOS).map((t) => [t.kind, t.nome]);
@@ -117,6 +117,22 @@ for (const width of TELAS) {
     });
   }
 }
+
+test("Carteiro: a rota já está noutro dia (virou a meia-noite depois da consulta): nenhum card, nem erro; sem o dia, nenhum GET", async () => {
+  let { ctx, page, gets } = await abrir({ width: 1440, tipo: "contas", card: { tipo: "contas", hoje: "2026-10-19" } });
+  await perguntar(page, "Carteiro");
+  await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy .card-agente[aria-busy]"));
+  await page.waitForTimeout(200);
+  assert.equal(gets.length, 1);
+  assert.equal(await card(page).count(), 0);
+  await ctx.close();
+  ({ ctx, page, gets } = await abrir({ width: 1440, tipo: "contas", card: { tipo: "contas" } }));
+  await perguntar(page, "Carteiro");
+  await page.waitForTimeout(300);
+  assert.equal(gets.length, 0);
+  assert.equal(await card(page).count(), 0);
+  await ctx.close();
+});
 
 test("Carteiro: conta variável sem estimativa (gravada como 0) diz 'valor a definir', não R$ 0,00", async () => {
   const base = RESPOSTAS.contas_a_pagar.cheia;

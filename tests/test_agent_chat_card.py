@@ -18,7 +18,7 @@ from tests.test_agent_chat_conversation import ScriptedClient, SnapshotCall, own
 
 SNAP = ("consultar_dados_do_agente", {}, {})
 BUDGETS = {"budgets": [{"categoria": "mercado"}], "count": 1, "mes": "2026-10"}
-BILLS = {"bills": [], "count_pending": 0}
+BILLS = {"bills": [], "count_pending": 0, "today": "2026-10-20"}
 POCKETS = {"pockets": []}
 
 
@@ -53,8 +53,9 @@ def gate(monkeypatch):
     ("xerife", [("get_budget_status", {}, {**BUDGETS, "mes": "2026-13"})], None),
     ("xerife", [("get_budget_status", {}, {"budgets": [], "count": 0})], None),  # nada a mostrar
     ("xerife", [("get_budget_status", {"categoria": "mercado"}, {"found": True, "categoria": "mercado"})], None),  # o texto fala de uma só
-    ("carteiro", [("get_bills_to_pay", {}, BILLS)], {"tipo": "contas"}),
-    ("carteiro", [("get_bills_to_pay", {"include_paid": False}, BILLS)], {"tipo": "contas"}),
+    ("carteiro", [("get_bills_to_pay", {}, BILLS)], {"tipo": "contas", "hoje": "2026-10-20"}),
+    ("carteiro", [("get_bills_to_pay", {"include_paid": False}, BILLS)], {"tipo": "contas", "hoje": "2026-10-20"}),
+    ("carteiro", [("get_bills_to_pay", {}, {**BILLS, "today": None})], None),  # sem o dia da consulta
     ("carteiro", [("get_bills_to_pay", {"include_paid": True}, BILLS)], None),  # o texto inclui as pagas, a rota só as pendentes
     ("carteiro", [("get_bills_to_pay", {}, {"error": "x"})], None),
     ("carteiro", [SNAP], None),

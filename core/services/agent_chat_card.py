@@ -17,12 +17,17 @@ GATES = {"investido": "investments", "renda_fixa": "investments", "assinaturas":
 # Consultas que não têm período (o saldo de agora): não mudam do que o texto fala. Qualquer outra consulta fora de CARDS é de um
 # período ou recorte que o card não mostra (compare_periods, get_spending_trend, get_category_spend…) = sem card.
 SEM_PERIODO = {"get_balance"}
+DIA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MES = re.compile(PADRAO_MES)  # o padrão da rota; tests/test_agent_chat_card.py prende a cópia TS (lib/agentes.ts) a ele
 
 
 def _card(tipo: str, resultado, args=None) -> dict | None:
     if tipo == "contas" and ((args or {}).get("include_paid") or not (isinstance(resultado, dict) and "bills" in resultado)):
         return None  # com as pagas o texto fala de mais que o card (a rota só traz as pendentes); sem `bills` a consulta falhou
+    if tipo == "contas":
+        # "vence amanhã" e "vencida" dependem do dia: o card leva o dia da consulta e some se a rota já está noutro (Codex no #1200)
+        hoje = resultado.get("today")
+        return {"tipo": tipo, "hoje": hoje} if isinstance(hoje, str) and DIA.match(hoje) else None
     if tipo == "caixinhas" and not (isinstance(resultado, dict) and "pockets" in resultado):
         return None
     if tipo == "resumo_mes":
