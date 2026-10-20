@@ -1,0 +1,23 @@
+/* O painel à direita da conversa (parts/PainelChat.tsx): fixo, ao lado da coluna (--chat-x/--chat-w, chat.css), só em tela larga. Grid, não flex gap (Safari 14). */
+@media (min-width: 1181px) {
+  .chat-painel {
+    position: fixed; z-index: 30; top: calc(64px + 8px); bottom: var(--askbar-bottom);
+    left: calc(var(--chat-x) + var(--chat-w) + var(--painel-gap)); width: var(--painel-w);
+    overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; row-gap: 20px;
+  }
+}
+.painel-lista { display: grid; row-gap: 2px; }
+.painel-tit { padding: 0 8px 6px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.painel-lista li + li .painel-tit { padding-top: 14px; }
+.painel-item {
+  width: 100%; min-height: 44px; padding: 0 8px; border: 0; border-radius: 10px; background: none; color: var(--ink);
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 10px;
+  font: inherit; font-size: 13.5px; text-align: left; cursor: pointer;
+}
+.painel-item span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.painel-item img { border-radius: 50%; }
+.painel-item:hover { background: var(--plane-3); }
+.painel-item:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+.painel-nota { padding: 0 8px; font-size: 13px; color: var(--ink-3); }
+.painel-erro { display: grid; row-gap: 8px; justify-items: start; }
+.painel-erro .btn { min-height: 44px; }
