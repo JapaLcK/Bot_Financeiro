@@ -27,6 +27,8 @@ export const perfilSchema = z.object({
   display_name: z.string().nullable().optional(),
   plan: z.string().nullable().optional(),
   app_access: z.boolean().optional(),
+  /** O freio AGENTS_UI_ENABLED=0 (só a allowlist); só `false` esconde a tela Agentes. */
+  agents_ui_enabled: z.boolean().optional(),
   history_earliest_date: z.iso.date().nullable().optional(),
   of_banks_max: z.number().int().nullable().optional(),
   cobranca_em_atraso: z.boolean().optional(),

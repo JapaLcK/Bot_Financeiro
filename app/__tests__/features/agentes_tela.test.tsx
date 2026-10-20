@@ -8,18 +8,18 @@ import { desligarTrava, drenar } from "./open_finance_volta_rota_apoio";
 import fixture from "./painel.fixture.json";
 // Tela Agentes (Ferramentas > Agentes): `renderRouter` + servidor falso; /agents/{uid} variável por caso.
 jest.setTimeout(30_000);
-let agentes: { status: number; corpo: object };
+let agentes: { status: number; corpo: object }; let freio: { me?: boolean; auth?: boolean }; // `agents_ui_enabled` do /api/app/me e do /auth/me (ausente = servidor antigo)
 const cat = (over: object = {}) => ({ catalog: AGENTES.map((a) => ({ kind: a.kind, nome: a.nome, disponivel: true, status: a.kind === "xerife" ? "active" : null, energy_cost: 2 })), can_chat: true, can_activate: true, energy_enabled: true, energy_budget: 10, energy_used: 2, ...over });
 const getsDeAgentes = () => fetchFalso.mock.calls.map(([u]) => new URL(String(u)).pathname).filter((p) => p.startsWith("/agents"));
 beforeEach(async () => {
-  prepararCaso(); desligarTrava(); agentes = { status: 200, corpo: cat() }; await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" });
+  prepararCaso(); desligarTrava(); agentes = { status: 200, corpo: cat() }; freio = {}; await guardarCredenciais({ access: "access-ana", refresh: "rt_ana" });
   fetchFalso.mockImplementation(async (url: string) => {
     const path = new URL(url).pathname;
-    if (path === "/auth/me") return resposta(200, { user_id: 1, display_name: "Ana", app_access: true });
+    if (path === "/auth/me") return resposta(200, { user_id: 1, display_name: "Ana", app_access: true, ...(freio.auth !== undefined && { agents_ui_enabled: freio.auth }) });
     if (path === "/agents/1") return resposta(agentes.status, agentes.status === 200 ? agentes.corpo : { detail: "x" });
     if (path === "/onboarding/open-finance") return resposta(200, { ok: true, completed: true, completed_at: "2026-10-05T12:00:00Z" });
     if (path === "/open-finance/1/limite") return resposta(200, { ok: true, of_banks_max: 3, em_uso: 0, pode_adicionar: true, code: null, message: null });
-    if (path === "/api/app/me") return resposta(200, { plan_tier: "pro" });
+    if (path === "/api/app/me") return resposta(200, { plan_tier: "pro", ...(freio.me !== undefined && { agents_ui_enabled: freio.me }) });
     if (path === "/auth/refresh") return resposta(401, { detail: "invalid_refresh_token" });
     return resposta(200, (fixture as Record<string, unknown>)[path] ?? {});
   });
@@ -93,4 +93,17 @@ it("/agents com erro: avisa e mostra o catálogo sem selo nem botão", async () 
   await waitFor(() => expect(screen.getByText(/Não deu para carregar o estado dos seus agentes/)).toBeTruthy());
   expect(screen.getByText("De olho nos excessos.")).toBeTruthy();
   expect(screen.queryByText("No seu time")).toBeNull(); expect(screen.queryByRole("button", { name: "Conversar" })).toBeNull();
+});
+
+it("freio dos agentes (AGENTS_UI_ENABLED=0): Ferramentas sem a linha Agentes", async () => {
+  freio.me = false; renderRouter("./app", { initialUrl: "/gastos" });
+  await waitFor(() => expect(screen.getByTestId("painel-ferramentas")).toBeTruthy()); await act(drenar);
+  await tocar(screen.getByTestId("painel-ferramentas")); await waitFor(() => expect(screen.getByText("Progresso ao milhão")).toBeTruthy());
+  expect(screen.queryByText("Agentes")).toBeNull();
+});
+
+it("freio dos agentes com a tela já aberta: só o aviso, sem pedir /agents", async () => {
+  freio.auth = false; renderRouter("./app", { initialUrl: "/agentes" });
+  await waitFor(() => expect(screen.getByText("Os agentes estão indisponíveis no momento.")).toBeTruthy()); await act(drenar);
+  expect(getsDeAgentes()).toEqual([]); expect(screen.queryByText("De olho nos excessos.")).toBeNull();
 });

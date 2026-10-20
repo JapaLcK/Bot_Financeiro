@@ -30,11 +30,11 @@ let entradas = 0; // muda a cada toque: o chat põe o "@Nome pergunta" no campo 
 /** Lê o dono da sessão (`/auth/me`) e o `/agents/{uid}` dele; o uid nunca vem de param nem de texto. */
 function useElenco() {
   const { expirou } = useSessao();
-  const [d, setD] = useState<Agentes | null>(null), [erro, setErro] = useState(false);
+  const [d, setD] = useState<Agentes | null>(null), [erro, setErro] = useState(false), [desligado, setDesligado] = useState(false);
   const ctl = useRef<AbortController | null>(null);
   const ler = useCallback(async () => {
     ctl.current?.abort(); const c = (ctl.current = new AbortController());
-    try { const { user_id } = await perfil(); if (ctl.current !== c) return; const r = await lerAgentes(user_id, c); if (ctl.current !== c) return; setD(r); setErro(false); }
+    try { const { user_id, agents_ui_enabled } = await perfil(); if (ctl.current !== c) return; setDesligado(agents_ui_enabled === false); if (agents_ui_enabled === false) return; const r = await lerAgentes(user_id, c); if (ctl.current !== c) return; setD(r); setErro(false); }
     catch (e) {
       if (ctl.current !== c) return;
       if (e instanceof SessaoExpirada) return expirou(e.detalhe);
@@ -54,11 +54,11 @@ function useElenco() {
   });
   // Plano sem energia (orçamento 0): sem barra, como no /painel.
   const energia = d?.energy_enabled && Number(d.energy_budget) > 0 ? { usada: Number(d.energy_used || 0), total: Number(d.energy_budget) } : null;
-  return { lista, energia, erro };
+  return { lista, energia, erro, desligado };
 }
 
 export function AgentesTela() {
-  const { lista, energia, erro } = useElenco();
+  const { lista, energia, erro, desligado } = useElenco();
   const reduzir = useReduzirMovimento(), indo = useRef(false);
   const [aberto, setAberto] = useState(0), [largura, setLargura] = useState(0);
   useFocusEffect(useCallback(() => { indo.current = false; }, []));
@@ -66,6 +66,7 @@ export function AgentesTela() {
   const abrir = (i: number) => { if (!reduzir) LayoutAnimation.configureNext(LayoutAnimation.create(260, "easeInEaseOut", "opacity")); tocou.current = true; setAberto(i); };
   // dismissTo, não navigate: o painel já está embaixo na pilha (Painel > Ferramentas > Agentes); `navigate` empilhava um painel novo por cima.
   const conversar = (kind: string) => { if (indo.current) return; indo.current = true; router.dismissTo({ pathname: "/piggy", params: { agente: kind, entrada: ++entradas } }); };
+  if (desligado) return <Screen sobCabecalho><Texto tom="inkMuted" style={{ paddingVertical: espaco.lg }}>Os agentes estão indisponíveis no momento.</Texto></Screen>; // o freio AGENTS_UI_ENABLED=0, como o /painel
   return <Screen sobCabecalho rolar={false}>
     <ScrollView ref={rolagem} contentContainerStyle={{ gap: espaco.lg, paddingVertical: espaco.lg }}>
       <Texto tom="inkMuted">Sete Piggys, cada um cuidando de uma parte do seu dinheiro.</Texto>

@@ -10,15 +10,15 @@ import { espaco } from "@/ui/tokens";
 
 const breve = <Texto variante="legenda" tom="inkMuted">Em breve</Texto>;
 
-/** `pro` vem do botão do cabeçalho ("1" | "0"); ausente = o plano não chegou. O POST do simulador recusa `pro_required` de qualquer forma. */
+/** `pro` vem do botão do cabeçalho ("1" | "0"); ausente = o plano não chegou. O POST do simulador recusa `pro_required` de qualquer forma. `agentes` = "0" com o freio dos agentes ligado; a própria tela Agentes confere de novo no /auth/me. */
 export default function Ferramentas() {
-  const { pro } = useLocalSearchParams<{ pro?: string }>();
+  const { pro, agentes } = useLocalSearchParams<{ pro?: string; agentes?: string }>();
   const { navegar } = useNavegarPainel();
   return <Screen sobCabecalho><View style={{ gap: espaco.lg, paddingVertical: espaco.xl }}>
     <GrupoDeLinhas>
       <ListRow icone="ShoppingCart" titulo="Vale a pena comprar?" desativado={pro === undefined} chevron={pro === "1"} trailing={pro === "0" ? <Selo texto="Pro" /> : undefined} onPress={() => { if (pro === "1") navegar("/simulador-compra"); else if (pro === "0") Alert.alert(SEM_PLANO); }} />
       <ListRow icone="Trophy" titulo="Progresso ao milhão" chevron onPress={() => navegar("/progresso-milhao")} />
-      <ListRow icone="Robot" titulo="Agentes" chevron onPress={() => navegar("/agentes")} />
+      {agentes !== "0" && <ListRow icone="Robot" titulo="Agentes" chevron onPress={() => navegar("/agentes")} />}
     </GrupoDeLinhas>
     <GrupoDeLinhas>
       <ListRow icone="Lightning" titulo="Simulador" trailing={breve} />
