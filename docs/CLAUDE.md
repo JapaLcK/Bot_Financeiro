@@ -592,6 +592,18 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   por categoria. No app: folha `app/(app)/simulador-compra.tsx` (`features/painel/simuladorCompra.ts`,
   `simuladorForm.tsx`, `simuladorResultado.tsx`), aberta pelo `+` do bloco Simulador na aba Gastos, só Pro;
   frases mais curtas que as do web, chaves comparadas por `simulador_textos_paridade.test.ts`.
+- `POST /api/v2/simulador/habitos` (mesmo módulo; também `/api/app/simulador/habitos`; só Pro, mesmo gate): corte
+  de hábito real. Corpo `{"cortes":[{"categoria","percentual"}]}` (1..50, `percentual` int estrito 0..100, sem `user_id`).
+  Ordem: gate (403 antes de ler corpo e dado) -> corpo -> `categorias_repetidas` -> leitura da snapshot ->
+  `categoria_fora_da_estimativa` (loc `["body","cortes",i,"categoria"]`; também com estimativa null; a chave tem de estar
+  na estimativa DA SNAPSHOT do próprio uid). Conta: `previsao_variavel.cortar` (economia por categoria em `centavos`,
+  total = soma) e `decision_simulator.simular_corte`: só as ocorrências da fonte `FONTE_VARIAVEL` trocam, por
+  `ocorrencias(hoje, hoje+90, despesa_mensal − economia)`; o corte começa amanhã (ponto de hoje igual) e `delta_vs_atual`
+  no dia 90 = 3 × `economia_mensal`. Reserva 0. Resposta: dinheiro em texto, `atual` e `com_corte` (91 pontos), `cortes`
+  só os enviados, na ordem da estimativa; premissas da snapshot + `PREMISSAS_HABITOS_V2`. Não grava. Cada POST relê a
+  snapshot; o cliente posta ao soltar o slider. Card `simulador` do chat: o bloco ganha o
+  recurso `previsao` (90 dias) ao lado do `detalhes` do mês (build antigo ignora); a visão do modelo e o texto do
+  Piggy não mudam: a leitura da mediana pelo Piggy vem no PR 3b, junto com o card novo do app. Telas: PR seguinte (web e app).
 - `GET /api/v2/progresso-milhao` (`api/v2/progresso_milhao.py`; também `/api/app/progresso-milhao`): o
   patrimônio de hoje (`db/patrimonio.calcular`, a conta da tela Patrimônio do app, lida como em
   `api/nativo/patrimonio.py`) para o `/painel#/milhao`, fora do menu lateral e do Menu do celular (só o card
