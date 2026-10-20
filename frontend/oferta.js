@@ -17,6 +17,16 @@
     for (const b of planos.querySelectorAll("[data-set]")) b.setAttribute("aria-pressed", String(b === btn));
   });
 
+  // ── Quem já tem sessão escolhe o plano pela /precos, como na home antiga: lá o assinante
+  // troca de plano (/billing/change-plan). A /assinar abre assinatura nova, e com uma ativa
+  // ela para no "Você já é assinante". Sem resposta, fica a /assinar (que recusa com 409).
+  fetch("/auth/validate", { credentials: "same-origin" })
+    .then((r) => {
+      if (!r.ok) return;
+      for (const a of planos.querySelectorAll('a[href^="/assinar"]')) a.setAttribute("href", "/precos");
+    })
+    .catch(() => {});
+
   // ── Plano sem price no Stripe: o mesmo critério da /precos (plans-config). Sem isso o
   // visitante criaria a conta na /assinar para só então tomar o erro do checkout.
   // Sem resposta (rede, 5xx) os links ficam como estão: a /assinar segue sendo a guarda final.

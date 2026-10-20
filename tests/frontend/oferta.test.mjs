@@ -294,6 +294,22 @@ test("teclado: o 1º Tab é o 'Pular para o conteúdo', que aparece no foco e le
   assert.deepEqual(erros, []);
 });
 
+test("com sessão, os botões de plano levam à /precos (troca de plano do assinante); sem sessão, à /assinar", async () => {
+  const hrefs = async logado => {
+    const { page, ctx, erros } = await abrir({ logado });
+    if (logado) await page.waitForFunction(() => !document.querySelector('[data-plano] a[href^="/assinar"]'));
+    else await page.waitForSelector("#pb-acct-btn", { state: "attached", timeout: 1500 }).catch(() => {});
+    const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => a.getAttribute("href")));
+    await ctx.close();
+    assert.deepEqual(erros, []);
+    return r;
+  };
+  assert.deepEqual(await hrefs(true), Array(6).fill("/precos"));
+  const anonimo = await hrefs(false);
+  assert.equal(anonimo.length, 6);
+  for (const h of anonimo) assert.match(h, /^\/assinar\?plano=(essencial|plus|pro)&ciclo=(annual|monthly)$/);
+});
+
 test("plano sem price no Stripe (plans-config): os botões dele viram 'Indisponível' sem link; os outros seguem para a /assinar", async () => {
   const { page, ctx, erros } = await abrir({ disponivel: { plus_available: false } });
   await page.waitForFunction(() => document.querySelectorAll('[data-plano="plus"] [aria-disabled="true"]').length === 2);
