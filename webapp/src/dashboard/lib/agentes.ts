@@ -3,6 +3,7 @@
 // tudo (plano, energia, cota); o painel só agrupa a lista e mostra o que ele responde.
 import { queryOptions } from "@tanstack/react-query";
 import { uidValido } from "../conta/api";
+import { textos } from "./bancos";
 import { DEMO, chamar, escrever, meQuery } from "./v2";
 
 // Fonte da tela: kind e nome iguais a core/services/agent_chat.py::DOMAINS (tests/test_painel_agentes_catalogo.py confere).
@@ -96,12 +97,13 @@ export function ativar(uid: number, kind: string) {
 export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
 /** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
-export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "orcamentos" | "contas" | "caixinhas" } | { tipo: "resumo_mes"; mes: string };
-const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
+export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "orcamentos" | "contas" | "caixinhas" } | { tipo: "resumo_mes"; mes: string; motivos: string[] };
+export const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
 export const cardDe = (v: unknown): CardAgente | null => {
-  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown }) : {};
+  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown; motivos?: unknown }) : {};
   if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "orcamentos" || c.tipo === "contas" || c.tipo === "caixinhas") return { tipo: c.tipo };
-  return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes } : null;
+  // `motivos`: os avisos que o agente deu sobre o mês (lista de texto; fora disso, nenhum aviso).
+  return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes, motivos: textos(c.motivos) ? c.motivos as string[] : [] } : null;
 };
 /** Pergunta vinda do botão "Perguntar ao X": o servidor não a reclassifica, e o agente sugerido responde. */
 export interface Encaminhada { needs_data: boolean }

@@ -21,7 +21,7 @@ export function Linha({ o }: { o: Orcamento }) {
   return <>
     <span className="orc-icone" style={COR.test(o.cor) ? { color: o.cor } : undefined}><IconeCategoria icone={o.icone} /></span>
     <span className="orc-linha-corpo">
-      <span className="orc-linha-topo"><b>{o.categoria}</b><span className="num faint">{moneyText(o.gasto)} de {moneyText(o.teto)}</span></span>
+      <span className="orc-linha-topo"><b>{o.categoria}</b><span className="orc-linha-valor faint"><span className="num">{moneyText(o.gasto)}</span> de <span className="num">{moneyText(o.teto)}</span></span></span>
       <span className={`meter${passou ? " warn" : ""}`} aria-hidden="true"><span style={{ width: `${largura(o.usado_pct)}%` }} /></span>
       <span className={passou ? "warn" : "faint"}>
         {passou ? <><i className="ph ph-warning" aria-hidden="true" /> {ehNegativo(o.restante) ? `passou ${sem(o.restante)}` : "chegou ao teto"}</>

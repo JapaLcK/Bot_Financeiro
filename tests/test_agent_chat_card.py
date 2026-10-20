@@ -1,6 +1,8 @@
 """Card abaixo da resposta do agente (core/services/agent_chat_card.py) e a regra dos números:
 o snapshot do agente e o card leem `db.investido.ler`, a mesma do /api/v2/investido."""
 import json
+from datetime import date
+import re
 from pathlib import Path
 from decimal import Decimal
 
@@ -60,19 +62,19 @@ def gate(monkeypatch):
     ("cofre", [("get_bills_to_pay", {}, BILLS)], None),
     ("carteiro", [("list_pockets", {}, POCKETS)], None),
     ("xerife", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
-    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
-    ("reporter", [("get_period_summary", {}, mes("2024-02-01", "2024-02-29"))], {"tipo": "resumo_mes", "mes": "2024-02"}),
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10", "motivos": []}),
+    ("reporter", [("get_period_summary", {}, mes("2024-02-01", "2024-02-29"))], {"tipo": "resumo_mes", "mes": "2024-02", "motivos": []}),
     ("reporter", [("get_period_summary", {}, mes("2026-03-01", "2026-08-31"))], None),  # vários meses
     ("reporter", [("get_period_summary", {}, mes("2026-10-05", "2026-10-12", por="data_da_compra"))], None),  # período livre
     ("reporter", [("get_period_summary", {}, mes("2099-01-01", "2099-01-31", motivos=["mes_futuro"]))], None),  # a rota dá 422
     ("reporter", [("get_period_summary", {}, {"saldo_periodo": 1})], None),
     ("reporter", [("get_period_summary", {}, mes("2026-09-01", "2026-09-30")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
-    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10", "motivos": []}),
     # outra consulta de período que o card não mostra: o texto fala dela também (Tester no PR 3b)
     ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("compare_periods", {}, {})], None),
     ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_spending_trend", {}, {})], None),
     ("xerife", [("get_budget_status", {}, BUDGETS), ("get_category_spend", {}, {})], None),
-    ("reporter", [("get_balance", {}, {}), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),  # saldo não tem período
+    ("reporter", [("get_balance", {}, {}), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10", "motivos": []}),  # saldo não tem período
     ("reporter", [("get_period_summary", {}, mes("0999-01-01", "0999-01-31"))], None),  # o padrão da rota não aceita
 ])
 def test_decisao_do_card(gate, kind, consultas, esperado):
@@ -89,7 +91,7 @@ def test_gate_de_cada_tipo_e_o_da_rota_v2(gate):
     gate["ok"] = False
     assert card_da_resposta(1, "detetive", [SNAP]) is None and gate["consultadas"] == ["subscriptions"]
     gate["consultadas"].clear()
-    assert card_da_resposta(1, "reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))]) == {"tipo": "resumo_mes", "mes": "2026-10"}
+    assert card_da_resposta(1, "reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))]) == {"tipo": "resumo_mes", "mes": "2026-10", "motivos": []}
     assert card_da_resposta(1, "xerife", [("get_budget_status", {}, BUDGETS)]) == {"tipo": "orcamentos"}
     assert gate["consultadas"] == []
     # contas = `recurring_expenses` (api/v2/contas_a_pagar.py, o gate da agenda de boletos); caixinhas não tem gate
@@ -224,4 +226,28 @@ def test_snapshot_degrada_se_a_leitura_do_total_falha(monkeypatch, kind):
 ])
 def test_resultado_real_do_get_period_summary(gate, user_id, args, esperado):
     from core.services.ai_chat.tools.launches import _get_period_summary
-    assert card_da_resposta(user_id, "reporter", [("get_period_summary", args, _get_period_summary(user_id, args))]) == esperado
+    r = _get_period_summary(user_id, args)
+    # os avisos do card são os do resultado (a janela do plano da conta de teste decide se março está cortado)
+    assert card_da_resposta(user_id, "reporter", [("get_period_summary", args, r)]) == (esperado and esperado | {"motivos": r["motivos"]})
+
+
+@pytest.mark.parametrize("corte,no_card", [
+    (date(2025, 2, 15), False),  # cortou só o mês anterior: março está inteiro, o agente não avisa, o card também não
+    (date(2025, 3, 10), True),  # cortou o mês pedido: os dois avisam
+])
+def test_card_do_resumo_leva_os_avisos_do_agente_nao_os_da_rota(gate, monkeypatch, user_id, corte, no_card):
+    from core.services.ai_chat.tools.launches import _get_period_summary
+    from db import resumo_mes
+    monkeypatch.setattr(plan_service, "history_earliest_date", lambda uid, agora: corte)
+    texto = _get_period_summary(user_id, {"start_date": "2025-03-01", "end_date": "2025-03-31"})
+    card = card_da_resposta(user_id, "reporter", [("get_period_summary", {}, texto)])
+    assert ("inicio_do_historico" in texto["motivos"]) is no_card
+    assert ("inicio_do_historico" in card["motivos"]) is no_card
+    assert "inicio_do_historico" in resumo_mes.resumo_do_mes(user_id, 2025, 3)["motivos"]  # a rota avisa nos dois: o card não pode lê-la
+
+
+def test_padrao_do_mes_no_cliente_e_o_da_rota():
+    """§0.7: o TS não importa Python; a cópia de lib/agentes.ts tem de ser a mesma regex."""
+    from api.v2.resumo_mes import PADRAO_MES
+    ts = (Path(__file__).parent.parent / "webapp/src/dashboard/lib/agentes.ts").read_text(encoding="utf-8")
+    assert re.search(r"export const MES = /(.+?)/;", ts).group(1) == PADRAO_MES

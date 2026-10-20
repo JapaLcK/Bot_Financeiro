@@ -21,7 +21,8 @@ function sobrou(entrou: string, saiu: string) {
 }
 
 /** Entrou, Saiu e Sobrou do mês: a regra de `GET /api/v2/resumo-do-mes`, a mesma do `get_period_summary` de meses inteiros. */
-export function CardResumoMes({ d }: { d: ResumoDoMes }) {
+/** `motivos`: os avisos que o agente deu (o card do servidor), não os da rota (ela também avisa do corte no mês anterior). */
+export function CardResumoMes({ d, motivos }: { d: ResumoDoMes; motivos: string[] }) {
   const s = sobrou(d.entrou, d.saiu);
   return (
     <section className="card-agente" aria-label={`Resumo de ${mesAno(d.mes)}`}>
@@ -31,7 +32,7 @@ export function CardResumoMes({ d }: { d: ResumoDoMes }) {
         <div><dt>Saiu</dt><dd className="num">{moneyText(d.saiu)}</dd></div>
         <div><dt>Sobrou</dt><dd className={`num${s.startsWith("-") ? " warn" : ""}`}>{moneyText(s)}</dd></div>
       </dl>
-      <Selos motivos={d.motivos} />{/* o mesmo aviso que o texto dá (conciliação pendente, início do histórico…) */}
+      <Selos motivos={motivos} />
       <a className="link msg-open" href={href("/")}>Ver o resumo<i className="ph ph-arrow-right" aria-hidden="true" /></a>
     </section>
   );

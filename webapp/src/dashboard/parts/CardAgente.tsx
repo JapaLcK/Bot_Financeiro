@@ -33,7 +33,7 @@ function leituraDe(c: Card): Leitura {
     case "assinaturas":
       return { chave: "card-assinaturas", titulo: "Assinaturas", ler: (signal) => assinaturasQuery.queryFn({ signal }), contrato: contratoAssinaturas, desenha: (d) => <CardAssinaturas d={d} /> };
     case "resumo_mes":
-      return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} /> };
+      return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} motivos={c.motivos} /> };
     case "orcamentos":
       return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} /> };
     case "contas":
