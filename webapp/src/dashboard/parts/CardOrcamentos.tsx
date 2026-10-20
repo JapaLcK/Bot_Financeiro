@@ -22,7 +22,7 @@ export function CardOrcamentos({ d }: { d: OrcamentosCategoria }) {
       <p className="card-agente-tit"><b>Orçamentos de {mesAno(d.mes)}</b></p>
       {linhas.length === 0
         ? <p className="card-agente-vazio">Nenhum orçamento por categoria ainda.</p>
-        : <p className="card-agente-total num">{moneyText(d.total.gasto)} <span className="faint card-agente-de">de {moneyText(d.total.teto)}</span></p>}
+        : <p className="card-agente-total"><span className="num">{moneyText(d.total.gasto)}</span> <span className="faint num card-agente-de">de {moneyText(d.total.teto)}</span></p>}
       {linhas.length > 0 && (
         <ul className="orc-lista">
           {linhas.slice(0, VISIVEIS).map((o) => <li key={o.categoria}><div className="orc-linha"><Linha o={o} /></div></li>)}

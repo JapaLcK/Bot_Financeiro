@@ -21,5 +21,5 @@
 .card-agente-valores > div:first-child { border-top: 0; padding-top: 0; }
 .card-agente-valores dt { color: var(--ink-2); }
 .card-agente-valores dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
-.card-agente-de { font-size: 14px; font-weight: 400; white-space: nowrap; }
+.card-agente-de { font-size: 14px; font-weight: 400; } /* .num (nowrap) só em cada valor: "de R$ X" desce para a linha de baixo em vez de sair do card */
 .card-agente .msg-open { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }

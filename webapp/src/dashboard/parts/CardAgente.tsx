@@ -6,6 +6,7 @@ import type { Investido } from "../lib/api-v2.gen";
 import { DEMO, ErroApi, assinaturasQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
+import { textos } from "../lib/bancos";
 import { CardAssinaturas, contratoAssinaturas } from "./CardAssinaturas";
 import { CardInvestido } from "./CardInvestido";
 import { CardOrcamentos, contratoOrcamentos } from "./CardOrcamentos";
@@ -15,12 +16,12 @@ import { CardResumoMes, contratoResumoMes } from "./CardResumoMes";
 // regra do que o agente leu. A /api/v2 lê o usuário da SESSÃO, não o `uid`: a resposta só vale depois de conferir que a sessão ainda é a de
 // `uid` (daConta). Sessão de outra conta = nenhum número na tela, e a conta é relida (a conversa da anterior some em contaDaSessao).
 const NUM = /^-?\d+\.\d+$/;
-// Corpo fora do contrato não desenha meio número.
+// Corpo fora do contrato não desenha meio número. Os motivos viram selos (texto): objeto ali derrubaria o render (Codex no #1198).
 const contratoInvestido = (d: unknown) => {
   const x = d as { total?: unknown; por_tipo?: unknown; motivos?: unknown } | null;
-  return !!x && (x.total === null || (typeof x.total === "string" && moneyText(x.total) !== null)) && Array.isArray(x.motivos) && Array.isArray(x.por_tipo)
-    && (x.por_tipo as { tipo?: unknown; rotulo?: unknown; valor?: unknown }[]).every((p) => p && typeof p.tipo === "string" && typeof p.rotulo === "string"
-      && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))));
+  return !!x && (x.total === null || (typeof x.total === "string" && moneyText(x.total) !== null)) && textos(x.motivos) && Array.isArray(x.por_tipo)
+    && (x.por_tipo as { tipo?: unknown; rotulo?: unknown; valor?: unknown; motivos?: unknown }[]).every((p) => p && typeof p.tipo === "string" && typeof p.rotulo === "string"
+      && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))) && textos(p.motivos));
 };
 
 type Leitura = { chave: string; titulo: string; ler: (signal: AbortSignal) => Promise<unknown>; contrato: (d: unknown) => boolean; desenha: (d: any) => ReactNode }; // eslint-disable-line @typescript-eslint/no-explicit-any

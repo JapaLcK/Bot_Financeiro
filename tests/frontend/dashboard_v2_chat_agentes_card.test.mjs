@@ -284,6 +284,10 @@ test("corpo fora do contrato: o card mostra o erro e não desenha número", asyn
     { ...BASE, total: 100 }, { ...BASE, total: "abc" }, { ...BASE, motivos: undefined }, { ...BASE, por_tipo: null },
     { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "1e3", motivos: [] }] },
     { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: 5, valor: "1.00", motivos: [] }] },
+    { ...BASE, motivos: [{}] }, { ...BASE, motivos: [7] },
+    { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "1.00", motivos: [{ x: 1 }] }] },
+    { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "1.00", motivos: "saldo_ausente" }] },
+    { ...BASE, por_tipo: [{ tipo: "renda_fixa", rotulo: "Renda fixa", valor: "1.00" }] },
   ];
   for (const corpo of ruins) {
     const { ctx, page } = await abrir({ width: 1440, investido: corpo });

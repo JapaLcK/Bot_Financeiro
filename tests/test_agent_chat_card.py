@@ -56,6 +56,12 @@ def gate(monkeypatch):
     ("reporter", [("get_period_summary", {}, {"saldo_periodo": 1})], None),
     ("reporter", [("get_period_summary", {}, mes("2026-09-01", "2026-09-30")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
     ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
+    # outra consulta de período que o card não mostra: o texto fala dela também (Tester no PR 3b)
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("compare_periods", {}, {})], None),
+    ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31")), ("get_spending_trend", {}, {})], None),
+    ("xerife", [("get_budget_status", {}, BUDGETS), ("get_category_spend", {}, {})], None),
+    ("reporter", [("get_balance", {}, {}), ("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),  # saldo não tem período
+    ("reporter", [("get_period_summary", {}, mes("0999-01-01", "0999-01-31"))], None),  # o padrão da rota não aceita
 ])
 def test_decisao_do_card(gate, kind, consultas, esperado):
     assert card_da_resposta(1, kind, consultas) == esperado
