@@ -644,7 +644,7 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   futuros e até 3 marcos; grupos/ocorrências completos, sem truncamento. Não há teto
   global de bytes comprovado/adicionado: esses limites dimensionais não limitam
   fontes, nomes ou motivos, nem concluem o requisito de um teto global de payload.
-  Consumidor (estimativa do gasto do dia a dia): `Previsao.tsx` mostra `estimativa_variavel` (fato "Gastos do dia a dia −R$ X/mês" no card e na página, categorias só na página) e a parte `pior_dia.despesa_variavel` na frase do pior dia; o app mostra a linha na folha e no card do chat (`futuro.tsx`; `previsaoSchema` lê os campos com `.catch(null)`). Só o mensal; sem estimativa (`null`) as telas são as de antes. Dinheiro é o texto da API (`saida()` em `Compromissos.tsx`); a única conta do cliente é a largura da barra. Tabela: `docs/paridade-app-dashboard.md`.
+  Consumidor (estimativa do gasto do dia a dia): `Previsao.tsx` mostra `estimativa_variavel` (fato "Gastos do dia a dia −R$ X/mês" no card e na página, categorias só na página) e a parte `pior_dia.despesa_variavel` na frase do pior dia; o app mostra a linha na folha e no card do chat (`futuro.tsx`; `previsaoSchema` lê os campos com `.catch(null)`). Só o mensal; sem estimativa (`null`) as telas são as de antes. Dinheiro é o texto da API (`saida()` em `Compromissos.tsx`); a única conta do cliente é a largura da barra. Paridade plena entre os dois lados (por isso fora de `docs/paridade-app-dashboard.md`).
   Consumidor (Etapa 3 PR3): `webapp/src/dashboard/widgets/Previsao.tsx` (página
   `/previsao` e card "Saldo previsto" do Resumo) e `Compromissos.tsx`, com
   `previsaoQuery` em `lib/v2.ts`: chave `["previsao", dias]`, `gcTime: 0` (dado sem
