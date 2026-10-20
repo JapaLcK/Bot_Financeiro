@@ -75,10 +75,13 @@ def test_assets_versionados_tem_cache_imutavel_sem_cachear_url_nua():
     assert _cache_asset_versionado(SimpleNamespace(query_params={"v": "1"})) == "no-cache"
 
 
-def test_landing_tem_landmark_principal():
-    html = _landing_servida()
-    assert html.count("<main ") == 1
+@pytest.mark.parametrize("servir", [serve_landing, serve_inicio_antiga], ids=["raiz", "inicio-antiga"])
+def test_landing_tem_landmark_principal_e_link_para_pular_o_nav(servir):
+    html = asyncio.run(servir()).body.decode("utf-8")
+    assert len(re.findall(r"<main\b", html)) == 1
     assert html.count("</main>") == 1
+    alvo = re.search(r'<a class="[^"]*skip[^"]*" href="#([\w-]+)"', html).group(1)
+    assert html.count(f'id="{alvo}"') == 1
 
 
 def test_imagens_exclusivas_da_landing_tem_dimensoes_e_orcamento():

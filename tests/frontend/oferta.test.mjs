@@ -270,6 +270,30 @@ for (const largura of [320, 375, 390, 1280]) {
   }
 }
 
+test("teclado: o 1º Tab é o 'Pular para o conteúdo', que aparece no foco e leva ao hero dentro do <main>; o Tab seguinte não volta ao nav", async () => {
+  const { page, ctx, erros } = await abrir({ calmo: true });
+  const estrutura = await page.evaluate(() => {
+    const main = document.querySelectorAll("main");
+    return [main.length, !!main[0]?.querySelector("#conteudo, #planos, #cta-final"), ["#conteudo", "#planos", "#cta-final"].every(s => main[0]?.contains(document.querySelector(s))),
+      !main[0]?.contains(document.querySelector("footer"))];
+  });
+  assert.deepEqual(estrutura, [1, true, true, true]);
+  const escondido = await page.locator(".pb-skip").evaluate(e => e.getBoundingClientRect().bottom <= 0);
+  await page.keyboard.press("Tab");
+  const pulo = await page.evaluate(() => { const a = document.activeElement, r = a.getBoundingClientRect();
+    return [a.textContent.trim(), a.getAttribute("href"), r.top >= 0 && r.bottom <= innerHeight]; });
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.activeElement?.id === "conteudo");
+  await page.keyboard.press("Tab");
+  const depois = await page.evaluate(() => { const a = document.activeElement;
+    return [!!a.closest(".pb-hero"), !!a.closest("nav"), a.textContent.trim().slice(0, 30)]; });
+  await ctx.close();
+  assert.ok(escondido, "o link aparece antes do foco");
+  assert.deepEqual(pulo, ["Pular para o conteúdo", "#conteudo", true]);
+  assert.deepEqual(depois.slice(0, 2), [true, false], `o Tab seguinte foi para "${depois[2]}"`);
+  assert.deepEqual(erros, []);
+});
+
 test("plano sem price no Stripe (plans-config): os botões dele viram 'Indisponível' sem link; os outros seguem para a /assinar", async () => {
   const { page, ctx, erros } = await abrir({ disponivel: { plus_available: false } });
   await page.waitForFunction(() => document.querySelectorAll('[data-plano="plus"] [aria-disabled="true"]').length === 2);

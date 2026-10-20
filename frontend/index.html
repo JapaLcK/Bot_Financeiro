@@ -123,6 +123,10 @@ details[open]>summary .fq-i{background:#FF2D8E;color:#111111}
 details[open]>summary .fq-i::before{content:"\2212"}
 /* width/height nas <img> só reservam a proporção: a altura segue a largura que o CSS dá. */
 img{height:auto}
+/* Pular o nav: some até receber foco do teclado. O alvo é o hero, depois do nav. */
+.pb-skip{position:fixed;top:8px;left:8px;z-index:99;transform:translateY(-180%);padding:12px 18px;border-radius:999px;background:#FFFFFF;color:#111111;font-weight:700;text-decoration:none;font-family:'Archivo',system-ui,sans-serif}
+.pb-skip:focus{transform:translateY(0);outline:3px solid #FF2D8E;outline-offset:2px}
+#conteudo:focus{outline:none}
 .nav .pb-acct-lbl{max-width:150px}
 /* Menu da conta (nav-auth.js): ancora a 31px da borda direita e soma 18px de padding+borda (content-box); 288px fixos vazavam 17px à esquerda a 320. 57 = 31+18+8 de respiro. */
 .nav .pb-acct-dd{width:min(288px,calc(100vw - 57px))}
@@ -148,8 +152,10 @@ img{height:auto}
 <script src="/oferta.js?v=1" defer></script>
 </head>
 <body>
+<a class="pb-skip" href="#conteudo">Pular para o conteúdo</a>
 <div style="font-family: 'Archivo', system-ui, sans-serif; color: #111111; background: #FFFFFF; width: 100%; overflow-x: hidden;">
 
+<main>
 <!-- ============ HERO ============ -->
 <section id="topo" style="background: #111111; color: #FFFFFF; padding: 20px 20px 0;">
 <nav class="nav" aria-label="Principal" style="position: sticky; top: calc(16px + env(safe-area-inset-top)); z-index: 30; max-width: 1180px; margin: 0 auto; background: rgba(17,17,17,0.82); backdrop-filter: blur(14px); border: 1px solid #2A2A2A; border-radius: 999px; padding: 10px 10px 10px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
@@ -168,7 +174,7 @@ img{height:auto}
 </div>
 </nav>
 
-<div class="pb-hero" style="max-width: 1180px; margin: 0 auto; padding: 72px 0 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 56px;">
+<div class="pb-hero" id="conteudo" tabindex="-1" style="max-width: 1180px; margin: 0 auto; padding: 72px 0 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 56px;">
 <div class="pb-hl" style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 28px;">
 <div class="pb-u1 pb-pill" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; border: 1px solid #333333; border-radius: 999px; padding: 8px 16px 8px 10px; font-size: 14px; color: #D9D9D9;">
 <span class="pb-new" style="background: #FF2D8E; color: #111111; border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 12px;">NOVO</span>
@@ -1024,6 +1030,7 @@ Assistente financeiro com IA no WhatsApp
 </div>
 </div>
 </section>
+</main>
 
 <!-- ============ RODAPÉ ============ -->
 <footer style="background: #111111; color: #BDBDBD;">
