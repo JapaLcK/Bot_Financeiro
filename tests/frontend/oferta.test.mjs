@@ -17,7 +17,7 @@ before(async () => { ({ proc: server, origin: ORIGIN } = await startServer());
 after(async () => { await browser?.close(); server?.kill(); });
 
 /** Contexto novo por caso. `erros` junta pageerror e resposta >= 400. */
-async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false } = {}) {
+async function abrir({ js = true, calmo = false, mobile = false, relogio = false, largura, logado = false, disponivel = {} } = {}) {
   const ctx = await browser.newContext({
     viewport: largura ? { width: largura, height: 800 } : mobile ? { width: 390, height: 844 } : { width: 1280, height: 800 },
     javaScriptEnabled: js, reducedMotion: calmo ? "reduce" : "no-preference",
@@ -29,6 +29,9 @@ async function abrir({ js = true, calmo = false, mobile = false, relogio = false
   await ctx.route("**/auth/dashboard-profile", r => r.fulfill({
     status: 200, contentType: "application/json",
     body: JSON.stringify({ email: "ana.beatriz@gmail.com", display_name: "Ana Beatriz", plan: "free" }) }));
+  // o servidor estático não tem o /billing/plans-config: por padrão os três planos estão à venda
+  await ctx.route("**/billing/plans-config", r => r.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ essencial_available: true, plus_available: true, pro_available: true, ...disponivel }) }));
   const page = await ctx.newPage();
   const erros = [];
   page.on("pageerror", e => erros.push("pageerror: " + e.message));
@@ -266,6 +269,18 @@ for (const largura of [320, 375, 390, 1280]) {
     });
   }
 }
+
+test("plano sem price no Stripe (plans-config): os botões dele viram 'Indisponível' sem link; os outros seguem para a /assinar", async () => {
+  const { page, ctx, erros } = await abrir({ disponivel: { plus_available: false } });
+  await page.waitForFunction(() => document.querySelectorAll('[data-plano="plus"] [aria-disabled="true"]').length === 2);
+  const r = await page.$$eval("[data-plano] a.so-anual, [data-plano] a.so-mensal", as => as.map(a => [a.closest("[data-plano]").dataset.plano, a.getAttribute("href"), a.textContent.trim()]));
+  await ctx.close();
+  assert.deepEqual(r.filter(([t]) => t === "plus"), [["plus", null, "Indisponível"], ["plus", null, "Indisponível"]]);
+  const outros = r.filter(([t]) => t !== "plus");
+  assert.equal(outros.length, 4);
+  for (const [t, href, txt] of outros) assert.ok(href.startsWith(`/assinar?plano=${t}&`) && txt !== "Indisponível", `${t}: ${href} ${txt}`);
+  assert.deepEqual(erros, []);
+});
 
 // ── Imagens: só o topo baixa de cara, e o espaço de cada uma já está reservado ─────────
 

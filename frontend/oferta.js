@@ -1,4 +1,4 @@
-/* /oferta (frontend/oferta.html): só o que precisa de JS. O resto da página é markup.
+/* A / (frontend/index.html): só o que precisa de JS. O resto da página é markup.
    Sem JS a página já mostra o ciclo anual, a 1ª pergunta aberta e os números finais.
    Só textContent/setAttribute: nada de innerHTML (o texto das respostas vem do atributo). */
 (function () {
@@ -16,6 +16,27 @@
     planos.dataset.ciclo = btn.dataset.set;
     for (const b of planos.querySelectorAll("[data-set]")) b.setAttribute("aria-pressed", String(b === btn));
   });
+
+  // ── Plano sem price no Stripe: o mesmo critério da /precos (plans-config). Sem isso o
+  // visitante criaria a conta na /assinar para só então tomar o erro do checkout.
+  // Sem resposta (rede, 5xx) os links ficam como estão: a /assinar segue sendo a guarda final.
+  fetch("/billing/plans-config", { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((cfg) => {
+      if (!cfg) return;
+      for (const card of planos.querySelectorAll("[data-plano]")) {
+        if (cfg[card.dataset.plano + "_available"] !== false) continue;
+        for (const a of card.querySelectorAll('a[href^="/assinar"]')) {
+          a.removeAttribute("href");
+          a.setAttribute("aria-disabled", "true");
+          a.textContent = "Indisponível";
+          a.style.opacity = "0.5";
+          a.style.cursor = "not-allowed";
+          a.style.animation = "none";  // o do Plus pulsa (.pb-pulse): botão morto não chama atenção
+        }
+      }
+    })
+    .catch(() => {});
 
   // ── Chat de demonstração: pergunta → ✓ azul (450 ms) → digitando (750 ms) → resposta.
   const chat = $("#chat");
