@@ -119,9 +119,11 @@ function PiggySays({ m }: { m: Msg }) {
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
       {!DEMO && !m.real && <p className="msg-by"><Demonstracao /></p>}
       {a && m.estado === "enviando" && <Carregando kind={a.kind} />}
-      {/* O card do agente vem primeiro, acima do texto, com o mesmo fade dos botões (chat.css); o texto se revela depois dele. */}
-      {m.card && (m.agente ? <div className="card-slot" data-revela={animar || undefined} data-espera={(animar && paciente) || undefined} style={animar ? { animationDelay: "0ms", animationDuration: `${ACOES_ANIM}ms` } : undefined}>{m.card}</div> : m.card)}
+      {/* O card do agente vem primeiro, acima do texto, com o mesmo fade dos botões (chat.css); o texto se revela depois dele.
+          O do Piggy (metas, topics.tsx) continua depois do texto. */}
+      {m.card && m.agente && <div className="card-slot" data-revela={animar || undefined} data-espera={(animar && paciente) || undefined} style={animar ? { animationDelay: "0ms", animationDuration: `${ACOES_ANIM}ms` } : undefined}>{m.card}</div>}
       <p ref={pTexto} className={a ? "msg-text msg-pre" : "msg-text"} data-carga={a && m.estado === "enviando" ? "" : undefined} aria-busy={m.estado === "enviando" || undefined}>{animar ? <Revela t={texto} inicio={inicio} /> : m.text}</p>
+      {m.card && !m.agente && m.card}
       {m.estado === "inativo" && (
         <div className="msg-acoes">
           <button type="button" className="btn btn-primary" disabled={m.ativando} onClick={() => void ativarEResponder(m.id, () => qc.invalidateQueries({ queryKey: agentesQuery(m.uid).queryKey }))}>{m.ativando ? "Ativando…" : "Ativar e responder"}</button>

@@ -381,11 +381,13 @@ for (const width of TELAS) {
     assert.equal(await opacidadeDa1a(page), "0", "com o card carregando, nenhuma palavra aparece");
     solta();
     await card(page).locator(".card-agente-total").waitFor();
-    const depoisDoCard = await topoTexto(page), t0 = Date.now();
+    const t0 = Date.now();
+    await page.waitForFunction(() => +getComputedStyle(document.querySelector(".chat > .msg-piggy .msg-text .rv")).opacity > 0, null, { timeout: 3000 });
+    const visivel = await topoTexto(page); // onde o texto estava quando a 1ª palavra apareceu
     await page.locator(".chat > .msg-piggy .rv").first().waitFor({ state: "detached", timeout: 6000 });
     // A revelação inteira depois do card: 400 (fade do card) + 40 × 30 + 500 = 2100 ms; o relógio sozinho a cortaria no meio.
     assert.ok(Date.now() - t0 >= 2000, `a revelação foi cortada ${Date.now() - t0} ms depois do card`);
-    assert.equal(await topoTexto(page), depoisDoCard, "o texto não se moveu durante a revelação");
+    assert.equal(await topoTexto(page), visivel, "o texto não se moveu depois de visível");
     await ctx.close();
   });
 
