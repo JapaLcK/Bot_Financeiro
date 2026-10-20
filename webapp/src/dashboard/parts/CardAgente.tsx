@@ -11,12 +11,13 @@ import { CardInvestido } from "./CardInvestido";
 // `uid` (daConta). Sessão de outra conta = nenhum número na tela, e a conta é relida (a conversa da anterior some em contaDaSessao).
 const TITULO = { investido: "Investimentos", renda_fixa: "Renda fixa" };
 const NUM = /^-?\d+\.\d+$/;
-// Corpo fora do contrato não desenha meio número.
+// Corpo fora do contrato não desenha meio número. Os motivos viram selos (texto): objeto ali derrubaria o render (Codex no #1198).
+const textos = (v: unknown) => Array.isArray(v) && v.every((m) => typeof m === "string");
 const contratoOk = (d: unknown) => {
   const x = d as { total?: unknown; por_tipo?: unknown; motivos?: unknown } | null;
-  return !!x && (x.total === null || (typeof x.total === "string" && moneyText(x.total) !== null)) && Array.isArray(x.motivos) && Array.isArray(x.por_tipo)
-    && (x.por_tipo as { tipo?: unknown; rotulo?: unknown; valor?: unknown }[]).every((p) => p && typeof p.tipo === "string" && typeof p.rotulo === "string"
-      && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))));
+  return !!x && (x.total === null || (typeof x.total === "string" && moneyText(x.total) !== null)) && textos(x.motivos) && Array.isArray(x.por_tipo)
+    && (x.por_tipo as { tipo?: unknown; rotulo?: unknown; valor?: unknown; motivos?: unknown }[]).every((p) => p && typeof p.tipo === "string" && typeof p.rotulo === "string"
+      && (p.valor === null || (typeof p.valor === "string" && NUM.test(p.valor))) && textos(p.motivos));
 };
 
 export function CardAgente({ uid, c }: { uid: number; c: Card }) {
