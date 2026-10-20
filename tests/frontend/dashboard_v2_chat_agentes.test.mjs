@@ -1081,6 +1081,22 @@ for (const width of TELAS) {
     assert.deepEqual(chats.map((c) => c.kind), ["detetive", "carteiro"]);
   });
 
+  test(`${width}: duplo clique no redirect para um agente inativo cria uma bolha só`, async () => {
+    const { ctx, page } = await abrir({ width, ativos: ["detetive"],
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
+    await enviar(page, "@Detetive e os boletos?");
+    const botao = page.getByRole("button", { name: "Perguntar ao Carteiro" });
+    await botao.waitFor();
+    await botao.evaluate((b) => { b.click(); b.click(); }); // no mesmo tick, antes do re-render
+    await page.getByRole("button", { name: "Ativar e responder" }).first().waitFor();
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByRole("button", { name: "Ativar e responder" }).count(), 1);
+    assert.equal(await page.locator(".chat > .msg-user", { hasText: "Que contas vencem?" }).count(), 1);
+    await botao.click(); // controle: depois da 1ª, um clique novo ainda segue
+    await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-user").length === 3);
+    await ctx.close();
+  });
+
   test(`${width}: a conta muda enquanto o redirect relê o catálogo: a pergunta da anterior não reaparece na conversa nova`, async () => {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
       chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });
