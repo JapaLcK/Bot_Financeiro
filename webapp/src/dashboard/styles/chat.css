@@ -117,7 +117,7 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
   background: linear-gradient(100deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%) 100% 0 / 250% 100% no-repeat;
   -webkit-background-clip: text; background-clip: text;
 }
-.rv { display: inline-block; }
+.rv { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; } /* inline-block não herda o quebra-tudo do pai: uma URL sem espaço alargaria a página */
 @media (prefers-reduced-motion: no-preference) {
   .msg-carga-anel { animation: carga-gira 0.9s linear infinite; }
   .msg-carga-frase { animation: carga-entra 0.35s var(--ease-out) both, carga-brilho 1.8s linear infinite; }

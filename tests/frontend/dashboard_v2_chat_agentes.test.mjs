@@ -1582,6 +1582,20 @@ for (const width of TELAS) {
     await ctx.close();
   });
 
+  test(`${width}: URL gigante sem espaço não estoura a bolha DURANTE a revelação (.rv)`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.locator(".rv").first().waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth, rv: document.querySelectorAll(".rv").length }));
+    assert.ok(m.rv > 0, "sem .rv o caso não mede nada");
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
+    await ctx.close();
+  });
+
   test(`${width}: acabada a revelação a bolha volta ao texto contínuo, sem spans, sem salto`, async () => {
     const texto = `um dois três ${palavras(10)}`;
     const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: texto, context: "c", redirects: [] } }) });
