@@ -1,5 +1,5 @@
 /**
- * Botões "Testar o Piggy agora" (a[data-teste] → /teste) em /lp, /, /precos.
+ * Botões "Testar o Piggy agora" (a[data-teste] → /teste) em /lp, /, /inicio-antiga, /precos.
  * Quem faz o trabalho é frontend/teste-piggy.js: repassa utm_ e fbclid e avisa o
  * Pixel e o GA no clique. Sem JS o href="/teste" funciona.
  *
@@ -36,7 +36,8 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 390, height: 844 };
-const PAGINAS = [["/lp.html", "a.lp-cta-sec"], ["/index.html", "a.lp-btn-line"], ["/precos.html", "#testar-piggy a"]];
+const PAGINAS = [["/lp.html", "a.lp-cta-sec"], ["/index.html", "a[data-teste]"],
+                 ["/inicio-antiga.html", "a.lp-btn-line"], ["/precos.html", "#testar-piggy a"]];
 
 /** `me` = corpo do /auth/me (null = 401, deslogado). O /teste é interceptado:
  *  o servidor estático não o conhece e a navegação não pode cair num 404. */
@@ -126,13 +127,46 @@ test("/lp em 1366x657 (notebook): CTA rosa inteiro na dobra e sem overflow horiz
   await page.close();
 });
 
-test("/: o botão do hero está na primeira dobra (desktop e mobile)", async () => {
+test("/inicio-antiga: o botão do hero está na primeira dobra (desktop e mobile)", async () => {
   for (const viewport of [DESKTOP, MOBILE]) {
-    const { page } = await abrir("/index.html", { viewport });
+    const { page } = await abrir("/inicio-antiga.html", { viewport });
     const r = await page.locator("a.lp-btn-line").first().boundingBox();
     assert.ok(r.y >= 0 && r.y + r.height <= viewport.height, `${viewport.width}: hero fora da dobra ${JSON.stringify(r)}`);
     await page.close();
   }
+});
+
+/** Box do #hero-cta e do botão do teste do hero da / (a 1280 o botão pode ficar abaixo da dobra). */
+test("/: no celular o botão do teste do hero cabe inteiro na 1ª dobra e não empurra o #hero-cta; no desktop o #hero-cta está na dobra", async () => {
+  const { page } = await abrir("/index.html", { viewport: MOBILE });
+  const hero = () => page.locator("#hero-cta").boundingBox();
+  const teste = await page.locator(".pb-hl > a[data-teste]").boundingBox();
+  assert.ok(teste.y >= 0 && teste.y + teste.height <= MOBILE.height, `botão fora da dobra: ${JSON.stringify(teste)}`);
+  const com = await hero();
+  await page.evaluate(() => document.querySelector(".pb-hl > a[data-teste]").remove());
+  const sem = await hero();
+  assert.equal(com.y, sem.y, "o botão do teste moveu o #hero-cta");
+  await page.close();
+
+  const d = await abrir("/index.html", { viewport: DESKTOP });
+  const r = await d.page.locator("#hero-cta").boundingBox();
+  assert.ok(r.y >= 0 && r.y + r.height <= DESKTOP.height, `#hero-cta fora da dobra: ${JSON.stringify(r)}`);
+  // limite aceito (registrado): se o botão do teste passar da dobra a 1280x800, só o #hero-cta é exigido.
+  await d.page.close();
+});
+
+test("/: sem JavaScript os dois botões do teste existem, apontam para /teste e têm o texto exato", async () => {
+  const ctx = await browser.newContext({ viewport: MOBILE, javaScriptEnabled: false });
+  const page = await ctx.newPage();
+  await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
+  const botoes = page.locator("a[data-teste]");
+  assert.equal(await botoes.count(), 2);
+  for (const b of await botoes.all()) {
+    assert.equal(await b.getAttribute("href"), "/teste");
+    assert.equal((await b.textContent()).trim(), "Testar o Piggy agora");
+    assert.ok(await b.isVisible());
+  }
+  await ctx.close();
 });
 
 for (const [caminho, seletor] of PAGINAS) {
@@ -242,9 +276,23 @@ test("/lp sem a marca da VSL: o botão do teste fica escondido como o do quiz; c
   await liberada.page.close();
 });
 
-test("/: em 320x568 hero e CTA final não estouram a largura (os botões quebram de linha)", async () => {
+test("/: em 320x568 os botões do teste cabem na largura e a página não estoura", async () => {
   const viewport = { width: 320, height: 568 };
   const { page } = await abrir("/index.html", { viewport });
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "overflow horizontal na /");
+  const botoes = await page.locator("a[data-teste]").all();
+  assert.equal(botoes.length, 2);
+  for (const b of botoes) {
+    await b.scrollIntoViewIfNeeded();
+    const r = await b.boundingBox();
+    assert.ok(r.x >= 0 && r.x + r.width <= viewport.width, `botão fora da viewport: ${JSON.stringify(r)}`);
+  }
+  await page.close();
+});
+
+test("/inicio-antiga: em 320x568 hero e CTA final não estouram a largura (os botões quebram de linha)", async () => {
+  const viewport = { width: 320, height: 568 };
+  const { page } = await abrir("/inicio-antiga.html", { viewport });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "overflow horizontal na /");
   const blocos = await page.locator(".lp-actions").all();
   assert.equal(blocos.length, 2, "esperava .lp-actions no hero e no CTA final");

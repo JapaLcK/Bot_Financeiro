@@ -32,6 +32,7 @@ HTML_PAGES = [
     "/como-funciona",
     "/precos",
     "/lp",
+    "/inicio-antiga",
     "/vsl",
     "/continuar-compra",
     "/suporte",
@@ -124,7 +125,7 @@ def test_index_nao_inverte_o_fluxo_do_trial():
     A landing aprovada substitui o trilho antigo por demonstrações estáticas e
     remete aos planos reais; não anuncia oferta de trial própria.
     """
-    html = " ".join(client.get("/").text.split())
+    html = " ".join(client.get("/inicio-antiga").text.split())
     bloco = re.search(r'class="lp-cta-copy".*?</div>', html)
     assert bloco, "o convite final precisa explicar a ordem de entrada"
     cta = bloco.group(0)
@@ -832,7 +833,7 @@ def test_par_pix_sai_versionado_por_hash_do_conteudo():
     assert "/pix-checkout.js?v=1\"" not in html
 
 
-PAGINAS_DO_TESTE = ("/lp", "/", "/precos")   # a /vsl é a continuação do quiz: nunca leva o botão
+PAGINAS_DO_TESTE = ("/lp", "/", "/inicio-antiga", "/precos")   # a /vsl é a continuação do quiz: nunca leva o botão
 
 
 def _liga_demo(monkeypatch):
@@ -875,14 +876,17 @@ def test_demo_desligado_nenhuma_pagina_promete_o_teste(monkeypatch):
             html = client.get(path).text
             assert "data-teste" not in html and 'id="testar-piggy"' not in html, (path, env)
             assert "teste-piggy.js" not in html, (path, env)   # sem botão, sem script
+            if path == "/":   # a LP nova: o botão sai e o resto (CTAs do hero e do fim) fica
+                assert 'id="hero-cta"' in html and 'id="cta-final"' in html, env
+                assert html.count('href="#planos"') == ligado["/"].count('href="#planos"'), env
             if path in ("/lp", "/vsl"):   # sem o botão a /lp é a de antes: dobra de 380, não de 420
                 assert '<main class="lp">' in html and 'class="lp lp-com-teste"' not in html, (path, env)
         for path, on in ligado.items():   # cada <a removido leva o seu </a>: nada órfão
             (a_on, f_on), (a_off, f_off) = _abre_fecha(on), _abre_fecha(client.get(path).text)
             assert a_on - a_off == f_on - f_off >= 1, (path, env)
-    # vizinhos intactos: CTA do quiz na /lp, CTAs de cadastro na /, "Ver planos" na /.
+    # vizinhos intactos: CTA do quiz na /lp, CTAs de cadastro e "Ver planos" na /inicio-antiga.
     assert 'id="lp-cta"' in client.get("/lp").text
-    home = client.get("/").text
+    home = client.get("/inicio-antiga").text
     assert home.count('href="/cadastro"') >= 4 and 'href="/precos">Ver planos</a>' in home
 
 
