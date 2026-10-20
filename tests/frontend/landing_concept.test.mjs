@@ -13,7 +13,7 @@ after(async () => { await browser?.close(); server?.kill(); });
 
 async function openPage(width = 1280, options = {}) {
   const page = await browser.newPage({ viewport: { width, height: 900 }, ...options });
-  await page.goto(`${origin}/index.html`);
+  await page.goto(`${origin}/inicio-antiga.html`);
   await page.evaluate(() => document.fonts.ready);
   return page;
 }
@@ -138,7 +138,7 @@ test('âncora direta no celular posiciona a seção após o layout inicial', asy
   });
   for (const id of ['agentes', 'open-finance', 'como-funciona']) {
     await page.evaluate(() => { window.__landingScrollEnded = false; });
-    await page.goto(`${origin}/index.html#${id}`);
+    await page.goto(`${origin}/inicio-antiga.html#${id}`);
     await page.evaluate(() => document.fonts.ready);
     await page.waitForFunction(() => window.__landingScrollEnded);
     const position = await page.evaluate(async target => {

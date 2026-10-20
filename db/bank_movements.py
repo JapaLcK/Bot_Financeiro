@@ -147,9 +147,10 @@ def _bind(cur, user_id, declaration, tx, method):
     cur.execute(
         """update bank_movement_declarations
               set matched_transaction_id=%s, confirmation_method=%s, confirmed_at=now(),
-                  requires_review = requires_review and not %s
+                  requires_review = requires_review and not %s, manual_only = manual_only or %s
             where user_id=%s and launch_id=%s""",
-        (tx["id"], method, e_fluxo(declaration), user_id, declaration["launch_id"]))
+        (tx["id"], method, e_fluxo(declaration), method == "manual" and e_fluxo(declaration),
+         user_id, declaration["launch_id"]))
     cur.execute(
         """update open_finance_transactions t
               set imported_launch_id=%s, match_launch_id=%s, reconciliation_status='bank_movement_confirmed'
@@ -220,8 +221,9 @@ def reconcile_bank_movements(cur, user_id):
         # de conta, ADR 0003) não se aplica; o candidato único nos dois sentidos segue valendo.
         # Congelada que perdeu a prova NESTA passada leu só a janela das ativas: não escolhe par agora
         # (voltaria a ligar com unicidade falsa); no próximo reconcile ela já não é congelada.
+        # I7: fluxo só manual (escolhido, trocado ou desfeito) nunca liga sozinho, mas segue em `claims`.
         if (d["requires_review"] and not e_fluxo(d)) or d["account_ambiguous"] or len(candidates) != 1 \
-                or d["launch_id"] in congeladas:
+                or d["launch_id"] in congeladas or (e_fluxo(d) and d["manual_only"]):
             continue
         tx = candidates[0]
         if claims[tx["id"]] != 1:

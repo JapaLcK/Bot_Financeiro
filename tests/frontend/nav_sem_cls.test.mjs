@@ -23,7 +23,7 @@ test("ativar o menu mobile não desloca o conteúdo depois do primeiro paint", a
   });
 
   const page = await ctx.newPage();
-  const navegacao = page.goto(`${ORIGIN}/index.html`);
+  const navegacao = page.goto(`${ORIGIN}/inicio-antiga.html`);
   await page.waitForSelector("main#conteudo");
   // Dois frames garantem que o estado anterior ao script chegou a ser pintado.
   await page.evaluate(() => new Promise((resolve) =>
