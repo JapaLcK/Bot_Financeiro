@@ -267,6 +267,50 @@ for (const largura of [320, 375, 390, 1280]) {
   }
 }
 
+// ── Imagens: só o topo baixa de cara, e o espaço de cada uma já está reservado ─────────
+
+for (const [w, h] of [[1440, 900], [390, 844], [320, 640]]) {
+  test(`imagens em ${w}px: a dobra é eager, o resto é lazy, e a altura não depende do download`, async () => {
+    const medir = async bloquear => {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+      if (bloquear) await ctx.route(/\/brand\/oferta\//, r => r.abort());
+      const page = await ctx.newPage();
+      await page.goto(`${ORIGIN}/index.html`, { waitUntil: "load" });
+      const topo = await page.evaluate(() => ({
+        lazyNaDobra: [...document.images].filter(i => { const r = i.getBoundingClientRect();
+          return i.loading === "lazy" && r.width > 0 && r.top < innerHeight; }).map(i => i.src.split("/").pop()),
+        lazy: [...document.images].filter(i => i.loading === "lazy").length,
+        total: document.images.length,
+      }));
+      // força o download de tudo para comparar a altura final e a proporção de cada arte
+      if (!bloquear) {
+        await page.evaluate(() => [...document.images].forEach(i => { i.loading = "eager"; }));
+        await page.waitForFunction(() => [...document.images].every(i => i.complete && i.naturalWidth));
+      }
+      const fim = await page.evaluate(() => ({
+        alturas: [...document.images].map(i => Math.round(i.getBoundingClientRect().height)),
+        // width/height viram proporção, não tamanho: nenhuma arte sai esticada (fora as de caixa
+        // fixa do design: cover recorta, e altura no style é ícone quadrado de propósito)
+        esticadas: [...document.images].filter(i => { const r = i.getBoundingClientRect();
+          return i.naturalWidth && r.width > 2 && getComputedStyle(i).objectFit !== "cover" &&
+            !(i.style.height && i.style.height !== "auto") &&
+            Math.abs(r.height - r.width * i.naturalHeight / i.naturalWidth) > 2; })
+          .map(i => i.src.split("/").pop()),
+        medidas: [...document.images].filter(i => i.naturalWidth && i.getBoundingClientRect().width > 2).length,
+      }));
+      await ctx.close();
+      return { ...topo, ...fim };
+    };
+    const com = await medir(false), sem = await medir(true);
+    assert.deepEqual(com.lazyNaDobra, [], "imagem da dobra adiada");
+    assert.ok(com.lazy >= com.total - 4, `só ${com.lazy} de ${com.total} são lazy`);
+    assert.ok(com.medidas >= 30, `só ${com.medidas} imagens medidas: a medição não achou a página`);
+    assert.deepEqual(com.esticadas, [], "arte fora da proporção");
+    // sem o download, cada <img> já ocupa a altura final: rolar não empurra o conteúdo
+    assert.deepEqual(sem.alturas, com.alturas);
+  });
+}
+
 // ── Guard da PWA instalada (index.html, 1º <script>): standalone entra pelo app ─────────
 
 /** Abre `/index.html` + `query` com `display-mode: standalone` emulado e devolve o pathname final.
