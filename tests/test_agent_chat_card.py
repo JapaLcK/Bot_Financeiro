@@ -1,6 +1,7 @@
 """Card abaixo da resposta do agente (core/services/agent_chat_card.py) e a regra dos números:
 o snapshot do agente e o card leem `db.investido.ler`, a mesma do /api/v2/investido."""
 import json
+from pathlib import Path
 from decimal import Decimal
 
 import pytest
@@ -131,16 +132,9 @@ def _inv(total, partes):
     return {"total_investido": total, "por_tipo": [{"tipo": t, "valor": v} for t, v in partes]}
 
 
-TABELA = [
-    (_inv("57123.45", [("renda_fixa", "40000.00"), ("acoes", "17123.45")]), "40000.00"),
-    (_inv("1234.50", [("renda_fixa", "1234.50")]), "1234.50"),
-    (_inv("500.00", [("renda_fixa", "500.00"), ("fundos", None)]), "500.00"),
-    (_inv("300.00", [("renda_fixa", "100.10"), ("tesouro", "50.05"), ("acoes", "149.85")]), "150.15"),
-    (_inv("300.00", [("renda_fixa", "100.00"), ("tesouro", None), ("acoes", "200.00")]), None),
-    (_inv("300.00", [("acoes", "300.00")]), "0.00"),
-    (_inv(None, []), None),
-    (_inv(None, [("fundos", None)]), None),
-]
+# A tabela é a mesma do teste do card (tests/frontend/dashboard_v2_chat_agentes_card.test.mjs): a regra existe em Python e em TS (§0.7).
+with open(Path(__file__).parent / "frontend" / "total_renda_fixa.json", encoding="utf-8") as _f:
+    TABELA = [(_inv(c["total"], c["partes"]), c["esperado"]) for c in json.load(_f)]
 
 
 @pytest.mark.parametrize("investido,esperado", TABELA)

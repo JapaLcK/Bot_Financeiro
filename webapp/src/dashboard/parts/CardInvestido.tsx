@@ -29,7 +29,10 @@ export function CardInvestido({ d, foco }: { d: Investido; foco?: "renda_fixa" }
   const pct = (c: bigint | null) => (c !== null && c > BigInt(0) && soma > BigInt(0) ? Math.round(Number((c * BigInt(10000)) / soma) / 100) : null);
   const rot = (n: number) => (n === 0 ? "<1%" : `${n}%`); // positivo que arredonda a 0 não vira "0%"
   const barra = partes.flatMap((p, i) => (pct(cents[i]) === null ? [] : [{ p, c: cents[i]!, n: pct(cents[i])! }]));
-  const selos = d.motivos.filter((m) => m !== "sem_banco_conectado");
+  // No foco, os avisos das partes mostradas (o "saldo ausente" dos fundos não é da renda fixa) e os do banco, que não têm tipo.
+  const selos = foco
+    ? [...new Set([...partes.flatMap((p) => p.motivos), ...d.motivos.filter((m) => m === "outra_moeda" || m === "conexao_pausada")])]
+    : d.motivos.filter((m) => m !== "sem_banco_conectado");
   return (
     <section className="card-agente" aria-label={foco ? "Renda fixa" : "Investimentos"}>
       <p className="card-agente-tit"><b>{foco ? "Renda fixa" : "Investimentos"}</b> <span className="faint">nos bancos conectados</span></p>
