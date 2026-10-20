@@ -28,7 +28,7 @@ export function CardContas({ d }: { d: ContasAPagar }) {
               <i className={c.vencida ? "ph ph-warning warn" : "ph ph-calendar-blank"} aria-hidden="true" />
               <span className="card-agente-nome">{c.nome ?? "Conta"}</span>
               <span className={c.vencida ? "warn num" : "faint num"}>{c.dias === null ? "" : relativeDays(c.dias)}</span>
-              <b className="num">{moneyText(c.valor) ?? "—"}</b>
+              {c.variavel === true && c.valor !== null && Number(c.valor) === 0 ? <span className="faint">valor a definir</span> : <b className="num">{moneyText(c.valor) ?? "—"}</b>}{/* variável sem estimativa é gravada como 0: não é "grátis" */}
             </li>
           ))}
         </ul>

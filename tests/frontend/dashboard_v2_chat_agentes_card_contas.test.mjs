@@ -117,13 +117,25 @@ for (const width of TELAS) {
   }
 }
 
+test("Carteiro: conta variável sem estimativa (gravada como 0) diz 'valor a definir', não R$ 0,00", async () => {
+  const base = RESPOSTAS.contas_a_pagar.cheia;
+  const contas = base.contas.map((c, i) => (i === 1 ? { ...c, valor: "0.00", variavel: true } : i === 2 ? { ...c, valor: "0.00", variavel: false } : c));
+  const { ctx, page } = await abrir({ width: 1440, tipo: "contas", corpo: { ...base, contas } });
+  await perguntar(page, "Carteiro");
+  await carregado(page);
+  const l = await linhas(card(page), ".card-agente-lista li");
+  assert.match(l[1], /valor a definir/);
+  assert.match(l[2], /R\$ 0,00/); // fixa de valor zero continua R$ 0,00
+  await ctx.close();
+});
+
 test("Banqueiro: sem a meta batida o card nunca diz 100% (99,96% é 99%)", async () => {
   const cx = { total: "999.60", caixinhas: [{ id: 1, nome: "Quase", saldo: "999.60", meta: "1000.00", progresso_pct: "99.96", atingida: false }] };
   const { ctx, page } = await abrir({ width: 1440, tipo: "caixinhas", corpo: cx });
   await perguntar(page, "Banqueiro");
   await carregado(page);
-  const r = await card(page).evaluate((c) => ({ sub: c.querySelector(".card-agente-sub").textContent, valor: c.querySelector("[role=meter]").getAttribute("aria-valuenow") }));
-  assert.deepEqual(r, { sub: "99% · meta R$ 1.000,00", valor: "99" });
+  const r = await card(page).evaluate((c) => ({ sub: c.querySelector(".card-agente-sub").textContent, valor: c.querySelector("[role=meter]").getAttribute("aria-valuenow"), barra: c.querySelector("[role=meter] > span").style.width }));
+  assert.deepEqual(r, { sub: "99% · meta R$ 1.000,00", valor: "99", barra: "99%" }); // a barra não fica cheia ao lado de "99%"
   await ctx.close();
 });
 

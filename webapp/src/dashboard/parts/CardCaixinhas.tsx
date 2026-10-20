@@ -31,7 +31,7 @@ export function CardCaixinhas({ d }: { d: Caixinhas }) {
                 <span className="card-agente-nome">{c.nome}</span><b className="num">{moneyText(c.saldo)}</b>
                 {p !== null && (
                   <>
-                    <div className={`meter${c.atingida ? " ok" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={n!} aria-label={`${c.nome}: ${n}% da meta`}><span style={{ width: `${p}%` }} /></div>
+                    <div className={`meter${c.atingida ? " ok" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={n!} aria-label={`${c.nome}: ${n}% da meta`}><span style={{ width: `${c.atingida ? p : n}%` }} /></div>
                     <span className="faint card-agente-sub">{c.atingida ? "Meta batida" : `${n}%`} · meta {moneyText(c.meta)}</span>
                   </>
                 )}
