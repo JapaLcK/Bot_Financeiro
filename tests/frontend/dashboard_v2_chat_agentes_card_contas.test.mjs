@@ -117,6 +117,16 @@ for (const width of TELAS) {
   }
 }
 
+test("Banqueiro: sem a meta batida o card nunca diz 100% (99,96% é 99%)", async () => {
+  const cx = { total: "999.60", caixinhas: [{ id: 1, nome: "Quase", saldo: "999.60", meta: "1000.00", progresso_pct: "99.96", atingida: false }] };
+  const { ctx, page } = await abrir({ width: 1440, tipo: "caixinhas", corpo: cx });
+  await perguntar(page, "Banqueiro");
+  await carregado(page);
+  const r = await card(page).evaluate((c) => ({ sub: c.querySelector(".card-agente-sub").textContent, valor: c.querySelector("[role=meter]").getAttribute("aria-valuenow") }));
+  assert.deepEqual(r, { sub: "99% · meta R$ 1.000,00", valor: "99" });
+  await ctx.close();
+});
+
 test("estados vazios: sem conta pendente e sem caixinha dizem isso, sem total nem lista", async () => {
   for (const [tipo, frase] of [["contas", /Nenhuma conta a pagar pendente/], ["caixinhas", /Nenhuma caixinha ainda/]]) {
     const { ctx, page } = await abrir({ width: 390, tipo, corpo: TIPOS[tipo].vazio });

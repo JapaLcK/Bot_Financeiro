@@ -24,13 +24,15 @@ export function CardCaixinhas({ d }: { d: Caixinhas }) {
         <ul className="card-agente-lista card-agente-lista-2">
           {d.caixinhas.slice(0, VISIVEIS).map((c) => {
             const p = c.meta !== null && c.progresso_pct !== null ? Math.max(0, Math.min(100, Number(c.progresso_pct))) : null;
+            // Sem a meta batida, nunca "100%": arredonda para baixo (99,96% é 99%).
+            const n = p === null ? null : c.atingida ? Math.round(p) : Math.min(99, Math.floor(p));
             return (
               <li key={c.id}>
                 <span className="card-agente-nome">{c.nome}</span><b className="num">{moneyText(c.saldo)}</b>
                 {p !== null && (
                   <>
-                    <div className={`meter${c.atingida ? " ok" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(p)} aria-label={`${c.nome}: ${Math.round(p)}% da meta`}><span style={{ width: `${p}%` }} /></div>
-                    <span className="faint card-agente-sub">{c.atingida ? "Meta batida" : `${Math.round(p)}%`} · meta {moneyText(c.meta)}</span>
+                    <div className={`meter${c.atingida ? " ok" : ""}`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={n!} aria-label={`${c.nome}: ${n}% da meta`}><span style={{ width: `${p}%` }} /></div>
+                    <span className="faint card-agente-sub">{c.atingida ? "Meta batida" : `${n}%`} · meta {moneyText(c.meta)}</span>
                   </>
                 )}
               </li>
