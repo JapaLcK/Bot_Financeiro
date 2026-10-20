@@ -24,17 +24,22 @@ export const segurancaQuery = (uid: number | undefined) => queryOptions({
 
 // Bancos conectados: o snapshot do Open Finance (`GET /open-finance/{uid}`, fora da /api/v2) e o teto do plano. O snapshot traz também
 // contas, transações e investimentos; só os campos que a tela usa ficam no cache. O `uid` vem só da sessão (contaQuery).
-export type Conexao = { id: number; institution_id: string | null; institution_name: string | null; last_sync_at: string | null; logo_url: string | null; provider_item_id: string | null; ui: { state: string; label: string; detail: string | null } };
+export type Conexao = { id: number; institution_id: string | null; institution_name: string | null; last_sync_at: string | null; logo_url: string | null; logo_proprio: string | null; provider_item_id: string | null; ui: { state: string; label: string; detail: string | null } };
 export type Limite = { of_banks_max: number | null; em_uso: number; pode_adicionar: boolean; message: string | null };
 // `logo_url` é dado de terceiro e o navegador o busca: só https no CDN de ícones da Pluggy; outro host, http, `user@host`, porta ou query = null
 // (a inicial). A MESMA regra do app (app/src/features/openFinance/conexoes/juntar.ts::logoSeguro): tests/frontend/logo_banco_paridade.test.mjs as compara.
 const LOGO_PLUGGY = /^https:\/\/cdn\.pluggy\.ai\/[\w.~/-]+$/;
 export const logoSeguro = (url: unknown): string | null => (typeof url === "string" && LOGO_PLUGGY.test(url) ? url : null);
+// Logo PRÓPRIO do banco (servidor: core/services/pluggy_catalogo.py::logo_proprio): arquivo do repo, mesma origem. Só `/brand/bancos/<8 dígitos>.png`; qualquer outra
+// coisa (outro host, `..`, query, número) é ignorada. Precedência: próprio > `logo_url` da Pluggy (`logoSeguro`) > null (a inicial).
+const LOGO_PROPRIO = /^\/brand\/bancos\/\d{8}\.png$/;
+export const logoDoBanco = ({ logo_proprio, logo_url }: { logo_proprio?: unknown; logo_url?: unknown }): string | null =>
+  (typeof logo_proprio === "string" && LOGO_PROPRIO.test(logo_proprio) ? logo_proprio : logoSeguro(logo_url));
 const aberto = { staleTime: 0, refetchOnWindowFocus: true, networkMode: "always", retry: meQuery.retry } as const;
 
 // O leitor do snapshot, UM só: o `conexoesQuery` (página Bancos, aviso do topo) e a máquina do "Atualizar agora" (lib/atualizarBanco.ts) o usam.
 const t = (x: unknown) => (typeof x === "string" ? x : null); // fora do contrato (número, objeto) vira null: nunca derruba a tela
-const conexaoDe = (c: Partial<Conexao>): Conexao => ({ id: c.id!, institution_id: t(c.institution_id), institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), logo_url: logoSeguro(c.logo_url), provider_item_id: t(c.provider_item_id),
+const conexaoDe = (c: Partial<Conexao>): Conexao => ({ id: c.id!, institution_id: t(c.institution_id), institution_name: t(c.institution_name), last_sync_at: t(c.last_sync_at), logo_url: logoSeguro(c.logo_url), logo_proprio: logoDoBanco({ logo_proprio: c.logo_proprio }), provider_item_id: t(c.provider_item_id),
   ui: { state: t(c.ui?.state) ?? "", label: t(c.ui?.label) ?? "", detail: t(c.ui?.detail) } });
 // `connections` fora de lista é contrato quebrado nos dois caminhos (lista vazia diria "nenhum banco", e na rodada "todos removidos" = em dia).
 // `estrito` (a rodada do "Atualizar agora" e o POST): a conexão segue o `conexaoSchema` do app nos campos que a máquina lê, porque o nulo
@@ -88,7 +93,7 @@ export const conectoresQuery = (uid: unknown, ativo = true) => queryOptions({
     const r = await chamar<{ connectors?: unknown }>(`/open-finance/${uid}/connectors`, GET(signal));
     return (Array.isArray(r.connectors) ? r.connectors : []).flatMap((c: Record<string, unknown> | null) =>
       c && Number.isInteger(c.id) && typeof c.name === "string" && c.name.trim()
-        ? [{ id: c.id as number, name: c.name.trim(), color: typeof c.color === "string" ? c.color : null, logo: logoSeguro(c.logo) }] : []);
+        ? [{ id: c.id as number, name: c.name.trim(), color: typeof c.color === "string" ? c.color : null, logo: logoSeguro(c.logo), logo_proprio: logoDoBanco({ logo_proprio: c.logo_proprio }) }] : []);
   },
   staleTime: 300000, refetchOnWindowFocus: false, networkMode: "always", retry: meQuery.retry, enabled: !DEMO && uidValido(uid) && ativo,
 });
