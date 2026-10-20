@@ -86,6 +86,16 @@ it("500 sem dado: 'Não deu para carregar'; 'Tentar de novo' com 200 mostra o co
   await waitFor(() => expect(screen.getByLabelText("Guardar por mês")).toBeTruthy()); expect(screen.queryByText(NAO_DEU)).toBeNull();
 });
 it("404 (outro 4xx) sem dado: 'Não deu para carregar'", async () => { milhao = () => erro(404, "nao_achou"); await abrir(); expect(screen.getByText(NAO_DEU)).toBeTruthy(); });
+describe("portão: 402 e onboarding pendente saem para o Resumo (tentar de novo não resolve)", () => {
+  const SAIDAS = [["402 subscription_required", () => erro(402, "subscription_required")], ["402 plan_selection_required", () => erro(402, "plan_selection_required")], ["403 open_finance_onboarding_required", () => erro(403, "open_finance_onboarding_required")]] as const;
+  it.each(SAIDAS)("%s ao abrir: sai para /resumo, sem 'Não deu para carregar'", async (_, r) => {
+    milhao = r; await abrir(); await waitFor(() => expect(screen).toHavePathname("/resumo")); await act(drenar); expect(leituras()).toHaveLength(1); expect(screen.queryByText(NAO_DEU)).toBeNull();
+  });
+  it.each(SAIDAS)("200 e depois %s no puxar: sai e o dado não fica", async (_, r) => {
+    await abrir(); expect(screen.getByLabelText("Guardar por mês")).toBeTruthy();
+    milhao = r; await puxar(); await waitFor(() => expect(screen).toHavePathname("/resumo")); expect(screen.queryByLabelText("Guardar por mês")).toBeNull();
+  });
+});
 describe("releitura", () => {
   it("200 e depois 500: o corpo fica e entra o aviso; 'Tentar de novo' do aviso com 200 tira o aviso", async () => {
     await abrir(); expect(screen.getByLabelText("Guardar por mês")).toBeTruthy();
