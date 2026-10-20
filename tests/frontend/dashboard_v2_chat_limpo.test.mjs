@@ -83,7 +83,7 @@ for (const [width, height] of TELAS) {
     await page.locator(".chat-follow button").first().waitFor();
     const r = await page.evaluate(() => {
       const box = (s) => document.querySelector(s).getBoundingClientRect();
-      const pag = box(".page"), h2 = box(".chat-empty h2"), img = box(".chat-empty img"), ul = box(".chat-follow"), bar = box(".askbar");
+      const pag = box(".chat-empty"), h2 = box(".chat-empty h2"), img = box(".chat-empty img"), ul = box(".chat-follow"), bar = box(".askbar");
       const bs = [...document.querySelectorAll(".chat-follow button")].map((b) => b.getBoundingClientRect());
       return {
         centroH2: Math.abs(h2.left + h2.width / 2 - (pag.left + pag.width / 2)),
