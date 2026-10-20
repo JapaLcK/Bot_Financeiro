@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from core.services.cashflow_contract import (Motivo, Ocorrencia, Snapshot, centavos, dinheiro, legado, somar)
+from core.services.cashflow_contract import (Motivo, Ocorrencia, Snapshot, centavos, dinheiro, legado, somar,
+                                             premissa_com_estimativa, PREMISSA_SEM_ESTIMATIVA)
 
 
 # Enumeração dos escritores do registro db.pending e tools de confirmação da IA.
@@ -218,9 +219,10 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
             'conhecida' if d else 'desconhecida', 'realizada' if realized else 'a_conferir',
             tuple(reasons), not ambiguous))
 
+    cadeias = []
     if bancos_permitidos:  # sem os bancos na base, despesa deles seria incoerente
         from core.services.previsao_recorrencias import anexar
-        anexar(cur, s, user_id, until, recs, instances, {c['id'] for c in banks})
+        cadeias = anexar(cur, s, user_id, until, recs, instances, {c['id'] for c in banks})
 
     for b in ler_faturas(cur, user_id):
         total, paid, remaining, invalid_value = valores_fatura(b)
@@ -252,7 +254,14 @@ def ler(cur, user_id: int, today: date, until: date, now: datetime,
             due, 'fatura_cartao', b['card_name'], remaining if valid_amount else None,
             'saida', 'conhecido' if valid_amount else 'desconhecido',
             'conhecida' if known_date else 'presumida', 'a_conferir', tuple(reasons)))
-    _motivo(s, 'gastos_variaveis_nao_estimados', 'so_melhora')
+    from core.services.previsao_variavel import estimar, ocorrencias
+    est = estimar(cur, user_id, today, recs, cadeias, {c['id'] for c in banks}, bancos_permitidos)
+    if est is None:
+        _motivo(s, 'gastos_variaveis_nao_estimados', 'so_melhora')
+    else:
+        s.estimativa_variavel = est
+        s.ocorrencias += ocorrencias(today, until, est['despesa_mensal'])
+        s.premissas = [premissa_com_estimativa(est) if p == PREMISSA_SEM_ESTIMATIVA else p for p in s.premissas]
     return s
 
 

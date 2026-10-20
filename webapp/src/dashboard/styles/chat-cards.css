@@ -1,0 +1,31 @@
+/* Card de dados abaixo da resposta de um agente (parts/CardAgente.tsx e um Card*.tsx por tipo). Grid, não flex com gap (Safari 14).
+   O rosa só no realce (o foco do botão); as cores dos tipos são as séries de metas.css, longe do verde (ganho) e do âmbar (aviso). */
+.card-agente { display: grid; gap: 10px; max-width: 480px; box-sizing: border-box; padding: 14px; margin-top: 10px; border-radius: 14px; background: var(--plane-2); border: 1px solid var(--rule); box-shadow: var(--lift); }
+.card-agente > * { margin: 0; min-width: 0; }
+.card-agente-tit { font-size: 13px; color: var(--ink-2); }
+.card-agente-tit b { color: var(--ink); font-weight: 600; }
+.card-agente-total { font-size: clamp(22px, 7.5vw, 30px); font-weight: 600; line-height: 1.1; color: var(--ink); letter-spacing: -0.01em; }
+.card-agente-vazio { font-size: 14px; color: var(--ink-2); }
+.card-agente .comp-bar { height: 10px; }
+.card-agente-lista { display: grid; margin: 0; padding: 0; list-style: none; }
+.card-agente-lista li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; column-gap: 10px; padding: 9px 0; border-top: 1px solid var(--rule); font-size: 13px; }
+.card-agente-lista b { font-weight: 600; text-align: right; }
+.card-agente-lista .faint:last-child { text-align: right; white-space: nowrap; }
+.card-agente-lista i { font-size: 16px; }
+.card-agente-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-agente .btn { justify-self: start; min-height: 44px; }
+.card-slot { min-width: 0; }
+.card-slot:empty { display: none; } /* card que não desenha nada (401/403, outro período): sem o gap do grid em cima do texto */
+.card-agente-lista-2 li { grid-template-columns: minmax(0, 1fr) auto; }
+.card-agente-valores { display: grid; margin: 0; }
+.card-agente-valores > div { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 12px; padding: 8px 0; border-top: 1px solid var(--rule); font-size: 14px; }
+.card-agente-valores > div:first-child { border-top: 0; padding-top: 0; }
+.card-agente-valores dt { color: var(--ink-2); }
+.card-agente-valores dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.card-agente-de { font-size: 14px; font-weight: 400; } /* .num (nowrap) só em cada valor: "de R$ X" desce para a linha de baixo em vez de sair do card */
+.card-agente .msg-open { justify-self: start; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; }
+.card-agente-aviso { font-size: 13px; font-weight: 600; }
+.card-agente-lista .meter, .card-agente-sub { grid-column: 1 / -1; }
+.card-agente-lista .meter { margin-top: 6px; }
+.card-agente-sub { font-size: 12px; margin-top: 4px; }
+.card-agente .meter.ok > span { background: var(--gain); }

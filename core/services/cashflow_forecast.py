@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from core.services import cashflow
+from core.services.cashflow_contract import FONTE_VARIAVEL
 from core.services.cashflow_snapshot import carregar, centavos, dinheiro, legado, somar, Ocorrencia
 
 HORIZONS = (30, 60, 90)
@@ -66,6 +67,7 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
     vencem_hoje: list[dict] = []
     eventos_por_dia: dict[date, list[dict]] = {}
     valores_por_dia: dict[date, list[Decimal]] = {}
+    variavel_por_dia: dict[date, Decimal] = {}  # a estimativa do dia a dia pesa no saldo, mas não é compromisso
     for event in events:
         d = event.data
         compromisso = event.detalhe()
@@ -80,7 +82,10 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
             parcelas.append(valor)
             (vencidos if d < today else vencem_hoje).append({"date": d.isoformat(), **compromisso})
             continue
-        eventos_por_dia.setdefault(d, []).append(compromisso)
+        if event.fonte == FONTE_VARIAVEL:
+            variavel_por_dia[d] = variavel_por_dia.get(d, Decimal(0)) - valor
+        else:
+            eventos_por_dia.setdefault(d, []).append(compromisso)
         valores_por_dia.setdefault(d, []).append(valor)
     vencidos.sort(key=lambda v: v["date"])  # mais antigo primeiro; estável no empate
 
@@ -116,7 +121,7 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
         if worst["saldo_projetado"] >= saldos[topo]:
             # Não houve queda (só possível com o pior dia no dia 1, sem cair em
             # relação à partida): nada a explicar, então sem causas e sem `desde`.
-            causas, desde = [], None
+            causas, desde, topo = [], None, worst_i
         else:
             pico = topo
             while pico > 0 and saldos[pico - 1] == saldos[pico]:
@@ -129,7 +134,9 @@ def _trajectory(today: date, sb: dict[str, Any], events: list[Ocorrencia],
             ]
             desde = (today + timedelta(days=pico)).isoformat()
         # Dict novo: `worst` é o próprio item de `trajectory`, e não pode ganhar chave.
-        worst_day = {**worst, "causas": causas, "desde": desde}
+        # `despesa_variavel`: a estimativa entre o último pico e o pior dia (fora de `causas`, que só lista compromissos).
+        variavel = somar([variavel_por_dia.get(today + timedelta(days=n), Decimal(0)) for n in range(topo + 1, worst_i + 1)])
+        worst_day = {**worst, "causas": causas, "desde": desde, "despesa_variavel": centavos(variavel) if variavel else None}
 
     return {
         "period": {"start": (today + timedelta(days=1)).isoformat(), "end": horizon_end.isoformat()} if days > 0 else None,
@@ -153,8 +160,10 @@ def forecast_with_trajectory(user_id: int, days: int = 90, threshold: float = 0.
         **_horizons(today, snapshot.base, snapshot.ocorrencias, HORIZONS),
         **_trajectory(today, snapshot.base, snapshot.ocorrencias, days, threshold),
         **snapshot.qualidade(),
-        'compromissos': [e.detalhe() for e in snapshot.ocorrencias if e.realizacao != 'realizada'],
-        'premises': 'Projeção condicional das obrigações conhecidas; valores ou realizações desconhecidos permanecem a conferir. Não inclui estimativa variável.',
+        'compromissos': [e.detalhe() for e in snapshot.ocorrencias
+                         if e.realizacao != 'realizada' and e.fonte != FONTE_VARIAVEL],
+        'premises': 'Projeção condicional das obrigações conhecidas; valores ou realizações desconhecidos permanecem a conferir. '
+                    + ('Inclui a estimativa dos gastos do dia a dia.' if snapshot.estimativa_variavel else 'Não inclui estimativa variável.'),
     })
 
 

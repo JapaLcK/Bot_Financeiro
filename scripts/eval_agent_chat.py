@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+from decimal import Decimal
 import json
 import hashlib
 import re
@@ -28,6 +29,9 @@ def cases(suite):
         rows += [
             ('detective_investments', 'detetive', 'O que é CDI em renda fixa?', None, ['barao'], False, False, 0),
             ('baron_due_dates', 'barao', 'Quais boletos vencem amanhã?', None, ['carteiro'], False, False, 0),
+            # Rendimento da carteira inteira é do Faria Limer, venha de onde vier (antes: Detetive → Barão → Faria Limer).
+            ('detective_portfolio_return', 'detetive', 'quanto rendeu meus investimentos?', None, ['faria_limer'], False, False, 0),
+            ('baron_portfolio_return', 'barao', 'quanto rendeu meus investimentos?', None, ['faria_limer'], False, False, 0),
             ('mixed_due_summary', 'carteiro', 'Quais contas cadastradas vencem esta semana e como estão minhas entradas e saídas do mês?', None, ['reporter'], True, True, 1),
             ('outside_domain', 'carteiro', 'Como preparar um bolo de chocolate?', None, [], False, False, 0),
             ('education_xerife', 'xerife', 'Como avaliar se um gasto foge do padrão?', None, [], False, True, 1),
@@ -48,8 +52,18 @@ def cases(suite):
             for i, a, q, s, r, d, own, charge in rows]
 
 
+SYNTHETIC_INVESTIDO = {  # o formato de db.investido.ler: o total dos bancos, por tipo
+    'total': Decimal('64321.00'), 'motivos': [], 'por_banco': [],  # total != renda fixa: o eval distingue um do outro
+    'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': Decimal('48000.00'), 'motivos': []},
+                 {'tipo': 'fundos', 'rotulo': 'Fundos', 'valor': Decimal('16321.00'), 'motivos': []}],
+}
+
+
 def synthetic_data():
     return {
+        'investido': {'total_investido': '64321.00', 'por_banco': [], 'motivos': [], 'fonte': 'sintética',
+                      'por_tipo': [{'tipo': 'renda_fixa', 'rotulo': 'Renda fixa', 'valor': '48000.00', 'motivos': []},
+                                   {'tipo': 'fundos', 'rotulo': 'Fundos', 'valor': '16321.00', 'motivos': []}]},
         'posicoes': [],
         'resumo_brl': {'count': 0, 'market_value': 0, 'invested': 0, 'pnl': 0, 'pnl_pct': 0, 'cost_known': False},
         'renda_fixa_brl': {'count': 22, 'balance': 48000, 'invested': 45000, 'pnl': 3000},
@@ -66,6 +80,7 @@ def synthetic_read(uid, kind, name, arguments):
     """Usa formatos reais de consulta com fontes vazias/sintéticas, sem banco."""
     import db
     import db.bills
+    import db.investido
     from core.services import agent_chat as chat, assinaturas, comparacao_periodos, piggy_agents, plan_service
     from core.services.agent_chat_data import _snapshot
     from core.services.ai_chat.tools import get_tool
@@ -99,6 +114,7 @@ def synthetic_read(uid, kind, name, arguments):
         for attribute, value in rows.items():
             stack.enter_context(patch.object(db, attribute, return_value=value))
         stack.enter_context(patch.object(db.bills, 'list_bills', return_value=[]))
+        stack.enter_context(patch.object(db.investido, 'ler', return_value=SYNTHETIC_INVESTIDO))
         stack.enter_context(patch.object(resumo_mes, 'resumo_do_mes', return_value={
             'entrou': 0, 'saiu': 0, 'motivos': []}))
         # compare_periods: período livre lê `db.*` (patchados acima) e conta compras de cartão; `mes=` e meses inteiros
@@ -109,7 +125,7 @@ def synthetic_read(uid, kind, name, arguments):
         stack.enter_context(patch.object(plan_service, 'consolidated_balance_enabled', return_value=False))
         stack.enter_context(patch.object(plan_service, 'get_plan_tier', return_value='pro'))
         stack.enter_context(patch.object(piggy_agents, 'find_duplicate_charges', return_value=[]))
-        stack.enter_context(patch.object(assinaturas, 'listar_assinaturas', return_value={'servicos': [], 'outras': []}))
+        stack.enter_context(patch.object(assinaturas, 'listar_assinaturas', return_value={'servicos': [], 'outras': [], 'ignoradas': [], 'total_mensal': Decimal('0'), 'total_anual': Decimal('0'), 'chaves': []}))
         if snapshot:
             result = _snapshot(uid, kind)
         elif name == 'get_bills_to_pay':
@@ -237,6 +253,7 @@ def run(args):
         stack.enter_context(patch.object(chat, 'require_access'))
         stack.enter_context(patch.object(chat, 'access_state', return_value='ready'))
         stack.enter_context(patch.object(plan_service, 'ai_monthly_limit_for', return_value=100))
+        stack.enter_context(patch.object(plan_service, 'plan_gate_ok', return_value=True))  # card_da_resposta: sem banco
         stack.enter_context(patch.object(db, 'ai_get_usage_this_month', side_effect=lambda uid: len(charges)))
         stack.enter_context(patch.object(quota, 'try_consume_usage', side_effect=lambda *a: charges.append(1) or len(charges)))
         stack.enter_context(patch.object(chat, 'execute_read', read))

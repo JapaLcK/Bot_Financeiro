@@ -18,8 +18,10 @@ import frontend.finance_bot_websocket_custom as dashboard
 from api.v2 import app as app_v2
 from api.v2.assinaturas import Assinaturas
 from api.v2.bancos import Bancos
+from api.v2.caixinhas import Caixinhas
 from api.v2.categorias import Categorias
 from api.v2.contas import Contas
+from api.v2.contas_a_pagar import ContasAPagar
 from api.v2.erros import ErroV2
 from api.v2.gastos import Gastos, GastosDaCategoria
 from api.v2.guia import DICAS, PASSOS, Guia
@@ -474,7 +476,8 @@ def test_fixture_de_previsao_segue_modelo_e_precisao(nome):
     f = FIXTURES["previsao"][nome]
     p = Previsao.model_validate(f)
     assert p.model_dump(mode="json") == f
-    assert p.cabe_nas_premissas is p.cobertura.inclui_estimativa_variavel is False
+    assert p.cabe_nas_premissas is False
+    assert p.cobertura.inclui_estimativa_variavel is (p.estimativa_variavel is not None)
     assert len(p.marcos) <= 3
     if p.trajetoria is not None:
         assert len(p.trajetoria) == p.dias <= 90
@@ -510,3 +513,26 @@ def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
 def test_fixture_dos_orcamentos_por_categoria_segue_o_modelo(nome):
     f = FIXTURES["orcamentos_categoria"][nome]
     assert OrcamentosCategoria.model_validate(f).model_dump(mode="json") == f  # dinheiro e % são texto, sem número solto
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["contas_a_pagar"]))
+def test_fixture_de_contas_a_pagar_segue_o_modelo(nome):
+    """Dinheiro é texto; o total soma os valores das pendentes (a regra da consulta do Carteiro); vencida = dias < 0."""
+    f = FIXTURES["contas_a_pagar"][nome]
+    c = ContasAPagar.model_validate(f)
+    assert c.model_dump(mode="json") == f
+    assert c.pendentes == len(c.contas) and c.vencidas == sum(x.dias < 0 for x in c.contas) == sum(x.vencida for x in c.contas)
+    assert c.total_estimado == sum((x.valor for x in c.contas), Decimal(0)) and c.tem_variavel == any(x.variavel for x in c.contas)
+
+
+@pytest.mark.parametrize("nome", sorted(FIXTURES["caixinhas"]))
+def test_fixture_de_caixinhas_segue_o_modelo(nome):
+    """Dinheiro e % são texto; o total soma os saldos; o progresso é saldo/meta limitado a 100; sem meta, sem progresso."""
+    f = FIXTURES["caixinhas"][nome]
+    c = Caixinhas.model_validate(f)
+    assert c.model_dump(mode="json") == f
+    assert c.total == sum((x.saldo for x in c.caixinhas), Decimal(0))
+    for x in c.caixinhas:
+        assert (x.meta is None) == (x.progresso_pct is None) == (x.atingida is None)
+        if x.meta:
+            assert x.progresso_pct == min(x.saldo / x.meta * 100, 100).quantize(Decimal("0.01")) and x.atingida == (x.saldo >= x.meta)

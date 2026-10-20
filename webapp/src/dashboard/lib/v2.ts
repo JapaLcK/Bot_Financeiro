@@ -174,6 +174,17 @@ export const orcamentosCategoriaQuery = {
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/orcamentos-categoria", signal),
   ...vivo,
 };
+// As contas a pagar e as caixinhas lidas pelos cards do Carteiro e do Banqueiro (sem sync nem juros: parts/CardAgente.tsx).
+export const contasAPagarQuery = {
+  queryKey: ["contas-a-pagar"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/contas-a-pagar", signal),
+  ...vivo,
+};
+export const caixinhasQuery = {
+  queryKey: ["caixinhas"],
+  queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/caixinhas", signal),
+  ...vivo,
+};
 export const guiaQuery = {
   queryKey: ["guia"],
   queryFn: ({ signal }: { signal: AbortSignal }) => apiGet("/guia", signal),

@@ -113,3 +113,11 @@ def test_compare_periods_sem_banco_em_todas_as_formas_de_argumento(forma):
         result = synthetic_read(42, 'reporter', 'compare_periods', _formas_de_compare_periods()[forma])
     assert not result.get('error'), result
     assert result['base']['cartao'] in ('fatura', 'data_da_compra')
+
+
+def test_investido_sintetico_distingue_total_de_renda_fixa():
+    faria = synthetic_read(42, 'faria_limer', 'consultar_dados_do_agente', {})['investido']
+    barao = synthetic_read(42, 'barao', 'consultar_dados_do_agente', {})
+    assert faria['total_investido'] == '64321.00'
+    assert barao['total_renda_fixa'] == '48000.00' != faria['total_investido']
+

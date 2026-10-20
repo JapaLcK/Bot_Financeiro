@@ -37,7 +37,7 @@ def test_rota_estruturada_preserva_destino_e_necessidade_de_consulta():
     response = reply(json.dumps({'parts': [
         {'kind': 'reporter', 'question': 'Como estão as entradas do mês?', 'needs_data': True}]}))
     route = chat._route(client_for(response, requests), 'carteiro', 'Como estão as entradas do mês?', [])
-    assert route['redirects'] == [{'kind': 'reporter', 'question': 'Como estão as entradas do mês?'}]
+    assert route['redirects'] == [{'kind': 'reporter', 'question': 'Como estão as entradas do mês?', 'needs_data': True}]
     contract = requests[0]['response_format']['json_schema']
     assert contract['strict'] is True
     assert set(contract['schema']['properties']['parts']['items']['properties']['kind']['enum']) == set(chat.DOMAINS) | {'outside'}
@@ -53,7 +53,7 @@ def test_pergunta_mista_consulta_so_a_parte_do_agente():
                         'Explique diversificação e quais boletos vencem amanhã?', [])
     assert route['own_question'] == 'Explique diversificação'
     assert route['needs_data'] is False
-    assert route['redirects'] == [{'kind': 'carteiro', 'question': 'Quais boletos vencem amanhã?'}]
+    assert route['redirects'] == [{'kind': 'carteiro', 'question': 'Quais boletos vencem amanhã?', 'needs_data': True}]
 
 
 @pytest.mark.parametrize('model', ['gpt-5.4-mini', 'gpt-4.1-mini'])

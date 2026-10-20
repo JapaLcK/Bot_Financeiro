@@ -247,6 +247,7 @@ const projectionCases = [
   ["base indisponível", { saldo_atual: null, projetado: null, receitas_previstas: null, gastos_fixos_previstos: null, estado: "indisponivel", tranquilo: false, balance_source: "unavailable" }, "Indisponível"],
   ["condicional sem motivos", { estado: "condicional", motivos: [] }, "R$ 123,00"],
   ["final positivo com percurso negativo", { minimo_percurso: -100 }, "R$ 123,00"],
+  ["com a estimativa do dia a dia", { estado: "condicional", motivos: [], despesa_variavel_estimada: 30, cobertura: { inclui_estimativa_variavel: true } }, "R$ 123,00"],
 ];
 
 for (const [name, changes, value] of projectionCases) {
@@ -277,13 +278,20 @@ for (const [name, changes, value] of projectionCases) {
     assert.equal(rendered.border, "1px solid var(--border)");
     assert.equal(rendered.titleColor, "var(--text)");
     assert.doesNotMatch(rendered.text, /Tranquilo|sobra|Aperta|falta R\$|gastos_variaveis_nao_estimados|minimo_percurso/);
-    assert.match(rendered.text, /faturas.*Não inclui estimativa variável nem autoriza uma compra/s);
+    if (projection.cobertura?.inclui_estimativa_variavel) {
+      assert.match(rendered.text, /faturas − estimativa dos gastos do dia a dia\. Não autoriza uma compra/);
+      assert.doesNotMatch(rendered.text, /Não inclui estimativa variável/);
+    } else {
+      assert.match(rendered.text, /faturas.*Não inclui estimativa variável nem autoriza uma compra/s);
+      assert.equal(rendered.rows.some(row => /dia a dia/.test(row.label)), false);
+    }
     const rows = Object.fromEntries(rendered.rows.map(row => [row.label, row]));
     assert.equal(rows["Projeção do caixa"].value, value);
     assert.equal(rows["Projeção do caixa"].color, "var(--text)");
     assert.equal(rows["Boletos até lá (1)"].value, "− R$ 77,00");
     assert.equal(rows["Faturas de cartão até lá"].value, "− R$ 10,00");
     assert.equal(rows["Boleto novo em análise"].value, "− R$ 50,00");
+    if (projection.despesa_variavel_estimada) assert.equal(rows["Gastos do dia a dia (estimativa)"].value, "− R$ 30,00");
     if (projection.estado === "indisponivel") {
       for (const label of ["Saldo hoje", "Receitas previstas", "Gastos fixos"]) assert.equal(rows[label].value, "Indisponível");
       assert.doesNotMatch(rendered.text, /R\$ 0,00|NaN|Infinity/);

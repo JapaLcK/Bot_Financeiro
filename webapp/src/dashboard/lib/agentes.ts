@@ -3,6 +3,7 @@
 // tudo (plano, energia, cota); o painel só agrupa a lista e mostra o que ele responde.
 import { queryOptions } from "@tanstack/react-query";
 import { uidValido } from "../conta/api";
+import { textos } from "./bancos";
 import { DEMO, chamar, escrever, meQuery } from "./v2";
 
 // Fonte da tela: kind e nome iguais a core/services/agent_chat.py::DOMAINS (tests/test_painel_agentes_catalogo.py confere).
@@ -16,6 +17,20 @@ export const AGENTES = [
   { kind: "faria_limer", nome: "Faria Limer", tema: "Carteira de investimentos" },
 ];
 export const agenteDe = (kind: string) => AGENTES.find((a) => a.kind === kind);
+
+// As frases do "enviando" (parts/Carregando.tsx), em ordem fixa. Só dizem o que o agente está FAZENDO: o servidor não informa etapas,
+// então nenhuma afirma uma etapa concluída. Depois das do agente vêm as comuns, e a lista recomeça.
+const FRASES_COMUNS = ["Desenrolando o novelo…", "Organizando a resposta…"];
+const FRASES: Record<string, string[]> = {
+  faria_limer: ["Abrindo a carteira…", "Pulando entre os números…", "Olhando ações e renda fixa…"],
+  barao: ["Olhando a renda fixa…", "Procurando dinheiro parado…"],
+  detetive: ["Procurando pistas nos lançamentos…", "Comparando cobranças parecidas…"],
+  carteiro: ["Separando as contas…", "Conferindo os vencimentos…"],
+  reporter: ["Juntando entradas e saídas…", "Montando o resumo…"],
+  cofre: ["Abrindo as caixinhas…", "Conferindo as metas…"],
+  xerife: ["Patrulhando os gastos…", "Comparando com seus limites…"],
+};
+export const frasesDe = (kind: string) => [...(FRASES[kind] ?? []), ...FRASES_COMUNS];
 
 export interface Agentes {
   catalog: { kind: string; nome: string; disponivel: boolean; status: string | null; energy_cost: number }[];
@@ -79,11 +94,25 @@ export function ativar(uid: number, kind: string) {
   if (DEMO) { demo(); ativosDemo!.add(kind); return Promise.resolve({ ok: true }); }
   return escrever<{ ok: boolean }>("POST", `/agents/${uid}/${kind}/activate`, {});
 }
-export interface Redirect { kind: string; name: string; question: string; access: string }
-export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[] }
-export function conversar(uid: number, kind: string, message: string, context: string | null) {
+export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
+export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
+/** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
+export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "caixinhas" } | { tipo: "contas"; hoje: string } | { tipo: "orcamentos"; mes: string } | { tipo: "resumo_mes"; mes: string; motivos: string[] };
+export const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
+export const cardDe = (v: unknown): CardAgente | null => {
+  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown; motivos?: unknown; hoje?: unknown }) : {};
+  if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "caixinhas") return { tipo: c.tipo };
+  if (c.tipo === "contas") return typeof c.hoje === "string" && /^\d{4}-\d{2}-\d{2}$/.test(c.hoje) ? { tipo: "contas", hoje: c.hoje } : null;
+  if (c.tipo === "orcamentos") return typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "orcamentos", mes: c.mes } : null;
+  // `motivos`: os avisos que o agente deu sobre o mês (lista de texto; fora disso, nenhum aviso).
+  return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes, motivos: textos(c.motivos) ? c.motivos as string[] : [] } : null;
+};
+/** Pergunta vinda do botão "Perguntar ao X": o servidor não a reclassifica, e o agente sugerido responde. */
+export interface Encaminhada { needs_data: boolean }
+export function conversar(uid: number, kind: string, message: string, context: string | null, encaminhada?: Encaminhada) {
   if (DEMO) return Promise.resolve<RespostaChat>({ reply: RESPOSTA_DEMO[kind], context: null });
-  return escrever<RespostaChat>("POST", `/agents/${uid}/${kind}/chat`, { message, context });
+  return escrever<RespostaChat>("POST", `/agents/${uid}/${kind}/chat`,
+    encaminhada ? { message, context, forwarded: true, needs_data: encaminhada.needs_data } : { message, context });
 }
 
 // --- A menção: "@Nome" no começo do texto ou depois de espaço/quebra (assim fulano@gmail.com não conta). ---

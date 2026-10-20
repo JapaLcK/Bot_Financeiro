@@ -32,6 +32,7 @@
 .msg-foot { display: grid; grid-auto-flow: column; justify-content: start; column-gap: 20px; margin-top: -8px; }
 .msg-foot .link { color: var(--ink-2); }
 .msg-text { max-width: 68ch; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.msg-text, .msg-user { word-break: break-word; overflow-wrap: anywhere; } /* URL longa sem espaço quebra em vez de estourar a bolha; break-word é o fallback do Safari 14 (anywhere: 15.4+) */
 .msg-text b { color: var(--ink); font-weight: 600; }
 
 /* Estado vazio: logo e saudação no centro da coluna (vh e não dvh: o Safari 14 não tem). */
@@ -106,3 +107,30 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
 }
 /* Na volta do foco, até a conta ser relida (PiggyChat): a conversa não aparece, mas fica no lugar (sem pular a rolagem). */
 [data-reconferindo] { visibility: hidden; }
+
+/* Resposta de agente viva (parts/PiggyChat.tsx, parts/Carregando.tsx). Nada daqui esconde texto do DOM: só opacidade, blur e subida. */
+.msg-text[data-carga] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } /* "Preparando a resposta…" fica só para o leitor de tela; quem se vê é .msg-carga */
+.msg-carga { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 10px; font-size: 15px; line-height: 1.55; overflow: hidden; }
+.msg-carga-anel { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--pink-line); border-top-color: var(--pink); }
+.msg-carga-frase {
+  min-width: 0; color: transparent;
+  background: linear-gradient(100deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%) 100% 0 / 250% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text;
+}
+.rv { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; } /* guarda: o quebra-tudo já vem herdado do .msg-text; explícito aqui para que um nowrap futuro no .rv não deixe uma URL alargar a página */
+@media (prefers-reduced-motion: no-preference) {
+  .msg-carga-anel { animation: carga-gira 0.9s linear infinite; }
+  .msg-carga-frase { animation: carga-entra 0.35s var(--ease-out) both, carga-brilho 1.8s linear infinite; }
+  .rv { animation: rv-entra 0s var(--ease-out) both; } /* a duração vem inline (REVELA_ANIM em PiggyChat.tsx) */
+  .msg-acoes[data-revela], .card-slot[data-revela] { animation: rv-acoes 0s var(--ease-out) both; } /* duração inline (ACOES_ANIM) */
+  /* O texto e os botões esperam o card acima deles carregar: revelados antes, desceriam quando ele cresce (o timer de PiggyChat.tsx espera junto). */
+  .msg-piggy:has(.card-slot[data-espera] [aria-busy="true"]) :is(.rv, .msg-acoes[data-revela]) { animation-play-state: paused; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-carga-frase { background: none; color: var(--ink-2); } /* sem brilho: a cor lisa */
+}
+@keyframes carga-gira { to { transform: rotate(1turn); } }
+@keyframes carga-entra { from { opacity: 0; transform: translateY(6px); } }
+@keyframes carga-brilho { to { background-position: 0 0; } }
+@keyframes rv-entra { from { opacity: 0; filter: blur(4px); transform: translateY(4px); } }
+@keyframes rv-acoes { from { opacity: 0; visibility: hidden; } } /* hidden: sem foco nem clique enquanto invisíveis; visível assim que o fade começa */

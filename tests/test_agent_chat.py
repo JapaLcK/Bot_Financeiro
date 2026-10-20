@@ -81,7 +81,7 @@ def test_redirecionamento_puro_nao_consulta_dados_nem_desconta(monkeypatch, arme
 
 def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
     monkeypatch.setattr(chat, '_route', lambda *a: {'own_question': 'Há duplicatas?', 'redirects': [{'kind': 'barao', 'question': 'O que é CDI?'}], 'outside': False})
-    def answer(client, uid, kind, question, history, *, needs_data=False):
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
         assert question == 'Há duplicatas?'
         assert history == []
         return 'Há indícios que podemos conferir.'
@@ -90,6 +90,26 @@ def test_pergunta_mista_responde_apenas_parte_propria(monkeypatch, armed):
     assert len(armed) == 1
     assert result['redirects'][0]['kind'] == 'barao'
     assert chat.decode_context(result['context'], 42, 'detetive')[0]['content'] == 'Há duplicatas?'
+
+
+def test_pergunta_encaminhada_responde_direto_sem_reclassificar(monkeypatch, armed):
+    # O classificador do agente sugerido mandaria a pergunta adiante (Barão → Faria Limer): encaminhada, ela não passa por ele.
+    routed = []
+    monkeypatch.setattr(chat, '_route', lambda *a: routed.append(a) or {
+        'own_question': '', 'redirects': [{'kind': 'faria_limer', 'question': 'Quanto rendeu?', 'needs_data': True}], 'outside': False})
+    answered = []
+    def answer(client, uid, kind, question, history, *, needs_data=False, consultas=None):
+        answered.append((kind, question, needs_data))
+        return 'Sua renda fixa rendeu assim.'
+    monkeypatch.setattr(chat, '_answer', answer)
+    result = chat.chat(42, 'barao', 'Quanto rendeu?', forwarded=True, needs_data=True)
+    assert (routed, result['redirects']) == ([], [])
+    assert answered == [('barao', 'Quanto rendeu?', True)]
+    assert result['reply'] == 'Sua renda fixa rendeu assim.'
+    assert len(armed) == 1
+    # Sem a marca, a mesma pergunta continua passando pelo classificador.
+    assert chat.chat(42, 'barao', 'Quanto rendeu?')['redirects'][0]['kind'] == 'faria_limer'
+    assert len(routed) == 1
 
 
 def test_falha_na_ia_nao_desconta(monkeypatch, armed):
@@ -114,18 +134,26 @@ def test_detetive_consulta_duplicidades_sem_emitir_alertas(monkeypatch):
     monkeypatch.setattr(agents, 'find_duplicate_charges', lambda uid, today: [{'descricao': 'Mercado', 'repeticoes': 2}])
     from core.services import assinaturas
     monkeypatch.setattr(assinaturas, 'listar_assinaturas', lambda uid, today: {
-        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}]})
+        'servicos': [], 'outras': [], 'ignoradas': [{'chave': 'netflix', 'valor': 39.9}], 'total_mensal': 0})
     monkeypatch.setattr(db, 'record_agent_event', lambda *a, **k: pytest.fail('gravou evento'))
     dados = chat.execute_read(42, 'detetive', 'consultar_dados_do_agente', {})
     assert dados['possiveis_duplicidades'][0]['repeticoes'] == 2
     # Ignorada é decisão do usuário: o chat do Detetive não a vê.
-    assert (dados['recorrencias'], dados['total_recorrencias']) == ([], 0)
+    assert (dados['recorrencias'], dados['total_recorrencias'], dados['total_mensal']) == ([], 0, 0)
 
 
 def test_classificador_descarta_destinos_invalidos():
     output = {'parts': [{'kind': 'admin', 'question': 'x', 'needs_data': False}, {'kind': 'barao', 'question': 'CDI', 'needs_data': False}]}
     client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(output)))]))))
-    assert chat._route(client, 'detetive', 'CDI', [])['redirects'] == [{'kind': 'barao', 'question': 'CDI'}]
+    assert chat._route(client, 'detetive', 'CDI', [])['redirects'] == [{'kind': 'barao', 'question': 'CDI', 'needs_data': False}]
+
+
+def test_partes_do_mesmo_destino_juntam_a_necessidade_de_consulta():
+    output = {'parts': [{'kind': 'carteiro', 'question': 'O que é boleto?', 'needs_data': False},
+                        {'kind': 'carteiro', 'question': 'Quais vencem amanhã?', 'needs_data': True}]}
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(output)))]))))
+    assert chat._route(client, 'detetive', 'x', [])['redirects'] == [
+        {'kind': 'carteiro', 'question': 'O que é boleto?\nQuais vencem amanhã?', 'needs_data': True}]
 
 
 def test_endpoint_autoriza_usuario_e_valida_corpo(monkeypatch):
@@ -140,12 +168,16 @@ def test_endpoint_autoriza_usuario_e_valida_corpo(monkeypatch):
         if uid != 42:
             raise HTTPException(status_code=403)
     monkeypatch.setattr(agents.shared, 'authorize_dashboard_access', authorize)
-    monkeypatch.setattr(chat, 'chat', lambda *a: {'reply': 'ok'})
+    calls = []
+    monkeypatch.setattr(chat, 'chat', lambda *a, **kw: calls.append(kw) or {'reply': 'ok'})
     client = TestClient(app)
     assert client.post('/agents/43/detetive/chat', json={'message': 'oi'}).status_code == 403
     assert client.post('/agents/42/detetive/chat', json={'message': ' '}).status_code == 400
     assert client.post('/agents/42/detetive/chat', json={'message': 'x' * 2001}).status_code == 422
     assert client.post('/agents/42/detetive/chat', json={'message': 'oi'}).json()['reply'] == 'ok'
+    assert calls[-1] == {'forwarded': False, 'needs_data': False}
+    client.post('/agents/42/detetive/chat', json={'message': 'oi', 'forwarded': True, 'needs_data': True})
+    assert calls[-1] == {'forwarded': True, 'needs_data': True}
 
 
 def test_cota_atomica_entre_conversas(user_id):

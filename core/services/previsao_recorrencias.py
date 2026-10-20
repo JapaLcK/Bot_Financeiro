@@ -104,7 +104,8 @@ def cadeias_do_banco(cur, user_id: int, marcas: dict | None = None) -> list[dict
                        'descricao': ult['description'], 'valor': abs(ult['amount']),
                        'dia': dia_da_cadeia(ls), 'ultima': ult['transaction_date'],
                        'cartao': ult['account_type'] == 'CREDIT',
-                       'conta': ult['account_id']})
+                       'conta': ult['account_id'],
+                       'launches': {r['imported_launch_id'] for r in ls if r.get('imported_launch_id')}})
     return cs
 
 
@@ -250,12 +251,13 @@ def _sim_muda_a_conta(r, hoje, contas_na_base) -> bool:
     return not (interrompida or _fora_da_base(r, contas_na_base)) and any(not (atrasada and d < hoje) for d in datas)
 
 
-def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, contas_na_base: set) -> None:
-    """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base."""
+def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, contas_na_base: set) -> list:
+    """`contas_na_base`: ids (`open_finance_accounts.id`) das contas cujo saldo está na base.
+    Devolve as cadeias lidas (a estimativa do dia a dia tira os lançamentos delas)."""
     hoje = s.hoje
     conexoes = ler_frescor(cur, user_id)
     if not conexoes:
-        return
+        return []
     s.premissas.append(PREMISSA)
     velho = s.calculado_em - BANCO_VELHO
     if any(c['recurring_fetched_at'] is None or c['recurring_fetched_at'] < velho for c in conexoes):
@@ -316,3 +318,4 @@ def anexar(cur, s, user_id: int, until: date, recs: list, instancias: list, cont
                 'recorrencia_banco', c['id'], d.isoformat(), d, 'gasto_fixo' if saida else 'receita',
                 c['nome'], c['valor'], c['direcao'], 'estimado', 'presumida',
                 'a_conferir' if d <= hoje else 'prevista', tuple(motivos), incluida))
+    return cs

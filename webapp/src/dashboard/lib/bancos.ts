@@ -37,7 +37,7 @@ export const corDoConector = (hex: unknown, indice: number) => corOuTinta(typeof
 // Disponíveis para conectar: os populares, nesta ordem, que a conta ainda não tem. O NOME só escolhe a ordem de exibição; "já conectado" é
 // pelo ID (`institution_id` do snapshot × `id` do conector): o gêmeo Open Finance de um banco tem nome igual e id diferente, e é outra conexão.
 const POPULARES = ["itau", "bradesco", "banco do brasil", "santander", "caixa", "inter", "c6", "nubank", "btg", "mercado pago"];
-export type Conector = { id: number; name: string; color: string | null; logo: string | null };
+export type Conector = { id: number; name: string; color: string | null; logo: string | null; logo_proprio: string | null };
 export function disponiveis(todos: Conector[], conectados: (string | null)[], max = 5): Conector[] {
   const tem = new Set(conectados);
   const porPosicao = new Map<number, Conector>(); // um por posição: o de nome exato vence o parecido ("Itaú" × "Itaú Personnalité")
@@ -76,7 +76,7 @@ export const ultimaSync = (datas: (string | null)[]): string | null =>
   datas.reduce<string | null>((a, d) => (Number.isFinite(instante(d)) && (a === null || instante(d) > instante(a)) ? d : a), null);
 
 // A resposta do /bancos tem a forma do contrato? Fora dela a tela trata como leitura falha (nunca quebra a SPA).
-const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
+export const textos = (m: unknown) => Array.isArray(m) && m.every((s) => typeof s === "string"); // motivo que não é texto derrubaria o Selos (erro #31)
 export const bancosValidos = (b: unknown): b is Bancos => {
   const x = b as Bancos | null;
   return !!x && textos(x.motivos) && Array.isArray(x.bancos) && x.bancos.every((y) => !!y && textos(y.motivos));
