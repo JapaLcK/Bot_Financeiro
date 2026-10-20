@@ -25,7 +25,7 @@ def test_rota_preserva_contrato_e_expoe_campos_de_recuperacao(monkeypatch, failu
     monkeypatch.setattr(agents.shared, "authorize_dashboard_access", lambda *a: None)
     monkeypatch.setattr(agents, "_require_agents_beta", lambda *a: None)
 
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise failure
 
     monkeypatch.setattr(agent_chat, "chat", fail)

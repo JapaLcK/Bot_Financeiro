@@ -160,8 +160,9 @@ def _route(client, kind: str, text: str, history: list[dict]) -> dict:
             existing = next((r for r in redirects if r["kind"] == target), None)
             if existing:
                 existing["question"] = (existing["question"] + "\n" + question)[:2000]
+                existing["needs_data"] = existing["needs_data"] or part.get("needs_data") is True
             else:
-                redirects.append({"kind": target, "question": question})
+                redirects.append({"kind": target, "question": question, "needs_data": part.get("needs_data") is True})
     if not own and not redirects and not outside:
         raise ModelResponseError("No valid routing target")
     return {"own_question": "\n".join(own)[:2000], "redirects": redirects,
@@ -245,7 +246,11 @@ def _check_answer(client, kind: str, question: str, reply: str, *, evidence: lis
         raise AnswerPolicyError(reason if reason in {"wrong_domain", "financial_action", "unsupported_claim"} else "policy")
 
 
-def chat(user_id: int, kind: str, text: str, context: str | None = None) -> dict:
+def chat(user_id: int, kind: str, text: str, context: str | None = None, *,
+         forwarded: bool = False, needs_data: bool = False) -> dict:
+    """`forwarded`: a pergunta veio do botão de encaminhamento de outro agente, que já
+    classificou o tema. Ela não passa de novo pelo classificador: quem foi sugerido
+    responde, sem um segundo encaminhamento em cadeia."""
     from core.services.plan_service import ai_monthly_limit_for
     from db.ai_chat import try_consume_usage
     stage = "access"
@@ -262,7 +267,8 @@ def chat(user_id: int, kind: str, text: str, context: str | None = None) -> dict
         from openai import OpenAI
         client = OpenAI(api_key=(os.getenv("OPENAI_API_KEY") or "").strip(), timeout=OPENAI_TIMEOUT, max_retries=OPENAI_MAX_RETRIES)
         stage = "routing"
-        route = _route(client, kind, text, history)
+        route = ({"own_question": text, "redirects": [], "outside": False, "needs_data": needs_data}
+                 if forwarded else _route(client, kind, text, history))
         own = route["own_question"].strip()
         if own and not route["redirects"] and not route["outside"]:
             own = text  # Um classificador não reescreve a intenção de uma pergunta integralmente própria.

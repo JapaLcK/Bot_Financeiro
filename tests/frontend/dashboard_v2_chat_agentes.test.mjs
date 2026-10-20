@@ -1057,7 +1057,7 @@ for (const width of TELAS) {
 
   test(`${width}: o redirect "Perguntar ao Carteiro" manda a pergunta dele ao Carteiro`, async () => {
     const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
-      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready" }] } } : null) });
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready", needs_data: true }] } } : null) });
     await digitar(page, "@det");
     await lista(page).waitFor();
     await campo(page).pressSequentially("etive e os boletos?");
@@ -1066,6 +1066,31 @@ for (const width of TELAS) {
     await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
     await ctx.close();
     assert.deepEqual(chats.map((c) => [c.kind, c.message]), [["detetive", "e os boletos?"], ["carteiro", "Que contas vencem?"]]);
+    // Só a pergunta do botão vai marcada: o Carteiro responde sem reclassificar (sem um 2º encaminhamento em cadeia).
+    assert.deepEqual(chats.map((c) => [c.forwarded, c.needs_data]), [[undefined, undefined], [true, true]]);
+  });
+
+  test(`${width}: o redirect falha com erro repetível: "Tentar de novo" manda a pergunta ainda marcada como encaminhada`, async () => {
+    const { ctx, page, chats } = await abrir({ width, ativos: ["detetive", "carteiro"],
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "ready", needs_data: true }] } }
+        : n === 2 ? { status: 502, json: { detail: { error: "model_unavailable", message: "Falhou agora.", retryable: true } } } : null) });
+    await enviar(page, "@Detetive e os boletos?");
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.getByRole("button", { name: "Tentar de novo" }).click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 3 do carteiro." }).waitFor();
+    await ctx.close();
+    assert.deepEqual(chats.map((c) => [c.kind, c.forwarded, c.needs_data]), [["detetive", undefined, undefined], ["carteiro", true, true], ["carteiro", true, true]]);
+  });
+
+  test(`${width}: o redirect para um agente inativo: "Ativar e responder" manda a pergunta ainda marcada como encaminhada`, async () => {
+    const { ctx, page, chats } = await abrir({ width, ativos: ["detetive"],
+      chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: "Isso é com o Carteiro.", context: "c1", redirects: [{ kind: "carteiro", name: "Carteiro", question: "Que contas vencem?", access: "activate" }] } } : null) });
+    await enviar(page, "@Detetive e os boletos?");
+    await page.getByRole("button", { name: "Perguntar ao Carteiro" }).click();
+    await page.getByRole("button", { name: "Ativar e responder" }).click();
+    await resposta(page).locator(".msg-text", { hasText: "Resposta 2 do carteiro." }).waitFor();
+    await ctx.close();
+    assert.deepEqual(chats.map((c) => [c.kind, c.forwarded, c.needs_data]), [["detetive", undefined, undefined], ["carteiro", true, false]]);
   });
 
   test(`${width}: o redirect relê o acesso no clique: o Carteiro ativado depois da resposta recebe a pergunta`, async () => {

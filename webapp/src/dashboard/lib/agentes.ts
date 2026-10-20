@@ -79,11 +79,14 @@ export function ativar(uid: number, kind: string) {
   if (DEMO) { demo(); ativosDemo!.add(kind); return Promise.resolve({ ok: true }); }
   return escrever<{ ok: boolean }>("POST", `/agents/${uid}/${kind}/activate`, {});
 }
-export interface Redirect { kind: string; name: string; question: string; access: string }
+export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[] }
-export function conversar(uid: number, kind: string, message: string, context: string | null) {
+/** Pergunta vinda do botão "Perguntar ao X": o servidor não a reclassifica, e o agente sugerido responde. */
+export interface Encaminhada { needs_data: boolean }
+export function conversar(uid: number, kind: string, message: string, context: string | null, encaminhada?: Encaminhada) {
   if (DEMO) return Promise.resolve<RespostaChat>({ reply: RESPOSTA_DEMO[kind], context: null });
-  return escrever<RespostaChat>("POST", `/agents/${uid}/${kind}/chat`, { message, context });
+  return escrever<RespostaChat>("POST", `/agents/${uid}/${kind}/chat`,
+    encaminhada ? { message, context, forwarded: true, needs_data: encaminhada.needs_data } : { message, context });
 }
 
 // --- A menção: "@Nome" no começo do texto ou depois de espaço/quebra (assim fulano@gmail.com não conta). ---
