@@ -171,3 +171,10 @@ def test_snapshots_nao_somam_moedas_mesmo_com_nome_igual(user_id, monkeypatch, k
     assert result["cobertura_renda_fixa"]["moeda"] == "BRL"
     assert result["cobertura_renda_fixa"]["outras_moedas_incluidas"] is False
     assert db.list_pockets(user_id, accrue=False) == before
+
+
+@pytest.mark.parametrize("kind", ["faria_limer", "barao"])
+def test_nota_orienta_custo_desconhecido(portfolios, kind):
+    portfolios(1)
+    nota = chat.execute_read(42, kind, "consultar_dados_do_agente", {})["nota"]
+    assert "`cost_known` false = o banco não informou o custo" in nota

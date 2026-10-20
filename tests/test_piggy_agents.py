@@ -210,14 +210,16 @@ def test_rv_insights_sem_taxa_do_mes_omite_variacao():
 
 
 def test_rv_insights_sem_custo_conhecido_nao_inventa_resultado():
-    # Conector sem custo de aquisição: invested cai pro valor de mercado (P&L 0),
-    # mas o retrato NÃO pode mostrar "R$ 0,00 (+0,0%)" — tem que dizer que não sabe.
+    # Conector sem custo de aquisição: invested/pnl None; o retrato NÃO pode mostrar
+    # "R$ 0,00 (+0,0%)" nem número de resultado — tem que dizer que não sabe.
     from core.services.piggy_agents import faria_limer_insights
     pos = [
-        {"ticker": "PETR4", "market_value": 8000.0, "invested": 8000.0, "cost_known": False},
-        {"ticker": "ITUB4", "market_value": 4000.0, "invested": 4000.0, "cost_known": False},
+        {"ticker": "PETR4", "market_value": 8000.0, "invested": None, "pnl": None, "pnl_pct": None, "cost_known": False},
+        {"ticker": "ITUB4", "market_value": 4000.0, "invested": None, "pnl": None, "pnl_pct": None, "cost_known": False},
     ]
-    ins = faria_limer_insights(pos, _rv_summary(pos), "2026-08")
+    summ = {"market_value": 12000.0, "invested": None, "pnl": None, "pnl_pct": None,
+            "cost_known": False, "count": 2}
+    ins = faria_limer_insights(pos, summ, "2026-08")
     msg = next(i for i in ins if i["payload"]["tipo"] == "rv_retrato")["payload"]["mensagem"]
     assert "sem custo de aquisição conhecido" in msg
     assert "R$ 0,00" not in msg and "+0,0%" not in msg
@@ -252,9 +254,9 @@ def test_rv_insights_taxa_do_mes_exige_cobertura_total():
     assert "No mês" not in msg          # cobertura incompleta → omite a variação do mês
 
 
-def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch):
-    # amount:0 vindo do conector não é custo real — não pode virar "lucro" = valor
-    # de mercado inteiro. Fica cost_known=False e P&L 0 (custo cai pro market_value).
+def test_list_rv_positions_amount_igual_ao_saldo_e_custo_desconhecido(monkeypatch):
+    # `amount` é o saldo (== balance em produção), não o custo: sem amountOriginal o
+    # custo é desconhecido e invested/pnl são None, nunca o saldo nem 0.
     import db.rv as rv
 
     class _Cur:
@@ -264,7 +266,7 @@ def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch
         def fetchall(self):
             return [{"of_investment_id": 1, "name": "Petrobras", "type": "EQUITY",
                      "subtype": "STOCK", "balance": 1000.0, "currency": "BRL",
-                     "raw": {"amount": 0, "code": "PETR4"}}]
+                     "raw": {"amount": 1000, "code": "PETR4"}}]
 
     class _Conn:
         def __enter__(self): return self
@@ -275,9 +277,9 @@ def test_list_rv_positions_amount_zero_conta_como_custo_desconhecido(monkeypatch
     monkeypatch.setattr(rv, "get_conn", lambda: _Conn())
     pos = rv.list_rv_positions(1)
     assert len(pos) == 1
-    assert pos[0]["cost_known"] is False       # amount 0 → custo desconhecido
-    assert pos[0]["invested"] == 1000.0        # fallback pro valor de mercado
-    assert pos[0]["pnl"] == 0.0                # sem lucro fantasma
+    assert pos[0]["cost_known"] is False       # amount == balance, sem amountOriginal
+    assert pos[0]["invested"] is None
+    assert pos[0]["pnl"] is None
 
 
 def test_rv_portfolio_summary_usa_posicoes_passadas_sem_rebuscar(monkeypatch):

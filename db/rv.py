@@ -22,6 +22,7 @@ import re
 from decimal import InvalidOperation
 
 from .connection import get_conn
+from .of_snapshots import _numero
 from .users import ensure_user
 
 # Rótulos por classe (exibição no dashboard e na IA).
@@ -54,6 +55,13 @@ def _f(value, default: float = 0.0) -> float:
         return default
 
 
+def _custo(raw) -> float | None:
+    """Custo de aquisição = `amountOriginal` do Pluggy; `amount` é o saldo e não
+    serve. None = custo desconhecido (nunca 0). Parser: `of_snapshots._numero`."""
+    d = _numero(raw.get("amountOriginal")) if isinstance(raw, dict) else None
+    return float(d) if d is not None and d > 0 else None
+
+
 def list_rv_positions(user_id: int) -> list[dict]:
     """Posições de renda variável (ações/FIIs) do usuário via Open Finance, já com
     preço de mercado e P&L. Só entra posição com valor de mercado > 0."""
@@ -84,14 +92,9 @@ def list_rv_positions(user_id: int) -> list[dict]:
         if market_value <= 0:
             continue  # posição zerada/vendida — não exibe
 
-        # `invested_known` é None quando o conector não mandou um custo utilizável;
-        # nesse caso caímos pro valor de mercado (P&L 0) mas marcamos cost_known=False
-        # pra quem consome não confundir "R$ 0,00 de resultado" com "custo desconhecido".
-        # amount<=0 (ou 0 do conector) também é custo inútil: P&L viraria o valor de
-        # mercado inteiro como "lucro" — então segue como desconhecido.
-        invested_known = _f(raw.get("amount"), None)
-        cost_known = invested_known is not None and invested_known > 0
-        invested = invested_known if cost_known else market_value
+        # Custo desconhecido => invested/pnl/pnl_pct/avg_price None (nunca 0).
+        invested = _custo(raw)
+        cost_known = invested is not None
         quantity = _f(raw.get("quantity")) or None
 
         # preço unitário: `value` pode vir null (validado no sandbox) → fallback.
@@ -103,7 +106,7 @@ def list_rv_positions(user_id: int) -> list[dict]:
         else:
             market_price = None
 
-        pnl = market_value - invested
+        pnl = (market_value - invested) if cost_known else None
         ticker = (raw.get("code") or raw.get("isin") or r.get("name") or "").upper()
 
         out.append({
@@ -113,13 +116,13 @@ def list_rv_positions(user_id: int) -> list[dict]:
             "kind": kind,
             "kind_label": RV_KIND_LABELS.get(kind, kind),
             "quantity": quantity,
-            "avg_price": (invested / quantity) if quantity else None,
+            "avg_price": (invested / quantity) if cost_known and quantity else None,
             "market_price": market_price,
             "market_value": market_value,
             "invested": invested,
             "cost_known": cost_known,
             "pnl": pnl,
-            "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
+            "pnl_pct": (pnl / invested) if cost_known else None,
             "currency": r.get("currency") or "BRL",
             "source": "open_finance",
             # rentabilidade que o Pluggy já entrega (quando o conector mandar).
@@ -138,17 +141,16 @@ def rv_portfolio_summary(user_id: int, positions: list[dict] | None = None) -> d
     """
     pos = positions if positions is not None else list_rv_positions(user_id)
     mv = sum(p["market_value"] for p in pos)
-    invested = sum(p["invested"] for p in pos)
-    pnl = mv - invested
-    # Só é confiável quando TODAS as posições trazem custo (senão o P&L agregado
-    # mistura custo real com fallback pro valor de mercado e subestima o retorno).
+    # Só é confiável quando TODAS as posições trazem custo; senão invested/pnl são None.
     cost_known = bool(pos) and all(p.get("cost_known") for p in pos)
+    invested = sum(p["invested"] for p in pos) if cost_known else (None if pos else 0.0)
+    pnl = (mv - invested) if invested is not None else None
     return {
         "market_value": mv,
         "invested": invested,
         "cost_known": cost_known,
         "pnl": pnl,
-        "pnl_pct": (pnl / invested) if invested > 0 else 0.0,
+        "pnl_pct": (pnl / invested) if cost_known else (None if pos else 0.0),
         "count": len(pos),
     }
 
@@ -181,7 +183,7 @@ def _clean_of_name(name: str) -> str:
 def list_of_fixed_income(user_id: int, *, currency: str | None = None) -> list[dict]:
     """Renda fixa do banco (FIXED_INCOME: CDB/Tesouro) via Open Finance, agregada por
     nome limpo, read-only. Exclui o que virou caixinha (of_investment_id vinculado) e
-    saldo <= 0. P&L = balance − amount. `currency` filtra antes de agregar; sem
+    saldo <= 0. P&L = balance − amountOriginal (None sem custo). `currency` filtra antes de agregar; sem
     filtro preserva a consulta legada usada pelo dashboard."""
     ensure_user(user_id)
     with get_conn() as conn:
@@ -189,7 +191,7 @@ def list_of_fixed_income(user_id: int, *, currency: str | None = None) -> list[d
             cur.execute(
                 """
                 select i.name, i.balance,
-                       nullif(i.raw->>'amount', '')::numeric as amount
+                       i.raw
                 from open_finance_investments i
                 join open_finance_connections c on c.id = i.connection_id
                 where c.user_id = %s
@@ -208,23 +210,35 @@ def list_of_fixed_income(user_id: int, *, currency: str | None = None) -> list[d
     groups: dict[str, dict] = {}
     for r in rows:
         label = _clean_of_name(r.get("name"))
-        bal = _f(r.get("balance"))
-        inv = _f(r.get("amount"), bal)
-        g = groups.setdefault(label, {"name": label, "balance": 0.0, "invested": 0.0, "count": 0})
-        g["balance"] += bal
-        g["invested"] += inv
+        cost = _custo(r.get("raw"))
+        g = groups.setdefault(label, {"name": label, "balance": 0.0, "invested": 0.0, "count": 0, "cost_known": True})
+        g["balance"] += _f(r.get("balance"))
         g["count"] += 1
+        if cost is None:
+            g["cost_known"] = False
+        else:
+            g["invested"] += cost
 
     out = []
     for g in groups.values():
-        pnl = g["balance"] - g["invested"]
-        out.append({**g, "pnl": pnl, "pnl_pct": (pnl / g["invested"]) if g["invested"] > 0 else 0.0})
+        if g["cost_known"]:
+            pnl = g["balance"] - g["invested"]
+            out.append({**g, "pnl": pnl, "pnl_pct": (pnl / g["invested"]) if g["invested"] > 0 else 0.0})
+        else:
+            out.append({**g, "invested": None, "pnl": None, "pnl_pct": None})
     out.sort(key=lambda x: x["balance"], reverse=True)
     return out
 
 
-def of_fixed_income_summary(user_id: int, *, currency: str | None = None) -> dict:
-    items = list_of_fixed_income(user_id, currency=currency)
+def of_fixed_income_summary(user_id: int, *, currency: str | None = None, items: list[dict] | None = None) -> dict:
+    """`items` (de um `list_of_fixed_income` já feito) deriva o resumo do mesmo snapshot."""
+    if items is None:
+        items = list_of_fixed_income(user_id, currency=currency)
     bal = sum(i["balance"] for i in items)
-    inv = sum(i["invested"] for i in items)
-    return {"balance": bal, "invested": inv, "pnl": bal - inv, "count": sum(i["count"] for i in items)}
+    cost_known = bool(items) and all(i["cost_known"] for i in items)
+    inv = sum(i["invested"] for i in items) if cost_known else (None if items else 0.0)
+    return {
+        "balance": bal, "invested": inv, "cost_known": cost_known,
+        "pnl": (bal - inv) if inv is not None else (None if items else 0.0),
+        "count": sum(i["count"] for i in items),
+    }

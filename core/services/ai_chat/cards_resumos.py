@@ -67,8 +67,22 @@ def _resumo_calendario(v: dict, categoria: str | None) -> dict:
     return {**{k: x for k, x in v.items() if k != "dias"}, "maior_dia": maior and {"dia": maior["dia"], "saiu": maior["saiu"]}}
 
 
+def _resumo_rendimento(v: dict, categoria: str | None) -> dict:
+    """O topo e as categorias do `rendimentos` (sem a lista de ativos, que está na tela), mais os códigos distintos
+    de por que ativos ficaram sem dado no Mês e no Total. Mais `taxas`, só nome, taxa e tipo da contratada (não é
+    dinheiro nem o "quanto rendeu"): responde "qual a taxa do meu CDB?"."""
+    taxas = [{"nome": i["nome"], "taxa": None if i["taxa"] is None else float(i["taxa"]), "tipo_taxa": i["tipo_taxa"]}
+             for i in v["itens"]]
+    r = v["rendimentos"]
+    if r is None:  # o cálculo falhou: sem número de rendimento, o modelo não inventa
+        return {"rendimentos": None, "taxas": taxas}
+    sem = lambda per: sorted({a[per]["motivo"] for c in r["categorias"] for a in c["ativos"] if a[per]["motivo"]})  # noqa: E731
+    return {"rendimentos": {**r, "categorias": [{k: x for k, x in c.items() if k != "ativos"} for c in r["categorias"]],
+                            "motivos_sem_dado": {"mes": sem("mes"), "total": sem("total")}}, "taxas": taxas}
+
+
 _RESUMOS = {"periodo": _resumo_periodo, "categorias": _resumo_categorias, "renda": _resumo_renda,
-            "calendario": _resumo_calendario}
+            "calendario": _resumo_calendario, "rendimento": _resumo_rendimento}
 
 
 def resumo_maiores(r: dict[str, Any]) -> dict[str, Any]:
