@@ -5259,6 +5259,1037 @@
       "trajetoria": null,
       "pior_dia": null,
       "compromissos": null
+    },
+    "pro90_com_estimativa": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 90,
+      "dias_permitidos": [
+        30,
+        60,
+        90
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "1500.00",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Inclui estimativa dos gastos do dia a dia (mediana mensal por categoria dos últimos 90 dias, a partir de amanhã); não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": true
+      },
+      "cabe_nas_premissas": false,
+      "estimativa_variavel": {
+        "despesa_mensal": "330.00",
+        "despesa_no_horizonte": "990.00",
+        "janela": {
+          "inicio": "2026-07-08",
+          "fim": "2026-10-05"
+        },
+        "dias_de_historico": 90,
+        "janelas_completas": 3,
+        "categorias": [
+          {
+            "chave": "mercado",
+            "nome": "Mercado",
+            "despesa_mensal": "180.00"
+          },
+          {
+            "chave": "transporte",
+            "nome": "Transporte",
+            "despesa_mensal": "90.00"
+          },
+          {
+            "chave": "lazer",
+            "nome": "Lazer",
+            "despesa_mensal": "60.00"
+          }
+        ]
+      },
+      "receitas_do_banco": [],
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "2370.00"
+        },
+        {
+          "dias": 60,
+          "data": "2026-12-05",
+          "saldo": "3240.00"
+        },
+        {
+          "dias": 90,
+          "data": "2027-01-04",
+          "saldo": "4110.00"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2027-01-04"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "1500.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "1489.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "1478.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "1467.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "1456.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "1445.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "1434.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "1423.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "-388.00",
+          "compromissos": [
+            {
+              "chave": "aluguel-2026-10-14",
+              "ciclo": "2026-10-14",
+              "data": "2026-10-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "-399.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "-410.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "-421.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "-432.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "-443.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "2546.00",
+          "compromissos": [
+            {
+              "chave": "salário-2026-10-20",
+              "ciclo": "2026-10-20",
+              "data": "2026-10-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "2535.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "2524.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "2513.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "2502.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "2491.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "2480.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "2469.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "2458.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "2447.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "2436.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "2425.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "2414.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "2403.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "2392.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "2381.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "2370.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-06",
+          "saldo": "2359.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-07",
+          "saldo": "2348.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-08",
+          "saldo": "2337.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-09",
+          "saldo": "2326.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-10",
+          "saldo": "2315.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-11",
+          "saldo": "2304.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-12",
+          "saldo": "2293.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-13",
+          "saldo": "2282.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-14",
+          "saldo": "471.00",
+          "compromissos": [
+            {
+              "chave": "aluguel-2026-11-14",
+              "ciclo": "2026-11-14",
+              "data": "2026-11-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-11-15",
+          "saldo": "460.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-16",
+          "saldo": "449.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-17",
+          "saldo": "438.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-18",
+          "saldo": "427.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-19",
+          "saldo": "416.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-20",
+          "saldo": "3405.00",
+          "compromissos": [
+            {
+              "chave": "salário-2026-11-20",
+              "ciclo": "2026-11-20",
+              "data": "2026-11-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-11-21",
+          "saldo": "3394.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-22",
+          "saldo": "3383.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-23",
+          "saldo": "3372.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-24",
+          "saldo": "3361.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-25",
+          "saldo": "3350.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-26",
+          "saldo": "3339.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-27",
+          "saldo": "3328.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-28",
+          "saldo": "3317.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-29",
+          "saldo": "3306.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-30",
+          "saldo": "3295.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-01",
+          "saldo": "3284.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-02",
+          "saldo": "3273.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-03",
+          "saldo": "3262.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-04",
+          "saldo": "3251.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-05",
+          "saldo": "3240.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-06",
+          "saldo": "3229.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-07",
+          "saldo": "3218.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-08",
+          "saldo": "3207.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-09",
+          "saldo": "3196.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-10",
+          "saldo": "3185.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-11",
+          "saldo": "3174.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-12",
+          "saldo": "3163.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-13",
+          "saldo": "3152.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-14",
+          "saldo": "1341.00",
+          "compromissos": [
+            {
+              "chave": "aluguel-2026-12-14",
+              "ciclo": "2026-12-14",
+              "data": "2026-12-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "data": "2026-12-15",
+          "saldo": "1330.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-16",
+          "saldo": "1319.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-17",
+          "saldo": "1308.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-18",
+          "saldo": "1297.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-19",
+          "saldo": "1286.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-20",
+          "saldo": "4275.00",
+          "compromissos": [
+            {
+              "chave": "salário-2026-12-20",
+              "ciclo": "2026-12-20",
+              "data": "2026-12-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "data": "2026-12-21",
+          "saldo": "4264.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-22",
+          "saldo": "4253.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-23",
+          "saldo": "4242.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-24",
+          "saldo": "4231.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-25",
+          "saldo": "4220.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-26",
+          "saldo": "4209.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-27",
+          "saldo": "4198.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-28",
+          "saldo": "4187.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-29",
+          "saldo": "4176.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-30",
+          "saldo": "4165.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-12-31",
+          "saldo": "4154.00",
+          "compromissos": []
+        },
+        {
+          "data": "2027-01-01",
+          "saldo": "4143.00",
+          "compromissos": []
+        },
+        {
+          "data": "2027-01-02",
+          "saldo": "4132.00",
+          "compromissos": []
+        },
+        {
+          "data": "2027-01-03",
+          "saldo": "4121.00",
+          "compromissos": []
+        },
+        {
+          "data": "2027-01-04",
+          "saldo": "4110.00",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-10-19",
+        "saldo": "-443.00",
+        "desde": "2026-10-14",
+        "despesa_variavel": "66.00",
+        "causas": [
+          {
+            "chave": "aluguel-2026-10-14",
+            "ciclo": "2026-10-14",
+            "data": "2026-10-14",
+            "fonte": "gasto_recorrente",
+            "tipo": "gasto_fixo",
+            "nome": "Aluguel",
+            "valor": "1800.00",
+            "direcao": "saida",
+            "qualidade_valor": "conhecido",
+            "qualidade_data": "conhecida",
+            "realizacao": "prevista",
+            "incluida_no_calculo": true,
+            "motivos": []
+          }
+        ]
+      },
+      "compromissos": [
+        {
+          "chave": "g-aluguel",
+          "fonte": "gasto_recorrente",
+          "nome": "Aluguel",
+          "primeira_data": "2026-10-14",
+          "ultima_data": "2026-12-14",
+          "ocorrencias": [
+            {
+              "chave": "aluguel-2026-10-14",
+              "ciclo": "2026-10-14",
+              "data": "2026-10-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            },
+            {
+              "chave": "aluguel-2026-11-14",
+              "ciclo": "2026-11-14",
+              "data": "2026-11-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            },
+            {
+              "chave": "aluguel-2026-12-14",
+              "ciclo": "2026-12-14",
+              "data": "2026-12-14",
+              "fonte": "gasto_recorrente",
+              "tipo": "gasto_fixo",
+              "nome": "Aluguel",
+              "valor": "1800.00",
+              "direcao": "saida",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": []
+            }
+          ]
+        },
+        {
+          "chave": "g-salário",
+          "fonte": "receita_recorrente",
+          "nome": "Salário",
+          "primeira_data": "2026-10-20",
+          "ultima_data": "2026-12-20",
+          "ocorrencias": [
+            {
+              "chave": "salário-2026-10-20",
+              "ciclo": "2026-10-20",
+              "data": "2026-10-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            },
+            {
+              "chave": "salário-2026-11-20",
+              "ciclo": "2026-11-20",
+              "data": "2026-11-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            },
+            {
+              "chave": "salário-2026-12-20",
+              "ciclo": "2026-12-20",
+              "data": "2026-12-20",
+              "fonte": "receita_recorrente",
+              "tipo": "receita",
+              "nome": "Salário",
+              "valor": "3000.00",
+              "direcao": "entrada",
+              "qualidade_valor": "conhecido",
+              "qualidade_data": "conhecida",
+              "realizacao": "prevista",
+              "incluida_no_calculo": true,
+              "motivos": [
+                {
+                  "codigo": "receita_nao_garantida",
+                  "direcao_do_erro": "so_melhora"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "pro30_estimativa_curta": {
+      "hoje": "2026-10-06",
+      "calculado_em": "2026-10-06T12:00:00-03:00",
+      "valido_ate": "2026-10-07T00:00:00-03:00",
+      "dias": 30,
+      "dias_permitidos": [
+        30
+      ],
+      "capacidades": [
+        "marcos",
+        "trajetoria",
+        "pior_dia",
+        "compromissos"
+      ],
+      "base": {
+        "saldo": "200.00",
+        "origem": "manual",
+        "contas_bancarias": 0,
+        "bancos_excluidos": false,
+        "motivos": []
+      },
+      "estado": "condicional",
+      "motivos": [],
+      "premissas": [
+        "Projeção condicional; receitas previstas não são garantidas.",
+        "Inclui estimativa dos gastos do dia a dia (mediana mensal por categoria dos últimos 90 dias, a partir de amanhã); não autoriza compra segura.",
+        "Recorrências sem data de fim seguem ativas no horizonte consultado.",
+        "Não reconstrói realização passada nem desloca datas por feriados."
+      ],
+      "cobertura": {
+        "fontes_incompletas": [],
+        "janela_conferencia_inicio": null,
+        "inclui_estimativa_variavel": true
+      },
+      "cabe_nas_premissas": false,
+      "estimativa_variavel": {
+        "despesa_mensal": "330.00",
+        "despesa_no_horizonte": "330.00",
+        "janela": {
+          "inicio": "2026-07-08",
+          "fim": "2026-10-05"
+        },
+        "dias_de_historico": 12,
+        "janelas_completas": 0,
+        "categorias": [
+          {
+            "chave": "mercado",
+            "nome": "Mercado",
+            "despesa_mensal": "330.00"
+          }
+        ]
+      },
+      "receitas_do_banco": [],
+      "marcos": [
+        {
+          "dias": 30,
+          "data": "2026-11-05",
+          "saldo": "-130.00"
+        }
+      ],
+      "periodo": {
+        "inicio": "2026-10-07",
+        "fim": "2026-11-05"
+      },
+      "ancora": {
+        "data": "2026-10-06",
+        "saldo": "200.00"
+      },
+      "trajetoria": [
+        {
+          "data": "2026-10-07",
+          "saldo": "189.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-08",
+          "saldo": "178.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-09",
+          "saldo": "167.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-10",
+          "saldo": "156.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-11",
+          "saldo": "145.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-12",
+          "saldo": "134.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-13",
+          "saldo": "123.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-14",
+          "saldo": "112.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-15",
+          "saldo": "101.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-16",
+          "saldo": "90.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-17",
+          "saldo": "79.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-18",
+          "saldo": "68.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-19",
+          "saldo": "57.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-20",
+          "saldo": "46.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-21",
+          "saldo": "35.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-22",
+          "saldo": "24.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-23",
+          "saldo": "13.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-24",
+          "saldo": "2.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-25",
+          "saldo": "-9.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-26",
+          "saldo": "-20.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-27",
+          "saldo": "-31.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-28",
+          "saldo": "-42.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-29",
+          "saldo": "-53.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-30",
+          "saldo": "-64.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-10-31",
+          "saldo": "-75.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-01",
+          "saldo": "-86.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-02",
+          "saldo": "-97.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-03",
+          "saldo": "-108.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-04",
+          "saldo": "-119.00",
+          "compromissos": []
+        },
+        {
+          "data": "2026-11-05",
+          "saldo": "-130.00",
+          "compromissos": []
+        }
+      ],
+      "pior_dia": {
+        "data": "2026-11-05",
+        "saldo": "-130.00",
+        "desde": "2026-10-25",
+        "despesa_variavel": "132.00",
+        "causas": []
+      },
+      "compromissos": []
     }
   },
   "metas": {

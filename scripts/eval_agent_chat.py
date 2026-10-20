@@ -66,7 +66,7 @@ def synthetic_data():
                                    {'tipo': 'fundos', 'rotulo': 'Fundos', 'valor': '16321.00', 'motivos': []}]},
         'posicoes': [],
         'resumo_brl': {'count': 0, 'market_value': 0, 'invested': 0, 'pnl': 0, 'pnl_pct': 0, 'cost_known': False},
-        'renda_fixa_brl': {'count': 22, 'balance': 48000, 'invested': 45000, 'pnl': 3000},
+        'renda_fixa_brl': {'count': 22, 'balance': 48000, 'invested': 45000, 'pnl': 3000, 'cost_known': True},
         'renda_fixa_manual': [], 'resumo_renda_fixa_manual_brl': {'balance': 0, 'count': 0},
         'cobertura': {name: {'total': 0, 'incluidos': 0, 'truncado': False}
                       for name in ('posicoes', 'renda_fixa_manual')},
