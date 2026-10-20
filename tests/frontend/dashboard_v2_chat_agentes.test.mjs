@@ -822,9 +822,8 @@ for (const width of TELAS) {
 
   // O envio relê a conta; enquanto ela é relida a lista sai do catálogo (uid indefinido), e a leitura do catálogo em voo é cancelada:
   // o envio sempre faz uma leitura nova. Este teste fica de guarda dessa cadeia (Codex no #1157).
-  // Com o painel lateral (≥1181 px) o catálogo tem um observador fixo: sem ele, a releitura do perfil no envio soltava o observador da barra e cancelava a leitura em voo;
-  // com ele a leitura em voo é aproveitada pelo envio. O servidor decide o acesso de qualquer forma (o 403 do chat vale).
-  test(`${width}: o plano muda com a leitura do catálogo em voo: o envio lê de novo e vai ao agente`, { skip: width >= 1181 && "o painel lateral mantém a leitura em voo viva" }, async () => {
+  // Com o painel lateral (≥1181 px) a leitura em voo tem um observador fixo e não se cancela sozinha: o envio a cancela (AskBar.tsx).
+  test(`${width}: o plano muda com a leitura do catálogo em voo: o envio lê de novo e vai ao agente`, async () => {
     const cat = (pro) => ({ json: { catalog: CAT.map(([kind, nome, energy_cost]) => ({ kind, nome, disponivel: true, status: "active", energy_cost })), can_chat: pro, can_activate: pro, energy_enabled: false, energy_budget: 99, energy_used: 0 } });
     let solta, n = 0;
     const presa = new Promise((ok) => { solta = ok; });

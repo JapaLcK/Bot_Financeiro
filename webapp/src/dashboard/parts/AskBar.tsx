@@ -128,7 +128,9 @@ export function AskBar({ path }: { path: Path }) {
           if (quer) {
             try {
               if (!DEMO) u = (await lerContaFresca(qc)).user_id;
-              // O catálogo também é relido: o plano ou um agente pode ter mudado noutra aba com a mesma conta (Codex no #1157).
+              // O catálogo também é relido: o plano ou um agente pode ter mudado noutra aba com a mesma conta (Codex no #1157). Uma leitura
+              // em voo pode ter saído antes da mudança (o painel lateral a mantém viva): cancelada, para o envio sempre ler de novo.
+              if (DEMO || uidValido(u)) await qc.cancelQueries({ queryKey: agentesQuery(u).queryKey, exact: true });
               d = DEMO || uidValido(u) ? await qc.fetchQuery(agentesQuery(u)) : undefined;
             } catch { d = undefined; /* sem conta conferida ou sem catálogo: vai ao Piggy */ }
           }
