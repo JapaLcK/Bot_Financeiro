@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from api.v2.erros import _envelope
@@ -12,7 +13,7 @@ from api.v2.lancamentos import _DATA, _VALOR
 from api.v2.previsao import BasePrevisao, CoberturaPrevisao, MotivoPrevisao
 from api.v2.sessao import usuario_atual
 from core.services import decision_simulator as ds
-from core.services.decision_simulator import CASAS_DINHEIRO, DIAS, EXTENSO, Simulacao, simular
+from core.services.decision_simulator import CASAS_DINHEIRO, DIAS, EXTENSO, Simulacao, simular, simular_corte
 from core.services.plan_service import plan_gate_ok
 from core.services.previsao_v2 import _motivos, apresentar_base, ler_snapshot
 
@@ -31,6 +32,14 @@ PREMISSAS_V2 = [
     "Receitas fixas só entram quando mensais ou anuais; gastos fixos entram em todas as frequências.",
     "Não inclui IOF, seguro ou tarifas que você não informou.",
     f"Valores em reais aceitam no máximo {EXTENSO[CASAS_DINHEIRO]} casas decimais; os juros, no máximo {EXTENSO[CASAS_JUROS]}.",
+]
+
+# Premissas do corte de hábito (somam às da snapshot). Fonte única; texto para a pessoa, sem nome de campo.
+PREMISSAS_HABITOS_V2 = [
+    "O corte vale a partir de amanhã e se repete todo dia até o dia 90, sobre a estimativa dos gastos do dia a dia.",
+    "Só o gasto do dia a dia muda: gastos fixos, boletos, faturas e parcelas ficam como na previsão.",
+    "A economia de cada categoria é o percentual do gasto mensal estimado, arredondado em centavos.",
+    "É uma simulação: não grava nada nem cria meta.",
 ]
 
 # Cada `value_error` da `Simulacao` (mensagem do servidor) -> (código estável, campo do cenário ou None
@@ -181,3 +190,70 @@ def simulador(corpo: SimuladorIn, uid: int = Depends(_assinante)):
         reserva_minima=r["reserva_minima"], atual=_resumo(r["atual"]),
         cenarios=[{"nome": c["nome"], "resumo": _resumo(c["resumo"]), "contrato": c["contrato"]}
                   for c in r["cenarios"]])
+
+
+
+class CorteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    categoria: str = Field(min_length=1, max_length=120)
+    percentual: int = Field(strict=True, ge=0, le=100)
+
+
+class HabitosIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cortes: list[CorteIn] = Field(min_length=1, max_length=50)
+
+
+class CorteOut(BaseModel):
+    chave: str
+    nome: str
+    despesa_mensal: Decimal
+    percentual: int
+    economia_mensal: Decimal
+
+
+class ResumoComCorte(ResumoAtual):
+    delta_vs_atual: Decimal | None
+
+
+class SimuladorHabitos(BaseModel):
+    hoje: str
+    calculado_em: datetime
+    valido_ate: datetime | None
+    dias: int
+    estado: Literal["condicional", "a_conferir", "indisponivel"]
+    motivos: list[MotivoPrevisao]
+    premissas: list[str]
+    cobertura: CoberturaPrevisao
+    cabe_nas_premissas: bool
+    orientacao: Literal["abster"]
+    base: BasePrevisao
+    despesa_mensal: Decimal
+    economia_mensal: Decimal
+    cortes: list[CorteOut]
+    atual: ResumoAtual
+    com_corte: ResumoComCorte
+
+
+def _422(codigo: str, loc: list) -> JSONResponse:
+    return _envelope(422, "validation_error", "Dados inválidos.", [{"loc": loc, "msg": "Valor inválido.", "type": codigo}])
+
+
+@router.post("/simulador/habitos", response_model=SimuladorHabitos)
+def simulador_habitos(corpo: HabitosIn, uid: int = Depends(_assinante)):
+    chaves = [c.categoria for c in corpo.cortes]
+    if len(set(chaves)) != len(chaves):
+        return _422("categorias_repetidas", ["body", "cortes"])
+    snap = ler_snapshot(uid, DIAS)  # a estimativa é a do próprio uid: é contra ela que a categoria é validada
+    est = snap.estimativa_variavel
+    conhecidas = {c["chave"] for c in est["categorias"]} if est else set()
+    for i, k in enumerate(chaves):
+        if k not in conhecidas:
+            return _422("categoria_fora_da_estimativa", ["body", "cortes", i, "categoria"])
+    r = simular_corte(snap, {c.categoria: c.percentual for c in corpo.cortes})
+    return SimuladorHabitos(
+        hoje=r["today"], calculado_em=r["calculado_em"], valido_ate=r["valido_ate"], dias=DIAS,
+        estado=r["estado"], motivos=_motivos(r["motivos"]), premissas=[*snap.premissas, *PREMISSAS_HABITOS_V2],
+        cobertura=r["cobertura"], cabe_nas_premissas=r["cabe_nas_premissas"], orientacao=r["orientacao"],
+        base=apresentar_base(snap.base), despesa_mensal=r["despesa_mensal"], economia_mensal=r["economia_mensal"],
+        cortes=r["cortes"], atual=_resumo(r["atual"]), com_corte=_resumo(r["com_corte"]) | {"delta_vs_atual": r["com_corte"]["delta_vs_atual"]})

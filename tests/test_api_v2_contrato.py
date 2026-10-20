@@ -509,6 +509,20 @@ def test_fixture_do_simulador_segue_modelo_e_dinheiro_em_texto():
     assert bloco and "saldo: number" not in bloco and "total_pago: number" not in bloco
 
 
+def test_fixture_do_simulador_de_habitos_segue_modelo_e_dinheiro_em_texto():
+    from datetime import date, timedelta
+    from api.v2.simulador import PREMISSAS_HABITOS_V2, SimuladorHabitos
+    f = FIXTURES["simulador"]["habitos"]
+    s = SimuladorHabitos.model_validate(f)
+    assert s.model_dump(mode="json") == f
+    esperado = [(date.fromisoformat(f["hoje"]) + timedelta(days=i)).isoformat() for i in range(f["dias"] + 1)]
+    for t in (s.atual.trajetoria, s.com_corte.trajetoria):
+        assert [p.data for p in t] == esperado
+    assert len(s.cortes) == 2 and s.economia_mensal == sum(c.economia_mensal for c in s.cortes)
+    assert s.com_corte.delta_vs_atual == 3 * s.economia_mensal and s.atual.pior_dia.saldo < 0
+    assert f["premissas"][-len(PREMISSAS_HABITOS_V2):] == PREMISSAS_HABITOS_V2
+
+
 @pytest.mark.parametrize("nome", sorted(FIXTURES["orcamentos_categoria"]))
 def test_fixture_dos_orcamentos_por_categoria_segue_o_modelo(nome):
     f = FIXTURES["orcamentos_categoria"][nome]
