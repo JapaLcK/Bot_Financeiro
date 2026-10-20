@@ -58,7 +58,7 @@ async function setup({ budget = 14, active = ['detetive', 'barao'], viewport, ho
       return route.fulfill({ json: {
         reply: body.message === 'Analisar cobranças' ? 'Encontrei duas cobranças de R$ 49,90 para o mesmo serviço, no mesmo dia. Isso é um indício de duplicidade. Você reconhece duas compras nesse valor?' : 'Podemos avaliar essas cobranças. <img src=x onerror=alert(1)>', context: `contexto-${requests.length}`,
         usage: { used: requests.length, limit: 100 },
-        redirects: body.message.includes('CDI') ? [{ kind: 'barao', name: 'Barão', question: 'O que é CDI?', access: 'ready' }] : [],
+        redirects: body.message.includes('CDI') ? [{ kind: 'barao', name: 'Barão', question: 'O que é CDI?', access: 'ready', needs_data: true }] : [],
       } });
     }
     if (path.endsWith('/activate')) {
