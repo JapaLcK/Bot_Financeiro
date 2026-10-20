@@ -16,6 +16,8 @@ from tests.test_agent_chat_conversation import ScriptedClient, SnapshotCall, own
 
 SNAP = ("consultar_dados_do_agente", {}, {})
 BUDGETS = {"budgets": [{"categoria": "mercado"}], "count": 1}
+BILLS = {"bills": [], "count_pending": 0}
+POCKETS = {"pockets": []}
 
 
 def mes(ini, fim, por="fatura", motivos=()):
@@ -29,7 +31,7 @@ def gate(monkeypatch):
     # só as features que o card consulta; `consultadas` prova que resumo_mes e orcamentos (rotas sem gate) não consultam nenhuma
     estado["consultadas"] = []
     monkeypatch.setattr(plan_service, "plan_gate_ok",
-                        lambda uid, feature: estado["consultadas"].append(feature) or (estado["ok"] if feature in ("investments", "subscriptions") else False))
+                        lambda uid, feature: estado["consultadas"].append(feature) or (estado["ok"] if feature in ("investments", "subscriptions", "recurring_expenses") else False))
     return estado
 
 
@@ -47,6 +49,16 @@ def gate(monkeypatch):
     ("xerife", [("get_budget_status", {}, BUDGETS)], {"tipo": "orcamentos"}),
     ("xerife", [("get_budget_status", {}, {"budgets": [], "count": 0})], None),  # nada a mostrar
     ("xerife", [("get_budget_status", {"categoria": "mercado"}, {"found": True, "categoria": "mercado"})], None),  # o texto fala de uma só
+    ("carteiro", [("get_bills_to_pay", {}, BILLS)], {"tipo": "contas"}),
+    ("carteiro", [("get_bills_to_pay", {"include_paid": False}, BILLS)], {"tipo": "contas"}),
+    ("carteiro", [("get_bills_to_pay", {"include_paid": True}, BILLS)], None),  # o texto inclui as pagas, a rota só as pendentes
+    ("carteiro", [("get_bills_to_pay", {}, {"error": "x"})], None),
+    ("carteiro", [SNAP], None),
+    ("reporter", [("get_bills_to_pay", {}, BILLS)], None),  # fora do tema do agente
+    ("cofre", [("list_pockets", {}, POCKETS)], {"tipo": "caixinhas"}),
+    ("cofre", [("list_pockets", {}, {"error": "x"})], None),
+    ("cofre", [("get_bills_to_pay", {}, BILLS)], None),
+    ("carteiro", [("list_pockets", {}, POCKETS)], None),
     ("xerife", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], None),
     ("reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))], {"tipo": "resumo_mes", "mes": "2026-10"}),
     ("reporter", [("get_period_summary", {}, mes("2024-02-01", "2024-02-29"))], {"tipo": "resumo_mes", "mes": "2024-02"}),
@@ -74,6 +86,11 @@ def test_gate_de_cada_tipo_e_o_da_rota_v2(gate):
     assert card_da_resposta(1, "reporter", [("get_period_summary", {}, mes("2026-10-01", "2026-10-31"))]) == {"tipo": "resumo_mes", "mes": "2026-10"}
     assert card_da_resposta(1, "xerife", [("get_budget_status", {}, BUDGETS)]) == {"tipo": "orcamentos"}
     assert gate["consultadas"] == []
+    # contas = `recurring_expenses` (api/v2/contas_a_pagar.py, o gate da agenda de boletos); caixinhas não tem gate
+    gate["consultadas"].clear()
+    assert card_da_resposta(1, "carteiro", [("get_bills_to_pay", {}, BILLS)]) is None and gate["consultadas"] == ["recurring_expenses"]
+    gate["consultadas"].clear()
+    assert card_da_resposta(1, "cofre", [("list_pockets", {}, POCKETS)]) == {"tipo": "caixinhas"} and gate["consultadas"] == []
 
 
 # --- ponta a ponta: chat() com o cliente roteirizado, sem mockar _answer ---

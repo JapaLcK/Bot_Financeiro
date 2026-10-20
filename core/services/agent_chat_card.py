@@ -9,13 +9,17 @@ import re
 # (agente, consulta) -> tipo do card
 CARDS = {("faria_limer", "consultar_dados_do_agente"): "investido", ("barao", "consultar_dados_do_agente"): "renda_fixa",
          ("detetive", "consultar_dados_do_agente"): "assinaturas", ("reporter", "get_period_summary"): "resumo_mes",
-         ("xerife", "get_budget_status"): "orcamentos"}
-# tipo -> feature do plan_gate_ok da rota v2 que o card lê; fora daqui a rota não tem gate (resumo-do-mes, orcamentos-categoria)
-GATES = {"investido": "investments", "renda_fixa": "investments", "assinaturas": "subscriptions"}
+         ("xerife", "get_budget_status"): "orcamentos", ("carteiro", "get_bills_to_pay"): "contas", ("cofre", "list_pockets"): "caixinhas"}
+# tipo -> feature do plan_gate_ok da rota v2 que o card lê; fora daqui a rota não tem gate (resumo-do-mes, orcamentos-categoria, caixinhas)
+GATES = {"investido": "investments", "renda_fixa": "investments", "assinaturas": "subscriptions", "contas": "recurring_expenses"}
 MES = re.compile(r"^[1-9][0-9]{3}-(0[1-9]|1[0-2])$")  # o PADRAO_MES de api/v2/resumo_mes.py
 
 
-def _card(tipo: str, resultado) -> dict | None:
+def _card(tipo: str, resultado, args=None) -> dict | None:
+    if tipo == "contas" and ((args or {}).get("include_paid") or not (isinstance(resultado, dict) and "bills" in resultado)):
+        return None  # com as pagas o texto fala de mais que o card (a rota só traz as pendentes); sem `bills` a consulta falhou
+    if tipo == "caixinhas" and not (isinstance(resultado, dict) and "pockets" in resultado):
+        return None
     if tipo == "resumo_mes":
         # get_period_summary de meses inteiros leva as datas do mês (fim = último dia) e cartao_por "fatura": é o resumo-do-mes.
         # Período livre, vários meses ou mês futuro (a rota dá 422) = sem card.
@@ -31,7 +35,7 @@ def _card(tipo: str, resultado) -> dict | None:
 
 def card_da_resposta(user_id: int, kind: str, consultas: list) -> dict | None:
     from core.services.plan_service import plan_gate_ok
-    cards = [_card(CARDS[(kind, nome)], res) for nome, _, res in consultas if (kind, nome) in CARDS]
+    cards = [_card(CARDS[(kind, nome)], res, args) for nome, args, res in consultas if (kind, nome) in CARDS]
     # Duas consultas que dão cards diferentes (dois meses): o texto fala dos dois, nenhum card o representa.
     if not cards or any(c is None or c != cards[0] for c in cards):
         return None

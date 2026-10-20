@@ -3,10 +3,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ContaTrocada, daConta, uidValido } from "../conta/api";
 import type { CardAgente as Card } from "../lib/agentes";
 import type { Investido } from "../lib/api-v2.gen";
-import { DEMO, ErroApi, assinaturasQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
+import { DEMO, ErroApi, assinaturasQuery, caixinhasQuery, contasAPagarQuery, investidoQuery, lerContaFresca, meQuery, orcamentosCategoriaQuery, resumoMesQuery } from "../lib/v2";
 import { moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
 import { CardAssinaturas, contratoAssinaturas } from "./CardAssinaturas";
+import { CardCaixinhas, contratoCaixinhas } from "./CardCaixinhas";
+import { CardContas, contratoContas } from "./CardContas";
 import { CardInvestido } from "./CardInvestido";
 import { CardOrcamentos, contratoOrcamentos } from "./CardOrcamentos";
 import { CardResumoMes, contratoResumoMes } from "./CardResumoMes";
@@ -33,6 +35,10 @@ function leituraDe(c: Card): Leitura {
       return { chave: `card-resumo_mes-${c.mes}`, titulo: `Resumo de ${mesAno(c.mes)}`, ler: (signal) => resumoMesQuery(c.mes).queryFn({ signal }), contrato: (d) => contratoResumoMes(d, c.mes), desenha: (d) => <CardResumoMes d={d} /> };
     case "orcamentos":
       return { chave: "card-orcamentos", titulo: "Orçamentos", ler: (signal) => orcamentosCategoriaQuery.queryFn({ signal }), contrato: contratoOrcamentos, desenha: (d) => <CardOrcamentos d={d} /> };
+    case "contas":
+      return { chave: "card-contas", titulo: "Contas a pagar", ler: (signal) => contasAPagarQuery.queryFn({ signal }), contrato: contratoContas, desenha: (d) => <CardContas d={d} /> };
+    case "caixinhas":
+      return { chave: "card-caixinhas", titulo: "Caixinhas", ler: (signal) => caixinhasQuery.queryFn({ signal }), contrato: contratoCaixinhas, desenha: (d) => <CardCaixinhas d={d} /> };
     default: {
       const foco = c.tipo === "renda_fixa" ? "renda_fixa" : undefined;
       return { chave: "card-investido", titulo: foco ? "Renda fixa" : "Investimentos", ler: (signal) => investidoQuery.queryFn({ signal }), contrato: contratoInvestido, desenha: (d: Investido) => <CardInvestido d={d} foco={foco} /> };

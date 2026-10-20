@@ -7310,5 +7310,118 @@
       "nomes_repetidos",
       "valor_invalido"
     ]
+  },
+
+  "contas_a_pagar": {
+    "cheia": {
+      "hoje": "2026-10-20",
+      "pendentes": 5,
+      "vencidas": 1,
+      "total_estimado": "1245.60",
+      "tem_variavel": true,
+      "contas": [
+        {
+          "id": 11,
+          "nome": "Aluguel",
+          "categoria": "moradia",
+          "vence_em": "2026-10-18",
+          "dias": -2,
+          "valor": "850.00",
+          "variavel": false,
+          "vencida": true
+        },
+        {
+          "id": 12,
+          "nome": "Luz",
+          "categoria": "moradia",
+          "vence_em": "2026-10-20",
+          "dias": 0,
+          "valor": "132.60",
+          "variavel": true,
+          "vencida": false
+        },
+        {
+          "id": 13,
+          "nome": "Internet",
+          "categoria": null,
+          "vence_em": "2026-10-23",
+          "dias": 3,
+          "valor": "99.90",
+          "variavel": false,
+          "vencida": false
+        },
+        {
+          "id": 14,
+          "nome": "Condomínio",
+          "categoria": "moradia",
+          "vence_em": "2026-10-28",
+          "dias": 8,
+          "valor": "123.10",
+          "variavel": false,
+          "vencida": false
+        },
+        {
+          "id": 15,
+          "nome": "Seguro do carro",
+          "categoria": null,
+          "vence_em": "2026-11-02",
+          "dias": 13,
+          "valor": "40.00",
+          "variavel": false,
+          "vencida": false
+        }
+      ]
+    },
+    "vazia": {
+      "hoje": "2026-10-20",
+      "pendentes": 0,
+      "vencidas": 0,
+      "total_estimado": "0.00",
+      "tem_variavel": false,
+      "contas": []
+    }
+  },
+  "caixinhas": {
+    "cheia": {
+      "total": "7350.50",
+      "caixinhas": [
+        {
+          "id": 1,
+          "nome": "Reserva de emergência",
+          "saldo": "4500.50",
+          "meta": "10000.00",
+          "progresso_pct": "45.00",
+          "atingida": false
+        },
+        {
+          "id": 2,
+          "nome": "Viagem",
+          "saldo": "2000.00",
+          "meta": "2000.00",
+          "progresso_pct": "100.00",
+          "atingida": true
+        },
+        {
+          "id": 3,
+          "nome": "Presente",
+          "saldo": "850.00",
+          "meta": null,
+          "progresso_pct": null,
+          "atingida": null
+        },
+        {
+          "id": 4,
+          "nome": "Moto",
+          "saldo": "0.00",
+          "meta": "15000.00",
+          "progresso_pct": "0.00",
+          "atingida": false
+        }
+      ]
+    },
+    "vazia": {
+      "total": "0.00",
+      "caixinhas": []
+    }
   }
 }
