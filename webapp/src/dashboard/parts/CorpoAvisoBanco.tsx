@@ -3,7 +3,6 @@
 // "Atualizar agora" e "Atualizando…" são UM nó, na mesma posição: `aria-disabled` e não `disabled`, que tiraria o foco e o mandaria para o <body> (precedente: BoardControls.tsx).
 import { href } from "../router";
 import { ATUALIZANDO_SOZINHO, FALHA, type AcaoBanco, type EstadoAtualizar } from "../lib/atualizarBanco";
-import { OF } from "./guia-falas";
 
 export function CorpoAvisoBanco({ padrao, acao, maquina, atualizar }: { padrao: string; acao: AcaoBanco | null; maquina: EstadoAtualizar; atualizar: () => void }) {
   const texto = (t: string) => <p className="pilha-texto">{t}</p>;
@@ -20,6 +19,6 @@ export function CorpoAvisoBanco({ padrao, acao, maquina, atualizar }: { padrao: 
       </>
     );
   }
-  if (acao?.tipo === "reconectar") return <>{texto(padrao)}<a className="btn btn-ghost" href={OF}>{`Reconectar ${acao.banco}`}</a></>;
+  if (acao?.tipo === "reconectar") return <>{texto(padrao)}<a className="btn btn-ghost" href={href("/conta/bancos")}>{`Reconectar ${acao.banco}`}</a></>;
   return <>{acao?.tipo === "ver" && acao.texto ? texto(acao.texto) : texto(padrao)}{ver}</>;
 }
