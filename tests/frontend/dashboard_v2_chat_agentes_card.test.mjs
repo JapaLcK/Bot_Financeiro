@@ -356,3 +356,64 @@ for (const width of TELAS) {
     await ctx.close();
   });
 }
+
+// --- Card acima do texto: o texto não desce quando o card carrega, nem herda o espaço de um card que não desenha nada ---
+const LONGO = { json: { ...FARIA.json, reply: Array.from({ length: 40 }, (_, i) => `palavra${i}`).join(" ") } };
+// O GET do card responde só quando `solta()` é chamado (ou nunca).
+async function cardPreso(ctx) {
+  let solta;
+  const preso = new Promise((r) => { solta = r; });
+  await ctx.unroute("**/api/v2/investido");
+  await ctx.route("**/api/v2/investido", async (r) => { await preso; r.fulfill({ json: FIXTURE }).catch(() => {}); });
+  return () => solta();
+}
+const topoTexto = (page) => page.evaluate(() => document.querySelector(".chat > .msg-piggy .msg-text").getBoundingClientRect().top);
+const opacidadeDa1a = (page) => page.evaluate(() => getComputedStyle(document.querySelector(".chat > .msg-piggy .msg-text .rv")).opacity);
+
+for (const width of TELAS) {
+  test(`${width}: card lento: o texto espera o card carregar e não desce depois de visível`, async () => {
+    const { ctx, page } = await abrir({ width, chat: LONGO });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    const solta = await cardPreso(ctx);
+    await perguntar(page);
+    await page.locator(".chat > .msg-piggy .card-agente[aria-busy=true]").waitFor();
+    await page.waitForTimeout(1200); // bem depois dos 400 ms em que o texto começaria
+    assert.equal(await opacidadeDa1a(page), "0", "com o card carregando, nenhuma palavra aparece");
+    solta();
+    await card(page).locator(".card-agente-total").waitFor();
+    const depoisDoCard = await topoTexto(page), t0 = Date.now();
+    await page.locator(".chat > .msg-piggy .rv").first().waitFor({ state: "detached", timeout: 6000 });
+    // A revelação inteira depois do card: 400 (fade do card) + 40 × 30 + 500 = 2100 ms; o relógio sozinho a cortaria no meio.
+    assert.ok(Date.now() - t0 >= 2000, `a revelação foi cortada ${Date.now() - t0} ms depois do card`);
+    assert.equal(await topoTexto(page), depoisDoCard, "o texto não se moveu durante a revelação");
+    await ctx.close();
+  });
+
+  test(`${width}: card pendurado: o texto aparece mesmo assim, no máximo ~3 s depois`, async () => {
+    const { ctx, page } = await abrir({ width, chat: LONGO });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await cardPreso(ctx); // nunca solta
+    await perguntar(page);
+    await page.locator(".chat > .msg-piggy .rv").first().waitFor({ state: "detached", timeout: 8000 });
+    assert.equal(await card(page).getAttribute("aria-busy"), "true", "o card ainda carrega");
+    assert.match(await page.locator(".chat > .msg-piggy .msg-text").innerText(), /^palavra0 .* palavra39$/);
+    await ctx.close();
+  });
+
+  test(`${width}: card que não desenha nada (403): sem espaço em cima do texto, como resposta sem card`, async () => {
+    const gap = async (o) => {
+      const { ctx, page } = await abrir({ width, ...o });
+      await perguntar(page);
+      await page.waitForTimeout(300);
+      const r = await page.evaluate(() => {
+        const li = document.querySelector(".chat > .msg-piggy"), t = (s) => li.querySelector(s).getBoundingClientRect();
+        return { gap: Math.round(t(".msg-text").top - t(".msg-autor").bottom), card: !!li.querySelector(".card-agente") };
+      });
+      await ctx.close();
+      return r;
+    };
+    const semCard = await gap({ chat: resposta(null) }), com403 = await gap({ status: 403 });
+    assert.equal(com403.card, false);
+    assert.equal(com403.gap, semCard.gap, JSON.stringify({ semCard, com403 }));
+  });
+}

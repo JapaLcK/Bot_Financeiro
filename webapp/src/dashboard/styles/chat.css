@@ -123,6 +123,8 @@ body[data-mencoes] .chat-follow { visibility: hidden; }
   .msg-carga-frase { animation: carga-entra 0.35s var(--ease-out) both, carga-brilho 1.8s linear infinite; }
   .rv { animation: rv-entra 0s var(--ease-out) both; } /* a duração vem inline (REVELA_ANIM em PiggyChat.tsx) */
   .msg-acoes[data-revela], .card-slot[data-revela] { animation: rv-acoes 0s var(--ease-out) both; } /* duração inline (ACOES_ANIM) */
+  /* O texto e os botões esperam o card acima deles carregar: revelados antes, desceriam quando ele cresce (o timer de PiggyChat.tsx espera junto). */
+  .msg-piggy:has(.card-slot[data-espera] [aria-busy="true"]) :is(.rv, .msg-acoes[data-revela]) { animation-play-state: paused; }
 }
 @media (prefers-reduced-motion: reduce) {
   .msg-carga-frase { background: none; color: var(--ink-2); } /* sem brilho: a cor lisa */
