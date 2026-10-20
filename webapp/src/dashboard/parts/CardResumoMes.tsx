@@ -12,9 +12,9 @@ export const contratoResumoMes = (d: unknown, mes: string) => {
   return !!x && x.mes === mes && decimal(x.entrou) !== null && decimal(x.saiu) !== null && textos(x.motivos);
 };
 
-// entrou − saiu em inteiros exatos (BigInt, nunca float), de volta como texto decimal para o moneyText.
-function sobrou(entrou: string, saiu: string) {
-  const a = decimal(entrou)!, b = decimal(saiu)!, e = Math.max(a.escala, b.escala);
+// a − b em inteiros exatos (BigInt, nunca float), de volta como texto decimal para o moneyText (também a diferença do CardComparacaoMeses).
+export function menos(a0: string, b0: string) {
+  const a = decimal(a0)!, b = decimal(b0)!, e = Math.max(a.escala, b.escala);
   const n = a.n * BIG(10) ** BIG(e - a.escala) - b.n * BIG(10) ** BIG(e - b.escala);
   const dig = (n < BIG(0) ? -n : n).toString().padStart(e + 1, "0");
   return `${n < BIG(0) ? "-" : ""}${dig.slice(0, dig.length - e)}${e ? `.${dig.slice(dig.length - e)}` : ""}`;
@@ -23,7 +23,7 @@ function sobrou(entrou: string, saiu: string) {
 /** Entrou, Saiu e Sobrou do mês: a regra de `GET /api/v2/resumo-do-mes`, a mesma do `get_period_summary` de meses inteiros. */
 /** `motivos`: os avisos que o agente deu (o card do servidor), não os da rota (ela também avisa do corte no mês anterior). */
 export function CardResumoMes({ d, motivos }: { d: ResumoDoMes; motivos: string[] }) {
-  const s = sobrou(d.entrou, d.saiu);
+  const s = menos(d.entrou, d.saiu);
   return (
     <section className="card-agente" aria-label={`Resumo de ${mesAno(d.mes)}`}>
       <p className="card-agente-tit"><b>Resumo de {mesAno(d.mes)}</b></p>

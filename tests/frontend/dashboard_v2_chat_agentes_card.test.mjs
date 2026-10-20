@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
-import { bundleSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
+import { servirSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -204,7 +204,7 @@ for (const width of TELAS) {
 
 // --- Isolamento: a /api/v2 lê o usuário da SESSÃO. Se a sessão virou a conta B entre o pedido e a resposta, o total de B nunca aparece. ---
 const DA_B = { total: "98765.43", motivos: [], por_banco: [], por_tipo: [{ tipo: "acoes", rotulo: "Ações", valor: "98765.43", motivos: [] }] };
-const viraConta43NoGet = (ctx, page, sem = false) => vira(ctx, page, "**/api/v2/investido", DA_B, "98.765,43", sem);
+const viraConta43NoGet = (ctx, page) => vira(ctx, page, "**/api/v2/investido", DA_B, "98.765,43");
 for (const width of TELAS) {
   test(`${width}: ISOLAMENTO: depois do GET do card a sessão vira a conta 43: o total dela nunca aparece e a conversa é limpa`, async () => {
     const { ctx, page, erros } = await abrir({ width });
@@ -226,15 +226,15 @@ for (const width of TELAS) {
 }
 test("ISOLAMENTO, controle negativo: com a conferência da conta desligada no bundle, o total de B APARECE (o teste acima mede)", async () => {
   const { ctx, page } = await abrir({ width: 1440 });
-  const desligado = bundleSemConferencia();
-  await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
-  const arma = await viraConta43NoGet(ctx, page, true);
-  await page.goto(page.url()); // recarrega com o bundle patchado (as rotas do contexto seguem valendo)
+  const servido = await servirSemConferencia(ctx);
+  const arma = await viraConta43NoGet(ctx, page);
+  await page.reload();
   await page.locator(".chat-empty").waitFor();
   arma();
   await page.locator("#askbar-input").fill("@Faria Limer como está minha carteira?");
   await page.locator("#askbar-input").press("Enter");
   await page.waitForFunction(() => window.__viu, null, { timeout: 5000 }).catch(() => {});
+  assert.ok(servido.n > 0, "o bundle desligado não foi servido: o controle não mede nada");
   assert.equal(await page.evaluate(() => window.__viu), true, "sem a conferência o total de B tem de aparecer");
   await ctx.close();
 });

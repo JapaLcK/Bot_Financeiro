@@ -97,13 +97,20 @@ export function ativar(uid: number, kind: string) {
 export interface Redirect { kind: string; name: string; question: string; access: string; needs_data?: boolean }
 export interface RespostaChat { reply: string; context: string | null; redirects?: Redirect[]; card?: unknown }
 /** O card com os dados do tema, abaixo da resposta (parts/CardAgente.tsx). O servidor só diz QUAL; tipo desconhecido não desenha nada. */
-export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "caixinhas" } | { tipo: "contas"; hoje: string } | { tipo: "orcamentos"; mes: string } | { tipo: "resumo_mes"; mes: string; motivos: string[] };
+export type CardAgente = { tipo: "investido" | "renda_fixa" | "assinaturas" | "caixinhas" } | { tipo: "contas"; hoje: string } | { tipo: "orcamentos"; mes: string } | { tipo: "resumo_mes"; mes: string; motivos: string[] }
+  | { tipo: "comparacao_meses"; meses: [string, string]; motivos: string[] };
 export const MES = /^[1-9][0-9]{3}-(0[1-9]|1[0-2])$/; // o PADRAO_MES do servidor: o mês entra na URL do GET
 export const cardDe = (v: unknown): CardAgente | null => {
-  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown; motivos?: unknown; hoje?: unknown }) : {};
+  const c = v && typeof v === "object" ? (v as { tipo?: unknown; mes?: unknown; meses?: unknown; motivos?: unknown; hoje?: unknown }) : {};
   if (c.tipo === "investido" || c.tipo === "renda_fixa" || c.tipo === "assinaturas" || c.tipo === "caixinhas") return { tipo: c.tipo };
   if (c.tipo === "contas") return typeof c.hoje === "string" && /^\d{4}-\d{2}-\d{2}$/.test(c.hoje) ? { tipo: "contas", hoje: c.hoje } : null;
   if (c.tipo === "orcamentos") return typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "orcamentos", mes: c.mes } : null;
+  // Os dois meses entram na URL do GET: dois meses válidos, o mais antigo primeiro (a diferença é novo − antigo); fora disso, nenhum card.
+  if (c.tipo === "comparacao_meses") {
+    const m = c.meses;
+    return Array.isArray(m) && m.length === 2 && typeof m[0] === "string" && typeof m[1] === "string" && MES.test(m[0]) && MES.test(m[1]) && m[0] < m[1]
+      ? { tipo: "comparacao_meses", meses: [m[0], m[1]], motivos: textos(c.motivos) ? c.motivos as string[] : [] } : null;
+  }
   // `motivos`: os avisos que o agente deu sobre o mês (lista de texto; fora disso, nenhum aviso).
   return c.tipo === "resumo_mes" && typeof c.mes === "string" && MES.test(c.mes) ? { tipo: "resumo_mes", mes: c.mes, motivos: textos(c.motivos) ? c.motivos as string[] : [] } : null;
 };

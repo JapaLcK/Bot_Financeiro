@@ -8,7 +8,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
 import { abrirPainel, exigeArtefatoEmDia, RESPOSTAS } from "./_painel.mjs";
-import { bundleSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
+import { servirSemConferencia, viraConta43NoGet as vira } from "./_isolamento_card.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -221,9 +221,9 @@ test("nomes e valores enormes não estouram o card em 390; corpo fora do contrat
 
 // --- Isolamento: a /api/v2 lê o usuário da SESSÃO. Se a sessão virou a conta B entre o pedido e a resposta, o número de B nunca aparece. ---
 const DA_B = { contas: [{ ...RESPOSTAS.contas_a_pagar.cheia, total_estimado: "98765.43" }, "98.765,43"], caixinhas: [{ ...RESPOSTAS.caixinhas.cheia, total: "98765.43" }, "98.765,43"] };
-const viraConta43NoGet = async (ctx, page, tipo, sem = false) => {
+const viraConta43NoGet = async (ctx, page, tipo) => {
   const [corpoB, marca] = DA_B[tipo];
-  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca, sem), marca };
+  return { arma: await vira(ctx, page, TIPOS[tipo].url, corpoB, marca), marca };
 };
 for (const width of TELAS) {
   for (const tipo of Object.keys(TIPOS)) {
@@ -249,15 +249,15 @@ for (const width of TELAS) {
 for (const tipo of Object.keys(TIPOS)) {
   test(`ISOLAMENTO ${tipo}, controle negativo: com a conferência da conta desligada no bundle, o número de B APARECE (o teste acima mede)`, async () => {
     const { ctx, page, t } = await abrir({ width: 1440, tipo });
-    const desligado = bundleSemConferencia();
-    await ctx.route("**/dashboard-app.js", (r) => r.fulfill({ contentType: "application/javascript", body: desligado }));
-    const { arma } = await viraConta43NoGet(ctx, page, tipo, true);
-    await page.goto(page.url());
+    const servido = await servirSemConferencia(ctx);
+    const { arma } = await viraConta43NoGet(ctx, page, tipo);
+    await page.reload();
     await page.locator(".chat-empty").waitFor();
     arma();
     await page.locator("#askbar-input").fill(`@${t.nome} me mostra?`);
     await page.locator("#askbar-input").press("Enter");
     await page.waitForFunction(() => window.__viu, null, { timeout: 5000 }).catch(() => {});
+    assert.ok(servido.n > 0, "o bundle desligado não foi servido: o controle não mede nada");
     assert.equal(await page.evaluate(() => window.__viu), true, "sem a conferência o número de B tem de aparecer");
     await ctx.close();
   });
