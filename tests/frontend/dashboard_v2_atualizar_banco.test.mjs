@@ -9,7 +9,7 @@ import { setTimeout as dorme } from "node:timers/promises";
 import { chromium } from "playwright";
 import { exigeArtefatoEmDia } from "./_painel.mjs";
 import { con, item, refreshDe } from "./_bancos.mjs";
-import { ATUALIZANDO, AVISO, AINDA, DITO, FALHA, REGIAO, abrirBanco, assentar, avancar, congelar, falado, gets, instantePost, marca, marcar, pedidos, porta, texto } from "./_atualizar_banco.mjs";
+import { ATUALIZANDO, AVISO, AINDA, DITO, FALHA, REGIAO, abrirBanco, assentar, ate, avancar, congelar, falado, gets, instantePost, marca, marcar, pedidos, porta, texto } from "./_atualizar_banco.mjs";
 
 let browser;
 before(async () => { exigeArtefatoEmDia(); browser = await chromium.launch(); });
@@ -185,9 +185,12 @@ test("W7: o POST pendurado: aos 60 s ele falha como abortado (requestfailed) e U
     const t0 = await instantePost(page), base = await marca(page);
     await avancar(page, 59_000, 1000, { preso: true });
     const antes = await gets(page, base);
-    await avancar(page, 2000, 1000, { preso: true });
+    await avancar(page, 1000, 1000, { preso: true }); // chega aos 60 s: o prazo do POST corta e o GET sai
     const esperado = espera === "acompanha" ? 1 : 2;
     await page.waitForFunction(([n, d]) => window.__req.slice(d).filter(([m, p]) => m === "GET" && p === "/open-finance/7").length >= n, [esperado, base]);
+    // O relógio está parado: as notificações do React Query (setTimeout 0, falso) só saem quando ele anda, então o aviso só some se o relógio for andado (`ate`). Esperar tempo real não basta (flake sob carga).
+    if (espera === "acompanha") await page.waitForFunction((t) => document.querySelector("#avisos-topo section.pilha .pilha-corpo")?.textContent.includes(t), ATUALIZANDO);
+    else await ate(page, (sel) => !document.querySelector(sel), AVISO);
     await dorme(300); // e prova que não sai um a mais
     const l = await gets(page, base);
     const corpo = (await page.locator(AVISO).count()) ? await texto(page) : "(sem aviso)";
