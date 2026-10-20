@@ -157,6 +157,7 @@ test("a conversa sobrevive à troca de página e some ao recarregar", async () =
   await page.evaluate(() => { location.hash = "#/metas"; });
   await page.locator("#page-title", { hasText: "Metas" }).waitFor();
   await page.evaluate(() => { location.hash = "#/piggy"; });
+  await page.locator(".chat > li").nth(1).waitFor(); // a conversa volta depois de conferir a conta (PiggyChat, `conferida`)
   const volta = await page.locator(".chat > li").count();
   await page.reload();
   await page.locator("#page-title").waitFor();
@@ -242,7 +243,8 @@ test("a resposta nova é anunciada para leitor de tela", async () => {
   await perguntar(page, "oi");
   await page.waitForFunction(() => document.querySelectorAll(".chat > .msg-piggy").length === 2);
   // Em #main: o guia (parts/Guia.tsx) tem a própria região de anúncio, antes dele no DOM.
-  await page.waitForFunction(() => document.querySelector("#main [role=status]").textContent === [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent, null, { timeout: 2000 }).catch(() => {});
+  // Respostas que terminam a menos de 60 ms uma da outra saem no mesmo anúncio (a do chip e a do "oi", aqui): a última fecha o texto.
+  await page.waitForFunction(() => document.querySelector("#main [role=status]").textContent.endsWith([...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent), null, { timeout: 2000 }).catch(() => {});
   const r = await page.evaluate(() => [document.querySelector("#main [role=status]").textContent, [...document.querySelectorAll(".chat > .msg-piggy .msg-text")].pop().textContent]);
   // Duas respostas iguais seguidas (texto livre): a região esvazia e enche de novo, então muda.
   const mudancas = await page.evaluate(async () => {
@@ -255,7 +257,7 @@ test("a resposta nova é anunciada para leitor de tela", async () => {
     return [n, st.textContent.startsWith("Aqui no protótipo")];
   });
   await ctx.close();
-  assert.equal(r[0], r[1]);
+  assert.ok(r[0].endsWith(r[1]), JSON.stringify(r));
   assert.ok(mudancas[0] >= 2 && mudancas[1], JSON.stringify(mudancas)); // esvaziou e encheu com a mesma resposta
 });
 

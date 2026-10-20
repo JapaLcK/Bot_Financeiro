@@ -8,6 +8,17 @@
   font-size: 15px; line-height: 1.45; scroll-margin-top: 80px;
 }
 .msg-piggy { display: grid; gap: 12px; }
+/* Quem fala: avatar, nome e, no agente, a etiqueta de estado. Separado do .msg-by, que é só o selo de demonstração. */
+.msg-autor { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 13px; color: var(--ink-2); }
+.msg-autor img { border-radius: 50%; }
+/* O retrato do agente é de corpo inteiro (~265x433): cover no quadrado 22px mostra cabeça e chapéu. O ícone do Piggy não entra. */
+.msg-autor img[src*="/agents/"], .mencoes .cmdk-item img[src*="/agents/"] { object-fit: cover; object-position: 50% 4%; }
+.msg-autor b { font-weight: 600; color: var(--ink); }
+.msg-tag { padding: 2px 6px; border-radius: 6px; background: var(--plane-3); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-3); }
+.msg-pre { white-space: pre-line; } /* a resposta do agente é texto, com as quebras de linha dele */
+.msg-acoes { display: grid; justify-items: start; gap: 8px; }
+.msg-acoes .btn { min-height: 44px; height: auto; white-space: normal; text-align: left; }
+.mencao { color: var(--pink-ink); }
 .msg-by { display: grid; grid-auto-flow: column; justify-content: start; align-items: center; column-gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
 
 /* Blocos vivos (parts/LiveAnswer.tsx): na visão compacta cortam na altura e esmaecem embaixo. */
@@ -24,10 +35,10 @@
 .msg-text b { color: var(--ink); font-weight: 600; }
 
 /* Estado vazio: logo e saudação no centro da coluna (vh e não dvh: o Safari 14 não tem). */
-.chat-empty { display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; min-height: calc(100vh - var(--askbar-bottom) - 280px); }
+.chat-empty, .chat-espera { display: grid; place-content: center; justify-items: center; gap: 6px; text-align: center; min-height: calc(100vh - var(--askbar-bottom) - 280px); }
 .chat-empty img { margin-bottom: 8px; }
 .chat-empty h2 { max-width: 100%; overflow-wrap: break-word; word-break: break-word; /* nome sem espaço (o e-mail inteiro): quebra em vez de rolar a página; break-word porque o anywhere é do Safari 15.4 */ font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
-.chat-empty p { font-size: 16px; color: var(--ink-2); }
+.chat-empty p, .chat-espera p { font-size: 16px; color: var(--ink-2); }
 
 /* A fileira de perguntas: uma linha só, fixa logo acima da barra, na mesma coluna dela. Grid em coluna e
    não flex gap (Safari 14). Cada pílula tem 44 px de alto (alvo de toque) e se vê com 36: a borda de 4 px é transparente. */
@@ -44,8 +55,22 @@
 /* O anel de foco fica dentro da caixa da pílula (a borda transparente de 4 px ao redor do desenho): fora dela o overflow da fileira o corta. */
 .chat-follow .chip:focus-visible { outline-offset: -2px; }
 
+/* A lista do @ (parts/Mencoes.tsx): presa acima da barra, na mesma coluna dela, por cima da fileira de perguntas (que some). Grid, não flex gap (Safari 14). */
+.mencoes {
+  position: fixed; z-index: 45; bottom: calc(var(--askbar-bottom) + var(--askbar-h) + 8px);
+  display: flex; flex-direction: column; max-height: min(380px, calc(100vh - var(--askbar-bottom) - var(--askbar-h) - 96px));
+  border-radius: 14px; background: #141418; overflow: hidden;
+  box-shadow: 0 0 0 1px var(--rule-strong), 0 20px 50px -12px rgba(0, 0, 0, 0.8);
+}
+.mencoes .cmdk-list { min-height: 0; }
+.mencoes .cmdk-item { display: grid; grid-template-columns: 22px auto minmax(0, 1fr); column-gap: 10px; }
+.mencoes .cmdk-item img { border-radius: 50%; }
+.mencoes .cmdk-item[aria-selected="true"] img { box-shadow: 0 0 0 2px var(--pink); }
+.mencoes .cmdk-hint { justify-self: end; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body[data-mencoes] .chat-follow { visibility: hidden; }
+
 /* A barra: flutua no centro da coluna de conteúdo; na conversa ela alarga. */
-.askbar, .chat-follow {
+.askbar, .chat-follow, .mencoes {
   position: fixed; left: calc(var(--rail-w) + (100vw - var(--rail-w)) / 2); transform: translateX(-50%);
   width: min(560px, calc(100vw - var(--rail-w) - 2 * var(--gutter)));
 }
@@ -59,7 +84,7 @@
   color: var(--ink); text-decoration: none;
   view-transition-name: askbar;
 }
-.askbar[data-here], .chat-follow { --follow-w: min(760px, calc(100vw - var(--rail-w) - 2 * var(--gutter))); width: var(--follow-w); }
+.askbar[data-here], .chat-follow, .mencoes[data-here] { --follow-w: min(760px, calc(100vw - var(--rail-w) - 2 * var(--gutter))); width: var(--follow-w); }
 .askbar input { min-width: 0; height: 36px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; outline: none; }
 .askbar input::placeholder { color: var(--ink-3); }
 .askbar:focus-within { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 0 0 2px var(--pink); }
@@ -77,5 +102,7 @@
   :root { --askbar-bottom: calc(76px + env(safe-area-inset-bottom)); }
   .askbar[data-here] { display: grid; }
   .chat-follow { --follow-w: calc(100vw - 2 * var(--gutter)); } /* ponytail: 100vw inclui a barra de rolagem clássica (alguns px a mais); a pílula só passaria da fileira nesse caso */
-  .askbar[data-here], .chat-follow { left: var(--gutter); right: var(--gutter); width: auto; transform: none; }
+  .askbar[data-here], .chat-follow, .mencoes[data-here] { left: var(--gutter); right: var(--gutter); width: auto; transform: none; }
 }
+/* Na volta do foco, até a conta ser relida (PiggyChat): a conversa não aparece, mas fica no lugar (sem pular a rolagem). */
+[data-reconferindo] { visibility: hidden; }
