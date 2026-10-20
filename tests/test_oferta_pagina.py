@@ -122,5 +122,6 @@ def test_selo_dos_agentes_e_rodape_sem_promessa_nem_placeholder():
     assert 0 < plus < pro
     assert f"Até {plus} no Plus, os {pro} no Pro" in pagina
     assert "Nos planos Plus e Pro" not in pagina
-    for sobra in ("Razão social", "00.000.000", "[CNPJ"):
+    # "Preço de fundador" (valor congelado) contradiz termos.html: preço muda na renovação.
+    for sobra in ("Razão social", "00.000.000", "[CNPJ", "fundador", "congelado"):
         assert sobra not in pagina, sobra
