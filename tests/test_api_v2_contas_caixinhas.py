@@ -146,6 +146,19 @@ def test_caixinhas_mesmo_numero_da_consulta_do_banqueiro(a_e_b):
     assert j["total"] == f"{sum(p['balance'] for p in lido):.2f}"
 
 
+def test_caixinhas_total_soma_os_saldos_crus_como_o_whatsapp(a_e_b):
+    """pockets.balance é numeric sem escala: juros legados deixam fração de centavo. O total é a soma crua arredondada uma vez,
+    a do "Total nas caixinhas" do WhatsApp, não a soma das linhas já arredondadas (Codex no #1200)."""
+    from core.handlers.pockets import list_pockets as whatsapp
+    a, _ = a_e_b
+    _caixinha(a, "A", "0.006")
+    _caixinha(a, "B", "0.006")
+    j = _get(CAIXINHAS, a).json()
+    assert [c["saldo"] for c in j["caixinhas"]] == ["0.01", "0.01"]
+    assert j["total"] == "0.01"  # 0,012; somar as linhas daria 0,02
+    assert "Total nas caixinhas: **R$ 0,01**" in whatsapp(a)
+
+
 def test_caixinhas_ler_nao_aplica_juros(a_e_b, monkeypatch):
     a, _ = a_e_b
     _caixinha(a, "Reserva", 100)

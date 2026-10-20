@@ -32,4 +32,6 @@ def caixinhas(uid: int = Depends(usuario_atual)) -> Caixinhas:
     ps = _list_pockets(uid, {}, accrue=False)["pockets"]
     linhas = [Caixinha(id=p["id"], nome=p["name"], saldo=_d(p["balance"]), meta=_d(p["target_amount"]),
                        progresso_pct=_d(p["progress_pct"]), atingida=p["achieved"]) for p in ps]
-    return Caixinhas(total=sum((c.saldo for c in linhas), Decimal("0.00")), caixinhas=linhas)
+    # Soma os saldos crus e arredonda uma vez, como o WhatsApp ("Total nas caixinhas"): saldo legado com fração de centavo somado já
+    # arredondado daria outro total (0,006 + 0,006 = 0,02 em vez de 0,01) (Codex no #1200).
+    return Caixinhas(total=_d(sum((Decimal(str(p["balance"])) for p in ps), Decimal("0"))), caixinhas=linhas)
