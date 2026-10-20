@@ -139,16 +139,10 @@ const card_ = (page) => page.locator(".chat > .msg-piggy .card-agente").count();
 
 // A MESMA tabela está em tests/test_agent_chat_card.py (§0.7): o `total_renda_fixa` do servidor e o foco "Renda fixa" do card.
 const inv = (total, partes) => ({ total, motivos: total === null ? ["nenhum_investimento"] : [], por_banco: [], por_tipo: partes.map(([tipo, valor]) => ({ tipo, rotulo: tipo, valor, motivos: valor === null ? ["saldo_ausente"] : [] })) });
-const TABELA = [
-  [inv("57123.45", [["renda_fixa", "40000.00"], ["acoes", "17123.45"]]), "R$ 40.000,00"],
-  [inv("1234.50", [["renda_fixa", "1234.50"]]), "R$ 1.234,50"],
-  [inv("500.00", [["renda_fixa", "500.00"], ["fundos", null]]), "R$ 500,00"],
-  [inv("300.00", [["renda_fixa", "100.10"], ["tesouro", "50.05"], ["acoes", "149.85"]]), "R$ 150,15"],
-  [inv("300.00", [["renda_fixa", "100.00"], ["tesouro", null], ["acoes", "200.00"]]), "—"],
-  [inv("300.00", [["acoes", "300.00"]]), "R$ 0,00"],
-  [inv(null, []), null],
-  [inv(null, [["fundos", null]]), null],
-];
+// A mesma tabela do tests/test_agent_chat_card.py (a regra existe em Python e em TS, §0.7). Sem total: nenhum número; sem soma: "—".
+const brl = (v) => `R$ ${new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(v))}`;
+const TABELA = JSON.parse(readFileSync(new URL("./total_renda_fixa.json", import.meta.url), "utf8"))
+  .map((c) => [inv(c.total, c.partes), c.total === null ? null : c.esperado === null ? "—" : brl(c.esperado)]);
 test("Barão: o total do card segue a tabela literal do total_renda_fixa do servidor", async () => {
   for (const [corpo, esperado] of TABELA) {
     const { ctx, page } = await abrir({ width: 1440, chat: resposta({ tipo: "renda_fixa" }), investido: corpo });
@@ -269,9 +263,10 @@ test("ISOLAMENTO, controle negativo: com a conferência da conta desligada no bu
 for (const width of TELAS) {
   test(`${width}: o card entra com o fade dos botões uma vez e não anima ao voltar ao /piggy`, async () => {
     const { ctx, page } = await abrir({ width });
+    await page.emulateMedia({ reducedMotion: "no-preference" }); // com movimento reduzido não há fade nem marca (PiggyChat.tsx)
     await perguntar(page);
+    await page.locator(".chat > .msg-piggy .card-slot[data-revela]").waitFor();
     await card(page).locator(".card-agente-total").waitFor();
-    assert.equal(await page.locator(".chat > .msg-piggy .card-slot[data-revela]").count(), 1);
     await page.evaluate(() => { location.hash = "#/conta/perfil"; });
     await page.locator(".chat").waitFor({ state: "detached" });
     await page.evaluate(() => { location.hash = "#/piggy"; });
@@ -344,6 +339,19 @@ test("selos: 'sem banco conectado' não vira selo no card; os outros motivos sim
   const t = await card(page).innerText();
   assert.match(t, /banco desatualizado/);
   assert.ok(!/sem banco conectado/.test(t), t);
+  await ctx.close();
+});
+
+test("selos do Barão: só os da renda fixa e os do banco; o 'saldo ausente' dos fundos fica de fora", async () => {
+  const corpo = { total: "100.00", motivos: ["saldo_ausente", "banco_desatualizado", "conexao_pausada"], por_banco: [], por_tipo: [
+    { tipo: "renda_fixa", rotulo: "Renda fixa", valor: "100.00", motivos: ["banco_desatualizado"] }, { tipo: "fundos", rotulo: "Fundos", valor: null, motivos: ["saldo_ausente"] }] };
+  const { ctx, page } = await abrir({ width: 1440, chat: resposta({ tipo: "renda_fixa" }), investido: corpo });
+  await perguntar(page, "@Barão quanto tenho em renda fixa?");
+  await card(page).locator(".card-agente-total").waitFor();
+  const t = await card(page).innerText();
+  assert.match(t, /banco desatualizado/);
+  assert.match(t, /pausad/i);
+  assert.ok(!/saldo ausente|sem saldo/i.test(t), t);
   await ctx.close();
 });
 

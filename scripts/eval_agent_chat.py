@@ -125,7 +125,7 @@ def synthetic_read(uid, kind, name, arguments):
         stack.enter_context(patch.object(plan_service, 'consolidated_balance_enabled', return_value=False))
         stack.enter_context(patch.object(plan_service, 'get_plan_tier', return_value='pro'))
         stack.enter_context(patch.object(piggy_agents, 'find_duplicate_charges', return_value=[]))
-        stack.enter_context(patch.object(assinaturas, 'listar_assinaturas', return_value={'servicos': [], 'outras': []}))
+        stack.enter_context(patch.object(assinaturas, 'listar_assinaturas', return_value={'servicos': [], 'outras': [], 'ignoradas': [], 'total_mensal': Decimal('0'), 'total_anual': Decimal('0'), 'chaves': []}))
         if snapshot:
             result = _snapshot(uid, kind)
         elif name == 'get_bills_to_pay':

@@ -1472,7 +1472,8 @@ for (const width of TELAS) {
     assert.equal(fade.estado, "finished", "a animação das ações não foi cortada");
     assert.ok(fade.op.some((o) => o > 0 && o < 1), `sem opacidade intermediária: ${[...new Set(fade.op)]}`);
     assert.equal(fade.op.at(-1), 1);
-    assert.equal(await bolha.locator(".rv").count(), 0, "texto voltou a ser contínuo");
+    await bolha.locator(".rv").first().waitFor({ state: "detached", timeout: 1000 }); // texto voltou a ser contínuo, logo depois do fade
+    assert.equal(await acoes.getAttribute("data-revela"), null, "a marca dos botões saiu");
     await ctx.close();
     assert.deepEqual(erros, []);
   });
@@ -1554,6 +1555,36 @@ for (const width of TELAS) {
     solta();
     await ctx.close();
   });
+  test(`${width}: enquanto envia, ligar o movimento reduzido no meio da espera congela a frase`, async () => {
+    let solta;
+    const { ctx, page } = await abrir({ width, segura: new Promise((ok) => { solta = ok; }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive tem duplicada?");
+    const carga = resposta(page).locator(".msg-carga");
+    await carga.filter({ hasText: "Comparando cobranças parecidas…" }).waitFor({ timeout: 3500 }); // trocando
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForTimeout(4500); // duas trocas
+    assert.equal(await carga.textContent(), "Comparando cobranças parecidas…");
+    solta();
+    await ctx.close();
+  });
+  test(`${width}: resposta mostrada com movimento reduzido não se revela depois que a preferência muda; revelada, a marca dos botões sai`, async () => {
+    const { ctx, page } = await abrir({ width, chat: (c, n) => ({ json: { reply: n === 1 ? palavras(40) : "Segunda.", context: "c", redirects: [RED] } }) });
+    await enviar(page, "@Detetive tem duplicada?"); // contexto reduce
+    const primeira = page.locator(".chat > .msg-piggy").filter({ hasText: "p39" });
+    await primeira.locator(".msg-text", { hasText: "p39" }).waitFor();
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive e agora?"); // re-render com a preferência nova
+    await resposta(page).locator(".rv").first().waitFor();
+    assert.equal(await primeira.locator(".rv").count(), 0, "a primeira resposta não reanima");
+    assert.equal(await primeira.locator(".msg-acoes[data-revela]").count(), 0, "nem os botões dela");
+    assert.equal(await primeira.locator(".msg-acoes button").first().evaluate((b) => b.checkVisibility({ visibilityProperty: true, opacityProperty: true })), true);
+    const ultima = resposta(page).locator(".msg-acoes");
+    assert.equal(await ultima.getAttribute("data-revela"), "true"); // a nova revela
+    await page.waitForFunction(() => !document.querySelector(".chat > .msg-piggy:last-child .msg-acoes[data-revela]"), null, { timeout: 5000 });
+    assert.equal(await resposta(page).locator(".rv").count(), 0);
+    await ctx.close();
+  });
   test(`${width}: durante a revelação os botões das ações não recebem foco; depois recebem e o clique funciona`, async () => {
     const { ctx, page } = await abrir({ width, ativos: ["detetive", "carteiro"], chat: (c, n, kind) => (kind === "detetive" ? { json: { reply: palavras(150), context: "c", redirects: [RED] } } : null) });
     await MOVIMENTO(page);
@@ -1577,6 +1608,20 @@ for (const width of TELAS) {
     const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
     await bolha.waitFor();
     const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth }));
+    assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
+    assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
+    await ctx.close();
+  });
+
+  test(`${width}: URL gigante sem espaço não estoura a bolha DURANTE a revelação (.rv)`, async () => {
+    const url = "https://exemplo.com/" + "a".repeat(300);
+    const { ctx, page } = await abrir({ width, chat: () => ({ json: { reply: `Veja ${url}`, context: "c", redirects: [] } }) });
+    await MOVIMENTO(page);
+    await enviar(page, "@Detetive oi");
+    const bolha = resposta(page).locator(".msg-text", { hasText: "exemplo.com" });
+    await bolha.locator(".rv").first().waitFor();
+    const m = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, w: innerWidth, rv: document.querySelectorAll(".rv").length }));
+    assert.ok(m.rv > 0, "sem .rv o caso não mede nada");
     assert.ok(m.doc <= m.w, `documento ${m.doc} > ${m.w}`);
     assert.ok(await bolha.evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "texto passa da bolha");
     await ctx.close();

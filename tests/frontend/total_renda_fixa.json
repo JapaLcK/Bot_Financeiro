@@ -1,0 +1,10 @@
+[
+  {"total": "57123.45", "partes": [["renda_fixa", "40000.00"], ["acoes", "17123.45"]], "esperado": "40000.00"},
+  {"total": "1234.50", "partes": [["renda_fixa", "1234.50"]], "esperado": "1234.50"},
+  {"total": "500.00", "partes": [["renda_fixa", "500.00"], ["fundos", null]], "esperado": "500.00"},
+  {"total": "300.00", "partes": [["renda_fixa", "100.10"], ["tesouro", "50.05"], ["acoes", "149.85"]], "esperado": "150.15"},
+  {"total": "300.00", "partes": [["renda_fixa", "100.00"], ["tesouro", null], ["acoes", "200.00"]], "esperado": null},
+  {"total": "300.00", "partes": [["acoes", "300.00"]], "esperado": "0.00"},
+  {"total": null, "partes": [], "esperado": null},
+  {"total": null, "partes": [["fundos", null]], "esperado": null}
+]

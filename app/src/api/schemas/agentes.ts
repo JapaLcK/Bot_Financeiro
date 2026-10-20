@@ -7,7 +7,7 @@ export const agentesSchema = z.object({
 });
 export const respostaAgenteSchema = z.object({
   reply: z.string(), context: z.string().nullable(),
-  redirects: z.array(z.object({ kind: z.string(), name: z.string(), question: z.string(), access: z.string() })).optional(),
+  redirects: z.array(z.object({ kind: z.string(), name: z.string(), question: z.string(), access: z.string(), needs_data: z.boolean().optional() })).optional(),
   usage: z.object({ used: z.number(), limit: z.number() }).optional(),
 });
 export const ativacaoSchema = z.object({ ok: z.boolean() });
