@@ -45,7 +45,7 @@ test("RES o resumo e a coluna 'Última atualização' (fuso de São Paulo, não 
   assert.deepEqual(r.icone, ["ph ph-bank", "ph ph-warning"]);
 });
 
-test("RES 'Concluída' só com todos em tom ok (verde, ícone de check); banco em coleta (updating) é 'Atenção' em amarelo; um banco só diz 'banco conectado'", async () => {
+test("RES 'Concluída' só com todos em tom ok (verde, ícone de check); banco em coleta (updating) NÃO tira o 'Concluída' (decisão do dono), mas 'partial' sim, em amarelo; um banco só diz 'banco conectado'", async () => {
   const lido = async (conexoes) => {
     const { ctx, page } = await telaRecon({ conexoes }, SEM_VAGAS);
     const r = { estado: await page.locator(".banco-resumo .banco-estado").evaluate((e) => [e.textContent, e.className]), icone: await page.locator(".banco-resumo .resumo-ico i").last().getAttribute("class"), rotulo: await page.locator(".banco-resumo .resumo-txt").first().innerText() };
@@ -53,7 +53,8 @@ test("RES 'Concluída' só com todos em tom ok (verde, ícone de check); banco e
     return r;
   };
   assert.deepEqual(await lido([con(11, "Nubank")]), { estado: ["Concluída", "banco-estado estado-ok"], icone: "ph ph-check-circle", rotulo: "1\nbanco conectado\n2 de 3 bancos" }); // positivo; as vagas, discretas, na mesma zona
-  assert.deepEqual((await lido([con(11, "Nubank"), con(12, "Inter", "updating", "Atualizando…")])).estado, ["Atenção", "banco-estado estado-pendente"]);
+  assert.deepEqual((await lido([con(11, "Nubank"), con(12, "Inter", "updating", "Atualizando…")])).estado, ["Concluída", "banco-estado estado-ok"]); // coleta é normal
+  assert.deepEqual((await lido([con(11, "Nubank"), con(12, "Inter", "partial", "Parcial")])).estado, ["Atenção", "banco-estado estado-pendente"]); // positivo: pendente de verdade segue sendo atenção
 });
 
 test("RES o pior tom vence nas DUAS ordens: erro vence pendente (banco em erro antes ou depois do que coleta); pendente sozinho fica pendente", async () => {
@@ -66,7 +67,8 @@ test("RES o pior tom vence nas DUAS ordens: erro vence pendente (banco em erro a
   const coleta = con(11, "Nubank", "updating", "Atualizando…"), erro = con(12, "Inter", ATENCAO, "Atenção");
   assert.deepEqual(await lido([coleta, erro]), ["Atenção", "banco-estado estado-erro"]);
   assert.deepEqual(await lido([erro, coleta]), ["Atenção", "banco-estado estado-erro"]);
-  assert.deepEqual(await lido([coleta, con(13, "Itaú")]), ["Atenção", "banco-estado estado-pendente"]); // positivo: sem erro, o pendente aparece
+  assert.deepEqual(await lido([coleta, con(13, "Itaú", "partial", "Parcial")]), ["Atenção", "banco-estado estado-pendente"]); // positivo: sem erro, o pendente aparece
+  assert.deepEqual(await lido([coleta, con(13, "Itaú")]), ["Concluída", "banco-estado estado-ok"]); // a coleta sozinha não conta
 });
 
 test("RES a 'última sincronização' do resumo é a MAIS RECENTE, esteja na 1ª, no meio ou na última posição da lista", async () => {

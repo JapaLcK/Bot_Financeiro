@@ -80,7 +80,7 @@ test("leituras opcionais: /bancos 500 e 404 deixam as linhas com nome e estado e
     };
     await ctx.close();
     assert.deepEqual(r.nomes.slice(0, 3), ["Nubank", "Inter", "Itaú"], rotulo);
-    assert.deepEqual([r.estados, r.vagas, r.total], [["Atualizado", "Atualizado", "Pausado"], true, "—"], rotulo);
+    assert.deepEqual([r.estados, r.vagas, r.total], [["Conectado", "Conectado", "Pausado"], true, "—"], rotulo);
   }
   const { ctx, page } = await bancos({ limiteRes: ERRO_500, bancos: "padrao" });
   await esperaCards(page, 3);
@@ -193,7 +193,7 @@ test("estado: updated é ok (pontinho verde), needs_user_action é erro (laranja
   const noDetalhe = await d.innerText();
   await ctx.close();
   // "constructor" não é estado: pendente, não "estado-function Object()…"
-  assert.deepEqual(r, [["estado-ok", "Atualizado", "rgb(61, 220, 151)", false], ["estado-erro", "Reconectar", "rgb(255, 122, 69)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false]]);
+  assert.deepEqual(r, [["estado-ok", "Conectado", "rgb(61, 220, 151)", false], ["estado-erro", "Reconectar", "rgb(255, 122, 69)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false], ["estado-pendente", "Pendente", "rgb(245, 181, 68)", false]]);
   assert.ok(noDetalhe.includes("O banco pediu novo login.") && noDetalhe.includes("Reconectar"), noDetalhe);
 });
 
@@ -379,7 +379,7 @@ test("motivos que não são texto ({'x':1}), no topo ou no banco, tiram os núme
 });
 
 test("snapshot fora do contrato não derruba a SPA: institution_name número, ui.label/ui.detail objeto, last_sync_at número viram nulo (nome 'Banco', 'Pendente', sem detalhe, sem <time>)", async () => {
-  const feia = con(11, 5, "updated", { a: 1 }, 5, { b: 2 });
+  const feia = con(11, 5, "no_accounts", { a: 1 }, 5, { b: 2 });
   const { ctx, page, erros } = await bancos({ conexoes: [feia, con(12, "Inter")], bancos: "barra" });
   await esperaCards(page, 2);
   const d = await detalhe(page, 0);
@@ -693,7 +693,7 @@ test("a linha: ladrilho, nome, estado, 'Última atualização' e três botões d
   assert.deepEqual(r.botoes.map((b) => b[0]), ["Detalhes de Nubank", "Sincronizar todos os bancos", "Mais ações de Nubank"]);
   assert.ok(r.botoes.every(([, w, h]) => w >= 44 && h >= 44), `botões ${JSON.stringify(r.botoes)}`);
   // a inicial do ladrilho, o nome, o estado, a última atualização (relógio em 2026-10-02 15:00Z, 14:47Z em São Paulo = 11:47, "Hoje") e os rótulos dos botões; sem valor, "há N min", contagens, barra nem ui.detail
-  assert.deepEqual(r.texto, ["N", "Nubank", "Atualizado", "Última atualização", "Hoje, 11:47", "Detalhes", "Sincronizar", "…"]);
+  assert.deepEqual(r.texto, ["N", "Nubank", "Conectado", "Última atualização", "Hoje, 11:47", "Detalhes", "Sincronizar", "…"]);
   assert.equal(r.barra, null);
 });
 
