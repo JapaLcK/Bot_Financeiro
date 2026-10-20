@@ -521,6 +521,8 @@ def test_fixture_do_simulador_de_habitos_segue_modelo_e_dinheiro_em_texto():
     assert len(s.cortes) == 2 and s.economia_mensal == sum(c.economia_mensal for c in s.cortes)
     assert s.com_corte.delta_vs_atual == 3 * s.economia_mensal and s.atual.pior_dia.saldo < 0
     assert f["premissas"][-len(PREMISSAS_HABITOS_V2):] == PREMISSAS_HABITOS_V2
+    from api.v2.simulador import CODIGOS_HABITOS
+    assert FIXTURES["simulador"]["codigos_422_habitos"] == sorted(CODIGOS_HABITOS)  # os que `SimuladorHabitos.tsx` cobre
 
 
 @pytest.mark.parametrize("nome", sorted(FIXTURES["orcamentos_categoria"]))

@@ -601,9 +601,15 @@ Sub-app FastAPI (`api/v2/app.py`) montado pelo monólito com `app.mount("/api/v2
   `ocorrencias(hoje, hoje+90, despesa_mensal − economia)`; o corte começa amanhã (ponto de hoje igual) e `delta_vs_atual`
   no dia 90 = 3 × `economia_mensal`. Reserva 0. Resposta: dinheiro em texto, `atual` e `com_corte` (91 pontos), `cortes`
   só os enviados, na ordem da estimativa; premissas da snapshot + `PREMISSAS_HABITOS_V2`. Não grava. Cada POST relê a
-  snapshot; o cliente posta ao soltar o slider. Card `simulador` do chat: o bloco ganha o
-  recurso `previsao` (90 dias) ao lado do `detalhes` do mês (build antigo ignora); a visão do modelo e o texto do
-  Piggy não mudam: a leitura da mediana pelo Piggy vem no PR 3b, junto com o card novo do app. Telas: PR seguinte (web e app).
+  snapshot; o cliente posta ao soltar o slider. `categoria` sem teto de tamanho (a chave é coluna `text` sem teto; o
+  teto do corpo protege); códigos de 422 próprios em `CODIGOS_HABITOS` (fixture `simulador.codigos_422_habitos`). Card
+  `simulador` do chat: o bloco ganha o recurso `previsao` (90 dias) ao lado do `detalhes` do mês (build antigo ignora);
+  a visão do modelo é `{mes, gasto_do_dia_a_dia: null | {despesa_mensal, categorias[{nome, despesa_mensal}]}}` (a chave é
+  `despesa_mensal` porque o `ai_guard` só aceita número sob chave monetária) e o Piggy fala do gasto ESTIMADO, nunca do
+  mês (sem marcador de capacidade: decisão do dono, 20/10/2026). Telas (PR 3b): web `SimuladorHabitos.tsx` (bloco do
+  Resumo com as `MAX_NO_RESUMO` maiores categorias (`SimuladorHabitos.tsx`) e `#/simulador` com todas; só Pro; o POST é uma query cuja chave é o corpo, no
+  evento nativo `change`) e app `simuladorHabitos.tsx` (aba Gastos e card do chat; `onSlidingComplete`); o protótipo
+  (DEMO) mantém o exemplo antigo.
 - `GET /api/v2/progresso-milhao` (`api/v2/progresso_milhao.py`; também `/api/app/progresso-milhao`): o
   patrimônio de hoje (`db/patrimonio.calcular`, a conta da tela Patrimônio do app, lida como em
   `api/nativo/patrimonio.py`) para o `/painel#/milhao`, fora do menu lateral e do Menu do celular (só o card

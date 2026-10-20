@@ -1,18 +1,17 @@
 import { irAoExtrato, useNavegacaoPainel } from "./navegacao";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
-import Slider from "@react-native-community/slider";
 import { useTema } from "@/ui/tema";
 import { Icone } from "@/ui/componentes/Icone";
 import { TextoPainel as Texto, useTipografiaPainel } from "./tipografia";
 import { diaMes, nomeCategoria } from "./catalogo";
 import { usePainel } from "./provider";
-import { RecursoDados, Anel, Linha, Avisos, Acao, Vazio, Valor, SeteDias } from "./base";
+import { RecursoDados, Anel, Linha, Avisos, Vazio, Valor, SeteDias } from "./base";
 import { useBloco } from "./blocoContexto";
 import { LancamentosDe, LinhaExpansivel } from "./expansao";
 import { FolhaDia, abreFolha } from "./folhaDia";
 import { CORES_CATEGORIA, raio } from "@/ui/tokens";
-import { somarCentavos, percentualEmCentavos } from "./decimal";
+import { somarCentavos } from "./decimal";
 // Barra da cor da fatia no donut, logo abaixo do nome (linha + barra = 44pt). Decorativa: o valor já está na linha. `fracao` é 0–1.
 export function LinhaCategoria({ titulo, detalhe, valor, tipo, fracao, cor, onPress }: { titulo: string; detalhe?: string; valor: number; tipo?: "saida"; fracao: number; cor: string; onPress?: () => void }) {
   const { oculto } = usePainel(); const { cores } = useTema();
@@ -35,11 +34,4 @@ export function Calendario() {
    // No chat o dia expande os lançamentos dele (`?dia=` do endpoint, dentro do mês do bloco: a parcela de outro ano também casa), 10 por vez.
    return bloco ? <LinhaExpansivel key={dia.dia} testID={`calendario-dia-${dia.dia}`} linha={conteudo} aberta={aberto === dia.dia} alternar={() => setAberto(aberto === dia.dia ? null : dia.dia)}><LancamentosDe consulta={new URLSearchParams({ mes: d.mes, dia: dia.dia, limite: "10" }).toString()} /></LinhaExpansivel>
     : <Pressable key={dia.dia} testID={`calendario-dia-${dia.dia}`} accessibilityRole="button" onPress={() => abreFolha(dia.dia, d.mes, p.usuario.history_earliest_date) ? setDiaFolha(dia.dia) : irAoExtrato(navegar, { dia: dia.dia })} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 12 }}>{conteudo}<Icone nome="CaretRight" tamanho={20} /></Pressable>; }}</SeteDias></View> : <Vazio texto="Ainda não há movimentos neste período." />}<Avisos motivos={d.motivos} />{!bloco && <FolhaDia dia={diaFolha} mudar={setDiaFolha} />}</View>; }}</RecursoDados>;
-}
-// Slider nativo (UISlider): ajustável no VoiceOver sem código. O valor chega como `number` qualquer e
-// `percentualEmCentavos` lança com percentual não inteiro, daí o arredondamento ao passo antes do estado.
-export function Simulador() {
- const { ampliado } = useTipografiaPainel(); const { cores } = useTema();
- const p = usePainel(); const catalogo = p.dados.categorias?.fase === "pronto" ? p.dados.categorias.dado.categorias : undefined; const [cortes, setCortes] = useState<Record<string, number>>({});
- return <RecursoDados nome="detalhes">{(d) => { const economias = d.categorias.map((c) => percentualEmCentavos(c.valor, cortes[c.categoria ?? ""] ?? 0)); return <View style={{ gap: 8 }}>{d.categorias.length ? d.categorias.map((c, i) => { const chave = c.categoria ?? "", corte = cortes[chave] ?? 0, nome = nomeCategoria(c.categoria, catalogo); return <View key={chave}><View style={{ flexDirection: "row", flexWrap: ampliado ? "wrap" : "nowrap", justifyContent: "space-between", alignItems: "center", columnGap: 8 }}><Texto variante="rotulo" numberOfLines={ampliado ? undefined : 1} style={{ flexShrink: 1 }}>{nome}</Texto><View style={{ flexDirection: "row", alignItems: "center", gap: 4, flexShrink: 0 }}><Texto variante="rotulo" tom="inkMuted">{corte}%</Texto><Texto variante="rotulo" tom="inkMuted">·</Texto><Valor valor={economias[i]!} pequeno /></View></View><Slider accessibilityLabel={`Corte em ${nome}`} style={{ height: 40 }} minimumValue={0} maximumValue={100} step={10} value={corte} minimumTrackTintColor={CORES_CATEGORIA[i % CORES_CATEGORIA.length]!} maximumTrackTintColor={cores.surfaceRaised} onValueChange={(v) => setCortes((s) => ({ ...s, [chave]: Math.round(v / 10) * 10 }))} /></View>; }) : <Vazio texto="Sem gastos neste mês." />}<Texto variante="legenda" tom="inkMuted">Economia potencial</Texto><Valor valor={somarCentavos(economias)} destaque /><Acao rotulo="Zerar simulação" onPress={() => setCortes({})} /><Avisos motivos={d.motivos} /></View>; }}</RecursoDados>;
 }

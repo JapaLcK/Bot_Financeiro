@@ -181,9 +181,15 @@ def registro() -> dict[str, Card]:
 
     def le_simulador(uid, a):
         """O mês (builds antigos do app desenham só ele) + a previsão de 90 dias para o app novo. A visão do
-        modelo segue a de antes: o Piggy só passa a ler a previsão no PR 3b, junto com o card novo."""
+        modelo é a estimativa do gasto do dia a dia (a mesma que o card desenha), não o mês."""
         p = previsao(dias="90", uid=uid)
         return [(m, r | {"previsao": p}) for m, r in _mes(uid, a, detalhes=mes_detalhes)]
+
+    def visao_simulador(r):
+        # `despesa_mensal` (e não `mensal`): o ai_guard só aceita como evidência número sob chave monetária
+        est = r["previsao"]["estimativa_variavel"]
+        return {"gasto_do_dia_a_dia": est and {"despesa_mensal": est["despesa_mensal"], "categorias": [
+            {"nome": str(c["nome"])[:60], "despesa_mensal": c["despesa_mensal"]} for c in est["categorias"]]}}
 
     def gate_periodo(uid, a):
         mes_pedido(a["ate"])  # defensivo: quem chama já cortou o futuro
@@ -259,7 +265,7 @@ def registro() -> dict[str, Card]:
         "categorias": Card(categorias_e_contas, det("mes", "ate", "entrou", "saiu", "categorias", "motivos"), gate_mes),
         "calendario": Card(lambda uid, a: _mes(uid, a, detalhes=mes_detalhes),
                            det("mes", "ate", "entrou", "saiu", "dias", "motivos"), gate_mes),
-        "simulador": Card(le_simulador, det("mes", "categorias", "motivos"), gate_simulador),
+        "simulador": Card(le_simulador, visao_simulador, gate_simulador),
         "patrimonio": Card(lambda uid, a: [(None, {"patrimonio": patrimonio(uid=uid)})], historico),
         "wealth": Card(lambda uid, a: [(None, {"patrimonio": patrimonio(uid=uid)})],
                        _so("patrimonio", "total", "partes", "motivos")),

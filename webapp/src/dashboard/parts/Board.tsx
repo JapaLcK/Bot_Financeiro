@@ -18,6 +18,7 @@ import { Calendar } from "../widgets/Calendar";
 import { GastosCalendario } from "../widgets/GastosCalendario";
 import { GastosCategorias } from "../widgets/GastosCategorias";
 import { Simulator } from "../widgets/Simulator";
+import { SimuladorHabitos } from "../widgets/SimuladorHabitos";
 import { Bills } from "../widgets/Bills";
 import { Piggy } from "../widgets/Piggy";
 import { NetWorth } from "../widgets/NetWorth";
@@ -60,7 +61,7 @@ const ITEM = new Map(ALL.map((w) => [w.id, w]));
 
 const VIEWS: Record<string, (p: { s: DashState }) => ReactNode> = {
   contas: () => <Contas />, hero: DEMO ? Hero : () => <PrevisaoCard />, resumo: MonthStats,
-  categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: Simulator,
+  categorias: DEMO ? Categories : GastosCategorias, calendario: DEMO ? Calendar : GastosCalendario, simulador: DEMO ? Simulator : SimuladorHabitos,
   compromissos: Bills, piggy: Piggy, patrimonio: () => <NetWorth />,
   fatura: Invoice, wealth: () => <Wealth />,
   renda: () => <Income />, rendimento: () => <Yield />, parcelas: () => <Installments />,

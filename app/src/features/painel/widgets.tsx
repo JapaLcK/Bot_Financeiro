@@ -1,6 +1,7 @@
 import { Contas } from "./contasResumo";
 import { ResumoMes } from "./resumoMes";
-import { Categorias, Calendario, Simulador } from "./gastos";
+import { Categorias, Calendario } from "./gastos";
+import { SimuladorHabitos } from "./simuladorHabitos";
 import { Previsao, Compromissos } from "./futuro";
 import { Caixinhas, Metas, Patrimonio, Distribuicao, Rendimento } from "./patrimonio";
 import { Faturas, Parcelas, Renda, Assinaturas, Notou } from "./complementos";
@@ -14,7 +15,7 @@ import { useBloco } from "./blocoContexto";
 import { Vazio } from "./base";
 import { SEM_PLANO } from "./simuladorCompra";
 import type { CardChat } from "@/api/schemas/painel";
-const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: Categorias, calendario: Calendario, simulador: Simulador, compromissos: Compromissos, piggy: Notou, metas: Metas, caixinhas: Caixinhas, patrimonio: Patrimonio, fatura: Faturas, wealth: Distribuicao, renda: Renda, rendimento: Rendimento, parcelas: Parcelas, assinaturas: Assinaturas };
+const VIEWS = { contas: Contas, hero: Previsao, resumo: ResumoMes, categorias: Categorias, calendario: Calendario, simulador: SimuladorHabitos, compromissos: Compromissos, piggy: Notou, metas: Metas, caixinhas: Caixinhas, patrimonio: Patrimonio, fatura: Faturas, wealth: Distribuicao, renda: Renda, rendimento: Rendimento, parcelas: Parcelas, assinaturas: Assinaturas };
 export const planoPro = (d: ReturnType<typeof usePainel>["dados"]) => d.plano?.fase === "pronto" && d.plano.dado.plan_tier === "pro";
 /** No chat o servidor já aplicou o plano (`plan_gate_ok`): o gate do simulador vale só FORA de um bloco. */
 export function WidgetConteudo({ id }: { id: CardChat }) { const p = usePainel(); const bloco = useBloco();

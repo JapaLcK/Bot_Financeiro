@@ -205,7 +205,7 @@ test("\"Fechar extrato\" fecha o extrato aberto por \"Ver N lançamentos\", o fo
 });
 
 test("a resposta lê a simulação atual: zerar no Simulador tira \"Com a simulação\" da resposta", async () => {
-  const { ctx, page, erros } = await abrir({ hash: "#/simulador" });
+  const { ctx, page, erros } = await abrir({ hash: "#/simulador", demo: true });
   await page.locator(".presets .chip").first().click();
   await page.locator(".sim-facts").waitFor();
   await atalho(page, "Pra onde vai meu dinheiro?");

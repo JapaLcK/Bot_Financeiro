@@ -3,16 +3,15 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CenarioOut, Simulador, SimuladorIn } from "../lib/api-v2.gen";
-import { ERRO_VALOR, dayMonth, isoDay, moneyText, normalizaValor } from "../lib/format.js";
+import { ERRO_VALOR, moneyText, normalizaValor } from "../lib/format.js";
 import { hojeNoFuso } from "../lib/metas-textos";
-import type { Point } from "../lib/types";
 import { ErroApi, apiPost, meQuery, usePlan } from "../lib/v2";
 import { CRIAR_SENHA } from "../parts/Entrada";
 import { Frame } from "../parts/Frame";
 import { MotivosPrevisao } from "../parts/Selos";
 import { ConvitePro, ddmm } from "./Compromissos";
+import { CurvaComparada } from "./CurvaComparada";
 import { hora } from "./Previsao";
-import { TrajectoryChart } from "./TrajectoryChart";
 
 type Campo = "nome" | "preco" | "entrada" | "parcelas" | "juros_mensal_pct" | "data_compra" | "custos_unicos" | "despesa_mensal_nova";
 type Cen = Record<Campo, string>;
@@ -91,23 +90,7 @@ function falhaDe(e: unknown, n: number): Falha {
 }
 
 function Grafico({ d, c }: { d: Simulador; c: CenarioOut }) {
-  const pts: Point[] = d.atual.trajetoria.map((p, i) => {
-    const com = c.resumo.trajetoria[i];
-    return { date: isoDay(p.data), value: Number(p.saldo), sim: Number(com.saldo), real: false, events: [], texto: moneyText(p.saldo) ?? undefined };
-  });
-  if (!pts.length || d.atual.trajetoria.some((p, i) => p.saldo === null || c.resumo.trajetoria[i]?.saldo == null)) {
-    return <p className="w-lede">Sem saldo de partida, não dá para desenhar a curva.</p>;
-  }
-  return (
-    <>
-      <ul className="legend" aria-label="Legenda do gráfico">
-        <li><span className="key forecast" />Sem a compra</li>
-        <li><span className="key sim" />Com a compra</li>
-        <li className="faint">de {dayMonth(pts[0].date)} a {dayMonth(pts[pts.length - 1].date)}</li>
-      </ul>
-      <TrajectoryChart traj={{ points: pts, end: pts[pts.length - 1], start: pts[0].value }} simOn highlight={null} drawKey={`compra-${c.nome}`} />
-    </>
-  );
+  return <CurvaComparada antes={d.atual.trajetoria} depois={c.resumo.trajetoria} rotulos={["Sem a compra", "Com a compra"]} drawKey={`compra-${c.nome}`} />;
 }
 
 const reais = (s: string | null) => (s === null ? "indisponível" : moneyText(s) ?? "indisponível");
