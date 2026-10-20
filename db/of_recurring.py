@@ -46,7 +46,7 @@ def salvar_recorrencias(connection_id: int, itens: list) -> None:
 # Uma linha por ocorrência casada. O join da transação fica preso às contas do
 # MESMO item da recorrência: o id de transação da Pluggy não é único entre usuários.
 _SQL_OCORRENCIAS = """
-select rp.id rp_id, rp.description, rp.average_amount,
+select rp.id rp_id, rp.description, rp.average_amount, t.imported_launch_id,
        t.transaction_date, t.amount, t.category, t.raw->'merchant' merchant,
        t.raw->'creditCardMetadata' cc_meta, a.id account_id, a.type account_type, a.name account_name,
        a.raw->>'number' account_number

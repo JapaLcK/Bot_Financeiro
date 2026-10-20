@@ -5544,6 +5544,13 @@ async function simularPrazo() {
   }
 }
 
+// A estimativa do dia a dia (servidor) entra na conta quando `cobertura.inclui_estimativa_variavel`.
+function _notaProjecao(c) {
+  return (c.cobertura && c.cobertura.inclui_estimativa_variavel)
+    ? "Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas − estimativa dos gastos do dia a dia. Não autoriza uma compra."
+    : "Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.";
+}
+
 function _renderProjection(p) {
   const resEl = document.getElementById("boleto-sim-result");
   if (!resEl || !p) return;
@@ -5571,12 +5578,13 @@ function _renderProjection(p) {
       ${line("Gastos fixos", p.gastos_fixos_previstos, false, true)}
       ${line(`Boletos até lá (${p.n_boletos})`, p.boletos_ate, false)}
       ${line("Faturas de cartão até lá", p.faturas_cartao, false, true)}
+      ${p.despesa_variavel_estimada == null ? "" : line("Gastos do dia a dia (estimativa)", p.despesa_variavel_estimada, false, true)}
       ${line("Boleto novo em análise", p.boleto_novo, false, true)}
       <div style="border-top:1px solid rgba(128,128,128,.25);margin-top:6px;padding-top:6px;display:flex;justify-content:space-between;font-weight:700">
         <span>Projeção do caixa</span><span style="color:var(--text)">${available ? _fmtBRL(p.projetado) : "Indisponível"}</span>
       </div>
       ${_forecastBanksWarning(p)}
-      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>
+      <div style="font-size:.68rem;color:var(--text-3);margin-top:6px">${_notaProjecao(p)}</div>
     </div>`;
 }
 
@@ -5641,7 +5649,7 @@ function _renderForecast(fc) {
       ${tile(30, h["30"])}${tile(60, h["60"])}${tile(90, h["90"])}
     </div>
     ${_forecastBanksWarning(fc)}
-    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">Projeção condicional: saldo + receitas previstas − gastos fixos − boletos − faturas. Não inclui estimativa variável nem autoriza uma compra.</div>`;
+    <div style="font-size:.68rem;color:var(--text-3);margin-top:8px">${_notaProjecao(fc)}</div>`;
 }
 
 // Aviso quando a previsão não parte do saldo consolidado: ou o usuário tem bancos

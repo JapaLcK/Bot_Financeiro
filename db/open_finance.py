@@ -1895,6 +1895,13 @@ def _normalize_merchant(s) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def merchant_contido(fixo, texto) -> bool:
+    """Puro: o nome do `fixo` está contido no `texto` como PALAVRAS inteiras ("gas" não casa "gasolina").
+    Um sentido só: "Conta de luz" não come o gasto "Conta"."""
+    nf, nt = _normalize_merchant(fixo), _normalize_merchant(texto)
+    return bool(nf and nt and f" {nf} " in f" {nt} ")
+
+
 def merchant_similarity(a, b) -> bool:
     """Puro: dois estabelecimentos são 'parecidos'? Substring ou token (>=3) em comum."""
     na, nb = _normalize_merchant(a), _normalize_merchant(b)

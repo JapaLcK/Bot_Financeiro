@@ -22,14 +22,14 @@ _JUROS = rf"^[0-9]{{1,2}}(\.[0-9]{{1,{CASAS_JUROS}}})?$"
 
 # Premissas para a pessoa (as da `ds.PREMISSAS` falam com a tool de IA, com nomes de campo). Fonte única na v2.
 PREMISSAS_V2 = [
-    f"Saldo de {DIAS} dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos previstos − boletos − faturas observadas), mais a compra simulada.",
+    f"Saldo de {DIAS} dias: o mesmo da previsão de saldo (saldo + receitas fixas − gastos fixos previstos − boletos − faturas observadas − a estimativa dos gastos do dia a dia, quando há histórico), mais a compra simulada.",
     f"O pior dia e os dias abaixo da reserva contam hoje, depois dos compromissos e da compra, até o dia {DIAS} inclusive ({DIAS + 1} datas).",
     "Na data da compra sai o preço cheio (à vista) ou a entrada (parcelado), mais os custos únicos.",
     "A primeira parcela e a despesa mensal nova saem um mês depois, no mesmo dia (ajustado ao fim do mês).",
     "Parcelado com juros usa a tabela Price; a diferença de centavos do arredondamento vai para a última parcela.",
     f"O total pago soma o que sai na compra e todas as parcelas, inclusive as que caem depois do dia {DIAS}. Não inclui a despesa mensal nova, que não tem fim definido.",
     "Receitas fixas só entram quando mensais ou anuais; gastos fixos entram em todas as frequências.",
-    "Não inclui gastos avulsos futuros nem IOF, seguro ou tarifas que você não informou.",
+    "Não inclui IOF, seguro ou tarifas que você não informou.",
     f"Valores em reais aceitam no máximo {EXTENSO[CASAS_DINHEIRO]} casas decimais; os juros, no máximo {EXTENSO[CASAS_JUROS]}.",
 ]
 
