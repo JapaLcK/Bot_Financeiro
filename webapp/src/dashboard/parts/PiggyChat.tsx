@@ -39,6 +39,7 @@ const fila: { id: number; text: ReactNode }[] = [];
 const aRevelar = new Set<number>();
 const REVELA_MS = 2000; // teto do atraso somado das palavras; 30 ms por palavra até caber
 const REVELA_PASSO = 30;
+const REVELA_ANIM = 500; // duração da animação de cada palavra (inline no span: a CSS não repete o valor)
 
 // Cada palavra é um <span> que anima só opacidade/blur/subida (chat.css); o espaço e as quebras de linha ficam como texto.
 function Revela({ t }: { t: string }) {
@@ -46,7 +47,7 @@ function Revela({ t }: { t: string }) {
   const n = partes.length >> 1 || 1;
   const passo = Math.min(REVELA_PASSO, REVELA_MS / n);
   let w = 0;
-  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms` }}>{p}</span>)}</>;
+  return <>{partes.map((p, i) => i % 2 || !p ? p : <span key={i} className="rv" style={{ animationDelay: `${Math.round(w++ * passo)}ms`, animationDuration: `${REVELA_ANIM}ms` }}>{p}</span>)}</>;
 }
 
 // Resposta do Piggy ou de um agente: quem fala (avatar, nome, etiqueta), o texto e os blocos (vivos, com o estado
@@ -82,8 +83,15 @@ function PiggySays({ m }: { m: Msg }) {
   if (m.estado === "pronto" && aRevelar.has(m.id)) revela.current = true;
   useEffect(() => { if (m.estado === "pronto") aRevelar.delete(m.id); }, [m.estado, m.id]);
   const texto = typeof m.text === "string" ? m.text : "";
-  const animar = revela.current && m.estado === "pronto" && !!texto;
-  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS);
+  // Acabada a última palavra, volta ao texto contínuo: spans inline-block por palavra viram uma parada por palavra no leitor de tela.
+  const [fim, setFim] = useState(false);
+  const animar = revela.current && m.estado === "pronto" && !!texto && !fim;
+  const total = Math.min(REVELA_PASSO * texto.split(/\s+/).length, REVELA_MS) + REVELA_ANIM; // a última palavra começa antes e dura REVELA_ANIM
+  useEffect(() => {
+    if (!animar) return;
+    const id = setTimeout(() => setFim(true), total);
+    return () => clearTimeout(id);
+  }, [animar, total]);
   return (
     <FrameScope.Provider value={`m${m.id}-`}>
       <p className="msg-autor"><img src={a ? agenteImg(a.kind) : ICON} alt="" width={22} height={22} /><b>{a ? a.nome : "Piggy"}</b>{etiqueta && <span className="msg-tag">{etiqueta}</span>}</p>
