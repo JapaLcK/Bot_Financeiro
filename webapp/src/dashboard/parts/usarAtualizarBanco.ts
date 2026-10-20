@@ -30,6 +30,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
   const [estado, setEstado] = useState<{ uid: number; maquina: EstadoAtualizar }>({ uid: 0, maquina: OCIOSO });
   const [dito, setDito] = useState({ t: "", n: 0 });
   const vivo = useRef<AbortController | null>(null);
+  const enviando = useRef(false); // a fase da rodada em ref (síncrona): `acompanhando` segue sozinha e deixa Reconectar/Desconectar livres; só o envio do POST os trava
   const marco = useRef(Date.now());
   const dentroRef = useRef(dentro);
   dentroRef.current = dentro;
@@ -51,6 +52,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
   const abortar = () => {
     vivo.current?.abort();
     vivo.current = null;
+    enviando.current = false;
     marco.current = Date.now();
     setEstado({ uid: 0, maquina: OCIOSO });
     calar(); // o anúncio é da rodada (e da conta) que acabou: o texto do banco da conta anterior não fica na região viva
@@ -77,7 +79,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
       atual,
       enviar: () => comPrazo((s) => atualizarBancos(uidDaRodada, s), PRAZO_POST_MS, ctrl.signal),
       ler: () => comPrazo((s) => lerConexoes(uidDaRodada, s, true), PRAZO_LEITURA_MS, ctrl.signal), // a leitura que nunca volta vira AbortError (transitória): a cadência segue e o teto fecha a rodada
-      aoMudar: (maquina) => { if (atual()) setEstado({ uid: uidDaRodada, maquina }); },
+      aoMudar: (maquina) => { if (atual()) { enviando.current = maquina.fase === "enviando"; setEstado({ uid: uidDaRodada, maquina }); } },
       recarregar: () => { if (atual()) { marco.current = Date.now(); void qc.invalidateQueries(); } }, // o mesmo que um aviso do SSE: o aviso some porque o servidor deixa de mandar o motivo
       falhou: (e) => {
         if (!(e instanceof ErroApi)) return;
@@ -93,7 +95,7 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
     marco.current = Date.now();
     void entrada(d)
       .catch(() => { if (atual()) setEstado({ uid: uidDaRodada, maquina: OCIOSO }); })
-      .finally(() => { if (vivo.current === ctrl) vivo.current = null; marco.current = Date.now(); });
+      .finally(() => { if (vivo.current === ctrl) { vivo.current = null; enviando.current = false; } marco.current = Date.now(); });
   }
 
   useEffect(() => { marco.current = Date.now(); }, [ligado]); // o aviso entrou ou saiu da tela: o que já estava no cache não parte nada
@@ -108,6 +110,6 @@ export function useAtualizarBanco({ ativo, semMotivo, dentro, automatico = true 
     acao, maquina: vista, dito, cancelar: abortar,
     atualizar: () => { if (uid !== undefined && !vivo.current) correr(uid, atualizar); }, // o ref, não o estado: dois cliques no mesmo tique fazem 1 POST
     calar,
-    emVoo: () => vivo.current !== null, // há rodada em curso (síncrono, como o ref do `atualizar`): quem não pode andar junto com ela confere aqui
+    enviando: () => enviando.current, // o POST está saindo (síncrono): quem não pode andar junto com ele confere aqui; no `acompanhando` Reconectar e Desconectar podem
   };
 }

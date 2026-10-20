@@ -26,7 +26,7 @@ const bloco = (children: ReactNode) => <View style={{ gap: espaco.lg, paddingVer
 export function ProgressoMilhao() {
   const { expirou } = useSessao(), { navegar } = useNavegarPainel();
   const [dado, setDado] = useState<Dado | null>(null), [falha, setFalha] = useState<Falha | null>(null), [lendo, setLendo] = useState(true);
-  const ctl = useRef<AbortController | null>(null);
+  const ctl = useRef<AbortController | null>(null), ir = useRef(navegar); ir.current = navegar; // `navegar` muda a cada render: fora das deps de `ler`, senão o foco relê sem parar
   const ler = useCallback(async () => {
     ctl.current?.abort(); const c = (ctl.current = new AbortController());
     setLendo(true); setFalha((f) => (f === "erro" ? null : f));
@@ -35,6 +35,7 @@ export function ProgressoMilhao() {
       if (ctl.current !== c) return; // outra leitura tomou o lugar, ou a tela saiu
       if (e instanceof SessaoExpirada) return expirou(e.detalhe);
       if (e instanceof RequisicaoSuperada) return;
+      if (e instanceof ErroDeApi && (e.status === 402 || codigoDe(e) === "open_finance_onboarding_required")) { setDado(null); return ir.current("/resumo", "navigate"); } // assinatura inativa / onboarding pendente: tentar de novo não resolve; o foco do Resumo faz o provider reler e cair no portão
       if (e instanceof ErroDeApi && e.status >= 400 && e.status < 500) { const k = codigoDe(e); setDado(null); setFalha(k === "pro_required" ? "convite" : k === "password_required" ? "senha" : "erro"); return; }
       setFalha("erro");
     } finally { if (ctl.current === c) setLendo(false); }
