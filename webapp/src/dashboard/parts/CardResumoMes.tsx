@@ -1,13 +1,15 @@
 import type { ResumoDoMes } from "../lib/api-v2.gen";
 import { decimal, moneyText } from "../lib/format.js";
 import { mesAno } from "../lib/metas-textos";
+import { textos } from "../lib/bancos";
 import { href } from "../router";
+import { Selos } from "./Selos";
 
 const BIG = BigInt;
 // Corpo fora do contrato (ou de outro mês que o pedido) não desenha meio número.
 export const contratoResumoMes = (d: unknown, mes: string) => {
   const x = d as ResumoDoMes | null;
-  return !!x && x.mes === mes && decimal(x.entrou) !== null && decimal(x.saiu) !== null;
+  return !!x && x.mes === mes && decimal(x.entrou) !== null && decimal(x.saiu) !== null && textos(x.motivos);
 };
 
 // entrou − saiu em inteiros exatos (BigInt, nunca float), de volta como texto decimal para o moneyText.
@@ -29,6 +31,7 @@ export function CardResumoMes({ d }: { d: ResumoDoMes }) {
         <div><dt>Saiu</dt><dd className="num">{moneyText(d.saiu)}</dd></div>
         <div><dt>Sobrou</dt><dd className={`num${s.startsWith("-") ? " warn" : ""}`}>{moneyText(s)}</dd></div>
       </dl>
+      <Selos motivos={d.motivos} />{/* o mesmo aviso que o texto dá (conciliação pendente, início do histórico…) */}
       <a className="link msg-open" href={href("/")}>Ver o resumo<i className="ph ph-arrow-right" aria-hidden="true" /></a>
     </section>
   );

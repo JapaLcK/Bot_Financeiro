@@ -186,8 +186,27 @@ for (const [entrou, saiu, sobrou] of [["0.10", "0.30", "−R$ 0,20"], ["0", "310
   });
 }
 
+test("Repórter: os motivos do mês viram selos no card, como o texto avisa", async () => {
+  const { ctx, page } = await abrir({ width: 1440, tipo: "resumo_mes", corpo: { ...RES("10.00", "5.00"), motivos: ["conciliacao_pendente"] } });
+  await perguntar(page, "Repórter");
+  await carregado(page);
+  assert.deepEqual(await card(page).locator(".selo").allInnerTexts(), ["conciliação pendente"]);
+  await ctx.close();
+});
+
+test("Xerife: total de 7 dígitos em 390 não sai do card nem rola a página", async () => {
+  const o = RESPOSTAS.orcamentos_categoria.padrao;
+  const { ctx, page } = await abrir({ width: 390, tipo: "orcamentos", corpo: { ...o, total: { ...o.total, gasto: "1234567.89", teto: "9999999.99" } } });
+  await perguntar(page, "Xerife");
+  await carregado(page);
+  const r = await card(page).evaluate((c) => { const b = c.getBoundingClientRect();
+    return { fora: [...c.querySelectorAll("*")].filter((e) => e.getBoundingClientRect().right > b.right + 0.5).map((e) => e.className), pagina: document.documentElement.scrollWidth > innerWidth }; });
+  assert.deepEqual(r, { fora: [], pagina: false });
+  await ctx.close();
+});
+
 test("Repórter: corpo de outro mês ou fora do contrato: erro, nunca número", async () => {
-  for (const corpo of [RES("1.00", "1.00", "2026-09"), RES(1, "1.00"), RES("abc", "1.00"), RES("1.00", null)]) {
+  for (const corpo of [RES("1.00", "1.00", "2026-09"), RES(1, "1.00"), RES("abc", "1.00"), RES("1.00", null), { ...RES("1.00", "1.00"), motivos: [{}] }, { ...RES("1.00", "1.00"), motivos: null }]) {
     const { ctx, page } = await abrir({ width: 1440, tipo: "resumo_mes", corpo });
     await perguntar(page, "Repórter");
     await card(page).getByRole("button", { name: "Tentar de novo" }).waitFor({ timeout: 5000 });
