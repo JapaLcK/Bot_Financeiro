@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>PigBank — Seus gastos se organizam enquanto você vive</title>
+<meta name="robots" content="noindex"/>
+<meta name="theme-color" content="#111111"/>
+<link href="/favicon.png?v=3" rel="icon" type="image/png"/>
+<!-- /oferta: LP de comparação (fora do sitemap e do robots; nenhum link do site leva a ela).
+     Convertida da LP exportada pelo Claude Design: sem runtime, sem Google Fonts. Os blocos
+     repetidos (marquees, planos, FAQ) estão expandidos no markup; oferta.js só liga o que
+     precisa de JS (ciclo, chat, animações ao rolar, barra fixa). -->
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/Archivo-Variable.woff2">
+<style>
+@font-face{font-family:'Archivo';font-style:normal;font-weight:400 900;font-stretch:62% 125%;font-display:swap;src:url(/fonts/Archivo-Variable.woff2) format("woff2")}
+body{margin:0;background:#111111}
+a{color:inherit}a:hover{opacity:.85}
+.pb-d{font-family:'Archivo',sans-serif;font-stretch:62%;font-weight:900;text-transform:uppercase;line-height:.9;letter-spacing:-0.005em}
+@keyframes pgNtf{0%{opacity:0;transform:translateY(-150%) scale(.94)}20%{opacity:1}65%{transform:translateY(6%) scale(1)}82%{transform:translateY(-1.5%)}100%{opacity:1;transform:none}}.pg-wait .pg-ntf{opacity:0;transform:translateY(-150%)}.pg-go .pg-ntf{animation:pgNtf 1.1s cubic-bezier(.22,.8,.3,1) .5s both}@media (prefers-reduced-motion: reduce){.pg-go .pg-ntf{animation:none}}@media (max-width: 760px){.pg-ntf{left:10px!important;right:10px!important;top:10px!important;padding:10px 12px!important;border-radius:20px!important}.pg-ntf b,.pg-ntf span{font-size:12.5px!important}}
+@keyframes dkIn{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:none}}@keyframes dkArc{from{stroke-dasharray:0 100}}.dk-wait .dk{opacity:0}.dk-wait .dk-bar{width:0!important}.dk-wait .pb-donut circle+circle{stroke-dasharray:0 100}.dk-go .dk{animation:dkIn .55s cubic-bezier(.2,.8,.2,1) both}.dk-go .dk:nth-child(1){animation-delay:0.15s}.dk-go .dk:nth-child(2){animation-delay:0.27s}.dk-go .dk:nth-child(3){animation-delay:0.39s}.dk-go .dk:nth-child(4){animation-delay:0.51s}.dk-go .dk:nth-child(5){animation-delay:0.63s}.dk-go .dk:nth-child(6){animation-delay:0.75s}.dk-go .dk-bar{animation:baFill 2.2s cubic-bezier(.45,.05,.25,1) .9s both}.dk-go .pb-donut circle+circle{animation:dkArc 1.4s cubic-bezier(.3,.7,.2,1) .7s both}.dk-go .pb-donut circle:nth-child(3){animation-delay:.85s}.dk-go .pb-donut circle:nth-child(4){animation-delay:1s}.dk-go .pb-donut circle:nth-child(5){animation-delay:1.15s}@media (prefers-reduced-motion: reduce){.dk-go .dk,.dk-go .dk-bar,.dk-go .pb-donut circle{animation:none}}
+@keyframes pbPulseLite{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,45,142,.38)}50%{transform:scale(1.015)}75%{box-shadow:0 0 0 9px rgba(255,45,142,0)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,45,142,0)}}.pb-pulse-lite{animation:pbPulseLite 2.8s ease-in-out infinite}@media (prefers-reduced-motion: reduce){.pb-pulse-lite{animation:none}}
+@keyframes pbPulse{0%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,45,142,.5)}50%{transform:scale(1.025)}70%{box-shadow:0 0 0 14px rgba(255,45,142,0)}100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,45,142,0)}}.pb-pulse{animation:pbPulse 2.4s ease-in-out infinite;transition:filter .15s}.pb-pulse:hover{animation-play-state:paused;filter:brightness(1.06)}@media (prefers-reduced-motion: reduce){.pb-pulse{animation:none}}
+@keyframes baRow{0%{opacity:0;transform:translateX(-14px)}100%{opacity:1;transform:none}}@keyframes baEsq{0%,100%{transform:scale(1)}40%{transform:scale(1.14)}}.pb-wait .ba-sub,.pb-wait .ba-q2,.pb-wait .ba-a2{opacity:0}.pb-go .ba-sub{animation:baRow .5s cubic-bezier(.2,.8,.2,1) both}.pb-go .ba-sub1{animation-delay:1s}.pb-go .ba-sub2{animation-delay:1.45s}.pb-go .ba-sub3{animation-delay:1.9s}.ba-esq{transform-origin:right center}.pb-go .ba-esq{animation:baEsq .6s ease-in-out 2.6s 2}.pb-go .ba-q2{animation:baIn .4s cubic-bezier(.2,.8,.2,1) 1.4s both}.pb-go .ba-typ.ba-typ2{animation:baTyp 1.3s ease 1.95s both}.pb-go .ba-a2{animation:baIn .4s cubic-bezier(.2,.8,.2,1) 3.25s both}@media (prefers-reduced-motion: reduce){.pb-go .ba-sub,.pb-go .ba-esq,.pb-go .ba-q2,.pb-go .ba-a2{animation:none}.pb-go .ba-typ.ba-typ2{animation:none;opacity:0}}
+@keyframes baFill{from{width:0}}@keyframes baNtf{0%{opacity:0;transform:translateY(-170%) scale(.94)}20%{opacity:1}65%{transform:translateY(5%) scale(1)}82%{transform:translateY(-1.5%)}100%{opacity:1;transform:none}}@keyframes baPig{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-7px) rotate(2deg)}}.pb-ntf-card{overflow:hidden}.pb-wait .ba-fill{width:0!important}.pb-go .ba-fill{animation:baFill 3.4s cubic-bezier(.45,.05,.25,1) .5s both}.pb-go .ba-fill2{animation-delay:.9s}.pb-wait .pb-ntf{opacity:0;transform:translateY(-170%)}.pb-go .pb-ntf{animation:baNtf 1.1s cubic-bezier(.22,.8,.3,1) 1.2s both}.pb-fat-pig{animation:baPig 3.6s ease-in-out infinite;transform-origin:50% 90%}.pb-bento>.pb-fat-card{overflow:visible!important}@media (prefers-reduced-motion: reduce){.pb-go .ba-fill,.pb-go .pb-ntf,.pb-fat-pig{animation:none}}
+@keyframes baIn{0%{opacity:0;transform:translateY(10px) scale(.94)}100%{opacity:1;transform:none}}@keyframes baTyp{0%{opacity:0;transform:scale(.85)}12%,88%{opacity:1;transform:none}100%{opacity:0;transform:scale(.95)}}@keyframes baDot{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-3px);opacity:1}}@keyframes baBar{0%{transform:scaleY(.12)}70%{transform:scaleY(1.15)}100%{transform:scaleY(1)}}@keyframes baShow{0%{opacity:0}100%{opacity:1}}@keyframes baRec{0%{box-shadow:0 0 0 0 rgba(255,45,142,.55)}100%{box-shadow:0 0 0 12px rgba(255,45,142,0)}}.pb-wait .ba-q,.pb-wait .ba-a,.pb-wait .ba-typ{opacity:0}.pb-go .ba-typ,.pb-bento .ba-typ{opacity:0}.pb-go .ba-q{animation:baIn .4s cubic-bezier(.2,.8,.2,1) .25s both}.pb-go .ba-typ{animation:baTyp 1.3s ease .8s both}.pb-go .ba-typ span{animation:baDot 1s ease-in-out infinite}.pb-go .ba-typ span:nth-child(2){animation-delay:.15s}.pb-go .ba-typ span:nth-child(3){animation-delay:.3s}.pb-go .ba-a{animation:baIn .4s cubic-bezier(.2,.8,.2,1) 2.1s both}.ba-wave span{transform-origin:center}.pb-wait .ba-wave span{transform:scaleY(.12)}.pb-go .ba-wave span{animation:baBar .32s ease-out both}.pb-go .ba-wave span:nth-child(1){animation-delay:0.35s}.pb-go .ba-wave span:nth-child(2){animation-delay:0.61s}.pb-go .ba-wave span:nth-child(3){animation-delay:0.87s}.pb-go .ba-wave span:nth-child(4){animation-delay:1.13s}.pb-go .ba-wave span:nth-child(5){animation-delay:1.39s}.pb-go .ba-wave span:nth-child(6){animation-delay:1.65s}.pb-go .ba-wave span:nth-child(7){animation-delay:1.91s}.pb-go .ba-wave span:nth-child(8){animation-delay:2.17s}.pb-go .ba-wave span:nth-child(9){animation-delay:2.43s}.pb-go .ba-wave span:nth-child(10){animation-delay:2.69s}.ba-time span{opacity:0}.ba-time span:first-child{opacity:1}.pb-bento:not(.pb-wait):not(.pb-go) .ba-time span:last-child{opacity:1}.pb-go .ba-time span:nth-child(2){animation:baShow .01s 1.2s both}.pb-go .ba-time span:nth-child(3){animation:baShow .01s 2.1s both}.pb-go .ba-time span:nth-child(4){animation:baShow .01s 3s both}.pb-go .ba-play{animation:baRec .9s ease-out .3s 3}@media (prefers-reduced-motion: reduce){.pb-go .ba-q,.pb-go .ba-a,.pb-go .ba-wave span,.pb-go .ba-play{animation:none}.pb-go .ba-typ{animation:none;opacity:0}.pb-go .ba-time span{animation:none}.pb-go .ba-time span:last-child{opacity:1}}
+@keyframes chPop{0%{opacity:0;transform:translateY(8px) scale(.96)}100%{opacity:1;transform:none}}@keyframes chDot{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-4px);opacity:1}}.ch-pop{animation:chPop .28s cubic-bezier(.2,.8,.2,1) both}.ch-dot{animation:chDot 1.2s ease-in-out infinite}.ch-dot:nth-child(2){animation-delay:.15s}.ch-dot:nth-child(3){animation-delay:.3s}@media (prefers-reduced-motion: reduce){.ch-pop,.ch-dot{animation:none}}
+@keyframes pbUp{0%{opacity:0;transform:translateY(16px)}100%{opacity:1;transform:none}}
+@keyframes pbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes pbMarq{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.pb-u1{animation:pbUp .7s ease-out .15s both}
+.pb-u2{animation:pbUp .7s ease-out .55s both}
+.pb-u3{animation:pbUp .7s ease-out .95s both}
+.pb-u4{animation:pbUp .7s ease-out 1.35s both}
+.pb-fl{animation:pbFloat 6s ease-in-out infinite}
+.pb-mq{animation:pbMarq 40s linear infinite}
+.pb-mq2{animation:pbMarq 52s linear infinite reverse}
+.wa-bg{background-color:#EFEAE2;background-image:radial-gradient(rgba(84,101,111,.07) 1px,transparent 1.4px);background-size:16px 16px}
+.wa-out::after{content:"";position:absolute;top:0;right:-7px;border-top:8px solid #D9FDD3;border-right:8px solid transparent}
+.wa-in::before{content:"";position:absolute;top:0;left:-7px;border-top:8px solid #FFFFFF;border-left:8px solid transparent}
+
+/* ===== motion do hero (loop de 12s) ===== */
+.mo-chat,.mo-dash,.mo-m1,.mo-m2,.mo-m3,.mo-m4,.mo-t1,.mo-t2,.mo-tap,.mo-d1,.mo-d2,.mo-d3,.mo-bar,.mo-fill,.mo-dot{animation-duration:12s;animation-iteration-count:infinite;animation-timing-function:cubic-bezier(.22,.9,.24,1);animation-fill-mode:both}
+.mo-chat{animation-name:moChat}.mo-dash{animation-name:moDash}
+.mo-m1{animation-name:moM1;transform-origin:right top}.mo-m3{animation-name:moM3;transform-origin:right top}
+.mo-m2{animation-name:moM2;transform-origin:left top}.mo-m4{animation-name:moM4;transform-origin:left top}
+.mo-t1{animation-name:moT1}.mo-t2{animation-name:moT2}
+.mo-tap{animation-name:moTap}
+.mo-d1{animation-name:moD1}.mo-d2{animation-name:moD2}.mo-d3{animation-name:moD3}
+.mo-bar{animation-name:moBar}.mo-b2{animation-delay:.08s}.mo-b3{animation-delay:.16s}.mo-b4{animation-delay:.24s}.mo-b5{animation-delay:.32s}.mo-b6{animation-delay:.42s}
+.mo-fill{animation-name:moFill}
+.mo-dot{animation:moDot .9s ease-in-out infinite}.mo-dot:nth-child(2){animation-delay:.15s}.mo-dot:nth-child(3){animation-delay:.3s}
+@keyframes moChat{0%,51%{transform:none;opacity:1;filter:none}57%,96%{transform:translateX(-28%) scale(.94);opacity:0;filter:blur(2px)}98%,100%{transform:none;opacity:1;filter:none}}
+@keyframes moDash{0%,52%{transform:translateX(100%);opacity:1}58%,92%{transform:none;opacity:1}97%,100%{transform:none;opacity:0}}
+@keyframes moM1{0%,4%{opacity:0;transform:translateY(10px) scale(.9)}7%,94%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes moT1{0%,9%{opacity:0;transform:scale(.8)}11%,17%{opacity:1;transform:none}19%,100%{opacity:0;transform:scale(.9)}}
+@keyframes moM2{0%,18%{opacity:0;transform:translateY(8px) scale(.9)}21%,94%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes moM3{0%,27%{opacity:0;transform:translateY(10px) scale(.9)}30%,94%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes moT2{0%,32%{opacity:0;transform:scale(.8)}34%,40%{opacity:1;transform:none}42%,100%{opacity:0;transform:scale(.9)}}
+@keyframes moM4{0%,41%{opacity:0;transform:translateY(8px) scale(.9)}44%,94%{opacity:1;transform:none}96%,100%{opacity:0}}
+@keyframes moTap{0%,47%{opacity:0;transform:scale(.3)}49%{opacity:1;transform:scale(1)}52%,100%{opacity:0;transform:scale(1.6)}}
+@keyframes moD1{0%,56%{opacity:0;transform:translateY(14px)}60%,100%{opacity:1;transform:none}}
+@keyframes moD2{0%,64%{opacity:0;transform:translateY(14px)}68%,100%{opacity:1;transform:none}}
+@keyframes moD3{0%,70%{opacity:0;transform:translateY(14px)}74%,100%{opacity:1;transform:none}}
+@keyframes moBar{0%,59%{transform:scaleY(0)}66%,100%{transform:scaleY(1)}}
+@keyframes moFill{0%,67%{transform:scaleX(0)}77%,100%{transform:scaleX(1)}}
+@keyframes moDot{0%,60%,100%{transform:none;opacity:.5}30%{transform:translateY(-3px);opacity:1}}
+@media (max-width: 760px){.mo-wrap{min-height:540px!important}.mo-phone{top:24px!important;transform:rotate(-3deg) scale(.82)!important;transform-origin:center top}.mo-pig{width:110px!important;left:calc(50% + 44px)!important;bottom:20px!important}}
+@media (prefers-reduced-motion: reduce){.mo-chat,.mo-dash,.mo-m1,.mo-m2,.mo-m3,.mo-m4,.mo-t1,.mo-t2,.mo-tap,.mo-d1,.mo-d2,.mo-d3,.mo-bar,.mo-fill,.mo-dot{animation:none!important}.mo-dash,.mo-t1,.mo-t2,.mo-tap{display:none!important}}
+@media (max-width: 760px){.pb-bento{grid-template-columns:1fr 1fr!important;gap:10px!important}.pb-bento>div{aspect-ratio:1/1;min-height:0!important;padding:14px!important;border-radius:20px!important;gap:8px!important;overflow:hidden;position:relative;box-sizing:border-box}.pb-bento *{font-size:12px!important}.pb-bento>div>b{font-size:14px!important;line-height:1.2}.pb-bento .pb-d{font-size:34px!important;line-height:1}.pb-bento div[style*="padding: 10px 14px"]{padding:6px 9px!important;border-radius:12px 12px 12px 3px!important}.pb-bento div[style*="#D9FDD3"]{border-radius:12px 12px 3px 12px!important}.pb-bento div[style*="#1F1F1F"]{gap:6px!important;padding:6px 10px 6px 6px!important}.pb-bento span[style*="width: 34px"]{width:24px!important;height:24px!important;flex-basis:24px!important}.pb-bento span[style*="height: 26px"]{gap:2px!important;height:20px!important}.pb-bento>div>img{width:58px!important;right:-8px!important;bottom:-6px!important}.pb-bento>div[style*="#FF2D8E"]>b{max-width:72%}.pb-bento .pb-fat-t{max-width:54%!important}.pb-bento .pb-fat-pig{width:64cqw!important;right:-12cqw!important;bottom:-12cqw!important;z-index:2}.pb-bento *{line-height:1.25}.pb-bento .pb-d{white-space:nowrap}.pb-bento div[style*="padding: 10px 14px"]{font-size:11px!important;max-width:100%;box-sizing:border-box}.pb-bento div[style*="justify-content: space-between; font-size: 14px"]{font-size:11px!important;white-space:nowrap;gap:4px}.pb-bento div[style*="justify-content: space-between; font-size: 14px"] *{font-size:11px!important}.pb-bento span[style*="flex-direction: column; gap: 2px"]{min-width:0}.pb-bento span[style*="flex-direction: column; gap: 2px"] *{font-size:10.5px!important;white-space:nowrap}.pb-bento>div{container-type:inline-size}.pb-bento>div>div *,.pb-bento>div>div{font-size:8.4cqw!important}.pb-bento .pb-d{font-size:24cqw!important}.pb-bento div[style*="padding: 10px 14px"],.pb-bento div[style*="padding: 10px 14px"] *{font-size:8cqw!important}.pb-bento div[style*="justify-content: space-between; font-size: 14px"],.pb-bento div[style*="justify-content: space-between; font-size: 14px"] *{font-size:7.6cqw!important}.pb-bento span[style*="width: 34px"]{width:17cqw!important;height:17cqw!important;flex-basis:17cqw!important}.pb-bento span[style*="height: 26px"]{height:14cqw!important}.pb-bento>div>img{width:42cqw!important}.pb-bento .pb-ntf-x{display:none}.pb-bento .pb-ntf{padding:5cqw 5.5cqw!important;gap:4.5cqw!important;border-radius:10cqw!important}.pb-bento .pb-ntf-ic{width:15cqw!important;height:15cqw!important;flex-basis:15cqw!important;border-radius:4cqw!important;padding:2.6cqw!important}.pb-bento .pb-ntf-tx div,.pb-bento .pb-ntf-tx div *{font-size:5.6cqw!important}.pb-bento .pb-ntf-tx b{font-size:7cqw!important;line-height:1.2!important}.pb-bento .pb-ntf-tx>span{font-size:6.4cqw!important;white-space:nowrap}.pb-bento div[style*="height: 12px"]{height:8px!important}}
+@media (max-width: 760px){.pb-sec{grid-template-columns:1fr 1fr!important;gap:18px 12px!important;padding:24px 0 32px!important}.pb-sec>div{gap:8px!important}.pb-sec svg{width:18px;height:18px;flex:0 0 18px!important;margin-top:1px}.pb-sec b{font-size:13px!important;line-height:1.25}.pb-sec b+span{font-size:11.5px!important;line-height:1.35}}
+@media (max-width: 760px){.pb-dsb{flex:1 1 100%!important;flex-direction:row!important;align-items:center;overflow-x:auto;white-space:nowrap;padding:12px!important;gap:4px!important;border-right:0!important;border-bottom:1px solid #ECE9E4;scrollbar-width:none}.pb-dsb>div{flex:0 0 auto;font-size:13px!important;padding:8px 12px!important}.pb-dsb .pb-dlogo{margin:0 6px 0 0!important;padding:0 4px!important}.pb-dlogo b{display:none}.pb-dgrid{grid-template-columns:1fr 1fr!important;padding:12px!important;gap:10px!important}.pb-dgrid>div{padding:14px!important;border-radius:14px!important}.pb-dfull{grid-column:1/-1!important}.pb-kv{font-size:24px!important}.pb-dcat{flex-wrap:nowrap!important;gap:16px!important}.pb-donut{width:96px;height:96px;flex:0 0 96px}.pb-dcat>div{font-size:13px!important;gap:6px!important;min-width:0}.pb-hero{padding:28px 0 64px!important;gap:28px!important}.pb-hl{gap:20px!important}.pb-trust{flex-wrap:nowrap!important;gap:5px!important;font-size:clamp(9.5px,2.6vw,12px)!important;white-space:nowrap}.pb-hl{align-items:center!important;text-align:center}.pb-pill{align-self:center!important}.pb-ctas{width:100%;justify-content:center}.pb-trust{justify-content:center}.pb-pill{font-size:12px!important;padding:5px 12px 5px 5px!important;gap:8px!important;color:#9A9A9A!important;border-color:#262626!important;margin:0 0 -10px}.pb-new{font-size:10px!important;padding:2px 8px!important}.pb-h1{font-size:13.5vw!important}.pb-ctas{gap:8px!important}.pb-ctas a{flex:1 1 auto;justify-content:center;font-size:clamp(12px,3.4vw,14px)!important;padding:14px 12px!important;min-height:48px!important}.pb-arr{display:none}}
+@media (max-width: 760px){.pb-stk{display:none!important}.pb-navl{display:none!important}.pb-o1{left:12px!important}.pb-o2{right:12px!important;top:150px!important}.pb-o3{left:12px!important;right:12px!important}}
+@media (prefers-reduced-motion: reduce){.pb-u1,.pb-u2,.pb-u3,.pb-u4,.pb-fl,.pb-mq,.pb-mq2{animation:none}}
+@media (max-width: 760px){.pb-bento .pb-fat-n{font-size:34cqw!important;line-height:.95!important}.pb-bento .pb-fat-n .pb-cur{font-size:.42em!important}}
+@media (max-width: 760px){.pb-day{flex-direction:column!important;align-items:stretch!important;gap:28px!important}.pb-dayl{display:contents!important}.pb-dayh{order:1}.pb-day .pg-wrap{order:2;flex:none!important;width:100%}.pb-dayt{order:3}.pb-dayn{order:4;margin-top:-14px}}
+@media (max-width: 760px){.pb-tphone{zoom:.74}}
+.pb-wbtn{transition:transform .15s ease,box-shadow .15s ease,filter .15s ease}.pb-wbtn:hover{transform:translateY(-1px);filter:brightness(.97);box-shadow:0 4px 12px rgba(11,20,26,0.14)!important}.pb-wbtn:active{transform:scale(.98)}.pb-wbtn:focus-visible{outline:2px solid #111111;outline-offset:3px}
+@media (max-width: 760px){.pb-agents{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}.pb-agents>div{border-radius:20px!important}.pb-agents>div>div:first-child{height:150px!important;padding-top:14px!important}.pb-agents img{height:136px!important;max-width:94%!important}.pb-agents>div>div:last-child{padding:14px 14px 18px!important;gap:6px!important}.pb-agents .pb-d{font-size:26px!important}.pb-agents>div>div:last-child>span:last-child{font-size:13px!important;line-height:1.45!important}.pb-agents>div:last-child:nth-child(odd){grid-column:1/-1}.pb-agents .pb-agcta{min-height:0!important;padding:16px!important;gap:14px!important;border-radius:20px!important}.pb-agents .pb-agcta .pb-d{font-size:clamp(20px,6.2vw,28px)!important;line-height:1}.pb-agents .pb-agcta a{align-self:stretch!important;justify-content:center;text-align:center;font-size:13px!important;padding:12px 8px!important;min-height:44px!important;line-height:1.2}}
+@media (max-width: 760px){.pb-agents img.pb-agphoto{height:100%!important;max-width:none!important}}
+@media (max-width: 760px){.pb-sticky{display:flex!important;transform:translateY(140%);opacity:0;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .25s ease;pointer-events:none;bottom:calc(12px + env(safe-area-inset-bottom))!important}.pb-sticky.st-on{transform:none;opacity:1;pointer-events:auto}}@media (max-width: 760px) and (prefers-reduced-motion: reduce){.pb-sticky{transition:none}}
+@media (max-width: 760px){.pb-prova{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}.pb-prova>div:last-child{grid-column:1/-1}.pb-vcard{border-radius:20px!important}}
+
+/* ===== oferta: o que o runtime fazia em JS virou CSS/atributo ===== */
+[hidden]{display:none!important}
+/* o número da fatura é um filho do .pb-fat-n: sem isto o `.pb-bento *{font-size:12px!important}` do celular o encolhe a ~12px */
+.pb-bento .pb-fat-n [data-alvo]{font-size:inherit!important}
+#planos[data-ciclo=anual] .so-mensal,#planos[data-ciclo=mensal] .so-anual{display:none!important}
+.pb-ciclo{background:transparent;color:#111111}
+.pb-ciclo[aria-pressed=true]{background:#111111;color:#FFFFFF}
+details[name=faq]>summary{list-style:none}
+details[name=faq]>summary::-webkit-details-marker{display:none}
+details[name=faq]>summary:focus-visible{outline:2px solid #111111;outline-offset:3px}
+.fq-i{background:#111111;color:#FFFFFF}
+.fq-i::before{content:"+"}
+details[open]>summary .fq-i{background:#FF2D8E;color:#111111}
+details[open]>summary .fq-i::before{content:"\2212"}
+</style>
+<script src="/oferta.js?v=1" defer></script>
+</head>
+<body>
+<div style="font-family: 'Archivo', system-ui, sans-serif; color: #111111; background: #FFFFFF; width: 100%; overflow-x: hidden;">
+
+<!-- ============ HERO ============ -->
+<section id="topo" style="background: #111111; color: #FFFFFF; padding: 20px 20px 0;">
+<nav aria-label="Principal" style="position: sticky; top: 16px; z-index: 30; max-width: 1180px; margin: 0 auto; background: rgba(17,17,17,0.82); backdrop-filter: blur(14px); border: 1px solid #2A2A2A; border-radius: 999px; padding: 10px 10px 10px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px;">
+<a href="#topo" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #FFFFFF;">
+<img src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 30px; height: auto; display: block;">
+<span style="font-weight: 800; font-size: 21px; letter-spacing: -0.02em;">PigBank</span>
+</a>
+<div class="pb-navl" style="display: flex; align-items: center; gap: 28px; font-size: 15px;">
+<a href="#como-funciona" style="text-decoration: none; color: #BDBDBD;">Como funciona</a>
+<a href="#painel" style="text-decoration: none; color: #BDBDBD;">Painel</a>
+<a href="#planos" style="text-decoration: none; color: #BDBDBD;">Planos</a>
+</div>
+<a href="#planos" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 15px; padding: 12px 22px; border-radius: 999px; min-height: 44px; box-sizing: border-box; display: inline-flex; align-items: center;">Começar agora</a>
+</nav>
+
+<div class="pb-hero" style="max-width: 1180px; margin: 0 auto; padding: 72px 0 96px; display: flex; flex-wrap: wrap; align-items: center; gap: 56px;">
+<div class="pb-hl" style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 28px;">
+<div class="pb-u1 pb-pill" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; border: 1px solid #333333; border-radius: 999px; padding: 8px 16px 8px 10px; font-size: 14px; color: #D9D9D9;">
+<span class="pb-new" style="background: #FF2D8E; color: #111111; border-radius: 999px; padding: 3px 10px; font-weight: 800; font-size: 12px;">NOVO</span>
+Assistente financeiro com IA no WhatsApp
+</div>
+<h1 class="pb-d pb-u1 pb-h1" style="margin: 0; font-size: clamp(52px, 6.6vw, 100px); line-height: .92;"><span style="display: block; white-space: nowrap;">Seus gastos</span><span style="display: block; white-space: nowrap;">se organizam</span><span style="display: block; white-space: nowrap; color: #FF2D8E;">enquanto</span><span style="display: block; white-space: nowrap; color: #FF2D8E;">você vive.</span></h1>
+<p class="pb-u2" style="margin: 0; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: #BDBDBD; max-width: 520px;">Conecte seu banco uma vez e o Piggy organiza cada gasto no WhatsApp e num painel completo. O que não passa pelo banco, você manda num áudio.</p>
+<div class="pb-u2 pb-ctas" id="hero-cta" style="display: flex; flex-wrap: nowrap; align-items: center; gap: 12px;">
+<a href="#planos" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 17px; padding: 18px 30px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 10px; white-space: nowrap;">Quero viver sem planilha <span class="pb-arr">→</span></a>
+<a href="#como-funciona" style="color: #FFFFFF; text-decoration: none; font-weight: 600; font-size: 16px; padding: 18px 24px; border-radius: 999px; min-height: 58px; box-sizing: border-box; display: inline-flex; align-items: center; border: 1px solid #3A3A3A; white-space: nowrap;">Ver como funciona</a>
+</div>
+<div class="pb-u3 pb-trust" style="display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; color: #9A9A9A;">
+<span>Garantia de 7 dias</span><span>·</span><span>A partir de R$ 0,33 por dia</span><span>·</span><span>Sem app pra baixar</span>
+</div>
+</div>
+
+<div class="mo-wrap" style="flex: 1 1 460px; min-width: 0; position: relative; min-height: 640px;">
+<div style="position: absolute; inset: 0; background: #FF2D8E; border-radius: 40px; overflow: hidden;">
+</div>
+<img class="mo-pig" src="/brand/oferta/b8d6682715eabebc69fe2e4696acb39b.webp" alt="Piggy, o mascote do PigBank, de óculos escuros e moletom preto" style="position: absolute; left: calc(50% + 78px); bottom: 14px; width: 150px; height: auto; display: block; z-index: 4; filter: drop-shadow(0 18px 28px rgba(17,17,17,0.35));">
+<!-- iPhone com motion -->
+<div class="mo-phone" style="position: absolute; left: 50%; margin-left: -146px; top: 34px; width: 292px; border-radius: 52px; padding: 3px; background: linear-gradient(145deg, #5A5A5E 0%, #2C2C2E 30%, #1C1C1E 60%, #48484A 100%); box-shadow: 0 40px 80px rgba(17,17,17,0.35), 0 12px 28px rgba(17,17,17,0.25); transform: rotate(-4deg); z-index: 2; box-sizing: border-box;">
+<span style="position: absolute; left: -3px; top: 110px; width: 4px; height: 26px; border-radius: 3px 0 0 3px; background: #3A3A3C;"></span>
+<span style="position: absolute; left: -3px; top: 152px; width: 4px; height: 48px; border-radius: 3px 0 0 3px; background: #3A3A3C;"></span>
+<span style="position: absolute; right: -3px; top: 170px; width: 4px; height: 76px; border-radius: 0 3px 3px 0; background: #3A3A3C;"></span>
+<div style="background: #050505; border-radius: 49px; padding: 9px;">
+<div style="position: relative; border-radius: 40px; overflow: hidden; height: 556px; background: #EFEAE2; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;">
+<div style="position: absolute; top: 9px; left: 50%; margin-left: -48px; width: 96px; height: 28px; border-radius: 16px; background: #000000; z-index: 9;"></div>
+<!-- status bar -->
+<div style="position: absolute; top: 0; left: 0; right: 0; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 4px 26px 0 30px; box-sizing: border-box; z-index: 8; color: #000000;">
+<span style="font-size: 13px; font-weight: 600;">9:41</span>
+<span style="display: flex; align-items: center; gap: 4px;"><svg width="15" height="10" viewBox="0 0 18 12" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="6" width="3" height="6" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0" width="3" height="12" rx="1"></rect></svg><svg width="22" height="11" viewBox="0 0 27 13" aria-hidden="true"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" fill="none" stroke="#000" stroke-opacity="0.4"></rect><rect x="2" y="2" width="20" height="9" rx="2"></rect></svg></span>
+</div>
+
+<!-- CENA 1: WhatsApp -->
+<div class="mo-chat" style="position: absolute; inset: 0; display: flex; flex-direction: column; background: #EFEAE2;">
+<div style="flex: 0 0 auto; background: #F6F5F3; border-bottom: 1px solid #DEDCD8; display: flex; align-items: center; gap: 7px; padding: 46px 12px 8px 8px;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+<img src="/brand/oferta/b6773cde03c3fd2e557c31debc120db9.webp" alt="" style="width: 30px; height: 30px; border-radius: 50%; display: block;">
+<div style="display: flex; flex-direction: column; line-height: 1.2; flex: 1 1 auto;"><span style="font-size: 13.5px; font-weight: 600; color: #000000;">Piggy</span><span style="font-size: 10.5px; color: #8A8A8E;">online</span></div>
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="3"></rect><path d="M15 10.5l6-3.5v10l-6-3.5z"></path></svg>
+</div>
+<div class="wa-bg" style="flex: 1 1 auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 6px;">
+<div style="align-self: center; background: #FFFFFF; color: #54656F; border-radius: 7px; padding: 4px 9px; font-size: 10.5px; font-weight: 500; margin-bottom: 4px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Hoje</div>
+<div class="mo-m1 wa-out" style="align-self: flex-end; max-width: 80%; background: #D9FDD3; color: #111B21; border-radius: 8px 2px 8px 8px; padding: 5px 7px 5px 9px; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-right: 6px; position: relative;">gastei 58,90 no ifood<span style="float: right; display: inline-flex; align-items: center; gap: 2px; margin: 6px 0 -3px 8px; font-size: 9.5px; color: #667781;">12:40<svg width="15" height="10" viewBox="0 0 16 11" aria-hidden="true"><path d="M11.07.65 4.82 7.5 2.3 5" fill="none" stroke="#53BDEB" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path><path d="M14.9.65 8.65 7.5 7.6 6.5" fill="none" stroke="#53BDEB" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></span></div>
+<div style="display: grid;"><div class="mo-t1 wa-in" style="grid-area: 1 / 1; align-self: start; justify-self: start; background: #FFFFFF; border-radius: 2px 8px 8px 8px; padding: 10px 12px; display: flex; gap: 4px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-left: 6px; position: relative;"><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span></div><div class="mo-m2 wa-in" style="grid-area: 1 / 1; align-self: start; justify-self: start; max-width: 86%; background: #FFFFFF; color: #111B21; border-radius: 2px 8px 8px 8px; padding: 5px 7px 5px 9px; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-left: 6px; position: relative;">Anotado! <b>R$ 58,90</b> em <b>Alimentação</b> ✓<span style="float: right; margin: 6px 0 -3px 8px; font-size: 9.5px; color: #667781;">12:40</span></div></div>
+<div class="mo-m3 wa-out" style="align-self: flex-end; max-width: 80%; background: #D9FDD3; color: #111B21; border-radius: 8px 2px 8px 8px; padding: 5px 7px 5px 9px; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-right: 6px; position: relative;">quanto gastei com delivery?<span style="float: right; display: inline-flex; align-items: center; gap: 2px; margin: 6px 0 -3px 8px; font-size: 9.5px; color: #667781;">12:41<svg width="15" height="10" viewBox="0 0 16 11" aria-hidden="true"><path d="M11.07.65 4.82 7.5 2.3 5" fill="none" stroke="#53BDEB" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path><path d="M14.9.65 8.65 7.5 7.6 6.5" fill="none" stroke="#53BDEB" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg></span></div>
+<div style="display: grid;"><div class="mo-t2 wa-in" style="grid-area: 1 / 1; align-self: start; justify-self: start; background: #FFFFFF; border-radius: 2px 8px 8px 8px; padding: 10px 12px; display: flex; gap: 4px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-left: 6px; position: relative;"><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="mo-dot" style="width: 6px; height: 6px; border-radius: 50%; background: #8696A0; display: inline-block;"></span></div><div class="mo-m4 wa-in" style="grid-area: 1 / 1; align-self: start; justify-self: start; max-width: 86%; background: #FFFFFF; color: #111B21; border-radius: 2px 8px 8px 8px; padding: 5px 7px 5px 9px; font-size: 13px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin-left: 6px; position: relative;">Este mês foram <b>R$ 486</b> em 11 pedidos. É 32% a mais que em setembro.<span style="float: right; margin: 6px 0 -3px 8px; font-size: 9.5px; color: #667781;">12:41</span><div style="clear: both; margin: 8px -7px -5px -9px; border-top: 1px solid #E9EDEF; padding: 8px 0 6px; text-align: center; color: #0A7CFF; font-size: 13px; font-weight: 600; position: relative;">Abrir meu painel<span class="mo-tap" style="position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(17,17,17,0.18);"></span></div></div></div>
+</div>
+<div style="flex: 0 0 auto; background: #F6F5F3; display: flex; align-items: center; gap: 8px; padding: 7px 10px 20px;">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+<div style="flex: 1 1 auto; background: #FFFFFF; border: 1px solid #E2E0DC; border-radius: 16px; padding: 6px 10px; font-size: 12.5px; color: #B0B0B4;">Mensagem</div>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v4"></path></svg>
+</div>
+</div>
+
+<!-- CENA 2: Painel -->
+<div class="mo-dash" style="position: absolute; inset: 0; background: #F6F4F1; display: flex; flex-direction: column; padding: 50px 14px 16px; gap: 10px; box-sizing: border-box; color: #111111;">
+<div style="display: flex; align-items: center; justify-content: space-between;">
+<span style="display: flex; align-items: center; gap: 7px;"><img src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 22px; display: block;"><b style="font-size: 15px;">Visão geral</b></span>
+<span style="font-size: 11px; color: #6B6B6B; background: #FFFFFF; border-radius: 99px; padding: 4px 9px;">Outubro</span>
+</div>
+<div class="mo-d1" style="background: #111111; color: #FFFFFF; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 3px;">
+<span style="font-size: 11px; color: #9A9A9A; font-weight: 600;">Gastos do mês</span>
+<span style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em;">R$ 3.412</span>
+<span style="font-size: 11px; color: #FF2D8E; font-weight: 700;">Delivery: +32% vs. setembro</span>
+<div style="display: flex; align-items: flex-end; gap: 6px; height: 64px; margin-top: 8px;"><span class="mo-bar mo-b1" style="flex: 1 1 0; height: 45%; background: #3A3A3A; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span><span class="mo-bar mo-b2" style="flex: 1 1 0; height: 70%; background: #3A3A3A; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span><span class="mo-bar mo-b3" style="flex: 1 1 0; height: 55%; background: #3A3A3A; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span><span class="mo-bar mo-b4" style="flex: 1 1 0; height: 85%; background: #3A3A3A; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span><span class="mo-bar mo-b5" style="flex: 1 1 0; height: 62%; background: #3A3A3A; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span><span class="mo-bar mo-b6" style="flex: 1 1 0; height: 100%; background: #FF2D8E; border-radius: 5px 5px 2px 2px; transform-origin: bottom;"></span></div>
+</div>
+<div class="mo-d2" style="background: #FFFFFF; border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 7px;">
+<div style="display: flex; justify-content: space-between; font-size: 12px;"><b>Orçamento · Delivery</b><span style="color: #6B6B6B;">R$ 486 / 500</span></div>
+<div style="height: 9px; background: #F0EEEA; border-radius: 99px; overflow: hidden;"><div class="mo-fill" style="width: 97%; height: 9px; background: #FF2D8E; border-radius: 99px; transform-origin: left;"></div></div>
+<span style="font-size: 10.5px; font-weight: 700; color: #111111;">Quase no limite · o Xerife avisou</span>
+</div>
+<div class="mo-d3" style="background: #FFFFFF; border-radius: 16px; padding: 10px 14px; display: flex; flex-direction: column; gap: 7px; font-size: 12px;">
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 3px; background: #FF2D8E;"></span>Alimentação</span><b>R$ 1.296</b></span>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 3px; background: #111111;"></span>Casa</span><b>R$ 819</b></span>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; border-radius: 3px; background: #9A9A9A;"></span>Transporte</span><b>R$ 614</b></span>
+</div>
+</div>
+
+<!-- home indicator -->
+<div style="position: absolute; bottom: 6px; left: 50%; margin-left: -54px; width: 108px; height: 4px; border-radius: 3px; background: #000000; z-index: 9;"></div>
+</div>
+</div>
+</div>
+<div style="position: absolute; right: 18px; bottom: 12px; font-size: 11px; color: #111111; z-index: 3; font-weight: 600;">Imagens ilustrativas</div>
+</div>
+</div>
+
+<div class="pb-sec" style="max-width: 1180px; margin: 0 auto; border-top: 1px solid #2A2A2A; padding: 28px 0 36px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+<div style="display: flex; gap: 12px; align-items: flex-start;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 22px;"><path d="M3 21h18M5 21V10m14 11V10M12 3 3 8h18z"></path></svg><div style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Não sou banco</b><span style="font-size: 13px; color: #9A9A9A;">Não guardo nem movimento dinheiro</span></div></div>
+<div style="display: flex; gap: 12px; align-items: flex-start;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 22px;"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg><div style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Acesso só de leitura</b><span style="font-size: 13px; color: #9A9A9A;">Open Finance via Pluggy</span></div></div>
+<div style="display: flex; gap: 12px; align-items: flex-start;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 22px;"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg><div style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Nunca vejo sua senha</b><span style="font-size: 13px; color: #9A9A9A;">Você autoriza no app do banco</span></div></div>
+<div style="display: flex; gap: 12px; align-items: flex-start;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 22px;"><path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v10"></path></svg><div style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Desconecta quando quiser</b><span style="font-size: 13px; color: #9A9A9A;">Direto no painel, em segundos</span></div></div>
+</div>
+</section>
+
+<!-- ============ BENTO ============ -->
+<section style="background: #F6F4F1; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 56px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 820px;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px);">Você conversa. <span style="color: #FF2D8E;">O Piggy organiza.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555;">Gastos, cartões, faturas, boletos e metas. Tudo numa conversa no WhatsApp, sem planilha e sem app.</p>
+</div>
+<div class="pb-bento" id="bento" style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+<div style="background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div class="ba-q" style="align-self: flex-end; background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 10px 14px; font-size: 15px;">gastei 32 no almoço</div>
+<div style="align-self: flex-start; display: grid;">
+<div class="ba-typ" aria-hidden="true" style="grid-area: 1 / 1; align-self: start; justify-self: start; background: #F6F4F1; border-radius: 16px 16px 16px 4px; padding: 12px 14px; display: flex; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span></div>
+<div class="ba-a" style="grid-area: 1 / 1; background: #F6F4F1; border-radius: 16px 16px 16px 4px; padding: 10px 14px; font-size: 15px;">Anotado! <b>Alimentação</b> ✓</div>
+</div>
+</div>
+<b style="font-size: 17px;">Manda do seu jeito</b>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border-radius: 999px; padding: 10px 14px;">
+<span class="ba-play" style="width: 34px; height: 34px; border-radius: 50%; background: #FF2D8E; display: flex; align-items: center; justify-content: center; flex: 0 0 34px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#111111" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg></span>
+<span class="ba-wave" style="display: flex; align-items: center; gap: 3px; height: 26px;"><span style="width: 3px; height: 30%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 70%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 100%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 50%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 80%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 40%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 90%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 60%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 30%; background: #FFFFFF; border-radius: 2px;"></span><span style="width: 3px; height: 70%; background: #FFFFFF; border-radius: 2px;"></span></span>
+<span class="ba-time" style="display: grid; font-size: 13px; color: #9A9A9A;"><span style="grid-area: 1 / 1; background: #1F1F1F;">0:00</span><span style="grid-area: 1 / 1; background: #1F1F1F;">0:01</span><span style="grid-area: 1 / 1; background: #1F1F1F;">0:02</span><span style="grid-area: 1 / 1; background: #1F1F1F;">0:03</span></span>
+</div>
+<b style="font-size: 17px;">Áudio de 3 segundos</b>
+</div>
+<div style="background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; justify-content: space-between; font-size: 14px;"><span>Delivery</span><b>78%</b></div>
+<div style="height: 12px; background: #F0EEEA; border-radius: 99px;"><div class="ba-fill" style="width: 78%; height: 12px; background: #FF2D8E; border-radius: 99px;"></div></div>
+<span style="font-size: 13px; color: #6B6B6B;">R$ 312 de R$ 400 no mês</span>
+</div>
+<b style="font-size: 17px;">Limite por categoria</b>
+</div>
+<div class="pb-fat-card" style="background: #FF2D8E; color: #111111; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px; position: relative; overflow: visible; z-index: 2;">
+<div style="display: flex; flex-direction: column; gap: 2px; position: relative; z-index: 1;"><span style="font-size: 13px; font-weight: 700;">Fatura do cartão</span><span class="pb-d pb-fat-n" style="font-size: 76px; line-height: 0.95; white-space: nowrap;"><span class="pb-cur" style="font-size: 0.42em; vertical-align: 0.95em; margin-right: 0.12em;">R$</span><span data-alvo="1247">1.247</span></span><span style="font-size: 13px; font-weight: 700;">fecha em 4 dias</span></div>
+<b class="pb-fat-t" style="font-size: 17px; position: relative; z-index: 1;">A fatura sem susto</b>
+<img class="pb-fat-pig" src="/brand/oferta/c7da0b776981c18a35147276f8d8e464.webp" alt="" style="position: absolute; right: -26px; bottom: -26px; width: 136px; height: auto; z-index: 2;">
+</div>
+<div class="pb-ntf-card" style="background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div class="pb-ntf" style="background: #F6F4F1; border-radius: 18px; padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start; box-shadow: 0 6px 18px rgba(17,17,17,0.08);"><img class="pb-ntf-ic" src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 34px; height: 34px; border-radius: 9px; flex: 0 0 34px; display: block; background: #111111; padding: 6px; box-sizing: border-box;"><div class="pb-ntf-tx" style="display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto;"><div style="display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: #6B6B6B;"><span style="font-weight: 700; letter-spacing: 0.02em;">PIGGY</span><span>agora</span></div><b style="font-size: 14px; line-height: 1.3;">Internet vence amanhã</b><span style="font-size: 13px; line-height: 1.35; color: #333333;">Boleto de R$ 99,90<span class="pb-ntf-x">. Toca pra ver.</span></span></div></div>
+<b style="font-size: 17px;">Boleto lembrado</b>
+</div>
+<div style="background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; flex-direction: column; gap: 10px;">
+<span style="font-size: 14px; font-weight: 600;">Caixinha · Viagem</span>
+<div style="height: 12px; background: #F0EEEA; border-radius: 99px;"><div class="ba-fill ba-fill2" style="width: 62%; height: 12px; background: #111111; border-radius: 99px;"></div></div>
+<span style="font-size: 13px; color: #6B6B6B;">62% da meta</span>
+</div>
+<b style="font-size: 17px;">Metas com barra de progresso</b>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div class="ba-sub ba-sub1" style="display: flex; justify-content: space-between; font-size: 14px;"><span>Streaming</span><span style="color: #9A9A9A;">R$ 39,90/mês</span></div>
+<div class="ba-sub ba-sub2" style="display: flex; justify-content: space-between; font-size: 14px;"><span>Música</span><span style="color: #9A9A9A;">R$ 21,90/mês</span></div>
+<div class="ba-sub ba-sub3" style="display: flex; justify-content: space-between; font-size: 14px;"><span>App de treino</span><span class="ba-esq" style="color: #FF2D8E; font-weight: 700; display: inline-block;">esquecida?</span></div>
+</div>
+<b style="font-size: 17px;">Assinaturas num só lugar</b>
+</div>
+<div style="background: #FFFFFF; border-radius: 28px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; gap: 18px; min-height: 180px;">
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div class="ba-q2" style="align-self: flex-end; background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 10px 14px; font-size: 15px;">quanto sobrou este mês?</div>
+<div style="align-self: flex-start; display: grid;">
+<div class="ba-typ ba-typ2" aria-hidden="true" style="grid-area: 1 / 1; align-self: start; justify-self: start; background: #F6F4F1; border-radius: 16px 16px 16px 4px; padding: 12px 14px; display: flex; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #9A9A9A; display: inline-block;"></span></div>
+<div class="ba-a2" style="grid-area: 1 / 1; background: #F6F4F1; border-radius: 16px 16px 16px 4px; padding: 10px 14px; font-size: 15px;">Sobraram <b>R$ 1.940</b></div>
+</div>
+</div>
+<b style="font-size: 17px;">Pergunta e recebe</b>
+</div>
+</div>
+<div style="font-size: 12px; color: #6B6B6B;">Valores ilustrativos.</div>
+</div>
+</section>
+
+<!-- ============ MENSAGENS ============ -->
+<section style="background: #FFFFFF; padding: 112px 0; overflow: hidden;">
+<div style="max-width: 900px; margin: 0 auto 48px; padding: 0 20px; text-align: center; display: flex; flex-direction: column; gap: 16px;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(44px, 5.5vw, 80px);">Se você manda mensagem, <span style="color: #FF2D8E;">já sabe usar.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555;">Fala comigo do jeito que você fala com qualquer pessoa.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px;">
+<div class="pb-mq" style="display: flex; gap: 14px; width: max-content;">
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">gastei 32 no almoço</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">minha fatura já fechou?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">paguei 20 pro flanelinha</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">quanto gastei com Uber?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">recebi 2.500 de salário</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">me lembra da internet dia 12</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">quanto sobrou este mês?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">cria uma caixinha pra viagem</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">gastei 32 no almoço</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">minha fatura já fechou?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">paguei 20 pro flanelinha</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">quanto gastei com Uber?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">recebi 2.500 de salário</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">me lembra da internet dia 12</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">quanto sobrou este mês?</span>
+<span style="background: #D9FDD3; border-radius: 16px 16px 4px 16px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">cria uma caixinha pra viagem</span>
+</div>
+<div class="pb-mq2" style="display: flex; gap: 14px; width: max-content;">
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Anotado! Alimentação ✓</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Fecha em 4 dias: R$ 1.247</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Dinheiro vivo registrado ✓</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">R$ 186 em 14 corridas</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Entrada registrada!</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Combinado, te aviso dia 11</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Sobraram R$ 1.940</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Caixinha criada. Qual a meta?</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Anotado! Alimentação ✓</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Fecha em 4 dias: R$ 1.247</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Dinheiro vivo registrado ✓</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">R$ 186 em 14 corridas</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Entrada registrada!</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Combinado, te aviso dia 11</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Sobraram R$ 1.940</span>
+<span style="background: #111111; color: #FFFFFF; border-radius: 16px 16px 16px 4px; padding: 12px 18px; font-size: 16px; white-space: nowrap;">Caixinha criada. Qual a meta?</span>
+</div>
+</div>
+</section>
+
+<!-- ============ COMO FUNCIONA ============ -->
+<section id="como-funciona" style="background: #111111; color: #FFFFFF; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 56px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 860px;">
+<span style="font-size: 14px; font-weight: 800; letter-spacing: 0.14em; color: #FF2D8E;">COMO FUNCIONA</span>
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px);">A planilha dependia de você. <span style="color: #FF2D8E;">Eu dependo do seu banco.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #BDBDBD;">Conecte o banco uma vez pelo Open Finance. O que passa pela conta conectada chega até mim já organizado.</p>
+</div>
+<div style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
+<div style="background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 28px; padding: 14px; display: flex; flex-direction: column; gap: 22px;">
+<div style="background: #0B0B0B; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 10px; min-height: 230px; box-sizing: border-box; justify-content: center;">
+<div style="font-size: 12px; color: #9A9A9A; font-weight: 700; letter-spacing: 0.06em;">ESCOLHA SEU BANCO</div>
+<div style="display: flex; align-items: center; justify-content: space-between; background: #1F1F1F; border-radius: 14px; padding: 12px 14px;"><span style="display: flex; align-items: center; gap: 10px; font-size: 15px;"><span style="width: 28px; height: 28px; border-radius: 8px; background: #3A3A3A;"></span>Banco A</span><span style="font-size: 13px; color: #9A9A9A;">Conectar</span></div>
+<div style="display: flex; align-items: center; justify-content: space-between; background: #FFFFFF; color: #111111; border-radius: 14px; padding: 12px 14px;"><span style="display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700;"><span style="width: 28px; height: 28px; border-radius: 8px; background: #111111;"></span>Seu banco</span><span style="font-size: 13px; font-weight: 800; background: #FF2D8E; border-radius: 999px; padding: 6px 12px;">Conectado ✓</span></div>
+<div style="display: flex; align-items: center; justify-content: space-between; background: #1F1F1F; border-radius: 14px; padding: 12px 14px;"><span style="display: flex; align-items: center; gap: 10px; font-size: 15px;"><span style="width: 28px; height: 28px; border-radius: 8px; background: #3A3A3A;"></span>Banco C</span><span style="font-size: 13px; color: #9A9A9A;">Conectar</span></div>
+</div>
+<div style="padding: 0 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 40px; color: #FF2D8E;">01</span>
+<h3 style="margin: 0; font-size: 22px; font-weight: 800;">Conecta uma vez</h3>
+<p style="margin: 0; font-size: 16px; line-height: 1.55; color: #BDBDBD;">Escolhe o banco e autoriza no app dele. Leva 2 minutos e você desconecta quando quiser.</p>
+</div>
+</div>
+<div style="background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 28px; padding: 14px; display: flex; flex-direction: column; gap: 22px;">
+<div style="background: #0B0B0B; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 10px; min-height: 230px; box-sizing: border-box; justify-content: center;">
+<div style="font-size: 12px; color: #9A9A9A; font-weight: 700; letter-spacing: 0.06em;">CHEGANDO AGORA</div>
+<div style="display: flex; align-items: center; justify-content: space-between; font-size: 15px; padding: 8px 0; border-bottom: 1px solid #222222;"><span>Mercado</span><span style="display: flex; gap: 10px; align-items: center;"><span style="font-size: 12px; border: 1px solid #3A3A3A; border-radius: 999px; padding: 3px 10px; color: #D9D9D9;">Casa</span><b>R$ 212,40</b></span></div>
+<div style="display: flex; align-items: center; justify-content: space-between; font-size: 15px; padding: 8px 0; border-bottom: 1px solid #222222;"><span>Farmácia</span><span style="display: flex; gap: 10px; align-items: center;"><span style="font-size: 12px; border: 1px solid #3A3A3A; border-radius: 999px; padding: 3px 10px; color: #D9D9D9;">Saúde</span><b>R$ 64,30</b></span></div>
+<div style="display: flex; align-items: center; justify-content: space-between; font-size: 15px; padding: 8px 0;"><span>Streaming</span><span style="display: flex; gap: 10px; align-items: center;"><span style="font-size: 12px; background: #FF2D8E; color: #111111; font-weight: 700; border-radius: 999px; padding: 3px 10px;">Assinatura</span><b>R$ 39,90</b></span></div>
+</div>
+<div style="padding: 0 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 40px; color: #FF2D8E;">02</span>
+<h3 style="margin: 0; font-size: 22px; font-weight: 800;">Eu organizo</h3>
+<p style="margin: 0; font-size: 16px; line-height: 1.55; color: #BDBDBD;">Cada gasto da conta conectada chega com categoria. Você não digita nada.</p>
+</div>
+</div>
+<div style="background: #1A1A1A; border: 1px solid #2A2A2A; border-radius: 28px; padding: 14px; display: flex; flex-direction: column; gap: 22px;">
+<div style="background: #0B0B0B; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 10px; min-height: 230px; box-sizing: border-box; justify-content: center;">
+<div style="align-self: flex-end; background: #D9FDD3; color: #111111; border-radius: 16px 16px 4px 16px; padding: 10px 14px; font-size: 15px;">quanto gastei com delivery?</div>
+<div style="align-self: flex-start; background: #FFFFFF; color: #111111; border-radius: 16px 16px 16px 4px; padding: 10px 14px; font-size: 15px; line-height: 1.45; max-width: 88%;">R$ 486 em 11 pedidos. É sua 2ª maior categoria.</div>
+</div>
+<div style="padding: 0 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 40px; color: #FF2D8E;">03</span>
+<h3 style="margin: 0; font-size: 22px; font-weight: 800;">Você entende</h3>
+<p style="margin: 0; font-size: 16px; line-height: 1.55; color: #BDBDBD;">Pergunta no WhatsApp ou abre o painel. Dinheiro vivo? Manda um áudio.</p>
+</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 15px; color: #9A9A9A; text-align: center;">Prefere não conectar o banco? Tudo bem: dá pra usar 100% pelo WhatsApp, com texto, áudio ou foto do comprovante.</p>
+</div>
+<div style="margin-top: 88px; display: flex; flex-direction: column; align-items: center; gap: 36px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; padding: 0 20px;">
+<span class="pb-d" style="font-size: clamp(56px, 7vw, 104px); color: #FF2D8E;">+130</span>
+<span style="font-size: 20px; font-weight: 700;">bancos e instituições disponíveis para conexão</span>
+<span style="font-size: 15px; color: #9A9A9A;">Pelo Open Finance, regulado pelo Banco Central. Você escolhe o seu na hora de conectar.</span>
+</div>
+<div style="width: 100%; overflow: hidden; display: flex; flex-direction: column; gap: 14px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);">
+<div class="pb-mq" style="display: flex; gap: 14px; width: max-content;">
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/b3b69ddd2aa1c89e8e2a5135689b35d2.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Nubank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/e26c039652623c6e09971f5169ecd333.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Itaú</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/76b0e80cc814cf8c0444ad20a47167ef.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Banco do Brasil</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/c6a056836402b031169e14a99b5e96bd.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Caixa</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/29806fd5d2f49ba3b24e7e96e5fabca7.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Bradesco</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/21712df3595fcfbfd9ad61a4968eb5b6.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Santander</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/b3b69ddd2aa1c89e8e2a5135689b35d2.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Nubank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/e26c039652623c6e09971f5169ecd333.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Itaú</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/76b0e80cc814cf8c0444ad20a47167ef.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Banco do Brasil</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/c6a056836402b031169e14a99b5e96bd.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Caixa</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/29806fd5d2f49ba3b24e7e96e5fabca7.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Bradesco</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/21712df3595fcfbfd9ad61a4968eb5b6.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Santander</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/b3b69ddd2aa1c89e8e2a5135689b35d2.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Nubank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/e26c039652623c6e09971f5169ecd333.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Itaú</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/76b0e80cc814cf8c0444ad20a47167ef.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Banco do Brasil</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/c6a056836402b031169e14a99b5e96bd.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Caixa</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/29806fd5d2f49ba3b24e7e96e5fabca7.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Bradesco</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/21712df3595fcfbfd9ad61a4968eb5b6.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Santander</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/b3b69ddd2aa1c89e8e2a5135689b35d2.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Nubank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/e26c039652623c6e09971f5169ecd333.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Itaú</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/76b0e80cc814cf8c0444ad20a47167ef.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Banco do Brasil</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/c6a056836402b031169e14a99b5e96bd.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Caixa</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/29806fd5d2f49ba3b24e7e96e5fabca7.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Bradesco</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #FFFFFF; color: #111111; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #F6F4F1; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/21712df3595fcfbfd9ad61a4968eb5b6.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Santander</span>
+</div>
+</div>
+<div class="pb-mq2" style="display: flex; gap: 14px; width: max-content;">
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/afead3ad03b0b673dc42a015b0ba0131.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Inter</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/ae55b8327cc9dccbe3435c58141d5091.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">C6 Bank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/0cd7ad31f814f4aa93d887c8b71a245e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">BTG Pactual</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/a796d93bc0110e521cb98a163984780e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">PicPay</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/eb67a89e9049a1a27a5120409394ecae.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">XP</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/2c007b19e59f64091b7a445a600e7277.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Original</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/afead3ad03b0b673dc42a015b0ba0131.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Inter</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/ae55b8327cc9dccbe3435c58141d5091.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">C6 Bank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/0cd7ad31f814f4aa93d887c8b71a245e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">BTG Pactual</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/a796d93bc0110e521cb98a163984780e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">PicPay</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/eb67a89e9049a1a27a5120409394ecae.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">XP</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/2c007b19e59f64091b7a445a600e7277.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Original</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/afead3ad03b0b673dc42a015b0ba0131.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Inter</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/ae55b8327cc9dccbe3435c58141d5091.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">C6 Bank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/0cd7ad31f814f4aa93d887c8b71a245e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">BTG Pactual</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/a796d93bc0110e521cb98a163984780e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">PicPay</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/eb67a89e9049a1a27a5120409394ecae.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">XP</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/2c007b19e59f64091b7a445a600e7277.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Original</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/afead3ad03b0b673dc42a015b0ba0131.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Inter</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/ae55b8327cc9dccbe3435c58141d5091.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">C6 Bank</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/0cd7ad31f814f4aa93d887c8b71a245e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">BTG Pactual</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/a796d93bc0110e521cb98a163984780e.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">PicPay</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/eb67a89e9049a1a27a5120409394ecae.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">XP</span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; background: #1F1F1F; border: 1px solid #2E2E2E; color: #FFFFFF; border-radius: 18px; padding: 12px 20px 12px 12px; white-space: nowrap;">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex: 0 0 48px;"><img src="/brand/oferta/2c007b19e59f64091b7a445a600e7277.webp" alt="" style="max-width: 32px; max-height: 32px; display: block;"></span>
+<span style="font-size: 16px; font-weight: 700;">Original</span>
+</div>
+</div>
+</div>
+<span style="font-size: 12px; color: #6B6B6B; padding: 0 20px; text-align: center;">As marcas exibidas pertencem aos seus titulares e indicam apenas compatibilidade de conexão.</span>
+</div>
+</section>
+
+<!-- ============ TESTE O PIGGY ============ -->
+<section style="background: #F6F4F1; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 64px;">
+<div style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 22px;">
+<span style="font-size: 14px; font-weight: 800; letter-spacing: 0.14em;">TESTE AGORA</span>
+<h2 class="pb-d" style="margin: 0; font-size: clamp(56px, 7vw, 104px); text-align: start">Não acredita? <br><span style="color: rgb(255, 45, 142)">Me testa.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555; max-width: 440px; text-align: start">Toca numa mensagem e vê como eu respondo. É assim mesmo no seu WhatsApp.</p>
+<div class="pb-wchat" style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; max-width: 460px; padding-right: 8px; box-sizing: border-box; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;">
+<button type="button" class="wa-out pb-wbtn" data-resposta="Anotado! R$ 32,00 em Alimentação. Você já foi a 14 almoços fora este mês, R$ 448 no total." style="position: relative; text-align: left; background: #D9FDD3; color: #111B21; border: 0; border-radius: 12px 3px 12px 12px; padding: 9px 9px 9px 14px; font-family: inherit; font-size: 16px; line-height: 1.35; cursor: pointer; min-height: 46px; max-width: 92%; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Gastei 32 no almoço<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 50%; background: #00A884; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"></path></svg></span></button>
+<button type="button" class="wa-out pb-wbtn" data-resposta="R$ 486 em 11 pedidos. É sua 2ª maior categoria, atrás só do mercado." style="position: relative; text-align: left; background: #D9FDD3; color: #111B21; border: 0; border-radius: 12px 3px 12px 12px; padding: 9px 9px 9px 14px; font-family: inherit; font-size: 16px; line-height: 1.35; cursor: pointer; min-height: 46px; max-width: 92%; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Quanto gastei com delivery?<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 50%; background: #00A884; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"></path></svg></span></button>
+<button type="button" class="wa-out pb-wbtn" data-resposta="Achei 4 cobranças recorrentes. Uma delas, de R$ 29,90, cobra todo mês e você talvez nem lembre. Quer ver?" style="position: relative; text-align: left; background: #D9FDD3; color: #111B21; border: 0; border-radius: 12px 3px 12px 12px; padding: 9px 9px 9px 14px; font-family: inherit; font-size: 16px; line-height: 1.35; cursor: pointer; min-height: 46px; max-width: 92%; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Tenho alguma assinatura esquecida?<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 50%; background: #00A884; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"></path></svg></span></button>
+<button type="button" class="wa-out pb-wbtn" data-resposta="Entrada registrada! Seu saldo do mês agora é R$ 1.940. Bora fazer ele durar?" style="position: relative; text-align: left; background: #D9FDD3; color: #111B21; border: 0; border-radius: 12px 3px 12px 12px; padding: 9px 9px 9px 14px; font-family: inherit; font-size: 16px; line-height: 1.35; cursor: pointer; min-height: 46px; max-width: 92%; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Recebi 2.500 de salário<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 50%; background: #00A884; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2z"></path></svg></span></button>
+</div>
+</div>
+<div style="flex: 1 1 400px; min-width: 0; display: flex; justify-content: center; position: relative; padding: 10px 0;">
+<!-- iPhone -->
+<div class="pb-tphone" style="position: relative; width: 360px; max-width: 100%; border-radius: 62px; padding: 3px; background: linear-gradient(145deg, #5A5A5E 0%, #2C2C2E 30%, #1C1C1E 60%, #48484A 100%); box-shadow: 0 50px 100px rgba(17,17,17,0.28), 0 18px 36px rgba(17,17,17,0.18); box-sizing: border-box;">
+<span style="position: absolute; left: -3px; top: 128px; width: 4px; height: 30px; border-radius: 3px 0 0 3px; background: #3A3A3C;"></span>
+<span style="position: absolute; left: -3px; top: 180px; width: 4px; height: 58px; border-radius: 3px 0 0 3px; background: #3A3A3C;"></span>
+<span style="position: absolute; left: -3px; top: 250px; width: 4px; height: 58px; border-radius: 3px 0 0 3px; background: #3A3A3C;"></span>
+<span style="position: absolute; right: -3px; top: 205px; width: 4px; height: 92px; border-radius: 0 3px 3px 0; background: #3A3A3C;"></span>
+<div style="background: #050505; border-radius: 59px; padding: 11px;">
+<div style="position: relative; border-radius: 48px; overflow: hidden; height: 720px; display: flex; flex-direction: column; background: #EFEAE2;">
+<!-- dynamic island -->
+<div style="position: absolute; top: 11px; left: 50%; margin-left: -60px; width: 120px; height: 35px; border-radius: 20px; background: #000000; z-index: 5;"></div>
+<!-- status bar -->
+<div style="height: 54px; flex: 0 0 54px; background: #F6F5F3; display: flex; align-items: center; justify-content: space-between; padding: 6px 30px 0 38px; box-sizing: border-box; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; color: #000000;">
+<span style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em;">9:41</span>
+<span style="display: flex; align-items: center; gap: 6px;">
+<svg width="18" height="12" viewBox="0 0 18 12" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1" fill="#000"></rect><rect x="5" y="6" width="3" height="6" rx="1" fill="#000"></rect><rect x="10" y="3" width="3" height="9" rx="1" fill="#000"></rect><rect x="15" y="0" width="3" height="12" rx="1" fill="#000"></rect></svg>
+<svg width="16" height="12" viewBox="0 0 16 12" aria-hidden="true"><path d="M8 11.5 5.6 9a3.4 3.4 0 0 1 4.8 0z" fill="#000"></path><path d="M3.4 6.8a6.5 6.5 0 0 1 9.2 0l-1.4 1.4a4.5 4.5 0 0 0-6.4 0z" fill="#000"></path><path d="M1.2 4.6a9.6 9.6 0 0 1 13.6 0l-1.4 1.4a7.6 7.6 0 0 0-10.8 0z" fill="#000"></path></svg>
+<svg width="27" height="13" viewBox="0 0 27 13" aria-hidden="true"><rect x="0.5" y="0.5" width="23" height="12" rx="3.5" fill="none" stroke="#000" stroke-opacity="0.4"></rect><rect x="2" y="2" width="20" height="9" rx="2" fill="#000"></rect><path d="M25 4.5v4a2 2 0 0 0 0-4z" fill="#000" fill-opacity="0.45"></path></svg>
+</span>
+</div>
+<!-- header WhatsApp -->
+<div style="flex: 0 0 auto; background: #F6F5F3; border-bottom: 1px solid #DEDCD8; display: flex; align-items: center; gap: 8px; padding: 6px 14px 10px 8px; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"></path></svg>
+<span style="font-size: 16px; color: #007AFF; margin-left: -6px;">12</span>
+<img src="/brand/oferta/b6773cde03c3fd2e557c31debc120db9.webp" alt="" style="width: 36px; height: 36px; border-radius: 50%; display: block; margin-left: 4px; flex: 0 0 36px;">
+<div style="display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; line-height: 1.2;">
+<span style="font-size: 16px; font-weight: 600; color: #000000; display: flex; align-items: center; gap: 4px;">Piggy <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#25D366"></circle><path d="M7.5 12.2l3 3 6-6.2" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+<span id="ch-status" style="font-size: 12px; color: #8A8A8E;">online</span>
+</div>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="3"></rect><path d="M15 10.5l6-3.5v10l-6-3.5z"></path></svg>
+<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: 12px;"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"></path></svg>
+</div>
+<!-- conversa -->
+<div class="wa-bg" id="chat" style="flex: 1 1 auto; padding: 10px 12px 8px; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; overflow: hidden; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;">
+<div style="align-self: center; background: #FFF5C4; color: #54656F; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; line-height: 1.35; text-align: center; max-width: 86%; margin-bottom: 6px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">As mensagens são protegidas com a criptografia de ponta a ponta.</div>
+<div style="align-self: center; background: #FFFFFF; color: #54656F; border-radius: 8px; padding: 5px 10px; font-size: 12px; font-weight: 500; margin-bottom: 6px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13);">Hoje</div>
+<div class="wa-in ch-pop ch-msg" style="align-self: flex-start; max-width: 82%; background: #FFFFFF; color: #111B21; border-radius: 2px 9px 9px 9px; padding: 6px 8px 6px 10px; font-size: 15px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin: 3px 0 3px 6px; position: relative;">Oi! Eu sou o Piggy. Toca numa mensagem ao lado e vê como eu organizo seu dinheiro.<span style="float: right; margin: 7px 0 -4px 10px; font-size: 11px; color: #667781;">12:39</span></div>
+<div id="ch-typ" hidden class="wa-in ch-pop" aria-label="Piggy está digitando" style="align-self: flex-start; background: #FFFFFF; border-radius: 2px 9px 9px 9px; padding: 11px 14px; display: flex; gap: 4px; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin: 3px 0 3px 6px; position: relative;"><span class="ch-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="ch-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #8696A0; display: inline-block;"></span><span class="ch-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #8696A0; display: inline-block;"></span></div>
+<template id="t-eu"><div class="wa-out ch-pop ch-msg" style="align-self: flex-end; max-width: 78%; background: #D9FDD3; color: #111B21; border-radius: 9px 2px 9px 9px; padding: 6px 8px 6px 10px; font-size: 15px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin: 3px 6px 3px 0; position: relative;"><span class="ch-txt"></span><span style="float: right; display: inline-flex; align-items: center; gap: 3px; margin: 7px 0 -4px 10px; font-size: 11px; color: #667781;"><span class="ch-hora"></span><svg width="16" height="11" viewBox="0 0 16 11" aria-hidden="true"><path d="M11.07.65 4.82 7.5 2.3 5" fill="none" class="ch-tk" stroke="#8696A0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path><path d="M14.9.65 8.65 7.5 7.6 6.5" fill="none" class="ch-tk" stroke="#8696A0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></span></div></template>
+<template id="t-bot"><div class="wa-in ch-pop ch-msg" style="align-self: flex-start; max-width: 82%; background: #FFFFFF; color: #111B21; border-radius: 2px 9px 9px 9px; padding: 6px 8px 6px 10px; font-size: 15px; line-height: 1.35; box-shadow: 0 1px 0.5px rgba(11,20,26,0.13); margin: 3px 0 3px 6px; position: relative;"><span class="ch-txt"></span><span style="float: right; margin: 7px 0 -4px 10px; font-size: 11px; color: #667781;"><span class="ch-hora"></span></span></div></template>
+</div>
+<!-- barra de digitação -->
+<div style="flex: 0 0 auto; background: #F6F5F3; display: flex; align-items: center; gap: 10px; padding: 8px 12px 6px; font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+<div style="flex: 1 1 auto; background: #FFFFFF; border: 1px solid #E2E0DC; border-radius: 18px; padding: 7px 12px; display: flex; align-items: center; justify-content: space-between; font-size: 15px; color: #B0B0B4;">
+<span>Mensagem</span>
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8A8A8E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9h9z"></path><path d="M21 12h-5a4 4 0 0 1-4-4V3"></path></svg>
+</div>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#007AFF" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v4"></path></svg>
+</div>
+<!-- home indicator -->
+<div style="flex: 0 0 26px; background: #F6F5F3; display: flex; align-items: center; justify-content: center;"><span style="width: 128px; height: 5px; border-radius: 3px; background: #000000;"></span></div>
+</div>
+</div>
+</div>
+<div style="position: absolute; right: 0; bottom: -8px; font-size: 11px; color: #6B6B6B;">Conversa ilustrativa</div>
+</div>
+</div>
+</section>
+
+<!-- ============ PAINEL ============ -->
+<section id="painel" style="background: #111111; color: #FFFFFF; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 56px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 860px;">
+<span style="font-size: 14px; font-weight: 800; letter-spacing: 0.14em; color: #FF2D8E;">O PAINEL</span>
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px);">No WhatsApp você conversa. <span style="color: #FF2D8E;">No painel você enxerga.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #BDBDBD;">O que chega pelo banco ou pela conversa aparece aqui, organizado. Seu mês inteiro em uma tela, no navegador.</p>
+</div>
+<div class="pb-dash" id="dash" style="width: 100%; background: #1F1F1F; border: 1px solid #2E2E2E; border-radius: 24px; overflow: hidden; box-shadow: 0 50px 120px rgba(255,45,142,0.12);">
+<div style="display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-bottom: 1px solid #2E2E2E;">
+<span style="width: 12px; height: 12px; border-radius: 50%; background: #3A3A3A;"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #3A3A3A;"></span><span style="width: 12px; height: 12px; border-radius: 50%; background: #3A3A3A;"></span>
+<span style="margin-left: 16px; background: #2A2A2A; border-radius: 999px; padding: 6px 16px; font-size: 13px; color: #9A9A9A;">pigbankai.com/painel</span>
+</div>
+<div style="background: #F6F4F1; color: #111111; display: flex; flex-wrap: wrap;">
+<div class="pb-dsb" style="flex: 0 1 210px; background: #FFFFFF; padding: 24px 18px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box; border-right: 1px solid #ECE9E4;">
+<div class="pb-dlogo" style="display: flex; align-items: center; gap: 8px; margin-bottom: 18px;"><img src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 26px;"><b style="font-size: 17px;">PigBank</b></div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 12px; padding: 10px 12px; font-size: 14px; font-weight: 700;">Visão geral</div>
+<div style="padding: 10px 12px; font-size: 14px; color: #555555;">Cartões</div>
+<div style="padding: 10px 12px; font-size: 14px; color: #555555;">Orçamentos</div>
+<div style="padding: 10px 12px; font-size: 14px; color: #555555;">Recorrentes</div>
+<div style="padding: 10px 12px; font-size: 14px; color: #555555;">Caixinhas</div>
+<div style="padding: 10px 12px; font-size: 14px; color: #555555;">Agentes</div>
+</div>
+<div class="pb-dgrid" style="flex: 999 1 560px; min-width: 0; padding: 26px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; box-sizing: border-box;">
+<div class="dk" style="background: #FFFFFF; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #6B6B6B; font-weight: 600;">Gastos do mês</span><span class="pb-kv" style="font-size: 34px; font-weight: 800; letter-spacing: -0.02em;">R$ <span data-alvo="3412">3.412</span></span><span style="font-size: 13px; font-weight: 700; color: #0A7A3E;">↓ <span data-alvo="12">12</span>% vs. setembro</span></div>
+<div class="dk" style="background: #FFFFFF; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #6B6B6B; font-weight: 600;">Entradas</span><span class="pb-kv" style="font-size: 34px; font-weight: 800; letter-spacing: -0.02em;">R$ <span data-alvo="5352">5.352</span></span><span style="font-size: 13px; font-weight: 700; color: #6B6B6B;">Salário + extras</span></div>
+<div class="pb-dfull dk" style="background: #111111; color: #FFFFFF; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 6px;"><span style="font-size: 13px; color: #9A9A9A; font-weight: 600;">Sobrou no mês</span><span class="pb-kv" style="font-size: 34px; font-weight: 800; letter-spacing: -0.02em; color: #FF2D8E;">R$ <span data-alvo="1940">1.940</span></span><span style="font-size: 13px; font-weight: 600; color: #9A9A9A;">até hoje</span></div>
+<div style="background: #FFFFFF; border-radius: 18px; padding: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 22px; grid-column: span 2;" class="pb-dfull pb-dcat dk">
+<svg class="pb-donut" width="150" height="150" viewBox="0 0 42 42" role="img" aria-label="Gráfico de gastos por categoria"><circle cx="21" cy="21" r="15.9" fill="none" stroke="#F0EEEA" stroke-width="6"></circle><circle cx="21" cy="21" r="15.9" fill="none" stroke="#FF2D8E" stroke-width="6" stroke-dasharray="38 62" stroke-dashoffset="25"></circle><circle cx="21" cy="21" r="15.9" fill="none" stroke="#111111" stroke-width="6" stroke-dasharray="24 76" stroke-dashoffset="87"></circle><circle cx="21" cy="21" r="15.9" fill="none" stroke="#6B6B6B" stroke-width="6" stroke-dasharray="18 82" stroke-dashoffset="63"></circle><circle cx="21" cy="21" r="15.9" fill="none" stroke="#C9C6C0" stroke-width="6" stroke-dasharray="12 88" stroke-dashoffset="45"></circle></svg>
+<div style="display: flex; flex-direction: column; gap: 9px; flex: 1 1 180px; font-size: 14px;">
+<b style="font-size: 15px;">Gastos por categoria</b>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 8px;"><span style="width: 10px; height: 10px; border-radius: 3px; background: #FF2D8E;"></span>Alimentação</span><b><span data-alvo="38">38</span>%</b></span>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 8px;"><span style="width: 10px; height: 10px; border-radius: 3px; background: #111111;"></span>Casa</span><b><span data-alvo="24">24</span>%</b></span>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 8px;"><span style="width: 10px; height: 10px; border-radius: 3px; background: #6B6B6B;"></span>Transporte</span><b><span data-alvo="18">18</span>%</b></span>
+<span style="display: flex; justify-content: space-between;"><span style="display: inline-flex; align-items: center; gap: 8px;"><span style="width: 10px; height: 10px; border-radius: 3px; background: #C9C6C0;"></span>Assinaturas</span><b><span data-alvo="12">12</span>%</b></span>
+</div>
+</div>
+<div class="pb-dfull dk" style="background: #FFFFFF; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 10px;"><span style="font-size: 13px; color: #6B6B6B; font-weight: 600;">Orçamento · Delivery</span><span style="font-size: 22px; font-weight: 800;">R$ <span data-alvo="312">312</span> <span style="font-size: 14px; color: #6B6B6B; font-weight: 600;">de R$ 400</span></span><div style="height: 10px; background: #F0EEEA; border-radius: 99px;"><div class="dk-bar" style="width: 78%; height: 10px; background: #FF2D8E; border-radius: 99px;"></div></div><span style="font-size: 13px; font-weight: 700;"><span data-alvo="78">78</span>% · o Xerife está de olho</span></div>
+</div>
+</div>
+</div>
+<div style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 28px;">
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 2px solid #FF2D8E; padding-top: 18px;"><b style="font-size: 18px;">Pra onde foi cada real</b><span style="font-size: 15px; line-height: 1.55; color: #BDBDBD;">Gastos por categoria, mês a mês, num gráfico que você entende em 3 segundos.</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 2px solid #3A3A3A; padding-top: 18px;"><b style="font-size: 18px;">Cartões e parcelas</b><span style="font-size: 15px; line-height: 1.55; color: #BDBDBD;">Cada cartão, cada parcela e o dia em que a fatura fecha.</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 2px solid #3A3A3A; padding-top: 18px;"><b style="font-size: 18px;">Orçamentos e metas</b><span style="font-size: 15px; line-height: 1.55; color: #BDBDBD;">Um limite pra cada categoria e caixinhas com barra de progresso.</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px; border-top: 2px solid #3A3A3A; padding-top: 18px;"><b style="font-size: 18px;">Previsão de 90 dias <span style="font-size: 11px; background: #FF2D8E; color: #111111; border-radius: 99px; padding: 2px 8px; vertical-align: middle;">PRO</span></b><span style="font-size: 15px; line-height: 1.55; color: #BDBDBD;">Veja hoje como seu saldo vai estar nos próximos meses.</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============ TIME ============ -->
+<section style="background: #FFFFFF; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px;">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 24px 64px;">
+<h2 class="pb-d" style="margin: 0; flex: 1 1 560px; font-size: clamp(48px, 6.5vw, 96px);">Você não ganha um app. <span style="color: #FF2D8E;">Ganha um time.</span></h2>
+<div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start;">
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555;">Sete agentes trabalham por você em segundo plano e só aparecem quando algo merece sua atenção.</p>
+<span style="background: #111111; color: #FFFFFF; border-radius: 999px; padding: 8px 14px; font-size: 13px; font-weight: 700;">Nos planos Plus e Pro</span>
+</div>
+</div>
+<div class="pb-agents" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #1C1C1C; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/2f1b70ce571020d4b94154e5960faac9.webp" alt="Piggy detetive examinando cobranças com uma lupa" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 56% 6%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Detetive</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Encontro assinatura esquecida e cobrança duplicada antes de você pagar de novo.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #FF2D8E; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/aca70f87e0da9e33b6469d257565c09d.webp" alt="Piggy xerife fazendo sinal de pare ao lado de uma barra de limite de gastos quase cheia" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 62% 0%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Xerife</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Vigio seus limites e aviso quando um gasto sai do padrão.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #1C1C1C; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/8f94f234892f6b335182c4a7a91abedf.webp" alt="Piggy carteiro de bicicleta entregando cartas" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 30% 35%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Carteiro</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Lembro dos boletos antes de virarem juros.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #1C1C1C; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/8ffc86e01028c21d7e4d687bf8101da3.webp" alt="Piggy repórter com microfone mostrando o jornal com o resumo do mês" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 55% 15%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Repórter</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Todo mês te entrego o resumo: o que entrou, o que saiu, o que mudou.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #FF2D8E; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/b80f516a0c83a3fe554686bb8362adfd.webp" alt="Piggy banqueiro de terno mostrando a barra de progresso de uma meta" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 70% 20%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Banqueiro</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Acompanho suas caixinhas e mostro quanto falta pra meta.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #1C1C1C; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/a12daf82f9fa3cf3c3fd86fd0f5b9b37.webp" alt="Piggy barão de cartola e monóculo comparando duas linhas de rendimento" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 66% 20%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Barão</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Comparo seu saldo parado com o CDI pra você ver quanto poderia render. É uma estimativa.</span>
+</div>
+</div>
+<div style="background: #111111; color: #FFFFFF; border-radius: 28px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="height: 230px; display: flex; align-items: flex-end; justify-content: center; padding-top: 22px; box-sizing: border-box; background: #1C1C1C; position: relative; overflow: hidden;">
+<img class="pb-agphoto" src="/brand/oferta/d2f22ed541383df824666ca326e1d042.webp" alt="Piggy Faria Limer de colete e crachá apresentando um gráfico de pizza da carteira" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 64% 20%; display: block;">
+</div>
+<div style="padding: 22px 22px 26px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 36px;">Faria Limer</span>
+<span style="font-size: 15px; line-height: 1.5; color: #BDBDBD;">Acompanho sua carteira de ações e FIIs num só lugar.</span>
+</div>
+</div>
+<div class="pb-agcta" style="background: #FF2D8E; color: #111111; border-radius: 28px; padding: 28px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; min-height: 360px; box-sizing: border-box;">
+<span class="pb-d" style="font-size: 52px;">Um time inteiro por menos de R$ 0,70 por dia.</span>
+<a href="#planos" style="align-self: flex-start; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 24px; border-radius: 999px; min-height: 52px; box-sizing: border-box; display: inline-flex; align-items: center;">Conhecer os planos →</a>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ============ UM DIA ============ -->
+<section style="background: #F6F4F1; padding: 128px 20px;">
+<div class="pb-day" style="max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 56px; align-items: center;">
+<div class="pb-dayl" style="flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 36px;">
+<h2 class="pb-d pb-dayh" style="margin: 0; font-size: clamp(48px, 6vw, 88px);">Um dia comum. <span style="color: #FF2D8E;">Só que alguém está de olho.</span></h2>
+<div class="pb-dayt" style="display: flex; flex-direction: column;">
+<div style="display: flex; gap: 24px; padding: 18px 0; border-top: 1px solid #DDD9D2;"><span class="pb-d" style="flex: 0 0 84px; font-size: 28px; color: #FF2D8E;">07h50</span><span style="display: flex; flex-direction: column; gap: 4px;"><b style="font-size: 18px;">O aviso do boleto chega antes do café esfriar.</b><span style="font-size: 15px; color: #555555;">O Carteiro lembra: a internet vence amanhã.</span></span></div>
+<div style="display: flex; gap: 24px; padding: 18px 0; border-top: 1px solid #DDD9D2;"><span class="pb-d" style="flex: 0 0 84px; font-size: 28px; color: #FF2D8E;">12h40</span><span style="display: flex; flex-direction: column; gap: 4px;"><b style="font-size: 18px;">Pagou o almoço? Já está anotado.</b><span style="font-size: 15px; color: #555555;">Veio do banco direto pra categoria certa.</span></span></div>
+<div style="display: flex; gap: 24px; padding: 18px 0; border-top: 1px solid #DDD9D2;"><span class="pb-d" style="flex: 0 0 84px; font-size: 28px; color: #FF2D8E;">15h10</span><span style="display: flex; flex-direction: column; gap: 4px;"><b style="font-size: 18px;">Um áudio e o dinheiro vivo está registrado.</b><span style="font-size: 15px; color: #555555;">"Paguei 20 pro flanelinha." Pronto.</span></span></div>
+<div style="display: flex; gap: 24px; padding: 18px 0; border-top: 1px solid #DDD9D2;"><span class="pb-d" style="flex: 0 0 84px; font-size: 28px; color: #FF2D8E;">19h30</span><span style="display: flex; flex-direction: column; gap: 4px;"><b style="font-size: 18px;">O alerta chega antes do estrago.</b><span style="font-size: 15px; color: #555555;">O Xerife avisa: delivery passou de 80% do limite.</span></span></div>
+<div style="display: flex; gap: 24px; padding: 18px 0; border-top: 1px solid #DDD9D2; border-bottom: 1px solid #DDD9D2;"><span class="pb-d" style="flex: 0 0 84px; font-size: 28px; color: #FF2D8E;">22h00</span><span style="display: flex; flex-direction: column; gap: 4px;"><b style="font-size: 18px;">Antes de dormir, você sabe como foi o mês.</b><span style="font-size: 15px; color: #555555;">"Quanto sobrou?" e a resposta chega na hora.</span></span></div>
+</div>
+<span class="pb-dayn" style="font-size: 12px; color: #6B6B6B;">Carteiro e Xerife estão nos planos Plus e Pro.</span>
+</div>
+<div class="pg-wrap" id="piggy" style="flex: 1 1 380px; min-width: 0; position: relative; overflow: hidden; border-radius: 32px;">
+<img src="/brand/oferta/ba98861261dbecaf3a17f3f07e3f7011.webp" alt="Piggy no sofá olhando o celular" style="width: 100%; aspect-ratio: 4 / 5; object-fit: cover; object-position: center 35%; border-radius: 32px; display: block;">
+<div class="pg-ntf" role="status" style="position: absolute; left: 14px; right: 14px; top: 14px; background: rgba(246,245,243,0.86); -webkit-backdrop-filter: blur(18px) saturate(1.6); backdrop-filter: blur(18px) saturate(1.6); border-radius: 24px; padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; box-shadow: 0 18px 40px rgba(0,0,0,0.22); font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; color: #111111;"><div style="flex: 0 0 40px; height: 40px; border-radius: 10px; background: #111111; display: flex; align-items: center; justify-content: center;"><img src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 26px;"></div><div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px;"><div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;"><b style="font-size: 14px; font-weight: 600;">Carteiro · PigBank</b><span style="font-size: 12px; color: #6B6B6B;">agora</span></div><span style="font-size: 14px; line-height: 1.35; color: #222222;">A internet (R$ 99,90) vence amanhã. Quer que eu te lembre de novo às 9h?</span></div></div>
+</div>
+</div>
+</section>
+
+
+<!-- ============ PROVA SOCIAL ============ -->
+<section style="background: #111111; color: #FFFFFF; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px); max-width: 980px;">Eles também achavam que <span style="color: #FF2D8E;">"gastavam pouco".</span></h2>
+<div class="pb-prova" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px;">
+<div class="pb-vcard" style="position: relative; aspect-ratio: 9 / 16; background: #000000; border: 1px solid #2E2E2E; border-radius: 28px; overflow: hidden; box-sizing: border-box;">
+<video src="/brand/oferta/6c2cf6cf866d046c753761a4d3b89a97.mp4" poster="/brand/oferta/7c7160bef0652d482f6751e48d2c55ef.webp" controls playsinline preload="none" aria-label="Vídeo da creator Graziele mostrando como organiza os gastos com o PigBank" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; background: #000000;"></video>
+</div>
+<div class="pb-vcard" style="position: relative; aspect-ratio: 9 / 16; background: #000000; border: 1px solid #2E2E2E; border-radius: 28px; overflow: hidden; box-sizing: border-box;">
+<video src="/brand/oferta/efff28e4af443a091fabcd42bfc3de7b.mp4" poster="/brand/oferta/f62631bb77e027c0b62e3191730e2775.webp" controls playsinline preload="none" aria-label="Vídeo de creator explicando a conexão segura do PigBank com o banco" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; background: #000000;"></video>
+</div>
+<div style="display: flex; flex-direction: column; gap: 16px;">
+<div style="flex: 1 1 auto; background: #FFFFFF; color: #111111; border-radius: 28px; padding: 26px; display: flex; flex-direction: column; justify-content: space-between; gap: 16px;">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;"><span role="img" aria-label="5 de 5 estrelas" style="display: flex; gap: 2px;"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#FF2D8E"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#FF2D8E"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#FF2D8E"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#FF2D8E"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#FF2D8E"></path></svg></span><span style="font-size: 12px; font-weight: 700; color: #6B6B6B;">Avaliação no Trustpilot</span></div>
+<p style="margin: 0; font-size: 18px; line-height: 1.55;"><b>Muito bom!</b> É ótimo ter uma IA para facilitar meu dia a dia e minha organização financeira. Agora consigo fazer coisas que antes não sobrava tempo, ou tinha dificuldade.</p>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Maria Santos</b><span style="font-size: 13px; color: #6B6B6B;">Usuária do PigBank · ago. 2026</span></span><a href="https://br.trustpilot.com/reviews/6a751bb7ff051ba86a2e6dbb" target="_blank" rel="noopener" style="font-size: 13px; font-weight: 700; color: #111111; text-decoration: underline; text-underline-offset: 3px;">Ver no Trustpilot ↗</a></div>
+</div>
+<div style="flex: 1 1 auto; background: #FF2D8E; color: #111111; border-radius: 28px; padding: 26px; display: flex; flex-direction: column; justify-content: space-between; gap: 16px;">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;"><span role="img" aria-label="5 de 5 estrelas" style="display: flex; gap: 2px;"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#111111"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#111111"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#111111"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#111111"></path></svg><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.8 6 6.5.7-4.9 4.4 1.4 6.4L12 17l-5.8 3.3 1.4-6.4-4.9-4.4 6.5-.7z" fill="#111111"></path></svg></span><span style="font-size: 12px; font-weight: 700; color: #111111; opacity: 0.7;">Avaliação no Trustpilot</span></div>
+<p class="pb-d" style="margin: 0; font-size: clamp(26px, 6.5vw, 34px); line-height: 1.02;">"Eles são muito atenciosos, trabalho ótimo, uso muito"</p>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"><span style="display: flex; flex-direction: column; gap: 2px;"><b style="font-size: 15px;">Barbara Meireles</b><span style="font-size: 13px; color: #111111; opacity: 0.7;">Usuária do PigBank · ago. 2026</span></span><a href="https://br.trustpilot.com/reviews/6a75153815a013c7aa2c75c9" target="_blank" rel="noopener" style="font-size: 13px; font-weight: 700; color: #111111; text-decoration: underline; text-underline-offset: 3px;">Ver no Trustpilot ↗</a></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ============ PLANOS ============ -->
+<section id="planos" data-ciclo="anual" style="background: #F6F4F1; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 48px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; max-width: 860px;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6.5vw, 96px);">Menos que um delivery <span style="color: #FF2D8E;">por mês.</span></h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555;">Escolha o plano, conecte o WhatsApp e mande o primeiro gasto em 2 minutos.</p>
+</div>
+<div style="display: inline-flex; background: #FFFFFF; border: 1px solid #E4E1DC; border-radius: 999px; padding: 5px; gap: 4px;">
+<button type="button" class="pb-ciclo" data-set="mensal" aria-pressed="false" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Mensal</button>
+<button type="button" class="pb-ciclo" data-set="anual" aria-pressed="true" style="border: none; cursor: pointer; font-family: inherit; font-size: 15px; font-weight: 700; padding: 12px 24px; border-radius: 999px; min-height: 46px;">Anual · 2 meses grátis</button>
+</div>
+<div style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; align-items: stretch;">
+<div data-plano="essencial" style="background: #FFFFFF; color: #111111; border: 1px solid #E4E1DC; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="pb-d" style="font-size: 40px;">Essencial</span><span style="font-size: 15px; color: #555555;">Pra começar a se organizar</span></div>
+<div style="display: flex; align-items: baseline; gap: 6px;"><span class="pb-d so-anual" style="font-size: 68px; white-space: nowrap;">R$ 8,25</span><span class="pb-d so-mensal" style="font-size: 68px; white-space: nowrap;">R$ 9,90</span><span style="font-size: 15px; color: #555555;">/mês</span></div>
+<span class="so-anual" style="font-size: 14px; color: #555555; margin-top: -12px;">R$ 99 por ano · 2 meses grátis</span><span class="so-mensal" style="font-size: 14px; color: #555555; margin-top: -12px;">Cobrado por mês</span>
+<ul style="margin: 0; padding: 18px 0 0; border-top: 1px solid #ECE9E4; list-style: none; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto;">
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Piggy no WhatsApp</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Painel completo no navegador</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>1 banco conectado</li>
+</ul>
+<a href="/assinar?plano=essencial&amp;ciclo=annual" class="pb-plbtn so-anual" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
+<a href="/assinar?plano=essencial&amp;ciclo=monthly" class="pb-plbtn so-mensal" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Começar no Essencial</a>
+</div>
+<div data-plano="plus" style="background: #111111; color: #FFFFFF; border: 1px solid #111111; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
+<span style="position: absolute; top: -14px; left: 30px; background: #FF2D8E; color: #111111; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 800;">Mais escolhido</span>
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="pb-d" style="font-size: 40px;">Plus</span><span style="font-size: 15px; color: #BDBDBD;">Mais de um banco e o time de agentes</span></div>
+<div style="display: flex; align-items: baseline; gap: 6px;"><span class="pb-d so-anual" style="font-size: 68px; white-space: nowrap;">R$ 16,58</span><span class="pb-d so-mensal" style="font-size: 68px; white-space: nowrap;">R$ 19,90</span><span style="font-size: 15px; color: #BDBDBD;">/mês</span></div>
+<span class="so-anual" style="font-size: 14px; color: #BDBDBD; margin-top: -12px;">R$ 199 por ano · 2 meses grátis</span><span class="so-mensal" style="font-size: 14px; color: #BDBDBD; margin-top: -12px;">Cobrado por mês</span>
+<ul style="margin: 0; padding: 18px 0 0; border-top: 1px solid #2E2E2E; list-style: none; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto;">
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Tudo do Essencial</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>2 bancos conectados</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Agentes e alertas de gastos</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Orçamento Doméstico e previsão de 30 dias</li>
+</ul>
+<a href="/assinar?plano=plus&amp;ciclo=annual" class="pb-pulse so-anual" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
+<a href="/assinar?plano=plus&amp;ciclo=monthly" class="pb-pulse so-mensal" style="background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Plus</a>
+</div>
+<div data-plano="pro" style="background: #FFFFFF; color: #111111; border: 1px solid #E4E1DC; border-radius: 32px; padding: 34px 30px; display: flex; flex-direction: column; gap: 20px; position: relative;">
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="pb-d" style="font-size: 40px;">Pro</span><span style="font-size: 15px; color: #555555;">Casal, família e investimentos</span></div>
+<div style="display: flex; align-items: baseline; gap: 6px;"><span class="pb-d so-anual" style="font-size: 68px; white-space: nowrap;">R$ 41,58</span><span class="pb-d so-mensal" style="font-size: 68px; white-space: nowrap;">R$ 49,90</span><span style="font-size: 15px; color: #555555;">/mês</span></div>
+<span class="so-anual" style="font-size: 14px; color: #555555; margin-top: -12px;">R$ 499 por ano · 2 meses grátis</span><span class="so-mensal" style="font-size: 14px; color: #555555; margin-top: -12px;">Cobrado por mês</span>
+<ul style="margin: 0; padding: 18px 0 0; border-top: 1px solid #ECE9E4; list-style: none; display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto;">
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Tudo do Plus</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>5 bancos conectados</li>
+<li style="display: flex; gap: 10px; align-items: flex-start; font-size: 15px; line-height: 1.45;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FF2D8E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: 0 0 18px; margin-top: 2px;"><path d="M20 6 9 17l-5-5"></path></svg>Previsão de 90 dias</li>
+</ul>
+<a href="/assinar?plano=pro&amp;ciclo=annual" class="pb-plbtn so-anual" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
+<a href="/assinar?plano=pro&amp;ciclo=monthly" class="pb-plbtn so-mensal" style="background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 16px; padding: 16px 20px; border-radius: 999px; min-height: 54px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;">Quero o Pro</a>
+</div>
+</div>
+<div style="width: 100%; background: #111111; color: #FFFFFF; border-radius: 32px; padding: 30px 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 24px 40px; box-sizing: border-box;">
+<img src="/brand/oferta/d6cdf9600304bc874e257d4bc6425236.webp" alt="Piggy fazendo joinha" style="flex: 0 0 auto; width: 120px; height: auto;">
+<div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 8px;">
+<span class="pb-d" style="font-size: 44px;">Garantia Piggy <span style="color: #FF2D8E;">de 7 dias.</span></span>
+<p style="margin: 0; font-size: 17px; line-height: 1.55; color: #BDBDBD;">Conecta o banco, manda áudio, abre o painel, testa tudo. Se não for pra você, devolvo 100% do seu dinheiro. Sem pergunta e sem ligação.</p>
+</div>
+<div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #BDBDBD;">
+<span><b style="color: #FFFFFF;">Preço de fundador:</b> seu valor fica congelado enquanto você for assinante.</span>
+<span>Pagamento seguro · Cancele pelo painel</span>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section style="background: #FFFFFF; padding: 128px 20px;">
+<div style="max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 48px 72px;">
+<div style="flex: 1 1 340px; display: flex; flex-direction: column; gap: 20px; align-items: flex-start;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(48px, 6vw, 88px);">Ainda com dúvida? <span style="color: #FF2D8E;">Eu respondo.</span></h2>
+<img src="/brand/oferta/beb614462fdc8cb5f35622c96b434892.webp" alt="Piggy pensativo" style="width: 170px; height: auto;">
+</div>
+<div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column;">
+<details name="faq" open style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Você é um banco?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Não. Não guardo, não transfiro e não movimento seu dinheiro. Só organizo e te mostro.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">É seguro conectar meu banco?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Sim. A conexão é pelo Open Finance, via Pluggy, só de leitura. Eu nunca vejo sua senha.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Posso desconectar depois?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Sim, quando quiser, direto no painel.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Funciona com o meu banco?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Funciono com os principais bancos via Open Finance. Você vê a lista antes de conectar.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Preciso conectar o banco?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Não. Dá pra usar 100% pelo WhatsApp, com texto, áudio ou foto do comprovante.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">Preciso baixar algum app?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Não. É o WhatsApp mais um painel que abre no navegador.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">E se eu não gostar?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Você tem 7 dias de garantia e recebe 100% de volta.</p>
+</details>
+<details name="faq" style="border-top: 1px solid #E4E1DC;">
+<summary style="width: 100%; box-sizing: border-box; text-align: left; cursor: pointer; font-family: inherit; color: #111111; font-size: 19px; font-weight: 700; padding: 24px 0; min-height: 64px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">O que acontece depois que eu assino?<span class="fq-i" aria-hidden="true" style="flex: 0 0 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700;"></span></summary>
+<p style="margin: 0; padding: 0 56px 26px 0; font-size: 17px; line-height: 1.6; color: #555555;">Em 2 minutos você conecta o WhatsApp e já pode me mandar o primeiro gasto.</p>
+</details>
+<div style="border-top: 1px solid #E4E1DC;"></div>
+</div>
+</div>
+</section>
+
+<!-- ============ CTA FINAL ============ -->
+<section id="cta-final" style="background: #FFFFFF; padding: 0 20px 20px;">
+<div style="max-width: 1240px; margin: 0 auto; background: #FF2D8E; color: #111111; border-radius: 44px; padding: 80px 56px 0; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px; overflow: hidden;">
+<div style="flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 24px; padding-bottom: 80px;">
+<h2 class="pb-d" style="margin: 0; font-size: clamp(56px, 7.5vw, 112px);">Daqui a 30 dias, você vai saber pra onde foi cada real.</h2>
+<p style="margin: 0; font-size: 19px; line-height: 1.55; max-width: 540px; font-weight: 500;">Conecta uma vez, me manda um áudio quando precisar e deixa o resto comigo. Se em 7 dias não fizer sentido, seu dinheiro volta.</p>
+<a href="#planos" style="align-self: flex-start; background: #111111; color: #FFFFFF; text-decoration: none; font-weight: 800; font-size: 18px; padding: 20px 34px; border-radius: 999px; min-height: 62px; box-sizing: border-box; display: inline-flex; align-items: center;">Quero viver sem planilha →</a>
+<span style="font-size: 14px; font-weight: 600;">Garantia de 7 dias · Preço de fundador · Cancele quando quiser</span>
+</div>
+<div style="flex: 1 1 300px; display: flex; justify-content: center; align-self: flex-end;">
+<img src="/brand/oferta/0a9dd217fc9aa8c9d45b0c1c0ec872ef.webp" alt="Piggy comemorando de braços para cima" style="width: 100%; max-width: 380px; height: auto; display: block; margin-bottom: 40px;">
+</div>
+</div>
+</section>
+
+<!-- ============ RODAPÉ ============ -->
+<footer style="background: #111111; color: #BDBDBD;">
+<div style="max-width: 1180px; margin: 0 auto; padding: 56px 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 32px; font-size: 13px; line-height: 1.7;">
+<div style="flex: 1 1 380px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; align-items: center; gap: 10px;"><img src="/brand/oferta/12602bed94c657ececd47f7018994803.webp" alt="" style="width: 28px;"><span style="font-weight: 800; font-size: 19px; color: #FFFFFF;">PigBank</span></div>
+<span>O PigBank não é banco nem instituição financeira. Não guarda, não transfere e não movimenta dinheiro. Conexão via Open Finance pela Pluggy.</span>
+<span>As marcas de bancos citadas pertencem aos seus titulares e indicam apenas compatibilidade.</span>
+<span>[Razão social] · CNPJ [00.000.000/0001-00] · © 2026</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: flex-start;">
+<a href="/termos" style="text-decoration: none; color: #FFFFFF;">Termos de uso</a>
+<a href="/privacy" style="text-decoration: none; color: #FFFFFF;">Privacidade</a>
+<a href="/suporte" style="text-decoration: none; color: #FFFFFF;">Suporte</a>
+<a href="https://instagram.com/pigbank.oficial" target="_blank" rel="noopener" style="text-decoration: none; color: #FFFFFF;">Instagram</a>
+</div>
+</div>
+</footer>
+
+</div>
+<!-- barra fixa mobile -->
+<div class="pb-sticky" id="sticky" aria-hidden="true" style="position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 50; background: rgba(17,17,17,0.92); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border: 1px solid #2E2E2E; border-radius: 999px; padding: 6px 6px 6px 16px; display: none; align-items: center; justify-content: space-between; gap: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); color: #FFFFFF; font-family: 'Archivo', system-ui, sans-serif; box-sizing: border-box;"><span style="display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow: hidden;"><b style="font-size: clamp(12px, 3.5vw, 14px); line-height: 1.2; white-space: nowrap;">A partir de R$ 0,33/dia</b><span style="font-size: clamp(10.5px, 3vw, 11.5px); color: #BDBDBD; white-space: nowrap;">Garantia de 7 dias</span></span><a href="#planos" class="pb-pulse-lite" tabindex="-1" style="flex: 0 0 auto; background: #FF2D8E; color: #111111; text-decoration: none; font-weight: 800; font-size: clamp(13px, 3.8vw, 15px); padding: 0 16px; min-height: 48px; border-radius: 999px; display: inline-flex; align-items: center; white-space: nowrap;">Começar agora →</a></div>
+</body>
+</html>
