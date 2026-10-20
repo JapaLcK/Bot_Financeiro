@@ -31,6 +31,8 @@ async function abrir(url, raiz, width) {
   await servir(ctx, raiz);
   // O chat do Piggy lê o nome da conta para a saudação.
   await ctx.route("**/auth/dashboard-profile", (r) => r.fulfill({ json: { display_name: "Ana", email: "ana@exemplo.com", user_id: 1, whatsapp_linked: false } }));
+  // O painel lateral do /piggy (≥1181 px) lê o catálogo dos agentes; em produção a rota responde (frontend/routes/agents.py).
+  await ctx.route(/\/agents\/1$/, (r) => r.fulfill({ json: { catalog: [], can_chat: true, can_activate: true, energy_enabled: false, energy_budget: 0, energy_used: 0 } }));
   await ctx.addInitScript(() => localStorage.setItem("pigbank.dashboard.profile.v1", '"padrao"'));
   const page = await ctx.newPage();
   const falhas = [];
